@@ -1,0 +1,54 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "veil-toolkit"
+description = "Composable component library for Veil pipelines: recognizers, dedup layers, checks, redaction strategies"
+keywords = ["veil", "toolkit", "components", "pipeline"]
+categories = ["data-structures"]
+readme = "README.md"
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+# Internal crates
+veil-core = { workspace = true, features = [] }
+
+# Serialization
+serde = { workspace = true, features = [] }
+schemars = { workspace = true, features = [] }
+
+# Primitive datatypes
+uuid = { workspace = true, features = [] }
+type-map = { workspace = true, features = [] }
+
+# Encoding and hashing
+base64 = { workspace = true, features = [] }
+sha2 = { workspace = true, features = [] }
+
+# Async runtime and parallelism
+async-trait = { workspace = true, features = [] }
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros"] }
+
+# Observability
+tracing = { workspace = true, features = [] }
+
+# Text processing (unicode-aware folding, regex)
+unicode-normalization = { workspace = true, features = [] }
+regex = { workspace = true, features = [] }
+
+[dev-dependencies]
+veil-core = { workspace = true, features = ["test-utils"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

@@ -1,0 +1,50 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "veil-core"
+description = "Domain types, traits, and errors for the Veil toolkit"
+keywords = ["veil", "core", "domain", "types"]
+categories = ["data-structures"]
+readme = "README.md"
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+
+## Test utilities (fixture helpers, builders, …).
+test-utils = []
+
+[dependencies]
+# Serialization
+serde = { workspace = true, features = [] }
+serde_json = { workspace = true, features = [] }
+schemars = { workspace = true, features = [] }
+
+# Derive macros and error handling
+thiserror = { workspace = true, features = [] }
+derive_builder = { workspace = true, features = [] }
+derive_more = { workspace = true, features = ["as_ref", "deref", "deref_mut", "display", "from", "from_str", "into", "into_iterator", "is_variant"] }
+strum = { workspace = true, features = [] }
+
+# Primitive datatypes
+uuid = { workspace = true, features = [] }
+bytes = { workspace = true, features = [] }
+hipstr = { workspace = true, features = [] }
+type-map = { workspace = true, features = [] }
+
+# Async runtime and parallelism
+async-trait = { workspace = true, features = [] }
