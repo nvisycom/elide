@@ -21,7 +21,7 @@ use veil_core::modality::{DataReader, DataWriter};
 use veil_core::redaction::Redactions;
 use veil_core::{Error, ErrorKind};
 
-use super::redact;
+use crate::handler::redact;
 use crate::content::ContentData;
 use crate::{Chunk, Format, FormatId, Handler};
 

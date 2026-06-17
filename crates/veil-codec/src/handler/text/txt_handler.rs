@@ -13,7 +13,7 @@ use veil_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
 use veil_core::modality::{DataReader, DataWriter};
 use veil_core::redaction::Redactions;
 
-use super::redact;
+use crate::handler::redact;
 use crate::content::ContentData;
 use crate::{Chunk, Format, FormatId, Handler};
 

@@ -29,11 +29,14 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = ["text"]
 
 ## Every text-shaped format currently shipped.
-text = ["txt", "json"]
+text = ["txt", "json", "html"]
 
 ## Individual text formats.
 txt = []
 json = ["dep:serde_json"]
+## HTML — DOM-aware handler via `scraper` (shares the markup item model
+## with a future XML handler).
+html = ["dep:scraper", "dep:ego-tree"]
 
 [dependencies]
 # Internal crates
@@ -46,6 +49,10 @@ hex = { workspace = true, features = [] }
 
 # Serialization (JSON handler, gated behind `json`)
 serde_json = { workspace = true, features = [], optional = true }
+
+# Markup parsing (HTML handler, gated behind `html`)
+scraper = { workspace = true, features = [], optional = true }
+ego-tree = { workspace = true, features = [], optional = true }
 
 # Observability
 tracing = { workspace = true, features = [] }

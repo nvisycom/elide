@@ -78,3 +78,7 @@ unicode-segmentation = { version = "1.13", features = [] }
 bs58 = { version = "0.5", features = ["check"] }
 iban_validate = { version = "5.0" }
 phonenumber = { version = "0.3", default-features = false }
+
+# Markup parsing (codec HTML handler)
+scraper = { version = "0.27", features = [] }
+ego-tree = { version = "0.11", features = [] }

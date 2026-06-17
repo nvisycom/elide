@@ -4,7 +4,6 @@
 //! replacements written during redaction use
 //! [`TextReplacement`](veil_core::modality::text::TextReplacement).
 
-pub(crate) mod redact;
 
 #[cfg(feature = "json")]
 mod json_handler;
