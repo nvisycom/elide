@@ -1,0 +1,14 @@
+name = "us-passport"
+label = "passport_number"
+countries = ["US"]
+context = [
+  "passport",
+  "passport#",
+  "travel document",
+  "us passport",
+  "united states passport",
+]
+
+[[variants]]
+regex = "\\b[A-Z]\\d{8}\\b"
+score = 0.1

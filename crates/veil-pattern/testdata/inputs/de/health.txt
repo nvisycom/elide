@@ -1,0 +1,6 @@
+Patientenakte aus der Praxis Dr. Schmidt — siehe BSNR, LANR
+und Krankenversichertennummer von der gesetzlichen Krankenkasse.
+
+Betriebsstättennummer (BSNR): 381789045
+Arztnummer (LANR):            123456601
+Krankenversichertennummer:    A000500015

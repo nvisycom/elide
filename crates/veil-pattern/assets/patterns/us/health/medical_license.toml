@@ -1,0 +1,36 @@
+# US DEA (Drug Enforcement Administration) registration number,
+# used as a medical license identifier.
+#
+# 9-character format: two letters (DEA registration type plus
+# surname initial) followed by 7 digits, the last of which is a
+# checksum. Without context the pattern has a high false-positive
+# rate (matches arbitrary letter-pair plus digit-run strings), so
+# the regex score is low and the boost layer is expected to lift
+# legitimate matches.
+
+name = "us-medical-license"
+label = "medical_id"
+countries = ["US"]
+languages = ["en"]
+context = [
+  "medical",
+  "license",
+  "licence",
+  "certificate",
+  "dea",
+  "controlled substance",
+  "prescription",
+  "prescriber",
+]
+
+# DEA registration type letters: A, B, C, D, E, F, G, H, J, K, L,
+# M, P, R, S, T, U, X (plus mid-2000s practitioner-9 series).
+[[variants]]
+regex = '\b[abcdefghjklmprstuxABCDEFGHJKLMPRSTUX][a-zA-Z]\d{7}\b'
+score = 0.4
+validator = "us.dea_number"
+
+[[variants]]
+regex = '\b[abcdefghjklmprstuxABCDEFGHJKLMPRSTUX]9\d{7}\b'
+score = 0.4
+validator = "us.dea_number"

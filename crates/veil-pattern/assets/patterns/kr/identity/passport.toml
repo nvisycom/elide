@@ -1,0 +1,27 @@
+# Korean passport number. Current format: a leading letter from
+# `M/S/R/O/D` followed by 3 digits, one letter, and 4 digits.
+# Previous format: leading letter + 8 digits. No published
+# checksum.
+
+name = "kr-passport"
+label = "passport_number"
+countries = ["KR"]
+languages = ["ko"]
+context = [
+  "passport",
+  "passport number",
+  "korean passport",
+  "여권",
+  "대한민국 여권",
+  "여권번호",
+]
+
+# Current format `LDDDLDDDD`.
+[[variants]]
+regex = '\b[MSRODmsrod]\d{3}[A-Za-z]\d{4}\b'
+score = 0.2
+
+# Legacy 9-character format `LDDDDDDDD`.
+[[variants]]
+regex = '\b[MSRODmsrod]\d{8}\b'
+score = 0.1

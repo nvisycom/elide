@@ -1,0 +1,28 @@
+# Korean driver's license number: 12 digits formatted as
+# `AA-BB-CCCCCC-DD` (regional office + year + serial + check).
+# Region code is validated against the published Doro-gyotongan
+# list by `kr.driver_license`; the check digit algorithm itself
+# is not publicly disclosed.
+
+name = "kr-driver-license"
+label = "drivers_license"
+countries = ["KR"]
+languages = ["ko"]
+context = [
+  "운전면허",
+  "운전면허번호",
+  "면허번호",
+  "korean driver license",
+  "korean driver's license",
+  "driver license number",
+]
+
+[[variants]]
+regex = '\b\d{2}-\d{2}-\d{6}-\d{2}\b'
+score = 0.4
+validator = "kr.driver_license"
+
+[[variants]]
+regex = '\b\d{12}\b'
+score = 0.2
+validator = "kr.driver_license"

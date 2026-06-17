@@ -1,0 +1,14 @@
+# US Social Security Number.
+#
+# Omits very-weak variants (bare 9 digits, off-position splits).
+# Context-keyword boost is expected to lift legitimate matches.
+
+name = "ssn"
+label = "government_id"
+countries = ["US"]
+context = ["social security", "ssn", "tax id", "taxpayer identification"]
+
+[[variants]]
+regex = '\b(\d{3})[- .](\d{2})[- .](\d{4})\b'
+score = 0.5
+validator = "us.ssn"

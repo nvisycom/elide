@@ -1,0 +1,20 @@
+# Indian Goods and Services Tax Identification Number (GSTIN):
+# 15 chars: state code (01-37) + 10-char PAN + registration
+# sequence + `Z` literal + base-36 weighted check digit.
+
+name = "in-gstin"
+label = "tax_id"
+countries = ["IN"]
+languages = ["en", "hi"]
+context = [
+  "gstin",
+  "gst",
+  "goods and services tax",
+  "gst number",
+  "gst registration",
+]
+
+[[variants]]
+regex = '\b(0[1-9]|[12]\d|3[0-7])[A-Z]{5}\d{4}[A-Z][A-Z0-9]Z[A-Z0-9]\b'
+score = 0.6
+validator = "in.gstin"

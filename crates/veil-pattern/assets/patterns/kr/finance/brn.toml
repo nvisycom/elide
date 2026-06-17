@@ -1,0 +1,31 @@
+# Korean Business Registration Number (BRN): 10 digits formatted
+# as `AAA-BB-CCCCC` (district office + business type + serial +
+# check digit). Magic-keys Mod-10 checksum per National Tax
+# Service spec.
+
+name = "kr-brn"
+label = "company_id"
+countries = ["KR"]
+languages = ["ko"]
+context = [
+  "brn",
+  "사업자등록번호",
+  "사업자번호",
+  "사업자",
+  "business registration number",
+  "korean brn",
+  "business number",
+  "tax registration number",
+]
+
+# Hyphen-separated rendering.
+[[variants]]
+regex = '\b\d{3}-\d{2}-\d{5}\b'
+score = 0.5
+validator = "kr.brn"
+
+# Glued rendering.
+[[variants]]
+regex = '\b\d{10}\b'
+score = 0.2
+validator = "kr.brn"

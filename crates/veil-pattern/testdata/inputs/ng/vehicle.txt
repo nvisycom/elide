@@ -1,0 +1,7 @@
+Vehicle registered with the Federal Road Safety Corps (FRSC):
+
+  Make / model:           Toyota Camry
+  Plate number:           ABC-123DE
+  LGA:                    Ikeja
+
+Insurance billed against the plate above.

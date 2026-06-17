@@ -1,0 +1,7 @@
+Företagsuppgifter för bolagsregistret:
+
+  Företagsnamn:           Exempel AB
+  Organisationsnummer:    556677-1233
+  Säte:                   Stockholm
+
+Organisationsnumret ska anges på alla fakturor.

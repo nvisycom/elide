@@ -1,0 +1,5 @@
+Akta klienta Jan Kowalski — sprawdź numer PESEL i numer ewidencyjny
+osoby na utrzymaniu.
+
+Numer PESEL:           44051401359
+Numer ewidencyjny:     78010112345

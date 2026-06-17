@@ -34,8 +34,11 @@ impl CountryCode {
         Country::from_alpha3(alpha3).map(Self)
     }
 
-    /// The country's ISO 3166-1 alpha-2 code (e.g. `"US"`).
-    pub fn alpha2(&self) -> &'static str {
+    /// The country's ISO 3166-1 alpha-2 code (e.g. `"US"`) — its
+    /// canonical string form, matching [`Display`] and serde.
+    ///
+    /// [`Display`]: fmt::Display
+    pub fn as_str(&self) -> &'static str {
         self.0.alpha2
     }
 

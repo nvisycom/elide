@@ -1,0 +1,18 @@
+# Turkish posta kodu: 5-digit postal code. The first two digits
+# encode the province (01-81), matching the license-plate
+# province code.
+
+name = "tr-posta-kodu"
+label = "postal_code"
+countries = ["TR"]
+languages = ["tr"]
+context = [
+  "posta kodu",
+  "ptt",
+  "adres",
+  "postal code",
+]
+
+[[variants]]
+regex = '\b(0[1-9]|[1-7]\d|8[01])\d{3}\b'
+score = 0.4

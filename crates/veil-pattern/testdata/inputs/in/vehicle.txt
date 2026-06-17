@@ -1,0 +1,7 @@
+Vehicle on file with the Regional Transport Office:
+
+  Make / model:                 Tata Nexon
+  Vehicle registration number:  MH12AB1234
+  RTO:                          Pune
+
+Insurance to be billed against the registration plate above.

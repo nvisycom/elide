@@ -1,0 +1,21 @@
+# German Postleitzahl (PLZ): 5 digits, with `01000` and `99999`
+# reserved as test sentinels and never assigned.
+
+name = "de-plz"
+label = "postal_code"
+countries = ["DE"]
+languages = ["de"]
+context = [
+  "postleitzahl",
+  "plz",
+  "postanschrift",
+  "anschrift",
+  "lieferadresse",
+  "rechnungsadresse",
+  "postfach",
+]
+
+[[variants]]
+regex = '\b(0[1-9]\d{3}|[1-9]\d{4})\b'
+score = 0.3
+validator = "de.plz"

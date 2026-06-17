@@ -1,0 +1,13 @@
+name = "date_of_birth"
+label = "date_of_birth"
+
+[context]
+en = ["birth", "born", "dob", "birthday", "date of birth"]
+es = ["nacimiento", "nacido", "nacida", "fecha de nacimiento", "cumpleaños", "cumpleanos"]
+de = ["geburt", "geboren", "geburtsdatum", "geburtstag"]
+fr = ["naissance", "né", "nee", "née", "date de naissance", "anniversaire"]
+
+[[variants]]
+regex = "\\b(?:(?:0[1-9]|1[0-2]|[1-9])[/\\-](?:0[1-9]|[12]\\d|3[01]|[1-9])[/\\-](?:19|20)\\d{2}|(?:19|20)\\d{2}[/\\-](?:0[1-9]|1[0-2])[/\\-](?:0[1-9]|[12]\\d|3[01]))\\b"
+score = 0.1
+validator = "date"

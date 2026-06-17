@@ -1,0 +1,24 @@
+# Turkish T.C. Kimlik No (TCKN): 11-digit national identifier
+# issued by Nüfus ve Vatandaşlık İşleri (NVI) with a two-step
+# weighted checksum. Required on KVKK compliance forms.
+
+name = "tr-tckn"
+label = "government_id"
+countries = ["TR"]
+languages = ["tr"]
+context = [
+  "tc kimlik",
+  "kimlik no",
+  "kimlik numarası",
+  "tckn",
+  "tc no",
+  "nüfus cüzdanı",
+  "national id",
+  "türk kimlik",
+  "turkish id",
+]
+
+[[variants]]
+regex = '\b[1-9]\d{10}\b'
+score = 0.4
+validator = "tr.tckn"

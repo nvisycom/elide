@@ -1,0 +1,8 @@
+Patient handover for Mrs A. Patel — refer to the NHS patient
+file, the National Insurance reference, the DVLA driving licence,
+and her HM Passport Office passport.
+
+NHS number:             943 476 5919
+NI Number (NINO):       AB123456C
+Driving licence (DVLA): MORGA753116SM9IJ
+British passport:       AB1234567

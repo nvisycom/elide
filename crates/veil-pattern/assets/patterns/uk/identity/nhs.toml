@@ -1,0 +1,17 @@
+# UK National Health Service number.
+
+name = "uk-nhs"
+label = "medical_id"
+countries = ["GB"]
+languages = ["en"]
+context = [
+  "nhs",
+  "national health service",
+  "health services authority",
+  "health authority",
+]
+
+[[variants]]
+regex = '\b([0-9]{3})[- ]?([0-9]{3})[- ]?([0-9]{4})\b'
+score = 0.5
+validator = "uk.nhs"

@@ -1,0 +1,4 @@
+Client record for John Smith — see the Australian Tax File
+Number registered with the ATO.
+
+Tax File Number (TFN): 123 456 782

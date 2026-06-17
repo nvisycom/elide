@@ -1,0 +1,6 @@
+name = "internal-product-code"
+label = "internal_id"
+
+[[variants]]
+regex = "\\b(?:WIDGET-\\d{3}|SPROCKET-\\d{2}|GADGET-X\\d)\\b"
+score = 0.9

@@ -1,0 +1,32 @@
+# Canadian Social Insurance Number (SIN): 9 digits issued by
+# Employment and Social Development Canada. First digit must be
+# in `[1-7, 9]` (0 and 8 reserved). Luhn checksum.
+
+name = "ca-sin"
+label = "government_id"
+countries = ["CA"]
+languages = ["en", "fr"]
+context = [
+  "sin",
+  "social insurance number",
+  "social insurance",
+  "nas",
+  "numéro d'assurance sociale",
+  "numéro nas",
+  "assurance sociale",
+]
+
+[[variants]]
+regex = '\b[1-79]\d{2} \d{3} \d{3}\b'
+score = 0.5
+validator = "ca.sin"
+
+[[variants]]
+regex = '\b[1-79]\d{2}-\d{3}-\d{3}\b'
+score = 0.5
+validator = "ca.sin"
+
+[[variants]]
+regex = '\b[1-79]\d{8}\b'
+score = 0.2
+validator = "ca.sin"

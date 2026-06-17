@@ -1,0 +1,18 @@
+# Singapore postal code: 6 digits where the first two encode the
+# delivery sector (01-82 in current Singapore Post assignments).
+# No published checksum.
+
+name = "sg-postal-code"
+label = "postal_code"
+countries = ["SG"]
+languages = ["en"]
+context = [
+  "postal code",
+  "singapore post",
+  "singpost",
+  "mailing address",
+]
+
+[[variants]]
+regex = '\b(0[1-9]|[1-7]\d|8[0-2])\d{4}\b'
+score = 0.4

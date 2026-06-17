@@ -1,0 +1,8 @@
+Unternehmensdaten für die Gesellschaftsstammakte:
+
+  Firma:                   Beispiel GmbH
+  Handelsregister:          HRB 123456
+  Registergericht:          Amtsgericht Berlin-Charlottenburg
+  Sitz:                    Berlin
+
+Die Handelsregisternummer ist im Impressum aufzuführen.

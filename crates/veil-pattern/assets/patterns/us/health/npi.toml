@@ -1,0 +1,28 @@
+# US National Provider Identifier (NPI).
+#
+# 10-digit number assigned by CMS; validated via Luhn checksum on
+# `80840` + the 10 digits.
+
+name = "us-npi"
+label = "medical_id"
+countries = ["US"]
+languages = ["en"]
+context = [
+  "npi",
+  "national provider",
+  "provider",
+  "npi number",
+  "provider id",
+  "provider identifier",
+  "taxonomy",
+]
+
+[[variants]]
+regex = '\b[12]\d{9}\b'
+score = 0.1
+validator = "us.npi"
+
+[[variants]]
+regex = '\b[12]\d{3}[ -]\d{3}[ -]\d{3}\b'
+score = 0.4
+validator = "us.npi"

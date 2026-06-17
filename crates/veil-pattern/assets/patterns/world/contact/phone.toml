@@ -1,0 +1,13 @@
+name = "phone"
+label = "phone_number"
+
+[context]
+en = ["phone", "call", "mobile", "tel", "fax", "contact"]
+es = ["teléfono", "telefono", "llamar", "móvil", "movil", "celular", "tel", "fax", "contacto"]
+de = ["telefon", "anruf", "mobil", "handy", "tel", "fax", "kontakt"]
+fr = ["téléphone", "telephone", "appel", "mobile", "portable", "tel", "fax", "contact"]
+
+[[variants]]
+regex = "(?:\\+\\d{1,3}[\\s.\\-]?)?\\(?\\d{2,4}\\)?[\\s.\\-]?\\d{3,4}[\\s.\\-]?\\d{4}\\b"
+score = 0.4
+validator = "phone"

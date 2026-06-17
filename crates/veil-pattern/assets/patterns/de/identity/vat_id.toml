@@ -1,0 +1,32 @@
+# German Umsatzsteuer-Identifikationsnummer (USt-IdNr): `DE` prefix
+# + 9 digits. Used in B2B invoices and VAT registration. Validator
+# applies the community-documented ISO 7064 Mod 11, 10 heuristic.
+# Whitespace and dashes are stripped before validation.
+
+name = "de-vat-id"
+label = "tax_id"
+countries = ["DE"]
+languages = ["de"]
+context = [
+  "umsatzsteuer-identifikationsnummer",
+  "umsatzsteueridentifikationsnummer",
+  "ust-idnr",
+  "ustidnr",
+  "ust idnr",
+  "ust-id",
+  "umsatzsteuer",
+  "mehrwertsteuer",
+  "mwst-id",
+  "vat number",
+  "vat id",
+]
+
+[[variants]]
+regex = '\bDE\d{9}\b'
+score = 0.5
+validator = "de.vat_id"
+
+[[variants]]
+regex = '\bDE[\s.\-]?\d{3}[\s.\-]?\d{3}[\s.\-]?\d{3}\b'
+score = 0.4
+validator = "de.vat_id"

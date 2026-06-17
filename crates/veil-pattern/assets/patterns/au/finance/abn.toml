@@ -1,0 +1,25 @@
+# Australian Business Number (ABN): 11-digit ID issued by the
+# Australian Business Register. The leading digit is rewritten
+# (-1 with 0→9) before a weighted sum that must be divisible by
+# 89. The conventional rendering is `NN NNN NNN NNN`.
+
+name = "au-abn"
+label = "company_id"
+countries = ["AU"]
+languages = ["en"]
+context = [
+  "australian business number",
+  "abn",
+  "abr",
+  "australian business register",
+]
+
+[[variants]]
+regex = '\b\d{2}\s\d{3}\s\d{3}\s\d{3}\b'
+score = 0.4
+validator = "au.abn"
+
+[[variants]]
+regex = '\b\d{11}\b'
+score = 0.2
+validator = "au.abn"

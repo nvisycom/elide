@@ -1,0 +1,29 @@
+# Swedish Personnummer: `YYMMDD-XXXX` (10-digit) or
+# `YYYYMMDD-XXXX` (12-digit) personal identity number.
+# Samordningsnummer adds 60 to the day field. Luhn checksum
+# applies to the last 10 digits.
+
+name = "se-personnummer"
+label = "government_id"
+countries = ["SE"]
+languages = ["sv"]
+context = [
+  "personnummer",
+  "svenskt personnummer",
+  "personlig identitet",
+  "samordningsnummer",
+  "ssn",
+  "personal identity number",
+]
+
+# 12-digit form with optional dash/plus separator.
+[[variants]]
+regex = '\b\d{8}[+\-]?\d{4}\b'
+score = 0.5
+validator = "se.personnummer"
+
+# 10-digit form with optional dash/plus separator.
+[[variants]]
+regex = '\b\d{6}[+\-]?\d{4}\b'
+score = 0.5
+validator = "se.personnummer"

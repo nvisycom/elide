@@ -1,0 +1,12 @@
+name = "datetime"
+label = "date_time"
+
+[context]
+en = ["timestamp", "created", "modified", "logged", "at", "time"]
+es = ["marca de tiempo", "creado", "creada", "modificado", "modificada", "registrado", "a las", "hora", "fecha"]
+de = ["zeitstempel", "erstellt", "geändert", "geandert", "protokolliert", "um", "uhrzeit", "zeit"]
+fr = ["horodatage", "créé", "cree", "créée", "creee", "modifié", "modifie", "à", "heure", "date"]
+
+[[variants]]
+regex = "\\b(?:19|20)\\d{2}[/\\-](?:0[1-9]|1[0-2])[/\\-](?:0[1-9]|[12]\\d|3[01])[T ](?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d)?(?:Z|[+\\-]\\d{2}:?\\d{2})?\\b"
+score = 0.1

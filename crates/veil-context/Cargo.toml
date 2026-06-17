@@ -1,0 +1,36 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "veil-context"
+description = "Post-recognition keyword-boost enhancer for Veil entities"
+keywords = ["veil", "context", "enhancer", "pii"]
+categories = ["text-processing"]
+readme = "README.md"
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+# Internal crates
+veil-core = { workspace = true, features = [] }
+
+# Primitive datatypes (cheap-clone surface form on `Token`)
+hipstr = { workspace = true, features = [] }
+
+# Text processing (word-window walk for the substring fallback)
+unicode-segmentation = { workspace = true, features = [] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

@@ -1,0 +1,6 @@
+name = "internal-employee-id"
+label = "internal_id"
+
+[[variants]]
+regex = "\\bEMP-\\d{5}\\b"
+score = 0.95

@@ -4,6 +4,8 @@
 resolver = "3"
 members = [
     "./crates/veil-core",
+    "./crates/veil-context",
+    "./crates/veil-pattern",
     "./crates/veil-toolkit",
 ]
 
@@ -27,11 +29,15 @@ documentation = "https://docs.rs/veil-toolkit"
 
 # Internal crates
 veil-core = { path = "./crates/veil-core", version = "0.1.0" }
+veil-context = { path = "./crates/veil-context", version = "0.1.0" }
+veil-pattern = { path = "./crates/veil-pattern", version = "0.1.0" }
 veil-toolkit = { path = "./crates/veil-toolkit", version = "0.1.0" }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = [] }
+toml = { version = "1.1", features = [] }
+csv = { version = "1.0", features = [] }
 
 # Derive macros and error handling
 thiserror = { version = "2.0", features = [] }
@@ -62,4 +68,11 @@ tracing = { version = "0.1", features = ["attributes"] }
 
 # Text processing (pattern matching, unicode)
 regex = { version = "1.0", features = [] }
+aho-corasick = { version = "1.0", features = [] }
 unicode-normalization = { version = "0.1", features = [] }
+unicode-segmentation = { version = "1.13", features = [] }
+
+# Checksums / region-aware parsing (validators)
+bs58 = { version = "0.5", features = ["check"] }
+iban_validate = { version = "5.0" }
+phonenumber = { version = "0.3", default-features = false }

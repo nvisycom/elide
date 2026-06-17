@@ -1,0 +1,36 @@
+# German Personalausweis (national ID card). Two formats coexist:
+#
+# - nPA (since November 2010): 9 alphanumeric characters from the
+#   ICAO restricted charset (excludes A, B, D, E, I, O, Q, S, U)
+#   plus a trailing ICAO check digit.
+# - Legacy (pre-2010): letter `T` + 8 digits. No ICAO checksum.
+
+name = "de-id-card"
+label = "government_id"
+countries = ["DE"]
+languages = ["de"]
+context = [
+  "personalausweis",
+  "ausweis",
+  "personalausweisnummer",
+  "ausweisnummer",
+  "ausweisdokument",
+  "dokumentennummer",
+  "seriennummer",
+  "npa",
+  "neuer personalausweis",
+  "personalausweisgesetz",
+  "bundespersonalausweis",
+  "identity card",
+  "national id",
+]
+
+[[variants]]
+regex = '\b[CFGHJKLMNPRTVWXYZ][CFGHJKLMNPRTVWXYZ0-9]{7}[0-9]\b'
+score = 0.4
+validator = "de.id_card"
+
+[[variants]]
+regex = '\bT\d{8}\b'
+score = 0.5
+validator = "de.id_card"

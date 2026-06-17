@@ -1,0 +1,19 @@
+# Indian passport: 8-char alphanumeric in the form
+# `LDDDDDDDD` where the first char is a letter, position 2 is a
+# non-zero digit, and the last is a non-zero check digit. No
+# published checksum.
+
+name = "in-passport"
+label = "passport_number"
+countries = ["IN"]
+languages = ["en", "hi"]
+context = [
+  "passport",
+  "indian passport",
+  "passport number",
+  "ministry of external affairs",
+]
+
+[[variants]]
+regex = '\b[A-Z][1-9]\d\s?\d{4}[1-9]\b'
+score = 0.2

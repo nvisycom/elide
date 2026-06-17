@@ -1,0 +1,28 @@
+# US Individual Taxpayer Identification Number (ITIN).
+#
+# Format: 9NN-MM-NNNN where the middle group restricts to the
+# IRS-published ranges. No checksum.
+
+name = "us-itin"
+label = "tax_id"
+countries = ["US"]
+languages = ["en"]
+context = [
+  "individual",
+  "taxpayer",
+  "itin",
+  "tax",
+  "payer",
+  "taxid",
+  "tin",
+]
+
+# Medium: dashes / spaces around the IRS-published middle range.
+[[variants]]
+regex = '\b9\d{2}[- ](?:5\d|6[0-5]|7\d|8[0-8]|9(?:[0-2]|[4-9]))[- ]\d{4}\b'
+score = 0.5
+
+# Weak: unbroken 9-digit form.
+[[variants]]
+regex = '\b9\d{2}(?:5\d|6[0-5]|7\d|8[0-8]|9(?:[0-2]|[4-9]))\d{4}\b'
+score = 0.3

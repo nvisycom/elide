@@ -1,0 +1,21 @@
+# Swedish Organisationsnummer: 10 digits issued by Bolagsverket
+# (Swedish Companies Registration Office). Third digit must be
+# ≥ 2 to distinguish from personnummer; Luhn checksum.
+
+name = "se-organisationsnummer"
+label = "company_id"
+countries = ["SE"]
+languages = ["sv"]
+context = [
+  "organisationsnummer",
+  "orgnr",
+  "org nr",
+  "org.nr",
+  "företagsnummer",
+  "bolagsverket",
+]
+
+[[variants]]
+regex = '\b\d{6}[-]?\d{4}\b'
+score = 0.6
+validator = "se.organisationsnummer"

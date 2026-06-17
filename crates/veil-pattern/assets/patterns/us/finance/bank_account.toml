@@ -1,0 +1,26 @@
+# US Bank Account Number.
+#
+# 8-17 digit run with no checksum — usable only with strong
+# surrounding context. The very-weak score relies on the
+# context-keyword boost to lift legitimate matches above
+# downstream confidence thresholds.
+
+name = "us-bank-account"
+label = "bank_account"
+countries = ["US"]
+languages = ["en"]
+context = [
+  "check",
+  "checking account",
+  "account",
+  "account#",
+  "acct",
+  "bank",
+  "save",
+  "savings",
+  "debit",
+]
+
+[[variants]]
+regex = '\b\d{8,17}\b'
+score = 0.05

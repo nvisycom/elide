@@ -1,0 +1,34 @@
+# German Steuernummer (regional tax number): 10 or 11 digits
+# allocated per Finanzamt. Format varies by Bundesland and the
+# Vereinheitlichtes Bundesschema, so three regex variants cover the
+# common renderings. No checksum is publicly documented.
+
+name = "de-tax-number"
+label = "tax_id"
+countries = ["DE"]
+languages = ["de"]
+context = [
+  "steuernummer",
+  "st-nr",
+  "stnr",
+  "st.-nr",
+  "steuer-nr",
+  "finanzamt",
+  "bundeseinheitliche steuernummer",
+  "vereinheitlichtes bundesschema",
+]
+
+# Vereinheitlichtes Bundesschema: 13 digits.
+[[variants]]
+regex = '\b\d{13}\b'
+score = 0.2
+
+# Common rendering: 3/4/5 grouped form.
+[[variants]]
+regex = '\b\d{3}/\d{4}/\d{4}\b'
+score = 0.4
+
+# Common rendering: 2/3/5 grouped form (some Länder use this).
+[[variants]]
+regex = '\b\d{2,3}/\d{3}/\d{4,5}\b'
+score = 0.3

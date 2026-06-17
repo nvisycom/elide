@@ -1,0 +1,29 @@
+# Indian Aadhaar number: 12-digit ID issued by UIDAI. Leading
+# digit ≥ 2 (UIDAI reserves 0xx and 1xx); the number must not be
+# a palindrome; Verhoeff checksum.
+
+name = "in-aadhaar"
+label = "government_id"
+countries = ["IN"]
+languages = ["en", "hi"]
+context = [
+  "aadhaar",
+  "uidai",
+  "unique identification authority",
+  "आधार",
+]
+
+[[variants]]
+regex = '\b[2-9]\d{3}\s\d{4}\s\d{4}\b'
+score = 0.4
+validator = "in.aadhaar"
+
+[[variants]]
+regex = '\b[2-9]\d{3}-\d{4}-\d{4}\b'
+score = 0.4
+validator = "in.aadhaar"
+
+[[variants]]
+regex = '\b[2-9]\d{11}\b'
+score = 0.2
+validator = "in.aadhaar"

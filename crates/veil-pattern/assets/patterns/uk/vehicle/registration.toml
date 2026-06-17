@@ -1,0 +1,40 @@
+# UK Vehicle Registration Number.
+#
+# Covers three eras still seen on the road:
+# - Current (2001+): 2 area letters + 2-digit age + 3 random
+#   letters, e.g. "AB51 ABC"
+# - Prefix (1983-2001): year letter + 1-3 digits + 3 letters
+# - Suffix (1963-1983): 3 letters + 1-3 digits + year letter
+
+name = "uk-vehicle-registration"
+label = "license_plate"
+countries = ["GB"]
+languages = ["en"]
+context = [
+  "vehicle",
+  "registration",
+  "number plate",
+  "licence plate",
+  "license plate",
+  "reg",
+  "vrn",
+  "dvla",
+  "v5c",
+  "logbook",
+  "mot",
+  "car",
+  "insured vehicle",
+]
+
+[[variants]]
+regex = '\b[A-HJ-PR-Y][A-HJ-PR-Y](?:0[1-9]|[1-7][0-9])[- ]?[A-HJ-PR-Z]{3}\b'
+score = 0.3
+validator = "uk.vehicle_registration"
+
+[[variants]]
+regex = '\b[A-HJ-NPR-TV-Y]\d{1,3}[- ]?[A-HJ-PR-Y][A-HJ-PR-Z]{2}\b'
+score = 0.2
+
+[[variants]]
+regex = '\b[A-HJ-PR-Z]{3}[- ]?\d{1,3}[- ]?[A-HJ-NPR-TV-Y]\b'
+score = 0.15

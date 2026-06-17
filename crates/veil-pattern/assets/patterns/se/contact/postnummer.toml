@@ -1,0 +1,23 @@
+# Swedish postnummer: 5-digit postal code in `XXX XX` rendering
+# (Postnord standard). Codes start in `10-99x` range; `00xxx` is
+# reserved.
+
+name = "se-postnummer"
+label = "postal_code"
+countries = ["SE"]
+languages = ["sv"]
+context = [
+  "postnummer",
+  "post",
+  "postnord",
+  "postadress",
+  "postal code",
+]
+
+[[variants]]
+regex = '\b[1-9]\d{2}\s\d{2}\b'
+score = 0.5
+
+[[variants]]
+regex = '\b[1-9]\d{4}\b'
+score = 0.2

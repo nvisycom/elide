@@ -1,0 +1,7 @@
+Datos fiscales de la sociedad:
+
+  Razón social:        Ejemplo SL
+  Código de identificación fiscal (CIF): A12345674
+  Domicilio fiscal:    Madrid
+
+Incluir el CIF anterior en cualquier factura emitida.

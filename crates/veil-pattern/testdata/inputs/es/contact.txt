@@ -1,0 +1,7 @@
+Dirección postal para el envío de la factura:
+
+  Calle Gran Vía 28
+  28013 Madrid
+  España
+
+Utilizar el código postal anterior para el etiquetado.

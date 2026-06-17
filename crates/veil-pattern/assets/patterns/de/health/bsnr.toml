@@ -1,0 +1,29 @@
+# German Betriebsstättennummer (BSNR): 9-digit practice/site-of-care
+# number assigned by the regional Kassenärztliche Vereinigung (KV)
+# under § 75 Abs. 7 SGB V. Appears on Rezepte and billing records.
+
+name = "de-bsnr"
+label = "medical_id"
+countries = ["DE"]
+languages = ["de"]
+context = [
+  "betriebsstättennummer",
+  "betriebsstätten-nummer",
+  "bsnr",
+  "betriebsstätte",
+  "praxisnummer",
+  "arztpraxis",
+  "praxis",
+  "kassenärztliche vereinigung",
+  "kv-nummer",
+  "kv nummer",
+  "praxisadresse",
+  "praxisstandort",
+  "behandlungsort",
+  "vertragsarztpraxis",
+]
+
+[[variants]]
+regex = '\b\d{9}\b'
+score = 0.2
+validator = "de.bsnr"

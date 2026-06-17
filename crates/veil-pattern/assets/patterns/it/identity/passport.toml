@@ -1,0 +1,19 @@
+# Italian passport: 2 letters + 7 digits (Polizia di Stato
+# format). No published checksum, so the score stays weak.
+
+name = "it-passport"
+label = "passport_number"
+countries = ["IT"]
+languages = ["it"]
+context = [
+  "passaporto",
+  "passaporto italiano",
+  "passaporto elettronico",
+  "documento di viaggio",
+  "polizia di stato",
+  "dogana",
+]
+
+[[variants]]
+regex = '(?i)\b[A-Z]{2}\d{7}\b'
+score = 0.05

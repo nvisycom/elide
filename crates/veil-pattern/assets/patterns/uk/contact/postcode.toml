@@ -1,0 +1,23 @@
+# UK Postcode.
+#
+# Reference: https://en.wikipedia.org/wiki/Postcodes_in_the_United_Kingdom
+
+name = "uk-postcode"
+label = "postal_code"
+countries = ["GB"]
+languages = ["en"]
+context = [
+  "postcode",
+  "post code",
+  "postal code",
+  "zip",
+  "address",
+  "delivery",
+  "mailing",
+  "shipping",
+  "correspondence",
+]
+
+[[variants]]
+regex = '\b(GIR\s?0AA|[A-PR-UWYZ][0-9][ABCDEFGHJKPSTUW]?\s?[0-9][ABD-HJLNP-UW-Z]{2}|[A-PR-UWYZ][0-9]{2}\s?[0-9][ABD-HJLNP-UW-Z]{2}|[A-PR-UWYZ][A-HK-Y][0-9][ABEHMNPRVWXY]?\s?[0-9][ABD-HJLNP-UW-Z]{2}|[A-PR-UWYZ][A-HK-Y][0-9]{2}\s?[0-9][ABD-HJLNP-UW-Z]{2})\b'
+score = 0.1

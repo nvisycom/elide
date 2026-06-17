@@ -1,0 +1,15 @@
+Provider claim — Medicare crossover
+-----------------------------------
+
+Rendering provider:
+  Name:           Dr. Robert Hayes, MD
+  NPI:            1234567893
+  DEA license:    BB0000000
+  Taxonomy code:  207R00000X
+
+Beneficiary:
+  Name:           Henry Davies
+  Medicare MBI:   1EG4-TE5-MK73
+
+Claim submitted for evaluation under Medicare Part B; the DEA
+registration above authorizes prescribing of controlled substances.

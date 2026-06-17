@@ -37,9 +37,14 @@ test-utils = []
 # Serialization (optional — gated behind the `serde` feature)
 serde = { workspace = true, features = ["derive"], optional = true }
 
+# Derive macros (builders across the workspace use `derive_builder`,
+# whose generated `build()` returns this crate's `Error`)
+derive_builder = { workspace = true, features = [] }
+
 # Primitive datatypes
 uuid = { workspace = true, features = ["v7"] }
 hipstr = { workspace = true, features = [] }
 jiff = { workspace = true, features = [] }
 oxilangtag = { workspace = true, features = [] }
 celes = { workspace = true, features = [] }
+type-map = { workspace = true, features = [] }

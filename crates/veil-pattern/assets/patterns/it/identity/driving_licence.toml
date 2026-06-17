@@ -1,0 +1,22 @@
+# Italian patente di guida: 2 letters + 7 digits + 1 letter
+# (classic format) or `U1` + 7 alnum + 1 letter (Motorizzazione
+# Civile format issued post-2013).
+
+name = "it-driving-licence"
+label = "drivers_license"
+countries = ["IT"]
+languages = ["it"]
+context = [
+  "patente di guida",
+  "patente",
+  "motorizzazione civile",
+  "numero patente",
+]
+
+[[variants]]
+regex = '(?i)\b[A-Z]{2}\d{7}[A-Z]\b'
+score = 0.2
+
+[[variants]]
+regex = '(?i)\bU1[A-HJ-NP-Z0-9]{7}[A-Z]\b'
+score = 0.3

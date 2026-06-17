@@ -1,0 +1,23 @@
+# German Reisepass: 9-character serial from the ICAO restricted
+# charset (excludes A, B, D, E, I, O, Q, S, U) plus a trailing
+# ICAO Doc 9303 check digit. Issued by the Bundesdruckerei.
+
+name = "de-passport"
+label = "passport_number"
+countries = ["DE"]
+languages = ["de"]
+context = [
+  "passnummer",
+  "reisepassnummer",
+  "passport number",
+  "pass-nr",
+  "dokumentennummer",
+  "reisepass",
+  "reisedokument",
+  "bundesdruckerei",
+]
+
+[[variants]]
+regex = '\b[CFGHJKLMNPRTVWXYZ][CFGHJKLMNPRTVWXYZ0-9]{7}[0-9]\b'
+score = 0.4
+validator = "de.passport"

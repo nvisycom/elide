@@ -1,0 +1,7 @@
+Company filing with ACRA:
+
+  Entity name:                Example Pte Ltd
+  Unique Entity Number (UEN): 200512345R
+  Business address:           Singapore
+
+The UEN above must be quoted on tax invoices.
