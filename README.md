@@ -4,11 +4,11 @@
 
 Composable toolkit for detecting and redacting sensitive data.
 
-A Rust toolkit for PII/PHI detection and redaction — recognizers,
-deduplication layers, validation checks, and redaction strategies — that
-a consumer plugs into their own document-processing flow. Veil is the
-toolkit layer only; the orchestrating runtime and gateway server live in
-separate projects.
+Veil is a Rust toolkit for finding and removing PII and PHI from
+documents. It provides the building blocks (recognizers, deduplication,
+validation, redaction, and format handling) that a consumer wires into
+their own document-processing flow. Veil is the toolkit layer only; the
+orchestrating runtime and gateway server live in separate projects.
 
 > [!WARNING]
 > **Active development: API not stable.** This project is under active
@@ -18,8 +18,11 @@ separate projects.
 
 ## Crates
 
-- **veil-core:** Domain types, traits, and errors
-- **veil-toolkit:** Composable recognizer/redaction registries, dedup layers, and validation checks
+- **veil-core:** Shared domain model, traits, and errors.
+- **veil-context:** Keyword-based confidence boosting for detected entities.
+- **veil-pattern:** Regex and dictionary recognizers for PII/PHI.
+- **veil-codec:** Reading and redacting documents across file formats.
+- **veil-toolkit:** Composable recognition, deduplication, and redaction components.
 
 ## Documentation
 

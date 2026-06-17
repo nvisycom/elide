@@ -1,29 +1,26 @@
-# nvisy-context
+# veil-context
 
-[![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/runtime/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/runtime/actions/workflows/build.yml)
+[![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/veil/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/veil/actions/workflows/build.yml)
 
-Post-recognition keyword-boost enhancer for the Nvisy runtime.
+Keyword-based confidence boosting for detected entities.
 
 ## Overview
 
-Context-aware confidence boosting. Every recognizer that wants
-score boosting declares a `Context` (a list of keywords
-plus optional window / boost overrides), registered against the
-recognizer's name. After recognition, `ContextEnhancer` walks each
-detected `Entity<Text>`, looks the recognizer name up in the
-`ContextRegistry`, scans the surrounding window for any declared
-keyword via the configured `KeywordMatcher`, and bumps the entity's
-confidence on a hit.
+Some matches are ambiguous on their own but become far more likely when
+the surrounding text gives them away. A nine-digit number is just a
+number until the word "SSN" sits beside it. This crate raises the
+confidence of a detected entity when configured keywords appear nearby,
+so weak-but-plausible findings clear the threshold only when their
+context supports them.
 
-`Tokens` is the optional NLP artifact (surface + lemma per token)
-that a tokenizing NLP engine stashes on `RecognizerInput.artifacts`
-so `LemmaMatcher` can match morphological variants (`running` →
-`run`). The `SubstringMatcher` fallback runs whenever no `Tokens`
-artifact is present.
+A recognizer declares the keywords it cares about and how close they
+need to be. After recognition runs, the enhancer scans the neighbourhood
+of each entity for those keywords and lifts its confidence on a hit. It
+can match keywords as plain substrings, or, when token information is
+available, match across word variants such as "running" and "run".
 
-The crate depends only on `nvisy-core` for `Entity<Text>`,
-`TrailStep`, and `Confidence` — recognizer crates and the engine
-each depend on `nvisy-context` to participate.
+The boost itself is recorded on the entity, so its effect on the final
+confidence is always traceable.
 
 ## Documentation
 
@@ -40,5 +37,5 @@ Apache 2.0 License, see [LICENSE.txt](../../LICENSE.txt)
 ## Support
 
 - **Documentation**: [docs.nvisy.com](https://docs.nvisy.com)
-- **Issues**: [GitHub Issues](https://github.com/nvisycom/runtime/issues)
+- **Issues**: [GitHub Issues](https://github.com/nvisycom/veil/issues)
 - **Email**: [support@nvisy.com](mailto:support@nvisy.com)

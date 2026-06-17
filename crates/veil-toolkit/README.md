@@ -2,16 +2,20 @@
 
 [![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/veil/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/veil/actions/workflows/build.yml)
 
-Composable component library for Veil pipelines — the registries and
-policies a consumer plugs into their own document-processing flow.
+Composable recognition, deduplication, and redaction components.
 
 ## Overview
 
-Hosts the per-stage component machinery a document orchestrator drives:
-recognizer and redaction registries, deduplication layers, and
-validation checks. Sits one level above [`veil-core`](../veil-core):
-the toolkit owns reusable pieces; the orchestration that strings them
-into a full pipeline lives one layer up.
+This crate assembles the lower-level pieces into the working parts of a
+detection-and-redaction flow. It runs a set of recognizers over content,
+reconciles their overlapping findings into a single set of entities
+(resolving conflicts, adjusting confidence, and dropping weak matches),
+and applies redaction operators that hide each entity in a chosen way,
+such as masking, replacing, hashing, or encrypting it.
+
+It provides the reusable building blocks rather than a fixed pipeline.
+The orchestration that strings them into an end-to-end flow over whole
+documents lives one layer up, in the runtime.
 
 ## Documentation
 
