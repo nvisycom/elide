@@ -30,5 +30,4 @@ mod layer;
 mod pipeline;
 
 pub use self::layer::{Layer, LayerOutput};
-
 pub(crate) use self::pipeline::LayerPipeline;

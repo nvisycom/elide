@@ -20,16 +20,16 @@ use super::Confidence;
 pub struct ConfidenceThreshold(f32);
 
 impl ConfidenceThreshold {
-    /// The minimum threshold, `0.0` — accepts everything.
-    pub const MIN: Self = Self(0.0);
-    /// The maximum threshold, `1.0` — accepts only full confidence.
-    pub const MAX: Self = Self(1.0);
     /// A sensible default cutoff, `0.35`.
     ///
     /// Mirrors Presidio's default acceptance level — low enough to
     /// retain weak-but-plausible detections for a later layer to
     /// confirm, high enough to drop near-noise.
     pub const BASELINE: Self = Self(0.35);
+    /// The maximum threshold, `1.0` — accepts only full confidence.
+    pub const MAX: Self = Self(1.0);
+    /// The minimum threshold, `0.0` — accepts everything.
+    pub const MIN: Self = Self(0.0);
 
     /// Construct a threshold, returning [`None`] if the value is outside
     /// `0.0..=1.0` or not finite.

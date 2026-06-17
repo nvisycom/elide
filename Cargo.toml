@@ -51,6 +51,7 @@ type-map = { version = "0.5", features = [] }
 # Encoding and hashing
 base64 = { version = "0.22", features = [] }
 sha2 = { version = "0.11", features = [] }
+hex = { version = "0.4", features = [] }
 
 # Async runtime and parallelism
 tokio = { version = "1.50", features = [] }

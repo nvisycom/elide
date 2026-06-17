@@ -1,4 +1,4 @@
-//! The [`Anonymizer`] trait — the forward redaction direction — and the
+//! The [`Operator`] trait — the forward redaction direction — and the
 //! [`LeakProfile`] describing how much its output leaks.
 
 use std::future::Future;
@@ -15,8 +15,7 @@ use crate::redaction::OperatorId;
 ///
 /// Variants are ordered from most-leaky to least-leaky, so
 /// `Recoverable < Partial < Irrecoverable`. Surfaced through
-/// [`Anonymizer::leak_profile`] for policy authoring and audit
-/// reporting.
+/// [`Operator::leak_profile`] for policy authoring and audit reporting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
@@ -34,27 +33,27 @@ pub enum LeakProfile {
     Irrecoverable,
 }
 
-/// The forward redaction direction: computes what should replace an
-/// entity to remove or obscure it.
+/// A redaction operator: computes what should replace an entity to
+/// remove or obscure it.
 ///
 /// Modelled on Presidio's anonymizer operators (replace, redact, mask,
 /// hash, encrypt, keep, custom), generalised to be multimodal. Every
 /// redaction operator implements this trait.
 ///
-/// An anonymizer is **pure**: it reads the entity and the
+/// An operator is **pure**: it reads the entity and the
 /// [`Data`](Modality::Data) under it and returns a
 /// [`Replacement`](Modality::Replacement) — the instruction for what to
 /// write — *without* mutating anything. Applying the replacement back
 /// into the document is the codec's job. This keeps operators free of
-/// format knowledge (a `Mask` works the same whether the text lives in a
+/// format knowledge (a mask works the same whether the text lives in a
 /// PDF or a CSV), trivially testable, and cacheable. A reversible
 /// operator (encrypt) additionally implements
-/// [`Deanonymizer`](crate::redaction::Deanonymizer); an irreversible one
-/// (mask, redact, hash) does not.
+/// [`ReversibleOperator`](crate::redaction::ReversibleOperator); an
+/// irreversible one (mask, redact, hash) does not.
 ///
 /// Generic over the [`Modality`] `M`: reads `M::Data`, returns
 /// `M::Replacement`.
-pub trait Anonymizer<M: Modality>: Send + Sync {
+pub trait Operator<M: Modality>: Send + Sync {
     /// This operator's identity (name + version).
     fn id(&self) -> OperatorId;
 

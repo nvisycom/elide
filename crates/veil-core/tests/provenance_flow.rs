@@ -7,29 +7,34 @@ use veil_core::Result;
 use veil_core::entity::{Entity, EntityCoRef, Label, LabelCatalog, LabelRef};
 use veil_core::modality::Modality;
 use veil_core::primitive::{Confidence, ConfidenceThreshold, CountryCode, LanguageTag};
-use veil_core::provenance::{Manifest, Provenance};
-use veil_core::recognition::{Detection, Explanation, Merge, RecognizerId};
+use veil_core::provenance::{Event, EventKind, Manifest, ModelEvent, PatternEvent, Provenance};
 
 mod fixtures;
 use fixtures::{Text, TextData, TextLocation, TextReplacement};
 
-/// A trivial "highest confidence wins" fusion, of the kind the toolkit
-/// fusion step will provide — assembled here by hand from core parts.
-fn fuse_max_confidence(detections: Vec<Detection<Text>>) -> Entity<Text> {
-    let top = detections
-        .iter()
-        .max_by(|a, b| a.confidence.partial_cmp(&b.confidence).unwrap())
-        .expect("non-empty");
-    let label = top.label.clone();
-    let location = top.location.clone();
-    let confidence = top.confidence;
-    let merge = Merge::new("max", confidence);
-    Entity::new(
-        label,
-        location,
-        confidence,
-        Provenance::merged(detections, merge),
-    )
+/// Build a single-recognition entity, the way a recognizer would.
+fn recognized(
+    label: &LabelRef,
+    location: TextLocation,
+    confidence: Confidence,
+    event: Event<Text>,
+) -> Entity<Text> {
+    Entity::new(label.clone(), location, confidence, Provenance::new(event))
+}
+
+/// A trivial "highest confidence wins" fusion: concatenate every
+/// entity's events and append a deduplication event — what the toolkit
+/// fusion step does, assembled here by hand from core parts.
+fn fuse_max_confidence(mut entities: Vec<Entity<Text>>) -> Entity<Text> {
+    entities.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
+    let mut base = entities.remove(0);
+    let before = base.confidence;
+    for other in entities {
+        base.provenance.events.extend(other.provenance.events);
+    }
+    base.provenance
+        .record(Event::deduplication("max", before, base.confidence));
+    base
 }
 
 #[test]
@@ -37,36 +42,47 @@ fn two_recognizers_fuse_into_one() {
     let phone = LabelRef::new("PHONE_NUMBER");
 
     // Recognizer 1: a regex pattern.
-    let pattern = Detection::new(
-        RecognizerId::new("us-phone-pattern", "1.0.0"),
-        phone.clone(),
+    let pattern_conf = Confidence::new(0.8).unwrap();
+    let pattern = recognized(
+        &phone,
         TextLocation::new(10, 22),
-        Confidence::new(0.8).unwrap(),
-        Explanation {
-            pattern: Some("\\d{3}-\\d{3}-\\d{4}".into()),
-            validation: Some(true),
-            ..Explanation::new()
-        },
+        pattern_conf,
+        Event::pattern(
+            "us-phone-pattern",
+            pattern_conf,
+            TextLocation::new(10, 22),
+            PatternEvent {
+                name: "phone".into(),
+                regex: Some("\\d{3}-\\d{3}-\\d{4}".into()),
+                validator: Some("luhn".into()),
+                contextual: false,
+            },
+        ),
     );
 
     // Recognizer 2: an NER model, slightly different span, higher confidence.
-    let ner = Detection::new(
-        RecognizerId::new("ner-model", "2024.1"),
-        phone.clone(),
+    let ner_conf = Confidence::new(0.95).unwrap();
+    let ner = recognized(
+        &phone,
         TextLocation::new(10, 23),
-        Confidence::new(0.95).unwrap(),
-        Explanation {
-            textual: Some("token classified as phone number".into()),
-            ..Explanation::new()
-        },
+        ner_conf,
+        Event::model(
+            "ner-model",
+            ner_conf,
+            TextLocation::new(10, 23),
+            ModelEvent {
+                name: "ner-model".into(),
+                version: Some("2024.1".into()),
+                contextual: false,
+            },
+        ),
     );
 
-    // Fuse both detections into one provenanced entity.
+    // Fuse both into one provenanced entity.
     let mut entity = fuse_max_confidence(vec![pattern, ner]);
 
-    // The fusion kept the highest-confidence layer's location and score...
+    // The fusion kept the highest-confidence layer's location and score.
     assert_eq!(entity.label, phone);
-    assert_eq!(entity.location, TextLocation::new(10, 23));
     assert_eq!(entity.confidence, Confidence::new(0.95).unwrap());
 
     // The entity has a fresh v7 identity and a matching reference.
@@ -81,10 +97,17 @@ fn two_recognizers_fuse_into_one() {
         Some("ref-1")
     );
 
-    // ...while retaining *both* original detections in the audit trail.
-    assert_eq!(entity.provenance.detections.len(), 2);
-    let merge = entity.provenance.merge.as_ref().expect("merge recorded");
-    assert_eq!(merge.strategy, "max");
+    // Both recognitions survive, plus a deduplication event.
+    assert_eq!(entity.provenance.recognizers().count(), 2);
+    assert_eq!(entity.provenance.events.len(), 3);
+    assert!(matches!(
+        entity.provenance.events.last().unwrap().kind,
+        EventKind::Deduplication { ref strategy } if strategy == "max"
+    ));
+    assert_eq!(
+        entity.provenance.final_confidence(),
+        Some(Confidence::new(0.95).unwrap())
+    );
 }
 
 #[test]
@@ -211,7 +234,7 @@ fn recognizer_input_scopes_by_language_and_country() {
     assert!(en.matches(&en_us));
     assert!(!en.matches(&fr));
 
-    let input: RecognizerInput<Text> = RecognizerInput::new(TextData(String::new()))
+    let input: RecognizerInput<Text> = RecognizerInput::new(TextData::new(""))
         .with_language(en_us.clone())
         .with_country(CountryCode::from_alpha2("US").unwrap());
 
@@ -226,14 +249,14 @@ fn recognizer_input_scopes_by_language_and_country() {
 }
 
 #[test]
-fn anonymizer_trait_shape() {
-    use veil_core::redaction::{Anonymizer, LeakProfile, OperatorId};
+fn operator_trait_shape() {
+    use veil_core::redaction::{LeakProfile, Operator, OperatorId};
 
     /// A trivial `[LABEL]`-style replace operator, to exercise the
     /// trait shape and the pure `Replacement` model.
     struct Replace;
 
-    impl Anonymizer<Text> for Replace {
+    impl Operator<Text> for Replace {
         fn id(&self) -> OperatorId {
             OperatorId::new("replace", "1.0.0")
         }

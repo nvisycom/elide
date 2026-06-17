@@ -1,40 +1,34 @@
-//! Audit records: the per-entity [`Provenance`] ledger and the
-//! run-level [`Manifest`].
+//! Audit records: the per-entity [`Provenance`] trail and the run-level
+//! [`Manifest`].
 //!
 //! [`Provenance`]: crate::provenance::Provenance
 
+mod event;
 mod manifest;
-
-pub use self::manifest::Manifest;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+pub use self::event::{Event, EventKind, ModelEvent, PatternEvent};
+pub use self::manifest::Manifest;
 use crate::modality::Modality;
-use crate::recognition::{Detection, Merge};
+use crate::primitive::Confidence;
 
-/// The detection audit trail of an [`Entity`].
+/// The full audit trail of an [`Entity`] — every [`Event`] in its life,
+/// in order.
 ///
-/// This is the model's answer to "full provenance" — the spine that
-/// Presidio lacks. Where Presidio keeps a shallow, optional, per-stage
-/// explanation that is stripped by default, a `Provenance` is always
-/// present and records how the entity came to be:
+/// This is the model's answer to "full provenance": where Presidio keeps
+/// a shallow, optional, per-stage explanation that is stripped by
+/// default, a `Provenance` is always present and records the entity's
+/// *entire* life as an ordered list of events — each recognizer that
+/// found it, the deduplication that fused them, any confidence
+/// calibration, and the redaction that hid it. Nothing is collapsed:
+/// every recognizer keeps its own recognition event with its location
+/// and score.
 ///
-/// 1. **Detections** — every layer that independently found this
-///    entity, each with its own location, score, and reasoning. More
-///    than one entry means several recognizers (e.g. a pattern *and* a
-///    model) agreed, and were merged.
-/// 2. **Merge** — if the entity was born from combining detections,
-///    the record of *how* (which strategy, what resulting score).
-///
-/// Provenance covers **detection only** — it freezes once the entity is
-/// assembled. Redaction is a separate concern: an operator produces a
-/// [`Replacement`](crate::modality::Modality::Replacement), and the
-/// audit of *what was hidden, how* is assembled one layer up (by
-/// `veil-toolkit` / the orchestrating engine), not stored on the entity.
-///
-/// Generic over the modality `M` because the retained detections
-/// carry their own (per-layer) locations.
+/// The events form a confidence chain — each event's
+/// [`after`](Event::after) is the next's [`before`](Event::before) — so
+/// the final confidence and its full history are always recoverable.
 ///
 /// [`Entity`]: crate::entity::Entity
 #[derive(Debug, Clone)]
@@ -44,30 +38,42 @@ use crate::recognition::{Detection, Merge};
     serde(bound = "M::Location: Serialize + for<'a> Deserialize<'a>")
 )]
 pub struct Provenance<M: Modality> {
-    /// Every detection layer that found this entity.
-    pub detections: Vec<Detection<M>>,
-    /// How the detections were combined, if more than one contributed.
-    pub merge: Option<Merge>,
+    /// The events, in the order they happened.
+    pub events: Vec<Event<M>>,
 }
 
 impl<M: Modality> Provenance<M> {
-    /// Provenance for an entity that came straight from a single
-    /// detection, with no merge.
-    pub fn single(detection: Detection<M>) -> Self {
+    /// Provenance seeded with a single (birth) event.
+    pub fn new(event: Event<M>) -> Self {
         Self {
-            detections: vec![detection],
-            merge: None,
+            events: vec![event],
         }
     }
 
-    /// Provenance for an entity born from fusing several detections.
-    ///
-    /// Retains every contributing detection and records the [`Merge`]
-    /// event. Written by the fusion step in `veil-toolkit`.
-    pub fn merged(detections: Vec<Detection<M>>, merge: Merge) -> Self {
-        Self {
-            detections,
-            merge: Some(merge),
-        }
+    /// Append an event to the trail.
+    pub fn record(&mut self, event: Event<M>) {
+        self.events.push(event);
+    }
+
+    /// The recognition events (pattern / model) that found this entity.
+    pub fn recognizers(&self) -> impl Iterator<Item = &Event<M>> {
+        self.events.iter().filter(|e| e.is_recognition())
+    }
+
+    /// The confidence at the very first event, before any adjustment.
+    pub fn original_confidence(&self) -> Option<Confidence> {
+        self.events.first().map(|e| e.after)
+    }
+
+    /// The confidence after the most recent event — the entity's
+    /// effective confidence.
+    pub fn final_confidence(&self) -> Option<Confidence> {
+        self.events.last().map(|e| e.after)
+    }
+}
+
+impl<M: Modality> Default for Provenance<M> {
+    fn default() -> Self {
+        Self { events: Vec::new() }
     }
 }

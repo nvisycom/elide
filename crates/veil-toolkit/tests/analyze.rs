@@ -4,11 +4,10 @@
 
 use veil_core::Error;
 use veil_core::entity::{Entity, LabelRef};
-use veil_core::primitive::{Confidence, ConfidenceThreshold};
-use veil_core::provenance::Provenance;
-use veil_core::recognition::{
-    Detection, Explanation, Recognizer, RecognizerId, RecognizerInput, RecognizerOutput,
-};
+use veil_core::primitive::Confidence;
+use veil_core::primitive::ConfidenceThreshold;
+use veil_core::provenance::{Event, EventKind, PatternEvent, Provenance};
+use veil_core::recognition::{Recognizer, RecognizerId, RecognizerInput, RecognizerOutput};
 use veil_toolkit::Analyzer;
 use veil_toolkit::deduplication::calibrate::{CalibrateLayer, CalibrationMap};
 use veil_toolkit::deduplication::filter::FilterLayer;
@@ -18,19 +17,22 @@ use veil_toolkit::deduplication::resolve::{HighestConfidence, ResolveLayer};
 mod fixtures;
 use fixtures::{Text, TextData, TextLocation};
 
-/// Builds an entity carrying one detection, the way a recognizer would.
+/// Builds an entity carrying one recognition event, the way a recognizer
+/// would.
 fn detected(recognizer: &str, label: &str, loc: (usize, usize), conf: f32) -> Entity<Text> {
     let label = LabelRef::new(label.to_owned());
     let location = TextLocation::new(loc.0, loc.1);
     let confidence = Confidence::new(conf).unwrap();
-    let detection = Detection::new(
-        RecognizerId::new(recognizer.to_owned(), "1.0.0"),
-        label.clone(),
-        location.clone(),
+    let event = Event::pattern(
+        recognizer.to_owned(),
         confidence,
-        Explanation::new(),
+        location.clone(),
+        PatternEvent {
+            name: label.as_str().into(),
+            ..PatternEvent::default()
+        },
     );
-    Entity::new(label, location, confidence, Provenance::single(detection))
+    Entity::new(label, location, confidence, Provenance::new(event))
 }
 
 /// A recognizer that just replays a fixed entity list.
@@ -63,12 +65,12 @@ async fn analyze_fuses_resolves_filters() {
         .with_recognizer(a)
         .with_recognizer(b)
         .with_layer(CalibrateLayer::new(CalibrationMap::new())) // identity (empty)
-        .with_layer(FuseLayer::with_strategy(MaxConfidence))
+        .with_layer(FuseLayer::new(MaxConfidence))
         .with_layer(ResolveLayer::new(HighestConfidence))
         .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE));
 
     let mut entities = analyzer
-        .analyze(RecognizerInput::new(TextData(String::new())))
+        .analyze(RecognizerInput::new(TextData::new("")))
         .await
         .unwrap();
 
@@ -78,14 +80,18 @@ async fn analyze_fuses_resolves_filters() {
     let phone = entities.pop().unwrap();
     assert_eq!(phone.label, LabelRef::new("PHONE_NUMBER"));
     // Fusion kept the higher-confidence, larger span and recorded both
-    // detections.
+    // recognitions plus a deduplication event.
     assert_eq!(phone.confidence, Confidence::new(0.95).unwrap());
     assert_eq!(phone.location, TextLocation::new(10, 23));
-    assert_eq!(phone.provenance.detections.len(), 2);
-    assert_eq!(
-        phone.provenance.merge.as_ref().map(|m| m.strategy.as_str()),
-        Some("max")
-    );
+    assert_eq!(phone.provenance.recognizers().count(), 2);
+    // The trail: 2 recognition events + 1 deduplication event.
+    assert_eq!(phone.provenance.events.len(), 3);
+    let last = phone.provenance.events.last().unwrap();
+    assert!(matches!(
+        last.kind,
+        EventKind::Deduplication { ref strategy } if strategy == "max"
+    ));
+    assert_eq!(phone.provenance.final_confidence(), Some(phone.confidence));
 }
 
 #[test]

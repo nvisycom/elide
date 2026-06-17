@@ -7,26 +7,26 @@
 
 mod threshold;
 
-pub use self::threshold::ConfidenceThreshold;
-
 use std::fmt;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+pub use self::threshold::ConfidenceThreshold;
+
 /// A confidence score in the closed range `0.0..=1.0`.
 ///
-/// Carried both by a single layer's raw finding ([`Detection`]) and by
-/// the merged, effective confidence of an [`Entity`]. The newtype
-/// enforces the range at construction so no downstream code has to
-/// defend against values outside `[0, 1]`.
+/// Carried by every provenance [`Event`] (the `before`/`after` of a
+/// recognition, fusion, or calibration) and by the effective confidence
+/// of an [`Entity`]. The newtype enforces the range at construction so
+/// no downstream code has to defend against values outside `[0, 1]`.
 ///
 /// Distinct from [`ConfidenceThreshold`] so the two cannot be confused
 /// at a call site: a score is *produced* by detection, a threshold is a
 /// *cutoff* configured to filter scores. Compare the two with
 /// [`ConfidenceThreshold::passes`].
 ///
-/// [`Detection`]: crate::recognition::Detection
+/// [`Event`]: crate::provenance::Event
 /// [`Entity`]: crate::entity::Entity
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -34,10 +34,10 @@ use serde::{Deserialize, Serialize};
 pub struct Confidence(f32);
 
 impl Confidence {
-    /// The minimum score, `0.0` — no confidence.
-    pub const MIN: Self = Self(0.0);
     /// The maximum score, `1.0` — full confidence.
     pub const MAX: Self = Self(1.0);
+    /// The minimum score, `0.0` — no confidence.
+    pub const MIN: Self = Self(0.0);
 
     /// Construct a score, returning [`None`] if the value is outside
     /// `0.0..=1.0` or not finite.

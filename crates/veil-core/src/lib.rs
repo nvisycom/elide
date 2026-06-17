@@ -12,4 +12,4 @@ pub mod redaction;
 
 // The error type is the one piece flat enough to belong at the crate
 // root; every other type is reached through its module path.
-pub use self::error::{BoxError, Error, ErrorKind, Result};
+pub use self::error::{Error, ErrorKind, Result};

@@ -1,26 +1,15 @@
-//! Detection: recognizers, the entities they emit, and the records of
-//! how those entities were found.
+//! Detection: recognizers and the entities they emit.
 //!
 //! A [`Recognizer`] inspects content and emits entities, each carrying a
-//! [`Detection`] (its own [`Explanation`], confidence, location). When
-//! several recognizers find the same thing, a fusion step (in
-//! `veil-toolkit`) combines their entities into one, unioning the
-//! detections and writing a [`Merge`] record into the survivor's
-//! provenance.
+//! recognition [`Event`](crate::provenance::Event) in its provenance
+//! (its location, confidence, and pattern/model detail). When several
+//! recognizers find the same thing, a fusion step (in `veil-toolkit`)
+//! combines their entities into one, concatenating their events and
+//! appending a deduplication event.
 
-mod detection;
-mod explanation;
 mod input;
 mod label;
-mod merge;
 mod output;
-
-pub use self::detection::Detection;
-pub use self::explanation::Explanation;
-pub use self::input::RecognizerInput;
-pub use self::label::LabelMap;
-pub use self::merge::Merge;
-pub use self::output::RecognizerOutput;
 
 use std::fmt;
 use std::future::Future;
@@ -29,10 +18,13 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+pub use self::input::RecognizerInput;
+pub use self::label::LabelMap;
+pub use self::output::RecognizerOutput;
 use crate::error::Error;
 use crate::modality::Modality;
 
-/// Identifies the recognizer that produced a [`Detection`].
+/// Identifies a recognizer (name + version).
 ///
 /// Pairs a stable name with a free-form version string so the audit
 /// trail records not just *which* recognizer fired but *which build* of
@@ -45,7 +37,7 @@ use crate::modality::Modality;
 pub struct RecognizerId {
     /// Stable, human-readable recognizer name (e.g. `"us-ssn-pattern"`).
     pub name: HipStr<'static>,
-    /// The recognizer's version at the time of detection.
+    /// The recognizer's version at the time it ran.
     pub version: HipStr<'static>,
 }
 
@@ -69,8 +61,8 @@ impl fmt::Display for RecognizerId {
 ///
 /// Modelled on Presidio's `EntityRecognizer`, generalised to be
 /// multimodal (keyed on the [`Modality`] `M`) and provenance-first (the
-/// emitted [`Entity`](crate::entity::Entity)s carry full
-/// [`Explanation`]s through their detections).
+/// emitted [`Entity`](crate::entity::Entity)s carry a recognition
+/// [`Event`](crate::provenance::Event) in their provenance).
 ///
 /// A recognizer does **not** resolve conflicts or fuse across
 /// recognizers — it reports what it sees, in modality-local coordinates.
@@ -85,8 +77,7 @@ pub trait Recognizer<M>: Send + Sync
 where
     M: Modality,
 {
-    /// This recognizer's identity (name + version), stamped onto every
-    /// [`Detection`] it produces.
+    /// This recognizer's identity (name + version).
     fn id(&self) -> RecognizerId;
 
     /// Inspect the input and return the recognized entities.

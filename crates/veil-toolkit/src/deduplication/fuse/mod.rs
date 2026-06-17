@@ -6,13 +6,12 @@
 mod group;
 mod strategy;
 
-pub use self::group::{GroupPredicate, SameLabelOverlap};
-pub use self::strategy::{FusionStrategy, MaxConfidence, Mean, NoisyOr};
-
 use veil_core::entity::Entity;
 use veil_core::modality::{Modality, ModalityLocation};
-use veil_core::recognition::Merge;
+use veil_core::provenance::Event;
 
+pub use self::group::{GroupPredicate, SameLabelOverlap};
+pub use self::strategy::{FusionStrategy, MaxConfidence, Mean, NoisyOr};
 use super::{Layer, LayerOutput};
 
 /// The fusion stage: clusters entities by a [`GroupPredicate`] and
@@ -26,17 +25,26 @@ pub struct FuseLayer<S, G> {
     group: G,
 }
 
-impl<S, G> FuseLayer<S, G> {
-    /// A fuse layer using `strategy` to combine and `group` to cluster.
-    pub fn new(strategy: S, group: G) -> Self {
-        Self { strategy, group }
+impl<S> FuseLayer<S, SameLabelOverlap> {
+    /// A fuse layer using `strategy` to combine and the default
+    /// same-label/overlap grouping. Swap the grouping with
+    /// [`with_group`](FuseLayer::with_group).
+    pub fn new(strategy: S) -> Self {
+        Self {
+            strategy,
+            group: SameLabelOverlap,
+        }
     }
 }
 
-impl<S> FuseLayer<S, SameLabelOverlap> {
-    /// A fuse layer using the default same-label/overlap grouping.
-    pub fn with_strategy(strategy: S) -> Self {
-        Self::new(strategy, SameLabelOverlap)
+impl<S, G> FuseLayer<S, G> {
+    /// Replace the grouping predicate, consuming and returning `self`.
+    #[must_use]
+    pub fn with_group<G2>(self, group: G2) -> FuseLayer<S, G2> {
+        FuseLayer {
+            strategy: self.strategy,
+            group,
+        }
     }
 }
 
@@ -71,8 +79,9 @@ where
 }
 
 /// Combine a cluster into one entity: pick the highest-confidence base,
-/// adopt the largest location, union all detections, set the fused
-/// confidence, and record the [`Merge`] event.
+/// adopt the largest location, concatenate every contributing entity's
+/// provenance events, set the fused confidence, and append a
+/// deduplication [`Event`].
 fn fuse_group<M, S>(strategy: &S, mut group: Vec<Entity<M>>) -> Entity<M>
 where
     M: Modality,
@@ -82,7 +91,7 @@ where
         return group.pop().expect("len == 1");
     }
 
-    let confidence = strategy.confidence(&group);
+    let after = strategy.confidence(&group);
 
     // Highest-confidence entity becomes the base.
     group.sort_by(|a, b| {
@@ -91,6 +100,7 @@ where
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     let mut base = group.remove(0);
+    let before = base.confidence;
 
     // Adopt the largest location among the cluster.
     for other in &group {
@@ -99,14 +109,13 @@ where
         }
     }
 
-    // Union every contributing detection into the survivor.
-    let mut detections = std::mem::take(&mut base.provenance.detections);
+    // Concatenate every contributing entity's provenance events.
     for other in group {
-        detections.extend(other.provenance.detections);
+        base.provenance.events.extend(other.provenance.events);
     }
 
-    base.confidence = confidence;
-    base.provenance.detections = detections;
-    base.provenance.merge = Some(Merge::new(strategy.name(), confidence));
+    base.confidence = after;
+    base.provenance
+        .record(Event::deduplication(strategy.name(), before, after));
     base
 }

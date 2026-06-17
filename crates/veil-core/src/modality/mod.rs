@@ -13,11 +13,19 @@
 //! `M::Data` / `M::Location`; the human-readable [`Modality::NAME`] is
 //! available for serialization and logging.
 //!
-//! The core defines only the traits. The marker types and their
-//! bindings live in the modality crates: a `veil-text` crate (or this
-//! crate's own `text` module) defines its `Text` marker, its data and
-//! location types, and the `impl Modality for Text` that ties them
-//! together. Adding a new medium therefore needs no change here.
+//! The core defines the traits plus the [`text`] modality. Other media
+//! (image, audio, document) live in their own crates: each defines its
+//! marker type, its data/location/replacement types, and the `impl
+//! Modality` that ties them together. Adding a new medium therefore
+//! needs no change to this crate.
+
+pub mod text;
+
+mod data_reader;
+mod data_writer;
+
+pub use self::data_reader::DataReader;
+pub use self::data_writer::DataWriter;
 
 /// The payload a recognizer inspects for a modality.
 ///
@@ -55,7 +63,7 @@ pub trait ModalityLocation: Clone + std::fmt::Debug + Send + Sync + 'static {
     fn span_cmp(&self, other: &Self) -> std::cmp::Ordering;
 }
 
-/// What an [`Anonymizer`] produces for a modality — the instruction a
+/// What an [`Operator`] produces for a modality — the instruction a
 /// codec applies to hide an entity.
 ///
 /// Hiding is modality-specific even though detection is not: text yields
@@ -64,7 +72,7 @@ pub trait ModalityLocation: Clone + std::fmt::Debug + Send + Sync + 'static {
 /// the entity and its data; the codec writes it back into the document.
 /// A near-empty marker, like the others.
 ///
-/// [`Anonymizer`]: crate::redaction::Anonymizer
+/// [`Operator`]: crate::redaction::Operator
 pub trait ModalityReplacement: Clone + std::fmt::Debug + Send + Sync + 'static {}
 
 /// A medium that entities can be located within.

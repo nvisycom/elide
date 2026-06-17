@@ -1,84 +1,25 @@
-//! Shared test fixture: a minimal `Text` modality modelled on
-//! `nvisy-runtime`'s, the kind a real `veil-text` crate would provide.
-#![allow(dead_code)] // a fixture exposes more API than any one test uses
+//! Shared test fixtures: re-exports the core [`Text`] modality and a
+//! trivial in-memory [`DataReader`] over a single string, the way a
+//! real text codec would slice values at byte ranges.
+// A shared fixture exposes more than any one test uses.
+#![allow(dead_code, unused_imports)]
 
-use std::cmp::Ordering;
+use veil_core::modality::DataReader;
+pub use veil_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
 
-use veil_core::modality::{Modality, ModalityData, ModalityLocation, ModalityReplacement};
+/// An in-memory text source: reads the byte range of a location out of
+/// one backing string.
+pub struct TextSource(pub String);
 
-/// Per-call text payload — the content recognizers inspect.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TextData(pub String);
-
-impl ModalityData for TextData {}
-
-/// A half-open `[start, end)` byte range within text content.
-///
-/// Modelled on runtime's `TextLocation`: the core span plus the
-/// optional surrounding context window and page number a codec may
-/// attach. Ordering and overlap consider only `(start, end)`.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct TextLocation {
-    /// Byte offset where the range starts.
-    pub start: usize,
-    /// Byte offset where the range ends (exclusive).
-    pub end: usize,
-    /// Surrounding context window for redaction, when known.
-    pub context: Option<(usize, usize)>,
-    /// 1-based page number, when known.
-    pub page_number: Option<u32>,
-}
-
-impl TextLocation {
-    /// A location covering `start..end`, optional fields unset.
-    pub fn new(start: usize, end: usize) -> Self {
-        Self {
-            start,
-            end,
-            context: None,
-            page_number: None,
-        }
-    }
-
-    /// Byte length of the range (`end - start`).
-    pub fn len(&self) -> usize {
-        self.end.saturating_sub(self.start)
-    }
-
-    /// Whether the range is empty (zero length).
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
+impl TextSource {
+    /// A source over `text`.
+    pub fn new(text: impl Into<String>) -> Self {
+        Self(text.into())
     }
 }
 
-impl ModalityLocation for TextLocation {
-    fn overlaps(&self, other: &Self) -> bool {
-        self.start < other.end && other.start < self.end
+impl DataReader<Text> for TextSource {
+    async fn read_at(&self, location: &TextLocation) -> Option<TextData> {
+        self.0.get(location.start..location.end).map(TextData::new)
     }
-
-    fn span_cmp(&self, other: &Self) -> Ordering {
-        self.len().cmp(&other.len())
-    }
-}
-
-/// What a text anonymizer produces: a substitution or a removal.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TextReplacement {
-    /// Replace the span with this value.
-    Substituted(String),
-    /// Remove the span entirely.
-    Removed,
-}
-
-impl ModalityReplacement for TextReplacement {}
-
-/// The text modality marker, binding the data/location/replacement types.
-#[derive(Debug, Clone, Copy)]
-pub struct Text;
-
-impl Modality for Text {
-    type Data = TextData;
-    type Location = TextLocation;
-    type Replacement = TextReplacement;
-    const NAME: &'static str = "text";
 }

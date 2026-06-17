@@ -9,13 +9,12 @@
 mod label;
 mod reference;
 
-pub use self::label::{Label, LabelCatalog, LabelRef};
-pub use self::reference::{EntityCoRef, EntityRef};
-
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub use self::label::{Label, LabelCatalog, LabelRef};
+pub use self::reference::{EntityCoRef, EntityRef};
 use crate::modality::Modality;
 use crate::primitive::Confidence;
 use crate::provenance::Provenance;
@@ -29,18 +28,15 @@ use crate::provenance::Provenance;
 ///
 /// # Birth and fusion
 ///
-/// A recognizer emits an entity directly, carrying a single
-/// [`Detection`] (its own finding) in the entity's
+/// A recognizer emits an entity directly, carrying a single recognition
+/// [`Event`](crate::provenance::Event) (its own finding) in the entity's
 /// [`provenance`](Entity::provenance). When several recognizers find the
 /// same thing, a fusion step (in `veil-toolkit`) combines their entities
 /// into one: the survivor's [`location`](Entity::location) and
 /// [`confidence`](Entity::confidence) are the *fused* values, and every
-/// contributing detection — plus the fusion event itself
-/// ([`Merge`]) — is retained in its provenance. The entity therefore
-/// carries its full detection history with it.
-///
-/// [`Detection`]: crate::recognition::Detection
-/// [`Merge`]: crate::recognition::Merge
+/// contributing recognition event — plus a deduplication event — is
+/// retained in its provenance. The entity therefore carries its full
+/// audit trail with it.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(

@@ -9,13 +9,12 @@
 mod dyn_recognizer;
 mod registry;
 
-pub use self::registry::RecognizerRegistry;
-
 use veil_core::Error;
 use veil_core::entity::Entity;
 use veil_core::modality::Modality;
 use veil_core::recognition::{Recognizer, RecognizerInput};
 
+pub use self::registry::RecognizerRegistry;
 use crate::deduplication::{Layer, LayerPipeline};
 
 /// The find engine: recognizers + deduplication, in one call.
@@ -30,7 +29,7 @@ use crate::deduplication::{Layer, LayerPipeline};
 /// let entities = Analyzer::new()
 ///     .with_recognizer(us_phone)
 ///     .with_recognizer(ner)
-///     .with_layer(FuseLayer::with_strategy(MaxConfidence))
+///     .with_layer(FuseLayer::new(MaxConfidence))
 ///     .with_layer(ResolveLayer::new(HighestConfidence))
 ///     .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE))
 ///     .analyze(input)

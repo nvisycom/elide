@@ -1,18 +1,19 @@
-//! The [`Deanonymizer`] trait — the optional reverse redaction direction.
+//! The [`ReversibleOperator`] trait — the optional reverse redaction
+//! direction.
 
 use std::future::Future;
 
 use crate::entity::Entity;
 use crate::error::Error;
 use crate::modality::Modality;
-use crate::redaction::Anonymizer;
+use crate::redaction::Operator;
 
-/// The reverse redaction direction: recovers the original data an
-/// [`Anonymizer`] replaced.
+/// A reversible redaction operator: recovers the original data it
+/// replaced.
 ///
-/// A supertrait extension of [`Anonymizer`]: a `Deanonymizer` is always
-/// also an `Anonymizer`, sharing the same [`id`](Anonymizer::id), and
-/// only reversible operators (encrypt → decrypt) implement it. Like
+/// A supertrait extension of [`Operator`]: a `ReversibleOperator` is
+/// always also an [`Operator`], sharing the same [`id`](Operator::id),
+/// and only reversible operators (encrypt → decrypt) implement it. Like
 /// `anonymize`, it is **pure** — it reads the entity and the
 /// [`Replacement`](Modality::Replacement) and returns the recovered
 /// [`Data`](Modality::Data), without mutating anything.
@@ -22,7 +23,7 @@ use crate::redaction::Anonymizer;
 /// out-of-band keyed by the entity. Returns `None` when this operator
 /// cannot recover the original for the given replacement (e.g. the
 /// replacement wasn't produced by it).
-pub trait Deanonymizer<M: Modality>: Anonymizer<M> {
+pub trait ReversibleOperator<M: Modality>: Operator<M> {
     /// Recover the original data for `entity` from its `replacement`,
     /// or `None` if it cannot be reversed.
     fn deanonymize(

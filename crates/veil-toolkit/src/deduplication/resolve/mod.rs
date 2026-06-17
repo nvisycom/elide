@@ -3,11 +3,10 @@
 
 mod strategy;
 
-pub use self::strategy::{ConflictResolution, HighestConfidence, LongestSpan};
-
 use veil_core::entity::Entity;
 use veil_core::modality::{Modality, ModalityLocation};
 
+pub use self::strategy::{ConflictResolution, HighestConfidence, LongestSpan};
 use super::{Layer, LayerOutput};
 
 /// The conflict-resolution stage: where two entities of *different*

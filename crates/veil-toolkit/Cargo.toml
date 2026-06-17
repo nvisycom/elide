@@ -36,5 +36,9 @@ tokio = { workspace = true, features = ["rt", "sync", "macros"] }
 # Observability
 tracing = { workspace = true, features = [] }
 
+# Hashing (the Hash operator)
+sha2 = { workspace = true, features = [] }
+hex = { workspace = true, features = [] }
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

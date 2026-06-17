@@ -3,12 +3,12 @@
 
 mod map;
 
-pub use self::map::CalibrationMap;
-
 use veil_core::entity::Entity;
 use veil_core::modality::Modality;
 use veil_core::primitive::Confidence;
+use veil_core::provenance::Event;
 
+pub use self::map::CalibrationMap;
 use super::{Layer, LayerOutput};
 
 /// The calibration stage: scale each entity's confidence by the
@@ -38,15 +38,21 @@ impl<M: Modality> Layer<M> for CalibrateLayer {
         }
 
         for entity in &mut entities {
+            // The originating recognizer is the source of the first
+            // recognition event in the entity's provenance.
             let multiplier = entity
                 .provenance
-                .detections
-                .first()
-                .and_then(|d| self.calibration.get(d.recognizer.name.as_str()));
+                .recognizers()
+                .next()
+                .and_then(|e| self.calibration.get(e.source.as_str()));
 
             if let Some(m) = multiplier {
-                entity.confidence =
-                    Confidence::clamped((entity.confidence.get() as f64 * m) as f32);
+                let before = entity.confidence;
+                let after = Confidence::clamped((before.get() as f64 * m) as f32);
+                entity.confidence = after;
+                entity
+                    .provenance
+                    .record(Event::calibration(before, after, m));
             }
         }
 

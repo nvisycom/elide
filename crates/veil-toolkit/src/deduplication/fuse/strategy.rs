@@ -10,7 +10,8 @@ use veil_core::primitive::Confidence;
 /// [`FuseLayer`](super::FuseLayer) — not a stringly-tagged enum. The
 /// crate ships the three below; a consumer can implement their own.
 /// [`name`](FusionStrategy::name) is recorded in the
-/// [`Merge`](veil_core::recognition::Merge) provenance event.
+/// deduplication [`Event`](veil_core::provenance::Event) recorded on the
+/// fused entity.
 pub trait FusionStrategy<M: Modality>: Send + Sync {
     /// Stable name of the strategy, recorded in the fusion's `Merge`.
     fn name(&self) -> &'static str;

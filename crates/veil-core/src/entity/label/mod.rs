@@ -10,12 +10,12 @@
 mod catalog;
 mod reference;
 
-pub use self::catalog::LabelCatalog;
-pub use self::reference::LabelRef;
-
 use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+
+pub use self::catalog::LabelCatalog;
+pub use self::reference::LabelRef;
 
 /// A kind of sensitive information, with an optional description.
 ///
