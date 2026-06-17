@@ -70,8 +70,8 @@ impl<M: Modality> Default for Redactions<M> {
 }
 
 impl<M: Modality> IntoIterator for Redactions<M> {
-    type Item = (M::Location, M::Replacement);
     type IntoIter = std::vec::IntoIter<Self::Item>;
+    type Item = (M::Location, M::Replacement);
 
     fn into_iter(self) -> Self::IntoIter {
         self.items.into_iter()
@@ -79,8 +79,8 @@ impl<M: Modality> IntoIterator for Redactions<M> {
 }
 
 impl<'a, M: Modality> IntoIterator for &'a Redactions<M> {
-    type Item = &'a (M::Location, M::Replacement);
     type IntoIter = std::slice::Iter<'a, (M::Location, M::Replacement)>;
+    type Item = &'a (M::Location, M::Replacement);
 
     fn into_iter(self) -> Self::IntoIter {
         self.items.iter()

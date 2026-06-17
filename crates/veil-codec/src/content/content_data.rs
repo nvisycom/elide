@@ -7,27 +7,36 @@ use bytes::Bytes;
 use sha2::{Digest, Sha256};
 use veil_core::{Error, ErrorKind, Result};
 
+use super::TextEncoding;
+
 /// Raw content bytes with optional descriptive metadata.
 ///
-/// The data the codec moves around: the bytes, plus the caller-supplied
-/// hints a registry can use to resolve a format — an original
-/// [`filename`](ContentData::filename) and a declared
-/// [`content_type`](ContentData::content_type). Both are optional; the
-/// caller supplies whatever it knows. Helpers cover the things a handler
-/// needs — byte access, slicing, a content hash.
+/// The data the codec moves around: the bytes, the [`encoding`] used to
+/// read them as text, plus the caller-supplied hints a registry can use
+/// to resolve a format — an original [`filename`] and a declared
+/// [`content_type`]. The metadata fields are optional; the caller
+/// supplies whatever it knows. Helpers cover the things a handler needs —
+/// byte access, slicing, text [`decode`], a content hash.
+///
+/// [`encoding`]: ContentData::encoding
+/// [`filename`]: ContentData::filename
+/// [`content_type`]: ContentData::content_type
+/// [`decode`]: ContentData::decode
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContentData {
     data: Bytes,
+    encoding: TextEncoding,
     filename: Option<Cow<'static, str>>,
     content_type: Option<Cow<'static, str>>,
 }
 
 impl ContentData {
-    /// Wrap raw bytes, with no metadata.
+    /// Wrap raw bytes, with UTF-8 encoding and no metadata.
     #[must_use]
     pub fn new(data: Bytes) -> Self {
         Self {
             data,
+            encoding: TextEncoding::default(),
             filename: None,
             content_type: None,
         }
@@ -55,6 +64,35 @@ impl ContentData {
     pub fn with_content_type(mut self, content_type: impl Into<Cow<'static, str>>) -> Self {
         self.content_type = Some(content_type.into());
         self
+    }
+
+    /// Set the text encoding used by [`decode`](Self::decode) (default
+    /// [`TextEncoding::Utf8`]).
+    #[must_use]
+    pub fn with_encoding(mut self, encoding: TextEncoding) -> Self {
+        self.encoding = encoding;
+        self
+    }
+
+    /// The text encoding these bytes are read with.
+    #[must_use]
+    pub fn encoding(&self) -> TextEncoding {
+        self.encoding
+    }
+
+    /// Decode the bytes to a [`String`] using the content's
+    /// [`encoding`](Self::encoding).
+    ///
+    /// Text loaders call this instead of carrying their own encoding —
+    /// the charset is a property of the content, so it travels with the
+    /// bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns a validation error when the bytes are not valid for the
+    /// encoding.
+    pub fn decode(&self) -> Result<String> {
+        self.encoding.decode_bytes(&self.data)
     }
 
     /// The original filename, if one was attached.
@@ -219,6 +257,16 @@ mod tests {
         assert_eq!(c.filename(), None);
         assert_eq!(c.content_type(), None);
         assert_eq!(c.extension(), None);
+        assert_eq!(c.encoding(), TextEncoding::Utf8);
+    }
+
+    #[test]
+    fn decode_reads_bytes_as_text() {
+        let c = ContentData::from_text("héllo");
+        assert_eq!(c.decode().unwrap(), "héllo");
+        // Invalid UTF-8 fails to decode.
+        let bad = ContentData::new(Bytes::from_static(&[0xff, 0xfe]));
+        assert!(bad.decode().is_err());
     }
 
     #[test]

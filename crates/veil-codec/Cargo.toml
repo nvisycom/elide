@@ -28,16 +28,11 @@ rustdoc-args = ["--cfg", "docsrs"]
 # formats whose features are enabled.
 default = ["text"]
 
-## Every text-shaped format currently shipped. `json` is declared
-## below but not yet implemented, so it is deliberately excluded here
-## and from `default`; add it back once `handler::text::json_*` lands.
-text = ["txt"]
+## Every text-shaped format currently shipped.
+text = ["txt", "json"]
 
 ## Individual text formats.
 txt = []
-## JSON — in progress. The feature is declared so the gated
-## `handler::text::json_*` modules have a known cfg, but enabling it
-## will not compile until the handler is ported.
 json = ["dep:serde_json"]
 
 [dependencies]

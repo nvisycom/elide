@@ -22,7 +22,7 @@ pub const FORMAT_ID: FormatId = FormatId::from_static("veil.text.txt");
 
 /// [`Format`] descriptor registered into [`crate::CodecRegistry`].
 pub fn format() -> Format {
-    Format::new::<Text, _>(FORMAT_ID.clone(), super::TxtLoader::default())
+    Format::new::<Text, _>(FORMAT_ID.clone(), super::TxtLoader)
         .with_extensions(["txt", "log"])
         .with_content_types(["text/plain"])
 }
