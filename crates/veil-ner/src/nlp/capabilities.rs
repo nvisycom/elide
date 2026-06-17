@@ -3,19 +3,19 @@
 //!
 //! Composition-time contract between an `NlpEngine` and the
 //! recognizers / enhancer that read its artifacts. Lets the engine
-//! orchestrator refuse impossible asks at construction time — e.g.
+//! orchestrator refuse impossible asks at construction time: e.g.
 //! wiring a lemma-aware enhancer to a tokenizer-only
 //! engine that doesn't produce lemmas.
 //!
 //! Booleans rather than an enum because capabilities are
-//! independent — an engine may produce language only (Lingua),
+//! independent: an engine may produce language only (Lingua),
 //! tokens + NER but no lemmas (a tokenizer + transformer model
 //! without a lemmatizer), or the full set (a hosted full-NLP
 //! service that includes lemmatization).
 
 /// Per-engine capability advertisement.
 ///
-/// Fields are independent — each is `true` when the engine
+/// Fields are independent: each is `true` when the engine
 /// guarantees the corresponding artifact will be inserted into the
 /// shared `TypeMap` with meaningful data, `false` when the engine
 /// leaves it absent.
@@ -32,7 +32,7 @@ pub struct NlpCapabilities {
     pub produces_ner: bool,
     /// Engine emits a resolved stopword set.
     pub produces_stopwords: bool,
-    /// Engine has native batch processing — calling `process_batch`
+    /// Engine has native batch processing: calling `process_batch`
     /// is more efficient than looping `process`.
     pub batch_native: bool,
 }
@@ -51,15 +51,17 @@ impl NlpCapabilities {
         batch_native: false,
     };
 
-    /// Capabilities for an engine that only resolves language —
-    /// no tokens, no NER. Maps to `LinguaNlpEngine` in `nvisy-ner`.
+    /// Capabilities for an engine that only resolves language:
+    /// no tokens, no NER. Maps to [`LinguaNlpEngine`] in this crate.
+    ///
+    /// [`LinguaNlpEngine`]: crate::nlp::LinguaNlpEngine
     pub const fn language_only() -> Self {
         Self::NONE
     }
 
     /// Capabilities for an engine that produces tokens + lemmas +
-    /// NER + stopwords + native batching. Maps to a full
-    /// `BentoNlpEngine` (when the inference service supports it).
+    /// NER + stopwords + native batching. Maps to a full hosted NLP
+    /// engine (when the inference service supports it).
     pub const fn full() -> Self {
         Self {
             produces_tokens: true,

@@ -8,9 +8,9 @@
 //! [`Artifacts`], and attaches it to each [`RecognizerInput`] via
 //! [`RecognizerInput::with_artifacts`].
 //!
-//! [`Artifacts`]: nvisy_core::extraction::Artifacts
-//! [`RecognizerInput`]: nvisy_core::recognition::RecognizerInput
-//! [`RecognizerInput::with_artifacts`]: nvisy_core::recognition::RecognizerInput::with_artifacts
+//! [`Artifacts`]: veil_core::recognition::Artifacts
+//! [`RecognizerInput`]: veil_core::recognition::RecognizerInput
+//! [`RecognizerInput::with_artifacts`]: veil_core::recognition::RecognizerInput::with_artifacts
 //!
 //! Pluggable so different deployment shapes (pure language
 //! detection, hosted full-NLP service, future in-process model)
@@ -18,9 +18,9 @@
 //! (or `process_batch`) once per scan; recognizers and the
 //! keyword-boost enhancer borrow the resulting map by reference.
 
-use nvisy_core::Result;
-use nvisy_core::primitive::LanguageTag;
 use type_map::concurrent::TypeMap;
+use veil_core::Result;
+use veil_core::primitive::LanguageTag;
 
 use super::capabilities::NlpCapabilities;
 
@@ -33,7 +33,7 @@ use super::capabilities::NlpCapabilities;
 /// advertise the languages they support so a future per-language
 /// registry can route correctly.
 ///
-/// `Send + Sync + 'static` — engines live behind `Arc<dyn _>` in
+/// `Send + Sync + 'static`: engines live behind `Arc<dyn _>` in
 /// the orchestrator and are shared across recognition tasks.
 ///
 /// [`capabilities`]: Self::capabilities
@@ -44,7 +44,7 @@ pub trait NlpEngine: Send + Sync + 'static {
     /// works on bytes alone).
     fn supported_languages(&self) -> &[LanguageTag];
 
-    /// What the engine can produce. Advisory — consumers can still
+    /// What the engine can produce. Advisory; consumers can still
     /// call `process` even when capabilities are off, they just
     /// get an empty map back.
     fn capabilities(&self) -> NlpCapabilities;
@@ -58,7 +58,7 @@ pub trait NlpEngine: Send + Sync + 'static {
     /// # Errors
     ///
     /// Returns a runtime error when the underlying detection or
-    /// inference call fails. Empty input is not an error — engines
+    /// inference call fails. Empty input is not an error; engines
     /// should return an empty (or sparsely populated) map.
     async fn process(&self, text: &str, hint: Option<&LanguageTag>) -> Result<TypeMap>;
 

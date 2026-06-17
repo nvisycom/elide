@@ -1,10 +1,10 @@
 //! [`AggregationStrategy`] and [`AlignmentMode`]: policies for
 //! collapsing per-token NER predictions into entity spans.
 //!
-//! The producer engine may apply them server-side (the Bento
-//! `inference-gliner` already returns aggregated spans), in which
-//! case the consumer-side knobs are advisory; or the producer may
-//! emit unaggregated token-classification output, in which case
+//! The producer engine may apply them server-side (a hosted backend
+//! that already returns aggregated spans), in which case the
+//! consumer-side knobs are advisory; or the producer may emit
+//! unaggregated token-classification output, in which case
 //! [`NerRecognizer`] applies them itself.
 //!
 //! [`NerRecognizer`]: super::NerRecognizer
@@ -25,7 +25,7 @@ pub enum AggregationStrategy {
     /// continue the same entity (BIO-style `B-PER` then `I-PER`).
     First,
     /// Merge adjacent same-label tokens; the span's score is the
-    /// maximum across constituent tokens. The default — works best
+    /// maximum across constituent tokens. The default: works best
     /// when models output per-token confidences without a strong
     /// boundary signal.
     #[default]
@@ -52,7 +52,7 @@ pub enum AlignmentMode {
     Strict,
     /// Shrink the span to the next inner token boundary.
     Contract,
-    /// Expand the span to the next outer token boundary. Default —
+    /// Expand the span to the next outer token boundary. Default:
     /// favors recall over precision.
     #[default]
     Expand,

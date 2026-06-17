@@ -8,16 +8,16 @@
 //! fixed-label backends whose set of labels is baked into the
 //! model.
 //!
-//! Engines are called from inside [`NerRecognizer::recognize`] — no
+//! Engines are called from inside [`NerRecognizer::recognize`]; no
 //! shared NLP pass, no orchestrator plumbing. Each recognizer holds
 //! its own backend and is self-contained.
 //!
 //! [`NerRecognizer::recognize`]: crate::NerRecognizer
 
-use nvisy_core::Result;
-use nvisy_core::entity::ModelProvenance;
-use nvisy_core::primitive::LanguageTag;
 use uuid::Uuid;
+use veil_core::Result;
+use veil_core::primitive::LanguageTag;
+use veil_core::provenance::ModelEvent;
 
 use super::ner_span::RawNerSpan;
 
@@ -63,24 +63,22 @@ impl NerResponse {
 /// Per-call NER backend.
 ///
 /// Implemented by everything that turns `(text, kinds)` into raw
-/// NER spans — externalised inference services (BentoML), local
-/// model wrappers (future ORT/Candle backends), and the in-process
-/// no-op test stub.
+/// NER spans: externalised inference services, local model wrappers
+/// (future ORT/Candle backends), and the in-process no-op test stub.
 ///
 /// Object-safe: recognizers hold `Arc<dyn NerBackend>` and dispatch
 /// per call.
 #[async_trait::async_trait]
 pub trait NerBackend: Send + Sync + 'static {
-    /// Backend identity (model / service name + provenance kind).
+    /// Backend identity (model / service name + provenance detail).
     ///
     /// Distinct from the recognizer's configured name: the
     /// recognizer-level name (e.g. `"company-ner"`) labels the
     /// configured slot, while [`provenance`] identifies the actual
-    /// model the backend wraps (e.g. `"noop-ner"`,
-    /// `"bento-ner"`).
+    /// model the backend wraps (e.g. `"noop-ner"`).
     ///
     /// [`provenance`]: Self::provenance
-    fn provenance(&self) -> ModelProvenance;
+    fn provenance(&self) -> ModelEvent;
 
     /// Recognise spans for `request`. Returns raw
     /// (pre-normalization) spans; the recognizer applies

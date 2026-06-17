@@ -6,17 +6,18 @@
 //!
 //! Construct via [`NerModel::default`] for the canonical defaults
 //! (canonical label map, no ignored labels, score = 0.85, no
-//! demotion) — these match what the current `inference-gliner`
-//! service produces — or via [`NerModel::builder`] for an infallible
-//! chainable builder that overrides only the fields you care about.
+//! demotion), sensible defaults for a backend that already returns
+//! aggregated, canonically-labeled spans, or via [`NerModel::builder`]
+//! for an infallible chainable builder that overrides only the fields
+//! you care about.
 //!
 //! [`NerRecognizer`]: super::NerRecognizer
 
 use std::collections::HashSet;
 
 use derive_builder::Builder;
-use nvisy_core::primitive::Confidence;
-use nvisy_core::recognition::LabelMap;
+use veil_core::primitive::Confidence;
+use veil_core::recognition::LabelMap;
 
 use super::aggregation::{AggregationStrategy, AlignmentMode};
 
@@ -73,7 +74,7 @@ impl Default for NerModel {
 
 impl NerModel {
     /// Start a chainable, infallible builder seeded from the
-    /// canonical defaults — every field has a sensible default, so
+    /// canonical defaults; every field has a sensible default, so
     /// callers only override what they care about.
     #[must_use]
     pub fn builder() -> NerModelBuilder {
@@ -83,7 +84,7 @@ impl NerModel {
 
 impl NerModelBuilder {
     /// Finish the builder, filling every unset field with its
-    /// default. Infallible — no required fields.
+    /// default. Infallible: no required fields.
     #[must_use]
     pub fn build(self) -> NerModel {
         let defaults = NerModel::default();

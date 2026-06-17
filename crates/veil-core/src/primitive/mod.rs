@@ -5,8 +5,7 @@
 //!   `0.0..=1.0`;
 //! - [`geometry`]: [`Point`], [`BoundingBox`], and [`Polygon`] for
 //!   spatial spans;
-//! - [`language`]: [`LanguageTag`], a validated BCP 47 language tag,
-//!   and [`LanguageDetection`] pairing a tag with its provenance;
+//! - [`language`]: [`LanguageTag`], a validated BCP 47 language tag;
 //! - [`region`]: [`CountryCode`], an ISO 3166-1 country.
 //!
 //! Each wraps a well-validated representation so an invalid value cannot
@@ -19,5 +18,5 @@ pub mod region;
 
 pub use self::confidence::{Confidence, ConfidenceThreshold};
 pub use self::geometry::{BoundingBox, Point, Polygon};
-pub use self::language::{LanguageDetection, LanguageProvenance, LanguageTag};
+pub use self::language::LanguageTag;
 pub use self::region::CountryCode;

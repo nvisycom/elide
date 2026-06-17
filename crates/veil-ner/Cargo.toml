@@ -1,9 +1,9 @@
 # https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [package]
-name = "nvisy-ner"
-description = "NER traits and language detection for the Nvisy runtime"
-keywords = ["nvisy", "ner", "nlp", "pii"]
+name = "veil-ner"
+description = "NER traits and language detection for the Veil toolkit"
+keywords = ["ner", "nlp", "pii"]
 categories = ["text-processing"]
 readme = "README.md"
 
@@ -21,18 +21,13 @@ documentation = { workspace = true }
 [features]
 default = []
 
-## Enables [`BentoBackend`]: zero-shot NER over an externalized
-## HTTP inference service (the `inference-gliner` Bento in
-## https://github.com/nvisycom/inference).
-bento = ["dep:bentoml"]
-
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 # Internal crates
-nvisy-core = { workspace = true, features = [] }
+veil-core = { workspace = true, features = ["serde"] }
 
 # Serialization
 serde = { workspace = true, features = ["derive"] }
@@ -52,9 +47,6 @@ tracing = { workspace = true, features = [] }
 
 # Text processing (language detection)
 lingua = { workspace = true, features = [] }
-
-# AI / LLM frameworks (feature-gated)
-bentoml = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }

@@ -65,6 +65,11 @@ impl LabelCatalog {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+
+    /// Iterate over every [`Label`] in the catalog.
+    pub fn iter(&self) -> impl Iterator<Item = &Label> {
+        self.0.values()
+    }
 }
 
 impl FromIterator<Label> for LabelCatalog {

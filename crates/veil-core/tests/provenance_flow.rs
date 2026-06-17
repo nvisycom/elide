@@ -193,20 +193,6 @@ fn geometry_shapes_compose() {
 }
 
 #[test]
-fn language_detection_records_provenance() {
-    use veil_core::primitive::{LanguageDetection, LanguageProvenance};
-
-    let en = LanguageTag::parse("en").unwrap();
-    let detected = LanguageDetection::detected(en.clone(), Confidence::new(0.9));
-    assert_eq!(detected.provenance, LanguageProvenance::Detected);
-    assert_eq!(detected.confidence, Confidence::new(0.9));
-
-    let asserted = LanguageDetection::asserted(en);
-    assert_eq!(asserted.provenance, LanguageProvenance::Asserted);
-    assert!(asserted.confidence.is_none());
-}
-
-#[test]
 fn label_map_translates_raw_labels() {
     use veil_core::recognition::LabelMap;
 

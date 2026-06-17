@@ -6,6 +6,7 @@ pub mod backend;
 pub mod nlp;
 mod recognition;
 
+pub use self::nlp::{LanguageDetection, LanguageDetections, LanguageProvenance, LanguageSpan};
 pub use self::recognition::{
     LabelMap, NerModel, NerModelBuilder, NerRecognizer, NerRecognizerBuilder,
 };

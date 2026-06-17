@@ -10,16 +10,15 @@
 //! hint becomes a single-entry detection with provenance
 //! [`Asserted`].
 //!
-//! [`Asserted`]: nvisy_core::primitive::LanguageProvenance::Asserted
+//! [`Asserted`]: crate::LanguageProvenance::Asserted
 
-use nvisy_core::Result;
-use nvisy_core::primitive::{
-    LanguageDetection, LanguageDetections, LanguageProvenance, LanguageTag,
-};
 use type_map::concurrent::TypeMap;
+use veil_core::Result;
+use veil_core::primitive::LanguageTag;
 
 use super::capabilities::NlpCapabilities;
 use super::engine::NlpEngine;
+use super::language::{LanguageDetection, LanguageDetections, LanguageProvenance};
 use super::lingua_detector::LinguaDetector;
 
 /// Lingua-backed language-only NLP engine.
@@ -27,7 +26,7 @@ use super::lingua_detector::LinguaDetector;
 /// Stateless: every `process` call builds a fresh
 /// [`LinguaDetector`] for the requested language scope (the
 /// candidate set passed at construction, or "all languages"). The
-/// scope is locked in at construction time — there is no per-call
+/// scope is locked in at construction time; there is no per-call
 /// scope override; pattern pipelines that need different scopes
 /// per call should hold multiple engines.
 #[derive(Debug, Clone)]

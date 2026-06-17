@@ -1,7 +1,7 @@
 //! [`RawNerSpan`]: pre-normalization NER prediction.
 //!
 //! Emitted by a [`NerBackend`] backend. The label is the *raw* string
-//! the model produced — `PER`, `LOC`, `ORG`, `B-PERSON`, etc. — left
+//! the model produced (`PER`, `LOC`, `ORG`, `B-PERSON`, etc.) left
 //! untranslated so [`NerRecognizer`] can apply its [`LabelMap`] and
 //! `labels_to_ignore` policy uniformly across engines.
 //!
@@ -18,10 +18,10 @@ use std::ops::Range;
 /// One raw entity span predicted by a NER model.
 ///
 /// Pre-normalization: the label is the model's string, not a
-/// canonical [`EntityLabelRef`]. Coordinate space is byte offsets
+/// canonical [`LabelRef`]. Coordinate space is byte offsets
 /// into the source text the backend was called with.
 ///
-/// [`EntityLabelRef`]: nvisy_core::entity::EntityLabelRef
+/// [`LabelRef`]: veil_core::entity::LabelRef
 #[derive(Debug, Clone, PartialEq)]
 pub struct RawNerSpan {
     /// Model-emitted label, verbatim.

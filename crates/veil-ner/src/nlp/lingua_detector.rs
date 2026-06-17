@@ -8,7 +8,7 @@
 //! [`LinguaNlpEngine`].
 //!
 //! Construction takes either a candidate-language set or "all
-//! languages compiled into the lingua feature set" — the latter
+//! languages compiled into the lingua feature set"; the latter
 //! is the unrestricted fallback.
 //!
 //! [`lingua`]: https://crates.io/crates/lingua
@@ -21,14 +21,14 @@ use std::str::FromStr;
 use std::sync::{Mutex, OnceLock};
 
 use lingua::{IsoCode639_1, Language, LanguageDetector as LinguaInner, LanguageDetectorBuilder};
-use nvisy_core::Result;
-use nvisy_core::primitive::{
-    Confidence, LanguageDetection, LanguageProvenance, LanguageSpan, LanguageTag,
-};
+use veil_core::Result;
+use veil_core::primitive::{Confidence, LanguageTag};
+
+use super::language::{LanguageDetection, LanguageProvenance, LanguageSpan};
 
 /// Lingua-backed language detector.
 ///
-/// Detects per-region languages — for mixed-language input,
+/// Detects per-region languages: for mixed-language input,
 /// returns one [`LanguageDetection`] per detected region with a
 /// populated [`LanguageSpan`]. Monolingual input returns a single
 /// detection covering the whole text.
@@ -39,7 +39,7 @@ pub struct LinguaDetector {
 impl LinguaDetector {
     /// Construct a detector restricted to `tags`. Unrecognised
     /// tags (no matching ISO 639-1 primary subtag in lingua) are
-    /// silently skipped. Returns `None` when no tag matched —
+    /// silently skipped. Returns `None` when no tag matched;
     /// `LinguaNlpEngine` falls back to
     /// [`for_all_languages`] in that
     /// case.
@@ -79,7 +79,7 @@ impl LinguaDetector {
                 let raw_confidence = self
                     .inner
                     .compute_language_confidence(text, result.language());
-                let confidence = Confidence::new(raw_confidence.clamp(0.0, 1.0));
+                let confidence = Confidence::new(raw_confidence.clamp(0.0, 1.0) as f32);
                 Some(LanguageDetection {
                     language,
                     confidence,
@@ -108,7 +108,7 @@ fn lingua_to_tag(lang: Language) -> Option<LanguageTag> {
 
 /// Cache of ISO codes we've already logged an "unmappable" warning
 /// for, so a hot detection loop doesn't spam the log with the same
-/// failure once per call. Lingua's code set is finite and fixed —
+/// failure once per call. Lingua's code set is finite and fixed;
 /// real failures here are deterministic.
 fn warn_once_unmappable(iso: &str, error: &str) {
     static SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
@@ -119,7 +119,7 @@ fn warn_once_unmappable(iso: &str, error: &str) {
     };
     if guard.insert(iso.to_owned()) {
         tracing::warn!(
-            target: "nvisy_ner::nlp::lingua",
+            target: "veil_ner::nlp::lingua",
             iso_code = %iso,
             error = %error,
             "lingua ISO 639-1 code did not parse as a BCP-47 LanguageTag (logged once per process)",
