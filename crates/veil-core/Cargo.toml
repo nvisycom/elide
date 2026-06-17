@@ -25,26 +25,21 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 default = []
 
+## Derive `serde::{Serialize, Deserialize}` on the domain types, and
+## enable serde support in the underlying primitive crates. (`celes`
+## and `oxilangtag` carry their serde impls unconditionally.)
+serde = ["dep:serde", "hipstr/serde", "jiff/serde", "uuid/serde"]
+
 ## Test utilities (fixture helpers, builders, …).
 test-utils = []
 
 [dependencies]
-# Serialization
-serde = { workspace = true, features = [] }
-serde_json = { workspace = true, features = [] }
-schemars = { workspace = true, features = [] }
-
-# Derive macros and error handling
-thiserror = { workspace = true, features = [] }
-derive_builder = { workspace = true, features = [] }
-derive_more = { workspace = true, features = ["as_ref", "deref", "deref_mut", "display", "from", "from_str", "into", "into_iterator", "is_variant"] }
-strum = { workspace = true, features = [] }
+# Serialization (optional — gated behind the `serde` feature)
+serde = { workspace = true, features = ["derive"], optional = true }
 
 # Primitive datatypes
-uuid = { workspace = true, features = [] }
-bytes = { workspace = true, features = [] }
+uuid = { workspace = true, features = ["v7"] }
 hipstr = { workspace = true, features = [] }
-type-map = { workspace = true, features = [] }
-
-# Async runtime and parallelism
-async-trait = { workspace = true, features = [] }
+jiff = { workspace = true, features = [] }
+oxilangtag = { workspace = true, features = [] }
+celes = { workspace = true, features = [] }
