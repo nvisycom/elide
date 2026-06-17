@@ -1,0 +1,13 @@
+Wire transfer authorization
+---------------------------
+
+Beneficiary:    Acme Industries Ltd.
+IBAN:           GB29 NWBK 6016 1331 9268 19
+SWIFT/BIC:      NWBKGB2L
+Charge card on file (backup): 4539 1488 0343 6467
+Settlement:     in US Dollar, optionally EUR.
+
+Crypto reimbursement options:
+- Bitcoin: 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+- Ethereum: 0x742d35Cc6634C0532925a3b844Bc9e7595f6E842
+- Accepted coins: Tether, USDC

@@ -1,0 +1,24 @@
+# Australian Tax File Number (TFN): 9-digit ID issued by the
+# Australian Taxation Office. Weighted mod-11 checksum.
+# Rendering is `NNN NNN NNN`.
+
+name = "au-tfn"
+label = "tax_id"
+countries = ["AU"]
+languages = ["en"]
+context = [
+  "tax file number",
+  "tfn",
+  "australian taxation office",
+  "ato",
+]
+
+[[variants]]
+regex = '\b\d{3}\s\d{3}\s\d{3}\b'
+score = 0.4
+validator = "au.tfn"
+
+[[variants]]
+regex = '\b\d{9}\b'
+score = 0.1
+validator = "au.tfn"

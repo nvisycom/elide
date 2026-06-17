@@ -1,0 +1,20 @@
+# Canadian postal code: `A1A 1A1` format where the letter
+# alphabet excludes D, F, I, O, Q, U (and W, Z don't appear as
+# the first letter — Canada Post Address Standard).
+
+name = "ca-postal-code"
+label = "postal_code"
+countries = ["CA"]
+languages = ["en", "fr"]
+context = [
+  "postal code",
+  "code postal",
+  "canada post",
+  "postes canada",
+  "mailing address",
+  "adresse postale",
+]
+
+[[variants]]
+regex = '\b[ABCEGHJ-NPRSTVXY]\d[A-CEGHJ-NPRSTV-Z][ -]?\d[A-CEGHJ-NPRSTV-Z]\d\b'
+score = 0.5

@@ -1,0 +1,19 @@
+//! Keyword-matching strategies plugged into the [`Enhancer`].
+//!
+//! - [`KeywordMatcher`] is the trait the enhancer talks to.
+//! - [`SubstringMatcher`] is the default: ASCII case-insensitive
+//!   substring search over the raw text window. Runs whenever no
+//!   token artifact is present on `RecognizerInput.artifacts`.
+//! - [`LemmaMatcher`] reads lemmatized tokens an upstream NLP
+//!   engine stamped on `RecognizerInput.artifacts`. Recognizes
+//!   morphological variants substring matching misses.
+//!
+//! All three are re-exported at the crate root.
+//!
+//! [`Enhancer`]: crate::Enhancer
+
+mod lemma;
+mod matcher;
+
+pub use self::lemma::LemmaMatcher;
+pub use self::matcher::{KeywordMatcher, SubstringMatcher};

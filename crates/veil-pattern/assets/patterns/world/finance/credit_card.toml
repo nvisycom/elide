@@ -1,0 +1,22 @@
+# Credit / debit card number.
+#
+# Brand-prefix variants matching Visa, Mastercard, Discover, etc.
+# Luhn-validated. The Luhn validator drops false positives that
+# a length-based fallback regex would otherwise pick up.
+
+name = "credit-card"
+label = "payment_card"
+
+[context]
+en = ["card", "credit", "debit", "payment", "visa", "mastercard", "amex"]
+es = ["tarjeta", "crédito", "credito", "débito", "debito", "pago", "visa", "mastercard", "amex"]
+de = ["karte", "kredit", "kreditkarte", "debit", "zahlung", "visa", "mastercard", "amex"]
+fr = ["carte", "crédit", "credit", "débit", "debit", "paiement", "visa", "mastercard", "amex"]
+
+# Brand BIN ranges: Visa (4), Mastercard (51-55 and 2-series
+# 2221-2720 introduced 2017), Discover (6), Amex/Diners (3),
+# and a loose 1xxx catch-all that Luhn filters down.
+[[variants]]
+regex = '\b(?:(?:4\d{3})|(?:5[0-5]\d{2})|(?:2[2-7]\d{2})|(?:6\d{3})|(?:1\d{3})|(?:3\d{3}))[- ]?(?:\d{3,4})[- ]?(?:\d{3,4})[- ]?(?:\d{3,5})\b'
+score = 0.3
+validator = "luhn"

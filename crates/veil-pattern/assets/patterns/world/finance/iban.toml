@@ -1,0 +1,8 @@
+name = "iban"
+label = "iban"
+context = ["iban", "bank", "account", "transfer", "swift"]
+
+[[variants]]
+regex = "\\b[A-Z]{2}\\d{2}[\\s\\-]?[A-Z0-9]{4}[\\s\\-]?(?:[A-Z0-9]{4}[\\s\\-]?){2,7}[A-Z0-9]{1,4}\\b"
+score = 0.5
+validator = "iban"

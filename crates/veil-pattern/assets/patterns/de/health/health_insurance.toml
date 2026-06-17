@@ -1,0 +1,33 @@
+# German Krankenversicherungsnummer (KVNR): 10 characters —
+# leading letter + 9 digits. Printed on the eGK (elektronische
+# Gesundheitskarte). Check digit per § 290 SGB V Anlage 1.
+
+name = "de-health-insurance"
+label = "insurance_id"
+countries = ["DE"]
+languages = ["de"]
+context = [
+  "krankenversicherungsnummer",
+  "krankenversichertennummer",
+  "versichertennummer",
+  "kvnr",
+  "krankenkasse",
+  "krankenversicherung",
+  "gesundheitskarte",
+  "egk",
+  "elektronische gesundheitskarte",
+  "gkv",
+  "gesetzliche krankenversicherung",
+  "krankenversicherungsausweis",
+  "versichertenausweis",
+  "versichertenkarte",
+  "aok",
+  "tkk",
+  "barmer",
+  "dak",
+]
+
+[[variants]]
+regex = '\b[A-Z]\d{9}\b'
+score = 0.3
+validator = "de.health_insurance"

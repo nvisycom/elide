@@ -1,0 +1,24 @@
+# Finnish Henkilötunnus (HETU): 11 chars encoding birth date,
+# century separator, serial, and control character. Issued by
+# Digi- ja väestötietovirasto (DVV). The control character is
+# validated by `fi.hetu` (mod-31 lookup into
+# `0123456789ABCDEFHJKLMNPRSTUVWXY`).
+
+name = "fi-hetu"
+label = "government_id"
+countries = ["FI"]
+languages = ["fi", "sv"]
+context = [
+  "henkilötunnus",
+  "hetu",
+  "personbeteckning",
+  "personbeteckningen",
+  "personal identity code",
+  "social security number",
+  "dvv",
+]
+
+[[variants]]
+regex = '\b\d{6}[+\-A-FYXWVU]\d{3}[0-9A-FHJKLMNPRSTUVWXY]\b'
+score = 0.5
+validator = "fi.hetu"

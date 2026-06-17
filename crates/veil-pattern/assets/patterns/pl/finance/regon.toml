@@ -1,0 +1,26 @@
+# Polish REGON (Rejestr Gospodarki Narodowej): 9-digit
+# entity-level or 14-digit unit-level company registry number.
+# Both forms use a weighted mod-11 checksum, validated by
+# `pl.regon`.
+
+name = "pl-regon"
+label = "company_id"
+countries = ["PL"]
+languages = ["pl"]
+context = [
+  "regon",
+  "numer regon",
+  "rejestr gospodarki narodowej",
+  "gus",
+  "główny urząd statystyczny",
+]
+
+[[variants]]
+regex = '\b\d{9}\b'
+score = 0.3
+validator = "pl.regon"
+
+[[variants]]
+regex = '\b\d{14}\b'
+score = 0.4
+validator = "pl.regon"

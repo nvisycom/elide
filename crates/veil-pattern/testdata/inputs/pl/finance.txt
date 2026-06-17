@@ -1,0 +1,8 @@
+Dane podatnika spółki:
+
+  Nazwa firmy:           Przykład Sp. z o.o.
+  NIP:                   106-000-00-62
+  REGON:                 123456785
+  Siedziba:              Warszawa
+
+Numer NIP należy podawać na wszystkich fakturach.

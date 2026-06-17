@@ -1,0 +1,21 @@
+# Spanish CIF (Código de Identificación Fiscal): entity-class
+# letter + 7 digits + control char (digit or letter depending on
+# entity class). Now formally subsumed by NIF for new entities,
+# but legacy IDs remain in wide circulation.
+
+name = "es-cif"
+label = "company_id"
+countries = ["ES"]
+languages = ["es"]
+context = [
+  "código de identificación fiscal",
+  "cif",
+  "identificación fiscal",
+  "sociedad",
+  "empresa",
+]
+
+[[variants]]
+regex = '\b[ABCDEFGHJNPQRSUVW]-?\d{7}-?[0-9A-J]\b'
+score = 0.5
+validator = "es.cif"

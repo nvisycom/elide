@@ -1,0 +1,10 @@
+ACH transfer instruction (US correspondent)
+-------------------------------------------
+
+Beneficiary bank:    Wells Fargo Bank, N.A.
+Routing (ABA RTN):   121000358
+Checking account:    0123456789012
+Wire memo:           consultancy invoice 0042
+
+Use the checking account number above for the ACH debit and the
+routing number above for the bank deposit instruction.

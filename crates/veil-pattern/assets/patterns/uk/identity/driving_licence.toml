@@ -1,0 +1,25 @@
+# UK Driving Licence Number (DVLA).
+#
+# Format: 16-char alphanumeric — 5-char surname (letters padded
+# with 9s) + decade digit + month (01-12 or 51-62 for female) +
+# day + year digit + 2 initial chars (or 9) + check + 2 letters.
+
+name = "uk-driving-licence"
+label = "drivers_license"
+countries = ["GB"]
+languages = ["en"]
+context = [
+  "driving licence",
+  "driving license",
+  "driver's licence",
+  "driver's license",
+  "dvla",
+  "dl number",
+  "licence number",
+  "license number",
+]
+
+[[variants]]
+regex = '\b[A-Z9]{5}[0-9](?:0[1-9]|1[0-2]|5[1-9]|6[0-2])(?:0[1-9]|[12][0-9]|3[01])[0-9][A-Z9]{2}[A-Z0-9][A-Z]{2}\b'
+score = 0.5
+validator = "uk.driving_licence"

@@ -1,0 +1,17 @@
+name = "us-postal-code"
+label = "postal_code"
+countries = ["US"]
+context = [
+  "zip",
+  "zip code",
+  "zipcode",
+  "postal",
+  "postal code",
+  "address",
+  "mailing",
+]
+
+[[variants]]
+regex = "\\b\\d{5}(?:-\\d{4})?\\b"
+score = 0.1
+validator = "us.postal_code"

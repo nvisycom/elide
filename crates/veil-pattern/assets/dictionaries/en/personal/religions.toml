@@ -1,0 +1,4 @@
+name = "religions"
+label = "religion"
+languages = ["en"]
+score = 0.4

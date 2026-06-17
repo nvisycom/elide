@@ -1,0 +1,20 @@
+# Nigerian vehicle registration plate (2011-present format):
+# 3-letter LGA (Local Government Area) code + 3 digits + 2-letter
+# year/batch code. Optional hyphen or space separator.
+
+name = "ng-vehicle-registration"
+label = "license_plate"
+countries = ["NG"]
+languages = ["en"]
+context = [
+  "plate number",
+  "vehicle registration",
+  "license plate",
+  "number plate",
+  "frsc",
+  "federal road safety corps",
+]
+
+[[variants]]
+regex = '\b[A-Z]{3}[- ]?\d{3}[A-Z]{2}\b'
+score = 0.5

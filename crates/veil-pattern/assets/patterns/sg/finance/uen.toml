@@ -1,0 +1,37 @@
+# Singapore Unique Entity Number (UEN) issued by ACRA. Three
+# formats:
+#
+# - Format A: 9 chars (8 digits + check letter).
+# - Format B: 10 chars (YYYY year + 4 digits + check letter).
+# - Format C: 10 chars (T/S/R + 2 digits + 2-letter entity type
+#   + 4 digits + check letter).
+
+name = "sg-uen"
+label = "company_id"
+countries = ["SG"]
+languages = ["en"]
+context = [
+  "uen",
+  "unique entity number",
+  "acra",
+  "business registration",
+  "company registration",
+]
+
+# Format A.
+[[variants]]
+regex = '\b\d{8}[A-Z]\b'
+score = 0.3
+validator = "sg.uen"
+
+# Format B (must start with a 4-digit year).
+[[variants]]
+regex = '\b\d{9}[A-Z]\b'
+score = 0.3
+validator = "sg.uen"
+
+# Format C.
+[[variants]]
+regex = '\b[TSR]\d{2}[A-Z]{2}\d{4}[A-Z]\b'
+score = 0.5
+validator = "sg.uen"

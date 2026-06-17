@@ -1,0 +1,8 @@
+GST registration for the entity:
+
+  Legal name:     Example Private Limited
+  GSTIN:          27AAAPL1234C1ZE
+  State:          Maharashtra
+  PAN:            AAAPL1234C
+
+The GSTIN above must be quoted on every tax invoice raised.

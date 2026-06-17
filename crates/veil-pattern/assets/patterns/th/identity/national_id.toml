@@ -1,0 +1,30 @@
+# Thai National ID (เลขประจำตัวประชาชน): 13-digit identifier
+# issued by the Department of Provincial Administration. The
+# first digit encodes the citizenship category (1-8) and the
+# 13th is a weighted Mod-11 check digit.
+
+name = "th-national-id"
+label = "government_id"
+countries = ["TH"]
+languages = ["th"]
+context = [
+  "เลขประจำตัวประชาชน",
+  "เลขบัตรประชาชน",
+  "บัตรประจำตัวประชาชน",
+  "national id",
+  "thai national id",
+  "thai id",
+  "id card",
+]
+
+# Grouped rendering: 1-2345-67890-12-1.
+[[variants]]
+regex = '\b[1-8]-\d{4}-\d{5}-\d{2}-\d\b'
+score = 0.5
+validator = "th.national_id"
+
+# Glued rendering.
+[[variants]]
+regex = '\b[1-8]\d{12}\b'
+score = 0.3
+validator = "th.national_id"

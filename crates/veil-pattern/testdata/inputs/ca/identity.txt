@@ -1,0 +1,4 @@
+Client record for John Doe — see Social Insurance Number on
+file with Service Canada.
+
+SIN: 123 456 782

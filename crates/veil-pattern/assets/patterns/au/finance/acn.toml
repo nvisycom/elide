@@ -1,0 +1,24 @@
+# Australian Company Number (ACN): 9-digit ID issued by ASIC.
+# Weighted-sum mod-10 checksum, complement-to-10. Conventional
+# rendering is `NNN NNN NNN`.
+
+name = "au-acn"
+label = "company_id"
+countries = ["AU"]
+languages = ["en"]
+context = [
+  "australian company number",
+  "acn",
+  "asic",
+  "australian securities and investments commission",
+]
+
+[[variants]]
+regex = '\b\d{3}\s\d{3}\s\d{3}\b'
+score = 0.4
+validator = "au.acn"
+
+[[variants]]
+regex = '\b\d{9}\b'
+score = 0.1
+validator = "au.acn"

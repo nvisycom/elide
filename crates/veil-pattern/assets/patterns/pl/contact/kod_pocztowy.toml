@@ -1,0 +1,18 @@
+# Polish kod pocztowy: NN-NNN format introduced by Poczta Polska
+# in 1973. The first two digits encode the postal region (00-99,
+# all values are assigned).
+
+name = "pl-kod-pocztowy"
+label = "postal_code"
+countries = ["PL"]
+languages = ["pl"]
+context = [
+  "kod pocztowy",
+  "kod",
+  "poczta polska",
+  "adres pocztowy",
+]
+
+[[variants]]
+regex = '\b\d{2}-\d{3}\b'
+score = 0.4

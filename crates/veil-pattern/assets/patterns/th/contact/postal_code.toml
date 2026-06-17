@@ -1,0 +1,19 @@
+# Thai postal code (รหัสไปรษณีย์): 5 digits where the first two
+# encode the province (10-96 in current Thailand Post
+# assignments). No published checksum.
+
+name = "th-postal-code"
+label = "postal_code"
+countries = ["TH"]
+languages = ["th"]
+context = [
+  "รหัสไปรษณีย์",
+  "ไปรษณีย์",
+  "ที่อยู่",
+  "postal code",
+  "thailand post",
+]
+
+[[variants]]
+regex = '\b(1\d|[2-8]\d|9[0-6])\d{3}\b'
+score = 0.4

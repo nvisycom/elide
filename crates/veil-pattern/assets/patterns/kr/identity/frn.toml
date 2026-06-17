@@ -1,0 +1,27 @@
+# Korean Foreigner Registration Number (FRN): same shape as RRN
+# but the gender/century digit is in `[5-8]` and the checksum
+# formula adds 13 instead of 11.
+
+name = "kr-frn"
+label = "government_id"
+countries = ["KR"]
+languages = ["ko"]
+context = [
+  "frn",
+  "외국인등록번호",
+  "외국인번호",
+  "foreigner registration number",
+  "korean frn",
+]
+
+# Hyphen-separated rendering.
+[[variants]]
+regex = '\b\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])-[5-8]\d{6}\b'
+score = 0.5
+validator = "kr.frn"
+
+# Glued rendering.
+[[variants]]
+regex = '\b\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])[5-8]\d{6}\b'
+score = 0.4
+validator = "kr.frn"

@@ -1,0 +1,11 @@
+Network audit excerpt
+=====================
+
+Inbound connections last hour:
+  192.168.1.42      -> web01 (HTTP)
+  10.0.0.7          -> db01  (PG, blocked)
+  203.0.113.55      -> api01 (HTTPS)
+
+IPv6 peer: 2001:0db8:85a3:0000:0000:8a2e:0370:7334
+Spoofed gateway MAC observed: 00:1A:2B:3C:4D:5E (matches a known
+test device 3C-22-FB-A1-B2-C3 reported last week).

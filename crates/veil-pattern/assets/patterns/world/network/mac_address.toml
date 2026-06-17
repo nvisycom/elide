@@ -1,0 +1,16 @@
+# MAC (Ethernet) address.
+#
+# Two variants:
+# - Colon/hyphen form: `00:1A:2B:3C:4D:5E` or `00-1A-2B-3C-4D-5E`.
+# - Cisco dot-form: `0000.0000.0000` (three 4-hex-digit groups).
+
+name = "mac-address"
+label = "mac_address"
+
+[[variants]]
+regex = "\\b(?:[0-9A-Fa-f]{2}[:\\-]){5}[0-9A-Fa-f]{2}\\b"
+score = 0.5
+
+[[variants]]
+regex = "\\b[0-9A-Fa-f]{4}\\.[0-9A-Fa-f]{4}\\.[0-9A-Fa-f]{4}\\b"
+score = 0.5

@@ -1,0 +1,19 @@
+# Spanish código postal: 5 digits where the first two are the
+# province code (01-52, including Ceuta=51 and Melilla=52). Codes
+# 53-99 are unassigned.
+
+name = "es-codigo-postal"
+label = "postal_code"
+countries = ["ES"]
+languages = ["es"]
+context = [
+  "código postal",
+  "codigo postal",
+  "cp",
+  "c.p.",
+  "dirección postal",
+]
+
+[[variants]]
+regex = '\b(0[1-9]|[1-4]\d|5[0-2])\d{3}\b'
+score = 0.3

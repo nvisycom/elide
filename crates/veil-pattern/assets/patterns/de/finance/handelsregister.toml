@@ -1,0 +1,23 @@
+# German Handelsregisternummer: court-registered company ID with
+# section prefix `HRA` (partnerships) or `HRB` (capital companies)
+# followed by 1-6 digits.
+
+name = "de-handelsregister"
+label = "company_id"
+countries = ["DE"]
+languages = ["de"]
+context = [
+  "handelsregister",
+  "handelsregisternummer",
+  "registernummer",
+  "registergericht",
+  "amtsgericht",
+  "hrb",
+  "hra",
+  "handelsregister-nr",
+  "hr-nummer",
+]
+
+[[variants]]
+regex = '\bHR[AB]\s*\d{1,6}\b'
+score = 0.5

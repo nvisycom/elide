@@ -1,0 +1,44 @@
+# German Kfz-Kennzeichen (license plate): 1-3 letter
+# Unterscheidungszeichen (city/district code), optional
+# Erkennungszeichen (1-2 letters), and 1-4 digit serial.
+# Multiple variants cover hyphen, space, and Umlaut renderings.
+
+name = "de-kfz"
+label = "license_plate"
+countries = ["DE"]
+languages = ["de"]
+context = [
+  "kennzeichen",
+  "kfz-kennzeichen",
+  "kfz kennzeichen",
+  "amtliches kennzeichen",
+  "fahrzeugschein",
+  "fahrzeugbrief",
+  "zulassung",
+  "nummernschild",
+]
+
+# Canonical hyphen-separated rendering: BB-AB 1234.
+[[variants]]
+regex = '\b[A-ZÄÖÜ]{1,3}[-\s][A-Z]{1,2}\s?\d{1,4}H?E?\b'
+score = 0.3
+
+# ASCII-only rendering (commonly typed without Umlaut).
+[[variants]]
+regex = '\b[A-Z]{1,3}[-\s][A-Z]{1,2}\s?\d{1,4}H?E?\b'
+score = 0.2
+
+# Glued form without spaces: BBAB1234.
+[[variants]]
+regex = '\b[A-ZÄÖÜ]{1,3}[A-Z]{1,2}\d{1,4}H?E?\b'
+score = 0.2
+
+# Sondercode for diplomats and federal authorities (leading zero).
+[[variants]]
+regex = '\b0\s?\d{1,4}\b'
+score = 0.1
+
+# Saisonkennzeichen with month range suffix.
+[[variants]]
+regex = '\b[A-ZÄÖÜ]{1,3}[-\s][A-Z]{1,2}\s?\d{1,4}\s\d{2}\b'
+score = 0.3

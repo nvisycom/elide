@@ -1,0 +1,33 @@
+# Italian Carta d'Identità: paper-based (`AA0000000`),
+# Carta d'Identità Elettronica (CIE) 2.0 (`0000000AA`), and CIE
+# 3.0 (`AA00000AA`). No published checksum, so scores stay weak
+# and rely on the context-keyword boost.
+
+name = "it-identity-card"
+label = "government_id"
+countries = ["IT"]
+languages = ["it"]
+context = [
+  "carta d'identità",
+  "carta di identità",
+  "carta identità",
+  "cie",
+  "documento di identità",
+  "documento di riconoscimento",
+  "espatrio",
+]
+
+# Paper-based (issued through 2018, still valid until expiry).
+[[variants]]
+regex = '(?i)\b[A-Z]{2}\s?\d{7}\b'
+score = 0.05
+
+# CIE 2.0.
+[[variants]]
+regex = '(?i)\b\d{7}[A-Z]{2}\b'
+score = 0.05
+
+# CIE 3.0 (current standard).
+[[variants]]
+regex = '(?i)\b[A-Z]{2}\d{5}[A-Z]{2}\b'
+score = 0.05

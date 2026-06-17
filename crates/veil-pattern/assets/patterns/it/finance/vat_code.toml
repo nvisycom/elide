@@ -1,0 +1,20 @@
+# Italian Partita IVA (P.IVA): 11 digits with a Luhn-like
+# checksum. Validator rejects the all-zero sentinel.
+
+name = "it-vat-code"
+label = "tax_id"
+countries = ["IT"]
+languages = ["it"]
+context = [
+  "partita iva",
+  "piva",
+  "p.iva",
+  "p. iva",
+  "numero iva",
+  "agenzia delle entrate",
+]
+
+[[variants]]
+regex = '\b\d{11}\b'
+score = 0.3
+validator = "it.vat_code"

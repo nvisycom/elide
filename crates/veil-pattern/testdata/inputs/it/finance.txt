@@ -1,0 +1,7 @@
+Dati fiscali della società:
+
+  Ragione sociale:    Esempio S.r.l.
+  Partita IVA:        00154980569
+  Sede legale:        Milano
+
+Indicare la P.IVA su tutte le fatture emesse.

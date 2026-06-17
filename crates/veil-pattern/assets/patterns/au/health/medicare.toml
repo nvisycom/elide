@@ -1,0 +1,25 @@
+# Australian Medicare card number: 10-digit ID where the first
+# digit is in 2-6 and the 9th digit is a mod-10 weighted check.
+# Rendering is `NNNN NNNNN N` (card number + individual reference)
+# or `NNNN NNNNN N N` (with issue number).
+
+name = "au-medicare"
+label = "insurance_id"
+countries = ["AU"]
+languages = ["en"]
+context = [
+  "medicare",
+  "medicare card",
+  "medicare number",
+  "services australia",
+]
+
+[[variants]]
+regex = '\b[2-6]\d{3}\s\d{5}\s\d\b'
+score = 0.4
+validator = "au.medicare"
+
+[[variants]]
+regex = '\b[2-6]\d{9}\b'
+score = 0.2
+validator = "au.medicare"

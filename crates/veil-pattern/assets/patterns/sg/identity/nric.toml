@@ -1,0 +1,31 @@
+# Singapore NRIC / FIN: 9 characters — prefix letter (S/T for
+# Singapore citizens or PRs, F/G/M for foreigners) + 7 digits +
+# check letter. Validator applies the published weighted Mod-11
+# algorithm with prefix-specific letter tables.
+
+name = "sg-nric"
+label = "government_id"
+countries = ["SG"]
+languages = ["en"]
+context = [
+  "nric",
+  "nric#",
+  "fin",
+  "fin#",
+  "national registration",
+  "national registration identity",
+  "ica",
+]
+
+# Tight form anchored to the published prefix set.
+[[variants]]
+regex = '\b[STFGM]\d{7}[A-Z]\b'
+score = 0.5
+validator = "sg.nric"
+
+# Loose form (any leading letter); relies on the validator's
+# prefix check.
+[[variants]]
+regex = '\b[A-Z]\d{7}[A-Z]\b'
+score = 0.2
+validator = "sg.nric"

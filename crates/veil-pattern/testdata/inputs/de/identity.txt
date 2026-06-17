@@ -1,0 +1,9 @@
+Personenakte für Herrn Max Mustermann — siehe Personalausweis,
+Reisepass, Steueridentifikationsnummer und USt-IdNr.
+
+Personalausweis (nPA):       L01X00T44
+Reisepassnummer:             C0J9H58P3
+Steueridentifikationsnummer: 65929970489
+Umsatzsteuer-IdNr:           DE129273398
+Führerscheinnummer:          B072RRE2I52
+Rentenversicherungsnummer:   15010685M016

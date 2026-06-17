@@ -1,0 +1,8 @@
+Vehicle on file:
+
+  Make / model:           BMW 3 Series
+  Registration plate:     AB51 ABC
+  DVLA V5C log book:      yes
+  MOT current:            yes
+
+Insurance to be billed against the registered vehicle above.

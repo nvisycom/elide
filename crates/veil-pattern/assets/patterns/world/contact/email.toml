@@ -1,0 +1,12 @@
+# Email address (RFC 5322-loose).
+#
+# Accepts the RFC 5322 atom characters in the local part
+# (`!#$%&'*+\-/=?^_`{|}~`) so plus-addressing, dotted locals, and
+# similar are caught.
+
+name = "email"
+label = "email_address"
+
+[[variants]]
+regex = '''\b(?:[!#$%&'*+\-/=?^_`{|}~\w]|[!#$%&'*+\-/=?^_`{|}~\w][!#$%&'*+\-/=?^_`{|}~.\w]{0,}[!#$%&'*+\-/=?^_`{|}~\w])@\w+(?:[-.]\w+)*\.\w+(?:[-.]\w+)*\b'''
+score = 0.5

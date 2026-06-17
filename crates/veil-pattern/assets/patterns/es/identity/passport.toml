@@ -1,0 +1,18 @@
+# Spanish passport: 3 letters + 6 digits (e.g. AAA123456). No
+# published checksum, so the score stays low and relies on the
+# context-keyword boost.
+
+name = "es-passport"
+label = "passport_number"
+countries = ["ES"]
+languages = ["es"]
+context = [
+  "pasaporte",
+  "número de pasaporte",
+  "passport",
+  "passport number",
+]
+
+[[variants]]
+regex = '\b[A-Z]{3}\d{6}\b'
+score = 0.1

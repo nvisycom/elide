@@ -1,0 +1,7 @@
+Pratica del cliente Mario Rossi — vedere il codice fiscale, la
+carta d'identità elettronica e il passaporto allegati.
+
+Codice fiscale:     RSSMRA70A01H501S
+Carta d'identità:   CA12345AB
+Passaporto:         YA1234567
+Patente di guida:   MI1234567A

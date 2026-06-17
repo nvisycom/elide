@@ -1,0 +1,27 @@
+# US Medicare Beneficiary Identifier (MBI).
+#
+# 11-character CMS identifier with position-specific
+# character-class rules and letters restricted to
+# `ACDEFGHJKMNPQRTUVWXY` (excludes S, L, O, I, B, Z).
+
+name = "us-mbi"
+label = "medical_id"
+countries = ["US"]
+languages = ["en"]
+context = [
+  "mbi",
+  "medicare beneficiary",
+  "medicare",
+  "beneficiary",
+  "cms",
+]
+
+# 11-character form (no dashes), positions: N A AN N A AN N A A N N.
+[[variants]]
+regex = '\b[0-9][ACDEFGHJKMNPQRTUVWXY][0-9ACDEFGHJKMNPQRTUVWXY][0-9][ACDEFGHJKMNPQRTUVWXY][0-9ACDEFGHJKMNPQRTUVWXY][0-9][ACDEFGHJKMNPQRTUVWXY][ACDEFGHJKMNPQRTUVWXY][0-9][0-9]\b'
+score = 0.3
+
+# Dashed display form `XXXX-XXX-XXXX`.
+[[variants]]
+regex = '\b[0-9][ACDEFGHJKMNPQRTUVWXY][0-9ACDEFGHJKMNPQRTUVWXY][0-9]-[ACDEFGHJKMNPQRTUVWXY][0-9ACDEFGHJKMNPQRTUVWXY][0-9]-[ACDEFGHJKMNPQRTUVWXY][ACDEFGHJKMNPQRTUVWXY][0-9][0-9]\b'
+score = 0.5

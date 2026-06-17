@@ -1,0 +1,34 @@
+# German Führerscheinnummer (driving licence number): 11
+# alphanumeric characters in the EU-harmonized post-2013 format
+# (FeV Anlage 8). Format is opaque — position 3 onward mixes
+# letters and digits per issuing authority. The trailing check
+# character's algorithm is not published by KBA, so no validator
+# is wired.
+
+name = "de-fuehrerschein"
+label = "drivers_license"
+countries = ["DE"]
+languages = ["de"]
+context = [
+  "führerscheinnummer",
+  "führerschein",
+  "fahrerlaubnis",
+  "fahrerlaubnisnummer",
+  "fahrerlaubnisklasse",
+  "führerscheininhaber",
+  "fev",
+  "kba",
+  "kraftfahrt-bundesamt",
+  "driving licence",
+  "driving license",
+  "driver's license",
+  "licence number",
+  "license number",
+  "dokument nr",
+  "dokument-nr",
+  "feld 5",
+]
+
+[[variants]]
+regex = '\b[A-Z]\d{2}[A-Z0-9]{6}\d[A-Z0-9]\b'
+score = 0.35

@@ -1,0 +1,8 @@
+Company filing for the Australian Business Register:
+
+  Company name:                 Example Pty Ltd
+  Australian Business Number:   51 824 753 556
+  Australian Company Number:    123 456 780
+  Registered office:            Sydney NSW
+
+The ABN above must appear on all tax invoices issued.

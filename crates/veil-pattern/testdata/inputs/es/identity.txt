@@ -1,0 +1,7 @@
+Expediente del cliente Juan García López — referenciar el DNI, el
+número de identidad de extranjero (NIE) del conviviente, y el
+pasaporte adjunto.
+
+DNI:                12345678Z
+NIE (conviviente):  X1234567L
+Pasaporte:          AAA123456

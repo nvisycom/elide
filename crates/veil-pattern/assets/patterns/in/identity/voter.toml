@@ -1,0 +1,25 @@
+# Indian Voter ID (EPIC — Elector's Photo Identity Card):
+# 10-char alphanumeric issued by the Election Commission of
+# India. Two formats: 3 letters + 7 digits (older), or 1 letter
+# + restricted-set 2nd char + letter + 7 digits.
+
+name = "in-voter"
+label = "government_id"
+countries = ["IN"]
+languages = ["en", "hi"]
+context = [
+  "voter",
+  "voter id",
+  "epic",
+  "elector photo identity card",
+  "election commission",
+  "मतदाता",
+]
+
+[[variants]]
+regex = '\b[A-Z][ABCDGHJKMNPRSY][A-Z]\d{7}\b'
+score = 0.4
+
+[[variants]]
+regex = '\b[A-Z]{3}\d{7}\b'
+score = 0.3

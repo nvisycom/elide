@@ -1,0 +1,31 @@
+# Polish NIP (Numer Identyfikacji Podatkowej): 10-digit tax ID
+# with mod-11 weighted checksum per Ustawa o zasadach ewidencji i
+# identyfikacji podatników. The regex accepts the canonical
+# `XXX-XXX-XX-XX` and `XXX-XX-XX-XXX` separator renderings.
+
+name = "pl-nip"
+label = "tax_id"
+countries = ["PL"]
+languages = ["pl"]
+context = [
+  "nip",
+  "numer identyfikacji podatkowej",
+  "identyfikacja podatkowa",
+  "urząd skarbowy",
+  "ministerstwo finansów",
+]
+
+[[variants]]
+regex = '\b\d{10}\b'
+score = 0.3
+validator = "pl.nip"
+
+[[variants]]
+regex = '\b\d{3}-\d{3}-\d{2}-\d{2}\b'
+score = 0.5
+validator = "pl.nip"
+
+[[variants]]
+regex = '\b\d{3}-\d{2}-\d{2}-\d{3}\b'
+score = 0.4
+validator = "pl.nip"

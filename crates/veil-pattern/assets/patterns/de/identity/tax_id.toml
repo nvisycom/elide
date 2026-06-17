@@ -1,0 +1,24 @@
+# German Steueridentifikationsnummer (Steuer-IdNr): 11-digit
+# lifetime tax identifier per Bundeszentralamt für Steuern.
+# Check digit at pos 11 via ISO 7064 Mod 11, 10. No leading zero.
+
+name = "de-tax-id"
+label = "tax_id"
+countries = ["DE"]
+languages = ["de"]
+context = [
+  "steueridentifikationsnummer",
+  "steuerliche identifikationsnummer",
+  "persönliche identifikationsnummer",
+  "idnr",
+  "steuer-idnr",
+  "steuer idnr",
+  "steueridentnummer",
+  "bzst",
+  "bundeszentralamt für steuern",
+]
+
+[[variants]]
+regex = '\b[1-9]\d{10}\b'
+score = 0.4
+validator = "de.tax_id"

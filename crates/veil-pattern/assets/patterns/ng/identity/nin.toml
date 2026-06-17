@@ -1,0 +1,22 @@
+# Nigerian National Identification Number (NIN): 11-digit ID
+# issued by the National Identity Management Commission (NIMC).
+# The trailing digit is a Verhoeff checksum.
+
+name = "ng-nin"
+label = "government_id"
+countries = ["NG"]
+languages = ["en"]
+context = [
+  "nin",
+  "national identification number",
+  "national identity number",
+  "nimc",
+  "national identity",
+  "nigeria id",
+  "nigerian identification",
+]
+
+[[variants]]
+regex = '\b\d{11}\b'
+score = 0.3
+validator = "ng.nin"

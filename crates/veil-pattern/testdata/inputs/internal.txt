@@ -1,0 +1,6 @@
+Internal handoff note
+---------------------
+
+Engineer EMP-12345 is taking over the WIDGET-200 line from EMP-67890.
+Older invoices reference it as premium-widget; the next batch ships
+as Acme Premium Widget. For legal questions contact counsel@example.com.

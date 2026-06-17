@@ -1,0 +1,12 @@
+PATIENT INTAKE FORM
+
+Full name:        Jane Smith
+Date of birth:    1985-03-14
+Social security:  123-45-6789
+ITIN (taxpayer):  912-71-1234
+Driver license:   D123-4567-8901
+US passport:      A12345678
+Mailing address:  742 Evergreen Terrace
+                  Springfield, OR 97477-1234
+
+Confirm insurance card on file (see attached).

@@ -1,0 +1,32 @@
+# US ABA Routing Number.
+#
+# Two variants:
+# - 9-digit unbroken form, prefix-validated to the Fed routing
+#   ranges (01-12, 21-32) and checksum-validated by `us.aba_routing`.
+# - Dashed form `\b[0123678]\d{3}-\d{4}-\d\b` with the same
+#   checksum.
+
+name = "us-bank-routing"
+label = "bank_routing"
+countries = ["US"]
+languages = ["en"]
+context = [
+  "routing",
+  "aba",
+  "rtn",
+  "transit",
+  "bank",
+  "deposit",
+  "wire",
+  "ach",
+]
+
+[[variants]]
+regex = '\b(?:0[1-9]|[12]\d|3[0-2])\d{7}\b'
+score = 0.5
+validator = "us.aba_routing"
+
+[[variants]]
+regex = '\b[0123678]\d{3}-\d{4}-\d\b'
+score = 0.4
+validator = "us.aba_routing"

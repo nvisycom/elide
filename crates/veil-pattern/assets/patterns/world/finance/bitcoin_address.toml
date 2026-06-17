@@ -1,0 +1,17 @@
+name = "bitcoin-address"
+label = "crypto_address"
+
+# Legacy Base58 addresses (P2PKH `1…`, P2SH `3…`) carry a
+# four-byte double-SHA256 checksum that the `crypto.btc`
+# validator verifies.
+[[variants]]
+regex = "\\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\\b"
+score = 0.5
+validator = "crypto.btc"
+
+# Bech32 / Bech32m segwit + Taproot. Length window covers
+# v0 P2WPKH/P2WSH (42/62 chars total, body 39/59) and
+# v1 P2TR Taproot (62 chars total, body 59).
+[[variants]]
+regex = "\\bbc1[a-z0-9]{25,59}\\b"
+score = 0.5

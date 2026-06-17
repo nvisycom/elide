@@ -1,0 +1,26 @@
+# UK Passport Number (post-2015 format).
+#
+# 2 letters + 7 digits. Same shape as several other country
+# passports — without context-keyword boost the FP rate is high.
+# Low score by default so callers rely on context to lift
+# legitimate matches.
+
+name = "uk-passport"
+label = "passport_number"
+countries = ["GB"]
+languages = ["en"]
+context = [
+  "passport",
+  "passport number",
+  "travel document",
+  "uk passport",
+  "british passport",
+  "her majesty",
+  "his majesty",
+  "hm passport",
+  "hmpo",
+]
+
+[[variants]]
+regex = '\b[A-Z]{2}\d{7}\b'
+score = 0.1

@@ -1,0 +1,22 @@
+# Spanish NIF / DNI: 8 digits + Mod 23 control letter. The legacy
+# DNI (citizens) and NIF (taxpayers) share the algorithm; the
+# leading `0` is sometimes omitted, so 7 digits + letter is also
+# accepted by the validator.
+
+name = "es-nif"
+label = "government_id"
+countries = ["ES"]
+languages = ["es"]
+context = [
+  "documento nacional de identidad",
+  "número de identificación fiscal",
+  "dni",
+  "nif",
+  "identificación",
+  "identidad",
+]
+
+[[variants]]
+regex = '\b\d{7,8}-?[A-Z]\b'
+score = 0.5
+validator = "es.nif"

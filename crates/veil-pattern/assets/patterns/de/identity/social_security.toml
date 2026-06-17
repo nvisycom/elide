@@ -1,0 +1,25 @@
+# German Rentenversicherungsnummer (RVNR / SVNR): 12 characters
+# encoding region + birth date + surname initial + serial + check
+# digit per VKVV § 4 (Deutsche Rentenversicherung).
+
+name = "de-social-security"
+label = "national_insurance_number"
+countries = ["DE"]
+languages = ["de"]
+context = [
+  "rentenversicherungsnummer",
+  "sozialversicherungsnummer",
+  "versicherungsnummer",
+  "rvnr",
+  "svnr",
+  "sv-nummer",
+  "rentenversicherung",
+  "deutsche rentenversicherung",
+  "drv",
+  "sozialversicherung",
+]
+
+[[variants]]
+regex = '\b\d{8}[A-Z]\d{3}\b'
+score = 0.5
+validator = "de.social_security"

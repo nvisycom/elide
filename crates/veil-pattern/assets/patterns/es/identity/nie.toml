@@ -1,0 +1,21 @@
+# Spanish NIE (Número de Identidad de Extranjero): X, Y, or Z
+# prefix + 7 digits + Mod 23 control letter (X→0, Y→1, Z→2 before
+# the modulo).
+
+name = "es-nie"
+label = "government_id"
+countries = ["ES"]
+languages = ["es"]
+context = [
+  "número de identidad de extranjero",
+  "número de identificación de extranjero",
+  "nie",
+  "tarjeta de residencia",
+  "residencia",
+  "extranjero",
+]
+
+[[variants]]
+regex = '\b[XYZ]-?\d{7}-?[A-Z]\b'
+score = 0.5
+validator = "es.nie"

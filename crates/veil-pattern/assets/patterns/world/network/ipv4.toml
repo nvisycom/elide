@@ -1,0 +1,8 @@
+# IPv4 address with optional CIDR suffix.
+
+name = "ipv4"
+label = "ip_address"
+
+[[variants]]
+regex = '\b(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?)(?:/(?:[0-2]?\d|3[0-2]))?\b'
+score = 0.6

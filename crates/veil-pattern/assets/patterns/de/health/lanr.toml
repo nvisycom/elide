@@ -1,0 +1,31 @@
+# German Lebenslange Arztnummer (LANR): 9-digit lifetime physician
+# number assigned by the Kassenärztliche Vereinigung. Pos 7 is a
+# check digit per the KBV Arztnummern-Richtlinie; pos 8-9 carry
+# the Fachgruppe (specialty) code.
+
+name = "de-lanr"
+label = "medical_id"
+countries = ["DE"]
+languages = ["de"]
+context = [
+  "arztnummer",
+  "lanr",
+  "lebenslange arztnummer",
+  "arzt-nr",
+  "arzt nr",
+  "arzt-nummer",
+  "vertragsarzt",
+  "kassenarzt",
+  "niedergelassener arzt",
+  "kbv",
+  "rezept",
+  "verschreibung",
+  "behandelnder arzt",
+  "hausarzt",
+  "facharzt",
+]
+
+[[variants]]
+regex = '\b\d{9}\b'
+score = 0.3
+validator = "de.lanr"
