@@ -47,6 +47,8 @@ impl CodecRegistry {
         registry.add_format(crate::handler::text::json_format());
         #[cfg(feature = "html")]
         registry.add_format(crate::handler::markup::html_format());
+        #[cfg(feature = "xml")]
+        registry.add_format(crate::handler::markup::xml_format());
         registry
     }
 

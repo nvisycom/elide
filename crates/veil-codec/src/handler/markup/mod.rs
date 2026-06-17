@@ -5,12 +5,13 @@
 //! the same streaming/redaction bookkeeping over them. This module holds
 //! that neutral core:
 //!
-//! - [`RedactableItem`] / [`RedactableKind`] / [`ElementTarget`] — one
-//!   addressable position in a markup document, parser-agnostic.
+//! - [`RedactableItem<A>`](RedactableItem) — one addressable unit (its
+//!   `value` plus an encoder-private address `A`), parser-agnostic.
 //! - [`MarkupHandler`] — the [`Handler`] machinery over a
-//!   `Vec<RedactableItem>`: cumulative offsets, `next_chunk`, random
-//!   read, batch redact, and `lift_chunk`. Re-serialization is delegated
-//!   to a format-specific [`MarkupEncoder`].
+//!   `Vec<RedactableItem<A>>`: cumulative offsets, `next_chunk`, random
+//!   read, batch redact, and `lift_chunk`. It never inspects the address.
+//!   Re-serialization is delegated to a format-specific [`MarkupEncoder`],
+//!   which also chooses the [`Address`](MarkupEncoder::Address) type.
 //!
 //! A concrete format (e.g. the `html_loader` / `html_handler` pair in
 //! this module) supplies a parser that produces the item stream and a
@@ -18,8 +19,14 @@
 //! tree; everything between is shared. A future XML format would add an
 //! `xml_loader` / `xml_handler` pair alongside.
 
+#[cfg(feature = "html")]
 mod html_handler;
+#[cfg(feature = "html")]
 mod html_loader;
+#[cfg(feature = "xml")]
+mod xml_handler;
+#[cfg(feature = "xml")]
+mod xml_loader;
 
 use std::ops::Range;
 
@@ -28,8 +35,14 @@ use veil_core::modality::{DataReader, DataWriter};
 use veil_core::redaction::Redactions;
 use veil_core::Error;
 
+#[cfg(feature = "html")]
 pub use self::html_handler::{HtmlEncoder, HtmlHandler, format as html_format};
+#[cfg(feature = "html")]
 pub use self::html_loader::{HtmlLoader, ScriptPolicy};
+#[cfg(feature = "xml")]
+pub use self::xml_handler::{XmlEncoder, XmlHandler, format as xml_format};
+#[cfg(feature = "xml")]
+pub use self::xml_loader::XmlLoader;
 use crate::content::ContentData;
 use crate::handler::redact;
 use crate::{Chunk, Handler};
@@ -37,12 +50,16 @@ use crate::{Chunk, Handler};
 /// One redactable unit in a markup document.
 ///
 /// `value` is the text a recognizer scans and that redaction mutates in
-/// place; `kind` tells the [`MarkupEncoder`] where to splice the mutated
-/// value back into the document.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RedactableItem {
-    /// Where this item lives in the document.
-    pub kind: RedactableKind,
+/// place; `address` is the encoder-private "where" — how the format's
+/// [`MarkupEncoder`] re-finds this unit to splice the mutated value back
+/// in. The handler machinery never inspects `address`; it only streams
+/// and edits `value`, so each format chooses the addressing scheme its
+/// encoder needs (ordinal node indices for a DOM rebuild, source byte
+/// spans for in-place patching, …).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RedactableItem<A> {
+    /// The encoder-private location of this item in the document.
+    pub address: A,
     /// Text-node text, comment body, attribute value, or element text.
     pub value: String,
     /// Out-of-band context strings surfaced from the item's structural
@@ -51,57 +68,24 @@ pub struct RedactableItem {
     pub hints: Vec<String>,
 }
 
-/// Where a [`RedactableItem`] lives inside the parsed document. The
-/// encoder uses the ordinal indices to re-find the node on a fresh parse.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RedactableKind {
-    /// A text node, by its 0-based index in document-order text nodes.
-    TextNode {
-        /// Document-order index among text nodes.
-        index: usize,
-    },
-    /// A comment, by its 0-based index in document-order comments.
-    Comment {
-        /// Document-order index among comments.
-        index: usize,
-    },
-    /// An element-bound item: an attribute value or the element's text
-    /// body.
-    Element {
-        /// Document-order index among elements.
-        element_index: usize,
-        /// Which part of the element this item addresses.
-        target: ElementTarget,
-    },
-}
-
-/// The element-bound location a [`RedactableKind::Element`] item points
-/// at.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ElementTarget {
-    /// The value of `attr_name` on this element.
-    Attribute {
-        /// Attribute local name.
-        attr_name: String,
-    },
-    /// The element's text body, scanned as plain text (e.g. an HTML
-    /// `<script>` / `<style>` body under a scan-text policy).
-    Text,
-}
-
 /// Re-serialize a mutated [`RedactableItem`] stream into a document's
 /// native bytes.
 ///
-/// A markup format implements this over its own parser/serializer: parse
-/// the retained source, splice each item's current `value` back at its
-/// `kind` ordinal, and emit. [`MarkupHandler`] owns everything else.
+/// A markup format implements this over its own parser/serializer: it
+/// chooses an [`Address`](MarkupEncoder::Address) type for locating items,
+/// and `encode` splices each item's current `value` back at its address
+/// and emits. [`MarkupHandler`] owns everything else.
 pub trait MarkupEncoder: Send + Sync + 'static {
+    /// The encoder-private addressing payload carried on each
+    /// [`RedactableItem`] — e.g. an ordinal node index or a source span.
+    type Address: Send + Sync + 'static;
+
     /// Re-encode `items` against the retained source into output bytes.
     ///
     /// # Errors
     ///
     /// Returns an error when the document cannot be re-serialized.
-    fn encode(&self, items: &[RedactableItem]) -> Result<ContentData, Error>;
+    fn encode(&self, items: &[RedactableItem<Self::Address>]) -> Result<ContentData, Error>;
 }
 
 /// The [`Handler`] machinery over a markup item stream.
@@ -116,7 +100,7 @@ pub trait MarkupEncoder: Send + Sync + 'static {
 pub struct MarkupHandler<E: MarkupEncoder> {
     format_id: crate::FormatId,
     encoder: E,
-    items: Vec<RedactableItem>,
+    items: Vec<RedactableItem<E::Address>>,
     item_starts: Vec<usize>,
     cursor: usize,
 }
@@ -124,7 +108,11 @@ pub struct MarkupHandler<E: MarkupEncoder> {
 impl<E: MarkupEncoder> MarkupHandler<E> {
     /// Build a handler from a decoded item stream, a format id, and the
     /// format's encoder.
-    pub fn new(format_id: crate::FormatId, encoder: E, items: Vec<RedactableItem>) -> Self {
+    pub fn new(
+        format_id: crate::FormatId,
+        encoder: E,
+        items: Vec<RedactableItem<E::Address>>,
+    ) -> Self {
         let item_starts = compute_item_starts(&items);
         Self {
             format_id,
@@ -136,7 +124,7 @@ impl<E: MarkupEncoder> MarkupHandler<E> {
     }
 
     /// All redactable items in document order.
-    pub fn items(&self) -> &[RedactableItem] {
+    pub fn items(&self) -> &[RedactableItem<E::Address>] {
         &self.items
     }
 
@@ -279,7 +267,7 @@ impl<E: MarkupEncoder> DataWriter<Text> for MarkupHandler<E> {
 
 /// Cumulative byte-offset table over the items: `[0, len(item[0]),
 /// len(item[0]) + len(item[1]), …, total]`.
-fn compute_item_starts(items: &[RedactableItem]) -> Vec<usize> {
+fn compute_item_starts<A>(items: &[RedactableItem<A>]) -> Vec<usize> {
     let mut starts = Vec::with_capacity(items.len() + 1);
     let mut offset = 0usize;
     for item in items {

@@ -1546,6 +1546,7 @@ dependencies = [
  "bytes",
  "ego-tree",
  "hex",
+ "quick-xml",
  "scraper",
  "serde_json",
  "sha2 0.11.0",

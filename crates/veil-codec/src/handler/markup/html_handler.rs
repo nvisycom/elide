@@ -14,7 +14,7 @@ use scraper::node::Node;
 use veil_core::Error;
 use veil_core::modality::text::Text;
 
-use super::{ElementTarget, MarkupEncoder, MarkupHandler, RedactableItem, RedactableKind};
+use super::{MarkupEncoder, MarkupHandler, RedactableItem};
 use crate::content::ContentData;
 use crate::{Format, FormatId};
 
@@ -24,11 +24,51 @@ pub const FORMAT_ID: FormatId = FormatId::from_static("veil.text.html");
 /// Handler type for loaded HTML content.
 pub type HtmlHandler = MarkupHandler<HtmlEncoder>;
 
+/// An HTML [`RedactableItem`] carrying [`HtmlAddress`].
+pub(super) type HtmlItem = RedactableItem<HtmlAddress>;
+
 /// [`Format`] descriptor registered into [`crate::CodecRegistry`].
 pub fn format() -> Format {
     Format::new::<Text, _>(FORMAT_ID.clone(), super::HtmlLoader::default())
         .with_extensions(["html", "htm"])
         .with_content_types(["text/html"])
+}
+
+/// Where an HTML item lives in the document, as an ordinal index the
+/// encoder re-finds by walking a fresh parse of the retained source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HtmlAddress {
+    /// A text node, by its 0-based index in document-order text nodes.
+    TextNode {
+        /// Document-order index among text nodes.
+        index: usize,
+    },
+    /// A comment, by its 0-based index in document-order comments.
+    Comment {
+        /// Document-order index among comments.
+        index: usize,
+    },
+    /// An element-bound item: an attribute value or the element's text
+    /// body.
+    Element {
+        /// Document-order index among elements.
+        element_index: usize,
+        /// Which part of the element this item addresses.
+        target: ElementTarget,
+    },
+}
+
+/// The element-bound location an [`HtmlAddress::Element`] item points at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ElementTarget {
+    /// The value of `attr_name` on this element.
+    Attribute {
+        /// Attribute local name.
+        attr_name: String,
+    },
+    /// The element's text body, scanned as plain text (e.g. a `<script>`
+    /// / `<style>` body under a scan-text policy).
+    Text,
 }
 
 /// Re-serializes a mutated item stream by splicing values back into a
@@ -39,7 +79,9 @@ pub struct HtmlEncoder {
 }
 
 impl MarkupEncoder for HtmlEncoder {
-    fn encode(&self, items: &[RedactableItem]) -> Result<ContentData, Error> {
+    type Address = HtmlAddress;
+
+    fn encode(&self, items: &[HtmlItem]) -> Result<ContentData, Error> {
         let mut dom = Html::parse_document(&self.raw);
         EncodePlan::from_items(items).apply(&mut dom);
         Ok(ContentData::new(dom.html().into_bytes().into()))
@@ -67,22 +109,22 @@ struct ElementTargetPatch<'a> {
 }
 
 impl<'a> EncodePlan<'a> {
-    fn from_items(items: &'a [RedactableItem]) -> Self {
+    fn from_items(items: &'a [HtmlItem]) -> Self {
         let mut text_values: Vec<Option<&'a str>> = Vec::new();
         let mut comment_values: Vec<Option<&'a str>> = Vec::new();
         let mut element_targets: Vec<Vec<ElementTargetPatch<'a>>> = Vec::new();
 
         for item in items {
-            match &item.kind {
-                RedactableKind::TextNode { index } => {
+            match &item.address {
+                HtmlAddress::TextNode { index } => {
                     grow_to(&mut text_values, *index);
                     text_values[*index] = Some(item.value.as_str());
                 }
-                RedactableKind::Comment { index } => {
+                HtmlAddress::Comment { index } => {
                     grow_to(&mut comment_values, *index);
                     comment_values[*index] = Some(item.value.as_str());
                 }
-                RedactableKind::Element {
+                HtmlAddress::Element {
                     element_index,
                     target,
                 } => {

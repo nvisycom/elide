@@ -13,8 +13,8 @@ use scraper::node::Node;
 use veil_core::Error;
 use veil_core::modality::text::Text;
 
-use super::html_handler::{FORMAT_ID, HtmlEncoder, HtmlHandler};
-use super::{ElementTarget, MarkupHandler, RedactableItem, RedactableKind};
+use super::html_handler::{ElementTarget, FORMAT_ID, HtmlAddress, HtmlEncoder, HtmlHandler, HtmlItem};
+use super::MarkupHandler;
 use crate::Loader;
 use crate::content::ContentData;
 
@@ -54,7 +54,7 @@ impl Loader<Text> for HtmlLoader {
     }
 }
 
-fn build_items(dom: &Html, loader: &HtmlLoader) -> Vec<RedactableItem> {
+fn build_items(dom: &Html, loader: &HtmlLoader) -> Vec<HtmlItem> {
     let mut items = Vec::new();
     let mut text_index: usize = 0;
     let mut comment_index: usize = 0;
@@ -65,8 +65,8 @@ fn build_items(dom: &Html, loader: &HtmlLoader) -> Vec<RedactableItem> {
             Node::Text(t) => {
                 if !skip_text_under(node) {
                     let hints = sibling_text_hint(node, &t.text);
-                    items.push(RedactableItem {
-                        kind: RedactableKind::TextNode { index: text_index },
+                    items.push(HtmlItem {
+                        address: HtmlAddress::TextNode { index: text_index },
                         value: t.text.to_string(),
                         hints,
                     });
@@ -74,8 +74,8 @@ fn build_items(dom: &Html, loader: &HtmlLoader) -> Vec<RedactableItem> {
                 text_index += 1;
             }
             Node::Comment(c) => {
-                items.push(RedactableItem {
-                    kind: RedactableKind::Comment {
+                items.push(HtmlItem {
+                    address: HtmlAddress::Comment {
                         index: comment_index,
                     },
                     value: c.comment.to_string(),
@@ -90,8 +90,8 @@ fn build_items(dom: &Html, loader: &HtmlLoader) -> Vec<RedactableItem> {
                 // verbatim — URLs like `mailto:alice@x.com` have the email
                 // matched in place by the recognizer.
                 for (qn, val) in &e.attrs {
-                    items.push(RedactableItem {
-                        kind: RedactableKind::Element {
+                    items.push(HtmlItem {
+                        address: HtmlAddress::Element {
                             element_index,
                             target: ElementTarget::Attribute {
                                 attr_name: qn.local.as_ref().to_owned(),
@@ -111,8 +111,8 @@ fn build_items(dom: &Html, loader: &HtmlLoader) -> Vec<RedactableItem> {
                 if let Some(ScriptPolicy::ScanText) = policy
                     && let Some(body) = first_child_text(node)
                 {
-                    items.push(RedactableItem {
-                        kind: RedactableKind::Element {
+                    items.push(HtmlItem {
+                        address: HtmlAddress::Element {
                             element_index,
                             target: ElementTarget::Text,
                         },
