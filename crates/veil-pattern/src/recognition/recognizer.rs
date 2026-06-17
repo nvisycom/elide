@@ -245,14 +245,16 @@ impl PatternRecognizerBuilder {
         for pattern in &self.patterns {
             for variant in &pattern.variants {
                 let regex = ::regex::Regex::new(&variant.regex).map_err(|e| {
-                    Error::new(ErrorKind::Validation, 
+                    Error::new(
+                        ErrorKind::Validation,
                         format!("pattern `{}`: invalid regex: {e}", pattern.name),
                     )
                 })?;
                 let validator = match variant.validator.as_deref() {
                     None => None,
                     Some(name) => Some(validators.resolve(name).ok_or_else(|| {
-                        Error::new(ErrorKind::Validation, 
+                        Error::new(
+                            ErrorKind::Validation,
                             format!("pattern `{}`: unknown validator `{}`", pattern.name, name),
                         )
                     })?),
@@ -291,7 +293,8 @@ impl PatternRecognizerBuilder {
 
         for dict in &self.dictionaries {
             if let Err(reason) = dict.scoring.validate() {
-                return Err(Error::new(ErrorKind::Validation, 
+                return Err(Error::new(
+                    ErrorKind::Validation,
                     format!("dictionary `{}`: {reason}", dict.name),
                 ));
             }
@@ -312,7 +315,8 @@ impl PatternRecognizerBuilder {
                         let column_desc = entry
                             .column
                             .map_or_else(|| "no column".to_owned(), |c| format!("column {c}"));
-                        Error::new(ErrorKind::Validation, 
+                        Error::new(
+                            ErrorKind::Validation,
                             format!(
                                 "dictionary `{}`: term `{}` ({column_desc}) has no score in \
                                  dictionary scoring",
@@ -350,7 +354,8 @@ impl PatternRecognizerBuilder {
                     .match_kind(MatchKind::LeftmostLongest)
                     .build(&all_terms)
                     .map_err(|e| {
-                        Error::new(ErrorKind::Validation, 
+                        Error::new(
+                            ErrorKind::Validation,
                             format!("compiling dictionary automaton: {e}"),
                         )
                     })?,

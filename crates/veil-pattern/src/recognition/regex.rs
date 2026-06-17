@@ -51,7 +51,8 @@ impl Variant {
     pub fn new(regex: impl Into<String>) -> Result<Self, Error> {
         let regex = regex.into();
         if let Err(e) = ::regex::Regex::new(&regex) {
-            return Err(Error::new(ErrorKind::Validation, 
+            return Err(Error::new(
+                ErrorKind::Validation,
                 format!("invalid regex: {e}"),
             ));
         }

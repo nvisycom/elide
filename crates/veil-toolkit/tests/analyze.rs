@@ -4,8 +4,7 @@
 
 use veil_core::Error;
 use veil_core::entity::{Entity, LabelRef};
-use veil_core::primitive::Confidence;
-use veil_core::primitive::ConfidenceThreshold;
+use veil_core::primitive::{Confidence, ConfidenceThreshold};
 use veil_core::provenance::{Event, EventKind, PatternEvent, Provenance};
 use veil_core::recognition::{Recognizer, RecognizerId, RecognizerInput, RecognizerOutput};
 use veil_toolkit::Analyzer;

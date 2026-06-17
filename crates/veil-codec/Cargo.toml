@@ -1,0 +1,59 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "veil-codec"
+description = "Codec traits and format handlers for reading and redacting documents"
+keywords = ["veil", "codec", "document", "redaction"]
+categories = ["encoding", "text-processing"]
+readme = "README.md"
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+# No formats are built in by default; opt into the ones you need (or
+# the `text` umbrella). The registry's `with_builtin` only wires up the
+# formats whose features are enabled.
+default = ["text"]
+
+## Every text-shaped format currently shipped. `json` is declared
+## below but not yet implemented, so it is deliberately excluded here
+## and from `default`; add it back once `handler::text::json_*` lands.
+text = ["txt"]
+
+## Individual text formats.
+txt = []
+## JSON — in progress. The feature is declared so the gated
+## `handler::text::json_*` modules have a known cfg, but enabling it
+## will not compile until the handler is ported.
+json = ["dep:serde_json"]
+
+[dependencies]
+# Internal crates
+veil-core = { workspace = true, features = ["serde"] }
+
+# Byte containers and hashing
+bytes = { workspace = true, features = [] }
+sha2 = { workspace = true, features = [] }
+hex = { workspace = true, features = [] }
+
+# Serialization (JSON handler, gated behind `json`)
+serde_json = { workspace = true, features = [], optional = true }
+
+# Observability
+tracing = { workspace = true, features = [] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

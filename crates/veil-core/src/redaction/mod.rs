@@ -10,13 +10,16 @@
 //! reversible ones (encrypt → decrypt) additionally implement
 //! [`ReversibleOperator`].
 //!
-//! This module defines only the contracts. Concrete operators and the
-//! label→operator registry that selects them live in `veil-toolkit`.
+//! This module defines the operator contracts and the [`Redactions`]
+//! batch they feed into. Concrete operators and the label→operator
+//! registry that selects them live in `veil-toolkit`.
 
 mod operator;
 mod operator_id;
+mod redactions;
 mod reversible;
 
 pub use self::operator::{LeakProfile, Operator};
 pub use self::operator_id::OperatorId;
+pub use self::redactions::Redactions;
 pub use self::reversible::ReversibleOperator;

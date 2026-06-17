@@ -40,13 +40,16 @@ pub trait ModalityData: Clone + std::fmt::Debug + Send + Sync + 'static {}
 /// coordinate level: a text crate's `TextSpan { start, end }`, an image
 /// crate's pixel box, an audio crate's time range.
 ///
-/// Beyond being a marker, a location must answer two spatial questions
-/// the deduplication pipeline relies on: whether it
-/// [`overlaps`](ModalityLocation::overlaps) another (to group co-located
-/// findings and detect cross-label conflicts) and how its extent
+/// Beyond being a marker, a location must answer three spatial questions:
+/// whether it [`overlaps`](ModalityLocation::overlaps) another (to group
+/// co-located findings and detect cross-label conflicts), how its extent
 /// [`compares`](ModalityLocation::span_cmp) to another's (to prefer the
-/// larger, more specific span). Both are intrinsic to what a location
-/// *is*, so they live here rather than in a separate trait.
+/// larger, more specific span when the deduplication pipeline resolves
+/// conflicts), and where it sits
+/// [*positionally*](ModalityLocation::position_cmp) (so a codec applies
+/// redactions in a stable document order). All three are intrinsic to
+/// what a location *is*, so they live here rather than in a separate
+/// trait.
 pub trait ModalityLocation: Clone + std::fmt::Debug + Send + Sync + 'static {
     /// Whether this location overlaps `other`.
     ///
@@ -61,6 +64,16 @@ pub trait ModalityLocation: Clone + std::fmt::Debug + Send + Sync + 'static {
     /// larger (longer text span, bigger pixel area, longer duration).
     /// Used to prefer the more specific match when resolving conflicts.
     fn span_cmp(&self, other: &Self) -> std::cmp::Ordering;
+
+    /// Order this location against `other` by position in the medium.
+    ///
+    /// Earlier locations sort [`Less`](std::cmp::Ordering::Less): for
+    /// text/audio, by start offset (then end); for images, a stable
+    /// reading order (e.g. top-to-bottom, left-to-right). Distinct from
+    /// [`span_cmp`](ModalityLocation::span_cmp), which orders by *size*:
+    /// this orders by *where*. A codec sorts a batch of redactions by
+    /// this so it can apply them in a single deterministic pass.
+    fn position_cmp(&self, other: &Self) -> std::cmp::Ordering;
 }
 
 /// What an [`Operator`] produces for a modality — the instruction a
@@ -98,6 +111,9 @@ pub trait ModalityReplacement: Clone + std::fmt::Debug + Send + Sync + 'static {
 ///     }
 ///     fn span_cmp(&self, o: &Self) -> std::cmp::Ordering {
 ///         (self.end - self.start).cmp(&(o.end - o.start))
+///     }
+///     fn position_cmp(&self, o: &Self) -> std::cmp::Ordering {
+///         self.start.cmp(&o.start).then(self.end.cmp(&o.end))
 ///     }
 /// }
 ///

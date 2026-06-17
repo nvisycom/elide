@@ -86,6 +86,17 @@ impl ModalityLocation for TextLocation {
     fn span_cmp(&self, other: &Self) -> Ordering {
         self.len().cmp(&other.len())
     }
+
+    fn position_cmp(&self, other: &Self) -> Ordering {
+        // Reading order: page first (unpaged sorts as page 0), then by
+        // start offset, then by end so a shorter span at the same start
+        // sorts before a longer one.
+        self.page
+            .unwrap_or(0)
+            .cmp(&other.page.unwrap_or(0))
+            .then(self.start.cmp(&other.start))
+            .then(self.end.cmp(&other.end))
+    }
 }
 
 /// What a text operator produces: a substitution or a removal.
@@ -127,4 +138,63 @@ impl Modality for Text {
     type Replacement = TextReplacement;
 
     const NAME: &'static str = "text";
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cmp::Ordering;
+
+    use super::*;
+    use crate::redaction::Redactions;
+
+    #[test]
+    fn position_cmp_orders_by_start_then_end() {
+        let a = TextLocation::new(0, 5);
+        let b = TextLocation::new(3, 8);
+        let c = TextLocation::new(3, 4);
+        assert_eq!(a.position_cmp(&b), Ordering::Less);
+        // Same start: shorter end sorts first.
+        assert_eq!(c.position_cmp(&b), Ordering::Less);
+        assert_eq!(b.position_cmp(&a), Ordering::Greater);
+    }
+
+    #[test]
+    fn position_cmp_orders_pages_before_offsets() {
+        let early_page = TextLocation {
+            start: 100,
+            end: 110,
+            page: Some(1),
+        };
+        let late_page = TextLocation {
+            start: 0,
+            end: 5,
+            page: Some(2),
+        };
+        // Page 1 sorts before page 2 even with a larger offset.
+        assert_eq!(early_page.position_cmp(&late_page), Ordering::Less);
+    }
+
+    #[test]
+    fn span_cmp_is_extent_not_position() {
+        let short_late = TextLocation::new(10, 12);
+        let long_early = TextLocation::new(0, 9);
+        // Positionally the early one is first...
+        assert_eq!(long_early.position_cmp(&short_late), Ordering::Less);
+        // ...but by extent it is the larger span.
+        assert_eq!(long_early.span_cmp(&short_late), Ordering::Greater);
+    }
+
+    #[test]
+    fn sort_by_position_orders_in_place() {
+        let mut batch: Redactions<Text> = Redactions::new();
+        // Pushed out of order.
+        batch.push(TextLocation::new(20, 25), TextReplacement::Removed);
+        batch.push(TextLocation::new(0, 5), TextReplacement::Removed);
+        batch.push(TextLocation::new(10, 15), TextReplacement::Removed);
+
+        batch.sort_by_position();
+
+        let starts: Vec<usize> = batch.iter().map(|(loc, _)| loc.start).collect();
+        assert_eq!(starts, [0, 10, 20]);
+    }
 }

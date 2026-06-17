@@ -44,7 +44,8 @@ async fn anonymize_resolves_label_to_operator_with_fallback() {
         .anonymize(&entities, &source)
         .await
         .unwrap()
-        .into_items();
+        .into_iter()
+        .collect::<Vec<_>>();
 
     assert_eq!(items.len(), 2);
     // PHONE_NUMBER masked, last 4 kept.
@@ -64,7 +65,8 @@ async fn anonymize_replace_renders_label_and_value() {
         .anonymize(&entities, &source)
         .await
         .unwrap()
-        .into_items();
+        .into_iter()
+        .collect::<Vec<_>>();
 
     assert_eq!(items[0].1, TextReplacement::substituted("<PERSON:Alice>"));
 }

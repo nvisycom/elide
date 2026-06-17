@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub use self::builder::EntityBuilder;
-pub use self::label::{builtins, Label, LabelCatalog, LabelRef};
+pub use self::label::{Label, LabelCatalog, LabelRef, builtins};
 pub use self::reference::{EntityCoRef, EntityRef};
 use crate::modality::Modality;
 use crate::primitive::Confidence;

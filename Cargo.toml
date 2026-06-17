@@ -6,6 +6,7 @@ members = [
     "./crates/veil-core",
     "./crates/veil-context",
     "./crates/veil-pattern",
+    "./crates/veil-codec",
     "./crates/veil-toolkit",
 ]
 
@@ -31,6 +32,7 @@ documentation = "https://docs.rs/veil-toolkit"
 veil-core = { path = "./crates/veil-core", version = "0.1.0" }
 veil-context = { path = "./crates/veil-context", version = "0.1.0" }
 veil-pattern = { path = "./crates/veil-pattern", version = "0.1.0" }
+veil-codec = { path = "./crates/veil-codec", version = "0.1.0" }
 veil-toolkit = { path = "./crates/veil-toolkit", version = "0.1.0" }
 
 # Serialization

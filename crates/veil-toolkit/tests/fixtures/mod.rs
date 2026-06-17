@@ -4,6 +4,7 @@
 // A shared fixture exposes more than any one test uses.
 #![allow(dead_code, unused_imports)]
 
+use veil_core::Error;
 use veil_core::modality::DataReader;
 pub use veil_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
 
@@ -19,7 +20,7 @@ impl TextSource {
 }
 
 impl DataReader<Text> for TextSource {
-    async fn read_at(&self, location: &TextLocation) -> Option<TextData> {
-        self.0.get(location.start..location.end).map(TextData::new)
+    async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>, Error> {
+        Ok(self.0.get(location.start..location.end).map(TextData::new))
     }
 }

@@ -8,15 +8,13 @@
 
 mod dyn_operator;
 pub mod operators;
-mod redactions;
 mod registry;
 
 use veil_core::Error;
 use veil_core::entity::{Entity, LabelRef};
 use veil_core::modality::{DataReader, Modality};
-use veil_core::redaction::Operator;
+use veil_core::redaction::{Operator, Redactions};
 
-pub use self::redactions::Redactions;
 use self::registry::OperatorRegistry;
 
 /// The hide engine: selects an operator per entity label and computes
@@ -86,7 +84,7 @@ impl<M: Modality> Anonymizer<M> {
                 );
                 continue;
             };
-            let Some(data) = reader.read_at(&entity.location).await else {
+            let Some(data) = reader.read_at(&entity.location).await? else {
                 tracing::debug!(
                     modality = M::NAME,
                     label = entity.label.as_str(),

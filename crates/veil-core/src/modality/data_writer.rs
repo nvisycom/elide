@@ -1,31 +1,31 @@
-//! The [`DataWriter`] trait — applying a replacement at a location.
+//! The [`DataWriter`] trait — applying a batch of replacements.
 
 use std::future::Future;
 
 use super::Modality;
 use crate::error::Error;
+use crate::redaction::Redactions;
 
-/// Applies a [`Replacement`](Modality::Replacement) at a
-/// [`Location`](Modality::Location) within some target.
+/// Applies a [`Redactions`] batch back into some target.
 ///
 /// The write counterpart to [`DataReader`](super::DataReader):
 /// implemented by a modality's mutable content holder (a text buffer
 /// being rewritten, an image being painted over), it takes the
-/// instruction an operator produced and applies it back into the
-/// document. This completes the redaction round-trip — read the value,
-/// compute a replacement, write it — while keeping operators free of
-/// format knowledge: the writer owns the *how* of applying each
-/// modality's replacement.
+/// `(location, replacement)` pairs an anonymizer produced and applies
+/// them into the document. This completes the redaction round-trip —
+/// read the values, compute replacements, write them — while keeping
+/// operators free of format knowledge: the writer owns the *how* of
+/// applying each modality's replacements.
 ///
-/// Fails with an [`Error`] when the replacement cannot be applied (a
-/// location out of range, an encoding failure). Applying many
-/// replacements is the caller's loop; ordering (e.g. back-to-front for
-/// text, to keep offsets valid) is the caller's concern.
+/// The writer owns the *ordering*, too: it decides the order that keeps
+/// offsets valid for its format (e.g. back-to-front for text, so a
+/// length change doesn't shift later locations;
+/// [`Redactions::sort_by_position`] gives the document-order baseline to
+/// reverse). The first failure aborts the batch.
 pub trait DataWriter<M: Modality>: Send + Sync {
-    /// Apply `replacement` at `location`.
+    /// Apply every `(location, replacement)` pair in `redactions`.
     fn write_at(
         &mut self,
-        location: &M::Location,
-        replacement: &M::Replacement,
+        redactions: Redactions<M>,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 }
