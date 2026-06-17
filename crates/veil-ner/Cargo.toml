@@ -1,0 +1,60 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "nvisy-ner"
+description = "NER traits and language detection for the Nvisy runtime"
+keywords = ["nvisy", "ner", "nlp", "pii"]
+categories = ["text-processing"]
+readme = "README.md"
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[features]
+default = []
+
+## Enables [`BentoBackend`]: zero-shot NER over an externalized
+## HTTP inference service (the `inference-gliner` Bento in
+## https://github.com/nvisycom/inference).
+bento = ["dep:bentoml"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+# Internal crates
+nvisy-core = { workspace = true, features = [] }
+
+# Serialization
+serde = { workspace = true, features = ["derive"] }
+
+# Derive macros and error handling
+derive_builder = { workspace = true, features = [] }
+
+# Primitive datatypes
+uuid = { workspace = true, features = ["v7"] }
+type-map = { workspace = true, features = [] }
+
+# Async runtime and parallelism
+async-trait = { workspace = true, features = [] }
+
+# Observability
+tracing = { workspace = true, features = [] }
+
+# Text processing (language detection)
+lingua = { workspace = true, features = [] }
+
+# AI / LLM frameworks (feature-gated)
+bentoml = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
