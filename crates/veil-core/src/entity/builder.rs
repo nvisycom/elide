@@ -10,12 +10,9 @@ use crate::provenance::{Event, Provenance};
 /// A chainable builder for [`Entity`].
 ///
 /// More ergonomic than [`Entity::new`] when a producer assembles an
-/// entity from a recognition event: chain
-/// [`with_label`](EntityBuilder::with_label),
-/// [`with_location`](EntityBuilder::with_location),
-/// [`with_confidence`](EntityBuilder::with_confidence), and one or more
-/// [`with_event`](EntityBuilder::with_event)s, then
-/// [`build`](EntityBuilder::build). The id defaults to a fresh
+/// entity from a recognition event: chain [`with_label`],
+/// [`with_location`], [`with_confidence`], and one or more
+/// [`with_event`]s, then [`build`]. The id defaults to a fresh
 /// time-ordered UUIDv7 and `coref` to unset.
 ///
 /// ```
@@ -33,6 +30,12 @@ use crate::provenance::{Event, Provenance};
 ///     .build()
 ///     .unwrap();
 /// ```
+///
+/// [`with_label`]: EntityBuilder::with_label
+/// [`with_location`]: EntityBuilder::with_location
+/// [`with_confidence`]: EntityBuilder::with_confidence
+/// [`with_event`]: EntityBuilder::with_event
+/// [`build`]: EntityBuilder::build
 #[derive(Debug)]
 pub struct EntityBuilder<M: Modality> {
     id: Option<Uuid>,
@@ -107,9 +110,9 @@ impl<M: Modality> EntityBuilder<M> {
 
     /// Assemble the entity.
     ///
-    /// Returns [`None`] when `label`, `location`, or `confidence` was
-    /// not set. The id defaults to a fresh UUIDv7; provenance is built
-    /// from the accumulated events (empty if none were added).
+    /// Returns [`None`] when `label`, `location`, or `confidence` was not
+    /// set. The id defaults to a fresh UUIDv7; provenance is built from the
+    /// accumulated events (empty if none were added).
     pub fn build(self) -> Option<Entity<M>> {
         Some(Entity {
             id: self.id.unwrap_or_else(Uuid::now_v7),

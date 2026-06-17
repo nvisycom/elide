@@ -1,15 +1,13 @@
 //! Built-in [`Label`] constants.
 //!
 //! Each constant carries a category tag (`personal_identity`,
-//! `financial`, …) plus cross-cutting tags where applicable
-//! (`pii`, `phi`, `pci`). Selectors can match by label name *or*
-//! by tag without the workspace modelling categories as a
-//! separate enum.
+//! `financial`, …) plus cross-cutting tags where applicable (`pii`,
+//! `phi`, `pci`). Selectors can match by label name *or* by tag without
+//! the workspace modelling categories as a separate enum.
 //!
 //! The `BUILT_INS` slice indexes every constant for the
-//! [`LabelCatalog::with_builtins`] constructor; the constants
-//! themselves are public and reachable by name (e.g.
-//! `builtins::PERSON_NAME`).
+//! [`LabelCatalog::with_builtins`] constructor; the constants themselves
+//! are public and reachable by name (e.g. `builtins::PERSON_NAME`).
 //!
 //! [`LabelCatalog::with_builtins`]: super::LabelCatalog::with_builtins
 

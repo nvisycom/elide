@@ -6,6 +6,7 @@ members = [
     "./crates/veil-core",
     "./crates/veil-context",
     "./crates/veil-pattern",
+    "./crates/veil-codec",
     "./crates/veil-toolkit",
 ]
 
@@ -31,6 +32,7 @@ documentation = "https://docs.rs/veil-toolkit"
 veil-core = { path = "./crates/veil-core", version = "0.1.0" }
 veil-context = { path = "./crates/veil-context", version = "0.1.0" }
 veil-pattern = { path = "./crates/veil-pattern", version = "0.1.0" }
+veil-codec = { path = "./crates/veil-codec", version = "0.1.0" }
 veil-toolkit = { path = "./crates/veil-toolkit", version = "0.1.0" }
 
 # Serialization
@@ -76,3 +78,8 @@ unicode-segmentation = { version = "1.13", features = [] }
 bs58 = { version = "0.5", features = ["check"] }
 iban_validate = { version = "5.0" }
 phonenumber = { version = "0.3", default-features = false }
+
+# Markup parsing (codec HTML + XML handlers)
+scraper = { version = "0.27", features = [] }
+ego-tree = { version = "0.11", features = [] }
+quick-xml = { version = "0.38", features = [] }

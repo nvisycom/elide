@@ -1,0 +1,66 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "veil-codec"
+description = "Codec traits and format handlers for reading and redacting documents"
+keywords = ["veil", "codec", "document", "redaction"]
+categories = ["encoding", "text-processing"]
+readme = "README.md"
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+# No formats are built in by default; opt into the ones you need (or
+# the `text` umbrella). The registry's `with_builtin` only wires up the
+# formats whose features are enabled.
+default = ["text"]
+
+## Every text-shaped format currently shipped.
+text = ["txt", "json", "html", "xml"]
+
+## Individual text formats.
+txt = []
+json = ["dep:serde_json"]
+## HTML — DOM-aware handler via `scraper`, on the shared markup model.
+html = ["dep:scraper", "dep:ego-tree"]
+## XML — verbatim span-splicing handler via `quick-xml`, on the shared
+## markup model.
+xml = ["dep:quick-xml"]
+
+[dependencies]
+# Internal crates
+veil-core = { workspace = true, features = ["serde"] }
+
+# Byte containers and hashing
+bytes = { workspace = true, features = [] }
+sha2 = { workspace = true, features = [] }
+hex = { workspace = true, features = [] }
+
+# Serialization (JSON handler, gated behind `json`)
+serde_json = { workspace = true, features = [], optional = true }
+
+# Markup parsing (HTML handler, gated behind `html`)
+scraper = { workspace = true, features = [], optional = true }
+ego-tree = { workspace = true, features = [], optional = true }
+
+# XML parsing (XML handler, gated behind `xml`)
+quick-xml = { workspace = true, features = [], optional = true }
+
+# Observability
+tracing = { workspace = true, features = [] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

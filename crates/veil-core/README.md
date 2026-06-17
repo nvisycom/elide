@@ -2,39 +2,29 @@
 
 [![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/veil/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/veil/actions/workflows/build.yml)
 
-Domain types, traits, and errors for the Veil toolkit.
+Shared domain model, traits, and errors for the Veil toolkit.
 
 ## Overview
 
-The foundational crate of the workspace. Owns the shared domain model
-— entities, spans, modalities — and the recognition/redaction traits
-the rest of the toolkit builds on. Carries no orchestration or concrete
-recognizer/operator implementations; those live in downstream crates
-(`veil-pattern`, `veil-toolkit`, …).
+The foundational crate of the workspace. It owns the shared vocabulary
+that every other crate speaks: what a detected entity is, where it sits
+in a document, how confident a detection is, and the traits that
+recognizers and redaction operators implement. It carries no
+orchestration and no concrete recognizers or operators; those live in
+the downstream crates.
 
 The model draws from [Presidio](https://github.com/microsoft/presidio)
 but is shaped by two goals that set it apart:
 
 - **Multimodal by construction.** Nothing in the core hardcodes text
-  offsets. Locations are expressed through the `Span` trait, and the
-  central types (`Entity<S>`, `Detection<S>`) are generic over the span
-  type. Text, image, audio, and document spans are defined in their
-  respective modality crates; new modalities need no change here.
+  offsets. An entity's location is defined by its medium (text, image,
+  audio, …), and the core types are generic over that medium. Each
+  modality lives in its own crate, so new media need no change here.
 
-- **Provenance-first.** Every `Entity` carries a `Provenance`: the full,
-  always-present audit trail of every detection layer that found it
-  (`detections`), how those detections were combined (`merge`), and
-  every redaction applied (`history` of `Transformation`s) — each event
-  versioned and timestamped. A run-level `Manifest` anchors it all to
-  the source hash and engine build.
-
-### Flow
-
-`Recognizer`s emit `Detection`s → a `MergeStrategy` combines overlapping
-detections into an `Entity` → `Operator`s transform the entity's
-content, each recording a `Transformation`. The entity's `Provenance`
-accumulates the whole story, so nothing about how an entity was found,
-scored, or redacted is ever lost.
+- **Provenance-first.** Every entity carries its full audit trail: which
+  recognizers found it, how overlapping findings were combined, any
+  confidence adjustments, and every redaction applied. Nothing about how
+  an entity was found, scored, or hidden is ever discarded.
 
 ## Documentation
 

@@ -4,11 +4,11 @@
 
 Composable toolkit for detecting and redacting sensitive data.
 
-A Rust toolkit for PII/PHI detection and redaction — recognizers,
-deduplication layers, validation checks, and redaction strategies — that
-a consumer plugs into their own document-processing flow. Veil is the
-toolkit layer only; the orchestrating runtime and gateway server live in
-separate projects.
+Veil is a Rust toolkit for finding and removing PII and PHI from
+documents. It provides the building blocks (recognizers, deduplication,
+validation, redaction, and format handling) that a consumer wires into
+their own document-processing flow. Veil is the toolkit layer only; the
+orchestrating runtime and gateway server live in separate projects.
 
 > [!WARNING]
 > **Active development: API not stable.** This project is under active
@@ -16,10 +16,14 @@ separate projects.
 > change without notice between releases. Pin a specific commit if you
 > depend on this in production.
 
-## Crates
+## Features
 
-- **veil-core:** Domain types, traits, and errors
-- **veil-toolkit:** Composable recognizer/redaction registries, dedup layers, and validation checks
+- **Pattern detection**: regex, dictionary, and checksum recognizers find structured PII and PHI across many common formats and jurisdictions
+- **Context-aware scoring**: nearby keywords lift the confidence of ambiguous matches, so weak findings clear the threshold only when their surroundings support them
+- **Deduplication**: overlapping findings from multiple recognizers reconcile into a single set of entities, with conflict resolution and confidence calibration
+- **Redaction operators**: mask, replace, hash, or encrypt each detected entity, with the reversible options recording what is needed to restore it
+- **Format codecs**: read, edit, and write documents (plain text, JSON, HTML, XML, and more) with faithful round-tripping that changes only the redacted parts
+- **Provenance-first model**: every entity carries its full audit trail of how it was found, scored, and hidden
 
 ## Documentation
 

@@ -1,43 +1,27 @@
-# nvisy-pattern
+# veil-pattern
 
-[![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/runtime/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/runtime/actions/workflows/build.yml)
+[![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/veil/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/veil/actions/workflows/build.yml)
 
-Regex and dictionary recognizers for PII / PHI detection in the
-Nvisy runtime.
+Regex and dictionary recognizers for PII/PHI detection.
 
 ## Overview
 
-`PatternRecognizer` compiles a set of `Regex` rules (each holding
-one or more regex `Variant`s grouped as a multi-strategy detector
-for one entity type) and `Dictionary` term lists into pooled
-scanners — one shared `regex::RegexSet` for the regex side and
-one shared `aho_corasick::AhoCorasick` automaton for the literal
-side. A single walk over the input runs both scanners and emits
-`Entity<Text>` values in modality-local byte coordinates.
+Many kinds of sensitive data have a recognizable shape (a credit-card
+number, an email address, a national ID) or appear as known terms (a
+list of currencies, nationalities, or brand names). This crate detects
+both: regular-expression rules for structured formats, and dictionaries
+for fixed sets of literal terms. A single pass over the text runs every
+rule and reports what it found, with a confidence score for each match.
 
-Rules may declare per-label context keywords. Calling
-`build_context_enhanced()` wraps the recognizer in a
-`veil_context::ContextEnhanced` layer that lifts confidence on
-matches whose neighbourhood contains a declared keyword;
-`build()` returns the bare recognizer.
+Matches that have a definite structure can be checked against a
+validator before being reported, so values that merely look right but
+fail their checksum (an invalid IBAN, a malformed SSN) are dropped. A
+broad set of patterns, dictionaries, and validators ship built in,
+covering common formats across several jurisdictions, and you can add
+your own alongside them.
 
-The built-in pattern + dictionary set lives as TOML under
-`assets/` and is embedded at compile time. The recognizer's
-builder accepts both built-ins and user-supplied rules:
-
-```rust
-use veil_pattern::PatternRecognizer;
-
-let recognizer = PatternRecognizer::builder()
-    .with_builtin_patterns()
-    .with_builtin_dictionaries()
-    .build()
-    .expect("built-in recognizer builds");
-```
-
-Regex variants can opt into a post-match validator by name
-(`"luhn"`, `"ssn"`, `"iban"`, `"phone"`, `"date"`); custom
-validators can be registered via `ValidatorRegistry::with`.
+Many of the shipped patterns and validators are adapted from
+[Microsoft Presidio](https://github.com/microsoft/presidio).
 
 ## Documentation
 
@@ -54,5 +38,5 @@ Apache 2.0 License, see [LICENSE.txt](../../LICENSE.txt)
 ## Support
 
 - **Documentation**: [docs.nvisy.com](https://docs.nvisy.com)
-- **Issues**: [GitHub Issues](https://github.com/nvisycom/runtime/issues)
+- **Issues**: [GitHub Issues](https://github.com/nvisycom/veil/issues)
 - **Email**: [support@nvisy.com](mailto:support@nvisy.com)

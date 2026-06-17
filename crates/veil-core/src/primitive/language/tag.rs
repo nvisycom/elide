@@ -27,8 +27,9 @@ pub struct LanguageTag(RawLanguageTag<HipStr<'static>>);
 impl LanguageTag {
     /// Parse and validate a BCP 47 language tag.
     ///
-    /// Returns [`LanguageTagParseError`](oxilangtag::LanguageTagParseError)
-    /// if `tag` is not well-formed.
+    /// Returns [`LanguageTagParseError`] if `tag` is not well-formed.
+    ///
+    /// [`LanguageTagParseError`]: oxilangtag::LanguageTagParseError
     pub fn parse(
         tag: impl Into<HipStr<'static>>,
     ) -> Result<Self, oxilangtag::LanguageTagParseError> {
@@ -52,11 +53,11 @@ impl LanguageTag {
 
     /// Whether this tag matches `other` at the primary-language level.
     ///
-    /// Compares only the primary language subtag, so a broad tag
-    /// matches its regional refinements: `"en"` matches `"en-US"` and
-    /// `"en-GB"` (and vice versa), while `"en"` does not match `"fr"`.
-    /// Used to decide whether a language-scoped recognizer rule applies
-    /// to a hinted content language.
+    /// Compares only the primary language subtag, so a broad tag matches its
+    /// regional refinements: `"en"` matches `"en-US"` and `"en-GB"` (and
+    /// vice versa), while `"en"` does not match `"fr"`. Used to decide
+    /// whether a language-scoped recognizer rule applies to a hinted content
+    /// language.
     pub fn matches(&self, other: &LanguageTag) -> bool {
         self.primary_language()
             .eq_ignore_ascii_case(other.primary_language())

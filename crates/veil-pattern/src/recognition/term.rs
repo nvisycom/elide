@@ -2,9 +2,9 @@
 //!
 //! [`Dictionary`]: crate::Dictionary
 
-use veil_core::{Error, ErrorKind};
-use veil_core::primitive::Confidence;
 use serde::Deserialize;
+use veil_core::primitive::Confidence;
+use veil_core::{Error, ErrorKind};
 
 /// One literal scanned for by a [`Dictionary`].
 ///

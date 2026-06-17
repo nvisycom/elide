@@ -10,7 +10,9 @@
 use crate::entity::Entity;
 use crate::modality::Modality;
 
-/// Per-call output of a [`Recognizer`](super::Recognizer).
+/// Per-call output of a [`Recognizer`].
+///
+/// [`Recognizer`]: super::Recognizer
 #[derive(Debug, Clone)]
 pub struct RecognizerOutput<M: Modality> {
     /// Entities the recognizer emitted in modality-local coordinates.

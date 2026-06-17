@@ -12,14 +12,14 @@ use std::fmt;
 
 /// A type-erased, thread-safe error cause.
 ///
-/// The boxed form a downstream recognizer or operator error is stored
-/// in when attached to an [`Error`] as its underlying source.
+/// The boxed form a downstream recognizer or operator error is stored in
+/// when attached to an [`Error`] as its underlying source.
 pub type BoxError = Box<dyn StdError + Send + Sync + 'static>;
 
 /// The error type returned across the core domain operations.
 ///
-/// Opaque by design: construct one with [`Error::new`] (kind + cause)
-/// or [`Error::from`] (kind only), inspect it with [`Error::kind`], and
+/// Opaque by design: construct one with [`Error::new`] (kind + cause) or
+/// [`Error::from`] (kind only), inspect it with [`Error::kind`], and
 /// recover the cause, if any, with [`Error::into_source`] or the
 /// standard [`StdError::source`].
 pub struct Error {
@@ -58,9 +58,8 @@ impl From<ErrorKind> for Error {
 
 impl From<derive_builder::UninitializedFieldError> for Error {
     /// Bridge `derive_builder`'s missing-required-field error into a
-    /// [`ErrorKind::Validation`] failure, so generated builders that
-    /// declare `build_fn(error = "Error")` fail with the crate-wide
-    /// error type.
+    /// [`ErrorKind::Validation`] failure, so generated builders that declare
+    /// `build_fn(error = "Error")` fail with the crate-wide error type.
     fn from(err: derive_builder::UninitializedFieldError) -> Self {
         Self::new(ErrorKind::Validation, err)
     }
@@ -94,17 +93,17 @@ impl StdError for Error {
 
 /// A coarse category of [`Error`], suitable for matching.
 ///
-/// Deliberately small and `#[non_exhaustive]`: `veil-core` defines
-/// types and traits, so most failures here are validation errors and
-/// the fusion failures `veil-toolkit` may surface. Recognizer and
-/// operator implementations in downstream crates carry their own richer
-/// context and convert into [`Error`] at the trait boundary, tagging it
-/// with the matching kind.
+/// Deliberately small and `#[non_exhaustive]`: `veil-core` defines types
+/// and traits, so most failures here are validation errors and the
+/// fusion failures `veil-toolkit` may surface. Recognizer and operator
+/// implementations in downstream crates carry their own richer context
+/// and convert into [`Error`] at the trait boundary, tagging it with the
+/// matching kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ErrorKind {
-    /// A value was outside its permitted range (e.g. a confidence
-    /// outside `0.0..=1.0`).
+    /// A value was outside its permitted range (e.g. a confidence outside
+    /// `0.0..=1.0`).
     OutOfRange,
     /// A merge was attempted over an empty set of detections.
     EmptyMerge,

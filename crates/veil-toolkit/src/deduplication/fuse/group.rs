@@ -5,10 +5,12 @@ use veil_core::modality::{Modality, ModalityLocation};
 
 /// Decides whether two entities are the same finding and should fuse.
 ///
-/// A *type*, used as the `G` parameter of [`FuseLayer`](super::FuseLayer).
-/// The default, [`SameLabelOverlap`], groups entities with the same
-/// label whose locations overlap — the common case; a consumer can
-/// supply a value-aware or looser predicate.
+/// A *type*, used as the `G` parameter of [`FuseLayer`]. The default,
+/// [`SameLabelOverlap`], groups entities with the same label whose
+/// locations overlap — the common case; a consumer can supply a
+/// value-aware or looser predicate.
+///
+/// [`FuseLayer`]: super::FuseLayer
 pub trait GroupPredicate<M: Modality>: Send + Sync {
     /// Whether `a` and `b` denote the same finding.
     fn same(&self, a: &Entity<M>, b: &Entity<M>) -> bool;

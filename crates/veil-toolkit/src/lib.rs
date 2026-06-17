@@ -6,5 +6,8 @@ mod analyzer;
 mod anonymizer;
 pub mod deduplication;
 
+#[doc(no_inline)]
+pub use veil_core::redaction::Redactions;
+
 pub use self::analyzer::Analyzer;
-pub use self::anonymizer::{Anonymizer, Redactions, operators};
+pub use self::anonymizer::{Anonymizer, operators};

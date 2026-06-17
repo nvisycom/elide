@@ -7,10 +7,12 @@ use super::Point;
 
 /// A closed polygon, given by its ordered vertices.
 ///
-/// A richer location than a [`BoundingBox`](super::BoundingBox) for
-/// detections whose extent is not rectangular — rotated text, a region
-/// traced by a vision model, a signature. The boundary is implicitly
-/// closed: the last vertex connects back to the first.
+/// A richer location than a [`BoundingBox`] for detections whose extent
+/// is not rectangular — rotated text, a region traced by a vision model,
+/// a signature. The boundary is implicitly closed: the last vertex
+/// connects back to the first.
+///
+/// [`BoundingBox`]: super::BoundingBox
 #[derive(Debug, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]

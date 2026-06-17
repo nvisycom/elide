@@ -1,10 +1,10 @@
 //! [`Dictionary`]: literal-term detection rule.
 
 use derive_builder::Builder;
-use veil_core::{Error, ErrorKind};
+use serde::Deserialize;
 use veil_core::entity::LabelRef;
 use veil_core::primitive::{Confidence, CountryCode, LanguageTag};
-use serde::Deserialize;
+use veil_core::{Error, ErrorKind};
 
 use super::context::Context;
 use super::term::Term;
@@ -205,7 +205,10 @@ impl Dictionary {
     /// [`build`]: DictionaryBuilder::build
     pub fn metadata_from_toml(raw: &str) -> Result<DictionaryBuilder, Error> {
         let metadata: DictionaryMetadata = toml::from_str(raw).map_err(|e| {
-            Error::new(ErrorKind::Validation, format!("dictionary metadata TOML: {e}"))
+            Error::new(
+                ErrorKind::Validation,
+                format!("dictionary metadata TOML: {e}"),
+            )
         })?;
         let mut builder = Dictionary::builder()
             .with_name(metadata.name)

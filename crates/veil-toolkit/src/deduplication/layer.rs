@@ -8,8 +8,11 @@ use veil_core::modality::Modality;
 /// Names the two outcomes explicitly so call sites don't juggle a
 /// positional tuple, and so future per-stage metadata (counts, drop
 /// reasons) can be added without changing every layer's signature. The
-/// pipeline threads [`kept`](Self::kept) into the next layer and
-/// accumulates [`dropped`](Self::dropped) for logging.
+/// pipeline threads [`kept`] into the next layer and accumulates
+/// [`dropped`] for logging.
+///
+/// [`kept`]: Self::kept
+/// [`dropped`]: Self::dropped
 #[derive(Debug)]
 pub struct LayerOutput<M: Modality> {
     /// Entities that survived this layer.
@@ -39,15 +42,15 @@ impl<M: Modality> LayerOutput<M> {
 /// A layer takes the working set of entities and returns the reshaped
 /// set plus anything it removed. Stages are **pure and synchronous** —
 /// they operate over a `Vec<Entity<M>>` in memory with no I/O, so unlike
-/// recognition there is no async here. Concrete layers:
-/// [`FuseLayer`](crate::deduplication::fuse::FuseLayer) (combine
-/// co-located findings),
-/// [`ResolveLayer`](crate::deduplication::resolve::ResolveLayer) (break
-/// cross-label overlaps),
-/// [`FilterLayer`](crate::deduplication::filter::FilterLayer) (drop by
-/// label / confidence),
-/// [`CalibrateLayer`](crate::deduplication::calibrate::CalibrateLayer)
-/// (rescale confidence).
+/// recognition there is no async here. Concrete layers: [`FuseLayer`]
+/// (combine co-located findings), [`ResolveLayer`] (break cross-label
+/// overlaps), [`FilterLayer`] (drop by label / confidence),
+/// [`CalibrateLayer`] (rescale confidence).
+///
+/// [`FuseLayer`]: crate::deduplication::fuse::FuseLayer
+/// [`ResolveLayer`]: crate::deduplication::resolve::ResolveLayer
+/// [`FilterLayer`]: crate::deduplication::filter::FilterLayer
+/// [`CalibrateLayer`]: crate::deduplication::calibrate::CalibrateLayer
 pub trait Layer<M: Modality>: Send + Sync {
     /// Apply this stage to `entities`.
     fn apply(&self, entities: Vec<Entity<M>>) -> LayerOutput<M>;

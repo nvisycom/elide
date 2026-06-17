@@ -30,8 +30,8 @@ impl LabelMap {
         Self::default()
     }
 
-    /// Add a mapping from a raw label to a canonical [`LabelRef`],
-    /// returning the previous target for that raw label, if any.
+    /// Add a mapping from a raw label to a canonical [`LabelRef`], returning
+    /// the previous target for that raw label, if any.
     pub fn insert(&mut self, raw: impl Into<HipStr<'static>>, label: LabelRef) -> Option<LabelRef> {
         self.entries.insert(raw.into(), label)
     }
