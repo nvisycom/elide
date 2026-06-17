@@ -25,10 +25,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 # Internal crates
 veil-context = { workspace = true, features = [] }
-veil-core = { workspace = true, features = [] }
+veil-core = { workspace = true, features = ["serde"] }
 
 # Serialization
-serde = { workspace = true, features = [] }
+serde = { workspace = true, features = ["derive"] }
 toml = { workspace = true, features = ["parse"] }
 
 # Derive macros and error handling

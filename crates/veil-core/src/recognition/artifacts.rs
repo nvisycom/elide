@@ -1,0 +1,44 @@
+//! The [`Artifacts`] bundle — shared per-call NLP enrichment.
+
+use type_map::concurrent::TypeMap;
+
+/// A type-keyed bundle of shared per-call enrichment, carried on a
+/// [`RecognizerInput`](super::RecognizerInput).
+///
+/// Upstream NLP work (tokenization, lemmatization, language detection)
+/// is expensive and would be wasteful to repeat in every recognizer. A
+/// caller that runs it once stashes the result here, keyed by its Rust
+/// type, and any recognizer that wants it reads it back by type — e.g. a
+/// context enhancer's lemma matcher pulls a `Tokens` artifact. Each type
+/// has at most one entry. Recognizers that don't care leave it empty.
+#[derive(Default)]
+pub struct Artifacts(TypeMap);
+
+impl Artifacts {
+    /// An empty bundle.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Insert an artifact, replacing any previous value of the same
+    /// type and returning it.
+    pub fn insert<T: Send + Sync + 'static>(&mut self, artifact: T) -> Option<T> {
+        self.0.insert(artifact)
+    }
+
+    /// Borrow the artifact of type `T`, if present.
+    pub fn get<T: Send + Sync + 'static>(&self) -> Option<&T> {
+        self.0.get::<T>()
+    }
+
+    /// Whether an artifact of type `T` is present.
+    pub fn contains<T: Send + Sync + 'static>(&self) -> bool {
+        self.0.contains::<T>()
+    }
+}
+
+impl std::fmt::Debug for Artifacts {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Artifacts").finish_non_exhaustive()
+    }
+}

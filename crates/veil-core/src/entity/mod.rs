@@ -6,6 +6,7 @@
 //! module also defines the entity's building blocks — the [`Label`]
 //! taxonomy and the [`EntityRef`] / [`EntityCoRef`] reference types.
 
+mod builder;
 mod label;
 mod reference;
 
@@ -13,7 +14,8 @@ mod reference;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub use self::label::{Label, LabelCatalog, LabelRef};
+pub use self::builder::EntityBuilder;
+pub use self::label::{builtins, Label, LabelCatalog, LabelRef};
 pub use self::reference::{EntityCoRef, EntityRef};
 use crate::modality::Modality;
 use crate::primitive::Confidence;
@@ -85,6 +87,11 @@ impl<M: Modality> Entity<M> {
             coref: None,
             provenance,
         }
+    }
+
+    /// Start a chainable [`EntityBuilder`].
+    pub fn builder() -> EntityBuilder<M> {
+        EntityBuilder::new()
     }
 
     /// A lightweight reference to this entity, by its [`id`](Entity::id).

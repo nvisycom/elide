@@ -24,6 +24,18 @@ impl LabelCatalog {
         Self::default()
     }
 
+    /// A catalog pre-populated with every built-in label.
+    ///
+    /// Walks [`builtins::BUILT_INS`](super::builtins) and registers each
+    /// constant by name. Register custom labels alongside the built-ins
+    /// with [`insert`](LabelCatalog::insert).
+    pub fn with_builtins() -> Self {
+        super::builtins::BUILT_INS
+            .iter()
+            .map(|label| (**label).clone())
+            .collect()
+    }
+
     /// Insert a label, returning the previous definition for its name, if any.
     pub fn insert(&mut self, label: Label) -> Option<Label> {
         self.0.insert(label.name_owned(), label)

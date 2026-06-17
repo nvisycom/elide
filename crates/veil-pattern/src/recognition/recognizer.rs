@@ -1,13 +1,13 @@
 //! [`PatternRecognizer`] and its builder.
 
 use aho_corasick::{AhoCorasick, MatchKind};
-use nvisy_context::{BoostRule, ContextEnhanced, Enhancer, SubstringMatcher};
-use nvisy_core::entity::{Entity, EntityLabelCatalog, EntityLabelRef};
-use nvisy_core::modality::Text;
-use nvisy_core::primitive::LanguageTag;
-use nvisy_core::recognition::{EntityRecognizer, RecognizerInput, RecognizerOutput};
-use nvisy_core::{Error, Result};
 use regex::RegexSet;
+use veil_context::{BoostRule, ContextEnhanced, Enhancer, SubstringMatcher};
+use veil_core::entity::{Entity, LabelCatalog, LabelRef};
+use veil_core::modality::text::Text;
+use veil_core::primitive::LanguageTag;
+use veil_core::recognition::{Recognizer, RecognizerId, RecognizerInput, RecognizerOutput};
+use veil_core::{Error, ErrorKind, Result};
 
 use super::compiled::{CompiledDictionary, CompiledPattern, has_word_boundaries};
 use super::dictionary::Dictionary;
@@ -34,7 +34,7 @@ use crate::validators::{ValidationContext, ValidatorRegistry};
 /// # Examples
 ///
 /// ```
-/// use nvisy_pattern::PatternRecognizer;
+/// use veil_pattern::PatternRecognizer;
 ///
 /// let recognizer = PatternRecognizer::builder()
 ///     .with_builtin_patterns()
@@ -151,11 +151,9 @@ impl PatternRecognizerBuilder {
     /// a workspace-wide template — rules that would emit labels no
     /// policy declared never run.
     #[must_use]
-    pub fn filter_by_catalog(mut self, catalog: &EntityLabelCatalog) -> Self {
-        self.patterns
-            .retain(|p| catalog.lookup(p.label.as_str()).is_some());
-        self.dictionaries
-            .retain(|d| catalog.lookup(d.label.as_str()).is_some());
+    pub fn filter_by_catalog(mut self, catalog: &LabelCatalog) -> Self {
+        self.patterns.retain(|p| catalog.contains(&p.label));
+        self.dictionaries.retain(|d| catalog.contains(&d.label));
         self
     }
 
@@ -247,17 +245,15 @@ impl PatternRecognizerBuilder {
         for pattern in &self.patterns {
             for variant in &pattern.variants {
                 let regex = ::regex::Regex::new(&variant.regex).map_err(|e| {
-                    Error::validation(
+                    Error::new(ErrorKind::Validation, 
                         format!("pattern `{}`: invalid regex: {e}", pattern.name),
-                        "nvisy-pattern",
                     )
                 })?;
                 let validator = match variant.validator.as_deref() {
                     None => None,
                     Some(name) => Some(validators.resolve(name).ok_or_else(|| {
-                        Error::validation(
+                        Error::new(ErrorKind::Validation, 
                             format!("pattern `{}`: unknown validator `{}`", pattern.name, name),
-                            "nvisy-pattern",
                         )
                     })?),
                 };
@@ -278,7 +274,7 @@ impl PatternRecognizerBuilder {
             None
         } else {
             Some(RegexSet::new(&regex_sources).map_err(|e| {
-                Error::validation(format!("compiling regex set: {e}"), "nvisy-pattern")
+                Error::new(ErrorKind::Validation, format!("compiling regex set: {e}"))
             })?)
         };
         Ok((compiled, regex_set))
@@ -295,9 +291,8 @@ impl PatternRecognizerBuilder {
 
         for dict in &self.dictionaries {
             if let Err(reason) = dict.scoring.validate() {
-                return Err(Error::validation(
+                return Err(Error::new(ErrorKind::Validation, 
                     format!("dictionary `{}`: {reason}", dict.name),
-                    "nvisy-pattern",
                 ));
             }
             let term_start = all_terms.len();
@@ -317,13 +312,12 @@ impl PatternRecognizerBuilder {
                         let column_desc = entry
                             .column
                             .map_or_else(|| "no column".to_owned(), |c| format!("column {c}"));
-                        Error::validation(
+                        Error::new(ErrorKind::Validation, 
                             format!(
                                 "dictionary `{}`: term `{}` ({column_desc}) has no score in \
                                  dictionary scoring",
                                 dict.name, entry.term,
                             ),
-                            "nvisy-pattern",
                         )
                     })?;
                 term_scores.push(score);
@@ -356,9 +350,8 @@ impl PatternRecognizerBuilder {
                     .match_kind(MatchKind::LeftmostLongest)
                     .build(&all_terms)
                     .map_err(|e| {
-                        Error::validation(
+                        Error::new(ErrorKind::Validation, 
                             format!("compiling dictionary automaton: {e}"),
-                            "nvisy-pattern",
                         )
                     })?,
             )
@@ -396,7 +389,7 @@ impl PatternRecognizerBuilder {
     /// carry `Some(tag)`.
     fn context_keywords(
         &self,
-    ) -> impl Iterator<Item = (&EntityLabelRef, Option<&LanguageTag>, &[String])> {
+    ) -> impl Iterator<Item = (&LabelRef, Option<&LanguageTag>, &[String])> {
         let pattern_keywords = self
             .patterns
             .iter()
@@ -419,10 +412,13 @@ impl PatternRecognizerBuilder {
     }
 }
 
-#[async_trait::async_trait]
-impl EntityRecognizer<Text> for PatternRecognizer {
+impl Recognizer<Text> for PatternRecognizer {
+    fn id(&self) -> RecognizerId {
+        RecognizerId::new("veil-pattern", env!("CARGO_PKG_VERSION"))
+    }
+
     async fn recognize(&self, input: &RecognizerInput<Text>) -> Result<RecognizerOutput<Text>> {
-        let text = input.data.text.as_str();
+        let text = input.content.text.as_str();
         let mut entities: Vec<Entity<Text>> = Vec::new();
 
         if let Some(set) = self.regex_set.as_ref() {
@@ -470,389 +466,5 @@ impl EntityRecognizer<Text> for PatternRecognizer {
         }
 
         Ok(RecognizerOutput::new(entities))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::HashMap;
-
-    use nvisy_core::entity::{Entity, EntityLabelRef, builtins};
-    use nvisy_core::modality::{Text, TextData};
-    use nvisy_core::primitive::{Confidence, CountryCode};
-    use nvisy_core::recognition::RecognizerInput;
-
-    use super::*;
-    use crate::Dictionary;
-    use crate::recognition::term::Term;
-
-    fn dict(name: &str, terms: &[&str], word_boundary: bool) -> Dictionary {
-        Dictionary::builder()
-            .with_name(name.to_owned())
-            .with_label(EntityLabelRef::from(builtins::LANGUAGE.name.clone()))
-            .with_terms(terms.iter().copied().map(Term::new).collect::<Vec<_>>())
-            .with_word_boundary(word_boundary)
-            .build()
-            .expect("dictionary builds")
-    }
-
-    async fn run(recognizer: &impl EntityRecognizer<Text>, text: &str) -> Vec<Entity<Text>> {
-        let input = RecognizerInput::new(TextData::new(text.to_owned()));
-        recognizer
-            .recognize(&input)
-            .await
-            .expect("recognize succeeds")
-            .entities
-    }
-
-    #[tokio::test]
-    async fn word_boundary_rejects_substring_matches() {
-        let recognizer = PatternRecognizer::builder()
-            .with_dictionary(dict("langs", &["am", "or"], true))
-            .build()
-            .expect("recognizer builds");
-
-        let entities = run(&recognizer, "the example or a candidate").await;
-        let matched: Vec<&str> = entities
-            .iter()
-            .map(|e| &"the example or a candidate"[e.location.start..e.location.end])
-            .collect();
-
-        // "am" inside "example" and "or" inside "candidate" are
-        // substring matches and must be rejected. The standalone
-        // "or" between two spaces must be kept.
-        assert_eq!(matched, vec!["or"]);
-    }
-
-    #[tokio::test]
-    async fn word_boundary_disabled_keeps_substring_matches() {
-        let recognizer = PatternRecognizer::builder()
-            .with_dictionary(dict("langs", &["am"], false))
-            .build()
-            .expect("recognizer builds");
-
-        let entities = run(&recognizer, "example").await;
-        assert_eq!(entities.len(), 1, "substring match must be kept");
-    }
-
-    #[test]
-    fn regex_parses_flat_context_as_global() {
-        let toml = r#"
-            name = "x"
-            label = "government_id"
-            context = ["ssn", "social security"]
-            [[variants]]
-            regex = "\\d+"
-        "#;
-        let regex = crate::Regex::from_toml(toml).expect("flat-context TOML parses");
-        assert!(matches!(regex.context, crate::Context::Global(_)));
-    }
-
-    #[test]
-    fn regex_parses_table_context_as_per_language() {
-        let toml = r#"
-            name = "x"
-            label = "payment_card"
-            [context]
-            en = ["card", "credit"]
-            es = ["tarjeta", "crédito"]
-            [[variants]]
-            regex = "\\d+"
-        "#;
-        let regex = crate::Regex::from_toml(toml).expect("table-context TOML parses");
-        let map = match regex.context {
-            crate::Context::PerLanguage(m) => m,
-            _ => panic!("expected PerLanguage"),
-        };
-        assert_eq!(map.len(), 2);
-    }
-
-    #[test]
-    fn regex_omits_countries_by_default() {
-        let toml = r#"
-            name = "x"
-            label = "government_id"
-            [[variants]]
-            regex = "\\d+"
-        "#;
-        let regex = crate::Regex::from_toml(toml).expect("TOML parses");
-        assert!(
-            regex.countries.is_empty(),
-            "default countries must be empty"
-        );
-    }
-
-    #[test]
-    fn regex_parses_countries_field() {
-        let toml = r#"
-            name = "ssn"
-            label = "government_id"
-            countries = ["US"]
-            [[variants]]
-            regex = "\\d+"
-        "#;
-        let regex = crate::Regex::from_toml(toml).expect("TOML parses");
-        assert_eq!(regex.countries.len(), 1);
-        assert_eq!(regex.countries[0].as_str(), "US");
-    }
-
-    #[test]
-    fn regex_parses_multiple_countries() {
-        let toml = r#"
-            name = "eu-vat"
-            label = "tax_id"
-            countries = ["de", "FR", "iT"]
-            [[variants]]
-            regex = "\\d+"
-        "#;
-        let regex = crate::Regex::from_toml(toml).expect("TOML parses");
-        assert_eq!(regex.countries.len(), 3);
-        // Construction normalises to uppercase.
-        let codes: Vec<&str> = regex.countries.iter().map(CountryCode::as_str).collect();
-        assert_eq!(codes, vec!["DE", "FR", "IT"]);
-    }
-
-    #[test]
-    fn regex_rejects_invalid_country() {
-        let toml = r#"
-            name = "x"
-            label = "government_id"
-            countries = ["XZ"]
-            [[variants]]
-            regex = "\\d+"
-        "#;
-        assert!(
-            crate::Regex::from_toml(toml).is_err(),
-            "unassigned country code must error",
-        );
-    }
-
-    #[test]
-    fn regex_builder_accepts_countries() {
-        let variant = crate::Variant::new(r"\d{3}-\d{2}-\d{4}").unwrap();
-        let regex = crate::Regex::builder()
-            .with_name("ssn")
-            .with_label(builtins::GOVERNMENT_ID.label_ref())
-            .with_variants(vec![variant])
-            .with_countries(vec![CountryCode::new("US").unwrap()])
-            .build()
-            .expect("regex builds");
-        assert_eq!(regex.countries.len(), 1);
-        assert_eq!(regex.countries[0].as_str(), "US");
-    }
-
-    async fn run_with_language(
-        recognizer: &impl EntityRecognizer<Text>,
-        text: &str,
-        language: Option<&str>,
-    ) -> Vec<Entity<Text>> {
-        let mut input = RecognizerInput::new(TextData::new(text.to_owned()));
-        if let Some(lang) = language {
-            input = input.with_language(LanguageTag::new(lang).expect("language tag parses"));
-        }
-        recognizer
-            .recognize(&input)
-            .await
-            .expect("recognize succeeds")
-            .entities
-    }
-
-    async fn run_with_country(
-        recognizer: &impl EntityRecognizer<Text>,
-        text: &str,
-        country: Option<&str>,
-    ) -> Vec<Entity<Text>> {
-        let mut input = RecognizerInput::new(TextData::new(text.to_owned()));
-        if let Some(c) = country {
-            input = input.with_country(CountryCode::new(c).expect("country code parses"));
-        }
-        recognizer
-            .recognize(&input)
-            .await
-            .expect("recognize succeeds")
-            .entities
-    }
-
-    fn us_ssn_regex() -> crate::Regex {
-        let variant = crate::Variant::new(r"\b\d{3}-\d{2}-\d{4}\b")
-            .expect("variant builds")
-            .with_score(Confidence::clamped(0.5));
-        crate::Regex::builder()
-            .with_name("ssn")
-            .with_label(builtins::GOVERNMENT_ID.label_ref())
-            .with_variants(vec![variant])
-            .with_countries(vec![CountryCode::new("US").unwrap()])
-            .build()
-            .expect("regex builds")
-    }
-
-    #[tokio::test]
-    async fn country_scoped_rule_fires_under_matching_hint() {
-        let recognizer = PatternRecognizer::builder()
-            .with_pattern(us_ssn_regex())
-            .build()
-            .expect("recognizer builds");
-        let entities = run_with_country(&recognizer, "SSN: 123-45-6789", Some("US")).await;
-        assert_eq!(entities.len(), 1, "US-scoped rule must fire under US hint");
-    }
-
-    #[tokio::test]
-    async fn country_scoped_rule_skipped_under_non_matching_hint() {
-        let recognizer = PatternRecognizer::builder()
-            .with_pattern(us_ssn_regex())
-            .build()
-            .expect("recognizer builds");
-        let entities = run_with_country(&recognizer, "SSN: 123-45-6789", Some("GB")).await;
-        assert!(
-            entities.is_empty(),
-            "US-scoped rule must not fire under GB hint",
-        );
-    }
-
-    #[tokio::test]
-    async fn country_scoped_rule_fires_without_hint() {
-        // Permissive fallback: missing hint shouldn't drop the
-        // detection. Matches the existing `applies_to_language`
-        // semantic.
-        let recognizer = PatternRecognizer::builder()
-            .with_pattern(us_ssn_regex())
-            .build()
-            .expect("recognizer builds");
-        let entities = run_with_country(&recognizer, "SSN: 123-45-6789", None).await;
-        assert_eq!(
-            entities.len(),
-            1,
-            "missing country hint must permit US-scoped rule to run",
-        );
-    }
-
-    fn per_language_credit_card_regex() -> crate::Regex {
-        let variant = crate::Variant::new(r"\b\d{16}\b")
-            .expect("variant builds")
-            .with_score(Confidence::clamped(0.5));
-        let mut context = HashMap::new();
-        context.insert(
-            LanguageTag::new("en").unwrap(),
-            vec!["credit".to_owned(), "card".to_owned()],
-        );
-        context.insert(
-            LanguageTag::new("es").unwrap(),
-            vec!["tarjeta".to_owned(), "crédito".to_owned()],
-        );
-        crate::Regex::builder()
-            .with_name("credit_card")
-            .with_label(builtins::PAYMENT_CARD.label_ref())
-            .with_context(crate::Context::PerLanguage(context))
-            .with_variants(vec![variant])
-            .build()
-            .expect("regex builds")
-    }
-
-    #[tokio::test]
-    async fn per_language_boost_fires_for_matching_language() {
-        let recognizer = PatternRecognizer::builder()
-            .with_pattern(per_language_credit_card_regex())
-            .build_context_enhanced()
-            .expect("recognizer builds");
-
-        let text = "Pay with your credit card 4111111111111111 today";
-        let entities = run_with_language(&recognizer, text, Some("en")).await;
-        let card = entities
-            .iter()
-            .find(|e| &text[e.location.start..e.location.end] == "4111111111111111")
-            .expect("card match present");
-        assert!(
-            card.confidence.get() > 0.5,
-            "English keyword `credit` should boost under en hint",
-        );
-    }
-
-    #[tokio::test]
-    async fn per_language_boost_fires_for_regional_variant() {
-        // Pattern is scoped `en`; hint is `en-US`. Primary subtag
-        // matches, so the boost must fire.
-        let recognizer = PatternRecognizer::builder()
-            .with_pattern(per_language_credit_card_regex())
-            .build_context_enhanced()
-            .expect("recognizer builds");
-
-        let text = "Pay with your credit card 4111111111111111 today";
-        let entities = run_with_language(&recognizer, text, Some("en-US")).await;
-        let card = entities
-            .iter()
-            .find(|e| &text[e.location.start..e.location.end] == "4111111111111111")
-            .expect("card match present");
-        assert!(
-            card.confidence.get() > 0.5,
-            "`en-US` hint should fire the `en`-scoped boost",
-        );
-    }
-
-    #[tokio::test]
-    async fn rule_language_filter_accepts_regional_variant() {
-        // Pattern is scoped `languages = ["en"]`; the per-call
-        // hint is `en-US`. The rule must still run.
-        let variant = crate::Variant::new(r"\b\d{3}-\d{2}-\d{4}\b")
-            .expect("variant builds")
-            .with_score(Confidence::clamped(0.5));
-        let regex = crate::Regex::builder()
-            .with_name("ssn")
-            .with_label(builtins::GOVERNMENT_ID.label_ref())
-            .with_variants(vec![variant])
-            .with_languages(vec![LanguageTag::new("en").unwrap()])
-            .build()
-            .expect("regex builds");
-
-        let recognizer = PatternRecognizer::builder()
-            .with_pattern(regex)
-            .build()
-            .expect("recognizer builds");
-
-        let entities = run_with_language(&recognizer, "SSN: 123-45-6789", Some("en-US")).await;
-        assert_eq!(
-            entities.len(),
-            1,
-            "`en`-scoped rule must run for `en-US` input",
-        );
-    }
-
-    #[tokio::test]
-    async fn per_language_boost_skipped_for_non_matching_language() {
-        let recognizer = PatternRecognizer::builder()
-            .with_pattern(per_language_credit_card_regex())
-            .build_context_enhanced()
-            .expect("recognizer builds");
-
-        // English keywords near the match, but caller asserted Spanish.
-        let text = "Pay with your credit card 4111111111111111 today";
-        let entities = run_with_language(&recognizer, text, Some("es")).await;
-        let card = entities
-            .iter()
-            .find(|e| &text[e.location.start..e.location.end] == "4111111111111111")
-            .expect("card match present");
-        assert!(
-            (card.confidence.get() - 0.5).abs() < f64::EPSILON,
-            "English keywords must not boost under es hint",
-        );
-    }
-
-    #[tokio::test]
-    async fn no_language_hint_unions_per_language_keywords() {
-        let recognizer = PatternRecognizer::builder()
-            .with_pattern(per_language_credit_card_regex())
-            .build_context_enhanced()
-            .expect("recognizer builds");
-
-        // English keyword near the match, no language hint set.
-        let text = "Pay with your credit card 4111111111111111 today";
-        let entities = run_with_language(&recognizer, text, None).await;
-        let card = entities
-            .iter()
-            .find(|e| &text[e.location.start..e.location.end] == "4111111111111111")
-            .expect("card match present");
-        assert!(
-            card.confidence.get() > 0.5,
-            "missing language hint should permit any per-language keyword to boost",
-        );
     }
 }

@@ -6,10 +6,10 @@
 //! confirm a real internal-handoff document yields the custom
 //! entities.
 
-use nvisy_core::entity::builtins;
-use nvisy_core::modality::TextData;
-use nvisy_core::recognition::{EntityRecognizer, RecognizerInput};
-use nvisy_pattern::{Dictionary, PatternRecognizer, Regex, Term};
+use veil_core::entity::builtins;
+use veil_core::modality::text::TextData;
+use veil_core::recognition::{Recognizer, RecognizerInput};
+use veil_pattern::{Dictionary, PatternRecognizer, Regex, Term};
 
 #[tokio::test]
 async fn user_toml_rules_load_and_detect() {

@@ -2,8 +2,8 @@
 //!
 //! [`Dictionary`]: crate::Dictionary
 
-use nvisy_core::Error;
-use nvisy_core::primitive::Confidence;
+use veil_core::{Error, ErrorKind};
+use veil_core::primitive::Confidence;
 use serde::Deserialize;
 
 /// One literal scanned for by a [`Dictionary`].
@@ -90,7 +90,7 @@ impl Term {
         let mut entries = Vec::new();
         for row in reader.records() {
             let row =
-                row.map_err(|e| Error::validation(format!("terms CSV: {e}"), "nvisy-pattern"))?;
+                row.map_err(|e| Error::new(ErrorKind::Validation, format!("terms CSV: {e}")))?;
             for (col_idx, cell) in row.iter().enumerate() {
                 let trimmed = cell.trim();
                 if !trimmed.is_empty() {

@@ -17,10 +17,11 @@
 
 use std::sync::Arc;
 
-use nvisy_core::entity::{Entity, EntityLabelRef, PatternProvenance, TrailProvenance, TrailStep};
-use nvisy_core::modality::{Text, TextLocation};
-use nvisy_core::primitive::{Confidence, CountryCode, LanguageTag};
 use regex::Regex;
+use veil_core::entity::{Entity, LabelRef};
+use veil_core::modality::text::{Text, TextLocation};
+use veil_core::primitive::{Confidence, CountryCode, LanguageTag};
+use veil_core::provenance::{Event, PatternEvent};
 
 use crate::validators::Validator;
 
@@ -37,7 +38,7 @@ use crate::validators::Validator;
 pub(super) struct CompiledPattern {
     /// Pattern name (e.g. `"ssn"`). Surfaced in trail provenance.
     pub pattern_name: String,
-    pub label: EntityLabelRef,
+    pub label: LabelRef,
     pub regex: Regex,
     pub score: Confidence,
     pub validator: Option<Arc<dyn Validator>>,
@@ -55,23 +56,27 @@ impl CompiledPattern {
     /// lifts the location to absolute document coordinates after
     /// dispatch.
     pub(super) fn build_entity(&self, start: usize, end: usize) -> Entity<Text> {
-        let provenance = TrailProvenance::Pattern(PatternProvenance::Regex {
-            name: self.pattern_name.clone(),
-            regex: Some(self.regex.as_str().to_owned()),
-            validator: self.validator.as_ref().map(|_| self.pattern_name.clone()),
-            contextual: false,
-        });
-        let step = TrailStep::recognition(
+        let location = TextLocation::new(start, end);
+        let event = Event::pattern(
             "pattern",
             self.score,
-            provenance,
-            format!("pattern `{}` matched", self.pattern_name),
-        );
+            location.clone(),
+            PatternEvent {
+                name: self.pattern_name.clone().into(),
+                regex: Some(self.regex.as_str().into()),
+                validator: self
+                    .validator
+                    .as_ref()
+                    .map(|_| self.pattern_name.clone().into()),
+                contextual: false,
+            },
+        )
+        .with_reason(format!("pattern `{}` matched", self.pattern_name));
         Entity::builder()
             .with_label(self.label.clone())
-            .with_trail(vec![step])
+            .with_location(location)
             .with_confidence(self.score)
-            .with_location(TextLocation::new(start, end))
+            .with_event(event)
             .build()
             .expect("required fields provided")
     }
@@ -82,7 +87,7 @@ impl CompiledPattern {
 /// emission metadata.
 pub(super) struct CompiledDictionary {
     pub name: String,
-    pub label: EntityLabelRef,
+    pub label: LabelRef,
     /// First term-id (inclusive) for this dictionary inside the
     /// shared automaton.
     pub term_start: usize,
@@ -111,21 +116,23 @@ impl CompiledDictionary {
     /// time (the dictionary's `scoring` policy or per-term
     /// override).
     pub(super) fn build_entity(&self, score: Confidence, start: usize, end: usize) -> Entity<Text> {
-        let provenance = TrailProvenance::Pattern(PatternProvenance::Dictionary {
-            name: self.name.clone(),
-            contextual: false,
-        });
-        let step = TrailStep::recognition(
+        let location = TextLocation::new(start, end);
+        let event = Event::pattern(
             "pattern",
             score,
-            provenance,
-            format!("dictionary `{}` matched", self.name),
-        );
+            location.clone(),
+            PatternEvent {
+                name: self.name.clone().into(),
+                contextual: false,
+                ..PatternEvent::default()
+            },
+        )
+        .with_reason(format!("dictionary `{}` matched", self.name));
         Entity::builder()
             .with_label(self.label.clone())
-            .with_trail(vec![step])
+            .with_location(location)
             .with_confidence(score)
-            .with_location(TextLocation::new(start, end))
+            .with_event(event)
             .build()
             .expect("required fields provided")
     }

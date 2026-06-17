@@ -17,7 +17,7 @@ side. A single walk over the input runs both scanners and emits
 
 Rules may declare per-label context keywords. Calling
 `build_context_enhanced()` wraps the recognizer in a
-`nvisy_context::ContextEnhanced` layer that lifts confidence on
+`veil_context::ContextEnhanced` layer that lifts confidence on
 matches whose neighbourhood contains a declared keyword;
 `build()` returns the bare recognizer.
 
@@ -26,7 +26,7 @@ The built-in pattern + dictionary set lives as TOML under
 builder accepts both built-ins and user-supplied rules:
 
 ```rust
-use nvisy_pattern::PatternRecognizer;
+use veil_pattern::PatternRecognizer;
 
 let recognizer = PatternRecognizer::builder()
     .with_builtin_patterns()

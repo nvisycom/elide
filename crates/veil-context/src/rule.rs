@@ -1,6 +1,6 @@
 //! [`BoostRule`]: per-label keyword-boost rule.
 //!
-//! One rule per [`EntityLabelRef`] declares the keyword set that
+//! One rule per [`LabelRef`] declares the keyword set that
 //! lifts confidence when one of those keywords appears within
 //! `prefix_words` words before or `suffix_words` words after an
 //! entity carrying that label. The window radii and the additive
@@ -14,13 +14,13 @@
 //! `GOVERNMENT_ID`), the engine merges them by union of keywords —
 //! see [`BoostRule::merge`].
 //!
-//! [`EntityLabelRef`]: nvisy_core::entity::EntityLabelRef
+//! [`LabelRef`]: veil_core::entity::LabelRef
 
 use std::collections::HashSet;
 
 use hipstr::HipStr;
-use nvisy_core::entity::EntityLabelRef;
-use nvisy_core::primitive::{Confidence, LanguageTag};
+use veil_core::entity::LabelRef;
+use veil_core::primitive::{Confidence, LanguageTag};
 
 /// Default window radius in words *before* an entity match.
 pub const DEFAULT_PREFIX_WORDS: usize = 5;
@@ -33,7 +33,7 @@ pub const DEFAULT_PREFIX_WORDS: usize = 5;
 pub const DEFAULT_SUFFIX_WORDS: usize = 5;
 
 /// Default additive boost applied when a keyword fires.
-pub const DEFAULT_BOOST: f64 = 0.35;
+pub const DEFAULT_BOOST: f32 = 0.35;
 
 /// Per-label boost rule the [`Enhancer`] applies at runtime.
 ///
@@ -44,8 +44,8 @@ pub struct BoostRule {
     /// `Entity<Text>` whose [`label`] matches is checked against
     /// this rule's keywords.
     ///
-    /// [`label`]: nvisy_core::entity::Entity::label
-    pub label: EntityLabelRef,
+    /// [`label`]: veil_core::entity::Entity::label
+    pub label: LabelRef,
     /// Language scope. `None` means the rule applies regardless
     /// of the per-call language hint; `Some(lang)` means the rule
     /// only fires when the caller's language matches, or when no
@@ -81,7 +81,7 @@ impl BoostRule {
     /// [`with_language`]: Self::with_language
     #[must_use]
     pub fn new(
-        label: EntityLabelRef,
+        label: LabelRef,
         keywords: impl IntoIterator<Item = impl Into<HipStr<'static>>>,
         prefix_words: usize,
         suffix_words: usize,
@@ -108,7 +108,7 @@ impl BoostRule {
     /// [`boost`]: DEFAULT_BOOST
     #[must_use]
     pub fn for_label(
-        label: EntityLabelRef,
+        label: LabelRef,
         keywords: impl IntoIterator<Item = impl Into<HipStr<'static>>>,
     ) -> Self {
         Self::new(

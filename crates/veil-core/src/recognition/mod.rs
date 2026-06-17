@@ -7,6 +7,7 @@
 //! combines their entities into one, concatenating their events and
 //! appending a deduplication event.
 
+mod artifacts;
 mod input;
 mod label;
 mod output;
@@ -18,6 +19,7 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+pub use self::artifacts::Artifacts;
 pub use self::input::RecognizerInput;
 pub use self::label::LabelMap;
 pub use self::output::RecognizerOutput;

@@ -4,7 +4,7 @@
 mod fixtures;
 
 use fixtures::{assert_label_present, assert_match, scan};
-use nvisy_core::entity::builtins;
+use veil_core::entity::builtins;
 
 #[tokio::test]
 async fn builtin_identity() {

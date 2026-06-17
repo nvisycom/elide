@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::modality::Modality;
 use crate::primitive::{CountryCode, LanguageTag};
+use crate::recognition::Artifacts;
 
 /// Per-call input for a [`Recognizer`](super::Recognizer).
 ///
@@ -21,6 +22,10 @@ use crate::primitive::{CountryCode, LanguageTag};
 pub struct RecognizerInput<M: Modality> {
     /// The modality payload to inspect, in modality-local coordinates.
     pub content: M::Data,
+    /// Shared per-call NLP enrichment (tokens, lemmas, …), keyed by
+    /// type. A caller computes it once; recognizers that want it read it
+    /// back by type. Those that don't leave it empty.
+    pub artifacts: Artifacts,
     /// Caller-asserted language. When `Some`, recognizers that support
     /// per-call language hinting (typically NER / LLM backends) skip
     /// their own detection.
@@ -58,6 +63,7 @@ impl<M: Modality> RecognizerInput<M> {
     pub fn new(content: M::Data) -> Self {
         Self {
             content,
+            artifacts: Artifacts::new(),
             language: None,
             candidate_languages: Vec::new(),
             country: None,
@@ -65,6 +71,13 @@ impl<M: Modality> RecognizerInput<M> {
             context_hints: Vec::new(),
             correlation_id: None,
         }
+    }
+
+    /// Replace the artifacts bundle.
+    #[must_use]
+    pub fn with_artifacts(mut self, artifacts: Artifacts) -> Self {
+        self.artifacts = artifacts;
+        self
     }
 
     /// Set the asserted language.

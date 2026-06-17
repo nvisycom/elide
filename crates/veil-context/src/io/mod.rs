@@ -10,8 +10,8 @@
 //! All three types are re-exported at the crate root.
 //!
 //! [`Enhancer`]: crate::Enhancer
-//! [`EntityRecognizer`]: nvisy_core::recognition::EntityRecognizer
-//! [`EntityRecognizer<Text>`]: nvisy_core::recognition::EntityRecognizer
+//! [`EntityRecognizer`]: veil_core::recognition::EntityRecognizer
+//! [`EntityRecognizer<Text>`]: veil_core::recognition::EntityRecognizer
 
 mod tokens;
 mod wrapper;

@@ -99,7 +99,7 @@ impl Token {
 /// Owning token sequence stamped on a
 /// [`RecognizerInput::artifacts`] bundle by an upstream NLP engine.
 ///
-/// [`RecognizerInput::artifacts`]: nvisy_core::recognition::RecognizerInput::artifacts
+/// [`RecognizerInput::artifacts`]: veil_core::recognition::RecognizerInput::artifacts
 ///
 /// Tokens are sorted by `offset.start` (producers should emit them
 /// in order; consumer-side code assumes this). The [`Enhancer`]

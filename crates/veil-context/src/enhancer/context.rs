@@ -2,7 +2,7 @@
 //!
 //! [`Enhancer::enhance`]: super::Enhancer::enhance
 
-use nvisy_core::primitive::LanguageTag;
+use veil_core::primitive::LanguageTag;
 
 use crate::io::Token;
 

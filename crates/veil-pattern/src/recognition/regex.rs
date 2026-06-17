@@ -1,10 +1,10 @@
 //! [`Regex`] rule and its [`Variant`]s.
 
 use derive_builder::Builder;
-use nvisy_core::Error;
-use nvisy_core::entity::EntityLabelRef;
-use nvisy_core::primitive::{Confidence, CountryCode, LanguageTag};
 use serde::Deserialize;
+use veil_core::entity::LabelRef;
+use veil_core::primitive::{Confidence, CountryCode, LanguageTag};
+use veil_core::{Error, ErrorKind};
 
 use super::context::Context;
 
@@ -51,9 +51,8 @@ impl Variant {
     pub fn new(regex: impl Into<String>) -> Result<Self, Error> {
         let regex = regex.into();
         if let Err(e) = ::regex::Regex::new(&regex) {
-            return Err(Error::validation(
+            return Err(Error::new(ErrorKind::Validation, 
                 format!("invalid regex: {e}"),
-                "nvisy-pattern",
             ));
         }
         Ok(Self {
@@ -101,9 +100,9 @@ fn default_score() -> Confidence {
 /// # Examples
 ///
 /// ```
-/// use nvisy_core::entity::builtins;
-/// use nvisy_core::primitive::Confidence;
-/// use nvisy_pattern::{Regex, Variant};
+/// use veil_core::entity::builtins;
+/// use veil_core::primitive::Confidence;
+/// use veil_pattern::{Regex, Variant};
 ///
 /// let variant = Variant::new(r"\b\d{3}-\d{2}-\d{4}\b")
 ///     .expect("ssn variant builds")
@@ -133,7 +132,7 @@ pub struct Regex {
     /// `"ssn"`, `"credit_card"`).
     pub name: String,
     /// Entity label every variant emits.
-    pub label: EntityLabelRef,
+    pub label: LabelRef,
     /// Context keywords that lift confidence when one of them
     /// appears near a match. Either a flat list applied
     /// regardless of language, or a per-language map.
@@ -176,6 +175,6 @@ impl Regex {
     /// missing required fields.
     pub fn from_toml(raw: &str) -> Result<Self, Error> {
         toml::from_str(raw)
-            .map_err(|e| Error::validation(format!("regex rule TOML: {e}"), "nvisy-pattern"))
+            .map_err(|e| Error::new(ErrorKind::Validation, format!("regex rule TOML: {e}")))
     }
 }

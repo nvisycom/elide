@@ -60,7 +60,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
-use nvisy_core::primitive::{CountryCode, LanguageTag};
+use veil_core::primitive::{CountryCode, LanguageTag};
 
 pub use self::btc::btc;
 pub use self::date::date;
@@ -77,7 +77,7 @@ pub use self::phone::phone;
 /// guessing across a fixed fallback set. Validators that don't
 /// need either field can ignore it via `_ctx`.
 ///
-/// [`RecognizerInput`]: nvisy_core::recognition::RecognizerInput
+/// [`RecognizerInput`]: veil_core::recognition::RecognizerInput
 #[derive(Debug, Clone, Default)]
 pub struct ValidationContext {
     /// ISO 3166-1 alpha-2 jurisdiction associated with the input,

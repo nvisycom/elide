@@ -64,6 +64,14 @@ impl Confidence {
     pub const fn get(self) -> f32 {
         self.0
     }
+
+    /// Add `delta` to the score, saturating at the `[0, 1]` bounds.
+    ///
+    /// `0.95 + 0.35` yields `1.0`, not an out-of-range value. Used by
+    /// confidence-lifting steps such as context boosting.
+    pub fn saturating_add(self, delta: f32) -> Self {
+        Self::clamped(self.0 + delta)
+    }
 }
 
 #[cfg(feature = "serde")]

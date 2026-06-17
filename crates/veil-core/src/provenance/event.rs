@@ -109,6 +109,28 @@ impl<M: Modality> Event<M> {
         }
     }
 
+    /// A refinement event: a context keyword near the entity lifted its
+    /// confidence.
+    pub fn refinement(
+        source: impl Into<HipStr<'static>>,
+        before: Confidence,
+        after: Confidence,
+        keyword: impl Into<HipStr<'static>>,
+        in_hint: bool,
+    ) -> Self {
+        Self {
+            source: source.into(),
+            before: Some(before),
+            after,
+            at: Timestamp::now(),
+            reason: HipStr::default(),
+            kind: EventKind::Refinement {
+                keyword: keyword.into(),
+                in_hint,
+            },
+        }
+    }
+
     /// A redaction event hiding the entity with `operator`.
     pub fn redaction(
         operator: OperatorId,
@@ -190,6 +212,14 @@ pub enum EventKind<M: Modality> {
     Calibration {
         /// The multiplier applied.
         factor: f64,
+    },
+    /// A context keyword near the entity lifted its confidence.
+    Refinement {
+        /// The keyword that fired the boost.
+        keyword: HipStr<'static>,
+        /// Whether the keyword was found in an out-of-band hint
+        /// (`true`) rather than the in-text word window (`false`).
+        in_hint: bool,
     },
     /// An operator hid the entity.
     Redaction {

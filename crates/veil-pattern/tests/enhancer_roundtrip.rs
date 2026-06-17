@@ -3,14 +3,15 @@
 //! that confidence is boosted, and a [`Refinement`] step is
 //! appended only for matches that had a nearby keyword.
 //!
-//! [`Refinement`]: nvisy_core::entity::TrailStepKind::Refinement
-//! [`ContextEnhanced`]: nvisy_context::ContextEnhanced
+//! [`Refinement`]: veil_core::provenance::EventKind::Refinement
+//! [`ContextEnhanced`]: veil_context::ContextEnhanced
 
-use nvisy_core::entity::{TrailStepKind, builtins};
-use nvisy_core::modality::TextData;
-use nvisy_core::primitive::Confidence;
-use nvisy_core::recognition::{EntityRecognizer, RecognizerInput};
-use nvisy_pattern::{PatternRecognizer, Regex, Variant};
+use veil_core::entity::builtins;
+use veil_core::modality::text::TextData;
+use veil_core::primitive::Confidence;
+use veil_core::provenance::EventKind;
+use veil_core::recognition::{Recognizer, RecognizerInput};
+use veil_pattern::{PatternRecognizer, Regex, Variant};
 
 #[tokio::test]
 async fn enhancer_boosts_matches_near_keyword_only() {
@@ -51,9 +52,10 @@ async fn enhancer_boosts_matches_near_keyword_only() {
         "near-keyword match should be boosted",
     );
     assert!(
-        near.trail
+        near.provenance
+            .events
             .iter()
-            .any(|s| matches!(s.kind, TrailStepKind::Refinement)),
+            .any(|e| matches!(e.kind, EventKind::Refinement { .. })),
         "near-keyword match should have a Refinement step",
     );
 
@@ -63,13 +65,14 @@ async fn enhancer_boosts_matches_near_keyword_only() {
         .find(|e| &text[e.location.start..e.location.end] == "987-65-4329")
         .expect("far match present");
     assert!(
-        (far.confidence.get() - 0.6).abs() < f64::EPSILON,
+        (far.confidence.get() - 0.6).abs() < f32::EPSILON,
         "far-from-keyword match should not be boosted",
     );
     assert!(
-        !far.trail
+        !far.provenance
+            .events
             .iter()
-            .any(|s| matches!(s.kind, TrailStepKind::Refinement)),
+            .any(|e| matches!(e.kind, EventKind::Refinement { .. })),
         "far-from-keyword match should have no Refinement step",
     );
 }

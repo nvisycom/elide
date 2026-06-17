@@ -13,7 +13,7 @@
 //!
 //! [`Global`]: Context::Global
 //! [`PerLanguage`]: Context::PerLanguage
-//! [`ContextEnhanced`]: nvisy_context::ContextEnhanced
+//! [`ContextEnhanced`]: veil_context::ContextEnhanced
 //! [`Regex::languages`]: super::Regex::languages
 //! [`Dictionary::languages`]: super::Dictionary::languages
 
@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::collections::hash_map::Iter;
 
 use derive_more::From;
-use nvisy_core::primitive::LanguageTag;
+use veil_core::primitive::LanguageTag;
 use serde::Deserialize;
 
 /// Per-rule context keyword set.
@@ -121,11 +121,11 @@ mod tests {
         };
         assert_eq!(map.len(), 2);
         assert_eq!(
-            map.get(&LanguageTag::new("en").unwrap()).unwrap(),
+            map.get(&LanguageTag::parse("en").unwrap()).unwrap(),
             &vec!["card".to_owned()]
         );
         assert_eq!(
-            map.get(&LanguageTag::new("es").unwrap()).unwrap(),
+            map.get(&LanguageTag::parse("es").unwrap()).unwrap(),
             &vec!["tarjeta".to_owned()]
         );
     }
@@ -145,8 +145,8 @@ mod tests {
     #[test]
     fn iter_per_language_yields_one_entry_per_language() {
         let mut map = HashMap::new();
-        map.insert(LanguageTag::new("en").unwrap(), vec!["card".into()]);
-        map.insert(LanguageTag::new("es").unwrap(), vec!["tarjeta".into()]);
+        map.insert(LanguageTag::parse("en").unwrap(), vec!["card".into()]);
+        map.insert(LanguageTag::parse("es").unwrap(), vec!["tarjeta".into()]);
         let ctx = Context::PerLanguage(map);
         let collected: Vec<_> = ctx
             .iter()

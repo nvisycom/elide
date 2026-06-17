@@ -1,9 +1,9 @@
 //! [`Dictionary`]: literal-term detection rule.
 
 use derive_builder::Builder;
-use nvisy_core::Error;
-use nvisy_core::entity::EntityLabelRef;
-use nvisy_core::primitive::{Confidence, CountryCode, LanguageTag};
+use veil_core::{Error, ErrorKind};
+use veil_core::entity::LabelRef;
+use veil_core::primitive::{Confidence, CountryCode, LanguageTag};
 use serde::Deserialize;
 
 use super::context::Context;
@@ -91,8 +91,8 @@ impl Default for Scoring {
 /// # Examples
 ///
 /// ```
-/// use nvisy_core::entity::builtins;
-/// use nvisy_pattern::{Dictionary, Term};
+/// use veil_core::entity::builtins;
+/// use veil_pattern::{Dictionary, Term};
 ///
 /// let dictionary = Dictionary::builder()
 ///     .with_name("nationalities")
@@ -119,7 +119,7 @@ pub struct Dictionary {
     /// (e.g. `"nationalities"`).
     pub name: String,
     /// Entity label every match emits.
-    pub label: EntityLabelRef,
+    pub label: LabelRef,
     /// Literal terms to scan for. Compiled into the shared
     /// Aho-Corasick automaton at recognizer-build time.
     pub terms: Vec<Term>,
@@ -187,7 +187,7 @@ impl Dictionary {
     /// [`metadata_from_toml`]: Self::metadata_from_toml
     pub fn from_toml(raw: &str) -> Result<Self, Error> {
         toml::from_str(raw)
-            .map_err(|e| Error::validation(format!("dictionary TOML: {e}"), "nvisy-pattern"))
+            .map_err(|e| Error::new(ErrorKind::Validation, format!("dictionary TOML: {e}")))
     }
 
     /// Parse dictionary metadata from a sidecar TOML source.
@@ -205,7 +205,7 @@ impl Dictionary {
     /// [`build`]: DictionaryBuilder::build
     pub fn metadata_from_toml(raw: &str) -> Result<DictionaryBuilder, Error> {
         let metadata: DictionaryMetadata = toml::from_str(raw).map_err(|e| {
-            Error::validation(format!("dictionary metadata TOML: {e}"), "nvisy-pattern")
+            Error::new(ErrorKind::Validation, format!("dictionary metadata TOML: {e}"))
         })?;
         let mut builder = Dictionary::builder()
             .with_name(metadata.name)
@@ -232,7 +232,7 @@ impl Dictionary {
 #[derive(Debug, Clone, Deserialize)]
 struct DictionaryMetadata {
     name: String,
-    label: EntityLabelRef,
+    label: LabelRef,
     #[serde(default)]
     score: Option<Scoring>,
     #[serde(default)]
