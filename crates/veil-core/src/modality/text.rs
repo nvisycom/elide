@@ -39,9 +39,9 @@ impl ModalityData for TextData {}
 
 /// A half-open `[start, end)` byte range within text content.
 ///
-/// Ordering and overlap consider only `(start, end)`; the optional
-/// page number is carried for codecs that page their text but does not
-/// affect comparison.
+/// Ordering and overlap consider only `(start, end)`; the optional page
+/// number is carried for codecs that page their text but does not affect
+/// comparison.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct TextLocation {

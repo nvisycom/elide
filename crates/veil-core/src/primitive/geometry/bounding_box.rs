@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 
 /// A point in a 2-D coordinate space.
 ///
-/// The coordinate basis is left to the consumer: pixel coordinates for
-/// a raster image, normalized `0.0..=1.0` coordinates for a
+/// The coordinate basis is left to the consumer: pixel coordinates for a
+/// raster image, normalized `0.0..=1.0` coordinates for a
 /// resolution-independent region, or page units for a document. The
 /// model only requires the two scalars.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -28,10 +28,13 @@ impl Point {
 /// An axis-aligned rectangle, given by its minimum and maximum corners.
 ///
 /// The location type for the image and document modalities: where a
-/// detected entity sits within a rendered page. [`min`](Self::min) is
-/// the top-left corner and [`max`](Self::max) the bottom-right under the
-/// usual screen convention (y grows downward), though the box itself is
-/// agnostic to coordinate orientation.
+/// detected entity sits within a rendered page. [`min`] is the top-left
+/// corner and [`max`] the bottom-right under the usual screen convention
+/// (y grows downward), though the box itself is agnostic to coordinate
+/// orientation.
+///
+/// [`min`]: Self::min
+/// [`max`]: Self::max
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BoundingBox {

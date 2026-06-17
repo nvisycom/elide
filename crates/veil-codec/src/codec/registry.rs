@@ -8,9 +8,9 @@ use std::collections::HashMap;
 
 use veil_core::{Error, ErrorKind};
 
+use super::document::UntypedDocumentHandle;
 use super::{Format, FormatId};
 use crate::content::ContentData;
-use super::document::UntypedDocumentHandle;
 
 /// Codec registry — owns the set of registered [`Format`]s and resolves
 /// them by extension, content type, or id.
@@ -23,11 +23,13 @@ pub struct CodecRegistry {
 }
 
 impl CodecRegistry {
-    /// Empty registry. Use [`with_format`](Self::with_format) /
-    /// [`add_format`](Self::add_format) to add custom formats, or
-    /// [`with_builtin`](Self::with_builtin) to start from a pre-
-    /// populated set of every built-in format the active feature set
-    /// enables.
+    /// Empty registry. Use [`with_format`] / [`add_format`] to add custom
+    /// formats, or [`with_builtin`] to start from a pre-populated set of
+    /// every built-in format the active feature set enables.
+    ///
+    /// [`with_format`]: Self::with_format
+    /// [`add_format`]: Self::add_format
+    /// [`with_builtin`]: Self::with_builtin
     pub fn new() -> Self {
         Self::default()
     }
@@ -35,10 +37,12 @@ impl CodecRegistry {
     /// Pre-populated registry containing every built-in format the
     /// active feature set enables (TXT, JSON, Markdown, HTML, …).
     ///
-    /// Add custom formats afterward with
-    /// [`with_format`](Self::with_format) (chainable) or
-    /// [`add_format`](Self::add_format) (in-place); they take precedence
-    /// on extension / content-type collisions (last registration wins).
+    /// Add custom formats afterward with [`with_format`] (chainable) or
+    /// [`add_format`] (in-place); they take precedence on extension /
+    /// content-type collisions (last registration wins).
+    ///
+    /// [`with_format`]: Self::with_format
+    /// [`add_format`]: Self::add_format
     pub fn with_builtin() -> Self {
         let mut registry = Self::new();
         #[cfg(feature = "txt")]
@@ -60,18 +64,22 @@ impl CodecRegistry {
     /// Panics if the format's id is already registered. Extensions and
     /// content types that conflict with an existing format are
     /// overwritten (last registration wins) — register custom formats
-    /// *after* [`with_builtin`](Self::with_builtin) for precedence.
+    /// *after* [`with_builtin`] for precedence.
+    ///
+    /// [`with_builtin`]: Self::with_builtin
     #[must_use]
     pub fn with_format(mut self, format: Format) -> Self {
         self.add_format(format);
         self
     }
 
-    /// In-place equivalent of [`with_format`](Self::with_format).
+    /// In-place equivalent of [`with_format`].
     ///
     /// # Panics
     ///
-    /// Same conditions as [`with_format`](Self::with_format).
+    /// Same conditions as [`with_format`].
+    ///
+    /// [`with_format`]: Self::with_format
     pub fn add_format(&mut self, format: Format) -> &mut Self {
         assert!(
             !self.by_id.contains_key(&format.id),
@@ -139,14 +147,17 @@ impl CodecRegistry {
     }
 
     /// Decode [`ContentData`], resolving the format from the metadata it
-    /// carries: its [`extension`](ContentData::extension) first, then its
-    /// declared [`content_type`](ContentData::content_type).
+    /// carries: its [`extension`] first, then its declared
+    /// [`content_type`].
     ///
     /// # Errors
     ///
     /// Returns a validation error when the content carries neither a
     /// resolvable filename extension nor a known content type; otherwise
     /// propagates the loader's decode error.
+    ///
+    /// [`extension`]: ContentData::extension
+    /// [`content_type`]: ContentData::content_type
     pub async fn decode_content(
         &self,
         content: ContentData,

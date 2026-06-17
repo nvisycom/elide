@@ -2,7 +2,7 @@
 //! clean set.
 //!
 //! Recognizers emit entities independently; these [`Layer`]s reshape and
-//! prune them. They are composed onto an [`Analyzer`](crate::Analyzer),
+//! prune them. They are composed onto an [`Analyzer`],
 //! which runs them in order after detection. The shipped stages, in
 //! their usual order:
 //!
@@ -20,6 +20,8 @@
 //! Each stage is a [`Layer`] returning a [`LayerOutput`]. Stages are
 //! pure and synchronous. Each layer is its own submodule (e.g.
 //! [`fuse::FuseLayer`]); their types are reached through those modules.
+//!
+//! [`Analyzer`]: crate::Analyzer
 
 pub mod calibrate;
 pub mod filter;

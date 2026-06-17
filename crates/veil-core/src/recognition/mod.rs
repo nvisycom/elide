@@ -1,11 +1,12 @@
 //! Detection: recognizers and the entities they emit.
 //!
 //! A [`Recognizer`] inspects content and emits entities, each carrying a
-//! recognition [`Event`](crate::provenance::Event) in its provenance
-//! (its location, confidence, and pattern/model detail). When several
-//! recognizers find the same thing, a fusion step (in `veil-toolkit`)
-//! combines their entities into one, concatenating their events and
-//! appending a deduplication event.
+//! recognition [`Event`] in its provenance (its location, confidence,
+//! and pattern/model detail). When several recognizers find the same
+//! thing, a fusion step (in `veil-toolkit`) combines their entities into
+//! one, concatenating their events and appending a deduplication event.
+//!
+//! [`Event`]: crate::provenance::Event
 
 mod artifacts;
 mod input;
@@ -63,8 +64,8 @@ impl fmt::Display for RecognizerId {
 ///
 /// Modelled on Presidio's `EntityRecognizer`, generalised to be
 /// multimodal (keyed on the [`Modality`] `M`) and provenance-first (the
-/// emitted [`Entity`](crate::entity::Entity)s carry a recognition
-/// [`Event`](crate::provenance::Event) in their provenance).
+/// emitted [`Entity`]s carry a recognition [`Event`] in their
+/// provenance).
 ///
 /// A recognizer does **not** resolve conflicts or fuse across
 /// recognizers — it reports what it sees, in modality-local coordinates.
@@ -75,6 +76,9 @@ impl fmt::Display for RecognizerId {
 /// The per-call surface is the [`RecognizerInput<M>`] (the modality
 /// payload plus language/jurisdiction/label hints); the result is a
 /// [`RecognizerOutput<M>`].
+///
+/// [`Entity`]: crate::entity::Entity
+/// [`Event`]: crate::provenance::Event
 pub trait Recognizer<M>: Send + Sync
 where
     M: Modality,

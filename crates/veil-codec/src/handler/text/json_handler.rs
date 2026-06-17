@@ -21,8 +21,8 @@ use veil_core::modality::{DataReader, DataWriter};
 use veil_core::redaction::Redactions;
 use veil_core::{Error, ErrorKind};
 
-use crate::handler::redact;
 use crate::content::ContentData;
+use crate::handler::redact;
 use crate::{Chunk, Format, FormatId, Handler};
 
 /// Stable [`FormatId`] for the JSON codec.
@@ -575,7 +575,10 @@ impl<'a> SlotParser<'a> {
                         Some(other) => {
                             return Err(Error::new(
                                 ErrorKind::Validation,
-                                format!("invalid escape \\{} at offset {}", other as char, self.pos),
+                                format!(
+                                    "invalid escape \\{} at offset {}",
+                                    other as char, self.pos
+                                ),
                             ));
                         }
                         None => {
@@ -611,7 +614,8 @@ impl<'a> SlotParser<'a> {
     fn parse_scalar(&mut self) -> Result<Leaf, Error> {
         let start = self.pos;
         while let Some(b) = self.peek() {
-            let is_scalar_byte = b.is_ascii_alphanumeric() || matches!(b, b'-' | b'+' | b'.' | b'_');
+            let is_scalar_byte =
+                b.is_ascii_alphanumeric() || matches!(b, b'-' | b'+' | b'.' | b'_');
             if is_scalar_byte {
                 self.pos += 1;
             } else {
@@ -775,7 +779,10 @@ mod tests {
             }
         };
         let mut rs = Redactions::new();
-        rs.push(chunk.location.clone(), TextReplacement::substituted("contact"));
+        rs.push(
+            chunk.location.clone(),
+            TextReplacement::substituted("contact"),
+        );
         h.write_at(rs).await?;
         assert_eq!(encoded(&h), r#"{"contact":"a@b.c"}"#);
         Ok(())

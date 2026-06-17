@@ -49,8 +49,9 @@ impl ContentData {
     }
 
     /// Attach an original filename (e.g. `"report.txt"`). The registry
-    /// can derive a format-resolution [`extension`](Self::extension) from
-    /// it.
+    /// can derive a format-resolution [`extension`] from it.
+    ///
+    /// [`extension`]: Self::extension
     #[must_use]
     pub fn with_filename(mut self, filename: impl Into<Cow<'static, str>>) -> Self {
         self.filename = Some(filename.into());
@@ -66,8 +67,10 @@ impl ContentData {
         self
     }
 
-    /// Set the text encoding used by [`decode`](Self::decode) (default
+    /// Set the text encoding used by [`decode`] (default
     /// [`TextEncoding::Utf8`]).
+    ///
+    /// [`decode`]: Self::decode
     #[must_use]
     pub fn with_encoding(mut self, encoding: TextEncoding) -> Self {
         self.encoding = encoding;
@@ -80,8 +83,7 @@ impl ContentData {
         self.encoding
     }
 
-    /// Decode the bytes to a [`String`] using the content's
-    /// [`encoding`](Self::encoding).
+    /// Decode the bytes to a [`String`] using the content's [`encoding`].
     ///
     /// Text loaders call this instead of carrying their own encoding —
     /// the charset is a property of the content, so it travels with the
@@ -91,6 +93,8 @@ impl ContentData {
     ///
     /// Returns a validation error when the bytes are not valid for the
     /// encoding.
+    ///
+    /// [`encoding`]: Self::encoding
     pub fn decode(&self) -> Result<String> {
         self.encoding.decode_bytes(&self.data)
     }
@@ -107,11 +111,13 @@ impl ContentData {
         self.content_type.as_deref()
     }
 
-    /// The lowercased file extension derived from
-    /// [`filename`](Self::filename) (no leading dot), if any.
+    /// The lowercased file extension derived from [`filename`] (no
+    /// leading dot), if any.
     ///
     /// A registry can pass this to format resolution — e.g.
     /// `data.extension()` then `registry.by_extension(..)`.
+    ///
+    /// [`filename`]: Self::filename
     #[must_use]
     pub fn extension(&self) -> Option<String> {
         self.filename

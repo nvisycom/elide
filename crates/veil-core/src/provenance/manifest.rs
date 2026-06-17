@@ -9,16 +9,17 @@ use uuid::Uuid;
 /// The audit record for a single redaction run, tying together the
 /// source, the engine, and the moment it executed.
 ///
-/// Where a [`Provenance`] audits one
-/// entity, a `Manifest` audits the *run* as a whole. It is the anchor
-/// an external auditor needs to answer "what document was processed, by
-/// what build of the engine, when" — independent of the per-entity
-/// detail. Pairing the [`source_sha256`](Self::source_sha256) with the
-/// engine [`version`](Self::version) makes a run reproducible and
-/// tamper-evident: the same input through the same engine should yield
-/// the same entities and provenance.
+/// Where a [`Provenance`] audits one entity, a `Manifest` audits the
+/// *run* as a whole. It is the anchor an external auditor needs to
+/// answer "what document was processed, by what build of the engine,
+/// when" — independent of the per-entity detail. Pairing the
+/// [`source_sha256`] with the engine [`version`] makes a run
+/// reproducible and tamper-evident: the same input through the same
+/// engine should yield the same entities and provenance.
 ///
 /// [`Provenance`]: crate::provenance::Provenance
+/// [`source_sha256`]: Self::source_sha256
+/// [`version`]: Self::version
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Manifest {
@@ -33,9 +34,10 @@ pub struct Manifest {
 }
 
 impl Manifest {
-    /// Open a manifest for a run over content with the given source
-    /// hash, minting a fresh time-ordered [`run_id`](Self::run_id) and
-    /// stamping the start time.
+    /// Open a manifest for a run over content with the given source hash,
+    /// minting a fresh time-ordered [`run_id`] and stamping the start time.
+    ///
+    /// [`run_id`]: Self::run_id
     pub fn new(
         source_sha256: impl Into<HipStr<'static>>,
         version: impl Into<HipStr<'static>>,

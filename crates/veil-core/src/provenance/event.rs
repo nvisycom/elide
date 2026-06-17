@@ -12,16 +12,19 @@ use crate::redaction::{LeakProfile, OperatorId};
 
 /// One thing that happened to an entity, with its effect on confidence.
 ///
-/// Events are recorded in order on an entity's
-/// [`Provenance`](crate::provenance::Provenance), forming the full audit
-/// trail of its life: each recognizer that found it, the deduplication
-/// that fused them, any score calibration, and the redaction that hid
-/// it. The uniform spine — who, before/after score, when, why — is the
-/// same for every event; the [`kind`](Event::kind) carries the
+/// Events are recorded in order on an entity's [`Provenance`], forming
+/// the full audit trail of its life: each recognizer that found it, the
+/// deduplication that fused them, any score calibration, and the
+/// redaction that hid it. The uniform spine — who, before/after score,
+/// when, why — is the same for every event; the [`kind`] carries the
 /// event-specific detail.
 ///
-/// `entity.confidence` always equals the [`after`](Event::after) of the
-/// most recent event.
+/// `entity.confidence` always equals the [`after`] of the most recent
+/// event.
+///
+/// [`Provenance`]: crate::provenance::Provenance
+/// [`kind`]: Event::kind
+/// [`after`]: Event::after
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
@@ -29,11 +32,11 @@ use crate::redaction::{LeakProfile, OperatorId};
     serde(bound = "M::Location: Serialize + for<'a> Deserialize<'a>")
 )]
 pub struct Event<M: Modality> {
-    /// Who produced this event: a recognizer name, a deduplication
-    /// strategy, an operator — whatever acted.
+    /// Who produced this event: a recognizer name, a deduplication strategy,
+    /// an operator — whatever acted.
     pub source: HipStr<'static>,
-    /// The confidence before this event, if there was a prior value.
-    /// `None` on the first (birth) event.
+    /// The confidence before this event, if there was a prior value. `None`
+    /// on the first (birth) event.
     pub before: Option<Confidence>,
     /// The confidence after this event.
     pub after: Confidence,
@@ -172,11 +175,12 @@ impl<M: Modality> Event<M> {
 ///
 /// `#[non_exhaustive]`: new event kinds (verification, annotation, …)
 /// can be added compatibly. The recognition kinds ([`Pattern`],
-/// [`Model`]) carry the matched [`Location`](Modality::Location); the
-/// rest carry their own data.
+/// [`Model`]) carry the matched [`Location`]; the rest carry their own
+/// data.
 ///
 /// [`Pattern`]: EventKind::Pattern
 /// [`Model`]: EventKind::Model
+/// [`Location`]: Modality::Location
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
@@ -217,8 +221,8 @@ pub enum EventKind<M: Modality> {
     Refinement {
         /// The keyword that fired the boost.
         keyword: HipStr<'static>,
-        /// Whether the keyword was found in an out-of-band hint
-        /// (`true`) rather than the in-text word window (`false`).
+        /// Whether the keyword was found in an out-of-band hint (`true`) rather
+        /// than the in-text word window (`false`).
         in_hint: bool,
     },
     /// An operator hid the entity.

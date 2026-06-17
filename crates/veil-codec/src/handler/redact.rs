@@ -16,7 +16,11 @@ use veil_core::{Error, ErrorKind};
 /// # Errors
 ///
 /// Returns a validation error if either endpoint falls mid-character.
-pub(crate) fn replace_range(buf: &mut String, value: &str, range: Range<usize>) -> Result<(), Error> {
+pub(crate) fn replace_range(
+    buf: &mut String,
+    value: &str,
+    range: Range<usize>,
+) -> Result<(), Error> {
     let s = range.start.min(buf.len());
     let e = range.end.min(buf.len());
     if s >= e {

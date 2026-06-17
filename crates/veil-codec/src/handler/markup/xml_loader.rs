@@ -1,7 +1,6 @@
-//! XML loader: parses XML into the shared markup
-//! [`RedactableItem`](super::RedactableItem) stream, recording each
-//! item's source byte span so the [`XmlEncoder`](super::XmlEncoder) can
-//! splice mutated values back **verbatim**.
+//! XML loader: parses XML into the shared markup [`RedactableItem`]
+//! stream, recording each item's source byte span so the [`XmlEncoder`]
+//! can splice mutated values back **verbatim**.
 //!
 //! Emits items for element text content, comment bodies, and CDATA
 //! payloads — each addressed by an exact source span quick-xml gives us
@@ -14,6 +13,11 @@
 //! exposes an attribute's decoded value but not its source span, and
 //! recovering the span by hand means re-implementing the tag parser.
 //! Until a clean span is available, attributes pass through untouched.
+//!
+//! [`RedactableItem`]: super::RedactableItem
+//! [`XmlEncoder`]: super::XmlEncoder
+
+use std::ops::Range;
 
 use quick_xml::Reader;
 use quick_xml::events::Event;
@@ -75,12 +79,12 @@ fn build_items(raw: &str) -> Result<Vec<XmlItem>, Error> {
 
 /// Return `span` unless it covers only whitespace (those text runs carry
 /// no PII and only clutter the stream).
-fn non_blank(raw: &str, span: std::ops::Range<usize>) -> Option<std::ops::Range<usize>> {
+fn non_blank(raw: &str, span: Range<usize>) -> Option<Range<usize>> {
     (!raw[span.clone()].trim().is_empty()).then_some(span)
 }
 
 /// Build an item whose value is the verbatim source slice at `span`.
-fn span_item(raw: &str, span: std::ops::Range<usize>) -> XmlItem {
+fn span_item(raw: &str, span: Range<usize>) -> XmlItem {
     RedactableItem {
         value: raw[span.clone()].to_owned(),
         address: XmlSpan(span),
@@ -90,7 +94,7 @@ fn span_item(raw: &str, span: std::ops::Range<usize>) -> XmlItem {
 
 /// Narrow `span` by its `open`/`close` delimiters, returning the inner
 /// range, or `None` if the span doesn't fit them.
-fn strip(span: std::ops::Range<usize>, open: &str, close: &str) -> Option<std::ops::Range<usize>> {
+fn strip(span: Range<usize>, open: &str, close: &str) -> Option<Range<usize>> {
     let start = span.start.checked_add(open.len())?;
     let end = span.end.checked_sub(close.len())?;
     (start <= end).then_some(start..end)
@@ -144,7 +148,8 @@ mod tests {
 
     #[tokio::test]
     async fn stream_yields_text_comment_cdata() {
-        let raw = r#"<root id="A1"><name>Alice</name><!-- c --><data><![CDATA[secret]]></data></root>"#;
+        let raw =
+            r#"<root id="A1"><name>Alice</name><!-- c --><data><![CDATA[secret]]></data></root>"#;
         let mut h = load(raw).await;
         let mut values = Vec::new();
         while let Some(chunk) = h.next_chunk().await.unwrap() {
@@ -154,7 +159,10 @@ mod tests {
         assert!(values.iter().any(|v| v == " c "), "comment: {values:?}");
         assert!(values.iter().any(|v| v == "secret"), "cdata: {values:?}");
         // Attribute values are not yet redactable, so `A1` is not emitted.
-        assert!(!values.iter().any(|v| v == "A1"), "no attr items: {values:?}");
+        assert!(
+            !values.iter().any(|v| v == "A1"),
+            "no attr items: {values:?}"
+        );
     }
 
     #[tokio::test]
@@ -227,6 +235,9 @@ mod tests {
         let mut rs = Redactions::new();
         rs.push(chunk.location, TextReplacement::substituted("[NAME]"));
         h.write_at(rs).await.unwrap();
-        assert_eq!(encoded(&h), r#"<user email="alice@example.com">[NAME]</user>"#);
+        assert_eq!(
+            encoded(&h),
+            r#"<user email="alice@example.com">[NAME]</user>"#
+        );
     }
 }

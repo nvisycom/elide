@@ -12,13 +12,17 @@
 //! [`Modality`] — including custom ones a downstream crate defines —
 //! with no central registry of kinds.
 //!
-//! Consumers commit to a modality via [`into`](UntypedDocumentHandle::into),
-//! which downcasts by [`TypeId`](std::any::TypeId) and yields the typed
-//! [`DocumentHandle<M>`] — a wrapper that owns the underlying handler and
-//! exposes the per-modality capability surface.
+//! Consumers commit to a modality via [`into`], which downcasts by
+//! [`TypeId`] and yields the typed [`DocumentHandle<M>`] — a wrapper that
+//! owns the underlying handler and exposes the per-modality capability
+//! surface.
+//!
+//! [`into`]: UntypedDocumentHandle::into
+//! [`TypeId`]: std::any::TypeId
 
 use std::any::{Any, type_name};
 use std::fmt;
+use std::ops::Range;
 
 use veil_core::modality::{DataReader, DataWriter, Modality};
 use veil_core::redaction::Redactions;
@@ -30,10 +34,13 @@ use super::loader::DynHandler;
 /// [`DocumentHandle<M>`] for some `M` plus the [`FormatId`] of the
 /// producing loader.
 ///
-/// Commit to a modality with [`into::<M>()`](Self::into) (or peek with
-/// [`is`](Self::is)) to recover the typed [`DocumentHandle<M>`]. The
-/// downcast is by [`TypeId`](std::any::TypeId), so any registered
-/// modality works — built-in or custom.
+/// Commit to a modality with [`into::<M>()`] (or peek with [`is`]) to
+/// recover the typed [`DocumentHandle<M>`]. The downcast is by
+/// [`TypeId`], so any registered modality works — built-in or custom.
+///
+/// [`into::<M>()`]: Self::into
+/// [`is`]: Self::is
+/// [`TypeId`]: std::any::TypeId
 pub struct UntypedDocumentHandle {
     format_id: FormatId,
     handle: Box<dyn Any + Send + Sync>,
@@ -88,14 +95,15 @@ impl fmt::Debug for UntypedDocumentHandle {
 /// alongside the handler so provenance can always answer "what format is
 /// this?" without re-decoding.
 ///
-/// Constructed by codec loaders, erased into an
-/// [`UntypedDocumentHandle`] for registry return, then recovered with
-/// [`UntypedDocumentHandle::into`]. Implements core's
-/// [`DataReader`](veil_core::modality::DataReader) /
-/// [`DataWriter`](veil_core::modality::DataWriter) for every modality by
-/// delegating to the underlying handler, so any pipeline component can
-/// read from / write to a codec-backed source through the same traits the
-/// toolkit bounds on.
+/// Constructed by codec loaders, erased into an [`UntypedDocumentHandle`]
+/// for registry return, then recovered with
+/// [`UntypedDocumentHandle::into`]. Implements core's [`DataReader`] /
+/// [`DataWriter`] for every modality by delegating to the underlying
+/// handler, so any pipeline component can read from / write to a
+/// codec-backed source through the same traits the toolkit bounds on.
+///
+/// [`DataReader`]: veil_core::modality::DataReader
+/// [`DataWriter`]: veil_core::modality::DataWriter
 pub struct DocumentHandle<M: Modality> {
     format_id: FormatId,
     handler: Box<dyn DynHandler<M>>,
@@ -120,30 +128,31 @@ impl<M: Modality> DocumentHandle<M> {
     /// # Errors
     ///
     /// Propagates the handler's decode error.
-    pub async fn next_chunk(
-        &mut self,
-    ) -> Result<Option<super::Chunk<M>>, veil_core::Error> {
+    pub async fn next_chunk(&mut self) -> Result<Option<super::Chunk<M>>, veil_core::Error> {
         self.handler.next_chunk().await
     }
 
-    /// Serialize the current handler content back to
-    /// [`ContentData`](crate::content::ContentData).
+    /// Serialize the current handler content back to [`ContentData`].
     ///
     /// # Errors
     ///
     /// Returns an error when the in-memory representation cannot be
     /// re-encoded.
+    ///
+    /// [`ContentData`]: crate::content::ContentData
     pub fn encode(&self) -> Result<crate::content::ContentData, veil_core::Error> {
         self.handler.encode()
     }
 
     /// Translate a value-range inside a chunk's decoded payload back to a
     /// source-coordinate `M::Location`, or `None` when it has no source
-    /// pre-image. See [`Handler::lift_chunk`](crate::Handler::lift_chunk).
+    /// pre-image. See [`Handler::lift_chunk`].
+    ///
+    /// [`Handler::lift_chunk`]: crate::Handler::lift_chunk
     pub fn lift_chunk(
         &self,
         chunk: &super::Chunk<M>,
-        value_range: std::ops::Range<usize>,
+        value_range: Range<usize>,
     ) -> Option<M::Location> {
         self.handler.lift_chunk(chunk, value_range)
     }

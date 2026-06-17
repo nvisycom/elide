@@ -19,16 +19,18 @@ pub enum LanguageProvenance {
 /// The language of a piece of content, with how it was determined.
 ///
 /// Either a detection backend identified the language (with an optional
-/// confidence), or the caller asserted it outright — the
-/// [`provenance`](Self::provenance) field records which. Recognizers
-/// scoped to a language consult this to decide whether to run.
+/// confidence), or the caller asserted it outright — the [`provenance`]
+/// field records which. Recognizers scoped to a language consult this to
+/// decide whether to run.
+///
+/// [`provenance`]: Self::provenance
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LanguageDetection {
     /// The detected language.
     pub language: LanguageTag,
-    /// Optional confidence score. `None` when the backend doesn't
-    /// expose one.
+    /// Optional confidence score. `None` when the backend doesn't expose
+    /// one.
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "Option::is_none")

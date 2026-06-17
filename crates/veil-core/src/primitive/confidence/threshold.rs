@@ -22,9 +22,9 @@ pub struct ConfidenceThreshold(f32);
 impl ConfidenceThreshold {
     /// A sensible default cutoff, `0.35`.
     ///
-    /// Mirrors Presidio's default acceptance level — low enough to
-    /// retain weak-but-plausible detections for a later layer to
-    /// confirm, high enough to drop near-noise.
+    /// Mirrors Presidio's default acceptance level — low enough to retain
+    /// weak-but-plausible detections for a later layer to confirm, high
+    /// enough to drop near-noise.
     pub const BASELINE: Self = Self(0.35);
     /// The maximum threshold, `1.0` — accepts only full confidence.
     pub const MAX: Self = Self(1.0);

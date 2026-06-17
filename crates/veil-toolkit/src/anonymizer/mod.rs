@@ -1,10 +1,13 @@
 //! The [`Anonymizer`] — the "hide" engine.
 //!
-//! The redaction counterpart to [`Analyzer`](crate::Analyzer):
-//! a label→operator map plus an [`anonymize`](Anonymizer::anonymize)
-//! entry point that, for each entity, picks the operator for its label
-//! and computes a [`Replacement`](veil_core::modality::Modality::Replacement),
-//! producing a [`Redactions`] batch for a codec to apply.
+//! The redaction counterpart to [`Analyzer`]: a label→operator map plus
+//! an [`anonymize`] entry point that, for each entity, picks the operator
+//! for its label and computes a [`Replacement`], producing a
+//! [`Redactions`] batch for a codec to apply.
+//!
+//! [`Analyzer`]: crate::Analyzer
+//! [`anonymize`]: Anonymizer::anonymize
+//! [`Replacement`]: veil_core::modality::Modality::Replacement
 
 mod dyn_operator;
 pub mod operators;
@@ -21,10 +24,9 @@ use self::registry::OperatorRegistry;
 /// its replacement.
 ///
 /// Generic over the [`Modality`] `M`. Operators are mapped to labels
-/// with [`with_operator`](Anonymizer::with_operator); an optional
-/// [`with_fallback`](Anonymizer::with_fallback) covers unmapped labels.
-/// [`anonymize`](Anonymizer::anonymize) resolves and runs the operators,
-/// returning the [`Redactions`] batch.
+/// with [`with_operator`]; an optional [`with_fallback`] covers unmapped
+/// labels. [`anonymize`] resolves and runs the operators, returning the
+/// [`Redactions`] batch.
 ///
 /// ```ignore
 /// let redactions = Anonymizer::new()
@@ -34,6 +36,10 @@ use self::registry::OperatorRegistry;
 ///     .anonymize(&entities, &data)
 ///     .await?;
 /// ```
+///
+/// [`with_operator`]: Anonymizer::with_operator
+/// [`with_fallback`]: Anonymizer::with_fallback
+/// [`anonymize`]: Anonymizer::anonymize
 pub struct Anonymizer<M: Modality> {
     operators: OperatorRegistry<M>,
 }

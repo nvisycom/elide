@@ -4,8 +4,10 @@
 //! Text nodes, every element attribute, and HTML comments are emitted as
 //! items. Attribute values pass through verbatim (a `mailto:` URL has its
 //! email matched in place). `<script>` / `<style>` bodies follow the
-//! loader's [`script_policy`](HtmlLoader::script_policy) /
-//! [`style_policy`](HtmlLoader::style_policy).
+//! loader's [`script_policy`] / [`style_policy`].
+//!
+//! [`script_policy`]: HtmlLoader::script_policy
+//! [`style_policy`]: HtmlLoader::style_policy
 
 use ego_tree::NodeRef;
 use scraper::Html;
@@ -13,8 +15,10 @@ use scraper::node::Node;
 use veil_core::Error;
 use veil_core::modality::text::Text;
 
-use super::html_handler::{ElementTarget, FORMAT_ID, HtmlAddress, HtmlEncoder, HtmlHandler, HtmlItem};
 use super::MarkupHandler;
+use super::html_handler::{
+    ElementTarget, FORMAT_ID, HtmlAddress, HtmlEncoder, HtmlHandler, HtmlItem,
+};
 use crate::Loader;
 use crate::content::ContentData;
 
@@ -322,12 +326,16 @@ mod tests {
         );
         h.write_at(rs).await.unwrap();
         let out = encoded(&h);
-        assert!(out.contains("<!-- [email] -->"), "comment not rewritten: {out}");
+        assert!(
+            out.contains("<!-- [email] -->"),
+            "comment not rewritten: {out}"
+        );
     }
 
     #[tokio::test]
     async fn script_scan_text_policy_emits_body() {
-        let raw = r#"<html><head></head><body><script>var a="alice@example.com";</script></body></html>"#;
+        let raw =
+            r#"<html><head></head><body><script>var a="alice@example.com";</script></body></html>"#;
         let loader = HtmlLoader {
             script_policy: ScriptPolicy::ScanText,
             ..HtmlLoader::default()

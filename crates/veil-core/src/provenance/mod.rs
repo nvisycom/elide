@@ -26,11 +26,13 @@ use crate::primitive::Confidence;
 /// every recognizer keeps its own recognition event with its location
 /// and score.
 ///
-/// The events form a confidence chain — each event's
-/// [`after`](Event::after) is the next's [`before`](Event::before) — so
-/// the final confidence and its full history are always recoverable.
+/// The events form a confidence chain — each event's [`after`] is the
+/// next's [`before`] — so the final confidence and its full history are
+/// always recoverable.
 ///
 /// [`Entity`]: crate::entity::Entity
+/// [`after`]: Event::after
+/// [`before`]: Event::before
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
@@ -65,8 +67,8 @@ impl<M: Modality> Provenance<M> {
         self.events.first().map(|e| e.after)
     }
 
-    /// The confidence after the most recent event — the entity's
-    /// effective confidence.
+    /// The confidence after the most recent event — the entity's effective
+    /// confidence.
     pub fn final_confidence(&self) -> Option<Confidence> {
         self.events.last().map(|e| e.after)
     }

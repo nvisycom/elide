@@ -1,9 +1,10 @@
 //! Text modality: concrete format implementations that produce text
 //! handles (TXT, JSON, Markdown, HTML). The per-modality capability
-//! surface lives on the generic [`Handler<Text>`](crate::Handler) trait;
-//! replacements written during redaction use
-//! [`TextReplacement`](veil_core::modality::text::TextReplacement).
-
+//! surface lives on the generic [`Handler<Text>`] trait; replacements
+//! written during redaction use [`TextReplacement`].
+//!
+//! [`Handler<Text>`]: crate::Handler
+//! [`TextReplacement`]: veil_core::modality::text::TextReplacement
 
 #[cfg(feature = "json")]
 mod json_handler;

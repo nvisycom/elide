@@ -1,5 +1,7 @@
 //! The crate-private [`LayerPipeline`] — an ordered sequence of
-//! [`Layer`]s, owned and run by an [`Analyzer`](crate::Analyzer).
+//! [`Layer`]s, owned and run by an [`Analyzer`].
+//!
+//! [`Analyzer`]: crate::Analyzer
 
 use veil_core::entity::Entity;
 use veil_core::modality::Modality;
@@ -12,9 +14,11 @@ use super::Layer;
 /// accumulated and reported via tracing. Holds boxed layers so a
 /// pipeline can mix concretely-typed stages in one list.
 ///
-/// Crate-private: consumers compose layers via
-/// [`Analyzer::with_layer`](crate::Analyzer::with_layer), which forwards
-/// here. The pipeline itself is never named in the public API.
+/// Crate-private: consumers compose layers via [`Analyzer::with_layer`],
+/// which forwards here. The pipeline itself is never named in the public
+/// API.
+///
+/// [`Analyzer::with_layer`]: crate::Analyzer::with_layer
 pub(crate) struct LayerPipeline<M: Modality> {
     layers: Vec<Box<dyn Layer<M>>>,
 }

@@ -1,10 +1,12 @@
 //! The [`Analyzer`] — the "find" engine.
 //!
 //! Wraps recognizers and a deduplication pipeline into one
-//! Presidio-style entry point. Recognizers and
-//! [`Layer`](crate::deduplication::Layer)s are added with the `with_*`
-//! builders; [`analyze`](Analyzer::analyze) runs the recognizers, then
-//! the layers, returning a clean entity set.
+//! Presidio-style entry point. Recognizers and [`Layer`]s are added with
+//! the `with_*` builders; [`analyze`] runs the recognizers, then the
+//! layers, returning a clean entity set.
+//!
+//! [`Layer`]: crate::deduplication::Layer
+//! [`analyze`]: Analyzer::analyze
 
 mod dyn_recognizer;
 mod registry;
@@ -20,9 +22,8 @@ use crate::deduplication::{Layer, LayerPipeline};
 /// The find engine: recognizers + deduplication, in one call.
 ///
 /// Generic over the [`Modality`] `M`. Recognizers are added with
-/// [`with_recognizer`](Analyzer::with_recognizer) and deduplication
-/// stages with [`with_layer`](Analyzer::with_layer), in the order they
-/// should run. [`analyze`](Analyzer::analyze) runs detection, then every
+/// [`with_recognizer`] and deduplication stages with [`with_layer`], in
+/// the order they should run. [`analyze`] runs detection, then every
 /// layer, and returns the reconciled entities.
 ///
 /// ```ignore
@@ -35,6 +36,10 @@ use crate::deduplication::{Layer, LayerPipeline};
 ///     .analyze(input)
 ///     .await?;
 /// ```
+///
+/// [`with_recognizer`]: Analyzer::with_recognizer
+/// [`with_layer`]: Analyzer::with_layer
+/// [`analyze`]: Analyzer::analyze
 pub struct Analyzer<M: Modality> {
     recognizers: RecognizerRegistry,
     pipeline: LayerPipeline<M>,

@@ -3,10 +3,12 @@
 //! [`RedactableItem`] stream back into HTML.
 //!
 //! Streaming, reading, and redaction live on the shared
-//! [`MarkupHandler`](super::MarkupHandler); this side supplies only the
-//! DOM re-serializer (the `scraper` parser lives in the loader). The
-//! [`EncodePlan`] buckets the item stream by kind so a single DOM walk
-//! resolves each ordinal in O(1).
+//! [`MarkupHandler`]; this side supplies only the DOM re-serializer (the
+//! `scraper` parser lives in the loader). The [`EncodePlan`] buckets the
+//! item stream by kind so a single DOM walk resolves each ordinal in
+//! O(1).
+//!
+//! [`MarkupHandler`]: super::MarkupHandler
 
 use ego_tree::NodeId;
 use scraper::Html;

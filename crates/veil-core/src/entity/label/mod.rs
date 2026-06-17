@@ -18,29 +18,31 @@ use serde::{Deserialize, Serialize};
 pub use self::catalog::LabelCatalog;
 pub use self::reference::LabelRef;
 
-/// A kind of sensitive information: a name, an optional description,
-/// and zero or more tags.
+/// A kind of sensitive information: a name, an optional description, and
+/// zero or more tags.
 ///
 /// Names are conventionally `SCREAMING_SNAKE_CASE` (`"PHONE_NUMBER"`),
 /// matching Presidio, but this is convention, not enforcement. The
-/// taxonomy is open: a [`Label`] can be minted for any name a
-/// recognizer or configuration needs.
+/// taxonomy is open: a [`Label`] can be minted for any name a recognizer
+/// or configuration needs.
 ///
 /// # Identity
 ///
-/// Labels are identified by [`name`](Label::name); selectors match by
-/// name. Note that derived equality is *structural* — two labels with
-/// the same name but different descriptions or tags are not `==`. Code
-/// that wants name-only equality should compare [`name`](Label::name)
-/// explicitly.
+/// Labels are identified by [`name`]; selectors match by name. Note that
+/// derived equality is *structural* — two labels with the same name but
+/// different descriptions or tags are not `==`. Code that wants
+/// name-only equality should compare [`name`] explicitly.
 ///
 /// # Tags
 ///
-/// [`tags`](Label::tags) is a free-form list of short identifiers policy
-/// selectors can match against. Built-in labels carry category tags
+/// [`tags`] is a free-form list of short identifiers policy selectors
+/// can match against. Built-in labels carry category tags
 /// (`personal_identity`, `contact_info`, `financial`, …) plus
 /// cross-cutting tags where applicable (`pii`, `phi`, `pci`). Custom
 /// labels can ship with zero tags.
+///
+/// [`name`]: Label::name
+/// [`tags`]: Label::tags
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Label {
@@ -126,9 +128,11 @@ impl Label {
 
     /// A lightweight reference to this label, by name.
     ///
-    /// Alias for [`as_ref`](Label::as_ref) with an explicit name, for
-    /// call sites where method resolution against the [`AsRef`] trait
-    /// would otherwise be ambiguous.
+    /// Alias for [`as_ref`] with an explicit name, for call sites where
+    /// method resolution against the [`AsRef`] trait would otherwise be
+    /// ambiguous.
+    ///
+    /// [`as_ref`]: Label::as_ref
     #[must_use]
     pub fn label_ref(&self) -> LabelRef {
         self.as_ref()

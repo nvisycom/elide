@@ -5,19 +5,22 @@
 //! the same streaming/redaction bookkeeping over them. This module holds
 //! that neutral core:
 //!
-//! - [`RedactableItem<A>`](RedactableItem) — one addressable unit (its
-//!   `value` plus an encoder-private address `A`), parser-agnostic.
+//! - [`RedactableItem<A>`] — one addressable unit (its `value` plus an
+//!   encoder-private address `A`), parser-agnostic.
 //! - [`MarkupHandler`] — the [`Handler`] machinery over a
 //!   `Vec<RedactableItem<A>>`: cumulative offsets, `next_chunk`, random
 //!   read, batch redact, and `lift_chunk`. It never inspects the address.
 //!   Re-serialization is delegated to a format-specific [`MarkupEncoder`],
-//!   which also chooses the [`Address`](MarkupEncoder::Address) type.
+//!   which also chooses the [`Address`] type.
 //!
 //! A concrete format (e.g. the `html_loader` / `html_handler` pair in
 //! this module) supplies a parser that produces the item stream and a
 //! [`MarkupEncoder`] that splices mutated values back into its native
 //! tree; everything between is shared. A future XML format would add an
 //! `xml_loader` / `xml_handler` pair alongside.
+//!
+//! [`RedactableItem<A>`]: RedactableItem
+//! [`Address`]: MarkupEncoder::Address
 
 #[cfg(feature = "html")]
 mod html_handler;
@@ -30,10 +33,10 @@ mod xml_loader;
 
 use std::ops::Range;
 
+use veil_core::Error;
 use veil_core::modality::text::{Text, TextData, TextLocation};
 use veil_core::modality::{DataReader, DataWriter};
 use veil_core::redaction::Redactions;
-use veil_core::Error;
 
 #[cfg(feature = "html")]
 pub use self::html_handler::{HtmlEncoder, HtmlHandler, format as html_format};
@@ -72,9 +75,11 @@ pub struct RedactableItem<A> {
 /// native bytes.
 ///
 /// A markup format implements this over its own parser/serializer: it
-/// chooses an [`Address`](MarkupEncoder::Address) type for locating items,
-/// and `encode` splices each item's current `value` back at its address
-/// and emits. [`MarkupHandler`] owns everything else.
+/// chooses an [`Address`] type for locating items, and `encode` splices
+/// each item's current `value` back at its address and emits.
+/// [`MarkupHandler`] owns everything else.
+///
+/// [`Address`]: MarkupEncoder::Address
 pub trait MarkupEncoder: Send + Sync + 'static {
     /// The encoder-private addressing payload carried on each
     /// [`RedactableItem`] — e.g. an ordinal node index or a source span.

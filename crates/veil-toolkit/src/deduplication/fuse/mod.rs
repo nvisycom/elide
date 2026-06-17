@@ -27,8 +27,9 @@ pub struct FuseLayer<S, G> {
 
 impl<S> FuseLayer<S, SameLabelOverlap> {
     /// A fuse layer using `strategy` to combine and the default
-    /// same-label/overlap grouping. Swap the grouping with
-    /// [`with_group`](FuseLayer::with_group).
+    /// same-label/overlap grouping. Swap the grouping with [`with_group`].
+    ///
+    /// [`with_group`]: FuseLayer::with_group
     pub fn new(strategy: S) -> Self {
         Self {
             strategy,

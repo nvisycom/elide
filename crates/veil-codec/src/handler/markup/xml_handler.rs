@@ -1,6 +1,6 @@
 //! XML handler side: the [`XmlHandler`] type, its [`Format`] descriptor,
-//! and the [`XmlEncoder`] that re-serializes a mutated
-//! [`RedactableItem`](super::RedactableItem) stream back into XML.
+//! and the [`XmlEncoder`] that re-serializes a mutated [`RedactableItem`]
+//! stream back into XML.
 //!
 //! Unlike the HTML encoder (which rebuilds a DOM), the XML encoder
 //! preserves the document **verbatim**: it splices each item's current
@@ -9,6 +9,8 @@
 //! everything outside the redacted spans byte-identical. Splices apply
 //! right-to-left so an earlier edit's length delta never shifts a later
 //! span.
+//!
+//! [`RedactableItem`]: super::RedactableItem
 
 use std::ops::Range;
 
@@ -25,16 +27,19 @@ pub const FORMAT_ID: FormatId = FormatId::from_static("veil.text.xml");
 /// Handler type for loaded XML content.
 pub type XmlHandler = MarkupHandler<XmlEncoder>;
 
-/// An XML [`RedactableItem`](super::RedactableItem) addressed by the
-/// source byte span its `value` occupies in the original document.
+/// An XML [`RedactableItem`] addressed by the source byte span its
+/// `value` occupies in the original document.
+///
+/// [`RedactableItem`]: super::RedactableItem
 pub(super) type XmlItem = RedactableItem<XmlSpan>;
 
 /// The source byte span (in the retained raw document) that a
-/// [`RedactableItem`](super::RedactableItem)'s value occupies — the
-/// region the encoder overwrites. These are the *inner* bytes: a text
-/// node's text, an attribute value between the quotes, a comment body
-/// between `<!--` and `-->`, a CDATA payload between `<![CDATA[` and
-/// `]]>`.
+/// [`RedactableItem`]'s value occupies — the region the encoder
+/// overwrites. These are the *inner* bytes: a text node's text, an
+/// attribute value between the quotes, a comment body between `<!--` and
+/// `-->`, a CDATA payload between `<![CDATA[` and `]]>`.
+///
+/// [`RedactableItem`]: super::RedactableItem
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct XmlSpan(pub(super) Range<usize>);
 
@@ -74,7 +79,10 @@ impl MarkupEncoder for XmlEncoder {
             if end > out.len() || start > end {
                 return Err(Error::new(
                     ErrorKind::Validation,
-                    format!("xml splice span {start}..{end} out of bounds (len {})", out.len()),
+                    format!(
+                        "xml splice span {start}..{end} out of bounds (len {})",
+                        out.len()
+                    ),
                 ));
             }
             if !out.is_char_boundary(start) || !out.is_char_boundary(end) {

@@ -9,12 +9,13 @@ use uuid::Uuid;
 
 /// A lightweight, stable reference to an [`Entity`] by its identity.
 ///
-/// Carries only the entity's [`id`](crate::entity::Entity::id), so other
-/// records can point at an entity without duplicating it. Mirrors
-/// [`LabelRef`](crate::entity::LabelRef): the full entity is resolved
-/// elsewhere, the reference is cheap to copy and store.
+/// Carries only the entity's [`id`], so other records can point at an
+/// entity without duplicating it. Mirrors [`LabelRef`]: the full entity
+/// is resolved elsewhere, the reference is cheap to copy and store.
 ///
 /// [`Entity`]: crate::entity::Entity
+/// [`id`]: crate::entity::Entity::id
+/// [`LabelRef`]: crate::entity::LabelRef
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]

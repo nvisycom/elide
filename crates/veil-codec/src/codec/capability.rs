@@ -4,15 +4,17 @@
 //! - [`Handler<M>`] — per-modality capability trait. It *is* a
 //!   [`DataReader`] + [`DataWriter`] (the random-access read / write
 //!   surface, shared with the rest of the workspace), and adds the
-//!   codec-specific bits on top: identify and serialise
-//!   ([`format`](Handler::format), [`encode`](Handler::encode)), stream
-//!   chunks ([`next_chunk`](Handler::next_chunk)), and lift recognizer
-//!   offsets back to source coordinates
-//!   ([`lift_chunk`](Handler::lift_chunk)).
+//!   codec-specific bits on top: identify and serialise ([`format`],
+//!   [`encode`]), stream chunks ([`next_chunk`]), and lift recognizer
+//!   offsets back to source coordinates ([`lift_chunk`]).
 //! - [`Chunk<M>`] — one decoded unit yielded by `next_chunk`.
 //!
 //! [`DataReader`]: veil_core::modality::DataReader
 //! [`DataWriter`]: veil_core::modality::DataWriter
+//! [`format`]: Handler::format
+//! [`encode`]: Handler::encode
+//! [`next_chunk`]: Handler::next_chunk
+//! [`lift_chunk`]: Handler::lift_chunk
 
 use std::future::Future;
 use std::ops::Range;
@@ -48,15 +50,13 @@ pub struct Chunk<M: Modality> {
 
 /// Per-modality capability trait every format handler implements.
 ///
-/// A `Handler` *is* a [`DataReader`](veil_core::modality::DataReader) +
-/// [`DataWriter`](veil_core::modality::DataWriter): random-access read
+/// A `Handler` *is* a [`DataReader`] + [`DataWriter`]: random-access read
 /// (`read_at`) and batch redaction (`write_at`) come from those shared
 /// traits, so a codec-backed document plugs straight into anything that
 /// bounds on them (the toolkit's anonymizer, say). On top of that base,
 /// `Handler` adds the codec-specific surface — identify and serialise
-/// ([`format`](Handler::format), [`encode`](Handler::encode)), stream
-/// chunks ([`next_chunk`](Handler::next_chunk)), and lift recognizer
-/// offsets back to source coordinates ([`lift_chunk`](Handler::lift_chunk)).
+/// ([`format`], [`encode`]), stream chunks ([`next_chunk`]), and lift
+/// recognizer offsets back to source coordinates ([`lift_chunk`]).
 ///
 /// The handler owns the streaming cursor — concurrent iteration of the
 /// same handle is not supported (only one `&mut self`).
@@ -65,6 +65,13 @@ pub struct Chunk<M: Modality> {
 /// handlers behind a crate-private object-safe bridge that boxes those
 /// futures, so the public surface stays allocation-free for direct
 /// callers.
+///
+/// [`DataReader`]: veil_core::modality::DataReader
+/// [`DataWriter`]: veil_core::modality::DataWriter
+/// [`format`]: Handler::format
+/// [`encode`]: Handler::encode
+/// [`next_chunk`]: Handler::next_chunk
+/// [`lift_chunk`]: Handler::lift_chunk
 pub trait Handler<M: Modality>: DataReader<M> + DataWriter<M> + Send + Sync + 'static {
     /// Stable id of the format this handler represents (e.g.
     /// `"veil.text.txt"`). Cheap to clone.

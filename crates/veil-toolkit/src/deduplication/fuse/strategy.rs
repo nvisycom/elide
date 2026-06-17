@@ -6,12 +6,14 @@ use veil_core::primitive::Confidence;
 
 /// How a group of co-located entities' confidences combine into one.
 ///
-/// A *type*, used as the `S` parameter of
-/// [`FuseLayer`](super::FuseLayer) — not a stringly-tagged enum. The
-/// crate ships the three below; a consumer can implement their own.
-/// [`name`](FusionStrategy::name) is recorded in the
-/// deduplication [`Event`](veil_core::provenance::Event) recorded on the
-/// fused entity.
+/// A *type*, used as the `S` parameter of [`FuseLayer`] — not a
+/// stringly-tagged enum. The crate ships the three below; a consumer can
+/// implement their own. [`name`] is recorded in the deduplication
+/// [`Event`] recorded on the fused entity.
+///
+/// [`FuseLayer`]: super::FuseLayer
+/// [`name`]: FusionStrategy::name
+/// [`Event`]: veil_core::provenance::Event
 pub trait FusionStrategy<M: Modality>: Send + Sync {
     /// Stable name of the strategy, recorded in the fusion's `Merge`.
     fn name(&self) -> &'static str;
@@ -46,7 +48,9 @@ impl<M: Modality> FusionStrategy<M> for MaxConfidence {
 /// the fused score is monotonic in the number of agreeing detectors and
 /// can exceed any single one. Per-recognizer reliability is *not* a
 /// fusion concern: scale individual recognizers' scores beforehand with
-/// a [`CalibrateLayer`](crate::deduplication::calibrate::CalibrateLayer).
+/// a [`CalibrateLayer`].
+///
+/// [`CalibrateLayer`]: crate::deduplication::calibrate::CalibrateLayer
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NoisyOr;
 

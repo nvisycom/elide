@@ -12,7 +12,9 @@ use super::{Label, LabelRef};
 ///
 /// Holds the authoritative definitions (names + descriptions) for a run.
 /// A [`LabelRef`] carried on a detection or entity is resolved back to
-/// its full [`Label`] with [`get`](LabelCatalog::get).
+/// its full [`Label`] with [`get`].
+///
+/// [`get`]: LabelCatalog::get
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
@@ -26,9 +28,11 @@ impl LabelCatalog {
 
     /// A catalog pre-populated with every built-in label.
     ///
-    /// Walks [`builtins::BUILT_INS`](super::builtins) and registers each
-    /// constant by name. Register custom labels alongside the built-ins
-    /// with [`insert`](LabelCatalog::insert).
+    /// Walks [`builtins::BUILT_INS`] and registers each constant by name.
+    /// Register custom labels alongside the built-ins with [`insert`].
+    ///
+    /// [`builtins::BUILT_INS`]: super::builtins
+    /// [`insert`]: LabelCatalog::insert
     pub fn with_builtins() -> Self {
         super::builtins::BUILT_INS
             .iter()
@@ -36,7 +40,8 @@ impl LabelCatalog {
             .collect()
     }
 
-    /// Insert a label, returning the previous definition for its name, if any.
+    /// Insert a label, returning the previous definition for its name, if
+    /// any.
     pub fn insert(&mut self, label: Label) -> Option<Label> {
         self.0.insert(label.name_owned(), label)
     }

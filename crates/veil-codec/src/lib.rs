@@ -6,16 +6,18 @@
 //! A codec turns raw bytes into a streamable, redactable
 //! [`DocumentHandle`] and back. The [`CodecRegistry`] resolves an
 //! extension or content type to a [`Format`], whose [`Loader`] decodes
-//! bytes into a [`Handler`] for some [`Modality`](veil_core::modality::Modality).
+//! bytes into a [`Handler`] for some [`Modality`].
 //!
 //! Modality erasure is *open*: a decoded handle is returned as an
 //! [`UntypedDocumentHandle`] and recovered to the concrete
-//! [`DocumentHandle<M>`] with [`UntypedDocumentHandle::into`], a
-//! `TypeId` downcast that works for any modality — built-in or custom —
-//! with no central enum of kinds.
+//! [`DocumentHandle<M>`] with [`UntypedDocumentHandle::into`], a `TypeId`
+//! downcast that works for any modality — built-in or custom — with no
+//! central enum of kinds.
+//!
+//! [`Modality`]: veil_core::modality::Modality
 
-pub mod content;
 mod codec;
+pub mod content;
 pub mod handler;
 
 pub use self::codec::{
@@ -72,10 +74,11 @@ mod tests {
         use content::ContentData;
 
         let reg = CodecRegistry::with_builtin();
-        assert!(reg
-            .decode_content(ContentData::from_text("x"))
-            .await
-            .is_err());
+        assert!(
+            reg.decode_content(ContentData::from_text("x"))
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]

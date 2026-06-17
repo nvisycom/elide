@@ -13,8 +13,8 @@ use veil_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
 use veil_core::modality::{DataReader, DataWriter};
 use veil_core::redaction::Redactions;
 
-use crate::handler::redact;
 use crate::content::ContentData;
+use crate::handler::redact;
 use crate::{Chunk, Format, FormatId, Handler};
 
 /// Stable [`FormatId`] for the plain-text codec.
@@ -33,9 +33,8 @@ pub fn format() -> Format {
 /// `line_starts` is a cumulative-offset index maintained alongside
 /// `lines`: `line_starts[i]` is the byte position of line `i` in the
 /// serialized output, and `line_starts[lines.len()]` is the total-length
-/// sentinel. Random-access `read_at` / `write_at` (from
-/// [`DataReader`] / [`DataWriter`]) resolve a byte offset to a line in
-/// `O(log N)`.
+/// sentinel. Random-access `read_at` / `write_at` (from [`DataReader`] /
+/// [`DataWriter`]) resolve a byte offset to a line in `O(log N)`.
 #[derive(Debug)]
 pub struct TxtHandler {
     lines: Vec<String>,
@@ -107,9 +106,7 @@ impl DataReader<Text> for TxtHandler {
         }
         let local_start = location.start - line_start;
         let local_end = location.end - line_start;
-        Ok(self.lines[i]
-            .get(local_start..local_end)
-            .map(TextData::new))
+        Ok(self.lines[i].get(local_start..local_end).map(TextData::new))
     }
 }
 

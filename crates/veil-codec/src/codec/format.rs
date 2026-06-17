@@ -16,8 +16,8 @@ use std::sync::Arc;
 use veil_core::Error;
 use veil_core::modality::Modality;
 
-use super::loader::{ErasedLoader, erase};
 use super::Loader;
+use super::loader::{ErasedLoader, erase};
 use crate::content::ContentData;
 
 /// Stable identifier for a registered codec format. Open string
@@ -81,14 +81,17 @@ pub struct Format {
 
 impl Format {
     /// Build a [`Format`] for modality `M`. The modality name is taken
-    /// from [`M::NAME`](Modality::NAME) and the loader is erased
-    /// internally — neither needs naming at the call site.
+    /// from [`M::NAME`] and the loader is erased internally — neither
+    /// needs naming at the call site.
     ///
     /// Extensions and content types default to empty; chain
-    /// [`with_extensions`](Self::with_extensions) /
-    /// [`with_content_types`](Self::with_content_types) to declare the
-    /// lookup keys the [`CodecRegistry`](super::CodecRegistry) indexes
-    /// this format under.
+    /// [`with_extensions`] / [`with_content_types`] to declare the lookup
+    /// keys the [`CodecRegistry`] indexes this format under.
+    ///
+    /// [`M::NAME`]: Modality::NAME
+    /// [`with_extensions`]: Self::with_extensions
+    /// [`with_content_types`]: Self::with_content_types
+    /// [`CodecRegistry`]: super::CodecRegistry
     pub fn new<M, L>(id: FormatId, loader: L) -> Self
     where
         M: Modality,
@@ -152,11 +155,13 @@ impl Format {
 
     /// Decode raw content through this format's loader, returning the
     /// erased handle. Equivalent to resolving the format yourself and
-    /// calling [`CodecRegistry::decode`](super::CodecRegistry::decode).
+    /// calling [`CodecRegistry::decode`].
     ///
     /// # Errors
     ///
     /// Propagates the loader's decode error.
+    ///
+    /// [`CodecRegistry::decode`]: super::CodecRegistry::decode
     pub async fn decode(
         &self,
         content: ContentData,
