@@ -16,13 +16,14 @@ orchestrating runtime and gateway server live in separate projects.
 > change without notice between releases. Pin a specific commit if you
 > depend on this in production.
 
-## Crates
+## Features
 
-- **veil-core:** Shared domain model, traits, and errors.
-- **veil-context:** Keyword-based confidence boosting for detected entities.
-- **veil-pattern:** Regex and dictionary recognizers for PII/PHI.
-- **veil-codec:** Reading and redacting documents across file formats.
-- **veil-toolkit:** Composable recognition, deduplication, and redaction components.
+- **Pattern detection**: regex, dictionary, and checksum recognizers find structured PII and PHI across many common formats and jurisdictions
+- **Context-aware scoring**: nearby keywords lift the confidence of ambiguous matches, so weak findings clear the threshold only when their surroundings support them
+- **Deduplication**: overlapping findings from multiple recognizers reconcile into a single set of entities, with conflict resolution and confidence calibration
+- **Redaction operators**: mask, replace, hash, or encrypt each detected entity, with the reversible options recording what is needed to restore it
+- **Format codecs**: read, edit, and write documents (plain text, JSON, HTML, XML, and more) with faithful round-tripping that changes only the redacted parts
+- **Provenance-first model**: every entity carries its full audit trail of how it was found, scored, and hidden
 
 ## Documentation
 
