@@ -1,11 +1,11 @@
 //! Assembles the redaction side of the pipeline: an [`Anonymizer`] that
 //! maps a redaction operator to each label.
 
-use veil_core::entity::builtins;
-use veil_core::modality::text::Text;
+use elide_core::entity::builtins;
+use elide_core::modality::text::Text;
 
-use veil_toolkit::operators::{Mask, Redact, Replace};
-use veil_toolkit::Anonymizer;
+use elide::operators::{Mask, Redact, Replace};
+use elide::Anonymizer;
 
 /// Build an anonymizer that picks a redaction strategy per label.
 pub fn build_anonymizer() -> Anonymizer<Text> {

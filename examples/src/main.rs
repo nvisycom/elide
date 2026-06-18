@@ -17,21 +17,21 @@
 //!    applies the replacements back into the document, and we re-encode
 //!    and print the redacted text.
 //!
-//! Run with: `cargo run -p veil-examples --bin redact-txt`.
+//! Run with: `cargo run -p elide-examples --bin redact-txt`.
 //!
-//! [`DocumentHandle<Text>`]: veil_codec::DocumentHandle
-//! [`Analyzer::analyze_stream`]: veil_toolkit::Analyzer::analyze_stream
-//! [`Anonymizer::anonymize`]: veil_toolkit::Anonymizer::anonymize
-//! [`PatternRecognizer`]: veil_pattern::PatternRecognizer
-//! [`NerRecognizer`]: veil_ner::NerRecognizer
-//! [`LlmRecognizer`]: veil_llm::LlmRecognizer
+//! [`DocumentHandle<Text>`]: elide_codec::DocumentHandle
+//! [`Analyzer::analyze_stream`]: elide::Analyzer::analyze_stream
+//! [`Anonymizer::anonymize`]: elide::Anonymizer::anonymize
+//! [`PatternRecognizer`]: elide_pattern::PatternRecognizer
+//! [`NerRecognizer`]: elide_ner::NerRecognizer
+//! [`LlmRecognizer`]: elide_llm::LlmRecognizer
 
 mod analyzer;
 mod anonymizer;
 
-use veil_codec::CodecRegistry;
-use veil_core::Result;
-use veil_core::modality::text::Text;
+use elide_codec::CodecRegistry;
+use elide_core::Result;
+use elide_core::modality::text::Text;
 
 /// Sample document baked into the binary so the example is self-contained.
 const SAMPLE: &str = include_str!("../data/sample.txt");

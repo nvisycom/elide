@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for your interest in contributing to Veil.
+Thank you for your interest in contributing to elide.
 
 ## Requirements
 
@@ -10,8 +10,8 @@ Thank you for your interest in contributing to Veil.
 ## Setup
 
 ```bash
-git clone https://github.com/nvisycom/veil.git
-cd veil
+git clone https://github.com/nvisycom/elide.git
+cd elide
 cargo build
 ```
 

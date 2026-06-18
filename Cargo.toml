@@ -3,13 +3,13 @@
 [workspace]
 resolver = "3"
 members = [
-    "./crates/veil-core",
-    "./crates/veil-context",
-    "./crates/veil-pattern",
-    "./crates/veil-ner",
-    "./crates/veil-llm",
-    "./crates/veil-codec",
-    "./crates/veil-toolkit",
+    "./crates/elide-core",
+    "./crates/elide-context",
+    "./crates/elide-pattern",
+    "./crates/elide-ner",
+    "./crates/elide-llm",
+    "./crates/elide-codec",
+    "./crates/elide",
     "./examples",
 ]
 
@@ -21,9 +21,9 @@ license = "Apache-2.0"
 publish = false
 
 authors = ["nvisy <contact@nvisy.com>"]
-repository = "https://github.com/nvisycom/veil"
-homepage = "https://github.com/nvisycom/veil"
-documentation = "https://docs.rs/veil-toolkit"
+repository = "https://github.com/nvisycom/elide"
+homepage = "https://github.com/nvisycom/elide"
+documentation = "https://docs.rs/elide"
 
 [workspace.dependencies]
 # Default features are disabled for certain dependencies to allow
@@ -32,13 +32,13 @@ documentation = "https://docs.rs/veil-toolkit"
 # See for more details: https://github.com/rust-lang/cargo/issues/11329
 
 # Internal crates
-veil-core = { path = "./crates/veil-core", version = "0.1.0" }
-veil-context = { path = "./crates/veil-context", version = "0.1.0" }
-veil-pattern = { path = "./crates/veil-pattern", version = "0.1.0" }
-veil-ner = { path = "./crates/veil-ner", version = "0.1.0" }
-veil-llm = { path = "./crates/veil-llm", version = "0.1.0" }
-veil-codec = { path = "./crates/veil-codec", version = "0.1.0" }
-veil-toolkit = { path = "./crates/veil-toolkit", version = "0.1.0" }
+elide-core = { path = "./crates/elide-core", version = "0.1.0" }
+elide-context = { path = "./crates/elide-context", version = "0.1.0" }
+elide-pattern = { path = "./crates/elide-pattern", version = "0.1.0" }
+elide-ner = { path = "./crates/elide-ner", version = "0.1.0" }
+elide-llm = { path = "./crates/elide-llm", version = "0.1.0" }
+elide-codec = { path = "./crates/elide-codec", version = "0.1.0" }
+elide = { path = "./crates/elide", version = "0.1.0" }
 
 # (De)serialization
 serde = { version = "1.0", features = ["derive"] }

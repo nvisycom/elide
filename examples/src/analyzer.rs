@@ -1,19 +1,19 @@
 //! Assembles the detection side of the pipeline: a three-recognizer
 //! [`Analyzer`] plus its deduplication layers.
 
-use veil_core::Result;
-use veil_core::entity::builtins;
-use veil_core::modality::text::Text;
-use veil_core::primitive::ConfidenceThreshold;
+use elide_core::Result;
+use elide_core::entity::builtins;
+use elide_core::modality::text::Text;
+use elide_core::primitive::ConfidenceThreshold;
 
-use veil_llm::LlmRecognizer;
-use veil_ner::NerRecognizer;
-use veil_pattern::PatternRecognizer;
+use elide_llm::LlmRecognizer;
+use elide_ner::NerRecognizer;
+use elide_pattern::PatternRecognizer;
 
-use veil_toolkit::Analyzer;
-use veil_toolkit::deduplication::filter::FilterLayer;
-use veil_toolkit::deduplication::fuse::{FuseLayer, MaxConfidence};
-use veil_toolkit::deduplication::resolve::{HighestConfidence, ResolveLayer};
+use elide::Analyzer;
+use elide::deduplication::filter::FilterLayer;
+use elide::deduplication::fuse::{FuseLayer, MaxConfidence};
+use elide::deduplication::resolve::{HighestConfidence, ResolveLayer};
 
 /// Build the three-recognizer analyzer plus its deduplication pipeline.
 pub fn build_analyzer() -> Result<Analyzer<Text>> {

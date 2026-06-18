@@ -9,11 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Initial workspace scaffolding for the Veil toolkit
+- Initial workspace scaffolding for the elide toolkit
 
 ### Crates
 
-- **veil-core:** Domain types, traits, and errors
-- **veil-toolkit:** Composable recognizer/redaction registries, dedup layers, and validation checks
+- **elide-core:** Domain types, traits, and errors
+- **elide:** Composable recognizer/redaction registries, dedup layers, and validation checks
 
-[Unreleased]: https://github.com/nvisycom/veil/commits/main
+[Unreleased]: https://github.com/nvisycom/elide/commits/main

@@ -622,6 +622,130 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
+name = "elide"
+version = "0.1.0"
+dependencies = [
+ "elide-core",
+ "hex",
+ "sha2 0.11.0",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "elide-codec"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "ego-tree",
+ "elide-core",
+ "hex",
+ "quick-xml",
+ "scraper",
+ "serde_json",
+ "sha2 0.11.0",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "elide-context"
+version = "0.1.0"
+dependencies = [
+ "elide-core",
+ "hipstr",
+ "tokio",
+ "unicode-segmentation",
+]
+
+[[package]]
+name = "elide-core"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "celes",
+ "derive_builder",
+ "hipstr",
+ "jiff",
+ "oxilangtag",
+ "serde",
+ "type-map",
+ "uuid",
+]
+
+[[package]]
+name = "elide-examples"
+version = "0.1.0"
+dependencies = [
+ "elide",
+ "elide-codec",
+ "elide-core",
+ "elide-llm",
+ "elide-ner",
+ "elide-pattern",
+ "tokio",
+]
+
+[[package]]
+name = "elide-llm"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64",
+ "derive_builder",
+ "derive_more",
+ "elide-core",
+ "humantime-serde",
+ "minijinja",
+ "reqwest-middleware",
+ "reqwest-retry",
+ "reqwest-tracing",
+ "rig",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "toml",
+ "tracing",
+ "unicode-normalization",
+]
+
+[[package]]
+name = "elide-ner"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "derive_builder",
+ "elide-core",
+ "lingua",
+ "serde",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "elide-pattern"
+version = "0.1.0"
+dependencies = [
+ "aho-corasick",
+ "async-trait",
+ "bs58",
+ "csv",
+ "derive_builder",
+ "derive_more",
+ "elide-context",
+ "elide-core",
+ "iban_validate",
+ "phonenumber",
+ "regex",
+ "serde",
+ "tokio",
+ "toml",
+]
+
+[[package]]
 name = "embedded-io"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3287,130 +3411,6 @@ name = "valuable"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
-
-[[package]]
-name = "veil-codec"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "ego-tree",
- "hex",
- "quick-xml",
- "scraper",
- "serde_json",
- "sha2 0.11.0",
- "tokio",
- "tracing",
- "veil-core",
-]
-
-[[package]]
-name = "veil-context"
-version = "0.1.0"
-dependencies = [
- "hipstr",
- "tokio",
- "unicode-segmentation",
- "veil-core",
-]
-
-[[package]]
-name = "veil-core"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "celes",
- "derive_builder",
- "hipstr",
- "jiff",
- "oxilangtag",
- "serde",
- "type-map",
- "uuid",
-]
-
-[[package]]
-name = "veil-examples"
-version = "0.1.0"
-dependencies = [
- "tokio",
- "veil-codec",
- "veil-core",
- "veil-llm",
- "veil-ner",
- "veil-pattern",
- "veil-toolkit",
-]
-
-[[package]]
-name = "veil-llm"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64",
- "derive_builder",
- "derive_more",
- "humantime-serde",
- "minijinja",
- "reqwest-middleware",
- "reqwest-retry",
- "reqwest-tracing",
- "rig",
- "schemars",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "toml",
- "tracing",
- "unicode-normalization",
- "veil-core",
-]
-
-[[package]]
-name = "veil-ner"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "derive_builder",
- "lingua",
- "serde",
- "tokio",
- "tracing",
- "uuid",
- "veil-core",
-]
-
-[[package]]
-name = "veil-pattern"
-version = "0.1.0"
-dependencies = [
- "aho-corasick",
- "async-trait",
- "bs58",
- "csv",
- "derive_builder",
- "derive_more",
- "iban_validate",
- "phonenumber",
- "regex",
- "serde",
- "tokio",
- "toml",
- "veil-context",
- "veil-core",
-]
-
-[[package]]
-name = "veil-toolkit"
-version = "0.1.0"
-dependencies = [
- "hex",
- "sha2 0.11.0",
- "tokio",
- "tracing",
- "veil-core",
-]
 
 [[package]]
 name = "version_check"
