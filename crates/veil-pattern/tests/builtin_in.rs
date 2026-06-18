@@ -17,20 +17,20 @@ async fn builtin_identity() {
     assert_match(
         &text,
         &entities,
-        builtins::GOVERNMENT_ID.label_ref(),
+        builtins::GOVERNMENT_ID.to_ref(),
         "2341 2341 2346",
     );
-    assert_match(&text, &entities, builtins::TAX_ID.label_ref(), "ABCPK1234E");
+    assert_match(&text, &entities, builtins::TAX_ID.to_ref(), "ABCPK1234E");
     assert_match(
         &text,
         &entities,
-        builtins::PASSPORT_NUMBER.label_ref(),
+        builtins::PASSPORT_NUMBER.to_ref(),
         "M1234567",
     );
     assert_match(
         &text,
         &entities,
-        builtins::GOVERNMENT_ID.label_ref(),
+        builtins::GOVERNMENT_ID.to_ref(),
         "ABC1234567",
     );
 }
@@ -41,10 +41,10 @@ async fn builtin_finance() {
     assert_match(
         &text,
         &entities,
-        builtins::TAX_ID.label_ref(),
+        builtins::TAX_ID.to_ref(),
         "27AAAPL1234C1ZE",
     );
-    assert_match(&text, &entities, builtins::TAX_ID.label_ref(), "AAAPL1234C");
+    assert_match(&text, &entities, builtins::TAX_ID.to_ref(), "AAAPL1234C");
 }
 
 #[tokio::test]
@@ -53,8 +53,8 @@ async fn builtin_vehicle() {
     assert_match(
         &text,
         &entities,
-        builtins::LICENSE_PLATE.label_ref(),
+        builtins::LICENSE_PLATE.to_ref(),
         "MH12AB1234",
     );
-    assert_label_present(&entities, builtins::LICENSE_PLATE.label_ref());
+    assert_label_present(&entities, builtins::LICENSE_PLATE.to_ref());
 }

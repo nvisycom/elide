@@ -3330,6 +3330,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "veil-examples"
+version = "0.1.0"
+dependencies = [
+ "tokio",
+ "veil-codec",
+ "veil-core",
+ "veil-llm",
+ "veil-ner",
+ "veil-pattern",
+ "veil-toolkit",
+]
+
+[[package]]
 name = "veil-llm"
 version = "0.1.0"
 dependencies = [

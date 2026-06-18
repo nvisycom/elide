@@ -8,7 +8,7 @@
 //! - [`RedactableItem<A>`] — one addressable unit (its `value` plus an
 //!   encoder-private address `A`), parser-agnostic.
 //! - [`MarkupHandler`] — the [`Handler`] machinery over a
-//!   `Vec<RedactableItem<A>>`: cumulative offsets, `next_chunk`, random
+//!   `Vec<RedactableItem<A>>`: cumulative offsets, `read_next`, random
 //!   read, batch redact, and `lift_chunk`. It never inspects the address.
 //!   Re-serialization is delegated to a format-specific [`MarkupEncoder`],
 //!   which also chooses the [`Address`] type.
@@ -35,7 +35,7 @@ use std::ops::Range;
 
 use veil_core::Error;
 use veil_core::modality::text::{Text, TextData, TextLocation};
-use veil_core::modality::{DataReader, DataWriter};
+use veil_core::modality::{Chunk, DataReader, DataWriter};
 use veil_core::redaction::Redactions;
 
 #[cfg(feature = "html")]
@@ -48,7 +48,7 @@ pub use self::xml_handler::{XmlEncoder, XmlHandler, format as xml_format};
 pub use self::xml_loader::XmlLoader;
 use crate::content::ContentData;
 use crate::handler::redact;
-use crate::{Chunk, Handler};
+use crate::Handler;
 
 /// One redactable unit in a markup document.
 ///
@@ -199,7 +199,7 @@ impl<E: MarkupEncoder> Handler<Text> for MarkupHandler<E> {
         self.encoder.encode(&self.items)
     }
 
-    async fn next_chunk(&mut self) -> Result<Option<Chunk<Text>>, Error> {
+    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>, Error> {
         if self.cursor >= self.items.len() {
             return Ok(None);
         }

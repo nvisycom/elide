@@ -10,12 +10,12 @@ use std::ops::Range;
 
 use veil_core::Error;
 use veil_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
-use veil_core::modality::{DataReader, DataWriter};
+use veil_core::modality::{Chunk, DataReader, DataWriter};
 use veil_core::redaction::Redactions;
 
 use crate::content::ContentData;
 use crate::handler::redact;
-use crate::{Chunk, Format, FormatId, Handler};
+use crate::{Format, FormatId, Handler};
 
 /// Stable [`FormatId`] for the plain-text codec.
 pub const FORMAT_ID: FormatId = FormatId::from_static("veil.text.txt");
@@ -56,7 +56,7 @@ impl Handler<Text> for TxtHandler {
         Ok(ContentData::from_text(out))
     }
 
-    async fn next_chunk(&mut self) -> Result<Option<Chunk<Text>>, Error> {
+    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>, Error> {
         if self.cursor >= self.lines.len() {
             return Ok(None);
         }
@@ -234,23 +234,23 @@ mod tests {
     #[tokio::test]
     async fn stream_yields_each_line() -> Result<(), Error> {
         let mut h = handler("hello\nworld\n");
-        let first = h.next_chunk().await?.unwrap();
+        let first = h.read_next().await?.unwrap();
         assert_eq!(first.location.start, 0);
         assert_eq!(first.location.end, 5);
         assert_eq!(first.data.as_str(), "hello");
-        let second = h.next_chunk().await?.unwrap();
+        let second = h.read_next().await?.unwrap();
         assert_eq!(second.location.start, 6);
         assert_eq!(second.location.end, 11);
         assert_eq!(second.data.as_str(), "world");
-        assert!(h.next_chunk().await?.is_none());
+        assert!(h.read_next().await?.is_none());
         Ok(())
     }
 
     #[tokio::test]
     async fn lift_chunk_is_identity_on_second_line() -> Result<(), Error> {
         let mut h = handler("hello\nworld\n");
-        let _first = h.next_chunk().await?.unwrap();
-        let second = h.next_chunk().await?.unwrap();
+        let _first = h.read_next().await?.unwrap();
+        let second = h.read_next().await?.unwrap();
         let lifted = h.lift_chunk(&second, 1..4).expect("in bounds");
         assert_eq!(lifted.start, 7);
         assert_eq!(lifted.end, 10);

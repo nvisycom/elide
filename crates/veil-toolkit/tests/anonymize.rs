@@ -41,7 +41,7 @@ async fn anonymize_resolves_label_to_operator_with_fallback() {
         .with_fallback(Redact);
 
     let items = anonymizer
-        .anonymize(&entities, &source)
+        .plan(&entities, &source)
         .await
         .unwrap()
         .into_iter()
@@ -62,7 +62,7 @@ async fn anonymize_replace_renders_label_and_value() {
 
     let items = Anonymizer::<Text>::new()
         .with_operator(LabelRef::new("PERSON"), Replace::new("<{label}:{value}>"))
-        .anonymize(&entities, &source)
+        .plan(&entities, &source)
         .await
         .unwrap()
         .into_iter()
@@ -77,7 +77,7 @@ async fn anonymize_skips_unmapped_without_fallback() {
     let entities = vec![entity("SSN", (0, 11))];
     // No operator for SSN, no fallback -> skipped.
     let redactions = Anonymizer::<Text>::new()
-        .anonymize(&entities, &source)
+        .plan(&entities, &source)
         .await
         .unwrap();
     assert!(redactions.is_empty());

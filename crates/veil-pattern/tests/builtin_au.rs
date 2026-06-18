@@ -14,12 +14,7 @@ use veil_core::entity::builtins;
 #[tokio::test]
 async fn builtin_identity() {
     let (text, entities) = scan(include_str!("../testdata/inputs/au/identity.txt")).await;
-    assert_match(
-        &text,
-        &entities,
-        builtins::TAX_ID.label_ref(),
-        "123 456 782",
-    );
+    assert_match(&text, &entities, builtins::TAX_ID.to_ref(), "123 456 782");
 }
 
 #[tokio::test]
@@ -28,16 +23,16 @@ async fn builtin_finance() {
     assert_match(
         &text,
         &entities,
-        builtins::COMPANY_ID.label_ref(),
+        builtins::COMPANY_ID.to_ref(),
         "51 824 753 556",
     );
     assert_match(
         &text,
         &entities,
-        builtins::COMPANY_ID.label_ref(),
+        builtins::COMPANY_ID.to_ref(),
         "123 456 780",
     );
-    assert_label_present(&entities, builtins::COMPANY_ID.label_ref());
+    assert_label_present(&entities, builtins::COMPANY_ID.to_ref());
 }
 
 #[tokio::test]
@@ -46,7 +41,7 @@ async fn builtin_health() {
     assert_match(
         &text,
         &entities,
-        builtins::INSURANCE_ID.label_ref(),
+        builtins::INSURANCE_ID.to_ref(),
         "2228 12366 1",
     );
 }

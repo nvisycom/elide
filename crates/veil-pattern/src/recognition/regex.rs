@@ -112,7 +112,7 @@ fn default_score() -> Confidence {
 ///
 /// let ssn = Regex::builder()
 ///     .with_name("ssn")
-///     .with_label(builtins::GOVERNMENT_ID.label_ref())
+///     .with_label(builtins::GOVERNMENT_ID.to_ref())
 ///     .with_context(vec!["ssn".to_owned(), "social security".to_owned()])
 ///     .with_variants(vec![variant])
 ///     .build()

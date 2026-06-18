@@ -44,12 +44,12 @@ pub struct NerRecognizer {
     /// emitted entity.
     name: String,
     /// Backend that turns `(text, kinds)` into raw spans. Required.
-    /// Set via [`with_engine`], which accepts any concrete
+    /// Set via [`with_backend`], which accepts any concrete
     /// [`NerBackend`] impl by value and wraps it in `Arc` internally.
     ///
-    /// [`with_engine`]: NerRecognizerBuilder::with_engine
+    /// [`with_backend`]: NerRecognizerBuilder::with_backend
     #[builder(setter(custom))]
-    engine: Arc<dyn NerBackend>,
+    backend: Arc<dyn NerBackend>,
     /// Labels the recognizer advertises. When non-empty, the
     /// recognizer asks the backend for only this subset on every
     /// call (zero-shot path). When empty, the backend is asked for
@@ -63,7 +63,7 @@ pub struct NerRecognizer {
 }
 
 impl NerRecognizer {
-    /// Start the chainable builder. `name` and `engine` are
+    /// Start the chainable builder. `name` and `backend` are
     /// required; calling [`build`] without them returns a
     /// validation error.
     ///
@@ -122,16 +122,16 @@ impl NerRecognizer {
 }
 
 impl NerRecognizerBuilder {
-    /// Set the [`NerBackend`] backend that powers this recognizer.
-    /// Accepts any concrete impl by value and wraps it in `Arc`.
-    /// Required: `build` errors when this hasn't been called.
+    /// Set the [`NerBackend`] that powers this recognizer. Accepts any
+    /// concrete impl by value and wraps it in `Arc`. Required: `build`
+    /// errors when this hasn't been called.
     #[must_use]
-    pub fn with_engine<E: NerBackend>(mut self, engine: E) -> Self {
-        self.engine = Some(Arc::new(engine));
+    pub fn with_backend<B: NerBackend>(mut self, backend: B) -> Self {
+        self.backend = Some(Arc::new(backend));
         self
     }
 
-    /// Finish the builder. Errors when `name` or `engine` is unset.
+    /// Finish the builder. Errors when `name` or `backend` is unset.
     pub fn build(self) -> Result<NerRecognizer> {
         self.try_build()
     }
@@ -156,7 +156,7 @@ impl Recognizer<Text> for NerRecognizer {
             language: input.primary_language(),
             correlation_id: input.correlation_id,
         };
-        let response = self.engine.recognize(request).await?;
+        let response = self.backend.recognize(request).await?;
 
         let entities: Vec<Entity<Text>> = response
             .spans
@@ -180,7 +180,7 @@ impl Recognizer<Text> for NerRecognizer {
 
 #[cfg(test)]
 mod tests {
-    use veil_core::entity::{LabelRef, builtins};
+    use veil_core::entity::builtins;
     use veil_core::modality::text::TextData;
 
     use super::*;
@@ -190,10 +190,10 @@ mod tests {
     async fn noop_engine_yields_no_entities() {
         let rec = NerRecognizer::builder()
             .with_name("test")
-            .with_engine(NoopBackend)
+            .with_backend(NoopBackend)
             .with_supported_labels(vec![
-                LabelRef::from(&*builtins::PERSON_NAME),
-                LabelRef::from(&*builtins::EMAIL_ADDRESS),
+                builtins::PERSON_NAME.to_ref(),
+                builtins::EMAIL_ADDRESS.to_ref(),
             ])
             .build()
             .expect("builder succeeds");
@@ -206,7 +206,7 @@ mod tests {
     async fn empty_supported_labels_passes_none_to_engine() {
         let rec = NerRecognizer::builder()
             .with_name("test")
-            .with_engine(NoopBackend)
+            .with_backend(NoopBackend)
             .build()
             .expect("builder succeeds");
         let input = RecognizerInput::new(TextData::new("Alice Smith".to_owned()));

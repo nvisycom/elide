@@ -5,48 +5,30 @@
 //!   [`DataReader`] + [`DataWriter`] (the random-access read / write
 //!   surface, shared with the rest of the workspace), and adds the
 //!   codec-specific bits on top: identify and serialise ([`format`],
-//!   [`encode`]), stream chunks ([`next_chunk`]), and lift recognizer
+//!   [`encode`]), stream chunks ([`read_next`]), and lift recognizer
 //!   offsets back to source coordinates ([`lift_chunk`]).
-//! - [`Chunk<M>`] — one decoded unit yielded by `next_chunk`.
+//!
+//! [`Chunk<M>`] — the unit yielded by `read_next` — lives in
+//! [`veil_core::modality`], since it is the shared currency of the
+//! [`StreamDataReader`] contract, not a codec-private type.
 //!
 //! [`DataReader`]: veil_core::modality::DataReader
 //! [`DataWriter`]: veil_core::modality::DataWriter
+//! [`StreamDataReader`]: veil_core::modality::StreamDataReader
+//! [`Chunk<M>`]: veil_core::modality::Chunk
 //! [`format`]: Handler::format
 //! [`encode`]: Handler::encode
-//! [`next_chunk`]: Handler::next_chunk
+//! [`read_next`]: Handler::read_next
 //! [`lift_chunk`]: Handler::lift_chunk
 
 use std::future::Future;
 use std::ops::Range;
 
 use veil_core::Error;
-use veil_core::modality::{DataReader, DataWriter, Modality};
+use veil_core::modality::{Chunk, DataReader, DataWriter, Modality};
 
 use super::FormatId;
 use crate::content::ContentData;
-
-/// One decoded unit yielded by [`Handler::next_chunk`].
-///
-/// `data` is the per-modality wire payload; `location` is the coordinate
-/// the handler accepts in [`read_at`] / [`write_at`] to address the same
-/// chunk again. `hints` carries out-of-band context strings the chunk's
-/// structural neighbours surface — CSV/XLSX column headers, JSON object
-/// keys, HTML parent text — for context-aware recognizers; handlers
-/// without such metadata leave it empty.
-///
-/// [`read_at`]: veil_core::modality::DataReader::read_at
-/// [`write_at`]: veil_core::modality::DataWriter::write_at
-#[derive(Debug, Clone, PartialEq)]
-pub struct Chunk<M: Modality> {
-    /// Coordinate addressing this chunk inside the handler.
-    pub location: M::Location,
-    /// Wire payload at the chunk's location.
-    pub data: M::Data,
-    /// Out-of-band context strings recognizers should treat as
-    /// in-context (column headers, parent element text, …). Empty when
-    /// the handler has no such metadata to surface.
-    pub hints: Vec<String>,
-}
 
 /// Per-modality capability trait every format handler implements.
 ///
@@ -55,7 +37,7 @@ pub struct Chunk<M: Modality> {
 /// traits, so a codec-backed document plugs straight into anything that
 /// bounds on them (the toolkit's anonymizer, say). On top of that base,
 /// `Handler` adds the codec-specific surface — identify and serialise
-/// ([`format`], [`encode`]), stream chunks ([`next_chunk`]), and lift
+/// ([`format`], [`encode`]), stream chunks ([`read_next`]), and lift
 /// recognizer offsets back to source coordinates ([`lift_chunk`]).
 ///
 /// The handler owns the streaming cursor — concurrent iteration of the
@@ -70,7 +52,7 @@ pub struct Chunk<M: Modality> {
 /// [`DataWriter`]: veil_core::modality::DataWriter
 /// [`format`]: Handler::format
 /// [`encode`]: Handler::encode
-/// [`next_chunk`]: Handler::next_chunk
+/// [`read_next`]: Handler::read_next
 /// [`lift_chunk`]: Handler::lift_chunk
 pub trait Handler<M: Modality>: DataReader<M> + DataWriter<M> + Send + Sync + 'static {
     /// Stable id of the format this handler represents (e.g.
@@ -87,7 +69,7 @@ pub trait Handler<M: Modality>: DataReader<M> + DataWriter<M> + Send + Sync + 's
 
     /// Advance the cursor and yield the next chunk, or `None` at
     /// end-of-stream.
-    fn next_chunk(&mut self) -> impl Future<Output = Result<Option<Chunk<M>>, Error>> + Send;
+    fn read_next(&mut self) -> impl Future<Output = Result<Option<Chunk<M>>, Error>> + Send;
 
     /// Translate a `value_range` expressed inside `chunk.data`'s
     /// coordinate system into a source-coordinate `M::Location`.

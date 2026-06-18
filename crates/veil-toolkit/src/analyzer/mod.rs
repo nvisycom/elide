@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use tokio::task::JoinSet;
 use veil_core::entity::Entity;
-use veil_core::modality::Modality;
+use veil_core::modality::{Modality, StreamDataReader};
 use veil_core::recognition::{Enricher, Recognizer, RecognizerInput, RecognizerOutput};
 use veil_core::{Error, ErrorKind};
 
@@ -102,6 +102,44 @@ impl<M: Modality> Analyzer<M> {
         }
         let entities = self.recognize(input).await?;
         Ok(self.pipeline.run(entities))
+    }
+
+    /// Analyze a streamed source end to end, returning entities in the
+    /// source's own coordinate system.
+    ///
+    /// Drives `source` chunk by chunk: for each [`Chunk`], builds a
+    /// [`RecognizerInput`] from its payload (and its context hints),
+    /// runs the full [`analyze`] pipeline, then [`lift`]s every entity
+    /// from chunk-local to source coordinates — dropping any whose
+    /// location has no source pre-image. The result aggregates every
+    /// chunk's lifted entities.
+    ///
+    /// This is the [`analyze`] counterpart for I/O-backed sources (a
+    /// decoded codec document, say): the caller never sees a chunk or a
+    /// recognizer-local coordinate. Deduplication runs per chunk, the
+    /// way [`analyze`] reduces a single input.
+    ///
+    /// Returns the first enricher, recognizer, or read error.
+    ///
+    /// [`Chunk`]: veil_core::modality::Chunk
+    /// [`analyze`]: Self::analyze
+    /// [`lift`]: veil_core::modality::StreamDataReader::lift
+    pub async fn analyze_stream<S>(&self, source: &mut S) -> Result<Vec<Entity<M>>, Error>
+    where
+        S: StreamDataReader<M>,
+    {
+        let mut out = Vec::new();
+        while let Some(chunk) = source.read_next().await? {
+            let input = RecognizerInput::new(chunk.data.clone())
+                .with_context_hints(chunk.hints.clone());
+            let entities = self.analyze(input).await?;
+            out.extend(
+                entities
+                    .into_iter()
+                    .filter_map(|entity| source.lift(&chunk, entity)),
+            );
+        }
+        Ok(out)
     }
 
     /// Run every recognizer over `input` concurrently and collect their

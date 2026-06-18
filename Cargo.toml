@@ -10,6 +10,7 @@ members = [
     "./crates/veil-llm",
     "./crates/veil-codec",
     "./crates/veil-toolkit",
+    "./examples",
 ]
 
 [workspace.package]
@@ -39,7 +40,7 @@ veil-llm = { path = "./crates/veil-llm", version = "0.1.0" }
 veil-codec = { path = "./crates/veil-codec", version = "0.1.0" }
 veil-toolkit = { path = "./crates/veil-toolkit", version = "0.1.0" }
 
-# Serialization
+# (De)serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = [] }
 toml = { version = "1.1", features = [] }
@@ -72,21 +73,21 @@ async-trait = { version = "0.1", features = [] }
 # Observability
 tracing = { version = "0.1", features = ["attributes"] }
 
-# Text processing (pattern matching, unicode)
+# Text processing
 regex = { version = "1.0", features = [] }
 aho-corasick = { version = "1.0", features = [] }
 unicode-normalization = { version = "0.1", features = [] }
 unicode-segmentation = { version = "1.13", features = [] }
 
-# Language detection (NER crate)
+# Natural language processing
 lingua = { version = "1.8", default-features = false, features = ["english"] }
 
-# Checksums / region-aware parsing (validators)
+# Checksums & validators
 bs58 = { version = "0.5", features = ["check"] }
 iban_validate = { version = "5.0" }
 phonenumber = { version = "0.3", default-features = false }
 
-# Markup parsing (codec HTML + XML handlers)
+# Markup parsing
 scraper = { version = "0.27", features = [] }
 ego-tree = { version = "0.11", features = [] }
 quick-xml = { version = "0.38", features = [] }
@@ -97,7 +98,7 @@ minijinja = { version = "2.5", features = [] }
 schemars = { version = "1.0", features = ["uuid1", "bytes1"] }
 humantime-serde = { version = "1.1", features = [] }
 
-# HTTP client middleware (llm crate)
+# HTTP client & middlewares
 reqwest-middleware = { version = "0.5", features = ["json", "multipart"] }
 reqwest-retry = { version = "0.9", features = [] }
 reqwest-tracing = { version = "0.7", features = [] }

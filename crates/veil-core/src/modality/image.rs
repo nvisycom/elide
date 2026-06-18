@@ -130,8 +130,7 @@ impl ModalityLocation for ImageLocation {
         }
         // Bounding-box test first as a cheap reject; polygons only narrow
         // it, so a box miss is a definite miss.
-        self.bounding_box.overlaps(&other.bounding_box)
-            && self.shape().overlaps(&other.shape())
+        self.bounding_box.overlaps(&other.bounding_box) && self.shape().overlaps(&other.shape())
     }
 
     fn span_cmp(&self, other: &Self) -> Ordering {
@@ -179,7 +178,9 @@ pub enum ImageReplacement {
 impl ImageReplacement {
     /// A black block, the conservative default treatment.
     pub const fn block() -> Self {
-        Self::Block { color: Color::BLACK }
+        Self::Block {
+            color: Color::BLACK,
+        }
     }
 }
 

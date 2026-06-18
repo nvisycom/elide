@@ -51,7 +51,7 @@ async fn user_toml_rules_load_and_detect() {
     // The custom regex finds both employee numbers.
     let emp_hits: Vec<&str> = entities
         .iter()
-        .filter(|e| e.label == builtins::INTERNAL_ID.label_ref())
+        .filter(|e| e.label == builtins::INTERNAL_ID.to_ref())
         .map(|e| &text[e.location.start..e.location.end])
         .collect();
     assert!(
@@ -84,7 +84,7 @@ async fn user_toml_rules_load_and_detect() {
     assert!(
         entities
             .iter()
-            .any(|e| e.label == builtins::EMAIL_ADDRESS.label_ref()
+            .any(|e| e.label == builtins::EMAIL_ADDRESS.to_ref()
                 && &text[e.location.start..e.location.end] == "counsel@example.com"),
         "expected shipped email regex to fire alongside user rules"
     );

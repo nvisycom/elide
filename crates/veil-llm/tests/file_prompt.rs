@@ -30,7 +30,7 @@ fn text_prompt_renders_template_and_lifts_entities() {
 
     let hint = Hint::<Text>::new(TextLocation::new(alice_start, alice_end))
         .with_name("uploader-alice")
-        .with_label(builtins::PERSON_NAME.label_ref());
+        .with_label(builtins::PERSON_NAME.to_ref());
 
     let input = RecognizerInput::new(TextData::new(body))
         .with_hints(vec![hint])
@@ -73,15 +73,15 @@ fn text_prompt_renders_template_and_lifts_entities() {
 
     let kinds: Vec<LabelRef> = entities.iter().map(|e| e.label.clone()).collect();
     assert!(
-        kinds.contains(&builtins::DATE_OF_BIRTH.label_ref()),
+        kinds.contains(&builtins::DATE_OF_BIRTH.to_ref()),
         "person_name should have been remapped to DateOfBirth via label_map: {kinds:?}",
     );
     assert!(
-        kinds.contains(&builtins::EMAIL_ADDRESS.label_ref()),
+        kinds.contains(&builtins::EMAIL_ADDRESS.to_ref()),
         "email_address (no map entry) should pass through: {kinds:?}",
     );
     assert!(
-        !kinds.contains(&builtins::DIAGNOSIS.label_ref()),
+        !kinds.contains(&builtins::DIAGNOSIS.to_ref()),
         "diagnosis was in labels_to_ignore but appeared: {kinds:?}",
     );
     assert_eq!(
@@ -106,7 +106,7 @@ fn image_prompt_renders_template_and_lifts_entities() {
         50.0,
     )))
     .with_name("uploader-face")
-    .with_label(builtins::PERSON_NAME.label_ref());
+    .with_label(builtins::PERSON_NAME.to_ref());
 
     let input = RecognizerInput::new(ImageData::new(bytes.clone(), dims))
         .with_hints(vec![hint])
@@ -142,15 +142,15 @@ fn image_prompt_renders_template_and_lifts_entities() {
 
     let kinds: Vec<LabelRef> = entities.iter().map(|e| e.label.clone()).collect();
     assert!(
-        kinds.contains(&builtins::DATE_OF_BIRTH.label_ref()),
+        kinds.contains(&builtins::DATE_OF_BIRTH.to_ref()),
         "person_name should have been remapped to DateOfBirth via label_map: {kinds:?}",
     );
     assert!(
-        kinds.contains(&builtins::LICENSE_PLATE.label_ref()),
+        kinds.contains(&builtins::LICENSE_PLATE.to_ref()),
         "license_plate (no map entry) should pass through: {kinds:?}",
     );
     assert!(
-        !kinds.contains(&builtins::URL.label_ref()),
+        !kinds.contains(&builtins::URL.to_ref()),
         "url was in labels_to_ignore but appeared: {kinds:?}",
     );
     assert_eq!(

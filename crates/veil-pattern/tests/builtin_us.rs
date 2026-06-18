@@ -17,31 +17,26 @@ async fn builtin_identity() {
     assert_match(
         &text,
         &entities,
-        builtins::GOVERNMENT_ID.label_ref(),
+        builtins::GOVERNMENT_ID.to_ref(),
         "123-45-6789",
     );
+    assert_match(&text, &entities, builtins::TAX_ID.to_ref(), "912-71-1234");
     assert_match(
         &text,
         &entities,
-        builtins::TAX_ID.label_ref(),
-        "912-71-1234",
-    );
-    assert_match(
-        &text,
-        &entities,
-        builtins::DRIVERS_LICENSE.label_ref(),
+        builtins::DRIVERS_LICENSE.to_ref(),
         "D123-4567-8901",
     );
     assert_match(
         &text,
         &entities,
-        builtins::PASSPORT_NUMBER.label_ref(),
+        builtins::PASSPORT_NUMBER.to_ref(),
         "A12345678",
     );
     assert_match(
         &text,
         &entities,
-        builtins::POSTAL_CODE.label_ref(),
+        builtins::POSTAL_CODE.to_ref(),
         "97477-1234",
     );
 }
@@ -52,13 +47,13 @@ async fn builtin_finance() {
     assert_match(
         &text,
         &entities,
-        builtins::BANK_ROUTING.label_ref(),
+        builtins::BANK_ROUTING.to_ref(),
         "121000358",
     );
     // bank_account is `\b\d{8,17}\b` with score 0.05 — it requires
     // a context-keyword boost (e.g. `account`) to clear the
     // confidence threshold. The fixture provides one.
-    assert_label_present(&entities, builtins::BANK_ACCOUNT.label_ref());
+    assert_label_present(&entities, builtins::BANK_ACCOUNT.to_ref());
 }
 
 #[tokio::test]
@@ -67,19 +62,14 @@ async fn builtin_health() {
     assert_match(
         &text,
         &entities,
-        builtins::MEDICAL_ID.label_ref(),
+        builtins::MEDICAL_ID.to_ref(),
         "1234567893",
     );
     assert_match(
         &text,
         &entities,
-        builtins::MEDICAL_ID.label_ref(),
+        builtins::MEDICAL_ID.to_ref(),
         "1EG4-TE5-MK73",
     );
-    assert_match(
-        &text,
-        &entities,
-        builtins::MEDICAL_ID.label_ref(),
-        "BB0000000",
-    );
+    assert_match(&text, &entities, builtins::MEDICAL_ID.to_ref(), "BB0000000");
 }

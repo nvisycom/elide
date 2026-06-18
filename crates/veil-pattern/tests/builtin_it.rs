@@ -17,25 +17,25 @@ async fn builtin_identity() {
     assert_match(
         &text,
         &entities,
-        builtins::TAX_ID.label_ref(),
+        builtins::TAX_ID.to_ref(),
         "RSSMRA70A01H501S",
     );
     assert_match(
         &text,
         &entities,
-        builtins::GOVERNMENT_ID.label_ref(),
+        builtins::GOVERNMENT_ID.to_ref(),
         "CA12345AB",
     );
     assert_match(
         &text,
         &entities,
-        builtins::PASSPORT_NUMBER.label_ref(),
+        builtins::PASSPORT_NUMBER.to_ref(),
         "YA1234567",
     );
     assert_match(
         &text,
         &entities,
-        builtins::DRIVERS_LICENSE.label_ref(),
+        builtins::DRIVERS_LICENSE.to_ref(),
         "MI1234567A",
     );
 }
@@ -43,19 +43,14 @@ async fn builtin_identity() {
 #[tokio::test]
 async fn builtin_finance() {
     let (text, entities) = scan(include_str!("../testdata/inputs/it/finance.txt")).await;
-    assert_match(
-        &text,
-        &entities,
-        builtins::TAX_ID.label_ref(),
-        "00154980569",
-    );
+    assert_match(&text, &entities, builtins::TAX_ID.to_ref(), "00154980569");
     // English-language nationality dictionary stays silent on an
     // Italian document — assert it didn't fire.
     assert!(
         !entities
             .iter()
-            .any(|e| e.label == builtins::NATIONALITY.label_ref()),
+            .any(|e| e.label == builtins::NATIONALITY.to_ref()),
         "english-language NATIONALITY dictionary should not match on an IT fixture",
     );
-    assert_label_present(&entities, builtins::TAX_ID.label_ref());
+    assert_label_present(&entities, builtins::TAX_ID.to_ref());
 }

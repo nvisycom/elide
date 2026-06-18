@@ -152,7 +152,7 @@ mod tests {
             r#"<root id="A1"><name>Alice</name><!-- c --><data><![CDATA[secret]]></data></root>"#;
         let mut h = load(raw).await;
         let mut values = Vec::new();
-        while let Some(chunk) = h.next_chunk().await.unwrap() {
+        while let Some(chunk) = h.read_next().await.unwrap() {
             values.push(chunk.data.as_str().to_owned());
         }
         assert!(values.iter().any(|v| v == "Alice"), "text: {values:?}");
@@ -170,7 +170,7 @@ mod tests {
         let raw = "<root><name>Alice</name></root>";
         let mut h = load(raw).await;
         let chunk = loop {
-            let c = h.next_chunk().await.unwrap().unwrap();
+            let c = h.read_next().await.unwrap().unwrap();
             if c.data.as_str() == "Alice" {
                 break c;
             }
@@ -186,7 +186,7 @@ mod tests {
         let raw = "<doc><![CDATA[alice@example.com]]></doc>";
         let mut h = load(raw).await;
         let chunk = loop {
-            let c = h.next_chunk().await.unwrap().unwrap();
+            let c = h.read_next().await.unwrap().unwrap();
             if c.data.as_str() == "alice@example.com" {
                 break c;
             }
@@ -202,7 +202,7 @@ mod tests {
         let raw = "<p>contact alice@example.com today</p>";
         let mut h = load(raw).await;
         let chunk = loop {
-            let c = h.next_chunk().await.unwrap().unwrap();
+            let c = h.read_next().await.unwrap().unwrap();
             if c.data.as_str().contains("alice@example.com") {
                 break c;
             }
@@ -227,7 +227,7 @@ mod tests {
         let raw = r#"<user email="alice@example.com">Bob</user>"#;
         let mut h = load(raw).await;
         let chunk = loop {
-            let c = h.next_chunk().await.unwrap().unwrap();
+            let c = h.read_next().await.unwrap().unwrap();
             if c.data.as_str() == "Bob" {
                 break c;
             }

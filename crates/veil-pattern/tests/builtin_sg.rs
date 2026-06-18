@@ -12,13 +12,13 @@ async fn builtin_identity() {
     assert_match(
         &text,
         &entities,
-        builtins::GOVERNMENT_ID.label_ref(),
+        builtins::GOVERNMENT_ID.to_ref(),
         "S2740116C",
     );
     assert_match(
         &text,
         &entities,
-        builtins::GOVERNMENT_ID.label_ref(),
+        builtins::GOVERNMENT_ID.to_ref(),
         "F1234567N",
     );
 }
@@ -29,7 +29,7 @@ async fn builtin_finance() {
     assert_match(
         &text,
         &entities,
-        builtins::COMPANY_ID.label_ref(),
+        builtins::COMPANY_ID.to_ref(),
         "200512345R",
     );
 }
@@ -37,11 +37,6 @@ async fn builtin_finance() {
 #[tokio::test]
 async fn builtin_contact() {
     let (text, entities) = scan(include_str!("../testdata/inputs/sg/contact.txt")).await;
-    assert_match(
-        &text,
-        &entities,
-        builtins::POSTAL_CODE.label_ref(),
-        "018989",
-    );
-    assert_label_present(&entities, builtins::POSTAL_CODE.label_ref());
+    assert_match(&text, &entities, builtins::POSTAL_CODE.to_ref(), "018989");
+    assert_label_present(&entities, builtins::POSTAL_CODE.to_ref());
 }

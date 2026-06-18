@@ -121,21 +121,13 @@ impl Label {
         self.tags.iter().any(|t| t == tag)
     }
 
-    /// A lightweight reference to this label, by name.
-    pub fn as_ref(&self) -> LabelRef {
-        LabelRef::new(self.name.clone())
-    }
-
-    /// A lightweight reference to this label, by name.
+    /// A lightweight [`LabelRef`] to this label, by name.
     ///
-    /// Alias for [`as_ref`] with an explicit name, for call sites where
-    /// method resolution against the [`AsRef`] trait would otherwise be
-    /// ambiguous.
-    ///
-    /// [`as_ref`]: Label::as_ref
+    /// `to_` rather than `as_`: this clones the name into an owned
+    /// [`LabelRef`] (a value conversion), it does not borrow.
     #[must_use]
-    pub fn label_ref(&self) -> LabelRef {
-        self.as_ref()
+    pub fn to_ref(&self) -> LabelRef {
+        LabelRef::new(self.name.clone())
     }
 
     /// The label's name as an owned string (for catalog keying).
@@ -146,6 +138,6 @@ impl Label {
 
 impl From<&Label> for LabelRef {
     fn from(label: &Label) -> Self {
-        label.as_ref()
+        label.to_ref()
     }
 }

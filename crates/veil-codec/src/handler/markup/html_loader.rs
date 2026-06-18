@@ -261,7 +261,7 @@ mod tests {
     async fn redact_replaces_text_node() {
         let raw = "<html><head></head><body><p>Hello</p><p>World</p></body></html>";
         let mut h = load(raw).await;
-        let first = h.next_chunk().await.unwrap().unwrap();
+        let first = h.read_next().await.unwrap().unwrap();
         let mut rs = Redactions::new();
         rs.push(first.location, TextReplacement::substituted("[REDACTED]"));
         h.write_at(rs).await.unwrap();
@@ -275,7 +275,7 @@ mod tests {
         let raw = r#"<html><head></head><body><!-- secret 1 --><img alt="hello" title="alt"></body></html>"#;
         let mut h = load(raw).await;
         let mut values: Vec<String> = Vec::new();
-        while let Some(chunk) = h.next_chunk().await.unwrap() {
+        while let Some(chunk) = h.read_next().await.unwrap() {
             values.push(chunk.data.as_str().to_owned());
         }
         assert!(values.iter().any(|v| v == " secret 1 "));
@@ -288,7 +288,7 @@ mod tests {
         let raw = r#"<html><head></head><body><img alt="alice@example.com"></body></html>"#;
         let mut h = load(raw).await;
         let mut loc = None;
-        while let Some(chunk) = h.next_chunk().await.unwrap() {
+        while let Some(chunk) = h.read_next().await.unwrap() {
             if chunk.data.as_str() == "alice@example.com" {
                 loc = Some(chunk.location);
                 break;
@@ -309,7 +309,7 @@ mod tests {
         let raw = "<html><head></head><body><!-- alice@example.com --></body></html>";
         let mut h = load(raw).await;
         let mut loc = None;
-        while let Some(chunk) = h.next_chunk().await.unwrap() {
+        while let Some(chunk) = h.read_next().await.unwrap() {
             let s = chunk.data.as_str();
             if let Some(at) = s.find("alice") {
                 loc = Some(TextLocation::new(
@@ -345,7 +345,7 @@ mod tests {
             .await
             .expect("decode");
         let mut found = false;
-        while let Some(chunk) = h.next_chunk().await.unwrap() {
+        while let Some(chunk) = h.read_next().await.unwrap() {
             if chunk.data.as_str().contains("alice@example.com") {
                 found = true;
             }

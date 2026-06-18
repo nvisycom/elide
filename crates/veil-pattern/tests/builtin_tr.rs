@@ -12,13 +12,13 @@ async fn builtin_identity() {
     assert_match(
         &text,
         &entities,
-        builtins::GOVERNMENT_ID.label_ref(),
+        builtins::GOVERNMENT_ID.to_ref(),
         "12345678950",
     );
     assert_match(
         &text,
         &entities,
-        builtins::LICENSE_PLATE.label_ref(),
+        builtins::LICENSE_PLATE.to_ref(),
         "34-ABC-1234",
     );
 }
@@ -26,6 +26,6 @@ async fn builtin_identity() {
 #[tokio::test]
 async fn builtin_contact() {
     let (text, entities) = scan(include_str!("../testdata/inputs/tr/contact.txt")).await;
-    assert_match(&text, &entities, builtins::POSTAL_CODE.label_ref(), "34000");
-    assert_label_present(&entities, builtins::POSTAL_CODE.label_ref());
+    assert_match(&text, &entities, builtins::POSTAL_CODE.to_ref(), "34000");
+    assert_label_present(&entities, builtins::POSTAL_CODE.to_ref());
 }

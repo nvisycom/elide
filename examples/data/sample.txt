@@ -1,0 +1,15 @@
+Subject: Follow-up on your account
+
+Hi Alice Johnson,
+
+Thanks for reaching out yesterday. I have updated the contact details
+on file. You can reach our support team at support@example.test or by
+phone at +1 (415) 555-0142 during business hours.
+
+For verification we still have the card ending in 4242 4242 4242 4242
+on record. Please confirm whether the billing address at
+https://billing.example.test/acct/4821 is still current.
+
+Best regards,
+Bob Smith
+Customer Success

@@ -19,14 +19,13 @@ pub struct Color {
 }
 
 impl Color {
+    /// Solid black.
+    pub const BLACK: Self = Self::rgb(0, 0, 0);
+    /// Solid white.
+    pub const WHITE: Self = Self::rgb(255, 255, 255);
+
     /// A color from its red, green, and blue channels.
     pub const fn rgb(r: u8, g: u8, b: u8) -> Self {
         Self { r, g, b }
     }
-
-    /// Solid black.
-    pub const BLACK: Self = Self::rgb(0, 0, 0);
-
-    /// Solid white.
-    pub const WHITE: Self = Self::rgb(255, 255, 255);
 }

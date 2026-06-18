@@ -24,9 +24,20 @@ use crate::modality::{Modality, ModalityLocation};
 /// [`sort_by_position`]: Redactions::sort_by_position
 /// [`ModalityLocation::position_cmp`]: crate::modality::ModalityLocation::position_cmp
 /// [`iter`]: Redactions::iter
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Redactions<M: Modality> {
     items: Vec<(M::Location, M::Replacement)>,
+}
+
+// Manual `Clone`: `derive` would add a spurious `M: Clone` bound, but `M`
+// is a zero-size marker. The contents clone via the location/replacement
+// bounds the modality already guarantees.
+impl<M: Modality> Clone for Redactions<M> {
+    fn clone(&self) -> Self {
+        Self {
+            items: self.items.clone(),
+        }
+    }
 }
 
 impl<M: Modality> Redactions<M> {

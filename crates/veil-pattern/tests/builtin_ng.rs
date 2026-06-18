@@ -12,7 +12,7 @@ async fn builtin_identity() {
     assert_match(
         &text,
         &entities,
-        builtins::GOVERNMENT_ID.label_ref(),
+        builtins::GOVERNMENT_ID.to_ref(),
         "12345678902",
     );
 }
@@ -23,8 +23,8 @@ async fn builtin_vehicle() {
     assert_match(
         &text,
         &entities,
-        builtins::LICENSE_PLATE.label_ref(),
+        builtins::LICENSE_PLATE.to_ref(),
         "ABC-123DE",
     );
-    assert_label_present(&entities, builtins::LICENSE_PLATE.label_ref());
+    assert_label_present(&entities, builtins::LICENSE_PLATE.to_ref());
 }

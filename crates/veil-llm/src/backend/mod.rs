@@ -8,12 +8,14 @@
 //! tracking.
 
 pub mod http;
+mod noop;
 mod request;
 mod response;
 pub mod rig;
 
 use veil_core::Result;
 
+pub use self::noop::NoopBackend;
 pub use self::request::LlmRequest;
 pub use self::response::LlmResponse;
 

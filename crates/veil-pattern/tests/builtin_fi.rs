@@ -12,8 +12,8 @@ async fn builtin_identity() {
     assert_match(
         &text,
         &entities,
-        builtins::GOVERNMENT_ID.label_ref(),
+        builtins::GOVERNMENT_ID.to_ref(),
         "010170-123F",
     );
-    assert_label_present(&entities, builtins::GOVERNMENT_ID.label_ref());
+    assert_label_present(&entities, builtins::GOVERNMENT_ID.to_ref());
 }

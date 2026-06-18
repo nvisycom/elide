@@ -22,13 +22,17 @@
 
 use std::any::{Any, type_name};
 use std::fmt;
-use std::ops::Range;
 
-use veil_core::modality::{DataReader, DataWriter, Modality};
+use veil_core::Error;
+use veil_core::entity::Entity;
+use veil_core::modality::text::Text;
+use veil_core::modality::{Chunk, DataReader, DataWriter, Modality, StreamDataReader};
 use veil_core::redaction::Redactions;
 
-use super::FormatId;
+use crate::content::ContentData;
+
 use super::loader::DynHandler;
+use super::FormatId;
 
 /// Modality-erased handle the registry returns, carrying a typed
 /// [`DocumentHandle<M>`] for some `M` plus the [`FormatId`] of the
@@ -122,16 +126,6 @@ impl<M: Modality> DocumentHandle<M> {
         &self.format_id
     }
 
-    /// Advance the streaming cursor and yield the next chunk, or `None`
-    /// at end-of-stream.
-    ///
-    /// # Errors
-    ///
-    /// Propagates the handler's decode error.
-    pub async fn next_chunk(&mut self) -> Result<Option<super::Chunk<M>>, veil_core::Error> {
-        self.handler.next_chunk().await
-    }
-
     /// Serialize the current handler content back to [`ContentData`].
     ///
     /// # Errors
@@ -140,21 +134,8 @@ impl<M: Modality> DocumentHandle<M> {
     /// re-encoded.
     ///
     /// [`ContentData`]: crate::content::ContentData
-    pub fn encode(&self) -> Result<crate::content::ContentData, veil_core::Error> {
+    pub fn encode(&self) -> Result<ContentData, Error> {
         self.handler.encode()
-    }
-
-    /// Translate a value-range inside a chunk's decoded payload back to a
-    /// source-coordinate `M::Location`, or `None` when it has no source
-    /// pre-image. See [`Handler::lift_chunk`].
-    ///
-    /// [`Handler::lift_chunk`]: crate::Handler::lift_chunk
-    pub fn lift_chunk(
-        &self,
-        chunk: &super::Chunk<M>,
-        value_range: Range<usize>,
-    ) -> Option<M::Location> {
-        self.handler.lift_chunk(chunk, value_range)
     }
 }
 
@@ -168,13 +149,31 @@ impl<M: Modality> fmt::Debug for DocumentHandle<M> {
 }
 
 impl<M: Modality> DataReader<M> for DocumentHandle<M> {
-    async fn read_at(&self, location: &M::Location) -> Result<Option<M::Data>, veil_core::Error> {
+    async fn read_at(&self, location: &M::Location) -> Result<Option<M::Data>, Error> {
         self.handler.read_at(location).await
     }
 }
 
 impl<M: Modality> DataWriter<M> for DocumentHandle<M> {
-    async fn write_at(&mut self, redactions: Redactions<M>) -> Result<(), veil_core::Error> {
+    async fn write_at(&mut self, redactions: Redactions<M>) -> Result<(), Error> {
         self.handler.write_at(redactions).await
+    }
+}
+
+impl StreamDataReader<Text> for DocumentHandle<Text> {
+    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>, Error> {
+        self.handler.read_next().await
+    }
+
+    /// Lift a text entity from chunk-local to source coordinates by
+    /// mapping its `[start, end)` offset range through the handler's
+    /// [`lift_chunk`]. Drops the entity when the range has no source
+    /// pre-image.
+    ///
+    /// [`lift_chunk`]: crate::Handler::lift_chunk
+    fn lift(&self, chunk: &Chunk<Text>, mut entity: Entity<Text>) -> Option<Entity<Text>> {
+        let range = entity.location.start..entity.location.end;
+        entity.location = self.handler.lift_chunk(chunk, range)?;
+        Some(entity)
     }
 }

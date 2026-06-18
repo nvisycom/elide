@@ -28,10 +28,12 @@ use std::fmt;
 pub mod image;
 pub mod text;
 
+mod chunk;
 mod data_reader;
 mod data_writer;
 
-pub use self::data_reader::DataReader;
+pub use self::chunk::Chunk;
+pub use self::data_reader::{DataReader, StreamDataReader};
 pub use self::data_writer::DataWriter;
 
 /// The payload a recognizer inspects for a modality.

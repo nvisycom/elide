@@ -20,7 +20,7 @@ async fn enhancer_boosts_matches_near_keyword_only() {
         .with_score(Confidence::clamped(0.6));
     let regex = Regex::builder()
         .with_name("ssn")
-        .with_label(builtins::GOVERNMENT_ID.label_ref())
+        .with_label(builtins::GOVERNMENT_ID.to_ref())
         .with_context(vec!["ssn".to_owned(), "social security".to_owned()])
         .with_variants(vec![variant])
         .build()

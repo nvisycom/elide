@@ -22,11 +22,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use veil_core::Error;
-use veil_core::modality::{DataReader, DataWriter, Modality};
+use veil_core::modality::{Chunk, DataReader, DataWriter, Modality};
 use veil_core::redaction::Redactions;
 
 use super::Handler;
-use super::capability::Chunk;
 use super::document::{DocumentHandle, UntypedDocumentHandle};
 use crate::content::ContentData;
 
@@ -86,7 +85,7 @@ pub trait Loader<M: Modality>: Send + Sync + 'static {
 pub(crate) trait DynHandler<M: Modality>: Send + Sync + 'static {
     fn encode(&self) -> Result<ContentData, Error>;
 
-    fn next_chunk(&mut self) -> BoxFuture<'_, Result<Option<Chunk<M>>, Error>>;
+    fn read_next(&mut self) -> BoxFuture<'_, Result<Option<Chunk<M>>, Error>>;
 
     fn read_at<'a>(
         &'a self,
@@ -107,8 +106,8 @@ where
         Handler::encode(self)
     }
 
-    fn next_chunk(&mut self) -> BoxFuture<'_, Result<Option<Chunk<M>>, Error>> {
-        Box::pin(Handler::next_chunk(self))
+    fn read_next(&mut self) -> BoxFuture<'_, Result<Option<Chunk<M>>, Error>> {
+        Box::pin(Handler::read_next(self))
     }
 
     fn read_at<'a>(

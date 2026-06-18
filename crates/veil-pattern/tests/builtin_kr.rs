@@ -12,25 +12,25 @@ async fn builtin_identity() {
     assert_match(
         &text,
         &entities,
-        builtins::GOVERNMENT_ID.label_ref(),
+        builtins::GOVERNMENT_ID.to_ref(),
         "800101-1112343",
     );
     assert_match(
         &text,
         &entities,
-        builtins::GOVERNMENT_ID.label_ref(),
+        builtins::GOVERNMENT_ID.to_ref(),
         "900101-5112344",
     );
     assert_match(
         &text,
         &entities,
-        builtins::PASSPORT_NUMBER.label_ref(),
+        builtins::PASSPORT_NUMBER.to_ref(),
         "M123N4567",
     );
     assert_match(
         &text,
         &entities,
-        builtins::DRIVERS_LICENSE.label_ref(),
+        builtins::DRIVERS_LICENSE.to_ref(),
         "11-20-123456-78",
     );
 }
@@ -41,8 +41,8 @@ async fn builtin_finance() {
     assert_match(
         &text,
         &entities,
-        builtins::COMPANY_ID.label_ref(),
+        builtins::COMPANY_ID.to_ref(),
         "123-45-67891",
     );
-    assert_label_present(&entities, builtins::COMPANY_ID.label_ref());
+    assert_label_present(&entities, builtins::COMPANY_ID.to_ref());
 }

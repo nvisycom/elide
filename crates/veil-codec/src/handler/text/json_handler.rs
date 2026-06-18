@@ -4,7 +4,7 @@
 //! [`Slot::Passthrough`] (whitespace + structural punctuation, kept
 //! verbatim) or [`Slot::Leaf`] (a key, string value, or scalar). Leaves
 //! carry both the original source bytes (`serialized`) and the unescaped
-//! UTF-8 value the recognizer sees (`value`). [`Handler::next_chunk`]
+//! UTF-8 value the recognizer sees (`value`). [`Handler::read_next`]
 //! yields leaves in document order; `write_at` mutates the leaf's value
 //! and re-renders its serialized form; [`Handler::encode`] concatenates
 //! every slot.
@@ -17,13 +17,13 @@
 use std::ops::Range;
 
 use veil_core::modality::text::{Text, TextData, TextLocation};
-use veil_core::modality::{DataReader, DataWriter};
+use veil_core::modality::{Chunk, DataReader, DataWriter};
 use veil_core::redaction::Redactions;
 use veil_core::{Error, ErrorKind};
 
 use crate::content::ContentData;
 use crate::handler::redact;
-use crate::{Chunk, Format, FormatId, Handler};
+use crate::{Format, FormatId, Handler};
 
 /// Stable [`FormatId`] for the JSON codec.
 pub const FORMAT_ID: FormatId = FormatId::from_static("veil.text.json");
@@ -107,7 +107,7 @@ impl Handler<Text> for JsonHandler {
         Ok(ContentData::from_text(out))
     }
 
-    async fn next_chunk(&mut self) -> Result<Option<Chunk<Text>>, Error> {
+    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>, Error> {
         while self.cursor < self.slots.len() {
             let start = self.offset_of(self.cursor);
             let slot = &self.slots[self.cursor];
@@ -656,7 +656,7 @@ mod tests {
     async fn stream_yields_keys_and_values_in_order() -> Result<(), Error> {
         let mut h = handler(r#"{"name":"Alice","age":30}"#);
         let mut chunks = Vec::new();
-        while let Some(c) = h.next_chunk().await? {
+        while let Some(c) = h.read_next().await? {
             chunks.push(c.data.as_str().to_owned());
         }
         assert_eq!(chunks, vec!["name", "Alice", "age", "30"]);
@@ -667,7 +667,7 @@ mod tests {
     async fn duplicate_values_get_distinct_offsets() -> Result<(), Error> {
         let mut h = handler(r#"{"a":"same","b":"same"}"#);
         let mut offsets = Vec::new();
-        while let Some(c) = h.next_chunk().await? {
+        while let Some(c) = h.read_next().await? {
             if c.data.as_str() == "same" {
                 offsets.push(c.location.start);
             }
@@ -681,7 +681,7 @@ mod tests {
     async fn read_returns_string() -> Result<(), Error> {
         let mut h = handler(r#"{"name":"Alice"}"#);
         let mut found = false;
-        while let Some(chunk) = h.next_chunk().await? {
+        while let Some(chunk) = h.read_next().await? {
             if h.read_at(&chunk.location)
                 .await?
                 .map(|d| d.as_str().to_owned())
@@ -712,7 +712,7 @@ mod tests {
     async fn redact_whole_string_value() -> Result<(), Error> {
         let mut h = handler(r#"{"name":"Alice"}"#);
         let chunk = loop {
-            let c = h.next_chunk().await?.expect("expected chunk");
+            let c = h.read_next().await?.expect("expected chunk");
             if c.data.as_str() == "Alice" {
                 break c;
             }
@@ -729,7 +729,7 @@ mod tests {
         let src = r#"{"email":"alice@example.com"}"#;
         let mut h = handler(src);
         let _ = loop {
-            let c = h.next_chunk().await?.expect("chunk");
+            let c = h.read_next().await?.expect("chunk");
             if c.data.as_str() == "alice@example.com" {
                 break c;
             }
@@ -752,7 +752,7 @@ mod tests {
         let src = r#"{"msg":"foo\"bar"}"#;
         let mut h = handler(src);
         let _ = loop {
-            let c = h.next_chunk().await?.expect("chunk");
+            let c = h.read_next().await?.expect("chunk");
             if c.data.as_str() == r#"foo"bar"# {
                 break c;
             }
@@ -773,7 +773,7 @@ mod tests {
     async fn redact_key() -> Result<(), Error> {
         let mut h = handler(r#"{"email":"a@b.c"}"#);
         let chunk = loop {
-            let c = h.next_chunk().await?.expect("chunk");
+            let c = h.read_next().await?.expect("chunk");
             if c.data.as_str() == "email" {
                 break c;
             }
@@ -792,7 +792,7 @@ mod tests {
     async fn redact_scalar() -> Result<(), Error> {
         let mut h = handler(r#"{"n":42}"#);
         let chunk = loop {
-            let c = h.next_chunk().await?.expect("chunk");
+            let c = h.read_next().await?.expect("chunk");
             if c.data.as_str() == "42" {
                 break c;
             }
@@ -812,7 +812,7 @@ mod tests {
         let src = r#"{"a":"first","b":"second","c":"third"}"#;
         let mut h = handler(src);
         let mut locs = Vec::new();
-        while let Some(c) = h.next_chunk().await? {
+        while let Some(c) = h.read_next().await? {
             let v = c.data.as_str();
             if v == "first" || v == "second" || v == "third" {
                 locs.push(c.location);
@@ -833,7 +833,7 @@ mod tests {
         let src = r#"{"email":"alice@example.com"}"#;
         let mut h = handler(src);
         let chunk = loop {
-            let c = h.next_chunk().await?.expect("chunk");
+            let c = h.read_next().await?.expect("chunk");
             if c.data.as_str() == "alice@example.com" {
                 break c;
             }
@@ -855,7 +855,7 @@ mod tests {
         let src = r#"{"msg":"foo\"bar"}"#;
         let mut h = handler(src);
         let chunk = loop {
-            let c = h.next_chunk().await?.expect("chunk");
+            let c = h.read_next().await?.expect("chunk");
             if c.data.as_str() == r#"foo"bar"# {
                 break c;
             }
@@ -877,7 +877,7 @@ mod tests {
         let src = r#"{"msg":"foo\"bar"}"#;
         let mut h = handler(src);
         let chunk = loop {
-            let c = h.next_chunk().await?.expect("chunk");
+            let c = h.read_next().await?.expect("chunk");
             if c.data.as_str() == r#"foo"bar"# {
                 break c;
             }

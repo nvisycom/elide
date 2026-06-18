@@ -96,7 +96,7 @@ impl Default for Scoring {
 ///
 /// let dictionary = Dictionary::builder()
 ///     .with_name("nationalities")
-///     .with_label(builtins::NATIONALITY.label_ref())
+///     .with_label(builtins::NATIONALITY.to_ref())
 ///     .with_terms(vec![
 ///         Term::new("German"),
 ///         Term::new("French"),

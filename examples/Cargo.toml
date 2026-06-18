@@ -1,0 +1,31 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "veil-examples"
+description = "End-to-end usage examples for the Veil toolkit"
+publish = false
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+
+[[bin]]
+name = "redact-txt"
+path = "src/main.rs"
+
+[dependencies]
+# Internal crates
+veil-core = { workspace = true, features = [] }
+veil-pattern = { workspace = true, features = [] }
+veil-ner = { workspace = true, features = [] }
+veil-llm = { workspace = true, features = [] }
+veil-codec = { workspace = true, features = [] }
+veil-toolkit = { workspace = true, features = [] }
+
+# Async runtime
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
