@@ -27,6 +27,8 @@ openai-gpt = []
 anthropic-claude = []
 ## Enable Google Gemini completion provider.
 google-gemini = []
+## Ship the no-op `MockBackend` for tests, examples, and offline wiring.
+mock = []
 
 [package.metadata.docs.rs]
 all-features = true

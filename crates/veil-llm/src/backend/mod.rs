@@ -8,14 +8,17 @@
 //! tracking.
 
 pub mod http;
-mod noop;
+#[cfg(any(test, feature = "mock"))]
+mod mock;
 mod request;
 mod response;
 pub mod rig;
 
 use veil_core::Result;
 
-pub use self::noop::NoopBackend;
+#[cfg(any(test, feature = "mock"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "mock")))]
+pub use self::mock::MockBackend;
 pub use self::request::LlmRequest;
 pub use self::response::LlmResponse;
 

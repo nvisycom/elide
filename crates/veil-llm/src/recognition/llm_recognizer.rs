@@ -86,6 +86,20 @@ impl<M: Modality> LlmRecognizerBuilder<M> {
         self
     }
 
+    /// Wire the no-op [`MockBackend`] as this recognizer's backend.
+    ///
+    /// Convenience for tests, examples, and offline wiring: the
+    /// recognizer is fully built but produces no entities. Equivalent to
+    /// `with_backend(MockBackend)`.
+    ///
+    /// [`MockBackend`]: crate::backend::MockBackend
+    #[cfg(any(test, feature = "mock"))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "mock")))]
+    #[must_use]
+    pub fn with_mock_backend(self) -> Self {
+        self.with_backend(crate::backend::MockBackend)
+    }
+
     /// Set the modality-specific [`Prompt`] strategy. Accepts any
     /// concrete impl by value and wraps it in `Arc`. Required:
     /// `build` errors when this hasn't been called.
@@ -93,6 +107,21 @@ impl<M: Modality> LlmRecognizerBuilder<M> {
     pub fn with_prompt<P: Prompt<M>>(mut self, prompt: P) -> Self {
         self.prompt = Some(Arc::new(prompt));
         self
+    }
+
+    /// Use the built-in [`DefaultPrompt`] for this modality.
+    ///
+    /// Convenience for the common case: equivalent to
+    /// `with_prompt(DefaultPrompt)`. Available for any modality
+    /// [`DefaultPrompt`] supports (text and image).
+    ///
+    /// [`DefaultPrompt`]: crate::recognition::DefaultPrompt
+    #[must_use]
+    pub fn with_default_prompt(self) -> Self
+    where
+        crate::recognition::DefaultPrompt: Prompt<M>,
+    {
+        self.with_prompt(crate::recognition::DefaultPrompt)
     }
 
     /// Finish the builder. Errors when `name`, `backend`, or

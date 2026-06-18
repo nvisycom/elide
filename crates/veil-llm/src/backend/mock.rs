@@ -1,4 +1,4 @@
-//! [`NoopBackend`]: a no-op [`LlmBackend`] for tests, examples, and as a
+//! [`MockBackend`]: a no-op [`LlmBackend`] for tests, examples, and as a
 //! default before a real provider is configured.
 
 use veil_core::Result;
@@ -12,15 +12,15 @@ use super::{LlmBackend, LlmRequest, LlmResponse};
 /// pipeline together before a real provider is available, and for tests
 /// and examples that must run without network access or credentials.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct NoopBackend;
+pub struct MockBackend;
 
 #[async_trait::async_trait]
-impl LlmBackend for NoopBackend {
+impl LlmBackend for MockBackend {
     async fn predict(&self, _request: LlmRequest<'_>) -> Result<LlmResponse> {
         Ok(LlmResponse::default())
     }
 
     fn model(&self) -> &str {
-        "noop"
+        "mock"
     }
 }

@@ -2,14 +2,17 @@
 //!
 //! One trait covers zero-shot backends (per-call labels via
 //! [`NerRequest::labels`] = `Some(...)`) and fixed-label backends
-//! (labels baked into the model, `labels = None`). The built-in
-//! [`NoopBackend`] (returns no spans; test stub) ships here; concrete
-//! inference backends live downstream.
+//! (labels baked into the model, `labels = None`). The `mock`-gated
+//! [`MockBackend`] (returns no spans; test/example stub) ships here;
+//! concrete inference backends live downstream.
 
+#[cfg(any(test, feature = "mock"))]
+mod mock_backend;
 mod ner_backend;
 mod ner_span;
-mod noop_backend;
 
+#[cfg(any(test, feature = "mock"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "mock")))]
+pub use self::mock_backend::MockBackend;
 pub use self::ner_backend::{NerBackend, NerRequest, NerResponse};
 pub use self::ner_span::RawNerSpan;
-pub use self::noop_backend::NoopBackend;

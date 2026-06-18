@@ -23,6 +23,8 @@ default = []
 
 ## Language detection via the `lingua` crate.
 lingua = ["dep:lingua"]
+## Ship the no-op `MockBackend` for tests, examples, and offline wiring.
+mock = []
 
 [package.metadata.docs.rs]
 all-features = true

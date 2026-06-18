@@ -7,7 +7,7 @@
 //!    recognizers concurrently: a real built-in [`PatternRecognizer`]
 //!    (emails, phone numbers, payment cards, URLs, …), an
 //!    [`NerRecognizer`], and an [`LlmRecognizer`]. The NER and LLM
-//!    recognizers use no-op backends so the example runs offline with no
+//!    recognizers use mock backends so the example runs offline with no
 //!    API keys; swap in a real backend to see them contribute. The
 //!    returned entities are already in the document's coordinates —
 //!    chunking and coordinate lifting happen inside `analyze_stream`.
@@ -26,23 +26,12 @@
 //! [`NerRecognizer`]: veil_ner::NerRecognizer
 //! [`LlmRecognizer`]: veil_llm::LlmRecognizer
 
+mod analyzer;
+mod anonymizer;
+
 use veil_codec::CodecRegistry;
-use veil_core::entity::builtins;
-use veil_core::modality::text::Text;
-use veil_core::primitive::ConfidenceThreshold;
 use veil_core::Result;
-
-use veil_llm::backend::NoopBackend as LlmNoopBackend;
-use veil_llm::{DefaultPrompt, LlmRecognizer};
-use veil_ner::backend::NoopBackend as NerNoopBackend;
-use veil_ner::NerRecognizer;
-use veil_pattern::PatternRecognizer;
-
-use veil_toolkit::deduplication::filter::FilterLayer;
-use veil_toolkit::deduplication::fuse::{FuseLayer, MaxConfidence};
-use veil_toolkit::deduplication::resolve::{HighestConfidence, ResolveLayer};
-use veil_toolkit::operators::{Mask, Redact, Replace};
-use veil_toolkit::{Analyzer, Anonymizer};
+use veil_core::modality::text::Text;
 
 /// Sample document baked into the binary so the example is self-contained.
 const SAMPLE: &str = include_str!("../data/sample.txt");
@@ -57,10 +46,10 @@ async fn main() -> Result<()> {
         .expect("the txt codec yields a text document");
 
     // 2. Assemble the analyzer once; it is reused for every chunk.
-    let analyzer = build_analyzer()?;
+    let analyzer = analyzer::build_analyzer()?;
 
     // 3. Assemble the anonymizer: an operator per label, plus a fallback.
-    let anonymizer = build_anonymizer();
+    let anonymizer = anonymizer::build_anonymizer();
 
     // 4. Detect: stream the document and get entities already in the
     //    document's source coordinates (lift is folded in).
@@ -78,55 +67,6 @@ async fn main() -> Result<()> {
     println!("--- redacted ---\n{redacted}");
 
     Ok(())
-}
-
-/// Build the three-recognizer analyzer plus its deduplication pipeline.
-fn build_analyzer() -> Result<Analyzer<Text>> {
-    // Real built-in patterns + dictionaries, with context boosting.
-    let patterns = PatternRecognizer::builder()
-        .with_builtin_patterns()
-        .with_builtin_dictionaries()
-        .build_context_enhanced()?;
-
-    // No-op NER: wired like a real model, returns no spans offline.
-    let ner = NerRecognizer::builder()
-        .with_name("ner-noop")
-        .with_backend(NerNoopBackend)
-        .with_supported_labels(vec![
-            builtins::PERSON_NAME.to_ref(),
-            builtins::ADDRESS.to_ref(),
-        ])
-        .build()?;
-
-    // No-op LLM: wired like a real provider, returns no entities offline.
-    let llm = LlmRecognizer::<Text>::builder()
-        .with_name("llm-noop")
-        .with_backend(LlmNoopBackend)
-        .with_prompt(DefaultPrompt)
-        .build()?;
-
-    Ok(Analyzer::new()
-        .with_recognizer(patterns)
-        .with_recognizer(ner)
-        .with_recognizer(llm)
-        .with_layer(FuseLayer::new(MaxConfidence))
-        .with_layer(ResolveLayer::new(HighestConfidence))
-        .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE)))
-}
-
-/// Build an anonymizer that picks a redaction strategy per label.
-fn build_anonymizer() -> Anonymizer<Text> {
-    Anonymizer::new()
-        .with_operator(builtins::EMAIL_ADDRESS.to_ref(), Replace::new("[EMAIL]"))
-        .with_operator(builtins::PHONE_NUMBER.to_ref(), Replace::new("[PHONE]"))
-        .with_operator(builtins::URL.to_ref(), Replace::new("[URL]"))
-        // Keep the last four digits of a card visible, mask the rest.
-        .with_operator(
-            builtins::PAYMENT_CARD.to_ref(),
-            Mask::stars().with_keep_suffix(4),
-        )
-        // Anything else we detect gets fully removed.
-        .with_fallback(Redact)
 }
 
 /// Tiny pluralization helper for the summary line.

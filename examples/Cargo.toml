@@ -22,8 +22,8 @@ path = "src/main.rs"
 # Internal crates
 veil-core = { workspace = true, features = [] }
 veil-pattern = { workspace = true, features = [] }
-veil-ner = { workspace = true, features = [] }
-veil-llm = { workspace = true, features = [] }
+veil-ner = { workspace = true, features = ["mock"] }
+veil-llm = { workspace = true, features = ["mock"] }
 veil-codec = { workspace = true, features = [] }
 veil-toolkit = { workspace = true, features = [] }
 

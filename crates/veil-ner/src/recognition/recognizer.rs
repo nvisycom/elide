@@ -131,6 +131,20 @@ impl NerRecognizerBuilder {
         self
     }
 
+    /// Wire the no-op [`MockBackend`] as this recognizer's backend.
+    ///
+    /// Convenience for tests, examples, and offline wiring: the
+    /// recognizer is fully built but produces no entities. Equivalent to
+    /// `with_backend(MockBackend)`.
+    ///
+    /// [`MockBackend`]: crate::backend::MockBackend
+    #[cfg(any(test, feature = "mock"))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "mock")))]
+    #[must_use]
+    pub fn with_mock_backend(self) -> Self {
+        self.with_backend(crate::backend::MockBackend)
+    }
+
     /// Finish the builder. Errors when `name` or `backend` is unset.
     pub fn build(self) -> Result<NerRecognizer> {
         self.try_build()
@@ -184,13 +198,12 @@ mod tests {
     use veil_core::modality::text::TextData;
 
     use super::*;
-    use crate::backend::NoopBackend;
 
     #[tokio::test]
-    async fn noop_engine_yields_no_entities() {
+    async fn mock_backend_yields_no_entities() {
         let rec = NerRecognizer::builder()
             .with_name("test")
-            .with_backend(NoopBackend)
+            .with_mock_backend()
             .with_supported_labels(vec![
                 builtins::PERSON_NAME.to_ref(),
                 builtins::EMAIL_ADDRESS.to_ref(),
@@ -203,10 +216,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn empty_supported_labels_passes_none_to_engine() {
+    async fn empty_supported_labels_passes_none_to_backend() {
         let rec = NerRecognizer::builder()
             .with_name("test")
-            .with_backend(NoopBackend)
+            .with_mock_backend()
             .build()
             .expect("builder succeeds");
         let input = RecognizerInput::new(TextData::new("Alice Smith".to_owned()));
