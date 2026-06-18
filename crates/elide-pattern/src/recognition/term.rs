@@ -3,7 +3,7 @@
 //! [`Dictionary`]: crate::Dictionary
 
 use elide_core::primitive::Confidence;
-use elide_core::{Error, ErrorKind};
+use elide_core::{Error, ErrorKind, Result};
 use serde::Deserialize;
 
 /// One literal scanned for by a [`Dictionary`].
@@ -82,7 +82,7 @@ impl Term {
     /// Returns a validation error when the CSV is malformed.
     ///
     /// [`Scoring::PerColumn`]: crate::Scoring::PerColumn
-    pub fn from_csv(raw: &str) -> Result<Vec<Self>, Error> {
+    pub fn from_csv(raw: &str) -> Result<Vec<Self>> {
         let mut reader = csv::ReaderBuilder::new()
             .has_headers(false)
             .flexible(true)

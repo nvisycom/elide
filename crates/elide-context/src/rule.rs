@@ -58,7 +58,7 @@ pub struct BoostRule {
     pub keywords: Vec<HipStr<'static>>,
     /// Window radius in words *before* the entity's match.
     /// Counted against the token artifact on
-    /// `RecognizerInput.artifacts` when present, or via Unicode
+    /// `RecognizerContext.artifacts` when present, or via Unicode
     /// word segmentation of the source text otherwise.
     pub prefix_words: usize,
     /// Window radius in words *after* the entity's match. Same

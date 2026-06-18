@@ -13,9 +13,9 @@
 //! [`lingua`]: https://crates.io/crates/lingua
 
 use elide_core::Result;
-use elide_core::modality::text::Text;
+use elide_core::modality::text::{Text, TextData};
 use elide_core::primitive::LanguageTag;
-use elide_core::recognition::{Enricher, RecognizerInput};
+use elide_core::recognition::{Enricher, RecognizerContext};
 
 use super::lingua_detector::LinguaDetector;
 
@@ -68,13 +68,13 @@ impl Default for LinguaEnricher {
 }
 
 impl Enricher<Text> for LinguaEnricher {
-    async fn enrich(&self, input: &mut RecognizerInput<Text>) -> Result<()> {
+    async fn enrich(&self, data: &TextData, ctx: &mut RecognizerContext<Text>) -> Result<()> {
         // A caller-asserted language is authoritative; skip detection.
-        if !input.languages.is_empty() {
+        if !ctx.languages.is_empty() {
             return Ok(());
         }
-        for detection in self.detector().detect(input.content.text.as_str())? {
-            input.languages.push(detection);
+        for detection in self.detector().detect(data.text.as_str())? {
+            ctx.languages.push(detection);
         }
         Ok(())
     }
@@ -89,27 +89,26 @@ mod tests {
 
     #[tokio::test]
     async fn detects_english_onto_input() {
-        let mut input = RecognizerInput::new(TextData::new(
-            "The quick brown fox jumps over the lazy dog.",
-        ));
+        let data = TextData::new("The quick brown fox jumps over the lazy dog.");
+        let mut ctx = RecognizerContext::new();
         LinguaEnricher::unrestricted()
-            .enrich(&mut input)
+            .enrich(&data, &mut ctx)
             .await
             .unwrap();
-        assert_eq!(input.primary_language().unwrap().primary_language(), "en");
+        assert_eq!(ctx.primary_language().unwrap().primary_language(), "en");
     }
 
     #[tokio::test]
     async fn asserted_language_skips_detection() {
         let de: LanguageTag = "de".parse().unwrap();
-        let mut input =
-            RecognizerInput::new(TextData::new("The quick brown fox")).with_language(de, None);
+        let data = TextData::new("The quick brown fox");
+        let mut ctx = RecognizerContext::new().with_language(de, None);
         LinguaEnricher::unrestricted()
-            .enrich(&mut input)
+            .enrich(&data, &mut ctx)
             .await
             .unwrap();
         // Only the asserted German remains; English was never detected.
-        assert_eq!(input.languages.as_slice().len(), 1);
-        assert_eq!(input.primary_language().unwrap().primary_language(), "de");
+        assert_eq!(ctx.languages.as_slice().len(), 1);
+        assert_eq!(ctx.primary_language().unwrap().primary_language(), "de");
     }
 }

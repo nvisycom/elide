@@ -14,26 +14,26 @@
 
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
-use elide_core::recognition::RecognizerInput;
+use elide_core::recognition::RecognizerContext;
 
 use crate::backend::LlmResponse;
 
 /// Pluggable prompt builder + response lifter for one modality.
 ///
 /// Implementors own both halves of the modality-specific work: turn
-/// a [`RecognizerInput<M>`] into the prompt string the backend
-/// receives, then turn the backend's reply into entities. Keeping
-/// both halves on one trait means the lifter has access to whatever
-/// state the builder stamped into the prompt (label maps, hint
-/// indices, etc.) by construction.
+/// the modality payload (`data`) plus its [`RecognizerContext<M>`]
+/// into the prompt string the backend receives, then turn the
+/// backend's reply into entities. Keeping both halves on one trait
+/// means the lifter has access to whatever state the builder stamped
+/// into the prompt (label maps, hint indices, etc.) by construction.
 pub trait Prompt<M>: Send + Sync + 'static
 where
     M: Modality,
 {
-    /// Render the user prompt for `input`. Fold in source data,
-    /// hints, labels, and any base64-encoded binary payloads
+    /// Render the user prompt for `data` in `ctx`. Fold in source
+    /// data, hints, labels, and any base64-encoded binary payloads
     /// (images, audio) the model needs to see.
-    fn build(&self, input: &RecognizerInput<M>) -> String;
+    fn build(&self, data: &M::Data, ctx: &RecognizerContext<M>) -> String;
 
     /// Optional JSON schema describing the expected response shape.
     /// When `Some`, the backend asks the model to constrain its
@@ -44,9 +44,12 @@ where
         None
     }
 
-    /// Parse the response text into entities. The recognizer wraps
-    /// these into a [`RecognizerOutput`].
-    ///
-    /// [`RecognizerOutput`]: elide_core::recognition::RecognizerOutput
-    fn lift(&self, response: &LlmResponse, input: &RecognizerInput<M>) -> Vec<Entity<M>>;
+    /// Parse the response text into entities, in modality-local
+    /// coordinates relative to `data`.
+    fn lift(
+        &self,
+        response: &LlmResponse,
+        data: &M::Data,
+        ctx: &RecognizerContext<M>,
+    ) -> Vec<Entity<M>>;
 }

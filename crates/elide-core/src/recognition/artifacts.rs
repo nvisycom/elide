@@ -5,7 +5,7 @@ use std::fmt;
 use type_map::concurrent::TypeMap;
 
 /// A type-keyed bundle of shared per-call enrichment, carried on a
-/// [`RecognizerInput`].
+/// [`RecognizerContext`].
 ///
 /// Upstream NLP work (tokenization, lemmatization, language detection)
 /// is expensive and would be wasteful to repeat in every recognizer. A
@@ -14,7 +14,7 @@ use type_map::concurrent::TypeMap;
 /// context enhancer's lemma matcher pulls a `Tokens` artifact. Each type
 /// has at most one entry. Recognizers that don't care leave it empty.
 ///
-/// [`RecognizerInput`]: super::RecognizerInput
+/// [`RecognizerContext`]: super::RecognizerContext
 #[derive(Default)]
 pub struct Artifacts(TypeMap);
 

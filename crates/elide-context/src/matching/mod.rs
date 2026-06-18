@@ -3,9 +3,9 @@
 //! - [`KeywordMatcher`] is the trait the enhancer talks to.
 //! - [`SubstringMatcher`] is the default: ASCII case-insensitive
 //!   substring search over the raw text window. Runs whenever no
-//!   token artifact is present on `RecognizerInput.artifacts`.
+//!   token artifact is present on `RecognizerContext.artifacts`.
 //! - [`LemmaMatcher`] reads lemmatized tokens an upstream NLP
-//!   engine stamped on `RecognizerInput.artifacts`. It recognizes
+//!   engine stamped on `RecognizerContext.artifacts`. It recognizes
 //!   morphological variants substring matching misses.
 //!
 //! [`Enhancer`]: crate::Enhancer

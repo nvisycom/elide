@@ -1,8 +1,8 @@
 //! End-to-end: load [`FilePrompt`] from a TOML fixture (Jinja2
 //! template + label map + ignore list), then exercise both halves of
 //! the [`Prompt`] trait: render against a populated
-//! [`RecognizerInput`] and lift a stub [`LlmResponse`] back into
-//! entities.
+//! payload + [`RecognizerContext`] and lift a stub [`LlmResponse`]
+//! back into entities.
 //!
 //! Covers the minijinja code path end-to-end (variable interpolation,
 //! `{% for %}`, `{% if %}`, the `| join` filter, hint snippet
@@ -13,7 +13,7 @@ use elide_core::entity::{LabelRef, builtins};
 use elide_core::modality::image::{Image, ImageData, ImageLocation};
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::primitive::{BoundingBox, Dimensions, Point};
-use elide_core::recognition::{Hint, RecognizerInput};
+use elide_core::recognition::{Hint, RecognizerContext};
 use elide_llm::backend::LlmResponse;
 use elide_llm::{FilePrompt, Prompt};
 const NER_TOML: &str = include_str!("../testdata/prompts/ner.toml");
@@ -32,12 +32,13 @@ fn text_prompt_renders_template_and_lifts_entities() {
         .with_name("uploader-alice")
         .with_label(builtins::PERSON_NAME.to_ref());
 
-    let input = RecognizerInput::new(TextData::new(body))
+    let data = TextData::new(body);
+    let ctx = RecognizerContext::<Text>::new()
         .with_hints(vec![hint])
         .with_labels(vec!["medical".to_owned(), "gdpr-request".to_owned()]);
 
     // -- build()
-    let rendered = prompt.build(&input);
+    let rendered = prompt.build(&data, &ctx);
     assert!(rendered.contains(body), "source text missing: {rendered}");
     assert!(
         rendered.contains("Document labels: medical, gdpr-request"),
@@ -69,7 +70,7 @@ fn text_prompt_renders_template_and_lifts_entities() {
             {"entity_type":"diagnosis","value":"hello","context":"Subject: hello","confidence":0.1}
         ]}"#,
     );
-    let entities = prompt.lift(&response, &input);
+    let entities = prompt.lift(&response, &data, &ctx);
 
     let kinds: Vec<LabelRef> = entities.iter().map(|e| e.label.clone()).collect();
     assert!(
@@ -108,12 +109,13 @@ fn image_prompt_renders_template_and_lifts_entities() {
     .with_name("uploader-face")
     .with_label(builtins::PERSON_NAME.to_ref());
 
-    let input = RecognizerInput::new(ImageData::new(bytes.clone(), dims))
+    let data = ImageData::new(bytes.clone(), dims);
+    let ctx = RecognizerContext::<Image>::new()
         .with_hints(vec![hint])
         .with_labels(vec!["badge".to_owned()]);
 
     // -- build()
-    let rendered = prompt.build(&input);
+    let rendered = prompt.build(&data, &ctx);
     let expected_b64 = base64_encode(&bytes);
     assert!(
         rendered.contains(&expected_b64),
@@ -138,7 +140,7 @@ fn image_prompt_renders_template_and_lifts_entities() {
             {"label":"url","x":0.0,"y":0.0,"width":0.05,"height":0.05,"confidence":0.9}
         ]}"#,
     );
-    let entities = prompt.lift(&response, &input);
+    let entities = prompt.lift(&response, &data, &ctx);
 
     let kinds: Vec<LabelRef> = entities.iter().map(|e| e.label.clone()).collect();
     assert!(

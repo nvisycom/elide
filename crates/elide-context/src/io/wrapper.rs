@@ -17,11 +17,10 @@
 //! The wrapper implements [`Recognizer`]`<Text>` so the engine never has
 //! to know boosting happened.
 
-use elide_core::Error;
-use elide_core::modality::text::Text;
-use elide_core::recognition::{
-    Recognizer, RecognizerId, RecognizerInput, RecognizerLanguage, RecognizerOutput,
-};
+use elide_core::Result;
+use elide_core::entity::Entity;
+use elide_core::modality::text::{Text, TextData};
+use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId, RecognizerLanguage};
 
 use super::Tokens;
 use crate::{Context, Enhancer};
@@ -32,7 +31,7 @@ use crate::{Context, Enhancer};
 /// drop-in replacement.
 ///
 /// Assumes the inner recognizer emits entities whose byte offsets index
-/// into `input.content.text` (the standard text-recognizer contract).
+/// into `data.text` (the standard text-recognizer contract).
 /// The wrapper reads the same `&str` for the keyword-window walk; a
 /// recognizer that emitted entities relative to a different coordinate
 /// space would surface stale or panic-on-slice offsets.
@@ -69,20 +68,21 @@ where
 
     async fn recognize(
         &self,
-        input: &RecognizerInput<Text>,
-    ) -> Result<RecognizerOutput<Text>, Error> {
-        let mut output = self.inner.recognize(input).await?;
+        data: &TextData,
+        ctx: &RecognizerContext<Text>,
+    ) -> Result<Vec<Entity<Text>>> {
+        let mut entities = self.inner.recognize(data, ctx).await?;
         if self.enhancer.is_empty() {
-            return Ok(output);
+            return Ok(entities);
         }
-        let mut ctx = Context::new(input.content.text.as_str()).with_hints(&input.context_hints);
-        if let Some(tokens) = input.artifacts.get::<Tokens>() {
-            ctx = ctx.with_tokens(tokens.as_slice());
+        let mut context = Context::new(data.text.as_str()).with_hints(&ctx.context_hints);
+        if let Some(tokens) = ctx.artifacts.get::<Tokens>() {
+            context = context.with_tokens(tokens.as_slice());
         }
-        if let Some(language) = input.primary_language() {
-            ctx = ctx.with_language(language);
+        if let Some(language) = ctx.primary_language() {
+            context = context.with_language(language);
         }
-        self.enhancer.enhance(&mut output.entities, &ctx);
-        Ok(output)
+        self.enhancer.enhance(&mut entities, &context);
+        Ok(entities)
     }
 }

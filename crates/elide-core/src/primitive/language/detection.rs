@@ -123,10 +123,10 @@ impl Language {
 /// A list of [`Language`]s resolved for one text scan.
 ///
 /// Built by a detector (one entry per detected region) or by the caller
-/// asserting languages. Carried on a [`RecognizerInput`] so every
+/// asserting languages. Carried on a [`RecognizerContext`] so every
 /// recognizer and the context enhancer can consult the call's languages.
 ///
-/// [`RecognizerInput`]: crate::recognition::RecognizerInput
+/// [`RecognizerContext`]: crate::recognition::RecognizerContext
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]

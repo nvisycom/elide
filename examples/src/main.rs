@@ -29,10 +29,11 @@
 mod analyzer;
 mod anonymizer;
 
+use elide::Result;
 use elide::codec::FormatRegistry;
 use elide::modality::text::Text;
-use elide::primitive::{Language, LanguageTag, Languages};
-use elide::{AnalysisOptions, Result};
+use elide::primitive::LanguageTag;
+use elide::recognition::RecognizerContext;
 
 /// Sample document baked into the binary so the example is self-contained.
 const SAMPLE: &str = include_str!("../data/sample.txt");
@@ -53,15 +54,11 @@ async fn main() -> Result<()> {
     let anonymizer = anonymizer::build_anonymizer();
 
     // 4. Detect: stream the document and get entities already in the
-    //    document's source coordinates (lift is folded in). The options
-    //    carry per-call assertions (here, that the document is English).
-    let english_tag = LanguageTag::parse("en").expect("`en` is a valid tag");
-    let english = Language::asserted(english_tag, None);
-    let options = AnalysisOptions::builder()
-        .with_languages(Languages::new(vec![english]))
-        .build()
-        .expect("options have defaults");
-    let entities = analyzer.analyze_stream(&mut document, &options).await?;
+    //    document's source coordinates (lift is folded in). The context
+    //    carries per-call assertions (here, that the document is English).
+    let ctx = RecognizerContext::new()
+        .with_language(LanguageTag::parse("en").expect("`en` is a valid tag"), None);
+    let entities = analyzer.analyze_stream(&mut document, &ctx).await?;
 
     // 5. Redact: apply each entity's operator back into the document,
     //    then re-encode.

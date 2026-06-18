@@ -209,8 +209,8 @@ fn label_map_translates_raw_labels() {
 }
 
 #[test]
-fn recognizer_input_scopes_by_language_and_country() {
-    use elide_core::recognition::{RecognizerInput, RecognizerLanguage};
+fn recognizer_context_scopes_by_language_and_country() {
+    use elide_core::recognition::{RecognizerContext, RecognizerLanguage};
 
     let en_us = LanguageTag::parse("en-US").unwrap();
     let en = LanguageTag::parse("en").unwrap();
@@ -220,39 +220,38 @@ fn recognizer_input_scopes_by_language_and_country() {
     assert!(en.matches(&en_us));
     assert!(!en.matches(&fr));
 
-    let input: RecognizerInput<Text> = RecognizerInput::new(TextData::new(""))
+    let ctx: RecognizerContext<Text> = RecognizerContext::new()
         .with_language(en_us.clone(), None)
         .with_country(CountryCode::from_alpha2("US").unwrap());
 
     // The asserted language is the primary one.
-    assert_eq!(input.primary_language(), Some(&en_us));
+    assert_eq!(ctx.primary_language(), Some(&en_us));
 
     // Empty scope always applies.
-    assert!(input.applies_to_language(&[]));
-    assert!(input.applies_to_country(&[]));
+    assert!(ctx.applies_to_language(&[]));
+    assert!(ctx.applies_to_country(&[]));
     // Matching scope applies; non-matching does not.
-    assert!(input.applies_to_language(&[en]));
-    assert!(!input.applies_to_language(&[fr]));
-    assert!(input.applies_to_country(&[CountryCode::from_alpha2("US").unwrap()]));
-    assert!(!input.applies_to_country(&[CountryCode::from_alpha2("GB").unwrap()]));
+    assert!(ctx.applies_to_language(&[en]));
+    assert!(!ctx.applies_to_language(&[fr]));
+    assert!(ctx.applies_to_country(&[CountryCode::from_alpha2("US").unwrap()]));
+    assert!(!ctx.applies_to_country(&[CountryCode::from_alpha2("GB").unwrap()]));
 }
 
 #[test]
-fn recognizer_input_carries_hints() {
+fn recognizer_context_carries_hints() {
     use elide_core::entity::LabelRef;
     use elide_core::modality::text::TextLocation;
-    use elide_core::recognition::{Hint, RecognizerInput};
+    use elide_core::recognition::{Hint, RecognizerContext};
 
     let hint = Hint::new(TextLocation::new(0, 5))
         .with_name("uploaded selection")
         .with_label(LabelRef::new("PERSON"));
-    let input: RecognizerInput<Text> =
-        RecognizerInput::new(TextData::new("Alice was here")).with_hints(vec![hint]);
+    let ctx: RecognizerContext<Text> = RecognizerContext::new().with_hints(vec![hint]);
 
-    assert_eq!(input.hints.len(), 1);
-    assert_eq!(input.hints[0].location, TextLocation::new(0, 5));
-    assert_eq!(input.hints[0].name.as_deref(), Some("uploaded selection"));
-    assert_eq!(input.hints[0].label, Some(LabelRef::new("PERSON")));
+    assert_eq!(ctx.hints.len(), 1);
+    assert_eq!(ctx.hints[0].location, TextLocation::new(0, 5));
+    assert_eq!(ctx.hints[0].name.as_deref(), Some("uploaded selection"));
+    assert_eq!(ctx.hints[0].label, Some(LabelRef::new("PERSON")));
 }
 
 #[test]

@@ -6,7 +6,7 @@
 //! - [`Global`] — one flat keyword list applied regardless of the
 //!   per-call language hint.
 //! - [`PerLanguage`] — keyword lists keyed by [`LanguageTag`]; the
-//!   enhancer picks the entry matching `RecognizerInput.language`.
+//!   enhancer picks the entry matching `RecognizerContext.language`.
 //!   When no language hint is set, the union of every per-language
 //!   keyword fires (matches the crate's "missing language = any"
 //!   theme used by [`Regex::languages`] / [`Dictionary::languages`]).
@@ -38,7 +38,7 @@ pub enum Context {
     /// language hint.
     Global(Vec<String>),
     /// Per-language keyword lists. The enhancer picks the entry
-    /// matching `RecognizerInput.language`, or unions every list
+    /// matching `RecognizerContext.language`, or unions every list
     /// when no hint is set.
     PerLanguage(HashMap<LanguageTag, Vec<String>>),
 }

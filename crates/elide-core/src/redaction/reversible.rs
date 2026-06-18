@@ -4,7 +4,7 @@
 use std::future::Future;
 
 use crate::entity::Entity;
-use crate::error::Error;
+use crate::error::Result;
 use crate::modality::Modality;
 use crate::redaction::Operator;
 
@@ -34,5 +34,5 @@ pub trait ReversibleOperator<M: Modality>: Operator<M> {
         &self,
         entity: &Entity<M>,
         replacement: &M::Replacement,
-    ) -> impl Future<Output = Result<Option<M::Data>, Error>> + Send;
+    ) -> impl Future<Output = Result<Option<M::Data>>> + Send;
 }

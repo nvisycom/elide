@@ -17,7 +17,7 @@
 //!
 //! Tokens live next to the [`Enhancer`] because that's the only
 //! consumer: the enhancer reads them off
-//! `RecognizerInput::artifacts` to drive lemma-aware keyword
+//! `RecognizerContext::artifacts` to drive lemma-aware keyword
 //! matching. The producer (a tokenizer in some upstream NLP
 //! backend) only needs to know the type by name; the type itself
 //! belongs in the consumer's neighbourhood.
@@ -97,9 +97,9 @@ impl Token {
 }
 
 /// Owning token sequence stamped on a
-/// [`RecognizerInput::artifacts`] bundle by an upstream NLP engine.
+/// [`RecognizerContext::artifacts`] bundle by an upstream NLP engine.
 ///
-/// [`RecognizerInput::artifacts`]: elide_core::recognition::RecognizerInput::artifacts
+/// [`RecognizerContext::artifacts`]: elide_core::recognition::RecognizerContext::artifacts
 ///
 /// Tokens are sorted by `offset.start` (producers should emit them
 /// in order; consumer-side code assumes this). The [`Enhancer`]

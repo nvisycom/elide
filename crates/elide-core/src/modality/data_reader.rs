@@ -5,7 +5,7 @@ use std::future::Future;
 
 use super::{Chunk, Modality};
 use crate::entity::Entity;
-use crate::error::Error;
+use crate::error::Result;
 
 /// Reads the [`Data`] at a [`Location`] within some source.
 ///
@@ -36,7 +36,7 @@ pub trait DataReader<M: Modality>: Send + Sync {
     fn read_at(
         &self,
         location: &M::Location,
-    ) -> impl Future<Output = Result<Option<M::Data>, Error>> + Send;
+    ) -> impl Future<Output = Result<Option<M::Data>>> + Send;
 }
 
 /// Streams a source as a sequence of [`Chunk`]s and lifts
@@ -66,7 +66,7 @@ pub trait DataReader<M: Modality>: Send + Sync {
 pub trait StreamDataReader<M: Modality>: Send {
     /// Advance the cursor and yield the next [`Chunk`], or `Ok(None)` at
     /// end-of-stream. Propagates the source's decode error.
-    fn read_next(&mut self) -> impl Future<Output = Result<Option<Chunk<M>>, Error>> + Send;
+    fn read_next(&mut self) -> impl Future<Output = Result<Option<Chunk<M>>>> + Send;
 
     /// Map `entity` — whose location addresses `chunk`'s decoded payload —
     /// to a source-coordinate entity.

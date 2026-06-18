@@ -9,12 +9,11 @@
 //! [`Event`]: crate::provenance::Event
 
 mod artifacts;
+mod context;
 mod enricher;
 mod hint;
-mod input;
 mod label;
 mod language;
-mod output;
 
 use std::fmt;
 use std::future::Future;
@@ -24,13 +23,13 @@ use hipstr::HipStr;
 use serde::{Deserialize, Serialize};
 
 pub use self::artifacts::Artifacts;
+pub use self::context::RecognizerContext;
 pub use self::enricher::Enricher;
 pub use self::hint::Hint;
-pub use self::input::RecognizerInput;
 pub use self::label::LabelMap;
 pub use self::language::RecognizerLanguage;
-pub use self::output::RecognizerOutput;
-use crate::error::Error;
+use crate::entity::Entity;
+use crate::error::Result;
 use crate::modality::Modality;
 
 /// Identifies a recognizer (name + version).
@@ -79,9 +78,9 @@ impl fmt::Display for RecognizerId {
 /// fusion step in `elide`; pruning and orchestration belong to a
 /// higher layer, not to the recognizer itself.
 ///
-/// The per-call surface is the [`RecognizerInput<M>`] (the modality
-/// payload plus language/jurisdiction/label hints); the result is a
-/// [`RecognizerOutput<M>`].
+/// Per call, a recognizer receives the modality payload (`data`) plus a
+/// [`RecognizerContext<M>`] (the call's languages, jurisdictions, label
+/// and annotation hints), and returns the entities it found.
 ///
 /// [`Entity`]: crate::entity::Entity
 /// [`Event`]: crate::provenance::Event
@@ -92,9 +91,11 @@ where
     /// This recognizer's identity (name + version).
     fn id(&self) -> RecognizerId;
 
-    /// Inspect the input and return the recognized entities.
+    /// Inspect `data` in the given context and return the recognized
+    /// entities, in modality-local coordinates.
     fn recognize(
         &self,
-        input: &RecognizerInput<M>,
-    ) -> impl Future<Output = Result<RecognizerOutput<M>, Error>> + Send;
+        data: &M::Data,
+        ctx: &RecognizerContext<M>,
+    ) -> impl Future<Output = Result<Vec<Entity<M>>>> + Send;
 }

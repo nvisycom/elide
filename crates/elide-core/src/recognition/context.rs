@@ -1,11 +1,14 @@
-//! [`RecognizerInput<M>`]: per-call input for a [`Recognizer`].
+//! [`RecognizerContext<M>`]: per-call context for a [`Recognizer`].
 //!
-//! Flat per-call surface for recognizers: the modality payload plus the
-//! per-call concerns recognizers actually use (the call's languages, a
-//! jurisdiction hint, document-level labels, out-of-band context strings,
-//! shared NLP artifacts, and a correlation id).
+//! Flat per-call surface of the concerns recognizers consult alongside
+//! the payload: the call's languages, asserted jurisdictions,
+//! document-level labels, out-of-band context strings, shared NLP
+//! artifacts, caller hints, and a correlation id. The modality payload
+//! is passed separately to [`Recognizer::recognize`]; the context is
+//! built once and reused across every payload of one analysis.
 //!
 //! [`Recognizer`]: super::Recognizer
+//! [`Recognizer::recognize`]: super::Recognizer::recognize
 
 use uuid::Uuid;
 
@@ -13,17 +16,16 @@ use crate::modality::Modality;
 use crate::primitive::{Confidence, CountryCode, Language, LanguageTag, Languages};
 use crate::recognition::{Artifacts, Hint};
 
-/// Per-call input for a [`Recognizer`].
+/// Per-call context for a [`Recognizer`].
 ///
-/// Bundles the modality payload ([`content`], the modality's span/data)
-/// with the per-call concerns recognizers actually use.
+/// Holds the per-call concerns recognizers consult; the modality payload
+/// is passed alongside it to [`Recognizer::recognize`]. Built once with
+/// the `with_*` chain and reused across every payload of one analysis.
 ///
 /// [`Recognizer`]: super::Recognizer
-/// [`content`]: Self::content
+/// [`Recognizer::recognize`]: super::Recognizer::recognize
 #[derive(Debug)]
-pub struct RecognizerInput<M: Modality> {
-    /// The modality payload to inspect, in modality-local coordinates.
-    pub content: M::Data,
+pub struct RecognizerContext<M: Modality> {
     /// Shared per-call NLP enrichment (tokens, lemmas, …), keyed by type.
     /// An enricher computes it once; recognizers that want it read it back
     /// by type. Those that don't leave it empty.
@@ -34,10 +36,10 @@ pub struct RecognizerInput<M: Modality> {
     /// Consult it through the `RecognizerLanguage` trait rather than
     /// indexing directly.
     pub languages: Languages,
-    /// Caller-asserted jurisdiction. When `Some`, recognizers that carry
-    /// per-rule country scopes skip rules that match none of them. An
-    /// empty list means "any": rules that declare countries still run as
-    /// a permissive fallback so callers who don't assert a jurisdiction
+    /// Caller-asserted jurisdictions. When non-empty, recognizers that
+    /// carry per-rule country scopes skip rules that match none of them.
+    /// An empty list means "any": rules that declare countries still run
+    /// as a permissive fallback so callers who don't assert a jurisdiction
     /// don't lose detections. A document spanning several jurisdictions
     /// can assert all of them; a rule runs when any one matches.
     pub countries: Vec<CountryCode>,
@@ -64,12 +66,10 @@ pub struct RecognizerInput<M: Modality> {
     pub correlation_id: Option<Uuid>,
 }
 
-impl<M: Modality> RecognizerInput<M> {
-    /// Construct an input with only the modality payload set; every other
-    /// field defaults to empty.
-    pub fn new(content: M::Data) -> Self {
+impl<M: Modality> RecognizerContext<M> {
+    /// An empty context: nothing asserted, every field defaults to empty.
+    pub fn new() -> Self {
         Self {
-            content,
             artifacts: Artifacts::new(),
             languages: Languages::default(),
             countries: Vec::new(),
@@ -85,6 +85,27 @@ impl<M: Modality> RecognizerInput<M> {
     pub fn with_artifacts(mut self, artifacts: Artifacts) -> Self {
         self.artifacts = artifacts;
         self
+    }
+
+    /// A fresh per-call context carrying this one's caller-asserted fields
+    /// (languages, countries, labels, hints, correlation id) but an empty
+    /// [`Artifacts`] bundle.
+    ///
+    /// The caller builds the asserted context once; the analyzer forks a
+    /// working copy per payload so each call's enrichers stamp their own
+    /// artifacts and detected languages without sharing across payloads.
+    /// [`Artifacts`] is per-call NLP output, so it is never carried over.
+    #[must_use]
+    pub fn fork_assertions(&self) -> Self {
+        Self {
+            artifacts: Artifacts::new(),
+            languages: self.languages.clone(),
+            countries: self.countries.clone(),
+            labels: self.labels.clone(),
+            context_hints: self.context_hints.clone(),
+            hints: self.hints.clone(),
+            correlation_id: self.correlation_id,
+        }
     }
 
     /// Attach caller-supplied annotation [`Hint`]s.
@@ -164,5 +185,11 @@ impl<M: Modality> RecognizerInput<M> {
             return true;
         }
         self.countries.iter().any(|c| allowed.contains(c))
+    }
+}
+
+impl<M: Modality> Default for RecognizerContext<M> {
+    fn default() -> Self {
+        Self::new()
     }
 }

@@ -33,5 +33,5 @@ pub use elide_ner as ner;
 #[doc(inline)]
 pub use elide_pattern as pattern;
 
-pub use self::analyzer::{AnalysisOptions, AnalysisOptionsBuilder, Analyzer};
+pub use self::analyzer::Analyzer;
 pub use self::anonymizer::{Anonymizer, operators};

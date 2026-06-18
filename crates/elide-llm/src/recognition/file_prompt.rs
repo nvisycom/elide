@@ -48,9 +48,9 @@ use std::path::Path;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use elide_core::entity::{Entity, LabelRef};
-use elide_core::modality::image::Image;
-use elide_core::modality::text::Text;
-use elide_core::recognition::{LabelMap, RecognizerInput};
+use elide_core::modality::image::{Image, ImageData};
+use elide_core::modality::text::{Text, TextData};
+use elide_core::recognition::{LabelMap, RecognizerContext};
 use elide_core::{Error, ErrorKind, Result};
 use minijinja::{Environment, context};
 use schemars::Schema;
@@ -203,9 +203,9 @@ impl FilePrompt<Image> {
 }
 
 impl Prompt<Text> for FilePrompt<Text> {
-    fn build(&self, input: &RecognizerInput<Text>) -> String {
-        let text = input.content.text.as_str();
-        let hints: Vec<_> = input
+    fn build(&self, data: &TextData, ctx: &RecognizerContext<Text>) -> String {
+        let text = data.text.as_str();
+        let hints: Vec<_> = ctx
             .hints
             .iter()
             .map(|h| {
@@ -219,14 +219,14 @@ impl Prompt<Text> for FilePrompt<Text> {
                 }
             })
             .collect();
-        let ctx = context! {
+        let jinja_ctx = context! {
             text => text,
             hints => hints,
-            labels => input.labels.clone(),
+            labels => ctx.labels.clone(),
         };
         self.env
             .get_template("prompt")
-            .and_then(|t| t.render(ctx))
+            .and_then(|t| t.render(jinja_ctx))
             .unwrap_or_default()
     }
 
@@ -234,12 +234,17 @@ impl Prompt<Text> for FilePrompt<Text> {
         Some(text_schema())
     }
 
-    fn lift(&self, response: &LlmResponse, input: &RecognizerInput<Text>) -> Vec<Entity<Text>> {
+    fn lift(
+        &self,
+        response: &LlmResponse,
+        data: &TextData,
+        _ctx: &RecognizerContext<Text>,
+    ) -> Vec<Entity<Text>> {
         let Ok(parsed): Result<TextCandidates, _> = parse_json(&response.text) else {
             return Vec::new();
         };
         lift_text(
-            input,
+            data,
             parsed.entities,
             &self.label_map,
             &self.labels_to_ignore,
@@ -248,9 +253,9 @@ impl Prompt<Text> for FilePrompt<Text> {
 }
 
 impl Prompt<Image> for FilePrompt<Image> {
-    fn build(&self, input: &RecognizerInput<Image>) -> String {
-        let image_b64 = STANDARD.encode(input.content.bytes.as_ref());
-        let hints: Vec<_> = input
+    fn build(&self, data: &ImageData, ctx: &RecognizerContext<Image>) -> String {
+        let image_b64 = STANDARD.encode(data.bytes.as_ref());
+        let hints: Vec<_> = ctx
             .hints
             .iter()
             .map(|h| {
@@ -267,14 +272,14 @@ impl Prompt<Image> for FilePrompt<Image> {
                 }
             })
             .collect();
-        let ctx = context! {
+        let jinja_ctx = context! {
             image_b64 => image_b64,
             hints => hints,
-            labels => input.labels.clone(),
+            labels => ctx.labels.clone(),
         };
         self.env
             .get_template("prompt")
-            .and_then(|t| t.render(ctx))
+            .and_then(|t| t.render(jinja_ctx))
             .unwrap_or_default()
     }
 
@@ -282,12 +287,17 @@ impl Prompt<Image> for FilePrompt<Image> {
         Some(vlm_schema())
     }
 
-    fn lift(&self, response: &LlmResponse, input: &RecognizerInput<Image>) -> Vec<Entity<Image>> {
+    fn lift(
+        &self,
+        response: &LlmResponse,
+        data: &ImageData,
+        _ctx: &RecognizerContext<Image>,
+    ) -> Vec<Entity<Image>> {
         let Ok(parsed): Result<VlmCandidates, _> = parse_json(&response.text) else {
             return Vec::new();
         };
         lift_image(
-            input,
+            data,
             parsed.entities,
             &self.label_map,
             &self.labels_to_ignore,

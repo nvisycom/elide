@@ -7,7 +7,7 @@
 //! ones) fold hints into their detection pass so the model can confirm,
 //! relocate, or implicitly reject each one alongside open-ended
 //! discovery. Recognizers that don't (pattern, dictionary, generic NER
-//! backends) ignore [`RecognizerInput::hints`] entirely.
+//! backends) ignore [`RecognizerContext::hints`] entirely.
 //!
 //! `Hint<M>` mirrors [`Entity<M>`] structurally: both carry a
 //! modality-native location. The difference is direction. An entity is a
@@ -15,7 +15,7 @@
 //! is a recognizer's *input*, with neither.
 //!
 //! [`Entity<M>`]: crate::entity::Entity
-//! [`RecognizerInput::hints`]: super::RecognizerInput::hints
+//! [`RecognizerContext::hints`]: super::RecognizerContext::hints
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};

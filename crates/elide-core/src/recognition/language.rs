@@ -1,11 +1,11 @@
 //! [`RecognizerLanguage`]: the language-aware surface of a
-//! [`RecognizerInput`].
+//! [`RecognizerContext`].
 
 use crate::modality::Modality;
 use crate::primitive::{Confidence, Language, LanguageTag};
-use crate::recognition::RecognizerInput;
+use crate::recognition::RecognizerContext;
 
-/// The language-aware surface of a [`RecognizerInput`].
+/// The language-aware surface of a [`RecognizerContext`].
 ///
 /// Groups every "what languages does this call concern?" operation in one
 /// trait so recognizers and the context enhancer consult the call's
@@ -39,7 +39,7 @@ pub trait RecognizerLanguage {
     fn applies_to_language(&self, allowed: &[LanguageTag]) -> bool;
 }
 
-impl<M: Modality> RecognizerLanguage for RecognizerInput<M> {
+impl<M: Modality> RecognizerLanguage for RecognizerContext<M> {
     fn assert_language(&mut self, language: LanguageTag, confidence: Option<Confidence>) {
         self.languages
             .push(Language::asserted(language, confidence));
