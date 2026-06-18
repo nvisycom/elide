@@ -14,10 +14,10 @@
 //!
 //! [`NerRecognizer::recognize`]: crate::NerRecognizer
 
-use uuid::Uuid;
 use elide_core::Result;
 use elide_core::primitive::LanguageTag;
 use elide_core::provenance::ModelEvent;
+use uuid::Uuid;
 
 use super::ner_span::RawNerSpan;
 

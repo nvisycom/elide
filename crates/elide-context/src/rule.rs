@@ -18,9 +18,9 @@
 
 use std::collections::HashSet;
 
-use hipstr::HipStr;
 use elide_core::entity::LabelRef;
 use elide_core::primitive::{Confidence, LanguageTag};
+use hipstr::HipStr;
 
 /// Default window radius in words *before* an entity match.
 pub const DEFAULT_PREFIX_WORDS: usize = 5;

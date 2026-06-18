@@ -14,9 +14,9 @@
 mod config;
 mod middleware;
 
+use elide_core::{Error, ErrorKind, Result};
 use reqwest_middleware::reqwest::Client;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
-use elide_core::{Error, ErrorKind, Result};
 
 pub use self::config::HttpConfig;
 use self::middleware::{backoff_policy, retry_layer, tracing_layer};

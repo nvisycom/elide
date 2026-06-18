@@ -2,16 +2,16 @@
 //! `PHONE_NUMBER`s; the analyzer fuses them, and a `FilterLayer` drops a
 //! low-confidence stray.
 
-use elide_core::Error;
-use elide_core::entity::{Entity, LabelRef};
-use elide_core::primitive::{Confidence, ConfidenceThreshold};
-use elide_core::provenance::{Event, EventKind, PatternEvent, Provenance};
-use elide_core::recognition::{Recognizer, RecognizerId, RecognizerInput, RecognizerOutput};
 use elide::Analyzer;
 use elide::deduplication::calibrate::{CalibrateLayer, CalibrationMap};
 use elide::deduplication::filter::FilterLayer;
 use elide::deduplication::fuse::{FuseLayer, MaxConfidence};
 use elide::deduplication::resolve::{HighestConfidence, ResolveLayer};
+use elide_core::Error;
+use elide_core::entity::{Entity, LabelRef};
+use elide_core::primitive::{Confidence, ConfidenceThreshold};
+use elide_core::provenance::{Event, EventKind, PatternEvent, Provenance};
+use elide_core::recognition::{Recognizer, RecognizerId, RecognizerInput, RecognizerOutput};
 
 mod fixtures;
 use fixtures::{Text, TextData, TextLocation};

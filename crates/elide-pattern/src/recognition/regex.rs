@@ -1,10 +1,10 @@
 //! [`Regex`] rule and its [`Variant`]s.
 
 use derive_builder::Builder;
-use serde::Deserialize;
 use elide_core::entity::LabelRef;
 use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
 use elide_core::{Error, ErrorKind};
+use serde::Deserialize;
 
 use super::context::Context;
 

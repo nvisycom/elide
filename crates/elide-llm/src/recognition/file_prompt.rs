@@ -47,14 +47,14 @@ use std::path::Path;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use minijinja::{Environment, context};
-use schemars::Schema;
-use serde::Deserialize;
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::image::Image;
 use elide_core::modality::text::Text;
 use elide_core::recognition::{LabelMap, RecognizerInput};
 use elide_core::{Error, ErrorKind, Result};
+use minijinja::{Environment, context};
+use schemars::Schema;
+use serde::Deserialize;
 
 use super::candidates::{TextCandidates, VlmCandidates};
 use super::lift::{lift_image, lift_text};

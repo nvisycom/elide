@@ -10,8 +10,8 @@
 
 mod fixtures;
 
-use fixtures::{assert_label_present, assert_match, scan};
 use elide_core::entity::builtins;
+use fixtures::{assert_label_present, assert_match, scan};
 
 #[tokio::test]
 async fn builtin_contact() {

@@ -1,11 +1,11 @@
 //! The `Hash` operator: replace the matched value with a one-way SHA-2
 //! hash.
 
-use sha2::{Digest, Sha256, Sha512};
 use elide_core::Error;
 use elide_core::entity::Entity;
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use sha2::{Digest, Sha256, Sha512};
 
 /// Which SHA-2 variant to use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]

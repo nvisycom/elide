@@ -2,11 +2,11 @@
 //! operators, reading values through a `DataReader`, with a fallback for
 //! unmapped labels.
 
+use elide::Anonymizer;
+use elide::operators::{Mask, Redact, Replace};
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::primitive::Confidence;
 use elide_core::provenance::{Event, PatternEvent, Provenance};
-use elide::Anonymizer;
-use elide::operators::{Mask, Redact, Replace};
 
 mod fixtures;
 use fixtures::{Text, TextLocation, TextReplacement, TextSource};

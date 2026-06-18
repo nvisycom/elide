@@ -1,8 +1,8 @@
 //! Unified error type covering LLM provider, serialization, and tool failures.
 
+use elide_core::{Error as CoreError, ErrorKind as CoreErrorKind};
 use rig::completion::{CompletionError, PromptError, StructuredOutputError};
 use rig::http_client::Error as HttpClientError;
-use elide_core::{Error as CoreError, ErrorKind as CoreErrorKind};
 
 /// Internal error type for LLM provider interactions.
 ///

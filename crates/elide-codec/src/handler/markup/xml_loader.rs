@@ -19,10 +19,10 @@
 
 use std::ops::Range;
 
-use quick_xml::Reader;
-use quick_xml::events::Event;
 use elide_core::modality::text::Text;
 use elide_core::{Error, ErrorKind};
+use quick_xml::Reader;
+use quick_xml::events::Event;
 
 use super::xml_handler::{FORMAT_ID, XmlEncoder, XmlHandler, XmlItem, XmlSpan};
 use super::{MarkupHandler, RedactableItem};

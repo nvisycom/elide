@@ -10,10 +10,10 @@
 //! [`style_policy`]: HtmlLoader::style_policy
 
 use ego_tree::NodeRef;
-use scraper::Html;
-use scraper::node::Node;
 use elide_core::Error;
 use elide_core::modality::text::Text;
+use scraper::Html;
+use scraper::node::Node;
 
 use super::MarkupHandler;
 use super::html_handler::{

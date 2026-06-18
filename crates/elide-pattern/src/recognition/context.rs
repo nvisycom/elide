@@ -21,8 +21,8 @@ use std::collections::HashMap;
 use std::collections::hash_map::Iter;
 
 use derive_more::From;
-use serde::Deserialize;
 use elide_core::primitive::LanguageTag;
+use serde::Deserialize;
 
 /// Per-rule context keyword set.
 ///

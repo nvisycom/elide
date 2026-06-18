@@ -20,11 +20,11 @@ use std::fmt;
 use std::str::FromStr;
 use std::sync::{Mutex, OnceLock};
 
-use lingua::{IsoCode639_1, Language, LanguageDetector as LinguaInner, LanguageDetectorBuilder};
 use elide_core::Result;
 use elide_core::primitive::{
     Confidence, LanguageDetection, LanguageProvenance, LanguageSpan, LanguageTag,
 };
+use lingua::{IsoCode639_1, Language, LanguageDetector as LinguaInner, LanguageDetectorBuilder};
 
 /// Lingua-backed language detector.
 ///

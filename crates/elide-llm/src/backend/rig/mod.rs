@@ -13,10 +13,10 @@ mod usage;
 
 use std::borrow::Cow;
 
+use elide_core::{Error as CoreError, ErrorKind as CoreErrorKind, Result};
 use rig::agent::{Agent, AgentBuilder};
 use rig::client::CompletionClient;
 use rig::completion::{AssistantContent, Completion, CompletionModel, Message};
-use elide_core::{Error as CoreError, ErrorKind as CoreErrorKind, Result};
 
 pub use self::config::LlmConfig;
 pub use self::context::ContextWindow;

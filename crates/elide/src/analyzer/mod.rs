@@ -14,11 +14,11 @@ mod dyn_recognizer;
 
 use std::sync::Arc;
 
-use tokio::task::JoinSet;
 use elide_core::entity::Entity;
 use elide_core::modality::{Modality, StreamDataReader};
 use elide_core::recognition::{Enricher, Recognizer, RecognizerInput, RecognizerOutput};
 use elide_core::{Error, ErrorKind};
+use tokio::task::JoinSet;
 
 use self::dyn_enricher::DynEnricher;
 use self::dyn_recognizer::DynRecognizer;
@@ -130,8 +130,8 @@ impl<M: Modality> Analyzer<M> {
     {
         let mut out = Vec::new();
         while let Some(chunk) = source.read_next().await? {
-            let input = RecognizerInput::new(chunk.data.clone())
-                .with_context_hints(chunk.hints.clone());
+            let input =
+                RecognizerInput::new(chunk.data.clone()).with_context_hints(chunk.hints.clone());
             let entities = self.analyze(input).await?;
             out.extend(
                 entities

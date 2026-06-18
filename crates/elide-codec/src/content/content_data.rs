@@ -4,8 +4,8 @@ use std::borrow::Cow;
 use std::fmt;
 
 use bytes::Bytes;
-use sha2::{Digest, Sha256};
 use elide_core::{Error, ErrorKind, Result};
+use sha2::{Digest, Sha256};
 
 use super::TextEncoding;
 

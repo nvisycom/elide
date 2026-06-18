@@ -2,9 +2,9 @@
 //!
 //! [`Dictionary`]: crate::Dictionary
 
-use serde::Deserialize;
 use elide_core::primitive::Confidence;
 use elide_core::{Error, ErrorKind};
+use serde::Deserialize;
 
 /// One literal scanned for by a [`Dictionary`].
 ///

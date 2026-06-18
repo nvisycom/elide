@@ -17,11 +17,11 @@
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use schemars::Schema;
 use elide_core::entity::Entity;
 use elide_core::modality::image::Image;
 use elide_core::modality::text::Text;
 use elide_core::recognition::{LabelMap, RecognizerInput};
+use schemars::Schema;
 
 use super::candidates::{TextCandidates, VlmCandidates};
 use super::lift::{lift_image, lift_text};

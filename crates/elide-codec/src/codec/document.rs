@@ -29,10 +29,9 @@ use elide_core::modality::text::Text;
 use elide_core::modality::{Chunk, DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::redaction::Redactions;
 
-use crate::content::ContentData;
-
-use super::loader::DynHandler;
 use super::FormatId;
+use super::loader::DynHandler;
+use crate::content::ContentData;
 
 /// Modality-erased handle the registry returns, carrying a typed
 /// [`DocumentHandle<M>`] for some `M` plus the [`FormatId`] of the

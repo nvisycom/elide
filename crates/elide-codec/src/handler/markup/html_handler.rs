@@ -11,10 +11,10 @@
 //! [`MarkupHandler`]: super::MarkupHandler
 
 use ego_tree::NodeId;
-use scraper::Html;
-use scraper::node::Node;
 use elide_core::Error;
 use elide_core::modality::text::Text;
+use scraper::Html;
+use scraper::node::Node;
 
 use super::{MarkupEncoder, MarkupHandler, RedactableItem};
 use crate::content::ContentData;

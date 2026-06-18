@@ -1,9 +1,9 @@
 //! Structured-output candidate types: the typed schemas the model
 //! is asked to produce.
 
+use elide_core::primitive::UnitBoundingBox;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use elide_core::primitive::UnitBoundingBox;
 
 /// Serde wrapper matching the model's `{"entities": [...]}`
 /// response for the [`Text`] modality.

@@ -1,7 +1,6 @@
 //! [`PatternRecognizer`] and its builder.
 
 use aho_corasick::{AhoCorasick, MatchKind};
-use regex::RegexSet;
 use elide_context::{BoostRule, ContextEnhanced, Enhancer, SubstringMatcher};
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
 use elide_core::modality::text::Text;
@@ -10,6 +9,7 @@ use elide_core::recognition::{
     Recognizer, RecognizerId, RecognizerInput, RecognizerLanguage, RecognizerOutput,
 };
 use elide_core::{Error, ErrorKind, Result};
+use regex::RegexSet;
 
 use super::compiled::{CompiledDictionary, CompiledPattern, has_word_boundaries};
 use super::dictionary::Dictionary;

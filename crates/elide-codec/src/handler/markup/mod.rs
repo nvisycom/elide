@@ -46,9 +46,9 @@ pub use self::html_loader::{HtmlLoader, ScriptPolicy};
 pub use self::xml_handler::{XmlEncoder, XmlHandler, format as xml_format};
 #[cfg(feature = "xml")]
 pub use self::xml_loader::XmlLoader;
+use crate::Handler;
 use crate::content::ContentData;
 use crate::handler::redact;
-use crate::Handler;
 
 /// One redactable unit in a markup document.
 ///
