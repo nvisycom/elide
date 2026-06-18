@@ -67,4 +67,20 @@ impl BoundingBox {
     pub fn height(&self) -> f64 {
         self.max.y - self.min.y
     }
+
+    /// The box area (`width * height`).
+    pub fn area(&self) -> f64 {
+        self.width() * self.height()
+    }
+
+    /// Whether this box overlaps `other`.
+    ///
+    /// Rectangle intersection: the boxes share interior area. Touching
+    /// edges alone do not count as overlapping.
+    pub fn overlaps(&self, other: &Self) -> bool {
+        self.min.x < other.max.x
+            && other.min.x < self.max.x
+            && self.min.y < other.max.y
+            && other.min.y < self.max.y
+    }
 }
