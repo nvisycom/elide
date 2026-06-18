@@ -1,7 +1,11 @@
 //! A 2-D point and the axis-aligned bounding box built from it.
 
+use std::ops::Sub;
+
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+
+use super::Polygon;
 
 /// A point in a 2-D coordinate space.
 ///
@@ -22,6 +26,29 @@ impl Point {
     /// A point at `(x, y)`.
     pub const fn new(x: f64, y: f64) -> Self {
         Self { x, y }
+    }
+
+    /// The dot product of `self` and `other` as vectors.
+    pub fn dot(self, other: Self) -> f64 {
+        self.x * other.x + self.y * other.y
+    }
+
+    /// The left perpendicular of `self` as a vector: `(-y, x)`.
+    ///
+    /// Rotating a vector 90 degrees counter-clockwise. Used to turn an
+    /// edge direction into the axis normal to it.
+    pub fn perp(self) -> Self {
+        Self::new(-self.y, self.x)
+    }
+}
+
+impl Sub for Point {
+    type Output = Self;
+
+    /// Component-wise subtraction, treating both points as position
+    /// vectors: the displacement (edge) vector from `rhs` to `self`.
+    fn sub(self, rhs: Self) -> Self {
+        Self::new(self.x - rhs.x, self.y - rhs.y)
     }
 }
 
@@ -82,5 +109,44 @@ impl BoundingBox {
             && other.min.x < self.max.x
             && self.min.y < other.max.y
             && other.min.y < self.max.y
+    }
+
+    /// The box as a four-vertex [`Polygon`] (clockwise from the top-left
+    /// corner under the usual screen convention).
+    ///
+    /// Lets a box be compared against a rotated or quadrilateral region
+    /// through [`Polygon::overlaps`].
+    pub fn to_polygon(&self) -> Polygon {
+        Polygon::new(vec![
+            self.min,
+            Point::new(self.max.x, self.min.y),
+            self.max,
+            Point::new(self.min.x, self.max.y),
+        ])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn point_vector_ops() {
+        let a = Point::new(3.0, 4.0);
+        let b = Point::new(1.0, 2.0);
+        assert_eq!(a - b, Point::new(2.0, 2.0));
+        assert_eq!(a.dot(b), 11.0);
+        assert_eq!(a.perp(), Point::new(-4.0, 3.0));
+    }
+
+    #[test]
+    fn overlaps_and_area() {
+        let a = BoundingBox::from_origin_size(Point::new(0.0, 0.0), 10.0, 10.0);
+        let b = BoundingBox::from_origin_size(Point::new(5.0, 5.0), 10.0, 10.0);
+        assert!(a.overlaps(&b));
+        assert_eq!(a.area(), 100.0);
+        // Touching edge only: not an overlap.
+        let c = BoundingBox::from_origin_size(Point::new(10.0, 0.0), 5.0, 5.0);
+        assert!(!a.overlaps(&c));
     }
 }

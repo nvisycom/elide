@@ -24,6 +24,8 @@
 use std::cmp::Ordering;
 use std::fmt;
 
+#[cfg(feature = "image")]
+pub mod image;
 pub mod text;
 
 mod data_reader;

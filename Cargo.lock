@@ -1764,6 +1764,7 @@ dependencies = [
 name = "veil-core"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "celes",
  "derive_builder",
  "hipstr",

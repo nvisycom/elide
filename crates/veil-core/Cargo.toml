@@ -25,10 +25,15 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 default = []
 
+## The `image` modality (`Image`, `ImageData`, `ImageLocation`,
+## `ImageReplacement`). Off by default; text-only consumers don't pay for
+## it.
+image = ["dep:bytes"]
+
 ## Derive `serde::{Serialize, Deserialize}` on the domain types, and
 ## enable serde support in the underlying primitive crates. (`celes`
 ## and `oxilangtag` carry their serde impls unconditionally.)
-serde = ["dep:serde", "hipstr/serde", "jiff/serde", "uuid/serde"]
+serde = ["dep:serde", "hipstr/serde", "jiff/serde", "uuid/serde", "bytes?/serde"]
 
 ## Test utilities (fixture helpers, builders, …).
 test-utils = []
@@ -48,3 +53,6 @@ jiff = { workspace = true, features = [] }
 oxilangtag = { workspace = true, features = [] }
 celes = { workspace = true, features = [] }
 type-map = { workspace = true, features = [] }
+
+# Raw bytes (optional — gated behind the `image` feature)
+bytes = { workspace = true, features = [], optional = true }
