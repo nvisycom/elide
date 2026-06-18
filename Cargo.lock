@@ -1784,7 +1784,6 @@ dependencies = [
  "serde",
  "tokio",
  "tracing",
- "type-map",
  "uuid",
  "veil-core",
 ]
@@ -1817,8 +1816,6 @@ dependencies = [
  "sha2 0.11.0",
  "tokio",
  "tracing",
- "type-map",
- "uuid",
  "veil-core",
 ]
 

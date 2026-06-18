@@ -22,9 +22,9 @@ use std::sync::{Mutex, OnceLock};
 
 use lingua::{IsoCode639_1, Language, LanguageDetector as LinguaInner, LanguageDetectorBuilder};
 use veil_core::Result;
-use veil_core::primitive::{Confidence, LanguageTag};
-
-use super::language::{LanguageDetection, LanguageProvenance, LanguageSpan};
+use veil_core::primitive::{
+    Confidence, LanguageDetection, LanguageProvenance, LanguageSpan, LanguageTag,
+};
 
 /// Lingua-backed language detector.
 ///

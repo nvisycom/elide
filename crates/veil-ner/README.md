@@ -17,9 +17,9 @@ tests, and concrete inference backends live downstream.
 
 Raw backend labels are projected onto the toolkit's canonical label set,
 so consumers reason about one fixed taxonomy regardless of the upstream
-model. The crate also ships language detection, which resolves the
-language of a piece of text and carries that result alongside the input
-for language-aware recognizers and policies.
+model. An optional language-detection feature resolves the language of a
+piece of text and carries that result alongside the input for
+language-aware recognizers and policies.
 
 ## Documentation
 

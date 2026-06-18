@@ -23,7 +23,9 @@ use veil_core::entity::{Entity, LabelRef};
 use veil_core::modality::text::{Text, TextLocation};
 use veil_core::primitive::Confidence;
 use veil_core::provenance::{Event, ModelEvent};
-use veil_core::recognition::{Recognizer, RecognizerId, RecognizerInput, RecognizerOutput};
+use veil_core::recognition::{
+    Recognizer, RecognizerId, RecognizerInput, RecognizerLanguage, RecognizerOutput,
+};
 use veil_core::{Error, Result};
 
 use super::config::NerModel;
@@ -141,11 +143,8 @@ impl Recognizer<Text> for NerRecognizer {
     }
 
     async fn recognize(&self, input: &RecognizerInput<Text>) -> Result<RecognizerOutput<Text>> {
-        let supported_borrowed: Vec<&str> = self
-            .supported_labels
-            .iter()
-            .map(LabelRef::as_str)
-            .collect();
+        let supported_borrowed: Vec<&str> =
+            self.supported_labels.iter().map(LabelRef::as_str).collect();
         let labels = if supported_borrowed.is_empty() {
             None
         } else {
@@ -154,7 +153,7 @@ impl Recognizer<Text> for NerRecognizer {
         let request = NerRequest {
             text: input.content.text.as_str(),
             labels,
-            language: input.language.as_ref(),
+            language: input.primary_language(),
             correlation_id: input.correlation_id,
         };
         let response = self.engine.recognize(request).await?;

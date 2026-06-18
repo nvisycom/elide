@@ -21,6 +21,9 @@ documentation = { workspace = true }
 [features]
 default = []
 
+## Language detection via the `lingua` crate.
+lingua = ["dep:lingua"]
+
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
@@ -37,7 +40,6 @@ derive_builder = { workspace = true, features = [] }
 
 # Primitive datatypes
 uuid = { workspace = true, features = ["v7"] }
-type-map = { workspace = true, features = [] }
 
 # Async runtime and parallelism
 async-trait = { workspace = true, features = [] }
@@ -45,8 +47,8 @@ async-trait = { workspace = true, features = [] }
 # Observability
 tracing = { workspace = true, features = [] }
 
-# Text processing (language detection)
-lingua = { workspace = true, features = [] }
+# Text processing
+lingua = { workspace = true, features = [], optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
