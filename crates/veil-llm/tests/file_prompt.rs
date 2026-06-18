@@ -1,6 +1,6 @@
 //! End-to-end: load [`FilePrompt`] from a TOML fixture (Jinja2
 //! template + label map + ignore list), then exercise both halves of
-//! the [`Prompt`] trait — render against a populated
+//! the [`Prompt`] trait: render against a populated
 //! [`RecognizerInput`] and lift a stub [`LlmResponse`] back into
 //! entities.
 //!
@@ -9,12 +9,13 @@
 //! rendering for text, bbox access for image), plus the
 //! `label_map` / `labels_to_ignore` policy on the lift side.
 
-use nvisy_core::entity::{EntityLabelRef, builtins};
-use nvisy_core::modality::{Image, ImageData, ImageLocation, Text, TextData, TextLocation};
-use nvisy_core::primitive::{BoundingBox, Dimensions};
-use nvisy_core::recognition::{Hint, RecognizerInput};
-use nvisy_llm::backend::LlmResponse;
-use nvisy_llm::{FilePrompt, Prompt};
+use veil_core::entity::{LabelRef, builtins};
+use veil_core::modality::image::{Image, ImageData, ImageLocation};
+use veil_core::modality::text::{Text, TextData, TextLocation};
+use veil_core::primitive::{BoundingBox, Dimensions, Point};
+use veil_core::recognition::{Hint, RecognizerInput};
+use veil_llm::backend::LlmResponse;
+use veil_llm::{FilePrompt, Prompt};
 const NER_TOML: &str = include_str!("../testdata/prompts/ner.toml");
 const VLM_TOML: &str = include_str!("../testdata/prompts/vlm.toml");
 
@@ -70,7 +71,7 @@ fn text_prompt_renders_template_and_lifts_entities() {
     );
     let entities = prompt.lift(&response, &input);
 
-    let kinds: Vec<EntityLabelRef> = entities.iter().map(|e| e.label.clone()).collect();
+    let kinds: Vec<LabelRef> = entities.iter().map(|e| e.label.clone()).collect();
     assert!(
         kinds.contains(&builtins::DATE_OF_BIRTH.label_ref()),
         "person_name should have been remapped to DateOfBirth via label_map: {kinds:?}",
@@ -95,12 +96,14 @@ fn text_prompt_renders_template_and_lifts_entities() {
 fn image_prompt_renders_template_and_lifts_entities() {
     let prompt = FilePrompt::<Image>::from_toml(VLM_TOML).expect("vlm.toml parses");
 
-    // Tiny PNG-shaped payload — the prompt only base64-encodes it.
+    // Tiny PNG-shaped payload; the prompt only base64-encodes it.
     let bytes = b"\x89PNG\r\n\x1a\nfake-image-bytes".to_vec();
     let dims = Dimensions::new(640, 480);
 
-    let hint = Hint::<Image>::new(ImageLocation::new(BoundingBox::new(
-        10.0, 20.0, 100.0, 50.0,
+    let hint = Hint::<Image>::new(ImageLocation::new(BoundingBox::from_origin_size(
+        Point::new(10.0, 20.0),
+        100.0,
+        50.0,
     )))
     .with_name("uploader-face")
     .with_label(builtins::PERSON_NAME.label_ref());
@@ -137,7 +140,7 @@ fn image_prompt_renders_template_and_lifts_entities() {
     );
     let entities = prompt.lift(&response, &input);
 
-    let kinds: Vec<EntityLabelRef> = entities.iter().map(|e| e.label.clone()).collect();
+    let kinds: Vec<LabelRef> = entities.iter().map(|e| e.label.clone()).collect();
     assert!(
         kinds.contains(&builtins::DATE_OF_BIRTH.label_ref()),
         "person_name should have been remapped to DateOfBirth via label_map: {kinds:?}",

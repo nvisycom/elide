@@ -1,7 +1,7 @@
 //! [`Prompt`]: pluggable per-modality prompt builder + response
 //! lifter consumed by [`LlmRecognizer`].
 //!
-//! One trait per modality (`Prompt<Text>`, `Prompt<Image>`) — the
+//! One trait per modality (`Prompt<Text>`, `Prompt<Image>`): the
 //! recognizer holds `Arc<dyn Prompt<M>>` and dispatches through it.
 //! [`DefaultPrompt`] is the shipped impl, covering both modalities;
 //! users wanting different wording, different response shapes, or
@@ -12,9 +12,9 @@
 //! [`LlmRecognizer`]: super::LlmRecognizer
 //! [`LlmRecognizerBuilder::with_prompt`]: super::LlmRecognizerBuilder::with_prompt
 
-use nvisy_core::entity::Entity;
-use nvisy_core::modality::Modality;
-use nvisy_core::recognition::RecognizerInput;
+use veil_core::entity::Entity;
+use veil_core::modality::Modality;
+use veil_core::recognition::RecognizerInput;
 
 use crate::backend::LlmResponse;
 
@@ -47,6 +47,6 @@ where
     /// Parse the response text into entities. The recognizer wraps
     /// these into a [`RecognizerOutput`].
     ///
-    /// [`RecognizerOutput`]: nvisy_core::recognition::RecognizerOutput
+    /// [`RecognizerOutput`]: veil_core::recognition::RecognizerOutput
     fn lift(&self, response: &LlmResponse, input: &RecognizerInput<M>) -> Vec<Entity<M>>;
 }

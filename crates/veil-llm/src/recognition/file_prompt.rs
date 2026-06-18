@@ -48,12 +48,13 @@ use std::path::Path;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use minijinja::{Environment, context};
-use nvisy_core::entity::{Entity, EntityLabelRef};
-use nvisy_core::modality::{Image, Text};
-use nvisy_core::recognition::{LabelMap, RecognizerInput};
-use nvisy_core::{Error, Result};
 use schemars::Schema;
 use serde::Deserialize;
+use veil_core::entity::{Entity, LabelRef};
+use veil_core::modality::image::Image;
+use veil_core::modality::text::Text;
+use veil_core::recognition::{LabelMap, RecognizerInput};
+use veil_core::{Error, ErrorKind, Result};
 
 use super::candidates::{TextCandidates, VlmCandidates};
 use super::lift::{lift_image, lift_text};
@@ -102,26 +103,29 @@ struct PromptMeta {
 impl<M> FilePrompt<M> {
     fn from_parsed(parsed: PromptFile, expected_modality: &str) -> Result<Self> {
         if parsed.meta.modality != expected_modality {
-            return Err(Error::validation(
+            return Err(Error::new(
+                ErrorKind::Validation,
                 format!(
                     "prompt file modality is {:?}, expected {:?}",
                     parsed.meta.modality, expected_modality
                 ),
-                "file-prompt",
             ));
         }
 
         let mut label_map = LabelMap::new();
         if let Some(entries) = parsed.label_map {
             for (model_label, entity_label) in entries {
-                label_map = label_map.with_entry(model_label, EntityLabelRef::from(entity_label));
+                label_map.insert(model_label, LabelRef::new(entity_label));
             }
         }
 
         let mut env = Environment::new();
         env.add_template_owned("prompt", parsed.template.clone())
             .map_err(|e| {
-                Error::validation(format!("template compile error: {e}"), "file-prompt")
+                Error::new(
+                    ErrorKind::Validation,
+                    format!("template compile error: {e}"),
+                )
             })?;
 
         Ok(Self {
@@ -156,7 +160,7 @@ impl FilePrompt<Text> {
     /// template.
     pub fn from_toml_file(path: impl AsRef<Path>) -> Result<Self> {
         let raw = fs::read_to_string(path.as_ref())
-            .map_err(|e| Error::validation(format!("reading prompt file: {e}"), "file-prompt"))?;
+            .map_err(|e| Error::new(ErrorKind::Validation, format!("reading prompt file: {e}")))?;
         Self::from_toml(&raw)
     }
 
@@ -169,7 +173,7 @@ impl FilePrompt<Text> {
     /// [`from_toml_file`]: Self::from_toml_file
     pub fn from_toml(raw: &str) -> Result<Self> {
         let parsed: PromptFile = toml::from_str(raw)
-            .map_err(|e| Error::validation(format!("parsing prompt TOML: {e}"), "file-prompt"))?;
+            .map_err(|e| Error::new(ErrorKind::Validation, format!("parsing prompt TOML: {e}")))?;
         Self::from_parsed(parsed, "text")
     }
 }
@@ -182,7 +186,7 @@ impl FilePrompt<Image> {
     /// Same as the text-modality loader.
     pub fn from_toml_file(path: impl AsRef<Path>) -> Result<Self> {
         let raw = fs::read_to_string(path.as_ref())
-            .map_err(|e| Error::validation(format!("reading prompt file: {e}"), "file-prompt"))?;
+            .map_err(|e| Error::new(ErrorKind::Validation, format!("reading prompt file: {e}")))?;
         Self::from_toml(&raw)
     }
 
@@ -193,14 +197,14 @@ impl FilePrompt<Image> {
     /// Same as the text-modality loader.
     pub fn from_toml(raw: &str) -> Result<Self> {
         let parsed: PromptFile = toml::from_str(raw)
-            .map_err(|e| Error::validation(format!("parsing prompt TOML: {e}"), "file-prompt"))?;
+            .map_err(|e| Error::new(ErrorKind::Validation, format!("parsing prompt TOML: {e}")))?;
         Self::from_parsed(parsed, "image")
     }
 }
 
 impl Prompt<Text> for FilePrompt<Text> {
     fn build(&self, input: &RecognizerInput<Text>) -> String {
-        let text = input.data.text.as_str();
+        let text = input.content.text.as_str();
         let hints: Vec<_> = input
             .hints
             .iter()
@@ -209,7 +213,7 @@ impl Prompt<Text> for FilePrompt<Text> {
                 let snippet = snippet_around(text, h.location.start, h.location.end);
                 context! {
                     name => h.name.as_deref().unwrap_or(""),
-                    kind => h.label.as_ref().map(|l| l.to_string()).unwrap_or_else(|| "unknown".to_owned()),
+                    kind => h.label.as_ref().map(|l| l.as_str().to_owned()).unwrap_or_else(|| "unknown".to_owned()),
                     value => value,
                     snippet => snippet,
                 }
@@ -245,7 +249,7 @@ impl Prompt<Text> for FilePrompt<Text> {
 
 impl Prompt<Image> for FilePrompt<Image> {
     fn build(&self, input: &RecognizerInput<Image>) -> String {
-        let image_b64 = STANDARD.encode(input.data.bytes.as_ref());
+        let image_b64 = STANDARD.encode(input.content.bytes.as_ref());
         let hints: Vec<_> = input
             .hints
             .iter()
@@ -253,12 +257,12 @@ impl Prompt<Image> for FilePrompt<Image> {
                 let bbox = &h.location.bounding_box;
                 context! {
                     name => h.name.as_deref().unwrap_or(""),
-                    kind => h.label.as_ref().map(|l| l.to_string()).unwrap_or_else(|| "unknown".to_owned()),
+                    kind => h.label.as_ref().map(|l| l.as_str().to_owned()).unwrap_or_else(|| "unknown".to_owned()),
                     bbox => context! {
-                        x => bbox.x,
-                        y => bbox.y,
-                        width => bbox.width,
-                        height => bbox.height,
+                        x => bbox.min.x,
+                        y => bbox.min.y,
+                        width => bbox.width(),
+                        height => bbox.height(),
                     },
                 }
             })

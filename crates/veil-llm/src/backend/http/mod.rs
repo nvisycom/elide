@@ -14,14 +14,14 @@
 mod config;
 mod middleware;
 
-use nvisy_core::{Error, Result};
 use reqwest_middleware::reqwest::Client;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
+use veil_core::{Error, ErrorKind, Result};
 
 pub use self::config::HttpConfig;
 use self::middleware::{backoff_policy, retry_layer, tracing_layer};
 
-const TARGET: &str = "nvisy_llm::http";
+const TARGET: &str = "veil_llm::http";
 
 /// Build a [`ClientWithMiddleware`] from the given configuration.
 ///
@@ -51,7 +51,12 @@ pub fn build_http_client(config: &HttpConfig) -> Result<ClientWithMiddleware> {
         .connect_timeout(config.connect_timeout)
         .pool_idle_timeout(config.idle_timeout)
         .build()
-        .map_err(|e| Error::runtime(format!("failed to build HTTP client: {e}"), "http", false))?;
+        .map_err(|e| {
+            Error::new(
+                ErrorKind::Validation,
+                format!("failed to build HTTP client: {e}"),
+            )
+        })?;
 
     Ok(ClientBuilder::new(client)
         .with(tracing_layer())

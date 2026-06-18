@@ -1,26 +1,26 @@
-# nvisy-llm
+# veil-llm
 
-[![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/runtime/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/runtime/actions/workflows/build.yml)
+[![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/veil/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/veil/actions/workflows/build.yml)
 
-LLM-mediated entity recognition for the Nvisy runtime, built on the
-[`rig`](https://github.com/0xPlaygrounds/rig) framework.
+LLM-driven entity recognition over text and images for PII/PHI detection.
 
 ## Overview
 
-`LlmRecognizer` implements `EntityRecognizer<M>` against a
-caller-supplied `Prompt` (the `FilePrompt` helper loads templates
-from disk); pair it with any provider in `provider::*` and plug it
-into a `RecognizerRegistry`. The crate doesn't impose a fixed agent
-shape — the prompt + provider combination decides what the LLM is
-asked to do (NER, VLM, verification).
+Some sensitive data resists fixed rules: free-form prose, a face in a
+photo, a license plate on a sign. Recognizing it well means asking a
+model that reads meaning rather than matching a pattern. This crate
+provides a recognizer that drives a large language model (for text) or a
+vision-language model (for images) and turns its replies into typed
+entities, located back in the source so they can be redacted.
 
-Provider features (`openai-gpt`, `anthropic-claude`, `google-gemini`)
-are independently selectable; none are on by default — the CLI/server
-entry points opt in.
-
-Speech-to-text lives in [`nvisy-stt`](../nvisy-stt) — it ships with
-its own backend trait and segment-shaped output type, decoupled from
-the LLM family entirely.
+The model itself is swappable: providers connect to hosted services
+(OpenAI, Anthropic, Google) or a local runner, each enabled by an opt-in
+feature so consumers pay only for what they use. The prompt is swappable
+too: ship the built-in prompt, or load one from a TOML file so wording,
+label remapping, and ignore lists become data the operator edits rather
+than code. Either way the model's raw labels are projected onto the
+toolkit's canonical taxonomy, so downstream code reasons about one fixed
+label set regardless of which model produced a finding.
 
 ## Documentation
 
@@ -37,5 +37,5 @@ Apache 2.0 License, see [LICENSE.txt](../../LICENSE.txt)
 ## Support
 
 - **Documentation**: [docs.nvisy.com](https://docs.nvisy.com)
-- **Issues**: [GitHub Issues](https://github.com/nvisycom/runtime/issues)
+- **Issues**: [GitHub Issues](https://github.com/nvisycom/veil/issues)
 - **Email**: [support@nvisy.com](mailto:support@nvisy.com)

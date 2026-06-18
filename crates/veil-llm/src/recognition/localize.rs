@@ -9,7 +9,7 @@ use unicode_normalization::UnicodeNormalization;
 
 use super::candidates::TextCandidate;
 
-const TARGET: &str = "nvisy_llm::recognition::localize";
+const TARGET: &str = "veil_llm::recognition::localize";
 
 /// A candidate that's been resolved to a byte range in the source.
 #[derive(Debug, Clone)]

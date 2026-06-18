@@ -4,8 +4,8 @@
 //! [`DefaultPrompt`]: super::DefaultPrompt
 //! [`Prompt<Text>`]: super::Prompt
 
-use nvisy_core::modality::Text;
-use nvisy_core::recognition::Hint;
+use veil_core::modality::text::Text;
+use veil_core::recognition::Hint;
 
 /// Snippet window (in bytes) emitted on each side of a hint's
 /// range so the LLM has surrounding context for judgement.
@@ -59,7 +59,7 @@ impl<'a> TextPromptBuilder<'a> {
                 let kind = h
                     .label
                     .as_ref()
-                    .map(|l| l.to_string())
+                    .map(|l| l.as_str().to_owned())
                     .unwrap_or_else(|| "unknown".to_string());
                 prompt.push_str(&format!(
                     "\n[hint {i}] name=\"{name}\", kind={kind}, \

@@ -7,7 +7,7 @@ use rig::completion::Usage;
 
 /// Thread-safe accumulator for LLM token usage.
 ///
-/// Uses lock-free atomics instead of a mutex — all operations are
+/// Uses lock-free atomics instead of a mutex; all operations are
 /// wait-free counter increments/loads. Each [`RigBackend`] owns one
 /// tracker; callers snapshot it to inspect costs.
 ///

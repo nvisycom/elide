@@ -1,15 +1,15 @@
 //! Unified error type covering LLM provider, serialization, and tool failures.
 
-use nvisy_core::{Error as CoreError, ErrorKind as CoreErrorKind};
 use rig::completion::{CompletionError, PromptError, StructuredOutputError};
 use rig::http_client::Error as HttpClientError;
+use veil_core::{Error as CoreError, ErrorKind as CoreErrorKind};
 
 /// Internal error type for LLM provider interactions.
 ///
 /// Converted to [`CoreError`] at public API boundaries via the
 /// [`convert`] helper.
 ///
-/// [`CoreError`]: nvisy_core::Error
+/// [`CoreError`]: veil_core::Error
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
     /// An HTTP / network error from the LLM provider.
@@ -87,44 +87,26 @@ impl From<StructuredOutputError> for Error {
 /// [`CoreError`]. Intended for `.map_err(crate::error::convert)` at
 /// public API boundaries.
 ///
-/// [`CoreError`]: nvisy_core::Error
+/// [`CoreError`]: veil_core::Error
 pub(crate) fn convert<E: Into<Error>>(e: E) -> CoreError {
     CoreError::from(e.into())
 }
 
 impl From<Error> for CoreError {
     fn from(err: Error) -> Self {
-        match &err {
-            Error::Http(_) => CoreError::connection(err.to_string(), "rig", true),
-            Error::Json(_) => {
-                CoreError::new(CoreErrorKind::Serialization, err.to_string()).with_component("rig")
-            }
-            Error::Provider(msg) => {
-                let retryable = is_retryable_provider_error(msg);
-                CoreError::connection(err.to_string(), "rig", retryable)
-            }
-            Error::Response(_) => CoreError::runtime(err.to_string(), "rig", false),
-            Error::Request(_) => CoreError::validation(err.to_string(), "rig"),
-            Error::Runtime(_) => CoreError::runtime(err.to_string(), "rig", false),
-        }
+        // Request errors are caller-side validation problems; every other
+        // variant is a failure encountered while the recognizer drives the
+        // model, so it maps to the recognition kind.
+        let kind = match &err {
+            Error::Request(_) => CoreErrorKind::Validation,
+            Error::Http(_)
+            | Error::Json(_)
+            | Error::Provider(_)
+            | Error::Response(_)
+            | Error::Runtime(_) => CoreErrorKind::Recognition,
+        };
+        CoreError::new(kind, err.to_string())
     }
-}
-
-/// Check if a provider error message indicates a retryable condition.
-///
-/// This uses substring matching against known error patterns from OpenAI,
-/// Anthropic, and Google. If upstream providers change their error
-/// message format this may need updating — the test suite below
-/// validates all known patterns.
-fn is_retryable_provider_error(msg: &str) -> bool {
-    let lower = msg.to_lowercase();
-    lower.contains("rate_limit")
-        || lower.contains("rate limit")
-        || lower.contains("overloaded")
-        || lower.contains("timeout")
-        || lower.contains("429")
-        || lower.contains("503")
-        || lower.contains("529")
 }
 
 #[cfg(test)]
@@ -132,44 +114,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn retryable_patterns() {
-        // OpenAI
-        assert!(is_retryable_provider_error("Rate limit reached for gpt-4o"));
-        assert!(is_retryable_provider_error(
-            "Error code: 429 - You exceeded your current quota"
-        ));
-
-        // Anthropic
-        assert!(is_retryable_provider_error("overloaded_error: Overloaded"));
-        assert!(is_retryable_provider_error(
-            "rate_limit_error: Rate limited"
-        ));
-        assert!(is_retryable_provider_error("Error code: 529 - Overloaded"));
-
-        // Google
-        assert!(is_retryable_provider_error("503 Service Unavailable"));
-        assert!(is_retryable_provider_error("Request timeout"));
-    }
-
-    #[test]
-    fn non_retryable_patterns() {
-        assert!(!is_retryable_provider_error("invalid_api_key"));
-        assert!(!is_retryable_provider_error("model not found"));
-        assert!(!is_retryable_provider_error("content policy violation"));
-        assert!(!is_retryable_provider_error(""));
-    }
-
-    #[test]
-    fn provider_error_conversion_is_retryable() {
+    fn provider_error_maps_to_recognition() {
         let err = Error::Provider("Rate limit exceeded".to_string());
         let core_err: CoreError = err.into();
-        assert!(core_err.is_retryable());
+        assert_eq!(core_err.kind(), CoreErrorKind::Recognition);
     }
 
     #[test]
-    fn provider_error_conversion_is_not_retryable() {
-        let err = Error::Provider("invalid model".to_string());
+    fn request_error_maps_to_validation() {
+        let err = Error::Request("bad URL".to_string());
         let core_err: CoreError = err.into();
-        assert!(!core_err.is_retryable());
+        assert_eq!(core_err.kind(), CoreErrorKind::Validation);
     }
 }

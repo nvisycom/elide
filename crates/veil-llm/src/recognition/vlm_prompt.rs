@@ -4,8 +4,8 @@
 //! [`DefaultPrompt`]: super::DefaultPrompt
 //! [`Prompt<Image>`]: super::Prompt
 
-use nvisy_core::modality::Image;
-use nvisy_core::recognition::Hint;
+use veil_core::modality::image::Image;
+use veil_core::recognition::Hint;
 
 /// Builds user prompts for the VLM detect pass.
 pub(super) struct VlmPromptBuilder<'a> {
@@ -44,16 +44,16 @@ impl<'a> VlmPromptBuilder<'a> {
                 let kind = h
                     .label
                     .as_ref()
-                    .map(|l| l.to_string())
+                    .map(|l| l.as_str().to_owned())
                     .unwrap_or_else(|| "unknown".to_string());
                 let name = h.name.as_deref().unwrap_or("");
                 prompt.push_str(&format!(
                     "\n[hint {i}] name=\"{name}\", kind={kind}, \
                      bbox=({x}, {y}, {w}, {h})",
-                    x = bbox.x,
-                    y = bbox.y,
-                    w = bbox.width,
-                    h = bbox.height,
+                    x = bbox.min.x,
+                    y = bbox.min.y,
+                    w = bbox.width(),
+                    h = bbox.height(),
                 ));
             }
         }

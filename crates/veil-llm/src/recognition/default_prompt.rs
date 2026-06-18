@@ -9,7 +9,7 @@
 //! into a byte range; for image, the bounding box arrives in
 //! normalised `[0, 1]` coordinates and is scaled to pixel space.
 //!
-//! No label-map or labels-to-ignore filtering is applied here — the
+//! No label-map or labels-to-ignore filtering is applied here; the
 //! model's kinds pass through verbatim. Use [`FilePrompt`] when you
 //! need to remap raw model labels.
 //!
@@ -17,10 +17,11 @@
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use nvisy_core::entity::Entity;
-use nvisy_core::modality::{Image, Text};
-use nvisy_core::recognition::{LabelMap, RecognizerInput};
 use schemars::Schema;
+use veil_core::entity::Entity;
+use veil_core::modality::image::Image;
+use veil_core::modality::text::Text;
+use veil_core::recognition::{LabelMap, RecognizerInput};
 
 use super::candidates::{TextCandidates, VlmCandidates};
 use super::lift::{lift_image, lift_text};
@@ -40,7 +41,7 @@ pub struct DefaultPrompt;
 
 impl Prompt<Text> for DefaultPrompt {
     fn build(&self, input: &RecognizerInput<Text>) -> String {
-        TextPromptBuilder::new(input.data.text.as_str(), &input.hints, &input.labels).build()
+        TextPromptBuilder::new(input.content.text.as_str(), &input.hints, &input.labels).build()
     }
 
     fn schema(&self) -> Option<&Schema> {
@@ -57,7 +58,7 @@ impl Prompt<Text> for DefaultPrompt {
 
 impl Prompt<Image> for DefaultPrompt {
     fn build(&self, input: &RecognizerInput<Image>) -> String {
-        let image_b64 = STANDARD.encode(input.data.bytes.as_ref());
+        let image_b64 = STANDARD.encode(input.content.bytes.as_ref());
         VlmPromptBuilder::new(&input.hints, &input.labels).build(&image_b64)
     }
 

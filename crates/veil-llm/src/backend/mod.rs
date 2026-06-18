@@ -12,7 +12,7 @@ mod request;
 mod response;
 pub mod rig;
 
-use nvisy_core::Result;
+use veil_core::Result;
 
 pub use self::request::LlmRequest;
 pub use self::response::LlmResponse;
@@ -20,7 +20,7 @@ pub use self::response::LlmResponse;
 /// Per-call LLM backend.
 ///
 /// Implemented by everything that turns a `(prompt, schema)` pair
-/// into the model's text reply — rig-backed providers (OpenAI,
+/// into the model's text reply: rig-backed providers (OpenAI,
 /// Anthropic, Gemini, Ollama), externalised inference gateways, the
 /// in-process no-op test stub.
 ///

@@ -1,14 +1,14 @@
-//! Structured-output candidate types — the typed schemas the model
+//! Structured-output candidate types: the typed schemas the model
 //! is asked to produce.
 
-use nvisy_core::primitive::NormalizedBoundingBox;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use veil_core::primitive::UnitBoundingBox;
 
 /// Serde wrapper matching the model's `{"entities": [...]}`
 /// response for the [`Text`] modality.
 ///
-/// [`Text`]: nvisy_core::modality::Text
+/// [`Text`]: veil_core::modality::text::Text
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub(super) struct TextCandidates {
     /// Detected candidates.
@@ -28,7 +28,7 @@ pub(super) struct TextCandidate {
     /// Label name. Missing (`None`) means the model declined to
     /// type the candidate; the recognizer drops these.
     pub entity_type: Option<String>,
-    /// The matched text value — the literal surface form to flag.
+    /// The matched text value: the literal surface form to flag.
     pub value: String,
     /// Model-asserted confidence in `[0.0, 1.0]`.
     #[serde(default)]
@@ -46,7 +46,7 @@ pub(super) struct TextCandidate {
 /// Serde wrapper matching the model's `{"entities": [...]}`
 /// response for the [`Image`] modality.
 ///
-/// [`Image`]: nvisy_core::modality::Image
+/// [`Image`]: veil_core::modality::image::Image
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub(super) struct VlmCandidates {
     pub entities: Vec<VlmCandidate>,
@@ -59,9 +59,31 @@ pub(super) struct VlmCandidates {
 pub(super) struct VlmCandidate {
     pub label: String,
     #[serde(flatten)]
-    pub bbox: NormalizedBoundingBox,
+    pub bbox: UnitBox,
     #[serde(default)]
     pub confidence: Option<f64>,
     #[serde(default)]
     pub description: Option<String>,
+}
+
+/// Wire shape of a VLM bounding box, in normalised `[0, 1]`
+/// coordinates. Mirrors [`UnitBoundingBox`] but carries the
+/// `JsonSchema` derive the structured-output schema needs (the core's
+/// [`UnitBoundingBox`] does not depend on `schemars`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub(super) struct UnitBox {
+    /// Top-left x in `0.0..=1.0` (fraction of image width).
+    pub x: f64,
+    /// Top-left y in `0.0..=1.0` (fraction of image height).
+    pub y: f64,
+    /// Width in `0.0..=1.0` (fraction of image width).
+    pub width: f64,
+    /// Height in `0.0..=1.0` (fraction of image height).
+    pub height: f64,
+}
+
+impl From<UnitBox> for UnitBoundingBox {
+    fn from(b: UnitBox) -> Self {
+        UnitBoundingBox::new(b.x, b.y, b.width, b.height)
+    }
 }

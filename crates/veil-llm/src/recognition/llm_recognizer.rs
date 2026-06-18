@@ -10,9 +10,9 @@
 use std::sync::Arc;
 
 use derive_builder::Builder;
-use nvisy_core::modality::Modality;
-use nvisy_core::recognition::{EntityRecognizer, RecognizerInput, RecognizerOutput};
-use nvisy_core::{Error, Result};
+use veil_core::modality::Modality;
+use veil_core::recognition::{Recognizer, RecognizerId, RecognizerInput, RecognizerOutput};
+use veil_core::{Error, Result};
 
 use super::prompt::Prompt;
 use crate::backend::{LlmBackend, LlmRequest};
@@ -26,8 +26,8 @@ use crate::backend::{LlmBackend, LlmRequest};
     build_fn(error = "Error", name = "try_build", private)
 )]
 pub struct LlmRecognizer<M: Modality> {
-    /// Recognizer name. Surfaced in trail provenance and used as the
-    /// registry key.
+    /// Recognizer name. Surfaced in the recognition event on every
+    /// emitted entity and used as the recognizer id.
     name: String,
     /// Backend that sends the prompt to the model and returns its
     /// reply. Required. Set via [`with_backend`], which accepts any
@@ -48,7 +48,7 @@ pub struct LlmRecognizer<M: Modality> {
 
 impl<M: Modality> LlmRecognizer<M> {
     /// Start the chainable builder. `name`, `backend`, and `prompt`
-    /// are required — calling [`build`] without them returns a
+    /// are required; calling [`build`] without them returns a
     /// validation error.
     ///
     /// [`build`]: LlmRecognizerBuilder::build
@@ -78,7 +78,7 @@ impl<M: Modality> LlmRecognizer<M> {
 
 impl<M: Modality> LlmRecognizerBuilder<M> {
     /// Set the [`LlmBackend`] that powers this recognizer. Accepts
-    /// any concrete impl by value and wraps it in `Arc`. Required —
+    /// any concrete impl by value and wraps it in `Arc`. Required:
     /// `build` errors when this hasn't been called.
     #[must_use]
     pub fn with_backend<B: LlmBackend>(mut self, backend: B) -> Self {
@@ -87,7 +87,7 @@ impl<M: Modality> LlmRecognizerBuilder<M> {
     }
 
     /// Set the modality-specific [`Prompt`] strategy. Accepts any
-    /// concrete impl by value and wraps it in `Arc`. Required —
+    /// concrete impl by value and wraps it in `Arc`. Required:
     /// `build` errors when this hasn't been called.
     #[must_use]
     pub fn with_prompt<P: Prompt<M>>(mut self, prompt: P) -> Self {
@@ -102,8 +102,11 @@ impl<M: Modality> LlmRecognizerBuilder<M> {
     }
 }
 
-#[async_trait::async_trait]
-impl<M: Modality> EntityRecognizer<M> for LlmRecognizer<M> {
+impl<M: Modality> Recognizer<M> for LlmRecognizer<M> {
+    fn id(&self) -> RecognizerId {
+        RecognizerId::new(self.name.clone(), env!("CARGO_PKG_VERSION"))
+    }
+
     async fn recognize(&self, input: &RecognizerInput<M>) -> Result<RecognizerOutput<M>> {
         let prompt = self.prompt.build(input);
         let request = LlmRequest {

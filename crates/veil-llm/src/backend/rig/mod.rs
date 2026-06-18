@@ -13,10 +13,10 @@ mod usage;
 
 use std::borrow::Cow;
 
-use nvisy_core::{Error as CoreError, Result};
 use rig::agent::{Agent, AgentBuilder};
 use rig::client::CompletionClient;
 use rig::completion::{AssistantContent, Completion, CompletionModel, Message};
+use veil_core::{Error as CoreError, ErrorKind as CoreErrorKind, Result};
 
 pub use self::config::LlmConfig;
 pub use self::context::ContextWindow;
@@ -27,7 +27,7 @@ use super::{LlmBackend, LlmRequest, LlmResponse};
 use crate::error::Error;
 use crate::provider::LlmProvider;
 
-const TARGET: &str = "nvisy_llm::backend::rig";
+const TARGET: &str = "veil_llm::backend::rig";
 
 /// Rig-backed LLM backend.
 ///
@@ -162,9 +162,12 @@ impl RigBackendBuilder {
     /// Returns a validation error when `provider` is unset, and the
     /// underlying rig / HTTP error when client construction fails.
     pub fn build(self) -> Result<RigBackend> {
-        let provider = self
-            .provider
-            .ok_or_else(|| CoreError::validation("RigBackendBuilder requires a provider", "rig"))?;
+        let provider = self.provider.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::Validation,
+                "RigBackendBuilder requires a provider",
+            )
+        })?;
         let config = self.config.unwrap_or_default();
 
         let http = build_http_client(&HttpConfig {
@@ -233,10 +236,9 @@ fn extract_text<'a>(choices: impl Iterator<Item = &'a AssistantContent>) -> Resu
         .collect();
 
     if texts.is_empty() {
-        return Err(CoreError::runtime(
+        return Err(CoreError::new(
+            CoreErrorKind::Recognition,
             "LLM response contained no text content",
-            "rig",
-            false,
         ));
     }
     Ok(texts.join("\n"))

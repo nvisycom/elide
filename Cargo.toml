@@ -7,6 +7,7 @@ members = [
     "./crates/veil-context",
     "./crates/veil-pattern",
     "./crates/veil-ner",
+    "./crates/veil-llm",
     "./crates/veil-codec",
     "./crates/veil-toolkit",
 ]
@@ -34,6 +35,7 @@ veil-core = { path = "./crates/veil-core", version = "0.1.0" }
 veil-context = { path = "./crates/veil-context", version = "0.1.0" }
 veil-pattern = { path = "./crates/veil-pattern", version = "0.1.0" }
 veil-ner = { path = "./crates/veil-ner", version = "0.1.0" }
+veil-llm = { path = "./crates/veil-llm", version = "0.1.0" }
 veil-codec = { path = "./crates/veil-codec", version = "0.1.0" }
 veil-toolkit = { path = "./crates/veil-toolkit", version = "0.1.0" }
 
@@ -88,3 +90,14 @@ phonenumber = { version = "0.3", default-features = false }
 scraper = { version = "0.27", features = [] }
 ego-tree = { version = "0.11", features = [] }
 quick-xml = { version = "0.38", features = [] }
+
+# LLM framework + prompt templating + JSON schema (llm crate)
+rig = { version = "0.38", default-features = false, features = [] }
+minijinja = { version = "2.5", features = [] }
+schemars = { version = "1.0", features = ["uuid1", "bytes1"] }
+humantime-serde = { version = "1.1", features = [] }
+
+# HTTP client middleware (llm crate)
+reqwest-middleware = { version = "0.5", features = ["json", "multipart"] }
+reqwest-retry = { version = "0.9", features = [] }
+reqwest-tracing = { version = "0.7", features = [] }
