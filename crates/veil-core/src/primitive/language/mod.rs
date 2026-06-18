@@ -1,13 +1,15 @@
 //! Language identification primitives.
 //!
-//! [`LanguageTag`] is a validated BCP 47 tag; [`LanguageDetection`]
-//! pairs a tag with how it was obtained ([`LanguageProvenance`] —
-//! detected by a backend, or asserted by the caller). Recognizers use
-//! these to scope themselves to a language and to record the detected
-//! language of content.
+//! [`LanguageTag`] is a validated BCP 47 tag. A [`LanguageDetection`]
+//! pairs a tag with how it was obtained ([`LanguageProvenance`]) plus an
+//! optional confidence and [`LanguageSpan`]; [`LanguageDetections`] is the
+//! list a recognizer input carries for one call. Recognizers consult
+//! these to scope themselves to a language.
 
 mod detection;
 mod tag;
 
-pub use self::detection::{LanguageDetection, LanguageProvenance};
+pub use self::detection::{
+    LanguageDetection, LanguageDetections, LanguageProvenance, LanguageSpan,
+};
 pub use self::tag::LanguageTag;

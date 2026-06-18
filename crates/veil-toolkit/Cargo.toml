@@ -26,10 +26,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Internal crates
 veil-core = { workspace = true, features = [] }
 
-# Primitive datatypes
-uuid = { workspace = true, features = [] }
-type-map = { workspace = true, features = [] }
-
 # Async runtime and parallelism
 tokio = { workspace = true, features = ["rt", "sync", "macros"] }
 

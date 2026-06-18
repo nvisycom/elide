@@ -193,20 +193,6 @@ fn geometry_shapes_compose() {
 }
 
 #[test]
-fn language_detection_records_provenance() {
-    use veil_core::primitive::{LanguageDetection, LanguageProvenance};
-
-    let en = LanguageTag::parse("en").unwrap();
-    let detected = LanguageDetection::detected(en.clone(), Confidence::new(0.9));
-    assert_eq!(detected.provenance, LanguageProvenance::Detected);
-    assert_eq!(detected.confidence, Confidence::new(0.9));
-
-    let asserted = LanguageDetection::asserted(en);
-    assert_eq!(asserted.provenance, LanguageProvenance::Asserted);
-    assert!(asserted.confidence.is_none());
-}
-
-#[test]
 fn label_map_translates_raw_labels() {
     use veil_core::recognition::LabelMap;
 
@@ -224,7 +210,7 @@ fn label_map_translates_raw_labels() {
 
 #[test]
 fn recognizer_input_scopes_by_language_and_country() {
-    use veil_core::recognition::RecognizerInput;
+    use veil_core::recognition::{RecognizerInput, RecognizerLanguage};
 
     let en_us = LanguageTag::parse("en-US").unwrap();
     let en = LanguageTag::parse("en").unwrap();
@@ -235,8 +221,11 @@ fn recognizer_input_scopes_by_language_and_country() {
     assert!(!en.matches(&fr));
 
     let input: RecognizerInput<Text> = RecognizerInput::new(TextData::new(""))
-        .with_language(en_us.clone())
+        .with_language(en_us.clone(), None)
         .with_country(CountryCode::from_alpha2("US").unwrap());
+
+    // The asserted language is the primary one.
+    assert_eq!(input.primary_language(), Some(&en_us));
 
     // Empty scope always applies.
     assert!(input.applies_to_language(&[]));

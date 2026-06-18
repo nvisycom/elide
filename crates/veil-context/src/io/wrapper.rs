@@ -19,7 +19,9 @@
 
 use veil_core::Error;
 use veil_core::modality::text::Text;
-use veil_core::recognition::{Recognizer, RecognizerId, RecognizerInput, RecognizerOutput};
+use veil_core::recognition::{
+    Recognizer, RecognizerId, RecognizerInput, RecognizerLanguage, RecognizerOutput,
+};
 
 use super::Tokens;
 use crate::{Context, Enhancer};
@@ -76,7 +78,7 @@ where
         if let Some(tokens) = input.artifacts.get::<Tokens>() {
             ctx = ctx.with_tokens(tokens.as_slice());
         }
-        if let Some(language) = input.language.as_ref() {
+        if let Some(language) = input.primary_language() {
             ctx = ctx.with_language(language);
         }
         self.enhancer.enhance(&mut output.entities, &ctx);

@@ -9,8 +9,10 @@
 //! [`Event`]: crate::provenance::Event
 
 mod artifacts;
+mod enricher;
 mod input;
 mod label;
+mod language;
 mod output;
 
 use std::fmt;
@@ -21,8 +23,10 @@ use hipstr::HipStr;
 use serde::{Deserialize, Serialize};
 
 pub use self::artifacts::Artifacts;
+pub use self::enricher::Enricher;
 pub use self::input::RecognizerInput;
 pub use self::label::LabelMap;
+pub use self::language::RecognizerLanguage;
 pub use self::output::RecognizerOutput;
 use crate::error::Error;
 use crate::modality::Modality;

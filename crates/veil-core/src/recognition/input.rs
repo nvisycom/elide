@@ -1,16 +1,18 @@
 //! [`RecognizerInput<M>`]: per-call input for a [`Recognizer`].
 //!
 //! Flat per-call surface for recognizers: the modality payload plus the
-//! per-call concerns recognizers actually use — language hints,
-//! candidate-language whitelist, jurisdiction hint, document-level
-//! labels, out-of-band context strings, and a correlation id.
+//! per-call concerns recognizers actually use (the call's languages, a
+//! jurisdiction hint, document-level labels, out-of-band context strings,
+//! shared NLP artifacts, and a correlation id).
 //!
 //! [`Recognizer`]: super::Recognizer
 
 use uuid::Uuid;
 
 use crate::modality::Modality;
-use crate::primitive::{CountryCode, LanguageTag};
+use crate::primitive::{
+    Confidence, CountryCode, LanguageDetection, LanguageDetections, LanguageTag,
+};
 use crate::recognition::Artifacts;
 
 /// Per-call input for a [`Recognizer`].
@@ -24,22 +26,19 @@ use crate::recognition::Artifacts;
 pub struct RecognizerInput<M: Modality> {
     /// The modality payload to inspect, in modality-local coordinates.
     pub content: M::Data,
-    /// Shared per-call NLP enrichment (tokens, lemmas, …), keyed by type. A
-    /// caller computes it once; recognizers that want it read it back by
-    /// type. Those that don't leave it empty.
+    /// Shared per-call NLP enrichment (tokens, lemmas, …), keyed by type.
+    /// An enricher computes it once; recognizers that want it read it back
+    /// by type. Those that don't leave it empty.
     pub artifacts: Artifacts,
-    /// Caller-asserted language. When `Some`, recognizers that support
-    /// per-call language hinting (typically NER / LLM backends) skip their
-    /// own detection.
-    pub language: Option<LanguageTag>,
-    /// Restrict language auto-detection to this subset when [`language`] is
-    /// `None`. Empty means "any".
-    ///
-    /// [`language`]: Self::language
-    pub candidate_languages: Vec<LanguageTag>,
+    /// The call's languages: each entry is a language with how it was
+    /// obtained (detected by an enricher, or asserted by the caller), an
+    /// optional confidence, and an optional span. Empty means "unknown".
+    /// Consult it through the `RecognizerLanguage` trait rather than
+    /// indexing directly.
+    pub languages: LanguageDetections,
     /// Caller-asserted jurisdiction. When `Some`, recognizers that carry
     /// per-rule country scopes skip rules that don't match. `None` means
-    /// "any" — rules that declare countries still run as a permissive
+    /// "any": rules that declare countries still run as a permissive
     /// fallback so callers who don't pass a hint don't lose detections.
     pub country: Option<CountryCode>,
     /// Document-level classification labels (e.g. `"medical"`,
@@ -54,8 +53,8 @@ pub struct RecognizerInput<M: Modality> {
     /// enhancer ignore the field.
     pub context_hints: Vec<String>,
     /// Correlation UUID propagated through the tracing span for this call.
-    /// Recognizer bodies do not read this directly; it's set on the span by
-    /// the caller.
+    /// Recognizer bodies do not read this directly; it's set on the span
+    /// by the caller.
     pub correlation_id: Option<Uuid>,
 }
 
@@ -66,8 +65,7 @@ impl<M: Modality> RecognizerInput<M> {
         Self {
             content,
             artifacts: Artifacts::new(),
-            language: None,
-            candidate_languages: Vec::new(),
+            languages: LanguageDetections::default(),
             country: None,
             labels: Vec::new(),
             context_hints: Vec::new(),
@@ -82,17 +80,17 @@ impl<M: Modality> RecognizerInput<M> {
         self
     }
 
-    /// Set the asserted language.
+    /// Assert a language for this call, returning `self` for chaining.
+    ///
+    /// Adds a caller-asserted [`LanguageDetection`] to the call's
+    /// languages. `confidence` is optional; an assertion outranks a
+    /// detection at equal confidence (see [`RecognizerLanguage::languages`]).
+    ///
+    /// [`RecognizerLanguage::languages`]: super::RecognizerLanguage::languages
     #[must_use]
-    pub fn with_language(mut self, language: LanguageTag) -> Self {
-        self.language = Some(language);
-        self
-    }
-
-    /// Set the candidate languages for auto-detection.
-    #[must_use]
-    pub fn with_candidate_languages(mut self, languages: Vec<LanguageTag>) -> Self {
-        self.candidate_languages = languages;
+    pub fn with_language(mut self, language: LanguageTag, confidence: Option<Confidence>) -> Self {
+        self.languages
+            .push(LanguageDetection::asserted(language, confidence));
         self
     }
 
@@ -125,30 +123,6 @@ impl<M: Modality> RecognizerInput<M> {
         self
     }
 
-    /// Whether a recognizer rule scoped to `allowed` languages should run
-    /// for this call.
-    ///
-    /// - An empty `allowed` list means the rule is language-agnostic
-    ///   and always runs.
-    /// - When `allowed` is non-empty and [`language`] is `Some(_)`, the
-    ///   rule runs when the hint shares a primary subtag with any entry
-    ///   in `allowed` (so an `["en"]` rule fires for `"en-US"` and
-    ///   `"en-GB"` hints).
-    /// - When [`language`] is `None`, the rule still runs — we can't
-    ///   disprove applicability without a hint.
-    ///
-    /// [`language`]: Self::language
-    #[must_use]
-    pub fn applies_to_language(&self, allowed: &[LanguageTag]) -> bool {
-        if allowed.is_empty() {
-            return true;
-        }
-        match self.language.as_ref() {
-            Some(hint) => allowed.iter().any(|a| a.matches(hint)),
-            None => true,
-        }
-    }
-
     /// Whether a recognizer rule scoped to `allowed` countries should run
     /// for this call.
     ///
@@ -156,7 +130,7 @@ impl<M: Modality> RecognizerInput<M> {
     ///   and always runs.
     /// - When `allowed` is non-empty and [`country`] is `Some(_)`, the
     ///   rule runs only when the hint is in `allowed`.
-    /// - When [`country`] is `None`, the rule still runs — we can't
+    /// - When [`country`] is `None`, the rule still runs: we can't
     ///   disprove applicability without a hint, and silently dropping
     ///   detections would surprise callers who simply forgot to set the
     ///   field.

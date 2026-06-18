@@ -6,7 +6,7 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::entity::LabelRef;
+use crate::entity::{LabelCatalog, LabelRef};
 
 /// A translation table from a backend's raw label strings to the
 /// toolkit's canonical entity labels.
@@ -28,6 +28,28 @@ impl LabelMap {
     /// An empty map.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Identity map from every built-in label name to itself.
+    ///
+    /// Convenience for backends that already emit canonical label names
+    /// (or that have been calibrated to): every built-in label maps to a
+    /// [`LabelRef`] of the same name, so [`get`] passes those labels
+    /// through unchanged.
+    ///
+    /// [`get`]: Self::get
+    #[must_use]
+    pub fn canonical() -> Self {
+        Self::canonical_from(&LabelCatalog::with_builtins())
+    }
+
+    /// Identity map over every label name in `catalog`.
+    #[must_use]
+    pub fn canonical_from(catalog: &LabelCatalog) -> Self {
+        catalog
+            .iter()
+            .map(|label| (label.name().to_owned(), LabelRef::new(label.name())))
+            .collect()
     }
 
     /// Add a mapping from a raw label to a canonical [`LabelRef`], returning

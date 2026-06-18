@@ -6,7 +6,9 @@ use veil_context::{BoostRule, ContextEnhanced, Enhancer, SubstringMatcher};
 use veil_core::entity::{Entity, LabelCatalog, LabelRef};
 use veil_core::modality::text::Text;
 use veil_core::primitive::LanguageTag;
-use veil_core::recognition::{Recognizer, RecognizerId, RecognizerInput, RecognizerOutput};
+use veil_core::recognition::{
+    Recognizer, RecognizerId, RecognizerInput, RecognizerLanguage, RecognizerOutput,
+};
 use veil_core::{Error, ErrorKind, Result};
 
 use super::compiled::{CompiledDictionary, CompiledPattern, has_word_boundaries};
@@ -437,7 +439,7 @@ impl Recognizer<Text> for PatternRecognizer {
                 }
                 let ctx = ValidationContext {
                     country: input.country,
-                    language: input.language.clone(),
+                    language: input.primary_language().cloned(),
                 };
                 for m in pat.regex.find_iter(text) {
                     if let Some(validator) = pat.validator.as_ref()
