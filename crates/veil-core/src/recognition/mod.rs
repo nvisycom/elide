@@ -10,6 +10,7 @@
 
 mod artifacts;
 mod enricher;
+mod hint;
 mod input;
 mod label;
 mod language;
@@ -24,6 +25,7 @@ use serde::{Deserialize, Serialize};
 
 pub use self::artifacts::Artifacts;
 pub use self::enricher::Enricher;
+pub use self::hint::Hint;
 pub use self::input::RecognizerInput;
 pub use self::label::LabelMap;
 pub use self::language::RecognizerLanguage;

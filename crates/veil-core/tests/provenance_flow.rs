@@ -238,6 +238,24 @@ fn recognizer_input_scopes_by_language_and_country() {
 }
 
 #[test]
+fn recognizer_input_carries_hints() {
+    use veil_core::entity::LabelRef;
+    use veil_core::modality::text::TextLocation;
+    use veil_core::recognition::{Hint, RecognizerInput};
+
+    let hint = Hint::new(TextLocation::new(0, 5))
+        .with_name("uploaded selection")
+        .with_label(LabelRef::new("PERSON"));
+    let input: RecognizerInput<Text> =
+        RecognizerInput::new(TextData::new("Alice was here")).with_hints(vec![hint]);
+
+    assert_eq!(input.hints.len(), 1);
+    assert_eq!(input.hints[0].location, TextLocation::new(0, 5));
+    assert_eq!(input.hints[0].name.as_deref(), Some("uploaded selection"));
+    assert_eq!(input.hints[0].label, Some(LabelRef::new("PERSON")));
+}
+
+#[test]
 fn operator_trait_shape() {
     use veil_core::redaction::{LeakProfile, Operator, OperatorId};
 

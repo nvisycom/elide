@@ -13,7 +13,7 @@ use crate::modality::Modality;
 use crate::primitive::{
     Confidence, CountryCode, LanguageDetection, LanguageDetections, LanguageTag,
 };
-use crate::recognition::Artifacts;
+use crate::recognition::{Artifacts, Hint};
 
 /// Per-call input for a [`Recognizer`].
 ///
@@ -52,6 +52,12 @@ pub struct RecognizerInput<M: Modality> {
     /// enhancer alongside the in-text word window; recognizers without an
     /// enhancer ignore the field.
     pub context_hints: Vec<String>,
+    /// Caller-supplied annotation regions (a region the caller believes
+    /// may hold an entity, with an optional claimed label and name).
+    /// Recognizers that adjudicate hints (typically LLM-based) fold these
+    /// into detection to confirm, relocate, or reject each one; the rest
+    /// ignore the field.
+    pub hints: Vec<Hint<M>>,
     /// Correlation UUID propagated through the tracing span for this call.
     /// Recognizer bodies do not read this directly; it's set on the span
     /// by the caller.
@@ -69,6 +75,7 @@ impl<M: Modality> RecognizerInput<M> {
             country: None,
             labels: Vec::new(),
             context_hints: Vec::new(),
+            hints: Vec::new(),
             correlation_id: None,
         }
     }
@@ -77,6 +84,13 @@ impl<M: Modality> RecognizerInput<M> {
     #[must_use]
     pub fn with_artifacts(mut self, artifacts: Artifacts) -> Self {
         self.artifacts = artifacts;
+        self
+    }
+
+    /// Attach caller-supplied annotation [`Hint`]s.
+    #[must_use]
+    pub fn with_hints(mut self, hints: Vec<Hint<M>>) -> Self {
+        self.hints = hints;
         self
     }
 
