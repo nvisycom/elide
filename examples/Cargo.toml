@@ -1,0 +1,31 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "elide-examples"
+description = "End-to-end usage examples for the elide toolkit"
+publish = false
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+
+[[bin]]
+name = "redact-txt"
+path = "src/main.rs"
+
+[dependencies]
+# Internal crates
+elide-core = { workspace = true, features = [] }
+elide-pattern = { workspace = true, features = [] }
+elide-ner = { workspace = true, features = ["mock"] }
+elide-llm = { workspace = true, features = ["mock"] }
+elide-codec = { workspace = true, features = [] }
+elide = { workspace = true, features = [] }
+
+# Async runtime
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

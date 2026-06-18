@@ -1,0 +1,58 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "elide-core"
+description = "Domain types, traits, and errors for the elide toolkit"
+keywords = ["elide", "core", "domain", "types"]
+categories = ["data-structures"]
+readme = "README.md"
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+
+## The `image` modality (`Image`, `ImageData`, `ImageLocation`,
+## `ImageReplacement`). Off by default; text-only consumers don't pay for
+## it.
+image = ["dep:bytes"]
+
+## Derive `serde::{Serialize, Deserialize}` on the domain types, and
+## enable serde support in the underlying primitive crates. (`celes`
+## and `oxilangtag` carry their serde impls unconditionally.)
+serde = ["dep:serde", "hipstr/serde", "jiff/serde", "uuid/serde", "bytes?/serde"]
+
+## Test utilities (fixture helpers, builders, …).
+test-utils = []
+
+[dependencies]
+# Serialization (optional — gated behind the `serde` feature)
+serde = { workspace = true, features = ["derive"], optional = true }
+
+# Derive macros (builders across the workspace use `derive_builder`,
+# whose generated `build()` returns this crate's `Error`)
+derive_builder = { workspace = true, features = [] }
+
+# Primitive datatypes
+uuid = { workspace = true, features = ["v7"] }
+hipstr = { workspace = true, features = [] }
+jiff = { workspace = true, features = [] }
+oxilangtag = { workspace = true, features = [] }
+celes = { workspace = true, features = [] }
+type-map = { workspace = true, features = [] }
+
+# Raw bytes (optional — gated behind the `image` feature)
+bytes = { workspace = true, features = [], optional = true }

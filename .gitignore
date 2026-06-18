@@ -25,12 +25,6 @@ coverage/
 dist/
 build/
 
-# Environment, config, and runtime data
-.env*
-!.env.example
-Nvisy.toml
-data/
-
 # Logs
 logs/
 *.log

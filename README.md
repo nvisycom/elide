@@ -1,13 +1,13 @@
-# Veil
+# elide
 
-[![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/veil/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/veil/actions/workflows/build.yml)
+[![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/elide/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/elide/actions/workflows/build.yml)
 
 Composable toolkit for detecting and redacting sensitive data.
 
-Veil is a Rust toolkit for finding and removing PII and PHI from
+elide is a Rust toolkit for finding and removing PII and PHI from
 documents. It provides the building blocks (recognizers, deduplication,
 validation, redaction, and format handling) that a consumer wires into
-their own document-processing flow. Veil is the toolkit layer only; the
+their own document-processing flow. elide is the toolkit layer only; the
 orchestrating runtime and gateway server live in separate projects.
 
 > [!WARNING]
@@ -40,5 +40,5 @@ Apache 2.0 License, see [LICENSE.txt](LICENSE.txt)
 ## Support
 
 - **Documentation**: [docs.nvisy.com](https://docs.nvisy.com)
-- **Issues**: [GitHub Issues](https://github.com/nvisycom/veil/issues)
+- **Issues**: [GitHub Issues](https://github.com/nvisycom/elide/issues)
 - **Email**: [support@nvisy.com](mailto:support@nvisy.com)

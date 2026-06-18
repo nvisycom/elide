@@ -1,0 +1,33 @@
+schema_version = 1
+
+# Drop spans the model returned with these EntityKinds. Hoisted
+# above [label_map] because TOML tables continue until the next
+# header.
+labels_to_ignore = ["diagnosis"]
+
+# Jinja2 template exercising: variable interpolation, `{% for %}` over
+# hints, `{% if %}` gating on labels, the `| join` filter, and hint
+# snippet/value rendering.
+template = """
+You are a PII detector.
+Document text:
+---
+{{ text }}
+---
+{% if labels %}Document labels: {{ labels | join(", ") }}{% endif %}
+{% if hints %}Uploader hints:
+{% for h in hints %}- {{ h.name }} ({{ h.kind }}): value={{ h.value }} | snippet="{{ h.snippet }}"
+{% endfor %}{% endif %}
+Return JSON: {"entities": [...]}.
+"""
+
+[meta]
+name = "ner-e2e"
+modality = "text"
+
+# Remap one canonical EntityKind into another so the test can prove
+# `label_map` is invoked on the lift side. `TextCandidate.entity_type`
+# is strictly typed, so the model emits snake_case kinds; the map runs
+# over the rendered kind string.
+[label_map]
+person_name = "date_of_birth"
