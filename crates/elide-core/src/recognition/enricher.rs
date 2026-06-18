@@ -2,7 +2,7 @@
 
 use std::future::Future;
 
-use crate::error::Error;
+use crate::error::Result;
 use crate::modality::Modality;
 use crate::recognition::RecognizerInput;
 
@@ -28,8 +28,5 @@ where
     ///
     /// Returns an error when enrichment fails (e.g. a detection backend is
     /// unreachable). A failed enricher aborts the call before recognition.
-    fn enrich(
-        &self,
-        input: &mut RecognizerInput<M>,
-    ) -> impl Future<Output = Result<(), Error>> + Send;
+    fn enrich(&self, input: &mut RecognizerInput<M>) -> impl Future<Output = Result<()>> + Send;
 }

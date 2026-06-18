@@ -1,7 +1,7 @@
 //! The `Hash` operator: replace the matched value with a one-way SHA-2
 //! hash.
 
-use elide_core::Error;
+use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId};
@@ -85,11 +85,7 @@ impl Operator<Text> for Hash {
         LeakProfile::Recoverable
     }
 
-    async fn anonymize(
-        &self,
-        _entity: &Entity<Text>,
-        data: &TextData,
-    ) -> Result<TextReplacement, Error> {
+    async fn anonymize(&self, _entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
         Ok(TextReplacement::substituted(self.digest(data.as_str())))
     }
 }

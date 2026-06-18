@@ -11,6 +11,7 @@
 
 mod dyn_enricher;
 mod dyn_recognizer;
+mod options;
 
 use std::sync::Arc;
 
@@ -22,6 +23,7 @@ use tokio::task::JoinSet;
 
 use self::dyn_enricher::DynEnricher;
 use self::dyn_recognizer::DynRecognizer;
+pub use self::options::{AnalysisOptions, AnalysisOptionsBuilder};
 use crate::deduplication::{Layer, LayerPipeline};
 
 /// The find engine: enrichers, recognizers, and deduplication, in one
@@ -41,7 +43,7 @@ use crate::deduplication::{Layer, LayerPipeline};
 ///     .with_layer(FuseLayer::new(MaxConfidence))
 ///     .with_layer(ResolveLayer::new(HighestConfidence))
 ///     .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE))
-///     .analyze(input)
+///     .analyze(content, &AnalysisOptions::new())
 ///     .await?;
 /// ```
 ///
@@ -90,13 +92,16 @@ impl<M: Modality> Analyzer<M> {
         self
     }
 
-    /// Find entities in `input`, in three phases: run every enricher
-    /// (sequentially) to fill in per-call context, then every recognizer
-    /// (concurrently), then every deduplication layer.
+    /// Run the three analysis phases over a built [`RecognizerInput`]:
+    /// every enricher (sequentially) to fill in per-call context, then
+    /// every recognizer (concurrently), then every deduplication layer.
     ///
-    /// Returns the reconciled entity set. Propagates the first enricher or
-    /// recognizer error.
-    pub async fn analyze(&self, mut input: RecognizerInput<M>) -> Result<Vec<Entity<M>>, Error> {
+    /// The shared core behind [`analyze`] and [`analyze_stream`]; both
+    /// build the input and call here.
+    ///
+    /// [`analyze`]: Self::analyze
+    /// [`analyze_stream`]: Self::analyze_stream
+    async fn analyze_input(&self, mut input: RecognizerInput<M>) -> Result<Vec<Entity<M>>, Error> {
         for enricher in &self.enrichers {
             enricher.enrich_boxed(&mut input).await?;
         }
@@ -104,15 +109,31 @@ impl<M: Modality> Analyzer<M> {
         Ok(self.pipeline.run(entities))
     }
 
+    /// Analyze a single in-memory payload with the given options.
+    ///
+    /// Builds a [`RecognizerInput`] from `content` and `options`, then
+    /// runs the full analysis pipeline. Use [`analyze_stream`] for an
+    /// I/O-backed source that yields many chunks.
+    ///
+    /// [`analyze_stream`]: Self::analyze_stream
+    pub async fn analyze(
+        &self,
+        content: M::Data,
+        options: &AnalysisOptions<M>,
+    ) -> Result<Vec<Entity<M>>, Error> {
+        let input = options.apply_to(RecognizerInput::new(content));
+        self.analyze_input(input).await
+    }
+
     /// Analyze a streamed source end to end, returning entities in the
     /// source's own coordinate system.
     ///
     /// Drives `source` chunk by chunk: for each [`Chunk`], builds a
-    /// [`RecognizerInput`] from its payload (and its context hints),
-    /// runs the full [`analyze`] pipeline, then [`lift`]s every entity
-    /// from chunk-local to source coordinates — dropping any whose
-    /// location has no source pre-image. The result aggregates every
-    /// chunk's lifted entities.
+    /// [`RecognizerInput`] from its payload and the call's `options` (plus
+    /// the chunk's own context hints), runs the full analysis pipeline,
+    /// then [`lift`]s every entity from chunk-local to source
+    /// coordinates, dropping any whose location has no source pre-image.
+    /// The result aggregates every chunk's lifted entities.
     ///
     /// This is the [`analyze`] counterpart for I/O-backed sources (a
     /// decoded codec document, say): the caller never sees a chunk or a
@@ -124,15 +145,20 @@ impl<M: Modality> Analyzer<M> {
     /// [`Chunk`]: elide_core::modality::Chunk
     /// [`analyze`]: Self::analyze
     /// [`lift`]: elide_core::modality::StreamDataReader::lift
-    pub async fn analyze_stream<S>(&self, source: &mut S) -> Result<Vec<Entity<M>>, Error>
+    pub async fn analyze_stream<S>(
+        &self,
+        source: &mut S,
+        options: &AnalysisOptions<M>,
+    ) -> Result<Vec<Entity<M>>, Error>
     where
         S: StreamDataReader<M>,
     {
         let mut out = Vec::new();
         while let Some(chunk) = source.read_next().await? {
-            let input =
-                RecognizerInput::new(chunk.data.clone()).with_context_hints(chunk.hints.clone());
-            let entities = self.analyze(input).await?;
+            let input = options
+                .apply_to(RecognizerInput::new(chunk.data.clone()))
+                .with_context_hints(chunk.hints.clone());
+            let entities = self.analyze_input(input).await?;
             out.extend(
                 entities
                     .into_iter()

@@ -80,9 +80,10 @@ pub use self::phone::phone;
 /// [`RecognizerInput`]: elide_core::recognition::RecognizerInput
 #[derive(Debug, Clone, Default)]
 pub struct ValidationContext {
-    /// ISO 3166-1 alpha-2 jurisdiction associated with the input,
-    /// when the caller specified one.
-    pub country: Option<CountryCode>,
+    /// ISO 3166-1 alpha-2 jurisdictions the caller asserted for the
+    /// input. Empty when none were specified. Validators that need a
+    /// region (phone) try each one and accept a match for any.
+    pub countries: Vec<CountryCode>,
     /// BCP-47 language tag associated with the input, when the
     /// caller specified one.
     pub language: Option<LanguageTag>,

@@ -11,7 +11,7 @@
 //! [`MarkupHandler`]: super::MarkupHandler
 
 use ego_tree::NodeId;
-use elide_core::Error;
+use elide_core::Result;
 use elide_core::modality::text::Text;
 use scraper::Html;
 use scraper::node::Node;
@@ -106,7 +106,7 @@ pub(crate) struct HtmlEncoder {
 impl MarkupEncoder for HtmlEncoder {
     type Address = HtmlAddress;
 
-    fn encode(&self, items: &[HtmlItem]) -> Result<ContentData, Error> {
+    fn encode(&self, items: &[HtmlItem]) -> Result<ContentData> {
         let mut dom = Html::parse_document(&self.raw);
         EncodePlan::from_items(items).apply(&mut dom);
         Ok(ContentData::new(dom.html().into_bytes().into()))

@@ -1,7 +1,7 @@
 //! Plain-text loader: validates and parses raw text content into a
 //! [`TxtHandler`].
 
-use elide_core::Error;
+use elide_core::Result;
 use elide_core::modality::text::Text;
 
 use super::TxtHandler;
@@ -16,7 +16,7 @@ pub(crate) struct TxtLoader;
 impl Loader<Text> for TxtLoader {
     type Handler = TxtHandler;
 
-    async fn decode(&self, content: ContentData) -> Result<TxtHandler, Error> {
+    async fn decode(&self, content: ContentData) -> Result<TxtHandler> {
         let text = content.decode()?;
         let trailing_newline = text.ends_with('\n');
         let lines: Vec<String> = text.lines().map(String::from).collect();
@@ -32,7 +32,7 @@ mod tests {
     use crate::Handler;
 
     #[tokio::test]
-    async fn load_multiline() -> Result<(), Error> {
+    async fn load_multiline() -> Result<()> {
         let doc = TxtLoader
             .decode(ContentData::from_text("hello\nworld\n"))
             .await?;
@@ -43,7 +43,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn load_no_trailing_newline() -> Result<(), Error> {
+    async fn load_no_trailing_newline() -> Result<()> {
         let doc = TxtLoader
             .decode(ContentData::from_text("single line"))
             .await?;

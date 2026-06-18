@@ -13,7 +13,7 @@ use std::borrow::Cow;
 use std::fmt;
 use std::sync::Arc;
 
-use elide_core::Error;
+use elide_core::Result;
 use elide_core::modality::Modality;
 
 use super::Loader;
@@ -162,7 +162,7 @@ impl Format {
     pub async fn decode(
         &self,
         content: ContentData,
-    ) -> Result<super::document::UntypedDocumentHandle, Error> {
+    ) -> Result<super::document::UntypedDocumentHandle> {
         self.loader.decode(content).await
     }
 }

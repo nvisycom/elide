@@ -2,7 +2,7 @@
 //! [`RecognizerInput`].
 
 use crate::modality::Modality;
-use crate::primitive::{Confidence, LanguageDetection, LanguageTag};
+use crate::primitive::{Confidence, Language, LanguageTag};
 use crate::recognition::RecognizerInput;
 
 /// The language-aware surface of a [`RecognizerInput`].
@@ -20,7 +20,7 @@ pub trait RecognizerLanguage {
     /// Sorted by confidence descending (a missing confidence ranks last),
     /// with an asserted language breaking ties ahead of a detected one.
     /// Empty when the call has no language information.
-    fn languages(&self) -> Vec<&LanguageDetection>;
+    fn languages(&self) -> Vec<&Language>;
 
     /// The single most likely language tag for this call, or `None` when
     /// no language is known.
@@ -42,10 +42,10 @@ pub trait RecognizerLanguage {
 impl<M: Modality> RecognizerLanguage for RecognizerInput<M> {
     fn assert_language(&mut self, language: LanguageTag, confidence: Option<Confidence>) {
         self.languages
-            .push(LanguageDetection::asserted(language, confidence));
+            .push(Language::asserted(language, confidence));
     }
 
-    fn languages(&self) -> Vec<&LanguageDetection> {
+    fn languages(&self) -> Vec<&Language> {
         self.languages.ranked()
     }
 

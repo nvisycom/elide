@@ -31,9 +31,13 @@ pub fn phone(value: &str, ctx: &ValidationContext) -> bool {
         return true;
     }
 
-    ctx.country
-        .and_then(|c| Id::from_str(c.as_str()).ok())
-        .and_then(|region| parse(Some(region), trimmed).ok())
-        .map(|n| n.is_valid())
-        .unwrap_or(false)
+    // Try each asserted jurisdiction; a national-format number need only
+    // be valid for one of them.
+    ctx.countries.iter().any(|c| {
+        Id::from_str(c.as_str())
+            .ok()
+            .and_then(|region| parse(Some(region), trimmed).ok())
+            .map(|n| n.is_valid())
+            .unwrap_or(false)
+    })
 }

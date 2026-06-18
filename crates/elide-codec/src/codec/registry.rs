@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use elide_core::{Error, ErrorKind};
+use elide_core::{Error, ErrorKind, Result};
 
 use super::document::UntypedDocumentHandle;
 use super::{Format, FormatId};
@@ -138,7 +138,7 @@ impl FormatRegistry {
         &self,
         content: impl Into<ContentData>,
         extension: &str,
-    ) -> Result<UntypedDocumentHandle, Error> {
+    ) -> Result<UntypedDocumentHandle> {
         let format = self.by_extension(extension).ok_or_else(|| {
             Error::new(
                 ErrorKind::Validation,
@@ -160,10 +160,7 @@ impl FormatRegistry {
     ///
     /// [`extension`]: ContentData::extension
     /// [`content_type`]: ContentData::content_type
-    pub async fn decode_content(
-        &self,
-        content: ContentData,
-    ) -> Result<UntypedDocumentHandle, Error> {
+    pub async fn decode_content(&self, content: ContentData) -> Result<UntypedDocumentHandle> {
         let by_ext = content
             .extension()
             .and_then(|ext| self.by_extension(&ext))

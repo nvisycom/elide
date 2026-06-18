@@ -6,7 +6,7 @@
 
 use std::ops::Range;
 
-use elide_core::{Error, ErrorKind};
+use elide_core::{Error, ErrorKind, Result};
 
 /// Replace `buf[range]` with `value` in place.
 ///
@@ -16,11 +16,7 @@ use elide_core::{Error, ErrorKind};
 /// # Errors
 ///
 /// Returns a validation error if either endpoint falls mid-character.
-pub(crate) fn replace_range(
-    buf: &mut String,
-    value: &str,
-    range: Range<usize>,
-) -> Result<(), Error> {
+pub(crate) fn replace_range(buf: &mut String, value: &str, range: Range<usize>) -> Result<()> {
     let s = range.start.min(buf.len());
     let e = range.end.min(buf.len());
     if s >= e {

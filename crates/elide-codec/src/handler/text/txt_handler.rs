@@ -8,7 +8,7 @@
 
 use std::ops::Range;
 
-use elide_core::Error;
+use elide_core::Result;
 use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
@@ -51,7 +51,7 @@ impl Handler<Text> for TxtHandler {
         FORMAT_ID.clone()
     }
 
-    fn encode(&self) -> Result<ContentData, Error> {
+    fn encode(&self) -> Result<ContentData> {
         let mut out = self.lines.join("\n");
         if self.trailing_newline && !self.lines.is_empty() {
             out.push('\n');
@@ -59,7 +59,7 @@ impl Handler<Text> for TxtHandler {
         Ok(ContentData::from_text(out))
     }
 
-    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>, Error> {
+    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>> {
         if self.cursor >= self.lines.len() {
             return Ok(None);
         }
@@ -98,7 +98,7 @@ impl Handler<Text> for TxtHandler {
 }
 
 impl DataReader<Text> for TxtHandler {
-    async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>, Error> {
+    async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
         let Some(i) = self.line_for(location.start) else {
             return Ok(None);
         };
@@ -114,7 +114,7 @@ impl DataReader<Text> for TxtHandler {
 }
 
 impl DataWriter<Text> for TxtHandler {
-    async fn write_at(&mut self, mut redactions: Redactions<Text>) -> Result<(), Error> {
+    async fn write_at(&mut self, mut redactions: Redactions<Text>) -> Result<()> {
         // Apply right-to-left so each edit's length delta doesn't
         // invalidate earlier locations: sort ascending by position, then
         // walk in reverse.
@@ -184,11 +184,7 @@ impl TxtHandler {
         }
     }
 
-    fn redact_one(
-        &mut self,
-        location: &TextLocation,
-        replacement: &TextReplacement,
-    ) -> Result<(), Error> {
+    fn redact_one(&mut self, location: &TextLocation, replacement: &TextReplacement) -> Result<()> {
         let Some(i) = self.line_for(location.start) else {
             return Ok(());
         };
@@ -230,7 +226,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stream_yields_each_line() -> Result<(), Error> {
+    async fn stream_yields_each_line() -> Result<()> {
         let mut h = handler("hello\nworld\n");
         let first = h.read_next().await?.unwrap();
         assert_eq!(first.location.start, 0);
@@ -245,7 +241,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lift_chunk_is_identity_on_second_line() -> Result<(), Error> {
+    async fn lift_chunk_is_identity_on_second_line() -> Result<()> {
         let mut h = handler("hello\nworld\n");
         let _first = h.read_next().await?.unwrap();
         let second = h.read_next().await?.unwrap();
@@ -256,7 +252,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn read_returns_line() -> Result<(), Error> {
+    async fn read_returns_line() -> Result<()> {
         let h = handler("hello\nworld\n");
         let loc = TextLocation {
             start: 6,
@@ -268,7 +264,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn read_cross_line_returns_none() -> Result<(), Error> {
+    async fn read_cross_line_returns_none() -> Result<()> {
         let h = handler("hello\nworld\n");
         let loc = TextLocation {
             start: 3,
@@ -280,7 +276,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn redact_replaces_whole_line() -> Result<(), Error> {
+    async fn redact_replaces_whole_line() -> Result<()> {
         let mut h = handler("hello\nworld\n");
         let mut rs = Redactions::new();
         rs.push(
@@ -297,7 +293,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn redact_multiple_lines_any_input_order() -> Result<(), Error> {
+    async fn redact_multiple_lines_any_input_order() -> Result<()> {
         let mut h = handler("alpha\nbravo\ncharlie\n");
         let mut rs = Redactions::new();
         rs.push(
@@ -322,7 +318,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn redact_unknown_location_skipped() -> Result<(), Error> {
+    async fn redact_unknown_location_skipped() -> Result<()> {
         let mut h = handler("one line");
         let mut rs = Redactions::new();
         rs.push(
@@ -339,21 +335,21 @@ mod tests {
     }
 
     #[test]
-    fn encode_with_trailing_newline() -> Result<(), Error> {
+    fn encode_with_trailing_newline() -> Result<()> {
         let h = handler("hello\nworld\n");
         assert_eq!(h.encode()?.as_bytes(), b"hello\nworld\n");
         Ok(())
     }
 
     #[test]
-    fn encode_without_trailing_newline() -> Result<(), Error> {
+    fn encode_without_trailing_newline() -> Result<()> {
         let h = handler("no newline");
         assert_eq!(h.encode()?.as_bytes(), b"no newline");
         Ok(())
     }
 
     #[tokio::test]
-    async fn line_starts_shift_after_shrink() -> Result<(), Error> {
+    async fn line_starts_shift_after_shrink() -> Result<()> {
         let mut h = handler("hello\nworld\n");
         let mut rs = Redactions::new();
         rs.push(

@@ -21,7 +21,7 @@ use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use elide_core::Error;
+use elide_core::Result;
 use elide_core::modality::{Chunk, DataReader, DataWriter, Modality};
 use elide_core::redaction::Redactions;
 
@@ -66,10 +66,7 @@ pub trait Loader<M: Modality>: Send + Sync + 'static {
     /// # Errors
     ///
     /// Returns an error when the content is malformed for this format.
-    fn decode(
-        &self,
-        content: ContentData,
-    ) -> impl Future<Output = Result<Self::Handler, Error>> + Send;
+    fn decode(&self, content: ContentData) -> impl Future<Output = Result<Self::Handler>> + Send;
 }
 
 /// Object-safe bridge over [`Handler<M>`].
@@ -83,16 +80,13 @@ pub trait Loader<M: Modality>: Send + Sync + 'static {
 /// [`Handler<M>`]: super::Handler
 /// [`DocumentHandle<M>`]: super::document::DocumentHandle
 pub(crate) trait DynHandler<M: Modality>: Send + Sync + 'static {
-    fn encode(&self) -> Result<ContentData, Error>;
+    fn encode(&self) -> Result<ContentData>;
 
-    fn read_next(&mut self) -> BoxFuture<'_, Result<Option<Chunk<M>>, Error>>;
+    fn read_next(&mut self) -> BoxFuture<'_, Result<Option<Chunk<M>>>>;
 
-    fn read_at<'a>(
-        &'a self,
-        location: &'a M::Location,
-    ) -> BoxFuture<'a, Result<Option<M::Data>, Error>>;
+    fn read_at<'a>(&'a self, location: &'a M::Location) -> BoxFuture<'a, Result<Option<M::Data>>>;
 
-    fn write_at(&mut self, redactions: Redactions<M>) -> BoxFuture<'_, Result<(), Error>>;
+    fn write_at(&mut self, redactions: Redactions<M>) -> BoxFuture<'_, Result<()>>;
 
     fn lift_chunk(&self, chunk: &Chunk<M>, value_range: Range<usize>) -> Option<M::Location>;
 }
@@ -102,22 +96,19 @@ where
     M: Modality,
     H: Handler<M>,
 {
-    fn encode(&self) -> Result<ContentData, Error> {
+    fn encode(&self) -> Result<ContentData> {
         Handler::encode(self)
     }
 
-    fn read_next(&mut self) -> BoxFuture<'_, Result<Option<Chunk<M>>, Error>> {
+    fn read_next(&mut self) -> BoxFuture<'_, Result<Option<Chunk<M>>>> {
         Box::pin(Handler::read_next(self))
     }
 
-    fn read_at<'a>(
-        &'a self,
-        location: &'a M::Location,
-    ) -> BoxFuture<'a, Result<Option<M::Data>, Error>> {
+    fn read_at<'a>(&'a self, location: &'a M::Location) -> BoxFuture<'a, Result<Option<M::Data>>> {
         Box::pin(DataReader::read_at(self, location))
     }
 
-    fn write_at(&mut self, redactions: Redactions<M>) -> BoxFuture<'_, Result<(), Error>> {
+    fn write_at(&mut self, redactions: Redactions<M>) -> BoxFuture<'_, Result<()>> {
         Box::pin(DataWriter::write_at(self, redactions))
     }
 
@@ -137,7 +128,7 @@ where
 /// [`Format::decode`]: super::Format::decode
 /// [`FormatRegistry::decode`]: super::FormatRegistry::decode
 pub(crate) trait ErasedLoader: Send + Sync + 'static {
-    fn decode(&self, content: ContentData) -> BoxFuture<'_, Result<UntypedDocumentHandle, Error>>;
+    fn decode(&self, content: ContentData) -> BoxFuture<'_, Result<UntypedDocumentHandle>>;
 }
 
 /// Erase a typed [`Loader<M>`] into an `Arc<dyn ErasedLoader>` the
@@ -167,7 +158,7 @@ where
     M: Modality,
     L: Loader<M>,
 {
-    fn decode(&self, content: ContentData) -> BoxFuture<'_, Result<UntypedDocumentHandle, Error>> {
+    fn decode(&self, content: ContentData) -> BoxFuture<'_, Result<UntypedDocumentHandle>> {
         Box::pin(async move {
             let handler = self.loader.decode(content).await?;
             let format_id = Handler::format(&handler);

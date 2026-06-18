@@ -439,7 +439,7 @@ impl Recognizer<Text> for PatternRecognizer {
                     continue;
                 }
                 let ctx = ValidationContext {
-                    country: input.country,
+                    countries: input.countries.clone(),
                     language: input.primary_language().cloned(),
                 };
                 for m in pat.regex.find_iter(text) {

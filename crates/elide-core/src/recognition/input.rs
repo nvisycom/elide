@@ -10,9 +10,7 @@
 use uuid::Uuid;
 
 use crate::modality::Modality;
-use crate::primitive::{
-    Confidence, CountryCode, LanguageDetection, LanguageDetections, LanguageTag,
-};
+use crate::primitive::{Confidence, CountryCode, Language, LanguageTag, Languages};
 use crate::recognition::{Artifacts, Hint};
 
 /// Per-call input for a [`Recognizer`].
@@ -35,12 +33,14 @@ pub struct RecognizerInput<M: Modality> {
     /// optional confidence, and an optional span. Empty means "unknown".
     /// Consult it through the `RecognizerLanguage` trait rather than
     /// indexing directly.
-    pub languages: LanguageDetections,
+    pub languages: Languages,
     /// Caller-asserted jurisdiction. When `Some`, recognizers that carry
-    /// per-rule country scopes skip rules that don't match. `None` means
-    /// "any": rules that declare countries still run as a permissive
-    /// fallback so callers who don't pass a hint don't lose detections.
-    pub country: Option<CountryCode>,
+    /// per-rule country scopes skip rules that match none of them. An
+    /// empty list means "any": rules that declare countries still run as
+    /// a permissive fallback so callers who don't assert a jurisdiction
+    /// don't lose detections. A document spanning several jurisdictions
+    /// can assert all of them; a rule runs when any one matches.
+    pub countries: Vec<CountryCode>,
     /// Document-level classification labels (e.g. `"medical"`,
     /// `"gdpr-request"`). Recognizers may use these to bias their behavior
     /// for domain-specific terms; those that don't ignore the field.
@@ -71,8 +71,8 @@ impl<M: Modality> RecognizerInput<M> {
         Self {
             content,
             artifacts: Artifacts::new(),
-            languages: LanguageDetections::default(),
-            country: None,
+            languages: Languages::default(),
+            countries: Vec::new(),
             labels: Vec::new(),
             context_hints: Vec::new(),
             hints: Vec::new(),
@@ -96,7 +96,7 @@ impl<M: Modality> RecognizerInput<M> {
 
     /// Assert a language for this call, returning `self` for chaining.
     ///
-    /// Adds a caller-asserted [`LanguageDetection`] to the call's
+    /// Adds a caller-asserted [`Language`] to the call's
     /// languages. `confidence` is optional; an assertion outranks a
     /// detection at equal confidence (see [`RecognizerLanguage::languages`]).
     ///
@@ -104,14 +104,22 @@ impl<M: Modality> RecognizerInput<M> {
     #[must_use]
     pub fn with_language(mut self, language: LanguageTag, confidence: Option<Confidence>) -> Self {
         self.languages
-            .push(LanguageDetection::asserted(language, confidence));
+            .push(Language::asserted(language, confidence));
         self
     }
 
-    /// Set the asserted jurisdiction.
+    /// Assert a jurisdiction for this call. May be called more than once
+    /// to assert several; a rule runs when any one matches.
     #[must_use]
     pub fn with_country(mut self, country: CountryCode) -> Self {
-        self.country = Some(country);
+        self.countries.push(country);
+        self
+    }
+
+    /// Replace the asserted jurisdictions with `countries`.
+    #[must_use]
+    pub fn with_countries(mut self, countries: Vec<CountryCode>) -> Self {
+        self.countries = countries;
         self
     }
 
@@ -142,22 +150,19 @@ impl<M: Modality> RecognizerInput<M> {
     ///
     /// - An empty `allowed` list means the rule is jurisdiction-agnostic
     ///   and always runs.
-    /// - When `allowed` is non-empty and [`country`] is `Some(_)`, the
-    ///   rule runs only when the hint is in `allowed`.
-    /// - When [`country`] is `None`, the rule still runs: we can't
-    ///   disprove applicability without a hint, and silently dropping
-    ///   detections would surprise callers who simply forgot to set the
-    ///   field.
+    /// - When `allowed` is non-empty and [`countries`] is non-empty, the
+    ///   rule runs when any asserted country is in `allowed`.
+    /// - When [`countries`] is empty, the rule still runs: we can't
+    ///   disprove applicability without an assertion, and silently
+    ///   dropping detections would surprise callers who simply forgot to
+    ///   set the field.
     ///
-    /// [`country`]: Self::country
+    /// [`countries`]: Self::countries
     #[must_use]
     pub fn applies_to_country(&self, allowed: &[CountryCode]) -> bool {
-        if allowed.is_empty() {
+        if allowed.is_empty() || self.countries.is_empty() {
             return true;
         }
-        match self.country.as_ref() {
-            Some(hint) => allowed.iter().any(|a| a == hint),
-            None => true,
-        }
+        self.countries.iter().any(|c| allowed.contains(c))
     }
 }

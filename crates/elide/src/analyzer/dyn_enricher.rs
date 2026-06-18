@@ -3,7 +3,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use elide_core::Error;
+use elide_core::Result;
 use elide_core::modality::Modality;
 use elide_core::recognition::{Enricher, RecognizerInput};
 
@@ -19,7 +19,7 @@ pub(crate) trait DynEnricher<M: Modality>: Send + Sync {
     fn enrich_boxed<'a>(
         &'a self,
         input: &'a mut RecognizerInput<M>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
 }
 
 impl<M, E> DynEnricher<M> for E
@@ -30,7 +30,7 @@ where
     fn enrich_boxed<'a>(
         &'a self,
         input: &'a mut RecognizerInput<M>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(self.enrich(input))
     }
 }

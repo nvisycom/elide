@@ -15,7 +15,7 @@
 use std::ops::Range;
 
 use elide_core::modality::text::Text;
-use elide_core::{Error, ErrorKind};
+use elide_core::{Error, ErrorKind, Result};
 
 use super::{MarkupEncoder, MarkupHandler, RedactableItem, XmlLoader};
 use crate::content::ContentData;
@@ -62,7 +62,7 @@ pub(crate) struct XmlEncoder {
 impl MarkupEncoder for XmlEncoder {
     type Address = XmlSpan;
 
-    fn encode(&self, items: &[XmlItem]) -> Result<ContentData, Error> {
+    fn encode(&self, items: &[XmlItem]) -> Result<ContentData> {
         // Item spans are recorded by the loader from disjoint quick-xml
         // events over this same `raw`, so they never overlap. Applying
         // them right-to-left means each splice's length delta can't shift

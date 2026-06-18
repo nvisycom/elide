@@ -2,11 +2,11 @@
 //! `PHONE_NUMBER`s; the analyzer fuses them, and a `FilterLayer` drops a
 //! low-confidence stray.
 
-use elide::Analyzer;
 use elide::deduplication::calibrate::{CalibrateLayer, CalibrationMap};
 use elide::deduplication::filter::FilterLayer;
 use elide::deduplication::fuse::{FuseLayer, MaxConfidence};
 use elide::deduplication::resolve::{HighestConfidence, ResolveLayer};
+use elide::{AnalysisOptions, Analyzer};
 use elide_core::Error;
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::primitive::{Confidence, ConfidenceThreshold};
@@ -69,7 +69,7 @@ async fn analyze_fuses_resolves_filters() {
         .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE));
 
     let mut entities = analyzer
-        .analyze(RecognizerInput::new(TextData::new("")))
+        .analyze(TextData::new(""), &AnalysisOptions::new())
         .await
         .unwrap();
 

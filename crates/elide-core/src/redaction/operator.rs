@@ -7,7 +7,7 @@ use std::future::Future;
 use serde::{Deserialize, Serialize};
 
 use crate::entity::Entity;
-use crate::error::Error;
+use crate::error::Result;
 use crate::modality::Modality;
 use crate::redaction::OperatorId;
 
@@ -68,5 +68,5 @@ pub trait Operator<M: Modality>: Send + Sync {
         &self,
         entity: &Entity<M>,
         data: &M::Data,
-    ) -> impl Future<Output = Result<M::Replacement, Error>> + Send;
+    ) -> impl Future<Output = Result<M::Replacement>> + Send;
 }

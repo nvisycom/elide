@@ -24,7 +24,7 @@
 use std::future::Future;
 use std::ops::Range;
 
-use elide_core::Error;
+use elide_core::Result;
 use elide_core::modality::{Chunk, DataReader, DataWriter, Modality};
 
 use super::FormatId;
@@ -65,11 +65,11 @@ pub trait Handler<M: Modality>: DataReader<M> + DataWriter<M> + Send + Sync + 's
     ///
     /// Returns an error when the in-memory representation cannot be
     /// re-encoded.
-    fn encode(&self) -> Result<ContentData, Error>;
+    fn encode(&self) -> Result<ContentData>;
 
     /// Advance the cursor and yield the next chunk, or `None` at
     /// end-of-stream.
-    fn read_next(&mut self) -> impl Future<Output = Result<Option<Chunk<M>>, Error>> + Send;
+    fn read_next(&mut self) -> impl Future<Output = Result<Option<Chunk<M>>>> + Send;
 
     /// Translate a `value_range` expressed inside `chunk.data`'s
     /// coordinate system into a source-coordinate `M::Location`.

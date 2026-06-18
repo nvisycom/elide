@@ -23,7 +23,7 @@
 use std::any::{Any, type_name};
 use std::fmt;
 
-use elide_core::Error;
+use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::text::Text;
 use elide_core::modality::{Chunk, DataReader, DataWriter, Modality, StreamDataReader};
@@ -135,7 +135,7 @@ impl<M: Modality> DocumentHandle<M> {
     /// re-encoded.
     ///
     /// [`ContentData`]: crate::content::ContentData
-    pub fn encode(&self) -> Result<ContentData, Error> {
+    pub fn encode(&self) -> Result<ContentData> {
         self.handler.encode()
     }
 }
@@ -150,19 +150,19 @@ impl<M: Modality> fmt::Debug for DocumentHandle<M> {
 }
 
 impl<M: Modality> DataReader<M> for DocumentHandle<M> {
-    async fn read_at(&self, location: &M::Location) -> Result<Option<M::Data>, Error> {
+    async fn read_at(&self, location: &M::Location) -> Result<Option<M::Data>> {
         self.handler.read_at(location).await
     }
 }
 
 impl<M: Modality> DataWriter<M> for DocumentHandle<M> {
-    async fn write_at(&mut self, redactions: Redactions<M>) -> Result<(), Error> {
+    async fn write_at(&mut self, redactions: Redactions<M>) -> Result<()> {
         self.handler.write_at(redactions).await
     }
 }
 
 impl StreamDataReader<Text> for DocumentHandle<Text> {
-    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>, Error> {
+    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>> {
         self.handler.read_next().await
     }
 

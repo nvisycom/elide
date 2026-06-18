@@ -33,7 +33,7 @@ mod xml_loader;
 
 use std::ops::Range;
 
-use elide_core::Error;
+use elide_core::Result;
 use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
@@ -92,7 +92,7 @@ pub(crate) trait MarkupEncoder: Send + Sync + 'static {
     /// # Errors
     ///
     /// Returns an error when the document cannot be re-serialized.
-    fn encode(&self, items: &[RedactableItem<Self::Address>]) -> Result<ContentData, Error>;
+    fn encode(&self, items: &[RedactableItem<Self::Address>]) -> Result<ContentData>;
 }
 
 /// The [`Handler`] machinery over a markup item stream.
@@ -144,11 +144,7 @@ impl<E: MarkupEncoder> MarkupHandler<E> {
         }
     }
 
-    fn redact_one(
-        &mut self,
-        location: &TextLocation,
-        replacement: &TextReplacement,
-    ) -> Result<(), Error> {
+    fn redact_one(&mut self, location: &TextLocation, replacement: &TextReplacement) -> Result<()> {
         let Some(i) = self.item_for(location.start) else {
             return Ok(());
         };
@@ -173,11 +169,11 @@ impl<E: MarkupEncoder> Handler<Text> for MarkupHandler<E> {
         self.format_id.clone()
     }
 
-    fn encode(&self) -> Result<ContentData, Error> {
+    fn encode(&self) -> Result<ContentData> {
         self.encoder.encode(&self.items)
     }
 
-    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>, Error> {
+    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>> {
         if self.cursor >= self.items.len() {
             return Ok(None);
         }
@@ -218,7 +214,7 @@ impl<E: MarkupEncoder> Handler<Text> for MarkupHandler<E> {
 }
 
 impl<E: MarkupEncoder> DataReader<Text> for MarkupHandler<E> {
-    async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>, Error> {
+    async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
         let Some(i) = self.item_for(location.start) else {
             return Ok(None);
         };
@@ -237,7 +233,7 @@ impl<E: MarkupEncoder> DataReader<Text> for MarkupHandler<E> {
 }
 
 impl<E: MarkupEncoder> DataWriter<Text> for MarkupHandler<E> {
-    async fn write_at(&mut self, mut redactions: Redactions<Text>) -> Result<(), Error> {
+    async fn write_at(&mut self, mut redactions: Redactions<Text>) -> Result<()> {
         // Apply right-to-left so each edit's length delta doesn't
         // invalidate earlier locations.
         redactions.sort_by_position();

@@ -14,7 +14,7 @@
 //! let recognizer = ContextEnhanced::new(inner, enhancer);
 //! ```
 //!
-//! The wrapper implements [`Recognizer<Text>`] so the engine never has
+//! The wrapper implements [`Recognizer`]`<Text>` so the engine never has
 //! to know boosting happened.
 
 use elide_core::Error;
@@ -28,7 +28,7 @@ use crate::{Context, Enhancer};
 
 /// Wraps a text [`Recognizer`] with a post-recognition [`Enhancer`] pass.
 ///
-/// Implements [`Recognizer<Text>`] so the wrapped recognizer is a
+/// Implements [`Recognizer`]`<Text>` so the wrapped recognizer is a
 /// drop-in replacement.
 ///
 /// Assumes the inner recognizer emits entities whose byte offsets index

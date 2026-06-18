@@ -26,7 +26,7 @@ use crate::modality::Modality;
 /// A caller-supplied annotation region in modality-native coordinates (a
 /// [`Text`](crate::modality::text::Text) byte range, an image bounding
 /// box, and so on).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     feature = "serde",
@@ -41,6 +41,18 @@ pub struct Hint<M: Modality> {
     pub label: Option<LabelRef>,
     /// Region in modality-native coordinates.
     pub location: M::Location,
+}
+
+// Manual `Clone`: `derive` would add a spurious `M: Clone` bound, but `M`
+// is a zero-size marker. The fields clone via the location's own bound.
+impl<M: Modality> Clone for Hint<M> {
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            label: self.label.clone(),
+            location: self.location.clone(),
+        }
+    }
 }
 
 impl<M: Modality> Hint<M> {

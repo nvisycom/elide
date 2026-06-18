@@ -1,6 +1,6 @@
 //! [`Redact`]: delete the matched span entirely.
 
-use elide_core::Error;
+use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId};
@@ -22,11 +22,7 @@ impl Operator<Text> for Redact {
         LeakProfile::Irrecoverable
     }
 
-    async fn anonymize(
-        &self,
-        _entity: &Entity<Text>,
-        _data: &TextData,
-    ) -> Result<TextReplacement, Error> {
+    async fn anonymize(&self, _entity: &Entity<Text>, _data: &TextData) -> Result<TextReplacement> {
         Ok(TextReplacement::Removed)
     }
 }

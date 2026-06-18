@@ -19,8 +19,6 @@ pub mod rendering;
 
 pub use self::confidence::{Confidence, ConfidenceThreshold};
 pub use self::geometry::{BoundingBox, Dimensions, Point, Polygon, UnitBoundingBox};
-pub use self::language::{
-    LanguageDetection, LanguageDetections, LanguageProvenance, LanguageSpan, LanguageTag,
-};
+pub use self::language::{Language, LanguageProvenance, LanguageSpan, LanguageTag, Languages};
 pub use self::region::CountryCode;
 pub use self::rendering::Color;

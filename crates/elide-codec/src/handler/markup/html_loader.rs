@@ -10,7 +10,7 @@
 //! [`style_policy`]: HtmlLoader::style_policy
 
 use ego_tree::NodeRef;
-use elide_core::Error;
+use elide_core::Result;
 use elide_core::modality::text::Text;
 use scraper::Html;
 use scraper::node::Node;
@@ -46,7 +46,7 @@ pub(crate) struct HtmlLoader {
 impl Loader<Text> for HtmlLoader {
     type Handler = HtmlHandler;
 
-    async fn decode(&self, content: ContentData) -> Result<HtmlHandler, Error> {
+    async fn decode(&self, content: ContentData) -> Result<HtmlHandler> {
         let text = content.decode()?;
         let dom = Html::parse_document(&text);
         let items = build_items(&dom, self);

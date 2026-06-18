@@ -44,6 +44,9 @@ elide-ner = { workspace = true, features = [], optional = true }
 elide-llm = { workspace = true, features = [], optional = true }
 elide-codec = { workspace = true, features = [], optional = true }
 
+# Derive macros
+derive_builder = { workspace = true, features = [] }
+
 # Async runtime and parallelism
 tokio = { workspace = true, features = ["rt", "sync", "macros"] }
 
