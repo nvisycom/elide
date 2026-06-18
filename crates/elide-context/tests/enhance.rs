@@ -3,10 +3,10 @@
 
 use elide_context::matching::SubstringMatcher;
 use elide_context::{BoostRule, Context, Enhancer};
+use elide_core::entity::provenance::{Event, EventKind, PatternEvent, Provenance};
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::{Text, TextLocation};
 use elide_core::primitive::Confidence;
-use elide_core::provenance::{Event, EventKind, PatternEvent, Provenance};
 
 /// Build a single-recognition entity at `start..end`.
 fn entity(label: &LabelRef, start: usize, end: usize, score: f32) -> Entity<Text> {

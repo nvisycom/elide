@@ -6,7 +6,7 @@ use elide_context::{BoostRule, ContextEnhanced, Enhancer};
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
 use elide_core::modality::text::{Text, TextData};
 use elide_core::primitive::LanguageTag;
-use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId, RecognizerLanguage};
+use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
 use elide_core::{Error, ErrorKind, Result};
 use regex::RegexSet;
 

@@ -1,16 +1,13 @@
-//! Audit records: the per-entity [`Provenance`] trail and the run-level
-//! [`Manifest`].
+//! Audit records: the per-entity [`Provenance`] trail.
 //!
-//! [`Provenance`]: crate::provenance::Provenance
+//! [`Provenance`]: crate::entity::provenance::Provenance
 
 mod event;
-mod manifest;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 pub use self::event::{Event, EventKind, ModelEvent, PatternEvent};
-pub use self::manifest::Manifest;
 use crate::modality::Modality;
 use crate::primitive::Confidence;
 

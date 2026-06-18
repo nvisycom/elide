@@ -7,8 +7,8 @@ mod group;
 mod strategy;
 
 use elide_core::entity::Entity;
+use elide_core::entity::provenance::Event;
 use elide_core::modality::{Modality, ModalityLocation};
-use elide_core::provenance::Event;
 
 pub use self::group::{GroupPredicate, SameLabelOverlap};
 pub use self::strategy::{FusionStrategy, MaxConfidence, Mean, NoisyOr};

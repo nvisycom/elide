@@ -21,10 +21,10 @@
 //!
 //! [`DocumentHandle<Text>`]: elide::codec::DocumentHandle
 //! [`Analyzer::analyze_stream`]: elide::Analyzer::analyze_stream
-//! [`Anonymizer::anonymize`]: elide::Anonymizer::anonymize
-//! [`PatternRecognizer`]: elide::pattern::PatternRecognizer
-//! [`NerRecognizer`]: elide::ner::NerRecognizer
-//! [`LlmRecognizer`]: elide::llm::LlmRecognizer
+//! [`Anonymizer::anonymize`]: elide::redaction::Anonymizer::anonymize
+//! [`PatternRecognizer`]: elide::recognition::pattern::PatternRecognizer
+//! [`NerRecognizer`]: elide::recognition::ner::NerRecognizer
+//! [`LlmRecognizer`]: elide::recognition::llm::LlmRecognizer
 
 mod analyzer;
 mod anonymizer;

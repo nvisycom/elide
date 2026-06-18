@@ -8,9 +8,9 @@ use elide::deduplication::filter::FilterLayer;
 use elide::deduplication::fuse::{FuseLayer, MaxConfidence};
 use elide::deduplication::resolve::{HighestConfidence, ResolveLayer};
 use elide_core::Result;
+use elide_core::entity::provenance::{Event, EventKind, PatternEvent, Provenance};
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::primitive::{Confidence, ConfidenceThreshold};
-use elide_core::provenance::{Event, EventKind, PatternEvent, Provenance};
 use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
 
 mod fixtures;

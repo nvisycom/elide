@@ -3,9 +3,9 @@
 use uuid::Uuid;
 
 use super::{Entity, EntityCoRef, LabelRef};
+use crate::entity::provenance::{Event, Provenance};
 use crate::modality::Modality;
 use crate::primitive::Confidence;
-use crate::provenance::{Event, Provenance};
 
 /// A chainable builder for [`Entity`].
 ///
@@ -19,7 +19,7 @@ use crate::provenance::{Event, Provenance};
 /// # use elide_core::entity::{Entity, EntityBuilder, LabelRef};
 /// # use elide_core::modality::text::{Text, TextLocation};
 /// # use elide_core::primitive::Confidence;
-/// # use elide_core::provenance::{Event, PatternEvent};
+/// # use elide_core::entity::provenance::{Event, PatternEvent};
 /// let location = TextLocation::new(0, 11);
 /// let confidence = Confidence::clamped(0.8);
 /// let entity: Entity<Text> = EntityBuilder::new()

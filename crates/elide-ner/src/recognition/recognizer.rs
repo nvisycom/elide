@@ -19,11 +19,11 @@
 use std::sync::Arc;
 
 use derive_builder::Builder;
+use elide_core::entity::provenance::{Event, ModelEvent};
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::primitive::Confidence;
-use elide_core::provenance::{Event, ModelEvent};
-use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId, RecognizerLanguage};
+use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
 use elide_core::{Error, Result};
 
 use super::config::NerModel;

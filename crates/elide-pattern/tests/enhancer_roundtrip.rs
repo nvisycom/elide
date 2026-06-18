@@ -3,13 +3,13 @@
 //! that confidence is boosted, and a [`Refinement`] step is
 //! appended only for matches that had a nearby keyword.
 //!
-//! [`Refinement`]: elide_core::provenance::EventKind::Refinement
+//! [`Refinement`]: elide_core::entity::provenance::EventKind::Refinement
 //! [`ContextEnhanced`]: elide_context::ContextEnhanced
 
 use elide_core::entity::builtins;
+use elide_core::entity::provenance::EventKind;
 use elide_core::modality::text::TextData;
 use elide_core::primitive::Confidence;
-use elide_core::provenance::EventKind;
 use elide_core::recognition::{Recognizer, RecognizerContext};
 use elide_pattern::{PatternRecognizer, Regex, Variant};
 

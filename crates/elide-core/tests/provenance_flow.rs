@@ -4,10 +4,10 @@
 //! fusion step would.
 
 use elide_core::Result;
+use elide_core::entity::provenance::{Event, EventKind, ModelEvent, PatternEvent, Provenance};
 use elide_core::entity::{Entity, EntityCoRef, Label, LabelCatalog, LabelRef};
 use elide_core::modality::Modality;
 use elide_core::primitive::{Confidence, ConfidenceThreshold, CountryCode, LanguageTag};
-use elide_core::provenance::{Event, EventKind, Manifest, ModelEvent, PatternEvent, Provenance};
 
 mod fixtures;
 use fixtures::{Text, TextData, TextLocation, TextReplacement};
@@ -144,14 +144,6 @@ fn threshold_filters_by_confidence() {
 }
 
 #[test]
-fn manifest_anchors_a_run() {
-    let manifest = Manifest::new("e3b0c44298fc1c14", "0.1.0");
-    assert_eq!(manifest.version.as_str(), "0.1.0");
-    // UUIDv7 is time-ordered and non-nil.
-    assert!(!manifest.run_id.is_nil());
-}
-
-#[test]
 fn language_tag_parses_and_exposes_subtags() {
     let tag = LanguageTag::parse("en-US").unwrap();
     assert_eq!(tag.primary_language(), "en");
@@ -210,7 +202,7 @@ fn label_map_translates_raw_labels() {
 
 #[test]
 fn recognizer_context_scopes_by_language_and_country() {
-    use elide_core::recognition::{RecognizerContext, RecognizerLanguage};
+    use elide_core::recognition::RecognizerContext;
 
     let en_us = LanguageTag::parse("en-US").unwrap();
     let en = LanguageTag::parse("en").unwrap();

@@ -33,8 +33,11 @@ pub struct RecognizerContext<M: Modality> {
     /// The call's languages: each entry is a language with how it was
     /// obtained (detected by an enricher, or asserted by the caller), an
     /// optional confidence, and an optional span. Empty means "unknown".
-    /// Consult it through the `RecognizerLanguage` trait rather than
-    /// indexing directly.
+    /// Consult it through [`primary_language`] / [`ranked_languages`]
+    /// rather than indexing directly.
+    ///
+    /// [`primary_language`]: Self::primary_language
+    /// [`ranked_languages`]: Self::ranked_languages
     pub languages: Languages,
     /// Caller-asserted jurisdictions. When non-empty, recognizers that
     /// carry per-rule country scopes skip rules that match none of them.
@@ -117,11 +120,11 @@ impl<M: Modality> RecognizerContext<M> {
 
     /// Assert a language for this call, returning `self` for chaining.
     ///
-    /// Adds a caller-asserted [`Language`] to the call's
-    /// languages. `confidence` is optional; an assertion outranks a
-    /// detection at equal confidence (see [`RecognizerLanguage::languages`]).
+    /// Adds a caller-asserted [`Language`] to the call's languages.
+    /// `confidence` is optional; an assertion outranks a detection at
+    /// equal confidence (see [`ranked_languages`]).
     ///
-    /// [`RecognizerLanguage::languages`]: super::RecognizerLanguage::languages
+    /// [`ranked_languages`]: Self::ranked_languages
     #[must_use]
     pub fn with_language(mut self, language: LanguageTag, confidence: Option<Confidence>) -> Self {
         self.languages
@@ -185,6 +188,54 @@ impl<M: Modality> RecognizerContext<M> {
             return true;
         }
         self.countries.iter().any(|c| allowed.contains(c))
+    }
+
+    /// Add a caller-asserted language to the call, in place.
+    ///
+    /// The mutating counterpart to [`with_language`].
+    ///
+    /// [`with_language`]: Self::with_language
+    pub fn assert_language(&mut self, language: LanguageTag, confidence: Option<Confidence>) {
+        self.languages
+            .push(Language::asserted(language, confidence));
+    }
+
+    /// The call's languages, ranked best-first.
+    ///
+    /// Sorted by confidence descending (a missing confidence ranks last),
+    /// with an asserted language breaking ties ahead of a detected one.
+    /// Empty when the call has no language information.
+    #[must_use]
+    pub fn ranked_languages(&self) -> Vec<&Language> {
+        self.languages.ranked()
+    }
+
+    /// The single most likely language tag for this call, or `None` when
+    /// no language is known.
+    #[must_use]
+    pub fn primary_language(&self) -> Option<&LanguageTag> {
+        self.languages.best().map(|d| &d.language)
+    }
+
+    /// Whether a recognizer rule scoped to `allowed` languages should run
+    /// for this call.
+    ///
+    /// - An empty `allowed` list means the rule is language-agnostic and
+    ///   always runs.
+    /// - Otherwise the rule runs when *any* of the call's languages shares
+    ///   a primary subtag with an entry in `allowed` (so an `["en"]` rule
+    ///   fires when the call includes `"en-US"`).
+    /// - When the call has no languages, the rule still runs: we can't
+    ///   disprove applicability without information.
+    #[must_use]
+    pub fn applies_to_language(&self, allowed: &[LanguageTag]) -> bool {
+        if allowed.is_empty() || self.languages.is_empty() {
+            return true;
+        }
+        self.languages
+            .as_slice()
+            .iter()
+            .any(|d| allowed.iter().any(|a| a.matches(&d.language)))
     }
 }
 

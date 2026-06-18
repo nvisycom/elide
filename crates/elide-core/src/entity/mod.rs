@@ -8,6 +8,7 @@
 
 mod builder;
 mod label;
+pub mod provenance;
 mod reference;
 
 #[cfg(feature = "serde")]
@@ -16,10 +17,10 @@ use uuid::Uuid;
 
 pub use self::builder::EntityBuilder;
 pub use self::label::{Label, LabelCatalog, LabelRef, builtins};
+use self::provenance::Provenance;
 pub use self::reference::{EntityCoRef, EntityRef};
 use crate::modality::Modality;
 use crate::primitive::Confidence;
-use crate::provenance::Provenance;
 
 /// A detected piece of sensitive information within some medium.
 ///
@@ -40,7 +41,7 @@ use crate::provenance::Provenance;
 /// audit trail with it.
 ///
 /// [`Location`]: Modality::Location
-/// [`Event`]: crate::provenance::Event
+/// [`Event`]: crate::entity::provenance::Event
 /// [`provenance`]: Entity::provenance
 /// [`location`]: Entity::location
 /// [`confidence`]: Entity::confidence

@@ -20,7 +20,7 @@
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::text::{Text, TextData};
-use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId, RecognizerLanguage};
+use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
 
 use super::Tokens;
 use crate::{Context, Enhancer};

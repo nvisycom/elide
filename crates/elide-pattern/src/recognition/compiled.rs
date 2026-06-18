@@ -17,10 +17,10 @@
 
 use std::sync::Arc;
 
+use elide_core::entity::provenance::{Event, PatternEvent};
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::{Text, TextLocation};
 use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
-use elide_core::provenance::{Event, PatternEvent};
 use regex::Regex;
 
 use crate::validators::Validator;

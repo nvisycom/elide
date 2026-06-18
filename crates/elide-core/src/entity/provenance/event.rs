@@ -22,7 +22,7 @@ use crate::redaction::{LeakProfile, OperatorId};
 /// `entity.confidence` always equals the [`after`] of the most recent
 /// event.
 ///
-/// [`Provenance`]: crate::provenance::Provenance
+/// [`Provenance`]: crate::entity::provenance::Provenance
 /// [`kind`]: Event::kind
 /// [`after`]: Event::after
 #[derive(Debug, Clone)]

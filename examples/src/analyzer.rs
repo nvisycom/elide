@@ -5,11 +5,11 @@ use elide::deduplication::filter::FilterLayer;
 use elide::deduplication::fuse::{FuseLayer, MaxConfidence};
 use elide::deduplication::resolve::{HighestConfidence, ResolveLayer};
 use elide::entity::builtins;
-use elide::llm::LlmRecognizer;
 use elide::modality::text::Text;
-use elide::ner::NerRecognizer;
-use elide::pattern::PatternRecognizer;
 use elide::primitive::ConfidenceThreshold;
+use elide::recognition::llm::LlmRecognizer;
+use elide::recognition::ner::NerRecognizer;
+use elide::recognition::pattern::PatternRecognizer;
 use elide::{Analyzer, Result};
 
 /// Build the three-recognizer analyzer plus its deduplication pipeline.

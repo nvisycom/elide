@@ -11,11 +11,11 @@
 //! [`DefaultPrompt`]: super::default_prompt::DefaultPrompt
 //! [`FilePrompt`]: super::file_prompt::FilePrompt
 
+use elide_core::entity::provenance::{Event, ModelEvent};
 use elide_core::entity::{Entity, EntityCoRef, LabelRef};
 use elide_core::modality::image::{Image, ImageData, ImageLocation};
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::primitive::{Confidence, UnitBoundingBox};
-use elide_core::provenance::{Event, ModelEvent};
 use elide_core::recognition::LabelMap;
 
 use super::candidates::{TextCandidate, VlmCandidate};

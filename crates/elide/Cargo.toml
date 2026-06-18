@@ -56,6 +56,7 @@ tracing = { workspace = true, features = [] }
 # Hashing (the Hash operator)
 sha2 = { workspace = true, features = [] }
 hex = { workspace = true, features = [] }
+bytes = { workspace = true, features = [] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

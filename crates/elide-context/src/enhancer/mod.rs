@@ -3,9 +3,9 @@
 
 use std::collections::HashMap;
 
+use elide_core::entity::provenance::Event;
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::Text;
-use elide_core::provenance::Event;
 
 use crate::io::Token;
 use crate::matching::KeywordMatcher;

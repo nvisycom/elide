@@ -26,7 +26,7 @@ pub use self::threshold::ConfidenceThreshold;
 /// *cutoff* configured to filter scores. Compare the two with
 /// [`ConfidenceThreshold::passes`].
 ///
-/// [`Event`]: crate::provenance::Event
+/// [`Event`]: crate::entity::provenance::Event
 /// [`Entity`]: crate::entity::Entity
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

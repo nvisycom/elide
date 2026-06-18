@@ -6,14 +6,13 @@
 //! thing, a fusion step (in `elide`) combines their entities into
 //! one, concatenating their events and appending a deduplication event.
 //!
-//! [`Event`]: crate::provenance::Event
+//! [`Event`]: crate::entity::provenance::Event
 
 mod artifacts;
 mod context;
 mod enricher;
 mod hint;
 mod label;
-mod language;
 
 use std::fmt;
 use std::future::Future;
@@ -27,7 +26,6 @@ pub use self::context::RecognizerContext;
 pub use self::enricher::Enricher;
 pub use self::hint::Hint;
 pub use self::label::LabelMap;
-pub use self::language::RecognizerLanguage;
 use crate::entity::Entity;
 use crate::error::Result;
 use crate::modality::Modality;
@@ -83,7 +81,7 @@ impl fmt::Display for RecognizerId {
 /// and annotation hints), and returns the entities it found.
 ///
 /// [`Entity`]: crate::entity::Entity
-/// [`Event`]: crate::provenance::Event
+/// [`Event`]: crate::entity::provenance::Event
 pub trait Recognizer<M>: Send + Sync
 where
     M: Modality,

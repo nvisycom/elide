@@ -83,7 +83,6 @@ impl Enricher<Text> for LinguaEnricher {
 #[cfg(test)]
 mod tests {
     use elide_core::modality::text::TextData;
-    use elide_core::recognition::RecognizerLanguage;
 
     use super::*;
 

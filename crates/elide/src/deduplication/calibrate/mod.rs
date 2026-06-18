@@ -4,9 +4,9 @@
 mod map;
 
 use elide_core::entity::Entity;
+use elide_core::entity::provenance::Event;
 use elide_core::modality::Modality;
 use elide_core::primitive::Confidence;
-use elide_core::provenance::Event;
 
 pub use self::map::CalibrationMap;
 use super::{Layer, LayerOutput};

@@ -1,6 +1,7 @@
 //! The `Hash` operator: replace the matched value with a one-way SHA-2
 //! hash.
 
+use bytes::Bytes;
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::text::{Text, TextData, TextReplacement};
@@ -26,7 +27,7 @@ pub enum HashAlgorithm {
 #[derive(Debug, Clone, Default)]
 pub struct Hash {
     algorithm: HashAlgorithm,
-    salt: Vec<u8>,
+    salt: Bytes,
 }
 
 impl Hash {
@@ -34,7 +35,7 @@ impl Hash {
     pub fn new(algorithm: HashAlgorithm) -> Self {
         Self {
             algorithm,
-            salt: Vec::new(),
+            salt: Bytes::new(),
         }
     }
 
@@ -50,7 +51,7 @@ impl Hash {
 
     /// Attach a salt prepended to the value before hashing.
     #[must_use]
-    pub fn with_salt(mut self, salt: impl Into<Vec<u8>>) -> Self {
+    pub fn with_salt(mut self, salt: impl Into<Bytes>) -> Self {
         self.salt = salt.into();
         self
     }
