@@ -16,22 +16,45 @@ use elide_core::modality::text::Text;
 use scraper::Html;
 use scraper::node::Node;
 
-use super::{MarkupEncoder, MarkupHandler, RedactableItem};
+use super::html_loader::ScriptPolicy;
+use super::{HtmlLoader, MarkupEncoder, MarkupHandler, RedactableItem};
 use crate::content::ContentData;
 use crate::{Format, FormatId};
 
 /// Stable [`FormatId`] for the HTML codec.
-pub const FORMAT_ID: FormatId = FormatId::from_static("elide.text.html");
+pub const FORMAT_ID: FormatId = FormatId::new("elide.text.html");
 
 /// Handler type for loaded HTML content.
-pub type HtmlHandler = MarkupHandler<HtmlEncoder>;
+pub(crate) type HtmlHandler = MarkupHandler<HtmlEncoder>;
 
 /// An HTML [`RedactableItem`] carrying [`HtmlAddress`].
 pub(super) type HtmlItem = RedactableItem<HtmlAddress>;
 
-/// [`Format`] descriptor registered into [`crate::CodecRegistry`].
+/// [`Format`] descriptor registered into [`FormatRegistry`].
+///
+/// Skips `<script>` and `<style>` bodies. Use [`format_with`] to scan
+/// those bodies as text instead.
+///
+/// [`FormatRegistry`]: crate::FormatRegistry
 pub fn format() -> Format {
-    Format::new::<Text, _>(FORMAT_ID.clone(), super::HtmlLoader::default())
+    format_from(HtmlLoader::default())
+}
+
+/// [`Format`] descriptor with explicit `<script>` / `<style>` handling.
+///
+/// `script_policy` and `style_policy` control whether each element's body
+/// enters the detection stream ([`ScriptPolicy::ScanText`]) or is skipped
+/// ([`ScriptPolicy::Skip`], the [`format()`] default).
+pub fn format_with(script_policy: ScriptPolicy, style_policy: ScriptPolicy) -> Format {
+    format_from(HtmlLoader {
+        script_policy,
+        style_policy,
+    })
+}
+
+/// Build the HTML [`Format`] from a configured loader.
+fn format_from(loader: HtmlLoader) -> Format {
+    Format::new::<Text, _>(FORMAT_ID.clone(), loader)
         .with_extensions(["html", "htm"])
         .with_content_types(["text/html"])
 }
@@ -39,7 +62,7 @@ pub fn format() -> Format {
 /// Where an HTML item lives in the document, as an ordinal index the
 /// encoder re-finds by walking a fresh parse of the retained source.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HtmlAddress {
+pub(crate) enum HtmlAddress {
     /// A text node, by its 0-based index in document-order text nodes.
     TextNode {
         /// Document-order index among text nodes.
@@ -62,7 +85,7 @@ pub enum HtmlAddress {
 
 /// The element-bound location an [`HtmlAddress::Element`] item points at.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ElementTarget {
+pub(crate) enum ElementTarget {
     /// The value of `attr_name` on this element.
     Attribute {
         /// Attribute local name.
@@ -76,7 +99,7 @@ pub enum ElementTarget {
 /// Re-serializes a mutated item stream by splicing values back into a
 /// fresh parse of the retained source.
 #[derive(Debug)]
-pub struct HtmlEncoder {
+pub(crate) struct HtmlEncoder {
     pub(super) raw: String,
 }
 

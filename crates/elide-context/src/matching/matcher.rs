@@ -4,8 +4,7 @@ use hipstr::HipStr;
 
 use crate::io::Token;
 
-/// Decide whether any keyword from `keywords` fires within the
-/// candidate region around an entity match.
+/// Decides whether any keyword fires near an entity match.
 ///
 /// The strategy slot that lets the enhancer swap raw substring
 /// matching for lemma-aware matching (or a third-party
@@ -23,10 +22,11 @@ pub trait KeywordMatcher: Send + Sync {
     fn any_match(&self, window: &str, tokens: &[Token], keywords: &[HipStr<'static>]) -> bool;
 }
 
-/// ASCII case-insensitive substring matcher. The default —
-/// runs whenever no token artifact was stamped on
-/// `RecognizerInput.artifacts`, or whenever the caller explicitly
-/// picks raw matching.
+/// ASCII case-insensitive substring matcher.
+///
+/// The default matcher. It runs whenever no token artifact was
+/// stamped on `RecognizerInput.artifacts`, or whenever the caller
+/// explicitly picks raw matching.
 ///
 /// Fast, allocation-light, permissive: the keyword `"email"` fires
 /// inside `"MyEmailAddress"`. Ignores the `tokens` argument.

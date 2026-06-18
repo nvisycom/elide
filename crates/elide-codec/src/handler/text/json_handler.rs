@@ -1,6 +1,6 @@
 //! JSON handler: a flat ordered sequence of source slots.
 //!
-//! The loader lexes the source once into [`Slot`]s — either
+//! The loader lexes the source once into [`Slot`]s: either
 //! [`Slot::Passthrough`] (whitespace + structural punctuation, kept
 //! verbatim) or [`Slot::Leaf`] (a key, string value, or scalar). Leaves
 //! carry both the original source bytes (`serialized`) and the unescaped
@@ -21,16 +21,19 @@ use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
 use elide_core::{Error, ErrorKind};
 
+use super::JsonLoader;
 use crate::content::ContentData;
 use crate::handler::redact;
 use crate::{Format, FormatId, Handler};
 
 /// Stable [`FormatId`] for the JSON codec.
-pub const FORMAT_ID: FormatId = FormatId::from_static("elide.text.json");
+pub const FORMAT_ID: FormatId = FormatId::new("elide.text.json");
 
-/// [`Format`] descriptor registered into [`crate::CodecRegistry`].
+/// [`Format`] descriptor registered into [`FormatRegistry`].
+///
+/// [`FormatRegistry`]: crate::FormatRegistry
 pub fn format() -> Format {
-    Format::new::<Text, _>(FORMAT_ID.clone(), super::JsonLoader)
+    Format::new::<Text, _>(FORMAT_ID.clone(), JsonLoader)
         .with_extensions(["json"])
         .with_content_types(["application/json"])
 }
@@ -41,7 +44,7 @@ pub(super) enum Slot {
     /// Whitespace or structural punctuation (`{ } [ ] : ,` and
     /// surrounding whitespace). Held verbatim and emitted back unchanged.
     Passthrough(String),
-    /// A key, string value, or scalar (number/bool/null) — every position
+    /// A key, string value, or scalar (number/bool/null): every position
     /// a recognizer is allowed to address.
     Leaf(Leaf),
 }
@@ -50,10 +53,10 @@ pub(super) enum Slot {
 #[derive(Debug, Clone)]
 pub(super) struct Leaf {
     pub kind: LeafKind,
-    /// Current unescaped UTF-8 value — what the recognizer sees in
+    /// Current unescaped UTF-8 value: what the recognizer sees in
     /// [`Chunk::data`] and what redactions edit.
     pub value: String,
-    /// Current source bytes — what `encode` emits and what
+    /// Current source bytes: what `encode` emits and what
     /// [`TextLocation`] offsets address. For [`LeafKind::Key`] and
     /// [`LeafKind::StringValue`] this is the quoted form `"…"` with `\\` /
     /// `\"` escapes; for [`LeafKind::Scalar`] it is the bare literal.
@@ -86,7 +89,7 @@ impl Leaf {
 
 /// Handler for loaded JSON content.
 #[derive(Debug)]
-pub struct JsonHandler {
+pub(crate) struct JsonHandler {
     slots: Vec<Slot>,
     cursor: usize,
 }
@@ -201,24 +204,11 @@ impl DataWriter<Text> for JsonHandler {
 }
 
 impl JsonHandler {
-    /// Build a handler from a synthetic [`serde_json::Value`]. Synthetic
-    /// documents always re-emit compact JSON — loaded documents preserve
-    /// their source formatting via the slot model.
-    pub fn from_value(value: serde_json::Value) -> Self {
-        let serialized = serde_json::to_string(&value).unwrap_or_default();
-        Self::from_source_string(serialized)
-    }
-
     /// Build a handler directly from JSON source bytes. Used by the
     /// loader; preserves the source formatting verbatim.
     pub(super) fn from_source_string(source: String) -> Self {
         let slots = parse_slots(&source).unwrap_or_else(|_| vec![Slot::Passthrough(source)]);
         Self { slots, cursor: 0 }
-    }
-
-    /// Rewind the streaming cursor to the start of the document.
-    pub fn rewind(&mut self) {
-        self.cursor = 0;
     }
 
     /// Byte offset where the slot at `idx` starts in the current encoded
@@ -255,7 +245,7 @@ impl JsonHandler {
     }
 }
 
-/// Escape a string for JSON matching (backslash and quote only — other
+/// Escape a string for JSON matching (backslash and quote only; other
 /// control characters in keys/values are unsupported in this codec's
 /// redaction path and round-trip as-is).
 fn json_escape(s: &str) -> String {
@@ -507,7 +497,7 @@ impl<'a> SlotParser<'a> {
         }
         loop {
             // Array elements inherit the containing object key as their
-            // hint — `{"cards": ["4111…", "5555…"]}` should treat both
+            // hint: `{"cards": ["4111…", "5555…"]}` should treat both
             // PANs as living under `cards`.
             self.parse_value(key_context)?;
             self.consume_whitespace();
@@ -748,7 +738,7 @@ mod tests {
 
     #[tokio::test]
     async fn redact_partial_leaf_with_escapes() -> Result<(), Error> {
-        // unescaped value: foo"bar — source: "foo\"bar"
+        // unescaped value: foo"bar; source: "foo\"bar"
         let src = r#"{"msg":"foo\"bar"}"#;
         let mut h = handler(src);
         let _ = loop {
@@ -851,7 +841,7 @@ mod tests {
 
     #[tokio::test]
     async fn lift_chunk_walks_escapes() -> Result<(), Error> {
-        // unescaped value: foo"bar — source: "foo\"bar"
+        // unescaped value: foo"bar; source: "foo\"bar"
         let src = r#"{"msg":"foo\"bar"}"#;
         let mut h = handler(src);
         let chunk = loop {

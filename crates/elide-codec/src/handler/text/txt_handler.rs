@@ -13,16 +13,19 @@ use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
 
+use super::TxtLoader;
 use crate::content::ContentData;
 use crate::handler::redact;
 use crate::{Format, FormatId, Handler};
 
 /// Stable [`FormatId`] for the plain-text codec.
-pub const FORMAT_ID: FormatId = FormatId::from_static("elide.text.txt");
+pub const FORMAT_ID: FormatId = FormatId::new("elide.text.txt");
 
-/// [`Format`] descriptor registered into [`crate::CodecRegistry`].
+/// [`Format`] descriptor registered into [`FormatRegistry`].
+///
+/// [`FormatRegistry`]: crate::FormatRegistry
 pub fn format() -> Format {
-    Format::new::<Text, _>(FORMAT_ID.clone(), super::TxtLoader)
+    Format::new::<Text, _>(FORMAT_ID.clone(), TxtLoader)
         .with_extensions(["txt", "log"])
         .with_content_types(["text/plain"])
 }
@@ -36,7 +39,7 @@ pub fn format() -> Format {
 /// sentinel. Random-access `read_at` / `write_at` (from [`DataReader`] /
 /// [`DataWriter`]) resolve a byte offset to a line in `O(log N)`.
 #[derive(Debug)]
-pub struct TxtHandler {
+pub(crate) struct TxtHandler {
     lines: Vec<String>,
     line_starts: Vec<usize>,
     trailing_newline: bool,
@@ -135,34 +138,29 @@ impl TxtHandler {
         }
     }
 
-    /// All lines in the document.
+    /// All lines in the document. Test-only inspection helper.
+    #[cfg(test)]
     pub fn lines(&self) -> &[String] {
         &self.lines
     }
 
-    /// A specific line by 0-based index.
+    /// A specific line by 0-based index. Test-only inspection helper.
+    #[cfg(test)]
     pub fn line(&self, index: usize) -> Option<&str> {
         self.lines.get(index).map(String::as_str)
     }
 
-    /// Whether the original source had a trailing newline.
+    /// Whether the original source had a trailing newline. Test-only
+    /// inspection helper.
+    #[cfg(test)]
     pub fn trailing_newline(&self) -> bool {
         self.trailing_newline
     }
 
-    /// Total number of lines.
+    /// Total number of lines. Test-only inspection helper.
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.lines.len()
-    }
-
-    /// Whether the document has no lines.
-    pub fn is_empty(&self) -> bool {
-        self.lines.is_empty()
-    }
-
-    /// Rewind the streaming cursor to the start of the document.
-    pub fn rewind(&mut self) {
-        self.cursor = 0;
     }
 
     /// Line index containing `byte_offset`, or `None` if past the end.

@@ -1,6 +1,6 @@
 # German Führerscheinnummer (driving licence number): 11
 # alphanumeric characters in the EU-harmonized post-2013 format
-# (FeV Anlage 8). Format is opaque — position 3 onward mixes
+# (FeV Anlage 8). Format is opaque: position 3 onward mixes
 # letters and digits per issuing authority. The trailing check
 # character's algorithm is not published by KBA, so no validator
 # is wired.

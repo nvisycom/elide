@@ -12,7 +12,7 @@ use crate::content::ContentData;
 
 /// Loader for JSON files. Produces one [`JsonHandler`] per input.
 #[derive(Debug)]
-pub struct JsonLoader;
+pub(crate) struct JsonLoader;
 
 impl Loader<Text> for JsonLoader {
     type Handler = JsonHandler;

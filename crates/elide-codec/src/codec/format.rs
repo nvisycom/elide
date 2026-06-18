@@ -1,13 +1,13 @@
 //! Format identity: what kind of thing a registered codec is.
 //!
-//! - [`FormatId`] — stable string identifier (e.g. `"elide.text.txt"`).
+//! - [`FormatId`]: stable string identifier (e.g. `"elide.text.txt"`).
 //!   Open namespace, no central enum.
-//! - [`Format`] — descriptor the [`CodecRegistry`] indexes by id /
+//! - [`Format`]: descriptor the [`FormatRegistry`] indexes by id /
 //!   extension / content type. Bundles a `FormatId`, the modality name
 //!   it produces, lookup keys, and an erased loader that decodes bytes
 //!   into a typed handle.
 //!
-//! [`CodecRegistry`]: super::CodecRegistry
+//! [`FormatRegistry`]: super::FormatRegistry
 
 use std::borrow::Cow;
 use std::fmt;
@@ -20,9 +20,10 @@ use super::Loader;
 use super::loader::{ErasedLoader, erase};
 use crate::content::ContentData;
 
-/// Stable identifier for a registered codec format. Open string
-/// namespace — downstream crates ship their own formats by registering
-/// a [`Format`] with a unique [`FormatId`].
+/// Stable identifier for a registered codec format.
+///
+/// Open string namespace: downstream crates ship their own formats by
+/// registering a [`Format`] with a unique [`FormatId`].
 ///
 /// Convention: dot-separated namespace. Built-in formats use the
 /// `elide.` prefix (e.g. `"elide.text.txt"`). Third-party formats use
@@ -31,14 +32,9 @@ use crate::content::ContentData;
 pub struct FormatId(Cow<'static, str>);
 
 impl FormatId {
-    /// Construct from a static string literal — no allocation.
-    pub const fn from_static(id: &'static str) -> Self {
+    /// Construct from a static string literal, with no allocation.
+    pub const fn new(id: &'static str) -> Self {
         Self(Cow::Borrowed(id))
-    }
-
-    /// Construct from an owned [`String`].
-    pub fn from_owned(id: String) -> Self {
-        Self(Cow::Owned(id))
     }
 
     /// Borrow as `&str`.
@@ -59,17 +55,18 @@ impl AsRef<str> for FormatId {
     }
 }
 
-/// Descriptor for one registered codec format. Indexed by
-/// [`CodecRegistry`] under its [`FormatId`], every extension in
-/// `extensions`, and every MIME in `content_types`.
+/// Descriptor for one registered codec format.
+///
+/// Indexed by [`FormatRegistry`] under its [`FormatId`], every extension
+/// in `extensions`, and every MIME in `content_types`.
 ///
 /// Construct via [`Format::new`]; read the parts via the accessor
 /// methods. The fields are crate-private so the constructor stays the
-/// only path that produces a `Format` — that way the modality name is
+/// only path that produces a `Format`: that way the modality name is
 /// always derived from the loader's modality and never hand-set, and
 /// the loader is erased internally.
 ///
-/// [`CodecRegistry`]: super::CodecRegistry
+/// [`FormatRegistry`]: super::FormatRegistry
 #[derive(Clone)]
 pub struct Format {
     pub(crate) id: FormatId,
@@ -81,17 +78,17 @@ pub struct Format {
 
 impl Format {
     /// Build a [`Format`] for modality `M`. The modality name is taken
-    /// from [`M::NAME`] and the loader is erased internally — neither
+    /// from [`M::NAME`] and the loader is erased internally; neither
     /// needs naming at the call site.
     ///
     /// Extensions and content types default to empty; chain
     /// [`with_extensions`] / [`with_content_types`] to declare the lookup
-    /// keys the [`CodecRegistry`] indexes this format under.
+    /// keys the [`FormatRegistry`] indexes this format under.
     ///
     /// [`M::NAME`]: Modality::NAME
     /// [`with_extensions`]: Self::with_extensions
     /// [`with_content_types`]: Self::with_content_types
-    /// [`CodecRegistry`]: super::CodecRegistry
+    /// [`FormatRegistry`]: super::FormatRegistry
     pub fn new<M, L>(id: FormatId, loader: L) -> Self
     where
         M: Modality,
@@ -155,13 +152,13 @@ impl Format {
 
     /// Decode raw content through this format's loader, returning the
     /// erased handle. Equivalent to resolving the format yourself and
-    /// calling [`CodecRegistry::decode`].
+    /// calling [`FormatRegistry::decode`].
     ///
     /// # Errors
     ///
     /// Propagates the loader's decode error.
     ///
-    /// [`CodecRegistry::decode`]: super::CodecRegistry::decode
+    /// [`FormatRegistry::decode`]: super::FormatRegistry::decode
     pub async fn decode(
         &self,
         content: ContentData,

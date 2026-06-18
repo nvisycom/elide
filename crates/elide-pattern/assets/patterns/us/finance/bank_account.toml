@@ -1,6 +1,6 @@
 # US Bank Account Number.
 #
-# 8-17 digit run with no checksum — usable only with strong
+# 8-17 digit run with no checksum, usable only with strong
 # surrounding context. The very-weak score relies on the
 # context-keyword boost to lift legitimate matches above
 # downstream confidence thresholds.

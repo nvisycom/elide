@@ -1,3 +1,6 @@
+# Bitcoin address: legacy Base58 (P2PKH `1…`, P2SH `3…`,
+# checksum-validated) and Bech32/Bech32m segwit + Taproot (`bc1…`).
+
 name = "bitcoin-address"
 label = "crypto_address"
 

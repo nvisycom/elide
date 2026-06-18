@@ -2,16 +2,16 @@
 //! [`Analyzer`] plus its deduplication layers.
 
 use elide::Analyzer;
+use elide::core::Result;
+use elide::core::entity::builtins;
+use elide::core::modality::text::Text;
+use elide::core::primitive::ConfidenceThreshold;
 use elide::deduplication::filter::FilterLayer;
 use elide::deduplication::fuse::{FuseLayer, MaxConfidence};
 use elide::deduplication::resolve::{HighestConfidence, ResolveLayer};
-use elide_core::Result;
-use elide_core::entity::builtins;
-use elide_core::modality::text::Text;
-use elide_core::primitive::ConfidenceThreshold;
-use elide_llm::LlmRecognizer;
-use elide_ner::NerRecognizer;
-use elide_pattern::PatternRecognizer;
+use elide::llm::LlmRecognizer;
+use elide::ner::NerRecognizer;
+use elide::pattern::PatternRecognizer;
 
 /// Build the three-recognizer analyzer plus its deduplication pipeline.
 pub fn build_analyzer() -> Result<Analyzer<Text>> {

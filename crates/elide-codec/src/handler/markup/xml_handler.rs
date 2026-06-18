@@ -17,15 +17,15 @@ use std::ops::Range;
 use elide_core::modality::text::Text;
 use elide_core::{Error, ErrorKind};
 
-use super::{MarkupEncoder, MarkupHandler, RedactableItem};
+use super::{MarkupEncoder, MarkupHandler, RedactableItem, XmlLoader};
 use crate::content::ContentData;
 use crate::{Format, FormatId};
 
 /// Stable [`FormatId`] for the XML codec.
-pub const FORMAT_ID: FormatId = FormatId::from_static("elide.text.xml");
+pub const FORMAT_ID: FormatId = FormatId::new("elide.text.xml");
 
 /// Handler type for loaded XML content.
-pub type XmlHandler = MarkupHandler<XmlEncoder>;
+pub(crate) type XmlHandler = MarkupHandler<XmlEncoder>;
 
 /// An XML [`RedactableItem`] addressed by the source byte span its
 /// `value` occupies in the original document.
@@ -34,18 +34,20 @@ pub type XmlHandler = MarkupHandler<XmlEncoder>;
 pub(super) type XmlItem = RedactableItem<XmlSpan>;
 
 /// The source byte span (in the retained raw document) that a
-/// [`RedactableItem`]'s value occupies — the region the encoder
+/// [`RedactableItem`]'s value occupies: the region the encoder
 /// overwrites. These are the *inner* bytes: a text node's text, an
 /// attribute value between the quotes, a comment body between `<!--` and
 /// `-->`, a CDATA payload between `<![CDATA[` and `]]>`.
 ///
 /// [`RedactableItem`]: super::RedactableItem
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct XmlSpan(pub(super) Range<usize>);
+pub(crate) struct XmlSpan(pub(super) Range<usize>);
 
-/// [`Format`] descriptor registered into [`crate::CodecRegistry`].
+/// [`Format`] descriptor registered into [`FormatRegistry`].
+///
+/// [`FormatRegistry`]: crate::FormatRegistry
 pub fn format() -> Format {
-    Format::new::<Text, _>(FORMAT_ID.clone(), super::XmlLoader)
+    Format::new::<Text, _>(FORMAT_ID.clone(), XmlLoader)
         .with_extensions(["xml"])
         .with_content_types(["application/xml", "text/xml"])
 }
@@ -53,7 +55,7 @@ pub fn format() -> Format {
 /// Re-serializes a mutated item stream by splicing each value back at its
 /// source span into the retained raw document.
 #[derive(Debug)]
-pub struct XmlEncoder {
+pub(crate) struct XmlEncoder {
     pub(super) raw: String,
 }
 
@@ -74,7 +76,7 @@ impl MarkupEncoder for XmlEncoder {
             // Spans index into `out`, which starts as `raw` and only ever
             // grows/shrinks to the right of the current splice, so they
             // stay in-bounds and on char boundaries by construction. The
-            // guards are defensive — a malformed loader would surface here
+            // guards are defensive: a malformed loader would surface here
             // rather than panic in `replace_range`.
             if end > out.len() || start > end {
                 return Err(Error::new(
@@ -93,7 +95,7 @@ impl MarkupEncoder for XmlEncoder {
             }
             // `value` is the raw on-the-wire slice (the loader stores
             // source bytes verbatim, never a decoded form), so it splices
-            // back with no escape transform — only the redacted sub-range
+            // back with no escape transform: only the redacted sub-range
             // ever changed.
             out.replace_range(start..end, &item.value);
         }

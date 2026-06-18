@@ -1,19 +1,19 @@
 //! Decoding raw bytes into a typed handle, plus the erasure machinery
 //! the registry stores.
 //!
-//! - [`Loader<M>`] — per-modality decoder a format implementation
+//! - [`Loader<M>`]: per-modality decoder a format implementation
 //!   writes. Returns a concrete handler implementing [`Handler<M>`].
-//! - [`DynHandler<M>`] — crate-private object-safe bridge over
+//! - [`DynHandler<M>`]: crate-private object-safe bridge over
 //!   `Handler<M>` (boxes its RPITIT futures) so a [`DocumentHandle<M>`]
 //!   can store `Box<dyn DynHandler<M>>`.
-//! - [`ErasedLoader`] — modality-erased loader the [`CodecRegistry`]
+//! - [`ErasedLoader`]: modality-erased loader the [`FormatRegistry`]
 //!   holds behind `Arc`.
-//! - [`erase`] — bridge from a typed `Loader<M>` to
+//! - [`erase`]: bridge from a typed `Loader<M>` to
 //!   `Arc<dyn ErasedLoader>`.
 //!
 //! [`Handler<M>`]: super::Handler
 //! [`DocumentHandle<M>`]: super::document::DocumentHandle
-//! [`CodecRegistry`]: super::CodecRegistry
+//! [`FormatRegistry`]: super::FormatRegistry
 
 use std::future::Future;
 use std::marker::PhantomData;
@@ -29,7 +29,7 @@ use super::Handler;
 use super::document::{DocumentHandle, UntypedDocumentHandle};
 use crate::content::ContentData;
 
-/// A boxed, pinned future — the shape the object-safe bridges return so
+/// A boxed, pinned future: the shape the object-safe bridges return so
 /// `Handler`'s RPITIT futures can be stored behind a trait object.
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -37,7 +37,7 @@ type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 ///
 /// A loader validates and parses raw content for modality `M`,
 /// producing a handler that implements [`Handler<M>`]. Loaders are the
-/// leaves the [`CodecRegistry`] composes — registering a format means
+/// leaves the [`FormatRegistry`] composes: registering a format means
 /// registering its loader.
 ///
 /// # Implementing a third-party format
@@ -47,13 +47,13 @@ type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 /// 2. Implement `Loader<M>` for a stateless type whose [`decode`]
 ///    validates raw [`ContentData`] and returns the handler.
 /// 3. Build a [`Format`] with [`Format::new`], chain extensions /
-///    content types as needed, and register it on a [`CodecRegistry`].
+///    content types as needed, and register it on a [`FormatRegistry`].
 ///
 /// The registry erases `M` internally; third-party callers never touch
 /// the object-safe surface.
 ///
 /// [`Handler<M>`]: super::Handler
-/// [`CodecRegistry`]: super::CodecRegistry
+/// [`FormatRegistry`]: super::FormatRegistry
 /// [`decode`]: Loader::decode
 /// [`Format`]: super::Format
 /// [`Format::new`]: super::Format::new
@@ -77,8 +77,8 @@ pub trait Loader<M: Modality>: Send + Sync + 'static {
 /// `Handler`'s async methods return `impl Future` (RPITIT), which is not
 /// object-safe, so a [`DocumentHandle<M>`] can't store
 /// `Box<dyn Handler<M>>`. This crate-private trait boxes the futures; a
-/// blanket impl makes every `Handler` one automatically, so the boxing is
-/// invisible at the public API.
+/// blanket impl makes every `Handler` one automatically, so the boxing
+/// is invisible at the public API.
 ///
 /// [`Handler<M>`]: super::Handler
 /// [`DocumentHandle<M>`]: super::document::DocumentHandle
@@ -126,16 +126,16 @@ where
     }
 }
 
-/// Modality-erased loader the [`CodecRegistry`] holds behind `Arc`.
+/// Modality-erased loader the [`FormatRegistry`] holds behind `Arc`.
 /// Adapts a per-modality [`Loader<M>`] into a uniform `decode` returning
 /// an [`UntypedDocumentHandle`].
 ///
 /// Crate-internal: every consumer goes through [`Format::decode`] or
-/// [`CodecRegistry::decode`] instead.
+/// [`FormatRegistry::decode`] instead.
 ///
-/// [`CodecRegistry`]: super::CodecRegistry
+/// [`FormatRegistry`]: super::FormatRegistry
 /// [`Format::decode`]: super::Format::decode
-/// [`CodecRegistry::decode`]: super::CodecRegistry::decode
+/// [`FormatRegistry::decode`]: super::FormatRegistry::decode
 pub(crate) trait ErasedLoader: Send + Sync + 'static {
     fn decode(&self, content: ContentData) -> BoxFuture<'_, Result<UntypedDocumentHandle, Error>>;
 }

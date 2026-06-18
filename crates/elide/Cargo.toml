@@ -22,9 +22,27 @@ documentation = { workspace = true }
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[features]
+default = []
+
+## Re-export the pattern recognizer crate as `elide::pattern`.
+pattern = ["dep:elide-pattern"]
+## Re-export the NER crate as `elide::ner`.
+ner = ["dep:elide-ner"]
+## Re-export the LLM recognizer crate as `elide::llm`.
+llm = ["dep:elide-llm"]
+## Re-export the codec crate as `elide::codec`.
+codec = ["dep:elide-codec"]
+## Ship the no-op mock backends in the re-exported `ner`/`llm` crates.
+mock = ["elide-ner?/mock", "elide-llm?/mock"]
+
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }
+elide-pattern = { workspace = true, features = [], optional = true }
+elide-ner = { workspace = true, features = [], optional = true }
+elide-llm = { workspace = true, features = [], optional = true }
+elide-codec = { workspace = true, features = [], optional = true }
 
 # Async runtime and parallelism
 tokio = { workspace = true, features = ["rt", "sync", "macros"] }

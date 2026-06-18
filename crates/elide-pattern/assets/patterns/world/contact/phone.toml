@@ -1,3 +1,7 @@
+# International phone number: optional +country code, then 2-4
+# digit area/prefix groups separated by spaces, dots, or hyphens.
+# Loose by design; the `phone` validator confirms parseability.
+
 name = "phone"
 label = "phone_number"
 

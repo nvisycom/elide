@@ -1,27 +1,13 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-
-//! Codec traits and format handlers for reading and redacting documents.
-//!
-//! A codec turns raw bytes into a streamable, redactable
-//! [`DocumentHandle`] and back. The [`CodecRegistry`] resolves an
-//! extension or content type to a [`Format`], whose [`Loader`] decodes
-//! bytes into a [`Handler`] for some [`Modality`].
-//!
-//! Modality erasure is *open*: a decoded handle is returned as an
-//! [`UntypedDocumentHandle`] and recovered to the concrete
-//! [`DocumentHandle<M>`] with [`UntypedDocumentHandle::into`], a `TypeId`
-//! downcast that works for any modality — built-in or custom — with no
-//! central enum of kinds.
-//!
-//! [`Modality`]: elide_core::modality::Modality
+#![doc = include_str!("../README.md")]
 
 mod codec;
 pub mod content;
 pub mod handler;
 
 pub use self::codec::{
-    CodecRegistry, DocumentHandle, Format, FormatId, Handler, Loader, UntypedDocumentHandle,
+    DocumentHandle, Format, FormatId, FormatRegistry, Handler, Loader, UntypedDocumentHandle,
 };
 
 #[cfg(all(test, feature = "txt"))]
@@ -34,7 +20,7 @@ mod tests {
 
     #[tokio::test]
     async fn registry_decodes_txt_by_extension() {
-        let reg = CodecRegistry::with_builtin();
+        let reg = FormatRegistry::with_builtin();
         let handle = reg
             .decode("hello\nworld\n", "txt")
             .await
@@ -47,7 +33,7 @@ mod tests {
     async fn decode_content_resolves_from_filename() {
         use content::ContentData;
 
-        let reg = CodecRegistry::with_builtin();
+        let reg = FormatRegistry::with_builtin();
         let content = ContentData::from_text("hello\nworld\n").with_filename("notes.txt");
         let handle = reg
             .decode_content(content)
@@ -60,7 +46,7 @@ mod tests {
     async fn decode_content_resolves_from_content_type() {
         use content::ContentData;
 
-        let reg = CodecRegistry::with_builtin();
+        let reg = FormatRegistry::with_builtin();
         let content = ContentData::from_text("plain").with_content_type("text/plain");
         let handle = reg
             .decode_content(content)
@@ -73,7 +59,7 @@ mod tests {
     async fn decode_content_without_hints_is_an_error() {
         use content::ContentData;
 
-        let reg = CodecRegistry::with_builtin();
+        let reg = FormatRegistry::with_builtin();
         assert!(
             reg.decode_content(ContentData::from_text("x"))
                 .await
@@ -83,7 +69,7 @@ mod tests {
 
     #[tokio::test]
     async fn untyped_into_wrong_modality_returns_self() {
-        let reg = CodecRegistry::with_builtin();
+        let reg = FormatRegistry::with_builtin();
         let handle = reg.decode("hi", "txt").await.expect("decoded");
         // Recover as Text succeeds; the TypeId downcast is exact.
         let typed = handle.into::<Text>().expect("text handle");
@@ -92,7 +78,7 @@ mod tests {
 
     #[tokio::test]
     async fn decode_redact_reencode_round_trip() {
-        let reg = CodecRegistry::with_builtin();
+        let reg = FormatRegistry::with_builtin();
         let handle = reg
             .decode("contact alice@example.test today", "txt")
             .await
@@ -113,7 +99,7 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_extension_is_an_error() {
-        let reg = CodecRegistry::with_builtin();
+        let reg = FormatRegistry::with_builtin();
         assert!(reg.decode("data", "xyz").await.is_err());
     }
 }

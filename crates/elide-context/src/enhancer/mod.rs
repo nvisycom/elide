@@ -25,11 +25,12 @@ const EVENT_SOURCE_WINDOW: &str = "context";
 /// an out-of-band hint fires.
 const EVENT_SOURCE_HINT: &str = "context-hint";
 
-/// Post-recognition enhancer. Holds a label-keyed [`BoostRule`]
-/// map plus the keyword-matching strategy, and lifts the
-/// confidence of each text entity whose label has a rule and
-/// whose surrounding word window contains one of the rule's
-/// keywords.
+/// Post-recognition keyword-boost pass over recognized entities.
+///
+/// Holds a label-keyed [`BoostRule`] map plus the keyword-matching
+/// strategy, and lifts the confidence of each text entity whose
+/// label has a rule and whose surrounding word window contains one
+/// of the rule's keywords.
 ///
 /// Construct via [`Enhancer::new`]. Rules are passed in by value;
 /// duplicates for the same label are merged via
@@ -40,8 +41,8 @@ const EVENT_SOURCE_HINT: &str = "context-hint";
 /// the enhancer: [`SubstringMatcher`] when no upstream NLP engine
 /// produces tokens, [`LemmaMatcher`] when one does.
 ///
-/// [`SubstringMatcher`]: crate::SubstringMatcher
-/// [`LemmaMatcher`]: crate::LemmaMatcher
+/// [`SubstringMatcher`]: crate::matching::SubstringMatcher
+/// [`LemmaMatcher`]: crate::matching::LemmaMatcher
 pub struct Enhancer {
     /// Rules bucketed by label. Within one bucket, each entry is
     /// a distinct `(language)` scope; rules sharing the same
@@ -59,7 +60,25 @@ impl Enhancer {
     /// [`BoostRule::merge`]; rules with the same label but
     /// distinct languages live as separate entries inside the
     /// label's bucket.
-    pub fn new(
+    ///
+    /// `matcher` is any concrete [`KeywordMatcher`] taken by value;
+    /// it is boxed internally, so callers don't wrap it themselves.
+    pub fn new<M: KeywordMatcher + 'static>(
+        rules: impl IntoIterator<Item = BoostRule>,
+        matcher: M,
+    ) -> Self {
+        Self::with_boxed_matcher(rules, Box::new(matcher))
+    }
+
+    /// Construct from a rule iterator and an already-boxed matcher.
+    ///
+    /// Use this when the matcher is selected at runtime (e.g. a
+    /// substring vs. lemma strategy chosen by whether an NLP engine
+    /// produced tokens) and is therefore already a trait object.
+    /// [`new`] is the by-value convenience that wraps for you.
+    ///
+    /// [`new`]: Self::new
+    pub fn with_boxed_matcher(
         rules: impl IntoIterator<Item = BoostRule>,
         matcher: Box<dyn KeywordMatcher>,
     ) -> Self {
@@ -102,7 +121,7 @@ impl Enhancer {
     /// (saturating at the [`Confidence`] ceiling) plus record a
     /// refinement [`Event`] in the entity's provenance.
     ///
-    /// The in-text and hint paths are independent — at most one
+    /// The in-text and hint paths are independent: at most one
     /// boost per rule fires per entity (window first, hint as
     /// fallback) so a rule with a long keyword list can't
     /// double-dip.
@@ -138,7 +157,7 @@ impl Enhancer {
 
         // Prefer the token stream when the producer reached this
         // entity. Fall back to the word-segmented substring window
-        // whenever the token slice would be empty — that covers
+        // whenever the token slice would be empty; that covers
         // `tokens: None`, `tokens: Some(&[])`, and the "tokens
         // present but none overlap the entity" case (e.g. NLP
         // engine only tokenized part of the document).
@@ -177,7 +196,7 @@ impl Enhancer {
         }
         entity.confidence = after;
 
-        // Record the rule's first keyword as the representative match —
+        // Record the rule's first keyword as the representative match;
         // the matcher reports "any keyword fired", not which one.
         let keyword = rule.keywords.first().cloned().unwrap_or_default();
         entity.provenance.record(

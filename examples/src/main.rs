@@ -2,7 +2,7 @@
 //!
 //! Wires the full toolkit pipeline over a `.txt` document:
 //!
-//! 1. [`CodecRegistry`] decodes the file into a [`DocumentHandle<Text>`].
+//! 1. [`FormatRegistry`] decodes the file into a [`DocumentHandle<Text>`].
 //! 2. [`Analyzer::analyze_stream`] streams the document and runs three
 //!    recognizers concurrently: a real built-in [`PatternRecognizer`]
 //!    (emails, phone numbers, payment cards, URLs, …), an
@@ -19,19 +19,19 @@
 //!
 //! Run with: `cargo run -p elide-examples --bin redact-txt`.
 //!
-//! [`DocumentHandle<Text>`]: elide_codec::DocumentHandle
+//! [`DocumentHandle<Text>`]: elide::codec::DocumentHandle
 //! [`Analyzer::analyze_stream`]: elide::Analyzer::analyze_stream
 //! [`Anonymizer::anonymize`]: elide::Anonymizer::anonymize
-//! [`PatternRecognizer`]: elide_pattern::PatternRecognizer
-//! [`NerRecognizer`]: elide_ner::NerRecognizer
-//! [`LlmRecognizer`]: elide_llm::LlmRecognizer
+//! [`PatternRecognizer`]: elide::pattern::PatternRecognizer
+//! [`NerRecognizer`]: elide::ner::NerRecognizer
+//! [`LlmRecognizer`]: elide::llm::LlmRecognizer
 
 mod analyzer;
 mod anonymizer;
 
-use elide_codec::CodecRegistry;
-use elide_core::Result;
-use elide_core::modality::text::Text;
+use elide::codec::FormatRegistry;
+use elide::core::Result;
+use elide::core::modality::text::Text;
 
 /// Sample document baked into the binary so the example is self-contained.
 const SAMPLE: &str = include_str!("../data/sample.txt");
@@ -39,7 +39,7 @@ const SAMPLE: &str = include_str!("../data/sample.txt");
 #[tokio::main]
 async fn main() -> Result<()> {
     // 1. Decode the text file through the codec layer.
-    let registry = CodecRegistry::with_builtin();
+    let registry = FormatRegistry::with_builtin();
     let handle = registry.decode(SAMPLE, "txt").await?;
     let mut document = handle
         .into::<Text>()

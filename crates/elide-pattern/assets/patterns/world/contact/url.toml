@@ -1,3 +1,6 @@
+# HTTP(S) URL: an `http://` or `https://` scheme followed by a
+# host and path, stopping at whitespace.
+
 name = "url"
 label = "url"
 

@@ -1,4 +1,4 @@
-# Singapore NRIC / FIN: 9 characters — prefix letter (S/T for
+# Singapore NRIC / FIN: 9 characters: prefix letter (S/T for
 # Singapore citizens or PRs, F/G/M for foreigners) + 7 digits +
 # check letter. Validator applies the published weighted Mod-11
 # algorithm with prefix-specific letter tables.

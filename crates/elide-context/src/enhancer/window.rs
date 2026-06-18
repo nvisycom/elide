@@ -10,12 +10,12 @@
 //!   returns the contiguous token slice that covers the entity
 //!   plus that many neighbours.
 //!
-//! Both paths feed the same downstream [`KeywordMatcher`] —
+//! Both paths feed the same downstream [`KeywordMatcher`]:
 //! [`token_span`] reduces a non-empty token slice back to its
 //! spanning substring for matchers that operate on raw text.
 //!
 //! [`Enhancer::apply_rule`]: super::Enhancer
-//! [`KeywordMatcher`]: crate::KeywordMatcher
+//! [`KeywordMatcher`]: crate::matching::KeywordMatcher
 
 use unicode_segmentation::UnicodeSegmentation;
 

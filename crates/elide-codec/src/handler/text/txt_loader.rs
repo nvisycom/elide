@@ -11,7 +11,7 @@ use crate::content::ContentData;
 /// Loader that validates and parses plain-text files. Produces one
 /// [`TxtHandler`] per input.
 #[derive(Debug)]
-pub struct TxtLoader;
+pub(crate) struct TxtLoader;
 
 impl Loader<Text> for TxtLoader {
     type Handler = TxtHandler;

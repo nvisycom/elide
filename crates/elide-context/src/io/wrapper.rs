@@ -10,7 +10,7 @@
 //!
 //! ```ignore
 //! let inner = MyRecognizer::new(...);
-//! let enhancer = Enhancer::new(rules, Box::new(SubstringMatcher));
+//! let enhancer = Enhancer::new(rules, SubstringMatcher);
 //! let recognizer = ContextEnhanced::new(inner, enhancer);
 //! ```
 //!
@@ -26,8 +26,9 @@ use elide_core::recognition::{
 use super::Tokens;
 use crate::{Context, Enhancer};
 
-/// Wraps a text [`Recognizer`] with a post-recognition [`Enhancer`]
-/// pass. Implements [`Recognizer<Text>`] so the wrapped recognizer is a
+/// Wraps a text [`Recognizer`] with a post-recognition [`Enhancer`] pass.
+///
+/// Implements [`Recognizer<Text>`] so the wrapped recognizer is a
 /// drop-in replacement.
 ///
 /// Assumes the inner recognizer emits entities whose byte offsets index

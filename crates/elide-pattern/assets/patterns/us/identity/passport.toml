@@ -1,3 +1,7 @@
+# US passport number: one letter followed by 8 digits (older
+# book-style format). Low score on its own; the context boost
+# lifts hits near passport-related keywords.
+
 name = "us-passport"
 label = "passport_number"
 countries = ["US"]

@@ -1,7 +1,8 @@
 //! [`PatternRecognizer`] and its builder.
 
 use aho_corasick::{AhoCorasick, MatchKind};
-use elide_context::{BoostRule, ContextEnhanced, Enhancer, SubstringMatcher};
+use elide_context::matching::SubstringMatcher;
+use elide_context::{BoostRule, ContextEnhanced, Enhancer};
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
 use elide_core::modality::text::Text;
 use elide_core::primitive::LanguageTag;
@@ -387,7 +388,7 @@ impl PatternRecognizerBuilder {
                 }
             })
             .collect();
-        Enhancer::new(boost_rules, Box::new(SubstringMatcher))
+        Enhancer::new(boost_rules, SubstringMatcher)
     }
 
     /// Yield `(label, language, keywords)` for every pattern and

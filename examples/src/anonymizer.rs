@@ -2,9 +2,9 @@
 //! maps a redaction operator to each label.
 
 use elide::Anonymizer;
+use elide::core::entity::builtins;
+use elide::core::modality::text::Text;
 use elide::operators::{Mask, Redact, Replace};
-use elide_core::entity::builtins;
-use elide_core::modality::text::Text;
 
 /// Build an anonymizer that picks a redaction strategy per label.
 pub fn build_anonymizer() -> Anonymizer<Text> {

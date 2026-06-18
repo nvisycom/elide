@@ -22,7 +22,7 @@ pub struct Context<'a> {
     /// stream; when absent, words are derived from `text` via
     /// Unicode word segmentation.
     pub tokens: Option<&'a [Token]>,
-    /// Per-call language hint. `None` means "unknown" — every
+    /// Per-call language hint. `None` means "unknown", so every
     /// per-language rule applies as a permissive fallback.
     pub language: Option<&'a LanguageTag>,
     /// Out-of-band context strings (CSV column headers, JSON
