@@ -1,0 +1,25 @@
+schema_version = 1
+
+# Drop spans the VLM emits with these EntityKinds. Hoisted above
+# [label_map] so they don't get swallowed into that table.
+labels_to_ignore = ["url"]
+
+# Jinja2 template exercising: variable interpolation, `{% for %}` over
+# hints, the `{% if %}` gate on labels, and nested bbox access.
+template = """
+Inspect this image (base64): {{ image_b64 }}
+{% if labels %}Tags: {{ labels | join(", ") }}{% endif %}
+{% if hints %}Uploader regions:
+{% for h in hints %}- {{ h.name }} ({{ h.kind }}): bbox=[{{ h.bbox.x }},{{ h.bbox.y }},{{ h.bbox.width }}x{{ h.bbox.height }}]
+{% endfor %}{% endif %}
+Return JSON: {"entities": [...]}.
+"""
+
+[meta]
+name = "vlm-e2e"
+modality = "image"
+
+# Remap one canonical kind into another so the test can prove
+# `label_map` is invoked on the lift side.
+[label_map]
+person_name = "date_of_birth"

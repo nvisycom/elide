@@ -1,0 +1,76 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "nvisy-llm"
+description = "LLM-mediated entity recognizer (text NER + image VLM) for the Nvisy runtime"
+keywords = ["nvisy", "rig", "llm", "ner"]
+categories = ["text-processing", "api-bindings"]
+readme = "README.md"
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[features]
+default = []
+
+## Enable OpenAI GPT completion provider.
+openai-gpt = []
+## Enable Anthropic Claude completion provider.
+anthropic-claude = []
+## Enable Google Gemini completion provider.
+google-gemini = []
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+# Internal crates
+nvisy-core = { workspace = true, features = [] }
+
+# Serialization
+serde = { workspace = true, features = [] }
+serde_json = { workspace = true, features = [] }
+schemars = { workspace = true, features = [] }
+toml = { workspace = true, features = ["parse"] }
+minijinja = { workspace = true, features = [] }
+humantime-serde = { workspace = true, features = [] }
+
+# Derive macros and error handling
+derive_builder = { workspace = true, features = [] }
+derive_more = { workspace = true, features = ["add_assign"] }
+thiserror = { workspace = true, features = [] }
+
+# Encoding and hashing
+base64 = { workspace = true, features = [] }
+
+# Async runtime and parallelism
+async-trait = { workspace = true, features = [] }
+
+# Observability
+tracing = { workspace = true, features = [] }
+
+# Text processing
+unicode-normalization = { workspace = true, features = [] }
+
+# AI / LLM frameworks
+rig = { workspace = true, features = ["derive", "reqwest-middleware"] }
+
+# HTTP client and middleware (shared retry/tracing layers)
+reqwest-middleware = { workspace = true, features = [] }
+reqwest-retry = { workspace = true, features = [] }
+reqwest-tracing = { workspace = true, features = [] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[package.metadata.cargo-machete]
+ignored = ["humantime-serde"]
