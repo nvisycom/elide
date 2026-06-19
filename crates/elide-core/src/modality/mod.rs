@@ -13,11 +13,12 @@
 //! available for serialization and logging.
 //!
 //! The core defines the traits and ships [`text`] unconditionally, with
-//! [`image`] and [`audio`] behind their own features so a text-only
-//! consumer doesn't pay for them. Each modality defines its marker type,
-//! its data/location/replacement types, and the `impl Modality` that ties
-//! them together; an out-of-tree medium can do the same in its own crate,
-//! needing no change here.
+//! [`image`], [`audio`], and [`tabular`] behind their own features so a
+//! text-only consumer doesn't pay for them. Each modality defines its
+//! marker type, its data/location/replacement types, and the `impl
+//! Modality` that ties them together (tabular reuses the text payload and
+//! replacement, varying only the location); an out-of-tree medium can do
+//! the same in its own crate, needing no change here.
 //!
 //! [`Data`]: Modality::Data
 //! [`Location`]: Modality::Location
@@ -29,6 +30,8 @@ use std::fmt;
 pub mod audio;
 #[cfg(feature = "image")]
 pub mod image;
+#[cfg(feature = "tabular")]
+pub mod tabular;
 pub mod text;
 
 mod chunk;

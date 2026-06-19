@@ -35,6 +35,11 @@ image = ["dep:bytes"]
 ## it.
 audio = ["dep:bytes"]
 
+## The `tabular` modality (`Tabular`, `TabularLocation`). Cells reuse the
+## text payload and replacement, so this adds no dependency. Off by
+## default; text-only consumers don't pay for it.
+tabular = []
+
 ## Derive `serde::{Serialize, Deserialize}` on the domain types, and
 ## enable serde support in the underlying primitive crates. (`celes`
 ## and `oxilangtag` carry their serde impls unconditionally.)
