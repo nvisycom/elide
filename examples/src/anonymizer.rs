@@ -1,10 +1,10 @@
 //! Assembles the redaction side of the pipeline: an [`Anonymizer`] that
 //! maps a redaction operator to each label.
 
+use elide::Anonymizer;
 use elide::entity::builtins;
 use elide::modality::text::Text;
 use elide::primitive::ConfidenceThreshold;
-use elide::redaction::Anonymizer;
 use elide::redaction::operators::{Erase, Keep, Mask, Replace};
 
 /// Build an anonymizer that picks a redaction strategy per label.

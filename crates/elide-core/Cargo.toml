@@ -65,7 +65,3 @@ oxilangtag = { workspace = true, features = [] }
 celes = { workspace = true, features = [] }
 type-map = { workspace = true, features = [] }
 bytes = { workspace = true, features = [], optional = true }
-
-[dev-dependencies]
-# Async runtime for the vault's async trait tests
-tokio = { workspace = true, features = ["rt", "macros"] }

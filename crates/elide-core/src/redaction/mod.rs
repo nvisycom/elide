@@ -26,4 +26,4 @@ pub use self::operator::{LeakProfile, Operator};
 pub use self::operator_id::OperatorId;
 pub use self::redactions::Redactions;
 pub use self::reversible::ReversibleOperator;
-pub use self::vault::{InMemoryStore, Store};
+pub use self::vault::Vault;

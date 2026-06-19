@@ -81,8 +81,9 @@ derive_builder = { workspace = true, features = [] }
 
 # Primitive datatypes
 bytes = { workspace = true, features = [] }
+uuid = { workspace = true, features = ["v4"] }
 
-# Encoding & hashing (the Hash operator)
+# Encoding & hashing
 sha2 = { workspace = true, features = [] }
 hex = { workspace = true, features = [] }
 
@@ -96,9 +97,7 @@ tracing = { workspace = true, features = [] }
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
-# Codec round-trip e2e tests: each needs the codec format handlers plus
-# the mock recognizer backends. Run with, e.g.:
-#   cargo test -p elide --features codec-text,mock
+# Codec round-trip e2e tests
 [[test]]
 name = "e2e_txt"
 required-features = ["codec-txt", "mock"]

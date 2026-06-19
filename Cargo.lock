@@ -818,6 +818,7 @@ dependencies = [
  "sha2 0.11.0",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -863,7 +864,6 @@ dependencies = [
  "jiff",
  "oxilangtag",
  "serde",
- "tokio",
  "type-map",
  "uuid",
 ]

@@ -1,23 +1,19 @@
-//! [`Store<K, V>`]: pluggable token vault mapping keys to cloneable
-//! values, plus a default [`InMemoryStore`] backing.
+//! [`Vault<K, V>`]: the pluggable token-vault contract a recoverable
+//! operator resolves keys through.
 //!
 //! A vault is the out-of-band map a recoverable operator leans on: a
 //! token replaces the original in the document, and the token resolves
-//! back to its payload through the vault. Memoization is the same shape
-//! seen from the other side — the same input keys the same entry, so an
-//! inner operator runs only once per distinct payload.
+//! back to its payload through the vault. A pseudonymizer is the same
+//! shape — the same key resolves to the same generated replacement, so
+//! every mention of one entity redacts consistently.
 //!
-//! The store is generic over the key `K` as well as the value, so a
+//! The vault is generic over the key `K` as well as the value, so a
 //! caller can key on a *full identity* (collision-free by construction)
-//! rather than a lossy digest. Implementations pick their own backing
-//! (in-memory map, KV store, KMS-backed encrypted blob) and are chosen at
-//! compile time. [`InMemoryStore`] is the batteries-included one — a
-//! locked map, process-local, gone when dropped.
+//! rather than a lossy digest. The contract lives here; concrete backings
+//! (the in-memory default, a KV store, a KMS-backed blob) live in the
+//! toolkit crate.
 
-use std::collections::HashMap;
 use std::future::Future;
-use std::hash::Hash;
-use std::sync::Mutex;
 
 use crate::Result;
 
@@ -31,97 +27,31 @@ use crate::Result;
 /// Generic over `K` so the caller controls identity: keying on a digest
 /// trades space for collision risk, while keying on the full input keeps
 /// equality exact. The async methods return `impl Future`, matching
-/// [`Operator`]: a vault is a generic parameter (`S: Store<K, V>`),
+/// [`Operator`]: a vault is a generic parameter (`V: Vault<K, …>`),
 /// resolved and monomorphized at compile time rather than held behind a
 /// trait object.
 ///
+/// The write path is fused into [`get_or_try_insert_with`]: a value is
+/// only ever stored as part of resolving a key, never blindly, so a
+/// stored entry always wins and consistency holds by construction.
+///
 /// [`Operator`]: crate::redaction::Operator
-pub trait Store<K, V: Clone + Send + Sync>: Send + Sync {
-    /// Persist `value` under `key`. Re-using a key replaces the prior
-    /// value.
-    fn put(&self, key: K, value: V) -> impl Future<Output = Result<()>> + Send;
-
+/// [`get_or_try_insert_with`]: Vault::get_or_try_insert_with
+pub trait Vault<K, V: Clone + Send + Sync>: Send + Sync {
     /// Look up the value previously stored under `key`. Returns
     /// `Ok(None)` for unknown keys; reserve `Err` for backend failures.
     fn get(&self, key: &K) -> impl Future<Output = Result<Option<V>>> + Send;
-}
 
-/// Process-local [`Store`] backed by a locked [`HashMap`].
-///
-/// The default vault: holds everything in memory behind a [`Mutex`], so
-/// it is shareable and concurrency-safe but not durable — the contents
-/// vanish when the store is dropped. Suited to a single anonymization run
-/// or to tests; swap in a durable [`Store`] for cross-run consistency.
-#[derive(Debug, Default)]
-pub struct InMemoryStore<K, V> {
-    entries: Mutex<HashMap<K, V>>,
-}
-
-impl<K, V> InMemoryStore<K, V> {
-    /// An empty in-memory store.
-    pub fn new() -> Self {
-        Self {
-            entries: Mutex::new(HashMap::new()),
-        }
-    }
-}
-
-impl<K, V> Store<K, V> for InMemoryStore<K, V>
-where
-    K: Eq + Hash + Send + Sync,
-    V: Clone + Send + Sync,
-{
-    async fn put(&self, key: K, value: V) -> Result<()> {
-        // The guard never crosses an await, so a std Mutex is enough and
-        // the returned future stays Send.
-        self.entries
-            .lock()
-            .expect("vault mutex poisoned")
-            .insert(key, value);
-        Ok(())
-    }
-
-    async fn get(&self, key: &K) -> Result<Option<V>> {
-        Ok(self
-            .entries
-            .lock()
-            .expect("vault mutex poisoned")
-            .get(key)
-            .cloned())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn put_then_get_round_trips() {
-        let store = InMemoryStore::<String, String>::new();
-        assert!(store.get(&"missing".to_owned()).await.unwrap().is_none());
-
-        store.put("k".to_owned(), "v".to_owned()).await.unwrap();
-        assert_eq!(
-            store.get(&"k".to_owned()).await.unwrap(),
-            Some("v".to_owned())
-        );
-    }
-
-    #[tokio::test]
-    async fn put_overwrites_existing_key() {
-        let store = InMemoryStore::<&str, u32>::new();
-        store.put("k", 1).await.unwrap();
-        store.put("k", 2).await.unwrap();
-        assert_eq!(store.get(&"k").await.unwrap(), Some(2));
-    }
-
-    #[tokio::test]
-    async fn distinct_keys_do_not_collide() {
-        // A structured key: equal only when every field matches.
-        let store = InMemoryStore::<(&str, u32), &str>::new();
-        store.put(("a", 1), "first").await.unwrap();
-        store.put(("a", 2), "second").await.unwrap();
-        assert_eq!(store.get(&("a", 1)).await.unwrap(), Some("first"));
-        assert_eq!(store.get(&("a", 2)).await.unwrap(), Some("second"));
-    }
+    /// Return the value under `key`, or compute one with `init`, store it,
+    /// and return that. The value already present always wins, so repeated
+    /// first-sights of the same key resolve to a single value — the
+    /// consistency guarantee a pseudonymizer relies on.
+    ///
+    /// `init` is synchronous and fallible: a [`Vault`] may run it under a
+    /// lock to make the check-and-insert atomic, so it must not itself
+    /// touch the vault or otherwise block. An [`Err`] from `init`
+    /// propagates and stores nothing.
+    fn get_or_try_insert_with<F>(&self, key: K, init: F) -> impl Future<Output = Result<V>> + Send
+    where
+        F: FnOnce() -> Result<V> + Send;
 }

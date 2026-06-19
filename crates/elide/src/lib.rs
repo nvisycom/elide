@@ -5,22 +5,60 @@
 mod analyzer;
 mod anonymizer;
 pub mod deduplication;
-pub mod recognition;
 pub mod redaction;
 
-// Core re-exports: flatten the error vocabulary to the crate root and
-// surface core's domain modules directly (so callers write `elide::entity`
-// rather than `elide::core::entity`). The recognition and redaction
-// modules are defined locally (they also nest the shipped recognizer
-// crates / the anonymizer engine); the codec layer is feature-gated so a
-// minimal dependant doesn't compile what it doesn't use.
+/// Codec: decode documents into modality payloads, then re-encode them.
+///
+/// Format handlers (text, JSON, HTML, images, audio, …) sit behind a
+/// [`FormatRegistry`]: each turns raw bytes into something recognizers
+/// and operators can address, then folds the redactions back into the
+/// original container. Re-exported from [`elide_codec`].
+///
+/// [`FormatRegistry`]: elide_codec::FormatRegistry
 #[cfg(feature = "codec")]
 #[cfg_attr(docsrs, doc(cfg(feature = "codec")))]
-#[doc(inline)]
-pub use elide_codec as codec;
+pub mod codec {
+    #[doc(inline)]
+    pub use elide_codec::*;
+    #[doc(inline)]
+    pub use elide_codec::{content, handler};
+}
+
+/// Recognition: the [`Recognizer`] contract and its implementations.
+///
+/// Re-exports the core recognition vocabulary from
+/// [`elide_core::recognition`], and nests each shipped recognizer crate
+/// behind a feature: [`pattern`], [`ner`], [`llm`].
+///
+/// [`Recognizer`]: elide_core::recognition::Recognizer
+/// [`pattern`]: recognition::pattern
+/// [`ner`]: recognition::ner
+/// [`llm`]: recognition::llm
+pub mod recognition {
+    #[doc(inline)]
+    pub use elide_core::recognition::*;
+
+    /// LLM-mediated recognition (text NER and image VLM).
+    #[cfg(feature = "llm")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "llm")))]
+    #[doc(inline)]
+    pub use elide_llm as llm;
+    /// Model-based named-entity recognition.
+    #[cfg(feature = "ner")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "ner")))]
+    #[doc(inline)]
+    pub use elide_ner as ner;
+    /// Dictionary- and pattern-based recognition.
+    #[cfg(feature = "pattern")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "pattern")))]
+    #[doc(inline)]
+    pub use elide_pattern as pattern;
+}
+
 #[doc(inline)]
 pub use elide_core::{Error, ErrorKind, Result};
 #[doc(inline)]
 pub use elide_core::{entity, modality, primitive};
 
 pub use self::analyzer::Analyzer;
+pub use self::anonymizer::Anonymizer;
