@@ -25,9 +25,6 @@ use std::fmt;
 
 use elide_core::Result;
 use elide_core::entity::Entity;
-#[cfg(feature = "internal_tabular")]
-use elide_core::modality::tabular::Tabular;
-use elide_core::modality::text::Text;
 use elide_core::modality::{Chunk, DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::redaction::Redactions;
 
@@ -163,49 +160,21 @@ impl<M: Modality> DataWriter<M> for DocumentHandle<M> {
     }
 }
 
-impl StreamDataReader<Text> for DocumentHandle<Text> {
-    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>> {
+impl<M: Modality> StreamDataReader<M> for DocumentHandle<M> {
+    async fn read_next(&mut self) -> Result<Option<Chunk<M>>> {
         self.handler.read_next().await
     }
 
-    /// Lift a text entity from chunk-local to source coordinates by
-    /// mapping its `[start, end)` offset range through the handler's
-    /// [`lift_chunk`]. Drops the entity when the range has no source
+    /// Lift an entity from chunk-local to source coordinates by promoting
+    /// its location through the handler's [`lift`]. The entity's location
+    /// *is* the recognizer's chunk-local finding; `lift` rebases it onto
+    /// the chunk's origin (a text offset add, a JSON escape walk, a cell's
+    /// row/column). Drops the entity when the location has no source
     /// pre-image.
     ///
-    /// [`lift_chunk`]: crate::Handler::lift_chunk
-    fn lift(&self, chunk: &Chunk<Text>, mut entity: Entity<Text>) -> Option<Entity<Text>> {
-        let range = entity.location.start..entity.location.end;
-        entity.location = self.handler.lift_chunk(chunk, range)?;
-        Some(entity)
-    }
-}
-
-#[cfg(feature = "internal_tabular")]
-impl StreamDataReader<Tabular> for DocumentHandle<Tabular> {
-    async fn read_next(&mut self) -> Result<Option<Chunk<Tabular>>> {
-        self.handler.read_next().await
-    }
-
-    /// Lift a tabular entity from chunk-local to source coordinates.
-    ///
-    /// A recognizer runs on the chunk's cell text and emits a location
-    /// whose `start_offset`/`end_offset` are the intra-cell byte range it
-    /// matched (a missing offset means the whole cell). That range is
-    /// mapped through the handler's [`lift_chunk`], which re-anchors it to
-    /// the source cell. Drops the entity when the range has no source
-    /// pre-image.
-    ///
-    /// [`lift_chunk`]: crate::Handler::lift_chunk
-    fn lift(&self, chunk: &Chunk<Tabular>, mut entity: Entity<Tabular>) -> Option<Entity<Tabular>> {
-        // A recognizer on the cell text emits intra-cell offsets. When it
-        // emits none, the match spans the whole cell, whose text is the
-        // chunk payload.
-        let range = match (entity.location.start_offset, entity.location.end_offset) {
-            (Some(start), Some(end)) => start..end,
-            _ => 0..chunk.data.as_str().len(),
-        };
-        entity.location = self.handler.lift_chunk(chunk, range)?;
+    /// [`lift`]: crate::Handler::lift
+    fn lift(&self, chunk: &Chunk<M>, mut entity: Entity<M>) -> Option<Entity<M>> {
+        entity.location = self.handler.lift(chunk, entity.location)?;
         Some(entity)
     }
 }

@@ -6,8 +6,6 @@
 //! trailing-newline flag so the original file can be reconstructed
 //! byte-for-byte after edits.
 
-use std::ops::Range;
-
 use elide_core::Result;
 use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
@@ -79,13 +77,13 @@ impl Handler<Text> for TxtHandler {
         }))
     }
 
-    fn lift_chunk(&self, chunk: &Chunk<Text>, value_range: Range<usize>) -> Option<TextLocation> {
+    fn lift(&self, chunk: &Chunk<Text>, local: TextLocation) -> Option<TextLocation> {
         // TXT chunks are byte-for-byte slices of source, so lifting is an
-        // identity offset add against the chunk's start, bounded by its
-        // end.
+        // identity offset add of the chunk-local range against the chunk's
+        // start, bounded by its end.
         let base = chunk.location.start;
-        let start = base + value_range.start;
-        let end = base + value_range.end;
+        let start = base + local.start;
+        let end = base + local.end;
         if start > end || end > chunk.location.end {
             return None;
         }
@@ -241,11 +239,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lift_chunk_is_identity_on_second_line() -> Result<()> {
+    async fn lift_is_identity_on_second_line() -> Result<()> {
         let mut h = handler("hello\nworld\n");
         let _first = h.read_next().await?.unwrap();
         let second = h.read_next().await?.unwrap();
-        let lifted = h.lift_chunk(&second, 1..4).expect("in bounds");
+        let lifted = h.lift(&second, TextLocation::new(1, 4)).expect("in bounds");
         assert_eq!(lifted.start, 7);
         assert_eq!(lifted.end, 10);
         Ok(())

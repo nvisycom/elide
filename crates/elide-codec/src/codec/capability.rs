@@ -5,8 +5,8 @@
 //!   [`DataReader`] + [`DataWriter`] (the random-access read / write
 //!   surface, shared with the rest of the workspace), and adds the
 //!   codec-specific bits on top: identify and serialise ([`format`],
-//!   [`encode`]), stream chunks ([`read_next`]), and lift recognizer
-//!   offsets back to source coordinates ([`lift_chunk`]).
+//!   [`encode`]), stream chunks ([`read_next`]), and lift a chunk-local
+//!   finding back to source coordinates ([`lift`]).
 //!
 //! [`Chunk<M>`], the unit yielded by `read_next`, lives in
 //! [`elide_core::modality`], since it is the shared currency of the
@@ -19,10 +19,9 @@
 //! [`format`]: Handler::format
 //! [`encode`]: Handler::encode
 //! [`read_next`]: Handler::read_next
-//! [`lift_chunk`]: Handler::lift_chunk
+//! [`lift`]: Handler::lift
 
 use std::future::Future;
-use std::ops::Range;
 
 use elide_core::Result;
 use elide_core::modality::{Chunk, DataReader, DataWriter, Modality};
@@ -37,8 +36,8 @@ use crate::content::ContentData;
 /// traits, so a codec-backed document plugs straight into anything that
 /// bounds on them (the toolkit's anonymizer, say). On top of that base,
 /// `Handler` adds the codec-specific surface: identify and serialise
-/// ([`format`], [`encode`]), stream chunks ([`read_next`]), and lift
-/// recognizer offsets back to source coordinates ([`lift_chunk`]).
+/// ([`format`], [`encode`]), stream chunks ([`read_next`]), and lift a
+/// chunk-local finding back to source coordinates ([`lift`]).
 ///
 /// The handler owns the streaming cursor; concurrent iteration of the
 /// same handle is not supported (only one `&mut self`).
@@ -53,7 +52,7 @@ use crate::content::ContentData;
 /// [`format`]: Handler::format
 /// [`encode`]: Handler::encode
 /// [`read_next`]: Handler::read_next
-/// [`lift_chunk`]: Handler::lift_chunk
+/// [`lift`]: Handler::lift
 pub trait Handler<M: Modality>: DataReader<M> + DataWriter<M> + Send + Sync + 'static {
     /// Stable id of the format this handler represents (e.g.
     /// `"elide.text.txt"`). Cheap to clone.
@@ -71,20 +70,25 @@ pub trait Handler<M: Modality>: DataReader<M> + DataWriter<M> + Send + Sync + 's
     /// end-of-stream.
     fn read_next(&mut self) -> impl Future<Output = Result<Option<Chunk<M>>>> + Send;
 
-    /// Translate a `value_range` expressed inside `chunk.data`'s
-    /// coordinate system into a source-coordinate `M::Location`.
+    /// Promote a `local` location, expressed in `chunk`'s own coordinate
+    /// system, to a source-global [`M::Location`](Modality::Location).
     ///
-    /// Recognizers see the decoded chunk payload and emit offsets into
-    /// it; downstream stages need locations that address the handler's
-    /// source bytes. For text-shaped handlers where `chunk.data` is a
-    /// byte-for-byte slice of source, the mapping is the identity offset
-    /// add against `chunk.location`. Handlers whose chunks decode
-    /// escapes override to walk their per-chunk escape map.
+    /// A recognizer sees a chunk's decoded payload and emits a finding in
+    /// *chunk-local* coordinates: a byte range into the chunk text, a box
+    /// within the chunk frame, a span within the chunk's clip. Downstream
+    /// stages need locations that address the whole source, so the handler
+    /// rebases the local one onto the chunk's origin.
     ///
-    /// Returns `None` when the range has no source pre-image (out of
-    /// bounds, inside an escape pair, or the modality has no meaningful
-    /// `usize` value-range concept). The default is `None`.
-    fn lift_chunk(&self, _chunk: &Chunk<M>, _value_range: Range<usize>) -> Option<M::Location> {
-        None
+    /// For a chunk that is a byte-for-byte slice of source the mapping is
+    /// the identity offset add against `chunk.location`; a handler whose
+    /// chunks decode escapes (JSON) walks its per-chunk escape map; a cell
+    /// handler fills the chunk's row/column. The default is the identity:
+    /// a single-chunk source whose one chunk *is* the source, so a local
+    /// location already addresses the source.
+    ///
+    /// Returns `None` when `local` has no source pre-image (out of bounds,
+    /// inside an escape pair).
+    fn lift(&self, _chunk: &Chunk<M>, local: M::Location) -> Option<M::Location> {
+        Some(local)
     }
 }

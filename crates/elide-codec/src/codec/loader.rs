@@ -17,7 +17,6 @@
 
 use std::future::Future;
 use std::marker::PhantomData;
-use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -88,7 +87,7 @@ pub(crate) trait DynHandler<M: Modality>: Send + Sync + 'static {
 
     fn write_at(&mut self, redactions: Redactions<M>) -> BoxFuture<'_, Result<()>>;
 
-    fn lift_chunk(&self, chunk: &Chunk<M>, value_range: Range<usize>) -> Option<M::Location>;
+    fn lift(&self, chunk: &Chunk<M>, local: M::Location) -> Option<M::Location>;
 }
 
 impl<M, H> DynHandler<M> for H
@@ -112,8 +111,8 @@ where
         Box::pin(DataWriter::write_at(self, redactions))
     }
 
-    fn lift_chunk(&self, chunk: &Chunk<M>, value_range: Range<usize>) -> Option<M::Location> {
-        Handler::lift_chunk(self, chunk, value_range)
+    fn lift(&self, chunk: &Chunk<M>, local: M::Location) -> Option<M::Location> {
+        Handler::lift(self, chunk, local)
     }
 }
 

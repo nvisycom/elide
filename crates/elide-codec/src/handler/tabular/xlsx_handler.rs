@@ -7,8 +7,6 @@
 //! (`calamine` to read, a writer crate to re-emit) will replace this when
 //! spreadsheet extraction lands.
 
-use std::ops::Range;
-
 use elide_core::modality::tabular::{Tabular, TabularLocation};
 use elide_core::modality::text::TextData;
 use elide_core::modality::{Chunk, DataReader, DataWriter};
@@ -57,13 +55,8 @@ impl Handler<Tabular> for XlsxHandler {
         Ok(None)
     }
 
-    fn lift_chunk(
-        &self,
-        _chunk: &Chunk<Tabular>,
-        _value_range: Range<usize>,
-    ) -> Option<TabularLocation> {
-        None
-    }
+    // No `lift` override: the stub yields no chunks, so it is never called;
+    // the identity default suffices.
 }
 
 impl DataReader<Tabular> for XlsxHandler {
