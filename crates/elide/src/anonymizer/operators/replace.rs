@@ -2,7 +2,8 @@
 
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::modality::text::{Text, TextData, TextReplacement};
+use elide_core::modality::TextBacked;
+use elide_core::modality::text::{TextData, TextReplacement};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 
 /// Substitute the matched span with a template string.
@@ -35,7 +36,7 @@ impl Default for Replace {
     }
 }
 
-impl Operator<Text> for Replace {
+impl<M: TextBacked> Operator<M> for Replace {
     fn id(&self) -> OperatorId {
         OperatorId::new("replace", "1.0.0")
     }
@@ -46,7 +47,7 @@ impl Operator<Text> for Replace {
         LeakProfile::Partial
     }
 
-    async fn anonymize(&self, entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
+    async fn anonymize(&self, entity: &Entity<M>, data: &TextData) -> Result<TextReplacement> {
         let rendered = self
             .template
             .replace("{label}", entity.label.as_str())

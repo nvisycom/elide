@@ -4,7 +4,8 @@
 use bytes::Bytes;
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::modality::text::{Text, TextData, TextReplacement};
+use elide_core::modality::TextBacked;
+use elide_core::modality::text::{TextData, TextReplacement};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 use sha2::{Digest, Sha256, Sha512};
 
@@ -75,7 +76,7 @@ impl Hash {
     }
 }
 
-impl Operator<Text> for Hash {
+impl<M: TextBacked> Operator<M> for Hash {
     fn id(&self) -> OperatorId {
         OperatorId::new("hash", "1.0.0")
     }
@@ -86,7 +87,7 @@ impl Operator<Text> for Hash {
         LeakProfile::Recoverable
     }
 
-    async fn anonymize(&self, _entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
+    async fn anonymize(&self, _entity: &Entity<M>, data: &TextData) -> Result<TextReplacement> {
         Ok(TextReplacement::substituted(self.digest(data.as_str())))
     }
 }

@@ -1,56 +1,53 @@
-//! The shared codec round-trip driver for the text-format e2e tests.
+//! The shared codec round-trip driver for the e2e tests.
 //!
 //! Wires the same flow the `redact-txt` example does — decode (codec) →
 //! analyze (`Analyzer`) → anonymize (`Anonymizer`) → encode — into one
 //! helper the per-format tests call, plus a [`PipelineOutcome`] carrying
 //! the entities and re-encoded bytes for assertions.
 //!
-//! Scope: the [`Text`] modality only (`txt`, `json`, `html`). The
-//! tabular path (CSV) is deferred until the pattern recognizer and the
-//! anonymizer operators gain `Tabular` impls — today both are `Text`-only.
+//! Generic over any [`TextBacked`]: the [`Text`] formats (`txt`,
+//! `json`, `html`) and [`Tabular`] (`csv`). The shipped pattern
+//! recognizer and the operators serve both — only the codec handle's
+//! modality differs.
 
 use elide::codec::{DocumentHandle, FormatRegistry};
 use elide::deduplication::filter::FilterLayer;
 use elide::deduplication::fuse::{FuseLayer, MaxConfidence};
 use elide::deduplication::resolve::{HighestConfidence, ResolveLayer};
 use elide::entity::{Entity, builtins};
+use elide::modality::tabular::Tabular;
 use elide::modality::text::Text;
+use elide::modality::{Modality, StreamDataReader, TextBacked};
 use elide::primitive::{ConfidenceThreshold, Language, LanguageTag};
-use elide::recognition::Scope;
-use elide::recognition::ner::NerRecognizer;
 use elide::recognition::pattern::PatternRecognizer;
-use elide::redaction::Anonymizer;
+use elide::recognition::{Recognizer, Scope};
 use elide::redaction::operators::{Mask, Redact, Replace};
+use elide::redaction::{Anonymizer, Operator};
 use elide::{Analyzer, Result};
 
 /// Outcome of one end-to-end run: the entities that survived dedup and
 /// the re-encoded redacted document.
-pub struct PipelineOutcome {
+pub struct PipelineOutcome<M: Modality> {
     /// Entities detected and reconciled, in source coordinates.
-    pub entities: Vec<Entity<Text>>,
+    pub entities: Vec<Entity<M>>,
     /// Re-encoded document after redaction.
     pub redacted: String,
 }
 
 /// Build the detection side: the real built-in pattern recognizer (with
-/// context boosting) plus a mock NER, behind the standard dedup pipeline.
-fn build_analyzer() -> Result<Analyzer<Text>> {
+/// context boosting), behind the standard dedup pipeline. Generic over any
+/// text-payload modality the patterns serve.
+fn build_analyzer<M: TextBacked>() -> Result<Analyzer<M>>
+where
+    PatternRecognizer: Recognizer<M>,
+{
     let patterns = PatternRecognizer::builder()
         .with_builtin_patterns()
         .with_builtin_dictionaries()
         .build_context_enhanced()?;
 
-    // Mock NER: wired like a real model, returns nothing offline. Present
-    // so the pipeline shape matches production (multi-recognizer fan-in).
-    let ner = NerRecognizer::builder()
-        .with_name("ner-mock")
-        .with_mock_backend()
-        .with_supported_labels(vec![builtins::PERSON_NAME.to_ref()])
-        .build()?;
-
     Ok(Analyzer::new()
         .with_recognizer(patterns)
-        .with_recognizer(ner)
         .with_layer(FuseLayer::new(MaxConfidence))
         .with_layer(ResolveLayer::new(HighestConfidence))
         .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE)))
@@ -58,7 +55,12 @@ fn build_analyzer() -> Result<Analyzer<Text>> {
 
 /// Build the redaction side: one operator per label the shipped patterns
 /// emit, so assertions can spot the replacement tokens, plus a fallback.
-fn build_anonymizer() -> Anonymizer<Text> {
+fn build_anonymizer<M: TextBacked>() -> Anonymizer<M>
+where
+    Replace: Operator<M>,
+    Mask: Operator<M>,
+    Redact: Operator<M>,
+{
     Anonymizer::new()
         .with_operator(
             builtins::EMAIL_ADDRESS.to_ref(),
@@ -95,21 +97,40 @@ pub struct Fixture {
 }
 
 impl Fixture {
-    /// Decode → analyze → anonymize → encode this fixture, write the
-    /// `*.redacted.*` artifact, and return the outcome. Panics with a
-    /// descriptive message on any stage failure, the way an integration
-    /// test wants.
-    pub async fn run(&self) -> PipelineOutcome {
+    /// Run the pipeline as the [`Text`] modality (`txt`, `json`, `html`).
+    pub async fn run(&self) -> PipelineOutcome<Text> {
+        self.run_typed::<Text>().await
+    }
+
+    /// Run the pipeline as the [`Tabular`](elide::modality::tabular::Tabular)
+    /// modality (`csv`).
+    pub async fn run_tabular(&self) -> PipelineOutcome<Tabular> {
+        self.run_typed::<Tabular>().await
+    }
+
+    /// Decode → analyze → anonymize → encode this fixture as modality `M`,
+    /// write the `*.redacted.*` artifact, and return the outcome. Panics
+    /// with a descriptive message on any stage failure, the way an
+    /// integration test wants.
+    async fn run_typed<M>(&self) -> PipelineOutcome<M>
+    where
+        M: TextBacked,
+        DocumentHandle<M>: StreamDataReader<M>,
+        PatternRecognizer: Recognizer<M>,
+        Replace: Operator<M>,
+        Mask: Operator<M>,
+        Redact: Operator<M>,
+    {
         let handle = FormatRegistry::with_builtin()
             .decode(self.source, self.extension)
             .await
             .unwrap_or_else(|e| panic!("{} source decodes: {e}", self.extension));
-        let mut document: DocumentHandle<Text> = handle
-            .into::<Text>()
-            .expect("text-shaped format yields a text handle");
+        let mut document: DocumentHandle<M> = handle
+            .into::<M>()
+            .unwrap_or_else(|_| panic!("{} resolves to the expected modality", self.extension));
 
-        let analyzer = build_analyzer().expect("analyzer builds");
-        let anonymizer = build_anonymizer();
+        let analyzer = build_analyzer::<M>().expect("analyzer builds");
+        let anonymizer = build_anonymizer::<M>();
 
         let en = Language::asserted(LanguageTag::parse("en").unwrap());
         let scope = Scope::new().with_language(en);
@@ -125,7 +146,7 @@ impl Fixture {
 
         let encoded = document.encode().expect("encode succeeds");
         let redacted =
-            String::from_utf8(encoded.as_bytes().to_vec()).expect("text codec re-encodes to UTF-8");
+            String::from_utf8(encoded.as_bytes().to_vec()).expect("codec re-encodes to UTF-8");
 
         self.write_artifact(&redacted);
         PipelineOutcome { entities, redacted }

@@ -6,12 +6,14 @@
 //! and an optional byte range within the cell for sub-cell entities.
 
 use std::cmp::Ordering;
+use std::ops::Range;
 
 use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use super::text::{TextData, TextReplacement};
+use super::text_backed::TextBacked;
 use super::{Modality, ModalityLocation};
 
 /// Cell-addressed location within tabular content.
@@ -180,6 +182,18 @@ impl Modality for Tabular {
     type Replacement = TextReplacement;
 
     const NAME: &'static str = "tabular";
+}
+
+impl TextBacked for Tabular {
+    fn locate(range: Range<usize>) -> TabularLocation {
+        // Chunk-local: only the intra-cell byte range is known here; the
+        // codec's lift fills the row/column from the chunk.
+        TabularLocation::new(0, 0).with_range(range.start, range.end)
+    }
+
+    fn span(location: &TabularLocation) -> Range<usize> {
+        location.start_offset.unwrap_or(0)..location.end_offset.unwrap_or(0)
+    }
 }
 
 #[cfg(test)]

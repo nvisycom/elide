@@ -2,7 +2,8 @@
 
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::modality::text::{Text, TextData, TextReplacement};
+use elide_core::modality::TextBacked;
+use elide_core::modality::text::{TextData, TextReplacement};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 
 /// Delete the matched span entirely.
@@ -13,7 +14,7 @@ use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Redact;
 
-impl Operator<Text> for Redact {
+impl<M: TextBacked> Operator<M> for Redact {
     fn id(&self) -> OperatorId {
         OperatorId::new("redact", "1.0.0")
     }
@@ -22,7 +23,7 @@ impl Operator<Text> for Redact {
         LeakProfile::Irrecoverable
     }
 
-    async fn anonymize(&self, _entity: &Entity<Text>, _data: &TextData) -> Result<TextReplacement> {
+    async fn anonymize(&self, _entity: &Entity<M>, _data: &TextData) -> Result<TextReplacement> {
         Ok(TextReplacement::Removed)
     }
 }

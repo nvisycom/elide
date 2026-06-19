@@ -110,3 +110,7 @@ required-features = ["codec-json", "mock"]
 [[test]]
 name = "e2e_html"
 required-features = ["codec-html", "mock"]
+
+[[test]]
+name = "e2e_csv"
+required-features = ["codec-csv", "mock"]

@@ -37,10 +37,12 @@ pub mod text;
 mod chunk;
 mod data_reader;
 mod data_writer;
+mod text_backed;
 
 pub use self::chunk::Chunk;
 pub use self::data_reader::{DataReader, StreamDataReader};
 pub use self::data_writer::DataWriter;
+pub use self::text_backed::TextBacked;
 
 /// Payload a recognizer inspects for a modality.
 ///

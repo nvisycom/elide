@@ -2,11 +2,11 @@
 //! label/value, and redacted-output checks (originals gone, tokens in).
 
 use elide::entity::{Entity, LabelRef};
-use elide::modality::text::Text;
+use elide::modality::Modality;
 
 /// Assert that some detected entity carries `label`. Fails with the full
 /// label list when missing.
-pub fn assert_label_present(entities: &[Entity<Text>], label: &LabelRef) {
+pub fn assert_label_present<M: Modality>(entities: &[Entity<M>], label: &LabelRef) {
     let found = entities.iter().any(|e| &e.label == label);
     assert!(
         found,

@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use elide_core::entity::provenance::{Event, PatternEvent};
 use elide_core::entity::{Entity, LabelRef};
-use elide_core::modality::text::{Text, TextLocation};
+use elide_core::modality::TextBacked;
 use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
 use regex::Regex;
 
@@ -51,12 +51,11 @@ pub(super) struct CompiledPattern {
 }
 
 impl CompiledPattern {
-    /// Emit an `Entity<Text>` for a regex match at `[start, end)`
-    /// in modality-local byte coordinates. The recognizer phase
-    /// lifts the location to absolute document coordinates after
-    /// dispatch.
-    pub(super) fn build_entity(&self, start: usize, end: usize) -> Entity<Text> {
-        let location = TextLocation::new(start, end);
+    /// Emit an `Entity<M>` for a regex match at `[start, end)` in
+    /// chunk-local byte coordinates. The recognizer phase lifts the
+    /// location to absolute document coordinates after dispatch.
+    pub(super) fn build_entity<M: TextBacked>(&self, start: usize, end: usize) -> Entity<M> {
+        let location = M::locate(start..end);
         let event = Event::pattern(
             "pattern",
             self.score,
@@ -110,13 +109,17 @@ pub(super) struct CompiledDictionary {
 }
 
 impl CompiledDictionary {
-    /// Emit an `Entity<Text>` for an Aho-Corasick hit at
-    /// `[start, end)` in modality-local byte coordinates. `score`
-    /// is the per-term confidence resolved at recognizer-build
-    /// time (the dictionary's `scoring` policy or per-term
-    /// override).
-    pub(super) fn build_entity(&self, score: Confidence, start: usize, end: usize) -> Entity<Text> {
-        let location = TextLocation::new(start, end);
+    /// Emit an `Entity<M>` for an Aho-Corasick hit at `[start, end)`
+    /// in chunk-local byte coordinates. `score` is the per-term
+    /// confidence resolved at recognizer-build time (the dictionary's
+    /// `scoring` policy or per-term override).
+    pub(super) fn build_entity<M: TextBacked>(
+        &self,
+        score: Confidence,
+        start: usize,
+        end: usize,
+    ) -> Entity<M> {
+        let location = M::locate(start..end);
         let event = Event::pattern(
             "pattern",
             score,

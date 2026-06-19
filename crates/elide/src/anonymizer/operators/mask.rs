@@ -3,7 +3,8 @@
 
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::modality::text::{Text, TextData, TextReplacement};
+use elide_core::modality::TextBacked;
+use elide_core::modality::text::{TextData, TextReplacement};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 
 /// Character-replacement masking operator.
@@ -78,7 +79,7 @@ impl Mask {
     }
 }
 
-impl Operator<Text> for Mask {
+impl<M: TextBacked> Operator<M> for Mask {
     fn id(&self) -> OperatorId {
         OperatorId::new("mask", "1.0.0")
     }
@@ -88,7 +89,7 @@ impl Operator<Text> for Mask {
         LeakProfile::Partial
     }
 
-    async fn anonymize(&self, _entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
+    async fn anonymize(&self, _entity: &Entity<M>, data: &TextData) -> Result<TextReplacement> {
         Ok(TextReplacement::substituted(self.render(data.as_str())))
     }
 }
