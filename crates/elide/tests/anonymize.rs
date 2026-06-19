@@ -5,7 +5,7 @@
 use elide::redaction::Anonymizer;
 use elide::redaction::operators::{Erase, Keep, Mask, Replace};
 use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
-use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
+use elide_core::entity::{Entity, EntityCoRef, Label, LabelCatalog, LabelRef};
 use elide_core::primitive::{Confidence, ConfidenceThreshold};
 
 mod fixtures;
@@ -72,6 +72,49 @@ async fn anonymize_replace_renders_label_and_value() {
         .collect::<Vec<_>>();
 
     assert_eq!(items[0].1, TextReplacement::substituted("<PERSON:Alice>"));
+}
+
+#[tokio::test]
+async fn anonymize_replace_threads_coref_through_template() {
+    //            012345678901234567890
+    let source = TextSource::new("Alice told Bob she left");
+    // Alice and "she" share a cluster; Bob is his own.
+    let alice = EntityCoRef::new("alice");
+    let entities = vec![
+        entity("PERSON", (0, 5)).with_coref(alice.clone()), // "Alice"
+        entity("PERSON", (11, 14)).with_coref(EntityCoRef::new("bob")), // "Bob"
+        entity("PERSON", (15, 18)).with_coref(alice),       // "she"
+    ];
+
+    let items = Anonymizer::<Text>::new()
+        .with_label(LabelRef::new("PERSON"), Replace::new("[{label}:{coref}]"))
+        .plan(&entities, &source)
+        .await
+        .unwrap()
+        .into_iter()
+        .collect::<Vec<_>>();
+
+    // Coreferent mentions render to the same token; Bob's is distinct.
+    assert_eq!(items[0].1, TextReplacement::substituted("[PERSON:alice]"));
+    assert_eq!(items[2].1, TextReplacement::substituted("[PERSON:alice]"));
+    assert_eq!(items[1].1, TextReplacement::substituted("[PERSON:bob]"));
+}
+
+#[tokio::test]
+async fn anonymize_replace_coref_empty_when_unset() {
+    let source = TextSource::new("name: Alice");
+    let entities = vec![entity("PERSON", (6, 11))]; // "Alice", no coref
+
+    let items = Anonymizer::<Text>::new()
+        .with_label(LabelRef::new("PERSON"), Replace::new("[{label}:{coref}]"))
+        .plan(&entities, &source)
+        .await
+        .unwrap()
+        .into_iter()
+        .collect::<Vec<_>>();
+
+    // Unset coref expands to empty.
+    assert_eq!(items[0].1, TextReplacement::substituted("[PERSON:]"));
 }
 
 #[tokio::test]
