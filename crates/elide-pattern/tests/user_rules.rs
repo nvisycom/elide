@@ -7,7 +7,7 @@
 //! entities.
 
 use elide_core::entity::builtins;
-use elide_core::modality::text::TextData;
+use elide_core::modality::text::{Text, TextData};
 use elide_core::recognition::{Recognizer, RecognizerContext, Scope};
 use elide_pattern::{Dictionary, PatternRecognizer, Regex, Term};
 
@@ -42,7 +42,7 @@ async fn user_toml_rules_load_and_detect() {
 
     let text = include_str!("../testdata/inputs/internal.txt");
     let data = TextData::new(text.to_owned());
-    let scope = Scope::new();
+    let scope = Scope::<Text>::new();
     let ctx = RecognizerContext::new(&scope);
     let entities = recognizer.recognize(&data, &ctx).await.expect("recognize");
 

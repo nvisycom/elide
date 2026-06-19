@@ -9,7 +9,7 @@
 //!   encoder-private address `A`), parser-agnostic.
 //! - [`MarkupHandler`]: the [`Handler`] machinery over a
 //!   `Vec<RedactableItem<A>>`: cumulative offsets, `read_next`, random
-//!   read, batch redact, and `lift_chunk`. It never inspects the address.
+//!   read, batch redact, and `lift`. It never inspects the address.
 //!   Re-serialization is delegated to a format-specific [`MarkupEncoder`],
 //!   which also chooses the [`Address`] type.
 //!
@@ -30,8 +30,6 @@ mod html_loader;
 mod xml_handler;
 #[cfg(feature = "xml")]
 mod xml_loader;
-
-use std::ops::Range;
 
 use elide_core::Result;
 use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
@@ -195,13 +193,13 @@ impl<E: MarkupEncoder> Handler<Text> for MarkupHandler<E> {
         }))
     }
 
-    fn lift_chunk(&self, chunk: &Chunk<Text>, value_range: Range<usize>) -> Option<TextLocation> {
+    fn lift(&self, chunk: &Chunk<Text>, local: TextLocation) -> Option<TextLocation> {
         // Items are byte-for-byte the recognizer's view, so lifting is an
-        // identity offset add against the chunk's start, bounded by its
-        // end.
+        // identity offset add of the chunk-local range against the chunk's
+        // start, bounded by its end.
         let base = chunk.location.start;
-        let start = base + value_range.start;
-        let end = base + value_range.end;
+        let start = base + local.start;
+        let end = base + local.end;
         if start > end || end > chunk.location.end {
             return None;
         }

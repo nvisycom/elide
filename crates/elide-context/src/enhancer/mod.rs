@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use elide_core::entity::provenance::Event;
 use elide_core::entity::{Entity, LabelRef};
-use elide_core::modality::text::Text;
+use elide_core::modality::TextBacked;
 
 use crate::io::Token;
 use crate::matching::KeywordMatcher;
@@ -127,7 +127,7 @@ impl Enhancer {
     /// double-dip.
     ///
     /// [`Confidence`]: elide_core::primitive::Confidence
-    pub fn enhance(&self, entities: &mut [Entity<Text>], ctx: &Context<'_>) {
+    pub fn enhance<M: TextBacked>(&self, entities: &mut [Entity<M>], ctx: &Context<'_>) {
         if self.rules.is_empty() {
             return;
         }
@@ -136,7 +136,7 @@ impl Enhancer {
         }
     }
 
-    fn enhance_one(&self, entity: &mut Entity<Text>, ctx: &Context<'_>) {
+    fn enhance_one<M: TextBacked>(&self, entity: &mut Entity<M>, ctx: &Context<'_>) {
         let Some(bucket) = self.rules.get(&entity.label) else {
             return;
         };
@@ -151,9 +151,17 @@ impl Enhancer {
         }
     }
 
-    fn apply_rule(&self, entity: &mut Entity<Text>, rule: &BoostRule, ctx: &Context<'_>) {
-        let start = entity.location.start;
-        let end = entity.location.end;
+    fn apply_rule<M: TextBacked>(
+        &self,
+        entity: &mut Entity<M>,
+        rule: &BoostRule,
+        ctx: &Context<'_>,
+    ) {
+        // The entity is still chunk-local here; its location spans a byte
+        // range of `ctx.text` (the chunk payload).
+        let span = M::span(&entity.location);
+        let start = span.start;
+        let end = span.end;
 
         // Prefer the token stream when the producer reached this
         // entity. Fall back to the word-segmented substring window

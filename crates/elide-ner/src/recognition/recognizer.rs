@@ -21,7 +21,8 @@ use std::sync::Arc;
 use derive_builder::Builder;
 use elide_core::entity::provenance::{Event, ModelEvent};
 use elide_core::entity::{Entity, LabelRef};
-use elide_core::modality::text::{Text, TextData, TextLocation};
+use elide_core::modality::TextBacked;
+use elide_core::modality::text::TextData;
 use elide_core::primitive::Confidence;
 use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
 use elide_core::{Error, Result};
@@ -89,7 +90,7 @@ impl NerRecognizer {
         &self.model
     }
 
-    fn build_entity(&self, span: &RawNerSpan, label: LabelRef) -> Entity<Text> {
+    fn build_entity<M: TextBacked>(&self, span: &RawNerSpan, label: LabelRef) -> Entity<M> {
         let raw_confidence = Confidence::clamped(span.score as f32);
         let confidence = if self.model.low_score_labels.contains(label.as_str()) {
             let demoted = f64::from(raw_confidence.get()) * self.model.low_score_multiplier;
@@ -97,7 +98,7 @@ impl NerRecognizer {
         } else {
             raw_confidence
         };
-        let location = TextLocation::new(span.offset.start, span.offset.end);
+        let location = M::locate(span.offset.start..span.offset.end);
         let reason = format!("recognizer `{}` identified {}", self.name, label.as_str());
         let event = Event::model(
             "ner",
@@ -149,7 +150,7 @@ impl NerRecognizerBuilder {
     }
 }
 
-impl Recognizer<Text> for NerRecognizer {
+impl<M: TextBacked> Recognizer<M> for NerRecognizer {
     fn id(&self) -> RecognizerId {
         RecognizerId::new(self.name.clone(), env!("CARGO_PKG_VERSION"))
     }
@@ -157,8 +158,8 @@ impl Recognizer<Text> for NerRecognizer {
     async fn recognize(
         &self,
         data: &TextData,
-        ctx: &RecognizerContext<'_, Text>,
-    ) -> Result<Vec<Entity<Text>>> {
+        ctx: &RecognizerContext<'_, M>,
+    ) -> Result<Vec<Entity<M>>> {
         let supported_borrowed: Vec<&str> =
             self.supported_labels.iter().map(LabelRef::as_str).collect();
         let labels = if supported_borrowed.is_empty() {
@@ -174,7 +175,7 @@ impl Recognizer<Text> for NerRecognizer {
         };
         let response = self.backend.recognize(request).await?;
 
-        let entities: Vec<Entity<Text>> = response
+        let entities: Vec<Entity<M>> = response
             .spans
             .iter()
             .filter(|s| !self.model.labels_to_ignore.contains(s.label.as_str()))
@@ -187,7 +188,7 @@ impl Recognizer<Text> for NerRecognizer {
                             || self.supported_labels.iter().any(|sl| sl == *name)
                     })
                     .cloned()
-                    .map(|name| self.build_entity(s, name))
+                    .map(|name| self.build_entity::<M>(s, name))
             })
             .collect();
         Ok(entities)
@@ -197,6 +198,7 @@ impl Recognizer<Text> for NerRecognizer {
 #[cfg(test)]
 mod tests {
     use elide_core::entity::builtins;
+    use elide_core::modality::text::Text;
     use elide_core::recognition::Scope;
 
     use super::*;
@@ -213,7 +215,7 @@ mod tests {
             .build()
             .expect("builder succeeds");
         let data = TextData::new("Alice Smith".to_owned());
-        let scope = Scope::new();
+        let scope = Scope::<Text>::new();
         let ctx = RecognizerContext::new(&scope);
         let out = rec.recognize(&data, &ctx).await.unwrap();
         assert!(out.is_empty());
@@ -227,7 +229,7 @@ mod tests {
             .build()
             .expect("builder succeeds");
         let data = TextData::new("Alice Smith".to_owned());
-        let scope = Scope::new();
+        let scope = Scope::<Text>::new();
         let ctx = RecognizerContext::new(&scope);
         let out = rec.recognize(&data, &ctx).await.unwrap();
         assert!(out.is_empty());

@@ -19,7 +19,8 @@
 
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::modality::text::{Text, TextData};
+use elide_core::modality::TextBacked;
+use elide_core::modality::text::TextData;
 use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
 
 use super::Tokens;
@@ -58,9 +59,9 @@ impl<R> ContextEnhanced<R> {
     }
 }
 
-impl<R> Recognizer<Text> for ContextEnhanced<R>
+impl<M: TextBacked, R> Recognizer<M> for ContextEnhanced<R>
 where
-    R: Recognizer<Text> + 'static,
+    R: Recognizer<M> + 'static,
 {
     fn id(&self) -> RecognizerId {
         self.inner.id()
@@ -69,8 +70,8 @@ where
     async fn recognize(
         &self,
         data: &TextData,
-        ctx: &RecognizerContext<'_, Text>,
-    ) -> Result<Vec<Entity<Text>>> {
+        ctx: &RecognizerContext<'_, M>,
+    ) -> Result<Vec<Entity<M>>> {
         let mut entities = self.inner.recognize(data, ctx).await?;
         if self.enhancer.is_empty() {
             return Ok(entities);

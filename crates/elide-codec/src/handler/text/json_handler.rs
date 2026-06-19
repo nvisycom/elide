@@ -14,8 +14,6 @@
 //! reduces the partial-leaf offset translation to a single per-leaf walk
 //! of its escape table.
 
-use std::ops::Range;
-
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
@@ -130,11 +128,14 @@ impl Handler<Text> for JsonHandler {
         Ok(None)
     }
 
-    fn lift_chunk(&self, chunk: &Chunk<Text>, value_range: Range<usize>) -> Option<TextLocation> {
+    fn lift(&self, chunk: &Chunk<Text>, local: TextLocation) -> Option<TextLocation> {
+        // `local` is a byte range into this leaf's *decoded* value. Walk
+        // the leaf's escape table to map each endpoint to its source byte
+        // offset (a `\"` / `\\` pair is 2 source bytes for 1 value byte).
         let (idx, leaf) = self.find_leaf(&chunk.location)?;
         let slot_start = self.offset_of(idx);
-        let source_start = value_to_source_offset(leaf, slot_start, value_range.start)?;
-        let source_end = value_to_source_offset(leaf, slot_start, value_range.end)?;
+        let source_start = value_to_source_offset(leaf, slot_start, local.start)?;
+        let source_end = value_to_source_offset(leaf, slot_start, local.end)?;
         Some(TextLocation {
             start: source_start,
             end: source_end,
@@ -819,7 +820,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lift_chunk_simple_string() -> Result<()> {
+    async fn lift_simple_string() -> Result<()> {
         let src = r#"{"email":"alice@example.com"}"#;
         let mut h = handler(src);
         let chunk = loop {
@@ -831,7 +832,7 @@ mod tests {
         let value_start = "alice@example.com".find("alice").unwrap();
         let value_end = value_start + "alice".len();
         let source_loc = h
-            .lift_chunk(&chunk, value_start..value_end)
+            .lift(&chunk, TextLocation::new(value_start, value_end))
             .expect("range is in bounds");
         let expected_start = src.find("alice").unwrap();
         assert_eq!(source_loc.start, expected_start);
@@ -840,7 +841,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lift_chunk_walks_escapes() -> Result<()> {
+    async fn lift_walks_escapes() -> Result<()> {
         // unescaped value: foo"bar; source: "foo\"bar"
         let src = r#"{"msg":"foo\"bar"}"#;
         let mut h = handler(src);
@@ -854,7 +855,7 @@ mod tests {
         let value_start = value.find("bar").unwrap();
         let value_end = value_start + "bar".len();
         let source_loc = h
-            .lift_chunk(&chunk, value_start..value_end)
+            .lift(&chunk, TextLocation::new(value_start, value_end))
             .expect("range is in bounds");
         let expected_start = src.find("bar").unwrap();
         assert_eq!(source_loc.start, expected_start);
@@ -863,7 +864,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lift_chunk_redact_roundtrip() -> Result<()> {
+    async fn lift_redact_roundtrip() -> Result<()> {
         let src = r#"{"msg":"foo\"bar"}"#;
         let mut h = handler(src);
         let chunk = loop {
@@ -876,7 +877,7 @@ mod tests {
         let value_start = value.find("bar").unwrap();
         let value_end = value_start + "bar".len();
         let source_loc = h
-            .lift_chunk(&chunk, value_start..value_end)
+            .lift(&chunk, TextLocation::new(value_start, value_end))
             .expect("range is in bounds");
         let mut rs = Redactions::new();
         rs.push(source_loc, TextReplacement::substituted("XXX"));

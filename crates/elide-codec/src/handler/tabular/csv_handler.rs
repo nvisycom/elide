@@ -7,8 +7,6 @@
 //! tabular: a `(row, column)` address plus an optional intra-cell byte
 //! range.
 
-use std::ops::Range;
-
 use elide_core::modality::tabular::{Tabular, TabularLocation};
 use elide_core::modality::text::{TextData, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
@@ -203,18 +201,19 @@ impl Handler<Tabular> for CsvHandler {
         }
     }
 
-    fn lift_chunk(
-        &self,
-        chunk: &Chunk<Tabular>,
-        value_range: Range<usize>,
-    ) -> Option<TabularLocation> {
+    fn lift(&self, chunk: &Chunk<Tabular>, local: TabularLocation) -> Option<TabularLocation> {
+        // `local` carries the chunk-local intra-cell byte range in its
+        // offsets (its row/column are placeholders); a missing range means
+        // the whole cell. Re-anchor onto the chunk's real cell coordinates.
         let cell = self.cell_at(chunk.location.row_index, chunk.location.column_index)?;
-        if value_range.start > value_range.end || value_range.end > cell.len() {
+        let start = local.start_offset.unwrap_or(0);
+        let end = local.end_offset.unwrap_or(cell.len());
+        if start > end || end > cell.len() {
             return None;
         }
         let mut location =
             TabularLocation::new(chunk.location.row_index, chunk.location.column_index)
-                .with_range(value_range.start, value_range.end);
+                .with_range(start, end);
         if let Some(name) = &chunk.location.column_name {
             location = location.with_column_name(name.clone());
         }
@@ -295,17 +294,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lift_chunk_maps_offsets_into_the_cell() {
+    async fn lift_maps_offsets_into_the_cell() {
         let mut h = load("name\nAlice Carter\n").await;
         let _hdr = h.read_next().await.unwrap().unwrap();
         let cell = h.read_next().await.unwrap().unwrap();
-        let lifted = h.lift_chunk(&cell, 6..12).expect("in bounds");
+        // Chunk-local: row/col are placeholders, offsets carry the range.
+        let local = TabularLocation::new(0, 0).with_range(6, 12);
+        let lifted = h.lift(&cell, local).expect("in bounds");
         assert_eq!(lifted.row_index, 1);
         assert_eq!(lifted.column_index, 0);
         assert_eq!(lifted.start_offset, Some(6));
         assert_eq!(lifted.end_offset, Some(12));
         // Out-of-bounds range lifts to nothing.
-        assert!(h.lift_chunk(&cell, 0..99).is_none());
+        let oob = TabularLocation::new(0, 0).with_range(0, 99);
+        assert!(h.lift(&cell, oob).is_none());
     }
 
     #[tokio::test]
