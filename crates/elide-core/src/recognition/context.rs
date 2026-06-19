@@ -6,7 +6,8 @@ use uuid::Uuid;
 
 use crate::modality::Modality;
 use crate::primitive::{CountryCode, Language, LanguageTag, Languages};
-use crate::recognition::{Artifacts, Hint, Scope};
+use crate::recognition::annotation::{Exclusion, Inclusion};
+use crate::recognition::{Artifacts, Scope};
 
 /// Per-payload context handed to a [`Recognizer`].
 ///
@@ -17,9 +18,10 @@ use crate::recognition::{Artifacts, Hint, Scope};
 /// Enrichers write into it; recognizers read it. The analyzer constructs
 /// a fresh one per payload, so working state never leaks between payloads.
 ///
-/// Query the call's languages, jurisdictions, labels, and hints through
-/// the methods here rather than reaching into the scope directly: they
-/// fold the caller's assertions together with what enrichers detected.
+/// Query the call's languages, jurisdictions, labels, inclusions, and
+/// exclusions through the methods here rather than reaching into the
+/// scope directly: they fold the caller's assertions together with what
+/// enrichers detected.
 ///
 /// [`Recognizer`]: super::Recognizer
 /// [`Scope`]: super::Scope
@@ -75,10 +77,16 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
         self.scope
     }
 
-    /// Caller-asserted annotation [`Hint`]s for this analysis.
+    /// Caller-asserted [`Inclusion`] regions for this analysis.
     #[must_use]
-    pub fn hints(&self) -> &[Hint<M>] {
-        &self.scope.hints
+    pub fn inclusions(&self) -> &[Inclusion<M>] {
+        &self.scope.inclusions
+    }
+
+    /// Caller-asserted [`Exclusion`] regions for this analysis.
+    #[must_use]
+    pub fn exclusions(&self) -> &[Exclusion<M>] {
+        &self.scope.exclusions
     }
 
     /// Caller-asserted document-level labels for this analysis.

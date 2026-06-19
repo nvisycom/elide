@@ -16,7 +16,8 @@ use std::sync::Arc;
 
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::modality::{Modality, StreamDataReader};
+use elide_core::modality::{Modality, ModalityLocation, StreamDataReader};
+use elide_core::recognition::annotation::Exclusion;
 use elide_core::recognition::{Enricher, Recognizer, RecognizerContext, Scope};
 use futures::future;
 
@@ -110,13 +111,35 @@ impl<M: Modality> Analyzer<M> {
             enricher.enrich_boxed(&data, ctx).await?;
         }
         let entities = self.recognize(&data, ctx).await?;
-        Ok(self.pipeline.run(entities))
+        let reduced = self.pipeline.run(entities);
+        Ok(Self::apply_exclusions(reduced, ctx.exclusions()))
+    }
+
+    /// Drop every entity whose location overlaps a caller [`Exclusion`].
+    ///
+    /// Runs after deduplication so it culls the reconciled set, not
+    /// per-recognizer duplicates. A no-op when no exclusions are asserted.
+    ///
+    /// [`Exclusion`]: elide_core::recognition::annotation::Exclusion
+    fn apply_exclusions(entities: Vec<Entity<M>>, exclusions: &[Exclusion<M>]) -> Vec<Entity<M>> {
+        if exclusions.is_empty() {
+            return entities;
+        }
+        entities
+            .into_iter()
+            .filter(|entity| {
+                !exclusions
+                    .iter()
+                    .any(|exclusion| entity.location.overlaps(&exclusion.location))
+            })
+            .collect()
     }
 
     /// Analyze a single in-memory payload in the given scope.
     ///
     /// Runs the full analysis pipeline over `data`, with `scope` supplying
-    /// the caller's assertions (languages, jurisdictions, labels, hints).
+    /// the caller's assertions (languages, jurisdictions, labels,
+    /// inclusions, exclusions).
     /// Use [`analyze_stream`] for an I/O-backed source that yields many
     /// chunks.
     ///

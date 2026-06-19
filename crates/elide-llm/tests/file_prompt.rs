@@ -13,7 +13,8 @@ use elide_core::entity::{LabelRef, builtins};
 use elide_core::modality::image::{Image, ImageData, ImageLocation};
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::primitive::{BoundingBox, Dimensions, Point};
-use elide_core::recognition::{Hint, RecognizerContext, Scope};
+use elide_core::recognition::annotation::Inclusion;
+use elide_core::recognition::{RecognizerContext, Scope};
 use elide_llm::backend::LlmResponse;
 use elide_llm::{FilePrompt, Prompt};
 const NER_TOML: &str = include_str!("../testdata/prompts/ner.toml");
@@ -28,13 +29,13 @@ fn text_prompt_renders_template_and_lifts_entities() {
     let alice_start = body.find("Alice Carter").expect("alice substring");
     let alice_end = alice_start + "Alice Carter".len();
 
-    let hint = Hint::<Text>::new(TextLocation::new(alice_start, alice_end))
+    let inclusion = Inclusion::<Text>::new(TextLocation::new(alice_start, alice_end))
         .with_name("uploader-alice")
         .with_label(builtins::PERSON_NAME.to_ref());
 
     let data = TextData::new(body);
     let scope = Scope::<Text>::new()
-        .with_hints(vec![hint])
+        .with_inclusions(vec![inclusion])
         .with_labels(vec!["medical".to_owned(), "gdpr-request".to_owned()]);
     let ctx = RecognizerContext::new(&scope);
 
@@ -102,7 +103,7 @@ fn image_prompt_renders_template_and_lifts_entities() {
     let bytes = b"\x89PNG\r\n\x1a\nfake-image-bytes".to_vec();
     let dims = Dimensions::new(640, 480);
 
-    let hint = Hint::<Image>::new(ImageLocation::new(BoundingBox::from_origin_size(
+    let inclusion = Inclusion::<Image>::new(ImageLocation::new(BoundingBox::from_origin_size(
         Point::new(10.0, 20.0),
         100.0,
         50.0,
@@ -112,7 +113,7 @@ fn image_prompt_renders_template_and_lifts_entities() {
 
     let data = ImageData::new(bytes.clone(), dims);
     let scope = Scope::<Image>::new()
-        .with_hints(vec![hint])
+        .with_inclusions(vec![inclusion])
         .with_labels(vec!["badge".to_owned()]);
     let ctx = RecognizerContext::new(&scope);
 

@@ -41,7 +41,7 @@ pub struct DefaultPrompt;
 
 impl Prompt<Text> for DefaultPrompt {
     fn build(&self, data: &TextData, ctx: &RecognizerContext<'_, Text>) -> String {
-        TextPromptBuilder::new(data.text.as_str(), ctx.hints(), ctx.labels()).build()
+        TextPromptBuilder::new(data.text.as_str(), ctx.inclusions(), ctx.labels()).build()
     }
 
     fn schema(&self) -> Option<&Schema> {
@@ -64,7 +64,7 @@ impl Prompt<Text> for DefaultPrompt {
 impl Prompt<Image> for DefaultPrompt {
     fn build(&self, data: &ImageData, ctx: &RecognizerContext<'_, Image>) -> String {
         let image_b64 = STANDARD.encode(data.bytes.as_ref());
-        VlmPromptBuilder::new(ctx.hints(), ctx.labels()).build(&image_b64)
+        VlmPromptBuilder::new(ctx.inclusions(), ctx.labels()).build(&image_b64)
     }
 
     fn schema(&self) -> Option<&Schema> {

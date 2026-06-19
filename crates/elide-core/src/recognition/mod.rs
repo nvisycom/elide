@@ -8,10 +8,10 @@
 //!
 //! [`Event`]: crate::entity::provenance::Event
 
+pub mod annotation;
 mod artifacts;
 mod context;
 mod enricher;
-mod hint;
 mod label;
 mod scope;
 
@@ -25,7 +25,6 @@ use serde::{Deserialize, Serialize};
 pub use self::artifacts::Artifacts;
 pub use self::context::RecognizerContext;
 pub use self::enricher::Enricher;
-pub use self::hint::Hint;
 pub use self::label::LabelMap;
 pub use self::scope::Scope;
 use crate::entity::Entity;

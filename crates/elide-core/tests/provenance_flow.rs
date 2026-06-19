@@ -233,21 +233,37 @@ fn recognizer_context_scopes_by_language_and_country() {
 }
 
 #[test]
-fn recognizer_context_carries_hints() {
+fn recognizer_context_carries_annotations() {
     use elide_core::entity::LabelRef;
     use elide_core::modality::text::TextLocation;
-    use elide_core::recognition::{Hint, RecognizerContext, Scope};
+    use elide_core::primitive::Confidence;
+    use elide_core::recognition::annotation::{Exclusion, Inclusion};
+    use elide_core::recognition::{RecognizerContext, Scope};
 
-    let hint = Hint::new(TextLocation::new(0, 5))
+    let inclusion = Inclusion::new(TextLocation::new(0, 5))
         .with_name("uploaded selection")
-        .with_label(LabelRef::new("PERSON"));
-    let scope: Scope<Text> = Scope::new().with_hints(vec![hint]);
+        .with_label(LabelRef::new("PERSON"))
+        .with_confidence(Confidence::new(0.9).unwrap());
+    let exclusion = Exclusion::new(TextLocation::new(10, 20));
+    let scope: Scope<Text> = Scope::new()
+        .with_inclusions(vec![inclusion])
+        .with_exclusions(vec![exclusion]);
     let ctx = RecognizerContext::new(&scope);
 
-    assert_eq!(ctx.hints().len(), 1);
-    assert_eq!(ctx.hints()[0].location, TextLocation::new(0, 5));
-    assert_eq!(ctx.hints()[0].name.as_deref(), Some("uploaded selection"));
-    assert_eq!(ctx.hints()[0].label, Some(LabelRef::new("PERSON")));
+    assert_eq!(ctx.inclusions().len(), 1);
+    assert_eq!(ctx.inclusions()[0].location, TextLocation::new(0, 5));
+    assert_eq!(
+        ctx.inclusions()[0].name.as_deref(),
+        Some("uploaded selection")
+    );
+    assert_eq!(ctx.inclusions()[0].label, Some(LabelRef::new("PERSON")));
+    assert_eq!(
+        ctx.inclusions()[0].confidence,
+        Some(Confidence::new(0.9).unwrap())
+    );
+
+    assert_eq!(ctx.exclusions().len(), 1);
+    assert_eq!(ctx.exclusions()[0].location, TextLocation::new(10, 20));
 }
 
 #[test]

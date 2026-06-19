@@ -206,7 +206,7 @@ impl Prompt<Text> for FilePrompt<Text> {
     fn build(&self, data: &TextData, ctx: &RecognizerContext<'_, Text>) -> String {
         let text = data.text.as_str();
         let hints: Vec<_> = ctx
-            .hints()
+            .inclusions()
             .iter()
             .map(|h| {
                 let value = value_at(text, h.location.start, h.location.end);
@@ -256,7 +256,7 @@ impl Prompt<Image> for FilePrompt<Image> {
     fn build(&self, data: &ImageData, ctx: &RecognizerContext<'_, Image>) -> String {
         let image_b64 = STANDARD.encode(data.bytes.as_ref());
         let hints: Vec<_> = ctx
-            .hints()
+            .inclusions()
             .iter()
             .map(|h| {
                 let bbox = &h.location.bounding_box;

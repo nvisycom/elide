@@ -5,17 +5,17 @@
 //! [`Prompt<Image>`]: super::Prompt
 
 use elide_core::modality::image::Image;
-use elide_core::recognition::Hint;
+use elide_core::recognition::annotation::Inclusion;
 
 /// Builds user prompts for the VLM detect pass.
 pub(super) struct VlmPromptBuilder<'a> {
-    hints: &'a [Hint<Image>],
+    inclusions: &'a [Inclusion<Image>],
     labels: &'a [String],
 }
 
 impl<'a> VlmPromptBuilder<'a> {
-    pub fn new(hints: &'a [Hint<Image>], labels: &'a [String]) -> Self {
-        Self { hints, labels }
+    pub fn new(inclusions: &'a [Inclusion<Image>], labels: &'a [String]) -> Self {
+        Self { inclusions, labels }
     }
 
     pub fn build(&self, image_b64: &str) -> String {
@@ -33,13 +33,13 @@ impl<'a> VlmPromptBuilder<'a> {
             ));
         }
 
-        if !self.hints.is_empty() {
+        if !self.inclusions.is_empty() {
             prompt.push_str(
                 "\n\nThe uploader marked these regions as likely sensitive. \
                  Confirm or relocate each via your detections; ignore those you \
                  disagree with. Hints:",
             );
-            for (i, h) in self.hints.iter().enumerate() {
+            for (i, h) in self.inclusions.iter().enumerate() {
                 let bbox = &h.location.bounding_box;
                 let kind = h
                     .label
