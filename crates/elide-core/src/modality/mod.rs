@@ -13,7 +13,7 @@
 //! available for serialization and logging.
 //!
 //! The core defines the traits and ships [`text`] unconditionally, with
-//! [`image`], [`audio`], and [`tabular`] behind their own features so a
+//! `image`, `audio`, and `tabular` behind their own features so a
 //! text-only consumer doesn't pay for them. Each modality defines its
 //! marker type, its data/location/replacement types, and the `impl
 //! Modality` that ties them together (tabular reuses the text payload and
