@@ -19,6 +19,8 @@ homepage = { workspace = true }
 documentation = { workspace = true }
 
 [features]
+## No provider on by default: enable one of the provider features (or
+## `mock`) to obtain a usable backend.
 default = []
 
 ## Enable OpenAI GPT completion provider.

@@ -23,14 +23,24 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = []
+## The recognizer crates most pipelines use: pattern, NER, and LLM. Set
+## `default-features = false` to drop them and opt into only what you need
+## (e.g. `codec`, `serde`).
+default = ["pattern", "ner", "llm"]
 
-## Re-export the pattern recognizer crate as `elide::pattern`.
+## Derive `serde::{Serialize, Deserialize}` on the re-exported core
+## domain types. Recognizer crates (`pattern`/`ner`/`llm`) need serde
+## structurally and pull it in regardless; `codec` forwards it when both
+## are enabled.
+serde = ["elide-core/serde", "elide-codec?/serde"]
+
+## Re-export the pattern crate as `elide::recognition::pattern`.
 pattern = ["dep:elide-pattern"]
-## Re-export the NER crate as `elide::ner`.
+## Re-export the NER crate as `elide::recognition::ner`.
 ner = ["dep:elide-ner"]
-## Re-export the LLM recognizer crate as `elide::llm`.
+## Re-export the LLM crate as `elide::recognition::llm`.
 llm = ["dep:elide-llm"]
+
 ## Re-export the codec crate as `elide::codec`.
 codec = ["dep:elide-codec"]
 ## Ship the no-op mock backends in the re-exported `ner`/`llm` crates.

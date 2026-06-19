@@ -23,10 +23,15 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-# No formats are built in by default; opt into the ones you need (or
-# the `text` umbrella). The registry's `with_builtin` only wires up the
-# formats whose features are enabled.
-default = ["text"]
+## Only the plain-text format. Opt into more individually (`json`,
+## `html`, `xml`) or take the `text` umbrella for all of them. The
+## registry's `with_builtin` wires up only enabled formats.
+default = ["txt"]
+
+## Derive `serde::{Serialize, Deserialize}` on the re-exported core
+## domain types. The codec itself does not use serde; this only forwards
+## to `elide-core` for consumers who serialize the entities a codec reads.
+serde = ["elide-core/serde"]
 
 ## Every text-shaped format currently shipped.
 text = ["txt", "json", "html", "xml"]
@@ -41,7 +46,7 @@ xml = ["dep:quick-xml"]
 
 [dependencies]
 # Internal crates
-elide-core = { workspace = true, features = ["serde"] }
+elide-core = { workspace = true, features = [] }
 
 # (De)serialization (JSON handler, gated behind `json`)
 serde_json = { workspace = true, features = [], optional = true }
