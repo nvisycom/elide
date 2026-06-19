@@ -5,7 +5,7 @@ use std::ops::Sub;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::Polygon;
+use super::{Dimensions, PixelRegion, Polygon};
 
 /// Point in a 2-D coordinate space.
 ///
@@ -85,6 +85,29 @@ impl BoundingBox {
         }
     }
 
+    /// Clamp this box to integer pixels lying inside an image of `dims`.
+    ///
+    /// Floors the float corners to pixel indices, drops any part that
+    /// falls outside `[0, width) x [0, height)`, and returns the
+    /// resulting [`PixelRegion`]. Returns `None` when nothing of the box
+    /// lands inside the image (its origin is past an edge, or it clamps to
+    /// zero area), so a caller can `let region = bbox.to_pixels(dims)?;`
+    /// and skip empty regions.
+    #[must_use]
+    pub fn to_pixels(&self, dims: Dimensions) -> Option<PixelRegion> {
+        let x = self.min.x.max(0.0) as u32;
+        let y = self.min.y.max(0.0) as u32;
+        if x >= dims.width || y >= dims.height {
+            return None;
+        }
+        let w = (self.width().max(0.0) as u32).min(dims.width - x);
+        let h = (self.height().max(0.0) as u32).min(dims.height - y);
+        if w == 0 || h == 0 {
+            return None;
+        }
+        Some(PixelRegion::new(x, y, w, h))
+    }
+
     /// Box width (`max.x - min.x`).
     pub fn width(&self) -> f64 {
         self.max.x - self.min.x
@@ -148,5 +171,35 @@ mod tests {
         // Touching edge only: not an overlap.
         let c = BoundingBox::from_origin_size(Point::new(10.0, 0.0), 5.0, 5.0);
         assert!(!a.overlaps(&c));
+    }
+
+    #[test]
+    fn to_pixels_clamps_inside_the_image() {
+        let dims = Dimensions::new(100, 80);
+        // A box partly past the right/bottom edge clamps to what fits.
+        let b = BoundingBox::from_origin_size(Point::new(90.0, 70.0), 50.0, 50.0);
+        let region = b.to_pixels(dims).expect("partly inside");
+        assert_eq!((region.x, region.y), (90, 70));
+        assert_eq!((region.width, region.height), (10, 10));
+        assert_eq!(region.right(), 100);
+        assert_eq!(region.bottom(), 80);
+    }
+
+    #[test]
+    fn to_pixels_rejects_fully_outside_or_empty() {
+        let dims = Dimensions::new(100, 80);
+        // Origin past the edge: nothing inside.
+        let outside = BoundingBox::from_origin_size(Point::new(100.0, 0.0), 10.0, 10.0);
+        assert_eq!(outside.to_pixels(dims), None);
+        // Zero-size box clamps to empty.
+        let empty = BoundingBox::from_origin_size(Point::new(10.0, 10.0), 0.0, 0.0);
+        assert_eq!(empty.to_pixels(dims), None);
+        // Negative origin floors to 0 and still yields the in-image part.
+        let neg = BoundingBox::from_origin_size(Point::new(-5.0, -5.0), 10.0, 10.0);
+        let region = neg.to_pixels(dims).expect("partly inside");
+        assert_eq!(
+            (region.x, region.y, region.width, region.height),
+            (0, 0, 10, 10)
+        );
     }
 }

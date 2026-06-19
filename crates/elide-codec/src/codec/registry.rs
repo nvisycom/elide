@@ -55,6 +55,20 @@ impl FormatRegistry {
         registry.add_format(crate::handler::html_format());
         #[cfg(feature = "xml")]
         registry.add_format(crate::handler::xml_format());
+        #[cfg(feature = "png")]
+        registry.add_format(crate::handler::png_format());
+        #[cfg(feature = "jpeg")]
+        registry.add_format(crate::handler::jpeg_format());
+        #[cfg(feature = "tiff")]
+        registry.add_format(crate::handler::tiff_format());
+        #[cfg(feature = "wav")]
+        registry.add_format(crate::handler::wav_format());
+        #[cfg(feature = "mp3")]
+        registry.add_format(crate::handler::mp3_format());
+        #[cfg(feature = "csv")]
+        registry.add_format(crate::handler::csv_format());
+        #[cfg(feature = "xlsx")]
+        registry.add_format(crate::handler::xlsx_format());
         registry
     }
 

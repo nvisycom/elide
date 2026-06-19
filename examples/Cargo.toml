@@ -20,7 +20,7 @@ path = "src/main.rs"
 
 [dependencies]
 # Internal crates
-elide = { workspace = true, features = ["pattern", "ner", "llm", "codec", "mock"] }
+elide = { workspace = true, features = ["codec", "mock"] }
 
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

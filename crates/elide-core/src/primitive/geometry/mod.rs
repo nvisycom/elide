@@ -10,10 +10,12 @@
 
 mod bounding_box;
 mod dimensions;
+mod pixel_region;
 mod polygon;
 mod unit_bounding_box;
 
 pub use self::bounding_box::{BoundingBox, Point};
 pub use self::dimensions::Dimensions;
+pub use self::pixel_region::PixelRegion;
 pub use self::polygon::Polygon;
 pub use self::unit_bounding_box::UnitBoundingBox;

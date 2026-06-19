@@ -23,28 +23,72 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-# No formats are built in by default; opt into the ones you need (or
-# the `text` umbrella). The registry's `with_builtin` only wires up the
-# formats whose features are enabled.
-default = ["text"]
+## Only the plain-text format. Opt into more individually (`json`,
+## `html`, `xml`) or take the `text` umbrella for all of them. The
+## registry's `with_builtin` wires up only enabled formats.
+default = ["txt"]
+
+## Derive `serde::{Serialize, Deserialize}` on the re-exported core
+## domain types. The codec itself does not use serde; this only forwards
+## to `elide-core` for consumers who serialize the entities a codec reads.
+serde = ["elide-core/serde"]
 
 ## Every text-shaped format currently shipped.
 text = ["txt", "json", "html", "xml"]
 
 ## Individual text formats.
-txt = []
-json = ["dep:serde_json"]
-## HTML: DOM-aware handler via `scraper`.
-html = ["dep:scraper", "dep:ego-tree"]
-## XML: verbatim span-splicing handler via `quick-xml`.
-xml = ["dep:quick-xml"]
+txt = ["internal_text"]
+json = ["internal_text", "dep:serde_json"]
+html = ["internal_text", "dep:scraper", "dep:ego-tree"]
+xml = ["internal_text", "dep:quick-xml"]
+
+## Every image format currently shipped.
+image = ["png", "jpeg", "tiff"]
+
+## Individual image formats (all share the `image` + `imageproc` stack
+## pulled in by `internal_image`).
+png = ["internal_image"]
+jpeg = ["internal_image"]
+tiff = ["internal_image"]
+
+## Every audio format currently shipped.
+audio = ["wav", "mp3"]
+
+## WAV: `hound` reads and re-writes samples; `symphonia` probes the
+## clip duration.
+wav = ["internal_audio", "dep:hound", "dep:symphonia"]
+## MP3: `symphonia` probes duration and decodes to PCM; `mp3lame-encoder`
+## (LGPL-3.0 via libmp3lame, needs a C toolchain at build) re-encodes for
+## the redaction round-trip.
+mp3 = ["internal_audio", "dep:symphonia", "dep:mp3lame-encoder"]
+
+## Every tabular format currently shipped.
+tabular = ["csv", "xlsx"]
+
+## CSV: `csv` parses and re-writes rows. Cells hold text and redact like
+## text, so this pulls the shared text-redaction helper.
+csv = ["internal_tabular", "dep:csv"]
+## XLSX: a stub today (decode returns an empty handle); a parser dep will
+## be wired in when real spreadsheet extraction lands.
+xlsx = ["internal_tabular"]
+
+# Internal markers: set automatically by any format feature above. Code
+# uses `#[cfg(feature = "internal_image")]` to mean "any image format is
+# enabled", the gate for the shared per-modality infrastructure. Not meant
+# to be enabled directly. `internal_tabular` also pulls `internal_text`
+# because tabular cells reuse the text-redaction helper.
+internal_image = ["elide-core/image", "dep:image", "dep:imageproc"]
+internal_audio = ["elide-core/audio"]
+internal_tabular = ["elide-core/tabular", "internal_text"]
+internal_text = []
 
 [dependencies]
 # Internal crates
-elide-core = { workspace = true, features = ["serde"] }
+elide-core = { workspace = true, features = [] }
 
-# (De)serialization (JSON handler, gated behind `json`)
+# (De)serialization (JSON handler behind `json`, CSV behind `csv`)
 serde_json = { workspace = true, features = [], optional = true }
+csv = { workspace = true, features = [], optional = true }
 
 # Primitive datatypes
 bytes = { workspace = true, features = [] }
@@ -60,6 +104,15 @@ tracing = { workspace = true, features = [] }
 scraper = { workspace = true, features = [], optional = true }
 ego-tree = { workspace = true, features = [], optional = true }
 quick-xml = { workspace = true, features = [], optional = true }
+
+# Image processing (gated behind the image-format features)
+image = { workspace = true, features = [], optional = true }
+imageproc = { workspace = true, features = [], optional = true }
+
+# Audio processing (gated behind the audio-format features)
+hound = { workspace = true, features = [], optional = true }
+symphonia = { workspace = true, features = [], optional = true }
+mp3lame-encoder = { workspace = true, features = [], optional = true }
 
 [dev-dependencies]
 # Async runtime & parallelism

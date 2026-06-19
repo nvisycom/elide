@@ -23,6 +23,8 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
+## No features on by default: the core domain model is serde-free and
+## ships only the `text` modality unless a feature opts in more.
 default = []
 
 ## The `image` modality (`Image`, `ImageData`, `ImageLocation`,

@@ -19,6 +19,8 @@ homepage = { workspace = true }
 documentation = { workspace = true }
 
 [features]
+## No features on by default: the NER traits ship bare. Enable `lingua`
+## for language detection, or `mock` for the no-op backend.
 default = []
 
 ## Language detection via the `lingua` crate.
