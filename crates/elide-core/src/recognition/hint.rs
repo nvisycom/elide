@@ -23,9 +23,11 @@ use serde::{Deserialize, Serialize};
 use crate::entity::LabelRef;
 use crate::modality::Modality;
 
-/// A caller-supplied annotation region in modality-native coordinates (a
+/// Caller-supplied annotation region in modality-native coordinates.
+///
+/// The location is the modality's own coordinate type: a
 /// [`Text`](crate::modality::text::Text) byte range, an image bounding
-/// box, and so on).
+/// box, and so on.
 #[derive(Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
@@ -56,8 +58,7 @@ impl<M: Modality> Clone for Hint<M> {
 }
 
 impl<M: Modality> Hint<M> {
-    /// A hint with only the location set; name and label default to
-    /// `None`.
+    /// Hint with only the location set; name and label default to `None`.
     #[must_use]
     pub fn new(location: M::Location) -> Self {
         Self {

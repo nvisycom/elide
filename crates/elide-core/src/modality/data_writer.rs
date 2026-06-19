@@ -1,4 +1,4 @@
-//! The [`DataWriter`] trait — applying a batch of replacements.
+//! [`DataWriter`] trait: applying a batch of replacements.
 
 use std::future::Future;
 
@@ -12,8 +12,8 @@ use crate::redaction::Redactions;
 /// mutable content holder (a text buffer being rewritten, an image being
 /// painted over), it takes the `(location, replacement)` pairs an
 /// anonymizer produced and applies them into the document. This
-/// completes the redaction round-trip — read the values, compute
-/// replacements, write them — while keeping operators free of format
+/// completes the redaction round-trip (read the values, compute
+/// replacements, write them) while keeping operators free of format
 /// knowledge: the writer owns the *how* of applying each modality's
 /// replacements.
 ///

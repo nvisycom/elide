@@ -40,8 +40,8 @@ use crate::backend::LlmResponse;
 pub struct DefaultPrompt;
 
 impl Prompt<Text> for DefaultPrompt {
-    fn build(&self, data: &TextData, ctx: &RecognizerContext<Text>) -> String {
-        TextPromptBuilder::new(data.text.as_str(), &ctx.hints, &ctx.labels).build()
+    fn build(&self, data: &TextData, ctx: &RecognizerContext<'_, Text>) -> String {
+        TextPromptBuilder::new(data.text.as_str(), ctx.hints(), ctx.labels()).build()
     }
 
     fn schema(&self) -> Option<&Schema> {
@@ -52,7 +52,7 @@ impl Prompt<Text> for DefaultPrompt {
         &self,
         response: &LlmResponse,
         data: &TextData,
-        _ctx: &RecognizerContext<Text>,
+        _ctx: &RecognizerContext<'_, Text>,
     ) -> Vec<Entity<Text>> {
         let Ok(parsed): Result<TextCandidates, _> = parse_json(&response.text) else {
             return Vec::new();
@@ -62,9 +62,9 @@ impl Prompt<Text> for DefaultPrompt {
 }
 
 impl Prompt<Image> for DefaultPrompt {
-    fn build(&self, data: &ImageData, ctx: &RecognizerContext<Image>) -> String {
+    fn build(&self, data: &ImageData, ctx: &RecognizerContext<'_, Image>) -> String {
         let image_b64 = STANDARD.encode(data.bytes.as_ref());
-        VlmPromptBuilder::new(&ctx.hints, &ctx.labels).build(&image_b64)
+        VlmPromptBuilder::new(ctx.hints(), ctx.labels()).build(&image_b64)
     }
 
     fn schema(&self) -> Option<&Schema> {
@@ -75,7 +75,7 @@ impl Prompt<Image> for DefaultPrompt {
         &self,
         response: &LlmResponse,
         data: &ImageData,
-        _ctx: &RecognizerContext<Image>,
+        _ctx: &RecognizerContext<'_, Image>,
     ) -> Vec<Entity<Image>> {
         let Ok(parsed): Result<VlmCandidates, _> = parse_json(&response.text) else {
             return Vec::new();

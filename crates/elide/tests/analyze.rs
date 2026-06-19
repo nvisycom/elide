@@ -11,7 +11,7 @@ use elide_core::Result;
 use elide_core::entity::provenance::{Event, EventKind, PatternEvent, Provenance};
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::primitive::{Confidence, ConfidenceThreshold};
-use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
+use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId, Scope};
 
 mod fixtures;
 use fixtures::{Text, TextData, TextLocation};
@@ -45,7 +45,7 @@ impl Recognizer<Text> for Fixed {
     async fn recognize(
         &self,
         _data: &TextData,
-        _ctx: &RecognizerContext<Text>,
+        _ctx: &RecognizerContext<'_, Text>,
     ) -> Result<Vec<Entity<Text>>> {
         Ok(self.0.clone())
     }
@@ -70,7 +70,7 @@ async fn analyze_fuses_resolves_filters() {
         .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE));
 
     let mut entities = analyzer
-        .analyze(TextData::new(""), &RecognizerContext::new())
+        .analyze(TextData::new(""), &Scope::new())
         .await
         .unwrap();
 

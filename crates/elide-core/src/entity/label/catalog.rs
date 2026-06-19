@@ -1,4 +1,4 @@
-//! The [`LabelCatalog`] registry.
+//! [`LabelCatalog`] registry.
 
 use std::collections::HashMap;
 
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{Label, LabelRef};
 
-/// A registry of [`Label`]s, keyed by name.
+/// Registry of [`Label`]s, keyed by name.
 ///
 /// Holds the authoritative definitions (names + descriptions) for a run.
 /// A [`LabelRef`] carried on a detection or entity is resolved back to
@@ -21,12 +21,12 @@ use super::{Label, LabelRef};
 pub struct LabelCatalog(HashMap<HipStr<'static>, Label>);
 
 impl LabelCatalog {
-    /// An empty catalog.
+    /// Empty catalog.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// A catalog pre-populated with every built-in label.
+    /// Catalog pre-populated with every built-in label.
     ///
     /// Walks [`builtins::BUILT_INS`] and registers each constant by name.
     /// Register custom labels alongside the built-ins with [`insert`].
@@ -56,7 +56,7 @@ impl LabelCatalog {
         self.0.contains_key(label.as_str())
     }
 
-    /// The number of labels in the catalog.
+    /// Number of labels in the catalog.
     pub fn len(&self) -> usize {
         self.0.len()
     }

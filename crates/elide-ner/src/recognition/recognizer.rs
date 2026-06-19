@@ -157,7 +157,7 @@ impl Recognizer<Text> for NerRecognizer {
     async fn recognize(
         &self,
         data: &TextData,
-        ctx: &RecognizerContext<Text>,
+        ctx: &RecognizerContext<'_, Text>,
     ) -> Result<Vec<Entity<Text>>> {
         let supported_borrowed: Vec<&str> =
             self.supported_labels.iter().map(LabelRef::as_str).collect();
@@ -170,7 +170,7 @@ impl Recognizer<Text> for NerRecognizer {
             text: data.text.as_str(),
             labels,
             language: ctx.primary_language(),
-            correlation_id: ctx.correlation_id,
+            correlation_id: ctx.correlation_id(),
         };
         let response = self.backend.recognize(request).await?;
 
@@ -197,6 +197,7 @@ impl Recognizer<Text> for NerRecognizer {
 #[cfg(test)]
 mod tests {
     use elide_core::entity::builtins;
+    use elide_core::recognition::Scope;
 
     use super::*;
 
@@ -212,7 +213,8 @@ mod tests {
             .build()
             .expect("builder succeeds");
         let data = TextData::new("Alice Smith".to_owned());
-        let ctx = RecognizerContext::new();
+        let scope = Scope::new();
+        let ctx = RecognizerContext::new(&scope);
         let out = rec.recognize(&data, &ctx).await.unwrap();
         assert!(out.is_empty());
     }
@@ -225,7 +227,8 @@ mod tests {
             .build()
             .expect("builder succeeds");
         let data = TextData::new("Alice Smith".to_owned());
-        let ctx = RecognizerContext::new();
+        let scope = Scope::new();
+        let ctx = RecognizerContext::new(&scope);
         let out = rec.recognize(&data, &ctx).await.unwrap();
         assert!(out.is_empty());
     }

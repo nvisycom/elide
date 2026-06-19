@@ -1,5 +1,5 @@
-//! A single [`Event`] in an entity's life, and the [`EventKind`] of
-//! event it can be.
+//! Single [`Event`] in an entity's life, and the [`EventKind`] of event
+//! it can be.
 
 use hipstr::HipStr;
 use jiff::Timestamp;
@@ -15,8 +15,8 @@ use crate::redaction::{LeakProfile, OperatorId};
 /// Events are recorded in order on an entity's [`Provenance`], forming
 /// the full audit trail of its life: each recognizer that found it, the
 /// deduplication that fused them, any score calibration, and the
-/// redaction that hid it. The uniform spine — who, before/after score,
-/// when, why — is the same for every event; the [`kind`] carries the
+/// redaction that hid it. The uniform spine (who, before/after score,
+/// when, why) is the same for every event; the [`kind`] carries the
 /// event-specific detail.
 ///
 /// `entity.confidence` always equals the [`after`] of the most recent
@@ -33,23 +33,23 @@ use crate::redaction::{LeakProfile, OperatorId};
 )]
 pub struct Event<M: Modality> {
     /// Who produced this event: a recognizer name, a deduplication strategy,
-    /// an operator — whatever acted.
+    /// an operator, or whatever acted.
     pub source: HipStr<'static>,
-    /// The confidence before this event, if there was a prior value. `None`
-    /// on the first (birth) event.
+    /// Confidence before this event, if there was a prior value. `None` on
+    /// the first (birth) event.
     pub before: Option<Confidence>,
-    /// The confidence after this event.
+    /// Confidence after this event.
     pub after: Confidence,
     /// When the event happened (UTC).
     pub at: Timestamp,
     /// Free-text explanation of what the event did and why.
     pub reason: HipStr<'static>,
-    /// The kind of event, with its event-specific detail.
+    /// Kind of event, with its event-specific detail.
     pub kind: EventKind<M>,
 }
 
 impl<M: Modality> Event<M> {
-    /// A recognition event from a pattern/dictionary recognizer.
+    /// Recognition event from a pattern/dictionary recognizer.
     pub fn pattern(
         source: impl Into<HipStr<'static>>,
         confidence: Confidence,
@@ -66,7 +66,7 @@ impl<M: Modality> Event<M> {
         }
     }
 
-    /// A recognition event from a model/NER recognizer.
+    /// Recognition event from a model/NER recognizer.
     pub fn model(
         source: impl Into<HipStr<'static>>,
         confidence: Confidence,
@@ -83,7 +83,7 @@ impl<M: Modality> Event<M> {
         }
     }
 
-    /// A deduplication (fusion) event combining several detections.
+    /// Deduplication (fusion) event combining several detections.
     pub fn deduplication(
         strategy: impl Into<HipStr<'static>>,
         before: Confidence,
@@ -100,7 +100,7 @@ impl<M: Modality> Event<M> {
         }
     }
 
-    /// A calibration event rescaling confidence by `factor`.
+    /// Calibration event rescaling confidence by `factor`.
     pub fn calibration(before: Confidence, after: Confidence, factor: f64) -> Self {
         Self {
             source: HipStr::borrowed("calibration"),
@@ -112,7 +112,7 @@ impl<M: Modality> Event<M> {
         }
     }
 
-    /// A refinement event: a context keyword near the entity lifted its
+    /// Refinement event: a context keyword near the entity lifted its
     /// confidence.
     pub fn refinement(
         source: impl Into<HipStr<'static>>,
@@ -134,7 +134,7 @@ impl<M: Modality> Event<M> {
         }
     }
 
-    /// A redaction event hiding the entity with `operator`.
+    /// Redaction event hiding the entity with `operator`.
     pub fn redaction(
         operator: OperatorId,
         leak_profile: LeakProfile,
@@ -171,7 +171,7 @@ impl<M: Modality> Event<M> {
     }
 }
 
-/// The kind of an [`Event`], carrying its event-specific detail.
+/// Kind of an [`Event`], carrying its event-specific detail.
 ///
 /// `#[non_exhaustive]`: new event kinds (verification, annotation, …)
 /// can be added compatibly. The recognition kinds ([`Pattern`],
@@ -197,14 +197,14 @@ pub enum EventKind<M: Modality> {
     Pattern {
         /// Where the recognizer matched.
         location: M::Location,
-        /// The pattern detail.
+        /// Pattern detail.
         pattern: PatternEvent,
     },
     /// A model / NER recognizer matched here.
     Model {
         /// Where the recognizer matched.
         location: M::Location,
-        /// The model detail.
+        /// Model detail.
         model: ModelEvent,
     },
     /// Several detections were fused into one entity.
@@ -214,12 +214,12 @@ pub enum EventKind<M: Modality> {
     },
     /// The entity's confidence was rescaled by a per-recognizer factor.
     Calibration {
-        /// The multiplier applied.
+        /// Multiplier applied.
         factor: f64,
     },
     /// A context keyword near the entity lifted its confidence.
     Refinement {
-        /// The keyword that fired the boost.
+        /// Keyword that fired the boost.
         keyword: HipStr<'static>,
         /// Whether the keyword was found in an out-of-band hint (`true`) rather
         /// than the in-text word window (`false`).
@@ -242,7 +242,7 @@ pub enum EventKind<M: Modality> {
 pub struct PatternEvent {
     /// Name of the pattern that matched (e.g. `"ssn"`, `"email"`).
     pub name: HipStr<'static>,
-    /// The literal regex source that matched, when exposed.
+    /// Literal regex source that matched, when exposed.
     pub regex: Option<HipStr<'static>>,
     /// Name of the validator that confirmed the match (e.g. `"luhn"`).
     pub validator: Option<HipStr<'static>>,

@@ -31,7 +31,7 @@ pub struct UnitBoundingBox {
 }
 
 impl UnitBoundingBox {
-    /// A normalized box from explicit fields.
+    /// Normalized box from explicit fields.
     pub const fn new(x: f64, y: f64, width: f64, height: f64) -> Self {
         Self {
             x,

@@ -7,8 +7,8 @@ use super::Modality;
 /// `data` is the per-modality wire payload; `location` is the coordinate
 /// the source accepts in [`read_at`] / [`write_at`] to address the same
 /// chunk again. `hints` carries out-of-band context strings the chunk's
-/// structural neighbours surface — CSV/XLSX column headers, JSON object
-/// keys, HTML parent text — for context-aware recognizers; sources
+/// structural neighbours surface (CSV/XLSX column headers, JSON object
+/// keys, HTML parent text) for context-aware recognizers; sources
 /// without such metadata leave it empty.
 ///
 /// [`StreamDataReader`]: super::StreamDataReader
@@ -27,7 +27,7 @@ pub struct Chunk<M: Modality> {
 }
 
 impl<M: Modality> Chunk<M> {
-    /// A chunk over `data` at `location`, with no context hints.
+    /// Chunk over `data` at `location`, with no context hints.
     pub fn new(location: M::Location, data: M::Data) -> Self {
         Self {
             location,

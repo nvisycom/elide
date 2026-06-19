@@ -8,7 +8,7 @@
 
 use elide_core::entity::builtins;
 use elide_core::modality::text::TextData;
-use elide_core::recognition::{Recognizer, RecognizerContext};
+use elide_core::recognition::{Recognizer, RecognizerContext, Scope};
 use elide_pattern::{Dictionary, PatternRecognizer, Regex, Term};
 
 #[tokio::test]
@@ -42,7 +42,8 @@ async fn user_toml_rules_load_and_detect() {
 
     let text = include_str!("../testdata/inputs/internal.txt");
     let data = TextData::new(text.to_owned());
-    let ctx = RecognizerContext::new();
+    let scope = Scope::new();
+    let ctx = RecognizerContext::new(&scope);
     let entities = recognizer.recognize(&data, &ctx).await.expect("recognize");
 
     // The custom regex finds both employee numbers.

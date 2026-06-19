@@ -9,7 +9,7 @@
 
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::{Text, TextData};
-use elide_core::recognition::{Recognizer, RecognizerContext};
+use elide_core::recognition::{Recognizer, RecognizerContext, Scope};
 use elide_pattern::PatternRecognizer;
 
 pub async fn scan(text: &str) -> (String, Vec<Entity<Text>>) {
@@ -19,7 +19,8 @@ pub async fn scan(text: &str) -> (String, Vec<Entity<Text>>) {
         .build_context_enhanced()
         .expect("shipped recognizer builds");
     let data = TextData::new(text.to_owned());
-    let ctx = RecognizerContext::new();
+    let scope = Scope::new();
+    let ctx = RecognizerContext::new(&scope);
     let entities = recognizer
         .recognize(&data, &ctx)
         .await

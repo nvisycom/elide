@@ -1,4 +1,4 @@
-//! The reading traits: [`DataReader`] (random access at a location) and
+//! Reading traits: [`DataReader`] (random access at a location) and
 //! [`StreamDataReader`] (sequential streaming + lift).
 
 use std::future::Future;
@@ -10,7 +10,7 @@ use crate::error::Result;
 /// Reads the [`Data`] at a [`Location`] within some source.
 ///
 /// Implemented by a modality's content holder (a text buffer, a decoded
-/// image, a parsed document) — the thing being redacted. The anonymizer
+/// image, a parsed document): the thing being redacted. The anonymizer
 /// calls [`read_at`] once per entity to obtain just that entity's slice,
 /// which it hands to the operator. This is what keeps operators pure and
 /// modality-parametric: they never see the whole source, only the slice
@@ -19,7 +19,7 @@ use crate::error::Result;
 /// Returns `Ok(None)` when the location addresses nothing in this source
 /// (out of range, a location that crosses a structural boundary); the
 /// anonymizer treats that as "skip this entity". Returns `Err` when the
-/// read itself fails — a malformed offset that lands mid-character, a
+/// read itself fails: a malformed offset that lands mid-character, a
 /// decode error. A codec-backed reader surfaces those loudly rather than
 /// silently collapsing them to a miss.
 ///
@@ -31,16 +31,15 @@ use crate::error::Result;
 /// [`read_at`]: DataReader::read_at
 /// [`DataWriter`]: super::DataWriter
 pub trait DataReader<M: Modality>: Send + Sync {
-    /// The data at `location`: `Ok(Some(data))` on a hit, `Ok(None)` when
-    /// the location addresses nothing, `Err` when the read fails.
+    /// Data at `location`: `Ok(Some(data))` on a hit, `Ok(None)` when the
+    /// location addresses nothing, `Err` when the read fails.
     fn read_at(
         &self,
         location: &M::Location,
     ) -> impl Future<Output = Result<Option<M::Data>>> + Send;
 }
 
-/// Streams a source as a sequence of [`Chunk`]s and lifts
-/// recognizer-local locations back to source coordinates.
+/// Streams a source as [`Chunk`]s and lifts locations to source coordinates.
 ///
 /// The sequential counterpart to [`DataReader`]: where `read_at` is
 /// random access (give it a location, get that slice back), a
@@ -68,7 +67,7 @@ pub trait StreamDataReader<M: Modality>: Send {
     /// end-of-stream. Propagates the source's decode error.
     fn read_next(&mut self) -> impl Future<Output = Result<Option<Chunk<M>>>> + Send;
 
-    /// Map `entity` — whose location addresses `chunk`'s decoded payload —
+    /// Map `entity`, whose location addresses `chunk`'s decoded payload,
     /// to a source-coordinate entity.
     ///
     /// Returns `None` when the entity's location has no source pre-image

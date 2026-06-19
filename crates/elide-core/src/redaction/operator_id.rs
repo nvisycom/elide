@@ -1,4 +1,4 @@
-//! The [`OperatorId`] redaction-operator identity.
+//! [`OperatorId`] redaction-operator identity.
 
 use std::fmt;
 
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// As with [`RecognizerId`], the version is part of the identity so the
 /// audit trail records which build of the operator ran. The version is
-/// opaque text — the core attaches no ordering semantics to it.
+/// opaque text; the core attaches no ordering semantics to it.
 ///
 /// [`RecognizerId`]: crate::recognition::RecognizerId
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 pub struct OperatorId {
     /// Stable operator name (e.g. `"mask"`, `"aes-gcm-encrypt"`).
     pub name: HipStr<'static>,
-    /// The operator's version at the time it was applied.
+    /// Operator's version at the time it was applied.
     pub version: HipStr<'static>,
 }
 

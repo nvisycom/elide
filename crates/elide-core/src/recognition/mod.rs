@@ -13,6 +13,7 @@ mod context;
 mod enricher;
 mod hint;
 mod label;
+mod scope;
 
 use std::fmt;
 use std::future::Future;
@@ -26,6 +27,7 @@ pub use self::context::RecognizerContext;
 pub use self::enricher::Enricher;
 pub use self::hint::Hint;
 pub use self::label::LabelMap;
+pub use self::scope::Scope;
 use crate::entity::Entity;
 use crate::error::Result;
 use crate::modality::Modality;
@@ -34,16 +36,16 @@ use crate::modality::Modality;
 ///
 /// Pairs a stable name with a free-form version string so the audit
 /// trail records not just *which* recognizer fired but *which build* of
-/// it — a rerun against an updated ruleset or model is then
+/// it: a rerun against an updated ruleset or model is then
 /// distinguishable from the original. The version is opaque text (a
-/// semver, a checkpoint hash, a ruleset date) — the core attaches no
+/// semver, a checkpoint hash, a ruleset date); the core attaches no
 /// ordering or comparison semantics to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RecognizerId {
     /// Stable, human-readable recognizer name (e.g. `"us-ssn-pattern"`).
     pub name: HipStr<'static>,
-    /// The recognizer's version at the time it ran.
+    /// Recognizer's version at the time it ran.
     pub version: HipStr<'static>,
 }
 
@@ -63,7 +65,7 @@ impl fmt::Display for RecognizerId {
     }
 }
 
-/// A detection layer: inspects content and reports recognized entities.
+/// Detection layer: inspects content and reports recognized entities.
 ///
 /// Modelled on Presidio's `EntityRecognizer`, generalised to be
 /// multimodal (keyed on the [`Modality`] `M`) and provenance-first (the
@@ -71,7 +73,7 @@ impl fmt::Display for RecognizerId {
 /// provenance).
 ///
 /// A recognizer does **not** resolve conflicts or fuse across
-/// recognizers — it reports what it sees, in modality-local coordinates.
+/// recognizers; it reports what it sees, in modality-local coordinates.
 /// Combining the findings of multiple recognizers is the job of the
 /// fusion step in `elide`; pruning and orchestration belong to a
 /// higher layer, not to the recognizer itself.
@@ -94,6 +96,6 @@ where
     fn recognize(
         &self,
         data: &M::Data,
-        ctx: &RecognizerContext<M>,
+        ctx: &RecognizerContext<'_, M>,
     ) -> impl Future<Output = Result<Vec<Entity<M>>>> + Send;
 }

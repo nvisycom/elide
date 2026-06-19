@@ -1,8 +1,8 @@
 //! Redaction: the operator contracts for hiding detected entities.
 //!
 //! An operator reads an [`Entity`] and the [`Data`] under it and
-//! *computes* a [`Replacement`] — mask, replace, hash, encrypt, blur, …
-//! — without mutating anything; applying the replacement back into the
+//! *computes* a [`Replacement`] (mask, replace, hash, encrypt, blur, …)
+//! without mutating anything; applying the replacement back into the
 //! document is the codec's job. The forward direction is [`Operator`];
 //! the optional reverse is [`ReversibleOperator`]. Every operator is an
 //! [`Operator`]; only reversible ones (encrypt → decrypt) additionally

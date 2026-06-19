@@ -1,172 +1,142 @@
-//! [`RecognizerContext<M>`]: per-call context for a [`Recognizer`].
-//!
-//! Flat per-call surface of the concerns recognizers consult alongside
-//! the payload: the call's languages, asserted jurisdictions,
-//! document-level labels, out-of-band context strings, shared NLP
-//! artifacts, caller hints, and a correlation id. The modality payload
-//! is passed separately to [`Recognizer::recognize`]; the context is
-//! built once and reused across every payload of one analysis.
+//! [`RecognizerContext<M>`]: the per-payload view a [`Recognizer`] sees.
 //!
 //! [`Recognizer`]: super::Recognizer
-//! [`Recognizer::recognize`]: super::Recognizer::recognize
 
 use uuid::Uuid;
 
 use crate::modality::Modality;
-use crate::primitive::{Confidence, CountryCode, Language, LanguageTag, Languages};
-use crate::recognition::{Artifacts, Hint};
+use crate::primitive::{CountryCode, Language, LanguageTag, Languages};
+use crate::recognition::{Artifacts, Hint, Scope};
 
-/// Per-call context for a [`Recognizer`].
+/// Per-payload context handed to a [`Recognizer`].
 ///
-/// Holds the per-call concerns recognizers consult; the modality payload
-/// is passed alongside it to [`Recognizer::recognize`]. Built once with
-/// the `with_*` chain and reused across every payload of one analysis.
+/// Built up by enrichers for one payload of an analysis. Borrows the
+/// caller-asserted [`Scope`] (shared across every payload)
+/// and adds the *working* state produced per payload: NLP [`artifacts`],
+/// languages an enricher *detected*, and any payload-local context hints.
+/// Enrichers write into it; recognizers read it. The analyzer constructs
+/// a fresh one per payload, so working state never leaks between payloads.
+///
+/// Query the call's languages, jurisdictions, labels, and hints through
+/// the methods here rather than reaching into the scope directly: they
+/// fold the caller's assertions together with what enrichers detected.
 ///
 /// [`Recognizer`]: super::Recognizer
-/// [`Recognizer::recognize`]: super::Recognizer::recognize
+/// [`Scope`]: super::Scope
+/// [`artifacts`]: Self::artifacts
 #[derive(Debug)]
-pub struct RecognizerContext<M: Modality> {
-    /// Shared per-call NLP enrichment (tokens, lemmas, …), keyed by type.
-    /// An enricher computes it once; recognizers that want it read it back
-    /// by type. Those that don't leave it empty.
+pub struct RecognizerContext<'a, M: Modality> {
+    /// Caller-asserted scope for the analysis (shared, immutable).
+    scope: &'a Scope<M>,
+    /// Shared per-payload NLP enrichment (tokens, lemmas, …), keyed by
+    /// type. An enricher computes it once; recognizers that want it read
+    /// it back by type. Those that don't leave it empty.
     pub artifacts: Artifacts,
-    /// The call's languages: each entry is a language with how it was
-    /// obtained (detected by an enricher, or asserted by the caller), an
-    /// optional confidence, and an optional span. Empty means "unknown".
-    /// Consult it through [`primary_language`] / [`ranked_languages`]
-    /// rather than indexing directly.
+    /// Languages an enricher *detected* for this payload. The caller's
+    /// asserted languages live on the [`Scope`]; query both together via
+    /// [`primary_language`] / [`ranked_languages`].
     ///
+    /// [`Scope`]: super::Scope
     /// [`primary_language`]: Self::primary_language
     /// [`ranked_languages`]: Self::ranked_languages
-    pub languages: Languages,
-    /// Caller-asserted jurisdictions. When non-empty, recognizers that
-    /// carry per-rule country scopes skip rules that match none of them.
-    /// An empty list means "any": rules that declare countries still run
-    /// as a permissive fallback so callers who don't assert a jurisdiction
-    /// don't lose detections. A document spanning several jurisdictions
-    /// can assert all of them; a rule runs when any one matches.
-    pub countries: Vec<CountryCode>,
-    /// Document-level classification labels (e.g. `"medical"`,
-    /// `"gdpr-request"`). Recognizers may use these to bias their behavior
-    /// for domain-specific terms; those that don't ignore the field.
-    pub labels: Vec<String>,
-    /// Out-of-band context strings the caller wants treated as in-context
-    /// for confidence boosting (e.g. the column header of a CSV cell, the
-    /// JSON object key of a string value, the log field name a value sits
-    /// under). Recognizers that run a context enhancer feed these to the
-    /// enhancer alongside the in-text word window; recognizers without an
-    /// enhancer ignore the field.
+    detected_languages: Languages,
+    /// Out-of-band context strings to treat as in-context for confidence
+    /// boosting (e.g. a CSV column header, a JSON object key). A codec
+    /// surfaces these per chunk; recognizers that run a context enhancer
+    /// feed them to the enhancer, the rest ignore them.
     pub context_hints: Vec<String>,
-    /// Caller-supplied annotation regions (a region the caller believes
-    /// may hold an entity, with an optional claimed label and name).
-    /// Recognizers that adjudicate hints (typically LLM-based) fold these
-    /// into detection to confirm, relocate, or reject each one; the rest
-    /// ignore the field.
-    pub hints: Vec<Hint<M>>,
-    /// Correlation UUID propagated through the tracing span for this call.
-    /// Recognizer bodies do not read this directly; it's set on the span
-    /// by the caller.
-    pub correlation_id: Option<Uuid>,
 }
 
-impl<M: Modality> RecognizerContext<M> {
-    /// An empty context: nothing asserted, every field defaults to empty.
-    pub fn new() -> Self {
+impl<'a, M: Modality> RecognizerContext<'a, M> {
+    /// Context over `scope` with empty working state.
+    #[must_use]
+    pub fn new(scope: &'a Scope<M>) -> Self {
         Self {
+            scope,
             artifacts: Artifacts::new(),
-            languages: Languages::default(),
-            countries: Vec::new(),
-            labels: Vec::new(),
+            detected_languages: Languages::default(),
             context_hints: Vec::new(),
-            hints: Vec::new(),
-            correlation_id: None,
         }
     }
 
-    /// Replace the artifacts bundle.
-    #[must_use]
-    pub fn with_artifacts(mut self, artifacts: Artifacts) -> Self {
-        self.artifacts = artifacts;
-        self
-    }
-
-    /// A fresh per-call context carrying this one's caller-asserted fields
-    /// (languages, countries, labels, hints, correlation id) but an empty
-    /// [`Artifacts`] bundle.
-    ///
-    /// The caller builds the asserted context once; the analyzer forks a
-    /// working copy per payload so each call's enrichers stamp their own
-    /// artifacts and detected languages without sharing across payloads.
-    /// [`Artifacts`] is per-call NLP output, so it is never carried over.
-    #[must_use]
-    pub fn fork_assertions(&self) -> Self {
-        Self {
-            artifacts: Artifacts::new(),
-            languages: self.languages.clone(),
-            countries: self.countries.clone(),
-            labels: self.labels.clone(),
-            context_hints: self.context_hints.clone(),
-            hints: self.hints.clone(),
-            correlation_id: self.correlation_id,
-        }
-    }
-
-    /// Attach caller-supplied annotation [`Hint`]s.
-    #[must_use]
-    pub fn with_hints(mut self, hints: Vec<Hint<M>>) -> Self {
-        self.hints = hints;
-        self
-    }
-
-    /// Assert a language for this call, returning `self` for chaining.
-    ///
-    /// Adds a caller-asserted [`Language`] to the call's languages.
-    /// `confidence` is optional; an assertion outranks a detection at
-    /// equal confidence (see [`ranked_languages`]).
-    ///
-    /// [`ranked_languages`]: Self::ranked_languages
-    #[must_use]
-    pub fn with_language(mut self, language: LanguageTag, confidence: Option<Confidence>) -> Self {
-        self.languages
-            .push(Language::asserted(language, confidence));
-        self
-    }
-
-    /// Assert a jurisdiction for this call. May be called more than once
-    /// to assert several; a rule runs when any one matches.
-    #[must_use]
-    pub fn with_country(mut self, country: CountryCode) -> Self {
-        self.countries.push(country);
-        self
-    }
-
-    /// Replace the asserted jurisdictions with `countries`.
-    #[must_use]
-    pub fn with_countries(mut self, countries: Vec<CountryCode>) -> Self {
-        self.countries = countries;
-        self
-    }
-
-    /// Attach document-level classification labels.
-    #[must_use]
-    pub fn with_labels(mut self, labels: Vec<String>) -> Self {
-        self.labels = labels;
-        self
-    }
-
-    /// Attach out-of-band context hint strings (column headers, JSON keys,
-    /// …) the enhancer should treat as in-context.
+    /// Attach payload-local context hint strings (column headers, JSON
+    /// keys, …) the enhancer should treat as in-context.
     #[must_use]
     pub fn with_context_hints(mut self, hints: Vec<String>) -> Self {
         self.context_hints = hints;
         self
     }
 
-    /// Set the correlation id propagated through the tracing span.
+    /// Caller-asserted [`Scope`] this context borrows.
+    ///
+    /// [`Scope`]: super::Scope
     #[must_use]
-    pub fn with_correlation_id(mut self, id: Uuid) -> Self {
-        self.correlation_id = Some(id);
-        self
+    pub fn scope(&self) -> &Scope<M> {
+        self.scope
+    }
+
+    /// Caller-asserted annotation [`Hint`]s for this analysis.
+    #[must_use]
+    pub fn hints(&self) -> &[Hint<M>] {
+        &self.scope.hints
+    }
+
+    /// Caller-asserted document-level labels for this analysis.
+    #[must_use]
+    pub fn labels(&self) -> &[String] {
+        &self.scope.labels
+    }
+
+    /// Correlation id, if the caller set one.
+    #[must_use]
+    pub fn correlation_id(&self) -> Option<Uuid> {
+        self.scope.correlation_id
+    }
+
+    /// Record a [`Language`] an enricher detected for this payload.
+    ///
+    /// Build it with [`Language::detected`] (optionally
+    /// [`with_confidence`] / [`with_span`]).
+    ///
+    /// [`with_confidence`]: Language::with_confidence
+    /// [`with_span`]: Language::with_span
+    pub fn detect_language(&mut self, language: Language) {
+        self.detected_languages.push(language);
+    }
+
+    /// Whether the caller asserted any language on the scope.
+    ///
+    /// An enricher consults this to decide whether to run detection: a
+    /// caller assertion is authoritative, so detection can be skipped.
+    #[must_use]
+    pub fn has_asserted_language(&self) -> bool {
+        !self.scope.languages.is_empty()
+    }
+
+    /// Call's languages (asserted on the scope plus enricher-detected),
+    /// ranked best-first.
+    ///
+    /// Sorted by confidence descending (a missing confidence ranks last),
+    /// with an asserted language breaking ties ahead of a detected one.
+    /// Empty when the call has no language information.
+    #[must_use]
+    pub fn ranked_languages(&self) -> Vec<&Language> {
+        let mut all: Vec<&Language> = self
+            .scope
+            .languages
+            .as_slice()
+            .iter()
+            .chain(self.detected_languages.as_slice())
+            .collect();
+        all.sort_by(|a, b| b.rank(a));
+        all
+    }
+
+    /// Single most likely language tag for this call, or `None` when no
+    /// language is known.
+    #[must_use]
+    pub fn primary_language(&self) -> Option<&LanguageTag> {
+        self.ranked_languages().first().map(|d| &d.language)
     }
 
     /// Whether a recognizer rule scoped to `allowed` countries should run
@@ -174,47 +144,16 @@ impl<M: Modality> RecognizerContext<M> {
     ///
     /// - An empty `allowed` list means the rule is jurisdiction-agnostic
     ///   and always runs.
-    /// - When `allowed` is non-empty and [`countries`] is non-empty, the
+    /// - When `allowed` is non-empty and the scope asserts countries, the
     ///   rule runs when any asserted country is in `allowed`.
-    /// - When [`countries`] is empty, the rule still runs: we can't
-    ///   disprove applicability without an assertion, and silently
-    ///   dropping detections would surprise callers who simply forgot to
-    ///   set the field.
-    ///
-    /// [`countries`]: Self::countries
+    /// - When the scope asserts no countries, the rule still runs: we
+    ///   can't disprove applicability without an assertion.
     #[must_use]
     pub fn applies_to_country(&self, allowed: &[CountryCode]) -> bool {
-        if allowed.is_empty() || self.countries.is_empty() {
+        if allowed.is_empty() || self.scope.countries.is_empty() {
             return true;
         }
-        self.countries.iter().any(|c| allowed.contains(c))
-    }
-
-    /// Add a caller-asserted language to the call, in place.
-    ///
-    /// The mutating counterpart to [`with_language`].
-    ///
-    /// [`with_language`]: Self::with_language
-    pub fn assert_language(&mut self, language: LanguageTag, confidence: Option<Confidence>) {
-        self.languages
-            .push(Language::asserted(language, confidence));
-    }
-
-    /// The call's languages, ranked best-first.
-    ///
-    /// Sorted by confidence descending (a missing confidence ranks last),
-    /// with an asserted language breaking ties ahead of a detected one.
-    /// Empty when the call has no language information.
-    #[must_use]
-    pub fn ranked_languages(&self) -> Vec<&Language> {
-        self.languages.ranked()
-    }
-
-    /// The single most likely language tag for this call, or `None` when
-    /// no language is known.
-    #[must_use]
-    pub fn primary_language(&self) -> Option<&LanguageTag> {
-        self.languages.best().map(|d| &d.language)
+        self.scope.countries.iter().any(|c| allowed.contains(c))
     }
 
     /// Whether a recognizer rule scoped to `allowed` languages should run
@@ -222,25 +161,26 @@ impl<M: Modality> RecognizerContext<M> {
     ///
     /// - An empty `allowed` list means the rule is language-agnostic and
     ///   always runs.
-    /// - Otherwise the rule runs when *any* of the call's languages shares
-    ///   a primary subtag with an entry in `allowed` (so an `["en"]` rule
-    ///   fires when the call includes `"en-US"`).
+    /// - Otherwise the rule runs when *any* of the call's languages
+    ///   (asserted or detected) shares a primary subtag with an entry in
+    ///   `allowed` (so an `["en"]` rule fires on `"en-US"`).
     /// - When the call has no languages, the rule still runs: we can't
     ///   disprove applicability without information.
     #[must_use]
     pub fn applies_to_language(&self, allowed: &[LanguageTag]) -> bool {
-        if allowed.is_empty() || self.languages.is_empty() {
+        if allowed.is_empty() {
             return true;
         }
-        self.languages
+        let mut langs = self
+            .scope
+            .languages
             .as_slice()
             .iter()
-            .any(|d| allowed.iter().any(|a| a.matches(&d.language)))
-    }
-}
-
-impl<M: Modality> Default for RecognizerContext<M> {
-    fn default() -> Self {
-        Self::new()
+            .chain(self.detected_languages.as_slice())
+            .peekable();
+        if langs.peek().is_none() {
+            return true;
+        }
+        langs.any(|d| allowed.iter().any(|a| a.matches(&d.language)))
     }
 }

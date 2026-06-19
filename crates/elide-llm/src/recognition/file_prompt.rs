@@ -203,10 +203,10 @@ impl FilePrompt<Image> {
 }
 
 impl Prompt<Text> for FilePrompt<Text> {
-    fn build(&self, data: &TextData, ctx: &RecognizerContext<Text>) -> String {
+    fn build(&self, data: &TextData, ctx: &RecognizerContext<'_, Text>) -> String {
         let text = data.text.as_str();
         let hints: Vec<_> = ctx
-            .hints
+            .hints()
             .iter()
             .map(|h| {
                 let value = value_at(text, h.location.start, h.location.end);
@@ -222,7 +222,7 @@ impl Prompt<Text> for FilePrompt<Text> {
         let jinja_ctx = context! {
             text => text,
             hints => hints,
-            labels => ctx.labels.clone(),
+            labels => ctx.labels().to_vec(),
         };
         self.env
             .get_template("prompt")
@@ -238,7 +238,7 @@ impl Prompt<Text> for FilePrompt<Text> {
         &self,
         response: &LlmResponse,
         data: &TextData,
-        _ctx: &RecognizerContext<Text>,
+        _ctx: &RecognizerContext<'_, Text>,
     ) -> Vec<Entity<Text>> {
         let Ok(parsed): Result<TextCandidates, _> = parse_json(&response.text) else {
             return Vec::new();
@@ -253,10 +253,10 @@ impl Prompt<Text> for FilePrompt<Text> {
 }
 
 impl Prompt<Image> for FilePrompt<Image> {
-    fn build(&self, data: &ImageData, ctx: &RecognizerContext<Image>) -> String {
+    fn build(&self, data: &ImageData, ctx: &RecognizerContext<'_, Image>) -> String {
         let image_b64 = STANDARD.encode(data.bytes.as_ref());
         let hints: Vec<_> = ctx
-            .hints
+            .hints()
             .iter()
             .map(|h| {
                 let bbox = &h.location.bounding_box;
@@ -275,7 +275,7 @@ impl Prompt<Image> for FilePrompt<Image> {
         let jinja_ctx = context! {
             image_b64 => image_b64,
             hints => hints,
-            labels => ctx.labels.clone(),
+            labels => ctx.labels().to_vec(),
         };
         self.env
             .get_template("prompt")
@@ -291,7 +291,7 @@ impl Prompt<Image> for FilePrompt<Image> {
         &self,
         response: &LlmResponse,
         data: &ImageData,
-        _ctx: &RecognizerContext<Image>,
+        _ctx: &RecognizerContext<'_, Image>,
     ) -> Vec<Entity<Image>> {
         let Ok(parsed): Result<VlmCandidates, _> = parse_json(&response.text) else {
             return Vec::new();

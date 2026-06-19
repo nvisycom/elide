@@ -1,12 +1,12 @@
-//! Content modalities — the kinds of medium an entity can live in.
+//! Content modalities: the kinds of medium an entity can live in.
 //!
 //! A modality is a *type-level* fact, not a runtime string. Each
 //! modality is a marker type implementing [`Modality`], which binds
 //! together two associated types: the [`Data`] a recognizer inspects
-//! (the payload — text bytes, image pixels) and the [`Location`] an
-//! entity occupies within that medium (a character range, a bounding
-//! box, a time span). Both are type-level facts, so a modality, its
-//! data, and its locations can never disagree.
+//! (the payload, such as text bytes or image pixels) and the
+//! [`Location`] an entity occupies within that medium (a character
+//! range, a bounding box, a time span). Both are type-level facts, so a
+//! modality, its data, and its locations can never disagree.
 //!
 //! Code generic over a medium takes `M: Modality` and refers to
 //! `M::Data` / `M::Location`; the human-readable [`Modality::NAME`] is
@@ -36,14 +36,14 @@ pub use self::chunk::Chunk;
 pub use self::data_reader::{DataReader, StreamDataReader};
 pub use self::data_writer::DataWriter;
 
-/// The payload a recognizer inspects for a modality.
+/// Payload a recognizer inspects for a modality.
 ///
-/// The content a [`Modality`] presents to its recognizers — text bytes,
+/// The content a [`Modality`] presents to its recognizers: text bytes,
 /// a decoded image, an audio buffer. A near-empty marker: it only fixes
 /// the bounds a payload must satisfy to flow through the model.
 pub trait ModalityData: Clone + fmt::Debug + Send + Sync + 'static {}
 
-/// A location within a modality's medium — *where* an entity sits.
+/// Location within a modality's medium: *where* an entity sits.
 ///
 /// The extension point that makes the model multimodal at the coordinate
 /// level: a text crate's `TextSpan { start, end }`, an image crate's
@@ -91,10 +91,10 @@ pub trait ModalityLocation: Clone + fmt::Debug + Send + Sync + 'static {
     fn position_cmp(&self, other: &Self) -> Ordering;
 }
 
-/// What an [`Operator`] produces for a modality — the instruction a
-/// codec applies to hide an entity.
+/// Instruction a codec applies to hide an entity.
 ///
-/// Hiding is modality-specific even though detection is not: text yields
+/// What an [`Operator`] produces for a modality. Hiding is
+/// modality-specific even though detection is not: text yields
 /// a substituted/removed string, an image a blur/block/pixelate region,
 /// audio a silenced/removed span. An operator computes one of these from
 /// the entity and its data; the codec writes it back into the document.
@@ -103,7 +103,7 @@ pub trait ModalityLocation: Clone + fmt::Debug + Send + Sync + 'static {
 /// [`Operator`]: crate::redaction::Operator
 pub trait ModalityReplacement: Clone + fmt::Debug + Send + Sync + 'static {}
 
-/// A medium that entities can be located within.
+/// Medium that entities can be located within.
 ///
 /// Implemented by a modality crate's marker type, binding the medium's
 /// [`Data`], [`Location`], and [`Replacement`] types together at compile
@@ -149,15 +149,15 @@ pub trait ModalityReplacement: Clone + fmt::Debug + Send + Sync + 'static {}
 /// [`Location`]: Modality::Location
 /// [`Replacement`]: Modality::Replacement
 pub trait Modality: Send + Sync + 'static {
-    /// The payload a recognizer inspects for this medium.
+    /// Payload a recognizer inspects for this medium.
     type Data: ModalityData;
 
-    /// The location type that addresses entities within this medium.
+    /// Location type that addresses entities within this medium.
     type Location: ModalityLocation;
 
-    /// The instruction an anonymizer produces to hide an entity.
+    /// Instruction an anonymizer produces to hide an entity.
     type Replacement: ModalityReplacement;
 
-    /// A stable, human-readable name for the medium (e.g. `"text"`).
+    /// Stable, human-readable name for the medium (e.g. `"text"`).
     const NAME: &'static str;
 }

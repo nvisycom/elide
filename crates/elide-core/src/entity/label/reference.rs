@@ -1,14 +1,14 @@
-//! The [`LabelRef`] lightweight reference.
+//! [`LabelRef`] lightweight reference.
 
 use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// A lightweight reference to a [`Label`], carrying only its name.
+/// Lightweight reference to a [`Label`], carrying only its name.
 ///
 /// This is what detections and entities hold: cloning is cheap (short
-/// names inline into the [`HipStr`]), and the full [`Label`] — with its
-/// description — is resolved on demand from a [`LabelCatalog`].
+/// names inline into the [`HipStr`]), and the full [`Label`], with its
+/// description, is resolved on demand from a [`LabelCatalog`].
 ///
 /// [`Label`]: crate::entity::Label
 /// [`LabelCatalog`]: crate::entity::LabelCatalog
@@ -23,7 +23,7 @@ impl LabelRef {
         Self(name.into())
     }
 
-    /// The referenced label's name.
+    /// Referenced label's name.
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }

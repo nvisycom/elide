@@ -19,7 +19,7 @@ pub(crate) trait DynEnricher<M: Modality>: Send + Sync {
     fn enrich_boxed<'a>(
         &'a self,
         data: &'a M::Data,
-        ctx: &'a mut RecognizerContext<M>,
+        ctx: &'a mut RecognizerContext<'_, M>,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
 }
 
@@ -31,7 +31,7 @@ where
     fn enrich_boxed<'a>(
         &'a self,
         data: &'a M::Data,
-        ctx: &'a mut RecognizerContext<M>,
+        ctx: &'a mut RecognizerContext<'_, M>,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(self.enrich(data, ctx))
     }

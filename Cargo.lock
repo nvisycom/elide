@@ -632,6 +632,7 @@ dependencies = [
  "elide-llm",
  "elide-ner",
  "elide-pattern",
+ "futures",
  "hex",
  "sha2 0.11.0",
  "tokio",

@@ -1,4 +1,4 @@
-//! The [`EntityBuilder`] for assembling an [`Entity`] field by field.
+//! [`EntityBuilder`] for assembling an [`Entity`] field by field.
 
 use uuid::Uuid;
 
@@ -7,7 +7,7 @@ use crate::entity::provenance::{Event, Provenance};
 use crate::modality::Modality;
 use crate::primitive::Confidence;
 
-/// A chainable builder for [`Entity`].
+/// Chainable builder for [`Entity`].
 ///
 /// More ergonomic than [`Entity::new`] when a producer assembles an
 /// entity from a recognition event: chain [`with_label`],
@@ -47,7 +47,7 @@ pub struct EntityBuilder<M: Modality> {
 }
 
 impl<M: Modality> EntityBuilder<M> {
-    /// A fresh, empty builder.
+    /// Fresh, empty builder.
     pub fn new() -> Self {
         Self {
             id: None,

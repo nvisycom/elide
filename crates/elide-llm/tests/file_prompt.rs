@@ -13,7 +13,7 @@ use elide_core::entity::{LabelRef, builtins};
 use elide_core::modality::image::{Image, ImageData, ImageLocation};
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::primitive::{BoundingBox, Dimensions, Point};
-use elide_core::recognition::{Hint, RecognizerContext};
+use elide_core::recognition::{Hint, RecognizerContext, Scope};
 use elide_llm::backend::LlmResponse;
 use elide_llm::{FilePrompt, Prompt};
 const NER_TOML: &str = include_str!("../testdata/prompts/ner.toml");
@@ -33,9 +33,10 @@ fn text_prompt_renders_template_and_lifts_entities() {
         .with_label(builtins::PERSON_NAME.to_ref());
 
     let data = TextData::new(body);
-    let ctx = RecognizerContext::<Text>::new()
+    let scope = Scope::<Text>::new()
         .with_hints(vec![hint])
         .with_labels(vec!["medical".to_owned(), "gdpr-request".to_owned()]);
+    let ctx = RecognizerContext::new(&scope);
 
     // -- build()
     let rendered = prompt.build(&data, &ctx);
@@ -110,9 +111,10 @@ fn image_prompt_renders_template_and_lifts_entities() {
     .with_label(builtins::PERSON_NAME.to_ref());
 
     let data = ImageData::new(bytes.clone(), dims);
-    let ctx = RecognizerContext::<Image>::new()
+    let scope = Scope::<Image>::new()
         .with_hints(vec![hint])
         .with_labels(vec!["badge".to_owned()]);
+    let ctx = RecognizerContext::new(&scope);
 
     // -- build()
     let rendered = prompt.build(&data, &ctx);

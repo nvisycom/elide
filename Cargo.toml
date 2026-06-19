@@ -69,6 +69,7 @@ hex = { version = "0.4", features = [] }
 # Async runtime and parallelism
 tokio = { version = "1.50", features = [] }
 async-trait = { version = "0.1", features = [] }
+futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 
 # Observability
 tracing = { version = "0.1", features = ["attributes"] }

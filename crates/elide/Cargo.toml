@@ -47,8 +47,8 @@ elide-codec = { workspace = true, features = [], optional = true }
 # Derive macros
 derive_builder = { workspace = true, features = [] }
 
-# Async runtime and parallelism
-tokio = { workspace = true, features = ["rt", "sync", "macros"] }
+# Async combinators (concurrent recognizer join)
+futures = { workspace = true, features = [] }
 
 # Observability
 tracing = { workspace = true, features = [] }

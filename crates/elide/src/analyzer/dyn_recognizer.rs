@@ -25,7 +25,7 @@ pub(crate) trait DynRecognizer<M: Modality>: Send + Sync {
     fn recognize_boxed<'a>(
         &'a self,
         data: &'a M::Data,
-        ctx: &'a RecognizerContext<M>,
+        ctx: &'a RecognizerContext<'_, M>,
     ) -> RecognizeFuture<'a, M>;
 }
 
@@ -37,7 +37,7 @@ where
     fn recognize_boxed<'a>(
         &'a self,
         data: &'a M::Data,
-        ctx: &'a RecognizerContext<M>,
+        ctx: &'a RecognizerContext<'_, M>,
     ) -> RecognizeFuture<'a, M> {
         Box::pin(self.recognize(data, ctx))
     }

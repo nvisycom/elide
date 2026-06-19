@@ -69,7 +69,7 @@ where
     async fn recognize(
         &self,
         data: &TextData,
-        ctx: &RecognizerContext<Text>,
+        ctx: &RecognizerContext<'_, Text>,
     ) -> Result<Vec<Entity<Text>>> {
         let mut entities = self.inner.recognize(data, ctx).await?;
         if self.enhancer.is_empty() {

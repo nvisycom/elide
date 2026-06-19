@@ -13,7 +13,6 @@
 
 #[doc(inline)]
 pub use elide_core::recognition::*;
-
 /// LLM-mediated recognition (text NER and image VLM).
 #[cfg(feature = "llm")]
 #[cfg_attr(docsrs, doc(cfg(feature = "llm")))]

@@ -68,13 +68,13 @@ impl Default for LinguaEnricher {
 }
 
 impl Enricher<Text> for LinguaEnricher {
-    async fn enrich(&self, data: &TextData, ctx: &mut RecognizerContext<Text>) -> Result<()> {
+    async fn enrich(&self, data: &TextData, ctx: &mut RecognizerContext<'_, Text>) -> Result<()> {
         // A caller-asserted language is authoritative; skip detection.
-        if !ctx.languages.is_empty() {
+        if ctx.has_asserted_language() {
             return Ok(());
         }
         for detection in self.detector().detect(data.text.as_str())? {
-            ctx.languages.push(detection);
+            ctx.detect_language(detection);
         }
         Ok(())
     }
@@ -83,13 +83,16 @@ impl Enricher<Text> for LinguaEnricher {
 #[cfg(test)]
 mod tests {
     use elide_core::modality::text::TextData;
+    use elide_core::primitive::Language;
+    use elide_core::recognition::Scope;
 
     use super::*;
 
     #[tokio::test]
     async fn detects_english_onto_input() {
         let data = TextData::new("The quick brown fox jumps over the lazy dog.");
-        let mut ctx = RecognizerContext::new();
+        let scope = Scope::new();
+        let mut ctx = RecognizerContext::new(&scope);
         LinguaEnricher::unrestricted()
             .enrich(&data, &mut ctx)
             .await
@@ -101,13 +104,14 @@ mod tests {
     async fn asserted_language_skips_detection() {
         let de: LanguageTag = "de".parse().unwrap();
         let data = TextData::new("The quick brown fox");
-        let mut ctx = RecognizerContext::new().with_language(de, None);
+        let scope = Scope::new().with_language(Language::asserted(de));
+        let mut ctx = RecognizerContext::new(&scope);
         LinguaEnricher::unrestricted()
             .enrich(&data, &mut ctx)
             .await
             .unwrap();
         // Only the asserted German remains; English was never detected.
-        assert_eq!(ctx.languages.as_slice().len(), 1);
+        assert_eq!(ctx.ranked_languages().len(), 1);
         assert_eq!(ctx.primary_language().unwrap().primary_language(), "de");
     }
 }

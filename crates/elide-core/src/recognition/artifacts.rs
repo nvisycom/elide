@@ -1,16 +1,16 @@
-//! The [`Artifacts`] bundle — shared per-call NLP enrichment.
+//! [`Artifacts`] bundle: shared per-call NLP enrichment.
 
 use std::fmt;
 
 use type_map::concurrent::TypeMap;
 
-/// A type-keyed bundle of shared per-call enrichment, carried on a
+/// Type-keyed bundle of shared per-call enrichment, carried on a
 /// [`RecognizerContext`].
 ///
 /// Upstream NLP work (tokenization, lemmatization, language detection)
 /// is expensive and would be wasteful to repeat in every recognizer. A
 /// caller that runs it once stashes the result here, keyed by its Rust
-/// type, and any recognizer that wants it reads it back by type — e.g. a
+/// type, and any recognizer that wants it reads it back by type: e.g. a
 /// context enhancer's lemma matcher pulls a `Tokens` artifact. Each type
 /// has at most one entry. Recognizers that don't care leave it empty.
 ///
@@ -19,7 +19,7 @@ use type_map::concurrent::TypeMap;
 pub struct Artifacts(TypeMap);
 
 impl Artifacts {
-    /// An empty bundle.
+    /// Empty bundle.
     pub fn new() -> Self {
         Self::default()
     }

@@ -21,7 +21,7 @@ use crate::backend::LlmResponse;
 /// Pluggable prompt builder + response lifter for one modality.
 ///
 /// Implementors own both halves of the modality-specific work: turn
-/// the modality payload (`data`) plus its [`RecognizerContext<M>`]
+/// the modality payload (`data`) plus its [`RecognizerContext<'_, M>`]
 /// into the prompt string the backend receives, then turn the
 /// backend's reply into entities. Keeping both halves on one trait
 /// means the lifter has access to whatever state the builder stamped
@@ -33,7 +33,7 @@ where
     /// Render the user prompt for `data` in `ctx`. Fold in source
     /// data, hints, labels, and any base64-encoded binary payloads
     /// (images, audio) the model needs to see.
-    fn build(&self, data: &M::Data, ctx: &RecognizerContext<M>) -> String;
+    fn build(&self, data: &M::Data, ctx: &RecognizerContext<'_, M>) -> String;
 
     /// Optional JSON schema describing the expected response shape.
     /// When `Some`, the backend asks the model to constrain its
@@ -50,6 +50,6 @@ where
         &self,
         response: &LlmResponse,
         data: &M::Data,
-        ctx: &RecognizerContext<M>,
+        ctx: &RecognizerContext<'_, M>,
     ) -> Vec<Entity<M>>;
 }

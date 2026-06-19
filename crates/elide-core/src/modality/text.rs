@@ -1,5 +1,4 @@
-//! The [`Text`] modality — plain or structured text addressed by byte
-//! ranges.
+//! [`Text`] modality: plain or structured text addressed by byte ranges.
 
 use std::cmp::Ordering;
 
@@ -9,8 +8,10 @@ use serde::{Deserialize, Serialize};
 
 use super::{Modality, ModalityData, ModalityLocation, ModalityReplacement};
 
-/// A run of text — the payload a text recognizer inspects, or the value
-/// sliced out at an entity's location for an operator.
+/// Run of text.
+///
+/// Either the payload a text recognizer inspects, or the value sliced out
+/// at an entity's location for an operator.
 ///
 /// Held as a [`HipStr`] so short values inline and longer ones share a
 /// refcounted buffer, making cheap clones when one payload is passed to
@@ -19,7 +20,7 @@ use super::{Modality, ModalityData, ModalityLocation, ModalityReplacement};
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 pub struct TextData {
-    /// The text content.
+    /// Text content.
     pub text: HipStr<'static>,
 }
 
@@ -29,7 +30,7 @@ impl TextData {
         Self { text: text.into() }
     }
 
-    /// The text as a string slice.
+    /// Text as a string slice.
     pub fn as_str(&self) -> &str {
         self.text.as_str()
     }
@@ -37,7 +38,7 @@ impl TextData {
 
 impl ModalityData for TextData {}
 
-/// A half-open `[start, end)` byte range within text content.
+/// Half-open `[start, end)` byte range within text content.
 ///
 /// Ordering and overlap consider only `(start, end)`; the optional page
 /// number is carried for codecs that page their text but does not affect
@@ -58,7 +59,7 @@ pub struct TextLocation {
 }
 
 impl TextLocation {
-    /// A location covering `start..end`, page unset.
+    /// Location covering `start..end`, page unset.
     pub fn new(start: usize, end: usize) -> Self {
         Self {
             start,
@@ -111,12 +112,12 @@ pub enum TextReplacement {
 }
 
 impl TextReplacement {
-    /// A substitution with the given value.
+    /// Substitution with the given value.
     pub fn substituted(value: impl Into<String>) -> Self {
         Self::Substituted(value.into())
     }
 
-    /// The replacement value, or `None` for a removal.
+    /// Replacement value, or `None` for a removal.
     pub fn value(&self) -> Option<&str> {
         match self {
             Self::Substituted(value) => Some(value),
@@ -127,7 +128,7 @@ impl TextReplacement {
 
 impl ModalityReplacement for TextReplacement {}
 
-/// The text modality: data is [`TextData`], locations are
+/// Text modality: data is [`TextData`], locations are
 /// [`TextLocation`] byte ranges, replacements are [`TextReplacement`].
 #[derive(Debug, Clone, Copy)]
 pub struct Text;

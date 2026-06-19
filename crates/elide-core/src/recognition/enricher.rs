@@ -31,6 +31,6 @@ where
     fn enrich(
         &self,
         data: &M::Data,
-        ctx: &mut RecognizerContext<M>,
+        ctx: &mut RecognizerContext<'_, M>,
     ) -> impl Future<Output = Result<()>> + Send;
 }

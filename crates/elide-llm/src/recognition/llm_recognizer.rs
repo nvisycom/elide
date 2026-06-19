@@ -140,7 +140,7 @@ impl<M: Modality> Recognizer<M> for LlmRecognizer<M> {
     async fn recognize(
         &self,
         data: &M::Data,
-        ctx: &RecognizerContext<M>,
+        ctx: &RecognizerContext<'_, M>,
     ) -> Result<Vec<Entity<M>>> {
         let prompt = self.prompt.build(data, ctx);
         let request = LlmRequest {

@@ -426,7 +426,7 @@ impl Recognizer<Text> for PatternRecognizer {
     async fn recognize(
         &self,
         data: &TextData,
-        ctx: &RecognizerContext<Text>,
+        ctx: &RecognizerContext<'_, Text>,
     ) -> Result<Vec<Entity<Text>>> {
         let text = data.text.as_str();
         let mut entities: Vec<Entity<Text>> = Vec::new();
@@ -441,7 +441,7 @@ impl Recognizer<Text> for PatternRecognizer {
                     continue;
                 }
                 let validation_ctx = ValidationContext {
-                    countries: ctx.countries.clone(),
+                    countries: ctx.scope().countries.clone(),
                     language: ctx.primary_language().cloned(),
                 };
                 for m in pat.regex.find_iter(text) {

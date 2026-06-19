@@ -7,7 +7,7 @@ use elide_core::Result;
 use elide_core::entity::provenance::{Event, EventKind, ModelEvent, PatternEvent, Provenance};
 use elide_core::entity::{Entity, EntityCoRef, Label, LabelCatalog, LabelRef};
 use elide_core::modality::Modality;
-use elide_core::primitive::{Confidence, ConfidenceThreshold, CountryCode, LanguageTag};
+use elide_core::primitive::{Confidence, ConfidenceThreshold, CountryCode, Language, LanguageTag};
 
 mod fixtures;
 use fixtures::{Text, TextData, TextLocation, TextReplacement};
@@ -167,7 +167,7 @@ fn country_code_resolves_iso_codes() {
 
 #[test]
 fn geometry_shapes_compose() {
-    use elide_core::primitive::geometry::{BoundingBox, Point, Polygon};
+    use elide_core::primitive::{BoundingBox, Point, Polygon};
 
     let bbox = BoundingBox::from_origin_size(Point::new(10.0, 20.0), 100.0, 40.0);
     assert_eq!(bbox.width(), 100.0);
@@ -202,7 +202,7 @@ fn label_map_translates_raw_labels() {
 
 #[test]
 fn recognizer_context_scopes_by_language_and_country() {
-    use elide_core::recognition::RecognizerContext;
+    use elide_core::recognition::{RecognizerContext, Scope};
 
     let en_us = LanguageTag::parse("en-US").unwrap();
     let en = LanguageTag::parse("en").unwrap();
@@ -212,9 +212,12 @@ fn recognizer_context_scopes_by_language_and_country() {
     assert!(en.matches(&en_us));
     assert!(!en.matches(&fr));
 
-    let ctx: RecognizerContext<Text> = RecognizerContext::new()
-        .with_language(en_us.clone(), None)
+    // Assertions live on the scope; the query methods live on the
+    // context, which borrows the scope.
+    let scope: Scope<Text> = Scope::new()
+        .with_language(Language::asserted(en_us.clone()))
         .with_country(CountryCode::from_alpha2("US").unwrap());
+    let ctx = RecognizerContext::new(&scope);
 
     // The asserted language is the primary one.
     assert_eq!(ctx.primary_language(), Some(&en_us));
@@ -233,17 +236,18 @@ fn recognizer_context_scopes_by_language_and_country() {
 fn recognizer_context_carries_hints() {
     use elide_core::entity::LabelRef;
     use elide_core::modality::text::TextLocation;
-    use elide_core::recognition::{Hint, RecognizerContext};
+    use elide_core::recognition::{Hint, RecognizerContext, Scope};
 
     let hint = Hint::new(TextLocation::new(0, 5))
         .with_name("uploaded selection")
         .with_label(LabelRef::new("PERSON"));
-    let ctx: RecognizerContext<Text> = RecognizerContext::new().with_hints(vec![hint]);
+    let scope: Scope<Text> = Scope::new().with_hints(vec![hint]);
+    let ctx = RecognizerContext::new(&scope);
 
-    assert_eq!(ctx.hints.len(), 1);
-    assert_eq!(ctx.hints[0].location, TextLocation::new(0, 5));
-    assert_eq!(ctx.hints[0].name.as_deref(), Some("uploaded selection"));
-    assert_eq!(ctx.hints[0].label, Some(LabelRef::new("PERSON")));
+    assert_eq!(ctx.hints().len(), 1);
+    assert_eq!(ctx.hints()[0].location, TextLocation::new(0, 5));
+    assert_eq!(ctx.hints()[0].name.as_deref(), Some("uploaded selection"));
+    assert_eq!(ctx.hints()[0].label, Some(LabelRef::new("PERSON")));
 }
 
 #[test]
