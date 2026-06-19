@@ -9,6 +9,12 @@ define log
 printf "[%s] [MAKE] [$(MAKECMDGOALS)] $(1)\n" "$$(date '+%Y-%m-%d %H:%M:%S')"
 endef
 
+.PHONY: install-deps
+install-deps: ## Installs system build dependencies (C toolchain for the mp3 codec).
+	@$(call log,Installing build-essential autoconf automake...)
+	@sudo apt-get update && sudo apt-get install -y build-essential autoconf automake
+	@$(call log,Build dependencies installed.)
+
 .PHONY: install-tools
 install-tools: ## Installs CLI tools required for development.
 	@$(call log,Checking cargo-watch...)

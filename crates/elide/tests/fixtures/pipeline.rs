@@ -15,6 +15,7 @@ use elide::deduplication::filter::FilterLayer;
 use elide::deduplication::fuse::{FuseLayer, MaxConfidence};
 use elide::deduplication::resolve::{HighestConfidence, ResolveLayer};
 use elide::entity::{Entity, builtins};
+#[cfg(feature = "codec-csv")]
 use elide::modality::tabular::Tabular;
 use elide::modality::text::Text;
 use elide::modality::{Modality, StreamDataReader, TextBacked};
@@ -104,6 +105,7 @@ impl Fixture {
 
     /// Run the pipeline as the [`Tabular`](elide::modality::tabular::Tabular)
     /// modality (`csv`).
+    #[cfg(feature = "codec-csv")]
     pub async fn run_tabular(&self) -> PipelineOutcome<Tabular> {
         self.run_typed::<Tabular>().await
     }

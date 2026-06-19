@@ -10,6 +10,7 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/build.yml"
+      - "Makefile"
   pull_request:
     branches:
       - "main"
@@ -19,6 +20,7 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/build.yml"
+      - "Makefile"
   workflow_dispatch:
 
 env:
@@ -53,8 +55,14 @@ jobs:
           key: ${{ runner.os }}-cargo-check-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-check-
 
+      - name: Install C toolchain (libmp3lame for the mp3 codec)
+        run: make install-deps
+
       - name: Cargo check
         run: cargo check --workspace
+
+      - name: Cargo check (all features)
+        run: cargo check --workspace --all-features
 
   clippy:
     name: Clippy
@@ -80,8 +88,14 @@ jobs:
           key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-clippy-
 
+      - name: Install C toolchain (libmp3lame for the mp3 codec)
+        run: make install-deps
+
       - name: Clippy
         run: cargo clippy --workspace -- -D warnings
+
+      - name: Clippy (all features)
+        run: cargo clippy --workspace --all-features --all-targets -- -D warnings
 
   docs:
     name: Docs
@@ -106,8 +120,16 @@ jobs:
           key: ${{ runner.os }}-cargo-docs-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-docs-
 
+      - name: Install C toolchain (libmp3lame for the mp3 codec)
+        run: make install-deps
+
       - name: Cargo doc
         run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+
+      - name: Cargo doc (all features)
+        run: cargo doc --workspace --no-deps --all-features
         env:
           RUSTDOCFLAGS: "-D warnings"
 
@@ -135,8 +157,14 @@ jobs:
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-test-
 
+      - name: Install C toolchain (libmp3lame for the mp3 codec)
+        run: make install-deps
+
       - name: Run tests
         run: cargo test --workspace
+
+      - name: Run tests (all features)
+        run: cargo test --workspace --all-features
 
   build:
     name: Build
