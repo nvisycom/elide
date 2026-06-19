@@ -5,7 +5,13 @@
 //! entity's value (the slice a [`DataReader`] produced) and returns a
 //! [`TextReplacement`].
 //!
+//! [`Pseudonymize`] substitutes a consistent synthetic value per entity,
+//! drawn from a [`Generator`] and kept stable across mentions through a
+//! [`Vault`] — so coreferent mentions all read the same surrogate.
+//!
 //! [`Operator`]: elide_core::redaction::Operator
+//! [`Vault`]: elide_core::redaction::Vault
+//! [`Generator`]: crate::redaction::generator::Generator
 //! [`Text`]: elide_core::modality::text::Text
 //! [`Hash`]: struct@Hash
 //! [`DataReader`]: elide_core::modality::DataReader
@@ -15,10 +21,12 @@ mod erase;
 mod hash;
 mod keep;
 mod mask;
+mod pseudonymize;
 mod replace;
 
 pub use self::erase::Erase;
 pub use self::hash::{Hash, HashAlgorithm};
 pub use self::keep::Keep;
 pub use self::mask::Mask;
+pub use self::pseudonymize::Pseudonymize;
 pub use self::replace::Replace;

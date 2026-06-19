@@ -2,7 +2,7 @@
 //! operators, reading values through a `DataReader`, with a fallback for
 //! unmapped labels.
 
-use elide::redaction::Anonymizer;
+use elide::Anonymizer;
 use elide::redaction::operators::{Erase, Keep, Mask, Replace};
 use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
 use elide_core::entity::{Entity, EntityCoRef, Label, LabelCatalog, LabelRef};

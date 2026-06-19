@@ -22,9 +22,9 @@ use elide::modality::{Modality, StreamDataReader, TextBacked};
 use elide::primitive::{ConfidenceThreshold, Language, LanguageTag};
 use elide::recognition::pattern::PatternRecognizer;
 use elide::recognition::{Recognizer, Scope};
+use elide::redaction::Operator;
 use elide::redaction::operators::{Erase, Mask, Replace};
-use elide::redaction::{Anonymizer, Operator};
-use elide::{Analyzer, Result};
+use elide::{Analyzer, Anonymizer, Result};
 
 /// Outcome of one end-to-end run: the entities that survived dedup and
 /// the re-encoded redacted document.

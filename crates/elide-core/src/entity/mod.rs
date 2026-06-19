@@ -1,4 +1,4 @@
-//! Detected entity and its constituent parts.
+//! The detected [`Entity`] and the parts it is built from.
 //!
 //! An [`Entity`] is the unit that flows through the toolkit: a single
 //! piece of sensitive information located somewhere in a medium, the
