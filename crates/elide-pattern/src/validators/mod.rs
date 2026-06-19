@@ -71,18 +71,19 @@ pub use self::phone::phone;
 /// Per-call hints supplied to validators alongside the matched
 /// string.
 ///
-/// Carries the caller's [`RecognizerInput`] jurisdiction and
+/// Carries the caller's [`RecognizerContext`] jurisdiction and
 /// language so validators that need region-aware semantics
 /// (e.g. `phone`) can honour the caller's intent instead of
 /// guessing across a fixed fallback set. Validators that don't
 /// need either field can ignore it via `_ctx`.
 ///
-/// [`RecognizerInput`]: elide_core::recognition::RecognizerInput
+/// [`RecognizerContext`]: elide_core::recognition::RecognizerContext
 #[derive(Debug, Clone, Default)]
 pub struct ValidationContext {
-    /// ISO 3166-1 alpha-2 jurisdiction associated with the input,
-    /// when the caller specified one.
-    pub country: Option<CountryCode>,
+    /// ISO 3166-1 alpha-2 jurisdictions the caller asserted for the
+    /// input. Empty when none were specified. Validators that need a
+    /// region (phone) try each one and accept a match for any.
+    pub countries: Vec<CountryCode>,
     /// BCP-47 language tag associated with the input, when the
     /// caller specified one.
     pub language: Option<LanguageTag>,

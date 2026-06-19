@@ -5,24 +5,24 @@
 //! [`Prompt<Text>`]: super::Prompt
 
 use elide_core::modality::text::Text;
-use elide_core::recognition::Hint;
+use elide_core::recognition::annotation::Inclusion;
 
-/// Snippet window (in bytes) emitted on each side of a hint's
+/// Snippet window (in bytes) emitted on each side of an inclusion's
 /// range so the LLM has surrounding context for judgement.
 const SNIPPET_HALF_WIDTH: usize = 80;
 
 /// Builds user prompts for the text detect pass.
 pub(super) struct TextPromptBuilder<'a> {
     text: &'a str,
-    hints: &'a [Hint<Text>],
+    inclusions: &'a [Inclusion<Text>],
     labels: &'a [String],
 }
 
 impl<'a> TextPromptBuilder<'a> {
-    pub fn new(text: &'a str, hints: &'a [Hint<Text>], labels: &'a [String]) -> Self {
+    pub fn new(text: &'a str, inclusions: &'a [Inclusion<Text>], labels: &'a [String]) -> Self {
         Self {
             text,
-            hints,
+            inclusions,
             labels,
         }
     }
@@ -47,12 +47,12 @@ impl<'a> TextPromptBuilder<'a> {
             ));
         }
 
-        if !self.hints.is_empty() {
+        if !self.inclusions.is_empty() {
             prompt.push_str(
                 "\n\nThe uploader marked these regions as likely sensitive. \
                  Use them as priors when scoring candidates. Hints:",
             );
-            for (i, h) in self.hints.iter().enumerate() {
+            for (i, h) in self.inclusions.iter().enumerate() {
                 let value = value_at(self.text, h.location.start, h.location.end);
                 let snippet = snippet_around(self.text, h.location.start, h.location.end);
                 let name = h.name.as_deref().unwrap_or("");

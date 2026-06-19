@@ -1,4 +1,4 @@
-//! The [`Image`] modality: raster image content addressed by 2-D regions.
+//! [`Image`] modality: raster image content addressed by 2-D regions.
 
 use std::cmp::Ordering;
 
@@ -43,7 +43,7 @@ impl ImageData {
         self
     }
 
-    /// The lowercased extension derived from [`filename`](Self::filename),
+    /// Lowercased extension derived from [`filename`](Self::filename),
     /// or `"png"` when no filename is set or it has no extension.
     pub fn extension(&self) -> &str {
         self.filename
@@ -56,7 +56,7 @@ impl ImageData {
 
 impl ModalityData for ImageData {}
 
-/// A region within image content.
+/// Region within image content.
 ///
 /// An axis-aligned [`BoundingBox`] in pixel coordinates locates the
 /// region; an optional [`Polygon`] captures a rotated or quadrilateral
@@ -83,7 +83,7 @@ pub struct ImageLocation {
 }
 
 impl ImageLocation {
-    /// A location from the bounding box alone, every optional field unset.
+    /// Location from the bounding box alone, every optional field unset.
     pub fn new(bounding_box: BoundingBox) -> Self {
         Self {
             bounding_box,
@@ -108,7 +108,7 @@ impl ImageLocation {
 }
 
 impl ImageLocation {
-    /// The region's shape as a polygon: its explicit [`polygon`] when set,
+    /// Region's shape as a polygon: its explicit [`polygon`] when set,
     /// otherwise its bounding box as a rectangle.
     ///
     /// [`polygon`]: Self::polygon
@@ -176,7 +176,7 @@ pub enum ImageReplacement {
 }
 
 impl ImageReplacement {
-    /// A black block, the conservative default treatment.
+    /// Black block, the conservative default treatment.
     pub const fn block() -> Self {
         Self::Block {
             color: Color::BLACK,
@@ -186,7 +186,7 @@ impl ImageReplacement {
 
 impl ModalityReplacement for ImageReplacement {}
 
-/// The image modality: data is [`ImageData`], locations are
+/// Image modality: data is [`ImageData`], locations are
 /// [`ImageLocation`] regions, replacements are [`ImageReplacement`].
 #[derive(Debug, Clone, Copy)]
 pub struct Image;

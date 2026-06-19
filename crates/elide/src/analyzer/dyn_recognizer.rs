@@ -3,9 +3,14 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use elide_core::Error;
+use elide_core::Result;
+use elide_core::entity::Entity;
 use elide_core::modality::Modality;
-use elide_core::recognition::{Recognizer, RecognizerInput, RecognizerOutput};
+use elide_core::recognition::{Recognizer, RecognizerContext};
+
+/// Boxed future a [`DynRecognizer`] returns: the recognized entities (or
+/// an error), erased so trait objects can hold it.
+type RecognizeFuture<'a, M> = Pin<Box<dyn Future<Output = Result<Vec<Entity<M>>>> + Send + 'a>>;
 
 /// Object-safe bridge over [`Recognizer`].
 ///
@@ -19,8 +24,9 @@ use elide_core::recognition::{Recognizer, RecognizerInput, RecognizerOutput};
 pub(crate) trait DynRecognizer<M: Modality>: Send + Sync {
     fn recognize_boxed<'a>(
         &'a self,
-        input: &'a RecognizerInput<M>,
-    ) -> Pin<Box<dyn Future<Output = Result<RecognizerOutput<M>, Error>> + Send + 'a>>;
+        data: &'a M::Data,
+        ctx: &'a RecognizerContext<'_, M>,
+    ) -> RecognizeFuture<'a, M>;
 }
 
 impl<M, R> DynRecognizer<M> for R
@@ -30,8 +36,9 @@ where
 {
     fn recognize_boxed<'a>(
         &'a self,
-        input: &'a RecognizerInput<M>,
-    ) -> Pin<Box<dyn Future<Output = Result<RecognizerOutput<M>, Error>> + Send + 'a>> {
-        Box::pin(self.recognize(input))
+        data: &'a M::Data,
+        ctx: &'a RecognizerContext<'_, M>,
+    ) -> RecognizeFuture<'a, M> {
+        Box::pin(self.recognize(data, ctx))
     }
 }

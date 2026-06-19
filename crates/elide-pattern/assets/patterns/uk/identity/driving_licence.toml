@@ -1,6 +1,6 @@
 # UK Driving Licence Number (DVLA).
 #
-# Format: 16-char alphanumeric — 5-char surname (letters padded
+# Format: 16-char alphanumeric: 5-char surname (letters padded
 # with 9s) + decade digit + month (01-12 or 51-62 for female) +
 # day + year digit + 2 initial chars (or 9) + check + 2 letters.
 

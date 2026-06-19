@@ -1,14 +1,14 @@
-//! What a codec handler exposes — the trait surface every format
+//! What a codec handler exposes: the trait surface every format
 //! handler implements.
 //!
-//! - [`Handler<M>`] — per-modality capability trait. It *is* a
+//! - [`Handler<M>`]: per-modality capability trait. It *is* a
 //!   [`DataReader`] + [`DataWriter`] (the random-access read / write
 //!   surface, shared with the rest of the workspace), and adds the
 //!   codec-specific bits on top: identify and serialise ([`format`],
 //!   [`encode`]), stream chunks ([`read_next`]), and lift recognizer
 //!   offsets back to source coordinates ([`lift_chunk`]).
 //!
-//! [`Chunk<M>`] — the unit yielded by `read_next` — lives in
+//! [`Chunk<M>`], the unit yielded by `read_next`, lives in
 //! [`elide_core::modality`], since it is the shared currency of the
 //! [`StreamDataReader`] contract, not a codec-private type.
 //!
@@ -24,7 +24,7 @@
 use std::future::Future;
 use std::ops::Range;
 
-use elide_core::Error;
+use elide_core::Result;
 use elide_core::modality::{Chunk, DataReader, DataWriter, Modality};
 
 use super::FormatId;
@@ -36,11 +36,11 @@ use crate::content::ContentData;
 /// (`read_at`) and batch redaction (`write_at`) come from those shared
 /// traits, so a codec-backed document plugs straight into anything that
 /// bounds on them (the toolkit's anonymizer, say). On top of that base,
-/// `Handler` adds the codec-specific surface — identify and serialise
+/// `Handler` adds the codec-specific surface: identify and serialise
 /// ([`format`], [`encode`]), stream chunks ([`read_next`]), and lift
 /// recognizer offsets back to source coordinates ([`lift_chunk`]).
 ///
-/// The handler owns the streaming cursor — concurrent iteration of the
+/// The handler owns the streaming cursor; concurrent iteration of the
 /// same handle is not supported (only one `&mut self`).
 ///
 /// Async methods return `impl Future` (RPITIT). The registry stores
@@ -65,11 +65,11 @@ pub trait Handler<M: Modality>: DataReader<M> + DataWriter<M> + Send + Sync + 's
     ///
     /// Returns an error when the in-memory representation cannot be
     /// re-encoded.
-    fn encode(&self) -> Result<ContentData, Error>;
+    fn encode(&self) -> Result<ContentData>;
 
     /// Advance the cursor and yield the next chunk, or `None` at
     /// end-of-stream.
-    fn read_next(&mut self) -> impl Future<Output = Result<Option<Chunk<M>>, Error>> + Send;
+    fn read_next(&mut self) -> impl Future<Output = Result<Option<Chunk<M>>>> + Send;
 
     /// Translate a `value_range` expressed inside `chunk.data`'s
     /// coordinate system into a source-coordinate `M::Location`.

@@ -4,7 +4,7 @@
 // A shared fixture exposes more than any one test uses.
 #![allow(dead_code, unused_imports)]
 
-use elide_core::Error;
+use elide_core::Result;
 use elide_core::modality::DataReader;
 pub use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
 
@@ -20,7 +20,7 @@ impl TextSource {
 }
 
 impl DataReader<Text> for TextSource {
-    async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>, Error> {
+    async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
         Ok(self.0.get(location.start..location.end).map(TextData::new))
     }
 }

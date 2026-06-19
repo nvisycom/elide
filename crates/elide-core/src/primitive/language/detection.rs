@@ -1,10 +1,10 @@
 //! Language-detection result types.
 //!
-//! [`LanguageDetection`] pairs a [`LanguageTag`] with how it was obtained
+//! [`Language`] pairs a [`LanguageTag`] with how it was obtained
 //! ([`LanguageProvenance`]: detected by a backend, or asserted by the
 //! caller), an optional confidence, and the [`LanguageSpan`] byte-offset
 //! range it applies to when the detector reports per-region results.
-//! [`LanguageDetections`] is the list a detector (or the caller) builds
+//! [`Languages`] is the list a detector (or the caller) builds
 //! for one text scan.
 
 use std::cmp::Ordering;
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use super::LanguageTag;
 use crate::primitive::Confidence;
 
-/// How a [`LanguageDetection`]'s language was obtained.
+/// How a [`Language`]'s language was obtained.
 ///
 /// Lets consumers distinguish "a detector ran and got this answer" from
 /// "the caller asserted this language". An assertion may still carry an
@@ -30,9 +30,9 @@ pub enum LanguageProvenance {
     Asserted,
 }
 
-/// A byte-offset range within the analyzed text.
+/// Byte-offset range within the analyzed text.
 ///
-/// Attached to a [`LanguageDetection`] when the detector knows the span
+/// Attached to a [`Language`] when the detector knows the span
 /// its answer covers (mixed-language input produces multiple detections,
 /// each with a distinct span). Single-language detections from
 /// non-segmenting backends, and caller-asserted answers, typically leave
@@ -46,7 +46,7 @@ pub struct LanguageSpan {
     pub end: usize,
 }
 
-/// A single language detection result.
+/// Single language detection result.
 ///
 /// Carries the language plus an optional confidence and an optional
 /// byte-offset [`LanguageSpan`]. Backends that don't expose confidence
@@ -56,8 +56,8 @@ pub struct LanguageSpan {
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
-pub struct LanguageDetection {
-    /// The language.
+pub struct Language {
+    /// Language.
     pub language: LanguageTag,
     /// Optional confidence score. `None` when not exposed.
     #[cfg_attr(
@@ -76,28 +76,42 @@ pub struct LanguageDetection {
     pub span: Option<LanguageSpan>,
 }
 
-impl LanguageDetection {
-    /// A language produced by a detection backend, with optional
-    /// confidence.
+impl Language {
+    /// Language produced by a detection backend.
+    ///
+    /// Attach a score with [`with_confidence`].
+    ///
+    /// [`with_confidence`]: Self::with_confidence
     #[must_use]
-    pub fn detected(language: LanguageTag, confidence: Option<Confidence>) -> Self {
+    pub fn detected(language: LanguageTag) -> Self {
         Self {
             language,
-            confidence,
+            confidence: None,
             provenance: LanguageProvenance::Detected,
             span: None,
         }
     }
 
-    /// A language asserted by the caller, with optional confidence.
+    /// Language asserted by the caller.
+    ///
+    /// Attach a score with [`with_confidence`].
+    ///
+    /// [`with_confidence`]: Self::with_confidence
     #[must_use]
-    pub fn asserted(language: LanguageTag, confidence: Option<Confidence>) -> Self {
+    pub fn asserted(language: LanguageTag) -> Self {
         Self {
             language,
-            confidence,
+            confidence: None,
             provenance: LanguageProvenance::Asserted,
             span: None,
         }
+    }
+
+    /// Attach a confidence score.
+    #[must_use]
+    pub fn with_confidence(mut self, confidence: Confidence) -> Self {
+        self.confidence = Some(confidence);
+        self
     }
 
     /// Attach a byte-offset span this detection covers.
@@ -113,40 +127,40 @@ impl LanguageDetection {
     /// confidence wins (a missing confidence ranks below any present one),
     /// and at equal confidence an [`Asserted`](LanguageProvenance::Asserted)
     /// language beats a [`Detected`](LanguageProvenance::Detected) one.
-    fn rank(&self, other: &Self) -> Ordering {
+    pub(crate) fn rank(&self, other: &Self) -> Ordering {
         confidence_key(self)
             .total_cmp(&confidence_key(other))
             .then_with(|| provenance_rank(self).cmp(&provenance_rank(other)))
     }
 }
 
-/// A list of [`LanguageDetection`]s resolved for one text scan.
+/// List of [`Language`]s resolved for one text scan.
 ///
 /// Built by a detector (one entry per detected region) or by the caller
-/// asserting languages. Carried on a [`RecognizerInput`] so every
+/// asserting languages. Carried on a [`RecognizerContext`] so every
 /// recognizer and the context enhancer can consult the call's languages.
 ///
-/// [`RecognizerInput`]: crate::recognition::RecognizerInput
+/// [`RecognizerContext`]: crate::recognition::RecognizerContext
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
-pub struct LanguageDetections(pub Vec<LanguageDetection>);
+pub struct Languages(pub Vec<Language>);
 
-impl LanguageDetections {
+impl Languages {
     /// Construct from a list of detections.
     #[must_use]
-    pub fn new(detections: Vec<LanguageDetection>) -> Self {
+    pub fn new(detections: Vec<Language>) -> Self {
         Self(detections)
     }
 
     /// Add a detection to the list.
-    pub fn push(&mut self, detection: LanguageDetection) {
+    pub fn push(&mut self, detection: Language) {
         self.0.push(detection);
     }
 
     /// Borrow the detections in their stored order.
     #[must_use]
-    pub fn as_slice(&self) -> &[LanguageDetection] {
+    pub fn as_slice(&self) -> &[Language] {
         &self.0
     }
 
@@ -156,30 +170,30 @@ impl LanguageDetections {
         self.0.is_empty()
     }
 
-    /// The detections ranked best-first: by confidence descending (a
-    /// missing confidence sorts last), with an asserted language breaking
-    /// ties ahead of a detected one. The sort is stable.
+    /// Detections ranked best-first: by confidence descending (a missing
+    /// confidence sorts last), with an asserted language breaking ties
+    /// ahead of a detected one. The sort is stable.
     #[must_use]
-    pub fn ranked(&self) -> Vec<&LanguageDetection> {
-        let mut out: Vec<&LanguageDetection> = self.0.iter().collect();
+    pub fn ranked(&self) -> Vec<&Language> {
+        let mut out: Vec<&Language> = self.0.iter().collect();
         out.sort_by(|a, b| b.rank(a));
         out
     }
 
-    /// The single best language, or `None` when the list is empty.
+    /// Single best language, or `None` when the list is empty.
     #[must_use]
-    pub fn best(&self) -> Option<&LanguageDetection> {
+    pub fn best(&self) -> Option<&Language> {
         self.0.iter().max_by(|a, b| a.rank(b))
     }
 
-    /// The language covering the most bytes of the source text, breaking
-    /// ties on confidence.
+    /// Language covering the most bytes of the source text, breaking ties
+    /// on confidence.
     ///
     /// Caller-asserted or whole-document detections (no `span`) are
     /// treated as covering the whole text, so they win against any single
     /// region. Returns `None` iff the list is empty.
     #[must_use]
-    pub fn dominant(&self) -> Option<&LanguageDetection> {
+    pub fn dominant(&self) -> Option<&Language> {
         self.0.iter().max_by(|a, b| {
             span_bytes(a)
                 .cmp(&span_bytes(b))
@@ -188,15 +202,15 @@ impl LanguageDetections {
     }
 }
 
-impl From<Vec<LanguageDetection>> for LanguageDetections {
-    fn from(detections: Vec<LanguageDetection>) -> Self {
+impl From<Vec<Language>> for Languages {
+    fn from(detections: Vec<Language>) -> Self {
         Self::new(detections)
     }
 }
 
 /// Confidence as a sort key: present scores by value, a missing score as
 /// negative infinity so it ranks below any present one.
-fn confidence_key(d: &LanguageDetection) -> f32 {
+fn confidence_key(d: &Language) -> f32 {
     d.confidence
         .map(Confidence::get)
         .unwrap_or(f32::NEG_INFINITY)
@@ -204,7 +218,7 @@ fn confidence_key(d: &LanguageDetection) -> f32 {
 
 /// Provenance tiebreak: a higher number wins, so an assertion outranks a
 /// detection at equal confidence.
-fn provenance_rank(d: &LanguageDetection) -> u8 {
+fn provenance_rank(d: &Language) -> u8 {
     match d.provenance {
         LanguageProvenance::Asserted => 1,
         LanguageProvenance::Detected => 0,
@@ -213,7 +227,7 @@ fn provenance_rank(d: &LanguageDetection) -> u8 {
 
 /// Byte coverage of a detection, treating a missing span as the whole
 /// document (maximal coverage).
-fn span_bytes(d: &LanguageDetection) -> usize {
+fn span_bytes(d: &Language) -> usize {
     match d.span {
         Some(s) => s.end.saturating_sub(s.start),
         None => usize::MAX,
@@ -230,11 +244,11 @@ mod tests {
 
     #[test]
     fn ranked_orders_by_confidence_then_assertion() {
-        let dets = LanguageDetections::new(vec![
-            LanguageDetection::detected(tag("fr"), Confidence::new(0.8)),
-            LanguageDetection::asserted(tag("de"), None),
-            LanguageDetection::detected(tag("es"), None),
-            LanguageDetection::asserted(tag("it"), Confidence::new(0.8)),
+        let dets = Languages::new(vec![
+            Language::detected(tag("fr")).with_confidence(Confidence::new(0.8).unwrap()),
+            Language::asserted(tag("de")),
+            Language::detected(tag("es")),
+            Language::asserted(tag("it")).with_confidence(Confidence::new(0.8).unwrap()),
         ]);
         let order: Vec<&str> = dets
             .ranked()
@@ -248,9 +262,9 @@ mod tests {
 
     #[test]
     fn best_is_top_of_ranked() {
-        let dets = LanguageDetections::new(vec![
-            LanguageDetection::detected(tag("fr"), Confidence::new(0.8)),
-            LanguageDetection::asserted(tag("de"), None),
+        let dets = Languages::new(vec![
+            Language::detected(tag("fr")).with_confidence(Confidence::new(0.8).unwrap()),
+            Language::asserted(tag("de")),
         ]);
         // Confidence-first: detected French (0.8) beats asserted German (None).
         assert_eq!(dets.best().unwrap().language, tag("fr"));
@@ -258,17 +272,19 @@ mod tests {
 
     #[test]
     fn dominant_prefers_largest_span() {
-        let small = LanguageDetection::detected(tag("de"), Confidence::new(0.99))
+        let small = Language::detected(tag("de"))
+            .with_confidence(Confidence::new(0.99).unwrap())
             .with_span(LanguageSpan { start: 0, end: 5 });
-        let large = LanguageDetection::detected(tag("en"), Confidence::new(0.6))
+        let large = Language::detected(tag("en"))
+            .with_confidence(Confidence::new(0.6).unwrap())
             .with_span(LanguageSpan { start: 5, end: 40 });
-        let dets = LanguageDetections::new(vec![small, large]);
+        let dets = Languages::new(vec![small, large]);
         assert_eq!(dets.dominant().unwrap().language, tag("en"));
     }
 
     #[test]
     fn empty_has_no_best_or_dominant() {
-        let dets = LanguageDetections::default();
+        let dets = Languages::default();
         assert!(dets.is_empty());
         assert!(dets.best().is_none());
         assert!(dets.dominant().is_none());

@@ -8,21 +8,24 @@
 
 use std::ops::Range;
 
-use elide_core::Error;
+use elide_core::Result;
 use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
 
+use super::TxtLoader;
 use crate::content::ContentData;
 use crate::handler::redact;
 use crate::{Format, FormatId, Handler};
 
 /// Stable [`FormatId`] for the plain-text codec.
-pub const FORMAT_ID: FormatId = FormatId::from_static("elide.text.txt");
+pub const FORMAT_ID: FormatId = FormatId::new("elide.text.txt");
 
-/// [`Format`] descriptor registered into [`crate::CodecRegistry`].
+/// [`Format`] descriptor registered into [`FormatRegistry`].
+///
+/// [`FormatRegistry`]: crate::FormatRegistry
 pub fn format() -> Format {
-    Format::new::<Text, _>(FORMAT_ID.clone(), super::TxtLoader)
+    Format::new::<Text, _>(FORMAT_ID.clone(), TxtLoader)
         .with_extensions(["txt", "log"])
         .with_content_types(["text/plain"])
 }
@@ -36,7 +39,7 @@ pub fn format() -> Format {
 /// sentinel. Random-access `read_at` / `write_at` (from [`DataReader`] /
 /// [`DataWriter`]) resolve a byte offset to a line in `O(log N)`.
 #[derive(Debug)]
-pub struct TxtHandler {
+pub(crate) struct TxtHandler {
     lines: Vec<String>,
     line_starts: Vec<usize>,
     trailing_newline: bool,
@@ -48,7 +51,7 @@ impl Handler<Text> for TxtHandler {
         FORMAT_ID.clone()
     }
 
-    fn encode(&self) -> Result<ContentData, Error> {
+    fn encode(&self) -> Result<ContentData> {
         let mut out = self.lines.join("\n");
         if self.trailing_newline && !self.lines.is_empty() {
             out.push('\n');
@@ -56,7 +59,7 @@ impl Handler<Text> for TxtHandler {
         Ok(ContentData::from_text(out))
     }
 
-    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>, Error> {
+    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>> {
         if self.cursor >= self.lines.len() {
             return Ok(None);
         }
@@ -95,7 +98,7 @@ impl Handler<Text> for TxtHandler {
 }
 
 impl DataReader<Text> for TxtHandler {
-    async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>, Error> {
+    async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
         let Some(i) = self.line_for(location.start) else {
             return Ok(None);
         };
@@ -111,7 +114,7 @@ impl DataReader<Text> for TxtHandler {
 }
 
 impl DataWriter<Text> for TxtHandler {
-    async fn write_at(&mut self, mut redactions: Redactions<Text>) -> Result<(), Error> {
+    async fn write_at(&mut self, mut redactions: Redactions<Text>) -> Result<()> {
         // Apply right-to-left so each edit's length delta doesn't
         // invalidate earlier locations: sort ascending by position, then
         // walk in reverse.
@@ -135,34 +138,29 @@ impl TxtHandler {
         }
     }
 
-    /// All lines in the document.
+    /// All lines in the document. Test-only inspection helper.
+    #[cfg(test)]
     pub fn lines(&self) -> &[String] {
         &self.lines
     }
 
-    /// A specific line by 0-based index.
+    /// A specific line by 0-based index. Test-only inspection helper.
+    #[cfg(test)]
     pub fn line(&self, index: usize) -> Option<&str> {
         self.lines.get(index).map(String::as_str)
     }
 
-    /// Whether the original source had a trailing newline.
+    /// Whether the original source had a trailing newline. Test-only
+    /// inspection helper.
+    #[cfg(test)]
     pub fn trailing_newline(&self) -> bool {
         self.trailing_newline
     }
 
-    /// Total number of lines.
+    /// Total number of lines. Test-only inspection helper.
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.lines.len()
-    }
-
-    /// Whether the document has no lines.
-    pub fn is_empty(&self) -> bool {
-        self.lines.is_empty()
-    }
-
-    /// Rewind the streaming cursor to the start of the document.
-    pub fn rewind(&mut self) {
-        self.cursor = 0;
     }
 
     /// Line index containing `byte_offset`, or `None` if past the end.
@@ -186,11 +184,7 @@ impl TxtHandler {
         }
     }
 
-    fn redact_one(
-        &mut self,
-        location: &TextLocation,
-        replacement: &TextReplacement,
-    ) -> Result<(), Error> {
+    fn redact_one(&mut self, location: &TextLocation, replacement: &TextReplacement) -> Result<()> {
         let Some(i) = self.line_for(location.start) else {
             return Ok(());
         };
@@ -232,7 +226,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stream_yields_each_line() -> Result<(), Error> {
+    async fn stream_yields_each_line() -> Result<()> {
         let mut h = handler("hello\nworld\n");
         let first = h.read_next().await?.unwrap();
         assert_eq!(first.location.start, 0);
@@ -247,7 +241,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lift_chunk_is_identity_on_second_line() -> Result<(), Error> {
+    async fn lift_chunk_is_identity_on_second_line() -> Result<()> {
         let mut h = handler("hello\nworld\n");
         let _first = h.read_next().await?.unwrap();
         let second = h.read_next().await?.unwrap();
@@ -258,7 +252,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn read_returns_line() -> Result<(), Error> {
+    async fn read_returns_line() -> Result<()> {
         let h = handler("hello\nworld\n");
         let loc = TextLocation {
             start: 6,
@@ -270,7 +264,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn read_cross_line_returns_none() -> Result<(), Error> {
+    async fn read_cross_line_returns_none() -> Result<()> {
         let h = handler("hello\nworld\n");
         let loc = TextLocation {
             start: 3,
@@ -282,7 +276,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn redact_replaces_whole_line() -> Result<(), Error> {
+    async fn redact_replaces_whole_line() -> Result<()> {
         let mut h = handler("hello\nworld\n");
         let mut rs = Redactions::new();
         rs.push(
@@ -299,7 +293,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn redact_multiple_lines_any_input_order() -> Result<(), Error> {
+    async fn redact_multiple_lines_any_input_order() -> Result<()> {
         let mut h = handler("alpha\nbravo\ncharlie\n");
         let mut rs = Redactions::new();
         rs.push(
@@ -324,7 +318,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn redact_unknown_location_skipped() -> Result<(), Error> {
+    async fn redact_unknown_location_skipped() -> Result<()> {
         let mut h = handler("one line");
         let mut rs = Redactions::new();
         rs.push(
@@ -341,21 +335,21 @@ mod tests {
     }
 
     #[test]
-    fn encode_with_trailing_newline() -> Result<(), Error> {
+    fn encode_with_trailing_newline() -> Result<()> {
         let h = handler("hello\nworld\n");
         assert_eq!(h.encode()?.as_bytes(), b"hello\nworld\n");
         Ok(())
     }
 
     #[test]
-    fn encode_without_trailing_newline() -> Result<(), Error> {
+    fn encode_without_trailing_newline() -> Result<()> {
         let h = handler("no newline");
         assert_eq!(h.encode()?.as_bytes(), b"no newline");
         Ok(())
     }
 
     #[tokio::test]
-    async fn line_starts_shift_after_shrink() -> Result<(), Error> {
+    async fn line_starts_shift_after_shrink() -> Result<()> {
         let mut h = handler("hello\nworld\n");
         let mut rs = Redactions::new();
         rs.push(

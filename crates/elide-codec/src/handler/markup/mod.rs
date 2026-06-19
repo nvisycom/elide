@@ -1,13 +1,13 @@
 //! Shared model for tree-structured markup (HTML, and a future XML).
 //!
 //! Markup formats differ in their *parser* and *serializer* but share the
-//! same redactable units — text nodes, element attributes, comments — and
+//! same redactable units (text nodes, element attributes, comments) and
 //! the same streaming/redaction bookkeeping over them. This module holds
 //! that neutral core:
 //!
-//! - [`RedactableItem<A>`] — one addressable unit (its `value` plus an
+//! - [`RedactableItem<A>`]: one addressable unit (its `value` plus an
 //!   encoder-private address `A`), parser-agnostic.
-//! - [`MarkupHandler`] — the [`Handler`] machinery over a
+//! - [`MarkupHandler`]: the [`Handler`] machinery over a
 //!   `Vec<RedactableItem<A>>`: cumulative offsets, `read_next`, random
 //!   read, batch redact, and `lift_chunk`. It never inspects the address.
 //!   Re-serialization is delegated to a format-specific [`MarkupEncoder`],
@@ -33,34 +33,36 @@ mod xml_loader;
 
 use std::ops::Range;
 
-use elide_core::Error;
-use elide_core::modality::text::{Text, TextData, TextLocation};
+use elide_core::Result;
+use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
 
 #[cfg(feature = "html")]
-pub use self::html_handler::{HtmlEncoder, HtmlHandler, format as html_format};
+pub use self::html_handler::{format as html_format, format_with as html_format_with};
 #[cfg(feature = "html")]
-pub use self::html_loader::{HtmlLoader, ScriptPolicy};
+pub(crate) use self::html_loader::HtmlLoader;
+#[cfg(feature = "html")]
+pub use self::html_loader::ScriptPolicy;
 #[cfg(feature = "xml")]
-pub use self::xml_handler::{XmlEncoder, XmlHandler, format as xml_format};
+pub use self::xml_handler::format as xml_format;
 #[cfg(feature = "xml")]
-pub use self::xml_loader::XmlLoader;
-use crate::Handler;
+pub(crate) use self::xml_loader::XmlLoader;
 use crate::content::ContentData;
 use crate::handler::redact;
+use crate::{FormatId, Handler};
 
 /// One redactable unit in a markup document.
 ///
 /// `value` is the text a recognizer scans and that redaction mutates in
-/// place; `address` is the encoder-private "where" — how the format's
+/// place; `address` is the encoder-private "where": how the format's
 /// [`MarkupEncoder`] re-finds this unit to splice the mutated value back
 /// in. The handler machinery never inspects `address`; it only streams
 /// and edits `value`, so each format chooses the addressing scheme its
 /// encoder needs (ordinal node indices for a DOM rebuild, source byte
 /// spans for in-place patching, …).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RedactableItem<A> {
+pub(crate) struct RedactableItem<A> {
     /// The encoder-private location of this item in the document.
     pub address: A,
     /// Text-node text, comment body, attribute value, or element text.
@@ -80,9 +82,9 @@ pub struct RedactableItem<A> {
 /// [`MarkupHandler`] owns everything else.
 ///
 /// [`Address`]: MarkupEncoder::Address
-pub trait MarkupEncoder: Send + Sync + 'static {
+pub(crate) trait MarkupEncoder: Send + Sync + 'static {
     /// The encoder-private addressing payload carried on each
-    /// [`RedactableItem`] — e.g. an ordinal node index or a source span.
+    /// [`RedactableItem`], e.g. an ordinal node index or a source span.
     type Address: Send + Sync + 'static;
 
     /// Re-encode `items` against the retained source into output bytes.
@@ -90,7 +92,7 @@ pub trait MarkupEncoder: Send + Sync + 'static {
     /// # Errors
     ///
     /// Returns an error when the document cannot be re-serialized.
-    fn encode(&self, items: &[RedactableItem<Self::Address>]) -> Result<ContentData, Error>;
+    fn encode(&self, items: &[RedactableItem<Self::Address>]) -> Result<ContentData>;
 }
 
 /// The [`Handler`] machinery over a markup item stream.
@@ -102,8 +104,8 @@ pub trait MarkupEncoder: Send + Sync + 'static {
 /// `O(log N)`. Offsets are over the redactable-item sequence in document
 /// order, not raw source bytes.
 #[derive(Debug)]
-pub struct MarkupHandler<E: MarkupEncoder> {
-    format_id: crate::FormatId,
+pub(crate) struct MarkupHandler<E: MarkupEncoder> {
+    format_id: FormatId,
     encoder: E,
     items: Vec<RedactableItem<E::Address>>,
     item_starts: Vec<usize>,
@@ -113,11 +115,7 @@ pub struct MarkupHandler<E: MarkupEncoder> {
 impl<E: MarkupEncoder> MarkupHandler<E> {
     /// Build a handler from a decoded item stream, a format id, and the
     /// format's encoder.
-    pub fn new(
-        format_id: crate::FormatId,
-        encoder: E,
-        items: Vec<RedactableItem<E::Address>>,
-    ) -> Self {
+    pub fn new(format_id: FormatId, encoder: E, items: Vec<RedactableItem<E::Address>>) -> Self {
         let item_starts = compute_item_starts(&items);
         Self {
             format_id,
@@ -126,26 +124,6 @@ impl<E: MarkupEncoder> MarkupHandler<E> {
             item_starts,
             cursor: 0,
         }
-    }
-
-    /// All redactable items in document order.
-    pub fn items(&self) -> &[RedactableItem<E::Address>] {
-        &self.items
-    }
-
-    /// Total number of redactable items.
-    pub fn len(&self) -> usize {
-        self.items.len()
-    }
-
-    /// Whether the document has no redactable items.
-    pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
-    }
-
-    /// Rewind the streaming cursor to the start of the document.
-    pub fn rewind(&mut self) {
-        self.cursor = 0;
     }
 
     fn item_for(&self, byte_offset: usize) -> Option<usize> {
@@ -166,11 +144,7 @@ impl<E: MarkupEncoder> MarkupHandler<E> {
         }
     }
 
-    fn redact_one(
-        &mut self,
-        location: &TextLocation,
-        replacement: &elide_core::modality::text::TextReplacement,
-    ) -> Result<(), Error> {
+    fn redact_one(&mut self, location: &TextLocation, replacement: &TextReplacement) -> Result<()> {
         let Some(i) = self.item_for(location.start) else {
             return Ok(());
         };
@@ -191,15 +165,15 @@ impl<E: MarkupEncoder> MarkupHandler<E> {
 }
 
 impl<E: MarkupEncoder> Handler<Text> for MarkupHandler<E> {
-    fn format(&self) -> crate::FormatId {
+    fn format(&self) -> FormatId {
         self.format_id.clone()
     }
 
-    fn encode(&self) -> Result<ContentData, Error> {
+    fn encode(&self) -> Result<ContentData> {
         self.encoder.encode(&self.items)
     }
 
-    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>, Error> {
+    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>> {
         if self.cursor >= self.items.len() {
             return Ok(None);
         }
@@ -240,7 +214,7 @@ impl<E: MarkupEncoder> Handler<Text> for MarkupHandler<E> {
 }
 
 impl<E: MarkupEncoder> DataReader<Text> for MarkupHandler<E> {
-    async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>, Error> {
+    async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
         let Some(i) = self.item_for(location.start) else {
             return Ok(None);
         };
@@ -259,7 +233,7 @@ impl<E: MarkupEncoder> DataReader<Text> for MarkupHandler<E> {
 }
 
 impl<E: MarkupEncoder> DataWriter<Text> for MarkupHandler<E> {
-    async fn write_at(&mut self, mut redactions: Redactions<Text>) -> Result<(), Error> {
+    async fn write_at(&mut self, mut redactions: Redactions<Text>) -> Result<()> {
         // Apply right-to-left so each edit's length delta doesn't
         // invalidate earlier locations.
         redactions.sort_by_position();

@@ -4,14 +4,14 @@
 //! lifts confidence when one of those keywords appears within
 //! `prefix_words` words before or `suffix_words` words after an
 //! entity carrying that label. The window radii and the additive
-//! `boost` are resolved at rule construction time — there are no
+//! `boost` are resolved at rule construction time; there are no
 //! per-source overrides at apply time.
 //!
 //! Producers (the pattern crate today, future NER/LLM/custom
 //! recognizer authors) hand the engine a `Vec<BoostRule>` keyed by
 //! label. When several rules contribute to the same label (e.g.
 //! two different SSN detectors both contributing to
-//! `GOVERNMENT_ID`), the engine merges them by union of keywords —
+//! `GOVERNMENT_ID`), the engine merges them by union of keywords;
 //! see [`BoostRule::merge`].
 //!
 //! [`LabelRef`]: elide_core::entity::LabelRef
@@ -25,8 +25,9 @@ use hipstr::HipStr;
 /// Default window radius in words *before* an entity match.
 pub const DEFAULT_PREFIX_WORDS: usize = 5;
 
-/// Default window radius in words *after* an entity match. Set
-/// equal to [`DEFAULT_PREFIX_WORDS`] so trailing context like
+/// Default window radius in words *after* an entity match.
+///
+/// Set equal to [`DEFAULT_PREFIX_WORDS`] so trailing context like
 /// "123-45-6789 (social security)" boosts the same as leading
 /// context. Asymmetric windows surprise operators who rarely
 /// realize the asymmetry exists, so we pick symmetric defaults.
@@ -57,7 +58,7 @@ pub struct BoostRule {
     pub keywords: Vec<HipStr<'static>>,
     /// Window radius in words *before* the entity's match.
     /// Counted against the token artifact on
-    /// `RecognizerInput.artifacts` when present, or via Unicode
+    /// `RecognizerContext.artifacts` when present, or via Unicode
     /// word segmentation of the source text otherwise.
     pub prefix_words: usize,
     /// Window radius in words *after* the entity's match. Same
@@ -75,7 +76,7 @@ impl BoostRule {
     /// Construct a rule for `label` with explicit window radii
     /// and `boost`. The rule is language-agnostic; use
     /// [`with_language`] to scope it. Most callers want
-    /// [`BoostRule::for_label`] instead — it bakes in the default
+    /// [`BoostRule::for_label`] instead, which bakes in the default
     /// window / boost values.
     ///
     /// [`with_language`]: Self::with_language
@@ -99,8 +100,8 @@ impl BoostRule {
 
     /// Construct a rule for `label` using the crate's default
     /// [`prefix_words`], [`suffix_words`], and [`boost`]
-    /// constants. The common case — recognizers building their
-    /// own boost rules from declared keywords don't need to
+    /// constants. This is the common case: recognizers building
+    /// their own boost rules from declared keywords don't need to
     /// think about tuning knobs.
     ///
     /// [`prefix_words`]: DEFAULT_PREFIX_WORDS
@@ -152,14 +153,14 @@ impl BoostRule {
 
     /// Merge `other` into this rule by extending the keyword set
     /// with any keywords not already present. Window radii and
-    /// `boost` are kept from `self` — callers that need different
+    /// `boost` are kept from `self`; callers that need different
     /// values per source should construct independent rules and
     /// keep them separate.
     ///
     /// # Panics
     ///
     /// Debug-asserts when the labels or languages differ. Merging
-    /// across keys is a caller bug — rules are keyed by
+    /// across keys is a caller bug: rules are keyed by
     /// `(label, language)` and the engine looks them up by both.
     pub fn merge(&mut self, other: BoostRule) {
         debug_assert_eq!(

@@ -1,4 +1,4 @@
-//! A 2-D point and the axis-aligned bounding box built from it.
+//! 2-D point and the axis-aligned bounding box built from it.
 
 use std::ops::Sub;
 
@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::Polygon;
 
-/// A point in a 2-D coordinate space.
+/// Point in a 2-D coordinate space.
 ///
 /// The coordinate basis is left to the consumer: pixel coordinates for a
 /// raster image, normalized `0.0..=1.0` coordinates for a
@@ -16,24 +16,24 @@ use super::Polygon;
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Point {
-    /// The horizontal coordinate.
+    /// Horizontal coordinate.
     pub x: f64,
-    /// The vertical coordinate.
+    /// Vertical coordinate.
     pub y: f64,
 }
 
 impl Point {
-    /// A point at `(x, y)`.
+    /// Point at `(x, y)`.
     pub const fn new(x: f64, y: f64) -> Self {
         Self { x, y }
     }
 
-    /// The dot product of `self` and `other` as vectors.
+    /// Dot product of `self` and `other` as vectors.
     pub fn dot(self, other: Self) -> f64 {
         self.x * other.x + self.y * other.y
     }
 
-    /// The left perpendicular of `self` as a vector: `(-y, x)`.
+    /// Left perpendicular of `self` as a vector: `(-y, x)`.
     ///
     /// Rotating a vector 90 degrees counter-clockwise. Used to turn an
     /// edge direction into the axis normal to it.
@@ -52,7 +52,7 @@ impl Sub for Point {
     }
 }
 
-/// An axis-aligned rectangle, given by its minimum and maximum corners.
+/// Axis-aligned rectangle, given by its minimum and maximum corners.
 ///
 /// The location type for the image and document modalities: where a
 /// detected entity sits within a rendered page. [`min`] is the top-left
@@ -65,19 +65,19 @@ impl Sub for Point {
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BoundingBox {
-    /// The minimum corner (top-left, conventionally).
+    /// Minimum corner (top-left, conventionally).
     pub min: Point,
-    /// The maximum corner (bottom-right, conventionally).
+    /// Maximum corner (bottom-right, conventionally).
     pub max: Point,
 }
 
 impl BoundingBox {
-    /// A box spanning the two corners.
+    /// Box spanning the two corners.
     pub const fn new(min: Point, max: Point) -> Self {
         Self { min, max }
     }
 
-    /// A box from a top-left origin and a size.
+    /// Box from a top-left origin and a size.
     pub fn from_origin_size(origin: Point, width: f64, height: f64) -> Self {
         Self {
             min: origin,
@@ -85,17 +85,17 @@ impl BoundingBox {
         }
     }
 
-    /// The box width (`max.x - min.x`).
+    /// Box width (`max.x - min.x`).
     pub fn width(&self) -> f64 {
         self.max.x - self.min.x
     }
 
-    /// The box height (`max.y - min.y`).
+    /// Box height (`max.y - min.y`).
     pub fn height(&self) -> f64 {
         self.max.y - self.min.y
     }
 
-    /// The box area (`width * height`).
+    /// Box area (`width * height`).
     pub fn area(&self) -> f64 {
         self.width() * self.height()
     }
@@ -111,7 +111,7 @@ impl BoundingBox {
             && other.min.y < self.max.y
     }
 
-    /// The box as a four-vertex [`Polygon`] (clockwise from the top-left
+    /// Box as a four-vertex [`Polygon`] (clockwise from the top-left
     /// corner under the usual screen convention).
     ///
     /// Lets a box be compared against a rotated or quadrilateral region

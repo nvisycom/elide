@@ -6,7 +6,7 @@
 //! `catolico`, `English` → `englisch`). The terms here are the
 //! English forms; a non-English document needs its own locale
 //! sub-module (`fr`, `es`, …) once those land. Runtime
-//! filtering by `RecognizerInput.language` keeps these
+//! filtering by `RecognizerContext.language` keeps these
 //! dictionaries from firing when the caller asserts a
 //! non-English document.
 

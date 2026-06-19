@@ -2,7 +2,7 @@
 //!
 //! A [`Label`] is a named kind of sensitive information ("PHONE_NUMBER")
 //! with an optional human description. Detections and entities don't
-//! carry the full label — they carry a lightweight [`LabelRef`] (the
+//! carry the full label; they carry a lightweight [`LabelRef`] (the
 //! name only), and the descriptions live once in a [`LabelCatalog`].
 //! This keeps the per-detection footprint small while still letting a
 //! consumer resolve a reference back to its full definition.
@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 pub use self::catalog::LabelCatalog;
 pub use self::reference::LabelRef;
 
-/// A kind of sensitive information: a name, an optional description, and
+/// Kind of sensitive information: a name, an optional description, and
 /// zero or more tags.
 ///
 /// Names are conventionally `SCREAMING_SNAKE_CASE` (`"PHONE_NUMBER"`),
@@ -29,7 +29,7 @@ pub use self::reference::LabelRef;
 /// # Identity
 ///
 /// Labels are identified by [`name`]; selectors match by name. Note that
-/// derived equality is *structural* — two labels with the same name but
+/// derived equality is *structural*: two labels with the same name but
 /// different descriptions or tags are not `==`. Code that wants
 /// name-only equality should compare [`name`] explicitly.
 ///
@@ -52,7 +52,7 @@ pub struct Label {
 }
 
 impl Label {
-    /// A label with just a name, no description, and no tags.
+    /// Label with just a name, no description, and no tags.
     pub fn new(name: impl Into<HipStr<'static>>) -> Self {
         Self {
             name: name.into(),
@@ -61,7 +61,7 @@ impl Label {
         }
     }
 
-    /// A label with a name and a human-readable description.
+    /// Label with a name and a human-readable description.
     pub fn described(
         name: impl Into<HipStr<'static>>,
         description: impl Into<HipStr<'static>>,
@@ -100,17 +100,17 @@ impl Label {
         self
     }
 
-    /// The label's name.
+    /// Label's name.
     pub fn name(&self) -> &str {
         self.name.as_str()
     }
 
-    /// The label's description, if any.
+    /// Label's description, if any.
     pub fn description(&self) -> Option<&str> {
         self.description.as_deref()
     }
 
-    /// The label's tags.
+    /// Label's tags.
     pub fn tags(&self) -> &[HipStr<'static>] {
         &self.tags
     }
@@ -121,7 +121,7 @@ impl Label {
         self.tags.iter().any(|t| t == tag)
     }
 
-    /// A lightweight [`LabelRef`] to this label, by name.
+    /// Lightweight [`LabelRef`] to this label, by name.
     ///
     /// `to_` rather than `as_`: this clones the name into an owned
     /// [`LabelRef`] (a value conversion), it does not borrow.
@@ -130,7 +130,7 @@ impl Label {
         LabelRef::new(self.name.clone())
     }
 
-    /// The label's name as an owned string (for catalog keying).
+    /// Label's name as an owned string (for catalog keying).
     fn name_owned(&self) -> HipStr<'static> {
         self.name.clone()
     }

@@ -1,16 +1,16 @@
-//! An ISO 3166-1 country code.
+//! ISO 3166-1 country code.
 
 use std::fmt;
 use std::str::FromStr;
 
 use celes::Country;
 
-/// An [ISO 3166-1] country, identified by its code.
+/// [ISO 3166-1] country, identified by its code.
 ///
 /// Wraps [`celes::Country`], a static table entry carrying the numeric,
 /// alpha-2, and alpha-3 codes together with the country's name. Because
 /// every value comes from that fixed table, a `CountryCode` is always a
-/// real, recognised country — there is no way to hold an invalid one.
+/// real, recognised country; there is no way to hold an invalid one.
 ///
 /// Used to scope region-sensitive recognizers (a phone-number or
 /// national-id pattern, say) to the country whose format they target.
@@ -34,7 +34,7 @@ impl CountryCode {
         Country::from_alpha3(alpha3).map(Self)
     }
 
-    /// The country's ISO 3166-1 alpha-2 code (e.g. `"US"`) — its canonical
+    /// Country's ISO 3166-1 alpha-2 code (e.g. `"US"`): its canonical
     /// string form, matching [`Display`] and serde.
     ///
     /// [`Display`]: fmt::Display
@@ -42,12 +42,12 @@ impl CountryCode {
         self.0.alpha2
     }
 
-    /// The country's ISO 3166-1 alpha-3 code (e.g. `"USA"`).
+    /// Country's ISO 3166-1 alpha-3 code (e.g. `"USA"`).
     pub fn alpha3(&self) -> &'static str {
         self.0.alpha3
     }
 
-    /// The underlying [`celes::Country`].
+    /// Underlying [`celes::Country`].
     pub fn country(&self) -> Country {
         self.0
     }

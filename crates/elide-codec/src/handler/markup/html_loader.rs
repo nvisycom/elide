@@ -10,7 +10,7 @@
 //! [`style_policy`]: HtmlLoader::style_policy
 
 use ego_tree::NodeRef;
-use elide_core::Error;
+use elide_core::Result;
 use elide_core::modality::text::Text;
 use scraper::Html;
 use scraper::node::Node;
@@ -25,7 +25,7 @@ use crate::content::ContentData;
 /// How the loader handles `<script>` or `<style>` element bodies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScriptPolicy {
-    /// Skip the element entirely — its body never enters the detection
+    /// Skip the element entirely; its body never enters the detection
     /// stream.
     #[default]
     Skip,
@@ -36,7 +36,7 @@ pub enum ScriptPolicy {
 
 /// Loader for HTML files. Produces one [`HtmlHandler`] per input.
 #[derive(Debug, Clone, Default)]
-pub struct HtmlLoader {
+pub(crate) struct HtmlLoader {
     /// How `<script>` element bodies enter the detection stream.
     pub script_policy: ScriptPolicy,
     /// How `<style>` element bodies enter the detection stream.
@@ -46,7 +46,7 @@ pub struct HtmlLoader {
 impl Loader<Text> for HtmlLoader {
     type Handler = HtmlHandler;
 
-    async fn decode(&self, content: ContentData) -> Result<HtmlHandler, Error> {
+    async fn decode(&self, content: ContentData) -> Result<HtmlHandler> {
         let text = content.decode()?;
         let dom = Html::parse_document(&text);
         let items = build_items(&dom, self);
@@ -91,7 +91,7 @@ fn build_items(dom: &Html, loader: &HtmlLoader) -> Vec<HtmlItem> {
                 let element_name = e.name.local.as_ref();
 
                 // Every attribute on this element. Values pass through
-                // verbatim — URLs like `mailto:alice@x.com` have the email
+                // verbatim: URLs like `mailto:alice@x.com` have the email
                 // matched in place by the recognizer.
                 for (qn, val) in &e.attrs {
                     items.push(HtmlItem {
@@ -211,7 +211,7 @@ fn is_block_element(name: &str) -> bool {
 }
 
 /// Don't emit text-node items for text directly inside a `<script>` or
-/// `<style>` element — those bodies are handled by the script / style
+/// `<style>` element; those bodies are handled by the script / style
 /// policy on the parent. The `text_index` counter still advances so
 /// encode's document-order index lines up with decode.
 fn skip_text_under(text_node: NodeRef<'_, Node>) -> bool {

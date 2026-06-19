@@ -1,6 +1,6 @@
 # Indian vehicle registration: state code (2 letters) + RTO
 # district (2 digits) + series (1-3 letters) + serial (4 digits).
-# Per-state district codes are not validated here — relying on
+# Per-state district codes are not validated here; relying on
 # the canonical structural pattern + RTO/registration context.
 
 name = "in-vehicle-registration"

@@ -1,3 +1,6 @@
+# US ZIP code: 5 digits, optionally with the +4 add-on
+# (`12345` or `12345-6789`). Validated by `us.postal_code`.
+
 name = "us-postal-code"
 label = "postal_code"
 countries = ["US"]

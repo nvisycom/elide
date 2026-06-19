@@ -1,4 +1,4 @@
-//! Raw content bytes — the payload a codec decodes and re-encodes.
+//! Raw content bytes: the payload a codec decodes and re-encodes.
 
 use std::borrow::Cow;
 use std::fmt;
@@ -13,9 +13,9 @@ use super::TextEncoding;
 ///
 /// The data the codec moves around: the bytes, the [`encoding`] used to
 /// read them as text, plus the caller-supplied hints a registry can use
-/// to resolve a format — an original [`filename`] and a declared
+/// to resolve a format: an original [`filename`] and a declared
 /// [`content_type`]. The metadata fields are optional; the caller
-/// supplies whatever it knows. Helpers cover the things a handler needs —
+/// supplies whatever it knows. Helpers cover the things a handler needs:
 /// byte access, slicing, text [`decode`], a content hash.
 ///
 /// [`encoding`]: ContentData::encoding
@@ -85,7 +85,7 @@ impl ContentData {
 
     /// Decode the bytes to a [`String`] using the content's [`encoding`].
     ///
-    /// Text loaders call this instead of carrying their own encoding —
+    /// Text loaders call this instead of carrying their own encoding;
     /// the charset is a property of the content, so it travels with the
     /// bytes.
     ///
@@ -114,7 +114,7 @@ impl ContentData {
     /// The lowercased file extension derived from [`filename`] (no
     /// leading dot), if any.
     ///
-    /// A registry can pass this to format resolution — e.g.
+    /// A registry can pass this to format resolution, e.g.
     /// `data.extension()` then `registry.by_extension(..)`.
     ///
     /// [`filename`]: Self::filename

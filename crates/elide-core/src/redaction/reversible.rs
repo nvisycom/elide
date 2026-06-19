@@ -1,20 +1,19 @@
-//! The [`ReversibleOperator`] trait — the optional reverse redaction
+//! [`ReversibleOperator`] trait: the optional reverse redaction
 //! direction.
 
 use std::future::Future;
 
 use crate::entity::Entity;
-use crate::error::Error;
+use crate::error::Result;
 use crate::modality::Modality;
 use crate::redaction::Operator;
 
-/// A reversible redaction operator: recovers the original data it
-/// replaced.
+/// Reversible redaction operator: recovers the original data it replaced.
 ///
 /// A supertrait extension of [`Operator`]: a `ReversibleOperator` is
 /// always also an [`Operator`], sharing the same [`id`], and only
 /// reversible operators (encrypt → decrypt) implement it. Like
-/// `anonymize`, it is **pure** — it reads the entity and the
+/// `anonymize`, it is **pure**: it reads the entity and the
 /// [`Replacement`] and returns the recovered [`Data`], without mutating
 /// anything.
 ///
@@ -34,5 +33,5 @@ pub trait ReversibleOperator<M: Modality>: Operator<M> {
         &self,
         entity: &Entity<M>,
         replacement: &M::Replacement,
-    ) -> impl Future<Output = Result<Option<M::Data>, Error>> + Send;
+    ) -> impl Future<Output = Result<Option<M::Data>>> + Send;
 }

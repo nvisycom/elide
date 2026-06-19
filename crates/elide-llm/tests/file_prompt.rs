@@ -1,8 +1,8 @@
 //! End-to-end: load [`FilePrompt`] from a TOML fixture (Jinja2
 //! template + label map + ignore list), then exercise both halves of
 //! the [`Prompt`] trait: render against a populated
-//! [`RecognizerInput`] and lift a stub [`LlmResponse`] back into
-//! entities.
+//! payload + [`RecognizerContext`] and lift a stub [`LlmResponse`]
+//! back into entities.
 //!
 //! Covers the minijinja code path end-to-end (variable interpolation,
 //! `{% for %}`, `{% if %}`, the `| join` filter, hint snippet
@@ -13,7 +13,8 @@ use elide_core::entity::{LabelRef, builtins};
 use elide_core::modality::image::{Image, ImageData, ImageLocation};
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::primitive::{BoundingBox, Dimensions, Point};
-use elide_core::recognition::{Hint, RecognizerInput};
+use elide_core::recognition::annotation::Inclusion;
+use elide_core::recognition::{RecognizerContext, Scope};
 use elide_llm::backend::LlmResponse;
 use elide_llm::{FilePrompt, Prompt};
 const NER_TOML: &str = include_str!("../testdata/prompts/ner.toml");
@@ -28,16 +29,18 @@ fn text_prompt_renders_template_and_lifts_entities() {
     let alice_start = body.find("Alice Carter").expect("alice substring");
     let alice_end = alice_start + "Alice Carter".len();
 
-    let hint = Hint::<Text>::new(TextLocation::new(alice_start, alice_end))
+    let inclusion = Inclusion::<Text>::new(TextLocation::new(alice_start, alice_end))
         .with_name("uploader-alice")
         .with_label(builtins::PERSON_NAME.to_ref());
 
-    let input = RecognizerInput::new(TextData::new(body))
-        .with_hints(vec![hint])
+    let data = TextData::new(body);
+    let scope = Scope::<Text>::new()
+        .with_inclusions(vec![inclusion])
         .with_labels(vec!["medical".to_owned(), "gdpr-request".to_owned()]);
+    let ctx = RecognizerContext::new(&scope);
 
     // -- build()
-    let rendered = prompt.build(&input);
+    let rendered = prompt.build(&data, &ctx);
     assert!(rendered.contains(body), "source text missing: {rendered}");
     assert!(
         rendered.contains("Document labels: medical, gdpr-request"),
@@ -69,7 +72,7 @@ fn text_prompt_renders_template_and_lifts_entities() {
             {"entity_type":"diagnosis","value":"hello","context":"Subject: hello","confidence":0.1}
         ]}"#,
     );
-    let entities = prompt.lift(&response, &input);
+    let entities = prompt.lift(&response, &data, &ctx);
 
     let kinds: Vec<LabelRef> = entities.iter().map(|e| e.label.clone()).collect();
     assert!(
@@ -100,7 +103,7 @@ fn image_prompt_renders_template_and_lifts_entities() {
     let bytes = b"\x89PNG\r\n\x1a\nfake-image-bytes".to_vec();
     let dims = Dimensions::new(640, 480);
 
-    let hint = Hint::<Image>::new(ImageLocation::new(BoundingBox::from_origin_size(
+    let inclusion = Inclusion::<Image>::new(ImageLocation::new(BoundingBox::from_origin_size(
         Point::new(10.0, 20.0),
         100.0,
         50.0,
@@ -108,12 +111,14 @@ fn image_prompt_renders_template_and_lifts_entities() {
     .with_name("uploader-face")
     .with_label(builtins::PERSON_NAME.to_ref());
 
-    let input = RecognizerInput::new(ImageData::new(bytes.clone(), dims))
-        .with_hints(vec![hint])
+    let data = ImageData::new(bytes.clone(), dims);
+    let scope = Scope::<Image>::new()
+        .with_inclusions(vec![inclusion])
         .with_labels(vec!["badge".to_owned()]);
+    let ctx = RecognizerContext::new(&scope);
 
     // -- build()
-    let rendered = prompt.build(&input);
+    let rendered = prompt.build(&data, &ctx);
     let expected_b64 = base64_encode(&bytes);
     assert!(
         rendered.contains(&expected_b64),
@@ -138,7 +143,7 @@ fn image_prompt_renders_template_and_lifts_entities() {
             {"label":"url","x":0.0,"y":0.0,"width":0.05,"height":0.05,"confidence":0.9}
         ]}"#,
     );
-    let entities = prompt.lift(&response, &input);
+    let entities = prompt.lift(&response, &data, &ctx);
 
     let kinds: Vec<LabelRef> = entities.iter().map(|e| e.label.clone()).collect();
     assert!(

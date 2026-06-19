@@ -4,7 +4,7 @@
 //!
 //! Owns the lingua detector and exposes one method,
 //! [`detect`], that returns a
-//! [`Vec<LanguageDetection>`] in our ontology shape. Used by
+//! [`Vec<Language>`] in our ontology shape. Used by
 //! [`LinguaNlpEngine`].
 //!
 //! Construction takes either a candidate-language set or "all
@@ -21,15 +21,16 @@ use std::str::FromStr;
 use std::sync::{Mutex, OnceLock};
 
 use elide_core::Result;
-use elide_core::primitive::{
-    Confidence, LanguageDetection, LanguageProvenance, LanguageSpan, LanguageTag,
+use elide_core::primitive::{Confidence, Language, LanguageProvenance, LanguageSpan, LanguageTag};
+use lingua::{
+    IsoCode639_1, Language as LinguaLanguage, LanguageDetector as LinguaInner,
+    LanguageDetectorBuilder,
 };
-use lingua::{IsoCode639_1, Language, LanguageDetector as LinguaInner, LanguageDetectorBuilder};
 
 /// Lingua-backed language detector.
 ///
 /// Detects per-region languages: for mixed-language input,
-/// returns one [`LanguageDetection`] per detected region with a
+/// returns one [`Language`] per detected region with a
 /// populated [`LanguageSpan`]. Monolingual input returns a single
 /// detection covering the whole text.
 pub struct LinguaDetector {
@@ -69,7 +70,7 @@ impl LinguaDetector {
     /// or more entries otherwise. Each entry has a populated
     /// [`LanguageSpan`] so mixed-language input can be attributed
     /// region-by-region.
-    pub fn detect(&self, text: &str) -> Result<Vec<LanguageDetection>> {
+    pub fn detect(&self, text: &str) -> Result<Vec<Language>> {
         let detections = self
             .inner
             .detect_multiple_languages_of(text)
@@ -80,7 +81,7 @@ impl LinguaDetector {
                     .inner
                     .compute_language_confidence(text, result.language());
                 let confidence = Confidence::new(raw_confidence.clamp(0.0, 1.0) as f32);
-                Some(LanguageDetection {
+                Some(Language {
                     language,
                     confidence,
                     provenance: LanguageProvenance::Detected,
@@ -95,7 +96,7 @@ impl LinguaDetector {
     }
 }
 
-fn lingua_to_tag(lang: Language) -> Option<LanguageTag> {
+fn lingua_to_tag(lang: LinguaLanguage) -> Option<LanguageTag> {
     let iso = lang.iso_code_639_1().to_string();
     match iso.parse() {
         Ok(tag) => Some(tag),
@@ -127,10 +128,10 @@ fn warn_once_unmappable(iso: &str, error: &str) {
     }
 }
 
-fn tags_to_languages(tags: &[LanguageTag]) -> Vec<Language> {
+fn tags_to_languages(tags: &[LanguageTag]) -> Vec<LinguaLanguage> {
     tags.iter()
         .filter_map(|t| IsoCode639_1::from_str(t.primary_language()).ok())
-        .map(|iso| Language::from_iso_code_639_1(&iso))
+        .map(|iso| LinguaLanguage::from_iso_code_639_1(&iso))
         .collect()
 }
 

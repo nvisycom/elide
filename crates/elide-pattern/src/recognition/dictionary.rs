@@ -3,7 +3,7 @@
 use derive_builder::Builder;
 use elide_core::entity::LabelRef;
 use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
-use elide_core::{Error, ErrorKind};
+use elide_core::{Error, ErrorKind, Result};
 use serde::Deserialize;
 
 use super::context::Context;
@@ -185,7 +185,7 @@ impl Dictionary {
     /// missing required fields.
     ///
     /// [`metadata_from_toml`]: Self::metadata_from_toml
-    pub fn from_toml(raw: &str) -> Result<Self, Error> {
+    pub fn from_toml(raw: &str) -> Result<Self> {
         toml::from_str(raw)
             .map_err(|e| Error::new(ErrorKind::Validation, format!("dictionary TOML: {e}")))
     }
@@ -203,7 +203,7 @@ impl Dictionary {
     ///
     /// [`with_terms`]: DictionaryBuilder::with_terms
     /// [`build`]: DictionaryBuilder::build
-    pub fn metadata_from_toml(raw: &str) -> Result<DictionaryBuilder, Error> {
+    pub fn metadata_from_toml(raw: &str) -> Result<DictionaryBuilder> {
         let metadata: DictionaryMetadata = toml::from_str(raw).map_err(|e| {
             Error::new(
                 ErrorKind::Validation,

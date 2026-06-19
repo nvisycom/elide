@@ -1,4 +1,4 @@
-//! A BCP 47 language tag.
+//! BCP 47 language tag.
 
 use std::fmt;
 use std::str::FromStr;
@@ -6,7 +6,7 @@ use std::str::FromStr;
 use hipstr::HipStr;
 use oxilangtag::LanguageTag as RawLanguageTag;
 
-/// A well-formed [BCP 47] language tag, such as `en`, `en-US`, or
+/// Well-formed [BCP 47] language tag, such as `en`, `en-US`, or
 /// `zh-Hant-HK`.
 ///
 /// Wraps [`oxilangtag::LanguageTag`] over a [`HipStr`] backing store, so
@@ -36,17 +36,17 @@ impl LanguageTag {
         RawLanguageTag::parse(tag.into()).map(Self)
     }
 
-    /// The primary language subtag (e.g. `"en"` for `"en-US"`).
+    /// Primary language subtag (e.g. `"en"` for `"en-US"`).
     pub fn primary_language(&self) -> &str {
         self.0.primary_language()
     }
 
-    /// The region subtag, if present (e.g. `"US"` for `"en-US"`).
+    /// Region subtag, if present (e.g. `"US"` for `"en-US"`).
     pub fn region(&self) -> Option<&str> {
         self.0.region()
     }
 
-    /// The full tag as a string slice.
+    /// Full tag as a string slice.
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }

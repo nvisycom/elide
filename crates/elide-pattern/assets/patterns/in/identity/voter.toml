@@ -1,4 +1,4 @@
-# Indian Voter ID (EPIC — Elector's Photo Identity Card):
+# Indian Voter ID (EPIC, Elector's Photo Identity Card):
 # 10-char alphanumeric issued by the Election Commission of
 # India. Two formats: 3 letters + 7 digits (older), or 1 letter
 # + restricted-set 2nd char + letter + 7 digits.

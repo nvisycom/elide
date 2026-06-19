@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 pub use self::threshold::ConfidenceThreshold;
 
-/// A confidence score in the closed range `0.0..=1.0`.
+/// Confidence score in the closed range `0.0..=1.0`.
 ///
 /// Carried by every provenance [`Event`] (the `before`/`after` of a
 /// recognition, fusion, or calibration) and by the effective confidence
@@ -26,7 +26,7 @@ pub use self::threshold::ConfidenceThreshold;
 /// *cutoff* configured to filter scores. Compare the two with
 /// [`ConfidenceThreshold::passes`].
 ///
-/// [`Event`]: crate::provenance::Event
+/// [`Event`]: crate::entity::provenance::Event
 /// [`Entity`]: crate::entity::Entity
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -34,9 +34,9 @@ pub use self::threshold::ConfidenceThreshold;
 pub struct Confidence(f32);
 
 impl Confidence {
-    /// The maximum score, `1.0` — full confidence.
+    /// Maximum score, `1.0`; full confidence.
     pub const MAX: Self = Self(1.0);
-    /// The minimum score, `0.0` — no confidence.
+    /// Minimum score, `0.0`; no confidence.
     pub const MIN: Self = Self(0.0);
 
     /// Construct a score, returning [`None`] if the value is outside
@@ -60,7 +60,7 @@ impl Confidence {
         }
     }
 
-    /// The score as a bare `f32`.
+    /// Score as a bare `f32`.
     pub const fn get(self) -> f32 {
         self.0
     }

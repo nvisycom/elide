@@ -1,4 +1,4 @@
-//! The [`LabelMap`] raw-to-canonical label translation table.
+//! [`LabelMap`] raw-to-canonical label translation table.
 
 use std::collections::HashMap;
 
@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::entity::{LabelCatalog, LabelRef};
 
-/// A translation table from a backend's raw label strings to the
-/// toolkit's canonical entity labels.
+/// Translation table from a backend's raw label strings to the toolkit's
+/// canonical entity labels.
 ///
-/// Recognizers — NER models especially — emit labels in their own
+/// Recognizers (NER models especially) emit labels in their own
 /// vocabulary (`"PER"`, `"LOC"`, `"B-ORG"`). A `LabelMap` maps each such
 /// raw string to the [`LabelRef`] the rest of the model speaks
 /// (`"PERSON"`, `"LOCATION"`, `"ORGANIZATION"`), so a recognizer can
@@ -25,7 +25,7 @@ pub struct LabelMap {
 }
 
 impl LabelMap {
-    /// An empty map.
+    /// Empty map.
     pub fn new() -> Self {
         Self::default()
     }
@@ -68,7 +68,7 @@ impl LabelMap {
         self.entries.contains_key(raw)
     }
 
-    /// The number of mappings.
+    /// Number of mappings.
     pub fn len(&self) -> usize {
         self.entries.len()
     }

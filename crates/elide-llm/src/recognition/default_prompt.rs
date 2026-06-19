@@ -18,9 +18,9 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use elide_core::entity::Entity;
-use elide_core::modality::image::Image;
-use elide_core::modality::text::Text;
-use elide_core::recognition::{LabelMap, RecognizerInput};
+use elide_core::modality::image::{Image, ImageData};
+use elide_core::modality::text::{Text, TextData};
+use elide_core::recognition::{LabelMap, RecognizerContext};
 use schemars::Schema;
 
 use super::candidates::{TextCandidates, VlmCandidates};
@@ -40,36 +40,46 @@ use crate::backend::LlmResponse;
 pub struct DefaultPrompt;
 
 impl Prompt<Text> for DefaultPrompt {
-    fn build(&self, input: &RecognizerInput<Text>) -> String {
-        TextPromptBuilder::new(input.content.text.as_str(), &input.hints, &input.labels).build()
+    fn build(&self, data: &TextData, ctx: &RecognizerContext<'_, Text>) -> String {
+        TextPromptBuilder::new(data.text.as_str(), ctx.inclusions(), ctx.labels()).build()
     }
 
     fn schema(&self) -> Option<&Schema> {
         Some(text_schema())
     }
 
-    fn lift(&self, response: &LlmResponse, input: &RecognizerInput<Text>) -> Vec<Entity<Text>> {
+    fn lift(
+        &self,
+        response: &LlmResponse,
+        data: &TextData,
+        _ctx: &RecognizerContext<'_, Text>,
+    ) -> Vec<Entity<Text>> {
         let Ok(parsed): Result<TextCandidates, _> = parse_json(&response.text) else {
             return Vec::new();
         };
-        lift_text(input, parsed.entities, &LabelMap::new(), &[])
+        lift_text(data, parsed.entities, &LabelMap::new(), &[])
     }
 }
 
 impl Prompt<Image> for DefaultPrompt {
-    fn build(&self, input: &RecognizerInput<Image>) -> String {
-        let image_b64 = STANDARD.encode(input.content.bytes.as_ref());
-        VlmPromptBuilder::new(&input.hints, &input.labels).build(&image_b64)
+    fn build(&self, data: &ImageData, ctx: &RecognizerContext<'_, Image>) -> String {
+        let image_b64 = STANDARD.encode(data.bytes.as_ref());
+        VlmPromptBuilder::new(ctx.inclusions(), ctx.labels()).build(&image_b64)
     }
 
     fn schema(&self) -> Option<&Schema> {
         Some(vlm_schema())
     }
 
-    fn lift(&self, response: &LlmResponse, input: &RecognizerInput<Image>) -> Vec<Entity<Image>> {
+    fn lift(
+        &self,
+        response: &LlmResponse,
+        data: &ImageData,
+        _ctx: &RecognizerContext<'_, Image>,
+    ) -> Vec<Entity<Image>> {
         let Ok(parsed): Result<VlmCandidates, _> = parse_json(&response.text) else {
             return Vec::new();
         };
-        lift_image(input, parsed.entities, &LabelMap::new(), &[])
+        lift_image(data, parsed.entities, &LabelMap::new(), &[])
     }
 }

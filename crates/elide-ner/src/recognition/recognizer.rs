@@ -19,13 +19,11 @@
 use std::sync::Arc;
 
 use derive_builder::Builder;
+use elide_core::entity::provenance::{Event, ModelEvent};
 use elide_core::entity::{Entity, LabelRef};
-use elide_core::modality::text::{Text, TextLocation};
+use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::primitive::Confidence;
-use elide_core::provenance::{Event, ModelEvent};
-use elide_core::recognition::{
-    Recognizer, RecognizerId, RecognizerInput, RecognizerLanguage, RecognizerOutput,
-};
+use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
 use elide_core::{Error, Result};
 
 use super::config::NerModel;
@@ -156,7 +154,11 @@ impl Recognizer<Text> for NerRecognizer {
         RecognizerId::new(self.name.clone(), env!("CARGO_PKG_VERSION"))
     }
 
-    async fn recognize(&self, input: &RecognizerInput<Text>) -> Result<RecognizerOutput<Text>> {
+    async fn recognize(
+        &self,
+        data: &TextData,
+        ctx: &RecognizerContext<'_, Text>,
+    ) -> Result<Vec<Entity<Text>>> {
         let supported_borrowed: Vec<&str> =
             self.supported_labels.iter().map(LabelRef::as_str).collect();
         let labels = if supported_borrowed.is_empty() {
@@ -165,10 +167,10 @@ impl Recognizer<Text> for NerRecognizer {
             Some(supported_borrowed.as_slice())
         };
         let request = NerRequest {
-            text: input.content.text.as_str(),
+            text: data.text.as_str(),
             labels,
-            language: input.primary_language(),
-            correlation_id: input.correlation_id,
+            language: ctx.primary_language(),
+            correlation_id: ctx.correlation_id(),
         };
         let response = self.backend.recognize(request).await?;
 
@@ -188,14 +190,14 @@ impl Recognizer<Text> for NerRecognizer {
                     .map(|name| self.build_entity(s, name))
             })
             .collect();
-        Ok(RecognizerOutput::new(entities))
+        Ok(entities)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use elide_core::entity::builtins;
-    use elide_core::modality::text::TextData;
+    use elide_core::recognition::Scope;
 
     use super::*;
 
@@ -210,9 +212,11 @@ mod tests {
             ])
             .build()
             .expect("builder succeeds");
-        let input = RecognizerInput::new(TextData::new("Alice Smith".to_owned()));
-        let out = rec.recognize(&input).await.unwrap();
-        assert!(out.entities.is_empty());
+        let data = TextData::new("Alice Smith".to_owned());
+        let scope = Scope::new();
+        let ctx = RecognizerContext::new(&scope);
+        let out = rec.recognize(&data, &ctx).await.unwrap();
+        assert!(out.is_empty());
     }
 
     #[tokio::test]
@@ -222,8 +226,10 @@ mod tests {
             .with_mock_backend()
             .build()
             .expect("builder succeeds");
-        let input = RecognizerInput::new(TextData::new("Alice Smith".to_owned()));
-        let out = rec.recognize(&input).await.unwrap();
-        assert!(out.entities.is_empty());
+        let data = TextData::new("Alice Smith".to_owned());
+        let scope = Scope::new();
+        let ctx = RecognizerContext::new(&scope);
+        let out = rec.recognize(&data, &ctx).await.unwrap();
+        assert!(out.is_empty());
     }
 }

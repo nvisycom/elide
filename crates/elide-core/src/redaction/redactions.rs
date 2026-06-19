@@ -1,16 +1,15 @@
-//! The [`Redactions`] batch — what an anonymizer hands a codec to apply.
+//! [`Redactions`] batch: what an anonymizer hands a codec to apply.
 
 use std::{slice, vec};
 
 use crate::modality::{Modality, ModalityLocation};
 
-/// A batch of `(location, replacement)` pairs ready to be applied to a
-/// document by a codec.
+/// Batch of `(location, replacement)` pairs for a codec to apply.
 ///
 /// The output of anonymizing a set of entities: each entry says *where*
 /// (a [`Location`]) and *what* (a [`Replacement`]) to write. The
 /// anonymizer only computes these; applying them back into the source is
-/// the codec's job — which keeps redaction free of format knowledge.
+/// the codec's job, which keeps redaction free of format knowledge.
 ///
 /// Entries accumulate in [`push`] order. A codec that rewrites a medium
 /// in a single forward pass wants them in document order instead;
@@ -41,7 +40,7 @@ impl<M: Modality> Clone for Redactions<M> {
 }
 
 impl<M: Modality> Redactions<M> {
-    /// An empty batch.
+    /// Empty batch.
     pub fn new() -> Self {
         Self { items: Vec::new() }
     }
@@ -68,7 +67,7 @@ impl<M: Modality> Redactions<M> {
         self.items.iter()
     }
 
-    /// The number of redactions.
+    /// Number of redactions.
     pub fn len(&self) -> usize {
         self.items.len()
     }

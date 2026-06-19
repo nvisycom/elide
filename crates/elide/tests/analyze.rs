@@ -7,11 +7,11 @@ use elide::deduplication::calibrate::{CalibrateLayer, CalibrationMap};
 use elide::deduplication::filter::FilterLayer;
 use elide::deduplication::fuse::{FuseLayer, MaxConfidence};
 use elide::deduplication::resolve::{HighestConfidence, ResolveLayer};
-use elide_core::Error;
+use elide_core::Result;
+use elide_core::entity::provenance::{Event, EventKind, PatternEvent, Provenance};
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::primitive::{Confidence, ConfidenceThreshold};
-use elide_core::provenance::{Event, EventKind, PatternEvent, Provenance};
-use elide_core::recognition::{Recognizer, RecognizerId, RecognizerInput, RecognizerOutput};
+use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId, Scope};
 
 mod fixtures;
 use fixtures::{Text, TextData, TextLocation};
@@ -44,9 +44,10 @@ impl Recognizer<Text> for Fixed {
 
     async fn recognize(
         &self,
-        _input: &RecognizerInput<Text>,
-    ) -> Result<RecognizerOutput<Text>, Error> {
-        Ok(RecognizerOutput::new(self.0.clone()))
+        _data: &TextData,
+        _ctx: &RecognizerContext<'_, Text>,
+    ) -> Result<Vec<Entity<Text>>> {
+        Ok(self.0.clone())
     }
 }
 
@@ -69,7 +70,7 @@ async fn analyze_fuses_resolves_filters() {
         .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE));
 
     let mut entities = analyzer
-        .analyze(RecognizerInput::new(TextData::new("")))
+        .analyze(TextData::new(""), &Scope::new())
         .await
         .unwrap();
 

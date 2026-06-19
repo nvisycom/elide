@@ -1,7 +1,8 @@
 //! The `Hash` operator: replace the matched value with a one-way SHA-2
 //! hash.
 
-use elide_core::Error;
+use bytes::Bytes;
+use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId};
@@ -26,7 +27,7 @@ pub enum HashAlgorithm {
 #[derive(Debug, Clone, Default)]
 pub struct Hash {
     algorithm: HashAlgorithm,
-    salt: Vec<u8>,
+    salt: Bytes,
 }
 
 impl Hash {
@@ -34,7 +35,7 @@ impl Hash {
     pub fn new(algorithm: HashAlgorithm) -> Self {
         Self {
             algorithm,
-            salt: Vec::new(),
+            salt: Bytes::new(),
         }
     }
 
@@ -50,7 +51,7 @@ impl Hash {
 
     /// Attach a salt prepended to the value before hashing.
     #[must_use]
-    pub fn with_salt(mut self, salt: impl Into<Vec<u8>>) -> Self {
+    pub fn with_salt(mut self, salt: impl Into<Bytes>) -> Self {
         self.salt = salt.into();
         self
     }
@@ -85,11 +86,7 @@ impl Operator<Text> for Hash {
         LeakProfile::Recoverable
     }
 
-    async fn anonymize(
-        &self,
-        _entity: &Entity<Text>,
-        data: &TextData,
-    ) -> Result<TextReplacement, Error> {
+    async fn anonymize(&self, _entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
         Ok(TextReplacement::substituted(self.digest(data.as_str())))
     }
 }

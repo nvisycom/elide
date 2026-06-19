@@ -1,13 +1,14 @@
-//! The detected entity and its constituent parts.
+//! Detected entity and its constituent parts.
 //!
 //! An [`Entity`] is the unit that flows through the toolkit: a single
 //! piece of sensitive information located somewhere in a medium, the
 //! product of one or more detection layers being merged together. This
-//! module also defines the entity's building blocks — the [`Label`]
+//! module also defines the entity's building blocks: the [`Label`]
 //! taxonomy and the [`EntityRef`] / [`EntityCoRef`] reference types.
 
 mod builder;
 mod label;
+pub mod provenance;
 mod reference;
 
 #[cfg(feature = "serde")]
@@ -16,12 +17,12 @@ use uuid::Uuid;
 
 pub use self::builder::EntityBuilder;
 pub use self::label::{Label, LabelCatalog, LabelRef, builtins};
+use self::provenance::Provenance;
 pub use self::reference::{EntityCoRef, EntityRef};
 use crate::modality::Modality;
 use crate::primitive::Confidence;
-use crate::provenance::Provenance;
 
-/// A detected piece of sensitive information within some medium.
+/// Detected piece of sensitive information within some medium.
 ///
 /// Generic over the [`Modality`] `M`, which is what makes the model
 /// multimodal: a text pipeline yields `Entity<Text>`, an audio pipeline
@@ -35,12 +36,12 @@ use crate::provenance::Provenance;
 /// several recognizers find the same thing, a fusion step (in
 /// `elide`) combines their entities into one: the survivor's
 /// [`location`] and [`confidence`] are the *fused* values, and every
-/// contributing recognition event — plus a deduplication event — is
+/// contributing recognition event, plus a deduplication event, is
 /// retained in its provenance. The entity therefore carries its full
 /// audit trail with it.
 ///
 /// [`Location`]: Modality::Location
-/// [`Event`]: crate::provenance::Event
+/// [`Event`]: crate::entity::provenance::Event
 /// [`provenance`]: Entity::provenance
 /// [`location`]: Entity::location
 /// [`confidence`]: Entity::confidence
@@ -57,17 +58,17 @@ pub struct Entity<M: Modality> {
     /// What kind of sensitive information this is (resolved via a
     /// [`LabelCatalog`]).
     pub label: LabelRef,
-    /// The location of the entity within the medium (fused, if it came from
-    /// more than one detection).
+    /// Location of the entity within the medium (fused, if it came from more
+    /// than one detection).
     pub location: M::Location,
-    /// The effective confidence in `0.0..=1.0` (fused, if applicable).
+    /// Effective confidence in `0.0..=1.0` (fused, if applicable).
     pub confidence: Confidence,
     /// Coreference identifier, if a recognizer resolved this entity as one
     /// mention of a cluster. Entities sharing an [`EntityCoRef`] denote the
     /// same real-world thing.
     pub coref: Option<EntityCoRef>,
-    /// The detection audit trail: every contributing detection and the
-    /// fusion event, if any.
+    /// Detection audit trail: every contributing detection and the fusion
+    /// event, if any.
     pub provenance: Provenance<M>,
 }
 
@@ -101,7 +102,7 @@ impl<M: Modality> Entity<M> {
         EntityBuilder::new()
     }
 
-    /// A lightweight reference to this entity, by its [`id`].
+    /// Lightweight reference to this entity, by its [`id`].
     ///
     /// [`id`]: Entity::id
     pub fn as_ref(&self) -> EntityRef {

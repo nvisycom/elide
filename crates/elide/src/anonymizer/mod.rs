@@ -15,7 +15,7 @@ mod dyn_operator;
 pub mod operators;
 mod registry;
 
-use elide_core::Error;
+use elide_core::Result;
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::{DataReader, DataWriter, Modality};
 use elide_core::redaction::{Operator, Redactions};
@@ -85,7 +85,7 @@ impl<M: Modality> Anonymizer<M> {
         &self,
         entities: &[Entity<M>],
         reader: &impl DataReader<M>,
-    ) -> Result<Redactions<M>, Error> {
+    ) -> Result<Redactions<M>> {
         let mut redactions = Redactions::new();
         for entity in entities {
             let Some(operator) = self.operators.resolve(&entity.label) else {
@@ -124,7 +124,7 @@ impl<M: Modality> Anonymizer<M> {
     /// (or instead of) applying it.
     ///
     /// [`plan`]: Self::plan
-    pub async fn anonymize<T>(&self, target: &mut T, entities: &[Entity<M>]) -> Result<(), Error>
+    pub async fn anonymize<T>(&self, target: &mut T, entities: &[Entity<M>]) -> Result<()>
     where
         T: DataReader<M> + DataWriter<M>,
     {

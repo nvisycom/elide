@@ -3,7 +3,7 @@
 use derive_builder::Builder;
 use elide_core::entity::LabelRef;
 use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
-use elide_core::{Error, ErrorKind};
+use elide_core::{Error, ErrorKind, Result};
 use serde::Deserialize;
 
 use super::context::Context;
@@ -48,7 +48,7 @@ impl Variant {
     ///
     /// [`with_score`]: Self::with_score
     /// [`with_validator`]: Self::with_validator
-    pub fn new(regex: impl Into<String>) -> Result<Self, Error> {
+    pub fn new(regex: impl Into<String>) -> Result<Self> {
         let regex = regex.into();
         if let Err(e) = ::regex::Regex::new(&regex) {
             return Err(Error::new(
@@ -174,7 +174,7 @@ impl Regex {
     ///
     /// Returns a validation error when the TOML is malformed or
     /// missing required fields.
-    pub fn from_toml(raw: &str) -> Result<Self, Error> {
+    pub fn from_toml(raw: &str) -> Result<Self> {
         toml::from_str(raw)
             .map_err(|e| Error::new(ErrorKind::Validation, format!("regex rule TOML: {e}")))
     }

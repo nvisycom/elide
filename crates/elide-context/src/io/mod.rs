@@ -2,7 +2,7 @@
 //! pipeline.
 //!
 //! - [`Token`] / [`Tokens`] is the shared NLP token artifact the
-//!   enhancer reads off `RecognizerInput.artifacts`.
+//!   enhancer reads off `RecognizerContext.artifacts`.
 //! - [`ContextEnhanced`] wraps any [`EntityRecognizer<Text>`] so
 //!   the enhancer runs automatically after the inner recognizer's
 //!   pass.

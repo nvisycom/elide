@@ -1,3 +1,7 @@
+# Date of birth: a calendar date in D/M/Y or Y/M/D order with `/`
+# or `-` separators and a 1900-2099 year. Low score on its own;
+# the context boost lifts hits near birth-related keywords.
+
 name = "date_of_birth"
 label = "date_of_birth"
 

@@ -1,11 +1,12 @@
 //! Enhancer end-to-end: a context keyword near an entity lifts its
 //! confidence and records a refinement event.
 
-use elide_context::{BoostRule, Context, Enhancer, SubstringMatcher};
+use elide_context::matching::SubstringMatcher;
+use elide_context::{BoostRule, Context, Enhancer};
+use elide_core::entity::provenance::{Event, EventKind, PatternEvent, Provenance};
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::{Text, TextLocation};
 use elide_core::primitive::Confidence;
-use elide_core::provenance::{Event, EventKind, PatternEvent, Provenance};
 
 /// Build a single-recognition entity at `start..end`.
 fn entity(label: &LabelRef, start: usize, end: usize, score: f32) -> Entity<Text> {
@@ -24,7 +25,7 @@ fn entity(label: &LabelRef, start: usize, end: usize, score: f32) -> Entity<Text
 fn keyword_in_window_boosts_and_records_refinement() {
     let ssn = LabelRef::new("US_SSN");
     let rule = BoostRule::for_label(ssn.clone(), ["social security"]);
-    let enhancer = Enhancer::new([rule], Box::new(SubstringMatcher));
+    let enhancer = Enhancer::new([rule], SubstringMatcher);
 
     //          0         1         2
     //          0123456789012345678901234567890
@@ -49,7 +50,7 @@ fn keyword_in_window_boosts_and_records_refinement() {
 fn no_keyword_leaves_entity_untouched() {
     let ssn = LabelRef::new("US_SSN");
     let rule = BoostRule::for_label(ssn.clone(), ["social security"]);
-    let enhancer = Enhancer::new([rule], Box::new(SubstringMatcher));
+    let enhancer = Enhancer::new([rule], SubstringMatcher);
 
     let text = "the number is 123-45-6789";
     let mut entities = vec![entity(&ssn, 14, 25, 0.5)];
@@ -65,7 +66,7 @@ fn no_keyword_leaves_entity_untouched() {
 fn out_of_band_hint_boosts_via_hint_path() {
     let ssn = LabelRef::new("US_SSN");
     let rule = BoostRule::for_label(ssn.clone(), ["ssn"]);
-    let enhancer = Enhancer::new([rule], Box::new(SubstringMatcher));
+    let enhancer = Enhancer::new([rule], SubstringMatcher);
 
     // No keyword in the text, but the column header is supplied as a hint.
     let text = "123-45-6789";

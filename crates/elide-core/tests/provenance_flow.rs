@@ -4,10 +4,10 @@
 //! fusion step would.
 
 use elide_core::Result;
+use elide_core::entity::provenance::{Event, EventKind, ModelEvent, PatternEvent, Provenance};
 use elide_core::entity::{Entity, EntityCoRef, Label, LabelCatalog, LabelRef};
 use elide_core::modality::Modality;
-use elide_core::primitive::{Confidence, ConfidenceThreshold, CountryCode, LanguageTag};
-use elide_core::provenance::{Event, EventKind, Manifest, ModelEvent, PatternEvent, Provenance};
+use elide_core::primitive::{Confidence, ConfidenceThreshold, CountryCode, Language, LanguageTag};
 
 mod fixtures;
 use fixtures::{Text, TextData, TextLocation, TextReplacement};
@@ -144,14 +144,6 @@ fn threshold_filters_by_confidence() {
 }
 
 #[test]
-fn manifest_anchors_a_run() {
-    let manifest = Manifest::new("e3b0c44298fc1c14", "0.1.0");
-    assert_eq!(manifest.version.as_str(), "0.1.0");
-    // UUIDv7 is time-ordered and non-nil.
-    assert!(!manifest.run_id.is_nil());
-}
-
-#[test]
 fn language_tag_parses_and_exposes_subtags() {
     let tag = LanguageTag::parse("en-US").unwrap();
     assert_eq!(tag.primary_language(), "en");
@@ -175,7 +167,7 @@ fn country_code_resolves_iso_codes() {
 
 #[test]
 fn geometry_shapes_compose() {
-    use elide_core::primitive::geometry::{BoundingBox, Point, Polygon};
+    use elide_core::primitive::{BoundingBox, Point, Polygon};
 
     let bbox = BoundingBox::from_origin_size(Point::new(10.0, 20.0), 100.0, 40.0);
     assert_eq!(bbox.width(), 100.0);
@@ -209,8 +201,8 @@ fn label_map_translates_raw_labels() {
 }
 
 #[test]
-fn recognizer_input_scopes_by_language_and_country() {
-    use elide_core::recognition::{RecognizerInput, RecognizerLanguage};
+fn recognizer_context_scopes_by_language_and_country() {
+    use elide_core::recognition::{RecognizerContext, Scope};
 
     let en_us = LanguageTag::parse("en-US").unwrap();
     let en = LanguageTag::parse("en").unwrap();
@@ -220,39 +212,58 @@ fn recognizer_input_scopes_by_language_and_country() {
     assert!(en.matches(&en_us));
     assert!(!en.matches(&fr));
 
-    let input: RecognizerInput<Text> = RecognizerInput::new(TextData::new(""))
-        .with_language(en_us.clone(), None)
+    // Assertions live on the scope; the query methods live on the
+    // context, which borrows the scope.
+    let scope: Scope<Text> = Scope::new()
+        .with_language(Language::asserted(en_us.clone()))
         .with_country(CountryCode::from_alpha2("US").unwrap());
+    let ctx = RecognizerContext::new(&scope);
 
     // The asserted language is the primary one.
-    assert_eq!(input.primary_language(), Some(&en_us));
+    assert_eq!(ctx.primary_language(), Some(&en_us));
 
     // Empty scope always applies.
-    assert!(input.applies_to_language(&[]));
-    assert!(input.applies_to_country(&[]));
+    assert!(ctx.applies_to_language(&[]));
+    assert!(ctx.applies_to_country(&[]));
     // Matching scope applies; non-matching does not.
-    assert!(input.applies_to_language(&[en]));
-    assert!(!input.applies_to_language(&[fr]));
-    assert!(input.applies_to_country(&[CountryCode::from_alpha2("US").unwrap()]));
-    assert!(!input.applies_to_country(&[CountryCode::from_alpha2("GB").unwrap()]));
+    assert!(ctx.applies_to_language(&[en]));
+    assert!(!ctx.applies_to_language(&[fr]));
+    assert!(ctx.applies_to_country(&[CountryCode::from_alpha2("US").unwrap()]));
+    assert!(!ctx.applies_to_country(&[CountryCode::from_alpha2("GB").unwrap()]));
 }
 
 #[test]
-fn recognizer_input_carries_hints() {
+fn recognizer_context_carries_annotations() {
     use elide_core::entity::LabelRef;
     use elide_core::modality::text::TextLocation;
-    use elide_core::recognition::{Hint, RecognizerInput};
+    use elide_core::primitive::Confidence;
+    use elide_core::recognition::annotation::{Exclusion, Inclusion};
+    use elide_core::recognition::{RecognizerContext, Scope};
 
-    let hint = Hint::new(TextLocation::new(0, 5))
+    let inclusion = Inclusion::new(TextLocation::new(0, 5))
         .with_name("uploaded selection")
-        .with_label(LabelRef::new("PERSON"));
-    let input: RecognizerInput<Text> =
-        RecognizerInput::new(TextData::new("Alice was here")).with_hints(vec![hint]);
+        .with_label(LabelRef::new("PERSON"))
+        .with_confidence(Confidence::new(0.9).unwrap());
+    let exclusion = Exclusion::new(TextLocation::new(10, 20));
+    let scope: Scope<Text> = Scope::new()
+        .with_inclusions(vec![inclusion])
+        .with_exclusions(vec![exclusion]);
+    let ctx = RecognizerContext::new(&scope);
 
-    assert_eq!(input.hints.len(), 1);
-    assert_eq!(input.hints[0].location, TextLocation::new(0, 5));
-    assert_eq!(input.hints[0].name.as_deref(), Some("uploaded selection"));
-    assert_eq!(input.hints[0].label, Some(LabelRef::new("PERSON")));
+    assert_eq!(ctx.inclusions().len(), 1);
+    assert_eq!(ctx.inclusions()[0].location, TextLocation::new(0, 5));
+    assert_eq!(
+        ctx.inclusions()[0].name.as_deref(),
+        Some("uploaded selection")
+    );
+    assert_eq!(ctx.inclusions()[0].label, Some(LabelRef::new("PERSON")));
+    assert_eq!(
+        ctx.inclusions()[0].confidence,
+        Some(Confidence::new(0.9).unwrap())
+    );
+
+    assert_eq!(ctx.exclusions().len(), 1);
+    assert_eq!(ctx.exclusions()[0].location, TextLocation::new(10, 20));
 }
 
 #[test]

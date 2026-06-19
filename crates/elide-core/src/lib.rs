@@ -6,7 +6,6 @@ pub mod entity;
 mod error;
 pub mod modality;
 pub mod primitive;
-pub mod provenance;
 pub mod recognition;
 pub mod redaction;
 

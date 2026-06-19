@@ -3,14 +3,14 @@
 //! that confidence is boosted, and a [`Refinement`] step is
 //! appended only for matches that had a nearby keyword.
 //!
-//! [`Refinement`]: elide_core::provenance::EventKind::Refinement
+//! [`Refinement`]: elide_core::entity::provenance::EventKind::Refinement
 //! [`ContextEnhanced`]: elide_context::ContextEnhanced
 
 use elide_core::entity::builtins;
+use elide_core::entity::provenance::EventKind;
 use elide_core::modality::text::TextData;
 use elide_core::primitive::Confidence;
-use elide_core::provenance::EventKind;
-use elide_core::recognition::{Recognizer, RecognizerInput};
+use elide_core::recognition::{Recognizer, RecognizerContext, Scope};
 use elide_pattern::{PatternRecognizer, Regex, Variant};
 
 #[tokio::test]
@@ -33,12 +33,10 @@ async fn enhancer_boosts_matches_near_keyword_only() {
 
     // Two SSN-shaped numbers: one near the keyword, one not.
     let text = "First SSN: 123-45-6789. Unrelated number 987-65-4329 elsewhere.";
-    let input = RecognizerInput::new(TextData::new(text.to_owned()));
-    let entities = recognizer
-        .recognize(&input)
-        .await
-        .expect("recognize")
-        .entities;
+    let data = TextData::new(text.to_owned());
+    let scope = Scope::new();
+    let ctx = RecognizerContext::new(&scope);
+    let entities = recognizer.recognize(&data, &ctx).await.expect("recognize");
     assert_eq!(entities.len(), 2, "two SSN matches expected");
 
     // First match has `SSN:` within the default 5-word prefix/suffix

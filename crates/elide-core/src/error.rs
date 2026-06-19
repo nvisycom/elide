@@ -1,22 +1,22 @@
-//! The crate-wide error type.
+//! Crate-wide error type.
 //!
 //! Modelled on [`std::io::Error`]: a single opaque [`Error`] struct
 //! pairs a coarse, matchable [`ErrorKind`] with an optional boxed cause.
 //! Callers match on the kind for control flow while the underlying
-//! source — a recognizer's failure, an operator's failure — travels
+//! source (a recognizer's failure, an operator's failure) travels
 //! along for diagnostics without widening the public enum. New failure
 //! modes can be added as kinds without breaking the struct's API.
 
 use std::error::Error as StdError;
 use std::fmt;
 
-/// A type-erased, thread-safe error cause.
+/// Type-erased, thread-safe error cause.
 ///
 /// The boxed form a downstream recognizer or operator error is stored in
 /// when attached to an [`Error`] as its underlying source.
 pub type BoxError = Box<dyn StdError + Send + Sync + 'static>;
 
-/// The error type returned across the core domain operations.
+/// Error type returned across the core domain operations.
 ///
 /// Opaque by design: construct one with [`Error::new`] (kind + cause) or
 /// [`Error::from`] (kind only), inspect it with [`Error::kind`], and
@@ -39,7 +39,7 @@ impl Error {
         }
     }
 
-    /// The coarse category of this error, for control-flow matching.
+    /// Coarse category of this error, for control-flow matching.
     pub fn kind(&self) -> ErrorKind {
         self.kind
     }
@@ -91,7 +91,7 @@ impl StdError for Error {
     }
 }
 
-/// A coarse category of [`Error`], suitable for matching.
+/// Coarse category of [`Error`], suitable for matching.
 ///
 /// Deliberately small and `#[non_exhaustive]`: `elide-core` defines types
 /// and traits, so most failures here are validation errors and the
@@ -113,13 +113,13 @@ pub enum ErrorKind {
     Recognition,
     /// An operator failed while transforming content.
     Redaction,
-    /// A configuration or rule was malformed — a bad regex, an unknown
+    /// A configuration or rule was malformed: a bad regex, an unknown
     /// validator, a builder missing a required field.
     Validation,
 }
 
 impl ErrorKind {
-    /// A stable, human-readable description of the kind.
+    /// Stable, human-readable description of the kind.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::OutOfRange => "value out of range",

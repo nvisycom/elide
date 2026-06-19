@@ -6,15 +6,14 @@
 //! thing, a fusion step (in `elide`) combines their entities into
 //! one, concatenating their events and appending a deduplication event.
 //!
-//! [`Event`]: crate::provenance::Event
+//! [`Event`]: crate::entity::provenance::Event
 
+pub mod annotation;
 mod artifacts;
+mod context;
 mod enricher;
-mod hint;
-mod input;
 mod label;
-mod language;
-mod output;
+mod scope;
 
 use std::fmt;
 use std::future::Future;
@@ -24,29 +23,28 @@ use hipstr::HipStr;
 use serde::{Deserialize, Serialize};
 
 pub use self::artifacts::Artifacts;
+pub use self::context::RecognizerContext;
 pub use self::enricher::Enricher;
-pub use self::hint::Hint;
-pub use self::input::RecognizerInput;
 pub use self::label::LabelMap;
-pub use self::language::RecognizerLanguage;
-pub use self::output::RecognizerOutput;
-use crate::error::Error;
+pub use self::scope::Scope;
+use crate::entity::Entity;
+use crate::error::Result;
 use crate::modality::Modality;
 
 /// Identifies a recognizer (name + version).
 ///
 /// Pairs a stable name with a free-form version string so the audit
 /// trail records not just *which* recognizer fired but *which build* of
-/// it — a rerun against an updated ruleset or model is then
+/// it: a rerun against an updated ruleset or model is then
 /// distinguishable from the original. The version is opaque text (a
-/// semver, a checkpoint hash, a ruleset date) — the core attaches no
+/// semver, a checkpoint hash, a ruleset date); the core attaches no
 /// ordering or comparison semantics to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RecognizerId {
     /// Stable, human-readable recognizer name (e.g. `"us-ssn-pattern"`).
     pub name: HipStr<'static>,
-    /// The recognizer's version at the time it ran.
+    /// Recognizer's version at the time it ran.
     pub version: HipStr<'static>,
 }
 
@@ -66,7 +64,7 @@ impl fmt::Display for RecognizerId {
     }
 }
 
-/// A detection layer: inspects content and reports recognized entities.
+/// Detection layer: inspects content and reports recognized entities.
 ///
 /// Modelled on Presidio's `EntityRecognizer`, generalised to be
 /// multimodal (keyed on the [`Modality`] `M`) and provenance-first (the
@@ -74,17 +72,17 @@ impl fmt::Display for RecognizerId {
 /// provenance).
 ///
 /// A recognizer does **not** resolve conflicts or fuse across
-/// recognizers — it reports what it sees, in modality-local coordinates.
+/// recognizers; it reports what it sees, in modality-local coordinates.
 /// Combining the findings of multiple recognizers is the job of the
 /// fusion step in `elide`; pruning and orchestration belong to a
 /// higher layer, not to the recognizer itself.
 ///
-/// The per-call surface is the [`RecognizerInput<M>`] (the modality
-/// payload plus language/jurisdiction/label hints); the result is a
-/// [`RecognizerOutput<M>`].
+/// Per call, a recognizer receives the modality payload (`data`) plus a
+/// [`RecognizerContext<M>`] (the call's languages, jurisdictions, label
+/// and annotation hints), and returns the entities it found.
 ///
 /// [`Entity`]: crate::entity::Entity
-/// [`Event`]: crate::provenance::Event
+/// [`Event`]: crate::entity::provenance::Event
 pub trait Recognizer<M>: Send + Sync
 where
     M: Modality,
@@ -92,9 +90,11 @@ where
     /// This recognizer's identity (name + version).
     fn id(&self) -> RecognizerId;
 
-    /// Inspect the input and return the recognized entities.
+    /// Inspect `data` in the given context and return the recognized
+    /// entities, in modality-local coordinates.
     fn recognize(
         &self,
-        input: &RecognizerInput<M>,
-    ) -> impl Future<Output = Result<RecognizerOutput<M>, Error>> + Send;
+        data: &M::Data,
+        ctx: &RecognizerContext<'_, M>,
+    ) -> impl Future<Output = Result<Vec<Entity<M>>>> + Send;
 }

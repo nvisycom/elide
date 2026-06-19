@@ -1,4 +1,4 @@
-//! The [`Operator`] trait — the forward redaction direction — and the
+//! [`Operator`] trait (the forward redaction direction) and the
 //! [`LeakProfile`] describing how much its output leaks.
 
 use std::future::Future;
@@ -7,7 +7,7 @@ use std::future::Future;
 use serde::{Deserialize, Serialize};
 
 use crate::entity::Entity;
-use crate::error::Error;
+use crate::error::Result;
 use crate::modality::Modality;
 use crate::redaction::OperatorId;
 
@@ -32,16 +32,16 @@ pub enum LeakProfile {
     Irrecoverable,
 }
 
-/// A redaction operator: computes what should replace an entity to
-/// remove or obscure it.
+/// Redaction operator: computes what should replace an entity to remove
+/// or obscure it.
 ///
 /// Modelled on Presidio's anonymizer operators (replace, redact, mask,
 /// hash, encrypt, keep, custom), generalised to be multimodal. Every
 /// redaction operator implements this trait.
 ///
 /// An operator is **pure**: it reads the entity and the [`Data`] under
-/// it and returns a [`Replacement`] — the instruction for what to write
-/// — *without* mutating anything. Applying the replacement back into the
+/// it and returns a [`Replacement`] (the instruction for what to write)
+/// *without* mutating anything. Applying the replacement back into the
 /// document is the codec's job. This keeps operators free of format
 /// knowledge (a mask works the same whether the text lives in a PDF or a
 /// CSV), trivially testable, and cacheable. A reversible operator
@@ -68,5 +68,5 @@ pub trait Operator<M: Modality>: Send + Sync {
         &self,
         entity: &Entity<M>,
         data: &M::Data,
-    ) -> impl Future<Output = Result<M::Replacement, Error>> + Send;
+    ) -> impl Future<Output = Result<M::Replacement>> + Send;
 }

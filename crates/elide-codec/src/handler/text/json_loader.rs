@@ -4,7 +4,7 @@
 //! well-formedness checks.
 
 use elide_core::modality::text::Text;
-use elide_core::{Error, ErrorKind};
+use elide_core::{Error, ErrorKind, Result};
 
 use super::JsonHandler;
 use crate::Loader;
@@ -12,12 +12,12 @@ use crate::content::ContentData;
 
 /// Loader for JSON files. Produces one [`JsonHandler`] per input.
 #[derive(Debug)]
-pub struct JsonLoader;
+pub(crate) struct JsonLoader;
 
 impl Loader<Text> for JsonLoader {
     type Handler = JsonHandler;
 
-    async fn decode(&self, content: ContentData) -> Result<JsonHandler, Error> {
+    async fn decode(&self, content: ContentData) -> Result<JsonHandler> {
         let text = content.decode()?;
         // Validate well-formedness eagerly; the handler's lexer re-parses
         // but with a friendlier error path. Reject here so callers get a
@@ -34,7 +34,7 @@ mod tests {
     use crate::Handler;
 
     #[tokio::test]
-    async fn load_valid_json() -> Result<(), Error> {
+    async fn load_valid_json() -> Result<()> {
         let doc = JsonLoader
             .decode(ContentData::from_text(r#"{"a":1}"#))
             .await?;

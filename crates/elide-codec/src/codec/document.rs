@@ -5,15 +5,15 @@
 //! # Open two-tier handle shape
 //!
 //! The registry can't know up front which modality a decoded format
-//! produces — that's a property of the format descriptor, resolved at
+//! produces: that's a property of the format descriptor, resolved at
 //! decode time. [`UntypedDocumentHandle`] is the registry-level return:
 //! a [`FormatId`] plus the typed [`DocumentHandle<M>`] erased to
 //! `Box<dyn Any>`. Unlike a closed per-modality enum, this supports any
-//! [`Modality`] — including custom ones a downstream crate defines —
-//! with no central registry of kinds.
+//! [`Modality`], including custom ones a downstream crate defines, with
+//! no central registry of kinds.
 //!
 //! Consumers commit to a modality via [`into`], which downcasts by
-//! [`TypeId`] and yields the typed [`DocumentHandle<M>`] — a wrapper that
+//! [`TypeId`] and yields the typed [`DocumentHandle<M>`], a wrapper that
 //! owns the underlying handler and exposes the per-modality capability
 //! surface.
 //!
@@ -23,7 +23,7 @@
 use std::any::{Any, type_name};
 use std::fmt;
 
-use elide_core::Error;
+use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::text::Text;
 use elide_core::modality::{Chunk, DataReader, DataWriter, Modality, StreamDataReader};
@@ -33,13 +33,14 @@ use super::FormatId;
 use super::loader::DynHandler;
 use crate::content::ContentData;
 
-/// Modality-erased handle the registry returns, carrying a typed
-/// [`DocumentHandle<M>`] for some `M` plus the [`FormatId`] of the
-/// producing loader.
+/// Modality-erased handle the registry returns.
+///
+/// Carries a typed [`DocumentHandle<M>`] for some `M` plus the
+/// [`FormatId`] of the producing loader.
 ///
 /// Commit to a modality with [`into::<M>()`] (or peek with [`is`]) to
 /// recover the typed [`DocumentHandle<M>`]. The downcast is by
-/// [`TypeId`], so any registered modality works — built-in or custom.
+/// [`TypeId`], so any registered modality works, built-in or custom.
 ///
 /// [`into::<M>()`]: Self::into
 /// [`is`]: Self::is
@@ -94,9 +95,10 @@ impl fmt::Debug for UntypedDocumentHandle {
     }
 }
 
-/// Typed view of a single-modality handle. Carries the [`FormatId`]
-/// alongside the handler so provenance can always answer "what format is
-/// this?" without re-decoding.
+/// Typed view of a single-modality handle.
+///
+/// Carries the [`FormatId`] alongside the handler so provenance can
+/// always answer "what format is this?" without re-decoding.
 ///
 /// Constructed by codec loaders, erased into an [`UntypedDocumentHandle`]
 /// for registry return, then recovered with
@@ -133,7 +135,7 @@ impl<M: Modality> DocumentHandle<M> {
     /// re-encoded.
     ///
     /// [`ContentData`]: crate::content::ContentData
-    pub fn encode(&self) -> Result<ContentData, Error> {
+    pub fn encode(&self) -> Result<ContentData> {
         self.handler.encode()
     }
 }
@@ -148,19 +150,19 @@ impl<M: Modality> fmt::Debug for DocumentHandle<M> {
 }
 
 impl<M: Modality> DataReader<M> for DocumentHandle<M> {
-    async fn read_at(&self, location: &M::Location) -> Result<Option<M::Data>, Error> {
+    async fn read_at(&self, location: &M::Location) -> Result<Option<M::Data>> {
         self.handler.read_at(location).await
     }
 }
 
 impl<M: Modality> DataWriter<M> for DocumentHandle<M> {
-    async fn write_at(&mut self, redactions: Redactions<M>) -> Result<(), Error> {
+    async fn write_at(&mut self, redactions: Redactions<M>) -> Result<()> {
         self.handler.write_at(redactions).await
     }
 }
 
 impl StreamDataReader<Text> for DocumentHandle<Text> {
-    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>, Error> {
+    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>> {
         self.handler.read_next().await
     }
 

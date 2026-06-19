@@ -1,3 +1,7 @@
+# International Bank Account Number: 2-letter country code, 2 check
+# digits, then up to 30 alphanumerics in optional 4-char groups.
+# Validated by `iban` (per-country length + mod-97 checksum).
+
 name = "iban"
 label = "iban"
 context = ["iban", "bank", "account", "transfer", "swift"]

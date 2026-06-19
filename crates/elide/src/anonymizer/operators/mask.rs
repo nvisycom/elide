@@ -1,7 +1,7 @@
 //! [`Mask`]: replace characters of the matched value with a fixed mask
 //! character, optionally leaving a prefix and/or suffix visible.
 
-use elide_core::Error;
+use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId};
@@ -88,11 +88,7 @@ impl Operator<Text> for Mask {
         LeakProfile::Partial
     }
 
-    async fn anonymize(
-        &self,
-        _entity: &Entity<Text>,
-        data: &TextData,
-    ) -> Result<TextReplacement, Error> {
+    async fn anonymize(&self, _entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
         Ok(TextReplacement::substituted(self.render(data.as_str())))
     }
 }

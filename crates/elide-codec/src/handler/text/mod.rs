@@ -15,11 +15,18 @@ mod txt_handler;
 #[cfg(feature = "txt")]
 mod txt_loader;
 
+// `*_format` is `pub` so the parent `handler` module can re-export it as
+// the crate's public contract; the loader/handler pairs are `pub(crate)`
+// for the sibling loader/handler to reference each other.
 #[cfg(feature = "json")]
-pub use self::json_handler::{JsonHandler, format as json_format};
+pub(crate) use self::json_handler::JsonHandler;
 #[cfg(feature = "json")]
-pub use self::json_loader::JsonLoader;
+pub use self::json_handler::format as json_format;
+#[cfg(feature = "json")]
+pub(crate) use self::json_loader::JsonLoader;
 #[cfg(feature = "txt")]
-pub use self::txt_handler::{TxtHandler, format as txt_format};
+pub(crate) use self::txt_handler::TxtHandler;
 #[cfg(feature = "txt")]
-pub use self::txt_loader::TxtLoader;
+pub use self::txt_handler::format as txt_format;
+#[cfg(feature = "txt")]
+pub(crate) use self::txt_loader::TxtLoader;

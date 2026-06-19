@@ -1,11 +1,11 @@
-//! A closed polygon.
+//! Closed polygon.
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use super::Point;
 
-/// A closed polygon, given by its ordered vertices.
+/// Closed polygon, given by its ordered vertices.
 ///
 /// A richer location than a [`BoundingBox`] for detections whose extent
 /// is not rectangular: rotated text, a region traced by a vision model, a
@@ -19,17 +19,17 @@ use super::Point;
 pub struct Polygon(Vec<Point>);
 
 impl Polygon {
-    /// A polygon from its ordered vertices.
+    /// Polygon from its ordered vertices.
     pub fn new(vertices: impl Into<Vec<Point>>) -> Self {
         Self(vertices.into())
     }
 
-    /// The polygon's vertices, in order.
+    /// Polygon's vertices, in order.
     pub fn vertices(&self) -> &[Point] {
         &self.0
     }
 
-    /// The number of vertices.
+    /// Number of vertices.
     pub fn len(&self) -> usize {
         self.0.len()
     }
@@ -98,7 +98,7 @@ impl FromIterator<Point> for Polygon {
 mod tests {
     use super::*;
 
-    /// An axis-aligned square `[x, x+s] x [y, y+s]` as a polygon.
+    /// Axis-aligned square `[x, x+s] x [y, y+s]` as a polygon.
     fn square(x: f64, y: f64, s: f64) -> Polygon {
         Polygon::new(vec![
             Point::new(x, y),

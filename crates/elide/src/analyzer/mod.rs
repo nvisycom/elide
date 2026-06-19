@@ -14,11 +14,12 @@ mod dyn_recognizer;
 
 use std::sync::Arc;
 
+use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::modality::{Modality, StreamDataReader};
-use elide_core::recognition::{Enricher, Recognizer, RecognizerInput, RecognizerOutput};
-use elide_core::{Error, ErrorKind};
-use tokio::task::JoinSet;
+use elide_core::modality::{Modality, ModalityLocation, StreamDataReader};
+use elide_core::recognition::annotation::Exclusion;
+use elide_core::recognition::{Enricher, Recognizer, RecognizerContext, Scope};
+use futures::future;
 
 use self::dyn_enricher::DynEnricher;
 use self::dyn_recognizer::DynRecognizer;
@@ -41,7 +42,7 @@ use crate::deduplication::{Layer, LayerPipeline};
 ///     .with_layer(FuseLayer::new(MaxConfidence))
 ///     .with_layer(ResolveLayer::new(HighestConfidence))
 ///     .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE))
-///     .analyze(input)
+///     .analyze(data, &Scope::new())
 ///     .await?;
 /// ```
 ///
@@ -90,49 +91,96 @@ impl<M: Modality> Analyzer<M> {
         self
     }
 
-    /// Find entities in `input`, in three phases: run every enricher
-    /// (sequentially) to fill in per-call context, then every recognizer
-    /// (concurrently), then every deduplication layer.
+    /// Run the three analysis phases over one payload: every enricher
+    /// (sequentially) to fill in the working context, then every
+    /// recognizer (concurrently), then every deduplication layer.
     ///
-    /// Returns the reconciled entity set. Propagates the first enricher or
-    /// recognizer error.
-    pub async fn analyze(&self, mut input: RecognizerInput<M>) -> Result<Vec<Entity<M>>, Error> {
+    /// `scope` is the caller's asserted scope; a fresh working
+    /// [`RecognizerContext`] is built per payload, borrowing the scope and
+    /// owning that payload's artifacts. The shared core behind [`analyze`]
+    /// and [`analyze_stream`].
+    ///
+    /// [`analyze`]: Self::analyze
+    /// [`analyze_stream`]: Self::analyze_stream
+    async fn analyze_core(
+        &self,
+        data: M::Data,
+        ctx: &mut RecognizerContext<'_, M>,
+    ) -> Result<Vec<Entity<M>>> {
         for enricher in &self.enrichers {
-            enricher.enrich_boxed(&mut input).await?;
+            enricher.enrich_boxed(&data, ctx).await?;
         }
-        let entities = self.recognize(input).await?;
-        Ok(self.pipeline.run(entities))
+        let entities = self.recognize(&data, ctx).await?;
+        let reduced = self.pipeline.run(entities);
+        Ok(Self::apply_exclusions(reduced, ctx.exclusions()))
+    }
+
+    /// Drop every entity whose location overlaps a caller [`Exclusion`].
+    ///
+    /// Runs after deduplication so it culls the reconciled set, not
+    /// per-recognizer duplicates. A no-op when no exclusions are asserted.
+    ///
+    /// [`Exclusion`]: elide_core::recognition::annotation::Exclusion
+    fn apply_exclusions(entities: Vec<Entity<M>>, exclusions: &[Exclusion<M>]) -> Vec<Entity<M>> {
+        if exclusions.is_empty() {
+            return entities;
+        }
+        entities
+            .into_iter()
+            .filter(|entity| {
+                !exclusions
+                    .iter()
+                    .any(|exclusion| entity.location.overlaps(&exclusion.location))
+            })
+            .collect()
+    }
+
+    /// Analyze a single in-memory payload in the given scope.
+    ///
+    /// Runs the full analysis pipeline over `data`, with `scope` supplying
+    /// the caller's assertions (languages, jurisdictions, labels,
+    /// inclusions, exclusions).
+    /// Use [`analyze_stream`] for an I/O-backed source that yields many
+    /// chunks.
+    ///
+    /// [`analyze_stream`]: Self::analyze_stream
+    pub async fn analyze(&self, data: M::Data, scope: &Scope<M>) -> Result<Vec<Entity<M>>> {
+        let mut ctx = RecognizerContext::new(scope);
+        self.analyze_core(data, &mut ctx).await
     }
 
     /// Analyze a streamed source end to end, returning entities in the
     /// source's own coordinate system.
     ///
-    /// Drives `source` chunk by chunk: for each [`Chunk`], builds a
-    /// [`RecognizerInput`] from its payload (and its context hints),
-    /// runs the full [`analyze`] pipeline, then [`lift`]s every entity
-    /// from chunk-local to source coordinates — dropping any whose
+    /// Drives `source` chunk by chunk: for each [`Chunk`], runs the full
+    /// analysis pipeline over its payload in a fresh context (carrying the
+    /// `scope` plus the chunk's own context hints), then [`lift`]s every
+    /// entity from chunk-local to source coordinates, dropping any whose
     /// location has no source pre-image. The result aggregates every
     /// chunk's lifted entities.
     ///
     /// This is the [`analyze`] counterpart for I/O-backed sources (a
     /// decoded codec document, say): the caller never sees a chunk or a
     /// recognizer-local coordinate. Deduplication runs per chunk, the
-    /// way [`analyze`] reduces a single input.
+    /// way [`analyze`] reduces a single payload.
     ///
     /// Returns the first enricher, recognizer, or read error.
     ///
     /// [`Chunk`]: elide_core::modality::Chunk
     /// [`analyze`]: Self::analyze
     /// [`lift`]: elide_core::modality::StreamDataReader::lift
-    pub async fn analyze_stream<S>(&self, source: &mut S) -> Result<Vec<Entity<M>>, Error>
+    pub async fn analyze_stream<S>(
+        &self,
+        source: &mut S,
+        scope: &Scope<M>,
+    ) -> Result<Vec<Entity<M>>>
     where
         S: StreamDataReader<M>,
     {
         let mut out = Vec::new();
         while let Some(chunk) = source.read_next().await? {
-            let input =
-                RecognizerInput::new(chunk.data.clone()).with_context_hints(chunk.hints.clone());
-            let entities = self.analyze(input).await?;
+            let mut ctx = RecognizerContext::new(scope).with_context_hints(chunk.hints.clone());
+            let entities = self.analyze_core(chunk.data.clone(), &mut ctx).await?;
             out.extend(
                 entities
                     .into_iter()
@@ -142,35 +190,27 @@ impl<M: Modality> Analyzer<M> {
         Ok(out)
     }
 
-    /// Run every recognizer over `input` concurrently and collect their
-    /// entities. The first error aborts the rest and is returned
-    /// (fail-fast).
-    async fn recognize(&self, input: RecognizerInput<M>) -> Result<Vec<Entity<M>>, Error> {
+    /// Run every recognizer over `data` concurrently and collect their
+    /// entities. The first error is returned (fail-fast).
+    ///
+    /// Recognizers borrow `data` and `ctx`, so they are joined in place
+    /// rather than spawned onto the runtime.
+    async fn recognize(
+        &self,
+        data: &M::Data,
+        ctx: &RecognizerContext<'_, M>,
+    ) -> Result<Vec<Entity<M>>> {
         if self.recognizers.is_empty() {
             return Ok(Vec::new());
         }
 
-        let input = Arc::new(input);
-        let mut set: JoinSet<Result<RecognizerOutput<M>, Error>> = JoinSet::new();
-        for recognizer in &self.recognizers {
-            let recognizer = Arc::clone(recognizer);
-            let input = Arc::clone(&input);
-            set.spawn(async move { recognizer.recognize_boxed(&input).await });
-        }
-
+        let futures = self
+            .recognizers
+            .iter()
+            .map(|recognizer| recognizer.recognize_boxed(data, ctx));
         let mut entities = Vec::new();
-        while let Some(joined) = set.join_next().await {
-            match joined {
-                Ok(Ok(output)) => entities.extend(output.entities),
-                Ok(Err(error)) => {
-                    set.abort_all();
-                    return Err(error);
-                }
-                Err(join) => {
-                    set.abort_all();
-                    return Err(Error::new(ErrorKind::Recognition, join));
-                }
-            }
+        for found in future::join_all(futures).await {
+            entities.extend(found?);
         }
         Ok(entities)
     }

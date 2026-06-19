@@ -13,7 +13,7 @@ use elide_core::primitive::Confidence;
 ///
 /// [`FuseLayer`]: super::FuseLayer
 /// [`name`]: FusionStrategy::name
-/// [`Event`]: elide_core::provenance::Event
+/// [`Event`]: elide_core::entity::provenance::Event
 pub trait FusionStrategy<M: Modality>: Send + Sync {
     /// Stable name of the strategy, recorded in the fusion's `Merge`.
     fn name(&self) -> &'static str;

@@ -10,8 +10,9 @@
 use std::sync::Arc;
 
 use derive_builder::Builder;
+use elide_core::entity::Entity;
 use elide_core::modality::Modality;
-use elide_core::recognition::{Recognizer, RecognizerId, RecognizerInput, RecognizerOutput};
+use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
 use elide_core::{Error, Result};
 
 use super::prompt::Prompt;
@@ -136,14 +137,18 @@ impl<M: Modality> Recognizer<M> for LlmRecognizer<M> {
         RecognizerId::new(self.name.clone(), env!("CARGO_PKG_VERSION"))
     }
 
-    async fn recognize(&self, input: &RecognizerInput<M>) -> Result<RecognizerOutput<M>> {
-        let prompt = self.prompt.build(input);
+    async fn recognize(
+        &self,
+        data: &M::Data,
+        ctx: &RecognizerContext<'_, M>,
+    ) -> Result<Vec<Entity<M>>> {
+        let prompt = self.prompt.build(data, ctx);
         let request = LlmRequest {
             prompt: &prompt,
             schema: self.prompt.schema(),
         };
         let response = self.backend.predict(request).await?;
-        let entities = self.prompt.lift(&response, input);
-        Ok(RecognizerOutput::new(entities))
+        let entities = self.prompt.lift(&response, data, ctx);
+        Ok(entities)
     }
 }

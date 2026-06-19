@@ -30,6 +30,16 @@ default = []
 ## it.
 image = ["dep:bytes"]
 
+## The `audio` modality (`Audio`, `AudioData`, `AudioLocation`,
+## `AudioReplacement`). Off by default; text-only consumers don't pay for
+## it.
+audio = ["dep:bytes"]
+
+## The `tabular` modality (`Tabular`, `TabularLocation`). Cells reuse the
+## text payload and replacement, so this adds no dependency. Off by
+## default; text-only consumers don't pay for it.
+tabular = []
+
 ## Derive `serde::{Serialize, Deserialize}` on the domain types, and
 ## enable serde support in the underlying primitive crates. (`celes`
 ## and `oxilangtag` carry their serde impls unconditionally.)
@@ -39,20 +49,17 @@ serde = ["dep:serde", "hipstr/serde", "jiff/serde", "uuid/serde", "bytes?/serde"
 test-utils = []
 
 [dependencies]
-# Serialization (optional — gated behind the `serde` feature)
+# (De)serialization (optional — gated behind the `serde` feature)
 serde = { workspace = true, features = ["derive"], optional = true }
 
-# Derive macros (builders across the workspace use `derive_builder`,
-# whose generated `build()` returns this crate's `Error`)
+# Derive macros & error handling
 derive_builder = { workspace = true, features = [] }
 
-# Primitive datatypes
+# Primitive datatypes (`bytes` optional — gated behind `image`/`audio`)
 uuid = { workspace = true, features = ["v7"] }
 hipstr = { workspace = true, features = [] }
 jiff = { workspace = true, features = [] }
 oxilangtag = { workspace = true, features = [] }
 celes = { workspace = true, features = [] }
 type-map = { workspace = true, features = [] }
-
-# Raw bytes (optional — gated behind the `image` feature)
 bytes = { workspace = true, features = [], optional = true }

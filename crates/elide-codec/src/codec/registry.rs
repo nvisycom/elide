@@ -1,28 +1,30 @@
-//! [`CodecRegistry`]: resolves an extension or content type to a
+//! [`FormatRegistry`]: resolves an extension or content type to a
 //! registered [`Format`] and decodes content through its loader.
 //!
 //! Downstream crates register their own formats with
-//! [`CodecRegistry::add_format`] — there is no central enum to extend.
+//! [`FormatRegistry::add_format`]; there is no central enum to extend.
 
 use std::collections::HashMap;
 
-use elide_core::{Error, ErrorKind};
+use elide_core::{Error, ErrorKind, Result};
 
 use super::document::UntypedDocumentHandle;
 use super::{Format, FormatId};
 use crate::content::ContentData;
 
-/// Codec registry — owns the set of registered [`Format`]s and resolves
-/// them by extension, content type, or id.
+/// Owns the registered [`Format`]s and resolves content to one of them.
+///
+/// Resolves by file extension, MIME content type, or [`FormatId`], then
+/// decodes through the matched format's loader.
 #[derive(Debug, Default)]
-pub struct CodecRegistry {
+pub struct FormatRegistry {
     formats: Vec<Format>,
     by_id: HashMap<FormatId, usize>,
     by_extension: HashMap<String, usize>,
     by_content_type: HashMap<String, usize>,
 }
 
-impl CodecRegistry {
+impl FormatRegistry {
     /// Empty registry. Use [`with_format`] / [`add_format`] to add custom
     /// formats, or [`with_builtin`] to start from a pre-populated set of
     /// every built-in format the active feature set enables.
@@ -35,7 +37,7 @@ impl CodecRegistry {
     }
 
     /// Pre-populated registry containing every built-in format the
-    /// active feature set enables (TXT, JSON, Markdown, HTML, …).
+    /// active feature set enables (TXT, JSON, Markdown, HTML, and so on).
     ///
     /// Add custom formats afterward with [`with_format`] (chainable) or
     /// [`add_format`] (in-place); they take precedence on extension /
@@ -46,13 +48,13 @@ impl CodecRegistry {
     pub fn with_builtin() -> Self {
         let mut registry = Self::new();
         #[cfg(feature = "txt")]
-        registry.add_format(crate::handler::text::txt_format());
+        registry.add_format(crate::handler::txt_format());
         #[cfg(feature = "json")]
-        registry.add_format(crate::handler::text::json_format());
+        registry.add_format(crate::handler::json_format());
         #[cfg(feature = "html")]
-        registry.add_format(crate::handler::markup::html_format());
+        registry.add_format(crate::handler::html_format());
         #[cfg(feature = "xml")]
-        registry.add_format(crate::handler::markup::xml_format());
+        registry.add_format(crate::handler::xml_format());
         registry
     }
 
@@ -63,7 +65,7 @@ impl CodecRegistry {
     ///
     /// Panics if the format's id is already registered. Extensions and
     /// content types that conflict with an existing format are
-    /// overwritten (last registration wins) — register custom formats
+    /// overwritten (last registration wins); register custom formats
     /// *after* [`with_builtin`] for precedence.
     ///
     /// [`with_builtin`]: Self::with_builtin
@@ -125,7 +127,7 @@ impl CodecRegistry {
     }
 
     /// Decode raw content using the format resolved from the extension
-    /// hint. Accepts anything convertible into [`ContentData`] — `&str`,
+    /// hint. Accepts anything convertible into [`ContentData`]: `&str`,
     /// `&[u8]`, `Vec<u8>`, `Bytes`, `String`.
     ///
     /// # Errors
@@ -136,7 +138,7 @@ impl CodecRegistry {
         &self,
         content: impl Into<ContentData>,
         extension: &str,
-    ) -> Result<UntypedDocumentHandle, Error> {
+    ) -> Result<UntypedDocumentHandle> {
         let format = self.by_extension(extension).ok_or_else(|| {
             Error::new(
                 ErrorKind::Validation,
@@ -158,10 +160,7 @@ impl CodecRegistry {
     ///
     /// [`extension`]: ContentData::extension
     /// [`content_type`]: ContentData::content_type
-    pub async fn decode_content(
-        &self,
-        content: ContentData,
-    ) -> Result<UntypedDocumentHandle, Error> {
+    pub async fn decode_content(&self, content: ContentData) -> Result<UntypedDocumentHandle> {
         let by_ext = content
             .extension()
             .and_then(|ext| self.by_extension(&ext))

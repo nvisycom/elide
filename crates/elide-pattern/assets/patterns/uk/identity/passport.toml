@@ -1,7 +1,7 @@
 # UK Passport Number (post-2015 format).
 #
 # 2 letters + 7 digits. Same shape as several other country
-# passports — without context-keyword boost the FP rate is high.
+# passports; without context-keyword boost the FP rate is high.
 # Low score by default so callers rely on context to lift
 # legitimate matches.
 

@@ -1,13 +1,12 @@
 //! [`PatternRecognizer`] and its builder.
 
 use aho_corasick::{AhoCorasick, MatchKind};
-use elide_context::{BoostRule, ContextEnhanced, Enhancer, SubstringMatcher};
+use elide_context::matching::SubstringMatcher;
+use elide_context::{BoostRule, ContextEnhanced, Enhancer};
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
-use elide_core::modality::text::Text;
+use elide_core::modality::text::{Text, TextData};
 use elide_core::primitive::LanguageTag;
-use elide_core::recognition::{
-    Recognizer, RecognizerId, RecognizerInput, RecognizerLanguage, RecognizerOutput,
-};
+use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
 use elide_core::{Error, ErrorKind, Result};
 use regex::RegexSet;
 
@@ -387,7 +386,7 @@ impl PatternRecognizerBuilder {
                 }
             })
             .collect();
-        Enhancer::new(boost_rules, Box::new(SubstringMatcher))
+        Enhancer::new(boost_rules, SubstringMatcher)
     }
 
     /// Yield `(label, language, keywords)` for every pattern and
@@ -424,26 +423,30 @@ impl Recognizer<Text> for PatternRecognizer {
         RecognizerId::new("elide-pattern", env!("CARGO_PKG_VERSION"))
     }
 
-    async fn recognize(&self, input: &RecognizerInput<Text>) -> Result<RecognizerOutput<Text>> {
-        let text = input.content.text.as_str();
+    async fn recognize(
+        &self,
+        data: &TextData,
+        ctx: &RecognizerContext<'_, Text>,
+    ) -> Result<Vec<Entity<Text>>> {
+        let text = data.text.as_str();
         let mut entities: Vec<Entity<Text>> = Vec::new();
 
         if let Some(set) = self.regex_set.as_ref() {
             for pattern_id in set.matches(text).into_iter() {
                 let pat = &self.patterns[pattern_id];
-                if !input.applies_to_language(&pat.languages) {
+                if !ctx.applies_to_language(&pat.languages) {
                     continue;
                 }
-                if !input.applies_to_country(&pat.countries) {
+                if !ctx.applies_to_country(&pat.countries) {
                     continue;
                 }
-                let ctx = ValidationContext {
-                    country: input.country,
-                    language: input.primary_language().cloned(),
+                let validation_ctx = ValidationContext {
+                    countries: ctx.scope().countries.clone(),
+                    language: ctx.primary_language().cloned(),
                 };
                 for m in pat.regex.find_iter(text) {
                     if let Some(validator) = pat.validator.as_ref()
-                        && !validator.validate(m.as_str(), &ctx)
+                        && !validator.validate(m.as_str(), &validation_ctx)
                     {
                         continue;
                     }
@@ -458,10 +461,10 @@ impl Recognizer<Text> for PatternRecognizer {
                 let Some(dict) = self.dictionary_owning_term(term_id) else {
                     continue;
                 };
-                if !input.applies_to_language(&dict.languages) {
+                if !ctx.applies_to_language(&dict.languages) {
                     continue;
                 }
-                if !input.applies_to_country(&dict.countries) {
+                if !ctx.applies_to_country(&dict.countries) {
                     continue;
                 }
                 if dict.word_boundary && !has_word_boundaries(text, mat.start(), mat.end()) {
@@ -472,6 +475,6 @@ impl Recognizer<Text> for PatternRecognizer {
             }
         }
 
-        Ok(RecognizerOutput::new(entities))
+        Ok(entities)
     }
 }

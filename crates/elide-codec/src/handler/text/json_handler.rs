@@ -1,6 +1,6 @@
 //! JSON handler: a flat ordered sequence of source slots.
 //!
-//! The loader lexes the source once into [`Slot`]s — either
+//! The loader lexes the source once into [`Slot`]s: either
 //! [`Slot::Passthrough`] (whitespace + structural punctuation, kept
 //! verbatim) or [`Slot::Leaf`] (a key, string value, or scalar). Leaves
 //! carry both the original source bytes (`serialized`) and the unescaped
@@ -19,18 +19,21 @@ use std::ops::Range;
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
-use elide_core::{Error, ErrorKind};
+use elide_core::{Error, ErrorKind, Result};
 
+use super::JsonLoader;
 use crate::content::ContentData;
 use crate::handler::redact;
 use crate::{Format, FormatId, Handler};
 
 /// Stable [`FormatId`] for the JSON codec.
-pub const FORMAT_ID: FormatId = FormatId::from_static("elide.text.json");
+pub const FORMAT_ID: FormatId = FormatId::new("elide.text.json");
 
-/// [`Format`] descriptor registered into [`crate::CodecRegistry`].
+/// [`Format`] descriptor registered into [`FormatRegistry`].
+///
+/// [`FormatRegistry`]: crate::FormatRegistry
 pub fn format() -> Format {
-    Format::new::<Text, _>(FORMAT_ID.clone(), super::JsonLoader)
+    Format::new::<Text, _>(FORMAT_ID.clone(), JsonLoader)
         .with_extensions(["json"])
         .with_content_types(["application/json"])
 }
@@ -41,7 +44,7 @@ pub(super) enum Slot {
     /// Whitespace or structural punctuation (`{ } [ ] : ,` and
     /// surrounding whitespace). Held verbatim and emitted back unchanged.
     Passthrough(String),
-    /// A key, string value, or scalar (number/bool/null) — every position
+    /// A key, string value, or scalar (number/bool/null): every position
     /// a recognizer is allowed to address.
     Leaf(Leaf),
 }
@@ -50,10 +53,10 @@ pub(super) enum Slot {
 #[derive(Debug, Clone)]
 pub(super) struct Leaf {
     pub kind: LeafKind,
-    /// Current unescaped UTF-8 value — what the recognizer sees in
+    /// Current unescaped UTF-8 value: what the recognizer sees in
     /// [`Chunk::data`] and what redactions edit.
     pub value: String,
-    /// Current source bytes — what `encode` emits and what
+    /// Current source bytes: what `encode` emits and what
     /// [`TextLocation`] offsets address. For [`LeafKind::Key`] and
     /// [`LeafKind::StringValue`] this is the quoted form `"…"` with `\\` /
     /// `\"` escapes; for [`LeafKind::Scalar`] it is the bare literal.
@@ -86,7 +89,7 @@ impl Leaf {
 
 /// Handler for loaded JSON content.
 #[derive(Debug)]
-pub struct JsonHandler {
+pub(crate) struct JsonHandler {
     slots: Vec<Slot>,
     cursor: usize,
 }
@@ -96,7 +99,7 @@ impl Handler<Text> for JsonHandler {
         FORMAT_ID.clone()
     }
 
-    fn encode(&self) -> Result<ContentData, Error> {
+    fn encode(&self) -> Result<ContentData> {
         let mut out = String::new();
         for slot in &self.slots {
             match slot {
@@ -107,7 +110,7 @@ impl Handler<Text> for JsonHandler {
         Ok(ContentData::from_text(out))
     }
 
-    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>, Error> {
+    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>> {
         while self.cursor < self.slots.len() {
             let start = self.offset_of(self.cursor);
             let slot = &self.slots[self.cursor];
@@ -141,7 +144,7 @@ impl Handler<Text> for JsonHandler {
 }
 
 impl DataReader<Text> for JsonHandler {
-    async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>, Error> {
+    async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
         Ok(self
             .find_leaf(location)
             .map(|(_, leaf)| TextData::new(leaf.value.clone())))
@@ -149,7 +152,7 @@ impl DataReader<Text> for JsonHandler {
 }
 
 impl DataWriter<Text> for JsonHandler {
-    async fn write_at(&mut self, redactions: Redactions<Text>) -> Result<(), Error> {
+    async fn write_at(&mut self, redactions: Redactions<Text>) -> Result<()> {
         // Resolve every redaction against the **pre-mutation** slot
         // offsets first. Mutating a leaf shifts every later slot's
         // source-byte offset, so resolving inline would mismatch later
@@ -201,24 +204,11 @@ impl DataWriter<Text> for JsonHandler {
 }
 
 impl JsonHandler {
-    /// Build a handler from a synthetic [`serde_json::Value`]. Synthetic
-    /// documents always re-emit compact JSON — loaded documents preserve
-    /// their source formatting via the slot model.
-    pub fn from_value(value: serde_json::Value) -> Self {
-        let serialized = serde_json::to_string(&value).unwrap_or_default();
-        Self::from_source_string(serialized)
-    }
-
     /// Build a handler directly from JSON source bytes. Used by the
     /// loader; preserves the source formatting verbatim.
     pub(super) fn from_source_string(source: String) -> Self {
         let slots = parse_slots(&source).unwrap_or_else(|_| vec![Slot::Passthrough(source)]);
         Self { slots, cursor: 0 }
-    }
-
-    /// Rewind the streaming cursor to the start of the document.
-    pub fn rewind(&mut self) {
-        self.cursor = 0;
     }
 
     /// Byte offset where the slot at `idx` starts in the current encoded
@@ -255,7 +245,7 @@ impl JsonHandler {
     }
 }
 
-/// Escape a string for JSON matching (backslash and quote only — other
+/// Escape a string for JSON matching (backslash and quote only; other
 /// control characters in keys/values are unsupported in this codec's
 /// redaction path and round-trip as-is).
 fn json_escape(s: &str) -> String {
@@ -357,7 +347,7 @@ fn value_to_source_offset(leaf: &Leaf, slot_start: usize, value_offset: usize) -
 /// [`Slot::Passthrough`]; keys, string values and scalars become
 /// [`Slot::Leaf`]. Returns an error if the source is not well-formed
 /// JSON.
-pub(super) fn parse_slots(src: &str) -> Result<Vec<Slot>, Error> {
+pub(super) fn parse_slots(src: &str) -> Result<Vec<Slot>> {
     let mut p = SlotParser::new(src);
     p.parse_value(None)?;
     p.flush_passthrough();
@@ -420,7 +410,7 @@ impl<'a> SlotParser<'a> {
         }
     }
 
-    fn consume_punct(&mut self, c: u8) -> Result<(), Error> {
+    fn consume_punct(&mut self, c: u8) -> Result<()> {
         if self.peek() != Some(c) {
             return Err(Error::new(
                 ErrorKind::Validation,
@@ -432,7 +422,7 @@ impl<'a> SlotParser<'a> {
         Ok(())
     }
 
-    fn parse_value(&mut self, key_context: Option<&str>) -> Result<(), Error> {
+    fn parse_value(&mut self, key_context: Option<&str>) -> Result<()> {
         self.consume_whitespace();
         match self.peek() {
             Some(b'{') => self.parse_object(),
@@ -464,7 +454,7 @@ impl<'a> SlotParser<'a> {
         }
     }
 
-    fn parse_object(&mut self) -> Result<(), Error> {
+    fn parse_object(&mut self) -> Result<()> {
         self.consume_punct(b'{')?;
         self.consume_whitespace();
         if self.peek() == Some(b'}') {
@@ -498,7 +488,7 @@ impl<'a> SlotParser<'a> {
         }
     }
 
-    fn parse_array(&mut self, key_context: Option<&str>) -> Result<(), Error> {
+    fn parse_array(&mut self, key_context: Option<&str>) -> Result<()> {
         self.consume_punct(b'[')?;
         self.consume_whitespace();
         if self.peek() == Some(b']') {
@@ -507,7 +497,7 @@ impl<'a> SlotParser<'a> {
         }
         loop {
             // Array elements inherit the containing object key as their
-            // hint — `{"cards": ["4111…", "5555…"]}` should treat both
+            // hint: `{"cards": ["4111…", "5555…"]}` should treat both
             // PANs as living under `cards`.
             self.parse_value(key_context)?;
             self.consume_whitespace();
@@ -529,7 +519,7 @@ impl<'a> SlotParser<'a> {
         }
     }
 
-    fn parse_string_leaf(&mut self, kind: LeafKind) -> Result<Leaf, Error> {
+    fn parse_string_leaf(&mut self, kind: LeafKind) -> Result<Leaf> {
         if self.peek() != Some(b'"') {
             return Err(Error::new(
                 ErrorKind::Validation,
@@ -611,7 +601,7 @@ impl<'a> SlotParser<'a> {
         }
     }
 
-    fn parse_scalar(&mut self) -> Result<Leaf, Error> {
+    fn parse_scalar(&mut self) -> Result<Leaf> {
         let start = self.pos;
         while let Some(b) = self.peek() {
             let is_scalar_byte =
@@ -653,7 +643,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stream_yields_keys_and_values_in_order() -> Result<(), Error> {
+    async fn stream_yields_keys_and_values_in_order() -> Result<()> {
         let mut h = handler(r#"{"name":"Alice","age":30}"#);
         let mut chunks = Vec::new();
         while let Some(c) = h.read_next().await? {
@@ -664,7 +654,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn duplicate_values_get_distinct_offsets() -> Result<(), Error> {
+    async fn duplicate_values_get_distinct_offsets() -> Result<()> {
         let mut h = handler(r#"{"a":"same","b":"same"}"#);
         let mut offsets = Vec::new();
         while let Some(c) = h.read_next().await? {
@@ -678,7 +668,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn read_returns_string() -> Result<(), Error> {
+    async fn read_returns_string() -> Result<()> {
         let mut h = handler(r#"{"name":"Alice"}"#);
         let mut found = false;
         while let Some(chunk) = h.read_next().await? {
@@ -695,21 +685,21 @@ mod tests {
     }
 
     #[test]
-    fn encode_preserves_source_compact() -> Result<(), Error> {
+    fn encode_preserves_source_compact() -> Result<()> {
         let src = r#"{"a":1}"#;
         assert_eq!(encoded(&handler(src)), src);
         Ok(())
     }
 
     #[test]
-    fn encode_preserves_source_pretty() -> Result<(), Error> {
+    fn encode_preserves_source_pretty() -> Result<()> {
         let src = "{\n  \"a\": 1\n}\n";
         assert_eq!(encoded(&handler(src)), src);
         Ok(())
     }
 
     #[tokio::test]
-    async fn redact_whole_string_value() -> Result<(), Error> {
+    async fn redact_whole_string_value() -> Result<()> {
         let mut h = handler(r#"{"name":"Alice"}"#);
         let chunk = loop {
             let c = h.read_next().await?.expect("expected chunk");
@@ -725,7 +715,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn redact_partial_leaf_in_compact_source() -> Result<(), Error> {
+    async fn redact_partial_leaf_in_compact_source() -> Result<()> {
         let src = r#"{"email":"alice@example.com"}"#;
         let mut h = handler(src);
         let _ = loop {
@@ -747,8 +737,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn redact_partial_leaf_with_escapes() -> Result<(), Error> {
-        // unescaped value: foo"bar — source: "foo\"bar"
+    async fn redact_partial_leaf_with_escapes() -> Result<()> {
+        // unescaped value: foo"bar; source: "foo\"bar"
         let src = r#"{"msg":"foo\"bar"}"#;
         let mut h = handler(src);
         let _ = loop {
@@ -770,7 +760,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn redact_key() -> Result<(), Error> {
+    async fn redact_key() -> Result<()> {
         let mut h = handler(r#"{"email":"a@b.c"}"#);
         let chunk = loop {
             let c = h.read_next().await?.expect("chunk");
@@ -789,7 +779,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn redact_scalar() -> Result<(), Error> {
+    async fn redact_scalar() -> Result<()> {
         let mut h = handler(r#"{"n":42}"#);
         let chunk = loop {
             let c = h.read_next().await?.expect("chunk");
@@ -808,7 +798,7 @@ mod tests {
     /// leaf, with length deltas that shift later slot offsets. Regression
     /// test for the "only the first redaction lands" bug.
     #[tokio::test]
-    async fn redact_multiple_leaves_with_shifting_offsets() -> Result<(), Error> {
+    async fn redact_multiple_leaves_with_shifting_offsets() -> Result<()> {
         let src = r#"{"a":"first","b":"second","c":"third"}"#;
         let mut h = handler(src);
         let mut locs = Vec::new();
@@ -829,7 +819,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lift_chunk_simple_string() -> Result<(), Error> {
+    async fn lift_chunk_simple_string() -> Result<()> {
         let src = r#"{"email":"alice@example.com"}"#;
         let mut h = handler(src);
         let chunk = loop {
@@ -850,8 +840,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lift_chunk_walks_escapes() -> Result<(), Error> {
-        // unescaped value: foo"bar — source: "foo\"bar"
+    async fn lift_chunk_walks_escapes() -> Result<()> {
+        // unescaped value: foo"bar; source: "foo\"bar"
         let src = r#"{"msg":"foo\"bar"}"#;
         let mut h = handler(src);
         let chunk = loop {
@@ -873,7 +863,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lift_chunk_redact_roundtrip() -> Result<(), Error> {
+    async fn lift_chunk_redact_roundtrip() -> Result<()> {
         let src = r#"{"msg":"foo\"bar"}"#;
         let mut h = handler(src);
         let chunk = loop {

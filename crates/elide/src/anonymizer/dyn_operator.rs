@@ -3,7 +3,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use elide_core::Error;
+use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 use elide_core::redaction::Operator;
@@ -21,7 +21,7 @@ pub(crate) trait DynOperator<M: Modality>: Send + Sync {
         &'a self,
         entity: &'a Entity<M>,
         data: &'a M::Data,
-    ) -> Pin<Box<dyn Future<Output = Result<M::Replacement, Error>> + Send + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Result<M::Replacement>> + Send + 'a>>;
 }
 
 impl<M, O> DynOperator<M> for O
@@ -33,7 +33,7 @@ where
         &'a self,
         entity: &'a Entity<M>,
         data: &'a M::Data,
-    ) -> Pin<Box<dyn Future<Output = Result<M::Replacement, Error>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Result<M::Replacement>> + Send + 'a>> {
         Box::pin(self.anonymize(entity, data))
     }
 }

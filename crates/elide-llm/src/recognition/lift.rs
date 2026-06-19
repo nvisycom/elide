@@ -11,12 +11,12 @@
 //! [`DefaultPrompt`]: super::default_prompt::DefaultPrompt
 //! [`FilePrompt`]: super::file_prompt::FilePrompt
 
+use elide_core::entity::provenance::{Event, ModelEvent};
 use elide_core::entity::{Entity, EntityCoRef, LabelRef};
-use elide_core::modality::image::{Image, ImageLocation};
-use elide_core::modality::text::{Text, TextLocation};
+use elide_core::modality::image::{Image, ImageData, ImageLocation};
+use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::primitive::{Confidence, UnitBoundingBox};
-use elide_core::provenance::{Event, ModelEvent};
-use elide_core::recognition::{LabelMap, RecognizerInput};
+use elide_core::recognition::LabelMap;
 
 use super::candidates::{TextCandidate, VlmCandidate};
 use super::localize::{UnresolvedCandidatePolicy, localize_all};
@@ -31,12 +31,12 @@ const DEFAULT_CONFIDENCE: f64 = 0.5;
 /// model-label to canonical-name translation. Pass an empty map + an
 /// empty slice for no filtering.
 pub(super) fn lift_text(
-    input: &RecognizerInput<Text>,
+    data: &TextData,
     candidates: Vec<TextCandidate>,
     label_map: &LabelMap,
     labels_to_ignore: &[String],
 ) -> Vec<Entity<Text>> {
-    let text = input.content.text.as_str();
+    let text = data.text.as_str();
     let localized = localize_all(text, candidates, UnresolvedCandidatePolicy::default());
 
     let mut out = Vec::with_capacity(localized.len());
@@ -83,12 +83,12 @@ pub(super) fn lift_text(
 
 /// Lift a parsed VLM-candidate batch into `Entity<Image>` values.
 pub(super) fn lift_image(
-    input: &RecognizerInput<Image>,
+    data: &ImageData,
     candidates: Vec<VlmCandidate>,
     label_map: &LabelMap,
     labels_to_ignore: &[String],
 ) -> Vec<Entity<Image>> {
-    let dims = input.content.dimensions;
+    let dims = data.dimensions;
 
     let mut out = Vec::with_capacity(candidates.len());
     for d in candidates {

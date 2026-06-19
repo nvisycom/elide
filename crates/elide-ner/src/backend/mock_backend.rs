@@ -2,7 +2,7 @@
 //! default before a real backend is configured.
 
 use elide_core::Result;
-use elide_core::provenance::ModelEvent;
+use elide_core::entity::provenance::ModelEvent;
 
 use super::ner_backend::{NerBackend, NerRequest, NerResponse};
 

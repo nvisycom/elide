@@ -20,7 +20,7 @@ broad set of patterns, dictionaries, and validators ship built in,
 covering common formats across several jurisdictions, and you can add
 your own alongside them.
 
-Many of the shipped patterns and validators are adapted from
+Some of the shipped patterns and validators are adapted from
 [Microsoft Presidio](https://github.com/microsoft/presidio).
 
 ## Documentation

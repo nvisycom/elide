@@ -1,10 +1,10 @@
 //! Assembles the redaction side of the pipeline: an [`Anonymizer`] that
 //! maps a redaction operator to each label.
 
-use elide::Anonymizer;
-use elide::operators::{Mask, Redact, Replace};
-use elide_core::entity::builtins;
-use elide_core::modality::text::Text;
+use elide::entity::builtins;
+use elide::modality::text::Text;
+use elide::redaction::Anonymizer;
+use elide::redaction::operators::{Mask, Redact, Replace};
 
 /// Build an anonymizer that picks a redaction strategy per label.
 pub fn build_anonymizer() -> Anonymizer<Text> {

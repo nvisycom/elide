@@ -7,8 +7,6 @@ pub mod backend;
 pub mod nlp;
 mod recognition;
 
-#[cfg(feature = "lingua")]
-pub use self::nlp::{LinguaDetector, LinguaEnricher};
 pub use self::recognition::{
     LabelMap, NerModel, NerModelBuilder, NerRecognizer, NerRecognizerBuilder,
 };

@@ -1,13 +1,13 @@
-//! The [`EntityBuilder`] for assembling an [`Entity`] field by field.
+//! [`EntityBuilder`] for assembling an [`Entity`] field by field.
 
 use uuid::Uuid;
 
 use super::{Entity, EntityCoRef, LabelRef};
+use crate::entity::provenance::{Event, Provenance};
 use crate::modality::Modality;
 use crate::primitive::Confidence;
-use crate::provenance::{Event, Provenance};
 
-/// A chainable builder for [`Entity`].
+/// Chainable builder for [`Entity`].
 ///
 /// More ergonomic than [`Entity::new`] when a producer assembles an
 /// entity from a recognition event: chain [`with_label`],
@@ -19,7 +19,7 @@ use crate::provenance::{Event, Provenance};
 /// # use elide_core::entity::{Entity, EntityBuilder, LabelRef};
 /// # use elide_core::modality::text::{Text, TextLocation};
 /// # use elide_core::primitive::Confidence;
-/// # use elide_core::provenance::{Event, PatternEvent};
+/// # use elide_core::entity::provenance::{Event, PatternEvent};
 /// let location = TextLocation::new(0, 11);
 /// let confidence = Confidence::clamped(0.8);
 /// let entity: Entity<Text> = EntityBuilder::new()
@@ -47,7 +47,7 @@ pub struct EntityBuilder<M: Modality> {
 }
 
 impl<M: Modality> EntityBuilder<M> {
-    /// A fresh, empty builder.
+    /// Fresh, empty builder.
     pub fn new() -> Self {
         Self {
             id: None,

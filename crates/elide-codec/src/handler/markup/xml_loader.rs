@@ -3,7 +3,7 @@
 //! can splice mutated values back **verbatim**.
 //!
 //! Emits items for element text content, comment bodies, and CDATA
-//! payloads — each addressed by an exact source span quick-xml gives us
+//! payloads, each addressed by an exact source span quick-xml gives us
 //! from event positions. Each item's `value` is the raw on-the-wire slice
 //! (never a decoded form), so encode is a byte-for-byte splice at the
 //! recorded span: the declaration, whitespace, attributes, and everything
@@ -20,7 +20,7 @@
 use std::ops::Range;
 
 use elide_core::modality::text::Text;
-use elide_core::{Error, ErrorKind};
+use elide_core::{Error, ErrorKind, Result};
 use quick_xml::Reader;
 use quick_xml::events::Event;
 
@@ -31,12 +31,12 @@ use crate::content::ContentData;
 
 /// Loader for XML files. Produces one [`XmlHandler`] per input.
 #[derive(Debug)]
-pub struct XmlLoader;
+pub(crate) struct XmlLoader;
 
 impl Loader<Text> for XmlLoader {
     type Handler = XmlHandler;
 
-    async fn decode(&self, content: ContentData) -> Result<XmlHandler, Error> {
+    async fn decode(&self, content: ContentData) -> Result<XmlHandler> {
         let text = content.decode()?;
         let items = build_items(&text)?;
         Ok(MarkupHandler::new(
@@ -47,7 +47,7 @@ impl Loader<Text> for XmlLoader {
     }
 }
 
-fn build_items(raw: &str) -> Result<Vec<XmlItem>, Error> {
+fn build_items(raw: &str) -> Result<Vec<XmlItem>> {
     let mut reader = Reader::from_str(raw);
     let mut items = Vec::new();
     let mut last = 0usize;
@@ -130,7 +130,7 @@ mod tests {
 
     /// The span arithmetic is over raw bytes, so the round-trip must hold
     /// across a BOM, leading whitespace, multibyte UTF-8 text, entity
-    /// references, and multibyte CDATA — the cases most likely to break a
+    /// references, and multibyte CDATA: the cases most likely to break a
     /// byte-offset assumption.
     #[tokio::test]
     async fn round_trips_verbatim_across_tricky_inputs() {

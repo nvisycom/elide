@@ -1,3 +1,6 @@
+# Ethereum address: `0x` followed by 40 hex characters (a 20-byte
+# account or contract address).
+
 name = "ethereum-address"
 label = "crypto_address"
 

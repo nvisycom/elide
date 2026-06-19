@@ -6,7 +6,7 @@
 //! text, and two precomputed predicates the enhancer reads
 //! (`is_stop`, `is_punct`).
 //!
-//! [`Tokens`] is the owning collection — a `Vec<Token>` newtype
+//! [`Tokens`] is the owning collection: a `Vec<Token>` newtype
 //! exposing iteration and length. The [`Enhancer`] slices the
 //! stream by *count* (prefix/suffix word radii) using its own
 //! internal helpers; the byte range carried on each [`Token`] is
@@ -17,7 +17,7 @@
 //!
 //! Tokens live next to the [`Enhancer`] because that's the only
 //! consumer: the enhancer reads them off
-//! `RecognizerInput::artifacts` to drive lemma-aware keyword
+//! `RecognizerContext::artifacts` to drive lemma-aware keyword
 //! matching. The producer (a tokenizer in some upstream NLP
 //! backend) only needs to know the type by name; the type itself
 //! belongs in the consumer's neighbourhood.
@@ -26,8 +26,8 @@
 //! dependency trees, and other heavier features are not part of
 //! the v1 surface; they get added as fields when a downstream
 //! consumer needs them. This keeps the artifact cheap for engines
-//! that don't produce them — `text == lemma`, `is_stop == false`,
-//! `is_punct == false` are the defaults for a tokenizer-only
+//! that don't produce them: `text == lemma`, `is_stop == false`,
+//! and `is_punct == false` are the defaults for a tokenizer-only
 //! engine.
 
 use std::ops::Range;
@@ -38,7 +38,7 @@ use hipstr::HipStr;
 /// One token produced by an upstream tokenizer.
 ///
 /// `lemma` falls back to `text` when the producer has no
-/// lemmatizer — callers that want lemma-aware matching can read
+/// lemmatizer, so callers that want lemma-aware matching can read
 /// `token.lemma` uniformly without checking which engine produced
 /// the artifact.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,9 +97,9 @@ impl Token {
 }
 
 /// Owning token sequence stamped on a
-/// [`RecognizerInput::artifacts`] bundle by an upstream NLP engine.
+/// [`RecognizerContext::artifacts`] bundle by an upstream NLP engine.
 ///
-/// [`RecognizerInput::artifacts`]: elide_core::recognition::RecognizerInput::artifacts
+/// [`RecognizerContext::artifacts`]: elide_core::recognition::RecognizerContext::artifacts
 ///
 /// Tokens are sorted by `offset.start` (producers should emit them
 /// in order; consumer-side code assumes this). The [`Enhancer`]
