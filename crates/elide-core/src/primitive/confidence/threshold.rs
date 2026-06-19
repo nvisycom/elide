@@ -41,6 +41,21 @@ impl ConfidenceThreshold {
         }
     }
 
+    /// Construct a threshold, clamping out-of-range values into `[0, 1]`.
+    ///
+    /// A non-finite input clamps to [`ConfidenceThreshold::MIN`]. Mirrors
+    /// [`Confidence::clamped`], for the common case of a literal cutoff
+    /// known to be in range.
+    ///
+    /// [`Confidence::clamped`]: crate::primitive::Confidence::clamped
+    pub fn clamped(threshold: f32) -> Self {
+        if threshold.is_nan() {
+            Self::MIN
+        } else {
+            Self(threshold.clamp(0.0, 1.0))
+        }
+    }
+
     /// Whether `confidence` meets or exceeds this threshold.
     pub fn passes(self, confidence: Confidence) -> bool {
         confidence.get() >= self.0
@@ -70,5 +85,29 @@ impl From<ConfidenceThreshold> for f32 {
 impl fmt::Display for ConfidenceThreshold {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:.3}", self.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clamped_clamps_out_of_range_and_nan() {
+        assert_eq!(ConfidenceThreshold::clamped(0.5).get(), 0.5);
+        assert_eq!(ConfidenceThreshold::clamped(2.0), ConfidenceThreshold::MAX);
+        assert_eq!(ConfidenceThreshold::clamped(-1.0), ConfidenceThreshold::MIN);
+        assert_eq!(
+            ConfidenceThreshold::clamped(f32::NAN),
+            ConfidenceThreshold::MIN
+        );
+    }
+
+    #[test]
+    fn passes_at_or_above_threshold() {
+        let t = ConfidenceThreshold::clamped(0.5);
+        assert!(t.passes(Confidence::clamped(0.5)));
+        assert!(t.passes(Confidence::clamped(0.9)));
+        assert!(!t.passes(Confidence::clamped(0.4)));
     }
 }

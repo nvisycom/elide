@@ -22,7 +22,7 @@ use elide::modality::{Modality, StreamDataReader, TextBacked};
 use elide::primitive::{ConfidenceThreshold, Language, LanguageTag};
 use elide::recognition::pattern::PatternRecognizer;
 use elide::recognition::{Recognizer, Scope};
-use elide::redaction::operators::{Mask, Redact, Replace};
+use elide::redaction::operators::{Erase, Mask, Replace};
 use elide::redaction::{Anonymizer, Operator};
 use elide::{Analyzer, Result};
 
@@ -60,25 +60,25 @@ fn build_anonymizer<M: TextBacked>() -> Anonymizer<M>
 where
     Replace: Operator<M>,
     Mask: Operator<M>,
-    Redact: Operator<M>,
+    Erase: Operator<M>,
 {
     Anonymizer::new()
-        .with_operator(
+        .with_label(
             builtins::EMAIL_ADDRESS.to_ref(),
             Replace::new("[email_address]"),
         )
-        .with_operator(
+        .with_label(
             builtins::PHONE_NUMBER.to_ref(),
             Replace::new("[phone_number]"),
         )
-        .with_operator(builtins::IBAN.to_ref(), Replace::new("[iban]"))
-        .with_operator(
+        .with_label(builtins::IBAN.to_ref(), Replace::new("[iban]"))
+        .with_label(
             builtins::GOVERNMENT_ID.to_ref(),
             Replace::new("[government_id]"),
         )
-        .with_operator(builtins::IP_ADDRESS.to_ref(), Replace::new("[ip_address]"))
-        .with_operator(builtins::PAYMENT_CARD.to_ref(), Mask::stars())
-        .with_fallback(Redact)
+        .with_label(builtins::IP_ADDRESS.to_ref(), Replace::new("[ip_address]"))
+        .with_label(builtins::PAYMENT_CARD.to_ref(), Mask::stars())
+        .with_fallback(Erase)
 }
 
 /// A text-format fixture the e2e tests load: the inlined source bytes,
@@ -121,7 +121,7 @@ impl Fixture {
         PatternRecognizer: Recognizer<M>,
         Replace: Operator<M>,
         Mask: Operator<M>,
-        Redact: Operator<M>,
+        Erase: Operator<M>,
     {
         let handle = FormatRegistry::with_builtin()
             .decode(self.source, self.extension)
