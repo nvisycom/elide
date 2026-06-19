@@ -67,14 +67,8 @@ async fn main() -> Result<()> {
     let redacted = String::from_utf8_lossy(encoded.as_bytes());
 
     let count = entities.len();
-    println!("--- detected {count} entit{} ---", plural(count));
     println!("\n--- original ---\n{SAMPLE}");
-    println!("--- redacted ---\n{redacted}");
+    println!("--- redacted ({count} entities) ---\n{redacted}");
 
     Ok(())
-}
-
-/// Tiny pluralization helper for the summary line.
-fn plural(n: usize) -> &'static str {
-    if n == 1 { "y" } else { "ies" }
 }
