@@ -15,6 +15,9 @@ use elide_core::redaction::Operator;
 
 use super::dyn_operator::DynOperator;
 
+/// Boxed predicate over an entity, used by [`Matcher::Predicate`].
+pub(crate) type Predicate<M> = Box<dyn Fn(&Entity<M>) -> bool + Send + Sync>;
+
 /// How a rule decides whether it applies to an entity.
 pub(crate) enum Matcher<M: Modality> {
     /// Exact label-name match.
@@ -23,7 +26,7 @@ pub(crate) enum Matcher<M: Modality> {
     /// [`LabelCatalog`]). Without a catalog, a tag matcher never matches.
     Tag(String),
     /// An arbitrary predicate over the entity.
-    Predicate(Box<dyn Fn(&Entity<M>) -> bool + Send + Sync>),
+    Predicate(Predicate<M>),
     /// Matches every entity. The catch-all fallback.
     Always,
 }
