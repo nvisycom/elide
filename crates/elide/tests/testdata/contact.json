@@ -1,0 +1,23 @@
+{
+  "subject": "Customer onboarding",
+  "contacts": [
+    {
+      "name": "Alice Johnson",
+      "email": "alice.johnson@example.com",
+      "phone": "+1 (415) 555-0142",
+      "card": "4111 1111 1111 1111",
+      "iban": "GB29 NWBK 6016 1331 9268 19",
+      "ssn": "123-45-6789",
+      "host": "192.168.1.42"
+    },
+    {
+      "name": "Bob Smith",
+      "email": "bob.smith@example.com",
+      "phone": "+1 (510) 555-0199",
+      "card": "5555 5555 5555 4444",
+      "iban": "DE89 3704 0044 0532 0130 00",
+      "ssn": "234-56-7890",
+      "host": "10.0.0.7"
+    }
+  ]
+}

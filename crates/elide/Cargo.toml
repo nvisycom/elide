@@ -41,8 +41,30 @@ ner = ["dep:elide-ner"]
 ## Re-export the LLM crate as `elide::recognition::llm`.
 llm = ["dep:elide-llm"]
 
-## Re-export the codec crate as `elide::codec`.
+## Re-export the codec crate as `elide::codec`. On its own this enables
+## only the codec's default formats; use the per-modality or per-format
+## `codec-*` features below to pull in the shipped format handlers.
 codec = ["dep:elide-codec"]
+
+## Per-modality format groups (each aggregates its per-format features).
+codec-text = ["codec-txt", "codec-json", "codec-html", "codec-xml"]
+codec-tabular = ["codec-csv", "codec-xlsx"]
+codec-image = ["codec-png", "codec-jpeg", "codec-tiff"]
+codec-audio = ["codec-wav", "codec-mp3"]
+
+## Per-format handlers.
+codec-txt = ["codec", "elide-codec/txt"]
+codec-json = ["codec", "elide-codec/json"]
+codec-html = ["codec", "elide-codec/html"]
+codec-xml = ["codec", "elide-codec/xml"]
+codec-csv = ["codec", "elide-codec/csv"]
+codec-xlsx = ["codec", "elide-codec/xlsx"]
+codec-png = ["codec", "elide-codec/png"]
+codec-jpeg = ["codec", "elide-codec/jpeg"]
+codec-tiff = ["codec", "elide-codec/tiff"]
+codec-wav = ["codec", "elide-codec/wav"]
+codec-mp3 = ["codec", "elide-codec/mp3"]
+
 ## Ship the no-op mock backends in the re-exported `ner`/`llm` crates.
 mock = ["elide-ner?/mock", "elide-llm?/mock"]
 
@@ -73,3 +95,18 @@ tracing = { workspace = true, features = [] }
 [dev-dependencies]
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+# Codec round-trip e2e tests: each needs the codec format handlers plus
+# the mock recognizer backends. Run with, e.g.:
+#   cargo test -p elide --features codec-text,mock
+[[test]]
+name = "e2e_txt"
+required-features = ["codec-txt", "mock"]
+
+[[test]]
+name = "e2e_json"
+required-features = ["codec-json", "mock"]
+
+[[test]]
+name = "e2e_html"
+required-features = ["codec-html", "mock"]

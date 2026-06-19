@@ -1,0 +1,14 @@
+Subject: Customer onboarding
+
+Hi team,
+
+Please reach out to alice.johnson@example.com if you have questions
+about the proposal. For urgent matters, call me at +1 (415) 555-0142
+and confirm the payment card 4111 1111 1111 1111 is on file.
+
+For wire transfers, use IBAN GB29 NWBK 6016 1331 9268 19. The customer's
+US tax id (SSN) is 123-45-6789. Our staging API runs at 192.168.1.42 if
+you need to verify the flow end-to-end.
+
+Best,
+Bob
