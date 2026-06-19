@@ -20,8 +20,10 @@ mod operator;
 mod operator_id;
 mod redactions;
 mod reversible;
+mod vault;
 
 pub use self::operator::{LeakProfile, Operator};
 pub use self::operator_id::OperatorId;
 pub use self::redactions::Redactions;
 pub use self::reversible::ReversibleOperator;
+pub use self::vault::{InMemoryStore, Store};
