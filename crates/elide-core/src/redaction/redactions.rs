@@ -63,7 +63,12 @@ impl<M: Modality> Redactions<M> {
 
     /// Iterate the `(location, replacement)` pairs by reference, in the
     /// batch's current order.
-    pub fn iter(&self) -> impl Iterator<Item = &(M::Location, M::Replacement)> {
+    ///
+    /// Returns a [`slice::Iter`], a double-ended iterator, so callers can
+    /// walk the batch in reverse with `.rev()` (a writer applies a
+    /// position-sorted batch back-to-front so length changes don't shift
+    /// later locations).
+    pub fn iter(&self) -> slice::Iter<'_, (M::Location, M::Replacement)> {
         self.items.iter()
     }
 

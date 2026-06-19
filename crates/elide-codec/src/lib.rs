@@ -103,3 +103,43 @@ mod tests {
         assert!(reg.decode("data", "xyz").await.is_err());
     }
 }
+
+#[cfg(all(test, feature = "csv"))]
+mod csv_tests {
+    use elide_core::modality::tabular::{Tabular, TabularLocation};
+    use elide_core::modality::text::TextReplacement;
+    use elide_core::modality::{DataWriter, StreamDataReader};
+    use elide_core::redaction::Redactions;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn registry_decodes_and_redacts_csv() {
+        let reg = FormatRegistry::with_builtin();
+        let handle = reg
+            .decode("name,email\nAlice,alice@x.test\n", "csv")
+            .await
+            .expect("csv decoded");
+        assert_eq!(handle.format_id().as_str(), "elide.tabular.csv");
+        let mut doc = handle.into::<Tabular>().expect("tabular handle");
+
+        // Stream to the email cell, then redact it.
+        let mut email_chunk = None;
+        while let Some(chunk) = doc.read_next().await.expect("read") {
+            if chunk.location.row_index == 1 && chunk.location.column_index == 1 {
+                email_chunk = Some(chunk);
+            }
+        }
+        assert!(email_chunk.is_some(), "found the email cell");
+
+        let mut batch: Redactions<Tabular> = Redactions::new();
+        batch.push(
+            TabularLocation::new(1, 1),
+            TextReplacement::substituted("[EMAIL]"),
+        );
+        doc.write_at(batch).await.expect("redacted");
+
+        let out = doc.encode().expect("re-encoded");
+        assert_eq!(out.decode().unwrap(), "name,email\nAlice,[EMAIL]\n");
+    }
+}
