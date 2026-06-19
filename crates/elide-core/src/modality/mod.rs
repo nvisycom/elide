@@ -12,11 +12,12 @@
 //! `M::Data` / `M::Location`; the human-readable [`Modality::NAME`] is
 //! available for serialization and logging.
 //!
-//! The core defines the traits plus the [`text`] modality. Other media
-//! (image, audio, document) live in their own crates: each defines its
-//! marker type, its data/location/replacement types, and the `impl
-//! Modality` that ties them together. Adding a new medium therefore
-//! needs no change to this crate.
+//! The core defines the traits and ships [`text`] unconditionally, with
+//! [`image`] and [`audio`] behind their own features so a text-only
+//! consumer doesn't pay for them. Each modality defines its marker type,
+//! its data/location/replacement types, and the `impl Modality` that ties
+//! them together; an out-of-tree medium can do the same in its own crate,
+//! needing no change here.
 //!
 //! [`Data`]: Modality::Data
 //! [`Location`]: Modality::Location
@@ -24,6 +25,8 @@
 use std::cmp::Ordering;
 use std::fmt;
 
+#[cfg(feature = "audio")]
+pub mod audio;
 #[cfg(feature = "image")]
 pub mod image;
 pub mod text;

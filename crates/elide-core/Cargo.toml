@@ -30,6 +30,11 @@ default = []
 ## it.
 image = ["dep:bytes"]
 
+## The `audio` modality (`Audio`, `AudioData`, `AudioLocation`,
+## `AudioReplacement`). Off by default; text-only consumers don't pay for
+## it.
+audio = ["dep:bytes"]
+
 ## Derive `serde::{Serialize, Deserialize}` on the domain types, and
 ## enable serde support in the underlying primitive crates. (`celes`
 ## and `oxilangtag` carry their serde impls unconditionally.)
@@ -54,5 +59,5 @@ oxilangtag = { workspace = true, features = [] }
 celes = { workspace = true, features = [] }
 type-map = { workspace = true, features = [] }
 
-# Raw bytes (optional — gated behind the `image` feature)
+# Raw bytes (optional — gated behind the `image` and `audio` features)
 bytes = { workspace = true, features = [], optional = true }
