@@ -43,23 +43,24 @@ xml = ["dep:quick-xml"]
 # Internal crates
 elide-core = { workspace = true, features = ["serde"] }
 
-# Byte containers and hashing
-bytes = { workspace = true, features = [] }
-sha2 = { workspace = true, features = [] }
-hex = { workspace = true, features = [] }
-
-# Serialization (JSON handler, gated behind `json`)
+# (De)serialization (JSON handler, gated behind `json`)
 serde_json = { workspace = true, features = [], optional = true }
 
-# Markup parsing (HTML handler, gated behind `html`)
-scraper = { workspace = true, features = [], optional = true }
-ego-tree = { workspace = true, features = [], optional = true }
+# Primitive datatypes
+bytes = { workspace = true, features = [] }
 
-# XML parsing (XML handler, gated behind `xml`)
-quick-xml = { workspace = true, features = [], optional = true }
+# Encoding & hashing
+sha2 = { workspace = true, features = [] }
+hex = { workspace = true, features = [] }
 
 # Observability
 tracing = { workspace = true, features = [] }
 
+# Markup parsing (HTML gated behind `html`, XML behind `xml`)
+scraper = { workspace = true, features = [], optional = true }
+ego-tree = { workspace = true, features = [], optional = true }
+quick-xml = { workspace = true, features = [], optional = true }
+
 [dev-dependencies]
+# Async runtime & parallelism
 tokio = { workspace = true, features = ["macros", "rt"] }

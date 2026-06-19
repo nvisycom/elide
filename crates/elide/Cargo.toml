@@ -44,19 +44,22 @@ elide-ner = { workspace = true, features = [], optional = true }
 elide-llm = { workspace = true, features = [], optional = true }
 elide-codec = { workspace = true, features = [], optional = true }
 
-# Derive macros
+# Derive macros & error handling
 derive_builder = { workspace = true, features = [] }
 
-# Async combinators (concurrent recognizer join)
+# Primitive datatypes
+bytes = { workspace = true, features = [] }
+
+# Encoding & hashing (the Hash operator)
+sha2 = { workspace = true, features = [] }
+hex = { workspace = true, features = [] }
+
+# Async runtime & parallelism (concurrent recognizer join)
 futures = { workspace = true, features = [] }
 
 # Observability
 tracing = { workspace = true, features = [] }
 
-# Hashing (the Hash operator)
-sha2 = { workspace = true, features = [] }
-hex = { workspace = true, features = [] }
-bytes = { workspace = true, features = [] }
-
 [dev-dependencies]
+# Async runtime & parallelism
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

@@ -19,8 +19,8 @@ name = "redact-txt"
 path = "src/main.rs"
 
 [dependencies]
-# The umbrella crate re-exports everything the example needs.
+# Internal crates
 elide = { workspace = true, features = ["pattern", "ner", "llm", "codec", "mock"] }
 
-# Async runtime
+# Async runtime & parallelism
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

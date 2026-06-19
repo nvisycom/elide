@@ -34,23 +34,24 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Internal crates
 elide-core = { workspace = true, features = ["serde"] }
 
-# Serialization
+# (De)serialization
 serde = { workspace = true, features = ["derive"] }
 
-# Derive macros and error handling
+# Derive macros & error handling
 derive_builder = { workspace = true, features = [] }
 
 # Primitive datatypes
 uuid = { workspace = true, features = ["v7"] }
 
-# Async runtime and parallelism
+# Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
 
 # Observability
 tracing = { workspace = true, features = [] }
 
-# Text processing
+# Natural language processing (optional — gated behind the `lingua` feature)
 lingua = { workspace = true, features = [], optional = true }
 
 [dev-dependencies]
+# Async runtime & parallelism
 tokio = { workspace = true, features = ["macros", "rt"] }

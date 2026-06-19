@@ -45,8 +45,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = [] }
 toml = { version = "1.1", features = [] }
 csv = { version = "1.0", features = [] }
+humantime-serde = { version = "1.1", features = [] }
 
-# Derive macros and error handling
+# Derive macros & error handling
 thiserror = { version = "2.0", features = [] }
 derive_more = { version = "2.0", features = ["as_ref", "deref", "deref_mut", "display", "from", "from_str", "into", "into_iterator", "is_variant"] }
 derive_builder = { version = "0.20", features = [] }
@@ -61,12 +62,12 @@ oxilangtag = { version = "0.1", features = ["serialize"] }
 celes = { version = "2.8", features = [] }
 type-map = { version = "0.5", features = [] }
 
-# Encoding and hashing
+# Encoding & hashing
 base64 = { version = "0.22", features = [] }
 sha2 = { version = "0.11", features = [] }
 hex = { version = "0.4", features = [] }
 
-# Async runtime and parallelism
+# Async runtime & parallelism
 tokio = { version = "1.50", features = [] }
 async-trait = { version = "0.1", features = [] }
 futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
@@ -93,11 +94,12 @@ scraper = { version = "0.27", features = [] }
 ego-tree = { version = "0.11", features = [] }
 quick-xml = { version = "0.38", features = [] }
 
-# LLM framework + prompt templating + JSON schema (llm crate)
+# AI & LLM frameworks
 rig = { version = "0.38", default-features = false, features = [] }
+
+# Templating & schema
 minijinja = { version = "2.5", features = [] }
 schemars = { version = "1.0", features = ["uuid1", "bytes1"] }
-humantime-serde = { version = "1.1", features = [] }
 
 # HTTP client & middlewares
 reqwest-middleware = { version = "0.5", features = ["json", "multipart"] }

@@ -38,23 +38,21 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Internal crates
 elide-core = { workspace = true, features = ["image", "serde"] }
 
-# Serialization
+# (De)serialization
 serde = { workspace = true, features = [] }
 serde_json = { workspace = true, features = [] }
-schemars = { workspace = true, features = [] }
 toml = { workspace = true, features = ["parse"] }
-minijinja = { workspace = true, features = [] }
 humantime-serde = { workspace = true, features = [] }
 
-# Derive macros and error handling
+# Derive macros & error handling
 derive_builder = { workspace = true, features = [] }
 derive_more = { workspace = true, features = ["add_assign"] }
 thiserror = { workspace = true, features = [] }
 
-# Encoding and hashing
+# Encoding & hashing
 base64 = { workspace = true, features = [] }
 
-# Async runtime and parallelism
+# Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
 
 # Observability
@@ -63,15 +61,20 @@ tracing = { workspace = true, features = [] }
 # Text processing
 unicode-normalization = { workspace = true, features = [] }
 
-# AI / LLM frameworks
+# AI & LLM frameworks
 rig = { workspace = true, features = ["derive", "reqwest-middleware"] }
 
-# HTTP client and middleware (shared retry/tracing layers)
+# Templating & schema
+minijinja = { workspace = true, features = [] }
+schemars = { workspace = true, features = [] }
+
+# HTTP client & middlewares
 reqwest-middleware = { workspace = true, features = [] }
 reqwest-retry = { workspace = true, features = [] }
 reqwest-tracing = { workspace = true, features = [] }
 
 [dev-dependencies]
+# Async runtime & parallelism
 tokio = { workspace = true, features = ["macros", "rt"] }
 
 [package.metadata.cargo-machete]

@@ -26,11 +26,12 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Internal crates
 elide-core = { workspace = true, features = [] }
 
-# Primitive datatypes (cheap-clone surface form on `Token`)
+# Primitive datatypes
 hipstr = { workspace = true, features = [] }
 
-# Text processing (word-window walk for the substring fallback)
+# Text processing
 unicode-segmentation = { workspace = true, features = [] }
 
 [dev-dependencies]
+# Async runtime & parallelism
 tokio = { workspace = true, features = ["macros", "rt"] }

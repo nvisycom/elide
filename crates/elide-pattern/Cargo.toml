@@ -27,28 +27,27 @@ rustdoc-args = ["--cfg", "docsrs"]
 elide-context = { workspace = true, features = [] }
 elide-core = { workspace = true, features = ["serde"] }
 
-# Serialization
+# (De)serialization
 serde = { workspace = true, features = ["derive"] }
 toml = { workspace = true, features = ["parse"] }
+csv = { workspace = true, features = [] }
 
-# Derive macros and error handling
+# Derive macros & error handling
 derive_builder = { workspace = true, features = [] }
 derive_more = { workspace = true, features = ["from"] }
 
-# Async runtime and parallelism
+# Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
 
 # Text processing
 regex = { workspace = true, features = [] }
 aho-corasick = { workspace = true, features = [] }
 
-# Tabular document parsing
-csv = { workspace = true, features = [] }
-
-# Checksum / encoding
+# Checksums & validators
 bs58 = { workspace = true, features = ["check"] }
 iban_validate = { workspace = true }
 phonenumber = { workspace = true }
 
 [dev-dependencies]
+# Async runtime & parallelism
 tokio = { workspace = true, features = ["macros", "rt"] }
