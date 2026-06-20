@@ -1,4 +1,4 @@
-//! HTML loader: parses HTML into the shared markup [`RedactableItem`]
+//! HTML loader: parses HTML into the shared markup [`ExtractedItem`]
 //! stream.
 //!
 //! Text nodes, every element attribute, and HTML comments are emitted as
@@ -15,12 +15,12 @@ use elide_core::modality::text::Text;
 use scraper::Html;
 use scraper::node::Node;
 
-use super::MarkupHandler;
 use super::html_handler::{
     ElementTarget, FORMAT_ID, HtmlAddress, HtmlEncoder, HtmlHandler, HtmlItem,
 };
 use crate::Loader;
 use crate::content::ContentData;
+use crate::handler::extract::ExtractHandler;
 
 /// How the loader handles `<script>` or `<style>` element bodies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -50,7 +50,7 @@ impl Loader<Text> for HtmlLoader {
         let text = content.decode()?;
         let dom = Html::parse_document(&text);
         let items = build_items(&dom, self);
-        Ok(MarkupHandler::new(
+        Ok(ExtractHandler::new(
             FORMAT_ID.clone(),
             HtmlEncoder { raw: text },
             items,

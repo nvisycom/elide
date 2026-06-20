@@ -31,14 +31,37 @@ use elide::{Analyzer, Anonymizer, Result};
 pub struct PipelineOutcome<M: Modality> {
     /// Entities detected and reconciled, in source coordinates.
     pub entities: Vec<Entity<M>>,
-    /// Re-encoded document after redaction.
-    pub redacted: String,
+    /// Re-encoded document after redaction, as raw bytes. For text
+    /// formats this is UTF-8 — use [`redacted_text`](Self::redacted_text);
+    /// for container formats (DOCX) it is the rebuilt package — use
+    /// [`part`](Self::part) to read one entry.
+    pub redacted: Vec<u8>,
+}
+
+impl<M: Modality> PipelineOutcome<M> {
+    /// The redacted output decoded as UTF-8 text. Panics if it is not
+    /// (i.e. for a binary container format — read a [`part`](Self::part)
+    /// instead).
+    pub fn redacted_text(&self) -> String {
+        String::from_utf8(self.redacted.clone()).expect("redacted output is UTF-8 text")
+    }
+
+    /// Read one entry out of the redacted output, treating it as a zip
+    /// container (DOCX). Returns the entry bytes, or `None` if absent.
+    pub fn part(&self, name: &str) -> Option<Vec<u8>> {
+        use std::io::Read;
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(self.redacted.clone())).ok()?;
+        let mut entry = zip.by_name(name).ok()?;
+        let mut buf = Vec::new();
+        entry.read_to_end(&mut buf).ok()?;
+        Some(buf)
+    }
 }
 
 /// Build the detection side: the real built-in pattern recognizer (with
 /// context boosting), behind the standard dedup pipeline. Generic over any
 /// text-payload modality the patterns serve.
-fn build_analyzer<M: TextBacked>() -> Result<Analyzer<M>>
+pub fn build_analyzer<M: TextBacked>() -> Result<Analyzer<M>>
 where
     PatternRecognizer: Recognizer<M>,
 {
@@ -56,7 +79,7 @@ where
 
 /// Build the redaction side: one operator per label the shipped patterns
 /// emit, so assertions can spot the replacement tokens, plus a fallback.
-fn build_anonymizer<M: TextBacked>() -> Anonymizer<M>
+pub fn build_anonymizer<M: TextBacked>() -> Anonymizer<M>
 where
     Replace: Operator<M>,
     Mask: Operator<M>,
@@ -81,18 +104,20 @@ where
         .with_fallback(Erase)
 }
 
-/// A text-format fixture the e2e tests load: the inlined source bytes,
-/// the extension the codec registry resolves on, and the on-disk path the
+/// A codec fixture the e2e tests load: the inlined source bytes, the
+/// extension the codec registry resolves on, and the on-disk path the
 /// redacted artifact is written next to.
 ///
-/// Construct one per format with [`include_str!`] for `source` and the
-/// matching `testdata/` path, then call [`run`](Self::run).
+/// Construct one per format with [`include_bytes!`] for `source` (so the
+/// same shape serves text formats and binary containers like DOCX) and
+/// the matching `testdata/` path, then call [`run`](Self::run) /
+/// [`run_docx`](Self::run_docx).
 pub struct Fixture {
     /// Absolute path to the fixture on disk; the artifact writer derives
     /// `{stem}.redacted.{ext}` next to it.
     pub path: &'static str,
-    /// Fixture body the codec decodes (compile-time inlined).
-    pub source: &'static str,
+    /// Fixture body the codec decodes (compile-time inlined bytes).
+    pub source: &'static [u8],
     /// Extension hint the codec registry resolves on (`"txt"`, …).
     pub extension: &'static str,
 }
@@ -108,6 +133,15 @@ impl Fixture {
     #[cfg(feature = "codec-csv")]
     pub async fn run_tabular(&self) -> PipelineOutcome<Tabular> {
         self.run_typed::<Tabular>().await
+    }
+
+    /// Run the pipeline for a DOCX container. It is a [`Text`]-backed
+    /// document (the body XML), so the modality is the same as `run`; the
+    /// distinction is that the encoded output is a rebuilt zip, read with
+    /// [`PipelineOutcome::part`].
+    #[cfg(feature = "codec-docx")]
+    pub async fn run_docx(&self) -> PipelineOutcome<Text> {
+        self.run_typed::<Text>().await
     }
 
     /// Decode → analyze → anonymize → encode this fixture as modality `M`,
@@ -147,8 +181,7 @@ impl Fixture {
             .expect("anonymize succeeds");
 
         let encoded = document.encode().expect("encode succeeds");
-        let redacted =
-            String::from_utf8(encoded.as_bytes().to_vec()).expect("codec re-encodes to UTF-8");
+        let redacted = encoded.as_bytes().to_vec();
 
         self.write_artifact(&redacted);
         PipelineOutcome { entities, redacted }
@@ -156,7 +189,7 @@ impl Fixture {
 
     /// Write `redacted` next to the fixture as `{stem}.redacted.{ext}` for
     /// inspection. Gitignored via `**/testdata/**/*.redacted.*`.
-    fn write_artifact(&self, redacted: &str) {
+    fn write_artifact(&self, redacted: &[u8]) {
         let path = std::path::Path::new(self.path);
         let stem = path
             .file_stem()

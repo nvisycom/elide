@@ -1,14 +1,14 @@
 //! HTML handler side: the [`HtmlHandler`] type, its [`Format`]
 //! descriptor, and the [`HtmlEncoder`] that re-serializes a mutated
-//! [`RedactableItem`] stream back into HTML.
+//! [`ExtractedItem`] stream back into HTML.
 //!
 //! Streaming, reading, and redaction live on the shared
-//! [`MarkupHandler`]; this side supplies only the DOM re-serializer (the
+//! [`ExtractHandler`]; this side supplies only the DOM re-serializer (the
 //! `scraper` parser lives in the loader). The [`EncodePlan`] buckets the
 //! item stream by kind so a single DOM walk resolves each ordinal in
 //! O(1).
 //!
-//! [`MarkupHandler`]: super::MarkupHandler
+//! [`ExtractHandler`]: super::ExtractHandler
 
 use ego_tree::NodeId;
 use elide_core::Result;
@@ -16,19 +16,20 @@ use elide_core::modality::text::Text;
 use scraper::Html;
 use scraper::node::Node;
 
+use super::HtmlLoader;
 use super::html_loader::ScriptPolicy;
-use super::{HtmlLoader, MarkupEncoder, MarkupHandler, RedactableItem};
 use crate::content::ContentData;
+use crate::handler::extract::{Encoder, ExtractHandler, ExtractedItem};
 use crate::{Format, FormatId};
 
 /// Stable [`FormatId`] for the HTML codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.text.html");
 
 /// Handler type for loaded HTML content.
-pub(crate) type HtmlHandler = MarkupHandler<HtmlEncoder>;
+pub(crate) type HtmlHandler = ExtractHandler<HtmlEncoder>;
 
-/// An HTML [`RedactableItem`] carrying [`HtmlAddress`].
-pub(super) type HtmlItem = RedactableItem<HtmlAddress>;
+/// An HTML [`ExtractedItem`] carrying [`HtmlAddress`].
+pub(super) type HtmlItem = ExtractedItem<HtmlAddress>;
 
 /// [`Format`] descriptor registered into [`FormatRegistry`].
 ///
@@ -103,7 +104,7 @@ pub(crate) struct HtmlEncoder {
     pub(super) raw: String,
 }
 
-impl MarkupEncoder for HtmlEncoder {
+impl Encoder for HtmlEncoder {
     type Address = HtmlAddress;
 
     fn encode(&self, items: &[HtmlItem]) -> Result<ContentData> {

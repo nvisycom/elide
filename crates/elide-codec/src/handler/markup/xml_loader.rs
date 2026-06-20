@@ -1,4 +1,4 @@
-//! XML loader: parses XML into the shared markup [`RedactableItem`]
+//! XML loader: parses XML into the shared markup [`ExtractedItem`]
 //! stream, recording each item's source byte span so the [`XmlEncoder`]
 //! can splice mutated values back **verbatim**.
 //!
@@ -14,7 +14,7 @@
 //! recovering the span by hand means re-implementing the tag parser.
 //! Until a clean span is available, attributes pass through untouched.
 //!
-//! [`RedactableItem`]: super::RedactableItem
+//! [`ExtractedItem`]: super::ExtractedItem
 //! [`XmlEncoder`]: super::XmlEncoder
 
 use std::ops::Range;
@@ -25,9 +25,9 @@ use quick_xml::Reader;
 use quick_xml::events::Event;
 
 use super::xml_handler::{FORMAT_ID, XmlEncoder, XmlHandler, XmlItem, XmlSpan};
-use super::{MarkupHandler, RedactableItem};
 use crate::Loader;
 use crate::content::ContentData;
+use crate::handler::extract::{ExtractHandler, ExtractedItem};
 
 /// Loader for XML files. Produces one [`XmlHandler`] per input.
 #[derive(Debug)]
@@ -39,7 +39,7 @@ impl Loader<Text> for XmlLoader {
     async fn decode(&self, content: ContentData) -> Result<XmlHandler> {
         let text = content.decode()?;
         let items = build_items(&text)?;
-        Ok(MarkupHandler::new(
+        Ok(ExtractHandler::new(
             FORMAT_ID.clone(),
             XmlEncoder { raw: text.clone() },
             items,
@@ -47,7 +47,10 @@ impl Loader<Text> for XmlLoader {
     }
 }
 
-fn build_items(raw: &str) -> Result<Vec<XmlItem>> {
+/// Extract the redactable XML items from `raw`. Exposed for container
+/// formats (DOCX) that run the XML engine over a part they unzip rather
+/// than over a whole standalone document.
+pub(crate) fn build_items(raw: &str) -> Result<Vec<XmlItem>> {
     let mut reader = Reader::from_str(raw);
     let mut items = Vec::new();
     let mut last = 0usize;
@@ -85,7 +88,7 @@ fn non_blank(raw: &str, span: Range<usize>) -> Option<Range<usize>> {
 
 /// Build an item whose value is the verbatim source slice at `span`.
 fn span_item(raw: &str, span: Range<usize>) -> XmlItem {
-    RedactableItem {
+    ExtractedItem {
         value: raw[span.clone()].to_owned(),
         address: XmlSpan(span),
         hints: Vec::new(),

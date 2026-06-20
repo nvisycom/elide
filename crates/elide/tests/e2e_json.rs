@@ -12,7 +12,7 @@ use fixtures::pipeline::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/contact.json"),
-    source: include_str!("testdata/contact.json"),
+    source: include_bytes!("testdata/contact.json"),
     extension: "json",
 };
 
@@ -33,7 +33,7 @@ async fn json_detects_and_redacts() {
 
     // Both rows' sensitive values are gone.
     assert_pii_removed(
-        &outcome.redacted,
+        &outcome.redacted_text(),
         &[
             "alice.johnson@example.com",
             "bob.smith@example.com",
@@ -48,7 +48,7 @@ async fn json_detects_and_redacts() {
     );
 
     assert_tokens_present(
-        &outcome.redacted,
+        &outcome.redacted_text(),
         &[
             "[email_address]",
             "[phone_number]",
@@ -61,7 +61,7 @@ async fn json_detects_and_redacts() {
     // JSON structure survives: keys, braces, and the non-sensitive
     // subject all stay verbatim.
     assert_preserved(
-        &outcome.redacted,
+        &outcome.redacted_text(),
         &[
             "\"subject\"",
             "Customer onboarding",
@@ -71,8 +71,8 @@ async fn json_detects_and_redacts() {
         ],
     );
     assert!(
-        outcome.redacted.trim_start().starts_with('{'),
+        outcome.redacted_text().trim_start().starts_with('{'),
         "redacted JSON lost its opening brace:\n{}",
-        outcome.redacted,
+        outcome.redacted_text(),
     );
 }

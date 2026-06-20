@@ -39,8 +39,17 @@ text = ["txt", "json", "html", "xml"]
 ## Individual text formats.
 txt = ["internal_text"]
 json = ["internal_text", "dep:serde_json"]
-html = ["internal_text", "dep:scraper", "dep:ego-tree"]
-xml = ["internal_text", "dep:quick-xml"]
+html = ["internal_extract", "dep:scraper", "dep:ego-tree"]
+xml = ["internal_extract", "dep:quick-xml"]
+
+## Every rich-document format currently shipped.
+document = ["docx"]
+
+## DOCX: a zip of OOXML. Body text in `word/document.xml` (and
+## headers/footers) is extracted and spliced through the shared XML
+## engine; `zip` opens and rebuilds the container. Pulls `xml` for the
+## extraction and `internal_document` for the container machinery.
+docx = ["xml", "internal_document"]
 
 ## Every image format currently shipped.
 image = ["png", "jpeg", "tiff"]
@@ -81,6 +90,13 @@ internal_image = ["elide-core/image", "dep:image", "dep:imageproc"]
 internal_audio = ["elide-core/audio"]
 internal_tabular = ["elide-core/tabular", "internal_text"]
 internal_text = []
+# The shared text-extract-and-splice engine, used by the markup formats
+# and rich documents. Pulls `internal_text` because items are text and
+# reuse the text-redaction helper.
+internal_extract = ["internal_text"]
+# Rich-document container machinery (`handler::document`): unzip a
+# package, redact its parts, rebuild it. Pulls `zip` for the container.
+internal_document = ["dep:zip"]
 
 [dependencies]
 # Internal crates
@@ -104,6 +120,9 @@ tracing = { workspace = true, features = [] }
 scraper = { workspace = true, features = [], optional = true }
 ego-tree = { workspace = true, features = [], optional = true }
 quick-xml = { workspace = true, features = [], optional = true }
+
+# Container formats (DOCX is a zip; gated behind `internal_document`)
+zip = { workspace = true, optional = true }
 
 # Image processing (gated behind the image-format features)
 image = { workspace = true, features = [], optional = true }

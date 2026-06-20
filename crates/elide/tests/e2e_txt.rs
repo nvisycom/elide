@@ -12,7 +12,7 @@ use fixtures::pipeline::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/contact.txt"),
-    source: include_str!("testdata/contact.txt"),
+    source: include_bytes!("testdata/contact.txt"),
     extension: "txt",
 };
 
@@ -34,7 +34,7 @@ async fn txt_detects_and_redacts() {
 
     // Originals are gone from the re-encoded document.
     assert_pii_removed(
-        &outcome.redacted,
+        &outcome.redacted_text(),
         &[
             "alice.johnson@example.com",
             "+1 (415) 555-0142",
@@ -47,7 +47,7 @@ async fn txt_detects_and_redacts() {
 
     // Replacement tokens are present (payment card is masked, not tokened).
     assert_tokens_present(
-        &outcome.redacted,
+        &outcome.redacted_text(),
         &[
             "[email_address]",
             "[phone_number]",
@@ -59,7 +59,7 @@ async fn txt_detects_and_redacts() {
 
     // Non-sensitive prose passes through untouched.
     assert_preserved(
-        &outcome.redacted,
+        &outcome.redacted_text(),
         &["Subject: Customer onboarding", "Hi team,", "Best,"],
     );
 }
