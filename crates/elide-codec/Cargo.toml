@@ -33,7 +33,7 @@ default = ["txt"]
 ## to `elide-core` for consumers who serialize the entities a codec reads.
 serde = ["elide-core/serde"]
 
-## Every text-shaped format currently shipped.
+## The text-shaped formats.
 text = ["txt", "json", "html", "xml"]
 
 ## Individual text formats.
@@ -42,16 +42,25 @@ json = ["internal_text", "dep:serde_json"]
 html = ["internal_extract", "dep:scraper", "dep:ego-tree"]
 xml = ["internal_extract", "dep:quick-xml"]
 
-## Every rich-document format currently shipped.
-document = ["docx"]
+## The rich-document formats.
+document = ["docx", "pdf", "rtf"]
 
-## DOCX: a zip of OOXML. Body text in `word/document.xml` (and
-## headers/footers) is extracted and spliced through the shared XML
-## engine; `zip` opens and rebuilds the container. Pulls `xml` for the
-## extraction and `internal_document` for the container machinery.
-docx = ["xml", "internal_document"]
+## DOCX: a zip of OOXML. Body text in `word/document.xml` is extracted and
+## spliced through the shared XML engine; `zip` opens and rebuilds the
+## package. Pulls `xml` for extraction, `internal_document` for the
+## container surface, and `zip` for the package.
+docx = ["xml", "internal_document", "dep:zip"]
 
-## Every image format currently shipped.
+## PDF: a container of page text and image XObjects in its own indirect-
+## object format (not a zip). Pulls `internal_document` for the container
+## surface; the object parser is its own dep.
+pdf = ["internal_document"]
+
+## RTF: flat rich text (control words and groups), a leaf text handler
+## alongside the other document formats.
+rtf = ["internal_document"]
+
+## The image formats.
 image = ["png", "jpeg", "tiff"]
 
 ## Individual image formats (all share the `image` + `imageproc` stack
@@ -60,7 +69,7 @@ png = ["internal_image"]
 jpeg = ["internal_image"]
 tiff = ["internal_image"]
 
-## Every audio format currently shipped.
+## The audio formats.
 audio = ["wav", "mp3"]
 
 ## WAV: `hound` reads and re-writes samples; `symphonia` probes the
@@ -71,14 +80,14 @@ wav = ["internal_audio", "dep:hound", "dep:symphonia"]
 ## the redaction round-trip.
 mp3 = ["internal_audio", "dep:symphonia", "dep:mp3lame-encoder"]
 
-## Every tabular format currently shipped.
+## The tabular formats.
 tabular = ["csv", "xlsx"]
 
 ## CSV: `csv` parses and re-writes rows. Cells hold text and redact like
 ## text, so this pulls the shared text-redaction helper.
 csv = ["internal_tabular", "dep:csv"]
-## XLSX: a stub today (decode returns an empty handle); a parser dep will
-## be wired in when real spreadsheet extraction lands.
+## XLSX: an OOXML spreadsheet; cells redact like text via the shared
+## tabular surface.
 xlsx = ["internal_tabular"]
 
 # Internal markers: set automatically by any format feature above. Code
@@ -94,9 +103,10 @@ internal_text = []
 # and rich documents. Pulls `internal_text` because items are text and
 # reuse the text-redaction helper.
 internal_extract = ["internal_text"]
-# Rich-document container machinery (`handler::document`): unzip a
-# package, redact its parts, rebuild it. Pulls `zip` for the container.
-internal_document = ["dep:zip"]
+# The rich-document container machinery (`handler::document`): the
+# modality-neutral part surface shared by the document formats. No dep of
+# its own; each format pulls its own parser.
+internal_document = []
 
 [dependencies]
 # Internal crates

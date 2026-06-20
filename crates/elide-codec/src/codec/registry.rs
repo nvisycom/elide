@@ -71,6 +71,10 @@ impl FormatRegistry {
         registry.add_format(crate::handler::xlsx_format());
         #[cfg(feature = "docx")]
         registry.add_format(crate::handler::docx_format());
+        #[cfg(feature = "pdf")]
+        registry.add_format(crate::handler::pdf_format());
+        #[cfg(feature = "rtf")]
+        registry.add_format(crate::handler::rtf_format());
         registry
     }
 
