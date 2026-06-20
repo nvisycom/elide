@@ -19,12 +19,16 @@
 //! Concrete format implementations live in `crate::handler::*`.
 
 mod capability;
+mod container;
 mod document;
 mod format;
 pub(crate) mod loader;
 mod registry;
 
 pub use self::capability::Handler;
+pub use self::container::Container;
+#[cfg(feature = "internal_document")]
+pub use self::container::Part;
 pub use self::document::{DocumentHandle, UntypedDocumentHandle};
 pub use self::format::{Format, FormatId};
 pub use self::loader::Loader;

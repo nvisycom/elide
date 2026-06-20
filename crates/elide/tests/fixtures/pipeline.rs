@@ -24,7 +24,7 @@ use elide::recognition::pattern::PatternRecognizer;
 use elide::recognition::{Recognizer, Scope};
 use elide::redaction::Operator;
 use elide::redaction::operators::{Erase, Mask, Replace};
-use elide::{Analyzer, Anonymizer, Result};
+use elide::{Analyzer, Anonymizer, Orchestrator, Result};
 
 /// Outcome of one end-to-end run: the entities that survived dedup and
 /// the re-encoded redacted document.
@@ -40,21 +40,9 @@ pub struct PipelineOutcome<M: Modality> {
 
 impl<M: Modality> PipelineOutcome<M> {
     /// The redacted output decoded as UTF-8 text. Panics if it is not
-    /// (i.e. for a binary container format — read a [`part`](Self::part)
-    /// instead).
+    /// (i.e. for a binary container format).
     pub fn redacted_text(&self) -> String {
         String::from_utf8(self.redacted.clone()).expect("redacted output is UTF-8 text")
-    }
-
-    /// Read one entry out of the redacted output, treating it as a zip
-    /// container (DOCX). Returns the entry bytes, or `None` if absent.
-    pub fn part(&self, name: &str) -> Option<Vec<u8>> {
-        use std::io::Read;
-        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(self.redacted.clone())).ok()?;
-        let mut entry = zip.by_name(name).ok()?;
-        let mut buf = Vec::new();
-        entry.read_to_end(&mut buf).ok()?;
-        Some(buf)
     }
 }
 
@@ -111,7 +99,7 @@ where
 /// Construct one per format with [`include_bytes!`] for `source` (so the
 /// same shape serves text formats and binary containers like DOCX) and
 /// the matching `testdata/` path, then call [`run`](Self::run) /
-/// [`run_docx`](Self::run_docx).
+/// [`run_tabular`](Self::run_tabular).
 pub struct Fixture {
     /// Absolute path to the fixture on disk; the artifact writer derives
     /// `{stem}.redacted.{ext}` next to it.
@@ -135,53 +123,60 @@ impl Fixture {
         self.run_typed::<Tabular>().await
     }
 
-    /// Run the pipeline for a DOCX container. It is a [`Text`]-backed
-    /// document (the body XML), so the modality is the same as `run`; the
-    /// distinction is that the encoded output is a rebuilt zip, read with
-    /// [`PipelineOutcome::part`].
-    #[cfg(feature = "codec-docx")]
-    pub async fn run_docx(&self) -> PipelineOutcome<Text> {
-        self.run_typed::<Text>().await
-    }
-
-    /// Decode → analyze → anonymize → encode this fixture as modality `M`,
-    /// write the `*.redacted.*` artifact, and return the outcome. Panics
-    /// with a descriptive message on any stage failure, the way an
-    /// integration test wants.
+    /// Decode this fixture as modality `M`, redact it through the
+    /// [`Orchestrator`] (body + any container parts), encode, write the
+    /// `*.redacted.*` artifact, and return the outcome. Panics with a
+    /// descriptive message on any stage failure, the way an integration
+    /// test wants.
+    ///
+    /// One pipeline is registered for `M`; the orchestrator drives the
+    /// document's body through it and, for a container fixture (DOCX), any
+    /// embedded parts of a registered modality. Per-format media pipelines
+    /// are added by the dedicated container tests, not this shared driver.
     async fn run_typed<M>(&self) -> PipelineOutcome<M>
     where
         M: TextBacked,
+        Entity<M>: Clone,
         DocumentHandle<M>: StreamDataReader<M>,
         PatternRecognizer: Recognizer<M>,
         Replace: Operator<M>,
         Mask: Operator<M>,
         Erase: Operator<M>,
     {
-        let handle = FormatRegistry::with_builtin()
+        let registry = FormatRegistry::with_builtin();
+        let mut document: DocumentHandle<M> = registry
             .decode(self.source, self.extension)
             .await
-            .unwrap_or_else(|e| panic!("{} source decodes: {e}", self.extension));
-        let mut document: DocumentHandle<M> = handle
+            .unwrap_or_else(|e| panic!("{} source decodes: {e}", self.extension))
             .into::<M>()
             .unwrap_or_else(|_| panic!("{} resolves to the expected modality", self.extension));
-
-        let analyzer = build_analyzer::<M>().expect("analyzer builds");
-        let anonymizer = build_anonymizer::<M>();
 
         let en = Language::asserted(LanguageTag::parse("en").unwrap());
         let scope = Scope::new().with_language(en);
 
-        let entities = analyzer
-            .analyze_stream(&mut document, &scope)
-            .await
-            .expect("analyze succeeds");
-        anonymizer
-            .anonymize(&mut document, &entities)
-            .await
-            .expect("anonymize succeeds");
+        let orchestrator = Orchestrator::new(&registry).with_modality::<M>(
+            build_analyzer::<M>().expect("analyzer builds"),
+            build_anonymizer::<M>(),
+            scope,
+        );
 
-        let encoded = document.encode().expect("encode succeeds");
-        let redacted = encoded.as_bytes().to_vec();
+        // Two phases so the entities surface for assertions: detect, copy
+        // the body entities out, then apply with no editing.
+        let mut plan = orchestrator
+            .analyze_document(&mut document)
+            .await
+            .expect("analyze document");
+        let entities: Vec<Entity<M>> = plan.entities::<M>().map(|e| e.to_vec()).unwrap_or_default();
+        orchestrator
+            .apply(&mut document, plan)
+            .await
+            .expect("apply document");
+
+        let redacted = document
+            .encode()
+            .expect("encode succeeds")
+            .as_bytes()
+            .to_vec();
 
         self.write_artifact(&redacted);
         PipelineOutcome { entities, redacted }

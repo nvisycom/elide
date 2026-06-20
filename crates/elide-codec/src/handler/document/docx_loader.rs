@@ -2,11 +2,11 @@
 //! item stream, and retain the original archive for a byte-faithful
 //! re-pack.
 
+use std::collections::HashMap;
 use std::io::{Cursor, Read};
 
-use elide_core::Result;
 use elide_core::modality::text::Text;
-use elide_core::{Error, ErrorKind};
+use elide_core::{Error, ErrorKind, Result};
 use zip::ZipArchive;
 
 use super::docx_handler::{BODY_PART, DocxEncoder, DocxHandler, FORMAT_ID};
@@ -28,7 +28,11 @@ impl Loader<Text> for DocxLoader {
         let items = xml_build_items(&body_raw)?;
         Ok(ExtractHandler::new(
             FORMAT_ID.clone(),
-            DocxEncoder { archive, body_raw },
+            DocxEncoder {
+                archive,
+                body_raw,
+                replacements: HashMap::new(),
+            },
             items,
         ))
     }

@@ -6,8 +6,11 @@ mod codec;
 pub mod content;
 pub mod handler;
 
+#[cfg(feature = "internal_document")]
+pub use self::codec::Part;
 pub use self::codec::{
-    DocumentHandle, Format, FormatId, FormatRegistry, Handler, Loader, UntypedDocumentHandle,
+    Container, DocumentHandle, Format, FormatId, FormatRegistry, Handler, Loader,
+    UntypedDocumentHandle,
 };
 
 #[cfg(all(test, feature = "txt"))]

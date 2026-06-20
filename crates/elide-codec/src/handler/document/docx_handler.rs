@@ -10,6 +10,7 @@
 //!
 //! [`ExtractHandler`]: crate::handler::extract::ExtractHandler
 
+use std::collections::HashMap;
 use std::io::{Cursor, Read, Write};
 
 use bytes::Bytes;
@@ -19,8 +20,7 @@ use zip::{ZipArchive, ZipWriter};
 
 use super::DocxLoader;
 use crate::content::ContentData;
-use crate::handler::extract::Encoder;
-use crate::handler::extract::ExtractHandler;
+use crate::handler::extract::{Encoder, ExtractHandler};
 use crate::handler::markup::{XmlItem, XmlSpan, xml_splice};
 use crate::{Format, FormatId};
 
@@ -44,9 +44,13 @@ pub fn format() -> Format {
         ])
 }
 
+/// The OOXML media directory whose entries are embedded binary parts
+/// (images). The `Container` impl exposes these for out-of-band redaction.
+pub(super) const MEDIA_PREFIX: &str = "word/media/";
+
 /// Re-packs a DOCX: splice the redacted body items back into the body XML,
-/// then rebuild the zip with that one part replaced and every other entry
-/// copied through verbatim.
+/// fold in any replaced media parts, and copy every other entry through
+/// verbatim.
 #[derive(Debug)]
 pub(crate) struct DocxEncoder {
     /// The original package bytes, retained so non-text parts (media,
@@ -54,6 +58,9 @@ pub(crate) struct DocxEncoder {
     pub(super) archive: Bytes,
     /// The raw `word/document.xml` string the items were extracted from.
     pub(super) body_raw: String,
+    /// Redacted replacements for media parts, keyed by zip entry name,
+    /// filled through the [`Container`](crate::codec::Container) surface.
+    pub(super) replacements: HashMap<String, Bytes>,
 }
 
 impl Encoder for DocxEncoder {
@@ -63,8 +70,9 @@ impl Encoder for DocxEncoder {
         // 1. Splice the redacted item values back into the body XML.
         let body = xml_splice(&self.body_raw, items)?;
 
-        // 2. Rebuild the zip: copy every entry verbatim except the body
-        //    part, which is replaced with the redacted XML.
+        // 2. Rebuild the zip: the body part becomes the redacted XML, a
+        //    replaced media part becomes its redacted bytes, and every
+        //    other entry is copied through verbatim.
         let mut reader = ZipArchive::new(Cursor::new(self.archive.as_ref()))
             .map_err(|e| Error::new(ErrorKind::Validation, format!("malformed docx zip: {e}")))?;
         let mut out = ZipWriter::new(Cursor::new(Vec::new()));
@@ -81,6 +89,10 @@ impl Encoder for DocxEncoder {
             if name == BODY_PART {
                 out.write_all(body.as_bytes())
                     .map_err(|e| Error::new(ErrorKind::Validation, format!("docx body: {e}")))?;
+            } else if let Some(redacted) = self.replacements.get(&name) {
+                out.write_all(redacted).map_err(|e| {
+                    Error::new(ErrorKind::Validation, format!("docx media {name}: {e}"))
+                })?;
             } else {
                 let mut buf = Vec::with_capacity(entry.size() as usize);
                 entry.read_to_end(&mut buf).map_err(|e| {
@@ -96,5 +108,52 @@ impl Encoder for DocxEncoder {
             .finish()
             .map_err(|e| Error::new(ErrorKind::Validation, format!("docx finalize: {e}")))?;
         Ok(ContentData::new(Bytes::from(cursor.into_inner())))
+    }
+
+    fn as_container_mut(&mut self) -> Option<&mut dyn crate::codec::Container> {
+        Some(self)
+    }
+}
+
+impl crate::codec::Container for DocxEncoder {
+    fn parts(&self) -> Vec<crate::codec::Part> {
+        let Ok(mut zip) = ZipArchive::new(Cursor::new(self.archive.as_ref())) else {
+            return Vec::new();
+        };
+        let mut parts = Vec::new();
+        for i in 0..zip.len() {
+            let Ok(mut entry) = zip.by_index(i) else {
+                continue;
+            };
+            let name = entry.name().to_owned();
+            if !name.starts_with(MEDIA_PREFIX) {
+                continue;
+            }
+            let mut buf = Vec::with_capacity(entry.size() as usize);
+            if entry.read_to_end(&mut buf).is_err() {
+                continue;
+            }
+            let hint = name
+                .rsplit_once('.')
+                .map(|(_, e)| e.to_owned())
+                .unwrap_or_default();
+            parts.push(crate::codec::Part {
+                id: name,
+                bytes: Bytes::from(buf),
+                hint,
+            });
+        }
+        parts
+    }
+
+    fn replace_part(&mut self, id: &str, bytes: Bytes) -> Result<()> {
+        if !id.starts_with(MEDIA_PREFIX) {
+            return Err(Error::new(
+                ErrorKind::Validation,
+                format!("docx replace_part: `{id}` is not a media part"),
+            ));
+        }
+        self.replacements.insert(id.to_owned(), bytes);
+        Ok(())
     }
 }

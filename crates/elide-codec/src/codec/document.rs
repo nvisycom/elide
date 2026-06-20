@@ -30,6 +30,7 @@ use elide_core::redaction::Redactions;
 
 use super::FormatId;
 use super::loader::DynHandler;
+use crate::codec::Container;
 use crate::content::ContentData;
 
 /// Modality-erased handle the registry returns.
@@ -136,6 +137,14 @@ impl<M: Modality> DocumentHandle<M> {
     /// [`ContentData`]: crate::content::ContentData
     pub fn encode(&self) -> Result<ContentData> {
         self.handler.encode()
+    }
+
+    /// This document as a [`Container`] of cross-modality sub-parts, if it
+    /// is one. `None` for a plain single-modality format.
+    ///
+    /// [`Container`]: crate::Container
+    pub fn as_container_mut(&mut self) -> Option<&mut dyn Container> {
+        self.handler.as_container_mut()
     }
 }
 

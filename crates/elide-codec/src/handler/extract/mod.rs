@@ -73,6 +73,17 @@ pub(crate) trait Encoder: Send + Sync + 'static {
     ///
     /// Returns an error when the document cannot be re-serialized.
     fn encode(&self, items: &[ExtractedItem<Self::Address>]) -> Result<ContentData>;
+
+    /// This encoder as a [`Container`] of cross-modality sub-parts, if the
+    /// format is a container (DOCX). The default is `None`; a plain
+    /// single-part encoder (HTML, XML) is not a container. Lives on the
+    /// encoder because that is where a container format holds its retained
+    /// package and part replacements.
+    ///
+    /// [`Container`]: crate::codec::Container
+    fn as_container_mut(&mut self) -> Option<&mut dyn crate::codec::Container> {
+        None
+    }
 }
 
 /// The [`Handler`] machinery over an extracted item stream.
@@ -190,6 +201,10 @@ impl<E: Encoder> Handler<Text> for ExtractHandler<E> {
             end,
             page: chunk.location.page,
         })
+    }
+
+    fn as_container_mut(&mut self) -> Option<&mut dyn crate::codec::Container> {
+        self.encoder.as_container_mut()
     }
 }
 

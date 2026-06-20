@@ -5,6 +5,8 @@
 mod analyzer;
 mod anonymizer;
 pub mod deduplication;
+#[cfg(feature = "codec")]
+mod orchestrator;
 pub mod redaction;
 
 /// Codec: decode documents into modality payloads, then re-encode them.
@@ -62,3 +64,5 @@ pub use elide_core::{entity, modality, primitive};
 
 pub use self::analyzer::Analyzer;
 pub use self::anonymizer::Anonymizer;
+#[cfg(feature = "codec")]
+pub use self::orchestrator::{DocumentPlan, Orchestrator};

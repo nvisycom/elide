@@ -91,4 +91,13 @@ pub trait Handler<M: Modality>: DataReader<M> + DataWriter<M> + Send + Sync + 's
     fn lift(&self, _chunk: &Chunk<M>, local: M::Location) -> Option<M::Location> {
         Some(local)
     }
+
+    /// This handler as a [`Container`] of cross-modality sub-parts, if it
+    /// is one (DOCX, ahead PDF). The default is `None`: a plain
+    /// single-modality format is not a container.
+    ///
+    /// [`Container`]: crate::Container
+    fn as_container_mut(&mut self) -> Option<&mut dyn crate::codec::Container> {
+        None
+    }
 }

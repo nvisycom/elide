@@ -88,6 +88,8 @@ pub(crate) trait DynHandler<M: Modality>: Send + Sync + 'static {
     fn write_at(&mut self, redactions: Redactions<M>) -> BoxFuture<'_, Result<()>>;
 
     fn lift(&self, chunk: &Chunk<M>, local: M::Location) -> Option<M::Location>;
+
+    fn as_container_mut(&mut self) -> Option<&mut dyn super::Container>;
 }
 
 impl<M, H> DynHandler<M> for H
@@ -113,6 +115,10 @@ where
 
     fn lift(&self, chunk: &Chunk<M>, local: M::Location) -> Option<M::Location> {
         Handler::lift(self, chunk, local)
+    }
+
+    fn as_container_mut(&mut self) -> Option<&mut dyn super::Container> {
+        Handler::as_container_mut(self)
     }
 }
 
