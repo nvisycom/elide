@@ -6,7 +6,7 @@ use jiff::Timestamp;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::modality::Modality;
+use crate::modality::{Hint, Modality};
 use crate::primitive::Confidence;
 use crate::redaction::{LeakProfile, OperatorId};
 
@@ -29,7 +29,8 @@ use crate::redaction::{LeakProfile, OperatorId};
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     feature = "serde",
-    serde(bound = "M::Location: Serialize + for<'a> Deserialize<'a>")
+    serde(bound = "M::Location: Serialize + for<'a> Deserialize<'a>, \
+                   M::Data: Serialize + for<'a> Deserialize<'a>")
 )]
 pub struct Event<M: Modality> {
     /// Who produced this event: a recognizer name, a deduplication strategy,
@@ -119,7 +120,7 @@ impl<M: Modality> Event<M> {
         before: Confidence,
         after: Confidence,
         keyword: impl Into<HipStr<'static>>,
-        in_hint: bool,
+        hint: Option<Hint<M>>,
     ) -> Self {
         Self {
             source: source.into(),
@@ -129,7 +130,7 @@ impl<M: Modality> Event<M> {
             reason: HipStr::default(),
             kind: EventKind::Refinement {
                 keyword: keyword.into(),
-                in_hint,
+                hint,
             },
         }
     }
@@ -188,7 +189,8 @@ impl<M: Modality> Event<M> {
     serde(
         tag = "kind",
         rename_all = "snake_case",
-        bound = "M::Location: Serialize + for<'a> Deserialize<'a>"
+        bound = "M::Location: Serialize + for<'a> Deserialize<'a>, \
+                 M::Data: Serialize + for<'a> Deserialize<'a>"
     )
 )]
 #[non_exhaustive]
@@ -221,9 +223,12 @@ pub enum EventKind<M: Modality> {
     Refinement {
         /// Keyword that fired the boost.
         keyword: HipStr<'static>,
-        /// Whether the keyword was found in an out-of-band hint (`true`) rather
-        /// than the in-text word window (`false`).
-        in_hint: bool,
+        /// The located [`Hint`] the keyword fired from, when the match came
+        /// from an out-of-band hint (a column header, a key) rather than
+        /// the in-text word window. `None` for an in-text-window match.
+        ///
+        /// [`Hint`]: crate::modality::Hint
+        hint: Option<Hint<M>>,
     },
     /// An operator hid the entity.
     Redaction {

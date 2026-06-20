@@ -14,7 +14,7 @@ use fixtures::pipeline::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/contact.csv"),
-    source: include_str!("testdata/contact.csv"),
+    source: include_bytes!("testdata/contact.csv"),
     extension: "csv",
 };
 
@@ -36,7 +36,7 @@ async fn csv_detects_and_redacts() {
 
     // Both rows' sensitive values are gone from the re-encoded CSV.
     assert_pii_removed(
-        &outcome.redacted,
+        &outcome.redacted_text(),
         &[
             "alice.johnson@example.com",
             "bob.smith@example.com",
@@ -51,7 +51,7 @@ async fn csv_detects_and_redacts() {
     );
 
     assert_tokens_present(
-        &outcome.redacted,
+        &outcome.redacted_text(),
         &[
             "[email_address]",
             "[phone_number]",
@@ -63,7 +63,7 @@ async fn csv_detects_and_redacts() {
 
     // CSV structure survives: header row and non-sensitive name cells stay.
     assert_preserved(
-        &outcome.redacted,
+        &outcome.redacted_text(),
         &[
             "name,email,phone,card,iban,ssn,host",
             "Alice Johnson,",

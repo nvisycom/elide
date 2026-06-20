@@ -17,6 +17,10 @@ pub(crate) mod redact;
 
 #[cfg(feature = "internal_audio")]
 pub(crate) mod audio;
+#[cfg(feature = "internal_document")]
+pub(crate) mod document;
+#[cfg(feature = "internal_extract")]
+pub(crate) mod extract;
 #[cfg(feature = "internal_image")]
 pub(crate) mod image;
 #[cfg(any(feature = "html", feature = "xml"))]
@@ -34,6 +38,15 @@ pub use self::audio::mp3_format;
 #[cfg(feature = "wav")]
 #[cfg_attr(docsrs, doc(cfg(feature = "wav")))]
 pub use self::audio::wav_format;
+#[cfg(feature = "docx")]
+#[cfg_attr(docsrs, doc(cfg(feature = "docx")))]
+pub use self::document::docx_format;
+#[cfg(feature = "pdf")]
+#[cfg_attr(docsrs, doc(cfg(feature = "pdf")))]
+pub use self::document::pdf_format;
+#[cfg(feature = "rtf")]
+#[cfg_attr(docsrs, doc(cfg(feature = "rtf")))]
+pub use self::document::rtf_format;
 #[cfg(feature = "jpeg")]
 #[cfg_attr(docsrs, doc(cfg(feature = "jpeg")))]
 pub use self::image::jpeg_format;

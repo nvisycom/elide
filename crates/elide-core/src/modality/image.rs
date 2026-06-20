@@ -17,8 +17,12 @@ use crate::primitive::{BoundingBox, Color, Dimensions, Polygon};
 /// coordinates. An optional filename aids diagnostics and encoding
 /// inference.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ImageData {
-    /// Encoded image bytes.
+    /// Encoded image bytes. Skipped by serde: the bytes are the raw payload,
+    /// not metadata, and a serialized report (entities, provenance) has no
+    /// need to carry megabytes of image data.
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub bytes: Bytes,
     /// Pixel dimensions of the encoded image.
     pub dimensions: Dimensions,

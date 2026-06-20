@@ -19,6 +19,7 @@
 
 use elide_core::Result;
 use elide_core::entity::Entity;
+use elide_core::entity::provenance::Event;
 use elide_core::modality::TextBacked;
 use elide_core::modality::text::TextData;
 use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
@@ -76,14 +77,31 @@ where
         if self.enhancer.is_empty() {
             return Ok(entities);
         }
-        let mut context = Context::new(data.text.as_str()).with_hints(&ctx.context_hints);
+        // Feed the enhancer hint *texts*; it reports the matched hint by
+        // index so we can reattach the located `Hint<M>` to provenance.
+        let hint_texts: Vec<&str> = ctx.context_hints.iter().map(|h| h.data.as_str()).collect();
+        let mut context = Context::new(data.text.as_str()).with_hints(&hint_texts);
         if let Some(tokens) = ctx.artifacts.get::<Tokens>() {
             context = context.with_tokens(tokens.as_slice());
         }
         if let Some(language) = ctx.primary_language() {
             context = context.with_language(language);
         }
-        self.enhancer.enhance(&mut entities, &context);
+
+        // The enhancer lifts confidence and reports each boost; we record
+        // the refinement with the located hint it fired from (if any).
+        for boost in self.enhancer.enhance(&mut entities, &context) {
+            let hint = boost.hint_index.map(|i| ctx.context_hints[i].clone());
+            let label = entities[boost.entity_index].label.clone();
+            entities[boost.entity_index].provenance.record(
+                Event::refinement(boost.source, boost.before, boost.after, boost.keyword, hint)
+                    .with_reason(format!(
+                        "context keyword near `{}` (+{:.3})",
+                        label.as_str(),
+                        boost.amount,
+                    )),
+            );
+        }
         Ok(entities)
     }
 }

@@ -49,7 +49,8 @@ use crate::primitive::Confidence;
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     feature = "serde",
-    serde(bound = "M::Location: Serialize + for<'a> Deserialize<'a>")
+    serde(bound = "M::Location: Serialize + for<'a> Deserialize<'a>, \
+                   M::Data: Serialize + for<'a> Deserialize<'a>")
 )]
 pub struct Entity<M: Modality> {
     /// Stable unique identity for this entity (time-ordered UUIDv7), minted

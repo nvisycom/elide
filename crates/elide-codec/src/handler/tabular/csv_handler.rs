@@ -9,7 +9,7 @@
 
 use elide_core::modality::tabular::{Tabular, TabularLocation};
 use elide_core::modality::text::{TextData, TextReplacement};
-use elide_core::modality::{Chunk, DataReader, DataWriter};
+use elide_core::modality::{Chunk, DataReader, DataWriter, Hint};
 use elide_core::redaction::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 
@@ -191,7 +191,11 @@ impl Handler<Tabular> for CsvHandler {
             let mut hints = Vec::new();
             if let Some(name) = self.column_name(col) {
                 location = location.with_column_name(name.to_owned());
-                hints.push(name.to_owned());
+                // The header label lives in the header cell at row 0, same
+                // column — a real tabular location the boost can point at.
+                let header_location =
+                    TabularLocation::new(0, col).with_column_name(name.to_owned());
+                hints.push(Hint::new(header_location, TextData::new(name.to_owned())));
             }
             return Ok(Some(Chunk {
                 location,

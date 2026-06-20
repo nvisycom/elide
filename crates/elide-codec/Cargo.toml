@@ -33,16 +33,34 @@ default = ["txt"]
 ## to `elide-core` for consumers who serialize the entities a codec reads.
 serde = ["elide-core/serde"]
 
-## Every text-shaped format currently shipped.
+## The text-shaped formats.
 text = ["txt", "json", "html", "xml"]
 
 ## Individual text formats.
 txt = ["internal_text"]
 json = ["internal_text", "dep:serde_json"]
-html = ["internal_text", "dep:scraper", "dep:ego-tree"]
-xml = ["internal_text", "dep:quick-xml"]
+html = ["internal_extract", "dep:scraper", "dep:ego-tree"]
+xml = ["internal_extract", "dep:quick-xml"]
 
-## Every image format currently shipped.
+## The rich-document formats.
+document = ["docx", "pdf", "rtf"]
+
+## DOCX: a zip of OOXML. Body text in `word/document.xml` is extracted and
+## spliced through the shared XML engine; `zip` opens and rebuilds the
+## package. Pulls `xml` for extraction, `internal_document` for the
+## container surface, and `zip` for the package.
+docx = ["xml", "internal_document", "dep:zip"]
+
+## PDF: a container of page text and image XObjects in its own indirect-
+## object format (not a zip). Pulls `internal_document` for the container
+## surface; the object parser is its own dep.
+pdf = ["internal_document"]
+
+## RTF: flat rich text (control words and groups), a leaf text handler
+## alongside the other document formats.
+rtf = ["internal_document"]
+
+## The image formats.
 image = ["png", "jpeg", "tiff"]
 
 ## Individual image formats (all share the `image` + `imageproc` stack
@@ -51,7 +69,7 @@ png = ["internal_image"]
 jpeg = ["internal_image"]
 tiff = ["internal_image"]
 
-## Every audio format currently shipped.
+## The audio formats.
 audio = ["wav", "mp3"]
 
 ## WAV: `hound` reads and re-writes samples; `symphonia` probes the
@@ -62,14 +80,14 @@ wav = ["internal_audio", "dep:hound", "dep:symphonia"]
 ## the redaction round-trip.
 mp3 = ["internal_audio", "dep:symphonia", "dep:mp3lame-encoder"]
 
-## Every tabular format currently shipped.
+## The tabular formats.
 tabular = ["csv", "xlsx"]
 
 ## CSV: `csv` parses and re-writes rows. Cells hold text and redact like
 ## text, so this pulls the shared text-redaction helper.
 csv = ["internal_tabular", "dep:csv"]
-## XLSX: a stub today (decode returns an empty handle); a parser dep will
-## be wired in when real spreadsheet extraction lands.
+## XLSX: an OOXML spreadsheet; cells redact like text via the shared
+## tabular surface.
 xlsx = ["internal_tabular"]
 
 # Internal markers: set automatically by any format feature above. Code
@@ -81,12 +99,20 @@ internal_image = ["elide-core/image", "dep:image", "dep:imageproc"]
 internal_audio = ["elide-core/audio"]
 internal_tabular = ["elide-core/tabular", "internal_text"]
 internal_text = []
+# The shared text-extract-and-splice engine, used by the markup formats
+# and rich documents. Pulls `internal_text` because items are text and
+# reuse the text-redaction helper.
+internal_extract = ["internal_text"]
+# The rich-document container machinery (`handler::document`): the
+# modality-neutral part surface shared by the document formats. No dep of
+# its own; each format pulls its own parser.
+internal_document = []
 
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }
 
-# (De)serialization (JSON handler behind `json`, CSV behind `csv`)
+# (De)serialization
 serde_json = { workspace = true, features = [], optional = true }
 csv = { workspace = true, features = [], optional = true }
 
@@ -100,16 +126,19 @@ hex = { workspace = true, features = [] }
 # Observability
 tracing = { workspace = true, features = [] }
 
-# Markup parsing (HTML gated behind `html`, XML behind `xml`)
+# Markup parsing
 scraper = { workspace = true, features = [], optional = true }
 ego-tree = { workspace = true, features = [], optional = true }
 quick-xml = { workspace = true, features = [], optional = true }
 
-# Image processing (gated behind the image-format features)
+# Container formats
+zip = { workspace = true, optional = true }
+
+# Image processing
 image = { workspace = true, features = [], optional = true }
 imageproc = { workspace = true, features = [], optional = true }
 
-# Audio processing (gated behind the audio-format features)
+# Audio processing
 hound = { workspace = true, features = [], optional = true }
 symphonia = { workspace = true, features = [], optional = true }
 mp3lame-encoder = { workspace = true, features = [], optional = true }

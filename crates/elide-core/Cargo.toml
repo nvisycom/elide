@@ -51,13 +51,13 @@ serde = ["dep:serde", "hipstr/serde", "jiff/serde", "uuid/serde", "bytes?/serde"
 test-utils = []
 
 [dependencies]
-# (De)serialization (optional — gated behind the `serde` feature)
+# (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }
 
 # Derive macros & error handling
 derive_builder = { workspace = true, features = [] }
 
-# Primitive datatypes (`bytes` optional — gated behind `image`/`audio`)
+# Primitive datatypes
 uuid = { workspace = true, features = ["v7"] }
 hipstr = { workspace = true, features = [] }
 jiff = { workspace = true, features = [] }

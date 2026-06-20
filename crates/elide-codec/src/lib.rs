@@ -7,7 +7,8 @@ pub mod content;
 pub mod handler;
 
 pub use self::codec::{
-    DocumentHandle, Format, FormatId, FormatRegistry, Handler, Loader, UntypedDocumentHandle,
+    Container, DocumentHandle, Format, FormatId, FormatRegistry, Handler, Loader, Part, PartId,
+    UntypedDocumentHandle,
 };
 
 #[cfg(all(test, feature = "txt"))]

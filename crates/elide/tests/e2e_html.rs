@@ -12,7 +12,7 @@ use fixtures::pipeline::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/contact.html"),
-    source: include_str!("testdata/contact.html"),
+    source: include_bytes!("testdata/contact.html"),
     extension: "html",
 };
 
@@ -34,7 +34,7 @@ async fn html_detects_and_redacts() {
     // PII is gone from element text, including the values that also
     // appear in attributes and the comment.
     assert_pii_removed(
-        &outcome.redacted,
+        &outcome.redacted_text(),
         &[
             "alice.johnson@example.com",
             "+1 (415) 555-0142",
@@ -46,7 +46,7 @@ async fn html_detects_and_redacts() {
     );
 
     assert_tokens_present(
-        &outcome.redacted,
+        &outcome.redacted_text(),
         &[
             "[email_address]",
             "[phone_number]",
@@ -58,7 +58,7 @@ async fn html_detects_and_redacts() {
 
     // Markup structure survives: tags and non-sensitive text stay.
     assert_preserved(
-        &outcome.redacted,
+        &outcome.redacted_text(),
         &["<html", "<body>", "<h1>Customer onboarding</h1>", "Best,"],
     );
 }
