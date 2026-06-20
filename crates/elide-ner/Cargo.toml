@@ -51,7 +51,7 @@ async-trait = { workspace = true, features = [] }
 # Observability
 tracing = { workspace = true, features = [] }
 
-# Natural language processing (optional — gated behind the `lingua` feature)
+# Natural language processing
 lingua = { workspace = true, features = [], optional = true }
 
 [dev-dependencies]

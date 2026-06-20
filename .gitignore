@@ -42,6 +42,6 @@ temp/
 .claude
 CLAUDE.md
 
-# Pipeline-test artifacts: `{stem}.redacted.{ext}` written next to
-# fixtures by the toolkit pipeline tests for human inspection.
+# E2E-test artifacts
 **/testdata/**/*.redacted.*
+**/testdata/**/*.*.json

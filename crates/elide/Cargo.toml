@@ -32,7 +32,7 @@ default = ["pattern", "ner", "llm"]
 ## domain types. Recognizer crates (`pattern`/`ner`/`llm`) need serde
 ## structurally and pull it in regardless; `codec` forwards it when both
 ## are enabled.
-serde = ["elide-core/serde", "elide-codec?/serde"]
+serde = ["dep:serde", "dep:erased-serde", "elide-core/serde", "elide-codec?/serde"]
 
 ## Re-export the pattern crate as `elide::recognition::pattern`.
 pattern = ["dep:elide-pattern"]
@@ -78,6 +78,10 @@ elide-ner = { workspace = true, features = [], optional = true }
 elide-llm = { workspace = true, features = [], optional = true }
 elide-codec = { workspace = true, features = [], optional = true }
 
+# (De)serialization
+serde = { workspace = true, features = [], optional = true }
+erased-serde = { workspace = true, features = [], optional = true }
+
 # Derive macros & error handling
 derive_builder = { workspace = true, features = [] }
 
@@ -89,36 +93,39 @@ uuid = { workspace = true, features = ["v4"] }
 sha2 = { workspace = true, features = [] }
 hex = { workspace = true, features = [] }
 
-# Async runtime & parallelism (concurrent recognizer join)
+# Async runtime & parallelism
 futures = { workspace = true, features = [] }
 
 # Observability
 tracing = { workspace = true, features = [] }
 
 [dev-dependencies]
+# (De)serialization
+serde_json = { workspace = true, features = [] }
+
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
-# Building/inspecting .docx zip fixtures in the DOCX e2e test
+# Container formats
 zip = { workspace = true }
 
 # Codec round-trip e2e tests
 [[test]]
 name = "e2e_txt"
-required-features = ["codec-txt", "mock"]
+required-features = ["codec-txt", "mock", "serde"]
 
 [[test]]
 name = "e2e_json"
-required-features = ["codec-json", "mock"]
+required-features = ["codec-json", "mock", "serde"]
 
 [[test]]
 name = "e2e_html"
-required-features = ["codec-html", "mock"]
+required-features = ["codec-html", "mock", "serde"]
 
 [[test]]
 name = "e2e_csv"
-required-features = ["codec-csv", "mock"]
+required-features = ["codec-csv", "mock", "serde"]
 
 [[test]]
 name = "e2e_docx"
-required-features = ["codec-docx", "codec-png", "llm", "mock"]
+required-features = ["codec-docx", "codec-png", "llm", "mock", "serde"]

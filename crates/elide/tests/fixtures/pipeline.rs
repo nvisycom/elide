@@ -40,9 +40,20 @@ pub struct PipelineOutcome<M: Modality> {
 
 impl<M: Modality> PipelineOutcome<M> {
     /// The redacted output decoded as UTF-8 text. Panics if it is not
-    /// (i.e. for a binary container format).
+    /// (i.e. for a binary container format — read a [`part`](Self::part)).
     pub fn redacted_text(&self) -> String {
         String::from_utf8(self.redacted.clone()).expect("redacted output is UTF-8 text")
+    }
+
+    /// Read one entry out of the redacted output, treating it as a zip
+    /// container (DOCX). Returns the entry bytes, or `None` if absent.
+    pub fn part(&self, name: &str) -> Option<Vec<u8>> {
+        use std::io::Read;
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(self.redacted.clone())).ok()?;
+        let mut entry = zip.by_name(name).ok()?;
+        let mut buf = Vec::new();
+        entry.read_to_end(&mut buf).ok()?;
+        Some(buf)
     }
 }
 
@@ -92,6 +103,21 @@ where
         .with_fallback(Erase)
 }
 
+/// Build an image analyzer backed by the mock LLM (detects nothing) — the
+/// image pipeline the master orchestrator registers so a container's
+/// embedded media is driven. Real image detection is a separate concern;
+/// here it proves the multi-modal path runs.
+#[cfg(feature = "llm")]
+fn build_image_analyzer() -> Result<Analyzer<elide::modality::image::Image>> {
+    use elide::recognition::llm::LlmRecognizer;
+    let recognizer = LlmRecognizer::builder()
+        .with_name("mock-image")
+        .with_mock_backend()
+        .with_default_prompt()
+        .build()?;
+    Ok(Analyzer::new().with_recognizer(recognizer))
+}
+
 /// A codec fixture the e2e tests load: the inlined source bytes, the
 /// extension the codec registry resolves on, and the on-disk path the
 /// redacted artifact is written next to.
@@ -111,7 +137,8 @@ pub struct Fixture {
 }
 
 impl Fixture {
-    /// Run the pipeline as the [`Text`] modality (`txt`, `json`, `html`).
+    /// Run the pipeline as the [`Text`] modality (`txt`, `json`, `html`,
+    /// and a DOCX's body).
     pub async fn run(&self) -> PipelineOutcome<Text> {
         self.run_typed::<Text>().await
     }
@@ -123,20 +150,21 @@ impl Fixture {
         self.run_typed::<Tabular>().await
     }
 
-    /// Decode this fixture as modality `M`, redact it through the
+    /// Decode this fixture as modality `M`, redact it through the master
     /// [`Orchestrator`] (body + any container parts), encode, write the
-    /// `*.redacted.*` artifact, and return the outcome. Panics with a
-    /// descriptive message on any stage failure, the way an integration
-    /// test wants.
+    /// `*.redacted.*` and entities artifacts, and return the outcome.
+    /// Panics with a descriptive message on any stage failure.
     ///
-    /// One pipeline is registered for `M`; the orchestrator drives the
-    /// document's body through it and, for a container fixture (DOCX), any
-    /// embedded parts of a registered modality. Per-format media pipelines
-    /// are added by the dedicated container tests, not this shared driver.
+    /// The orchestrator registers a pipeline for the body modality `M` and
+    /// — when the `llm` feature is on — an image pipeline (mock backend) so
+    /// a container fixture's embedded media is driven too. Registering the
+    /// image modality is format-neutral: it only fires for a document that
+    /// actually has image parts (a DOCX), and is inert for the rest.
     async fn run_typed<M>(&self) -> PipelineOutcome<M>
     where
         M: TextBacked,
         Entity<M>: Clone,
+        Vec<Entity<M>>: elide::EntityGroup,
         DocumentHandle<M>: StreamDataReader<M>,
         PatternRecognizer: Recognizer<M>,
         Replace: Operator<M>,
@@ -159,16 +187,29 @@ impl Fixture {
             build_anonymizer::<M>(),
             scope,
         );
+        // Drive embedded images too when the image recognizer is available.
+        #[cfg(feature = "llm")]
+        let orchestrator = orchestrator.with_modality::<elide::modality::image::Image>(
+            build_image_analyzer().expect("image analyzer builds"),
+            elide::Anonymizer::new(),
+            Scope::new(),
+        );
 
         // Two phases so the entities surface for assertions: detect, copy
         // the body entities out, then apply with no editing.
-        let mut plan = orchestrator
+        let mut report = orchestrator
             .analyze_document(&mut document)
             .await
             .expect("analyze document");
-        let entities: Vec<Entity<M>> = plan.entities::<M>().map(|e| e.to_vec()).unwrap_or_default();
+        let entities: Vec<Entity<M>> = report
+            .entities::<M>()
+            .map(|e| e.to_vec())
+            .unwrap_or_default();
+        // Write the detected entities as JSON for inspection before the
+        // report is consumed by `apply`.
+        self.write_entities(&report);
         orchestrator
-            .apply(&mut document, plan)
+            .apply(&mut document, report)
             .await
             .expect("apply document");
 
@@ -178,13 +219,28 @@ impl Fixture {
             .as_bytes()
             .to_vec();
 
-        self.write_artifact(&redacted);
+        self.write_redacted(&redacted);
         PipelineOutcome { entities, redacted }
     }
 
-    /// Write `redacted` next to the fixture as `{stem}.redacted.{ext}` for
-    /// inspection. Gitignored via `**/testdata/**/*.redacted.*`.
-    fn write_artifact(&self, redacted: &[u8]) {
+    /// Write the serialized detection [`Report`] next to the fixture as
+    /// `{filename}.json` (e.g. `contact.docx.json`): the body and any
+    /// container parts' findings, grouped by part id. Only with the `serde`
+    /// feature; gitignored under `testdata/`.
+    #[cfg(feature = "serde")]
+    fn write_entities(&self, report: &elide::Report) {
+        let out = format!("{}.json", self.path);
+        let json = serde_json::to_string_pretty(report).expect("report serializes");
+        std::fs::write(&out, json).unwrap_or_else(|e| panic!("write entities {out}: {e}"));
+    }
+
+    /// No-op when `serde` is off.
+    #[cfg(not(feature = "serde"))]
+    fn write_entities(&self, _report: &elide::Report) {}
+
+    /// Write the redacted document next to the fixture as
+    /// `{stem}.redacted.{ext}`. Gitignored via `**/testdata/**/*.redacted.*`.
+    fn write_redacted(&self, redacted: &[u8]) {
         let path = std::path::Path::new(self.path);
         let stem = path
             .file_stem()

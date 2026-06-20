@@ -19,9 +19,9 @@
 //!     .with_modality::<Text>(text_analyzer, text_anonymizer, text_scope)
 //!     .with_modality::<Image>(image_analyzer, image_anonymizer, image_scope);
 //!
-//! let mut plan = orchestrator.analyze_document(&mut docx).await?;
-//! plan.entities::<Text>().unwrap().retain(|e| keep(e)); // drop a false positive
-//! orchestrator.apply(&mut docx, plan).await?;
+//! let mut report = orchestrator.analyze_document(&mut docx).await?;
+//! report.entities::<Text>().unwrap().retain(|e| keep(e)); // drop a false positive
+//! orchestrator.apply(&mut docx, report).await?;
 //! ```
 //!
 //! [`anonymize_document`] is the one-call shorthand when no editing is
@@ -32,7 +32,7 @@
 //! [`anonymize_document`]: Orchestrator::anonymize_document
 
 mod pipeline;
-mod plan;
+mod report;
 
 use std::any::TypeId;
 use std::collections::HashMap;
@@ -44,11 +44,17 @@ use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::recognition::Scope;
 
 use self::pipeline::{AnalyzeOutcome, ErasedPipeline, ModalityPipeline};
-use self::plan::PartPlan;
+use self::report::PartReport;
 use crate::codec::{DocumentHandle, FormatRegistry};
 use crate::{Analyzer, Anonymizer};
 
-pub use self::plan::DocumentPlan;
+pub use self::report::Report;
+// `EntityGroup` is re-exported (not just `use`d) because the bound
+// `Vec<Entity<M>>: EntityGroup` appears on the public construction methods,
+// so callers must be able to name it. Hidden from the docs: it is an
+// implementation detail of the report's storage.
+#[doc(hidden)]
+pub use self::report::EntityGroup;
 
 /// Drives analyze + redact across a document's body and its cross-modality
 /// container parts.
@@ -92,6 +98,7 @@ impl<'r> Orchestrator<'r> {
     ) -> Self
     where
         M: Modality,
+        Vec<Entity<M>>: EntityGroup,
         DocumentHandle<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
     {
         self.pipelines.insert(
@@ -107,26 +114,29 @@ impl<'r> Orchestrator<'r> {
 
     /// Detect the entities of a whole document without redacting: its
     /// own-modality body *and* every container part whose modality has a
-    /// registered pipeline. Returns an editable [`DocumentPlan`] to hand to
+    /// registered pipeline. Returns an editable [`Report`] to hand to
     /// [`apply`].
     ///
     /// The body of `document`'s own modality `M` is analyzed through its
     /// pipeline (skipped when `M` has none). Then, if `document` is a
     /// container, each part is decoded through the registry and analyzed by
     /// the pipeline whose modality matches; the decoded part handle is
-    /// retained in the plan so [`apply`] can re-drive it. Parts with no
+    /// retained in the report so [`apply`] can re-drive it. Parts with no
     /// matching pipeline, or that no codec can decode, are omitted.
     ///
-    /// Edit the plan ([`entities`], [`part_entities`]) before applying.
+    /// Edit the report ([`entities`], [`part_entities`]) before applying.
     ///
     /// [`apply`]: Self::apply
-    /// [`entities`]: DocumentPlan::entities
-    /// [`part_entities`]: DocumentPlan::part_entities
+    /// [`entities`]: Report::entities
+    /// [`part_entities`]: Report::part_entities
     pub async fn analyze_document<M: Modality>(
         &self,
         document: &mut DocumentHandle<M>,
-    ) -> Result<DocumentPlan> {
-        let mut document_plan = DocumentPlan::new();
+    ) -> Result<Report>
+    where
+        Vec<Entity<M>>: EntityGroup,
+    {
+        let mut document_plan = Report::new();
 
         // The body: recovered concretely since `M` is known statically.
         if let Some(typed) = self
@@ -156,7 +166,7 @@ impl<'r> Orchestrator<'r> {
                         } => {
                             document_plan.parts.insert(
                                 part.id.clone(),
-                                PartPlan {
+                                PartReport {
                                     modality,
                                     handle: retained,
                                     entities,
@@ -173,16 +183,16 @@ impl<'r> Orchestrator<'r> {
         Ok(document_plan)
     }
 
-    /// Apply a (possibly edited) [`DocumentPlan`] back onto `document`:
+    /// Apply a (possibly edited) [`Report`] back onto `document`:
     /// redact the body in place, redact each retained part, and write the
     /// parts back into the container. Re-encode `document` afterward to
     /// serialize the result.
     pub async fn apply<M: Modality>(
         &self,
         document: &mut DocumentHandle<M>,
-        plan: DocumentPlan,
+        plan: Report,
     ) -> Result<()> {
-        let DocumentPlan { body, parts } = plan;
+        let Report { body, parts } = plan;
 
         // The body: apply its edited entities through the `M` pipeline.
         if let Some((type_id, entities)) = body
@@ -193,6 +203,7 @@ impl<'r> Orchestrator<'r> {
                 .and_then(|p| p.as_any().downcast_ref::<ModalityPipeline<M>>())
         {
             let entities = entities
+                .as_any()
                 .downcast_ref::<Vec<Entity<M>>>()
                 .expect("plan body modality matches M");
             typed.apply(document, entities).await?;
@@ -230,7 +241,10 @@ impl<'r> Orchestrator<'r> {
     pub async fn anonymize_document<M: Modality>(
         &self,
         document: &mut DocumentHandle<M>,
-    ) -> Result<()> {
+    ) -> Result<()>
+    where
+        Vec<Entity<M>>: EntityGroup,
+    {
         let plan = self.analyze_document(document).await?;
         self.apply(document, plan).await
     }

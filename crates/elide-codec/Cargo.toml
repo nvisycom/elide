@@ -102,7 +102,7 @@ internal_document = ["dep:zip"]
 # Internal crates
 elide-core = { workspace = true, features = [] }
 
-# (De)serialization (JSON handler behind `json`, CSV behind `csv`)
+# (De)serialization
 serde_json = { workspace = true, features = [], optional = true }
 csv = { workspace = true, features = [], optional = true }
 
@@ -116,19 +116,19 @@ hex = { workspace = true, features = [] }
 # Observability
 tracing = { workspace = true, features = [] }
 
-# Markup parsing (HTML gated behind `html`, XML behind `xml`)
+# Markup parsing
 scraper = { workspace = true, features = [], optional = true }
 ego-tree = { workspace = true, features = [], optional = true }
 quick-xml = { workspace = true, features = [], optional = true }
 
-# Container formats (DOCX is a zip; gated behind `internal_document`)
+# Container formats
 zip = { workspace = true, optional = true }
 
-# Image processing (gated behind the image-format features)
+# Image processing
 image = { workspace = true, features = [], optional = true }
 imageproc = { workspace = true, features = [], optional = true }
 
-# Audio processing (gated behind the audio-format features)
+# Audio processing
 hound = { workspace = true, features = [], optional = true }
 symphonia = { workspace = true, features = [], optional = true }
 mp3lame-encoder = { workspace = true, features = [], optional = true }

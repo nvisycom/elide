@@ -12,6 +12,7 @@ use elide_core::entity::Entity;
 use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::recognition::Scope;
 
+use super::report::EntityGroup;
 use crate::codec::{DocumentHandle, UntypedDocumentHandle};
 use crate::{Analyzer, Anonymizer};
 
@@ -58,7 +59,7 @@ pub(super) enum AnalyzeOutcome {
     Mine {
         modality: std::any::TypeId,
         handle: UntypedDocumentHandle,
-        entities: Box<dyn Any + Send + Sync>,
+        entities: Box<dyn EntityGroup>,
     },
     /// Not this pipeline's modality; the undecoded handle is returned.
     NotMine(UntypedDocumentHandle),
@@ -84,7 +85,7 @@ pub(super) trait ErasedPipeline: Send + Sync {
     fn apply_part<'a>(
         &'a self,
         handle: UntypedDocumentHandle,
-        entities: &'a (dyn Any + Send + Sync),
+        entities: &'a dyn EntityGroup,
     ) -> BoxFuture<'a, Result<Bytes>>;
 
     fn as_any(&self) -> &dyn Any;
@@ -93,6 +94,7 @@ pub(super) trait ErasedPipeline: Send + Sync {
 impl<M> ErasedPipeline for ModalityPipeline<M>
 where
     M: Modality,
+    Vec<Entity<M>>: EntityGroup,
     DocumentHandle<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
 {
     fn analyze_part(&self, part: UntypedDocumentHandle) -> BoxFuture<'_, Result<AnalyzeOutcome>> {
@@ -113,7 +115,7 @@ where
     fn apply_part<'a>(
         &'a self,
         handle: UntypedDocumentHandle,
-        entities: &'a (dyn Any + Send + Sync),
+        entities: &'a dyn EntityGroup,
     ) -> BoxFuture<'a, Result<Bytes>> {
         Box::pin(async move {
             // The handle and entities were produced by this same pipeline
@@ -122,6 +124,7 @@ where
                 .into::<M>()
                 .unwrap_or_else(|_| unreachable!("apply_part handle modality mismatch"));
             let entities = entities
+                .as_any()
                 .downcast_ref::<Vec<Entity<M>>>()
                 .expect("apply_part entities modality mismatch");
             self.apply(&mut handle, entities).await?;
