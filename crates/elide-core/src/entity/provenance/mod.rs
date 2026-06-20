@@ -34,7 +34,8 @@ use crate::primitive::Confidence;
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     feature = "serde",
-    serde(bound = "M::Location: Serialize + for<'a> Deserialize<'a>")
+    serde(bound = "M::Location: Serialize + for<'a> Deserialize<'a>, \
+                   M::Data: Serialize + for<'a> Deserialize<'a>")
 )]
 pub struct Provenance<M: Modality> {
     /// Events, in the order they happened.

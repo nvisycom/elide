@@ -25,7 +25,7 @@
 
 use elide_core::Result;
 use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
-use elide_core::modality::{Chunk, DataReader, DataWriter};
+use elide_core::modality::{Chunk, DataReader, DataWriter, Hint};
 use elide_core::redaction::Redactions;
 
 use crate::content::ContentData;
@@ -47,10 +47,11 @@ pub(crate) struct ExtractedItem<A> {
     pub address: A,
     /// Text-node text, comment body, attribute value, or element text.
     pub value: String,
-    /// Out-of-band context strings surfaced from the item's structural
-    /// neighbours (e.g. the parent element's text minus this item's own).
-    /// Empty when there's no useful surrounding context.
-    pub hints: Vec<String>,
+    /// Out-of-band located context surfaced from the item's structural
+    /// neighbours (e.g. a sibling element's text), each carrying the source
+    /// span where its text sits. Empty when there's no useful surrounding
+    /// context.
+    pub hints: Vec<Hint<Text>>,
 }
 
 /// Re-serialize a mutated [`ExtractedItem`] stream into a document's

@@ -15,7 +15,7 @@
 //! of its escape table.
 
 use elide_core::modality::text::{Text, TextData, TextLocation};
-use elide_core::modality::{Chunk, DataReader, DataWriter};
+use elide_core::modality::{Chunk, DataReader, DataWriter, Hint};
 use elide_core::redaction::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 
@@ -59,10 +59,11 @@ pub(super) struct Leaf {
     /// [`LeafKind::StringValue`] this is the quoted form `"…"` with `\\` /
     /// `\"` escapes; for [`LeafKind::Scalar`] it is the bare literal.
     pub serialized: String,
-    /// Out-of-band context strings (currently the enclosing object key)
+    /// Out-of-band located context (currently the enclosing object key)
     /// surfaced to recognizers as hints; empty for keys and for value
-    /// leaves outside any object (e.g. a top-level scalar).
-    pub hints: Vec<String>,
+    /// leaves outside any object (e.g. a top-level scalar). Each hint
+    /// carries the key's source span so a boost can point back at the key.
+    pub hints: Vec<Hint<Text>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -423,7 +424,7 @@ impl<'a> SlotParser<'a> {
         Ok(())
     }
 
-    fn parse_value(&mut self, key_context: Option<&str>) -> Result<()> {
+    fn parse_value(&mut self, key_context: Option<&Hint<Text>>) -> Result<()> {
         self.consume_whitespace();
         match self.peek() {
             Some(b'{') => self.parse_object(),
@@ -431,7 +432,7 @@ impl<'a> SlotParser<'a> {
             Some(b'"') => {
                 let mut leaf = self.parse_string_leaf(LeafKind::StringValue)?;
                 if let Some(k) = key_context {
-                    leaf.hints.push(k.to_owned());
+                    leaf.hints.push(k.clone());
                 }
                 self.push_leaf(leaf);
                 Ok(())
@@ -439,7 +440,7 @@ impl<'a> SlotParser<'a> {
             Some(b't') | Some(b'f') | Some(b'n') | Some(b'-') | Some(b'0'..=b'9') => {
                 let mut leaf = self.parse_scalar()?;
                 if let Some(k) = key_context {
-                    leaf.hints.push(k.to_owned());
+                    leaf.hints.push(k.clone());
                 }
                 self.push_leaf(leaf);
                 Ok(())
@@ -464,12 +465,19 @@ impl<'a> SlotParser<'a> {
         }
         loop {
             self.consume_whitespace();
+            // The key's source span is the quoted form `"…"` between here
+            // and where `parse_string_leaf` leaves the cursor; that span is
+            // the located hint we hand every value under this key.
+            let key_start = self.pos;
             let key = self.parse_string_leaf(LeafKind::Key)?;
-            let key_value = key.value.clone();
+            let key_hint = Hint::new(
+                TextLocation::new(key_start, self.pos),
+                TextData::new(key.value.clone()),
+            );
             self.push_leaf(key);
             self.consume_whitespace();
             self.consume_punct(b':')?;
-            self.parse_value(Some(&key_value))?;
+            self.parse_value(Some(&key_hint))?;
             self.consume_whitespace();
             match self.peek() {
                 Some(b',') => {
@@ -489,7 +497,7 @@ impl<'a> SlotParser<'a> {
         }
     }
 
-    fn parse_array(&mut self, key_context: Option<&str>) -> Result<()> {
+    fn parse_array(&mut self, key_context: Option<&Hint<Text>>) -> Result<()> {
         self.consume_punct(b'[')?;
         self.consume_whitespace();
         if self.peek() == Some(b']') {

@@ -2,10 +2,13 @@
 //! [`Entity<Text>`] regardless of which recognizer produced it.
 
 use std::collections::HashMap;
+use std::ops::Range;
 
-use elide_core::entity::provenance::Event;
+use hipstr::HipStr;
+
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::TextBacked;
+use elide_core::primitive::Confidence;
 
 use crate::io::Token;
 use crate::matching::KeywordMatcher;
@@ -112,31 +115,48 @@ impl Enhancer {
         self.rules.len()
     }
 
-    /// Apply boost rules to `entities` in place. For each entity:
-    /// walk every rule registered for its label whose language
-    /// scope applies under `ctx.language`, walk a window of
-    /// `prefix_words` words before and `suffix_words` words after
-    /// the entity's location, ask the matcher whether any keyword
-    /// fires, and on a hit lift confidence by the rule's `boost`
-    /// (saturating at the [`Confidence`] ceiling) plus record a
-    /// refinement [`Event`] in the entity's provenance.
+    /// Apply boost rules to `entities` in place, lifting confidence where a
+    /// keyword fires, and return one [`Boost`] per lift for the caller to
+    /// record in provenance.
     ///
-    /// The in-text and hint paths are independent: at most one
-    /// boost per rule fires per entity (window first, hint as
-    /// fallback) so a rule with a long keyword list can't
-    /// double-dip.
+    /// For each entity: walk every rule registered for its label whose
+    /// language scope applies under `ctx.language`, check a window of
+    /// `prefix_words`/`suffix_words` around the entity's location (and the
+    /// out-of-band hints), and on a hit lift confidence by the rule's
+    /// `boost` (saturating at the [`Confidence`] ceiling). The in-text and
+    /// hint paths are independent — at most one boost per rule fires per
+    /// entity (window first, hint as fallback) — so a long keyword list
+    /// can't double-dip.
+    ///
+    /// This crate is modality-agnostic and matches on `&str`, so it does
+    /// *not* build the provenance event: it returns each [`Boost`] with the
+    /// matched hint's *index* (when the match came from a hint), and the
+    /// caller — which holds the located `Hint<M>`s — records the refinement
+    /// with the hint's location.
     ///
     /// [`Confidence`]: elide_core::primitive::Confidence
-    pub fn enhance<M: TextBacked>(&self, entities: &mut [Entity<M>], ctx: &Context<'_>) {
+    pub fn enhance<M: TextBacked>(
+        &self,
+        entities: &mut [Entity<M>],
+        ctx: &Context<'_>,
+    ) -> Vec<Boost> {
+        let mut boosts = Vec::new();
         if self.rules.is_empty() {
-            return;
+            return boosts;
         }
-        for entity in entities {
-            self.enhance_one(entity, ctx);
+        for (entity_index, entity) in entities.iter_mut().enumerate() {
+            self.enhance_one(entity_index, entity, ctx, &mut boosts);
         }
+        boosts
     }
 
-    fn enhance_one<M: TextBacked>(&self, entity: &mut Entity<M>, ctx: &Context<'_>) {
+    fn enhance_one<M: TextBacked>(
+        &self,
+        entity_index: usize,
+        entity: &mut Entity<M>,
+        ctx: &Context<'_>,
+        boosts: &mut Vec<Boost>,
+    ) {
         let Some(bucket) = self.rules.get(&entity.label) else {
             return;
         };
@@ -147,21 +167,22 @@ impl Enhancer {
             if rule.keywords.is_empty() {
                 continue;
             }
-            self.apply_rule(entity, rule, ctx);
+            if let Some(boost) = self.apply_rule(entity_index, entity, rule, ctx) {
+                boosts.push(boost);
+            }
         }
     }
 
     fn apply_rule<M: TextBacked>(
         &self,
+        entity_index: usize,
         entity: &mut Entity<M>,
         rule: &BoostRule,
         ctx: &Context<'_>,
-    ) {
+    ) -> Option<Boost> {
         // The entity is still chunk-local here; its location spans a byte
         // range of `ctx.text` (the chunk payload).
-        let span = M::span(&entity.location);
-        let start = span.start;
-        let end = span.end;
+        let Range { start, end } = M::span(&entity.location);
 
         // Prefer the token stream when the producer reached this
         // entity. Fall back to the word-segmented substring window
@@ -181,38 +202,66 @@ impl Enhancer {
             (snippet, token_slice)
         };
 
-        let matched = if self
+        // Window first; the hint path reports *which* hint fired so the
+        // caller can record its location.
+        let (source, hint_index) = if self
             .matcher
             .any_match(snippet, tokens_in_window, &rule.keywords)
         {
-            (EVENT_SOURCE_WINDOW, false)
-        } else if ctx
+            (EVENT_SOURCE_WINDOW, None)
+        } else if let Some(i) = ctx
             .hints
             .iter()
-            .any(|h| self.matcher.any_match(h, &[], &rule.keywords))
+            .position(|h| self.matcher.any_match(h, &[], &rule.keywords))
         {
-            (EVENT_SOURCE_HINT, true)
+            (EVENT_SOURCE_HINT, Some(i))
         } else {
-            return;
+            return None;
         };
-        let (source, in_hint) = matched;
 
         let before = entity.confidence;
         let after = before.saturating_add(rule.boost.get());
         if after == before {
-            return;
+            return None;
         }
         entity.confidence = after;
 
-        // Record the rule's first keyword as the representative match;
-        // the matcher reports "any keyword fired", not which one.
+        // The rule's first keyword stands in for the match — the matcher
+        // reports "any keyword fired", not which one.
         let keyword = rule.keywords.first().cloned().unwrap_or_default();
-        entity.provenance.record(
-            Event::refinement(source, before, after, keyword, in_hint).with_reason(format!(
-                "context keyword near `{}` (+{:.3})",
-                entity.label.as_str(),
-                rule.boost.get(),
-            )),
-        );
+        Some(Boost {
+            entity_index,
+            source,
+            before,
+            after,
+            keyword,
+            hint_index,
+            amount: rule.boost.get(),
+        })
     }
+}
+
+/// One confidence lift the enhancer applied, for the caller to record in
+/// provenance. Modality-free: the matched hint is referenced by *index*
+/// into the context hints, so the caller (which holds the located hints)
+/// can attach the hint's location.
+#[derive(Debug, Clone)]
+pub struct Boost {
+    /// Index of the entity that was lifted, into the slice passed to
+    /// [`Enhancer::enhance`].
+    pub entity_index: usize,
+    /// Event source tag (`"context"` for a window match, `"context-hint"`
+    /// for a hint match).
+    pub source: &'static str,
+    /// Confidence before the lift.
+    pub before: Confidence,
+    /// Confidence after the lift.
+    pub after: Confidence,
+    /// Representative keyword (the rule's first).
+    pub keyword: HipStr<'static>,
+    /// Index of the matched hint into the context hints, or `None` for an
+    /// in-text-window match.
+    pub hint_index: Option<usize>,
+    /// The boost amount applied, as a bare `f32` (for the reason string).
+    pub amount: f32,
 }

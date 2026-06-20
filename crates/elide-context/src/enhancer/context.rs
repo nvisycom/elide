@@ -25,12 +25,16 @@ pub struct Context<'a> {
     /// Per-call language hint. `None` means "unknown", so every
     /// per-language rule applies as a permissive fallback.
     pub language: Option<&'a LanguageTag>,
-    /// Out-of-band context strings (CSV column headers, JSON
-    /// object keys, log field names) the caller wants treated as
-    /// in-context. Each hint is fed to the matcher as its own
-    /// one-string window; a hit boosts the entity exactly as an
-    /// in-text keyword would.
-    pub hints: &'a [String],
+    /// Out-of-band context hint *texts* (CSV column headers, JSON object
+    /// keys, log field names) the caller wants treated as in-context. Each
+    /// hint is fed to the matcher as its own one-string window; a hit
+    /// boosts the entity exactly as an in-text keyword would.
+    ///
+    /// Texts only — the located [`Hint`] each came from is the caller's,
+    /// reattached by index when the boost is recorded.
+    ///
+    /// [`Hint`]: elide_core::modality::Hint
+    pub hints: &'a [&'a str],
 }
 
 impl<'a> Context<'a> {
@@ -59,9 +63,10 @@ impl<'a> Context<'a> {
         self
     }
 
-    /// Attach out-of-band hint strings.
+    /// Attach out-of-band hint texts (by index, the caller's located
+    /// hints).
     #[must_use]
-    pub fn with_hints(mut self, hints: &'a [String]) -> Self {
+    pub fn with_hints(mut self, hints: &'a [&'a str]) -> Self {
         self.hints = hints;
         self
     }

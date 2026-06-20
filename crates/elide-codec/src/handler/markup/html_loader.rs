@@ -9,9 +9,12 @@
 //! [`script_policy`]: HtmlLoader::script_policy
 //! [`style_policy`]: HtmlLoader::style_policy
 
-use ego_tree::NodeRef;
+use std::collections::HashMap;
+
+use ego_tree::{NodeId, NodeRef};
 use elide_core::Result;
-use elide_core::modality::text::Text;
+use elide_core::modality::Hint;
+use elide_core::modality::text::{Text, TextData, TextLocation};
 use scraper::Html;
 use scraper::node::Node;
 
@@ -64,25 +67,39 @@ fn build_items(dom: &Html, loader: &HtmlLoader) -> Vec<HtmlItem> {
     let mut comment_index: usize = 0;
     let mut element_index: usize = 0;
 
+    // The engine assigns each item a cumulative-offset span (see
+    // `compute_item_starts`): item `n` spans `[offset, offset + value.len())`
+    // where `offset` is the summed length of all prior items. We mirror that
+    // running offset here so we can record, per text node, the engine-space
+    // span its value occupies — the coordinate a sibling hint resolves to.
+    let mut offset: usize = 0;
+    let mut text_node_spans: HashMap<NodeId, TextLocation> = HashMap::new();
+
     for node in dom.tree.nodes() {
         match node.value() {
             Node::Text(t) => {
                 if !skip_text_under(node) {
-                    let hints = sibling_text_hint(node, &t.text);
+                    let len = t.text.len();
+                    text_node_spans.insert(node.id(), TextLocation::new(offset, offset + len));
                     items.push(HtmlItem {
                         address: HtmlAddress::TextNode { index: text_index },
                         value: t.text.to_string(),
-                        hints,
+                        // Filled in a second pass, once every text node's
+                        // span is known (a sibling may sit after this node).
+                        hints: Vec::new(),
                     });
+                    offset += len;
                 }
                 text_index += 1;
             }
             Node::Comment(c) => {
+                let value = c.comment.to_string();
+                offset += value.len();
                 items.push(HtmlItem {
                     address: HtmlAddress::Comment {
                         index: comment_index,
                     },
-                    value: c.comment.to_string(),
+                    value,
                     hints: Vec::new(),
                 });
                 comment_index += 1;
@@ -94,6 +111,8 @@ fn build_items(dom: &Html, loader: &HtmlLoader) -> Vec<HtmlItem> {
                 // verbatim: URLs like `mailto:alice@x.com` have the email
                 // matched in place by the recognizer.
                 for (qn, val) in &e.attrs {
+                    let value = val.to_string();
+                    offset += value.len();
                     items.push(HtmlItem {
                         address: HtmlAddress::Element {
                             element_index,
@@ -101,7 +120,7 @@ fn build_items(dom: &Html, loader: &HtmlLoader) -> Vec<HtmlItem> {
                                 attr_name: qn.local.as_ref().to_owned(),
                             },
                         },
-                        value: val.to_string(),
+                        value,
                         hints: Vec::new(),
                     });
                 }
@@ -115,6 +134,7 @@ fn build_items(dom: &Html, loader: &HtmlLoader) -> Vec<HtmlItem> {
                 if let Some(ScriptPolicy::ScanText) = policy
                     && let Some(body) = first_child_text(node)
                 {
+                    offset += body.len();
                     items.push(HtmlItem {
                         address: HtmlAddress::Element {
                             element_index,
@@ -131,41 +151,75 @@ fn build_items(dom: &Html, loader: &HtmlLoader) -> Vec<HtmlItem> {
         }
     }
 
+    attach_sibling_hints(dom, &mut items, &text_node_spans);
     items
 }
 
-/// Collect the surrounding-text content of the text node's nearest
-/// block-level ancestor as a single hint string.
+/// Second pass: give each text-node item one located hint per *other* text
+/// node under its nearest block-level ancestor.
 ///
-/// Surfaces the surrounding sentence as an out-of-band hint when a text
-/// node sits inside an inline wrapper (`<code>4111…</code>`) that splits
-/// the prose into multiple chunks. The walk targets the nearest *block*
-/// ancestor; stopping at the immediate inline parent would yield only the
-/// chunk's own text. `own_text` is excluded so the hint doesn't echo the
-/// node's own bytes.
-fn sibling_text_hint(text_node: NodeRef<'_, Node>, own_text: &str) -> Vec<String> {
+/// Surfaces the surrounding prose as out-of-band hints when a text node
+/// sits inside an inline wrapper (`<code>4111…</code>`) that splits the
+/// sentence into multiple chunks. Each sibling becomes its own
+/// [`Hint<Text>`] located at the sibling's engine-space span — the same
+/// coordinate the sibling's own chunk carries — so a boost can point back
+/// at exactly which neighbour fired it. The node's own text is excluded so
+/// a hint never echoes the chunk's own bytes.
+fn attach_sibling_hints(
+    dom: &Html,
+    items: &mut [HtmlItem],
+    spans: &HashMap<NodeId, TextLocation>,
+) {
+    // Walk text nodes in the same document order the items were pushed; the
+    // i-th text-node item lines up with the i-th non-skipped text node.
+    let mut item_idx = 0;
+    for node in dom.tree.nodes() {
+        let Node::Text(_) = node.value() else {
+            continue;
+        };
+        if skip_text_under(node) {
+            continue;
+        }
+        // Advance to the matching text-node item, skipping non-text items.
+        while !matches!(items[item_idx].address, HtmlAddress::TextNode { .. }) {
+            item_idx += 1;
+        }
+        items[item_idx].hints = sibling_text_hints(node, spans);
+        item_idx += 1;
+    }
+}
+
+/// One located hint per *other* text node under `text_node`'s nearest
+/// block-level ancestor. Empty when there's no block ancestor or no other
+/// text. The walk targets the nearest *block* ancestor; stopping at the
+/// immediate inline parent would yield only the chunk's own text.
+fn sibling_text_hints(
+    text_node: NodeRef<'_, Node>,
+    spans: &HashMap<NodeId, TextLocation>,
+) -> Vec<Hint<Text>> {
     let Some(ancestor) = nearest_block_ancestor(text_node) else {
         return Vec::new();
     };
-    let mut buf = String::new();
+    let mut hints = Vec::new();
     for descendant in ancestor.descendants() {
-        if let Node::Text(t) = descendant.value() {
-            let chunk = t.text.as_ref();
-            if chunk == own_text {
-                continue;
-            }
-            if !buf.is_empty() {
-                buf.push(' ');
-            }
-            buf.push_str(chunk);
+        if descendant.id() == text_node.id() {
+            continue;
         }
+        let Node::Text(t) = descendant.value() else {
+            continue;
+        };
+        let trimmed = t.text.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        // A sibling with no recorded span was skipped (e.g. script/style
+        // body); skip it as a hint too rather than fabricate a location.
+        let Some(location) = spans.get(&descendant.id()) else {
+            continue;
+        };
+        hints.push(Hint::new(location.clone(), TextData::new(trimmed.to_owned())));
     }
-    let trimmed = buf.trim();
-    if trimmed.is_empty() {
-        Vec::new()
-    } else {
-        vec![trimmed.to_owned()]
-    }
+    hints
 }
 
 /// Walk parents until we hit a block-level element (or root).

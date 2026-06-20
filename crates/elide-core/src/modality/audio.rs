@@ -14,8 +14,12 @@ use super::{Modality, ModalityData, ModalityLocation, ModalityReplacement};
 /// Carries the encoded audio bytes; an optional filename aids diagnostics
 /// and encoding inference (the container format a decoder should expect).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct AudioData {
-    /// Encoded audio bytes.
+    /// Encoded audio bytes. Skipped by serde: the bytes are the raw payload,
+    /// not metadata, and a serialized report has no need to carry the audio
+    /// stream.
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub bytes: Bytes,
     /// Original filename, when known.
     pub filename: Option<HipStr<'static>>,

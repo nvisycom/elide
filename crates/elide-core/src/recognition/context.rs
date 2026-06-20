@@ -4,7 +4,7 @@
 
 use uuid::Uuid;
 
-use crate::modality::Modality;
+use crate::modality::{Hint, Modality};
 use crate::primitive::{CountryCode, Language, LanguageTag, Languages};
 use crate::recognition::annotation::{Exclusion, Inclusion};
 use crate::recognition::{Artifacts, Scope};
@@ -42,11 +42,13 @@ pub struct RecognizerContext<'a, M: Modality> {
     /// [`primary_language`]: Self::primary_language
     /// [`ranked_languages`]: Self::ranked_languages
     detected_languages: Languages,
-    /// Out-of-band context strings to treat as in-context for confidence
+    /// Out-of-band located [`Hint`]s to treat as in-context for confidence
     /// boosting (e.g. a CSV column header, a JSON object key). A codec
     /// surfaces these per chunk; recognizers that run a context enhancer
     /// feed them to the enhancer, the rest ignore them.
-    pub context_hints: Vec<String>,
+    ///
+    /// [`Hint`]: crate::modality::Hint
+    pub context_hints: Vec<Hint<M>>,
 }
 
 impl<'a, M: Modality> RecognizerContext<'a, M> {
@@ -61,10 +63,12 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
         }
     }
 
-    /// Attach payload-local context hint strings (column headers, JSON
-    /// keys, …) the enhancer should treat as in-context.
+    /// Attach payload-local context [`Hint`]s (column headers, JSON keys,
+    /// …) the enhancer should treat as in-context.
+    ///
+    /// [`Hint`]: crate::modality::Hint
     #[must_use]
-    pub fn with_context_hints(mut self, hints: Vec<String>) -> Self {
+    pub fn with_context_hints(mut self, hints: Vec<Hint<M>>) -> Self {
         self.context_hints = hints;
         self
     }
