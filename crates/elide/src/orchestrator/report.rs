@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 
-use crate::codec::UntypedDocumentHandle;
+use crate::codec::{PartId, UntypedDocumentHandle};
 
 /// A type-erased, downcastable group of entities (a `Vec<Entity<M>>`).
 ///
@@ -88,8 +88,8 @@ pub struct Report {
     /// The body's entities keyed by their modality's `TypeId`. A document
     /// has exactly one body modality, so this holds at most one entry.
     pub(super) body: Option<(TypeId, Box<dyn EntityGroup>)>,
-    /// Each container part's entry, keyed by part id (a zip entry name).
-    pub(super) parts: HashMap<String, PartReport>,
+    /// Each container part's entry, keyed by its [`PartId`].
+    pub(super) parts: HashMap<PartId, PartReport>,
 }
 
 impl Report {
@@ -111,10 +111,10 @@ impl Report {
         boxed.as_any_mut().downcast_mut::<Vec<Entity<M>>>()
     }
 
-    /// The entities of the container part named `id`, as modality `P`, for
-    /// inspection or editing. Returns `None` for an unknown part or a
-    /// modality mismatch.
-    pub fn part_entities<P: Modality>(&mut self, id: &str) -> Option<&mut Vec<Entity<P>>> {
+    /// The entities of the container part identified by `id`, as modality
+    /// `P`, for inspection or editing. Returns `None` for an unknown part or
+    /// a modality mismatch.
+    pub fn part_entities<P: Modality>(&mut self, id: &PartId) -> Option<&mut Vec<Entity<P>>> {
         let part = self.parts.get_mut(id)?;
         if part.modality != TypeId::of::<P>() {
             return None;
@@ -122,10 +122,11 @@ impl Report {
         part.entities.as_any_mut().downcast_mut::<Vec<Entity<P>>>()
     }
 
-    /// The ids of the container parts the report carries, paired with each
-    /// part's modality `TypeId` — for a caller enumerating what's editable.
-    pub fn part_ids(&self) -> impl Iterator<Item = (&str, TypeId)> {
-        self.parts.iter().map(|(id, p)| (id.as_str(), p.modality))
+    /// The [`PartId`]s of the container parts the report carries, paired
+    /// with each part's modality `TypeId` — for a caller enumerating what's
+    /// editable.
+    pub fn part_ids(&self) -> impl Iterator<Item = (&PartId, TypeId)> {
+        self.parts.iter().map(|(id, p)| (id, p.modality))
     }
 }
 

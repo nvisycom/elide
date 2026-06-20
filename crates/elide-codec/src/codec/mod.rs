@@ -26,7 +26,7 @@ pub(crate) mod loader;
 mod registry;
 
 pub use self::capability::Handler;
-pub use self::container::Container;
+pub use self::container::{Container, PartId};
 #[cfg(feature = "internal_document")]
 pub use self::container::Part;
 pub use self::document::{DocumentHandle, UntypedDocumentHandle};

@@ -9,7 +9,7 @@ pub mod handler;
 #[cfg(feature = "internal_document")]
 pub use self::codec::Part;
 pub use self::codec::{
-    Container, DocumentHandle, Format, FormatId, FormatRegistry, Handler, Loader,
+    Container, DocumentHandle, Format, FormatId, FormatRegistry, Handler, Loader, PartId,
     UntypedDocumentHandle,
 };
 

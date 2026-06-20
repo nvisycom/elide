@@ -19,6 +19,7 @@ use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
 
 use super::DocxLoader;
+use crate::codec::{Container, Part, PartId};
 use crate::content::ContentData;
 use crate::handler::extract::{Encoder, ExtractHandler};
 use crate::handler::markup::{XmlItem, XmlSpan, xml_splice};
@@ -110,13 +111,13 @@ impl Encoder for DocxEncoder {
         Ok(ContentData::new(Bytes::from(cursor.into_inner())))
     }
 
-    fn as_container_mut(&mut self) -> Option<&mut dyn crate::codec::Container> {
+    fn as_container_mut(&mut self) -> Option<&mut dyn Container> {
         Some(self)
     }
 }
 
-impl crate::codec::Container for DocxEncoder {
-    fn parts(&self) -> Vec<crate::codec::Part> {
+impl Container for DocxEncoder {
+    fn parts(&self) -> Vec<Part> {
         let Ok(mut zip) = ZipArchive::new(Cursor::new(self.archive.as_ref())) else {
             return Vec::new();
         };
@@ -137,8 +138,8 @@ impl crate::codec::Container for DocxEncoder {
                 .rsplit_once('.')
                 .map(|(_, e)| e.to_owned())
                 .unwrap_or_default();
-            parts.push(crate::codec::Part {
-                id: name,
+            parts.push(Part {
+                id: name.into(),
                 bytes: Bytes::from(buf),
                 hint,
             });
@@ -146,14 +147,14 @@ impl crate::codec::Container for DocxEncoder {
         parts
     }
 
-    fn replace_part(&mut self, id: &str, bytes: Bytes) -> Result<()> {
-        if !id.starts_with(MEDIA_PREFIX) {
+    fn replace_part(&mut self, id: &PartId, bytes: Bytes) -> Result<()> {
+        if !id.as_str().starts_with(MEDIA_PREFIX) {
             return Err(Error::new(
                 ErrorKind::Validation,
                 format!("docx replace_part: `{id}` is not a media part"),
             ));
         }
-        self.replacements.insert(id.to_owned(), bytes);
+        self.replacements.insert(id.as_str().to_owned(), bytes);
         Ok(())
     }
 }

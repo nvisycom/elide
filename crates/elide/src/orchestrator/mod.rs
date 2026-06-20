@@ -45,7 +45,7 @@ use elide_core::recognition::Scope;
 
 use self::pipeline::{AnalyzeOutcome, ErasedPipeline, ModalityPipeline};
 use self::report::PartReport;
-use crate::codec::{DocumentHandle, FormatRegistry};
+use crate::codec::{DocumentHandle, FormatRegistry, PartId};
 use crate::{Analyzer, Anonymizer};
 
 pub use self::report::Report;
@@ -211,7 +211,7 @@ impl<'r> Orchestrator<'r> {
 
         // The parts: re-drive each retained handle with its edited
         // entities, then write the redacted bytes back into the container.
-        let mut redactions: Vec<(String, Bytes)> = Vec::new();
+        let mut redactions: Vec<(PartId, Bytes)> = Vec::new();
         for (id, part) in parts {
             let Some(pipeline) = self.pipelines.get(&part.modality) else {
                 continue; // pipeline for this modality is gone
