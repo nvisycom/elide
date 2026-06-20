@@ -7,6 +7,6 @@ mod io;
 pub mod matching;
 mod rule;
 
-pub use self::enhancer::{Context, Enhancer};
+pub use self::enhancer::{Boost, Context, Enhancer};
 pub use self::io::{ContextEnhanced, Token, Tokens};
 pub use self::rule::{BoostRule, DEFAULT_BOOST, DEFAULT_PREFIX_WORDS, DEFAULT_SUFFIX_WORDS};

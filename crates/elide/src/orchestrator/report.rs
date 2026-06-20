@@ -196,7 +196,7 @@ mod tests {
         assert_eq!(value["parts"].as_object().unwrap().len(), 0);
 
         // No body pipeline ran → body is null.
-        let empty = serde_json::to_value(&Report::new()).unwrap();
+        let empty = serde_json::to_value(Report::new()).unwrap();
         assert!(empty["body"].is_null());
     }
 }
