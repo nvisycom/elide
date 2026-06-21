@@ -8,6 +8,7 @@ use hipstr::HipStr;
 use serde::{Deserialize, Serialize};
 
 use super::{Modality, ModalityData, ModalityLocation, ModalityReplacement};
+use crate::primitive::TimeSpan;
 
 /// Per-call payload a recognizer inspects for the [`Audio`] modality.
 ///
@@ -54,22 +55,18 @@ impl AudioData {
 
 impl ModalityData for AudioData {}
 
-/// Half-open `[start, end)` time range within audio content, in
-/// milliseconds from the start of the stream.
+/// A [`TimeSpan`] within audio content, with an optional speaker label.
 ///
-/// Ordering and overlap consider only the time range. The optional
-/// [`speaker_id`](Self::speaker_id) is a diarization label, not a
-/// coordinate: two utterances from different speakers at the same instant
-/// still overlap in time, so the speaker is carried for provenance but
-/// excluded from comparison.
+/// The time span is the coordinate; ordering and overlap consider only it.
+/// The optional [`speaker_id`](Self::speaker_id) is a diarization label,
+/// not a coordinate: two utterances from different speakers at the same
+/// instant still overlap in time, so the speaker is carried for provenance
+/// but excluded from comparison.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct AudioLocation {
-    /// Milliseconds from the start of the stream where the range begins.
-    pub start_ms: u64,
-    /// Milliseconds from the start of the stream where the range ends
-    /// (exclusive).
-    pub end_ms: u64,
+    /// Time span the location covers, in the stream's timeline.
+    pub span: TimeSpan,
     /// Diarization label of the speaker, when a diarizer assigned one.
     #[cfg_attr(
         feature = "serde",
@@ -79,13 +76,18 @@ pub struct AudioLocation {
 }
 
 impl AudioLocation {
-    /// Location covering `start_ms..end_ms`, speaker unset.
-    pub fn new(start_ms: u64, end_ms: u64) -> Self {
+    /// Location covering `span`, speaker unset.
+    pub fn new(span: TimeSpan) -> Self {
         Self {
-            start_ms,
-            end_ms,
+            span,
             speaker_id: None,
         }
+    }
+
+    /// Location covering `[start_ms, end_ms)` in milliseconds, speaker
+    /// unset.
+    pub fn from_millis(start_ms: u64, end_ms: u64) -> Self {
+        Self::new(TimeSpan::from_millis(start_ms, end_ms))
     }
 
     /// Attach a diarization speaker label.
@@ -95,35 +97,28 @@ impl AudioLocation {
         self
     }
 
-    /// Duration of the range in milliseconds (`end_ms - start_ms`).
-    pub fn duration_ms(&self) -> u64 {
-        self.end_ms.saturating_sub(self.start_ms)
-    }
-
-    /// Whether the range is empty (zero duration).
+    /// Whether the location's span is empty (zero duration).
     pub fn is_empty(&self) -> bool {
-        self.duration_ms() == 0
+        self.span.is_empty()
     }
 }
 
 impl ModalityLocation for AudioLocation {
     fn overlaps(&self, other: &Self) -> bool {
-        // Time-range intersection; the speaker label is ignored, so two
+        // Time-span intersection; the speaker label is ignored, so two
         // speakers talking over each other still overlap.
-        self.start_ms < other.end_ms && other.start_ms < self.end_ms
+        self.span.overlaps(&other.span)
     }
 
     fn span_cmp(&self, other: &Self) -> Ordering {
         // By duration: the longer utterance is the more specific match.
-        self.duration_ms().cmp(&other.duration_ms())
+        self.span.duration_cmp(&other.span)
     }
 
     fn position_cmp(&self, other: &Self) -> Ordering {
         // Playback order: by start, then by end so a shorter span at the
         // same start sorts before a longer one.
-        self.start_ms
-            .cmp(&other.start_ms)
-            .then(self.end_ms.cmp(&other.end_ms))
+        self.span.position_cmp(&other.span)
     }
 }
 
@@ -161,38 +156,38 @@ mod tests {
 
     #[test]
     fn overlaps_is_time_range_intersection() {
-        let a = AudioLocation::new(0, 1000);
-        let b = AudioLocation::new(500, 1500);
+        let a = AudioLocation::from_millis(0, 1000);
+        let b = AudioLocation::from_millis(500, 1500);
         assert!(a.overlaps(&b));
         // Touching but disjoint ranges do not overlap.
-        let c = AudioLocation::new(1000, 2000);
+        let c = AudioLocation::from_millis(1000, 2000);
         assert!(!a.overlaps(&c));
     }
 
     #[test]
     fn overlaps_ignores_speaker() {
-        let a = AudioLocation::new(0, 1000).with_speaker_id("spk_0");
-        let b = AudioLocation::new(500, 1500).with_speaker_id("spk_1");
+        let a = AudioLocation::from_millis(0, 1000).with_speaker_id("spk_0");
+        let b = AudioLocation::from_millis(500, 1500).with_speaker_id("spk_1");
         // Different speakers talking over each other still overlap.
         assert!(a.overlaps(&b));
     }
 
     #[test]
     fn span_cmp_orders_by_duration() {
-        let short = AudioLocation::new(0, 200);
-        let long = AudioLocation::new(0, 1000);
+        let short = AudioLocation::from_millis(0, 200);
+        let long = AudioLocation::from_millis(0, 1000);
         assert_eq!(short.span_cmp(&long), Ordering::Less);
     }
 
     #[test]
     fn position_cmp_is_playback_order() {
-        let early = AudioLocation::new(0, 5000);
-        let late = AudioLocation::new(1000, 2000);
+        let early = AudioLocation::from_millis(0, 5000);
+        let late = AudioLocation::from_millis(1000, 2000);
         // Earlier start sorts first even though it is the longer span.
         assert_eq!(early.position_cmp(&late), Ordering::Less);
         // Same start: shorter end sorts first.
-        let a = AudioLocation::new(1000, 1500);
-        let b = AudioLocation::new(1000, 3000);
+        let a = AudioLocation::from_millis(1000, 1500);
+        let b = AudioLocation::from_millis(1000, 3000);
         assert_eq!(a.position_cmp(&b), Ordering::Less);
     }
 

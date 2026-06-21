@@ -58,7 +58,7 @@ impl Handler<Audio> for Mp3Handler {
         let total_ms = duration_ms(&self.bytes)?;
         self.yielded = true;
         Ok(Some(Chunk {
-            location: AudioLocation::new(0, total_ms),
+            location: AudioLocation::from_millis(0, total_ms),
             data: AudioData::new(self.bytes.clone()),
             hints: Vec::new(),
         }))
@@ -86,8 +86,7 @@ impl DataWriter<Audio> for Mp3Handler {
         for (location, replacement) in redactions.iter().rev() {
             redact::apply(
                 &mut decoded.samples,
-                location.start_ms,
-                location.end_ms,
+                location.span,
                 replacement,
                 decoded.sample_rate,
                 decoded.channels,
@@ -124,8 +123,11 @@ mod tests {
     async fn stream_reports_a_duration() {
         let mut h = Mp3Handler::new(tone_mp3());
         let chunk = h.read_next().await.unwrap().expect("one chunk");
-        assert_eq!(chunk.location.start_ms, 0);
-        assert!(chunk.location.end_ms > 0, "duration should be positive");
+        assert_eq!(chunk.location.span.start_millis(), 0);
+        assert!(
+            chunk.location.span.end_millis() > 0,
+            "duration should be positive"
+        );
         assert!(h.read_next().await.unwrap().is_none());
     }
 
@@ -133,7 +135,10 @@ mod tests {
     async fn silence_redaction_reencodes_to_valid_mp3() {
         let mut h = Mp3Handler::new(tone_mp3());
         let mut batch: Redactions<Audio> = Redactions::new();
-        batch.push(AudioLocation::new(100, 200), AudioReplacement::Silenced);
+        batch.push(
+            AudioLocation::from_millis(100, 200),
+            AudioReplacement::Silenced,
+        );
         h.write_at(batch).await.unwrap();
 
         // The re-encoded clip still decodes, and the silenced span reads

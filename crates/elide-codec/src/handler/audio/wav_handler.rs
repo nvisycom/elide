@@ -61,7 +61,7 @@ impl Handler<Audio> for WavHandler {
         let duration_ms = probe_duration_ms(&self.bytes, "wav")?;
         self.yielded = true;
         Ok(Some(Chunk {
-            location: AudioLocation::new(0, duration_ms),
+            location: AudioLocation::from_millis(0, duration_ms),
             data: AudioData::new(self.bytes.clone()),
             hints: Vec::new(),
         }))
@@ -121,8 +121,7 @@ impl WavHandler {
         for (location, replacement) in redactions.iter().rev() {
             redact::apply(
                 &mut samples,
-                location.start_ms,
-                location.end_ms,
+                location.span,
                 replacement,
                 spec.sample_rate,
                 spec.channels,
@@ -184,8 +183,8 @@ mod tests {
     async fn stream_reports_one_second() {
         let mut h = WavHandler::new(ramp_wav());
         let chunk = h.read_next().await.unwrap().expect("one chunk");
-        assert_eq!(chunk.location.start_ms, 0);
-        assert_eq!(chunk.location.end_ms, 1_000);
+        assert_eq!(chunk.location.span.start_millis(), 0);
+        assert_eq!(chunk.location.span.end_millis(), 1_000);
         assert!(h.read_next().await.unwrap().is_none());
     }
 
@@ -193,7 +192,10 @@ mod tests {
     async fn silence_zeroes_a_span_and_preserves_length() {
         let mut h = WavHandler::new(ramp_wav());
         let mut batch: Redactions<Audio> = Redactions::new();
-        batch.push(AudioLocation::new(100, 200), AudioReplacement::Silenced);
+        batch.push(
+            AudioLocation::from_millis(100, 200),
+            AudioReplacement::Silenced,
+        );
         h.write_at(batch).await.unwrap();
 
         // Re-read: the clip is still 1s and samples in 100..200ms are zero.
@@ -210,7 +212,10 @@ mod tests {
     async fn remove_shortens_the_clip() {
         let mut h = WavHandler::new(ramp_wav());
         let mut batch: Redactions<Audio> = Redactions::new();
-        batch.push(AudioLocation::new(0, 500), AudioReplacement::Removed);
+        batch.push(
+            AudioLocation::from_millis(0, 500),
+            AudioReplacement::Removed,
+        );
         h.write_at(batch).await.unwrap();
 
         let out = h.encode().unwrap();
