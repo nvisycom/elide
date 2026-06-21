@@ -13,7 +13,7 @@ use hipstr::HipStr;
 use serde::{Deserialize, Serialize};
 
 use super::text::{TextData, TextReplacement};
-use super::text_backed::TextBacked;
+use super::text_backed::{TextBacked, TextRecognizable};
 use super::{Modality, ModalityLocation};
 
 /// Cell-addressed location within tabular content.
@@ -184,13 +184,19 @@ impl Modality for Tabular {
     const NAME: &'static str = "tabular";
 }
 
-impl TextBacked for Tabular {
-    fn locate(range: Range<usize>) -> TabularLocation {
+impl TextRecognizable for Tabular {
+    fn as_text(data: &TextData) -> &str {
+        data.text.as_str()
+    }
+
+    fn locate(range: Range<usize>, _data: &TextData) -> TabularLocation {
         // Chunk-local: only the intra-cell byte range is known here; the
         // codec's lift fills the row/column from the chunk.
         TabularLocation::new(0, 0).with_range(range.start, range.end)
     }
+}
 
+impl TextBacked for Tabular {
     fn span(location: &TabularLocation) -> Range<usize> {
         location.start_offset.unwrap_or(0)..location.end_offset.unwrap_or(0)
     }

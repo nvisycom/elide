@@ -3,9 +3,8 @@
 //!
 //! [`SttBackend`]: super::SttBackend
 
-use uuid::Uuid;
-
 use elide_core::primitive::LanguageTag;
+use uuid::Uuid;
 
 /// One per-call STT request handed to an [`SttBackend`].
 ///

@@ -6,7 +6,7 @@ use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::image::{Image, ImageData, ImageLocation};
 use elide_core::primitive::{Confidence, UnitBoundingBox};
 
-use super::{LlmModality, DEFAULT_CONFIDENCE};
+use super::{DEFAULT_CONFIDENCE, LlmModality};
 use crate::candidates::{Candidates, ImageCandidate};
 
 impl LlmModality for Image {

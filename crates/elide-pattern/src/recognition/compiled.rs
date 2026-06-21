@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use elide_core::entity::provenance::{Event, PatternEvent};
 use elide_core::entity::{Entity, LabelRef};
-use elide_core::modality::TextBacked;
+use elide_core::modality::TextRecognizable;
 use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
 use regex::Regex;
 
@@ -54,8 +54,13 @@ impl CompiledPattern {
     /// Emit an `Entity<M>` for a regex match at `[start, end)` in
     /// chunk-local byte coordinates. The recognizer phase lifts the
     /// location to absolute document coordinates after dispatch.
-    pub(super) fn build_entity<M: TextBacked>(&self, start: usize, end: usize) -> Entity<M> {
-        let location = M::locate(start..end);
+    pub(super) fn build_entity<M: TextRecognizable>(
+        &self,
+        start: usize,
+        end: usize,
+        data: &M::Data,
+    ) -> Entity<M> {
+        let location = M::locate(start..end, data);
         let event = Event::pattern(
             "pattern",
             self.score,
@@ -113,13 +118,14 @@ impl CompiledDictionary {
     /// in chunk-local byte coordinates. `score` is the per-term
     /// confidence resolved at recognizer-build time (the dictionary's
     /// `scoring` policy or per-term override).
-    pub(super) fn build_entity<M: TextBacked>(
+    pub(super) fn build_entity<M: TextRecognizable>(
         &self,
         score: Confidence,
         start: usize,
         end: usize,
+        data: &M::Data,
     ) -> Entity<M> {
-        let location = M::locate(start..end);
+        let location = M::locate(start..end, data);
         let event = Event::pattern(
             "pattern",
             score,

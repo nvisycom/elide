@@ -6,8 +6,8 @@ use elide_core::entity::{Entity, EntityCoRef, LabelRef};
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::primitive::Confidence;
 
-use super::localize::{localize_all, UnresolvedCandidatePolicy};
-use super::{LlmModality, DEFAULT_CONFIDENCE};
+use super::localize::{UnresolvedCandidatePolicy, localize_all};
+use super::{DEFAULT_CONFIDENCE, LlmModality};
 use crate::candidates::{Candidates, TextCandidate};
 
 impl LlmModality for Text {

@@ -20,13 +20,12 @@ pub mod rig;
 
 use elide_core::Result;
 
-pub use crate::modality::LlmModality;
-
+pub use self::llm_request::LlmRequest;
+pub use self::llm_response::LlmResponse;
 #[cfg(any(test, feature = "mock"))]
 #[cfg_attr(docsrs, doc(cfg(feature = "mock")))]
 pub use self::mock_backend::MockBackend;
-pub use self::llm_request::LlmRequest;
-pub use self::llm_response::LlmResponse;
+pub use crate::modality::LlmModality;
 
 /// Per-call LLM backend for modality `M`.
 ///

@@ -26,6 +26,7 @@
 //! [`NerRecognizer`]: elide::recognition::ner::NerRecognizer
 //! [`LlmRecognizer`]: elide::recognition::llm::LlmRecognizer
 
+use elide::codec::FormatRegistry;
 use elide::deduplication::filter::FilterLayer;
 use elide::deduplication::fuse::{FuseLayer, MaxConfidence};
 use elide::deduplication::resolve::{HighestConfidence, ResolveLayer};
@@ -38,7 +39,6 @@ use elide::recognition::ner::NerRecognizer;
 use elide::recognition::pattern::PatternRecognizer;
 use elide::redaction::operators::{Erase, Keep, Mask, Replace};
 use elide::{Analyzer, Anonymizer, Result};
-use elide::codec::FormatRegistry;
 
 /// Sample document baked into the binary so the example is self-contained.
 const SAMPLE: &str = include_str!("data/sample.txt");

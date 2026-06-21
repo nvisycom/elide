@@ -34,10 +34,6 @@ pub use self::threshold::ConfidenceThreshold;
 pub struct Confidence(f32);
 
 impl Confidence {
-    /// Maximum score, `1.0`; full confidence.
-    pub const MAX: Self = Self(1.0);
-    /// Minimum score, `0.0`; no confidence.
-    pub const MIN: Self = Self(0.0);
     /// Sensible default score, `0.35`.
     ///
     /// The score to assign a detection that carries none of its own (e.g. a
@@ -48,6 +44,10 @@ impl Confidence {
     ///
     /// [`ConfidenceThreshold::BASELINE`]: super::ConfidenceThreshold::BASELINE
     pub const BASELINE: Self = Self(0.35);
+    /// Maximum score, `1.0`; full confidence.
+    pub const MAX: Self = Self(1.0);
+    /// Minimum score, `0.0`; no confidence.
+    pub const MIN: Self = Self(0.0);
 
     /// Construct a score, returning [`None`] if the value is outside
     /// `0.0..=1.0` or not finite.

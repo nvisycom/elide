@@ -9,9 +9,8 @@
 //! [`SttBackend`]: super::SttBackend
 //! [`AudioLocation`]: elide_core::modality::audio::AudioLocation
 
-use hipstr::HipStr;
-
 use elide_core::primitive::{Confidence, LanguageTag, TimeSpan};
+use hipstr::HipStr;
 
 /// One transcription segment from an [`SttBackend`].
 ///

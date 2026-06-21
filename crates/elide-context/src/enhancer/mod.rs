@@ -4,11 +4,10 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
-use hipstr::HipStr;
-
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::TextBacked;
 use elide_core::primitive::Confidence;
+use hipstr::HipStr;
 
 use crate::io::Token;
 use crate::matching::KeywordMatcher;
@@ -204,20 +203,21 @@ impl Enhancer {
 
         // Window first; the hint path reports *which* hint fired so the
         // caller can record its location.
-        let (source, hint_index) = if self
-            .matcher
-            .any_match(snippet, tokens_in_window, &rule.keywords)
-        {
-            (EVENT_SOURCE_WINDOW, None)
-        } else if let Some(i) = ctx
-            .hints
-            .iter()
-            .position(|h| self.matcher.any_match(h, &[], &rule.keywords))
-        {
-            (EVENT_SOURCE_HINT, Some(i))
-        } else {
-            return None;
-        };
+        let (source, hint_index) =
+            if self
+                .matcher
+                .any_match(snippet, tokens_in_window, &rule.keywords)
+            {
+                (EVENT_SOURCE_WINDOW, None)
+            } else if let Some(i) = ctx
+                .hints
+                .iter()
+                .position(|h| self.matcher.any_match(h, &[], &rule.keywords))
+            {
+                (EVENT_SOURCE_HINT, Some(i))
+            } else {
+                return None;
+            };
 
         let before = entity.confidence;
         let after = before.saturating_add(rule.boost.get());

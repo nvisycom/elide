@@ -11,9 +11,9 @@ use elide_core::modality::image::{Image, ImageData};
 use elide_core::modality::text::{Text, TextData};
 use elide_core::recognition::RecognizerContext;
 
+use super::Prompt;
 use super::image_prompt::ImagePromptBuilder;
 use super::text_prompt::TextPromptBuilder;
-use super::Prompt;
 
 /// Shipped [`Prompt`] impl covering both [`Text`] and [`Image`].
 ///

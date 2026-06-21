@@ -18,12 +18,12 @@ use std::fs;
 use std::marker::PhantomData;
 use std::path::Path;
 
+use elide_core::modality::Modality;
 use elide_core::modality::image::{Image, ImageData};
 use elide_core::modality::text::{Text, TextData};
-use elide_core::modality::Modality;
 use elide_core::recognition::RecognizerContext;
 use elide_core::{Error, ErrorKind, Result};
-use minijinja::{context, Environment};
+use minijinja::{Environment, context};
 
 use super::Prompt;
 

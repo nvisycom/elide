@@ -131,7 +131,12 @@ impl TimeSpan {
 impl std::fmt::Display for TimeSpan {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let secs = |us: u64| us as f64 / MICROS_PER_SECOND as f64;
-        write!(f, "[{:.3}s, {:.3}s)", secs(self.start_us), secs(self.end_us))
+        write!(
+            f,
+            "[{:.3}s, {:.3}s)",
+            secs(self.start_us),
+            secs(self.end_us)
+        )
     }
 }
 
