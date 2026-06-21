@@ -116,6 +116,12 @@ pub enum ErrorKind {
     /// A configuration or rule was malformed: a bad regex, an unknown
     /// validator, a builder missing a required field.
     Validation,
+    /// An external provider (an LLM service, a hosted model) returned an
+    /// error response.
+    Provider,
+    /// A transport-layer failure reaching an external service (HTTP,
+    /// network, timeout).
+    Transport,
 }
 
 impl ErrorKind {
@@ -128,6 +134,8 @@ impl ErrorKind {
             Self::Recognition => "recognition failed",
             Self::Redaction => "redaction failed",
             Self::Validation => "validation failed",
+            Self::Provider => "provider returned an error",
+            Self::Transport => "transport failure",
         }
     }
 }

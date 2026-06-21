@@ -29,6 +29,6 @@ impl UnauthenticatedProvider {
         if let Some(url) = &self.base_url {
             b = b.base_url(url);
         }
-        b.build().map_err(|e| Error::Request(e.to_string()))
+        b.build().map_err(|e| Error::Request(Box::new(e)))
     }
 }

@@ -1,8 +1,7 @@
-//! Backend layer: the [`LlmBackend<M>`] trait that turns a rendered
-//! prompt into the model's structured candidate batch, plus its shipped
-//! impls.
+//! Backend layer: the [`LlmBackend<M>`] trait and its shipped impls.
 //!
-//! A backend is generic over the modality `M`: it extracts a
+//! A backend turns a rendered prompt into the model's structured candidate
+//! batch. It is generic over the modality `M`: it extracts a
 //! [`Candidates<M::Item>`] — the typed candidate batch the model is asked
 //! to produce. A backend declares which modalities it serves by which
 //! `LlmBackend<M>` impls it carries. Prompt wording lives in
@@ -10,7 +9,7 @@
 //! recognizer (via [`LlmModality::lift`]).
 //!
 //! [`Candidates<M::Item>`]: crate::candidates::Candidates
-//! [`LlmModality::lift`]: crate::modality::LlmModality::lift
+//! [`LlmModality::lift`]: crate::backend::LlmModality::lift
 
 pub mod http;
 mod llm_request;
@@ -21,7 +20,7 @@ pub mod rig;
 
 use elide_core::Result;
 
-use crate::modality::LlmModality;
+pub use crate::modality::LlmModality;
 
 #[cfg(any(test, feature = "mock"))]
 #[cfg_attr(docsrs, doc(cfg(feature = "mock")))]

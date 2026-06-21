@@ -44,12 +44,10 @@ elide-core = { workspace = true, features = ["image", "serde"] }
 
 # (De)serialization
 serde = { workspace = true, features = [] }
-serde_json = { workspace = true, features = [] }
 humantime-serde = { workspace = true, features = [] }
 
 # Derive macros & error handling
 derive_builder = { workspace = true, features = [] }
-derive_more = { workspace = true, features = ["add_assign"] }
 thiserror = { workspace = true, features = [] }
 
 # Async runtime & parallelism
