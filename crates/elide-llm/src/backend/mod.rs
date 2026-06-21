@@ -2,14 +2,15 @@
 //! prompt into the model's structured candidate batch, plus its shipped
 //! impls.
 //!
-//! A backend is generic over the modality `M`: it extracts
-//! [`M::Batch`](crate::candidates::Candidates::Batch) — the typed
-//! candidate shape the model is asked to produce. A backend declares which
-//! modalities it serves by which `LlmBackend<M>` impls it carries. Prompt
-//! wording lives in [`crate::prompt`]; localizing candidates into entities
-//! lives in the recognizer.
+//! A backend is generic over the modality `M`: it extracts a
+//! [`Candidates<M::Item>`] — the typed candidate batch the model is asked
+//! to produce. A backend declares which modalities it serves by which
+//! `LlmBackend<M>` impls it carries. Prompt wording lives in
+//! [`crate::prompt`]; localizing candidates into entities lives in the
+//! recognizer (via [`LlmModality::lift`]).
 //!
-//! [`M::Batch`]: crate::candidates::Candidates::Batch
+//! [`Candidates<M::Item>`]: crate::candidates::Candidates
+//! [`LlmModality::lift`]: crate::modality::LlmModality::lift
 
 pub mod http;
 mod llm_request;
@@ -20,7 +21,7 @@ pub mod rig;
 
 use elide_core::Result;
 
-use crate::candidates::Candidates;
+use crate::modality::LlmModality;
 
 #[cfg(any(test, feature = "mock"))]
 #[cfg_attr(docsrs, doc(cfg(feature = "mock")))]
@@ -38,7 +39,7 @@ pub use self::llm_response::LlmResponse;
 /// call. The candidate type is fixed by `M`, so there is no free generic
 /// on the call.
 #[async_trait::async_trait]
-pub trait LlmBackend<M: Candidates>: Send + Sync + 'static {
+pub trait LlmBackend<M: LlmModality>: Send + Sync + 'static {
     /// Send `request` to the model and return its structured candidate
     /// batch.
     ///

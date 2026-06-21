@@ -7,8 +7,6 @@
 //! [`LlmBackend`]: crate::backend::LlmBackend
 //! [`Prompt<M>`]: crate::prompt::Prompt
 
-mod lift;
 mod llm_recognizer;
-mod localize;
 
 pub use self::llm_recognizer::{LlmRecognizer, LlmRecognizerBuilder};

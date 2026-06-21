@@ -4,7 +4,7 @@
 use elide_core::Result;
 
 use super::{LlmBackend, LlmRequest, LlmResponse};
-use crate::candidates::Candidates;
+use crate::modality::LlmModality;
 
 /// An [`LlmBackend`] that calls no model and returns an empty batch.
 ///
@@ -16,7 +16,7 @@ use crate::candidates::Candidates;
 pub struct MockBackend;
 
 #[async_trait::async_trait]
-impl<M: Candidates> LlmBackend<M> for MockBackend {
+impl<M: LlmModality> LlmBackend<M> for MockBackend {
     async fn extract(&self, _request: LlmRequest<'_, M>) -> Result<LlmResponse<M>> {
         Ok(LlmResponse::default())
     }

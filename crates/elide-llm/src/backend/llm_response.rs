@@ -3,6 +3,7 @@
 //! [`LlmBackend`]: super::LlmBackend
 
 use crate::candidates::Candidates;
+use crate::modality::LlmModality;
 
 /// One per-call LLM response from an [`LlmBackend<M>`], generic over the
 /// modality.
@@ -13,24 +14,24 @@ use crate::candidates::Candidates;
 ///
 /// [`LlmBackend<M>`]: super::LlmBackend
 #[derive(Debug, Clone)]
-pub struct LlmResponse<M: Candidates> {
+pub struct LlmResponse<M: LlmModality> {
     /// The structured candidate batch the model produced.
-    pub candidates: M::Batch,
+    pub candidates: Candidates<M::Item>,
 }
 
-impl<M: Candidates> LlmResponse<M> {
+impl<M: LlmModality> LlmResponse<M> {
     /// Wrap a candidate batch as a response.
-    pub fn new(candidates: M::Batch) -> Self {
+    pub fn new(candidates: Candidates<M::Item>) -> Self {
         Self { candidates }
     }
 }
 
-// Hand-written so the bound is `M::Batch: Default` (always true for
-// `Candidates`), not the spurious `M: Default` a derive would add.
-impl<M: Candidates> Default for LlmResponse<M> {
+// Hand-written so the bound stays `M: LlmModality` (which yields a
+// `Default` batch), not the spurious `M: Default` a derive would add.
+impl<M: LlmModality> Default for LlmResponse<M> {
     fn default() -> Self {
         Self {
-            candidates: M::Batch::default(),
+            candidates: Candidates::default(),
         }
     }
 }

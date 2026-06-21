@@ -1,24 +1,21 @@
 //! [`LlmRecognizer`]: LLM-driven recognizer.
 //!
-//! Generic over [`Modality`] so one type drives text and image detection
-//! through the same surface. Holds an `Arc<dyn LlmBackend<M>>` for the
-//! swappable LLM plumbing plus an `Arc<dyn Prompt<M>>` for the swappable
-//! prompt wording. The recognizer renders the prompt, asks the backend to
-//! extract the candidate batch, then localizes each candidate into an
-//! entity (the per-modality lifting lives in [`super::lift`]).
+//! Generic over [`LlmModality`] so one type drives text and image
+//! detection through the same surface. Holds an `Arc<dyn LlmBackend<M>>`
+//! for the swappable LLM plumbing plus an `Arc<dyn Prompt<M>>` for the
+//! swappable prompt wording. The recognizer renders the prompt, asks the
+//! backend to extract the candidate batch, then lifts each candidate into
+//! an entity via [`LlmModality::lift`].
 
 use std::sync::Arc;
 
 use derive_builder::Builder;
 use elide_core::entity::Entity;
-use elide_core::modality::image::{Image, ImageData};
-use elide_core::modality::text::{Text, TextData};
 use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
 use elide_core::{Error, Result};
 
-use super::lift::{lift_image, lift_text};
 use crate::backend::{LlmBackend, LlmRequest};
-use crate::candidates::Candidates;
+use crate::modality::LlmModality;
 use crate::prompt::Prompt;
 
 /// LLM-driven recognizer.
@@ -29,7 +26,7 @@ use crate::prompt::Prompt;
     setter(into, prefix = "with"),
     build_fn(error = "Error", name = "try_build", private)
 )]
-pub struct LlmRecognizer<M: Candidates> {
+pub struct LlmRecognizer<M: LlmModality> {
     /// Recognizer name. Surfaced in the recognition event on every
     /// emitted entity and used as the recognizer id.
     name: String,
@@ -47,7 +44,7 @@ pub struct LlmRecognizer<M: Candidates> {
     prompt: Arc<dyn Prompt<M>>,
 }
 
-impl<M: Candidates> LlmRecognizer<M> {
+impl<M: LlmModality> LlmRecognizer<M> {
     /// Start the chainable builder. `name`, `backend`, and `prompt`
     /// are required; calling [`build`] without them returns a
     /// validation error.
@@ -81,7 +78,7 @@ impl<M: Candidates> LlmRecognizer<M> {
     }
 }
 
-impl<M: Candidates> LlmRecognizerBuilder<M> {
+impl<M: LlmModality> LlmRecognizerBuilder<M> {
     /// Set the [`LlmBackend`] that powers this recognizer. Accepts
     /// any concrete impl by value and wraps it in `Arc`. Required:
     /// `build` errors when this hasn't been called.
@@ -138,34 +135,18 @@ impl<M: Candidates> LlmRecognizerBuilder<M> {
     }
 }
 
-impl Recognizer<Text> for LlmRecognizer<Text> {
+impl<M: LlmModality> Recognizer<M> for LlmRecognizer<M> {
     fn id(&self) -> RecognizerId {
         self.recognizer_id()
     }
 
     async fn recognize(
         &self,
-        data: &TextData,
-        ctx: &RecognizerContext<'_, Text>,
-    ) -> Result<Vec<Entity<Text>>> {
+        data: &M::Data,
+        ctx: &RecognizerContext<'_, M>,
+    ) -> Result<Vec<Entity<M>>> {
         let prompt = self.prompt.build(data, ctx);
         let response = self.backend.extract(LlmRequest::new(&prompt, data)).await?;
-        Ok(lift_text(data, response.candidates.entities))
-    }
-}
-
-impl Recognizer<Image> for LlmRecognizer<Image> {
-    fn id(&self) -> RecognizerId {
-        self.recognizer_id()
-    }
-
-    async fn recognize(
-        &self,
-        data: &ImageData,
-        ctx: &RecognizerContext<'_, Image>,
-    ) -> Result<Vec<Entity<Image>>> {
-        let prompt = self.prompt.build(data, ctx);
-        let response = self.backend.extract(LlmRequest::new(&prompt, data)).await?;
-        Ok(lift_image(data, response.candidates.entities))
+        Ok(M::lift(response.candidates, data))
     }
 }

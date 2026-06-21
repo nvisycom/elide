@@ -9,7 +9,7 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::candidates::TextCandidate;
 
-const TARGET: &str = "elide_llm::prompt::localize";
+const TARGET: &str = "elide_llm::modality::localize";
 
 /// A candidate that's been resolved to a byte range in the source.
 #[derive(Debug, Clone)]
