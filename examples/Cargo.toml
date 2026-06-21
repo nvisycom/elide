@@ -4,6 +4,9 @@
 name = "elide-examples"
 description = "End-to-end usage examples for the elide toolkit"
 publish = false
+# Each example is a self-contained file at the crate root, declared as its
+# own binary below; nothing is auto-discovered.
+autobins = false
 
 version = { workspace = true }
 rust-version = { workspace = true }
@@ -14,13 +17,24 @@ authors = { workspace = true }
 repository = { workspace = true }
 homepage = { workspace = true }
 
+## Each example is a self-contained binary, run with
+## `cargo run -p elide-examples --bin <name>`.
 [[bin]]
-name = "redact-txt"
-path = "src/main.rs"
+name = "redact_txt"
+path = "redact_txt.rs"
+
+[[bin]]
+name = "redact_docx"
+path = "redact_docx.rs"
 
 [dependencies]
 # Internal crates
-elide = { workspace = true, features = ["codec", "mock"] }
+elide = { workspace = true, features = [
+    "codec",
+    "codec-docx",
+    "codec-png",
+    "mock",
+] }
 
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
