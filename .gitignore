@@ -45,3 +45,6 @@ CLAUDE.md
 # E2E-test artifacts
 **/testdata/**/*.redacted.*
 **/testdata/**/*.*.json
+
+# Example output
+examples/data/*.redacted.*
