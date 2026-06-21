@@ -31,6 +31,8 @@ anthropic-claude = []
 google-gemini = []
 ## Ship the no-op `MockBackend` for tests, examples, and offline wiring.
 mock = []
+## Load prompt wording from a Jinja2 template file (`Jinja2Prompt`).
+jinja2 = ["dep:minijinja"]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -42,17 +44,11 @@ elide-core = { workspace = true, features = ["image", "serde"] }
 
 # (De)serialization
 serde = { workspace = true, features = [] }
-serde_json = { workspace = true, features = [] }
-toml = { workspace = true, features = ["parse"] }
 humantime-serde = { workspace = true, features = [] }
 
 # Derive macros & error handling
 derive_builder = { workspace = true, features = [] }
-derive_more = { workspace = true, features = ["add_assign"] }
 thiserror = { workspace = true, features = [] }
-
-# Encoding & hashing
-base64 = { workspace = true, features = [] }
 
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
@@ -67,7 +63,7 @@ unicode-normalization = { workspace = true, features = [] }
 rig = { workspace = true, features = ["derive", "reqwest-middleware"] }
 
 # Templating & schema
-minijinja = { workspace = true, features = [] }
+minijinja = { workspace = true, features = [], optional = true }
 schemars = { workspace = true, features = [] }
 
 # HTTP client & middlewares

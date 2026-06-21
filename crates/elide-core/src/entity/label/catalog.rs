@@ -70,6 +70,12 @@ impl LabelCatalog {
     pub fn iter(&self) -> impl Iterator<Item = &Label> {
         self.0.values()
     }
+
+    /// A [`LabelRef`] for every label in the catalog — the set of labels
+    /// recognizers are asked to emit (zero-shot NER, LLM prompt targets).
+    pub fn refs(&self) -> impl Iterator<Item = LabelRef> + '_ {
+        self.0.values().map(|label| label.to_ref())
+    }
 }
 
 impl FromIterator<Label> for LabelCatalog {

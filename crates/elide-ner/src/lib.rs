@@ -3,10 +3,11 @@
 #![doc = include_str!("../README.md")]
 
 pub mod backend;
+pub mod decorator;
 #[cfg(feature = "lingua")]
 pub mod nlp;
 mod recognition;
 
 pub use self::recognition::{
-    LabelMap, NerModel, NerModelBuilder, NerRecognizer, NerRecognizerBuilder,
+    AggregationStrategy, AlignmentMode, NerRecognizer, NerRecognizerBuilder,
 };

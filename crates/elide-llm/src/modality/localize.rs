@@ -7,9 +7,9 @@
 
 use unicode_normalization::UnicodeNormalization;
 
-use super::candidates::TextCandidate;
+use crate::candidates::TextCandidate;
 
-const TARGET: &str = "elide_llm::recognition::localize";
+const TARGET: &str = "elide_llm::modality::localize";
 
 /// A candidate that's been resolved to a byte range in the source.
 #[derive(Debug, Clone)]

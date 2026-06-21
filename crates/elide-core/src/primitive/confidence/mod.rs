@@ -38,6 +38,16 @@ impl Confidence {
     pub const MAX: Self = Self(1.0);
     /// Minimum score, `0.0`; no confidence.
     pub const MIN: Self = Self(0.0);
+    /// Sensible default score, `0.35`.
+    ///
+    /// The score to assign a detection that carries none of its own (e.g. a
+    /// backend span with no model probability). Mirrors
+    /// [`ConfidenceThreshold::BASELINE`]: a weak-but-plausible level that
+    /// sits at the default acceptance cutoff, for a later layer to confirm
+    /// or drop.
+    ///
+    /// [`ConfidenceThreshold::BASELINE`]: super::ConfidenceThreshold::BASELINE
+    pub const BASELINE: Self = Self(0.35);
 
     /// Construct a score, returning [`None`] if the value is outside
     /// `0.0..=1.0` or not finite.
@@ -71,6 +81,14 @@ impl Confidence {
     /// confidence-lifting steps such as context boosting.
     pub fn saturating_add(self, delta: f32) -> Self {
         Self::clamped(self.0 + delta)
+    }
+
+    /// Multiply the score by `factor`, saturating at the `[0, 1]` bounds.
+    ///
+    /// `0.9 * 1.2` yields `1.0`, not an out-of-range value. Used by
+    /// score-scaling steps such as the `ScoreScale` backend decorator.
+    pub fn saturating_mul(self, factor: f32) -> Self {
+        Self::clamped(self.0 * factor)
     }
 }
 

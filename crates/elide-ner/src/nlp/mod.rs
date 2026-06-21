@@ -1,13 +1,19 @@
-//! Language detection.
+//! NLP enrichers: pre-recognition passes that annotate the input.
 //!
-//! [`LinguaEnricher`] is a language-detection enricher backed by the
-//! [`lingua`] crate. A pipeline registers one ahead of its recognizers to
-//! resolve the document's language onto the call; recognizers and the
-//! context enhancer then read the languages back from the input. The
-//! language-result types it produces live in `elide-core`.
+//! Each runs ahead of the recognizers and context enhancer, annotating the
+//! input for the stages that follow.
 //!
-//! NER lives in a separate trait-driven path ([`NerBackend`] +
-//! [`NerRecognizer`]); detection backends plug in there, not here.
+//! A pipeline registers an enricher ahead of its recognizers; the enricher
+//! resolves some property onto the call, and downstream stages read it
+//! back from the input. The enrichment-result types live in `elide-core`.
+//!
+//! Language detection is the first such enricher: [`LinguaEnricher`],
+//! backed by the [`lingua`] crate, detects the document's language(s).
+//! Other enrichers (tokenization, sentence segmentation, …) belong here
+//! too.
+//!
+//! NER itself is a separate trait-driven path ([`NerBackend`] +
+//! [`NerRecognizer`]); recognition backends plug in there, not here.
 //!
 //! [`lingua`]: https://crates.io/crates/lingua
 //! [`NerBackend`]: crate::backend::NerBackend
@@ -16,5 +22,4 @@
 mod lingua_detector;
 mod lingua_enricher;
 
-pub use self::lingua_detector::LinguaDetector;
 pub use self::lingua_enricher::LinguaEnricher;

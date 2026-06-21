@@ -1,51 +1,53 @@
-//! Unified error type covering LLM provider, serialization, and tool failures.
+//! Internal error type bridging rig's provider errors to
+//! [`elide_core::Error`].
+//!
+//! The crate exposes no error type of its own — every public result is an
+//! [`elide_core::Error`]. This private [`Error`] exists only to host the
+//! `From<rig error>` conversions the orphan rule forbids writing directly
+//! onto `elide_core::Error`, and to keep call sites `?`-ergonomic. Its
+//! variants name the [`ErrorKind`] each maps to; the underlying rig error
+//! is preserved as the error source.
+//!
+//! [`ErrorKind`]: elide_core::ErrorKind
 
-use elide_core::{Error as CoreError, ErrorKind as CoreErrorKind};
+use elide_core::{Error as CoreError, ErrorKind};
 use rig::completion::{CompletionError, PromptError, StructuredOutputError};
+use rig::extractor::ExtractionError;
 use rig::http_client::Error as HttpClientError;
 
-/// Internal error type for LLM provider interactions.
+/// Internal LLM error, tagged by the [`ErrorKind`] it maps to.
 ///
-/// Converted to [`CoreError`] at public API boundaries via the
-/// [`convert`] helper.
-///
-/// [`CoreError`]: elide_core::Error
+/// [`ErrorKind`]: elide_core::ErrorKind
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
-    /// An HTTP / network error from the LLM provider.
-    #[error("HTTP error: {0}")]
-    Http(HttpClientError),
+    /// A transport-layer failure reaching the provider (HTTP, network).
+    #[error("transport: {0}")]
+    Transport(Box<dyn std::error::Error + Send + Sync>),
 
-    /// A JSON (de)serialization error.
-    #[error("JSON error: {0}")]
-    Json(#[from] serde_json::Error),
+    /// The provider returned an error response.
+    #[error("provider: {0}")]
+    Provider(Box<dyn std::error::Error + Send + Sync>),
 
-    /// The LLM provider returned an error response.
-    #[error("Provider error: {0}")]
-    Provider(String),
+    /// A malformed, empty, or unparseable model reply.
+    #[error("response: {0}")]
+    Response(Box<dyn std::error::Error + Send + Sync>),
 
-    /// The LLM response was malformed or unexpected.
-    #[error("Response error: {0}")]
-    Response(String),
-
-    /// A request construction or validation error.
-    #[error("Request error: {0}")]
-    Request(String),
-
-    /// A runtime error (tool failure, agent limits, generation errors, etc.).
-    #[error("{0}")]
-    Runtime(String),
+    /// A request-construction / configuration problem.
+    #[error("request: {0}")]
+    Request(Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl From<CompletionError> for Error {
     fn from(err: CompletionError) -> Self {
         match err {
-            CompletionError::HttpError(e) => Self::Http(e),
-            CompletionError::JsonError(e) => Self::Json(e),
-            CompletionError::ProviderError(msg) => Self::Provider(msg),
-            CompletionError::ResponseError(msg) => Self::Response(msg),
-            CompletionError::RequestError(e) => Self::Request(e.to_string()),
-            CompletionError::UrlError(e) => Self::Request(format!("URL: {e}")),
+            CompletionError::HttpError(_) | CompletionError::RequestError(_) => {
+                Self::Transport(Box::new(err))
+            }
+            CompletionError::ProviderError(_) => Self::Provider(Box::new(err)),
+            CompletionError::ResponseError(_) | CompletionError::JsonError(_) => {
+                Self::Response(Box::new(err))
+            }
+            CompletionError::UrlError(_) => Self::Request(Box::new(err)),
         }
     }
 }
@@ -54,17 +56,9 @@ impl From<PromptError> for Error {
     fn from(err: PromptError) -> Self {
         match err {
             PromptError::CompletionError(e) => Self::from(e),
-            PromptError::ToolError(e) => Self::Runtime(format!("tool: {e}")),
-            PromptError::ToolServerError(e) => Self::Runtime(format!("tool server: {e}")),
-            PromptError::MaxTurnsError { max_turns, .. } => {
-                Self::Runtime(format!("agent exceeded max turn limit ({max_turns})"))
-            }
-            PromptError::PromptCancelled { reason, .. } => {
-                Self::Runtime(format!("prompt cancelled: {reason}"))
-            }
-            PromptError::UnknownToolCall { tool_name, .. } => {
-                Self::Runtime(format!("agent called unknown tool: {tool_name}"))
-            }
+            // Tool / turn-limit / cancellation failures occur while the
+            // recognizer drives the model.
+            other => Self::Response(Box::new(other)),
         }
     }
 }
@@ -73,57 +67,37 @@ impl From<StructuredOutputError> for Error {
     fn from(err: StructuredOutputError) -> Self {
         match err {
             StructuredOutputError::PromptError(e) => Self::from(*e),
-            StructuredOutputError::DeserializationError(e) => {
-                Self::Response(format!("structured output: {e}"))
-            }
-            StructuredOutputError::EmptyResponse => {
-                Self::Response("model returned no content".to_string())
-            }
+            other => Self::Response(Box::new(other)),
         }
     }
 }
 
-/// Convert any error that can be turned into a provider [`Error`] into a
-/// [`CoreError`]. Intended for `.map_err(crate::error::convert)` at
-/// public API boundaries.
-///
-/// [`CoreError`]: elide_core::Error
-pub(crate) fn convert<E: Into<Error>>(e: E) -> CoreError {
-    CoreError::from(e.into())
+impl From<ExtractionError> for Error {
+    fn from(err: ExtractionError) -> Self {
+        match err {
+            ExtractionError::CompletionError(e) => Self::from(e),
+            // No data / deserialization failure: no usable structured reply.
+            other => Self::Response(Box::new(other)),
+        }
+    }
+}
+
+impl From<HttpClientError> for Error {
+    fn from(err: HttpClientError) -> Self {
+        Self::Transport(Box::new(err))
+    }
 }
 
 impl From<Error> for CoreError {
     fn from(err: Error) -> Self {
-        // Request errors are caller-side validation problems; every other
-        // variant is a failure encountered while the recognizer drives the
-        // model, so it maps to the recognition kind.
         let kind = match &err {
-            Error::Request(_) => CoreErrorKind::Validation,
-            Error::Http(_)
-            | Error::Json(_)
-            | Error::Provider(_)
-            | Error::Response(_)
-            | Error::Runtime(_) => CoreErrorKind::Recognition,
+            Error::Transport(_) => ErrorKind::Transport,
+            Error::Provider(_) => ErrorKind::Provider,
+            // A bad reply is a recognition-time failure.
+            Error::Response(_) => ErrorKind::Recognition,
+            // Request construction is caller-side validation.
+            Error::Request(_) => ErrorKind::Validation,
         };
-        CoreError::new(kind, err.to_string())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn provider_error_maps_to_recognition() {
-        let err = Error::Provider("Rate limit exceeded".to_string());
-        let core_err: CoreError = err.into();
-        assert_eq!(core_err.kind(), CoreErrorKind::Recognition);
-    }
-
-    #[test]
-    fn request_error_maps_to_validation() {
-        let err = Error::Request("bad URL".to_string());
-        let core_err: CoreError = err.into();
-        assert_eq!(core_err.kind(), CoreErrorKind::Validation);
+        CoreError::new(kind, err)
     }
 }
