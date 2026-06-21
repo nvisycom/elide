@@ -1,19 +1,12 @@
-//! [`AggregationStrategy`] and [`AlignmentMode`]: policies for
-//! collapsing per-token NER predictions into entity spans.
-//!
-//! The producer engine may apply them server-side (a hosted backend
-//! that already returns aggregated spans), in which case the
-//! consumer-side knobs are advisory; or the producer may emit
-//! unaggregated token-classification output, in which case
-//! [`NerRecognizer`] applies them itself.
-//!
-//! [`NerRecognizer`]: super::NerRecognizer
+//! [`AggregationStrategy`]: how per-token NER predictions are collapsed
+//! into entity spans.
 
 use serde::{Deserialize, Serialize};
 
-/// How adjacent token-level predictions of the same entity type are
-/// merged into one span. Names follow HuggingFace
-/// `transformers.pipeline(aggregation_strategy=...)` semantics.
+/// How adjacent token predictions merge into one span.
+///
+/// Names follow HuggingFace
+/// `transformers.pipeline(aggregation_strategy=...)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AggregationStrategy {
@@ -40,20 +33,4 @@ pub enum AggregationStrategy {
     /// equality. The span's score is the first token's. Match
     /// HuggingFace `"simple"` strategy.
     Simple,
-}
-
-/// How a token-classification span snaps to character boundaries
-/// when the model emits sub-word predictions. Mirrors spaCy
-/// `Doc.char_span(alignment_mode=...)`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum AlignmentMode {
-    /// Reject spans that don't land on a token boundary.
-    Strict,
-    /// Shrink the span to the next inner token boundary.
-    Contract,
-    /// Expand the span to the next outer token boundary. Default:
-    /// favors recall over precision.
-    #[default]
-    Expand,
 }

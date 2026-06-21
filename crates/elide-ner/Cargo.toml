@@ -44,6 +44,7 @@ derive_builder = { workspace = true, features = [] }
 
 # Primitive datatypes
 uuid = { workspace = true, features = ["v7"] }
+hipstr = { workspace = true, features = [] }
 
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }

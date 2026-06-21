@@ -4,6 +4,7 @@
 //! [`DefaultPrompt`]: super::DefaultPrompt
 //! [`Prompt<Text>`]: super::Prompt
 
+use elide_core::entity::LabelRef;
 use elide_core::modality::text::Text;
 use elide_core::recognition::annotation::Inclusion;
 
@@ -16,14 +17,21 @@ pub(super) struct TextPromptBuilder<'a> {
     text: &'a str,
     inclusions: &'a [Inclusion<Text>],
     labels: &'a [String],
+    target_labels: &'a [LabelRef],
 }
 
 impl<'a> TextPromptBuilder<'a> {
-    pub fn new(text: &'a str, inclusions: &'a [Inclusion<Text>], labels: &'a [String]) -> Self {
+    pub fn new(
+        text: &'a str,
+        inclusions: &'a [Inclusion<Text>],
+        labels: &'a [String],
+        target_labels: &'a [LabelRef],
+    ) -> Self {
         Self {
             text,
             inclusions,
             labels,
+            target_labels,
         }
     }
 
@@ -38,6 +46,19 @@ impl<'a> TextPromptBuilder<'a> {
         prompt.push_str("\n\n---\n");
         prompt.push_str(self.text);
         prompt.push_str("\n---");
+
+        if !self.target_labels.is_empty() {
+            let types = self
+                .target_labels
+                .iter()
+                .map(LabelRef::as_str)
+                .collect::<Vec<_>>()
+                .join(", ");
+            prompt.push_str(&format!(
+                "\n\nEmit only these entity types (use the exact names for \
+                 entity_type): {types}."
+            ));
+        }
 
         if !self.labels.is_empty() {
             let labels = self.labels.join(", ");

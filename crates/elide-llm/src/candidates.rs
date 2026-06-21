@@ -1,16 +1,46 @@
-//! Structured-output candidate types: the typed schemas the model
-//! is asked to produce.
+//! Structured-output candidate types: the typed schemas the model is
+//! asked to produce.
+//!
+//! These are the `T` in rig's `Extractor::<T>` — the backend asks the
+//! model to fill them in, and the [`JsonSchema`] derive is what constrains
+//! the output. One shape per modality; the recognizer localizes each
+//! candidate's value into the source and builds the final entity.
 
+use elide_core::modality::Modality;
+use elide_core::modality::image::Image;
+use elide_core::modality::text::Text;
 use elide_core::primitive::UnitBoundingBox;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// The structured-output candidate batch a backend extracts for modality
+/// `M`: [`TextCandidates`] for [`Text`], [`ImageCandidates`] for [`Image`].
+///
+/// Bound on the modality so a generic backend can name the right shape
+/// from `M` alone.
+pub trait Candidates: Modality {
+    /// The candidate-batch type the model produces for this modality.
+    type Batch: JsonSchema
+        + for<'a> Deserialize<'a>
+        + Serialize
+        + Default
+        + Send
+        + Sync
+        + 'static;
+}
+
+impl Candidates for Text {
+    type Batch = TextCandidates;
+}
+
+impl Candidates for Image {
+    type Batch = ImageCandidates;
+}
+
 /// Serde wrapper matching the model's `{"entities": [...]}`
 /// response for the [`Text`] modality.
-///
-/// [`Text`]: elide_core::modality::text::Text
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub(super) struct TextCandidates {
+pub struct TextCandidates {
     /// Detected candidates.
     pub entities: Vec<TextCandidate>,
 }
@@ -20,7 +50,7 @@ pub(super) struct TextCandidates {
 /// `context` snippet the recognizer uses to localize the value back
 /// into a byte range in the source text.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub(super) struct TextCandidate {
+pub struct TextCandidate {
     /// Model-assigned identifier for the underlying real-world
     /// entity. Stable across coreferent mentions within one call.
     #[serde(default)]
@@ -45,33 +75,36 @@ pub(super) struct TextCandidate {
 
 /// Serde wrapper matching the model's `{"entities": [...]}`
 /// response for the [`Image`] modality.
-///
-/// [`Image`]: elide_core::modality::image::Image
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub(super) struct VlmCandidates {
-    pub entities: Vec<VlmCandidate>,
+pub struct ImageCandidates {
+    /// Detected candidates.
+    pub entities: Vec<ImageCandidate>,
 }
 
-/// One image entity discovered by the VLM. Bounding box is
+/// One image entity discovered by the model. Bounding box is
 /// normalised (`[0, 1]`); the recognizer scales to pixel
 /// coordinates using the source image's dimensions.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub(super) struct VlmCandidate {
+pub struct ImageCandidate {
+    /// Label name for the detected region.
     pub label: String,
+    /// Normalised bounding box of the region.
     #[serde(flatten)]
     pub bbox: UnitBox,
+    /// Model-asserted confidence in `[0.0, 1.0]`.
     #[serde(default)]
     pub confidence: Option<f64>,
+    /// Brief description of the region (advisory).
     #[serde(default)]
     pub description: Option<String>,
 }
 
-/// Wire shape of a VLM bounding box, in normalised `[0, 1]`
+/// Wire shape of a bounding box, in normalised `[0, 1]`
 /// coordinates. Mirrors [`UnitBoundingBox`] but carries the
 /// `JsonSchema` derive the structured-output schema needs (the core's
 /// [`UnitBoundingBox`] does not depend on `schemars`).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub(super) struct UnitBox {
+pub struct UnitBox {
     /// Top-left x in `0.0..=1.0` (fraction of image width).
     pub x: f64,
     /// Top-left y in `0.0..=1.0` (fraction of image height).

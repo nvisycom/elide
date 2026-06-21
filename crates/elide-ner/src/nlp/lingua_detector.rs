@@ -33,7 +33,12 @@ use lingua::{
 /// returns one [`Language`] per detected region with a
 /// populated [`LanguageSpan`]. Monolingual input returns a single
 /// detection covering the whole text.
-pub struct LinguaDetector {
+///
+/// Internal helper for [`LinguaEnricher`], which builds a fresh detector
+/// per call; not part of the public API.
+///
+/// [`LinguaEnricher`]: super::LinguaEnricher
+pub(crate) struct LinguaDetector {
     inner: LinguaInner,
 }
 

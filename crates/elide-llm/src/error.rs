@@ -2,6 +2,7 @@
 
 use elide_core::{Error as CoreError, ErrorKind as CoreErrorKind};
 use rig::completion::{CompletionError, PromptError, StructuredOutputError};
+use rig::extractor::ExtractionError;
 use rig::http_client::Error as HttpClientError;
 
 /// Internal error type for LLM provider interactions.
@@ -79,6 +80,18 @@ impl From<StructuredOutputError> for Error {
             StructuredOutputError::EmptyResponse => {
                 Self::Response("model returned no content".to_string())
             }
+        }
+    }
+}
+
+impl From<ExtractionError> for Error {
+    fn from(err: ExtractionError) -> Self {
+        match err {
+            ExtractionError::NoData => {
+                Self::Response("model extracted no structured data".to_string())
+            }
+            ExtractionError::DeserializationError(e) => Self::Json(e),
+            ExtractionError::CompletionError(e) => Self::from(e),
         }
     }
 }

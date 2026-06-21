@@ -1,47 +1,59 @@
-//! Backend layer: the modality-agnostic [`LlmBackend`] trait that
-//! turns a prompt + schema into the model's reply, plus its shipped
+//! Backend layer: the [`LlmBackend<M>`] trait that turns a rendered
+//! prompt into the model's structured candidate batch, plus its shipped
 //! impls.
 //!
-//! Modality-specific work (prompt construction, response → entity
-//! lifting) lives in [`crate::LlmRecognizer`]; backends only handle
-//! provider dispatch, structured-output, retries, and usage
-//! tracking.
+//! A backend is generic over the modality `M`: it extracts
+//! [`M::Batch`](crate::candidates::Candidates::Batch) — the typed
+//! candidate shape the model is asked to produce. A backend declares which
+//! modalities it serves by which `LlmBackend<M>` impls it carries. Prompt
+//! wording lives in [`crate::prompt`]; localizing candidates into entities
+//! lives in the recognizer.
+//!
+//! [`M::Batch`]: crate::candidates::Candidates::Batch
 
 pub mod http;
+mod llm_request;
+mod llm_response;
 #[cfg(any(test, feature = "mock"))]
-mod mock;
-mod request;
-mod response;
+mod mock_backend;
 pub mod rig;
 
 use elide_core::Result;
 
+use crate::candidates::Candidates;
+
 #[cfg(any(test, feature = "mock"))]
 #[cfg_attr(docsrs, doc(cfg(feature = "mock")))]
-pub use self::mock::MockBackend;
-pub use self::request::LlmRequest;
-pub use self::response::LlmResponse;
+pub use self::mock_backend::MockBackend;
+pub use self::llm_request::LlmRequest;
+pub use self::llm_response::LlmResponse;
 
-/// Per-call LLM backend.
+/// Per-call LLM backend for modality `M`.
 ///
-/// Implemented by everything that turns a `(prompt, schema)` pair
-/// into the model's text reply: rig-backed providers (OpenAI,
-/// Anthropic, Gemini, Ollama), externalised inference gateways, the
-/// in-process no-op test stub.
+/// Implemented by everything that turns a rendered prompt into the model's
+/// structured candidate batch: rig-backed providers (OpenAI, Anthropic,
+/// Gemini, Ollama) and the in-process no-op test stub.
 ///
-/// Object-safe: recognizers hold `Arc<dyn LlmBackend>` and dispatch
-/// per call.
+/// Object-safe: recognizers hold `Arc<dyn LlmBackend<M>>` and dispatch per
+/// call. The candidate type is fixed by `M`, so there is no free generic
+/// on the call.
 #[async_trait::async_trait]
-pub trait LlmBackend: Send + Sync + 'static {
-    /// Send `request` to the model and return its reply.
+pub trait LlmBackend<M: Candidates>: Send + Sync + 'static {
+    /// Send `request` to the model and return its structured candidate
+    /// batch.
+    ///
+    /// The prompt wording is rendered by the recognizer's
+    /// [`Prompt`](crate::prompt::Prompt); the backend folds in the source
+    /// payload (e.g. image bytes) to build the provider message, and
+    /// constrains the model to produce the candidate shape for `M`.
     ///
     /// # Errors
     ///
-    /// Returns the underlying transport / provider / parse error.
-    async fn predict(&self, request: LlmRequest<'_>) -> Result<LlmResponse>;
+    /// Returns the underlying transport / provider / extraction error.
+    async fn extract(&self, request: LlmRequest<'_, M>) -> Result<LlmResponse<M>>;
 
-    /// Model name the backend is configured to call. Recognizers
-    /// stamp this into entity trail provenance so post-hoc analysis
-    /// can attribute scores to a specific model.
+    /// Model name the backend is configured to call. Recognizers stamp
+    /// this into entity trail provenance so post-hoc analysis can
+    /// attribute scores to a specific model.
     fn model(&self) -> &str;
 }

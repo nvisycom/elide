@@ -21,7 +21,7 @@ use super::lingua_detector::LinguaDetector;
 
 /// Lingua-backed language-detection enricher.
 ///
-/// Stateless: every call builds a fresh [`LinguaDetector`] for the
+/// Stateless: every call builds a fresh detector for the
 /// configured language scope (the candidate set passed at construction,
 /// or every language when unrestricted). The scope is fixed at
 /// construction; pipelines that need different scopes per call hold

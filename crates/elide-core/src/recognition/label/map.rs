@@ -8,15 +8,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::entity::{LabelCatalog, LabelRef};
 
-/// Translation table from a backend's raw label strings to the toolkit's
+/// Translation table from a model's raw label strings to the toolkit's
 /// canonical entity labels.
 ///
-/// Recognizers (NER models especially) emit labels in their own
-/// vocabulary (`"PER"`, `"LOC"`, `"B-ORG"`). A `LabelMap` maps each such
-/// raw string to the [`LabelRef`] the rest of the model speaks
-/// (`"PERSON"`, `"LOCATION"`, `"ORGANIZATION"`), so a recognizer can
-/// translate its output at the boundary without the canonical taxonomy
-/// leaking into the backend or vice versa.
+/// A model may emit labels in its own vocabulary (`"PER"`, `"LOC"`,
+/// `"B-ORG"`) rather than the canonical taxonomy the rest of the toolkit
+/// speaks (`"person_name"`, `"location"`, `"organization"`). A `LabelMap`
+/// maps each raw string to its canonical [`LabelRef`].
+///
+/// It is a utility for the *boundary* that adapts such a model — a NER
+/// backend that wraps a fixed-label or BIO-tagged model applies it before
+/// returning its spans, so the spans it emits already carry canonical
+/// labels and downstream code never sees the raw vocabulary. Backends that
+/// are given the canonical labels up front (zero-shot models) don't need
+/// it. Lives here in `elide-core` so any modality's boundary can reuse it.
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
@@ -30,22 +35,17 @@ impl LabelMap {
         Self::default()
     }
 
-    /// Identity map from every built-in label name to itself.
+    /// Identity map over every label name in `catalog`: each name maps to
+    /// a [`LabelRef`] of itself.
     ///
-    /// Convenience for backends that already emit canonical label names
-    /// (or that have been calibrated to): every built-in label maps to a
-    /// [`LabelRef`] of the same name, so [`get`] passes those labels
-    /// through unchanged.
+    /// Convenience for a boundary whose model already emits canonical label
+    /// names (or has been calibrated to): [`get`] passes those labels
+    /// through unchanged, and any name absent from `catalog` returns
+    /// `None`.
     ///
     /// [`get`]: Self::get
     #[must_use]
-    pub fn canonical() -> Self {
-        Self::canonical_from(&LabelCatalog::with_builtins())
-    }
-
-    /// Identity map over every label name in `catalog`.
-    #[must_use]
-    pub fn canonical_from(catalog: &LabelCatalog) -> Self {
+    pub fn canonical(catalog: &LabelCatalog) -> Self {
         catalog
             .iter()
             .map(|label| (label.name().to_owned(), LabelRef::new(label.name())))

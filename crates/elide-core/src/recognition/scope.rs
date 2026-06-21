@@ -2,6 +2,7 @@
 
 use uuid::Uuid;
 
+use crate::entity::LabelCatalog;
 use crate::modality::Modality;
 use crate::primitive::{CountryCode, Language, Languages};
 use crate::recognition::annotation::{Exclusion, Inclusion};
@@ -31,7 +32,16 @@ pub struct Scope<M: Modality> {
     /// Document-level classification labels (e.g. `"medical"`,
     /// `"gdpr-request"`). Recognizers may use these to bias their behavior
     /// for domain-specific terms; those that don't ignore the field.
+    ///
+    /// Distinct from [`catalog`](Self::catalog): these classify the
+    /// *document*, whereas the catalog names the entity *types* to emit.
     pub labels: Vec<String>,
+    /// The entity types recognizers are asked to emit. A zero-shot NER
+    /// model requests exactly this set; an LLM prompt lists it as the
+    /// labels to find. Empty means "the recognizer's own default" — a
+    /// recognizer with its own configured label set keeps it; one without
+    /// emits whatever its backend natively produces.
+    pub catalog: LabelCatalog,
     /// Caller-supplied candidate regions (each a region the caller
     /// believes may hold an entity, with an optional claimed label, name,
     /// and confidence). Recognizers that adjudicate inclusions (typically
@@ -54,6 +64,7 @@ impl<M: Modality> Scope<M> {
             languages: Languages::default(),
             countries: Vec::new(),
             labels: Vec::new(),
+            catalog: LabelCatalog::new(),
             inclusions: Vec::new(),
             exclusions: Vec::new(),
             correlation_id: None,
@@ -92,6 +103,20 @@ impl<M: Modality> Scope<M> {
     #[must_use]
     pub fn with_labels(mut self, labels: Vec<String>) -> Self {
         self.labels = labels;
+        self
+    }
+
+    /// Set the [`LabelCatalog`] of entity types recognizers should emit.
+    ///
+    /// Threaded onto every [`RecognizerContext`]; a zero-shot NER model
+    /// requests exactly these labels and an LLM prompt lists them as the
+    /// types to find. A recognizer with its own configured label set may
+    /// override.
+    ///
+    /// [`RecognizerContext`]: super::RecognizerContext
+    #[must_use]
+    pub fn with_catalog(mut self, catalog: LabelCatalog) -> Self {
+        self.catalog = catalog;
         self
     }
 

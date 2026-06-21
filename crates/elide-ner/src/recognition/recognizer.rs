@@ -1,34 +1,38 @@
 //! [`NerRecognizer`]: unified NER recognizer that drives any
 //! [`NerBackend`] backend.
 //!
-//! Holds an `Arc<dyn NerBackend>` plus a [`NerModel`] (label-map +
-//! ignore set + low-score demotion knobs) plus the recognizer's
-//! advertised [`supported_kinds`]. On each `recognize` call it asks
-//! the backend for spans (passing `Some(&supported_kinds)` when
-//! non-empty for zero-shot backends, `None` when empty for
-//! fixed-label backends), then normalizes through the model and
-//! emits entities.
+//! Holds an `Arc<dyn NerBackend>` plus the recognizer's advertised
+//! [`supported_labels`]. On each `recognize` call it asks the backend for
+//! spans (passing `Some(&labels)` when non-empty for zero-shot backends,
+//! `None` when empty for fixed-label backends), then emits entities from
+//! the canonical spans the backend returns. Filtering ignored labels or
+//! scaling scores is the job of backend decorators
+//! ([`IgnoreLabels`], [`ScoreScale`]), not the recognizer.
 //!
 //! Implements [`Recognizer<Text>`] so it composes with the
 //! rest of the platform through the same trait every other text
 //! recognizer uses.
 //!
-//! [`supported_kinds`]: NerRecognizer::supported_kinds
+//! [`supported_labels`]: NerRecognizer::supported_labels
+//! [`IgnoreLabels`]: crate::decorator::IgnoreLabels
+//! [`ScoreScale`]: crate::decorator::ScoreScale
 //! [`Recognizer<Text>`]: elide_core::recognition::Recognizer
 
 use std::sync::Arc;
 
 use derive_builder::Builder;
+use hipstr::HipStr;
+
 use elide_core::entity::provenance::{Event, ModelEvent};
-use elide_core::entity::{Entity, LabelRef};
+use elide_core::entity::{Entity, Label, LabelRef};
 use elide_core::modality::TextBacked;
 use elide_core::modality::text::TextData;
-use elide_core::primitive::Confidence;
 use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
 use elide_core::{Error, Result};
 
-use super::config::NerModel;
-use crate::backend::{NerBackend, NerRequest, RawNerSpan};
+use super::aggregation::AggregationStrategy;
+use super::alignment::AlignmentMode;
+use crate::backend::{NerBackend, NerRequest, NerSpan};
 
 /// Trait-driven NER recognizer.
 #[derive(Clone, Builder)]
@@ -40,8 +44,9 @@ use crate::backend::{NerBackend, NerRequest, RawNerSpan};
 )]
 pub struct NerRecognizer {
     /// Recognizer name. Surfaced in the recognition event on every
-    /// emitted entity.
-    name: String,
+    /// emitted entity, so cheap to clone and never changed after
+    /// construction.
+    name: HipStr<'static>,
     /// Backend that turns `(text, kinds)` into raw spans. Required.
     /// Set via [`with_backend`], which accepts any concrete
     /// [`NerBackend`] impl by value and wraps it in `Arc` internally.
@@ -55,10 +60,14 @@ pub struct NerRecognizer {
     /// whatever it natively produces (fixed-label path).
     #[builder(default)]
     supported_labels: Vec<LabelRef>,
-    /// Normalization knobs applied to the backend's raw output
-    /// before entities are emitted.
+    /// Aggregation policy for backends that emit token-level
+    /// predictions. Advisory for backends that aggregate server-side.
     #[builder(default)]
-    model: NerModel,
+    aggregation: AggregationStrategy,
+    /// Alignment policy for sub-word predictions. Same advisory
+    /// status as `aggregation`.
+    #[builder(default)]
+    alignment: AlignmentMode,
 }
 
 impl NerRecognizer {
@@ -84,20 +93,20 @@ impl NerRecognizer {
         &self.supported_labels
     }
 
-    /// Borrow the normalization config.
+    /// Aggregation policy for token-level backends.
     #[must_use]
-    pub fn model(&self) -> &NerModel {
-        &self.model
+    pub fn aggregation(&self) -> AggregationStrategy {
+        self.aggregation
     }
 
-    fn build_entity<M: TextBacked>(&self, span: &RawNerSpan, label: LabelRef) -> Entity<M> {
-        let raw_confidence = Confidence::clamped(span.score as f32);
-        let confidence = if self.model.low_score_labels.contains(label.as_str()) {
-            let demoted = f64::from(raw_confidence.get()) * self.model.low_score_multiplier;
-            Confidence::clamped(demoted as f32)
-        } else {
-            raw_confidence
-        };
+    /// Alignment policy for sub-word backends.
+    #[must_use]
+    pub fn alignment(&self) -> AlignmentMode {
+        self.alignment
+    }
+
+    fn build_entity<M: TextBacked>(&self, span: &NerSpan, label: LabelRef) -> Entity<M> {
+        let confidence = span.confidence;
         let location = M::locate(span.offset.start..span.offset.end);
         let reason = format!("recognizer `{}` identified {}", self.name, label.as_str());
         let event = Event::model(
@@ -105,7 +114,7 @@ impl NerRecognizer {
             confidence,
             location.clone(),
             ModelEvent {
-                name: self.name.clone().into(),
+                name: self.name.clone(),
                 ..ModelEvent::default()
             },
         )
@@ -160,12 +169,30 @@ impl<M: TextBacked> Recognizer<M> for NerRecognizer {
         data: &TextData,
         ctx: &RecognizerContext<'_, M>,
     ) -> Result<Vec<Entity<M>>> {
-        let supported_borrowed: Vec<&str> =
-            self.supported_labels.iter().map(LabelRef::as_str).collect();
-        let labels = if supported_borrowed.is_empty() {
+        // The effective target labels, as full `Label`s (name +
+        // description) so a zero-shot backend like GLiNER 2.0 gets the
+        // descriptions: the recognizer's own configured set overrides when
+        // present, else the run-wide catalog from the scope. Descriptions
+        // for the override path are resolved against the catalog; a label
+        // absent from it falls back to a description-less `Label`. Empty
+        // leaves the backend to emit whatever it natively produces.
+        let effective_labels: Vec<Label> = if self.supported_labels.is_empty() {
+            ctx.catalog().iter().cloned().collect()
+        } else {
+            self.supported_labels
+                .iter()
+                .map(|r| {
+                    ctx.catalog()
+                        .get(r)
+                        .cloned()
+                        .unwrap_or_else(|| Label::new(r.as_str()))
+                })
+                .collect()
+        };
+        let labels = if effective_labels.is_empty() {
             None
         } else {
-            Some(supported_borrowed.as_slice())
+            Some(effective_labels.as_slice())
         };
         let request = NerRequest {
             text: data.text.as_str(),
@@ -175,21 +202,18 @@ impl<M: TextBacked> Recognizer<M> for NerRecognizer {
         };
         let response = self.backend.recognize(request).await?;
 
+        // Spans already carry canonical labels (the backend did any
+        // raw-to-canonical mapping; ignored labels are dropped by an
+        // `IgnoreLabels` decorator). When a target set was requested, we
+        // restrict to it.
         let entities: Vec<Entity<M>> = response
             .spans
             .iter()
-            .filter(|s| !self.model.labels_to_ignore.contains(s.label.as_str()))
-            .filter_map(|s| {
-                self.model
-                    .label_map
-                    .get(&s.label)
-                    .filter(|name| {
-                        self.supported_labels.is_empty()
-                            || self.supported_labels.iter().any(|sl| sl == *name)
-                    })
-                    .cloned()
-                    .map(|name| self.build_entity::<M>(s, name))
+            .filter(|s| {
+                effective_labels.is_empty()
+                    || effective_labels.iter().any(|l| l.to_ref() == s.label)
             })
+            .map(|s| self.build_entity::<M>(s, s.label.clone()))
             .collect();
         Ok(entities)
     }
@@ -197,11 +221,14 @@ impl<M: TextBacked> Recognizer<M> for NerRecognizer {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::builtins;
+    use std::sync::{Arc, Mutex};
+
+    use elide_core::entity::{LabelCatalog, builtins};
     use elide_core::modality::text::Text;
     use elide_core::recognition::Scope;
 
     use super::*;
+    use crate::backend::NerResponse;
 
     #[tokio::test]
     async fn mock_backend_yields_no_entities() {
@@ -233,5 +260,84 @@ mod tests {
         let ctx = RecognizerContext::new(&scope);
         let out = rec.recognize(&data, &ctx).await.unwrap();
         assert!(out.is_empty());
+    }
+
+    /// Each captured label: its name and whether it carried a description.
+    type SeenLabels = Arc<Mutex<Option<Vec<(String, bool)>>>>;
+
+    /// Backend that records the labels it received, so a test can assert
+    /// what the recognizer sent.
+    #[derive(Clone, Default)]
+    struct CapturingBackend {
+        seen: SeenLabels,
+    }
+
+    #[async_trait::async_trait]
+    impl NerBackend for CapturingBackend {
+        fn provenance(&self) -> ModelEvent {
+            ModelEvent {
+                name: "capturing".into(),
+                ..ModelEvent::default()
+            }
+        }
+
+        async fn recognize(&self, request: NerRequest<'_>) -> Result<NerResponse> {
+            *self.seen.lock().unwrap() = request.labels.map(|labels| {
+                labels
+                    .iter()
+                    .map(|l| (l.name().to_owned(), l.description().is_some()))
+                    .collect()
+            });
+            Ok(NerResponse::default())
+        }
+    }
+
+    #[tokio::test]
+    async fn catalog_on_scope_becomes_the_target_labels() {
+        let backend = CapturingBackend::default();
+        let seen = backend.seen.clone();
+        let rec = NerRecognizer::builder()
+            .with_name("test")
+            .with_backend(backend)
+            .build()
+            .expect("builder succeeds");
+
+        // No `with_supported_labels`: the scope's catalog drives the labels,
+        // carrying descriptions for a zero-shot backend.
+        let mut catalog = LabelCatalog::new();
+        catalog.insert(Label::described("EMAIL", "an email address"));
+        let scope = Scope::<Text>::new().with_catalog(catalog);
+        let ctx = RecognizerContext::new(&scope);
+        rec.recognize(&TextData::new("x".to_owned()), &ctx)
+            .await
+            .unwrap();
+
+        let seen = seen.lock().unwrap().clone().expect("labels were sent");
+        assert_eq!(seen, vec![("EMAIL".to_owned(), true)]);
+    }
+
+    #[tokio::test]
+    async fn supported_labels_override_the_catalog() {
+        let backend = CapturingBackend::default();
+        let seen = backend.seen.clone();
+        let rec = NerRecognizer::builder()
+            .with_name("test")
+            .with_backend(backend)
+            .with_supported_labels(vec![builtins::PERSON_NAME.to_ref()])
+            .build()
+            .expect("builder succeeds");
+
+        // The catalog is present but the recognizer's own set overrides it.
+        let mut catalog = LabelCatalog::new();
+        catalog.insert(Label::described("EMAIL", "an email address"));
+        let scope = Scope::<Text>::new().with_catalog(catalog);
+        let ctx = RecognizerContext::new(&scope);
+        rec.recognize(&TextData::new("x".to_owned()), &ctx)
+            .await
+            .unwrap();
+
+        let seen = seen.lock().unwrap().clone().expect("labels were sent");
+        let names: Vec<&str> = seen.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, vec![builtins::PERSON_NAME.name()]);
     }
 }

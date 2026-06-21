@@ -4,6 +4,7 @@
 
 use uuid::Uuid;
 
+use crate::entity::{LabelCatalog, LabelRef};
 use crate::modality::{Hint, Modality};
 use crate::primitive::{CountryCode, Language, LanguageTag, Languages};
 use crate::recognition::annotation::{Exclusion, Inclusion};
@@ -93,10 +94,29 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
         &self.scope.exclusions
     }
 
-    /// Caller-asserted document-level labels for this analysis.
+    /// Caller-asserted document-level classification labels for this
+    /// analysis (e.g. `"medical"`). Distinct from the entity types to emit
+    /// — those are [`target_labels`](Self::target_labels).
     #[must_use]
     pub fn labels(&self) -> &[String] {
         &self.scope.labels
+    }
+
+    /// The [`LabelCatalog`] of entity types recognizers are asked to emit.
+    /// A zero-shot NER model requests exactly these labels; an LLM prompt
+    /// lists them as the types to find. Empty means "no run-wide target
+    /// set" — a recognizer falls back to its own configured labels.
+    #[must_use]
+    pub fn catalog(&self) -> &LabelCatalog {
+        &self.scope.catalog
+    }
+
+    /// The entity types to emit, as [`LabelRef`]s — the catalog's labels.
+    /// Convenience over [`catalog`](Self::catalog) for recognizers that
+    /// only need the names.
+    #[must_use]
+    pub fn target_labels(&self) -> Vec<LabelRef> {
+        self.scope.catalog.refs().collect()
     }
 
     /// Correlation id, if the caller set one.
