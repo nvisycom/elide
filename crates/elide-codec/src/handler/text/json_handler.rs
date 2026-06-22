@@ -14,6 +14,8 @@
 //! reduces the partial-leaf offset translation to a single per-leaf walk
 //! of its escape table.
 
+use std::ops::Range;
+
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter, Hint};
 use elide_core::redaction::Redactions;
@@ -179,7 +181,7 @@ impl DataWriter<Text> for JsonHandler {
                 if loc.start < slot_end {
                     if let Slot::Leaf(leaf) = slot
                         && let Some((value_start, value_end)) =
-                            translate_to_value(leaf, slot_offset, loc.start, loc.end)
+                            translate_to_value(leaf, slot_offset, loc.start..loc.end)
                     {
                         let value = replacement.value().unwrap_or_default().to_owned();
                         plan.push((idx, value_start, value_end, value));
@@ -269,9 +271,12 @@ fn json_escape(s: &str) -> String {
 fn translate_to_value(
     leaf: &Leaf,
     slot_start: usize,
-    source_start: usize,
-    source_end: usize,
+    source: Range<usize>,
 ) -> Option<(usize, usize)> {
+    let Range {
+        start: source_start,
+        end: source_end,
+    } = source;
     let slot_end = slot_start + leaf.serialized.len();
     if !leaf.is_quoted() {
         return Some((source_start - slot_start, source_end - slot_start));

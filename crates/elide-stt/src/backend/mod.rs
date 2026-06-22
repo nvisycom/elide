@@ -4,16 +4,18 @@
 //! single full-clip segment (OpenAI Whisper), hosted APIs that emit
 //! diarized multi-speaker segments (Deepgram, AssemblyAI), and
 //! local/self-hosted inference services. Each backend turns a request
-//! (audio bytes + optional hints) into a response (ordered
-//! [`TranscribedSegment`]s). The `mock`-gated [`MockBackend`] (returns no
-//! segments; test/example stub) ships here; concrete provider backends
-//! live downstream.
+//! (audio bytes + optional hints) into a response of ordered
+//! [`TranscriptSegment`]s — the core transcription type, so a backend's
+//! output drops straight onto the call's artifacts with no remapping. The
+//! `mock`-gated [`MockBackend`] (returns no segments; test/example stub)
+//! ships here; concrete provider backends live downstream.
+//!
+//! [`TranscriptSegment`]: elide_core::primitive::TranscriptSegment
 
 #[cfg(any(test, feature = "mock"))]
 mod mock_backend;
 mod stt_request;
 mod stt_response;
-mod transcribed_segment;
 
 use elide_core::Result;
 use elide_core::entity::provenance::ModelEvent;
@@ -23,7 +25,6 @@ use elide_core::entity::provenance::ModelEvent;
 pub use self::mock_backend::MockBackend;
 pub use self::stt_request::SttRequest;
 pub use self::stt_response::SttResponse;
-pub use self::transcribed_segment::{TranscribedSegment, TranscribedWord};
 
 /// Per-call speech-to-text backend.
 ///

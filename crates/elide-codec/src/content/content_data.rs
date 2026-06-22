@@ -2,6 +2,7 @@
 
 use std::borrow::Cow;
 use std::fmt;
+use std::ops::Range;
 
 use bytes::Bytes;
 use elide_core::{Error, ErrorKind, Result};
@@ -170,13 +171,14 @@ impl ContentData {
         hex::encode(self.sha256())
     }
 
-    /// A slice of the content over `start..end`.
+    /// A slice of the content over `range`.
     ///
     /// # Errors
     ///
-    /// Returns a validation error when `end` is past the content length
-    /// or `start > end`.
-    pub fn slice(&self, start: usize, end: usize) -> Result<Bytes> {
+    /// Returns a validation error when the range end is past the content
+    /// length or its start exceeds its end.
+    pub fn slice(&self, range: Range<usize>) -> Result<Bytes> {
+        let Range { start, end } = range;
         if end > self.data.len() {
             return Err(Error::new(
                 ErrorKind::Validation,
@@ -243,9 +245,9 @@ mod tests {
     #[test]
     fn slice_bounds_are_checked() {
         let c = ContentData::from_text("hello");
-        assert_eq!(&c.slice(0, 3).unwrap()[..], b"hel");
-        assert!(c.slice(0, 99).is_err());
-        assert!(c.slice(3, 1).is_err());
+        assert_eq!(&c.slice(0..3).unwrap()[..], b"hel");
+        assert!(c.slice(0..99).is_err());
+        assert!(c.slice(3..1).is_err());
     }
 
     #[test]

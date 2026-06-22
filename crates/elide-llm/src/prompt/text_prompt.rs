@@ -4,6 +4,8 @@
 //! [`DefaultPrompt`]: super::DefaultPrompt
 //! [`Prompt<Text>`]: super::Prompt
 
+use std::ops::Range;
+
 use elide_core::entity::LabelRef;
 use elide_core::modality::text::Text;
 use elide_core::recognition::annotation::Inclusion;
@@ -74,8 +76,9 @@ impl<'a> TextPromptBuilder<'a> {
                  Use them as priors when scoring candidates. Hints:",
             );
             for (i, h) in self.inclusions.iter().enumerate() {
-                let value = value_at(self.text, h.location.start, h.location.end);
-                let snippet = snippet_around(self.text, h.location.start, h.location.end);
+                let range = h.location.start..h.location.end;
+                let value = value_at(self.text, range.clone());
+                let snippet = snippet_around(self.text, range);
                 let name = h.name.as_deref().unwrap_or("");
                 let kind = h
                     .label
@@ -93,13 +96,14 @@ impl<'a> TextPromptBuilder<'a> {
     }
 }
 
-fn snippet_around(text: &str, start: usize, end: usize) -> &str {
-    let lo = floor_char_boundary(text, start.saturating_sub(SNIPPET_HALF_WIDTH));
-    let hi = ceil_char_boundary(text, (end + SNIPPET_HALF_WIDTH).min(text.len()));
+fn snippet_around(text: &str, range: Range<usize>) -> &str {
+    let lo = floor_char_boundary(text, range.start.saturating_sub(SNIPPET_HALF_WIDTH));
+    let hi = ceil_char_boundary(text, (range.end + SNIPPET_HALF_WIDTH).min(text.len()));
     &text[lo..hi]
 }
 
-fn value_at(text: &str, start: usize, end: usize) -> &str {
+fn value_at(text: &str, range: Range<usize>) -> &str {
+    let Range { start, end } = range;
     if start < end
         && end <= text.len()
         && text.is_char_boundary(start)

@@ -2,25 +2,27 @@
 //!
 //! [`SttBackend`]: super::SttBackend
 
-use super::transcribed_segment::TranscribedSegment;
+use elide_core::primitive::TranscriptSegment;
 
 /// One per-call STT response from an [`SttBackend`].
 ///
-/// Wraps the segments the backend produced in backend order (typically
-/// source order). The recognition layer treats each segment as a chunk of
-/// transcript text addressable by its `[start_ms, end_ms)` interval.
+/// Wraps the [`TranscriptSegment`]s the backend produced in backend order
+/// (typically source order). These are the core transcription type, so an
+/// enricher folds them into a [`Transcription`] and onto the call's
+/// artifacts without any remapping.
 ///
 /// [`SttBackend`]: super::SttBackend
+/// [`Transcription`]: elide_core::primitive::Transcription
 #[derive(Debug, Clone, Default)]
 pub struct SttResponse {
     /// Segments predicted for the request, in backend order.
-    pub segments: Vec<TranscribedSegment>,
+    pub segments: Vec<TranscriptSegment>,
 }
 
 impl SttResponse {
     /// Construct a response from segments.
     #[must_use]
-    pub fn new(segments: Vec<TranscribedSegment>) -> Self {
+    pub fn new(segments: Vec<TranscriptSegment>) -> Self {
         Self { segments }
     }
 }

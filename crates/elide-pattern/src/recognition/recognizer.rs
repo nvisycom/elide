@@ -428,7 +428,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
         data: &M::Data,
         ctx: &RecognizerContext<'_, M>,
     ) -> Result<Vec<Entity<M>>> {
-        let text = M::as_text(data);
+        let text = M::as_text(data, ctx);
         let mut entities: Vec<Entity<M>> = Vec::new();
 
         if let Some(set) = self.regex_set.as_ref() {
@@ -450,7 +450,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
                     {
                         continue;
                     }
-                    entities.push(pat.build_entity::<M>(m.start(), m.end(), data));
+                    entities.push(pat.build_entity::<M>(m.range(), data, ctx));
                 }
             }
         }
@@ -467,11 +467,12 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
                 if !ctx.applies_to_country(&dict.countries) {
                     continue;
                 }
-                if dict.word_boundary && !has_word_boundaries(text, mat.start(), mat.end()) {
+                let range = mat.range();
+                if dict.word_boundary && !has_word_boundaries(text, range.clone()) {
                     continue;
                 }
                 let score = dict.term_scores[term_id - dict.term_start];
-                entities.push(dict.build_entity::<M>(score, mat.start(), mat.end(), data));
+                entities.push(dict.build_entity::<M>(score, range, data, ctx));
             }
         }
 

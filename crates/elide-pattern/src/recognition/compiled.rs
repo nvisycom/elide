@@ -15,12 +15,14 @@
 //! [`AhoCorasick`]: aho_corasick::AhoCorasick
 //! [`PatternRecognizerBuilder::build`]: super::PatternRecognizerBuilder::build
 
+use std::ops::Range;
 use std::sync::Arc;
 
 use elide_core::entity::provenance::{Event, PatternEvent};
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
+use elide_core::recognition::RecognizerContext;
 use regex::Regex;
 
 use crate::validators::Validator;
@@ -56,11 +58,11 @@ impl CompiledPattern {
     /// location to absolute document coordinates after dispatch.
     pub(super) fn build_entity<M: TextRecognizable>(
         &self,
-        start: usize,
-        end: usize,
+        range: Range<usize>,
         data: &M::Data,
+        ctx: &RecognizerContext<'_, M>,
     ) -> Entity<M> {
-        let location = M::locate(start..end, data);
+        let location = M::locate(range, data, ctx);
         let event = Event::pattern(
             "pattern",
             self.score,
@@ -121,11 +123,11 @@ impl CompiledDictionary {
     pub(super) fn build_entity<M: TextRecognizable>(
         &self,
         score: Confidence,
-        start: usize,
-        end: usize,
+        range: Range<usize>,
         data: &M::Data,
+        ctx: &RecognizerContext<'_, M>,
     ) -> Entity<M> {
-        let location = M::locate(start..end, data);
+        let location = M::locate(range, data, ctx);
         let event = Event::pattern(
             "pattern",
             score,
@@ -156,9 +158,12 @@ impl CompiledDictionary {
 /// Operates on `char` boundaries, not raw bytes, so multibyte
 /// codepoints don't trigger false rejections (`é` is one char,
 /// not two).
-pub(super) fn has_word_boundaries(text: &str, start: usize, end: usize) -> bool {
-    let left_is_word = text[..start].chars().next_back().is_some_and(is_word_char);
-    let right_is_word = text[end..].chars().next().is_some_and(is_word_char);
+pub(super) fn has_word_boundaries(text: &str, range: Range<usize>) -> bool {
+    let left_is_word = text[..range.start]
+        .chars()
+        .next_back()
+        .is_some_and(is_word_char);
+    let right_is_word = text[range.end..].chars().next().is_some_and(is_word_char);
     !left_is_word && !right_is_word
 }
 
@@ -173,16 +178,16 @@ mod tests {
     #[test]
     fn has_word_boundaries_handles_edges_and_unicode() {
         // Match touches both edges of the input → boundaries OK.
-        assert!(has_word_boundaries("hello", 0, 5));
+        assert!(has_word_boundaries("hello", 0..5));
         // Match preceded by a word char → not a boundary.
-        assert!(!has_word_boundaries("example", 5, 7));
+        assert!(!has_word_boundaries("example", 5..7));
         // Match followed by a word char → not a boundary.
-        assert!(!has_word_boundaries("amount", 0, 2));
+        assert!(!has_word_boundaries("amount", 0..2));
         // Space surround → boundaries OK.
-        assert!(has_word_boundaries(" am ", 1, 3));
+        assert!(has_word_boundaries(" am ", 1..3));
         // Unicode word char on the left → not a boundary.
-        assert!(!has_word_boundaries("café_am", 5, 7));
+        assert!(!has_word_boundaries("café_am", 5..7));
         // Punctuation around → boundaries OK.
-        assert!(has_word_boundaries("(am)", 1, 3));
+        assert!(has_word_boundaries("(am)", 1..3));
     }
 }

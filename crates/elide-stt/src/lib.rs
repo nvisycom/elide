@@ -3,3 +3,6 @@
 #![doc = include_str!("../README.md")]
 
 pub mod backend;
+mod enricher;
+
+pub use self::enricher::SttEnricher;

@@ -108,9 +108,10 @@ impl NerRecognizer {
         span: &NerSpan,
         label: LabelRef,
         data: &M::Data,
+        ctx: &RecognizerContext<'_, M>,
     ) -> Entity<M> {
         let confidence = span.confidence;
-        let location = M::locate(span.offset.start..span.offset.end, data);
+        let location = M::locate(span.offset.start..span.offset.end, data, ctx);
         let reason = format!("recognizer `{}` identified {}", self.name, label.as_str());
         let event = Event::model(
             "ner",
@@ -198,7 +199,7 @@ impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
             Some(effective_labels.as_slice())
         };
         let request = NerRequest {
-            text: M::as_text(data),
+            text: M::as_text(data, ctx),
             labels,
             language: ctx.primary_language(),
             correlation_id: ctx.correlation_id(),
@@ -216,7 +217,7 @@ impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
                 effective_labels.is_empty()
                     || effective_labels.iter().any(|l| l.to_ref() == s.label)
             })
-            .map(|s| self.build_entity::<M>(s, s.label.clone(), data))
+            .map(|s| self.build_entity::<M>(s, s.label.clone(), data, ctx))
             .collect();
         Ok(entities)
     }

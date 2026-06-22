@@ -16,6 +16,7 @@
 
 use std::fs;
 use std::marker::PhantomData;
+use std::ops::Range;
 use std::path::Path;
 
 use elide_core::modality::Modality;
@@ -88,8 +89,9 @@ impl Prompt<Text> for Jinja2Prompt<Text> {
             .inclusions()
             .iter()
             .map(|h| {
-                let value = value_at(text, h.location.start, h.location.end);
-                let snippet = snippet_around(text, h.location.start, h.location.end);
+                let range = h.location.start..h.location.end;
+                let value = value_at(text, range.clone());
+                let snippet = snippet_around(text, range);
                 context! {
                     name => h.name.as_deref().unwrap_or(""),
                     kind => h.label.as_ref().map(|l| l.as_str().to_owned()).unwrap_or_else(|| "unknown".to_owned()),
@@ -134,7 +136,8 @@ impl Prompt<Image> for Jinja2Prompt<Image> {
     }
 }
 
-fn value_at(text: &str, start: usize, end: usize) -> &str {
+fn value_at(text: &str, range: Range<usize>) -> &str {
+    let Range { start, end } = range;
     if start < end
         && end <= text.len()
         && text.is_char_boundary(start)
@@ -146,9 +149,9 @@ fn value_at(text: &str, start: usize, end: usize) -> &str {
     }
 }
 
-fn snippet_around(text: &str, start: usize, end: usize) -> &str {
-    let lo = floor_char_boundary(text, start.saturating_sub(HINT_SNIPPET_HALF_WIDTH));
-    let hi = ceil_char_boundary(text, (end + HINT_SNIPPET_HALF_WIDTH).min(text.len()));
+fn snippet_around(text: &str, range: Range<usize>) -> &str {
+    let lo = floor_char_boundary(text, range.start.saturating_sub(HINT_SNIPPET_HALF_WIDTH));
+    let hi = ceil_char_boundary(text, (range.end + HINT_SNIPPET_HALF_WIDTH).min(text.len()));
     &text[lo..hi]
 }
 

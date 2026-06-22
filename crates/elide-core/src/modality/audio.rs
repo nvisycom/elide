@@ -1,19 +1,27 @@
 //! [`Audio`] modality: audio content addressed by time ranges.
 
 use std::cmp::Ordering;
+use std::ops::Range;
 
 use bytes::Bytes;
 use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{Modality, ModalityData, ModalityLocation, ModalityReplacement};
-use crate::primitive::TimeSpan;
+use super::{Modality, ModalityData, ModalityLocation, ModalityReplacement, TextRecognizable};
+use crate::primitive::{TimeSpan, Transcription};
+use crate::recognition::RecognizerContext;
 
 /// Per-call payload a recognizer inspects for the [`Audio`] modality.
 ///
 /// Carries the encoded audio bytes; an optional filename aids diagnostics
 /// and encoding inference (the container format a decoder should expect).
+/// The recognizable text — a timestamped transcript — is *not* held here;
+/// a speech-to-text [`Enricher`] stamps it onto the call's
+/// [`artifacts`](crate::recognition::RecognizerContext::artifacts), keeping
+/// `AudioData` the codec's payload alone.
+///
+/// [`Enricher`]: crate::recognition::Enricher
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct AudioData {
@@ -150,9 +158,44 @@ impl Modality for Audio {
     const NAME: &'static str = "audio";
 }
 
+impl TextRecognizable for Audio {
+    /// The transcript text a recognizer inspects: the [`Transcription`] an
+    /// enricher stamped onto the call's artifacts, or `""` when none is
+    /// present (a clip that was never transcribed) — a recognizer then finds
+    /// nothing, rather than erroring.
+    fn as_text<'a>(_data: &'a AudioData, ctx: &'a RecognizerContext<'_, Self>) -> &'a str {
+        ctx.artifacts
+            .get::<Transcription>()
+            .map_or("", Transcription::text)
+    }
+
+    /// Resolve a transcript byte `range` to the audio time it was spoken in.
+    ///
+    /// Unlike the byte-based text modalities, audio's location is a time
+    /// span, so `locate` resolves `range` immediately against the
+    /// transcript's word timings (read from the call's artifacts) rather
+    /// than deferring to a lift. A range that resolves to nothing (no
+    /// transcript, or out of bounds) yields a zero-length span at the
+    /// origin; such an entity carries no real audio extent.
+    fn locate(
+        range: Range<usize>,
+        _data: &AudioData,
+        ctx: &RecognizerContext<'_, Self>,
+    ) -> AudioLocation {
+        let span = ctx
+            .artifacts
+            .get::<Transcription>()
+            .and_then(|t| t.resolve(range))
+            .unwrap_or_default();
+        AudioLocation::new(span)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::primitive::{TranscriptSegment, TranscriptWord};
+    use crate::recognition::Scope;
 
     #[test]
     fn overlaps_is_time_range_intersection() {
@@ -197,5 +240,54 @@ mod tests {
         assert_eq!(d.extension(), "wav");
         let named = d.with_filename("call.MP3");
         assert_eq!(named.extension(), "MP3");
+    }
+
+    #[test]
+    fn as_text_is_empty_without_a_transcript() {
+        let data = AudioData::new(Bytes::new());
+        let scope = Scope::<Audio>::new();
+        let ctx = RecognizerContext::new(&scope);
+        assert_eq!(Audio::as_text(&data, &ctx), "");
+    }
+
+    /// A context whose artifacts carry the phone-number transcript.
+    fn phone_context(scope: &Scope<Audio>) -> RecognizerContext<'_, Audio> {
+        let segment =
+            TranscriptSegment::new(TimeSpan::from_millis(0, 1_800), "Call Alice at 555-1234")
+                .with_words(vec![TranscriptWord::new(
+                    TimeSpan::from_millis(1_100, 1_800),
+                    "555-1234",
+                )]);
+        let mut ctx = RecognizerContext::new(scope);
+        ctx.artifacts.insert(Transcription::new(vec![segment]));
+        ctx
+    }
+
+    #[test]
+    fn as_text_reads_the_transcript_artifact() {
+        let data = AudioData::new(Bytes::new());
+        let scope = Scope::<Audio>::new();
+        let ctx = phone_context(&scope);
+        assert_eq!(Audio::as_text(&data, &ctx), "Call Alice at 555-1234");
+    }
+
+    #[test]
+    fn locate_resolves_a_transcript_range_to_audio_time() {
+        let data = AudioData::new(Bytes::new());
+        let scope = Scope::<Audio>::new();
+        let ctx = phone_context(&scope);
+        // "555-1234" is at bytes 14..22.
+        let loc = Audio::locate(14..22, &data, &ctx);
+        assert_eq!(loc.span.start_millis(), 1_100);
+        assert_eq!(loc.span.end_millis(), 1_800);
+    }
+
+    #[test]
+    fn locate_without_transcript_is_empty_span() {
+        let data = AudioData::new(Bytes::new());
+        let scope = Scope::<Audio>::new();
+        let ctx = RecognizerContext::new(&scope);
+        let loc = Audio::locate(0..5, &data, &ctx);
+        assert!(loc.span.is_empty());
     }
 }

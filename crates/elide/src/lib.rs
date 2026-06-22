@@ -5,6 +5,7 @@
 mod analyzer;
 mod anonymizer;
 pub mod deduplication;
+pub mod modality;
 #[cfg(feature = "codec")]
 mod orchestrator;
 pub mod redaction;
@@ -54,12 +55,18 @@ pub mod recognition {
     #[cfg_attr(docsrs, doc(cfg(feature = "pattern")))]
     #[doc(inline)]
     pub use elide_pattern as pattern;
+    /// Speech-to-text backends and the transcript-streaming reader that
+    /// drives the text recognizers over audio.
+    #[cfg(feature = "stt")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "stt")))]
+    #[doc(inline)]
+    pub use elide_stt as stt;
 }
 
 #[doc(inline)]
 pub use elide_core::{Error, ErrorKind, Result};
 #[doc(inline)]
-pub use elide_core::{entity, modality, primitive};
+pub use elide_core::{entity, primitive};
 
 pub use self::analyzer::Analyzer;
 pub use self::anonymizer::Anonymizer;

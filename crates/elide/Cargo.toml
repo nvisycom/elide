@@ -40,6 +40,15 @@ pattern = ["dep:elide-pattern"]
 ner = ["dep:elide-ner"]
 ## Re-export the LLM crate as `elide::recognition::llm`.
 llm = ["dep:elide-llm"]
+## Re-export the SST crate as `elide::recognition::stt`.
+stt = ["dep:elide-stt", "audio"]
+
+## The `audio` modality. Implied by the audio codec formats.
+audio = ["elide-core/audio"]
+## The `image` modality. Implied by the image codec formats.
+image = ["elide-core/image"]
+## The `tabular` modality. Implied by the tabular codec formats.
+tabular = ["elide-core/tabular"]
 
 ## Re-export the codec crate as `elide::codec`. On its own this enables
 ## only the codec's default formats; use the per-modality or per-format
@@ -58,17 +67,17 @@ codec-txt = ["codec", "elide-codec/txt"]
 codec-json = ["codec", "elide-codec/json"]
 codec-html = ["codec", "elide-codec/html"]
 codec-xml = ["codec", "elide-codec/xml"]
-codec-csv = ["codec", "elide-codec/csv"]
-codec-xlsx = ["codec", "elide-codec/xlsx"]
-codec-png = ["codec", "elide-codec/png"]
-codec-jpeg = ["codec", "elide-codec/jpeg"]
-codec-tiff = ["codec", "elide-codec/tiff"]
-codec-wav = ["codec", "elide-codec/wav"]
-codec-mp3 = ["codec", "elide-codec/mp3"]
+codec-csv = ["codec", "tabular", "elide-codec/csv"]
+codec-xlsx = ["codec", "tabular", "elide-codec/xlsx"]
+codec-png = ["codec", "image", "elide-codec/png"]
+codec-jpeg = ["codec", "image", "elide-codec/jpeg"]
+codec-tiff = ["codec", "image", "elide-codec/tiff"]
+codec-wav = ["codec", "audio", "elide-codec/wav"]
+codec-mp3 = ["codec", "audio", "elide-codec/mp3"]
 codec-docx = ["codec", "elide-codec/docx"]
 
-## Ship the no-op mock backends in the re-exported `ner`/`llm` crates.
-mock = ["elide-ner?/mock", "elide-llm?/mock"]
+## Ship the no-op mock backends in the re-exported `ner`/`llm`/`stt` crates.
+mock = ["elide-ner?/mock", "elide-llm?/mock", "elide-stt?/mock"]
 
 [dependencies]
 # Internal crates
@@ -76,6 +85,7 @@ elide-core = { workspace = true, features = [] }
 elide-pattern = { workspace = true, features = [], optional = true }
 elide-ner = { workspace = true, features = [], optional = true }
 elide-llm = { workspace = true, features = [], optional = true }
+elide-stt = { workspace = true, features = [], optional = true }
 elide-codec = { workspace = true, features = [], optional = true }
 
 # (De)serialization
@@ -105,6 +115,7 @@ serde_json = { workspace = true, features = [] }
 
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+async-trait = { workspace = true, features = [] }
 
 # Container formats
 zip = { workspace = true }
@@ -129,3 +140,11 @@ required-features = ["codec-csv", "mock", "serde"]
 [[test]]
 name = "e2e_docx"
 required-features = ["codec-docx", "codec-png", "llm", "mock", "serde"]
+
+[[test]]
+name = "e2e_wav"
+required-features = ["codec-wav", "stt", "mock", "serde"]
+
+[[test]]
+name = "e2e_mp3"
+required-features = ["codec-mp3", "stt", "mock", "serde"]
