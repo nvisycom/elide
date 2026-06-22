@@ -206,7 +206,7 @@ mod tests {
 
         let amp = (0.5 * i16::MAX as f32) as i16;
         assert!(samples.iter().all(|&s| s == amp || s == -amp));
-        assert!(samples.iter().any(|&s| s == amp));
-        assert!(samples.iter().any(|&s| s == -amp));
+        assert!(samples.contains(&amp));
+        assert!(samples.contains(&-amp));
     }
 }

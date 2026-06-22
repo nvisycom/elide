@@ -12,6 +12,9 @@
 //!
 //! Audio (feature `audio`): `Silence`, `Beep`.
 //!
+//! Reversible (feature `crypto`): `Encrypt` (AES-256-GCM) replaces the
+//! value with a ciphertext recoverable given the key.
+//!
 //! Cross-modality: [`Erase`] removes the entity in any modality, and
 //! [`Keep`] passes it through unchanged.
 //!
@@ -28,6 +31,8 @@ mod beep;
 mod blackbox;
 #[cfg(feature = "image")]
 mod blur;
+#[cfg(feature = "crypto")]
+mod encrypt;
 mod erase;
 mod hash;
 mod keep;
@@ -45,6 +50,8 @@ pub use self::beep::Beep;
 pub use self::blackbox::Blackbox;
 #[cfg(feature = "image")]
 pub use self::blur::Blur;
+#[cfg(feature = "crypto")]
+pub use self::encrypt::Encrypt;
 pub use self::erase::Erase;
 pub use self::hash::{Hash, HashAlgorithm};
 pub use self::keep::Keep;

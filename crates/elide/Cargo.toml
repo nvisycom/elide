@@ -94,6 +94,9 @@ codec-docx = ["codec", "elide-codec/docx"]
 ## Ship the no-op mock backends in the re-exported recognizer crates.
 mock = ["elide-ner?/mock", "elide-llm?/mock", "elide-stt?/mock", "elide-ocr?/mock"]
 
+## The reversible `Encrypt` operator (AES-256-GCM) and its `KeyProvider`.
+crypto = ["dep:aes-gcm", "dep:base64"]
+
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }
@@ -118,6 +121,10 @@ uuid = { workspace = true, features = ["v4"] }
 # Encoding & hashing
 sha2 = { workspace = true, features = [] }
 hex = { workspace = true, features = [] }
+base64 = { workspace = true, features = ["std"], optional = true }
+
+# Cryptography
+aes-gcm = { workspace = true, features = ["aes", "getrandom"], optional = true }
 
 # Async runtime & parallelism
 futures = { workspace = true, features = [] }
