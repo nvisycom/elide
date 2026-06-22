@@ -450,7 +450,9 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
                     {
                         continue;
                     }
-                    entities.push(pat.build_entity::<M>(m.range(), data, ctx));
+                    if let Some(entity) = pat.build_entity::<M>(m.range(), data, ctx) {
+                        entities.push(entity);
+                    }
                 }
             }
         }
@@ -472,7 +474,9 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
                     continue;
                 }
                 let score = dict.term_scores[term_id - dict.term_start];
-                entities.push(dict.build_entity::<M>(score, range, data, ctx));
+                if let Some(entity) = dict.build_entity::<M>(score, range, data, ctx) {
+                    entities.push(entity);
+                }
             }
         }
 

@@ -103,14 +103,14 @@ scraper = { version = "0.27", features = [] }
 ego-tree = { version = "0.11", features = [] }
 quick-xml = { version = "0.40", features = [] }
 
-# Container formats (OOXML/DOCX is a zip of XML + media)
+# Compression
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 
 # Image processing
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tiff"] }
 imageproc = { version = "0.27", features = [] }
 
-# PDF rendering (native PDFium shared library, loaded at runtime)
+# Rendering
 pdfium-render = { version = "0.9", features = [] }
 
 # Audio processing

@@ -61,8 +61,8 @@ impl CompiledPattern {
         range: Range<usize>,
         data: &M::Data,
         ctx: &RecognizerContext<'_, M>,
-    ) -> Entity<M> {
-        let location = M::locate(range, data, ctx);
+    ) -> Option<Entity<M>> {
+        let location = locate_or_drop::<M>(range, data, ctx, &self.pattern_name)?;
         let event = Event::pattern(
             "pattern",
             self.score,
@@ -78,14 +78,35 @@ impl CompiledPattern {
             },
         )
         .with_reason(format!("pattern `{}` matched", self.pattern_name));
-        Entity::builder()
-            .with_label(self.label.clone())
-            .with_location(location)
-            .with_confidence(self.score)
-            .with_event(event)
-            .build()
-            .expect("required fields provided")
+        Some(
+            Entity::builder()
+                .with_label(self.label.clone())
+                .with_location(location)
+                .with_confidence(self.score)
+                .with_event(event)
+                .build()
+                .expect("required fields provided"),
+        )
     }
+}
+
+/// Place `range` in the medium, or drop the match (returning `None`) with a
+/// warning when it can't be placed — an OCR/transcript range no enrichment
+/// covers, which would otherwise emit a placeless entity.
+fn locate_or_drop<M: TextRecognizable>(
+    range: Range<usize>,
+    data: &M::Data,
+    ctx: &RecognizerContext<'_, M>,
+    source: &str,
+) -> Option<M::Location> {
+    let location = M::locate(range, data, ctx);
+    if location.is_none() {
+        tracing::warn!(
+            source,
+            "could not place a match in the source; dropping it",
+        );
+    }
+    location
 }
 
 /// Source of truth for one runtime dictionary: its term range
@@ -126,8 +147,8 @@ impl CompiledDictionary {
         range: Range<usize>,
         data: &M::Data,
         ctx: &RecognizerContext<'_, M>,
-    ) -> Entity<M> {
-        let location = M::locate(range, data, ctx);
+    ) -> Option<Entity<M>> {
+        let location = locate_or_drop::<M>(range, data, ctx, &self.name)?;
         let event = Event::pattern(
             "pattern",
             score,
@@ -139,13 +160,15 @@ impl CompiledDictionary {
             },
         )
         .with_reason(format!("dictionary `{}` matched", self.name));
-        Entity::builder()
-            .with_label(self.label.clone())
-            .with_location(location)
-            .with_confidence(score)
-            .with_event(event)
-            .build()
-            .expect("required fields provided")
+        Some(
+            Entity::builder()
+                .with_label(self.label.clone())
+                .with_location(location)
+                .with_confidence(score)
+                .with_event(event)
+                .build()
+                .expect("required fields provided"),
+        )
     }
 }
 

@@ -16,7 +16,7 @@ use crate::modality::text::TextReplacement;
 /// [`Cell`]: TabularReplacement::Cell
 /// [`row`]: TabularReplacement::DropRow
 /// [`column`]: TabularReplacement::DropColumn
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub enum TabularReplacement {

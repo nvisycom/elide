@@ -42,10 +42,10 @@ impl TextRecognizable for Tabular {
         range: Range<usize>,
         _data: &TextData,
         _ctx: &RecognizerContext<'_, Self>,
-    ) -> TabularLocation {
+    ) -> Option<TabularLocation> {
         // Chunk-local: only the intra-cell byte range is known here; the
         // codec's lift fills the row/column from the chunk.
-        TabularLocation::new(0, 0).with_range(range.start, range.end)
+        Some(TabularLocation::new(0, 0).with_range(range.start, range.end))
     }
 }
 

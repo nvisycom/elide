@@ -53,6 +53,20 @@ pub use self::text_backed::{TextRecognizable, TextSpanned};
 /// the bounds a payload must satisfy to flow through the model.
 pub trait ModalityData: Clone + fmt::Debug + Send + Sync + 'static {}
 
+/// The lowercase-free extension of `filename`, or `fallback` when there is
+/// no filename or it has no extension. Shared by the byte-backed payloads
+/// ([`AudioData`], [`ImageData`]) that infer a codec from a name.
+///
+/// [`AudioData`]: audio::AudioData
+/// [`ImageData`]: image::ImageData
+#[cfg(any(feature = "audio", feature = "image"))]
+pub(crate) fn extension_or<'a>(filename: Option<&'a str>, fallback: &'a str) -> &'a str {
+    filename
+        .and_then(|name| name.rsplit_once('.'))
+        .map(|(_, ext)| ext)
+        .unwrap_or(fallback)
+}
+
 /// Location within a modality's medium: *where* an entity sits.
 ///
 /// The extension point that makes the model multimodal at the coordinate

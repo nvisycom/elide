@@ -7,7 +7,7 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::modality::ModalityData;
+use crate::modality::{ModalityData, extension_or};
 use crate::primitive::Dimensions;
 
 /// Per-call payload a recognizer inspects for the [`Image`] modality.
@@ -49,16 +49,12 @@ impl ImageData {
         self
     }
 
-    /// Lowercased extension derived from [`filename`],
-    /// or `"png"` when no filename is set or it has no extension.
+    /// Extension derived from [`filename`], or `"png"` when no filename is
+    /// set or it has no extension.
     ///
     /// [`filename`]: Self::filename
     pub fn extension(&self) -> &str {
-        self.filename
-            .as_deref()
-            .and_then(|name| name.rsplit_once('.'))
-            .map(|(_, ext)| ext)
-            .unwrap_or("png")
+        extension_or(self.filename.as_deref(), "png")
     }
 }
 
