@@ -285,7 +285,7 @@ fn operator_trait_shape() {
 
         async fn anonymize(
             &self,
-            entity: &elide_core::entity::Entity<Text>,
+            entity: &Entity<Text>,
             _data: &TextData,
         ) -> Result<TextReplacement> {
             // Pure: computes the replacement, mutates nothing.

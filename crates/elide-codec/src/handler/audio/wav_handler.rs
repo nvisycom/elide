@@ -12,6 +12,7 @@ use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 
 use super::duration::probe_duration_ms;
 use super::redact;
+use super::wav_loader::WavLoader;
 use crate::content::ContentData;
 use crate::{Format, FormatId, Handler};
 
@@ -22,7 +23,7 @@ pub const FORMAT_ID: FormatId = FormatId::new("elide.audio.wav");
 ///
 /// [`FormatRegistry`]: crate::FormatRegistry
 pub fn format() -> Format {
-    Format::new::<Audio, _>(FORMAT_ID.clone(), super::wav_loader::WavLoader)
+    Format::new::<Audio, _>(FORMAT_ID.clone(), WavLoader)
         .with_extensions(["wav"])
         .with_content_types(["audio/wav", "audio/x-wav"])
 }

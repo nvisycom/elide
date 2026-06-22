@@ -15,6 +15,10 @@ use elide::deduplication::filter::FilterLayer;
 use elide::deduplication::fuse::{FuseLayer, MaxConfidence};
 use elide::deduplication::resolve::{HighestConfidence, ResolveLayer};
 use elide::entity::{Entity, builtins};
+#[cfg(feature = "stt")]
+use elide::modality::audio::Audio;
+#[cfg(any(feature = "llm", feature = "ocr"))]
+use elide::modality::image::Image;
 #[cfg(feature = "codec-csv")]
 use elide::modality::tabular::Tabular;
 use elide::modality::text::Text;
@@ -24,7 +28,7 @@ use elide::recognition::pattern::PatternRecognizer;
 use elide::recognition::{Recognizer, Scope};
 use elide::redaction::Operator;
 use elide::redaction::operators::{Erase, Mask, Replace};
-use elide::{Analyzer, Anonymizer, Error, ErrorKind, Orchestrator, Result};
+use elide::{Analyzer, Anonymizer, EntityGroup, Error, ErrorKind, Orchestrator, Report, Result};
 
 /// Outcome of one end-to-end run: the entities that survived dedup and
 /// the re-encoded redacted document.
@@ -32,15 +36,20 @@ pub struct PipelineOutcome<M: Modality> {
     /// Entities detected and reconciled, in source coordinates.
     pub entities: Vec<Entity<M>>,
     /// Re-encoded document after redaction, as raw bytes. For text
-    /// formats this is UTF-8 — use [`redacted_text`](Self::redacted_text);
+    /// formats this is UTF-8 — use [`redacted_text`];
     /// for container formats (DOCX) it is the rebuilt package — use
-    /// [`part`](Self::part) to read one entry.
+    /// [`part`] to read one entry.
+    ///
+    /// [`redacted_text`]: Self::redacted_text
+    /// [`part`]: Self::part
     pub redacted: Vec<u8>,
 }
 
 impl<M: Modality> PipelineOutcome<M> {
     /// The redacted output decoded as UTF-8 text. Panics if it is not
-    /// (i.e. for a binary container format — read a [`part`](Self::part)).
+    /// (i.e. for a binary container format — read a [`part`]).
+    ///
+    /// [`part`]: Self::part
     pub fn redacted_text(&self) -> String {
         String::from_utf8(self.redacted.clone()).expect("redacted output is UTF-8 text")
     }
@@ -108,7 +117,7 @@ where
 /// embedded media is driven. Real image detection is a separate concern;
 /// here it proves the multi-modal path runs.
 #[cfg(feature = "llm")]
-fn build_image_analyzer() -> Result<Analyzer<elide::modality::image::Image>> {
+fn build_image_analyzer() -> Result<Analyzer<Image>> {
     use elide::recognition::llm::LlmRecognizer;
     let recognizer = LlmRecognizer::builder()
         .with_name("mock-image")
@@ -124,8 +133,10 @@ fn build_image_analyzer() -> Result<Analyzer<elide::modality::image::Image>> {
 ///
 /// Construct one per format with [`include_bytes!`] for `source` (so the
 /// same shape serves text formats and binary containers like DOCX) and
-/// the matching `testdata/` path, then call [`run`](Self::run) /
-/// [`run_tabular`](Self::run_tabular).
+/// the matching `testdata/` path, then call [`run`] / [`run_tabular`].
+///
+/// [`run`]: Self::run
+/// [`run_tabular`]: Self::run_tabular
 pub struct Fixture {
     /// Absolute path to the fixture on disk; the artifact writer derives
     /// `{stem}.out.{ext}` next to it.
@@ -143,15 +154,15 @@ impl Fixture {
         self.run_typed::<Text>().await
     }
 
-    /// Run the pipeline as the [`Tabular`](elide::modality::tabular::Tabular)
-    /// modality (`csv`).
+    /// Run the pipeline as the [`Tabular`] modality (`csv`).
+    ///
+    /// [`Tabular`]: elide::modality::tabular::Tabular
     #[cfg(feature = "codec-csv")]
     pub async fn run_tabular(&self) -> Result<PipelineOutcome<Tabular>> {
         self.run_typed::<Tabular>().await
     }
 
-    /// Run the pipeline as the [`Audio`](elide::modality::audio::Audio)
-    /// modality (`wav`, `mp3`).
+    /// Run the pipeline as the [`Audio`] modality (`wav`, `mp3`).
     ///
     /// The audio path differs from the text formats: recognition reads a
     /// *transcript* an STT enricher stamps onto the call, not the codec's
@@ -160,9 +171,10 @@ impl Fixture {
     /// the clip round-trips through decode → analyze → anonymize → encode
     /// unchanged. That still exercises the whole audio codec + pipeline
     /// wiring end to end.
+    ///
+    /// [`Audio`]: elide::modality::audio::Audio
     #[cfg(feature = "stt")]
-    pub async fn run_audio(&self) -> Result<PipelineOutcome<elide::modality::audio::Audio>> {
-        use elide::modality::audio::Audio;
+    pub async fn run_audio(&self) -> Result<PipelineOutcome<Audio>> {
         use elide::recognition::stt::SttEnricher;
         use elide::recognition::stt::backend::MockBackend;
         use elide::redaction::operators::{Erase, Silence};
@@ -193,8 +205,7 @@ impl Fixture {
         Ok(PipelineOutcome { entities, redacted })
     }
 
-    /// Run the pipeline as the [`Image`](elide::modality::image::Image)
-    /// modality (`png`, `jpeg`, `tiff`).
+    /// Run the pipeline as the [`Image`] modality (`png`, `jpeg`, `tiff`).
     ///
     /// Recognition reads OCR text an [`OcrEnricher`] stamps onto the call,
     /// not the codec's image bytes. Here the enricher is backed by the no-op
@@ -204,9 +215,9 @@ impl Fixture {
     /// wiring end to end.
     ///
     /// [`OcrEnricher`]: elide::recognition::ocr::OcrEnricher
+    /// [`Image`]: elide::modality::image::Image
     #[cfg(feature = "ocr")]
-    pub async fn run_image(&self) -> Result<PipelineOutcome<elide::modality::image::Image>> {
-        use elide::modality::image::Image;
+    pub async fn run_image(&self) -> Result<PipelineOutcome<Image>> {
         use elide::recognition::ocr::OcrEnricher;
         use elide::recognition::ocr::backend::MockBackend;
         use elide::redaction::operators::Erase;
@@ -249,7 +260,7 @@ impl Fixture {
     where
         M: TextBacked,
         Entity<M>: Clone,
-        Vec<Entity<M>>: elide::EntityGroup,
+        Vec<Entity<M>>: EntityGroup,
         DocumentHandle<M>: StreamDataReader<M>,
         PatternRecognizer: Recognizer<M>,
         Replace: Operator<M>,
@@ -270,9 +281,9 @@ impl Fixture {
         );
         // Drive embedded images too when the image recognizer is available.
         #[cfg(feature = "llm")]
-        let orchestrator = orchestrator.with_modality::<elide::modality::image::Image>(
+        let orchestrator = orchestrator.with_modality::<Image>(
             build_image_analyzer()?,
-            elide::Anonymizer::new(),
+            Anonymizer::new(),
             Scope::new(),
         );
 
@@ -318,7 +329,7 @@ impl Fixture {
     /// container parts' findings, grouped by part id. Only with the `serde`
     /// feature; gitignored under `testdata/`.
     #[cfg(feature = "serde")]
-    fn write_entities(&self, report: &elide::Report) {
+    fn write_entities(&self, report: &Report) {
         let out = format!("{}.json", self.path);
         let json = serde_json::to_string_pretty(report).expect("report serializes");
         std::fs::write(&out, json).unwrap_or_else(|e| panic!("write entities {out}: {e}"));
@@ -326,7 +337,7 @@ impl Fixture {
 
     /// No-op when `serde` is off.
     #[cfg(not(feature = "serde"))]
-    fn write_entities(&self, _report: &elide::Report) {}
+    fn write_entities(&self, _report: &Report) {}
 
     /// Write the redacted document next to the fixture as
     /// `{stem}.out.{ext}`. Gitignored via `**/testdata/**/*.out.*`.

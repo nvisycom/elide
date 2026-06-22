@@ -1,11 +1,14 @@
 //! [`Transcription`]: timestamped speech-to-text output addressable as text.
 //!
 //! A transcription is what makes audio *recognizable*: a recognizer reads
-//! its [`text`](Transcription::text) like any other string, finds a match
-//! at a byte range, and [`resolve`](Transcription::resolve)s that range back
+//! its [`text`] like any other string, finds a match
+//! at a byte range, and [`resolve`]s that range back
 //! to the [`TimeSpan`] of the audio it was spoken in — via the per-word
 //! timings the transcription carries. The same shape serves any medium that
 //! turns a stream into timestamped text.
+//!
+//! [`text`]: Transcription::text
+//! [`resolve`]: Transcription::resolve
 
 use std::ops::Range;
 
@@ -22,11 +25,14 @@ const SEGMENT_SEPARATOR: &str = " ";
 /// Timestamped transcript of an audio stream.
 ///
 /// An ordered set of [`TranscriptSegment`]s. The flat
-/// [`text`](Self::text) — the segments joined — is what a recognizer
-/// inspects; [`resolve`](Self::resolve) maps a byte range of that text back
+/// [`text`] — the segments joined — is what a recognizer
+/// inspects; [`resolve`] maps a byte range of that text back
 /// to the [`TimeSpan`] it occupies, using the segments' (and their words')
 /// timings. Empty when the backend produced nothing (silence, or a no-op
 /// backend).
+///
+/// [`text`]: Self::text
+/// [`resolve`]: Self::resolve
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Transcription {
@@ -35,7 +41,9 @@ pub struct Transcription {
     /// The segments' text joined by [`SEGMENT_SEPARATOR`], cached so
     /// recognition and byte-range resolution share one flat string. Each
     /// segment's text begins at a known offset within it (see
-    /// [`segment_offsets`](Self::segment_offsets)).
+    /// [`segment_offsets`]).
+    ///
+    /// [`segment_offsets`]: Self::segment_offsets
     text: String,
 }
 
@@ -187,10 +195,12 @@ impl Transcription {
         self.segments.is_empty()
     }
 
-    /// Byte offset where each segment's text begins within [`text`](Self::text).
+    /// Byte offset where each segment's text begins within [`text`].
     ///
     /// Mirrors how `text` is built: segment `i` starts after the previous
     /// segments plus one separator each.
+    ///
+    /// [`text`]: Self::text
     fn segment_offsets(&self) -> impl Iterator<Item = (usize, &TranscriptSegment)> {
         let mut offset = 0;
         self.segments.iter().map(move |segment| {
@@ -200,7 +210,7 @@ impl Transcription {
         })
     }
 
-    /// Resolve a byte `range` of [`text`](Self::text) to the [`TimeSpan`] it
+    /// Resolve a byte `range` of [`text`] to the [`TimeSpan`] it
     /// was spoken in.
     ///
     /// Returns the span from the start of the first overlapped word (or
@@ -208,6 +218,8 @@ impl Transcription {
     /// back to whole-segment spans when a segment has no per-word timings.
     /// `None` when the range overlaps no segment (out of bounds, or an empty
     /// transcription) — the caller drops such a match.
+    ///
+    /// [`text`]: Self::text
     #[must_use]
     pub fn resolve(&self, range: Range<usize>) -> Option<TimeSpan> {
         let mut start_us: Option<u64> = None;

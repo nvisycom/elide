@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::io::{Cursor, Read, Write};
 
 use bytes::Bytes;
+use elide_core::modality::text::Text;
 use elide_core::{Error, ErrorKind, Result};
 use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
@@ -38,7 +39,7 @@ pub(crate) type DocxHandler = ExtractHandler<DocxEncoder>;
 ///
 /// [`FormatRegistry`]: crate::FormatRegistry
 pub fn format() -> Format {
-    Format::new::<elide_core::modality::text::Text, _>(FORMAT_ID.clone(), DocxLoader)
+    Format::new::<Text, _>(FORMAT_ID.clone(), DocxLoader)
         .with_extensions(["docx"])
         .with_content_types([
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -60,7 +61,9 @@ pub(crate) struct DocxEncoder {
     /// The raw `word/document.xml` string the items were extracted from.
     pub(super) body_raw: String,
     /// Redacted replacements for media parts, keyed by zip entry name,
-    /// filled through the [`Container`](crate::codec::Container) surface.
+    /// filled through the [`Container`] surface.
+    ///
+    /// [`Container`]: crate::codec::Container
     pub(super) replacements: HashMap<String, Bytes>,
 }
 

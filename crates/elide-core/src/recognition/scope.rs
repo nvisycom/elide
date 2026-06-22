@@ -33,8 +33,10 @@ pub struct Scope<M: Modality> {
     /// `"gdpr-request"`). Recognizers may use these to bias their behavior
     /// for domain-specific terms; those that don't ignore the field.
     ///
-    /// Distinct from [`catalog`](Self::catalog): these classify the
+    /// Distinct from [`catalog`]: these classify the
     /// *document*, whereas the catalog names the entity *types* to emit.
+    ///
+    /// [`catalog`]: Self::catalog
     pub labels: Vec<String>,
     /// The entity types recognizers are asked to emit. A zero-shot NER
     /// model requests exactly this set; an LLM prompt lists it as the

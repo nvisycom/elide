@@ -17,6 +17,7 @@ use elide_core::Result;
 use elide_core::modality::Modality;
 
 use super::Loader;
+use super::document::UntypedDocumentHandle;
 use super::loader::{ErasedLoader, erase};
 use crate::content::ContentData;
 
@@ -159,10 +160,7 @@ impl Format {
     /// Propagates the loader's decode error.
     ///
     /// [`FormatRegistry::decode`]: super::FormatRegistry::decode
-    pub async fn decode(
-        &self,
-        content: ContentData,
-    ) -> Result<super::document::UntypedDocumentHandle> {
+    pub async fn decode(&self, content: ContentData) -> Result<UntypedDocumentHandle> {
         self.loader.decode(content).await
     }
 }

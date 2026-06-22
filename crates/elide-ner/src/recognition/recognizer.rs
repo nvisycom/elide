@@ -30,6 +30,8 @@ use hipstr::HipStr;
 
 use super::aggregation::AggregationStrategy;
 use super::alignment::AlignmentMode;
+#[cfg(any(test, feature = "mock"))]
+use crate::backend::MockBackend;
 use crate::backend::{NerBackend, NerRequest, NerSpan};
 
 /// Trait-driven NER recognizer.
@@ -154,7 +156,7 @@ impl NerRecognizerBuilder {
     #[cfg_attr(docsrs, doc(cfg(feature = "mock")))]
     #[must_use]
     pub fn with_mock_backend(self) -> Self {
-        self.with_backend(crate::backend::MockBackend)
+        self.with_backend(MockBackend)
     }
 
     /// Finish the builder. Errors when `name` or `backend` is unset.

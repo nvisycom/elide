@@ -4,8 +4,10 @@
 //! The redaction itself is format- and sample-type-agnostic: given a
 //! [`TimeSpan`], it silences or removes the corresponding span of the
 //! buffer. Callers must apply a batch in descending time order so a
-//! [`Removed`](AudioReplacement::Removed) span doesn't shift the indices
+//! [`Removed`] span doesn't shift the indices
 //! of spans not yet applied.
+//!
+//! [`Removed`]: AudioReplacement::Removed
 
 use elide_core::modality::audio::AudioReplacement;
 use elide_core::primitive::TimeSpan;

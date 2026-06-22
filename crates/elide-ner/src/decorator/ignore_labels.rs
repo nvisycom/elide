@@ -32,7 +32,10 @@ pub struct IgnoreLabels<B> {
 
 impl<B> IgnoreLabels<B> {
     /// Wrap `inner`. No labels are ignored until configured via
-    /// [`with_label`](Self::with_label) / [`with_labels`](Self::with_labels).
+    /// [`with_label`] / [`with_labels`].
+    ///
+    /// [`with_label`]: Self::with_label
+    /// [`with_labels`]: Self::with_labels
     pub fn new(inner: B) -> Self {
         Self {
             inner,

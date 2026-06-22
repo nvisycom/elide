@@ -8,6 +8,7 @@ use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
 
 use super::mp3_codec::{average_bitrate_bps, decode_to_pcm, duration_ms, encode_from_pcm};
+use super::mp3_loader::Mp3Loader;
 use super::redact;
 use crate::content::ContentData;
 use crate::{Format, FormatId, Handler};
@@ -19,7 +20,7 @@ pub const FORMAT_ID: FormatId = FormatId::new("elide.audio.mp3");
 ///
 /// [`FormatRegistry`]: crate::FormatRegistry
 pub fn format() -> Format {
-    Format::new::<Audio, _>(FORMAT_ID.clone(), super::mp3_loader::Mp3Loader)
+    Format::new::<Audio, _>(FORMAT_ID.clone(), Mp3Loader)
         .with_extensions(["mp3"])
         .with_content_types(["audio/mpeg"])
 }

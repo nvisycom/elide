@@ -43,7 +43,9 @@ impl LinguaEnricher {
 
     /// An enricher restricted to `candidates`. Tags lingua doesn't
     /// recognise are silently skipped at detector-build time; an empty
-    /// input is equivalent to [`unrestricted`](Self::unrestricted).
+    /// input is equivalent to [`unrestricted`].
+    ///
+    /// [`unrestricted`]: Self::unrestricted
     #[must_use]
     pub fn with_candidates(candidates: impl IntoIterator<Item = LanguageTag>) -> Self {
         Self {

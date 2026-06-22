@@ -123,10 +123,14 @@ impl Language {
 
     /// Rank against another for "best language" ordering.
     ///
-    /// [`Greater`](Ordering::Greater) is the stronger candidate: higher
+    /// [`Greater`] is the stronger candidate: higher
     /// confidence wins (a missing confidence ranks below any present one),
-    /// and at equal confidence an [`Asserted`](LanguageProvenance::Asserted)
-    /// language beats a [`Detected`](LanguageProvenance::Detected) one.
+    /// and at equal confidence an [`Asserted`]
+    /// language beats a [`Detected`] one.
+    ///
+    /// [`Greater`]: Ordering::Greater
+    /// [`Asserted`]: LanguageProvenance::Asserted
+    /// [`Detected`]: LanguageProvenance::Detected
     pub(crate) fn rank(&self, other: &Self) -> Ordering {
         confidence_key(self)
             .total_cmp(&confidence_key(other))

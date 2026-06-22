@@ -4,12 +4,12 @@
 //! The OCR counterpart to language detection: it produces no entities, it
 //! *enriches*. On each call it OCRs the [`ImageData`] bytes through its
 //! [`OcrBackend`] and inserts the resulting [`Layout`] into the call's
-//! [`artifacts`](elide_core::recognition::RecognizerContext::artifacts).
-//! Recognizers running afterward read the OCR text and resolve each match
-//! back to the image region it covers (see [`Image`]'s [`TextRecognizable`]
-//! impl).
+//! [`artifacts`]. Recognizers running afterward read the OCR text and
+//! resolve each match back to the image region it covers (see [`Image`]'s
+//! [`TextRecognizable`] impl).
 //!
 //! [`ImageData`]: elide_core::modality::image::ImageData
+//! [`artifacts`]: elide_core::recognition::RecognizerContext::artifacts
 //! [`OcrBackend`]: crate::backend::OcrBackend
 //! [`Image`]: elide_core::modality::image::Image
 //! [`TextRecognizable`]: elide_core::modality::TextRecognizable
@@ -17,8 +17,7 @@
 use std::sync::Arc;
 
 use elide_core::Result;
-use elide_core::modality::image::{Image, ImageData};
-use elide_core::modality::image::Layout;
+use elide_core::modality::image::{Image, ImageData, Layout};
 use elide_core::recognition::{Enricher, RecognizerContext};
 
 use crate::backend::{OcrBackend, OcrRequest};
@@ -66,19 +65,15 @@ impl Enricher<Image> for OcrEnricher {
 mod tests {
     use elide_core::entity::provenance::ModelEvent;
     use elide_core::modality::TextRecognizable;
-    use elide_core::modality::image::{LayoutBlock, LayoutWord};
+    use elide_core::modality::image::{ImageLocation, LayoutBlock, LayoutWord};
     use elide_core::primitive::{BoundingBox, Dimensions, Point};
     use elide_core::recognition::Scope;
 
     use super::*;
     use crate::backend::OcrResponse;
 
-    fn loc(x: f64, y: f64, w: f64, h: f64) -> elide_core::modality::image::ImageLocation {
-        elide_core::modality::image::ImageLocation::new(BoundingBox::from_origin_size(
-            Point::new(x, y),
-            w,
-            h,
-        ))
+    fn loc(x: f64, y: f64, w: f64, h: f64) -> ImageLocation {
+        ImageLocation::new(BoundingBox::from_origin_size(Point::new(x, y), w, h))
     }
 
     /// Backend returning a fixed one-block, two-word OCR result.

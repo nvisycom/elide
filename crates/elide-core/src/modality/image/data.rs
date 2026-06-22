@@ -49,8 +49,10 @@ impl ImageData {
         self
     }
 
-    /// Lowercased extension derived from [`filename`](Self::filename),
+    /// Lowercased extension derived from [`filename`],
     /// or `"png"` when no filename is set or it has no extension.
+    ///
+    /// [`filename`]: Self::filename
     pub fn extension(&self) -> &str {
         self.filename
             .as_deref()

@@ -10,16 +10,21 @@ use crate::modality::ModalityLocation;
 
 /// Cell-addressed location within tabular content.
 ///
-/// Identifies a cell by zero-based [`row_index`](Self::row_index) and
-/// [`column_index`](Self::column_index), optionally narrowed to a byte
+/// Identifies a cell by zero-based [`row_index`] and
+/// [`column_index`], optionally narrowed to a byte
 /// range within the cell text for an entity that spans only part of the
-/// cell. [`sheet_name`](Self::sheet_name) scopes the cell to one sheet of
-/// a multi-sheet workbook; [`column_name`](Self::column_name) is a
+/// cell. [`sheet_name`] scopes the cell to one sheet of
+/// a multi-sheet workbook; [`column_name`] is a
 /// human-readable header carried for provenance.
 ///
 /// Overlap and ordering treat the sheet, cell, and byte range as
 /// coordinates. The column name is redundant with the column index, so it
 /// is carried but excluded from comparison.
+///
+/// [`row_index`]: Self::row_index
+/// [`column_index`]: Self::column_index
+/// [`sheet_name`]: Self::sheet_name
+/// [`column_name`]: Self::column_name
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct TabularLocation {

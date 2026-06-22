@@ -8,8 +8,10 @@ use serde::{Deserialize, Serialize};
 /// Converts between normalized `0.0..=1.0` coordinates (what vision
 /// models typically emit) and absolute pixel coordinates (what renderers
 /// consume). See
-/// [`UnitBoundingBox::denormalize`](super::UnitBoundingBox::denormalize)
+/// [`UnitBoundingBox::denormalize`]
 /// for the conversion.
+///
+/// [`UnitBoundingBox::denormalize`]: super::UnitBoundingBox::denormalize
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Dimensions {

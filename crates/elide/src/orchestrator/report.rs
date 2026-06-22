@@ -1,5 +1,5 @@
 //! [`Report`]: the detected-but-not-yet-applied entities of a whole
-//! document, editable per modality before [`apply`](super::Orchestrator).
+//! document, editable per modality before [`apply`].
 //!
 //! Detection (`analyze_document`) and redaction (`apply`) are split so a
 //! caller can inspect and edit the entities in between — drop a
@@ -14,8 +14,10 @@
 //! external consumer (a review UI) can identify which part each entity
 //! belongs to. The part id is the map key; each entity carries its own id,
 //! label, location, and confidence.
+//!
+//! [`apply`]: super::Orchestrator
 
-use std::any::TypeId;
+use std::any::{Any, TypeId};
 use std::collections::HashMap;
 
 use elide_core::entity::Entity;
@@ -32,19 +34,19 @@ use crate::codec::{PartId, UntypedDocumentHandle};
 /// the `serde` feature it is additionally erased-serializable.
 #[doc(hidden)]
 pub trait EntityGroup: Send + Sync + MaybeErased {
-    fn as_any(&self) -> &dyn std::any::Any;
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
 impl<M: Modality> EntityGroup for Vec<Entity<M>>
 where
     Vec<Entity<M>>: MaybeErased,
 {
-    fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn Any {
         self
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
 }
