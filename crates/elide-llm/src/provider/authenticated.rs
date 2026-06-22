@@ -26,8 +26,9 @@ use crate::error::Error;
 
 /// Provider that requires an API key (OpenAI, Anthropic, Gemini).
 ///
-/// Connection parameters used by the completion-side
-/// [`crate::backend::rig`] path.
+/// Connection parameters used by the [`RigBackend`].
+///
+/// [`RigBackend`]: crate::backend::RigBackend
 #[derive(Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AuthenticatedProvider {
     /// API key for the provider.

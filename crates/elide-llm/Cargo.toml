@@ -19,20 +19,33 @@ homepage = { workspace = true }
 documentation = { workspace = true }
 
 [features]
-## No provider on by default: enable one of the provider features (or
-## `mock`) to obtain a usable backend.
+## No backend on by default: enable `rig` (or a provider feature, which
+## implies it) for the rig-backed network backend, or `mock` for the
+## in-process stub.
 default = []
 
-## Enable OpenAI GPT completion provider.
-openai-gpt = []
-## Enable Anthropic Claude completion provider.
-anthropic-claude = []
-## Enable Google Gemini completion provider.
-google-gemini = []
+## Ship the rig-backed `RigBackend`: the provider clients, the HTTP middleware
+## stack, and the rig dependency itself. Without it the crate ships only the
+## `LlmBackend` trait, the recognizer, candidates, prompts.
+rig = [
+    "dep:rig",
+    "dep:reqwest-middleware",
+    "dep:reqwest-retry",
+    "dep:reqwest-tracing",
+    "dep:thiserror",
+]
+
 ## Ship the no-op `MockBackend` for tests, examples, and offline wiring.
 mock = []
 ## Load prompt wording from a Jinja2 template file (`Jinja2Prompt`).
 jinja2 = ["dep:minijinja"]
+
+## Enable the OpenAI GPT completion provider (implies `rig`).
+openai-gpt = ["rig"]
+## Enable the Anthropic Claude completion provider (implies `rig`).
+anthropic-claude = ["rig"]
+## Enable the Google Gemini completion provider (implies `rig`).
+google-gemini = ["rig"]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -44,11 +57,10 @@ elide-core = { workspace = true, features = ["image", "serde"] }
 
 # (De)serialization
 serde = { workspace = true, features = [] }
-humantime-serde = { workspace = true, features = [] }
 
 # Derive macros & error handling
 derive_builder = { workspace = true, features = [] }
-thiserror = { workspace = true, features = [] }
+thiserror = { workspace = true, features = [], optional = true }
 
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
@@ -60,20 +72,17 @@ tracing = { workspace = true, features = [] }
 unicode-normalization = { workspace = true, features = [] }
 
 # AI & LLM frameworks
-rig = { workspace = true, features = ["derive", "reqwest-middleware"] }
+rig = { workspace = true, features = ["derive", "reqwest-middleware"], optional = true }
 
 # Templating & schema
 minijinja = { workspace = true, features = [], optional = true }
 schemars = { workspace = true, features = [] }
 
 # HTTP client & middlewares
-reqwest-middleware = { workspace = true, features = [] }
-reqwest-retry = { workspace = true, features = [] }
-reqwest-tracing = { workspace = true, features = [] }
+reqwest-middleware = { workspace = true, features = [], optional = true }
+reqwest-retry = { workspace = true, features = [], optional = true }
+reqwest-tracing = { workspace = true, features = [], optional = true }
 
 [dev-dependencies]
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["macros", "rt"] }
-
-[package.metadata.cargo-machete]
-ignored = ["humantime-serde"]

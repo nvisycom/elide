@@ -43,7 +43,7 @@ temp/
 CLAUDE.md
 
 # E2E-test artifacts
-**/testdata/**/*.redacted.*
+**/testdata/**/*.out.*
 **/testdata/**/*.*.json
 
 # Example output

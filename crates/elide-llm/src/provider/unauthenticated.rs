@@ -8,8 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
 
-/// Provider that does not require an API key (Ollama, future local
-/// STT backends).
+/// Provider that does not require an API key (Ollama).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct UnauthenticatedProvider {
     /// Model name (e.g. `llama3.1:8b`).

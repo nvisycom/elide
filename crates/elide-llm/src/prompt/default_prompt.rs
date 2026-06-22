@@ -6,6 +6,9 @@
 //! image bytes) is attached to the provider message by the backend, and
 //! the structured response shape is fixed per modality — so this is pure
 //! wording.
+//!
+//! [`Text`]: elide_core::modality::text::Text
+//! [`Image`]: elide_core::modality::image::Image
 
 use elide_core::modality::image::{Image, ImageData};
 use elide_core::modality::text::{Text, TextData};
@@ -19,6 +22,9 @@ use super::text_prompt::TextPromptBuilder;
 ///
 /// Stateless zero-sized type. Customise wording by writing your own
 /// [`Prompt<M>`] impl rather than tweaking this one.
+///
+/// [`Text`]: elide_core::modality::text::Text
+/// [`Image`]: elide_core::modality::image::Image
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultPrompt;
 

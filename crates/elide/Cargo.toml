@@ -38,8 +38,21 @@ serde = ["dep:serde", "dep:erased-serde", "elide-core/serde", "elide-codec?/serd
 pattern = ["dep:elide-pattern"]
 ## Re-export the NER crate as `elide::recognition::ner`.
 ner = ["dep:elide-ner"]
-## Re-export the LLM crate as `elide::recognition::llm`.
+
+## Re-export the LLM crate as `elide::recognition::llm`. Lean by default
+## (the trait, recognizer, prompts, and — with `mock` — the stub backend);
+## add `llm-rig` or a provider feature for the rig-backed network backend.
 llm = ["dep:elide-llm"]
+## The rig-backed `RigBackend` and its HTTP stack in the re-exported LLM
+## crate.
+llm-rig = ["llm", "elide-llm/rig"]
+## The OpenAI GPT provider for the rig LLM backend (implies `llm-rig`).
+llm-openai = ["llm", "elide-llm/openai-gpt"]
+## The Anthropic Claude provider for the rig LLM backend (implies `llm-rig`).
+llm-anthropic = ["llm", "elide-llm/anthropic-claude"]
+## The Google Gemini provider for the rig LLM backend (implies `llm-rig`).
+llm-gemini = ["llm", "elide-llm/google-gemini"]
+
 ## Re-export the SST crate as `elide::recognition::stt`.
 stt = ["dep:elide-stt", "audio"]
 

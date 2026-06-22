@@ -24,7 +24,7 @@ use elide::recognition::pattern::PatternRecognizer;
 use elide::recognition::{Recognizer, Scope};
 use elide::redaction::Operator;
 use elide::redaction::operators::{Erase, Mask, Replace};
-use elide::{Analyzer, Anonymizer, Orchestrator, Result};
+use elide::{Analyzer, Anonymizer, Error, ErrorKind, Orchestrator, Result};
 
 /// Outcome of one end-to-end run: the entities that survived dedup and
 /// the re-encoded redacted document.
@@ -128,7 +128,7 @@ fn build_image_analyzer() -> Result<Analyzer<elide::modality::image::Image>> {
 /// [`run_tabular`](Self::run_tabular).
 pub struct Fixture {
     /// Absolute path to the fixture on disk; the artifact writer derives
-    /// `{stem}.redacted.{ext}` next to it.
+    /// `{stem}.out.{ext}` next to it.
     pub path: &'static str,
     /// Fixture body the codec decodes (compile-time inlined bytes).
     pub source: &'static [u8],
@@ -139,14 +139,14 @@ pub struct Fixture {
 impl Fixture {
     /// Run the pipeline as the [`Text`] modality (`txt`, `json`, `html`,
     /// and a DOCX's body).
-    pub async fn run(&self) -> PipelineOutcome<Text> {
+    pub async fn run(&self) -> Result<PipelineOutcome<Text>> {
         self.run_typed::<Text>().await
     }
 
     /// Run the pipeline as the [`Tabular`](elide::modality::tabular::Tabular)
     /// modality (`csv`).
     #[cfg(feature = "codec-csv")]
-    pub async fn run_tabular(&self) -> PipelineOutcome<Tabular> {
+    pub async fn run_tabular(&self) -> Result<PipelineOutcome<Tabular>> {
         self.run_typed::<Tabular>().await
     }
 
@@ -161,19 +161,14 @@ impl Fixture {
     /// unchanged. That still exercises the whole audio codec + pipeline
     /// wiring end to end.
     #[cfg(feature = "stt")]
-    pub async fn run_audio(&self) -> PipelineOutcome<elide::modality::audio::Audio> {
+    pub async fn run_audio(&self) -> Result<PipelineOutcome<elide::modality::audio::Audio>> {
         use elide::modality::audio::Audio;
         use elide::recognition::stt::SttEnricher;
         use elide::recognition::stt::backend::MockBackend;
         use elide::redaction::operators::{Erase, Silence};
 
         let registry = FormatRegistry::with_builtin();
-        let mut document: DocumentHandle<Audio> = registry
-            .decode(self.source, self.extension)
-            .await
-            .unwrap_or_else(|e| panic!("{} source decodes: {e}", self.extension))
-            .into::<Audio>()
-            .unwrap_or_else(|_| panic!("{} resolves to the audio modality", self.extension));
+        let mut document: DocumentHandle<Audio> = self.decode_as::<Audio>(&registry).await?;
 
         // The mock STT backend transcribes nothing, so recognition finds
         // nothing; the anonymizer would silence/erase any time spans it did.
@@ -185,32 +180,22 @@ impl Fixture {
         let orchestrator =
             Orchestrator::new(&registry).with_modality::<Audio>(analyzer, anonymizer, Scope::new());
 
-        let mut report = orchestrator
-            .analyze_document(&mut document)
-            .await
-            .expect("analyze document");
+        let mut report = orchestrator.analyze_document(&mut document).await?;
         let entities: Vec<Entity<Audio>> = report
             .entities::<Audio>()
             .map(|e| e.to_vec())
             .unwrap_or_default();
         self.write_entities(&report);
-        orchestrator
-            .apply(&mut document, report)
-            .await
-            .expect("apply document");
+        orchestrator.apply(&mut document, report).await?;
 
-        let redacted = document
-            .encode()
-            .expect("encode succeeds")
-            .as_bytes()
-            .to_vec();
+        let redacted = document.encode()?.as_bytes().to_vec();
         self.write_redacted(&redacted);
-        PipelineOutcome { entities, redacted }
+        Ok(PipelineOutcome { entities, redacted })
     }
 
     /// Decode this fixture as modality `M`, redact it through the master
     /// [`Orchestrator`] (body + any container parts), encode, write the
-    /// `*.redacted.*` and entities artifacts, and return the outcome.
+    /// `*.out.*` and entities artifacts, and return the outcome.
     /// Panics with a descriptive message on any stage failure.
     ///
     /// The orchestrator registers a pipeline for the body modality `M` and
@@ -218,7 +203,7 @@ impl Fixture {
     /// a container fixture's embedded media is driven too. Registering the
     /// image modality is format-neutral: it only fires for a document that
     /// actually has image parts (a DOCX), and is inert for the rest.
-    async fn run_typed<M>(&self) -> PipelineOutcome<M>
+    async fn run_typed<M>(&self) -> Result<PipelineOutcome<M>>
     where
         M: TextBacked,
         Entity<M>: Clone,
@@ -230,35 +215,28 @@ impl Fixture {
         Erase: Operator<M>,
     {
         let registry = FormatRegistry::with_builtin();
-        let mut document: DocumentHandle<M> = registry
-            .decode(self.source, self.extension)
-            .await
-            .unwrap_or_else(|e| panic!("{} source decodes: {e}", self.extension))
-            .into::<M>()
-            .unwrap_or_else(|_| panic!("{} resolves to the expected modality", self.extension));
+        let mut document: DocumentHandle<M> = self.decode_as::<M>(&registry).await?;
 
-        let en = Language::asserted(LanguageTag::parse("en").unwrap());
-        let scope = Scope::new().with_language(en);
+        let en_tag = LanguageTag::parse("en")
+            .map_err(|e| Error::new(ErrorKind::Validation, format!("invalid language tag: {e}")))?;
+        let scope = Scope::new().with_language(Language::asserted(en_tag));
 
         let orchestrator = Orchestrator::new(&registry).with_modality::<M>(
-            build_analyzer::<M>().expect("analyzer builds"),
+            build_analyzer::<M>()?,
             build_anonymizer::<M>(),
             scope,
         );
         // Drive embedded images too when the image recognizer is available.
         #[cfg(feature = "llm")]
         let orchestrator = orchestrator.with_modality::<elide::modality::image::Image>(
-            build_image_analyzer().expect("image analyzer builds"),
+            build_image_analyzer()?,
             elide::Anonymizer::new(),
             Scope::new(),
         );
 
         // Two phases so the entities surface for assertions: detect, copy
         // the body entities out, then apply with no editing.
-        let mut report = orchestrator
-            .analyze_document(&mut document)
-            .await
-            .expect("analyze document");
+        let mut report = orchestrator.analyze_document(&mut document).await?;
         let entities: Vec<Entity<M>> = report
             .entities::<M>()
             .map(|e| e.to_vec())
@@ -266,23 +244,35 @@ impl Fixture {
         // Write the detected entities as JSON for inspection before the
         // report is consumed by `apply`.
         self.write_entities(&report);
-        orchestrator
-            .apply(&mut document, report)
-            .await
-            .expect("apply document");
+        orchestrator.apply(&mut document, report).await?;
 
-        let redacted = document
-            .encode()
-            .expect("encode succeeds")
-            .as_bytes()
-            .to_vec();
+        let redacted = document.encode()?.as_bytes().to_vec();
 
         self.write_redacted(&redacted);
-        PipelineOutcome { entities, redacted }
+        Ok(PipelineOutcome { entities, redacted })
+    }
+
+    /// Decode this fixture's bytes and recover the [`DocumentHandle`] as
+    /// modality `M`, erroring if the format resolves to a different one.
+    async fn decode_as<M: Modality>(&self, registry: &FormatRegistry) -> Result<DocumentHandle<M>>
+    where
+        DocumentHandle<M>: StreamDataReader<M>,
+    {
+        let untyped = registry.decode(self.source, self.extension).await?;
+        untyped.into::<M>().map_err(|_| {
+            Error::new(
+                ErrorKind::Validation,
+                format!(
+                    "{} did not resolve to the {} modality",
+                    self.extension,
+                    M::NAME
+                ),
+            )
+        })
     }
 
     /// Write the serialized detection [`Report`] next to the fixture as
-    /// `{filename}.json` (e.g. `contact.docx.json`): the body and any
+    /// `{filename}.json` (e.g. `sample.docx.json`): the body and any
     /// container parts' findings, grouped by part id. Only with the `serde`
     /// feature; gitignored under `testdata/`.
     #[cfg(feature = "serde")]
@@ -297,7 +287,7 @@ impl Fixture {
     fn write_entities(&self, _report: &elide::Report) {}
 
     /// Write the redacted document next to the fixture as
-    /// `{stem}.redacted.{ext}`. Gitignored via `**/testdata/**/*.redacted.*`.
+    /// `{stem}.out.{ext}`. Gitignored via `**/testdata/**/*.out.*`.
     fn write_redacted(&self, redacted: &[u8]) {
         let path = std::path::Path::new(self.path);
         let stem = path
@@ -305,7 +295,7 @@ impl Fixture {
             .and_then(|s| s.to_str())
             .expect("fixture has a UTF-8 stem");
         let parent = path.parent().expect("fixture has a parent");
-        let out = parent.join(format!("{stem}.redacted.{}", self.extension));
+        let out = parent.join(format!("{stem}.out.{}", self.extension));
         std::fs::write(&out, redacted)
             .unwrap_or_else(|e| panic!("write redacted artifact {}: {e}", out.display()));
     }

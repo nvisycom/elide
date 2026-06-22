@@ -1,22 +1,20 @@
-//! End-to-end DOCX container round-trip: decode → analyze → anonymize →
-//! encode, over a real `contact.docx` package.
+//! End-to-end DOCX codec round-trip: decode → analyze → anonymize → encode.
 //!
-//! Runs through the shared [`Fixture`] like every other format: the body
-//! XML (`word/document.xml`) is redacted as text, and the master
-//! orchestrator's image pipeline (mock LLM, detects nothing) drives the
-//! embedded `word/media/*` image. The redacted package is re-zipped with
-//! every structural part — the image, relationships, content-types —
-//! surviving. Assertions read the body and image back as zip entries.
+//! A container format: the body XML is redacted as text and the embedded
+//! image is driven by the orchestrator's image pipeline (mock LLM, detects
+//! nothing), while the rest of the package (relationships, content-types)
+//! passes through unchanged.
 
 mod fixtures;
 
+use elide::Result;
 use elide::entity::builtins;
 use fixtures::asserts::{assert_label_present, assert_pii_removed, assert_tokens_present};
 use fixtures::pipeline::Fixture;
 
 const FIXTURE: Fixture = Fixture {
-    path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/contact.docx"),
-    source: include_bytes!("testdata/contact.docx"),
+    path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/sample.docx"),
+    source: include_bytes!("testdata/sample.docx"),
     extension: "docx",
 };
 
@@ -24,11 +22,11 @@ const BODY_PART: &str = "word/document.xml";
 const IMAGE_PART: &str = "word/media/image1.png";
 
 #[tokio::test]
-async fn docx_detects_and_redacts() {
-    let outcome = FIXTURE.run().await;
+async fn docx_detects_and_redacts() -> Result<()> {
+    let outcome = FIXTURE.run().await?;
 
     // The shipped patterns find the same labels they do in the other
-    // `contact.*` fixtures.
+    // `sample.*` fixtures.
     for label in [
         builtins::EMAIL_ADDRESS.to_ref(),
         builtins::PHONE_NUMBER.to_ref(),
@@ -79,4 +77,5 @@ async fn docx_detects_and_redacts() {
         outcome.part("word/_rels/document.xml.rels").is_some(),
         "relationships part must survive",
     );
+    Ok(())
 }

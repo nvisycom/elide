@@ -42,8 +42,8 @@ impl<'a> TextPromptBuilder<'a> {
         prompt.push_str(
             "Detect every sensitive entity in the following text. \
              Return a JSON object with an \"entities\" key whose value is an array of \
-             candidates. Each candidate has keys: entity_id, entity_type, \
-             value, confidence, context, description.",
+             candidates. Each candidate has keys: value, description, label, \
+             confidence, context, coreference.",
         );
         prompt.push_str("\n\n---\n");
         prompt.push_str(self.text);
@@ -58,7 +58,7 @@ impl<'a> TextPromptBuilder<'a> {
                 .join(", ");
             prompt.push_str(&format!(
                 "\n\nEmit only these entity types (use the exact names for \
-                 entity_type): {types}."
+                 label): {types}."
             ));
         }
 

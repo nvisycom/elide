@@ -1,9 +1,11 @@
-//! End-to-end HTML codec round-trip: decode → analyze → anonymize →
-//! encode. The HTML handler redacts PII in text nodes and attribute
-//! values while preserving the tag structure.
+//! End-to-end HTML codec round-trip: decode → analyze → anonymize → encode.
+//!
+//! The handler redacts PII in text nodes and attribute values while the tag
+//! structure passes through unchanged.
 
 mod fixtures;
 
+use elide::Result;
 use elide::entity::builtins;
 use fixtures::asserts::{
     assert_label_present, assert_pii_removed, assert_preserved, assert_tokens_present,
@@ -11,14 +13,14 @@ use fixtures::asserts::{
 use fixtures::pipeline::Fixture;
 
 const FIXTURE: Fixture = Fixture {
-    path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/contact.html"),
-    source: include_bytes!("testdata/contact.html"),
+    path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/sample.html"),
+    source: include_bytes!("testdata/sample.html"),
     extension: "html",
 };
 
 #[tokio::test]
-async fn html_detects_and_redacts() {
-    let outcome = FIXTURE.run().await;
+async fn html_detects_and_redacts() -> Result<()> {
+    let outcome = FIXTURE.run().await?;
 
     for label in [
         builtins::EMAIL_ADDRESS.to_ref(),
@@ -61,4 +63,5 @@ async fn html_detects_and_redacts() {
         &outcome.redacted_text(),
         &["<html", "<body>", "<h1>Customer onboarding</h1>", "Best,"],
     );
+    Ok(())
 }

@@ -1,14 +1,13 @@
-//! End-to-end WAV codec round-trip: decode → analyze (mock STT enricher) →
-//! anonymize → encode.
+//! End-to-end WAV codec round-trip: decode → analyze → anonymize → encode.
 //!
-//! The mock STT backend transcribes nothing, so no entities are detected
-//! and the clip round-trips unchanged. The point is to exercise the whole
-//! audio path — the codec's `StreamDataReader`/`DataWriter<Audio>`, the
-//! `SttEnricher` in the analyze phase, and the `Anonymizer<Audio>` — end to
-//! end on real WAV bytes, the same way the text formats are covered.
+//! Recognition reads a transcript an `SttEnricher` stamps onto the call;
+//! the mock STT backend transcribes nothing, so nothing is detected and the
+//! clip round-trips unchanged — exercising the whole audio path on real
+//! WAV bytes.
 
 mod fixtures;
 
+use elide::Result;
 use fixtures::pipeline::Fixture;
 
 const FIXTURE: Fixture = Fixture {
@@ -18,8 +17,8 @@ const FIXTURE: Fixture = Fixture {
 };
 
 #[tokio::test]
-async fn wav_round_trips_with_no_detections() {
-    let outcome = FIXTURE.run_audio().await;
+async fn wav_round_trips_with_no_detections() -> Result<()> {
+    let outcome = FIXTURE.run_audio().await?;
 
     // The mock STT backend yields no transcript, so nothing is detected.
     assert!(
@@ -29,4 +28,5 @@ async fn wav_round_trips_with_no_detections() {
     // The clip decodes and re-encodes to a non-empty WAV.
     assert!(!outcome.redacted.is_empty(), "re-encoded WAV is non-empty");
     assert_eq!(&outcome.redacted[..4], b"RIFF", "output is still a WAV");
+    Ok(())
 }

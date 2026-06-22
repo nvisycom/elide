@@ -11,12 +11,14 @@
 //! [`Candidates<M::Item>`]: crate::candidates::Candidates
 //! [`LlmModality::lift`]: crate::backend::LlmModality::lift
 
-pub mod http;
+#[cfg(feature = "rig")]
+mod http;
 mod llm_request;
 mod llm_response;
 #[cfg(any(test, feature = "mock"))]
 mod mock_backend;
-pub mod rig;
+#[cfg(feature = "rig")]
+mod rig;
 
 use elide_core::Result;
 
@@ -25,6 +27,9 @@ pub use self::llm_response::LlmResponse;
 #[cfg(any(test, feature = "mock"))]
 #[cfg_attr(docsrs, doc(cfg(feature = "mock")))]
 pub use self::mock_backend::MockBackend;
+#[cfg(feature = "rig")]
+#[cfg_attr(docsrs, doc(cfg(feature = "rig")))]
+pub use self::rig::{RigBackend, RigConfig};
 pub use crate::modality::LlmModality;
 
 /// Per-call LLM backend for modality `M`.
