@@ -50,6 +50,12 @@ pub mod recognition {
     #[cfg_attr(docsrs, doc(cfg(feature = "ner")))]
     #[doc(inline)]
     pub use elide_ner as ner;
+    /// OCR backends and the enricher that drives the text recognizers over
+    /// recognized image text.
+    #[cfg(feature = "ocr")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "ocr")))]
+    #[doc(inline)]
+    pub use elide_ocr as ocr;
     /// Dictionary- and pattern-based recognition.
     #[cfg(feature = "pattern")]
     #[cfg_attr(docsrs, doc(cfg(feature = "pattern")))]

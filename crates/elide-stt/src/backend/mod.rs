@@ -10,7 +10,7 @@
 //! `mock`-gated `MockBackend` (returns no segments; test/example stub)
 //! ships here; concrete provider backends live downstream.
 //!
-//! [`TranscriptSegment`]: elide_core::primitive::TranscriptSegment
+//! [`TranscriptSegment`]: elide_core::modality::audio::TranscriptSegment
 
 #[cfg(any(test, feature = "mock"))]
 mod mock_backend;

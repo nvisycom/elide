@@ -55,6 +55,8 @@ llm-gemini = ["llm", "elide-llm/google-gemini"]
 
 ## Re-export the SST crate as `elide::recognition::stt`.
 stt = ["dep:elide-stt", "audio"]
+## Re-export the OCR crate as `elide::recognition::ocr`.
+ocr = ["dep:elide-ocr", "image"]
 
 ## The `audio` modality. Implied by the audio codec formats.
 audio = ["elide-core/audio"]
@@ -89,8 +91,8 @@ codec-wav = ["codec", "audio", "elide-codec/wav"]
 codec-mp3 = ["codec", "audio", "elide-codec/mp3"]
 codec-docx = ["codec", "elide-codec/docx"]
 
-## Ship the no-op mock backends in the re-exported `ner`/`llm`/`stt` crates.
-mock = ["elide-ner?/mock", "elide-llm?/mock", "elide-stt?/mock"]
+## Ship the no-op mock backends in the re-exported recognizer crates.
+mock = ["elide-ner?/mock", "elide-llm?/mock", "elide-stt?/mock", "elide-ocr?/mock"]
 
 [dependencies]
 # Internal crates
@@ -99,6 +101,7 @@ elide-pattern = { workspace = true, features = [], optional = true }
 elide-ner = { workspace = true, features = [], optional = true }
 elide-llm = { workspace = true, features = [], optional = true }
 elide-stt = { workspace = true, features = [], optional = true }
+elide-ocr = { workspace = true, features = [], optional = true }
 elide-codec = { workspace = true, features = [], optional = true }
 
 # (De)serialization
@@ -161,3 +164,7 @@ required-features = ["codec-wav", "stt", "mock", "serde"]
 [[test]]
 name = "e2e_mp3"
 required-features = ["codec-mp3", "stt", "mock", "serde"]
+
+[[test]]
+name = "e2e_png"
+required-features = ["codec-png", "ocr", "mock", "serde"]

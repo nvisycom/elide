@@ -18,8 +18,7 @@
 use std::sync::Arc;
 
 use elide_core::Result;
-use elide_core::modality::audio::{Audio, AudioData};
-use elide_core::primitive::Transcription;
+use elide_core::modality::audio::{Audio, AudioData, Transcription};
 use elide_core::recognition::{Enricher, RecognizerContext};
 
 use crate::backend::{SttBackend, SttRequest};
@@ -67,7 +66,8 @@ impl Enricher<Audio> for SttEnricher {
 mod tests {
     use elide_core::entity::provenance::ModelEvent;
     use elide_core::modality::TextRecognizable;
-    use elide_core::primitive::{TimeSpan, TranscriptSegment, TranscriptWord};
+    use elide_core::modality::audio::{TranscriptSegment, TranscriptWord};
+    use elide_core::primitive::TimeSpan;
     use elide_core::recognition::Scope;
 
     use super::*;
