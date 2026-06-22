@@ -56,6 +56,14 @@ docx = ["xml", "internal_document", "dep:zip"]
 ## surface; the object parser is its own dep.
 pdf = ["internal_document"]
 
+## PDF page rendering to images (for OCR), via the native PDFium shared
+## library. Off by default and separate from `pdf` because it needs the
+## PDFium `.so`/`.dylib` present at runtime (see `scripts/install-pdfium.sh`).
+## Pulls `pdf` (the loader/handler it extends) and `internal_image` (to
+## re-encode rendered pages as `ImageData`), plus `pdfium-render` and
+## `rayon` (the dedicated single-thread render pool).
+pdf-render = ["pdf", "internal_image", "dep:pdfium-render", "dep:rayon"]
+
 ## RTF: flat rich text (control words and groups), a leaf text handler
 ## alongside the other document formats.
 rtf = ["internal_document"]
@@ -137,6 +145,10 @@ zip = { workspace = true, optional = true }
 # Image processing
 image = { workspace = true, features = [], optional = true }
 imageproc = { workspace = true, features = [], optional = true }
+
+# PDF rendering (native PDFium; behind `pdf-render`)
+pdfium-render = { workspace = true, features = [], optional = true }
+rayon = { workspace = true, features = [], optional = true }
 
 # Audio processing
 hound = { workspace = true, features = [], optional = true }

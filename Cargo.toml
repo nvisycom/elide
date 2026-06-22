@@ -76,6 +76,7 @@ hex = { version = "0.4", features = [] }
 tokio = { version = "1.50", features = [] }
 async-trait = { version = "0.1", features = [] }
 futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+rayon = { version = "1.10", features = [] }
 
 # Observability
 tracing = { version = "0.1", features = ["attributes"] }
@@ -105,6 +106,9 @@ zip = { version = "8.6", default-features = false, features = ["deflate"] }
 # Image processing
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tiff"] }
 imageproc = { version = "0.27", features = [] }
+
+# PDF rendering (native PDFium shared library, loaded at runtime)
+pdfium-render = { version = "0.9", features = [] }
 
 # Audio processing
 hound = { version = "3.5", features = [] }

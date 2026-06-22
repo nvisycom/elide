@@ -9,9 +9,11 @@
 //!
 //! [`FormatId`]: crate::FormatId
 
-/// Encode a [`DynamicImage`](image::DynamicImage) to bytes in `fmt`.
+/// Encode a [`DynamicImage`] to bytes in `fmt`.
 ///
 /// Shared by every generated handler's `encode`/`read_next`/`read_at`.
+///
+/// [`DynamicImage`]: image::DynamicImage
 pub(crate) fn encode_image(
     img: &image::DynamicImage,
     fmt: image::ImageFormat,
@@ -29,6 +31,11 @@ pub(crate) fn encode_image(
 }
 
 /// Stamp out the handler, loader, and `format()` for one image format.
+///
+/// Only defined when at least one image format is enabled; `internal_image`
+/// can also be pulled on its own (e.g. by `pdf-render`, which reuses
+/// [`encode_image`] without any format handler).
+#[cfg(any(feature = "png", feature = "jpeg", feature = "tiff"))]
 macro_rules! impl_image_handler {
     (
         handler = $handler:ident,
@@ -38,11 +45,15 @@ macro_rules! impl_image_handler {
         content_types = [$($mime:literal),* $(,)?],
         image_format = $img_fmt:expr $(,)?
     ) => {
-        /// Stable [`FormatId`](crate::FormatId) for this image codec.
+        /// Stable [`FormatId`] for this image codec.
+        ///
+        /// [`FormatId`]: crate::FormatId
         pub const FORMAT_ID: crate::FormatId = crate::FormatId::new($format_id);
 
-        /// [`Format`](crate::Format) descriptor registered into
-        /// [`FormatRegistry`](crate::FormatRegistry).
+        /// [`Format`] descriptor registered into [`FormatRegistry`].
+        ///
+        /// [`Format`]: crate::Format
+        /// [`FormatRegistry`]: crate::FormatRegistry
         pub fn format() -> crate::Format {
             crate::Format::new::<::elide_core::modality::image::Image, _>(FORMAT_ID.clone(), $loader)
                 .with_extensions([$($ext),*])
@@ -52,9 +63,11 @@ macro_rules! impl_image_handler {
         #[doc = concat!("Handler for a decoded ", $format_id, " image.")]
         ///
         /// Holds the whole image in memory as a
-        /// [`DynamicImage`](image::DynamicImage); redaction paints over
+        /// [`DynamicImage`]; redaction paints over
         /// regions in place and `encode` re-serializes to the original
         /// format.
+        ///
+        /// [`DynamicImage`]: image::DynamicImage
         #[derive(Debug)]
         pub(crate) struct $handler {
             image: ::image::DynamicImage,
@@ -173,4 +186,5 @@ macro_rules! impl_image_handler {
     };
 }
 
+#[cfg(any(feature = "png", feature = "jpeg", feature = "tiff"))]
 pub(crate) use impl_image_handler;

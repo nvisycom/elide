@@ -2,7 +2,7 @@
 
 [package]
 name = "elide-llm"
-description = "LLM-mediated entity recognizer (text NER + image VLM) for the elide toolkit"
+description = "LLM-mediated entity recognizer (text NER + image VLM) for the Elide toolkit"
 keywords = ["rig", "llm", "ner", "pii"]
 categories = ["text-processing", "api-bindings"]
 readme = "README.md"

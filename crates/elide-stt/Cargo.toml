@@ -2,7 +2,7 @@
 
 [package]
 name = "elide-stt"
-description = "Speech-to-text backends and transcription types for the elide toolkit"
+description = "Speech-to-text backends and transcription types for the Elide toolkit"
 keywords = ["stt", "transcription", "audio", "pii"]
 categories = ["multimedia::audio"]
 readme = "README.md"

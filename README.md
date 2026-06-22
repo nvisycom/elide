@@ -1,13 +1,13 @@
-# elide
+# Elide
 
 [![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/elide/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/elide/actions/workflows/build.yml)
 
 Composable toolkit for detecting and redacting sensitive data.
 
-elide is a Rust toolkit for finding and removing PII and PHI from
+Elide is a Rust toolkit for finding and removing PII and PHI from
 documents. It provides the building blocks (recognizers, deduplication,
 validation, redaction, and format handling) that a consumer wires into
-their own document-processing flow. elide is the toolkit layer only; the
+their own document-processing flow. Elide is the toolkit layer only; the
 orchestrating runtime and gateway server live in separate projects.
 
 > [!WARNING]

@@ -2,7 +2,7 @@
 
 [package]
 name = "elide-core"
-description = "Domain types, traits, and errors for the elide toolkit"
+description = "Domain types, traits, and errors for the Elide toolkit"
 keywords = ["elide", "core", "domain", "types"]
 categories = ["data-structures"]
 readme = "README.md"

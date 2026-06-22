@@ -2,7 +2,7 @@
 
 [package]
 name = "elide"
-description = "Composable component library for elide pipelines: recognizers, dedup layers, checks, redaction strategies"
+description = "Composable component library for Elide pipelines: recognizers, dedup layers, checks, redaction strategies"
 keywords = ["elide", "toolkit", "components", "pipeline"]
 categories = ["data-structures"]
 readme = "README.md"

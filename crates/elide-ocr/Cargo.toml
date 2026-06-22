@@ -2,7 +2,7 @@
 
 [package]
 name = "elide-ocr"
-description = "OCR backends and recognized-text types for the elide toolkit"
+description = "OCR backends and recognized-text types for the Elide toolkit"
 keywords = ["ocr", "vision", "image", "pii"]
 categories = ["computer-vision"]
 readme = "README.md"

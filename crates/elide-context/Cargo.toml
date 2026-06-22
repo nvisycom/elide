@@ -2,7 +2,7 @@
 
 [package]
 name = "elide-context"
-description = "Post-recognition keyword-boost enhancer for elide entities"
+description = "Post-recognition keyword-boost enhancer for Elide entities"
 keywords = ["elide", "context", "enhancer", "pii"]
 categories = ["text-processing"]
 readme = "README.md"

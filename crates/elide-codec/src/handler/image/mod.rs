@@ -12,6 +12,10 @@
 //! [`ImageReplacement`]: elide_core::modality::image::ImageReplacement
 
 pub(crate) mod macros;
+// Redaction painting is only reached through the format handlers; without
+// any image format enabled (e.g. `pdf-render` pulling `internal_image` just
+// for `encode_image`), it has no caller.
+#[cfg(any(feature = "png", feature = "jpeg", feature = "tiff"))]
 pub(crate) mod redact;
 
 #[cfg(feature = "jpeg")]
@@ -39,6 +43,8 @@ mod tests {
     use elide_core::redaction::Redactions;
     use image::{DynamicImage, GenericImageView, RgbaImage};
 
+    use super::macros::encode_image;
+    use super::png_handler::PngLoader;
     use crate::content::ContentData;
     use crate::{Handler, Loader};
 
@@ -49,7 +55,7 @@ mod tests {
             4,
             image::Rgba([255, 255, 255, 255]),
         ));
-        let bytes = super::macros::encode_image(&img, image::ImageFormat::Png).unwrap();
+        let bytes = encode_image(&img, image::ImageFormat::Png).unwrap();
         ContentData::new(bytes)
     }
 
@@ -59,10 +65,7 @@ mod tests {
 
     #[tokio::test]
     async fn decode_stream_reports_full_frame() {
-        let mut h = super::png_handler::PngLoader
-            .decode(white_png())
-            .await
-            .unwrap();
+        let mut h = PngLoader.decode(white_png()).await.unwrap();
         assert_eq!(h.format().as_str(), "elide.image.png");
         let chunk = h.read_next().await.unwrap().expect("one chunk");
         assert_eq!(chunk.data.dimensions.width, 4);
@@ -73,10 +76,7 @@ mod tests {
 
     #[tokio::test]
     async fn read_at_crops_region() {
-        let h = super::png_handler::PngLoader
-            .decode(white_png())
-            .await
-            .unwrap();
+        let h = PngLoader.decode(white_png()).await.unwrap();
         let data = h
             .read_at(&bbox(1.0, 1.0, 2.0, 2.0))
             .await
@@ -94,10 +94,7 @@ mod tests {
 
     #[tokio::test]
     async fn redact_block_paints_region_and_reencodes() {
-        let mut h = super::png_handler::PngLoader
-            .decode(white_png())
-            .await
-            .unwrap();
+        let mut h = PngLoader.decode(white_png()).await.unwrap();
         let mut batch: Redactions<Image> = Redactions::new();
         batch.push(
             bbox(0.0, 0.0, 2.0, 2.0),
