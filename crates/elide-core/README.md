@@ -6,25 +6,24 @@ Shared domain model, traits, and errors for the elide toolkit.
 
 ## Overview
 
-The foundational crate of the workspace. It owns the shared vocabulary
-that every other crate speaks: what a detected entity is, where it sits
-in a document, how confident a detection is, and the traits that
-recognizers and redaction operators implement. It carries no
-orchestration and no concrete recognizers or operators; those live in
-the downstream crates.
+The foundational crate of the workspace. It owns the shared vocabulary that
+every other crate speaks: what a detected entity is, where it sits in a
+document, how confident a detection is, and the traits that recognizers and
+redaction operators implement. It carries no orchestration and no concrete
+recognizers or operators; those live in the downstream crates.
 
-The model draws from [Presidio](https://github.com/microsoft/presidio)
-but is shaped by two goals that set it apart:
+The model draws from [Presidio](https://github.com/microsoft/presidio) but is
+shaped by two goals that set it apart:
 
-- **Multimodal by construction.** Nothing in the core hardcodes text
-  offsets. An entity's location is defined by its medium (text, image,
-  audio, …), and the core types are generic over that medium. Each
-  modality lives in its own crate, so new media need no change here.
+- **Multimodal by construction.** Nothing in the core hardcodes text offsets. An
+  entity's location is defined by its medium (text, image, audio, …), and the
+  core types are generic over that medium. Each modality lives in its own crate,
+  so new media need no change here.
 
 - **Provenance-first.** Every entity carries its full audit trail: which
-  recognizers found it, how overlapping findings were combined, any
-  confidence adjustments, and every redaction applied. Nothing about how
-  an entity was found, scored, or hidden is ever discarded.
+  recognizers found it, how overlapping findings were combined, any confidence
+  adjustments, and every redaction applied. Nothing about how an entity was
+  found, scored, or hidden is ever discarded.
 
 ## Documentation
 

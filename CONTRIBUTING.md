@@ -36,13 +36,14 @@ cargo fmt
 1. Fork the repository
 2. Create a feature branch
 3. Make changes with tests
-4. Run `cargo fmt --check && cargo clippy && cargo test` to verify all checks pass
+4. Run `cargo fmt --check && cargo clippy && cargo test` to verify all checks
+   pass
 5. Submit a pull request
 
 ## Project Structure
 
-The workspace uses Cargo workspaces. All crates live under `crates/`. See
-the [CHANGELOG](CHANGELOG.md) for a description of each crate.
+The workspace uses Cargo workspaces. All crates live under `crates/`. See the
+[CHANGELOG](CHANGELOG.md) for a description of each crate.
 
 ## Security
 
@@ -52,5 +53,5 @@ the [CHANGELOG](CHANGELOG.md) for a description of each crate.
 
 ## License
 
-By contributing, you agree your contributions will be licensed under the
-Apache License 2.0.
+By contributing, you agree your contributions will be licensed under the Apache
+License 2.0.

@@ -6,19 +6,18 @@ Regex and dictionary recognizers for PII/PHI detection.
 
 ## Overview
 
-Many kinds of sensitive data have a recognizable shape (a credit-card
-number, an email address, a national ID) or appear as known terms (a
-list of currencies, nationalities, or brand names). This crate detects
-both: regular-expression rules for structured formats, and dictionaries
-for fixed sets of literal terms. A single pass over the text runs every
-rule and reports what it found, with a confidence score for each match.
+Many kinds of sensitive data have a recognizable shape (a credit-card number, an
+email address, a national ID) or appear as known terms (a list of currencies,
+nationalities, or brand names). This crate detects both: regular-expression
+rules for structured formats, and dictionaries for fixed sets of literal terms.
+A single pass over the text runs every rule and reports what it found, with a
+confidence score for each match.
 
-Matches that have a definite structure can be checked against a
-validator before being reported, so values that merely look right but
-fail their checksum (an invalid IBAN, a malformed SSN) are dropped. A
-broad set of patterns, dictionaries, and validators ship built in,
-covering common formats across several jurisdictions, and you can add
-your own alongside them.
+Matches that have a definite structure can be checked against a validator before
+being reported, so values that merely look right but fail their checksum (an
+invalid IBAN, a malformed SSN) are dropped. A broad set of patterns,
+dictionaries, and validators ship built in, covering common formats across
+several jurisdictions, and you can add your own alongside them.
 
 Some of the shipped patterns and validators are adapted from
 [Microsoft Presidio](https://github.com/microsoft/presidio).

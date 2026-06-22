@@ -1,16 +1,14 @@
 # Presidio attribution
 
-Several shipped pattern TOMLs under `patterns/` carry regular
-expressions ported or adapted from [Microsoft Presidio][presidio]
-(`microsoft/presidio`, MIT-licensed) — specifically the
-`presidio-analyzer/presidio_analyzer/predefined_recognizers/`
-classes. Validators (Luhn, IBAN mod-97, ABA, DEA, NPI, NHS,
-NINO, etc.) were re-implemented in Rust from the same upstream
-algorithms.
+Several shipped pattern TOMLs under `patterns/` carry regular expressions ported
+or adapted from [Microsoft Presidio][presidio] (`microsoft/presidio`,
+MIT-licensed) — specifically the
+`presidio-analyzer/presidio_analyzer/predefined_recognizers/` classes.
+Validators (Luhn, IBAN mod-97, ABA, DEA, NPI, NHS, NINO, etc.) were
+re-implemented in Rust from the same upstream algorithms.
 
-The Presidio MIT license text is reproduced below to satisfy its
-"include this permission notice in all copies or substantial
-portions" clause.
+The Presidio MIT license text is reproduced below to satisfy its "include this
+permission notice in all copies or substantial portions" clause.
 
 [presidio]: https://github.com/microsoft/presidio
 

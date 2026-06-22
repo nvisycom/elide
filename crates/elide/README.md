@@ -8,14 +8,14 @@ Composable recognition, deduplication, and redaction components.
 
 This crate assembles the lower-level pieces into the working parts of a
 detection-and-redaction flow. It runs a set of recognizers over content,
-reconciles their overlapping findings into a single set of entities
-(resolving conflicts, adjusting confidence, and dropping weak matches),
-and applies redaction operators that hide each entity in a chosen way,
-such as masking, replacing, hashing, or encrypting it.
+reconciles their overlapping findings into a single set of entities (resolving
+conflicts, adjusting confidence, and dropping weak matches), and applies
+redaction operators that hide each entity in a chosen way, such as masking,
+replacing, hashing, or encrypting it.
 
-It provides the reusable building blocks rather than a fixed pipeline.
-The orchestration that strings them into an end-to-end flow over whole
-documents lives one layer up, in the runtime.
+It provides the reusable building blocks rather than a fixed pipeline. The
+orchestration that strings them into an end-to-end flow over whole documents
+lives one layer up, in the runtime.
 
 ## Documentation
 
