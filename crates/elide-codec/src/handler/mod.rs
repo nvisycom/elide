@@ -43,7 +43,7 @@ pub use self::audio::wav_format;
 pub use self::document::docx_format;
 #[cfg(feature = "pdf-render")]
 #[cfg_attr(docsrs, doc(cfg(feature = "pdf-render")))]
-pub use self::document::pdf_format_with_ocr;
+pub use self::document::pdf_format_with;
 #[cfg(feature = "rtf")]
 #[cfg_attr(docsrs, doc(cfg(feature = "rtf")))]
 pub use self::document::rtf_format;
