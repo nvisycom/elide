@@ -44,7 +44,7 @@ pub use self::chunk::Chunk;
 pub use self::data_reader::{DataReader, StreamDataReader};
 pub use self::data_writer::DataWriter;
 pub use self::hint::Hint;
-pub use self::text_backed::{TextBacked, TextRecognizable};
+pub use self::text_backed::{TextRecognizable, TextSpanned};
 
 /// Payload a recognizer inspects for a modality.
 ///

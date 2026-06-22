@@ -1,22 +1,26 @@
 //! [`Tabular`] modality: spreadsheet and CSV content addressed by cell.
 //!
-//! A tabular cell holds text and is redacted like text, so this modality
-//! reuses [`TextData`] as its payload and [`TextReplacement`] as its
-//! treatment. Only the *location* is tabular: a sheet, a row, a column,
-//! and an optional byte range within the cell for sub-cell entities.
+//! A tabular cell holds text and is recognized like text, so this modality
+//! reuses [`TextData`] as its payload. Redaction is a [`TabularReplacement`]:
+//! usually a text treatment applied to the cell, but also structural drops
+//! (a whole row or column) that the text model can't express. The *location*
+//! is tabular: a sheet, a row, a column, and an optional byte range within
+//! the cell for sub-cell entities.
 
 mod location;
+mod replacement;
 
 use std::ops::Range;
 
 pub use self::location::TabularLocation;
+pub use self::replacement::TabularReplacement;
 use super::Modality;
-use super::text::{TextData, TextReplacement};
-use super::text_backed::{TextBacked, TextRecognizable};
+use super::text::TextData;
+use super::text_backed::{TextRecognizable, TextSpanned};
 use crate::recognition::RecognizerContext;
 
 /// Tabular modality: cells hold text, so data is [`TextData`] and
-/// replacements are [`TextReplacement`]; only [`TabularLocation`] is
+/// replacements are [`TabularReplacement`]; only [`TabularLocation`] is
 /// tabular-specific.
 #[derive(Debug, Clone, Copy)]
 pub struct Tabular;
@@ -24,7 +28,7 @@ pub struct Tabular;
 impl Modality for Tabular {
     type Data = TextData;
     type Location = TabularLocation;
-    type Replacement = TextReplacement;
+    type Replacement = TabularReplacement;
 
     const NAME: &'static str = "tabular";
 }
@@ -45,7 +49,7 @@ impl TextRecognizable for Tabular {
     }
 }
 
-impl TextBacked for Tabular {
+impl TextSpanned for Tabular {
     fn span(location: &TabularLocation) -> Range<usize> {
         location.start_offset.unwrap_or(0)..location.end_offset.unwrap_or(0)
     }

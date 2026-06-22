@@ -8,6 +8,9 @@
 //! [`Generator`] and kept stable across mentions through a [`Vault`], so
 //! coreferent mentions all read the same surrogate).
 //!
+//! Tabular (feature `tabular`): `DropRow`, `DropColumn` — structural drops
+//! that remove a whole record or field rather than editing a cell.
+//!
 //! Image (feature `image`): `Blur`, `Pixelate`, `Blackbox`.
 //!
 //! Audio (feature `audio`): `Silence`, `Beep`.
@@ -31,6 +34,10 @@ mod beep;
 mod blackbox;
 #[cfg(feature = "image")]
 mod blur;
+#[cfg(feature = "tabular")]
+mod drop_column;
+#[cfg(feature = "tabular")]
+mod drop_row;
 #[cfg(feature = "crypto")]
 mod encrypt;
 mod erase;
@@ -50,6 +57,10 @@ pub use self::beep::Beep;
 pub use self::blackbox::Blackbox;
 #[cfg(feature = "image")]
 pub use self::blur::Blur;
+#[cfg(feature = "tabular")]
+pub use self::drop_column::DropColumn;
+#[cfg(feature = "tabular")]
+pub use self::drop_row::DropRow;
 #[cfg(feature = "crypto")]
 pub use self::encrypt::Encrypt;
 pub use self::erase::Erase;

@@ -7,7 +7,7 @@ use elide_core::modality::audio::{Audio, AudioData, AudioReplacement};
 #[cfg(feature = "image")]
 use elide_core::modality::image::{Image, ImageData, ImageReplacement};
 #[cfg(feature = "tabular")]
-use elide_core::modality::tabular::Tabular;
+use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 
@@ -19,11 +19,8 @@ use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 /// shows up in the audit trail.
 ///
 /// Works across modalities — a text/tabular span stays verbatim, an image
-/// region or audio range is left untouched. Unlike the text operators,
-/// `Keep` is implemented per modality rather than over [`TextBacked`], so
-/// the one type serves every modality.
-///
-/// [`TextBacked`]: elide_core::modality::TextBacked
+/// region or audio range is left untouched. Like the other operators, `Keep`
+/// is implemented per modality, so the one type serves every modality.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Keep;
 
@@ -58,8 +55,8 @@ impl Operator<Tabular> for Keep {
         &self,
         _entity: &Entity<Tabular>,
         data: &TextData,
-    ) -> Result<TextReplacement> {
-        Ok(TextReplacement::substituted(data.as_str()))
+    ) -> Result<TabularReplacement> {
+        Ok(TextReplacement::substituted(data.as_str()).into())
     }
 }
 

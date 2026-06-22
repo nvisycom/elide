@@ -5,8 +5,9 @@ use aes_gcm::{AeadCore, Aes256Gcm, KeyInit, Nonce};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use elide_core::entity::Entity;
-use elide_core::modality::TextBacked;
-use elide_core::modality::text::{TextData, TextReplacement};
+#[cfg(feature = "tabular")]
+use elide_core::modality::tabular::{Tabular, TabularReplacement};
+use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId, ReversibleOperator};
 use elide_core::{Error, ErrorKind, Result};
 
@@ -43,47 +44,26 @@ impl<K: KeyProvider> Encrypt<K> {
     fn cipher(&self) -> Aes256Gcm {
         Aes256Gcm::new(self.keys.key().into())
     }
-}
 
-impl<M, K> Operator<M> for Encrypt<K>
-where
-    M: TextBacked,
-    K: KeyProvider,
-{
-    fn id(&self) -> OperatorId {
-        OperatorId::new("encrypt", "1.0.0")
-    }
-
-    fn leak_profile(&self) -> LeakProfile {
-        // The original is recoverable given the key.
-        LeakProfile::Recoverable
-    }
-
-    async fn anonymize(&self, _entity: &Entity<M>, data: &TextData) -> Result<TextReplacement> {
+    /// Encrypt `plaintext` to a base64 `nonce ++ ciphertext` blob.
+    fn encrypt_str(&self, plaintext: &str) -> Result<String> {
         let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
         let ciphertext = self
             .cipher()
-            .encrypt(&nonce, data.as_str().as_bytes())
+            .encrypt(&nonce, plaintext.as_bytes())
             .map_err(|_| Error::new(ErrorKind::Validation, "encryption failed"))?;
 
         // Prepend the nonce so the replacement is self-describing.
         let mut blob = Vec::with_capacity(NONCE_LEN + ciphertext.len());
         blob.extend_from_slice(&nonce);
         blob.extend_from_slice(&ciphertext);
-        Ok(TextReplacement::substituted(BASE64.encode(blob)))
+        Ok(BASE64.encode(blob))
     }
-}
 
-impl<M, K> ReversibleOperator<M> for Encrypt<K>
-where
-    M: TextBacked,
-    K: KeyProvider,
-{
-    async fn deanonymize(
-        &self,
-        _entity: &Entity<M>,
-        replacement: &TextReplacement,
-    ) -> Result<Option<TextData>> {
+    /// Recover the plaintext from a text `replacement` this operator made,
+    /// or `None` if it isn't recoverable (not a substitution, not our blob,
+    /// or the wrong key).
+    fn decrypt_replacement(&self, replacement: &TextReplacement) -> Result<Option<TextData>> {
         let TextReplacement::Substituted(encoded) = replacement else {
             // A `Removed` replacement carries nothing to recover.
             return Ok(None);
@@ -102,10 +82,72 @@ where
             // Authentication failed or wrong key: not recoverable here.
             Err(_) => Ok(None),
             Ok(plaintext) => {
-                let text = String::from_utf8(plaintext)
-                    .map_err(|_| Error::new(ErrorKind::Validation, "decrypted bytes are not UTF-8"))?;
+                let text = String::from_utf8(plaintext).map_err(|_| {
+                    Error::new(ErrorKind::Validation, "decrypted bytes are not UTF-8")
+                })?;
                 Ok(Some(TextData::new(text)))
             }
+        }
+    }
+}
+
+impl<K: KeyProvider> Operator<Text> for Encrypt<K> {
+    fn id(&self) -> OperatorId {
+        OperatorId::new("encrypt", "1.0.0")
+    }
+
+    fn leak_profile(&self) -> LeakProfile {
+        // The original is recoverable given the key.
+        LeakProfile::Recoverable
+    }
+
+    async fn anonymize(&self, _entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
+        Ok(TextReplacement::substituted(
+            self.encrypt_str(data.as_str())?,
+        ))
+    }
+}
+
+impl<K: KeyProvider> ReversibleOperator<Text> for Encrypt<K> {
+    async fn deanonymize(
+        &self,
+        _entity: &Entity<Text>,
+        replacement: &TextReplacement,
+    ) -> Result<Option<TextData>> {
+        self.decrypt_replacement(replacement)
+    }
+}
+
+#[cfg(feature = "tabular")]
+impl<K: KeyProvider> Operator<Tabular> for Encrypt<K> {
+    fn id(&self) -> OperatorId {
+        OperatorId::new("encrypt", "1.0.0")
+    }
+
+    fn leak_profile(&self) -> LeakProfile {
+        LeakProfile::Recoverable
+    }
+
+    async fn anonymize(
+        &self,
+        _entity: &Entity<Tabular>,
+        data: &TextData,
+    ) -> Result<TabularReplacement> {
+        Ok(TextReplacement::substituted(self.encrypt_str(data.as_str())?).into())
+    }
+}
+
+#[cfg(feature = "tabular")]
+impl<K: KeyProvider> ReversibleOperator<Tabular> for Encrypt<K> {
+    async fn deanonymize(
+        &self,
+        _entity: &Entity<Tabular>,
+        replacement: &TabularReplacement,
+    ) -> Result<Option<TextData>> {
+        // Only a cell treatment carries a recoverable ciphertext.
+        match replacement {
+            TabularReplacement::Cell(cell) => self.decrypt_replacement(cell),
+            _ => Ok(None),
         }
     }
 }
@@ -122,7 +164,12 @@ mod tests {
 
     fn entity() -> Entity<Text> {
         let location = TextLocation::new(0, 5);
-        let event = Event::pattern("t", Confidence::MAX, location.clone(), PatternEvent::default());
+        let event = Event::pattern(
+            "t",
+            Confidence::MAX,
+            location.clone(),
+            PatternEvent::default(),
+        );
         Entity::new(
             LabelRef::new("EMAIL_ADDRESS"),
             location,
@@ -140,7 +187,10 @@ mod tests {
         let op = encryptor();
         let e = entity();
 
-        let replacement = op.anonymize(&e, &TextData::new("alice@example.com")).await.unwrap();
+        let replacement = op
+            .anonymize(&e, &TextData::new("alice@example.com"))
+            .await
+            .unwrap();
         let recovered = op.deanonymize(&e, &replacement).await.unwrap();
         assert_eq!(recovered, Some(TextData::new("alice@example.com")));
     }
@@ -158,7 +208,10 @@ mod tests {
     #[tokio::test]
     async fn wrong_key_does_not_recover() {
         let e = entity();
-        let replacement = encryptor().anonymize(&e, &TextData::new("secret")).await.unwrap();
+        let replacement = encryptor()
+            .anonymize(&e, &TextData::new("secret"))
+            .await
+            .unwrap();
 
         let other = Encrypt::new(StaticKey::new([9u8; 32]));
         assert_eq!(other.deanonymize(&e, &replacement).await.unwrap(), None);

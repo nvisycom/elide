@@ -39,7 +39,7 @@ pub const FORMAT_ID: FormatId = FormatId::new("elide.document.pdf");
 /// [`Format`] descriptor registered into [`FormatRegistry`].
 ///
 /// Decodes on the plain text path (no page rendering). To rasterise pages
-/// for OCR, build the format with [`format_with_ocr`] instead.
+/// for OCR, build the format with [`format_with`] instead.
 ///
 /// [`FormatRegistry`]: crate::FormatRegistry
 pub fn format() -> Format {
@@ -57,7 +57,7 @@ pub fn format() -> Format {
 /// [`OcrMode::Force`]: super::OcrMode::Force
 #[cfg(feature = "pdf-render")]
 #[cfg_attr(docsrs, doc(cfg(feature = "pdf-render")))]
-pub fn format_with_ocr(ocr: OcrMode) -> Format {
+pub fn format_with(ocr: OcrMode) -> Format {
     Format::new::<Text, _>(FORMAT_ID.clone(), PdfLoader::with_ocr(ocr))
         .with_extensions(["pdf"])
         .with_content_types(["application/pdf"])
@@ -195,7 +195,7 @@ mod tests {
     async fn auto_mode_decodes_without_rendering() {
         use super::super::OcrMode;
 
-        let _ = format_with_ocr(OcrMode::force());
+        let _ = format_with(OcrMode::force());
 
         let h = PdfLoader::with_ocr(OcrMode::Auto)
             .decode(ContentData::new(Bytes::from_static(b"%PDF-1.7")))

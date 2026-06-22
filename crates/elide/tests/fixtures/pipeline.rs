@@ -5,7 +5,7 @@
 //! helper the per-format tests call, plus a [`PipelineOutcome`] carrying
 //! the entities and re-encoded bytes for assertions.
 //!
-//! Generic over any [`TextBacked`]: the [`Text`] formats (`txt`,
+//! Generic over any [`TextSpanned`]: the [`Text`] formats (`txt`,
 //! `json`, `html`) and [`Tabular`] (`csv`). The shipped pattern
 //! recognizer and the operators serve both — only the codec handle's
 //! modality differs.
@@ -22,7 +22,7 @@ use elide::modality::image::Image;
 #[cfg(feature = "codec-csv")]
 use elide::modality::tabular::Tabular;
 use elide::modality::text::Text;
-use elide::modality::{Modality, StreamDataReader, TextBacked};
+use elide::modality::{Modality, StreamDataReader, TextSpanned};
 use elide::primitive::{ConfidenceThreshold, Language, LanguageTag};
 use elide::recognition::pattern::PatternRecognizer;
 use elide::recognition::{Recognizer, Scope};
@@ -69,7 +69,7 @@ impl<M: Modality> PipelineOutcome<M> {
 /// Build the detection side: the real built-in pattern recognizer (with
 /// context boosting), behind the standard dedup pipeline. Generic over any
 /// text-payload modality the patterns serve.
-pub fn build_analyzer<M: TextBacked>() -> Result<Analyzer<M>>
+pub fn build_analyzer<M: TextSpanned>() -> Result<Analyzer<M>>
 where
     PatternRecognizer: Recognizer<M>,
 {
@@ -87,7 +87,7 @@ where
 
 /// Build the redaction side: one operator per label the shipped patterns
 /// emit, so assertions can spot the replacement tokens, plus a fallback.
-pub fn build_anonymizer<M: TextBacked>() -> Anonymizer<M>
+pub fn build_anonymizer<M: TextSpanned>() -> Anonymizer<M>
 where
     Replace: Operator<M>,
     Mask: Operator<M>,
@@ -258,7 +258,7 @@ impl Fixture {
     /// actually has image parts (a DOCX), and is inert for the rest.
     async fn run_typed<M>(&self) -> Result<PipelineOutcome<M>>
     where
-        M: TextBacked,
+        M: TextSpanned,
         Entity<M>: Clone,
         Vec<Entity<M>>: EntityGroup,
         DocumentHandle<M>: StreamDataReader<M>,

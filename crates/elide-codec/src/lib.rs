@@ -107,7 +107,7 @@ mod tests {
 
 #[cfg(all(test, feature = "csv"))]
 mod csv_tests {
-    use elide_core::modality::tabular::{Tabular, TabularLocation};
+    use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
     use elide_core::modality::text::TextReplacement;
     use elide_core::modality::{DataWriter, StreamDataReader};
     use elide_core::redaction::Redactions;
@@ -136,7 +136,7 @@ mod csv_tests {
         let mut batch: Redactions<Tabular> = Redactions::new();
         batch.push(
             TabularLocation::new(1, 1),
-            TextReplacement::substituted("[EMAIL]"),
+            TabularReplacement::Cell(TextReplacement::substituted("[EMAIL]")),
         );
         doc.write_at(batch).await.expect("redacted");
 

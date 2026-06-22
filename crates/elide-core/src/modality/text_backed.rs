@@ -1,10 +1,10 @@
 //! [`TextRecognizable`] (text recognition over any modality) and
-//! [`TextBacked`] (the subset that also redacts as text).
+//! [`TextSpanned`] (the subset whose match carries a chunk-local byte span).
 
 use std::ops::Range;
 
 use super::Modality;
-use super::text::{Text, TextData, TextLocation, TextReplacement};
+use super::text::{Text, TextData, TextLocation};
 use crate::recognition::RecognizerContext;
 
 /// A modality whose per-chunk payload can be read as text for recognition,
@@ -55,18 +55,24 @@ pub trait TextRecognizable: Modality + Sized {
     ) -> Self::Location;
 }
 
-/// A [`TextRecognizable`] modality whose payload and redaction replacement
-/// are both text.
+/// A [`TextRecognizable`] modality whose chunk payload is text and whose
+/// match carries a chunk-local byte range.
 ///
-/// The subset of text-recognizable media that also *redact* as text:
-/// [`Text`] itself, and `Tabular` (a cell holds text). The text operators
-/// (`Erase`, `Mask`, …) and the keyword-boost enhancer bind here, because
-/// they produce [`TextReplacement`]s and re-read the matched byte range via
-/// [`span`]. A medium that recognizes over text but redacts in another
-/// form (audio) is [`TextRecognizable`] but not `TextBacked`.
+/// The subset of text-recognizable media addressed by *byte spans*:
+/// [`Text`] itself, and `Tabular` (a cell holds text). The keyword-boost
+/// enhancer binds here, because it re-reads the matched byte range via
+/// [`span`] before the location is lifted to source coordinates. A medium
+/// whose location is not byte-based (audio time spans, image regions) is
+/// [`TextRecognizable`] but not `TextSpanned`.
 ///
-/// [`span`]: TextBacked::span
-pub trait TextBacked: TextRecognizable<Data = TextData, Replacement = TextReplacement> {
+/// This does **not** constrain the [`Replacement`] type: redaction is the
+/// operators' concern, and they bind the concrete modality directly so a
+/// text-recognized medium can still redact in its own form (a tabular cell
+/// drops a row, say).
+///
+/// [`span`]: TextSpanned::span
+/// [`Replacement`]: Modality::Replacement
+pub trait TextSpanned: TextRecognizable<Data = TextData> {
     /// The byte range a chunk-local `location` spans within the chunk text
     /// — the inverse of [`locate`]. Used by post-recognition passes (the
     /// keyword-boost enhancer) that re-read the matched text before the
@@ -90,7 +96,7 @@ impl TextRecognizable for Text {
     }
 }
 
-impl TextBacked for Text {
+impl TextSpanned for Text {
     fn span(location: &TextLocation) -> Range<usize> {
         location.start..location.end
     }

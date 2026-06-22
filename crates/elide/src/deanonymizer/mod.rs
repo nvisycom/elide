@@ -1,16 +1,16 @@
 //! The [`Deanonymizer`] — the "recover" engine.
 //!
-//! The reverse of [`Anonymizer`]: for each entity it resolves a
-//! [`ReversibleOperator`] (e.g. [`Encrypt`]), reads the current
-//! replacement text the document holds, recovers the original, and writes
-//! it back. Only [`TextBacked`] modalities are supported — recovery
-//! reconstructs a [`TextReplacement`] from the stored text, which is
-//! well-defined only where the data *is* the text.
+//! The reverse of [`Anonymizer`]: per entity it resolves a
+//! [`ReversibleOperator`] (e.g. [`Encrypt`]), reads the replacement text the
+//! document holds, recovers the original, and writes it back. Supported for
+//! modalities whose data and recoverable replacement are both text ([`Text`]
+//! and `Tabular`), where the stored value can be lifted back to a
+//! [`TextReplacement`] for the operator to reverse.
 //!
 //! [`Anonymizer`]: crate::Anonymizer
 //! [`ReversibleOperator`]: elide_core::redaction::ReversibleOperator
 //! [`Encrypt`]: crate::redaction::operators::Encrypt
-//! [`TextBacked`]: elide_core::modality::TextBacked
+//! [`Text`]: elide_core::modality::text::Text
 //! [`TextReplacement`]: elide_core::modality::text::TextReplacement
 
 mod dyn_reversible;
@@ -18,20 +18,19 @@ mod registry;
 
 use elide_core::Result;
 use elide_core::entity::{Entity, LabelRef};
-use elide_core::modality::text::TextReplacement;
-use elide_core::modality::{DataReader, DataWriter, Modality, TextBacked};
+use elide_core::modality::text::{TextData, TextReplacement};
+use elide_core::modality::{DataReader, DataWriter, Modality, TextRecognizable};
 use elide_core::redaction::{Redactions, ReversibleOperator};
 
 use self::registry::ReversibleRegistry;
 
-/// The recover engine: selects a reversible operator per entity and
-/// recovers the original value it replaced.
+/// The recover engine: picks a reversible operator per entity and restores
+/// the original value.
 ///
-/// Generic over a [`TextBacked`] modality `M`. Selection is an ordered list
-/// of rules tried top to bottom, first match winning: bind an operator to a
-/// label with [`with_label`], or as a catch-all with [`with_fallback`].
-/// [`deanonymize`] resolves and runs the operators, writing the recovered
-/// originals back into the target.
+/// Selection is an ordered list of rules tried top to bottom, first match
+/// winning: bind an operator to a label with [`with_label`], or as a
+/// catch-all with [`with_fallback`]. [`deanonymize`] resolves and runs the
+/// operators, writing the recovered originals back into the target.
 ///
 /// Pairs with [`Anonymizer`]: encrypt under a label on the way in, decrypt
 /// under the same label on the way out.
@@ -44,7 +43,7 @@ pub struct Deanonymizer<M: Modality> {
     operators: ReversibleRegistry<M>,
 }
 
-impl<M: TextBacked> Deanonymizer<M> {
+impl<M: Modality> Deanonymizer<M> {
     /// A deanonymizer with no rules.
     pub fn new() -> Self {
         Self {
@@ -70,16 +69,26 @@ impl<M: TextBacked> Deanonymizer<M> {
         self.operators.push_fallback(operator);
         self
     }
+}
 
+/// Recovery for a text-backed modality: the stored replacement is text, so
+/// it lifts to a [`TextReplacement`] (and into `M::Replacement`) the operator
+/// can reverse. Implemented for [`Text`] and `Tabular`.
+///
+/// [`Text`]: elide_core::modality::text::Text
+impl<M> Deanonymizer<M>
+where
+    M: TextRecognizable<Data = TextData>,
+    M::Replacement: From<TextReplacement>,
+{
     /// Plan the recovery for every entity, reading each one's current value
     /// from `reader`, without applying anything.
     ///
     /// For each entity: resolve its reversible operator, read the current
-    /// (replaced) value, reconstruct the [`TextReplacement`] it represents,
-    /// and recover the original. Entities with no operator, no readable
-    /// data, or an unrecoverable value (wrong key, not produced by this
-    /// operator) are skipped. Returns the [`Redactions`] batch of recovered
-    /// originals.
+    /// (replaced) value, lift it back to the modality's replacement, and
+    /// recover the original. Entities with no operator, no readable data, or
+    /// an unrecoverable value (wrong key, not produced by this operator) are
+    /// skipped.
     pub async fn plan(
         &self,
         entities: &[Entity<M>],
@@ -94,9 +103,8 @@ impl<M: TextBacked> Deanonymizer<M> {
                 continue;
             };
             // The document holds the replacement text as data; lift it back
-            // to a replacement so the operator can reverse it. For a
-            // `TextBacked` modality `M::Data` is `TextData`.
-            let current = TextReplacement::substituted(data.as_str());
+            // to the modality's replacement so the operator can reverse it.
+            let current = M::Replacement::from(TextReplacement::substituted(data.as_str()));
             let Some(original) = operator.deanonymize_boxed(entity, &current).await? else {
                 tracing::debug!(
                     modality = M::NAME,
@@ -105,10 +113,9 @@ impl<M: TextBacked> Deanonymizer<M> {
                 );
                 continue;
             };
-            // Write the recovered original back as a substitution.
             redactions.push(
                 entity.location.clone(),
-                TextReplacement::substituted(original.as_str()),
+                M::Replacement::from(TextReplacement::substituted(original.as_str())),
             );
         }
         Ok(redactions)
@@ -117,8 +124,8 @@ impl<M: TextBacked> Deanonymizer<M> {
     /// Recover every entity by writing its operator's recovered original
     /// back into `target`.
     ///
-    /// The complete recovery step: [`plan`]s each entity's original
-    /// (reading its current value from `target`), then hands the batch to
+    /// The complete recovery step: [`plan`]s each entity's original (reading
+    /// its current value from `target`), then hands the batch to
     /// [`DataWriter::write_at`]. `target` is both reader and writer.
     ///
     /// [`plan`]: Self::plan
@@ -131,7 +138,7 @@ impl<M: TextBacked> Deanonymizer<M> {
     }
 }
 
-impl<M: TextBacked> Default for Deanonymizer<M> {
+impl<M: Modality> Default for Deanonymizer<M> {
     fn default() -> Self {
         Self::new()
     }

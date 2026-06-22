@@ -2,8 +2,10 @@
 
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::modality::TextBacked;
-use elide_core::modality::text::{TextData, TextReplacement};
+use elide_core::modality::Modality;
+#[cfg(feature = "tabular")]
+use elide_core::modality::tabular::{Tabular, TabularReplacement};
+use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 
 /// Substitute the matched span with a template string.
@@ -48,7 +50,20 @@ impl Default for Replace {
     }
 }
 
-impl<M: TextBacked> Operator<M> for Replace {
+impl Replace {
+    /// Expand the template for an entity, substituting the placeholders.
+    fn render<M: Modality>(&self, entity: &Entity<M>, value: &str) -> TextReplacement {
+        let coref = entity.coref.as_ref().map_or("", |coref| coref.as_str());
+        let rendered = self
+            .template
+            .replace("{label}", entity.label.as_str())
+            .replace("{value}", value)
+            .replace("{coref}", coref);
+        TextReplacement::substituted(rendered)
+    }
+}
+
+impl Operator<Text> for Replace {
     fn id(&self) -> OperatorId {
         OperatorId::new("replace", "1.0.0")
     }
@@ -59,13 +74,26 @@ impl<M: TextBacked> Operator<M> for Replace {
         LeakProfile::Partial
     }
 
-    async fn anonymize(&self, entity: &Entity<M>, data: &TextData) -> Result<TextReplacement> {
-        let coref = entity.coref.as_ref().map_or("", |coref| coref.as_str());
-        let rendered = self
-            .template
-            .replace("{label}", entity.label.as_str())
-            .replace("{value}", data.as_str())
-            .replace("{coref}", coref);
-        Ok(TextReplacement::substituted(rendered))
+    async fn anonymize(&self, entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
+        Ok(self.render(entity, data.as_str()))
+    }
+}
+
+#[cfg(feature = "tabular")]
+impl Operator<Tabular> for Replace {
+    fn id(&self) -> OperatorId {
+        OperatorId::new("replace", "1.0.0")
+    }
+
+    fn leak_profile(&self) -> LeakProfile {
+        LeakProfile::Partial
+    }
+
+    async fn anonymize(
+        &self,
+        entity: &Entity<Tabular>,
+        data: &TextData,
+    ) -> Result<TabularReplacement> {
+        Ok(self.render(entity, data.as_str()).into())
     }
 }

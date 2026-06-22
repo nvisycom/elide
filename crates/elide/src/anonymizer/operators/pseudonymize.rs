@@ -3,9 +3,13 @@
 
 use elide_core::Result;
 use elide_core::entity::{Entity, LabelRef};
-use elide_core::modality::TextBacked;
-use elide_core::modality::text::{TextData, TextReplacement};
+use elide_core::modality::Modality;
+#[cfg(feature = "tabular")]
+use elide_core::modality::tabular::{Tabular, TabularReplacement};
+use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId, Vault};
+#[cfg(feature = "tabular")]
+use elide_core::{Error, ErrorKind};
 
 use crate::redaction::generator::Generator;
 
@@ -67,11 +71,19 @@ impl<V, G> Pseudonymize<V, G> {
 /// (coreference id when present, else the original value).
 type Key = (LabelRef, String);
 
-impl<M, V, G> Operator<M> for Pseudonymize<V, G>
+/// The cluster seed for an entity: its coreference id when present, else its
+/// original value.
+fn seed<M: Modality>(entity: &Entity<M>, data: &TextData) -> String {
+    entity.coref.as_ref().map_or_else(
+        || data.as_str().to_owned(),
+        |coref| coref.as_str().to_owned(),
+    )
+}
+
+impl<V, G> Operator<Text> for Pseudonymize<V, G>
 where
-    M: TextBacked,
     V: Vault<Key, TextReplacement>,
-    G: Generator<M>,
+    G: Generator<Text>,
 {
     fn id(&self) -> OperatorId {
         OperatorId::new("pseudonymize", "1.0.0")
@@ -83,16 +95,53 @@ where
         LeakProfile::Recoverable
     }
 
-    async fn anonymize(&self, entity: &Entity<M>, data: &TextData) -> Result<TextReplacement> {
-        let seed = entity.coref.as_ref().map_or_else(
-            || data.as_str().to_owned(),
-            |coref| coref.as_str().to_owned(),
-        );
+    async fn anonymize(&self, entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
+        let seed = seed(entity, data);
         let key = (entity.label.clone(), seed.clone());
 
         self.vault
             .get_or_try_insert_with(key, || Ok(self.generator.generate(&entity.label, &seed)))
             .await
+    }
+}
+
+#[cfg(feature = "tabular")]
+impl<V, G> Operator<Tabular> for Pseudonymize<V, G>
+where
+    V: Vault<Key, TextReplacement>,
+    G: Generator<Tabular>,
+{
+    fn id(&self) -> OperatorId {
+        OperatorId::new("pseudonymize", "1.0.0")
+    }
+
+    fn leak_profile(&self) -> LeakProfile {
+        LeakProfile::Recoverable
+    }
+
+    async fn anonymize(
+        &self,
+        entity: &Entity<Tabular>,
+        data: &TextData,
+    ) -> Result<TabularReplacement> {
+        let seed = seed(entity, data);
+        let key = (entity.label.clone(), seed.clone());
+
+        // The vault stores the text surrogate; unwrap the generator's cell
+        // treatment to get it (a surrogate generator never drops structure).
+        let cell = self
+            .vault
+            .get_or_try_insert_with(key, || {
+                match self.generator.generate(&entity.label, &seed) {
+                    TabularReplacement::Cell(replacement) => Ok(replacement),
+                    _ => Err(Error::new(
+                        ErrorKind::Validation,
+                        "pseudonymize generator must produce a cell surrogate",
+                    )),
+                }
+            })
+            .await?;
+        Ok(TabularReplacement::Cell(cell))
     }
 }
 

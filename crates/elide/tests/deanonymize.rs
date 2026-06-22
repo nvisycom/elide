@@ -39,7 +39,12 @@ impl DataWriter<Text> for TextDoc {
 
 fn entity(label: &str, start: usize, end: usize) -> Entity<Text> {
     let location = TextLocation::new(start, end);
-    let event = Event::pattern("t", Confidence::MAX, location.clone(), PatternEvent::default());
+    let event = Event::pattern(
+        "t",
+        Confidence::MAX,
+        location.clone(),
+        PatternEvent::default(),
+    );
     Entity::new(
         LabelRef::new(label),
         location,
@@ -90,7 +95,10 @@ async fn wrong_key_leaves_the_ciphertext_in_place() {
     let secret = entity("TOKEN", 2, 8);
 
     Anonymizer::<Text>::new()
-        .with_label(LabelRef::new("TOKEN"), Encrypt::new(StaticKey::new([1u8; 32])))
+        .with_label(
+            LabelRef::new("TOKEN"),
+            Encrypt::new(StaticKey::new([1u8; 32])),
+        )
         .anonymize(&mut doc, std::slice::from_ref(&secret))
         .await
         .unwrap();
@@ -101,7 +109,10 @@ async fn wrong_key_leaves_the_ciphertext_in_place() {
     // A deanonymizer with the wrong key cannot recover, so it skips the
     // entity and leaves the ciphertext untouched.
     Deanonymizer::<Text>::new()
-        .with_label(LabelRef::new("TOKEN"), Encrypt::new(StaticKey::new([2u8; 32])))
+        .with_label(
+            LabelRef::new("TOKEN"),
+            Encrypt::new(StaticKey::new([2u8; 32])),
+        )
         .deanonymize(&mut doc, std::slice::from_ref(&encrypted))
         .await
         .unwrap();
