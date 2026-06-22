@@ -7,7 +7,7 @@
 //! (audio bytes + optional hints) into a response of ordered
 //! [`TranscriptSegment`]s — the core transcription type, so a backend's
 //! output drops straight onto the call's artifacts with no remapping. The
-//! `mock`-gated [`MockBackend`] (returns no segments; test/example stub)
+//! `mock`-gated `MockBackend` (returns no segments; test/example stub)
 //! ships here; concrete provider backends live downstream.
 //!
 //! [`TranscriptSegment`]: elide_core::primitive::TranscriptSegment
