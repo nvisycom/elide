@@ -178,7 +178,7 @@ impl TxtHandler {
             return;
         }
         for s in &mut self.line_starts[i + 1..] {
-            *s = (*s as isize + delta) as usize;
+            *s = s.saturating_add_signed(delta);
         }
     }
 

@@ -78,16 +78,17 @@ impl CsvHandler {
 
     /// Number of cells in `row`, or `None` when the row is out of range.
     fn row_len(&self, row: u32) -> Option<usize> {
-        self.row_cells(row).map(Vec::len)
+        self.row_cells(row).map(<[String]>::len)
     }
 
     /// The cells of `row` (header row 0 when present, then data rows).
-    fn row_cells(&self, row: u32) -> Option<&Vec<String>> {
+    fn row_cells(&self, row: u32) -> Option<&[String]> {
         match &self.data.headers {
             Some(headers) if row == 0 => Some(headers),
             Some(_) => self.data.rows.get((row - 1) as usize),
             None => self.data.rows.get(row as usize),
         }
+        .map(Vec::as_slice)
     }
 
     /// Mutable cells of `row`, with the same addressing as [`row_cells`].
@@ -281,14 +282,13 @@ impl DataReader<Tabular> for CsvHandler {
 impl DataWriter<Tabular> for CsvHandler {
     async fn write_at(&mut self, mut redactions: Redactions<Tabular>) -> Result<()> {
         redactions.sort_by_position();
-        let items: Vec<_> = redactions.iter().cloned().collect();
 
         // Apply cell edits first, before any structural drop shifts indices.
         // Right-to-left so an edit's length delta doesn't move earlier
         // intra-cell offsets in the same cell. Collect drop targets as we go.
         let mut drop_rows = BTreeSet::new();
         let mut drop_cols = BTreeSet::new();
-        for (location, replacement) in items.iter().rev() {
+        for (location, replacement) in redactions.iter().rev() {
             match replacement {
                 TabularReplacement::Cell(cell) => self.redact_one(location, cell)?,
                 TabularReplacement::DropRow => {

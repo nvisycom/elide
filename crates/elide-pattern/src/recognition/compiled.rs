@@ -101,10 +101,7 @@ fn locate_or_drop<M: TextRecognizable>(
 ) -> Option<M::Location> {
     let location = M::locate(range, data, ctx);
     if location.is_none() {
-        tracing::warn!(
-            source,
-            "could not place a match in the source; dropping it",
-        );
+        tracing::warn!(source, "could not place a match in the source; dropping it");
     }
     location
 }
