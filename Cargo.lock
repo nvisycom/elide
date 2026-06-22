@@ -851,6 +851,7 @@ dependencies = [
  "elide-core",
  "elide-llm",
  "elide-ner",
+ "elide-ocr",
  "elide-pattern",
  "elide-stt",
  "erased-serde",
@@ -953,6 +954,16 @@ dependencies = [
  "serde",
  "tokio",
  "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "elide-ocr"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "elide-core",
+ "tokio",
  "uuid",
 ]
 

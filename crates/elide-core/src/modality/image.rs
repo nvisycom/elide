@@ -1,14 +1,16 @@
 //! [`Image`] modality: raster image content addressed by 2-D regions.
 
 use std::cmp::Ordering;
+use std::ops::Range;
 
 use bytes::Bytes;
 use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{Modality, ModalityData, ModalityLocation, ModalityReplacement};
-use crate::primitive::{BoundingBox, Color, Dimensions, Polygon};
+use super::{Modality, ModalityData, ModalityLocation, ModalityReplacement, TextRecognizable};
+use crate::primitive::{BoundingBox, Color, Dimensions, OcrText, Point, Polygon};
+use crate::recognition::RecognizerContext;
 
 /// Per-call payload a recognizer inspects for the [`Image`] modality.
 ///
@@ -203,10 +205,45 @@ impl Modality for Image {
     const NAME: &'static str = "image";
 }
 
+impl TextRecognizable for Image {
+    /// The OCR text a recognizer inspects: the [`OcrText`] an enricher
+    /// stamped onto the call's artifacts, or `""` when none is present (an
+    /// image that was never OCR'd) — a recognizer then finds nothing,
+    /// rather than erroring.
+    fn as_text<'a>(_data: &'a ImageData, ctx: &'a RecognizerContext<'_, Self>) -> &'a str {
+        ctx.artifacts.get::<OcrText>().map_or("", OcrText::text)
+    }
+
+    /// Resolve an OCR-text byte `range` to the region of the image it
+    /// covers.
+    ///
+    /// Unlike the byte-based text modalities, an image location is a 2-D
+    /// region, so `locate` resolves `range` immediately against the OCR
+    /// word boxes (read from the call's artifacts) rather than deferring to
+    /// a lift. A range that resolves to nothing (no OCR, or out of bounds)
+    /// yields an empty region at the origin; such an entity carries no real
+    /// image extent.
+    fn locate(
+        range: Range<usize>,
+        _data: &ImageData,
+        ctx: &RecognizerContext<'_, Self>,
+    ) -> ImageLocation {
+        ctx.artifacts
+            .get::<OcrText>()
+            .and_then(|t| t.resolve(range))
+            .unwrap_or_else(|| {
+                // No OCR / out of bounds: an empty region at the origin,
+                // carrying no real image extent.
+                ImageLocation::new(BoundingBox::new(Point::new(0.0, 0.0), Point::new(0.0, 0.0)))
+            })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::primitive::Point;
+    use crate::primitive::{OcrBlock, OcrWord, Point};
+    use crate::recognition::Scope;
 
     fn loc(x: f64, y: f64, w: f64, h: f64) -> ImageLocation {
         ImageLocation::new(BoundingBox::from_origin_size(Point::new(x, y), w, h))
@@ -242,5 +279,53 @@ mod tests {
         assert_eq!(d.extension(), "png");
         let named = d.with_filename("scan.JPEG");
         assert_eq!(named.extension(), "JPEG");
+    }
+
+    #[test]
+    fn as_text_is_empty_without_ocr() {
+        let data = ImageData::new(Bytes::new(), Dimensions::new(10, 10));
+        let scope = Scope::<Image>::new();
+        let ctx = RecognizerContext::new(&scope);
+        assert_eq!(Image::as_text(&data, &ctx), "");
+    }
+
+    /// A context whose artifacts carry a one-block, one-word OCR result.
+    fn ocr_context(scope: &Scope<Image>) -> RecognizerContext<'_, Image> {
+        let block =
+            OcrBlock::new(loc(0.0, 0.0, 100.0, 20.0), "Alice").with_words(vec![OcrWord::new(
+                loc(0.0, 0.0, 100.0, 20.0),
+                "Alice",
+            )]);
+        let mut ctx = RecognizerContext::new(scope);
+        ctx.artifacts.insert(OcrText::new(vec![block]));
+        ctx
+    }
+
+    #[test]
+    fn as_text_reads_the_ocr_artifact() {
+        let data = ImageData::new(Bytes::new(), Dimensions::new(10, 10));
+        let scope = Scope::<Image>::new();
+        let ctx = ocr_context(&scope);
+        assert_eq!(Image::as_text(&data, &ctx), "Alice");
+    }
+
+    #[test]
+    fn locate_resolves_a_range_to_the_word_box() {
+        let data = ImageData::new(Bytes::new(), Dimensions::new(10, 10));
+        let scope = Scope::<Image>::new();
+        let ctx = ocr_context(&scope);
+        // "Alice" is bytes 0..5.
+        let region = Image::locate(0..5, &data, &ctx);
+        assert_eq!(region.bounding_box.min.x, 0.0);
+        assert_eq!(region.bounding_box.max.x, 100.0);
+    }
+
+    #[test]
+    fn locate_without_ocr_is_empty_region() {
+        let data = ImageData::new(Bytes::new(), Dimensions::new(10, 10));
+        let scope = Scope::<Image>::new();
+        let ctx = RecognizerContext::new(&scope);
+        let region = Image::locate(0..5, &data, &ctx);
+        assert_eq!(region.bounding_box.area(), 0.0);
     }
 }

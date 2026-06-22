@@ -193,6 +193,48 @@ impl Fixture {
         Ok(PipelineOutcome { entities, redacted })
     }
 
+    /// Run the pipeline as the [`Image`](elide::modality::image::Image)
+    /// modality (`png`, `jpeg`, `tiff`).
+    ///
+    /// Recognition reads OCR text an [`OcrEnricher`] stamps onto the call,
+    /// not the codec's image bytes. Here the enricher is backed by the no-op
+    /// mock OCR backend, so no text is recognized and no entities are found
+    /// — the image round-trips through decode → analyze → anonymize → encode
+    /// unchanged. That still exercises the whole image codec + OCR pipeline
+    /// wiring end to end.
+    ///
+    /// [`OcrEnricher`]: elide::recognition::ocr::OcrEnricher
+    #[cfg(feature = "ocr")]
+    pub async fn run_image(&self) -> Result<PipelineOutcome<elide::modality::image::Image>> {
+        use elide::modality::image::Image;
+        use elide::recognition::ocr::OcrEnricher;
+        use elide::recognition::ocr::backend::MockBackend;
+        use elide::redaction::operators::Erase;
+
+        let registry = FormatRegistry::with_builtin();
+        let mut document: DocumentHandle<Image> = self.decode_as::<Image>(&registry).await?;
+
+        // The mock OCR backend recognizes nothing, so recognition finds
+        // nothing; the anonymizer would clear any regions it did.
+        let analyzer = Analyzer::new().with_enricher(OcrEnricher::new(MockBackend));
+        let anonymizer = Anonymizer::new().with_fallback(Erase);
+
+        let orchestrator =
+            Orchestrator::new(&registry).with_modality::<Image>(analyzer, anonymizer, Scope::new());
+
+        let mut report = orchestrator.analyze_document(&mut document).await?;
+        let entities: Vec<Entity<Image>> = report
+            .entities::<Image>()
+            .map(|e| e.to_vec())
+            .unwrap_or_default();
+        self.write_entities(&report);
+        orchestrator.apply(&mut document, report).await?;
+
+        let redacted = document.encode()?.as_bytes().to_vec();
+        self.write_redacted(&redacted);
+        Ok(PipelineOutcome { entities, redacted })
+    }
+
     /// Decode this fixture as modality `M`, redact it through the master
     /// [`Orchestrator`] (body + any container parts), encode, write the
     /// `*.out.*` and entities artifacts, and return the outcome.

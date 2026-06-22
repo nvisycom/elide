@@ -61,6 +61,12 @@ pub mod recognition {
     #[cfg_attr(docsrs, doc(cfg(feature = "stt")))]
     #[doc(inline)]
     pub use elide_stt as stt;
+    /// OCR backends and the enricher that drives the text recognizers over
+    /// recognized image text.
+    #[cfg(feature = "ocr")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "ocr")))]
+    #[doc(inline)]
+    pub use elide_ocr as ocr;
 }
 
 #[doc(inline)]

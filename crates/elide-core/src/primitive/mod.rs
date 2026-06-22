@@ -15,6 +15,8 @@
 mod confidence;
 mod geometry;
 mod language;
+#[cfg(feature = "image")]
+mod ocr_text;
 mod region;
 mod rendering;
 mod time;
@@ -24,6 +26,8 @@ mod transcription;
 pub use self::confidence::{Confidence, ConfidenceThreshold};
 pub use self::geometry::{BoundingBox, Dimensions, PixelRegion, Point, Polygon, UnitBoundingBox};
 pub use self::language::{Language, LanguageProvenance, LanguageSpan, LanguageTag, Languages};
+#[cfg(feature = "image")]
+pub use self::ocr_text::{OcrBlock, OcrText, OcrWord};
 pub use self::region::CountryCode;
 pub use self::rendering::Color;
 pub use self::time::TimeSpan;
