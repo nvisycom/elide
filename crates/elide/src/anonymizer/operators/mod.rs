@@ -10,7 +10,7 @@
 //!
 //! Image (feature `image`): `Blur`, `Pixelate`, `Blackbox`.
 //!
-//! Audio (feature `audio`): `Silence`.
+//! Audio (feature `audio`): `Silence`, `Beep`.
 //!
 //! Cross-modality: [`Erase`] removes the entity in any modality, and
 //! [`Keep`] passes it through unchanged.
@@ -22,6 +22,8 @@
 //! [`Hash`]: struct@Hash
 //! [`DataReader`]: elide_core::modality::DataReader
 
+#[cfg(feature = "audio")]
+mod beep;
 #[cfg(feature = "image")]
 mod blackbox;
 #[cfg(feature = "image")]
@@ -37,6 +39,8 @@ mod replace;
 #[cfg(feature = "audio")]
 mod silence;
 
+#[cfg(feature = "audio")]
+pub use self::beep::Beep;
 #[cfg(feature = "image")]
 pub use self::blackbox::Blackbox;
 #[cfg(feature = "image")]

@@ -27,17 +27,12 @@ use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Keep;
 
-/// Identity shared by every modality's `Keep` impl.
-fn keep_id() -> OperatorId {
-    OperatorId::new("keep", "1.0.0")
-}
-
 /// The original value is unchanged: strictly the most leaky profile.
 const KEEP_LEAK: LeakProfile = LeakProfile::Recoverable;
 
 impl Operator<Text> for Keep {
     fn id(&self) -> OperatorId {
-        keep_id()
+        OperatorId::new("keep", "1.0.0")
     }
 
     fn leak_profile(&self) -> LeakProfile {
@@ -52,7 +47,7 @@ impl Operator<Text> for Keep {
 #[cfg(feature = "tabular")]
 impl Operator<Tabular> for Keep {
     fn id(&self) -> OperatorId {
-        keep_id()
+        OperatorId::new("keep", "1.0.0")
     }
 
     fn leak_profile(&self) -> LeakProfile {
@@ -71,7 +66,7 @@ impl Operator<Tabular> for Keep {
 #[cfg(feature = "image")]
 impl Operator<Image> for Keep {
     fn id(&self) -> OperatorId {
-        keep_id()
+        OperatorId::new("keep", "1.0.0")
     }
 
     fn leak_profile(&self) -> LeakProfile {
@@ -90,7 +85,7 @@ impl Operator<Image> for Keep {
 #[cfg(feature = "audio")]
 impl Operator<Audio> for Keep {
     fn id(&self) -> OperatorId {
-        keep_id()
+        OperatorId::new("keep", "1.0.0")
     }
 
     fn leak_profile(&self) -> LeakProfile {
@@ -118,7 +113,12 @@ mod tests {
 
     fn text_entity() -> Entity<Text> {
         let location = TextLocation::new(0, 5);
-        let event = Event::pattern("t", Confidence::MAX, location.clone(), PatternEvent::default());
+        let event = Event::pattern(
+            "t",
+            Confidence::MAX,
+            location.clone(),
+            PatternEvent::default(),
+        );
         Entity::new(
             LabelRef::new("AMOUNT"),
             location,
@@ -144,7 +144,12 @@ mod tests {
 
         let bbox = BoundingBox::from_origin_size(Point::new(0.0, 0.0), 2.0, 2.0);
         let location = ImageLocation::new(bbox);
-        let event = Event::pattern("t", Confidence::MAX, location.clone(), PatternEvent::default());
+        let event = Event::pattern(
+            "t",
+            Confidence::MAX,
+            location.clone(),
+            PatternEvent::default(),
+        );
         let entity: Entity<Image> = Entity::new(
             LabelRef::new("FACE"),
             location,

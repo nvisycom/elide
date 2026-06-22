@@ -69,7 +69,12 @@ mod tests {
     fn image_entity() -> (Entity<Image>, ImageData) {
         let bbox = BoundingBox::from_origin_size(Point::new(0.0, 0.0), 2.0, 2.0);
         let location = ImageLocation::new(bbox);
-        let event = Event::pattern("t", Confidence::MAX, location.clone(), PatternEvent::default());
+        let event = Event::pattern(
+            "t",
+            Confidence::MAX,
+            location.clone(),
+            PatternEvent::default(),
+        );
         let entity = Entity::new(
             LabelRef::new("FACE"),
             location,
