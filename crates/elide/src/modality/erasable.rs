@@ -8,7 +8,7 @@ use elide_core::modality::audio::{Audio, AudioReplacement};
 #[cfg(feature = "image")]
 use elide_core::modality::image::{Image, ImageReplacement};
 #[cfg(feature = "tabular")]
-use elide_core::modality::tabular::Tabular;
+use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextReplacement};
 
 /// A modality whose entities can be removed entirely.
@@ -32,8 +32,9 @@ impl Erasable for Text {
 
 #[cfg(feature = "tabular")]
 impl Erasable for Tabular {
-    fn erased() -> TextReplacement {
-        TextReplacement::Removed
+    fn erased() -> TabularReplacement {
+        // Erasing a tabular entity removes the cell's text, not the row.
+        TabularReplacement::Cell(TextReplacement::Removed)
     }
 }
 

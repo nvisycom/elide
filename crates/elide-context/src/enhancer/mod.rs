@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use elide_core::entity::{Entity, LabelRef};
-use elide_core::modality::TextBacked;
+use elide_core::modality::TextSpanned;
 use elide_core::primitive::Confidence;
 use hipstr::HipStr;
 
@@ -133,7 +133,7 @@ impl Enhancer {
     /// with the hint's location.
     ///
     /// [`Confidence`]: elide_core::primitive::Confidence
-    pub fn enhance<M: TextBacked>(
+    pub fn enhance<M: TextSpanned>(
         &self,
         entities: &mut [Entity<M>],
         ctx: &Context<'_>,
@@ -148,7 +148,7 @@ impl Enhancer {
         boosts
     }
 
-    fn enhance_one<M: TextBacked>(
+    fn enhance_one<M: TextSpanned>(
         &self,
         entity_index: usize,
         entity: &mut Entity<M>,
@@ -171,7 +171,7 @@ impl Enhancer {
         }
     }
 
-    fn apply_rule<M: TextBacked>(
+    fn apply_rule<M: TextSpanned>(
         &self,
         entity_index: usize,
         entity: &mut Entity<M>,

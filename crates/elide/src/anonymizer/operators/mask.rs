@@ -3,8 +3,9 @@
 
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::modality::TextBacked;
-use elide_core::modality::text::{TextData, TextReplacement};
+#[cfg(feature = "tabular")]
+use elide_core::modality::tabular::{Tabular, TabularReplacement};
+use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 
 /// Character-replacement masking operator.
@@ -79,7 +80,7 @@ impl Mask {
     }
 }
 
-impl<M: TextBacked> Operator<M> for Mask {
+impl Operator<Text> for Mask {
     fn id(&self) -> OperatorId {
         OperatorId::new("mask", "1.0.0")
     }
@@ -89,7 +90,26 @@ impl<M: TextBacked> Operator<M> for Mask {
         LeakProfile::Partial
     }
 
-    async fn anonymize(&self, _entity: &Entity<M>, data: &TextData) -> Result<TextReplacement> {
+    async fn anonymize(&self, _entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
         Ok(TextReplacement::substituted(self.render(data.as_str())))
+    }
+}
+
+#[cfg(feature = "tabular")]
+impl Operator<Tabular> for Mask {
+    fn id(&self) -> OperatorId {
+        OperatorId::new("mask", "1.0.0")
+    }
+
+    fn leak_profile(&self) -> LeakProfile {
+        LeakProfile::Partial
+    }
+
+    async fn anonymize(
+        &self,
+        _entity: &Entity<Tabular>,
+        data: &TextData,
+    ) -> Result<TabularReplacement> {
+        Ok(TextReplacement::substituted(self.render(data.as_str())).into())
     }
 }

@@ -4,8 +4,9 @@
 use bytes::Bytes;
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::modality::TextBacked;
-use elide_core::modality::text::{TextData, TextReplacement};
+#[cfg(feature = "tabular")]
+use elide_core::modality::tabular::{Tabular, TabularReplacement};
+use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 use sha2::{Digest, Sha256, Sha512};
 
@@ -76,7 +77,7 @@ impl Hash {
     }
 }
 
-impl<M: TextBacked> Operator<M> for Hash {
+impl Operator<Text> for Hash {
     fn id(&self) -> OperatorId {
         OperatorId::new("hash", "1.0.0")
     }
@@ -87,7 +88,26 @@ impl<M: TextBacked> Operator<M> for Hash {
         LeakProfile::Recoverable
     }
 
-    async fn anonymize(&self, _entity: &Entity<M>, data: &TextData) -> Result<TextReplacement> {
+    async fn anonymize(&self, _entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
         Ok(TextReplacement::substituted(self.digest(data.as_str())))
+    }
+}
+
+#[cfg(feature = "tabular")]
+impl Operator<Tabular> for Hash {
+    fn id(&self) -> OperatorId {
+        OperatorId::new("hash", "1.0.0")
+    }
+
+    fn leak_profile(&self) -> LeakProfile {
+        LeakProfile::Recoverable
+    }
+
+    async fn anonymize(
+        &self,
+        _entity: &Entity<Tabular>,
+        data: &TextData,
+    ) -> Result<TabularReplacement> {
+        Ok(TextReplacement::substituted(self.digest(data.as_str())).into())
     }
 }

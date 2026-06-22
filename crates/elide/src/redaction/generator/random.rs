@@ -1,8 +1,9 @@
 //! [`RandomToken`]: the default [`Generator`], a random token per entity.
 
 use elide_core::entity::LabelRef;
-use elide_core::modality::TextBacked;
-use elide_core::modality::text::TextReplacement;
+#[cfg(feature = "tabular")]
+use elide_core::modality::tabular::{Tabular, TabularReplacement};
+use elide_core::modality::text::{Text, TextReplacement};
 use uuid::Uuid;
 
 use super::Generator;
@@ -18,9 +19,16 @@ use super::Generator;
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RandomToken;
 
-impl<M: TextBacked> Generator<M> for RandomToken {
+impl Generator<Text> for RandomToken {
     fn generate(&self, _label: &LabelRef, _seed: &str) -> TextReplacement {
         TextReplacement::substituted(Uuid::new_v4().to_string())
+    }
+}
+
+#[cfg(feature = "tabular")]
+impl Generator<Tabular> for RandomToken {
+    fn generate(&self, _label: &LabelRef, _seed: &str) -> TabularReplacement {
+        TabularReplacement::Cell(TextReplacement::substituted(Uuid::new_v4().to_string()))
     }
 }
 

@@ -20,7 +20,7 @@
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::entity::provenance::Event;
-use elide_core::modality::TextBacked;
+use elide_core::modality::TextSpanned;
 use elide_core::modality::text::TextData;
 use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
 
@@ -60,7 +60,7 @@ impl<R> ContextEnhanced<R> {
     }
 }
 
-impl<M: TextBacked, R> Recognizer<M> for ContextEnhanced<R>
+impl<M: TextSpanned, R> Recognizer<M> for ContextEnhanced<R>
 where
     R: Recognizer<M> + 'static,
 {

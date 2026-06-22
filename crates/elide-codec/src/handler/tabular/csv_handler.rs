@@ -1,13 +1,15 @@
 //! CSV handler: holds parsed rows and streams them cell by cell, with
 //! intra-cell random-access reads and redactions.
 //!
-//! Cells hold text, so the handler reuses [`TextData`] as the chunk
-//! payload and [`TextReplacement`] as the replacement, applying edits
-//! through the shared text-redaction helper. Only the *location* is
-//! tabular: a `(row, column)` address plus an optional intra-cell byte
-//! range.
+//! Cells hold text, so the handler applies a [`TabularReplacement`]'s cell
+//! treatment through the shared text-redaction helper, and its structural
+//! treatments — dropping a whole row or column — by removing them from the
+//! parsed rows. Only the *location* is tabular: a `(row, column)` address
+//! plus an optional intra-cell byte range.
 
-use elide_core::modality::tabular::{Tabular, TabularLocation};
+use std::collections::BTreeSet;
+
+use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
 use elide_core::modality::text::{TextData, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter, Hint};
 use elide_core::redaction::Redactions;
@@ -158,6 +160,40 @@ impl CsvHandler {
         let value = replacement.value().unwrap_or_default();
         redact::replace_range(cell, value, start..end)
     }
+
+    /// Drop the data row at `row_index` (the same addressing as
+    /// [`row_cells`]). The header row is never dropped — removing it would
+    /// strip the table's schema — so a drop targeting it is a no-op.
+    ///
+    /// [`row_cells`]: Self::row_cells
+    fn drop_row(&mut self, row_index: u32) {
+        let data_index = match &self.data.headers {
+            Some(_) if row_index == 0 => {
+                tracing::debug!("tabular drop-row targeting the header; skipping");
+                return;
+            }
+            Some(_) => (row_index - 1) as usize,
+            None => row_index as usize,
+        };
+        if data_index < self.data.rows.len() {
+            self.data.rows.remove(data_index);
+        }
+    }
+
+    /// Drop column `col` from the header and every data row.
+    fn drop_column(&mut self, col: u32) {
+        let col = col as usize;
+        if let Some(headers) = self.data.headers.as_mut()
+            && col < headers.len()
+        {
+            headers.remove(col);
+        }
+        for row in &mut self.data.rows {
+            if col < row.len() {
+                row.remove(col);
+            }
+        }
+    }
 }
 
 impl Handler<Tabular> for CsvHandler {
@@ -244,12 +280,34 @@ impl DataReader<Tabular> for CsvHandler {
 
 impl DataWriter<Tabular> for CsvHandler {
     async fn write_at(&mut self, mut redactions: Redactions<Tabular>) -> Result<()> {
-        // Sort by position, then apply right-to-left so an edit's length
-        // delta doesn't shift earlier intra-cell offsets in the same cell.
         redactions.sort_by_position();
         let items: Vec<_> = redactions.iter().cloned().collect();
+
+        // Apply cell edits first, before any structural drop shifts indices.
+        // Right-to-left so an edit's length delta doesn't move earlier
+        // intra-cell offsets in the same cell. Collect drop targets as we go.
+        let mut drop_rows = BTreeSet::new();
+        let mut drop_cols = BTreeSet::new();
         for (location, replacement) in items.iter().rev() {
-            self.redact_one(location, replacement)?;
+            match replacement {
+                TabularReplacement::Cell(cell) => self.redact_one(location, cell)?,
+                TabularReplacement::DropRow => {
+                    drop_rows.insert(location.row_index);
+                }
+                TabularReplacement::DropColumn => {
+                    drop_cols.insert(location.column_index);
+                }
+            }
+        }
+
+        // Then delete structure, highest index first so each removal leaves
+        // the not-yet-removed indices valid: columns right-to-left, rows
+        // bottom-up.
+        for &col in drop_cols.iter().rev() {
+            self.drop_column(col);
+        }
+        for &row in drop_rows.iter().rev() {
+            self.drop_row(row);
         }
         Ok(())
     }
@@ -322,11 +380,59 @@ mod tests {
         // Row 1, col 1 = "alice@x.test"; replace the whole cell.
         batch.push(
             TabularLocation::new(1, 1),
-            TextReplacement::substituted("[EMAIL]"),
+            TabularReplacement::Cell(TextReplacement::substituted("[EMAIL]")),
         );
         h.write_at(batch).await.unwrap();
         let out = h.encode().unwrap();
         assert_eq!(out.decode().unwrap(), "name,email\nAlice,[EMAIL]\n");
+    }
+
+    #[tokio::test]
+    async fn drop_row_removes_the_record() {
+        let mut h = load("name,city\nAlice,NYC\nBob,LA\n").await;
+        let mut batch: Redactions<Tabular> = Redactions::new();
+        // A match anywhere in Bob's row (row 2) drops the whole record.
+        batch.push(TabularLocation::new(2, 0), TabularReplacement::DropRow);
+        h.write_at(batch).await.unwrap();
+        let out = h.encode().unwrap();
+        assert_eq!(out.decode().unwrap(), "name,city\nAlice,NYC\n");
+    }
+
+    #[tokio::test]
+    async fn drop_multiple_rows_stays_aligned() {
+        let mut h = load("n\nA\nB\nC\nD\n").await;
+        let mut batch: Redactions<Tabular> = Redactions::new();
+        // Drop rows 1 (A) and 3 (C); bottom-up removal keeps indices valid.
+        batch.push(TabularLocation::new(1, 0), TabularReplacement::DropRow);
+        batch.push(TabularLocation::new(3, 0), TabularReplacement::DropRow);
+        h.write_at(batch).await.unwrap();
+        assert_eq!(h.encode().unwrap().decode().unwrap(), "n\nB\nD\n");
+    }
+
+    #[tokio::test]
+    async fn drop_row_never_drops_the_header() {
+        let mut h = load("name,city\nAlice,NYC\n").await;
+        let mut batch: Redactions<Tabular> = Redactions::new();
+        // Targeting the header row (0) is a no-op — the schema survives.
+        batch.push(TabularLocation::new(0, 0), TabularReplacement::DropRow);
+        h.write_at(batch).await.unwrap();
+        assert_eq!(
+            h.encode().unwrap().decode().unwrap(),
+            "name,city\nAlice,NYC\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn drop_column_removes_header_and_every_cell() {
+        let mut h = load("name,ssn,city\nAlice,111,NYC\nBob,222,LA\n").await;
+        let mut batch: Redactions<Tabular> = Redactions::new();
+        // A match in the ssn column (col 1) drops it across all rows.
+        batch.push(TabularLocation::new(1, 1), TabularReplacement::DropColumn);
+        h.write_at(batch).await.unwrap();
+        assert_eq!(
+            h.encode().unwrap().decode().unwrap(),
+            "name,city\nAlice,NYC\nBob,LA\n"
+        );
     }
 
     #[tokio::test]
