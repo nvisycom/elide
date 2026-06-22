@@ -53,6 +53,7 @@ pub(super) fn apply<S: Default + Clone>(
         AudioReplacement::Removed => {
             samples.drain(start..end);
         }
+        AudioReplacement::Unchanged => {}
     }
 }
 

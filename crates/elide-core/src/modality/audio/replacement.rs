@@ -16,6 +16,9 @@ pub enum AudioReplacement {
     Silenced,
     /// Cut the range out entirely, shortening the stream.
     Removed,
+    /// Leave the range untouched. Lets a policy keep a tagged range while
+    /// redacting everything else.
+    Unchanged,
 }
 
 impl ModalityReplacement for AudioReplacement {}

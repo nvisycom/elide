@@ -29,6 +29,9 @@ pub enum ImageReplacement {
     },
     /// Remove the region entirely (cut or fully obscure).
     Removed,
+    /// Leave the region untouched. Lets a policy keep a tagged region
+    /// (e.g. faces to retain) while redacting everything else.
+    Unchanged,
 }
 
 impl ImageReplacement {

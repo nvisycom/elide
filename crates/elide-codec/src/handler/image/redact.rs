@@ -24,6 +24,7 @@ pub(crate) fn apply(img: &mut DynamicImage, replacement: &ImageReplacement, bbox
         ImageReplacement::Pixelate { block_size } => pixelate(img, region, *block_size),
         ImageReplacement::Block { color } => block(img, region, *color),
         ImageReplacement::Removed => block(img, region, Color::BLACK),
+        ImageReplacement::Unchanged => {}
     }
 }
 
