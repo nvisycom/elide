@@ -5,6 +5,8 @@
 //! confidence and returns the boosts; recording the located refinement
 //! event is the M-aware wrapper's job, exercised separately.
 
+use std::ops::Range;
+
 use elide_context::matching::SubstringMatcher;
 use elide_context::{BoostRule, Context, Enhancer};
 use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
@@ -12,9 +14,9 @@ use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::{Text, TextLocation};
 use elide_core::primitive::Confidence;
 
-/// Build a single-recognition entity at `start..end`.
-fn entity(label: &LabelRef, start: usize, end: usize, score: f32) -> Entity<Text> {
-    let location = TextLocation::new(start, end);
+/// Build a single-recognition entity at `range`.
+fn entity(label: &LabelRef, range: Range<usize>, score: f32) -> Entity<Text> {
+    let location = TextLocation::new(range.start, range.end);
     let confidence = Confidence::new(score).unwrap();
     let event = Event::pattern(
         "test",
@@ -34,7 +36,7 @@ fn keyword_in_window_boosts_and_records_refinement() {
     //          0         1         2
     //          0123456789012345678901234567890
     let text = "social security 123-45-6789";
-    let mut entities = vec![entity(&ssn, 16, 27, 0.5)]; // "123-45-6789"
+    let mut entities = vec![entity(&ssn, 16..27, 0.5)]; // "123-45-6789"
 
     let boosts = enhancer.enhance(&mut entities, &Context::new(text));
 
@@ -56,7 +58,7 @@ fn no_keyword_leaves_entity_untouched() {
     let enhancer = Enhancer::new([rule], SubstringMatcher);
 
     let text = "the number is 123-45-6789";
-    let mut entities = vec![entity(&ssn, 14, 25, 0.5)];
+    let mut entities = vec![entity(&ssn, 14..25, 0.5)];
 
     let boosts = enhancer.enhance(&mut entities, &Context::new(text));
 
@@ -74,7 +76,7 @@ fn out_of_band_hint_boosts_via_hint_path() {
     // No keyword in the text, but the column header is supplied as a hint.
     let text = "123-45-6789";
     let hints = ["ssn"];
-    let mut entities = vec![entity(&ssn, 0, 11, 0.5)];
+    let mut entities = vec![entity(&ssn, 0..11, 0.5)];
 
     let boosts = enhancer.enhance(&mut entities, &Context::new(text).with_hints(&hints));
 

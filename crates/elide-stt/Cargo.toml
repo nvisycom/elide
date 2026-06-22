@@ -1,0 +1,45 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "elide-stt"
+description = "Speech-to-text backends and transcription types for the elide toolkit"
+keywords = ["stt", "transcription", "audio", "pii"]
+categories = ["multimedia::audio"]
+readme = "README.md"
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[features]
+## No features on by default: the STT traits ship bare. Enable `mock` for
+## the no-op backend used in tests, examples, and offline wiring.
+default = []
+
+## Ship the no-op `MockBackend` for tests, examples, and offline wiring.
+mock = []
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+# Internal crates
+elide-core = { workspace = true, features = ["audio"] }
+
+# Primitive datatypes
+uuid = { workspace = true, features = ["v7"] }
+
+# Async runtime & parallelism
+async-trait = { workspace = true, features = [] }
+
+[dev-dependencies]
+# Async runtime & parallelism
+tokio = { workspace = true, features = ["macros", "rt"] }

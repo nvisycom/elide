@@ -103,9 +103,8 @@ impl<B: NerBackend> NerBackend for ScoreScale<B> {
 mod tests {
     use elide_core::primitive::Confidence;
 
-    use crate::backend::NerSpan;
-
     use super::*;
+    use crate::backend::NerSpan;
 
     /// Backend that returns a fixed set of spans, ignoring the request.
     struct FixedBackend(Vec<NerSpan>);

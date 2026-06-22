@@ -165,11 +165,7 @@ fn build_items(dom: &Html, loader: &HtmlLoader) -> Vec<HtmlItem> {
 /// coordinate the sibling's own chunk carries — so a boost can point back
 /// at exactly which neighbour fired it. The node's own text is excluded so
 /// a hint never echoes the chunk's own bytes.
-fn attach_sibling_hints(
-    dom: &Html,
-    items: &mut [HtmlItem],
-    spans: &HashMap<NodeId, TextLocation>,
-) {
+fn attach_sibling_hints(dom: &Html, items: &mut [HtmlItem], spans: &HashMap<NodeId, TextLocation>) {
     // Walk text nodes in the same document order the items were pushed; the
     // i-th text-node item lines up with the i-th non-skipped text node.
     let mut item_idx = 0;
@@ -217,7 +213,10 @@ fn sibling_text_hints(
         let Some(location) = spans.get(&descendant.id()) else {
             continue;
         };
-        hints.push(Hint::new(location.clone(), TextData::new(trimmed.to_owned())));
+        hints.push(Hint::new(
+            location.clone(),
+            TextData::new(trimmed.to_owned()),
+        ));
     }
     hints
 }

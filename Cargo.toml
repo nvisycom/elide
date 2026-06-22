@@ -8,6 +8,7 @@ members = [
     "./crates/elide-pattern",
     "./crates/elide-ner",
     "./crates/elide-llm",
+    "./crates/elide-stt",
     "./crates/elide-codec",
     "./crates/elide",
     "./examples",
@@ -37,6 +38,7 @@ elide-context = { path = "./crates/elide-context", version = "0.1.0" }
 elide-pattern = { path = "./crates/elide-pattern", version = "0.1.0" }
 elide-ner = { path = "./crates/elide-ner", version = "0.1.0" }
 elide-llm = { path = "./crates/elide-llm", version = "0.1.0" }
+elide-stt = { path = "./crates/elide-stt", version = "0.1.0" }
 elide-codec = { path = "./crates/elide-codec", version = "0.1.0" }
 elide = { path = "./crates/elide", version = "0.1.0" }
 

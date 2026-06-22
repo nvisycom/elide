@@ -17,23 +17,19 @@
 //! [`Enhancer::apply_rule`]: super::Enhancer
 //! [`KeywordMatcher`]: crate::matching::KeywordMatcher
 
+use std::ops::Range;
+
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::io::Token;
 
-/// Walk `prefix` words before `[start, end)` and `suffix` words
-/// after, via Unicode word segmentation, and return the spanning
-/// substring (including any non-word whitespace and punctuation
-/// between words). The returned slice covers `[start, end)` itself
-/// plus the prefix / suffix words; the entity's own bytes are
-/// always inside.
-pub(super) fn word_window(
-    text: &str,
-    start: usize,
-    end: usize,
-    prefix: usize,
-    suffix: usize,
-) -> &str {
+/// Walk `prefix` words before `range` and `suffix` words after, via
+/// Unicode word segmentation, and return the spanning substring
+/// (including any non-word whitespace and punctuation between words).
+/// The returned slice covers `range` itself plus the prefix / suffix
+/// words; the entity's own bytes are always inside.
+pub(super) fn word_window(text: &str, range: Range<usize>, prefix: usize, suffix: usize) -> &str {
+    let Range { start, end } = range;
     let prefix_text = &text[..start.min(text.len())];
     let suffix_text = &text[end.min(text.len())..];
 
@@ -64,22 +60,21 @@ pub(super) fn word_window(
 }
 
 /// Slice tokens by *count*: take `prefix` tokens before the first
-/// token overlapping `[start, end)` and `suffix` tokens after the
-/// last. The returned slice is contiguous.
+/// token overlapping `range` and `suffix` tokens after the last. The
+/// returned slice is contiguous.
 pub(super) fn slice_tokens_around(
     tokens: &[Token],
-    start: usize,
-    end: usize,
+    range: Range<usize>,
     prefix: usize,
     suffix: usize,
 ) -> &[Token] {
     if tokens.is_empty() {
         return &[];
     }
-    // First token whose `offset.end > start` overlaps or follows the entity.
-    let first_overlap = tokens.partition_point(|t| t.offset.end <= start);
-    // One past the last token whose `offset.start < end` overlaps the entity.
-    let last_overlap = tokens.partition_point(|t| t.offset.start < end);
+    // First token whose `offset.end > range.start` overlaps or follows the entity.
+    let first_overlap = tokens.partition_point(|t| t.offset.end <= range.start);
+    // One past the last token whose `offset.start < range.end` overlaps the entity.
+    let last_overlap = tokens.partition_point(|t| t.offset.start < range.end);
     let lo = first_overlap.saturating_sub(prefix);
     let hi = (last_overlap + suffix).min(tokens.len());
     if lo >= hi {
@@ -94,10 +89,10 @@ pub(super) fn slice_tokens_around(
 ///
 /// Precondition: `tokens` is non-empty. Callers must take the
 /// [`word_window`] fallback path when their token slice is empty.
-pub(super) fn token_span<'a>(text: &'a str, tokens: &[Token], start: usize, end: usize) -> &'a str {
+pub(super) fn token_span<'a>(text: &'a str, tokens: &[Token], range: Range<usize>) -> &'a str {
     debug_assert!(!tokens.is_empty(), "token_span requires non-empty slice");
-    let lo = tokens[0].offset.start.min(start);
-    let hi = tokens[tokens.len() - 1].offset.end.max(end);
+    let lo = tokens[0].offset.start.min(range.start);
+    let hi = tokens[tokens.len() - 1].offset.end.max(range.end);
     let lo = floor_char_boundary(text, lo.min(text.len()));
     let hi = ceil_char_boundary(text, hi.min(text.len()));
     &text[lo..hi]

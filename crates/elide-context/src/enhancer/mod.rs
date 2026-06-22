@@ -2,13 +2,11 @@
 //! [`Entity<Text>`] regardless of which recognizer produced it.
 
 use std::collections::HashMap;
-use std::ops::Range;
-
-use hipstr::HipStr;
 
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::TextBacked;
 use elide_core::primitive::Confidence;
+use hipstr::HipStr;
 
 use crate::io::Token;
 use crate::matching::KeywordMatcher;
@@ -182,7 +180,7 @@ impl Enhancer {
     ) -> Option<Boost> {
         // The entity is still chunk-local here; its location spans a byte
         // range of `ctx.text` (the chunk payload).
-        let Range { start, end } = M::span(&entity.location);
+        let range = M::span(&entity.location);
 
         // Prefer the token stream when the producer reached this
         // entity. Fall back to the word-segmented substring window
@@ -192,32 +190,40 @@ impl Enhancer {
         // engine only tokenized part of the document).
         let token_slice = ctx
             .tokens
-            .map(|toks| slice_tokens_around(toks, start, end, rule.prefix_words, rule.suffix_words))
+            .map(|toks| {
+                slice_tokens_around(toks, range.clone(), rule.prefix_words, rule.suffix_words)
+            })
             .unwrap_or(&[]);
         let (snippet, tokens_in_window): (&str, &[Token]) = if token_slice.is_empty() {
-            let snippet = word_window(ctx.text, start, end, rule.prefix_words, rule.suffix_words);
+            let snippet = word_window(
+                ctx.text,
+                range.clone(),
+                rule.prefix_words,
+                rule.suffix_words,
+            );
             (snippet, &[])
         } else {
-            let snippet = token_span(ctx.text, token_slice, start, end);
+            let snippet = token_span(ctx.text, token_slice, range.clone());
             (snippet, token_slice)
         };
 
         // Window first; the hint path reports *which* hint fired so the
         // caller can record its location.
-        let (source, hint_index) = if self
-            .matcher
-            .any_match(snippet, tokens_in_window, &rule.keywords)
-        {
-            (EVENT_SOURCE_WINDOW, None)
-        } else if let Some(i) = ctx
-            .hints
-            .iter()
-            .position(|h| self.matcher.any_match(h, &[], &rule.keywords))
-        {
-            (EVENT_SOURCE_HINT, Some(i))
-        } else {
-            return None;
-        };
+        let (source, hint_index) =
+            if self
+                .matcher
+                .any_match(snippet, tokens_in_window, &rule.keywords)
+            {
+                (EVENT_SOURCE_WINDOW, None)
+            } else if let Some(i) = ctx
+                .hints
+                .iter()
+                .position(|h| self.matcher.any_match(h, &[], &rule.keywords))
+            {
+                (EVENT_SOURCE_HINT, Some(i))
+            } else {
+                return None;
+            };
 
         let before = entity.confidence;
         let after = before.saturating_add(rule.boost.get());

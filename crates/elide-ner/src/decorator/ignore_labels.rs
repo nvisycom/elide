@@ -68,7 +68,9 @@ impl<B: NerBackend> NerBackend for IgnoreLabels<B> {
 
     async fn recognize(&self, request: NerRequest<'_>) -> Result<NerResponse> {
         let mut response = self.inner.recognize(request).await?;
-        response.spans.retain(|span| !self.labels.contains(&span.label));
+        response
+            .spans
+            .retain(|span| !self.labels.contains(&span.label));
         Ok(response)
     }
 }
@@ -77,9 +79,8 @@ impl<B: NerBackend> NerBackend for IgnoreLabels<B> {
 mod tests {
     use elide_core::primitive::Confidence;
 
-    use crate::backend::NerSpan;
-
     use super::*;
+    use crate::backend::NerSpan;
 
     struct FixedBackend(Vec<NerSpan>);
 

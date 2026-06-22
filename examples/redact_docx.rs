@@ -103,7 +103,10 @@ fn print_report(report: &mut Report) {
         println!("parts: none with a matching pipeline");
     }
     for id in part_ids {
-        let n = report.part_entities::<Image>(&id).map(|v| v.len()).unwrap_or(0);
+        let n = report
+            .part_entities::<Image>(&id)
+            .map(|v| v.len())
+            .unwrap_or(0);
         println!("part {id}: {n} entities");
     }
 }

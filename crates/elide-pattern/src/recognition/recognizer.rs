@@ -4,8 +4,7 @@ use aho_corasick::{AhoCorasick, MatchKind};
 use elide_context::matching::SubstringMatcher;
 use elide_context::{BoostRule, ContextEnhanced, Enhancer};
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
-use elide_core::modality::TextBacked;
-use elide_core::modality::text::TextData;
+use elide_core::modality::TextRecognizable;
 use elide_core::primitive::LanguageTag;
 use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
 use elide_core::{Error, ErrorKind, Result};
@@ -419,17 +418,17 @@ impl PatternRecognizerBuilder {
     }
 }
 
-impl<M: TextBacked> Recognizer<M> for PatternRecognizer {
+impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
     fn id(&self) -> RecognizerId {
         RecognizerId::new("elide-pattern", env!("CARGO_PKG_VERSION"))
     }
 
     async fn recognize(
         &self,
-        data: &TextData,
+        data: &M::Data,
         ctx: &RecognizerContext<'_, M>,
     ) -> Result<Vec<Entity<M>>> {
-        let text = data.text.as_str();
+        let text = M::as_text(data, ctx);
         let mut entities: Vec<Entity<M>> = Vec::new();
 
         if let Some(set) = self.regex_set.as_ref() {
@@ -451,7 +450,7 @@ impl<M: TextBacked> Recognizer<M> for PatternRecognizer {
                     {
                         continue;
                     }
-                    entities.push(pat.build_entity::<M>(m.start(), m.end()));
+                    entities.push(pat.build_entity::<M>(m.range(), data, ctx));
                 }
             }
         }
@@ -468,11 +467,12 @@ impl<M: TextBacked> Recognizer<M> for PatternRecognizer {
                 if !ctx.applies_to_country(&dict.countries) {
                     continue;
                 }
-                if dict.word_boundary && !has_word_boundaries(text, mat.start(), mat.end()) {
+                let range = mat.range();
+                if dict.word_boundary && !has_word_boundaries(text, range.clone()) {
                     continue;
                 }
                 let score = dict.term_scores[term_id - dict.term_start];
-                entities.push(dict.build_entity::<M>(score, mat.start(), mat.end()));
+                entities.push(dict.build_entity::<M>(score, range, data, ctx));
             }
         }
 

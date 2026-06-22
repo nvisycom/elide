@@ -150,6 +150,64 @@ impl Fixture {
         self.run_typed::<Tabular>().await
     }
 
+    /// Run the pipeline as the [`Audio`](elide::modality::audio::Audio)
+    /// modality (`wav`, `mp3`).
+    ///
+    /// The audio path differs from the text formats: recognition reads a
+    /// *transcript* an STT enricher stamps onto the call, not the codec's
+    /// byte payload. Here the enricher is backed by the no-op mock STT
+    /// backend, so no transcript is produced and no entities are detected —
+    /// the clip round-trips through decode → analyze → anonymize → encode
+    /// unchanged. That still exercises the whole audio codec + pipeline
+    /// wiring end to end.
+    #[cfg(feature = "stt")]
+    pub async fn run_audio(&self) -> PipelineOutcome<elide::modality::audio::Audio> {
+        use elide::modality::audio::Audio;
+        use elide::recognition::stt::SttEnricher;
+        use elide::recognition::stt::backend::MockBackend;
+        use elide::redaction::operators::{Erase, Silence};
+
+        let registry = FormatRegistry::with_builtin();
+        let mut document: DocumentHandle<Audio> = registry
+            .decode(self.source, self.extension)
+            .await
+            .unwrap_or_else(|e| panic!("{} source decodes: {e}", self.extension))
+            .into::<Audio>()
+            .unwrap_or_else(|_| panic!("{} resolves to the audio modality", self.extension));
+
+        // The mock STT backend transcribes nothing, so recognition finds
+        // nothing; the anonymizer would silence/erase any time spans it did.
+        let analyzer = Analyzer::new().with_enricher(SttEnricher::new(MockBackend));
+        let anonymizer = Anonymizer::new()
+            .with_label(builtins::PHONE_NUMBER.to_ref(), Silence)
+            .with_fallback(Erase);
+
+        let orchestrator =
+            Orchestrator::new(&registry).with_modality::<Audio>(analyzer, anonymizer, Scope::new());
+
+        let mut report = orchestrator
+            .analyze_document(&mut document)
+            .await
+            .expect("analyze document");
+        let entities: Vec<Entity<Audio>> = report
+            .entities::<Audio>()
+            .map(|e| e.to_vec())
+            .unwrap_or_default();
+        self.write_entities(&report);
+        orchestrator
+            .apply(&mut document, report)
+            .await
+            .expect("apply document");
+
+        let redacted = document
+            .encode()
+            .expect("encode succeeds")
+            .as_bytes()
+            .to_vec();
+        self.write_redacted(&redacted);
+        PipelineOutcome { entities, redacted }
+    }
+
     /// Decode this fixture as modality `M`, redact it through the master
     /// [`Orchestrator`] (body + any container parts), encode, write the
     /// `*.redacted.*` and entities artifacts, and return the outcome.

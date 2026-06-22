@@ -35,16 +35,16 @@ pub mod tabular;
 pub mod text;
 
 mod chunk;
-mod hint;
 mod data_reader;
 mod data_writer;
+mod hint;
 mod text_backed;
 
 pub use self::chunk::Chunk;
-pub use self::hint::Hint;
 pub use self::data_reader::{DataReader, StreamDataReader};
 pub use self::data_writer::DataWriter;
-pub use self::text_backed::TextBacked;
+pub use self::hint::Hint;
+pub use self::text_backed::{TextBacked, TextRecognizable};
 
 /// Payload a recognizer inspects for a modality.
 ///

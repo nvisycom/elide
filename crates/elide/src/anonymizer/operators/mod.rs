@@ -23,6 +23,8 @@ mod keep;
 mod mask;
 mod pseudonymize;
 mod replace;
+#[cfg(feature = "audio")]
+mod silence;
 
 pub use self::erase::Erase;
 pub use self::hash::{Hash, HashAlgorithm};
@@ -30,3 +32,5 @@ pub use self::keep::Keep;
 pub use self::mask::Mask;
 pub use self::pseudonymize::Pseudonymize;
 pub use self::replace::Replace;
+#[cfg(feature = "audio")]
+pub use self::silence::Silence;

@@ -21,14 +21,12 @@
 use std::sync::Arc;
 
 use derive_builder::Builder;
-use hipstr::HipStr;
-
 use elide_core::entity::provenance::{Event, ModelEvent};
 use elide_core::entity::{Entity, Label, LabelRef};
-use elide_core::modality::TextBacked;
-use elide_core::modality::text::TextData;
+use elide_core::modality::TextRecognizable;
 use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
 use elide_core::{Error, Result};
+use hipstr::HipStr;
 
 use super::aggregation::AggregationStrategy;
 use super::alignment::AlignmentMode;
@@ -105,9 +103,15 @@ impl NerRecognizer {
         self.alignment
     }
 
-    fn build_entity<M: TextBacked>(&self, span: &NerSpan, label: LabelRef) -> Entity<M> {
+    fn build_entity<M: TextRecognizable>(
+        &self,
+        span: &NerSpan,
+        label: LabelRef,
+        data: &M::Data,
+        ctx: &RecognizerContext<'_, M>,
+    ) -> Entity<M> {
         let confidence = span.confidence;
-        let location = M::locate(span.offset.start..span.offset.end);
+        let location = M::locate(span.offset.start..span.offset.end, data, ctx);
         let reason = format!("recognizer `{}` identified {}", self.name, label.as_str());
         let event = Event::model(
             "ner",
@@ -159,14 +163,14 @@ impl NerRecognizerBuilder {
     }
 }
 
-impl<M: TextBacked> Recognizer<M> for NerRecognizer {
+impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
     fn id(&self) -> RecognizerId {
         RecognizerId::new(self.name.clone(), env!("CARGO_PKG_VERSION"))
     }
 
     async fn recognize(
         &self,
-        data: &TextData,
+        data: &M::Data,
         ctx: &RecognizerContext<'_, M>,
     ) -> Result<Vec<Entity<M>>> {
         // The effective target labels, as full `Label`s (name +
@@ -195,7 +199,7 @@ impl<M: TextBacked> Recognizer<M> for NerRecognizer {
             Some(effective_labels.as_slice())
         };
         let request = NerRequest {
-            text: data.text.as_str(),
+            text: M::as_text(data, ctx),
             labels,
             language: ctx.primary_language(),
             correlation_id: ctx.correlation_id(),
@@ -213,7 +217,7 @@ impl<M: TextBacked> Recognizer<M> for NerRecognizer {
                 effective_labels.is_empty()
                     || effective_labels.iter().any(|l| l.to_ref() == s.label)
             })
-            .map(|s| self.build_entity::<M>(s, s.label.clone()))
+            .map(|s| self.build_entity::<M>(s, s.label.clone(), data, ctx))
             .collect();
         Ok(entities)
     }
@@ -224,7 +228,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use elide_core::entity::{LabelCatalog, builtins};
-    use elide_core::modality::text::Text;
+    use elide_core::modality::text::{Text, TextData};
     use elide_core::recognition::Scope;
 
     use super::*;

@@ -5,6 +5,7 @@
 mod analyzer;
 mod anonymizer;
 pub mod deduplication;
+pub mod modality;
 #[cfg(feature = "codec")]
 mod orchestrator;
 pub mod redaction;
@@ -39,7 +40,6 @@ pub mod codec {
 pub mod recognition {
     #[doc(inline)]
     pub use elide_core::recognition::*;
-
     /// LLM-mediated recognition (text NER and image VLM).
     #[cfg(feature = "llm")]
     #[cfg_attr(docsrs, doc(cfg(feature = "llm")))]
@@ -55,19 +55,25 @@ pub mod recognition {
     #[cfg_attr(docsrs, doc(cfg(feature = "pattern")))]
     #[doc(inline)]
     pub use elide_pattern as pattern;
+    /// Speech-to-text backends and the transcript-streaming reader that
+    /// drives the text recognizers over audio.
+    #[cfg(feature = "stt")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "stt")))]
+    #[doc(inline)]
+    pub use elide_stt as stt;
 }
 
 #[doc(inline)]
 pub use elide_core::{Error, ErrorKind, Result};
 #[doc(inline)]
-pub use elide_core::{entity, modality, primitive};
+pub use elide_core::{entity, primitive};
 
 pub use self::analyzer::Analyzer;
 pub use self::anonymizer::Anonymizer;
-#[cfg(feature = "codec")]
-pub use self::orchestrator::{Orchestrator, Report};
 // Nameable so callers can state the `Vec<Entity<M>>: EntityGroup` bound on
 // the orchestrator's construction methods; hidden, an implementation detail.
 #[cfg(feature = "codec")]
 #[doc(hidden)]
 pub use self::orchestrator::EntityGroup;
+#[cfg(feature = "codec")]
+pub use self::orchestrator::{Orchestrator, Report};

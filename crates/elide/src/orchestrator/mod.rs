@@ -44,17 +44,16 @@ use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::recognition::Scope;
 
 use self::pipeline::{AnalyzeOutcome, ErasedPipeline, ModalityPipeline};
-use self::report::PartReport;
-use crate::codec::{DocumentHandle, FormatRegistry, PartId};
-use crate::{Analyzer, Anonymizer};
-
-pub use self::report::Report;
 // `EntityGroup` is re-exported (not just `use`d) because the bound
 // `Vec<Entity<M>>: EntityGroup` appears on the public construction methods,
 // so callers must be able to name it. Hidden from the docs: it is an
 // implementation detail of the report's storage.
 #[doc(hidden)]
 pub use self::report::EntityGroup;
+use self::report::PartReport;
+pub use self::report::Report;
+use crate::codec::{DocumentHandle, FormatRegistry, PartId};
+use crate::{Analyzer, Anonymizer};
 
 /// Drives analyze + redact across a document's body and its cross-modality
 /// container parts.
