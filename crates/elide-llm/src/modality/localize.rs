@@ -127,7 +127,7 @@ fn localize_one(
 fn warn_dropped(c: &TextCandidate, reason: &str) {
     tracing::warn!(
         target: TARGET,
-        entity_id = ?c.entity_id,
+        coreference = ?c.coreference,
         value = %c.value,
         reason,
         "dropping unresolvable text candidate"

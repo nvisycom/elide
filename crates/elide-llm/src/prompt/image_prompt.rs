@@ -44,7 +44,7 @@ impl<'a> ImagePromptBuilder<'a> {
                 .join(", ");
             prompt.push_str(&format!(
                 "\n\nEmit only these entity types (use the exact names for \
-                 entity_type): {types}."
+                 label): {types}."
             ));
         }
 

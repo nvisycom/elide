@@ -49,20 +49,20 @@ where
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// The result of offering a decoded part to a pipeline for analysis: the
-/// pipeline either claimed it (its modality matched) and returns the
-/// detected entities boxed by modality, or it's a different modality and
-/// the handle is returned for another pipeline to try.
+/// pipeline either accepts it (its modality matched) and returns the
+/// detected entities boxed by modality, or rejects it (a different
+/// modality) and hands the handle back for another pipeline to try.
 pub(super) enum AnalyzeOutcome {
     /// Modality matched: the matched modality's `TypeId`, the retained
     /// handle, and its boxed `Vec<Entity<M>>` (recoverable as that
     /// modality).
-    Mine {
+    Accepted {
         modality: std::any::TypeId,
         handle: UntypedDocumentHandle,
         entities: Box<dyn EntityGroup>,
     },
     /// Not this pipeline's modality; the undecoded handle is returned.
-    NotMine(UntypedDocumentHandle),
+    Rejected(UntypedDocumentHandle),
 }
 
 /// A type-erased pipeline the orchestrator stores per modality.
@@ -101,10 +101,10 @@ where
         Box::pin(async move {
             let mut handle = match part.into::<M>() {
                 Ok(handle) => handle,
-                Err(returned) => return Ok(AnalyzeOutcome::NotMine(returned)),
+                Err(returned) => return Ok(AnalyzeOutcome::Rejected(returned)),
             };
             let entities = self.analyze(&mut handle).await?;
-            Ok(AnalyzeOutcome::Mine {
+            Ok(AnalyzeOutcome::Accepted {
                 modality: std::any::TypeId::of::<M>(),
                 handle: UntypedDocumentHandle::new(handle),
                 entities: Box::new(entities),

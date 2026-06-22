@@ -1,9 +1,11 @@
-//! End-to-end plain-text codec round-trip: decode → analyze → anonymize
-//! → encode, asserting the shipped patterns detect the PII spread and the
-//! anonymizer rewrites it while preserving the surrounding text.
+//! End-to-end TXT codec round-trip: decode → analyze → anonymize → encode.
+//!
+//! The shipped patterns detect the PII spread and the anonymizer rewrites
+//! it, while the surrounding prose passes through unchanged.
 
 mod fixtures;
 
+use elide::Result;
 use elide::entity::builtins;
 use fixtures::asserts::{
     assert_label_present, assert_pii_removed, assert_preserved, assert_tokens_present,
@@ -11,14 +13,14 @@ use fixtures::asserts::{
 use fixtures::pipeline::Fixture;
 
 const FIXTURE: Fixture = Fixture {
-    path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/contact.txt"),
-    source: include_bytes!("testdata/contact.txt"),
+    path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/sample.txt"),
+    source: include_bytes!("testdata/sample.txt"),
     extension: "txt",
 };
 
 #[tokio::test]
-async fn txt_detects_and_redacts() {
-    let outcome = FIXTURE.run().await;
+async fn txt_detects_and_redacts() -> Result<()> {
+    let outcome = FIXTURE.run().await?;
 
     // The shipped patterns find every sensitive value in the fixture.
     for label in [
@@ -62,4 +64,5 @@ async fn txt_detects_and_redacts() {
         &outcome.redacted_text(),
         &["Subject: Customer onboarding", "Hi team,", "Best,"],
     );
+    Ok(())
 }

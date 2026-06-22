@@ -1,11 +1,11 @@
-//! End-to-end CSV codec round-trip: decode → analyze (per cell) →
-//! anonymize (intra-cell) → encode. The shipped pattern recognizer runs
-//! on each cell's text and the anonymizer rewrites the matched values,
-//! while the CSV structure (header row, delimiters, non-sensitive cells)
-//! passes through unchanged.
+//! End-to-end CSV codec round-trip: decode → analyze → anonymize → encode.
+//!
+//! The handler redacts PII per cell while the table structure (header row,
+//! delimiters, non-sensitive cells) passes through unchanged.
 
 mod fixtures;
 
+use elide::Result;
 use elide::entity::builtins;
 use fixtures::asserts::{
     assert_label_present, assert_pii_removed, assert_preserved, assert_tokens_present,
@@ -13,14 +13,14 @@ use fixtures::asserts::{
 use fixtures::pipeline::Fixture;
 
 const FIXTURE: Fixture = Fixture {
-    path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/contact.csv"),
-    source: include_bytes!("testdata/contact.csv"),
+    path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/sample.csv"),
+    source: include_bytes!("testdata/sample.csv"),
     extension: "csv",
 };
 
 #[tokio::test]
-async fn csv_detects_and_redacts() {
-    let outcome = FIXTURE.run_tabular().await;
+async fn csv_detects_and_redacts() -> Result<()> {
+    let outcome = FIXTURE.run_tabular().await?;
 
     // Every sensitive column is detected across both data rows.
     for label in [
@@ -70,4 +70,5 @@ async fn csv_detects_and_redacts() {
             "Bob Smith,",
         ],
     );
+    Ok(())
 }

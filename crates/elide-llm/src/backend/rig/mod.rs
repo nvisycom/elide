@@ -6,11 +6,11 @@
 //! [`LlmBackend`]: crate::backend::LlmBackend
 
 mod config;
-mod inner;
+mod dispatch;
 
+use elide_core::Result;
 use elide_core::modality::image::{Image, ImageData};
 use elide_core::modality::text::Text;
-use elide_core::{Error as CoreError, ErrorKind as CoreErrorKind, Result};
 use rig::OneOrMany;
 use rig::agent::{Agent, AgentBuilder};
 use rig::client::CompletionClient;
@@ -20,32 +20,88 @@ use rig::message::{ImageMediaType, UserContent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-pub use self::config::LlmConfig;
-use self::inner::{RigInner, dispatch};
+pub use self::config::RigConfig;
+use self::dispatch::{RigAgent, dispatch};
 use super::http::{HttpConfig, build_http_client};
 use super::{LlmBackend, LlmRequest, LlmResponse};
 use crate::error::Error;
-use crate::provider::LlmProvider;
+use crate::provider::Provider;
 
 const TARGET: &str = "elide_llm::backend::rig";
 
 /// Rig-backed LLM backend.
 ///
-/// Construct via [`builder`]. Owns the provider-specific rig agent
-/// (created at build time) and the [`LlmConfig`] driving sampling.
+/// Construct with [`new`] (default config) or [`new_with_config`]. Owns the
+/// provider-specific rig agent (created at construction) and the
+/// [`RigConfig`] driving sampling.
 ///
-/// [`builder`]: Self::builder
+/// [`new`]: Self::new
+/// [`new_with_config`]: Self::new_with_config
 pub struct RigBackend {
-    agent: RigInner,
-    config: LlmConfig,
+    agent: RigAgent,
+    config: RigConfig,
     model_name: String,
 }
 
 impl RigBackend {
-    /// Start the chainable builder.
-    #[must_use]
-    pub fn builder() -> RigBackendBuilder {
-        RigBackendBuilder::default()
+    /// Build a backend for `provider` with the default [`RigConfig`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the underlying rig / HTTP error when client construction
+    /// fails.
+    pub fn new(provider: Provider) -> Result<Self> {
+        Self::new_with_config(provider, RigConfig::default())
+    }
+
+    /// Build a backend for `provider` with an explicit [`RigConfig`].
+    ///
+    /// The config is consumed here: it shapes the HTTP retry policy and the
+    /// rig agent's sampling and preamble, all fixed at construction.
+    ///
+    /// # Errors
+    ///
+    /// Returns the underlying rig / HTTP error when client construction
+    /// fails.
+    pub fn new_with_config(provider: Provider, config: RigConfig) -> Result<Self> {
+        let http = build_http_client(&HttpConfig {
+            max_retries: config.max_retries,
+            ..HttpConfig::default()
+        })?;
+
+        let preamble = config.preamble.as_deref();
+        let agent = match &provider {
+            #[cfg(feature = "openai-gpt")]
+            Provider::OpenAi(p) => {
+                let client = p.openai_client(http)?;
+                let model = client.completions_api().completion_model(p.model.as_str());
+                RigAgent::OpenAi(build_agent(model, &config, preamble))
+            }
+            #[cfg(feature = "anthropic-claude")]
+            Provider::Anthropic(p) => {
+                let client = p.anthropic_client(http)?;
+                let model = client.completion_model(p.model.as_str());
+                RigAgent::Anthropic(build_agent(model, &config, preamble))
+            }
+            #[cfg(feature = "google-gemini")]
+            Provider::Gemini(p) => {
+                let client = p.gemini_client(http)?;
+                let model = client.completion_model(p.model.as_str());
+                RigAgent::Gemini(build_agent(model, &config, preamble))
+            }
+            Provider::Ollama(p) => {
+                let client = p.ollama_client(http)?;
+                let model = client.completion_model(p.model.as_str());
+                RigAgent::Ollama(build_agent(model, &config, preamble))
+            }
+        };
+
+        let model_name = provider.model().to_owned();
+        Ok(RigBackend {
+            agent,
+            config,
+            model_name,
+        })
     }
 
     /// Extract a structured candidate batch `T` from `message` using rig's
@@ -114,86 +170,9 @@ fn image_message(prompt: &str, data: &ImageData) -> Message {
     Message::User { content }
 }
 
-/// Builder for [`RigBackend`].
-#[derive(Debug, Default)]
-pub struct RigBackendBuilder {
-    provider: Option<LlmProvider>,
-    config: Option<LlmConfig>,
-}
-
-impl RigBackendBuilder {
-    /// Set the LLM provider. Required.
-    #[must_use]
-    pub fn with_provider(mut self, provider: LlmProvider) -> Self {
-        self.provider = Some(provider);
-        self
-    }
-
-    /// Set the agent config. Defaults to [`LlmConfig::default`].
-    #[must_use]
-    pub fn with_config(mut self, config: LlmConfig) -> Self {
-        self.config = Some(config);
-        self
-    }
-
-    /// Build the backend.
-    ///
-    /// # Errors
-    ///
-    /// Returns a validation error when `provider` is unset, and the
-    /// underlying rig / HTTP error when client construction fails.
-    pub fn build(self) -> Result<RigBackend> {
-        let provider = self.provider.ok_or_else(|| {
-            CoreError::new(
-                CoreErrorKind::Validation,
-                "RigBackendBuilder requires a provider",
-            )
-        })?;
-        let config = self.config.unwrap_or_default();
-
-        let http = build_http_client(&HttpConfig {
-            max_retries: config.max_retries,
-            ..HttpConfig::default()
-        })?;
-
-        let preamble = config.preamble.as_deref();
-        let agent = match &provider {
-            #[cfg(feature = "openai-gpt")]
-            LlmProvider::OpenAi(p) => {
-                let client = p.openai_client(http)?;
-                let model = client.completions_api().completion_model(p.model.as_str());
-                RigInner::OpenAi(build_agent(model, &config, preamble))
-            }
-            #[cfg(feature = "anthropic-claude")]
-            LlmProvider::Anthropic(p) => {
-                let client = p.anthropic_client(http)?;
-                let model = client.completion_model(p.model.as_str());
-                RigInner::Anthropic(build_agent(model, &config, preamble))
-            }
-            #[cfg(feature = "google-gemini")]
-            LlmProvider::Gemini(p) => {
-                let client = p.gemini_client(http)?;
-                let model = client.completion_model(p.model.as_str());
-                RigInner::Gemini(build_agent(model, &config, preamble))
-            }
-            LlmProvider::Ollama(p) => {
-                let client = p.ollama_client(http)?;
-                let model = client.completion_model(p.model.as_str());
-                RigInner::Ollama(build_agent(model, &config, preamble))
-            }
-        };
-
-        Ok(RigBackend {
-            agent,
-            config,
-            model_name: provider.model().to_owned(),
-        })
-    }
-}
-
 fn build_agent<M: CompletionModel>(
     model: M,
-    config: &LlmConfig,
+    config: &RigConfig,
     preamble: Option<&str>,
 ) -> Agent<M> {
     let mut b = AgentBuilder::new(model)

@@ -16,8 +16,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::candidates::Candidates;
 
-/// Per-modality binding for the LLM recognizer: the candidate item the
-/// model produces, and how a candidate batch lifts into entities.
+/// Per-modality binding the LLM recognizer is generic over.
+///
+/// Ties a modality to the candidate item the model produces and to how a
+/// candidate batch lifts into entities.
 pub trait LlmModality: Modality + Sized {
     /// The per-candidate item the model fills in (e.g. a text candidate or
     /// an image candidate). [`Candidates<Self::Item>`] is the structured

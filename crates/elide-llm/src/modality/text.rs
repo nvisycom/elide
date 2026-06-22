@@ -19,12 +19,7 @@ impl LlmModality for Text {
 
         let mut out = Vec::with_capacity(localized.len());
         for l in localized {
-            // The model's typed label is canonical; an untyped candidate is
-            // dropped.
-            let Some(model_label) = l.candidate.entity_type.as_deref() else {
-                continue;
-            };
-            let label = LabelRef::new(model_label.to_owned());
+            let label = LabelRef::new(l.candidate.label.clone());
             let raw = l.candidate.confidence.unwrap_or(DEFAULT_CONFIDENCE);
             let Some(confidence) = Confidence::new(raw.clamp(0.0, 1.0) as f32) else {
                 continue;
@@ -49,7 +44,7 @@ impl LlmModality for Text {
                 .with_event(event);
             // The model groups mentions of the same real-world entity under
             // a shared id; carry it onto the entity as a coreference cluster.
-            if let Some(id) = l.candidate.entity_id.clone() {
+            if let Some(id) = l.candidate.coreference.clone() {
                 builder = builder.with_coref(EntityCoRef::new(id));
             }
             out.push(builder.build().expect("required fields provided"));

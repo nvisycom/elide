@@ -2,7 +2,7 @@
 //! pixel space and build the entity.
 
 use elide_core::entity::provenance::{Event, ModelEvent};
-use elide_core::entity::{Entity, LabelRef};
+use elide_core::entity::{Entity, EntityCoRef, LabelRef};
 use elide_core::modality::image::{Image, ImageData, ImageLocation};
 use elide_core::primitive::{Confidence, UnitBoundingBox};
 
@@ -35,14 +35,17 @@ impl LlmModality for Image {
                 },
             )
             .with_reason(reason);
-            let entity = Entity::builder()
+            let mut builder = Entity::builder()
                 .with_label(label)
                 .with_location(location)
                 .with_confidence(confidence)
-                .with_event(event)
-                .build()
-                .expect("required fields provided");
-            out.push(entity);
+                .with_event(event);
+            // The model groups mentions of the same real-world entity under
+            // a shared id; carry it onto the entity as a coreference cluster.
+            if let Some(id) = d.coreference.clone() {
+                builder = builder.with_coref(EntityCoRef::new(id));
+            }
+            out.push(builder.build().expect("required fields provided"));
         }
         out
     }

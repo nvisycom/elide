@@ -14,7 +14,7 @@ use rig::providers::ollama::CompletionModel as OllamaCompletionModel;
 #[cfg(feature = "openai-gpt")]
 use rig::providers::openai::completion::CompletionModel as OpenAiCompletionModel;
 
-pub(super) enum RigInner {
+pub(super) enum RigAgent {
     #[cfg(feature = "openai-gpt")]
     OpenAi(Agent<OpenAiCompletionModel<ClientWithMiddleware>>),
     #[cfg(feature = "anthropic-claude")]
@@ -28,12 +28,12 @@ macro_rules! dispatch {
     ($inner:expr, |$agent:ident| $body:expr) => {
         match $inner {
             #[cfg(feature = "openai-gpt")]
-            $crate::backend::rig::inner::RigInner::OpenAi($agent) => $body,
+            $crate::backend::rig::dispatch::RigAgent::OpenAi($agent) => $body,
             #[cfg(feature = "anthropic-claude")]
-            $crate::backend::rig::inner::RigInner::Anthropic($agent) => $body,
+            $crate::backend::rig::dispatch::RigAgent::Anthropic($agent) => $body,
             #[cfg(feature = "google-gemini")]
-            $crate::backend::rig::inner::RigInner::Gemini($agent) => $body,
-            $crate::backend::rig::inner::RigInner::Ollama($agent) => $body,
+            $crate::backend::rig::dispatch::RigAgent::Gemini($agent) => $body,
+            $crate::backend::rig::dispatch::RigAgent::Ollama($agent) => $body,
         }
     };
 }

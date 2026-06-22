@@ -1,4 +1,4 @@
-//! [`LlmConfig`]: sampling, retry, and preamble settings for a
+//! [`RigConfig`]: sampling, retry, and preamble settings for a
 //! [`RigBackend`].
 //!
 //! [`RigBackend`]: super::RigBackend
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// [`RigBackend`]: super::RigBackend
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct LlmConfig {
+pub struct RigConfig {
     /// Sampling temperature (default: 0.1).
     pub temperature: f64,
     /// Maximum output tokens (default: 4096).
@@ -22,7 +22,7 @@ pub struct LlmConfig {
     pub preamble: Option<String>,
 }
 
-impl Default for LlmConfig {
+impl Default for RigConfig {
     fn default() -> Self {
         Self {
             temperature: 0.1,

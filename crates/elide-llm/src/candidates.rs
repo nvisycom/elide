@@ -1,5 +1,4 @@
-//! Structured-output candidate types: the typed schema the model is asked
-//! to produce.
+//! Structured-output candidate types the model is asked to produce.
 //!
 //! [`Candidates<C>`] is the `T` in rig's `Extractor::<T>` — the backend
 //! asks the model to fill it in, and the [`JsonSchema`] derive constrains
@@ -11,8 +10,10 @@ use elide_core::primitive::UnitBoundingBox;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// The model's `{"entities": [...]}` response, generic over the
-/// per-modality candidate item `C`.
+/// The model's `{"entities": [...]}` structured-output response.
+///
+/// Generic over the per-modality candidate item `C` ([`TextCandidate`] /
+/// [`ImageCandidate`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Candidates<C> {
     /// Detected candidates.
@@ -29,22 +30,19 @@ impl<C> Default for Candidates<C> {
     }
 }
 
-/// One entity candidate produced by the model for the text modality.
+/// Wire shape of one text entity the model detected in the source.
 ///
-/// Carries the surface form (`value`) plus a surrounding `context` snippet
-/// the recognizer uses to localize the value back into a byte range in the
-/// source text.
+/// A surface form (`value`) plus the surrounding `context` that locates it
+/// back into a byte range in the source text.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TextCandidate {
-    /// Model-assigned identifier for the underlying real-world entity.
-    /// Stable across coreferent mentions within one call.
-    #[serde(default)]
-    pub entity_id: Option<String>,
-    /// Label name. Missing (`None`) means the model declined to type the
-    /// candidate; the recognizer drops these.
-    pub entity_type: Option<String>,
-    /// The matched text value: the literal surface form to flag.
+    /// Matched text value: the literal surface form to flag.
     pub value: String,
+    /// Brief description of the real-world entity (advisory).
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Canonical label naming the entity's type.
+    pub label: String,
     /// Model-asserted confidence in `[0.0, 1.0]`.
     #[serde(default)]
     pub confidence: Option<f64>,
@@ -53,31 +51,38 @@ pub struct TextCandidate {
     /// per the recognizer's policy.
     #[serde(default)]
     pub context: Option<String>,
-    /// Brief description of the real-world entity (advisory).
+    /// Coreference identifier shared across mentions of one real-world
+    /// entity within a call.
     #[serde(default)]
-    pub description: Option<String>,
+    pub coreference: Option<String>,
 }
 
-/// One image entity discovered by the model. Bounding box is normalised
-/// (`[0, 1]`); the recognizer scales to pixel coordinates using the source
-/// image's dimensions.
+/// Wire shape of one image entity the model detected in the source.
+///
+/// A region (its normalised bounding box) plus a label and an optional
+/// description.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ImageCandidate {
-    /// Label name for the detected region.
-    pub label: String,
-    /// Normalised bounding box of the region.
+    /// Region's normalised bounding box: the image candidate's value.
     #[serde(flatten)]
     pub bbox: UnitBox,
-    /// Model-asserted confidence in `[0.0, 1.0]`.
-    #[serde(default)]
-    pub confidence: Option<f64>,
     /// Brief description of the region (advisory).
     #[serde(default)]
     pub description: Option<String>,
+    /// Canonical label naming the region's type.
+    pub label: String,
+    /// Model-asserted confidence in `[0.0, 1.0]`.
+    #[serde(default)]
+    pub confidence: Option<f64>,
+    /// Coreference identifier shared across mentions of one real-world
+    /// entity within a call.
+    #[serde(default)]
+    pub coreference: Option<String>,
 }
 
-/// Wire shape of a bounding box, in normalised `[0, 1]` coordinates as two
-/// corners (top-left + bottom-right).
+/// Wire shape of a normalised `[0, 1]` bounding box, as two corners.
+///
+/// Top-left (`x_min`, `y_min`) + bottom-right (`x_max`, `y_max`).
 ///
 /// Two-corner (`xyxy`) rather than corner+size (`xywh`): it matches the
 /// native output of vision models that ground boxes (Gemini emits

@@ -158,7 +158,7 @@ impl<'r> Orchestrator<'r> {
                 for pipeline in self.pipelines.values() {
                     let Some(taken) = handle.take() else { break };
                     match pipeline.analyze_part(taken).await? {
-                        AnalyzeOutcome::Mine {
+                        AnalyzeOutcome::Accepted {
                             modality,
                             handle: retained,
                             entities,
@@ -173,7 +173,7 @@ impl<'r> Orchestrator<'r> {
                             );
                             break;
                         }
-                        AnalyzeOutcome::NotMine(returned) => handle = Some(returned),
+                        AnalyzeOutcome::Rejected(returned) => handle = Some(returned),
                     }
                 }
             }

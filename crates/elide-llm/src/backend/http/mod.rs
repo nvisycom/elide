@@ -1,15 +1,13 @@
-//! Shared HTTP client factory (reqwest + retry + tracing middleware).
+//! HTTP client factory for the rig backend (reqwest + retry + tracing
+//! middleware).
 //!
 //! [`build_http_client`] builds a [`ClientWithMiddleware`] from an
-//! [`HttpConfig`] with exponential-backoff retry and OpenTelemetry
-//! tracing layers pre-installed. Callers hand the returned client to
-//! whatever HTTP-aware library they're driving (rig provider, STT
-//! provider, raw `reqwest_middleware` requests). [`HttpConfig`]
-//! deserialises durations via [`humantime_serde`] so config files
-//! accept `"120s"`, `"2min"`, etc.
+//! [`HttpConfig`] with exponential-backoff retry and OpenTelemetry tracing
+//! layers pre-installed; the [`RigBackend`] hands the returned client to its
+//! rig provider client at construction.
 //!
 //! [`ClientWithMiddleware`]: reqwest_middleware::ClientWithMiddleware
-//! [`humantime_serde`]: https://crates.io/crates/humantime-serde
+//! [`RigBackend`]: super::RigBackend
 
 mod config;
 mod middleware;
@@ -26,9 +24,8 @@ const TARGET: &str = "elide_llm::http";
 /// Build a [`ClientWithMiddleware`] from the given configuration.
 ///
 /// The returned client has exponential-backoff retry and OpenTelemetry
-/// tracing middleware pre-installed; callers wire it into rig
-/// providers, bento clients, or raw `reqwest_middleware` request
-/// builders.
+/// tracing middleware pre-installed; the rig backend wires it into the
+/// provider's rig client.
 ///
 /// # Errors
 ///
