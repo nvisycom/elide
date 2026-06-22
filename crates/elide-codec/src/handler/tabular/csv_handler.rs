@@ -13,6 +13,7 @@ use elide_core::modality::{Chunk, DataReader, DataWriter, Hint};
 use elide_core::redaction::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 
+use super::csv_loader::CsvLoader;
 use crate::content::ContentData;
 use crate::handler::redact;
 use crate::{Format, FormatId, Handler};
@@ -24,7 +25,7 @@ pub const FORMAT_ID: FormatId = FormatId::new("elide.tabular.csv");
 ///
 /// [`FormatRegistry`]: crate::FormatRegistry
 pub fn format() -> Format {
-    Format::new::<Tabular, _>(FORMAT_ID.clone(), super::csv_loader::CsvLoader::default())
+    Format::new::<Tabular, _>(FORMAT_ID.clone(), CsvLoader::default())
         .with_extensions(["csv"])
         .with_content_types(["text/csv"])
 }

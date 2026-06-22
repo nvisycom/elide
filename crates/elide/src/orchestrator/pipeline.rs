@@ -1,6 +1,8 @@
 //! Per-modality pipeline and its type-erased form, used by the
-//! [`Orchestrator`](super::Orchestrator) to drive a document's body and
+//! [`Orchestrator`] to drive a document's body and
 //! its container parts across two phases (analyze, then apply).
+//!
+//! [`Orchestrator`]: super::Orchestrator
 
 use std::any::Any;
 use std::future::Future;

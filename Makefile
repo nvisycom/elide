@@ -1,4 +1,4 @@
-# Makefile for the Veil toolkit workspace.
+# Makefile for the Elide toolkit workspace.
 
 ifneq (,$(wildcard ./.env))
     include .env
@@ -14,6 +14,13 @@ install-deps: ## Installs system build dependencies (C toolchain for the mp3 cod
 	@$(call log,Installing build-essential autoconf automake...)
 	@sudo apt-get update && sudo apt-get install -y build-essential autoconf automake
 	@$(call log,Build dependencies installed.)
+
+.PHONY: install-pdfium
+install-pdfium: ## Installs the shared libraries
+	@$(call log,Installing PDFium shared library...)
+	@chmod +x scripts/*.sh
+	@./scripts/install-pdfium.sh
+	@$(call log,PDFium installed.)
 
 .PHONY: install-tools
 install-tools: ## Installs CLI tools required for development.

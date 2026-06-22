@@ -14,9 +14,11 @@ use super::{BoundingBox, Dimensions, Point};
 ///
 /// Field values are not clamped to `0.0..=1.0`; the type carries the
 /// *intent* of unit-square coordinates, not a hard invariant. Conversion
-/// to pixel space with [`denormalize`](Self::denormalize) is mechanical
+/// to pixel space with [`denormalize`] is mechanical
 /// multiplication regardless, so out-of-range input yields out-of-range
 /// pixels.
+///
+/// [`denormalize`]: Self::denormalize
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct UnitBoundingBox {
@@ -56,8 +58,10 @@ impl UnitBoundingBox {
     /// Build a unit box from a pixel-space [`BoundingBox`] on an image of
     /// `dims`, dividing each axis by the matching dimension.
     ///
-    /// The inverse of [`denormalize`](Self::denormalize). A zero `dims`
+    /// The inverse of [`denormalize`]. A zero `dims`
     /// axis yields a zero on that axis rather than a non-finite value.
+    ///
+    /// [`denormalize`]: Self::denormalize
     pub fn normalize(bbox: &BoundingBox, dims: Dimensions) -> Self {
         let w = f64::from(dims.width);
         let h = f64::from(dims.height);

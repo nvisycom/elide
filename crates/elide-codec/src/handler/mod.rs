@@ -41,12 +41,15 @@ pub use self::audio::wav_format;
 #[cfg(feature = "docx")]
 #[cfg_attr(docsrs, doc(cfg(feature = "docx")))]
 pub use self::document::docx_format;
-#[cfg(feature = "pdf")]
-#[cfg_attr(docsrs, doc(cfg(feature = "pdf")))]
-pub use self::document::pdf_format;
+#[cfg(feature = "pdf-render")]
+#[cfg_attr(docsrs, doc(cfg(feature = "pdf-render")))]
+pub use self::document::pdf_format_with_ocr;
 #[cfg(feature = "rtf")]
 #[cfg_attr(docsrs, doc(cfg(feature = "rtf")))]
 pub use self::document::rtf_format;
+#[cfg(feature = "pdf")]
+#[cfg_attr(docsrs, doc(cfg(feature = "pdf")))]
+pub use self::document::{OcrMode, pdf_format};
 #[cfg(feature = "jpeg")]
 #[cfg_attr(docsrs, doc(cfg(feature = "jpeg")))]
 pub use self::image::jpeg_format;

@@ -2,7 +2,7 @@
 
 [package]
 name = "elide-ner"
-description = "NER traits and language detection for the elide toolkit"
+description = "NER traits and language detection for the Elide toolkit"
 keywords = ["ner", "nlp", "pii"]
 categories = ["text-processing"]
 readme = "README.md"

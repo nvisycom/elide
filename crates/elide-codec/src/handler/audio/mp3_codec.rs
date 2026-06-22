@@ -16,6 +16,8 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::default::{get_codecs, get_probe};
 
+use super::duration::probe_duration_ms;
+
 /// Decoded MP3 as interleaved f32 PCM, with the parameters needed to
 /// re-encode.
 pub(super) struct DecodedMp3 {
@@ -236,12 +238,14 @@ pub(super) fn encode_from_pcm(
 /// Duration of an MP3 clip in milliseconds.
 ///
 /// Prefers the container-level duration from
-/// [`probe_duration_ms`](super::duration::probe_duration_ms); a raw LAME
+/// [`probe_duration_ms`]; a raw LAME
 /// stream has no Xing/Info header and reports no duration, so this falls
 /// back to decoding the clip and dividing the per-channel frame count by
 /// the sample rate.
+///
+/// [`probe_duration_ms`]: super::duration::probe_duration_ms
 pub(super) fn duration_ms(bytes: &Bytes) -> Result<u64> {
-    if let Ok(ms) = super::duration::probe_duration_ms(bytes, "mp3") {
+    if let Ok(ms) = probe_duration_ms(bytes, "mp3") {
         return Ok(ms);
     }
     let decoded = decode_to_pcm(bytes)?;

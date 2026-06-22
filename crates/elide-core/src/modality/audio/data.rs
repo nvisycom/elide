@@ -15,11 +15,12 @@ use crate::modality::ModalityData;
 /// and encoding inference (the container format a decoder should expect).
 /// The recognizable text — a timestamped transcript — is *not* held here;
 /// a speech-to-text [`Enricher`] stamps it onto the call's
-/// [`artifacts`](crate::recognition::RecognizerContext::artifacts), keeping
+/// [`artifacts`], keeping
 /// `AudioData` the codec's payload alone.
 ///
 /// [`Audio`]: super::Audio
 /// [`Enricher`]: crate::recognition::Enricher
+/// [`artifacts`]: crate::recognition::RecognizerContext::artifacts
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct AudioData {
@@ -48,8 +49,10 @@ impl AudioData {
         self
     }
 
-    /// Lowercased extension derived from [`filename`](Self::filename),
+    /// Lowercased extension derived from [`filename`],
     /// or `"wav"` when no filename is set or it has no extension.
+    ///
+    /// [`filename`]: Self::filename
     pub fn extension(&self) -> &str {
         self.filename
             .as_deref()

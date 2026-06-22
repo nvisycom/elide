@@ -13,6 +13,7 @@ use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 
+use super::xlsx_loader::XlsxLoader;
 use crate::content::ContentData;
 use crate::{Format, FormatId, Handler};
 
@@ -23,7 +24,7 @@ pub const FORMAT_ID: FormatId = FormatId::new("elide.tabular.xlsx");
 ///
 /// [`FormatRegistry`]: crate::FormatRegistry
 pub fn format() -> Format {
-    Format::new::<Tabular, _>(FORMAT_ID.clone(), super::xlsx_loader::XlsxLoader)
+    Format::new::<Tabular, _>(FORMAT_ID.clone(), XlsxLoader)
         .with_extensions(["xlsx"])
         .with_content_types(["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"])
 }
@@ -78,7 +79,7 @@ mod tests {
 
     #[tokio::test]
     async fn stub_decodes_but_exposes_nothing() {
-        let mut h = super::super::xlsx_loader::XlsxLoader
+        let mut h = XlsxLoader
             .decode(ContentData::new(bytes::Bytes::from_static(b"PK\x03\x04")))
             .await
             .unwrap();

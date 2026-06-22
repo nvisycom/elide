@@ -24,8 +24,8 @@ use elide_core::Result;
 use elide_core::modality::{Chunk, DataReader, DataWriter, Modality};
 use elide_core::redaction::Redactions;
 
-use super::Handler;
 use super::document::{DocumentHandle, UntypedDocumentHandle};
+use super::{Container, Handler};
 use crate::content::ContentData;
 
 /// A boxed, pinned future: the shape the object-safe bridges return so
@@ -89,7 +89,7 @@ pub(crate) trait DynHandler<M: Modality>: Send + Sync + 'static {
 
     fn lift(&self, chunk: &Chunk<M>, local: M::Location) -> Option<M::Location>;
 
-    fn as_container_mut(&mut self) -> Option<&mut dyn super::Container>;
+    fn as_container_mut(&mut self) -> Option<&mut dyn Container>;
 }
 
 impl<M, H> DynHandler<M> for H
@@ -117,7 +117,7 @@ where
         Handler::lift(self, chunk, local)
     }
 
-    fn as_container_mut(&mut self) -> Option<&mut dyn super::Container> {
+    fn as_container_mut(&mut self) -> Option<&mut dyn Container> {
         Handler::as_container_mut(self)
     }
 }

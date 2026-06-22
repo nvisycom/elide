@@ -28,6 +28,7 @@ use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter, Hint};
 use elide_core::redaction::Redactions;
 
+use crate::codec::Container;
 use crate::content::ContentData;
 use crate::handler::redact;
 use crate::{FormatId, Handler};
@@ -82,7 +83,7 @@ pub(crate) trait Encoder: Send + Sync + 'static {
     /// package and part replacements.
     ///
     /// [`Container`]: crate::codec::Container
-    fn as_container_mut(&mut self) -> Option<&mut dyn crate::codec::Container> {
+    fn as_container_mut(&mut self) -> Option<&mut dyn Container> {
         None
     }
 }
@@ -204,7 +205,7 @@ impl<E: Encoder> Handler<Text> for ExtractHandler<E> {
         })
     }
 
-    fn as_container_mut(&mut self) -> Option<&mut dyn crate::codec::Container> {
+    fn as_container_mut(&mut self) -> Option<&mut dyn Container> {
         self.encoder.as_container_mut()
     }
 }

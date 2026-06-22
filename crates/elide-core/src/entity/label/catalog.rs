@@ -6,6 +6,7 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use super::builtins::BUILT_INS;
 use super::{Label, LabelRef};
 
 /// Registry of [`Label`]s, keyed by name.
@@ -34,10 +35,7 @@ impl LabelCatalog {
     /// [`builtins::BUILT_INS`]: super::builtins
     /// [`insert`]: LabelCatalog::insert
     pub fn with_builtins() -> Self {
-        super::builtins::BUILT_INS
-            .iter()
-            .map(|label| (**label).clone())
-            .collect()
+        BUILT_INS.iter().map(|label| (**label).clone()).collect()
     }
 
     /// Insert a label, returning the previous definition for its name, if

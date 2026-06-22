@@ -11,9 +11,12 @@
 //! be constructed and downstream code never has to re-check.
 //!
 //! Modality-specific recognition artifacts live with their modality:
-//! [`Transcription`](crate::modality::audio::Transcription) under
-//! `modality::audio`, [`Layout`](crate::modality::image::Layout) under
+//! [`Transcription`] under
+//! `modality::audio`, [`Layout`] under
 //! `modality::image`.
+//!
+//! [`Transcription`]: crate::modality::audio::Transcription
+//! [`Layout`]: crate::modality::image::Layout
 
 mod confidence;
 mod geometry;
@@ -26,5 +29,5 @@ pub use self::confidence::{Confidence, ConfidenceThreshold};
 pub use self::geometry::{BoundingBox, Dimensions, PixelRegion, Point, Polygon, UnitBoundingBox};
 pub use self::language::{Language, LanguageProvenance, LanguageSpan, LanguageTag, Languages};
 pub use self::region::CountryCode;
-pub use self::rendering::Color;
+pub use self::rendering::{Color, Dpi};
 pub use self::time::TimeSpan;

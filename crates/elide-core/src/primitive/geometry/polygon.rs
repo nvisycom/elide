@@ -49,7 +49,9 @@ impl Polygon {
     ///
     /// Touching-but-disjoint polygons (sharing only an edge or vertex) do
     /// not count as overlapping, matching the
-    /// [`BoundingBox`](super::BoundingBox) convention.
+    /// [`BoundingBox`] convention.
+    ///
+    /// [`BoundingBox`]: super::BoundingBox
     pub fn overlaps(&self, other: &Self) -> bool {
         if self.0.len() < 3 || other.0.len() < 3 {
             return false;

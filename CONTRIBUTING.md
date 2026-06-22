@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for your interest in contributing to elide.
+Thank you for your interest in contributing to Elide.
 
 ## Requirements
 

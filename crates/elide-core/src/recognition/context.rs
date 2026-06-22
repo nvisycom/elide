@@ -96,7 +96,9 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
 
     /// Caller-asserted document-level classification labels for this
     /// analysis (e.g. `"medical"`). Distinct from the entity types to emit
-    /// — those are [`target_labels`](Self::target_labels).
+    /// — those are [`target_labels`].
+    ///
+    /// [`target_labels`]: Self::target_labels
     #[must_use]
     pub fn labels(&self) -> &[String] {
         &self.scope.labels
@@ -112,8 +114,10 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
     }
 
     /// The entity types to emit, as [`LabelRef`]s — the catalog's labels.
-    /// Convenience over [`catalog`](Self::catalog) for recognizers that
+    /// Convenience over [`catalog`] for recognizers that
     /// only need the names.
+    ///
+    /// [`catalog`]: Self::catalog
     #[must_use]
     pub fn target_labels(&self) -> Vec<LabelRef> {
         self.scope.catalog.refs().collect()

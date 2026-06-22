@@ -1,4 +1,4 @@
-# elide: A Multimodal PII Detection and Redaction Toolkit
+# Elide: A Multimodal PII Detection and Redaction Toolkit
 
 ## Abstract
 

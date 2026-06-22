@@ -43,12 +43,10 @@ pub(crate) struct LinguaDetector {
 }
 
 impl LinguaDetector {
-    /// Construct a detector restricted to `tags`. Unrecognised
-    /// tags (no matching ISO 639-1 primary subtag in lingua) are
-    /// silently skipped. Returns `None` when no tag matched;
-    /// `LinguaNlpEngine` falls back to
-    /// [`for_all_languages`] in that
-    /// case.
+    /// Construct a detector restricted to `tags`. Unrecognised tags (no
+    /// matching ISO 639-1 primary subtag in lingua) are silently skipped.
+    /// Returns `None` when no tag matched; `LinguaNlpEngine` falls back to
+    /// [`for_all_languages`] in that case.
     ///
     /// [`for_all_languages`]: Self::for_all_languages
     pub(crate) fn for_languages(tags: &[LanguageTag]) -> Option<Self> {

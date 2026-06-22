@@ -26,7 +26,7 @@ use std::future::Future;
 use elide_core::Result;
 use elide_core::modality::{Chunk, DataReader, DataWriter, Modality};
 
-use super::FormatId;
+use super::{Container, FormatId};
 use crate::content::ContentData;
 
 /// Per-modality capability trait every format handler implements.
@@ -71,7 +71,7 @@ pub trait Handler<M: Modality>: DataReader<M> + DataWriter<M> + Send + Sync + 's
     fn read_next(&mut self) -> impl Future<Output = Result<Option<Chunk<M>>>> + Send;
 
     /// Promote a `local` location, expressed in `chunk`'s own coordinate
-    /// system, to a source-global [`M::Location`](Modality::Location).
+    /// system, to a source-global [`M::Location`].
     ///
     /// A recognizer sees a chunk's decoded payload and emits a finding in
     /// *chunk-local* coordinates: a byte range into the chunk text, a box
@@ -88,6 +88,8 @@ pub trait Handler<M: Modality>: DataReader<M> + DataWriter<M> + Send + Sync + 's
     ///
     /// Returns `None` when `local` has no source pre-image (out of bounds,
     /// inside an escape pair).
+    ///
+    /// [`M::Location`]: Modality::Location
     fn lift(&self, _chunk: &Chunk<M>, local: M::Location) -> Option<M::Location> {
         Some(local)
     }
@@ -97,7 +99,7 @@ pub trait Handler<M: Modality>: DataReader<M> + DataWriter<M> + Send + Sync + 's
     /// single-modality format is not a container.
     ///
     /// [`Container`]: crate::Container
-    fn as_container_mut(&mut self) -> Option<&mut dyn crate::codec::Container> {
+    fn as_container_mut(&mut self) -> Option<&mut dyn Container> {
         None
     }
 }

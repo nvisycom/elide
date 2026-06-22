@@ -8,13 +8,15 @@ use super::Dimensions;
 /// Axis-aligned rectangle in integer pixel coordinates, clamped to lie
 /// within an image.
 ///
-/// The integer counterpart to [`BoundingBox`](super::BoundingBox), which
+/// The integer counterpart to [`BoundingBox`], which
 /// holds floating-point corners. Where a `BoundingBox` is a recognizer's
 /// or caller's possibly-fractional, possibly-out-of-bounds claim, a
 /// `PixelRegion` is the concrete set of pixels a codec actually reads or
 /// paints: every field is a valid index, and `x + width <= image width`
-/// (likewise for height). Produced by
-/// [`BoundingBox::to_pixels`](super::BoundingBox::to_pixels).
+/// (likewise for height). Produced by [`BoundingBox::to_pixels`].
+///
+/// [`BoundingBox`]: super::BoundingBox
+/// [`BoundingBox::to_pixels`]: super::BoundingBox::to_pixels
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PixelRegion {
@@ -23,10 +25,14 @@ pub struct PixelRegion {
     /// Top edge, in pixels from the image origin.
     pub y: u32,
     /// Width in pixels. Always at least 1 in a region returned by
-    /// [`to_pixels`](super::BoundingBox::to_pixels).
+    /// [`to_pixels`].
+    ///
+    /// [`to_pixels`]: super::BoundingBox::to_pixels
     pub width: u32,
     /// Height in pixels. Always at least 1 in a region returned by
-    /// [`to_pixels`](super::BoundingBox::to_pixels).
+    /// [`to_pixels`].
+    ///
+    /// [`to_pixels`]: super::BoundingBox::to_pixels
     pub height: u32,
 }
 

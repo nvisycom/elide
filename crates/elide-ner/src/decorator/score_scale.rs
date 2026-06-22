@@ -29,9 +29,11 @@ const DEFAULT_MULTIPLIER: f32 = 1.0;
 /// a configured set.
 ///
 /// Delegates recognition to the wrapped backend, then multiplies the
-/// confidence of each matching span by
-/// [`multiplier`](Self::with_multiplier), saturating into `[0, 1]`. Spans
-/// whose label is not in the set pass through unchanged.
+/// confidence of each matching span by the [`multiplier`], saturating
+/// into `[0, 1]`. Spans whose label is not in the set pass through
+/// unchanged.
+///
+/// [`multiplier`]: Self::with_multiplier
 #[derive(Debug, Clone)]
 pub struct ScoreScale<B> {
     inner: B,
@@ -41,10 +43,12 @@ pub struct ScoreScale<B> {
 
 impl<B> ScoreScale<B> {
     /// Wrap `inner`. No labels are scaled and the multiplier starts at the
-    /// identity (`1.0`) until configured via
-    /// [`with_label`](Self::with_label) /
-    /// [`with_labels`](Self::with_labels) and
-    /// [`with_multiplier`](Self::with_multiplier).
+    /// identity (`1.0`) until configured via [`with_label`] /
+    /// [`with_labels`] and [`with_multiplier`].
+    ///
+    /// [`with_label`]: Self::with_label
+    /// [`with_labels`]: Self::with_labels
+    /// [`with_multiplier`]: Self::with_multiplier
     pub fn new(inner: B) -> Self {
         Self {
             inner,

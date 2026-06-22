@@ -2,7 +2,7 @@
 
 [package]
 name = "elide-examples"
-description = "End-to-end usage examples for the elide toolkit"
+description = "End-to-end usage examples for the Elide toolkit"
 publish = false
 # Each example is a self-contained file at the crate root, declared as its
 # own binary below; nothing is auto-discovered.

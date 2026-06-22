@@ -20,11 +20,14 @@ const MICROS_PER_SECOND: u64 = 1_000_000;
 /// `TimeSpan`; the endpoints are non-negative offsets by construction.
 ///
 /// Half-open like a byte range: `[start, end)`, so two intervals that
-/// merely touch (`a.end == b.start`) do not [`overlap`](Self::overlaps).
+/// merely touch (`a.end == b.start`) do not [`overlap`].
 ///
-/// [`from_millis`](Self::from_millis) and [`as_millis`](Self::start_millis)
-/// bridge the millisecond-based APIs that surround it (audio durations,
-/// provider timings reported in ms).
+/// [`from_millis`] and [`as_millis`] bridge the millisecond-based APIs
+/// that surround it (audio durations, provider timings reported in ms).
+///
+/// [`overlap`]: Self::overlaps
+/// [`from_millis`]: Self::from_millis
+/// [`as_millis`]: Self::start_millis
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct TimeSpan {

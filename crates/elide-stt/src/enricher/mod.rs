@@ -5,12 +5,13 @@
 //! entities, it *enriches*. On each call it transcribes the [`AudioData`]
 //! bytes through its [`SttBackend`] and inserts the resulting
 //! [`Transcription`] into the call's
-//! [`artifacts`](elide_core::recognition::RecognizerContext::artifacts).
+//! [`artifacts`].
 //! Recognizers running afterward read the transcript text and resolve each
 //! match back to the audio time it was spoken in (see [`Audio`]'s
 //! [`TextRecognizable`] impl).
 //!
 //! [`AudioData`]: elide_core::modality::audio::AudioData
+//! [`artifacts`]: elide_core::recognition::RecognizerContext::artifacts
 //! [`SttBackend`]: crate::backend::SttBackend
 //! [`Audio`]: elide_core::modality::audio::Audio
 //! [`TextRecognizable`]: elide_core::modality::TextRecognizable

@@ -14,9 +14,11 @@ use elide_core::entity::Entity;
 use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
 use elide_core::{Error, Result};
 
+#[cfg(any(test, feature = "mock"))]
+use crate::backend::MockBackend;
 use crate::backend::{LlmBackend, LlmRequest};
 use crate::modality::LlmModality;
-use crate::prompt::Prompt;
+use crate::prompt::{DefaultPrompt, Prompt};
 
 /// LLM-driven recognizer.
 #[derive(Clone, Builder)]
@@ -100,9 +102,9 @@ impl<M: LlmModality> LlmRecognizerBuilder<M> {
     #[must_use]
     pub fn with_mock_backend(self) -> Self
     where
-        crate::backend::MockBackend: LlmBackend<M>,
+        MockBackend: LlmBackend<M>,
     {
-        self.with_backend(crate::backend::MockBackend)
+        self.with_backend(MockBackend)
     }
 
     /// Set the modality-specific [`Prompt`] wording. Accepts any concrete
@@ -123,9 +125,9 @@ impl<M: LlmModality> LlmRecognizerBuilder<M> {
     #[must_use]
     pub fn with_default_prompt(self) -> Self
     where
-        crate::prompt::DefaultPrompt: Prompt<M>,
+        DefaultPrompt: Prompt<M>,
     {
-        self.with_prompt(crate::prompt::DefaultPrompt)
+        self.with_prompt(DefaultPrompt)
     }
 
     /// Finish the builder. Errors when `name`, `backend`, or

@@ -47,13 +47,15 @@ pub trait LlmBackend<M: LlmModality>: Send + Sync + 'static {
     /// batch.
     ///
     /// The prompt wording is rendered by the recognizer's
-    /// [`Prompt`](crate::prompt::Prompt); the backend folds in the source
+    /// [`Prompt`]; the backend folds in the source
     /// payload (e.g. image bytes) to build the provider message, and
     /// constrains the model to produce the candidate shape for `M`.
     ///
     /// # Errors
     ///
     /// Returns the underlying transport / provider / extraction error.
+    ///
+    /// [`Prompt`]: crate::prompt::Prompt
     async fn extract(&self, request: LlmRequest<'_, M>) -> Result<LlmResponse<M>>;
 
     /// Model name the backend is configured to call. Recognizers stamp

@@ -33,9 +33,11 @@ const HINT_SNIPPET_HALF_WIDTH: usize = 80;
 
 /// Jinja2-template-driven [`Prompt`] impl.
 ///
-/// Construct via [`from_file`](Self::from_file) or
-/// [`from_template`](Self::from_template); the modality `M` selects which
-/// template variables are populated.
+/// Construct via [`from_file`] or [`from_template`]; the modality `M`
+/// selects which template variables are populated.
+///
+/// [`from_file`]: Self::from_file
+/// [`from_template`]: Self::from_template
 pub struct Jinja2Prompt<M> {
     env: Environment<'static>,
     _modality: PhantomData<fn() -> M>,

@@ -12,10 +12,12 @@ use crate::primitive::TimeSpan;
 /// A [`TimeSpan`] within audio content, with an optional speaker label.
 ///
 /// The time span is the coordinate; ordering and overlap consider only it.
-/// The optional [`speaker_id`](Self::speaker_id) is a diarization label,
+/// The optional [`speaker_id`] is a diarization label,
 /// not a coordinate: two utterances from different speakers at the same
 /// instant still overlap in time, so the speaker is carried for provenance
 /// but excluded from comparison.
+///
+/// [`speaker_id`]: Self::speaker_id
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct AudioLocation {

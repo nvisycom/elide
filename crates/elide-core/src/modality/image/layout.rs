@@ -1,13 +1,15 @@
 //! [`Layout`]: an image's recognized text laid out in space.
 //!
 //! What makes an image *recognizable*: a recognizer reads its
-//! [`text`](Layout::text) like any other string, finds a match at a byte
-//! range, and [`resolve`](Layout::resolve)s that range back to the
+//! [`text`] like any other string, finds a match at a byte
+//! range, and [`resolve`]s that range back to the
 //! [`ImageLocation`] of the words it covers — via the per-word bounding
 //! boxes the layout carries. Populated by an OCR pass today; the structure
 //! can grow to carry richer layout (headings, tables, reading order). The
 //! image counterpart of the audio [`Transcription`].
 //!
+//! [`text`]: Layout::text
+//! [`resolve`]: Layout::resolve
 //! [`Transcription`]: crate::modality::audio::Transcription
 
 use std::ops::Range;
@@ -25,10 +27,13 @@ const BLOCK_SEPARATOR: &str = "\n";
 /// An image's recognized text, laid out in space.
 ///
 /// An ordered set of [`LayoutBlock`]s (the recognized text regions). The flat
-/// [`text`](Self::text) — the blocks joined — is what a recognizer
-/// inspects; [`resolve`](Self::resolve) maps a byte range of that text back
+/// [`text`] — the blocks joined — is what a recognizer
+/// inspects; [`resolve`] maps a byte range of that text back
 /// to the [`ImageLocation`] it occupies, using the blocks' (and their
 /// words') bounding boxes. Empty when the backend recognized nothing.
+///
+/// [`text`]: Self::text
+/// [`resolve`]: Self::resolve
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Layout {
@@ -136,7 +141,9 @@ impl Layout {
         self.blocks.is_empty()
     }
 
-    /// Byte offset where each block's text begins within [`text`](Self::text).
+    /// Byte offset where each block's text begins within [`text`].
+    ///
+    /// [`text`]: Self::text
     fn block_offsets(&self) -> impl Iterator<Item = (usize, &LayoutBlock)> {
         let mut offset = 0;
         self.blocks.iter().map(move |block| {
@@ -146,14 +153,16 @@ impl Layout {
         })
     }
 
-    /// Resolve a byte `range` of [`text`](Self::text) to the
-    /// [`ImageLocation`] of the words it covers.
+    /// Resolve a byte `range` of [`text`] to the [`ImageLocation`] of the
+    /// words it covers.
     ///
     /// Returns the union of the covered words' bounding boxes (the whole
     /// block region when a block has no per-word boxes), keeping the shared
     /// page. When a single word covers the range and carries a polygon, that
     /// polygon is preserved. `None` when the range covers no block (out of
     /// bounds, or an empty OCR).
+    ///
+    /// [`text`]: Self::text
     #[must_use]
     pub fn resolve(&self, range: Range<usize>) -> Option<ImageLocation> {
         let mut acc = RegionUnion::default();
