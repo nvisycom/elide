@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::modality::ModalityReplacement;
 
 /// What a text operator produces: a substitution or a removal.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub enum TextReplacement {

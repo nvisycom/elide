@@ -133,7 +133,7 @@ impl<E: Encoder> ExtractHandler<E> {
             return;
         }
         for s in &mut self.item_starts[i + 1..] {
-            *s = (*s as isize + delta) as usize;
+            *s = s.saturating_add_signed(delta);
         }
     }
 

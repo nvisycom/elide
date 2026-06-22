@@ -38,12 +38,14 @@ impl TextLocation {
     }
 
     /// Byte length of the range (`end - start`).
-    pub fn len(&self) -> usize {
+    #[must_use]
+    pub const fn len(&self) -> usize {
         self.end.saturating_sub(self.start)
     }
 
     /// Whether the range is empty (zero length).
-    pub fn is_empty(&self) -> bool {
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
         self.len() == 0
     }
 }

@@ -6,20 +6,19 @@ Named-entity recognition and language detection for PII/PHI detection.
 
 ## Overview
 
-Some sensitive data has no fixed shape: a person's name, an
-organization, a place. Recognizing it takes a model that reads the
-surrounding language rather than a regular expression. This crate
-provides the recognizer that turns model-produced spans into typed
-entities, with a pluggable backend so the model itself can run wherever
-suits the deployment: in process, as a hosted service, or as a future
-local inference engine. A no-op backend ships built in for wiring and
-tests, and concrete inference backends live downstream.
+Some sensitive data has no fixed shape: a person's name, an organization, a
+place. Recognizing it takes a model that reads the surrounding language rather
+than a regular expression. This crate provides the recognizer that turns
+model-produced spans into typed entities, with a pluggable backend so the model
+itself can run wherever suits the deployment: in process, as a hosted service,
+or as a future local inference engine. A no-op backend ships built in for wiring
+and tests, and concrete inference backends live downstream.
 
-Raw backend labels are projected onto the toolkit's canonical label set,
-so consumers reason about one fixed taxonomy regardless of the upstream
-model. An optional language-detection feature resolves the language of a
-piece of text and carries that result alongside the input for
-language-aware recognizers and policies.
+Raw backend labels are projected onto the toolkit's canonical label set, so
+consumers reason about one fixed taxonomy regardless of the upstream model. An
+optional language-detection feature resolves the language of a piece of text and
+carries that result alongside the input for language-aware recognizers and
+policies.
 
 ## Documentation
 

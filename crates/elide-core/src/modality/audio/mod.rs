@@ -43,20 +43,19 @@ impl TextRecognizable for Audio {
     /// Unlike the byte-based text modalities, audio's location is a time
     /// span, so `locate` resolves `range` immediately against the
     /// transcript's word timings (read from the call's artifacts) rather
-    /// than deferring to a lift. A range that resolves to nothing (no
-    /// transcript, or out of bounds) yields a zero-length span at the
-    /// origin; such an entity carries no real audio extent.
+    /// than deferring to a lift. Returns `None` when the range resolves to
+    /// nothing (no transcript, or out of bounds) — there is no time span to
+    /// address, so the caller drops the match.
     fn locate(
         range: Range<usize>,
         _data: &AudioData,
         ctx: &RecognizerContext<'_, Self>,
-    ) -> AudioLocation {
-        let span = ctx
-            .artifacts
+    ) -> Option<AudioLocation> {
+        // No transcript, or a range no segment covers: nothing to address.
+        ctx.artifacts
             .get::<Transcription>()
             .and_then(|t| t.resolve(range))
-            .unwrap_or_default();
-        AudioLocation::new(span)
+            .map(AudioLocation::new)
     }
 }
 
@@ -101,17 +100,17 @@ mod tests {
         let scope = Scope::<Audio>::new();
         let ctx = phone_context(&scope);
         // "555-1234" is at bytes 14..22.
-        let loc = Audio::locate(14..22, &data, &ctx);
+        let loc = Audio::locate(14..22, &data, &ctx).expect("range resolves");
         assert_eq!(loc.span.start_millis(), 1_100);
         assert_eq!(loc.span.end_millis(), 1_800);
     }
 
     #[test]
-    fn locate_without_transcript_is_empty_span() {
+    fn locate_without_transcript_is_none() {
         let data = AudioData::new(bytes::Bytes::new());
         let scope = Scope::<Audio>::new();
         let ctx = RecognizerContext::new(&scope);
-        let loc = Audio::locate(0..5, &data, &ctx);
-        assert!(loc.span.is_empty());
+        // No transcript: the range can't be placed, so no location.
+        assert!(Audio::locate(0..5, &data, &ctx).is_none());
     }
 }

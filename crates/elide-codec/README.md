@@ -6,21 +6,20 @@ Reading and redacting documents across file formats.
 
 ## Overview
 
-Detection works on text, but real documents arrive as files: plain text,
-JSON, HTML, XML, and more. This crate bridges the two. It reads a
-document of a given format, exposes its text so recognizers can scan it,
-applies redactions back to the right places, and writes the document out
-again.
+Detection works on text, but real documents arrive as files: plain text, JSON,
+HTML, XML, and more. This crate bridges the two. It reads a document of a given
+format, exposes its text so recognizers can scan it, applies redactions back to
+the right places, and writes the document out again.
 
-The guiding principle is faithful round-tripping. When a document is
-re-encoded, only the redacted parts change; structure, formatting, and
-everything left untouched are preserved. A registry resolves the right
-handler from a file's extension or content type, so callers work with
-documents without hardcoding format details.
+The guiding principle is faithful round-tripping. When a document is re-encoded,
+only the redacted parts change; structure, formatting, and everything left
+untouched are preserved. A registry resolves the right handler from a file's
+extension or content type, so callers work with documents without hardcoding
+format details.
 
-Formats are opt-in: enable only the ones you need, and add support for
-new formats without changing the core. Support beyond plain text is an
-ongoing effort.
+Formats are opt-in: enable only the ones you need, and add support for new
+formats without changing the core. Support beyond plain text is an ongoing
+effort.
 
 ## Documentation
 

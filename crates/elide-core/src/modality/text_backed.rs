@@ -40,19 +40,21 @@ pub trait TextRecognizable: Modality + Sized {
     fn as_text<'a>(data: &'a Self::Data, ctx: &'a RecognizerContext<'_, Self>) -> &'a str;
 
     /// Build the location of a match spanning `range` of the recognizable
-    /// text.
+    /// text, or `None` when the range cannot be placed in the medium.
     ///
     /// For [`Text`] and `Tabular` the location is *chunk-local* — it carries
     /// the byte range and lifting fills the outer coordinates (a cell's
-    /// row/column) later. For a medium whose location is not byte-based
-    /// (audio time spans), `locate` resolves `range` against the enrichment
-    /// in `ctx` (the transcript's timings) into the native coordinate
-    /// immediately, so the emitted entity already addresses the source.
+    /// row/column) later — so it always succeeds. For a medium whose location
+    /// is not byte-based (audio time spans, image regions), `locate` resolves
+    /// `range` against the enrichment in `ctx` (the transcript's timings, the
+    /// OCR layout) into the native coordinate, and returns `None` when no
+    /// enrichment covers the range. A caller that gets `None` drops the
+    /// match rather than emit an entity that addresses nowhere.
     fn locate(
         range: Range<usize>,
         data: &Self::Data,
         ctx: &RecognizerContext<'_, Self>,
-    ) -> Self::Location;
+    ) -> Option<Self::Location>;
 }
 
 /// A [`TextRecognizable`] modality whose chunk payload is text and whose
@@ -91,8 +93,8 @@ impl TextRecognizable for Text {
         range: Range<usize>,
         _data: &TextData,
         _ctx: &RecognizerContext<'_, Self>,
-    ) -> TextLocation {
-        TextLocation::new(range.start, range.end)
+    ) -> Option<TextLocation> {
+        Some(TextLocation::new(range.start, range.end))
     }
 }
 

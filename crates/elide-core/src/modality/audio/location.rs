@@ -54,6 +54,7 @@ impl AudioLocation {
     }
 
     /// Whether the location's span is empty (zero duration).
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.span.is_empty()
     }

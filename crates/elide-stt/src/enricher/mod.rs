@@ -109,7 +109,7 @@ mod tests {
         // Recognizers read the transcript from the call's artifacts.
         assert_eq!(Audio::as_text(&data, &ctx), "hi Alice");
         // "Alice" is at bytes 3..8; locate resolves it to the word's time.
-        let loc = Audio::locate(3..8, &data, &ctx);
+        let loc = Audio::locate(3..8, &data, &ctx).expect("range resolves");
         assert_eq!(loc.span.start_millis(), 300);
         assert_eq!(loc.span.end_millis(), 900);
     }

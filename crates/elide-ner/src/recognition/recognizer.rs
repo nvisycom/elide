@@ -111,9 +111,18 @@ impl NerRecognizer {
         label: LabelRef,
         data: &M::Data,
         ctx: &RecognizerContext<'_, M>,
-    ) -> Entity<M> {
+    ) -> Option<Entity<M>> {
         let confidence = span.confidence;
-        let location = M::locate(span.offset.start..span.offset.end, data, ctx);
+        let Some(location) = M::locate(span.offset.start..span.offset.end, data, ctx) else {
+            // The match can't be placed in the medium (e.g. an OCR range no
+            // word box covers); drop it rather than emit a placeless entity.
+            tracing::warn!(
+                recognizer = %self.name,
+                label = label.as_str(),
+                "could not place a match in the source; dropping it",
+            );
+            return None;
+        };
         let reason = format!("recognizer `{}` identified {}", self.name, label.as_str());
         let event = Event::model(
             "ner",
@@ -125,13 +134,15 @@ impl NerRecognizer {
             },
         )
         .with_reason(reason);
-        Entity::builder()
-            .with_label(label)
-            .with_location(location)
-            .with_confidence(confidence)
-            .with_event(event)
-            .build()
-            .expect("required fields provided")
+        Some(
+            Entity::builder()
+                .with_label(label)
+                .with_location(location)
+                .with_confidence(confidence)
+                .with_event(event)
+                .build()
+                .expect("required fields provided"),
+        )
     }
 }
 
@@ -219,7 +230,7 @@ impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
                 effective_labels.is_empty()
                     || effective_labels.iter().any(|l| l.to_ref() == s.label)
             })
-            .map(|s| self.build_entity::<M>(s, s.label.clone(), data, ctx))
+            .filter_map(|s| self.build_entity::<M>(s, s.label.clone(), data, ctx))
             .collect();
         Ok(entities)
     }
