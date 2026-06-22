@@ -15,6 +15,8 @@
 //! [`Anonymizer`]: crate::Anonymizer
 
 pub mod generator;
+#[cfg(feature = "crypto")]
+pub mod key_provider;
 mod vault;
 
 #[doc(inline)]

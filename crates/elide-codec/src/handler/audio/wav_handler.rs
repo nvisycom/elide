@@ -107,7 +107,7 @@ impl WavHandler {
     /// re-encode to `self.bytes`.
     fn redact_typed<S>(&mut self, spec: WavSpec, redactions: &Redactions<Audio>) -> Result<()>
     where
-        S: hound::Sample + Default + Clone,
+        S: hound::Sample + Default + Clone + redact::ToneSample,
     {
         let mut reader = WavReader::new(Cursor::new(self.bytes.clone()))
             .map_err(|e| Error::new(ErrorKind::Validation, format!("WAV read failed: {e}")))?;

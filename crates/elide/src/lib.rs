@@ -4,6 +4,8 @@
 
 mod analyzer;
 mod anonymizer;
+#[cfg(feature = "crypto")]
+mod deanonymizer;
 pub mod deduplication;
 pub mod modality;
 #[cfg(feature = "codec")]
@@ -76,6 +78,8 @@ pub use elide_core::{entity, primitive};
 
 pub use self::analyzer::Analyzer;
 pub use self::anonymizer::Anonymizer;
+#[cfg(feature = "crypto")]
+pub use self::deanonymizer::Deanonymizer;
 // Nameable so callers can state the `Vec<Entity<M>>: EntityGroup` bound on
 // the orchestrator's construction methods; hidden, an implementation detail.
 #[cfg(feature = "codec")]

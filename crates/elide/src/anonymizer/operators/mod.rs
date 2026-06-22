@@ -1,35 +1,63 @@
-//! Concrete text redaction operators.
+//! Concrete redaction operators.
 //!
-//! The shipped [`Operator`]s for the [`Text`] modality: [`Mask`],
-//! [`Replace`], [`Erase`], [`Hash`], and [`Keep`]. Each reads the
-//! entity's value (the slice a [`DataReader`] produced) and returns a
-//! [`TextReplacement`].
+//! Each shipped [`Operator`] reads the entity's value (the slice a
+//! [`DataReader`] produced) and returns a modality [`Replacement`].
 //!
-//! [`Pseudonymize`] substitutes a consistent synthetic value per entity,
-//! drawn from a [`Generator`] and kept stable across mentions through a
-//! [`Vault`] — so coreferent mentions all read the same surrogate.
+//! Text and tabular: [`Mask`], [`Replace`], [`Hash`], and
+//! [`Pseudonymize`] (a consistent synthetic value per entity, drawn from a
+//! [`Generator`] and kept stable across mentions through a [`Vault`], so
+//! coreferent mentions all read the same surrogate).
+//!
+//! Image (feature `image`): `Blur`, `Pixelate`, `Blackbox`.
+//!
+//! Audio (feature `audio`): `Silence`, `Beep`.
+//!
+//! Reversible (feature `crypto`): `Encrypt` (AES-256-GCM) replaces the
+//! value with a ciphertext recoverable given the key.
+//!
+//! Cross-modality: [`Erase`] removes the entity in any modality, and
+//! [`Keep`] passes it through unchanged.
 //!
 //! [`Operator`]: elide_core::redaction::Operator
+//! [`Replacement`]: elide_core::modality::Modality::Replacement
 //! [`Vault`]: elide_core::redaction::Vault
 //! [`Generator`]: crate::redaction::generator::Generator
-//! [`Text`]: elide_core::modality::text::Text
 //! [`Hash`]: struct@Hash
 //! [`DataReader`]: elide_core::modality::DataReader
-//! [`TextReplacement`]: elide_core::modality::text::TextReplacement
 
+#[cfg(feature = "audio")]
+mod beep;
+#[cfg(feature = "image")]
+mod blackbox;
+#[cfg(feature = "image")]
+mod blur;
+#[cfg(feature = "crypto")]
+mod encrypt;
 mod erase;
 mod hash;
 mod keep;
 mod mask;
+#[cfg(feature = "image")]
+mod pixelate;
 mod pseudonymize;
 mod replace;
 #[cfg(feature = "audio")]
 mod silence;
 
+#[cfg(feature = "audio")]
+pub use self::beep::Beep;
+#[cfg(feature = "image")]
+pub use self::blackbox::Blackbox;
+#[cfg(feature = "image")]
+pub use self::blur::Blur;
+#[cfg(feature = "crypto")]
+pub use self::encrypt::Encrypt;
 pub use self::erase::Erase;
 pub use self::hash::{Hash, HashAlgorithm};
 pub use self::keep::Keep;
 pub use self::mask::Mask;
+#[cfg(feature = "image")]
+pub use self::pixelate::Pixelate;
 pub use self::pseudonymize::Pseudonymize;
 pub use self::replace::Replace;
 #[cfg(feature = "audio")]

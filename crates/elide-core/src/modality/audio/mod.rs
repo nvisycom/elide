@@ -9,7 +9,7 @@ use std::ops::Range;
 
 pub use self::data::AudioData;
 pub use self::location::AudioLocation;
-pub use self::replacement::AudioReplacement;
+pub use self::replacement::{AudioReplacement, Waveform};
 pub use self::transcription::{TranscriptSegment, TranscriptWord, Transcription};
 use super::{Modality, TextRecognizable};
 use crate::recognition::RecognizerContext;
