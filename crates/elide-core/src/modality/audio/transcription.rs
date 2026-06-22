@@ -13,7 +13,7 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{Confidence, LanguageTag, TimeSpan};
+use crate::primitive::{Confidence, LanguageTag, TimeSpan};
 
 /// Separator inserted between segments when building the flat transcript
 /// text, so adjacent segments don't run their words together.

@@ -3,7 +3,7 @@
 //!
 //! The OCR counterpart to language detection: it produces no entities, it
 //! *enriches*. On each call it OCRs the [`ImageData`] bytes through its
-//! [`OcrBackend`] and inserts the resulting [`OcrText`] into the call's
+//! [`OcrBackend`] and inserts the resulting [`Layout`] into the call's
 //! [`artifacts`](elide_core::recognition::RecognizerContext::artifacts).
 //! Recognizers running afterward read the OCR text and resolve each match
 //! back to the image region it covers (see [`Image`]'s [`TextRecognizable`]
@@ -18,12 +18,12 @@ use std::sync::Arc;
 
 use elide_core::Result;
 use elide_core::modality::image::{Image, ImageData};
-use elide_core::primitive::OcrText;
+use elide_core::modality::image::Layout;
 use elide_core::recognition::{Enricher, RecognizerContext};
 
 use crate::backend::{OcrBackend, OcrRequest};
 
-/// An [`Enricher<Image>`] that OCRs the image and stamps the [`OcrText`]
+/// An [`Enricher<Image>`] that OCRs the image and stamps the [`Layout`]
 /// onto the call's artifacts.
 ///
 /// Holds an `Arc<dyn OcrBackend>`; cloning shares the backend. Registered on
@@ -46,7 +46,7 @@ impl OcrEnricher {
 impl Enricher<Image> for OcrEnricher {
     async fn enrich(&self, data: &ImageData, ctx: &mut RecognizerContext<'_, Image>) -> Result<()> {
         // Already OCR'd (e.g. a second enricher pass): leave it.
-        if ctx.artifacts.contains::<OcrText>() {
+        if ctx.artifacts.contains::<Layout>() {
             return Ok(());
         }
         let mut request = OcrRequest::new(&data.bytes);
@@ -57,7 +57,7 @@ impl Enricher<Image> for OcrEnricher {
             request = request.with_correlation_id(id);
         }
         let response = self.backend.recognize(request).await?;
-        ctx.artifacts.insert(OcrText::new(response.blocks));
+        ctx.artifacts.insert(Layout::new(response.blocks));
         Ok(())
     }
 }
@@ -66,7 +66,8 @@ impl Enricher<Image> for OcrEnricher {
 mod tests {
     use elide_core::entity::provenance::ModelEvent;
     use elide_core::modality::TextRecognizable;
-    use elide_core::primitive::{BoundingBox, Dimensions, OcrBlock, OcrWord, Point};
+    use elide_core::modality::image::{LayoutBlock, LayoutWord};
+    use elide_core::primitive::{BoundingBox, Dimensions, Point};
     use elide_core::recognition::Scope;
 
     use super::*;
@@ -94,9 +95,9 @@ mod tests {
         }
 
         async fn recognize(&self, _request: OcrRequest<'_>) -> Result<OcrResponse> {
-            let block = OcrBlock::new(loc(0.0, 0.0, 100.0, 20.0), "hi Alice").with_words(vec![
-                OcrWord::new(loc(0.0, 0.0, 30.0, 20.0), "hi"),
-                OcrWord::new(loc(40.0, 0.0, 60.0, 20.0), "Alice"),
+            let block = LayoutBlock::new(loc(0.0, 0.0, 100.0, 20.0), "hi Alice").with_words(vec![
+                LayoutWord::new(loc(0.0, 0.0, 30.0, 20.0), "hi"),
+                LayoutWord::new(loc(40.0, 0.0, 60.0, 20.0), "Alice"),
             ]);
             Ok(OcrResponse::new(vec![block]))
         }

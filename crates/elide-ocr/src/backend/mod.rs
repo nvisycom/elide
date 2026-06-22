@@ -4,12 +4,12 @@
 //! (Google Document AI, Azure, AWS Textract), local engines (Tesseract,
 //! PaddleOCR wrappers), and the in-process no-op test stub. Each backend
 //! turns a request (image bytes + optional hints) into a response of
-//! recognized [`OcrBlock`]s — the core OCR type, so a backend's output
+//! recognized [`LayoutBlock`]s — the core OCR type, so a backend's output
 //! drops straight onto the call's artifacts with no remapping. The
 //! `mock`-gated `MockBackend` (returns no blocks; test/example stub) ships
 //! here; concrete engine backends live downstream.
 //!
-//! [`OcrBlock`]: elide_core::primitive::OcrBlock
+//! [`LayoutBlock`]: elide_core::modality::image::LayoutBlock
 
 #[cfg(any(test, feature = "mock"))]
 mod mock_backend;

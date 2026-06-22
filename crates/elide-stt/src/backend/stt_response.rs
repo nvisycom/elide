@@ -2,7 +2,7 @@
 //!
 //! [`SttBackend`]: super::SttBackend
 
-use elide_core::primitive::TranscriptSegment;
+use elide_core::modality::audio::TranscriptSegment;
 
 /// One per-call STT response from an [`SttBackend`].
 ///
@@ -12,7 +12,7 @@ use elide_core::primitive::TranscriptSegment;
 /// artifacts without any remapping.
 ///
 /// [`SttBackend`]: super::SttBackend
-/// [`Transcription`]: elide_core::primitive::Transcription
+/// [`Transcription`]: elide_core::modality::audio::Transcription
 #[derive(Debug, Clone, Default)]
 pub struct SttResponse {
     /// Segments predicted for the request, in backend order.
