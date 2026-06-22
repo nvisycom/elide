@@ -95,7 +95,7 @@ phonenumber = { version = "0.3", default-features = false }
 # Markup parsing
 scraper = { version = "0.27", features = [] }
 ego-tree = { version = "0.11", features = [] }
-quick-xml = { version = "0.38", features = [] }
+quick-xml = { version = "0.40", features = [] }
 
 # Container formats (OOXML/DOCX is a zip of XML + media)
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
