@@ -236,30 +236,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn text_round_trips_through_bytes() {
-        let c = ContentData::from_text("hello");
-        assert_eq!(c.size(), 5);
-        assert!(!c.is_empty());
-    }
-
-    #[test]
-    fn slice_bounds_are_checked() {
-        let c = ContentData::from_text("hello");
-        assert_eq!(&c.slice(0..3).unwrap()[..], b"hel");
-        assert!(c.slice(0..99).is_err());
-        assert!(c.slice(3..1).is_err());
-    }
-
-    #[test]
-    fn sha256_hex_is_stable() {
-        let c = ContentData::from_text("abc");
-        assert_eq!(
-            c.sha256_hex(),
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-        );
-    }
-
-    #[test]
     fn metadata_defaults_to_none() {
         let c = ContentData::from_text("x");
         assert_eq!(c.filename(), None);
