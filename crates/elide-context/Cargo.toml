@@ -34,7 +34,3 @@ unicode-segmentation = { workspace = true, features = [] }
 
 # Observability
 tracing = { workspace = true, features = [] }
-
-[dev-dependencies]
-# Async runtime & parallelism
-tokio = { workspace = true, features = ["macros", "rt"] }
