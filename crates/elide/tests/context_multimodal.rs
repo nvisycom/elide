@@ -9,6 +9,7 @@
 #![cfg(all(feature = "ocr", feature = "stt"))]
 
 use elide::entity::LabelRef;
+use elide::entity::provenance::EventKind;
 use elide::modality::audio::{Audio, AudioData, TranscriptSegment, TranscriptWord, Transcription};
 use elide::modality::image::{Image, ImageData, ImageLocation, Layout, LayoutBlock, LayoutWord};
 use elide::primitive::{BoundingBox, Confidence, ConfidenceThreshold, Dimensions, Point, TimeSpan};
@@ -41,10 +42,11 @@ fn img_loc(x: f64, y: f64, w: f64, h: f64) -> ImageLocation {
 #[tokio::test]
 async fn image_context_boosts_and_keeps_the_native_region() {
     // OCR text: "ssn 123-45-6789", with per-word boxes.
-    let block = LayoutBlock::new(img_loc(0.0, 0.0, 200.0, 20.0), "ssn 123-45-6789").with_words(vec![
-        LayoutWord::new(img_loc(0.0, 0.0, 40.0, 20.0), "ssn"),
-        LayoutWord::new(img_loc(45.0, 0.0, 155.0, 20.0), "123-45-6789"),
-    ]);
+    let block =
+        LayoutBlock::new(img_loc(0.0, 0.0, 200.0, 20.0), "ssn 123-45-6789").with_words(vec![
+            LayoutWord::new(img_loc(0.0, 0.0, 40.0, 20.0), "ssn"),
+            LayoutWord::new(img_loc(45.0, 0.0, 155.0, 20.0), "123-45-6789"),
+        ]);
     let scope = Scope::<Image>::new();
     let mut ctx = RecognizerContext::new(&scope);
     ctx.artifacts.insert(Layout::new(vec![block]));
@@ -60,6 +62,20 @@ async fn image_context_boosts_and_keeps_the_native_region() {
     // The entity addresses the image region of the match, not a byte range.
     assert_eq!(entity.location.bounding_box.min.x, 45.0);
     assert!(entity.location.bounding_box.area() > 0.0);
+
+    // The boost's provenance resolves the *keyword* to its own region — the
+    // "ssn" word box at x=0..40, distinct from the match's box at x=45.
+    let kw = entity
+        .provenance
+        .events
+        .iter()
+        .find_map(|e| match &e.kind {
+            EventKind::Refinement { location, .. } => location.clone(),
+            _ => None,
+        })
+        .expect("an in-text refinement with a resolved keyword location");
+    assert_eq!(kw.bounding_box.min.x, 0.0);
+    assert!(kw.bounding_box.max.x <= entity.location.bounding_box.min.x);
 }
 
 #[tokio::test]
@@ -83,4 +99,18 @@ async fn audio_context_boosts_and_keeps_the_native_timespan() {
     // The entity addresses the audio time span of the match.
     assert_eq!(entity.location.span.start_millis(), 400);
     assert!(!entity.location.span.is_empty());
+
+    // The boost's provenance resolves the *keyword* to its own time span —
+    // "ssn" at 0..300 ms, before the match's span at 400 ms.
+    let kw = entity
+        .provenance
+        .events
+        .iter()
+        .find_map(|e| match &e.kind {
+            EventKind::Refinement { location, .. } => location.clone(),
+            _ => None,
+        })
+        .expect("an in-text refinement with a resolved keyword location");
+    assert_eq!(kw.span.start_millis(), 0);
+    assert!(kw.span.end_millis() <= entity.location.span.start_millis());
 }

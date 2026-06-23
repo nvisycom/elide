@@ -44,6 +44,9 @@ fn keyword_in_window_boosts_and_records_refinement() {
     assert_eq!(boost.entity_index, 0);
     assert_eq!(boost.keyword, "social security");
     assert!(boost.hint_index.is_none());
+    // The in-text path captures the keyword's *stream* range — "social
+    // security" is bytes 0..15 — so the caller can resolve its location.
+    assert_eq!(boost.keyword_range, Some(0..15));
 }
 
 #[test]
@@ -78,4 +81,7 @@ fn out_of_band_hint_boosts_via_hint_path() {
     // The boost fired from the first (and only) hint.
     assert_eq!(boosts.len(), 1);
     assert_eq!(boosts[0].hint_index, Some(0));
+    // A hint match carries no in-text keyword range; its location lives on
+    // the hint, resolved by the caller.
+    assert!(boosts[0].keyword_range.is_none());
 }

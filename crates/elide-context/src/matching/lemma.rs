@@ -1,5 +1,7 @@
 //! Lemma-aware [`KeywordMatcher`] implementation.
 
+use std::ops::Range;
+
 use hipstr::HipStr;
 
 use super::matcher::{KeywordMatcher, SubstringMatcher};
@@ -21,7 +23,12 @@ use crate::io::Token;
 pub struct LemmaMatcher;
 
 impl KeywordMatcher for LemmaMatcher {
-    fn any_match(&self, window: &str, tokens: &[Token], keywords: &[HipStr<'static>]) -> bool {
+    fn any_match(
+        &self,
+        window: &str,
+        tokens: &[Token],
+        keywords: &[HipStr<'static>],
+    ) -> Option<Range<usize>> {
         if tokens.is_empty() {
             return SubstringMatcher.any_match(window, tokens, keywords);
         }
@@ -29,9 +36,15 @@ impl KeywordMatcher for LemmaMatcher {
             .iter()
             .map(|k| k.as_str().to_ascii_lowercase())
             .collect();
-        tokens.iter().any(|tok| {
+        // Tokens carry stream-relative offsets; the contract is a
+        // *window*-relative range. The window spans from the first token
+        // (see `token_span`), so subtracting its start rebases each match.
+        let base = tokens[0].offset.start;
+        tokens.iter().find_map(|tok| {
             let lemma = tok.lemma.as_str().to_ascii_lowercase();
-            lowered_keywords.contains(&lemma)
+            lowered_keywords
+                .contains(&lemma)
+                .then(|| tok.offset.start - base..tok.offset.end - base)
         })
     }
 }
@@ -52,14 +65,31 @@ mod tests {
             Token::from_text("dogs", 12..16).with_lemma("dog"),
         ];
         let m = LemmaMatcher;
-        assert!(m.any_match("", &tokens, &kws(&["run"])));
-        assert!(m.any_match("", &tokens, &kws(&["dog"])));
-        assert!(!m.any_match("", &tokens, &kws(&["cat"])));
+        // Ranges are window-relative; here the first token starts at 0, so
+        // they coincide with the stream offsets.
+        assert_eq!(m.any_match("", &tokens, &kws(&["run"])), Some(4..11));
+        assert_eq!(m.any_match("", &tokens, &kws(&["dog"])), Some(12..16));
+        assert_eq!(m.any_match("", &tokens, &kws(&["cat"])), None);
+    }
+
+    #[test]
+    fn match_range_is_rebased_to_the_window() {
+        // First token starts at byte 100 in the stream; the window begins
+        // there, so the match's window-relative range is offset by 100.
+        let tokens = vec![
+            Token::from_text("running", 100..107).with_lemma("run"),
+            Token::from_text("dogs", 108..112).with_lemma("dog"),
+        ];
+        let m = LemmaMatcher;
+        assert_eq!(m.any_match("", &tokens, &kws(&["dog"])), Some(8..12));
     }
 
     #[test]
     fn falls_back_to_substring_without_tokens() {
         let m = LemmaMatcher;
-        assert!(m.any_match("Your SSN: 123", &[], &kws(&["ssn"])));
+        assert_eq!(
+            m.any_match("Your SSN: 123", &[], &kws(&["ssn"])),
+            Some(5..8)
+        );
     }
 }

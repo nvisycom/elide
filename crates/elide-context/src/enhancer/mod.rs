@@ -2,6 +2,7 @@
 //! [`Entity<Text>`] regardless of which recognizer produced it.
 
 use std::collections::HashMap;
+use std::ops::Range;
 
 use elide_core::entity::LabelRef;
 use elide_core::primitive::Confidence;
@@ -190,36 +191,42 @@ impl Enhancer {
                 slice_tokens_around(toks, range.clone(), rule.prefix_words, rule.suffix_words)
             })
             .unwrap_or(&[]);
-        let (snippet, tokens_in_window): (&str, &[Token]) = if token_slice.is_empty() {
-            let snippet = word_window(
-                ctx.text,
-                range.clone(),
-                rule.prefix_words,
-                rule.suffix_words,
-            );
-            (snippet, &[])
-        } else {
-            let snippet = token_span(ctx.text, token_slice, range.clone());
-            (snippet, token_slice)
-        };
+        // `window_offset` is the window's stream-byte start: a match the
+        // matcher reports is window-relative, so adding this rebases it into
+        // stream coordinates for `M::locate`.
+        let (snippet, tokens_in_window, window_offset): (&str, &[Token], usize) =
+            if token_slice.is_empty() {
+                let (snippet, offset) = word_window(
+                    ctx.text,
+                    range.clone(),
+                    rule.prefix_words,
+                    rule.suffix_words,
+                );
+                (snippet, &[], offset)
+            } else {
+                let (snippet, offset) = token_span(ctx.text, token_slice, range.clone());
+                (snippet, token_slice, offset)
+            };
 
         // Window first; the hint path reports *which* hint fired so the
-        // caller can record its location.
-        let (source, hint_index) =
-            if self
-                .matcher
+        // caller can record its location. The in-text path additionally
+        // carries the keyword's *stream* range so the caller can resolve a
+        // native location for it, symmetric with the hint's own location.
+        let (source, hint_index, keyword_range) = if let Some(m) =
+            self.matcher
                 .any_match(snippet, tokens_in_window, &rule.keywords)
-            {
-                (EVENT_SOURCE_WINDOW, None)
-            } else if let Some(i) = ctx
-                .hints
-                .iter()
-                .position(|h| self.matcher.any_match(h, &[], &rule.keywords))
-            {
-                (EVENT_SOURCE_HINT, Some(i))
-            } else {
-                return None;
-            };
+        {
+            let stream_range = window_offset + m.start..window_offset + m.end;
+            (EVENT_SOURCE_WINDOW, None, Some(stream_range))
+        } else if let Some(i) = ctx
+            .hints
+            .iter()
+            .position(|h| self.matcher.any_match(h, &[], &rule.keywords).is_some())
+        {
+            (EVENT_SOURCE_HINT, Some(i), None)
+        } else {
+            return None;
+        };
 
         let before = draft.confidence;
         let after = before.saturating_add(rule.boost.get());
@@ -238,6 +245,7 @@ impl Enhancer {
             after,
             keyword,
             hint_index,
+            keyword_range,
             amount: rule.boost.get(),
         })
     }
@@ -264,6 +272,14 @@ pub struct Boost {
     /// Index of the matched hint into the context hints, or `None` for an
     /// in-text-window match.
     pub hint_index: Option<usize>,
+    /// For an in-text-window match, the **stream** byte range of the keyword
+    /// that fired (into the recognized-text stream), so the caller can
+    /// resolve it to a native location via [`locate`] — symmetric with the
+    /// located hint a `hint_index` match carries. `None` for a hint match
+    /// (the location lives on the hint).
+    ///
+    /// [`locate`]: elide_core::modality::TextRecognizable::locate
+    pub keyword_range: Option<Range<usize>>,
     /// The boost amount applied, as a bare `f32` (for the reason string).
     pub amount: f32,
 }

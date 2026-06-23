@@ -24,8 +24,8 @@ use elide_core::modality::TextRecognizable;
 use elide_core::recognition::{Artifacts, Recognizer, RecognizerContext, RecognizerId};
 
 pub use self::draft::{DraftEvent, EntityDraft};
-use crate::{Context, Enhancer};
 use crate::io::Tokens;
+use crate::{Context, Enhancer};
 
 /// A recognizer that finds matches in the recognized-text stream and
 /// returns stream-positioned [`EntityDraft`]s.
@@ -182,14 +182,30 @@ where
                 continue; // the boosted draft didn't survive lift
             };
             let hint = boost.hint_index.map(|i| ctx.context_hints[i].clone());
+            // Where the boosting keyword sits: a hint carries its own
+            // location; an in-text match resolves its stream range through
+            // the modality (a pixel box / time span), mirroring how the
+            // entity itself was located. `None` when it can't be placed.
+            let location = match (&hint, boost.keyword_range) {
+                (Some(h), _) => Some(h.location.clone()),
+                (None, Some(range)) => M::locate(range, data, &ctx.artifacts),
+                (None, None) => None,
+            };
             let label = entities[entity_index].label.clone();
             entities[entity_index].provenance.record(
-                Event::refinement(boost.source, boost.before, boost.after, boost.keyword, hint)
-                    .with_reason(format!(
-                        "context keyword near `{}` (+{:.3})",
-                        label.as_str(),
-                        boost.amount,
-                    )),
+                Event::refinement(
+                    boost.source,
+                    boost.before,
+                    boost.after,
+                    boost.keyword,
+                    hint,
+                    location,
+                )
+                .with_reason(format!(
+                    "context keyword near `{}` (+{:.3})",
+                    label.as_str(),
+                    boost.amount,
+                )),
             );
         }
         Ok(entities)

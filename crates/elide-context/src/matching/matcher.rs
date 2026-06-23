@@ -1,10 +1,12 @@
 //! [`KeywordMatcher`] trait + the default [`SubstringMatcher`].
 
+use std::ops::Range;
+
 use hipstr::HipStr;
 
 use crate::io::Token;
 
-/// Decides whether any keyword fires near an entity match.
+/// Decides whether any keyword fires near an entity match, and where.
 ///
 /// The strategy slot that lets the enhancer swap raw substring
 /// matching for lemma-aware matching (or a third-party
@@ -17,9 +19,15 @@ use crate::io::Token;
 /// ignored; `tokens` is empty when no NLP engine produced a token
 /// artifact.
 pub trait KeywordMatcher: Send + Sync {
-    /// `true` if at least one keyword from `keywords` appears in
-    /// the input.
-    fn any_match(&self, window: &str, tokens: &[Token], keywords: &[HipStr<'static>]) -> bool;
+    /// The byte range, **within `window`**, of the first keyword that
+    /// fires, or `None` when none do. The range is window-relative; the
+    /// caller offsets it into stream coordinates to resolve a location.
+    fn any_match(
+        &self,
+        window: &str,
+        tokens: &[Token],
+        keywords: &[HipStr<'static>],
+    ) -> Option<Range<usize>>;
 }
 
 /// ASCII case-insensitive substring matcher.
@@ -34,11 +42,22 @@ pub trait KeywordMatcher: Send + Sync {
 pub struct SubstringMatcher;
 
 impl KeywordMatcher for SubstringMatcher {
-    fn any_match(&self, window: &str, _tokens: &[Token], keywords: &[HipStr<'static>]) -> bool {
+    fn any_match(
+        &self,
+        window: &str,
+        _tokens: &[Token],
+        keywords: &[HipStr<'static>],
+    ) -> Option<Range<usize>> {
+        // `to_ascii_lowercase` rewrites bytes in place without changing
+        // length, so an offset into `lowered` is the same offset into
+        // `window` — the match position is reusable as-is.
         let lowered = window.to_ascii_lowercase();
-        keywords
-            .iter()
-            .any(|kw| lowered.contains(kw.as_str().to_ascii_lowercase().as_str()))
+        keywords.iter().find_map(|kw| {
+            let needle = kw.as_str().to_ascii_lowercase();
+            lowered
+                .find(&needle)
+                .map(|start| start..start + needle.len())
+        })
     }
 }
 
@@ -53,18 +72,29 @@ mod tests {
     #[test]
     fn substring_matches_case_insensitively() {
         let m = SubstringMatcher;
-        assert!(m.any_match("Your SSN: 123", &[], &kws(&["ssn"])));
-        assert!(m.any_match(
-            "the SOCIAL SECURITY number",
-            &[],
-            &kws(&["social security"])
-        ));
-        assert!(!m.any_match("nothing here", &[], &kws(&["ssn"])));
+        // "SSN" sits at bytes 5..8 of the window.
+        assert_eq!(
+            m.any_match("Your SSN: 123", &[], &kws(&["ssn"])),
+            Some(5..8)
+        );
+        assert_eq!(
+            m.any_match(
+                "the SOCIAL SECURITY number",
+                &[],
+                &kws(&["social security"])
+            ),
+            Some(4..19)
+        );
+        assert_eq!(m.any_match("nothing here", &[], &kws(&["ssn"])), None);
     }
 
     #[test]
     fn substring_is_permissive() {
         let m = SubstringMatcher;
-        assert!(m.any_match("MyEmailAddress", &[], &kws(&["email"])));
+        // "Email" inside "MyEmailAddress" is bytes 2..7.
+        assert_eq!(
+            m.any_match("MyEmailAddress", &[], &kws(&["email"])),
+            Some(2..7)
+        );
     }
 }
