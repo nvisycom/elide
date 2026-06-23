@@ -100,6 +100,7 @@ crypto = ["dep:aes-gcm", "dep:base64"]
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }
+elide-context = { workspace = true, features = [] }
 elide-pattern = { workspace = true, features = [], optional = true }
 elide-ner = { workspace = true, features = [], optional = true }
 elide-llm = { workspace = true, features = [], optional = true }

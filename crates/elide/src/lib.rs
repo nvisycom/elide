@@ -41,6 +41,47 @@ pub mod codec {
 pub mod recognition {
     #[doc(inline)]
     pub use elide_core::recognition::*;
+
+    /// Context-enhanced recognition: wrap a stream recognizer to boost
+    /// confidence from nearby keywords before lifting matches.
+    ///
+    /// A [`StreamRecognizer`] finds matches over the recognized-text stream
+    /// and returns [`EntityDraft`]s; [`Enhanced`] adapts one into a full
+    /// [`Recognizer`], optionally running an [`Enhancer`] (built from
+    /// [`BoostRule`]s) over the drafts first. This is the home of the type
+    /// `PatternRecognizer::build_context_enhanced` returns. Re-exported from
+    /// [`elide_context`].
+    ///
+    /// The return type of `build_context_enhanced` is now nameable through
+    /// the facade, so a caller can store or return it:
+    ///
+    /// ```
+    /// # #[cfg(feature = "pattern")] {
+    /// use elide::recognition::context::Enhanced;
+    /// use elide::recognition::pattern::PatternRecognizer;
+    ///
+    /// fn build() -> Enhanced<PatternRecognizer> {
+    ///     PatternRecognizer::builder()
+    ///         .build_context_enhanced()
+    ///         .expect("recognizer builds")
+    /// }
+    /// # }
+    /// ```
+    ///
+    /// [`Recognizer`]: elide_core::recognition::Recognizer
+    /// [`StreamRecognizer`]: elide_context::StreamRecognizer
+    /// [`EntityDraft`]: elide_context::EntityDraft
+    /// [`Enhanced`]: elide_context::Enhanced
+    /// [`Enhancer`]: elide_context::Enhancer
+    /// [`BoostRule`]: elide_context::BoostRule
+    pub mod context {
+        #[doc(inline)]
+        pub use elide_context::{
+            Boost, BoostRule, Context, DraftEvent, Enhanced, Enhancer, EntityDraft,
+            StreamRecognizer, lift,
+        };
+    }
+
     /// LLM-mediated recognition (text NER and image VLM).
     #[cfg(feature = "llm")]
     #[cfg_attr(docsrs, doc(cfg(feature = "llm")))]
