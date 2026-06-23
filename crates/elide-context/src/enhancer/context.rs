@@ -6,11 +6,11 @@ use elide_core::primitive::LanguageTag;
 
 use crate::io::Token;
 
-/// Per-call inputs bundled together so the enhancer's internal
-/// methods don't drag a long argument list through every layer.
+/// Per-call inputs to one enhancement pass, bundled together.
 ///
-/// All fields borrow; the value lives for the duration of one
-/// [`Enhancer::enhance`] call.
+/// Bundling keeps the enhancer's internal methods from dragging a long
+/// argument list through every layer. All fields borrow; the value lives
+/// for the duration of one [`Enhancer::enhance`] call.
 ///
 /// [`Enhancer::enhance`]: super::Enhancer::enhance
 #[derive(Clone, Copy)]

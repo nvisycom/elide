@@ -65,6 +65,11 @@ impl<V, G> Pseudonymize<V, G> {
     pub fn new(vault: V, generator: G) -> Self {
         Self { vault, generator }
     }
+
+    /// Identity shared by every modality's impl.
+    fn id() -> OperatorId {
+        OperatorId::new("pseudonymize", "1.0.0")
+    }
 }
 
 /// The vault key for an entity: its label paired with the cluster seed
@@ -86,7 +91,7 @@ where
     G: Generator<Text>,
 {
     fn id(&self) -> OperatorId {
-        OperatorId::new("pseudonymize", "1.0.0")
+        Self::id()
     }
 
     fn leak_profile(&self) -> LeakProfile {
@@ -112,7 +117,7 @@ where
     G: Generator<Tabular>,
 {
     fn id(&self) -> OperatorId {
-        OperatorId::new("pseudonymize", "1.0.0")
+        Self::id()
     }
 
     fn leak_profile(&self) -> LeakProfile {

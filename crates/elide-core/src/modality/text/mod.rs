@@ -9,8 +9,8 @@ use std::ops::Range;
 pub use self::data::TextData;
 pub use self::location::TextLocation;
 pub use self::replacement::TextReplacement;
-use super::text_recognizable::TextRecognizable;
 use super::Modality;
+use super::text_recognizable::TextRecognizable;
 use crate::recognition::Artifacts;
 
 /// Text modality: data is [`TextData`], locations are

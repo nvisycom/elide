@@ -947,6 +947,7 @@ dependencies = [
  "bytes",
  "derive_builder",
  "elide-codec",
+ "elide-context",
  "elide-core",
  "elide-llm",
  "elide-ner",

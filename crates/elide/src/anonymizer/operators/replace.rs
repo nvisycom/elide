@@ -34,6 +34,11 @@ pub struct Replace {
 }
 
 impl Replace {
+    /// Identity shared by every modality's impl.
+    fn id() -> OperatorId {
+        OperatorId::new("replace", "1.0.0")
+    }
+
     /// A `Replace` with the given template (see the type docs for
     /// placeholder syntax).
     pub fn new(template: impl Into<String>) -> Self {
@@ -65,7 +70,7 @@ impl Replace {
 
 impl Operator<Text> for Replace {
     fn id(&self) -> OperatorId {
-        OperatorId::new("replace", "1.0.0")
+        Replace::id()
     }
 
     fn leak_profile(&self) -> LeakProfile {
@@ -82,7 +87,7 @@ impl Operator<Text> for Replace {
 #[cfg(feature = "tabular")]
 impl Operator<Tabular> for Replace {
     fn id(&self) -> OperatorId {
-        OperatorId::new("replace", "1.0.0")
+        Replace::id()
     }
 
     fn leak_profile(&self) -> LeakProfile {

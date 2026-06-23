@@ -113,7 +113,8 @@ impl NerRecognizer {
         ctx: &RecognizerContext<'_, M>,
     ) -> Option<Entity<M>> {
         let confidence = span.confidence;
-        let Some(location) = M::locate(span.offset.start..span.offset.end, data, &ctx.artifacts) else {
+        let Some(location) = M::locate(span.offset.start..span.offset.end, data, &ctx.artifacts)
+        else {
             // The match can't be placed in the medium (e.g. an OCR range no
             // word box covers); drop it rather than emit a placeless entity.
             tracing::warn!(

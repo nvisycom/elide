@@ -27,6 +27,11 @@ pub struct Mask {
 }
 
 impl Mask {
+    /// Identity shared by every modality's impl.
+    fn id() -> OperatorId {
+        OperatorId::new("mask", "1.0.0")
+    }
+
     /// A mask using `mask_char`, with no preserved prefix or suffix.
     pub fn new(mask_char: char) -> Self {
         Self {
@@ -82,7 +87,7 @@ impl Mask {
 
 impl Operator<Text> for Mask {
     fn id(&self) -> OperatorId {
-        OperatorId::new("mask", "1.0.0")
+        Mask::id()
     }
 
     fn leak_profile(&self) -> LeakProfile {
@@ -98,7 +103,7 @@ impl Operator<Text> for Mask {
 #[cfg(feature = "tabular")]
 impl Operator<Tabular> for Mask {
     fn id(&self) -> OperatorId {
-        OperatorId::new("mask", "1.0.0")
+        Mask::id()
     }
 
     fn leak_profile(&self) -> LeakProfile {

@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use super::Modality;
 
-/// A located, typed piece of context a recognizer may treat as
-/// in-context for a nearby value.
+/// Located, typed piece of context a recognizer may treat as in-context
+/// for a nearby value.
 ///
 /// Out-of-band by nature: a hint is *not* a sub-span of the value it
 /// informs — it lives elsewhere in the source (a table's column header, a

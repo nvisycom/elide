@@ -40,6 +40,11 @@ impl<K: KeyProvider> Encrypt<K> {
         Self { keys }
     }
 
+    /// Identity shared by every modality's impl.
+    fn id() -> OperatorId {
+        OperatorId::new("encrypt", "1.0.0")
+    }
+
     /// The cipher bound to the current key.
     fn cipher(&self) -> Aes256Gcm {
         Aes256Gcm::new(self.keys.key().into())
@@ -93,7 +98,7 @@ impl<K: KeyProvider> Encrypt<K> {
 
 impl<K: KeyProvider> Operator<Text> for Encrypt<K> {
     fn id(&self) -> OperatorId {
-        OperatorId::new("encrypt", "1.0.0")
+        Self::id()
     }
 
     fn leak_profile(&self) -> LeakProfile {
@@ -121,7 +126,7 @@ impl<K: KeyProvider> ReversibleOperator<Text> for Encrypt<K> {
 #[cfg(feature = "tabular")]
 impl<K: KeyProvider> Operator<Tabular> for Encrypt<K> {
     fn id(&self) -> OperatorId {
-        OperatorId::new("encrypt", "1.0.0")
+        Self::id()
     }
 
     fn leak_profile(&self) -> LeakProfile {

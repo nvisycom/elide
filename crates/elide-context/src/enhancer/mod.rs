@@ -252,9 +252,11 @@ impl Enhancer {
 }
 
 /// One confidence lift the enhancer applied, for the caller to record in
-/// provenance. Modality-free: the matched hint is referenced by *index*
-/// into the context hints, so the caller (which holds the located hints)
-/// can attach the hint's location.
+/// provenance.
+///
+/// Modality-free: the matched hint is referenced by *index* into the
+/// context hints, so the caller (which holds the located hints) can attach
+/// the hint's location.
 #[derive(Debug, Clone)]
 pub struct Boost {
     /// Index of the entity that was lifted, into the slice passed to

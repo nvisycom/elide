@@ -91,7 +91,10 @@ mod tests {
         let data = AudioData::new(bytes::Bytes::new());
         let scope = Scope::<Audio>::new();
         let ctx = phone_context(&scope);
-        assert_eq!(Audio::as_text(&data, &ctx.artifacts), "Call Alice at 555-1234");
+        assert_eq!(
+            Audio::as_text(&data, &ctx.artifacts),
+            "Call Alice at 555-1234"
+        );
     }
 
     #[test]
