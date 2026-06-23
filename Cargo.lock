@@ -942,10 +942,8 @@ name = "elide"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
- "async-trait",
  "base64",
  "bytes",
- "derive_builder",
  "elide-codec",
  "elide-context",
  "elide-core",
@@ -997,7 +995,6 @@ version = "0.1.0"
 dependencies = [
  "elide-core",
  "hipstr",
- "tokio",
  "tracing",
  "unicode-segmentation",
 ]
@@ -1040,7 +1037,6 @@ dependencies = [
  "schemars",
  "serde",
  "thiserror",
- "tokio",
  "tracing",
  "unicode-normalization",
 ]
@@ -1075,7 +1071,6 @@ name = "elide-pattern"
 version = "0.1.0"
 dependencies = [
  "aho-corasick",
- "async-trait",
  "bs58",
  "csv",
  "derive_builder",

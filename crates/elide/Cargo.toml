@@ -112,9 +112,6 @@ elide-codec = { workspace = true, features = [], optional = true }
 serde = { workspace = true, features = [], optional = true }
 erased-serde = { workspace = true, features = [], optional = true }
 
-# Derive macros & error handling
-derive_builder = { workspace = true, features = [] }
-
 # Primitive datatypes
 bytes = { workspace = true, features = [] }
 uuid = { workspace = true, features = ["v4"] }
@@ -139,7 +136,6 @@ serde_json = { workspace = true, features = [] }
 
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
-async-trait = { workspace = true, features = [] }
 
 # Container formats
 zip = { workspace = true }

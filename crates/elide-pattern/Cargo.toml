@@ -36,9 +36,6 @@ csv = { workspace = true, features = [] }
 derive_builder = { workspace = true, features = [] }
 derive_more = { workspace = true, features = ["from"] }
 
-# Async runtime & parallelism
-async-trait = { workspace = true, features = [] }
-
 # Text processing
 regex = { workspace = true, features = [] }
 aho-corasick = { workspace = true, features = [] }

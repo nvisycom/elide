@@ -82,7 +82,3 @@ schemars = { workspace = true, features = [] }
 reqwest-middleware = { workspace = true, features = [], optional = true }
 reqwest-retry = { workspace = true, features = [], optional = true }
 reqwest-tracing = { workspace = true, features = [], optional = true }
-
-[dev-dependencies]
-# Async runtime & parallelism
-tokio = { workspace = true, features = ["macros", "rt"] }
