@@ -16,8 +16,8 @@ pub use self::location::TabularLocation;
 pub use self::replacement::TabularReplacement;
 use super::Modality;
 use super::text::TextData;
-use super::text_backed::{TextRecognizable, TextSpanned};
-use crate::recognition::RecognizerContext;
+use super::text_recognizable::TextRecognizable;
+use crate::recognition::Artifacts;
 
 /// Tabular modality: cells hold text, so data is [`TextData`] and
 /// replacements are [`TabularReplacement`]; only [`TabularLocation`] is
@@ -34,23 +34,17 @@ impl Modality for Tabular {
 }
 
 impl TextRecognizable for Tabular {
-    fn as_text<'a>(data: &'a TextData, _ctx: &'a RecognizerContext<'_, Self>) -> &'a str {
+    fn as_text<'a>(data: &'a TextData, _artifacts: &'a Artifacts) -> &'a str {
         data.text.as_str()
     }
 
     fn locate(
         range: Range<usize>,
         _data: &TextData,
-        _ctx: &RecognizerContext<'_, Self>,
+        _artifacts: &Artifacts,
     ) -> Option<TabularLocation> {
         // Chunk-local: only the intra-cell byte range is known here; the
         // codec's lift fills the row/column from the chunk.
         Some(TabularLocation::new(0, 0).with_range(range.start, range.end))
-    }
-}
-
-impl TextSpanned for Tabular {
-    fn span(location: &TabularLocation) -> Range<usize> {
-        location.start_offset.unwrap_or(0)..location.end_offset.unwrap_or(0)
     }
 }

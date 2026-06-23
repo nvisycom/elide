@@ -1,5 +1,5 @@
 //! [`Context`]: per-rule keyword set used by the post-recognition
-//! [`ContextEnhanced`] layer.
+//! [`Enhanced`] layer.
 //!
 //! Two shapes:
 //!
@@ -13,7 +13,7 @@
 //!
 //! [`Global`]: Context::Global
 //! [`PerLanguage`]: Context::PerLanguage
-//! [`ContextEnhanced`]: elide_context::ContextEnhanced
+//! [`Enhanced`]: elide_context::Enhanced
 //! [`Regex::languages`]: super::Regex::languages
 //! [`Dictionary::languages`]: super::Dictionary::languages
 

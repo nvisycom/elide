@@ -38,13 +38,13 @@ mod chunk;
 mod data_reader;
 mod data_writer;
 mod hint;
-mod text_backed;
+mod text_recognizable;
 
 pub use self::chunk::Chunk;
 pub use self::data_reader::{DataReader, StreamDataReader};
 pub use self::data_writer::DataWriter;
 pub use self::hint::Hint;
-pub use self::text_backed::{TextRecognizable, TextSpanned};
+pub use self::text_recognizable::TextRecognizable;
 
 /// Payload a recognizer inspects for a modality.
 ///

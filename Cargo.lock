@@ -997,6 +997,7 @@ dependencies = [
  "elide-core",
  "hipstr",
  "tokio",
+ "tracing",
  "unicode-segmentation",
 ]
 
@@ -1086,7 +1087,6 @@ dependencies = [
  "serde",
  "tokio",
  "toml",
- "tracing",
 ]
 
 [[package]]

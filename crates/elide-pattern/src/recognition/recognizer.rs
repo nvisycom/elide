@@ -2,11 +2,11 @@
 
 use aho_corasick::{AhoCorasick, MatchKind};
 use elide_context::matching::SubstringMatcher;
-use elide_context::{BoostRule, ContextEnhanced, Enhancer};
-use elide_core::entity::{Entity, LabelCatalog, LabelRef};
+use elide_context::{BoostRule, Enhanced, Enhancer, EntityDraft, StreamRecognizer};
+use elide_core::entity::{LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::LanguageTag;
-use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
+use elide_core::recognition::{RecognizerContext, RecognizerId};
 use elide_core::{Error, ErrorKind, Result};
 use regex::RegexSet;
 
@@ -28,7 +28,7 @@ use crate::validators::{ValidationContext, ValidatorRegistry};
 ///
 /// Construct via [`PatternRecognizer::builder`]. [`build`]
 /// returns the bare recognizer; [`build_context_enhanced`] wraps
-/// it in a [`ContextEnhanced`] layer that lifts confidence on
+/// it in a [`Enhanced`] layer that lifts confidence on
 /// matches whose neighbourhood contains a per-label context
 /// keyword.
 ///
@@ -186,7 +186,7 @@ impl PatternRecognizerBuilder {
     /// Per-rule `context` keywords are ignored on the emission
     /// path; the recognizer emits raw confidence as authored by
     /// each rule. Wrap the result with [`build_context_enhanced`]
-    /// (or compose with [`ContextEnhanced`] manually) to lift
+    /// (or compose with [`Enhanced`] manually) to lift
     /// confidence on matches near a declared keyword.
     ///
     /// # Errors
@@ -214,22 +214,24 @@ impl PatternRecognizerBuilder {
         })
     }
 
-    /// Compile every rule and wrap the recognizer in a
-    /// [`ContextEnhanced`] layer.
+    /// Compile every rule and wrap the recognizer in an [`Enhanced`] layer
+    /// that runs keyword-boost context enhancement.
     ///
-    /// Context keywords from every pattern and dictionary are
-    /// harvested into per-label [`BoostRule`]s that lift confidence
-    /// on matches whose neighbourhood contains a declared keyword.
+    /// Context keywords from every pattern and dictionary are harvested into
+    /// per-label [`BoostRule`]s that lift confidence on matches whose
+    /// neighbourhood contains a declared keyword. Because enhancement runs on
+    /// the stream-positioned drafts before they are lifted, this works for
+    /// every modality (text, tabular, image, audio).
     ///
     /// # Errors
     ///
     /// See [`build`].
     ///
     /// [`build`]: Self::build
-    pub fn build_context_enhanced(self) -> Result<ContextEnhanced<PatternRecognizer>> {
+    pub fn build_context_enhanced(self) -> Result<Enhanced<PatternRecognizer>> {
         let enhancer = self.build_enhancer();
         let recognizer = self.build()?;
-        Ok(ContextEnhanced::new(recognizer, enhancer))
+        Ok(Enhanced::with_enhancer(recognizer, enhancer))
     }
 
     /// Compile every `(pattern, variant)` pair into a
@@ -418,18 +420,13 @@ impl PatternRecognizerBuilder {
     }
 }
 
-impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
+impl<M: TextRecognizable> StreamRecognizer<M> for PatternRecognizer {
     fn id(&self) -> RecognizerId {
         RecognizerId::new("elide-pattern", env!("CARGO_PKG_VERSION"))
     }
 
-    async fn recognize(
-        &self,
-        data: &M::Data,
-        ctx: &RecognizerContext<'_, M>,
-    ) -> Result<Vec<Entity<M>>> {
-        let text = M::as_text(data, ctx);
-        let mut entities: Vec<Entity<M>> = Vec::new();
+    fn find(&self, text: &str, ctx: &RecognizerContext<'_, M>) -> Vec<EntityDraft> {
+        let mut drafts: Vec<EntityDraft> = Vec::new();
 
         if let Some(set) = self.regex_set.as_ref() {
             for pattern_id in set.matches(text).into_iter() {
@@ -450,9 +447,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
                     {
                         continue;
                     }
-                    if let Some(entity) = pat.build_entity::<M>(m.range(), data, ctx) {
-                        entities.push(entity);
-                    }
+                    drafts.push(pat.draft(m.range()));
                 }
             }
         }
@@ -474,12 +469,10 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
                     continue;
                 }
                 let score = dict.term_scores[term_id - dict.term_start];
-                if let Some(entity) = dict.build_entity::<M>(score, range, data, ctx) {
-                    entities.push(entity);
-                }
+                drafts.push(dict.draft(score, range));
             }
         }
 
-        Ok(entities)
+        drafts
     }
 }

@@ -12,7 +12,7 @@ pub use self::layout::{Layout, LayoutBlock, LayoutWord};
 pub use self::location::ImageLocation;
 pub use self::replacement::ImageReplacement;
 use super::{Modality, TextRecognizable};
-use crate::recognition::RecognizerContext;
+use crate::recognition::Artifacts;
 
 /// Image modality: data is [`ImageData`], locations are
 /// [`ImageLocation`] regions, replacements are [`ImageReplacement`].
@@ -32,8 +32,8 @@ impl TextRecognizable for Image {
     /// stamped onto the call's artifacts, or `""` when none is present (an
     /// image that was never OCR'd) — a recognizer then finds nothing,
     /// rather than erroring.
-    fn as_text<'a>(_data: &'a ImageData, ctx: &'a RecognizerContext<'_, Self>) -> &'a str {
-        ctx.artifacts.get::<Layout>().map_or("", Layout::text)
+    fn as_text<'a>(_data: &'a ImageData, artifacts: &'a Artifacts) -> &'a str {
+        artifacts.get::<Layout>().map_or("", Layout::text)
     }
 
     /// Resolve an OCR-text byte `range` to the region of the image it
@@ -48,9 +48,9 @@ impl TextRecognizable for Image {
     fn locate(
         range: Range<usize>,
         _data: &ImageData,
-        ctx: &RecognizerContext<'_, Self>,
+        artifacts: &Artifacts,
     ) -> Option<ImageLocation> {
-        ctx.artifacts.get::<Layout>().and_then(|t| t.resolve(range))
+        artifacts.get::<Layout>().and_then(|t| t.resolve(range))
     }
 }
 
@@ -58,7 +58,7 @@ impl TextRecognizable for Image {
 mod tests {
     use super::*;
     use crate::primitive::{BoundingBox, Dimensions, Point};
-    use crate::recognition::Scope;
+    use crate::recognition::{RecognizerContext, Scope};
 
     fn loc(x: f64, y: f64, w: f64, h: f64) -> ImageLocation {
         ImageLocation::new(BoundingBox::from_origin_size(Point::new(x, y), w, h))
@@ -69,7 +69,7 @@ mod tests {
         let data = ImageData::new(bytes::Bytes::new(), Dimensions::new(10, 10));
         let scope = Scope::<Image>::new();
         let ctx = RecognizerContext::new(&scope);
-        assert_eq!(Image::as_text(&data, &ctx), "");
+        assert_eq!(Image::as_text(&data, &ctx.artifacts), "");
     }
 
     /// A context whose artifacts carry a one-block, one-word OCR result.
@@ -86,7 +86,7 @@ mod tests {
         let data = ImageData::new(bytes::Bytes::new(), Dimensions::new(10, 10));
         let scope = Scope::<Image>::new();
         let ctx = ocr_context(&scope);
-        assert_eq!(Image::as_text(&data, &ctx), "Alice");
+        assert_eq!(Image::as_text(&data, &ctx.artifacts), "Alice");
     }
 
     #[test]
@@ -95,7 +95,7 @@ mod tests {
         let scope = Scope::<Image>::new();
         let ctx = ocr_context(&scope);
         // "Alice" is bytes 0..5.
-        let region = Image::locate(0..5, &data, &ctx).expect("range resolves");
+        let region = Image::locate(0..5, &data, &ctx.artifacts).expect("range resolves");
         assert_eq!(region.bounding_box.min.x, 0.0);
         assert_eq!(region.bounding_box.max.x, 100.0);
     }
@@ -106,6 +106,6 @@ mod tests {
         let scope = Scope::<Image>::new();
         let ctx = RecognizerContext::new(&scope);
         // No OCR layout: the range can't be placed, so no location.
-        assert!(Image::locate(0..5, &data, &ctx).is_none());
+        assert!(Image::locate(0..5, &data, &ctx.artifacts).is_none());
     }
 }

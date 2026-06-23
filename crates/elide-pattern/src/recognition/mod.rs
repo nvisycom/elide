@@ -5,7 +5,7 @@
 //! runtime [`PatternRecognizer`] that compiles them into pooled
 //! scanners. Per-rule and per-dictionary `context` keyword lists
 //! are harvested by [`PatternRecognizerBuilder::build_context_enhanced`]
-//! into a wrapping `ContextEnhanced` layer that lifts confidence
+//! into a wrapping `Enhanced` layer that lifts confidence
 //! on matches near a declared keyword.
 
 mod compiled;
