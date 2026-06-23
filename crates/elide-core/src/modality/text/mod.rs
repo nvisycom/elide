@@ -4,10 +4,14 @@ mod data;
 mod location;
 mod replacement;
 
+use std::ops::Range;
+
 pub use self::data::TextData;
 pub use self::location::TextLocation;
 pub use self::replacement::TextReplacement;
+use super::text_recognizable::TextRecognizable;
 use super::Modality;
+use crate::recognition::Artifacts;
 
 /// Text modality: data is [`TextData`], locations are
 /// [`TextLocation`] byte ranges, replacements are [`TextReplacement`].
@@ -20,6 +24,20 @@ impl Modality for Text {
     type Replacement = TextReplacement;
 
     const NAME: &'static str = "text";
+}
+
+impl TextRecognizable for Text {
+    fn as_text<'a>(data: &'a TextData, _artifacts: &'a Artifacts) -> &'a str {
+        data.text.as_str()
+    }
+
+    fn locate(
+        range: Range<usize>,
+        _data: &TextData,
+        _artifacts: &Artifacts,
+    ) -> Option<TextLocation> {
+        Some(TextLocation::new(range.start, range.end))
+    }
 }
 
 #[cfg(test)]

@@ -107,9 +107,9 @@ mod tests {
         enricher.enrich(&data, &mut ctx).await.unwrap();
 
         // Recognizers read the transcript from the call's artifacts.
-        assert_eq!(Audio::as_text(&data, &ctx), "hi Alice");
+        assert_eq!(Audio::as_text(&data, &ctx.artifacts), "hi Alice");
         // "Alice" is at bytes 3..8; locate resolves it to the word's time.
-        let loc = Audio::locate(3..8, &data, &ctx).expect("range resolves");
+        let loc = Audio::locate(3..8, &data, &ctx.artifacts).expect("range resolves");
         assert_eq!(loc.span.start_millis(), 300);
         assert_eq!(loc.span.end_millis(), 900);
     }

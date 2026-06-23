@@ -3,13 +3,13 @@
 
 use std::collections::HashMap;
 
-use elide_core::entity::{Entity, LabelRef};
-use elide_core::modality::TextSpanned;
+use elide_core::entity::LabelRef;
 use elide_core::primitive::Confidence;
 use hipstr::HipStr;
 
 use crate::io::Token;
 use crate::matching::KeywordMatcher;
+use crate::recognition::EntityDraft;
 use crate::rule::BoostRule;
 
 mod context;
@@ -113,49 +113,46 @@ impl Enhancer {
         self.rules.len()
     }
 
-    /// Apply boost rules to `entities` in place, lifting confidence where a
+    /// Apply boost rules to `drafts` in place, lifting confidence where a
     /// keyword fires, and return one [`Boost`] per lift for the caller to
     /// record in provenance.
     ///
-    /// For each entity: walk every rule registered for its label whose
+    /// For each draft: walk every rule registered for its label whose
     /// language scope applies under `ctx.language`, check a window of
-    /// `prefix_words`/`suffix_words` around the entity's location (and the
-    /// out-of-band hints), and on a hit lift confidence by the rule's
+    /// `prefix_words`/`suffix_words` around the draft's [`stream_range`] (and
+    /// the out-of-band hints), and on a hit lift confidence by the rule's
     /// `boost` (saturating at the [`Confidence`] ceiling). The in-text and
     /// hint paths are independent — at most one boost per rule fires per
-    /// entity (window first, hint as fallback) — so a long keyword list
+    /// draft (window first, hint as fallback) — so a long keyword list
     /// can't double-dip.
     ///
-    /// This crate is modality-agnostic and matches on `&str`, so it does
-    /// *not* build the provenance event: it returns each [`Boost`] with the
-    /// matched hint's *index* (when the match came from a hint), and the
-    /// caller — which holds the located `Hint<M>`s — records the refinement
-    /// with the hint's location.
+    /// Operating on drafts (pre-lift) is what makes this modality-free: the
+    /// draft carries its stream byte range, so the enhancer never needs the
+    /// native location. It does *not* build the provenance event: it returns
+    /// each [`Boost`] with the matched hint's *index* (when the match came
+    /// from a hint), for the caller to record once the draft is lifted.
     ///
     /// [`Confidence`]: elide_core::primitive::Confidence
-    pub fn enhance<M: TextSpanned>(
-        &self,
-        entities: &mut [Entity<M>],
-        ctx: &Context<'_>,
-    ) -> Vec<Boost> {
+    /// [`stream_range`]: EntityDraft::stream_range
+    pub fn enhance(&self, drafts: &mut [EntityDraft], ctx: &Context<'_>) -> Vec<Boost> {
         let mut boosts = Vec::new();
         if self.rules.is_empty() {
             return boosts;
         }
-        for (entity_index, entity) in entities.iter_mut().enumerate() {
-            self.enhance_one(entity_index, entity, ctx, &mut boosts);
+        for (draft_index, draft) in drafts.iter_mut().enumerate() {
+            self.enhance_one(draft_index, draft, ctx, &mut boosts);
         }
         boosts
     }
 
-    fn enhance_one<M: TextSpanned>(
+    fn enhance_one(
         &self,
-        entity_index: usize,
-        entity: &mut Entity<M>,
+        draft_index: usize,
+        draft: &mut EntityDraft,
         ctx: &Context<'_>,
         boosts: &mut Vec<Boost>,
     ) {
-        let Some(bucket) = self.rules.get(&entity.label) else {
+        let Some(bucket) = self.rules.get(&draft.label) else {
             return;
         };
         for rule in bucket {
@@ -165,22 +162,21 @@ impl Enhancer {
             if rule.keywords.is_empty() {
                 continue;
             }
-            if let Some(boost) = self.apply_rule(entity_index, entity, rule, ctx) {
+            if let Some(boost) = self.apply_rule(draft_index, draft, rule, ctx) {
                 boosts.push(boost);
             }
         }
     }
 
-    fn apply_rule<M: TextSpanned>(
+    fn apply_rule(
         &self,
-        entity_index: usize,
-        entity: &mut Entity<M>,
+        draft_index: usize,
+        draft: &mut EntityDraft,
         rule: &BoostRule,
         ctx: &Context<'_>,
     ) -> Option<Boost> {
-        // The entity is still chunk-local here; its location spans a byte
-        // range of `ctx.text` (the chunk payload).
-        let range = M::span(&entity.location);
+        // The draft carries its byte range into `ctx.text` (the stream).
+        let range = draft.stream_range.clone();
 
         // Prefer the token stream when the producer reached this
         // entity. Fall back to the word-segmented substring window
@@ -225,18 +221,18 @@ impl Enhancer {
                 return None;
             };
 
-        let before = entity.confidence;
+        let before = draft.confidence;
         let after = before.saturating_add(rule.boost.get());
         if after == before {
             return None;
         }
-        entity.confidence = after;
+        draft.confidence = after;
 
         // The rule's first keyword stands in for the match — the matcher
         // reports "any keyword fired", not which one.
         let keyword = rule.keywords.first().cloned().unwrap_or_default();
         Some(Boost {
-            entity_index,
+            entity_index: draft_index,
             source,
             before,
             after,

@@ -48,9 +48,6 @@ bs58 = { workspace = true, features = ["check"] }
 iban_validate = { workspace = true }
 phonenumber = { workspace = true }
 
-# Observability
-tracing = { workspace = true, features = [] }
-
 [dev-dependencies]
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["macros", "rt"] }

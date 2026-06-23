@@ -1,10 +1,10 @@
 //! End-to-end: feed real input through a [`Regex`] →
-//! [`PatternRecognizer`] (wrapped in [`ContextEnhanced`]) and verify
+//! [`PatternRecognizer`] (wrapped in [`Enhanced`]) and verify
 //! that confidence is boosted, and a [`Refinement`] step is
 //! appended only for matches that had a nearby keyword.
 //!
 //! [`Refinement`]: elide_core::entity::provenance::EventKind::Refinement
-//! [`ContextEnhanced`]: elide_context::ContextEnhanced
+//! [`Enhanced`]: elide_context::Enhanced
 
 use elide_core::entity::builtins;
 use elide_core::entity::provenance::EventKind;
@@ -40,7 +40,7 @@ async fn enhancer_boosts_matches_near_keyword_only() {
     assert_eq!(entities.len(), 2, "two SSN matches expected");
 
     // First match has `SSN:` within the default 5-word prefix/suffix
-    // window and gets boosted by the ContextEnhanced<PatternRecognizer> wrapper.
+    // window and gets boosted by the Enhanced<PatternRecognizer> wrapper.
     let near = entities
         .iter()
         .find(|e| &text[e.location.start..e.location.end] == "123-45-6789")

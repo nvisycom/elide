@@ -6,23 +6,23 @@
 //! into a shared [`AhoCorasick`] automaton, then stores the
 //! per-rule emission metadata next to those scanners. This module
 //! holds the per-rule metadata structs ([`CompiledPattern`],
-//! [`CompiledDictionary`]) and their `build_entity` constructors —
-//! the bits that turn a regex / Aho-Corasick hit into an
-//! `Entity<Text>`.
+//! [`CompiledDictionary`]) and their `draft` constructors — the bits that
+//! turn a regex / Aho-Corasick hit into an [`EntityDraft`] (stream-positioned;
+//! the `Enhanced` adapter lifts it to an entity).
 //!
 //! [`Regex`]: super::Regex
 //! [`Dictionary`]: super::Dictionary
 //! [`AhoCorasick`]: aho_corasick::AhoCorasick
+//! [`EntityDraft`]: elide_context::EntityDraft
 //! [`PatternRecognizerBuilder::build`]: super::PatternRecognizerBuilder::build
 
 use std::ops::Range;
 use std::sync::Arc;
 
-use elide_core::entity::provenance::{Event, PatternEvent};
-use elide_core::entity::{Entity, LabelRef};
-use elide_core::modality::TextRecognizable;
+use elide_context::{DraftEvent, EntityDraft};
+use elide_core::entity::LabelRef;
+use elide_core::entity::provenance::PatternEvent;
 use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
-use elide_core::recognition::RecognizerContext;
 use regex::Regex;
 
 use crate::validators::Validator;
@@ -35,8 +35,8 @@ use crate::validators::Validator;
 /// indirection.
 ///
 /// `context` is intentionally not stored on compiled state — the
-/// recognizer's wrapping `ContextEnhanced` layer harvests keywords from
-/// the source patterns at build time.
+/// recognizer's wrapping `Enhanced` layer harvests keywords from the source
+/// patterns at build time.
 pub(super) struct CompiledPattern {
     /// Pattern name (e.g. `"ssn"`). Surfaced in trail provenance.
     pub pattern_name: String,
@@ -53,21 +53,14 @@ pub(super) struct CompiledPattern {
 }
 
 impl CompiledPattern {
-    /// Emit an `Entity<M>` for a regex match at `[start, end)` in
-    /// chunk-local byte coordinates. The recognizer phase lifts the
-    /// location to absolute document coordinates after dispatch.
-    pub(super) fn build_entity<M: TextRecognizable>(
-        &self,
-        range: Range<usize>,
-        data: &M::Data,
-        ctx: &RecognizerContext<'_, M>,
-    ) -> Option<Entity<M>> {
-        let location = locate_or_drop::<M>(range, data, ctx, &self.pattern_name)?;
-        let event = Event::pattern(
-            "pattern",
-            self.score,
-            location.clone(),
-            PatternEvent {
+    /// Build a stream-positioned [`EntityDraft`] for a regex match at
+    /// `[start, end)` byte coordinates in the recognized-text stream. The
+    /// `Enhanced` adapter lifts the draft to a located entity after dispatch.
+    pub(super) fn draft(&self, range: Range<usize>) -> EntityDraft {
+        let event = DraftEvent {
+            source: "pattern".into(),
+            reason: format!("pattern `{}` matched", self.pattern_name).into(),
+            pattern: PatternEvent {
                 name: self.pattern_name.clone().into(),
                 regex: Some(self.regex.as_str().into()),
                 validator: self
@@ -76,34 +69,9 @@ impl CompiledPattern {
                     .map(|_| self.pattern_name.clone().into()),
                 contextual: false,
             },
-        )
-        .with_reason(format!("pattern `{}` matched", self.pattern_name));
-        Some(
-            Entity::builder()
-                .with_label(self.label.clone())
-                .with_location(location)
-                .with_confidence(self.score)
-                .with_event(event)
-                .build()
-                .expect("required fields provided"),
-        )
+        };
+        EntityDraft::new(self.label.clone(), self.score, range, event)
     }
-}
-
-/// Place `range` in the medium, or drop the match (returning `None`) with a
-/// warning when it can't be placed — an OCR/transcript range no enrichment
-/// covers, which would otherwise emit a placeless entity.
-fn locate_or_drop<M: TextRecognizable>(
-    range: Range<usize>,
-    data: &M::Data,
-    ctx: &RecognizerContext<'_, M>,
-    source: &str,
-) -> Option<M::Location> {
-    let location = M::locate(range, data, ctx);
-    if location.is_none() {
-        tracing::warn!(source, "could not place a match in the source; dropping it");
-    }
-    location
 }
 
 /// Source of truth for one runtime dictionary: its term range
@@ -134,38 +102,21 @@ pub(super) struct CompiledDictionary {
 }
 
 impl CompiledDictionary {
-    /// Emit an `Entity<M>` for an Aho-Corasick hit at `[start, end)`
-    /// in chunk-local byte coordinates. `score` is the per-term
-    /// confidence resolved at recognizer-build time (the dictionary's
-    /// `scoring` policy or per-term override).
-    pub(super) fn build_entity<M: TextRecognizable>(
-        &self,
-        score: Confidence,
-        range: Range<usize>,
-        data: &M::Data,
-        ctx: &RecognizerContext<'_, M>,
-    ) -> Option<Entity<M>> {
-        let location = locate_or_drop::<M>(range, data, ctx, &self.name)?;
-        let event = Event::pattern(
-            "pattern",
-            score,
-            location.clone(),
-            PatternEvent {
+    /// Build a stream-positioned [`EntityDraft`] for an Aho-Corasick hit at
+    /// `[start, end)` byte coordinates in the recognized-text stream. `score`
+    /// is the per-term confidence resolved at recognizer-build time (the
+    /// dictionary's `scoring` policy or per-term override).
+    pub(super) fn draft(&self, score: Confidence, range: Range<usize>) -> EntityDraft {
+        let event = DraftEvent {
+            source: "pattern".into(),
+            reason: format!("dictionary `{}` matched", self.name).into(),
+            pattern: PatternEvent {
                 name: self.name.clone().into(),
                 contextual: false,
                 ..PatternEvent::default()
             },
-        )
-        .with_reason(format!("dictionary `{}` matched", self.name));
-        Some(
-            Entity::builder()
-                .with_label(self.label.clone())
-                .with_location(location)
-                .with_confidence(score)
-                .with_event(event)
-                .build()
-                .expect("required fields provided"),
-        )
+        };
+        EntityDraft::new(self.label.clone(), score, range, event)
     }
 }
 

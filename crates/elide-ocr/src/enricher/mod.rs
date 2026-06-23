@@ -108,9 +108,9 @@ mod tests {
         enricher.enrich(&data, &mut ctx).await.unwrap();
 
         // Recognizers read the OCR text from the call's artifacts.
-        assert_eq!(Image::as_text(&data, &ctx), "hi Alice");
+        assert_eq!(Image::as_text(&data, &ctx.artifacts), "hi Alice");
         // "Alice" is at bytes 3..8; locate resolves it to the word's box.
-        let region = Image::locate(3..8, &data, &ctx).expect("range resolves");
+        let region = Image::locate(3..8, &data, &ctx.artifacts).expect("range resolves");
         assert_eq!(region.bounding_box.min.x, 40.0);
         assert_eq!(region.bounding_box.max.x, 100.0);
     }
