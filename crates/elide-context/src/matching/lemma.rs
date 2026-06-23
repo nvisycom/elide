@@ -4,7 +4,7 @@ use std::ops::Range;
 
 use hipstr::HipStr;
 
-use super::matcher::{KeywordMatcher, SubstringMatcher};
+use super::{KeywordMatcher, SubstringMatcher};
 use crate::io::Token;
 
 /// Lemma-aware matcher. Compares each lemma in `tokens` against
