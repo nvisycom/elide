@@ -2,11 +2,11 @@
 
 use aho_corasick::{AhoCorasick, MatchKind};
 use elide_context::matching::SubstringMatcher;
-use elide_context::{BoostRule, Enhanced, Enhancer, EntityDraft, StreamRecognizer};
-use elide_core::entity::{LabelCatalog, LabelRef};
+use elide_context::{BoostRule, Enhanced, Enhancer, EntityDraft, StreamRecognizer, lift_all};
+use elide_core::entity::{Entity, LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::LanguageTag;
-use elide_core::recognition::{RecognizerContext, RecognizerId};
+use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
 use elide_core::{Error, ErrorKind, Result};
 use regex::RegexSet;
 
@@ -72,8 +72,7 @@ impl PatternRecognizer {
     }
 }
 
-/// Accumulator of rules + validator registry for
-/// [`PatternRecognizer`].
+/// Accumulator of rules + validator registry for [`PatternRecognizer`].
 ///
 /// Patterns and dictionaries are stored as authored — compilation
 /// into the pooled scanners happens in [`build`].
@@ -474,5 +473,27 @@ impl<M: TextRecognizable> StreamRecognizer<M> for PatternRecognizer {
         }
 
         drafts
+    }
+}
+
+/// `PatternRecognizer` is a [`Recognizer`] directly, with no context
+/// enhancement: it `find`s drafts and [`lift_all`]s them. Wrap it in
+/// [`Enhanced`] (via [`build_context_enhanced`]) for the keyword-boost path.
+///
+/// [`Recognizer`]: elide_core::recognition::Recognizer
+/// [`build_context_enhanced`]: PatternRecognizerBuilder::build_context_enhanced
+impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
+    fn id(&self) -> RecognizerId {
+        StreamRecognizer::<M>::id(self)
+    }
+
+    async fn recognize(
+        &self,
+        data: &M::Data,
+        ctx: &RecognizerContext<'_, M>,
+    ) -> Result<Vec<Entity<M>>> {
+        let text = M::as_text(data, &ctx.artifacts);
+        let drafts = self.find(text, ctx);
+        Ok(lift_all::<M>(drafts, data, &ctx.artifacts))
     }
 }

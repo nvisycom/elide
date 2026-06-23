@@ -74,3 +74,44 @@ async fn enhancer_boosts_matches_near_keyword_only() {
         "far-from-keyword match should have no Refinement step",
     );
 }
+
+/// A bare `PatternRecognizer` from `build()` is a `Recognizer` directly —
+/// no `Enhanced` wrapper — and finds + lifts matches with no boosting.
+#[tokio::test]
+async fn bare_recognizer_works_without_enhancement() {
+    let variant = Variant::new(r"\b\d{3}-\d{2}-\d{4}\b")
+        .expect("ssn variant builds")
+        .with_score(Confidence::clamped(0.6));
+    let regex = Regex::builder()
+        .with_name("ssn")
+        .with_label(builtins::GOVERNMENT_ID.to_ref())
+        .with_context(vec!["ssn".to_owned()])
+        .with_variants(vec![variant])
+        .build()
+        .expect("ssn regex builds");
+
+    // `build()` (not `build_context_enhanced`) — used directly as a Recognizer.
+    let recognizer = PatternRecognizer::builder()
+        .with_pattern(regex)
+        .build()
+        .expect("recognizer builds");
+
+    let text = "SSN: 123-45-6789.";
+    let data = TextData::new(text.to_owned());
+    let scope = Scope::<Text>::new();
+    let ctx = RecognizerContext::new(&scope);
+    let entities = recognizer.recognize(&data, &ctx).await.expect("recognize");
+
+    assert_eq!(entities.len(), 1, "one SSN match expected");
+    let entity = &entities[0];
+    // No enhancement: confidence is the raw score, and no Refinement event.
+    assert!((entity.confidence.get() - 0.6).abs() < f32::EPSILON);
+    assert!(
+        !entity
+            .provenance
+            .events
+            .iter()
+            .any(|e| matches!(e.kind, EventKind::Refinement { .. })),
+        "bare recognizer must not record any Refinement",
+    );
+}

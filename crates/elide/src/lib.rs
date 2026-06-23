@@ -78,7 +78,7 @@ pub mod recognition {
         #[doc(inline)]
         pub use elide_context::{
             Boost, BoostRule, Context, DraftEvent, Enhanced, Enhancer, EntityDraft,
-            StreamRecognizer, lift,
+            StreamRecognizer, lift, lift_all,
         };
     }
 

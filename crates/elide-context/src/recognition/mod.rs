@@ -16,14 +16,16 @@
 //! [`locate`]: elide_core::modality::TextRecognizable::locate
 
 mod draft;
+mod lift;
 
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::entity::provenance::Event;
 use elide_core::modality::TextRecognizable;
-use elide_core::recognition::{Artifacts, Recognizer, RecognizerContext, RecognizerId};
+use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
 
 pub use self::draft::{DraftEvent, EntityDraft};
+pub use self::lift::{lift, lift_all};
 use crate::io::Tokens;
 use crate::{Context, Enhancer};
 
@@ -48,46 +50,6 @@ pub trait StreamRecognizer<M: TextRecognizable>: Send + Sync {
     /// Find matches in `text` (the recognized-text stream) and return them
     /// as stream-positioned drafts.
     fn find(&self, text: &str, ctx: &RecognizerContext<'_, M>) -> Vec<EntityDraft>;
-}
-
-/// Lift a stream-positioned [`EntityDraft`] to a located [`Entity`].
-///
-/// Drops it (returning `None`) when its stream range can't be placed in the
-/// medium — the same fallible-locate behaviour bare recognizers use.
-///
-/// The draft's `stream_range` is consumed here; the resulting entity carries
-/// only the native location.
-pub fn lift<M: TextRecognizable>(
-    draft: EntityDraft,
-    data: &M::Data,
-    artifacts: &Artifacts,
-) -> Option<Entity<M>> {
-    let Some(location) = M::locate(draft.stream_range, data, artifacts) else {
-        // The match's stream range maps to no native location (an OCR /
-        // transcript range no enrichment covers); drop it rather than emit
-        // a placeless entity.
-        tracing::warn!(
-            label = draft.label.as_str(),
-            "could not place a match in the source; dropping it",
-        );
-        return None;
-    };
-    let event = Event::pattern(
-        draft.event.source,
-        draft.confidence,
-        location.clone(),
-        draft.event.pattern,
-    )
-    .with_reason(draft.event.reason);
-    let mut builder = Entity::builder()
-        .with_label(draft.label)
-        .with_location(location)
-        .with_confidence(draft.confidence)
-        .with_event(event);
-    if let Some(coref) = draft.coref {
-        builder = builder.with_coref(coref);
-    }
-    Some(builder.build().expect("required fields provided"))
 }
 
 /// Adapts a [`StreamRecognizer`] into a full [`Recognizer`].
