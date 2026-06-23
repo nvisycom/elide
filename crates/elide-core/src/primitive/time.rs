@@ -10,8 +10,7 @@ const MICROS_PER_MILLI: u64 = 1_000;
 /// Microseconds per second.
 const MICROS_PER_SECOND: u64 = 1_000_000;
 
-/// A half-open `[start, end)` interval within a stream, measured in
-/// microseconds from the start of the stream.
+/// Half-open `[start, end)` stream interval, measured in microseconds.
 ///
 /// The coordinate a time-addressed medium (audio, video) uses to locate a
 /// region: a transcribed segment, a redacted span. Microsecond precision

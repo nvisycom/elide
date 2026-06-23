@@ -8,8 +8,9 @@ use elide_core::entity::{EntityCoRef, LabelRef};
 use elide_core::primitive::Confidence;
 use hipstr::HipStr;
 
-/// What a [`StreamRecognizer`] finds: an entity positioned by a byte range
-/// in the recognized-text stream, not yet placed in the medium.
+/// A [`StreamRecognizer`] match, positioned by a stream byte range.
+///
+/// Not yet placed in the medium; that happens at [`lift`].
 ///
 /// Deliberately **non-generic**. A draft's position is a range into the
 /// `as_text` `&str`, which is the same shape for every modality (a byte
@@ -75,8 +76,10 @@ impl EntityDraft {
     }
 }
 
-/// The recognizer-supplied parts of a draft's birth [`Event`], minus the
-/// native location that [`lift`] resolves and fills in.
+/// The recognizer-supplied parts of a draft's birth [`Event`].
+///
+/// Everything except the native location, which [`lift`] resolves and
+/// fills in.
 ///
 /// [`Event`]: elide_core::entity::provenance::Event
 /// [`lift`]: super::lift

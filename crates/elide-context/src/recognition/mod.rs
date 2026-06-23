@@ -27,8 +27,10 @@ pub use self::draft::{DraftEvent, EntityDraft};
 use crate::io::Tokens;
 use crate::{Context, Enhancer};
 
-/// A recognizer that finds matches in the recognized-text stream and
-/// returns stream-positioned [`EntityDraft`]s.
+/// Finds matches in the recognized-text stream, as stream-positioned drafts.
+///
+/// Returns [`EntityDraft`]s carrying a stream byte range, not yet placed in
+/// the medium.
 ///
 /// A narrow, opt-in complement to [`Recognizer`] — not a replacement. A
 /// stream recognizer does all of its work over the `&str` that
@@ -48,8 +50,9 @@ pub trait StreamRecognizer<M: TextRecognizable>: Send + Sync {
     fn find(&self, text: &str, ctx: &RecognizerContext<'_, M>) -> Vec<EntityDraft>;
 }
 
-/// Lift a stream-positioned [`EntityDraft`] to a located [`Entity`], or
-/// drop it (returning `None`) when its stream range can't be placed in the
+/// Lift a stream-positioned [`EntityDraft`] to a located [`Entity`].
+///
+/// Drops it (returning `None`) when its stream range can't be placed in the
 /// medium — the same fallible-locate behaviour bare recognizers use.
 ///
 /// The draft's `stream_range` is consumed here; the resulting entity carries
@@ -87,8 +90,10 @@ pub fn lift<M: TextRecognizable>(
     Some(builder.build().expect("required fields provided"))
 }
 
-/// Wraps a [`StreamRecognizer`] as a full [`Recognizer`], optionally running
-/// a keyword-boost [`Enhancer`] over the drafts before lifting them.
+/// Adapts a [`StreamRecognizer`] into a full [`Recognizer`].
+///
+/// Optionally runs a keyword-boost [`Enhancer`] over the drafts before
+/// lifting them.
 ///
 /// This is where context enhancement happens: `find` produces drafts that
 /// still hold their stream range, the enhancer lifts confidence where a
@@ -100,24 +105,16 @@ pub fn lift<M: TextRecognizable>(
 /// [`Enhancer`]: crate::Enhancer
 pub struct Enhanced<R> {
     inner: R,
-    enhancer: Option<Enhancer>,
+    enhancer: Enhancer,
 }
 
 impl<R> Enhanced<R> {
-    /// Wrap `inner` with no enhancer: drafts are lifted as-is.
-    pub fn new(inner: R) -> Self {
-        Self {
-            inner,
-            enhancer: None,
-        }
-    }
-
     /// Wrap `inner` with a keyword-boost `enhancer` applied before lift.
-    pub fn with_enhancer(inner: R, enhancer: Enhancer) -> Self {
-        Self {
-            inner,
-            enhancer: Some(enhancer),
-        }
+    ///
+    /// An [`Enhancer`] with no rules is the "no enhancement" case: drafts
+    /// are lifted as-is.
+    pub fn new(inner: R, enhancer: Enhancer) -> Self {
+        Self { inner, enhancer }
     }
 
     /// Borrow the wrapped stream recognizer.
@@ -143,27 +140,27 @@ where
         let text = M::as_text(data, &ctx.artifacts);
         let mut drafts = self.inner.find(text, ctx);
 
-        // Enhance the drafts while the stream range is still available.
-        let boosts = match &self.enhancer {
-            Some(enhancer) if !enhancer.is_empty() => {
-                // A hint is a text annotation (a header, a field name). Read
-                // each through the modality's text view; for text/tabular
-                // that is the hint's own payload.
-                let hint_texts: Vec<&str> = ctx
-                    .context_hints
-                    .iter()
-                    .map(|h| M::as_text(&h.data, &ctx.artifacts))
-                    .collect();
-                let mut context = Context::new(text).with_hints(&hint_texts);
-                if let Some(tokens) = ctx.artifacts.get::<Tokens>() {
-                    context = context.with_tokens(tokens.as_slice());
-                }
-                if let Some(language) = ctx.primary_language() {
-                    context = context.with_language(language);
-                }
-                enhancer.enhance(&mut drafts, &context)
+        // Enhance the drafts while the stream range is still available. An
+        // enhancer with no rules is the no-op case — skip the context setup.
+        let boosts = if self.enhancer.is_empty() {
+            Vec::new()
+        } else {
+            // A hint is a text annotation (a header, a field name). Read
+            // each through the modality's text view; for text/tabular
+            // that is the hint's own payload.
+            let hint_texts: Vec<&str> = ctx
+                .context_hints
+                .iter()
+                .map(|h| M::as_text(&h.data, &ctx.artifacts))
+                .collect();
+            let mut context = Context::new(text).with_hints(&hint_texts);
+            if let Some(tokens) = ctx.artifacts.get::<Tokens>() {
+                context = context.with_tokens(tokens.as_slice());
             }
-            _ => Vec::new(),
+            if let Some(language) = ctx.primary_language() {
+                context = context.with_language(language);
+            }
+            self.enhancer.enhance(&mut drafts, &context)
         };
 
         // Lift each draft to a located entity, dropping the unplaceable, and

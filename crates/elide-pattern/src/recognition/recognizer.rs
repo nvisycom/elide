@@ -231,7 +231,7 @@ impl PatternRecognizerBuilder {
     pub fn build_context_enhanced(self) -> Result<Enhanced<PatternRecognizer>> {
         let enhancer = self.build_enhancer();
         let recognizer = self.build()?;
-        Ok(Enhanced::with_enhancer(recognizer, enhancer))
+        Ok(Enhanced::new(recognizer, enhancer))
     }
 
     /// Compile every `(pattern, variant)` pair into a

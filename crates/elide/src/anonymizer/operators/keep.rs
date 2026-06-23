@@ -27,9 +27,16 @@ pub struct Keep;
 /// The original value is unchanged: strictly the most leaky profile.
 const KEEP_LEAK: LeakProfile = LeakProfile::Recoverable;
 
+impl Keep {
+    /// Identity shared by every modality's impl.
+    fn id() -> OperatorId {
+        OperatorId::new("keep", "1.0.0")
+    }
+}
+
 impl Operator<Text> for Keep {
     fn id(&self) -> OperatorId {
-        OperatorId::new("keep", "1.0.0")
+        Keep::id()
     }
 
     fn leak_profile(&self) -> LeakProfile {
@@ -44,7 +51,7 @@ impl Operator<Text> for Keep {
 #[cfg(feature = "tabular")]
 impl Operator<Tabular> for Keep {
     fn id(&self) -> OperatorId {
-        OperatorId::new("keep", "1.0.0")
+        Keep::id()
     }
 
     fn leak_profile(&self) -> LeakProfile {
@@ -63,7 +70,7 @@ impl Operator<Tabular> for Keep {
 #[cfg(feature = "image")]
 impl Operator<Image> for Keep {
     fn id(&self) -> OperatorId {
-        OperatorId::new("keep", "1.0.0")
+        Keep::id()
     }
 
     fn leak_profile(&self) -> LeakProfile {
@@ -82,7 +89,7 @@ impl Operator<Image> for Keep {
 #[cfg(feature = "audio")]
 impl Operator<Audio> for Keep {
     fn id(&self) -> OperatorId {
-        OperatorId::new("keep", "1.0.0")
+        Keep::id()
     }
 
     fn leak_profile(&self) -> LeakProfile {

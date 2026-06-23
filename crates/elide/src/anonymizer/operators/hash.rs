@@ -33,6 +33,11 @@ pub struct Hash {
 }
 
 impl Hash {
+    /// Identity shared by every modality's impl.
+    fn id() -> OperatorId {
+        OperatorId::new("hash", "1.0.0")
+    }
+
     /// A hash operator using `algorithm`, with no salt.
     pub fn new(algorithm: HashAlgorithm) -> Self {
         Self {
@@ -79,7 +84,7 @@ impl Hash {
 
 impl Operator<Text> for Hash {
     fn id(&self) -> OperatorId {
-        OperatorId::new("hash", "1.0.0")
+        Hash::id()
     }
 
     fn leak_profile(&self) -> LeakProfile {
@@ -96,7 +101,7 @@ impl Operator<Text> for Hash {
 #[cfg(feature = "tabular")]
 impl Operator<Tabular> for Hash {
     fn id(&self) -> OperatorId {
-        OperatorId::new("hash", "1.0.0")
+        Hash::id()
     }
 
     fn leak_profile(&self) -> LeakProfile {

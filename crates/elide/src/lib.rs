@@ -42,8 +42,8 @@ pub mod recognition {
     #[doc(inline)]
     pub use elide_core::recognition::*;
 
-    /// Context-enhanced recognition: wrap a stream recognizer to boost
-    /// confidence from nearby keywords before lifting matches.
+    /// Context-enhanced recognition: keyword-boosted confidence over a
+    /// stream recognizer.
     ///
     /// A [`StreamRecognizer`] finds matches over the recognized-text stream
     /// and returns [`EntityDraft`]s; [`Enhanced`] adapts one into a full
@@ -82,29 +82,32 @@ pub mod recognition {
         };
     }
 
-    /// LLM-mediated recognition (text NER and image VLM).
+    /// LLM-mediated recognition: prompt a language or vision model over
+    /// text and images.
     #[cfg(feature = "llm")]
     #[cfg_attr(docsrs, doc(cfg(feature = "llm")))]
     #[doc(inline)]
     pub use elide_llm as llm;
-    /// Model-based named-entity recognition.
+    /// Model-based named-entity recognition: detect entities and their
+    /// language.
     #[cfg(feature = "ner")]
     #[cfg_attr(docsrs, doc(cfg(feature = "ner")))]
     #[doc(inline)]
     pub use elide_ner as ner;
-    /// OCR backends and the enricher that drives the text recognizers over
+    /// OCR backends and the enricher that runs text recognizers over the
     /// recognized image text.
     #[cfg(feature = "ocr")]
     #[cfg_attr(docsrs, doc(cfg(feature = "ocr")))]
     #[doc(inline)]
     pub use elide_ocr as ocr;
-    /// Dictionary- and pattern-based recognition.
+    /// Dictionary- and pattern-based recognition: match entities by regex
+    /// and term lists.
     #[cfg(feature = "pattern")]
     #[cfg_attr(docsrs, doc(cfg(feature = "pattern")))]
     #[doc(inline)]
     pub use elide_pattern as pattern;
-    /// Speech-to-text backends and the transcript-streaming reader that
-    /// drives the text recognizers over audio.
+    /// Speech-to-text backends and the enricher that runs text recognizers
+    /// over the transcript.
     #[cfg(feature = "stt")]
     #[cfg_attr(docsrs, doc(cfg(feature = "stt")))]
     #[doc(inline)]
