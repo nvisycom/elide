@@ -115,12 +115,18 @@ impl<M: Modality> Event<M> {
 
     /// Refinement event: a context keyword near the entity lifted its
     /// confidence.
+    ///
+    /// `location` is where the boosting keyword sits in the medium: for a
+    /// hint match the hint's own location, for an in-text-window match the
+    /// keyword resolved through the modality (`None` if it couldn't be
+    /// placed).
     pub fn refinement(
         source: impl Into<HipStr<'static>>,
         before: Confidence,
         after: Confidence,
         keyword: impl Into<HipStr<'static>>,
         hint: Option<Hint<M>>,
+        location: Option<M::Location>,
     ) -> Self {
         Self {
             source: source.into(),
@@ -131,6 +137,7 @@ impl<M: Modality> Event<M> {
             kind: EventKind::Refinement {
                 keyword: keyword.into(),
                 hint,
+                location,
             },
         }
     }
@@ -229,6 +236,15 @@ pub enum EventKind<M: Modality> {
         ///
         /// [`Hint`]: crate::modality::Hint
         hint: Option<Hint<M>>,
+        /// Where the boosting keyword sits in the medium. For a hint match
+        /// this mirrors the hint's own location; for an in-text-window match
+        /// it is the keyword resolved through the modality's [`locate`] (a
+        /// pixel box for image, a time span for audio, the byte range for
+        /// text/tabular). `None` when the keyword's stream range could not be
+        /// placed — symmetric with a match the recognizer itself drops.
+        ///
+        /// [`locate`]: crate::modality::TextRecognizable::locate
+        location: Option<M::Location>,
     },
     /// An operator hid the entity.
     Redaction {

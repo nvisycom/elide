@@ -25,10 +25,17 @@ use crate::io::Token;
 
 /// Walk `prefix` words before `range` and `suffix` words after, via
 /// Unicode word segmentation, and return the spanning substring
-/// (including any non-word whitespace and punctuation between words).
-/// The returned slice covers `range` itself plus the prefix / suffix
-/// words; the entity's own bytes are always inside.
-pub(super) fn word_window(text: &str, range: Range<usize>, prefix: usize, suffix: usize) -> &str {
+/// (including any non-word whitespace and punctuation between words)
+/// together with its **stream-byte start offset** in `text`. The
+/// returned slice covers `range` itself plus the prefix / suffix
+/// words; the entity's own bytes are always inside. The offset lets a
+/// caller rebase a window-relative match into stream coordinates.
+pub(super) fn word_window(
+    text: &str,
+    range: Range<usize>,
+    prefix: usize,
+    suffix: usize,
+) -> (&str, usize) {
     let Range { start, end } = range;
     let prefix_text = &text[..start.min(text.len())];
     let suffix_text = &text[end.min(text.len())..];
@@ -56,7 +63,7 @@ pub(super) fn word_window(text: &str, range: Range<usize>, prefix: usize, suffix
 
     let lo = floor_char_boundary(text, prefix_byte);
     let hi = ceil_char_boundary(text, suffix_byte.min(text.len()));
-    &text[lo..hi]
+    (&text[lo..hi], lo)
 }
 
 /// Slice tokens by *count*: take `prefix` tokens before the first
@@ -83,19 +90,29 @@ pub(super) fn slice_tokens_around(
     &tokens[lo..hi]
 }
 
-/// Spanning substring covering `tokens` plus the entity itself.
-/// Used to give the matcher a contiguous text window when slicing
-/// against the token stream.
+/// Spanning substring covering `tokens` plus the entity itself, with
+/// its **stream-byte start offset** in `text`. Used to give the matcher
+/// a contiguous text window when slicing against the token stream; the
+/// offset rebases a window-relative match into stream coordinates.
 ///
 /// Precondition: `tokens` is non-empty. Callers must take the
 /// [`word_window`] fallback path when their token slice is empty.
-pub(super) fn token_span<'a>(text: &'a str, tokens: &[Token], range: Range<usize>) -> &'a str {
+pub(super) fn token_span<'a>(
+    text: &'a str,
+    tokens: &[Token],
+    range: Range<usize>,
+) -> (&'a str, usize) {
     debug_assert!(!tokens.is_empty(), "token_span requires non-empty slice");
-    let lo = tokens[0].offset.start.min(range.start);
+    // The window starts exactly at the first token so a lemma matcher can
+    // rebase a match by `tokens[0].offset.start` and land on the same
+    // window-relative coordinate the caller offsets from. The entity is
+    // covered via `hi` when it extends past the last token; its leading
+    // bytes (if any precede the first token) carry no keyword.
+    let lo = tokens[0].offset.start;
     let hi = tokens[tokens.len() - 1].offset.end.max(range.end);
     let lo = floor_char_boundary(text, lo.min(text.len()));
     let hi = ceil_char_boundary(text, hi.min(text.len()));
-    &text[lo..hi]
+    (&text[lo..hi], lo)
 }
 
 fn floor_char_boundary(s: &str, mut pos: usize) -> usize {
