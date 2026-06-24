@@ -21,10 +21,13 @@
 use std::sync::Arc;
 
 use derive_builder::Builder;
-use elide_core::entity::provenance::{Event, ModelEvent};
+use elide_core::entity::provenance::ModelEvent;
 use elide_core::entity::{Entity, Label, LabelRef};
 use elide_core::modality::TextRecognizable;
-use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
+use elide_core::recognition::{
+    DraftEvent, EntityDraft, Recognizer, RecognizerContext, RecognizerId, StreamRecognizer,
+    lift_all,
+};
 use elide_core::{Error, Result};
 use hipstr::HipStr;
 
@@ -105,45 +108,25 @@ impl NerRecognizer {
         self.alignment
     }
 
-    fn build_entity<M: TextRecognizable>(
-        &self,
-        span: &NerSpan,
-        label: LabelRef,
-        data: &M::Data,
-        ctx: &RecognizerContext<'_, M>,
-    ) -> Option<Entity<M>> {
-        let confidence = span.confidence;
-        let Some(location) = M::locate(span.offset.start..span.offset.end, data, &ctx.artifacts)
-        else {
-            // The match can't be placed in the medium (e.g. an OCR range no
-            // word box covers); drop it rather than emit a placeless entity.
-            tracing::warn!(
-                recognizer = %self.name,
-                label = label.as_str(),
-                "could not place a match in the source; dropping it",
-            );
-            return None;
-        };
+    /// Turn a backend [`NerSpan`] into a stream-positioned [`EntityDraft`]
+    /// carrying a [`Model`] birth event. The span's byte offset becomes the
+    /// draft's `stream_range`; `lift` places it in the medium later.
+    ///
+    /// Non-generic: a draft is a position in the recognized text, identical
+    /// across modalities.
+    ///
+    /// [`Model`]: elide_core::entity::provenance::EventKind::Model
+    fn build_draft(&self, span: &NerSpan, label: LabelRef) -> EntityDraft {
         let reason = format!("recognizer `{}` identified {}", self.name, label.as_str());
-        let event = Event::model(
+        let event = DraftEvent::model(
             "ner",
-            confidence,
-            location.clone(),
+            reason,
             ModelEvent {
                 name: self.name.clone(),
                 ..ModelEvent::default()
             },
-        )
-        .with_reason(reason);
-        Some(
-            Entity::builder()
-                .with_label(label)
-                .with_location(location)
-                .with_confidence(confidence)
-                .with_event(event)
-                .build()
-                .expect("required fields provided"),
-        )
+        );
+        EntityDraft::new(label, span.confidence, span.offset.clone(), event)
     }
 }
 
@@ -177,16 +160,16 @@ impl NerRecognizerBuilder {
     }
 }
 
-impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
+impl<M: TextRecognizable> StreamRecognizer<M> for NerRecognizer {
     fn id(&self) -> RecognizerId {
         RecognizerId::new(self.name.clone(), env!("CARGO_PKG_VERSION"))
     }
 
-    async fn recognize(
+    async fn find(
         &self,
-        data: &M::Data,
+        text: &str,
         ctx: &RecognizerContext<'_, M>,
-    ) -> Result<Vec<Entity<M>>> {
+    ) -> Result<Vec<EntityDraft>> {
         // The effective target labels, as full `Label`s (name +
         // description) so a zero-shot backend like GLiNER 2.0 gets the
         // descriptions: the recognizer's own configured set overrides when
@@ -213,7 +196,7 @@ impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
             Some(effective_labels.as_slice())
         };
         let request = NerRequest {
-            text: M::as_text(data, &ctx.artifacts),
+            text,
             labels,
             language: ctx.primary_language(),
             correlation_id: ctx.correlation_id(),
@@ -224,16 +207,31 @@ impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
         // raw-to-canonical mapping; ignored labels are dropped by an
         // `IgnoreLabels` decorator). When a target set was requested, we
         // restrict to it.
-        let entities: Vec<Entity<M>> = response
+        Ok(response
             .spans
             .iter()
             .filter(|s| {
                 effective_labels.is_empty()
                     || effective_labels.iter().any(|l| l.to_ref() == s.label)
             })
-            .filter_map(|s| self.build_entity::<M>(s, s.label.clone(), data, ctx))
-            .collect();
-        Ok(entities)
+            .map(|s| self.build_draft(s, s.label.clone()))
+            .collect())
+    }
+}
+
+impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
+    fn id(&self) -> RecognizerId {
+        StreamRecognizer::<M>::id(self)
+    }
+
+    async fn recognize(
+        &self,
+        data: &M::Data,
+        ctx: &RecognizerContext<'_, M>,
+    ) -> Result<Vec<Entity<M>>> {
+        let text = M::as_text(data, &ctx.artifacts);
+        let drafts = self.find(text, ctx).await?;
+        Ok(lift_all::<M>(drafts, data, &ctx.artifacts))
     }
 }
 

@@ -20,7 +20,7 @@ pub use self::label::{Label, LabelCatalog, LabelRef, builtins};
 use self::provenance::Provenance;
 pub use self::reference::{EntityCoRef, EntityRef};
 use crate::modality::Modality;
-use crate::primitive::Confidence;
+use crate::primitive::{Confidence, LanguageTag};
 
 /// Detected piece of sensitive information within some medium.
 ///
@@ -68,6 +68,9 @@ pub struct Entity<M: Modality> {
     /// mention of a cluster. Entities sharing an [`EntityCoRef`] denote the
     /// same real-world thing.
     pub coref: Option<EntityCoRef>,
+    /// The language of this entity's surrounding text, when a recognizer
+    /// resolved one. `None` when unknown or language-agnostic.
+    pub language: Option<LanguageTag>,
     /// Detection audit trail: every contributing detection and the fusion
     /// event, if any.
     pub provenance: Provenance<M>,
@@ -94,6 +97,7 @@ impl<M: Modality> Entity<M> {
             location,
             confidence,
             coref: None,
+            language: None,
             provenance,
         }
     }

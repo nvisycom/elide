@@ -1011,6 +1011,7 @@ dependencies = [
  "jiff",
  "oxilangtag",
  "serde",
+ "tracing",
  "type-map",
  "uuid",
 ]

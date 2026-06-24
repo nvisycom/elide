@@ -10,7 +10,7 @@ use hipstr::HipStr;
 
 use crate::io::Token;
 use crate::matching::KeywordMatcher;
-use crate::recognition::EntityDraft;
+use elide_core::recognition::EntityDraft;
 use crate::rule::BoostRule;
 
 mod context;

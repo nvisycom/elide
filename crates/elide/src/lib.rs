@@ -69,17 +69,14 @@ pub mod recognition {
     /// ```
     ///
     /// [`Recognizer`]: elide_core::recognition::Recognizer
-    /// [`StreamRecognizer`]: elide_context::StreamRecognizer
-    /// [`EntityDraft`]: elide_context::EntityDraft
+    /// [`StreamRecognizer`]: elide_core::recognition::StreamRecognizer
+    /// [`EntityDraft`]: elide_core::recognition::EntityDraft
     /// [`Enhanced`]: elide_context::Enhanced
     /// [`Enhancer`]: elide_context::Enhancer
     /// [`BoostRule`]: elide_context::BoostRule
     pub mod context {
         #[doc(inline)]
-        pub use elide_context::{
-            Boost, BoostRule, Context, DraftEvent, Enhanced, Enhancer, EntityDraft,
-            StreamRecognizer, lift, lift_all,
-        };
+        pub use elide_context::{Boost, BoostRule, Context, Enhanced, Enhancer};
     }
 
     /// LLM-mediated recognition: prompt a language or vision model over

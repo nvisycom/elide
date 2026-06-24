@@ -4,14 +4,14 @@
 //! into a native location via the modality's [`locate`], shared by the
 //! bare and enhanced recognition paths.
 //!
-//! [`locate`]: elide_core::modality::TextRecognizable::locate
+//! [`locate`]: crate::modality::TextRecognizable::locate
 
-use elide_core::entity::Entity;
-use elide_core::entity::provenance::Event;
-use elide_core::modality::TextRecognizable;
-use elide_core::recognition::Artifacts;
+use crate::entity::Entity;
+use crate::entity::provenance::Event;
+use crate::modality::TextRecognizable;
+use crate::recognition::Artifacts;
 
-use super::EntityDraft;
+use super::{DraftEvent, DraftEventKind, EntityDraft};
 
 /// Lift a stream-positioned [`EntityDraft`] to a located [`Entity`].
 ///
@@ -35,13 +35,20 @@ pub fn lift<M: TextRecognizable>(
         );
         return None;
     };
-    let event = Event::pattern(
-        draft.event.source,
-        draft.confidence,
-        location.clone(),
-        draft.event.pattern,
-    )
-    .with_reason(draft.event.reason);
+    let DraftEvent {
+        source,
+        reason,
+        kind,
+    } = draft.event;
+    let event = match kind {
+        DraftEventKind::Pattern(pattern) => {
+            Event::pattern(source, draft.confidence, location.clone(), pattern)
+        }
+        DraftEventKind::Model(model) => {
+            Event::model(source, draft.confidence, location.clone(), model)
+        }
+    }
+    .with_reason(reason);
     let mut builder = Entity::builder()
         .with_label(draft.label)
         .with_location(location)
@@ -56,12 +63,12 @@ pub fn lift<M: TextRecognizable>(
 /// [`lift`] every draft to a located [`Entity`], dropping the unplaceable.
 ///
 /// The no-enhancement lift path: a [`StreamRecognizer`] that wants to be a
-/// plain [`Recognizer`] runs `find` then this. [`Enhanced`] does not call it
-/// — it lifts with extra bookkeeping so it can attach boost provenance.
+/// plain [`Recognizer`] runs `find` then this. The enhancement crate's
+/// `Enhanced` adapter does not call it — it lifts with extra bookkeeping so
+/// it can attach boost provenance.
 ///
 /// [`StreamRecognizer`]: super::StreamRecognizer
-/// [`Recognizer`]: elide_core::recognition::Recognizer
-/// [`Enhanced`]: super::Enhanced
+/// [`Recognizer`]: crate::recognition::Recognizer
 pub fn lift_all<M: TextRecognizable>(
     drafts: Vec<EntityDraft>,
     data: &M::Data,

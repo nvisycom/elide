@@ -2,7 +2,8 @@
 
 use aho_corasick::{AhoCorasick, MatchKind};
 use elide_context::matching::SubstringMatcher;
-use elide_context::{BoostRule, Enhanced, Enhancer, EntityDraft, StreamRecognizer, lift_all};
+use elide_context::{BoostRule, Enhanced, Enhancer};
+use elide_core::recognition::{EntityDraft, StreamRecognizer, lift_all};
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::LanguageTag;
@@ -424,7 +425,11 @@ impl<M: TextRecognizable> StreamRecognizer<M> for PatternRecognizer {
         RecognizerId::new("elide-pattern", env!("CARGO_PKG_VERSION"))
     }
 
-    fn find(&self, text: &str, ctx: &RecognizerContext<'_, M>) -> Vec<EntityDraft> {
+    async fn find(
+        &self,
+        text: &str,
+        ctx: &RecognizerContext<'_, M>,
+    ) -> Result<Vec<EntityDraft>> {
         let mut drafts: Vec<EntityDraft> = Vec::new();
 
         if let Some(set) = self.regex_set.as_ref() {
@@ -472,7 +477,7 @@ impl<M: TextRecognizable> StreamRecognizer<M> for PatternRecognizer {
             }
         }
 
-        drafts
+        Ok(drafts)
     }
 }
 
@@ -493,7 +498,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
         ctx: &RecognizerContext<'_, M>,
     ) -> Result<Vec<Entity<M>>> {
         let text = M::as_text(data, &ctx.artifacts);
-        let drafts = self.find(text, ctx);
+        let drafts = self.find(text, ctx).await?;
         Ok(lift_all::<M>(drafts, data, &ctx.artifacts))
     }
 }

@@ -5,7 +5,7 @@ use uuid::Uuid;
 use super::{Entity, EntityCoRef, LabelRef};
 use crate::entity::provenance::{Event, Provenance};
 use crate::modality::Modality;
-use crate::primitive::Confidence;
+use crate::primitive::{Confidence, LanguageTag};
 
 /// Chainable builder for [`Entity`].
 ///
@@ -43,6 +43,7 @@ pub struct EntityBuilder<M: Modality> {
     location: Option<M::Location>,
     confidence: Option<Confidence>,
     coref: Option<EntityCoRef>,
+    language: Option<LanguageTag>,
     events: Vec<Event<M>>,
 }
 
@@ -55,6 +56,7 @@ impl<M: Modality> EntityBuilder<M> {
             location: None,
             confidence: None,
             coref: None,
+            language: None,
             events: Vec::new(),
         }
     }
@@ -94,6 +96,13 @@ impl<M: Modality> EntityBuilder<M> {
         self
     }
 
+    /// Set the language of the entity's surrounding text.
+    #[must_use]
+    pub fn with_language(mut self, language: LanguageTag) -> Self {
+        self.language = Some(language);
+        self
+    }
+
     /// Append a provenance event. Events accumulate in order.
     #[must_use]
     pub fn with_event(mut self, event: Event<M>) -> Self {
@@ -120,6 +129,7 @@ impl<M: Modality> EntityBuilder<M> {
             location: self.location?,
             confidence: self.confidence?,
             coref: self.coref,
+            language: self.language,
             provenance: Provenance {
                 events: self.events,
             },

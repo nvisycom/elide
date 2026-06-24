@@ -8,18 +8,15 @@
 use std::ops::Range;
 
 use elide_context::matching::SubstringMatcher;
-use elide_context::{BoostRule, Context, DraftEvent, Enhancer, EntityDraft};
+use elide_context::{BoostRule, Context, Enhancer};
 use elide_core::entity::LabelRef;
+use elide_core::recognition::{DraftEvent, EntityDraft};
 use elide_core::entity::provenance::PatternEvent;
 use elide_core::primitive::Confidence;
 
 /// Build a single draft at `range` in the stream.
 fn draft(label: &LabelRef, range: Range<usize>, score: f32) -> EntityDraft {
-    let event = DraftEvent {
-        source: "test".into(),
-        reason: "test".into(),
-        pattern: PatternEvent::default(),
-    };
+    let event = DraftEvent::pattern("test", "test", PatternEvent::default());
     EntityDraft::new(label.clone(), Confidence::new(score).unwrap(), range, event)
 }
 

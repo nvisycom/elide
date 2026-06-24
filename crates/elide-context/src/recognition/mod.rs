@@ -15,42 +15,14 @@
 //! [`Enhancer`]: crate::Enhancer
 //! [`locate`]: elide_core::modality::TextRecognizable::locate
 
-mod draft;
-mod lift;
-
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::entity::provenance::Event;
 use elide_core::modality::TextRecognizable;
-use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
+use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId, StreamRecognizer, lift};
 
-pub use self::draft::{DraftEvent, EntityDraft};
-pub use self::lift::{lift, lift_all};
 use crate::io::Tokens;
 use crate::{Context, Enhancer};
-
-/// Finds matches in the recognized-text stream, as stream-positioned drafts.
-///
-/// Returns [`EntityDraft`]s carrying a stream byte range, not yet placed in
-/// the medium.
-///
-/// A narrow, opt-in complement to [`Recognizer`] — not a replacement. A
-/// stream recognizer does all of its work over the `&str` that
-/// [`as_text`] exposes (matching, validation, filtering), producing drafts
-/// with a stream byte range; wrapping it in [`Enhanced`] yields a full
-/// `Recognizer<M>`. Modalities whose text is a projection (image OCR, audio
-/// STT) are supported because [`as_text`] reads their enrichment artifact.
-///
-/// [`Recognizer`]: elide_core::recognition::Recognizer
-/// [`as_text`]: elide_core::modality::TextRecognizable::as_text
-pub trait StreamRecognizer<M: TextRecognizable>: Send + Sync {
-    /// This recognizer's identity (name + version).
-    fn id(&self) -> RecognizerId;
-
-    /// Find matches in `text` (the recognized-text stream) and return them
-    /// as stream-positioned drafts.
-    fn find(&self, text: &str, ctx: &RecognizerContext<'_, M>) -> Vec<EntityDraft>;
-}
 
 /// Adapts a [`StreamRecognizer`] into a full [`Recognizer`].
 ///
@@ -100,7 +72,7 @@ where
         ctx: &RecognizerContext<'_, M>,
     ) -> Result<Vec<Entity<M>>> {
         let text = M::as_text(data, &ctx.artifacts);
-        let mut drafts = self.inner.find(text, ctx);
+        let mut drafts = self.inner.find(text, ctx).await?;
 
         // Enhance the drafts while the stream range is still available. An
         // enhancer with no rules is the no-op case — skip the context setup.

@@ -19,7 +19,7 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use elide_context::{DraftEvent, EntityDraft};
+use elide_core::recognition::{DraftEvent, EntityDraft};
 use elide_core::entity::LabelRef;
 use elide_core::entity::provenance::PatternEvent;
 use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
@@ -57,10 +57,10 @@ impl CompiledPattern {
     /// `[start, end)` byte coordinates in the recognized-text stream. The
     /// `Enhanced` adapter lifts the draft to a located entity after dispatch.
     pub(super) fn draft(&self, range: Range<usize>) -> EntityDraft {
-        let event = DraftEvent {
-            source: "pattern".into(),
-            reason: format!("pattern `{}` matched", self.pattern_name).into(),
-            pattern: PatternEvent {
+        let event = DraftEvent::pattern(
+            "pattern",
+            format!("pattern `{}` matched", self.pattern_name),
+            PatternEvent {
                 name: self.pattern_name.clone().into(),
                 regex: Some(self.regex.as_str().into()),
                 validator: self
@@ -69,7 +69,7 @@ impl CompiledPattern {
                     .map(|_| self.pattern_name.clone().into()),
                 contextual: false,
             },
-        };
+        );
         EntityDraft::new(self.label.clone(), self.score, range, event)
     }
 }
@@ -107,15 +107,15 @@ impl CompiledDictionary {
     /// is the per-term confidence resolved at recognizer-build time (the
     /// dictionary's `scoring` policy or per-term override).
     pub(super) fn draft(&self, score: Confidence, range: Range<usize>) -> EntityDraft {
-        let event = DraftEvent {
-            source: "pattern".into(),
-            reason: format!("dictionary `{}` matched", self.name).into(),
-            pattern: PatternEvent {
+        let event = DraftEvent::pattern(
+            "pattern",
+            format!("dictionary `{}` matched", self.name),
+            PatternEvent {
                 name: self.name.clone().into(),
                 contextual: false,
                 ..PatternEvent::default()
             },
-        };
+        );
         EntityDraft::new(self.label.clone(), score, range, event)
     }
 }

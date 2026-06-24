@@ -11,9 +11,12 @@
 pub mod annotation;
 mod artifacts;
 mod context;
+mod draft;
 mod enricher;
 mod label;
+mod lift;
 mod scope;
+mod stream;
 
 use std::fmt;
 use std::future::Future;
@@ -24,9 +27,12 @@ use serde::{Deserialize, Serialize};
 
 pub use self::artifacts::Artifacts;
 pub use self::context::RecognizerContext;
+pub use self::draft::{DraftEvent, DraftEventKind, EntityDraft};
 pub use self::enricher::Enricher;
 pub use self::label::LabelMap;
+pub use self::lift::{lift, lift_all};
 pub use self::scope::Scope;
+pub use self::stream::StreamRecognizer;
 use crate::entity::Entity;
 use crate::error::Result;
 use crate::modality::Modality;
@@ -60,7 +66,7 @@ impl RecognizerId {
 
 impl fmt::Display for RecognizerId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}@{}", self.name, self.version)
+        write!(f, "{}@{}", self.name, self.version) 
     }
 }
 

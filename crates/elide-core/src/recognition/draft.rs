@@ -3,9 +3,9 @@
 
 use std::ops::Range;
 
-use elide_core::entity::provenance::PatternEvent;
-use elide_core::entity::{EntityCoRef, LabelRef};
-use elide_core::primitive::Confidence;
+use crate::entity::provenance::{ModelEvent, PatternEvent};
+use crate::entity::{EntityCoRef, LabelRef};
+use crate::primitive::Confidence;
 use hipstr::HipStr;
 
 /// A [`StreamRecognizer`] match, positioned by a stream byte range.
@@ -16,7 +16,7 @@ use hipstr::HipStr;
 /// `as_text` `&str`, which is the same shape for every modality (a byte
 /// stream); the modality enters only when [`lift`] turns the
 /// [`stream_range`] into a native location. Keeping the draft modality-free
-/// is what lets the keyword-boost [`Enhancer`] operate on it uniformly.
+/// is what lets the keyword-boost enhancer operate on it uniformly.
 ///
 /// The `stream_range` is an implementation detail of whichever OCR/STT
 /// engine produced the text and is **ephemeral**: it lives only between
@@ -26,21 +26,19 @@ use hipstr::HipStr;
 /// [`lift`]: super::lift
 /// [`stream_range`]: Self::stream_range
 /// [`find`]: super::StreamRecognizer::find
-/// [`Enhancer`]: crate::Enhancer
-/// [`Entity`]: elide_core::entity::Entity
+/// [`Entity`]: crate::entity::Entity
 #[derive(Debug, Clone)]
 pub struct EntityDraft {
     /// The label the recognizer assigned.
     pub label: LabelRef,
-    /// The match's confidence, mutated in place by the [`Enhancer`].
-    ///
-    /// [`Enhancer`]: crate::Enhancer
+    /// The match's confidence, mutated in place by the keyword-boost
+    /// enhancer.
     pub confidence: Confidence,
     /// Byte range of the match in the recognized-text stream. Ephemeral:
     /// consumed by [`lift`], never stored on the [`Entity`].
     ///
     /// [`lift`]: super::lift
-    /// [`Entity`]: elide_core::entity::Entity
+    /// [`Entity`]: crate::entity::Entity
     pub stream_range: Range<usize>,
     /// Coreference cluster id, when the recognizer grouped mentions.
     pub coref: Option<EntityCoRef>,
@@ -79,16 +77,62 @@ impl EntityDraft {
 /// The recognizer-supplied parts of a draft's birth [`Event`].
 ///
 /// Everything except the native location, which [`lift`] resolves and
-/// fills in.
+/// fills in. The [`kind`] carries the recognizer-specific detail — pattern
+/// metadata for a dictionary/regex match, model metadata for an NER/LLM
+/// match — so a draft can come from any text-localizable recognizer, not
+/// just the pattern engine.
 ///
-/// [`Event`]: elide_core::entity::provenance::Event
+/// [`Event`]: crate::entity::provenance::Event
 /// [`lift`]: super::lift
+/// [`kind`]: DraftEvent::kind
 #[derive(Debug, Clone)]
 pub struct DraftEvent {
-    /// Event source tag (e.g. `"pattern"`).
+    /// Event source tag (e.g. `"pattern"`, `"ner"`).
     pub source: HipStr<'static>,
     /// Free-text reason for the match.
     pub reason: HipStr<'static>,
-    /// Pattern/dictionary metadata stamped onto the birth event.
-    pub pattern: PatternEvent,
+    /// The recognizer-specific birth-event detail.
+    pub kind: DraftEventKind,
+}
+
+impl DraftEvent {
+    /// A pattern/dictionary draft event.
+    pub fn pattern(
+        source: impl Into<HipStr<'static>>,
+        reason: impl Into<HipStr<'static>>,
+        pattern: PatternEvent,
+    ) -> Self {
+        Self {
+            source: source.into(),
+            reason: reason.into(),
+            kind: DraftEventKind::Pattern(pattern),
+        }
+    }
+
+    /// A model (NER / LLM) draft event.
+    pub fn model(
+        source: impl Into<HipStr<'static>>,
+        reason: impl Into<HipStr<'static>>,
+        model: ModelEvent,
+    ) -> Self {
+        Self {
+            source: source.into(),
+            reason: reason.into(),
+            kind: DraftEventKind::Model(model),
+        }
+    }
+}
+
+/// Which kind of recognizer produced a draft — the birth-event detail that
+/// [`lift`] turns into the matching [`Pattern`] or [`Model`] event.
+///
+/// [`lift`]: super::lift
+/// [`Pattern`]: crate::entity::provenance::EventKind::Pattern
+/// [`Model`]: crate::entity::provenance::EventKind::Model
+#[derive(Debug, Clone)]
+pub enum DraftEventKind {
+    /// A regex / dictionary match: carries [`PatternEvent`] metadata.
+    Pattern(PatternEvent),
+    /// An NER / LLM model match: carries [`ModelEvent`] metadata.
+    Model(ModelEvent),
 }
