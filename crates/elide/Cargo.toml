@@ -115,6 +115,7 @@ erased-serde = { workspace = true, features = [], optional = true }
 # Primitive datatypes
 bytes = { workspace = true, features = [] }
 uuid = { workspace = true, features = ["v4"] }
+hipstr = { workspace = true, features = [] }
 
 # Encoding & hashing
 sha2 = { workspace = true, features = [] }

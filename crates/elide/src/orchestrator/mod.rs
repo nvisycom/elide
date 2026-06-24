@@ -194,7 +194,7 @@ impl<'r> Orchestrator<'r> {
         let Report { body, parts } = plan;
 
         // The body: apply its edited entities through the `M` pipeline.
-        if let Some((type_id, entities)) = body
+        if let Some((type_id, mut entities)) = body
             && type_id == TypeId::of::<M>()
             && let Some(typed) = self
                 .pipelines
@@ -202,8 +202,8 @@ impl<'r> Orchestrator<'r> {
                 .and_then(|p| p.as_any().downcast_ref::<ModalityPipeline<M>>())
         {
             let entities = entities
-                .as_any()
-                .downcast_ref::<Vec<Entity<M>>>()
+                .as_any_mut()
+                .downcast_mut::<Vec<Entity<M>>>()
                 .expect("plan body modality matches M");
             typed.apply(document, entities).await?;
         }
@@ -211,12 +211,12 @@ impl<'r> Orchestrator<'r> {
         // The parts: re-drive each retained handle with its edited
         // entities, then write the redacted bytes back into the container.
         let mut redactions: Vec<(PartId, Bytes)> = Vec::new();
-        for (id, part) in parts {
+        for (id, mut part) in parts {
             let Some(pipeline) = self.pipelines.get(&part.modality) else {
                 continue; // pipeline for this modality is gone
             };
             let bytes = pipeline
-                .apply_part(part.handle, part.entities.as_ref())
+                .apply_part(part.handle, part.entities.as_mut())
                 .await?;
             redactions.push((id, bytes));
         }

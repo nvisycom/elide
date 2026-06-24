@@ -16,10 +16,14 @@ mod dyn_operator;
 pub mod operators;
 mod registry;
 
+use std::sync::Arc;
+
 use elide_core::Result;
+use elide_core::entity::provenance::Event;
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
 use elide_core::modality::{DataReader, DataWriter, Modality};
-use elide_core::redaction::{Operator, Redactions};
+use elide_core::redaction::{Attribution, Operator, Redactions};
+use hipstr::HipStr;
 
 use self::registry::{Matcher, OperatorRegistry};
 
@@ -89,7 +93,7 @@ impl<M: Modality> Anonymizer<M> {
     #[must_use]
     pub fn with_tag<O: Operator<M> + 'static>(
         mut self,
-        tag: impl Into<String>,
+        tag: impl Into<HipStr<'static>>,
         operator: O,
     ) -> Self {
         self.operators.push(Matcher::Tag(tag.into()), operator);
@@ -119,6 +123,27 @@ impl<M: Modality> Anonymizer<M> {
         self
     }
 
+    /// Attribute the most-recently-added rule to a policy: the [`Attribution`]
+    /// (a bare policy id, or one built with a reason) is recorded on the
+    /// redaction provenance of every entity this rule redacts, the *why*
+    /// alongside the matched rule.
+    ///
+    /// Chains onto a rule builder; a no-op if no rule has been added yet:
+    ///
+    /// ```ignore
+    /// Anonymizer::new()
+    ///     .with_label(EMAIL, Replace::default()).because("gdpr-art-17")
+    ///     .with_tag("financial", Mask::stars())
+    ///         .because(Attribution::new("pci-dss-3.4").with_reason("PAN masking"));
+    /// ```
+    ///
+    /// [`Attribution`]: elide_core::redaction::Attribution
+    #[must_use]
+    pub fn because(mut self, attribution: impl Into<Attribution>) -> Self {
+        self.operators.set_last_attribution(attribution.into());
+        self
+    }
+
     /// Plan the redaction for every entity, reading each one's value from
     /// `reader`, without applying anything.
     ///
@@ -134,12 +159,12 @@ impl<M: Modality> Anonymizer<M> {
     /// [`anonymize`]: Self::anonymize
     pub async fn plan(
         &self,
-        entities: &[Entity<M>],
+        entities: &mut [Entity<M>],
         reader: &impl DataReader<M>,
     ) -> Result<Redactions<M>> {
         let mut redactions = Redactions::new();
         for entity in entities {
-            let Some(operator) = self.operators.resolve(entity) else {
+            let Some(resolved) = self.operators.resolve(entity) else {
                 tracing::debug!(
                     modality = M::NAME,
                     label = entity.label.as_str(),
@@ -147,6 +172,11 @@ impl<M: Modality> Anonymizer<M> {
                 );
                 continue;
             };
+            // Clone what we need so the registry borrow ends before we take
+            // `&mut entity` to record provenance below.
+            let operator = Arc::clone(resolved.operator);
+            let matched_by = resolved.matched_by;
+            let attribution = resolved.attribution.cloned();
             let Some(data) = reader.read_at(&entity.location).await? else {
                 tracing::debug!(
                     modality = M::NAME,
@@ -156,6 +186,19 @@ impl<M: Modality> Anonymizer<M> {
                 continue;
             };
             let replacement = operator.anonymize_boxed(entity, &data).await?;
+
+            // Record why and how this entity was redacted: the matched rule
+            // (automatic "why"), the operator identity + leak profile, and the
+            // rule's author-supplied attribution (the policy "why").
+            let event = Event::redaction(
+                operator.id(),
+                operator.leak_profile(),
+                entity.confidence,
+                matched_by,
+                attribution,
+            );
+            entity.provenance.record(event);
+
             redactions.push(entity.location.clone(), replacement);
         }
         Ok(redactions)
@@ -175,7 +218,7 @@ impl<M: Modality> Anonymizer<M> {
     /// (or instead of) applying it.
     ///
     /// [`plan`]: Self::plan
-    pub async fn anonymize<T>(&self, target: &mut T, entities: &[Entity<M>]) -> Result<()>
+    pub async fn anonymize<T>(&self, target: &mut T, entities: &mut [Entity<M>]) -> Result<()>
     where
         T: DataReader<M> + DataWriter<M>,
     {
