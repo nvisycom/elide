@@ -996,7 +996,6 @@ version = "0.1.0"
 dependencies = [
  "elide-core",
  "hipstr",
- "tracing",
  "unicode-segmentation",
 ]
 

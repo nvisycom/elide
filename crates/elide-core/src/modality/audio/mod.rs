@@ -52,10 +52,10 @@ impl TextRecognizable for Audio {
         artifacts: &Artifacts,
     ) -> Option<AudioLocation> {
         // No transcript, or a range no segment covers: nothing to address.
+        // `resolve` yields the time span *and* the speaker (when diarized).
         artifacts
             .get::<Transcription>()
             .and_then(|t| t.resolve(range))
-            .map(AudioLocation::new)
     }
 }
 

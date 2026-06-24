@@ -294,7 +294,10 @@ mod tests {
         // Same slot reused: no duplicate format.
         assert_eq!(reg.iter().count(), before);
         // The replacement's lookups now resolve to the (single) txt id.
-        assert_eq!(reg.by_extension("variant").map(|f| f.id.clone()), Some(id.clone()));
+        assert_eq!(
+            reg.by_extension("variant").map(|f| f.id.clone()),
+            Some(id.clone())
+        );
         assert_eq!(
             reg.by_content_type("text/variant").map(|f| f.id.clone()),
             Some(id.clone())

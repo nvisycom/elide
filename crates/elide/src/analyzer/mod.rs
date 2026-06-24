@@ -110,7 +110,8 @@ impl<M: Modality> Analyzer<M> {
         for enricher in &self.enrichers {
             enricher.enrich_boxed(&data, ctx).await?;
         }
-        let entities = self.recognize(&data, ctx).await?;
+        let mut entities = self.recognize(&data, ctx).await?;
+        ctx.stamp_languages(&mut entities);
         let reduced = self.pipeline.run(entities);
         Ok(Self::apply_exclusions(reduced, ctx.exclusions()))
     }

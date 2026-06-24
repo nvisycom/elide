@@ -16,6 +16,7 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use super::AudioLocation;
 use crate::primitive::{Confidence, LanguageTag, TimeSpan};
 
 /// Separator inserted between segments when building the flat transcript
@@ -210,20 +211,26 @@ impl Transcription {
         })
     }
 
-    /// Resolve a byte `range` of [`text`] to the [`TimeSpan`] it
-    /// was spoken in.
+    /// Resolve a byte `range` of [`text`] to the [`AudioLocation`] it was
+    /// spoken in: the time span plus the speaker, when diarization assigned
+    /// one *and* the range stays within a single speaker's segments.
     ///
-    /// Returns the span from the start of the first overlapped word (or
-    /// segment, when word timings are absent) to the end of the last. Falls
-    /// back to whole-segment spans when a segment has no per-word timings.
+    /// The span runs from the start of the first overlapped word (or segment,
+    /// when word timings are absent) to the end of the last, falling back to
+    /// whole-segment spans without per-word timings. The speaker is carried
+    /// through only when every overlapped segment shares it — a range that
+    /// crosses a speaker change is left speaker-less rather than mis-attributed.
     /// `None` when the range overlaps no segment (out of bounds, or an empty
     /// transcription) — the caller drops such a match.
     ///
     /// [`text`]: Self::text
     #[must_use]
-    pub fn resolve(&self, range: Range<usize>) -> Option<TimeSpan> {
+    pub fn resolve(&self, range: Range<usize>) -> Option<AudioLocation> {
         let mut start_us: Option<u64> = None;
         let mut end_us: Option<u64> = None;
+        // `Some(None)` = no speaker seen yet; `Some(Some(id))` = one consistent
+        // speaker; `None` = conflicting speakers, so attribute to nobody.
+        let mut speaker: Option<Option<&HipStr<'static>>> = Some(None);
 
         for (seg_start, segment) in self.segment_offsets() {
             let seg_end = seg_start + segment.text.len();
@@ -248,9 +255,22 @@ impl Transcription {
             end_us = Some(end_us.map_or(segment_span.end_micros(), |e| {
                 e.max(segment_span.end_micros())
             }));
+
+            // Track the speaker across overlapped segments: keep it only while
+            // every segment agrees, otherwise collapse to "no speaker".
+            speaker = match (speaker, segment.speaker_id.as_ref()) {
+                (Some(None), seen) => Some(seen),
+                (Some(Some(prev)), Some(seen)) if prev == seen => Some(Some(prev)),
+                (Some(Some(_)), _) | (None, _) => None,
+            };
         }
 
-        Some(TimeSpan::new(start_us?, end_us?))
+        let span = TimeSpan::new(start_us?, end_us?);
+        let mut location = AudioLocation::new(span);
+        if let Some(Some(id)) = speaker {
+            location = location.with_speaker_id(id.clone());
+        }
+        Some(location)
     }
 }
 
@@ -319,18 +339,18 @@ mod tests {
     fn resolve_maps_a_word_range_to_its_timing() {
         let t = Transcription::new(vec![phone_segment()]);
         // "555-1234" is at bytes 14..22.
-        let span = t.resolve(14..22).expect("in bounds");
-        assert_eq!(span.start_millis(), 1_100);
-        assert_eq!(span.end_millis(), 1_800);
+        let loc = t.resolve(14..22).expect("in bounds");
+        assert_eq!(loc.span.start_millis(), 1_100);
+        assert_eq!(loc.span.end_millis(), 1_800);
     }
 
     #[test]
     fn resolve_spans_multiple_words() {
         let t = Transcription::new(vec![phone_segment()]);
         // "Alice at 555-1234" -> bytes 5..22 -> Alice start to phone end.
-        let span = t.resolve(5..22).expect("in bounds");
-        assert_eq!(span.start_millis(), 400);
-        assert_eq!(span.end_millis(), 1_800);
+        let loc = t.resolve(5..22).expect("in bounds");
+        assert_eq!(loc.span.start_millis(), 400);
+        assert_eq!(loc.span.end_millis(), 1_800);
     }
 
     #[test]
@@ -339,9 +359,9 @@ mod tests {
             TimeSpan::from_millis(200, 900),
             "no word timings here",
         )]);
-        let span = t.resolve(3..7).expect("in bounds");
-        assert_eq!(span.start_millis(), 200);
-        assert_eq!(span.end_millis(), 900);
+        let loc = t.resolve(3..7).expect("in bounds");
+        assert_eq!(loc.span.start_millis(), 200);
+        assert_eq!(loc.span.end_millis(), 900);
     }
 
     #[test]
@@ -351,9 +371,30 @@ mod tests {
             TranscriptSegment::new(TimeSpan::from_millis(600, 1_000), "bob"),
         ]);
         // "alice bob" -> bytes 0..9 spans both segments.
-        let span = t.resolve(0..9).expect("in bounds");
-        assert_eq!(span.start_millis(), 0);
-        assert_eq!(span.end_millis(), 1_000);
+        let loc = t.resolve(0..9).expect("in bounds");
+        assert_eq!(loc.span.start_millis(), 0);
+        assert_eq!(loc.span.end_millis(), 1_000);
+    }
+
+    #[test]
+    fn resolve_carries_a_single_speaker() {
+        let t = Transcription::new(vec![
+            TranscriptSegment::new(TimeSpan::from_millis(0, 500), "alice").with_speaker_id("spk_0"),
+        ]);
+        let loc = t.resolve(0..5).expect("in bounds");
+        assert_eq!(loc.speaker_id.as_deref(), Some("spk_0"));
+    }
+
+    #[test]
+    fn resolve_drops_speaker_across_a_speaker_change() {
+        let t = Transcription::new(vec![
+            TranscriptSegment::new(TimeSpan::from_millis(0, 500), "alice").with_speaker_id("spk_0"),
+            TranscriptSegment::new(TimeSpan::from_millis(600, 1_000), "bob")
+                .with_speaker_id("spk_1"),
+        ]);
+        // bytes 0..9 cross both speakers -> attributed to neither.
+        let loc = t.resolve(0..9).expect("in bounds");
+        assert!(loc.speaker_id.is_none());
     }
 
     #[test]

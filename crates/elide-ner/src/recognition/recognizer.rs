@@ -105,6 +105,12 @@ impl NerRecognizer {
         self.alignment
     }
 
+    /// Place a backend [`NerSpan`] into a located [`Entity`] carrying a
+    /// [`Model`] birth event, keeping the span's byte offset as the entity's
+    /// `recognized_range`. Drops the match (`None`) when its range can't be
+    /// placed in the medium (an OCR/transcript range no enrichment covers).
+    ///
+    /// [`Model`]: elide_core::entity::provenance::EventKind::Model
     fn build_entity<M: TextRecognizable>(
         &self,
         span: &NerSpan,
@@ -112,22 +118,12 @@ impl NerRecognizer {
         data: &M::Data,
         ctx: &RecognizerContext<'_, M>,
     ) -> Option<Entity<M>> {
-        let confidence = span.confidence;
-        let Some(location) = M::locate(span.offset.start..span.offset.end, data, &ctx.artifacts)
-        else {
-            // The match can't be placed in the medium (e.g. an OCR range no
-            // word box covers); drop it rather than emit a placeless entity.
-            tracing::warn!(
-                recognizer = %self.name,
-                label = label.as_str(),
-                "could not place a match in the source; dropping it",
-            );
-            return None;
-        };
+        let range = span.offset.clone();
+        let location = M::locate(range.clone(), data, &ctx.artifacts)?;
         let reason = format!("recognizer `{}` identified {}", self.name, label.as_str());
         let event = Event::model(
             "ner",
-            confidence,
+            span.confidence,
             location.clone(),
             ModelEvent {
                 name: self.name.clone(),
@@ -139,7 +135,8 @@ impl NerRecognizer {
             Entity::builder()
                 .with_label(label)
                 .with_location(location)
-                .with_confidence(confidence)
+                .with_confidence(span.confidence)
+                .with_recognized_range(range)
                 .with_event(event)
                 .build()
                 .expect("required fields provided"),
@@ -223,8 +220,9 @@ impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
         // Spans already carry canonical labels (the backend did any
         // raw-to-canonical mapping; ignored labels are dropped by an
         // `IgnoreLabels` decorator). When a target set was requested, we
-        // restrict to it.
-        let entities: Vec<Entity<M>> = response
+        // restrict to it. Each surviving span is placed in the medium; one
+        // whose range can't be located is dropped.
+        Ok(response
             .spans
             .iter()
             .filter(|s| {
@@ -232,8 +230,7 @@ impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
                     || effective_labels.iter().any(|l| l.to_ref() == s.label)
             })
             .filter_map(|s| self.build_entity::<M>(s, s.label.clone(), data, ctx))
-            .collect();
-        Ok(entities)
+            .collect())
     }
 }
 

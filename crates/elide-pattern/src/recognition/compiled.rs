@@ -19,13 +19,25 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use elide_context::{DraftEvent, EntityDraft};
 use elide_core::entity::LabelRef;
 use elide_core::entity::provenance::PatternEvent;
 use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
 use regex::Regex;
 
 use crate::validators::Validator;
+
+/// One pattern/dictionary hit before placement: the recognizer lifts it to a
+/// located [`Entity`] via `M::locate(range)`, keeping `range` as the entity's
+/// `recognized_range`.
+///
+/// [`Entity`]: elide_core::entity::Entity
+pub(super) struct RawMatch {
+    pub label: LabelRef,
+    pub confidence: Confidence,
+    pub range: Range<usize>,
+    pub pattern: PatternEvent,
+    pub reason: String,
+}
 
 /// One compiled regex slot: a single `(pattern, variant)` pair,
 /// keyed in the shared `RegexSet` by its position in
@@ -53,13 +65,12 @@ pub(super) struct CompiledPattern {
 }
 
 impl CompiledPattern {
-    /// Build a stream-positioned [`EntityDraft`] for a regex match at
-    /// `[start, end)` byte coordinates in the recognized-text stream. The
-    /// `Enhanced` adapter lifts the draft to a located entity after dispatch.
-    pub(super) fn draft(&self, range: Range<usize>) -> EntityDraft {
-        let event = DraftEvent {
-            source: "pattern".into(),
-            reason: format!("pattern `{}` matched", self.pattern_name).into(),
+    /// A [`RawMatch`] for a regex hit at `range`, for the recognizer to place.
+    pub(super) fn raw_match(&self, range: Range<usize>) -> RawMatch {
+        RawMatch {
+            label: self.label.clone(),
+            confidence: self.score,
+            range,
             pattern: PatternEvent {
                 name: self.pattern_name.clone().into(),
                 regex: Some(self.regex.as_str().into()),
@@ -69,8 +80,8 @@ impl CompiledPattern {
                     .map(|_| self.pattern_name.clone().into()),
                 contextual: false,
             },
-        };
-        EntityDraft::new(self.label.clone(), self.score, range, event)
+            reason: format!("pattern `{}` matched", self.pattern_name),
+        }
     }
 }
 
@@ -102,21 +113,20 @@ pub(super) struct CompiledDictionary {
 }
 
 impl CompiledDictionary {
-    /// Build a stream-positioned [`EntityDraft`] for an Aho-Corasick hit at
-    /// `[start, end)` byte coordinates in the recognized-text stream. `score`
-    /// is the per-term confidence resolved at recognizer-build time (the
-    /// dictionary's `scoring` policy or per-term override).
-    pub(super) fn draft(&self, score: Confidence, range: Range<usize>) -> EntityDraft {
-        let event = DraftEvent {
-            source: "pattern".into(),
-            reason: format!("dictionary `{}` matched", self.name).into(),
+    /// A [`RawMatch`] for an Aho-Corasick dictionary hit at `range` with the
+    /// resolved per-term `score`, for the recognizer to place.
+    pub(super) fn raw_match(&self, score: Confidence, range: Range<usize>) -> RawMatch {
+        RawMatch {
+            label: self.label.clone(),
+            confidence: score,
+            range,
             pattern: PatternEvent {
                 name: self.name.clone().into(),
                 contextual: false,
                 ..PatternEvent::default()
             },
-        };
-        EntityDraft::new(self.label.clone(), score, range, event)
+            reason: format!("dictionary `{}` matched", self.name),
+        }
     }
 }
 
