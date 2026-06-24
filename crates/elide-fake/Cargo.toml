@@ -1,0 +1,41 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "elide-fake"
+description = "Locale-aware fake-data anonymizer operator for the Elide toolkit"
+keywords = ["elide", "fake", "anonymizer", "pii"]
+categories = ["text-processing"]
+readme = "README.md"
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+# Internal crates
+elide-core = { workspace = true, features = ["tabular"] }
+
+# Primitive datatypes
+uuid = { workspace = true, features = ["v4"] }
+
+# Fake-data generation
+fake = { workspace = true, features = [] }
+
+[dev-dependencies]
+# Internal crates — the facade, for the shipped operators the tests use as
+# fallbacks. Default features off to avoid pulling the recognizer backends.
+elide = { path = "../elide", default-features = false, features = ["tabular"] }
+
+# Async runtime & parallelism
+tokio = { workspace = true, features = ["macros", "rt"] }

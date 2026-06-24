@@ -11,6 +11,7 @@ members = [
     "./crates/elide-stt",
     "./crates/elide-ocr",
     "./crates/elide-codec",
+    "./crates/elide-fake",
     "./crates/elide",
     "./examples",
 ]
@@ -42,6 +43,7 @@ elide-llm = { path = "./crates/elide-llm", version = "0.1.0" }
 elide-stt = { path = "./crates/elide-stt", version = "0.1.0" }
 elide-ocr = { path = "./crates/elide-ocr", version = "0.1.0" }
 elide-codec = { path = "./crates/elide-codec", version = "0.1.0" }
+elide-fake = { path = "./crates/elide-fake", version = "0.1.0" }
 elide = { path = "./crates/elide", version = "0.1.0" }
 
 # (De)serialization
@@ -61,6 +63,7 @@ strum = { version = "0.28", features = ["derive"] }
 # Primitive datatypes
 uuid = { version = "1.23", features = ["serde", "v4", "v7"] }
 bytes = { version = "1.0", features = ["serde"] }
+fake = { version = "5.1", features = [] }
 hipstr = { version = "0.8", features = ["serde"] }
 jiff = { version = "0.2", features = ["serde"] }
 oxilangtag = { version = "0.1", features = ["serialize"] }
