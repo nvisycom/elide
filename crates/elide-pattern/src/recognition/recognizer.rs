@@ -3,7 +3,7 @@
 use aho_corasick::{AhoCorasick, MatchKind};
 use elide_context::matching::SubstringMatcher;
 use elide_context::{BoostRule, Enhanced, Enhancer};
-use elide_core::recognition::{EntityDraft, StreamRecognizer, lift_all};
+use elide_core::entity::provenance::Event;
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::LanguageTag;
@@ -11,7 +11,7 @@ use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
 use elide_core::{Error, ErrorKind, Result};
 use regex::RegexSet;
 
-use super::compiled::{CompiledDictionary, CompiledPattern, has_word_boundaries};
+use super::compiled::{CompiledDictionary, CompiledPattern, RawMatch, has_word_boundaries};
 use super::dictionary::Dictionary;
 use super::regex::Regex;
 use crate::shipped;
@@ -420,17 +420,45 @@ impl PatternRecognizerBuilder {
     }
 }
 
-impl<M: TextRecognizable> StreamRecognizer<M> for PatternRecognizer {
+impl PatternRecognizer {
+    /// Place a match at `range` of the recognized text into a located
+    /// [`Entity`], keeping the range as the entity's `recognized_range`.
+    /// Drops the match (`None`) when its range can't be placed in the medium
+    /// (an OCR/transcript range no enrichment covers).
+    fn build_entity<M: TextRecognizable>(
+        &self,
+        raw: RawMatch,
+        data: &M::Data,
+        ctx: &RecognizerContext<'_, M>,
+    ) -> Option<Entity<M>> {
+        let location = M::locate(raw.range.clone(), data, &ctx.artifacts)?;
+        let event = Event::pattern("pattern", raw.confidence, location.clone(), raw.pattern)
+            .with_reason(raw.reason);
+        Some(
+            Entity::builder()
+                .with_label(raw.label)
+                .with_location(location)
+                .with_confidence(raw.confidence)
+                .with_recognized_range(raw.range)
+                .with_event(event)
+                .build()
+                .expect("required fields provided"),
+        )
+    }
+}
+
+impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
     fn id(&self) -> RecognizerId {
         RecognizerId::new("elide-pattern", env!("CARGO_PKG_VERSION"))
     }
 
-    async fn find(
+    async fn recognize(
         &self,
-        text: &str,
+        data: &M::Data,
         ctx: &RecognizerContext<'_, M>,
-    ) -> Result<Vec<EntityDraft>> {
-        let mut drafts: Vec<EntityDraft> = Vec::new();
+    ) -> Result<Vec<Entity<M>>> {
+        let text = M::as_text(data, &ctx.artifacts);
+        let mut entities: Vec<Entity<M>> = Vec::new();
 
         if let Some(set) = self.regex_set.as_ref() {
             for pattern_id in set.matches(text).into_iter() {
@@ -451,7 +479,11 @@ impl<M: TextRecognizable> StreamRecognizer<M> for PatternRecognizer {
                     {
                         continue;
                     }
-                    drafts.push(pat.draft(m.range()));
+                    if let Some(entity) =
+                        self.build_entity::<M>(pat.raw_match(m.range()), data, ctx)
+                    {
+                        entities.push(entity);
+                    }
                 }
             }
         }
@@ -473,32 +505,14 @@ impl<M: TextRecognizable> StreamRecognizer<M> for PatternRecognizer {
                     continue;
                 }
                 let score = dict.term_scores[term_id - dict.term_start];
-                drafts.push(dict.draft(score, range));
+                if let Some(entity) =
+                    self.build_entity::<M>(dict.raw_match(score, range), data, ctx)
+                {
+                    entities.push(entity);
+                }
             }
         }
 
-        Ok(drafts)
-    }
-}
-
-/// `PatternRecognizer` is a [`Recognizer`] directly, with no context
-/// enhancement: it `find`s drafts and [`lift_all`]s them. Wrap it in
-/// [`Enhanced`] (via [`build_context_enhanced`]) for the keyword-boost path.
-///
-/// [`Recognizer`]: elide_core::recognition::Recognizer
-/// [`build_context_enhanced`]: PatternRecognizerBuilder::build_context_enhanced
-impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
-    fn id(&self) -> RecognizerId {
-        StreamRecognizer::<M>::id(self)
-    }
-
-    async fn recognize(
-        &self,
-        data: &M::Data,
-        ctx: &RecognizerContext<'_, M>,
-    ) -> Result<Vec<Entity<M>>> {
-        let text = M::as_text(data, &ctx.artifacts);
-        let drafts = self.find(text, ctx).await?;
-        Ok(lift_all::<M>(drafts, data, &ctx.artifacts))
+        Ok(entities)
     }
 }

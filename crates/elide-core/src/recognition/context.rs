@@ -4,7 +4,7 @@
 
 use uuid::Uuid;
 
-use crate::entity::{LabelCatalog, LabelRef};
+use crate::entity::{Entity, LabelCatalog, LabelRef};
 use crate::modality::{Hint, Modality};
 use crate::primitive::{CountryCode, Language, LanguageTag, Languages};
 use crate::recognition::annotation::{Exclusion, Inclusion};
@@ -173,6 +173,38 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
     #[must_use]
     pub fn primary_language(&self) -> Option<&LanguageTag> {
         self.ranked_languages().first().map(|d| &d.language)
+    }
+
+    /// Stamp each entity's [`language`] from this call's detected-language
+    /// spans: match the entity's [`recognized_range`] against the [`Language`]
+    /// a detector resolved for that span of the recognized text.
+    ///
+    /// A span-less detection (one covering the whole payload) applies to any
+    /// range, so a monolingual document attributes every entity to its single
+    /// language. Entities with no `recognized_range` (a natively-located VLM
+    /// box) are left untouched, as is the whole set when no language is known.
+    ///
+    /// [`language`]: crate::entity::Entity::language
+    /// [`recognized_range`]: crate::entity::Entity::recognized_range
+    pub fn stamp_languages(&self, entities: &mut [Entity<M>]) {
+        let languages = self.ranked_languages();
+        if languages.is_empty() {
+            return;
+        }
+        for entity in entities.iter_mut() {
+            let Some(range) = entity.recognized_range.clone() else {
+                continue;
+            };
+            // First detected language whose span covers the entity's range;
+            // a span-less language matches any range (whole-payload scope).
+            let resolved = languages.iter().find(|lang| {
+                lang.span
+                    .is_none_or(|span| range.start >= span.start && range.end <= span.end)
+            });
+            if let Some(lang) = resolved {
+                entity.language = Some(lang.language.clone());
+            }
+        }
     }
 
     /// Whether a recognizer rule scoped to `allowed` countries should run

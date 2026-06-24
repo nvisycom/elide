@@ -31,6 +31,3 @@ hipstr = { workspace = true, features = [] }
 
 # Text processing
 unicode-segmentation = { workspace = true, features = [] }
-
-# Observability
-tracing = { workspace = true, features = [] }

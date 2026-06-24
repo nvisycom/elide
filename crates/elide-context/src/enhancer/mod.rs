@@ -4,13 +4,13 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
-use elide_core::entity::LabelRef;
+use elide_core::entity::{Entity, LabelRef};
+use elide_core::modality::TextRecognizable;
 use elide_core::primitive::Confidence;
 use hipstr::HipStr;
 
 use crate::io::Token;
 use crate::matching::KeywordMatcher;
-use elide_core::recognition::EntityDraft;
 use crate::rule::BoostRule;
 
 mod context;
@@ -114,46 +114,49 @@ impl Enhancer {
         self.rules.len()
     }
 
-    /// Apply boost rules to `drafts` in place, lifting confidence where a
+    /// Apply boost rules to `entities` in place, lifting confidence where a
     /// keyword fires, and return one [`Boost`] per lift for the caller to
     /// record in provenance.
     ///
-    /// For each draft: walk every rule registered for its label whose
+    /// For each entity: walk every rule registered for its label whose
     /// language scope applies under `ctx.language`, check a window of
-    /// `prefix_words`/`suffix_words` around the draft's [`stream_range`] (and
-    /// the out-of-band hints), and on a hit lift confidence by the rule's
-    /// `boost` (saturating at the [`Confidence`] ceiling). The in-text and
-    /// hint paths are independent — at most one boost per rule fires per
-    /// draft (window first, hint as fallback) — so a long keyword list
-    /// can't double-dip.
+    /// `prefix_words`/`suffix_words` around the entity's
+    /// [`recognized_range`] (and the out-of-band hints), and on a hit lift
+    /// confidence by the rule's `boost` (saturating at the [`Confidence`]
+    /// ceiling). The in-text and hint paths are independent — at most one
+    /// boost per rule fires per entity (window first, hint as fallback) — so
+    /// a long keyword list can't double-dip.
     ///
-    /// Operating on drafts (pre-lift) is what makes this modality-free: the
-    /// draft carries its stream byte range, so the enhancer never needs the
-    /// native location. It does *not* build the provenance event: it returns
-    /// each [`Boost`] with the matched hint's *index* (when the match came
-    /// from a hint), for the caller to record once the draft is lifted.
+    /// Reads only the modality-free fields (`label`, `recognized_range`,
+    /// `confidence`), so it works for any modality. It does *not* build the
+    /// provenance event: it returns each [`Boost`] with the matched hint's
+    /// *index* (when the match came from a hint), for the caller to record.
     ///
     /// [`Confidence`]: elide_core::primitive::Confidence
-    /// [`stream_range`]: EntityDraft::stream_range
-    pub fn enhance(&self, drafts: &mut [EntityDraft], ctx: &Context<'_>) -> Vec<Boost> {
+    /// [`recognized_range`]: elide_core::entity::Entity::recognized_range
+    pub fn enhance<M: TextRecognizable>(
+        &self,
+        entities: &mut [Entity<M>],
+        ctx: &Context<'_>,
+    ) -> Vec<Boost> {
         let mut boosts = Vec::new();
         if self.rules.is_empty() {
             return boosts;
         }
-        for (draft_index, draft) in drafts.iter_mut().enumerate() {
-            self.enhance_one(draft_index, draft, ctx, &mut boosts);
+        for (entity_index, entity) in entities.iter_mut().enumerate() {
+            self.enhance_one(entity_index, entity, ctx, &mut boosts);
         }
         boosts
     }
 
-    fn enhance_one(
+    fn enhance_one<M: TextRecognizable>(
         &self,
-        draft_index: usize,
-        draft: &mut EntityDraft,
+        entity_index: usize,
+        entity: &mut Entity<M>,
         ctx: &Context<'_>,
         boosts: &mut Vec<Boost>,
     ) {
-        let Some(bucket) = self.rules.get(&draft.label) else {
+        let Some(bucket) = self.rules.get(&entity.label) else {
             return;
         };
         for rule in bucket {
@@ -163,28 +166,80 @@ impl Enhancer {
             if rule.keywords.is_empty() {
                 continue;
             }
-            if let Some(boost) = self.apply_rule(draft_index, draft, rule, ctx) {
+            if let Some(boost) = self.apply_rule(entity_index, entity, rule, ctx) {
                 boosts.push(boost);
             }
         }
     }
 
-    fn apply_rule(
+    fn apply_rule<M: TextRecognizable>(
         &self,
-        draft_index: usize,
-        draft: &mut EntityDraft,
+        entity_index: usize,
+        entity: &mut Entity<M>,
         rule: &BoostRule,
         ctx: &Context<'_>,
     ) -> Option<Boost> {
-        // The draft carries its byte range into `ctx.text` (the stream).
-        let range = draft.stream_range.clone();
+        // The in-text window path needs the entity's byte range into the
+        // recognized text; the out-of-band hint path does not. An entity with
+        // no `recognized_range` (e.g. a natively-located VLM box) can still be
+        // boosted by a hint, just not by its surrounding word window.
+        let window = entity
+            .recognized_range
+            .clone()
+            .and_then(|range| self.window_match(&range, rule, ctx));
 
-        // Prefer the token stream when the producer reached this
-        // entity. Fall back to the word-segmented substring window
-        // whenever the token slice would be empty; that covers
-        // `tokens: None`, `tokens: Some(&[])`, and the "tokens
-        // present but none overlap the entity" case (e.g. NLP
-        // engine only tokenized part of the document).
+        // Window first; the hint path reports *which* hint fired so the
+        // caller can record its location. The in-text path additionally
+        // carries the keyword's *stream* range so the caller can resolve a
+        // native location for it, symmetric with the hint's own location.
+        let (source, hint_index, keyword_range) = if let Some(keyword_range) = window {
+            (EVENT_SOURCE_WINDOW, None, Some(keyword_range))
+        } else if let Some(i) = ctx
+            .hints
+            .iter()
+            .position(|h| self.matcher.any_match(h, &[], &rule.keywords).is_some())
+        {
+            (EVENT_SOURCE_HINT, Some(i), None)
+        } else {
+            return None;
+        };
+
+        let before = entity.confidence;
+        let after = before.saturating_add(rule.boost.get());
+        if after == before {
+            return None;
+        }
+        entity.confidence = after;
+
+        // The rule's first keyword stands in for the match — the matcher
+        // reports "any keyword fired", not which one.
+        let keyword = rule.keywords.first().cloned().unwrap_or_default();
+        Some(Boost {
+            entity_index,
+            source,
+            before,
+            after,
+            keyword,
+            hint_index,
+            keyword_range,
+            amount: rule.boost.get(),
+        })
+    }
+
+    /// Match the rule's keywords in the word/token window around `range`,
+    /// returning the matched keyword's *stream* byte range (rebased into the
+    /// recognized text) when one fires.
+    fn window_match(
+        &self,
+        range: &Range<usize>,
+        rule: &BoostRule,
+        ctx: &Context<'_>,
+    ) -> Option<Range<usize>> {
+        // Prefer the token stream when the producer reached this entity. Fall
+        // back to the word-segmented substring window whenever the token slice
+        // would be empty; that covers `tokens: None`, `tokens: Some(&[])`, and
+        // the "tokens present but none overlap the entity" case (e.g. an NLP
+        // engine that only tokenized part of the document).
         let token_slice = ctx
             .tokens
             .map(|toks| {
@@ -196,58 +251,17 @@ impl Enhancer {
         // stream coordinates for `M::locate`.
         let (snippet, tokens_in_window, window_offset): (&str, &[Token], usize) =
             if token_slice.is_empty() {
-                let (snippet, offset) = word_window(
-                    ctx.text,
-                    range.clone(),
-                    rule.prefix_words,
-                    rule.suffix_words,
-                );
+                let (snippet, offset) =
+                    word_window(ctx.text, range.clone(), rule.prefix_words, rule.suffix_words);
                 (snippet, &[], offset)
             } else {
                 let (snippet, offset) = token_span(ctx.text, token_slice, range.clone());
                 (snippet, token_slice, offset)
             };
-
-        // Window first; the hint path reports *which* hint fired so the
-        // caller can record its location. The in-text path additionally
-        // carries the keyword's *stream* range so the caller can resolve a
-        // native location for it, symmetric with the hint's own location.
-        let (source, hint_index, keyword_range) = if let Some(m) =
-            self.matcher
-                .any_match(snippet, tokens_in_window, &rule.keywords)
-        {
-            let stream_range = window_offset + m.start..window_offset + m.end;
-            (EVENT_SOURCE_WINDOW, None, Some(stream_range))
-        } else if let Some(i) = ctx
-            .hints
-            .iter()
-            .position(|h| self.matcher.any_match(h, &[], &rule.keywords).is_some())
-        {
-            (EVENT_SOURCE_HINT, Some(i), None)
-        } else {
-            return None;
-        };
-
-        let before = draft.confidence;
-        let after = before.saturating_add(rule.boost.get());
-        if after == before {
-            return None;
-        }
-        draft.confidence = after;
-
-        // The rule's first keyword stands in for the match — the matcher
-        // reports "any keyword fired", not which one.
-        let keyword = rule.keywords.first().cloned().unwrap_or_default();
-        Some(Boost {
-            entity_index: draft_index,
-            source,
-            before,
-            after,
-            keyword,
-            hint_index,
-            keyword_range,
-            amount: rule.boost.get(),
-        })
+        let m = self
+            .matcher
+            .any_match(snippet, tokens_in_window, &rule.keywords)?;
+        Some(window_offset + m.start..window_offset + m.end)
     }
 }
 

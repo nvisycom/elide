@@ -94,6 +94,29 @@ async fn analyze_fuses_resolves_filters() {
     assert_eq!(phone.provenance.final_confidence(), Some(phone.confidence));
 }
 
+#[tokio::test]
+async fn analyze_stamps_language_from_recognized_range() {
+    use elide_core::primitive::{Language, LanguageTag};
+
+    // An entity carrying a recognized_range (where it was found in the text).
+    let mut e = detected("pattern", "PERSON", (0, 5), 0.9);
+    e.recognized_range = Some(0..5);
+
+    let analyzer = Analyzer::<Text>::new().with_recognizer(Fixed(vec![e]));
+
+    // The caller asserts the document language; it applies span-less (whole
+    // payload), so every ranged entity is attributed to it.
+    let de = Language::asserted(LanguageTag::parse("de").unwrap());
+    let scope = Scope::new().with_language(de);
+
+    let entities = analyzer.analyze(TextData::new("hello"), &scope).await.unwrap();
+    assert_eq!(entities.len(), 1);
+    assert_eq!(
+        entities[0].language.as_ref().map(|l| l.primary_language()),
+        Some("de")
+    );
+}
+
 #[test]
 fn calibrate_scales_by_originating_recognizer() {
     use elide::deduplication::Layer;

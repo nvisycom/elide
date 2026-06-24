@@ -1,5 +1,7 @@
 //! [`EntityBuilder`] for assembling an [`Entity`] field by field.
 
+use std::ops::Range;
+
 use uuid::Uuid;
 
 use super::{Entity, EntityCoRef, LabelRef};
@@ -44,6 +46,7 @@ pub struct EntityBuilder<M: Modality> {
     confidence: Option<Confidence>,
     coref: Option<EntityCoRef>,
     language: Option<LanguageTag>,
+    recognized_range: Option<Range<usize>>,
     events: Vec<Event<M>>,
 }
 
@@ -57,6 +60,7 @@ impl<M: Modality> EntityBuilder<M> {
             confidence: None,
             coref: None,
             language: None,
+            recognized_range: None,
             events: Vec::new(),
         }
     }
@@ -103,6 +107,14 @@ impl<M: Modality> EntityBuilder<M> {
         self
     }
 
+    /// Set the byte range of the match in the recognized text — the key back
+    /// into the enrichment artifact (OCR layout, transcript).
+    #[must_use]
+    pub fn with_recognized_range(mut self, range: Range<usize>) -> Self {
+        self.recognized_range = Some(range);
+        self
+    }
+
     /// Append a provenance event. Events accumulate in order.
     #[must_use]
     pub fn with_event(mut self, event: Event<M>) -> Self {
@@ -130,6 +142,7 @@ impl<M: Modality> EntityBuilder<M> {
             confidence: self.confidence?,
             coref: self.coref,
             language: self.language,
+            recognized_range: self.recognized_range,
             provenance: Provenance {
                 events: self.events,
             },

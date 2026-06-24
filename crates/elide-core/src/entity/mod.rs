@@ -11,6 +11,8 @@ mod label;
 pub mod provenance;
 mod reference;
 
+use std::ops::Range;
+
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -71,6 +73,20 @@ pub struct Entity<M: Modality> {
     /// The language of this entity's surrounding text, when a recognizer
     /// resolved one. `None` when unknown or language-agnostic.
     pub language: Option<LanguageTag>,
+    /// Byte range of the match in the *recognized text* it was found in (the
+    /// OCR layout text, the audio transcript, or the text payload itself) —
+    /// the stable key back into that enrichment artifact, where the rich
+    /// context lives (which OCR block, which speaker) that the geometric
+    /// [`location`] cannot hold. `None` for entities not found via text
+    /// recognition (e.g. a VLM box). Provenance, not a coordinate: redaction
+    /// uses [`location`]; an audit uses this with the artifact.
+    ///
+    /// [`location`]: Entity::location
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub recognized_range: Option<Range<usize>>,
     /// Detection audit trail: every contributing detection and the fusion
     /// event, if any.
     pub provenance: Provenance<M>,
@@ -98,6 +114,7 @@ impl<M: Modality> Entity<M> {
             confidence,
             coref: None,
             language: None,
+            recognized_range: None,
             provenance,
         }
     }
