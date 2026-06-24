@@ -193,6 +193,37 @@ async fn anonymize_selects_by_tag() {
 }
 
 #[tokio::test]
+async fn catalog_predicate_resolves_tags_through_the_catalog() {
+    let source = TextSource::new("4111111111111111 and bob");
+    let mut entities = vec![
+        entity("payment_card", (0, 16)), // financial -> Mask
+        entity("person_name", (21, 24)), // not financial -> fallback Erase
+    ];
+
+    let mut catalog = LabelCatalog::new();
+    catalog.insert(Label::from_static("payment_card", None, &["financial"]));
+    catalog.insert(Label::from_static("person_name", None, &["pii"]));
+
+    // A catalog-aware predicate resolves the entity's label to its tags —
+    // the same source `with_tag` consults, but expressed as a predicate.
+    let items = Anonymizer::<Text>::new()
+        .with_catalog(catalog)
+        .with_catalog_predicate(
+            |e, cat| cat.get(&e.label).is_some_and(|l| l.has_tag("financial")),
+            Mask::stars(),
+        )
+        .with_fallback(Erase)
+        .plan(&mut entities, &source)
+        .await
+        .unwrap()
+        .into_iter()
+        .collect::<Vec<_>>();
+
+    assert_eq!(items[0].1, TextReplacement::substituted("****************"));
+    assert_eq!(items[1].1, TextReplacement::Removed);
+}
+
+#[tokio::test]
 async fn anonymize_first_matching_rule_wins() {
     let source = TextSource::new("a@b.com");
     let mut entities = vec![entity("EMAIL_ADDRESS", (0, 7))];

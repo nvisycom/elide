@@ -1,7 +1,6 @@
 //! [`RuleMatch`]: which kind of selection rule chose an operator.
 
 use hipstr::HipStr;
-
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
