@@ -1,0 +1,37 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "elide-fake"
+description = "Locale-aware fake-data Anonymizer for elide entities"
+keywords = ["elide", "fake", "anonymizer", "pii"]
+categories = ["text-processing"]
+readme = "README.md"
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = true
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+# Framework
+elide-core = { workspace = true, features = ["tabular"] }
+
+# Primitive datatypes
+uuid = { workspace = true, features = ["v4"] }
+
+# Utilities
+fake = { workspace = true, features = [] }
+
+[dev-dependencies]
+elide = { workspace = true, default-features = false, features = ["tabular"] }
+tokio = { workspace = true, features = ["rt", "macros"] }
