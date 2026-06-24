@@ -42,13 +42,12 @@ pub mod recognition {
     #[doc(inline)]
     pub use elide_core::recognition::*;
 
-    /// Context-enhanced recognition: keyword-boosted confidence over a
-    /// stream recognizer.
+    /// Context-enhanced recognition: keyword-boosted confidence over another
+    /// recognizer.
     ///
-    /// A [`StreamRecognizer`] finds matches over the recognized-text stream
-    /// and returns [`EntityDraft`]s; [`Enhanced`] adapts one into a full
-    /// [`Recognizer`], optionally running an [`Enhancer`] (built from
-    /// [`BoostRule`]s) over the drafts first. This is the home of the type
+    /// [`Enhanced`] wraps a [`Recognizer`] and runs an [`Enhancer`] (built
+    /// from [`BoostRule`]s) over its entities, lifting confidence where a
+    /// context keyword fires near an entity. This is the home of the type
     /// `PatternRecognizer::build_context_enhanced` returns. Re-exported from
     /// [`elide_context`].
     ///
@@ -69,8 +68,6 @@ pub mod recognition {
     /// ```
     ///
     /// [`Recognizer`]: elide_core::recognition::Recognizer
-    /// [`StreamRecognizer`]: elide_core::recognition::StreamRecognizer
-    /// [`EntityDraft`]: elide_core::recognition::EntityDraft
     /// [`Enhanced`]: elide_context::Enhanced
     /// [`Enhancer`]: elide_context::Enhancer
     /// [`BoostRule`]: elide_context::BoostRule
