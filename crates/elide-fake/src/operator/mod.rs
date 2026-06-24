@@ -17,10 +17,9 @@ use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 use fake::rand::SeedableRng;
 use fake::rand::rngs::SmallRng;
 
+use self::identity::Identity;
 use crate::generator;
 use crate::locale::Locale;
-
-use self::identity::Identity;
 
 /// Locale-aware fake-data operator.
 ///
@@ -168,7 +167,9 @@ where
             Identity::from(entity),
             data.as_str(),
         ) {
-            return Ok(TabularReplacement::Cell(TextReplacement::substituted(value)));
+            return Ok(TabularReplacement::Cell(TextReplacement::substituted(
+                value,
+            )));
         }
         self.fallback.anonymize(entity, data).await
     }
@@ -336,13 +337,10 @@ mod tests {
             .with_confidence(Confidence::clamped(1.0))
             .build()
             .unwrap();
-        let out = <Fake<Mask> as Operator<Tabular>>::anonymize(
-            &op,
-            &entity,
-            &TextData::new("alice"),
-        )
-        .await
-        .unwrap();
+        let out =
+            <Fake<Mask> as Operator<Tabular>>::anonymize(&op, &entity, &TextData::new("alice"))
+                .await
+                .unwrap();
         let TabularReplacement::Cell(TextReplacement::Substituted(value)) = out else {
             panic!("expected Cell(Substituted)");
         };
