@@ -96,6 +96,8 @@ mock = ["elide-ner?/mock", "elide-llm?/mock", "elide-stt?/mock", "elide-ocr?/moc
 
 ## The reversible `Encrypt` operator (AES-256-GCM) and its `KeyProvider`.
 crypto = ["dep:aes-gcm", "dep:base64"]
+## The locale-aware `Fake` redaction operator based on the `fakers` crate.
+fake = ["dep:elide-fake", "tabular"]
 
 [dependencies]
 # Internal crates
@@ -107,6 +109,7 @@ elide-llm = { workspace = true, features = [], optional = true }
 elide-stt = { workspace = true, features = [], optional = true }
 elide-ocr = { workspace = true, features = [], optional = true }
 elide-codec = { workspace = true, features = [], optional = true }
+elide-fake = { workspace = true, features = [], optional = true }
 
 # (De)serialization
 serde = { workspace = true, features = [], optional = true }

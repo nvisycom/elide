@@ -953,6 +953,7 @@ dependencies = [
  "elide-codec",
  "elide-context",
  "elide-core",
+ "elide-fake",
  "elide-llm",
  "elide-ner",
  "elide-ocr",

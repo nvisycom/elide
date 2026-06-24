@@ -51,6 +51,11 @@ mod replace;
 #[cfg(feature = "audio")]
 mod silence;
 
+/// Replace an entity with a plausible, locale-aware fake value.
+#[cfg(feature = "fake")]
+#[cfg_attr(docsrs, doc(cfg(feature = "fake")))]
+pub use elide_fake::Fake;
+
 #[cfg(feature = "audio")]
 pub use self::beep::Beep;
 #[cfg(feature = "image")]
