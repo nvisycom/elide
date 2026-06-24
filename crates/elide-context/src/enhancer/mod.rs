@@ -251,8 +251,12 @@ impl Enhancer {
         // stream coordinates for `M::locate`.
         let (snippet, tokens_in_window, window_offset): (&str, &[Token], usize) =
             if token_slice.is_empty() {
-                let (snippet, offset) =
-                    word_window(ctx.text, range.clone(), rule.prefix_words, rule.suffix_words);
+                let (snippet, offset) = word_window(
+                    ctx.text,
+                    range.clone(),
+                    rule.prefix_words,
+                    rule.suffix_words,
+                );
                 (snippet, &[], offset)
             } else {
                 let (snippet, offset) = token_span(ctx.text, token_slice, range.clone());

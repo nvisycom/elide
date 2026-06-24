@@ -18,7 +18,12 @@ use elide_core::primitive::Confidence;
 fn entity(label: &LabelRef, range: Range<usize>, score: f32) -> Entity<Text> {
     let confidence = Confidence::new(score).unwrap();
     let location = TextLocation::new(range.start, range.end);
-    let event = Event::pattern("test", confidence, location.clone(), PatternEvent::default());
+    let event = Event::pattern(
+        "test",
+        confidence,
+        location.clone(),
+        PatternEvent::default(),
+    );
     let mut entity = Entity::new(label.clone(), location, confidence, Provenance::new(event));
     entity.recognized_range = Some(range);
     entity

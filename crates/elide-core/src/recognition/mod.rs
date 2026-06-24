@@ -60,7 +60,7 @@ impl RecognizerId {
 
 impl fmt::Display for RecognizerId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}@{}", self.name, self.version) 
+        write!(f, "{}@{}", self.name, self.version)
     }
 }
 

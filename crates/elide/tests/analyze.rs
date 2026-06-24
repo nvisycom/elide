@@ -109,7 +109,10 @@ async fn analyze_stamps_language_from_recognized_range() {
     let de = Language::asserted(LanguageTag::parse("de").unwrap());
     let scope = Scope::new().with_language(de);
 
-    let entities = analyzer.analyze(TextData::new("hello"), &scope).await.unwrap();
+    let entities = analyzer
+        .analyze(TextData::new("hello"), &scope)
+        .await
+        .unwrap();
     assert_eq!(entities.len(), 1);
     assert_eq!(
         entities[0].language.as_ref().map(|l| l.primary_language()),

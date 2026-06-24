@@ -379,8 +379,7 @@ mod tests {
     #[test]
     fn resolve_carries_a_single_speaker() {
         let t = Transcription::new(vec![
-            TranscriptSegment::new(TimeSpan::from_millis(0, 500), "alice")
-                .with_speaker_id("spk_0"),
+            TranscriptSegment::new(TimeSpan::from_millis(0, 500), "alice").with_speaker_id("spk_0"),
         ]);
         let loc = t.resolve(0..5).expect("in bounds");
         assert_eq!(loc.speaker_id.as_deref(), Some("spk_0"));
@@ -389,8 +388,7 @@ mod tests {
     #[test]
     fn resolve_drops_speaker_across_a_speaker_change() {
         let t = Transcription::new(vec![
-            TranscriptSegment::new(TimeSpan::from_millis(0, 500), "alice")
-                .with_speaker_id("spk_0"),
+            TranscriptSegment::new(TimeSpan::from_millis(0, 500), "alice").with_speaker_id("spk_0"),
             TranscriptSegment::new(TimeSpan::from_millis(600, 1_000), "bob")
                 .with_speaker_id("spk_1"),
         ]);
