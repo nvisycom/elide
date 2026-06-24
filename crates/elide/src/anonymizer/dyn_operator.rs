@@ -6,7 +6,7 @@ use std::pin::Pin;
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
-use elide_core::redaction::Operator;
+use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 
 /// Object-safe bridge over [`Operator`].
 ///
@@ -17,6 +17,10 @@ use elide_core::redaction::Operator;
 /// [`Operator`] one automatically, so the boxing is invisible at the
 /// public API — callers only ever deal in [`Operator`].
 pub(crate) trait DynOperator<M: Modality>: Send + Sync {
+    fn id(&self) -> OperatorId;
+
+    fn leak_profile(&self) -> LeakProfile;
+
     fn anonymize_boxed<'a>(
         &'a self,
         entity: &'a Entity<M>,
@@ -24,11 +28,15 @@ pub(crate) trait DynOperator<M: Modality>: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<M::Replacement>> + Send + 'a>>;
 }
 
-impl<M, O> DynOperator<M> for O
-where
-    M: Modality,
-    O: Operator<M>,
-{
+impl<M: Modality, O: Operator<M>> DynOperator<M> for O {
+    fn id(&self) -> OperatorId {
+        Operator::id(self)
+    }
+
+    fn leak_profile(&self) -> LeakProfile {
+        Operator::leak_profile(self)
+    }
+
     fn anonymize_boxed<'a>(
         &'a self,
         entity: &'a Entity<M>,

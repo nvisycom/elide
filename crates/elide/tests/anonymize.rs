@@ -31,7 +31,7 @@ fn entity_conf(label: &str, loc: (usize, usize), confidence: Confidence) -> Enti
 async fn anonymize_resolves_label_to_operator_with_fallback() {
     //            0123456789012345678901234567
     let source = TextSource::new("call 555-867-5309 or a@b.com");
-    let entities = vec![
+    let mut entities = vec![
         entity("PHONE_NUMBER", (5, 17)),   // "555-867-5309" -> Mask
         entity("EMAIL_ADDRESS", (21, 28)), // "a@b.com" -> fallback Erase
     ];
@@ -44,7 +44,7 @@ async fn anonymize_resolves_label_to_operator_with_fallback() {
         .with_fallback(Erase);
 
     let items = anonymizer
-        .plan(&entities, &source)
+        .plan(&mut entities, &source)
         .await
         .unwrap()
         .into_iter()
@@ -61,11 +61,11 @@ async fn anonymize_resolves_label_to_operator_with_fallback() {
 #[tokio::test]
 async fn anonymize_replace_renders_label_and_value() {
     let source = TextSource::new("name: Alice");
-    let entities = vec![entity("PERSON", (6, 11))]; // "Alice"
+    let mut entities = vec![entity("PERSON", (6, 11))]; // "Alice"
 
     let items = Anonymizer::<Text>::new()
         .with_label(LabelRef::new("PERSON"), Replace::new("<{label}:{value}>"))
-        .plan(&entities, &source)
+        .plan(&mut entities, &source)
         .await
         .unwrap()
         .into_iter()
@@ -80,7 +80,7 @@ async fn anonymize_replace_threads_coref_through_template() {
     let source = TextSource::new("Alice told Bob she left");
     // Alice and "she" share a cluster; Bob is his own.
     let alice = EntityCoRef::new("alice");
-    let entities = vec![
+    let mut entities = vec![
         entity("PERSON", (0, 5)).with_coref(alice.clone()), // "Alice"
         entity("PERSON", (11, 14)).with_coref(EntityCoRef::new("bob")), // "Bob"
         entity("PERSON", (15, 18)).with_coref(alice),       // "she"
@@ -88,7 +88,7 @@ async fn anonymize_replace_threads_coref_through_template() {
 
     let items = Anonymizer::<Text>::new()
         .with_label(LabelRef::new("PERSON"), Replace::new("[{label}:{coref}]"))
-        .plan(&entities, &source)
+        .plan(&mut entities, &source)
         .await
         .unwrap()
         .into_iter()
@@ -103,11 +103,11 @@ async fn anonymize_replace_threads_coref_through_template() {
 #[tokio::test]
 async fn anonymize_replace_coref_empty_when_unset() {
     let source = TextSource::new("name: Alice");
-    let entities = vec![entity("PERSON", (6, 11))]; // "Alice", no coref
+    let mut entities = vec![entity("PERSON", (6, 11))]; // "Alice", no coref
 
     let items = Anonymizer::<Text>::new()
         .with_label(LabelRef::new("PERSON"), Replace::new("[{label}:{coref}]"))
-        .plan(&entities, &source)
+        .plan(&mut entities, &source)
         .await
         .unwrap()
         .into_iter()
@@ -120,10 +120,10 @@ async fn anonymize_replace_coref_empty_when_unset() {
 #[tokio::test]
 async fn anonymize_skips_unmapped_without_fallback() {
     let source = TextSource::new("123-45-6789");
-    let entities = vec![entity("SSN", (0, 11))];
+    let mut entities = vec![entity("SSN", (0, 11))];
     // No operator for SSN, no fallback -> skipped.
     let redactions = Anonymizer::<Text>::new()
-        .plan(&entities, &source)
+        .plan(&mut entities, &source)
         .await
         .unwrap();
     assert!(redactions.is_empty());
@@ -132,7 +132,7 @@ async fn anonymize_skips_unmapped_without_fallback() {
 #[tokio::test]
 async fn anonymize_predicate_gates_on_confidence() {
     let source = TextSource::new("call 555-867-5309 or a@b.com");
-    let entities = vec![
+    let mut entities = vec![
         entity_conf("PHONE_NUMBER", (5, 17), Confidence::clamped(0.2)), // weak -> Keep
         entity_conf("EMAIL_ADDRESS", (21, 28), Confidence::MAX),        // strong -> Erase
     ];
@@ -144,7 +144,7 @@ async fn anonymize_predicate_gates_on_confidence() {
     let items = Anonymizer::<Text>::new()
         .with_predicate(move |e| !cutoff.passes(e.confidence), Keep)
         .with_fallback(Erase)
-        .plan(&entities, &source)
+        .plan(&mut entities, &source)
         .await
         .unwrap()
         .into_iter()
@@ -160,7 +160,7 @@ async fn anonymize_predicate_gates_on_confidence() {
 #[tokio::test]
 async fn anonymize_selects_by_tag() {
     let source = TextSource::new("4111111111111111 and bob");
-    let entities = vec![
+    let mut entities = vec![
         entity("payment_card", (0, 16)), // tagged "financial" -> Mask
         entity("person_name", (21, 24)), // no financial tag -> fallback Erase
     ];
@@ -179,7 +179,7 @@ async fn anonymize_selects_by_tag() {
         .with_catalog(catalog)
         .with_tag("financial", Mask::stars())
         .with_fallback(Erase)
-        .plan(&entities, &source)
+        .plan(&mut entities, &source)
         .await
         .unwrap()
         .into_iter()
@@ -195,17 +195,119 @@ async fn anonymize_selects_by_tag() {
 #[tokio::test]
 async fn anonymize_first_matching_rule_wins() {
     let source = TextSource::new("a@b.com");
-    let entities = vec![entity("EMAIL_ADDRESS", (0, 7))];
+    let mut entities = vec![entity("EMAIL_ADDRESS", (0, 7))];
 
     // Two rules match the same entity; the earlier one wins.
     let items = Anonymizer::<Text>::new()
         .with_label(LabelRef::new("EMAIL_ADDRESS"), Replace::new("[FIRST]"))
         .with_label(LabelRef::new("EMAIL_ADDRESS"), Replace::new("[SECOND]"))
-        .plan(&entities, &source)
+        .plan(&mut entities, &source)
         .await
         .unwrap()
         .into_iter()
         .collect::<Vec<_>>();
 
     assert_eq!(items[0].1, TextReplacement::substituted("[FIRST]"));
+}
+
+#[tokio::test]
+async fn plan_records_redaction_provenance_with_rule_and_attribution() {
+    use elide_core::entity::provenance::EventKind;
+    use elide_core::redaction::{Attribution, RuleMatch};
+
+    let source = TextSource::new("a@b.com here");
+    let mut entities = vec![entity("EMAIL_ADDRESS", (0, 7))];
+
+    Anonymizer::<Text>::new()
+        .with_label(LabelRef::new("EMAIL_ADDRESS"), Replace::new("[X]"))
+        .because(Attribution::new("gdpr-art-17").with_reason("right to erasure"))
+        .plan(&mut entities, &source)
+        .await
+        .unwrap();
+
+    // The entity now carries a Redaction event describing *why* and *how*.
+    let redaction = entities[0]
+        .provenance
+        .events
+        .iter()
+        .find_map(|e| match &e.kind {
+            EventKind::Redaction {
+                operator,
+                matched_by,
+                attribution,
+                ..
+            } => Some((operator.clone(), matched_by.clone(), attribution.clone())),
+            _ => None,
+        })
+        .expect("a Redaction event was recorded");
+
+    let (operator, matched_by, attribution) = redaction;
+    assert_eq!(operator.name, "replace");
+    // Automatic why: matched the exact-label rule.
+    assert_eq!(matched_by, RuleMatch::Label(LabelRef::new("EMAIL_ADDRESS")));
+    // Author why: the attribution the decorator carried.
+    let attribution = attribution.expect("attribution recorded");
+    assert_eq!(attribution.policy_id, "gdpr-art-17");
+    assert_eq!(attribution.reason.as_deref(), Some("right to erasure"));
+}
+
+#[tokio::test]
+async fn plan_records_fallback_rule_with_no_attribution() {
+    use elide_core::entity::provenance::EventKind;
+    use elide_core::redaction::RuleMatch;
+
+    let source = TextSource::new("a@b.com");
+    let mut entities = vec![entity("EMAIL_ADDRESS", (0, 7))];
+
+    // A bare operator via the fallback rule: matched_by is Fallback, no attribution.
+    Anonymizer::<Text>::new()
+        .with_fallback(Erase)
+        .plan(&mut entities, &source)
+        .await
+        .unwrap();
+
+    let (matched_by, attribution) = entities[0]
+        .provenance
+        .events
+        .iter()
+        .find_map(|e| match &e.kind {
+            EventKind::Redaction {
+                matched_by,
+                attribution,
+                ..
+            } => Some((matched_by.clone(), attribution.clone())),
+            _ => None,
+        })
+        .expect("a Redaction event was recorded");
+
+    assert_eq!(matched_by, RuleMatch::Fallback);
+    assert!(attribution.is_none());
+}
+
+#[tokio::test]
+async fn because_accepts_a_bare_policy_id() {
+    use elide_core::entity::provenance::EventKind;
+
+    let source = TextSource::new("a@b.com");
+    let mut entities = vec![entity("EMAIL_ADDRESS", (0, 7))];
+
+    // `.because` takes `Into<Attribution>`: a bare &str is the policy id, no reason.
+    Anonymizer::<Text>::new()
+        .with_label(LabelRef::new("EMAIL_ADDRESS"), Replace::new("[X]"))
+        .because("pci-dss-3.4")
+        .plan(&mut entities, &source)
+        .await
+        .unwrap();
+
+    let attribution = entities[0]
+        .provenance
+        .events
+        .iter()
+        .find_map(|e| match &e.kind {
+            EventKind::Redaction { attribution, .. } => attribution.clone(),
+            _ => None,
+        })
+        .expect("attribution recorded");
+    assert_eq!(attribution.policy_id, "pci-dss-3.4");
+    assert!(attribution.reason.is_none());
 }

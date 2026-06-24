@@ -63,11 +63,11 @@ async fn main() -> Result<()> {
     //    carries per-call assertions (here, that the document is English).
     let en = Language::asserted(LanguageTag::parse("en").unwrap());
     let scope = Scope::new().with_language(en);
-    let entities = analyzer.analyze_stream(&mut document, &scope).await?;
+    let mut entities = analyzer.analyze_stream(&mut document, &scope).await?;
 
     // 5. Redact: apply each entity's operator back into the document,
     //    then re-encode.
-    anonymizer.anonymize(&mut document, &entities).await?;
+    anonymizer.anonymize(&mut document, &mut entities).await?;
     let encoded = document.encode()?;
     let redacted = String::from_utf8_lossy(encoded.as_bytes());
 

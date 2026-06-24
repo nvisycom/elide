@@ -61,12 +61,12 @@ async fn encrypt_then_decrypt_recovers_the_original_document() {
     //                            0123456789012345678901234
     let mut doc = TextDoc("email a@b.com now".to_string());
     // "a@b.com" occupies bytes 6..13.
-    let email = entity("EMAIL_ADDRESS", 6, 13);
+    let mut email = entity("EMAIL_ADDRESS", 6, 13);
 
     // Encrypt under the label.
     Anonymizer::<Text>::new()
         .with_label(LabelRef::new("EMAIL_ADDRESS"), Encrypt::new(key.clone()))
-        .anonymize(&mut doc, std::slice::from_ref(&email))
+        .anonymize(&mut doc, std::slice::from_mut(&mut email))
         .await
         .unwrap();
 
@@ -92,14 +92,14 @@ async fn encrypt_then_decrypt_recovers_the_original_document() {
 #[tokio::test]
 async fn wrong_key_leaves_the_ciphertext_in_place() {
     let mut doc = TextDoc("x secret y".to_string());
-    let secret = entity("TOKEN", 2, 8);
+    let mut secret = entity("TOKEN", 2, 8);
 
     Anonymizer::<Text>::new()
         .with_label(
             LabelRef::new("TOKEN"),
             Encrypt::new(StaticKey::new([1u8; 32])),
         )
-        .anonymize(&mut doc, std::slice::from_ref(&secret))
+        .anonymize(&mut doc, std::slice::from_mut(&mut secret))
         .await
         .unwrap();
     let encrypted_doc = doc.0.clone();

@@ -16,14 +16,18 @@
 //! [`Data`]: crate::modality::Modality::Data
 //! [`Replacement`]: crate::modality::Modality::Replacement
 
+mod attribution;
 mod operator;
 mod operator_id;
 mod redactions;
 mod reversible;
+mod rule_match;
 mod vault;
 
+pub use self::attribution::Attribution;
 pub use self::operator::{LeakProfile, Operator};
 pub use self::operator_id::OperatorId;
 pub use self::redactions::Redactions;
 pub use self::reversible::ReversibleOperator;
+pub use self::rule_match::RuleMatch;
 pub use self::vault::Vault;

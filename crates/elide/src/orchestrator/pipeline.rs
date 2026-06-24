@@ -41,7 +41,7 @@ where
     pub(super) async fn apply(
         &self,
         handle: &mut DocumentHandle<M>,
-        entities: &[Entity<M>],
+        entities: &mut [Entity<M>],
     ) -> Result<()> {
         self.anonymizer.anonymize(handle, entities).await
     }
@@ -87,7 +87,7 @@ pub(super) trait ErasedPipeline: Send + Sync {
     fn apply_part<'a>(
         &'a self,
         handle: UntypedDocumentHandle,
-        entities: &'a dyn EntityGroup,
+        entities: &'a mut dyn EntityGroup,
     ) -> BoxFuture<'a, Result<Bytes>>;
 
     fn as_any(&self) -> &dyn Any;
@@ -117,7 +117,7 @@ where
     fn apply_part<'a>(
         &'a self,
         handle: UntypedDocumentHandle,
-        entities: &'a dyn EntityGroup,
+        entities: &'a mut dyn EntityGroup,
     ) -> BoxFuture<'a, Result<Bytes>> {
         Box::pin(async move {
             // The handle and entities were produced by this same pipeline
@@ -126,8 +126,8 @@ where
                 .into::<M>()
                 .unwrap_or_else(|_| unreachable!("apply_part handle modality mismatch"));
             let entities = entities
-                .as_any()
-                .downcast_ref::<Vec<Entity<M>>>()
+                .as_any_mut()
+                .downcast_mut::<Vec<Entity<M>>>()
                 .expect("apply_part entities modality mismatch");
             self.apply(&mut handle, entities).await?;
             Ok(handle.encode()?.to_bytes())

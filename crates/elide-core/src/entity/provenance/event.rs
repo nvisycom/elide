@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::modality::{Hint, Modality};
 use crate::primitive::Confidence;
-use crate::redaction::{LeakProfile, OperatorId};
+use crate::redaction::{Attribution, LeakProfile, OperatorId, RuleMatch};
 
 /// One thing that happened to an entity, with its effect on confidence.
 ///
@@ -147,6 +147,8 @@ impl<M: Modality> Event<M> {
         operator: OperatorId,
         leak_profile: LeakProfile,
         confidence: Confidence,
+        matched_by: RuleMatch,
+        attribution: Option<Attribution>,
     ) -> Self {
         let source = operator.name.clone();
         Self {
@@ -159,6 +161,8 @@ impl<M: Modality> Event<M> {
                 operator,
                 leak_profile,
                 key_id: None,
+                matched_by,
+                attribution,
             },
         }
     }
@@ -254,6 +258,12 @@ pub enum EventKind<M: Modality> {
         leak_profile: LeakProfile,
         /// Identifier of the key needed to reverse it, if reversible.
         key_id: Option<HipStr<'static>>,
+        /// Which selection rule chose this operator — the automatic "why"
+        /// (matched a label, a tag, a predicate, or the fallback).
+        matched_by: RuleMatch,
+        /// The author-supplied policy rationale, when the operator carried an
+        /// [`Attribution`]; `None` otherwise.
+        attribution: Option<Attribution>,
     },
 }
 
