@@ -83,11 +83,14 @@ impl FormatRegistry {
     ///
     /// # Panics
     ///
-    /// Panics if the format's id is already registered. Extensions and
-    /// content types that conflict with an existing format are
-    /// overwritten (last registration wins); register custom formats
-    /// *after* [`with_builtin`] for precedence.
+    /// Panics if the format's id is already registered — registering a new
+    /// format must not silently shadow an existing one. To deliberately
+    /// override a built-in (e.g. swap in the OCR-enabled PDF format), use
+    /// [`with_replaced_format`]. Extensions and content types that conflict
+    /// with an existing format are overwritten (last registration wins);
+    /// register custom formats *after* [`with_builtin`] for precedence.
     ///
+    /// [`with_replaced_format`]: Self::with_replaced_format
     /// [`with_builtin`]: Self::with_builtin
     #[must_use]
     pub fn with_format(mut self, format: Format) -> Self {
@@ -105,19 +108,70 @@ impl FormatRegistry {
     pub fn add_format(&mut self, format: Format) -> &mut Self {
         assert!(
             !self.by_id.contains_key(&format.id),
-            "format id already registered: {}",
+            "format id already registered: {} (use replace_format to override)",
             format.id
         );
-        let index = self.formats.len();
-        for ext in &format.extensions {
+        self.insert_format(format);
+        self
+    }
+
+    /// Register a [`Format`], **replacing** any already registered under the
+    /// same [`FormatId`], and return `self` for chained builder calls.
+    ///
+    /// This is the explicit override path: where [`with_format`] panics on a
+    /// duplicate id, this swaps the existing format out in place. Use it to
+    /// customize a built-in while keeping the rest:
+    ///
+    /// ```ignore
+    /// let registry = FormatRegistry::with_builtin()
+    ///     .with_replaced_format(handler::pdf_format_with(OcrMode::Force))
+    ///     .with_replaced_format(handler::html_format_with(ScanText, Skip));
+    /// ```
+    ///
+    /// Registering a format whose id is *not* present behaves like
+    /// [`with_format`] (it is simply added).
+    ///
+    /// [`with_format`]: Self::with_format
+    #[must_use]
+    pub fn with_replaced_format(mut self, format: Format) -> Self {
+        self.replace_format(format);
+        self
+    }
+
+    /// In-place equivalent of [`with_replaced_format`].
+    ///
+    /// [`with_replaced_format`]: Self::with_replaced_format
+    pub fn replace_format(&mut self, format: Format) -> &mut Self {
+        self.insert_format(format);
+        self
+    }
+
+    /// Insert `format`, reusing the existing slot when its id is already
+    /// registered (so the `usize` indices the lookup maps hold stay valid —
+    /// removing the old entry would shift every later index), and re-point
+    /// its extensions / content types to that slot.
+    fn insert_format(&mut self, format: Format) {
+        let id = format.id.clone();
+        let index = match self.by_id.get(&id) {
+            Some(&existing) => {
+                self.formats[existing] = format;
+                existing
+            }
+            None => {
+                let index = self.formats.len();
+                self.formats.push(format);
+                index
+            }
+        };
+        let extensions = self.formats[index].extensions.clone();
+        let content_types = self.formats[index].content_types.clone();
+        for ext in &extensions {
             self.by_extension.insert(ext.to_ascii_lowercase(), index);
         }
-        for ct in &format.content_types {
+        for ct in &content_types {
             self.by_content_type.insert(ct.to_ascii_lowercase(), index);
         }
-        self.by_id.insert(format.id.clone(), index);
-        self.formats.push(format);
-        self
+        self.by_id.insert(id, index);
     }
 
     /// Look up a registered format by id.
@@ -200,5 +254,61 @@ impl FormatRegistry {
         // `format_id` came from a lookup above, so this is present.
         let format = self.by_id(&format_id).expect("resolved format present");
         format.decode(content).await
+    }
+}
+
+#[cfg(all(test, feature = "txt"))]
+mod tests {
+    use elide_core::modality::text::Text;
+
+    use super::*;
+    use crate::Format;
+    use crate::handler::text::TxtLoader;
+    use crate::handler::txt_format;
+
+    /// A format reusing the txt id but claiming a different extension, to
+    /// stand in for a customized built-in.
+    fn txt_variant() -> Format {
+        Format::new::<Text, _>(txt_format().id.clone(), TxtLoader)
+            .with_extensions(["variant"])
+            .with_content_types(["text/variant"])
+    }
+
+    #[test]
+    #[should_panic(expected = "format id already registered")]
+    fn add_format_panics_on_duplicate_id() {
+        let mut reg = FormatRegistry::new();
+        reg.add_format(txt_format());
+        reg.add_format(txt_variant()); // same id -> panic
+    }
+
+    #[test]
+    fn replace_format_swaps_in_place() {
+        let id = txt_format().id.clone();
+        let mut reg = FormatRegistry::new();
+        reg.add_format(txt_format());
+        let before = reg.iter().count();
+
+        reg.replace_format(txt_variant());
+
+        // Same slot reused: no duplicate format.
+        assert_eq!(reg.iter().count(), before);
+        // The replacement's lookups now resolve to the (single) txt id.
+        assert_eq!(reg.by_extension("variant").map(|f| f.id.clone()), Some(id.clone()));
+        assert_eq!(
+            reg.by_content_type("text/variant").map(|f| f.id.clone()),
+            Some(id.clone())
+        );
+        // The original still resolves by id to the same single entry.
+        assert!(reg.by_id(&id).is_some());
+    }
+
+    #[test]
+    fn replace_format_adds_when_id_absent() {
+        // With no prior registration, replace behaves like add.
+        let mut reg = FormatRegistry::new();
+        reg.replace_format(txt_format());
+        assert_eq!(reg.iter().count(), 1);
+        assert!(reg.by_extension("txt").is_some());
     }
 }
