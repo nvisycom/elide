@@ -17,7 +17,11 @@ use hipstr::HipStr;
 use super::dyn_operator::DynOperator;
 
 /// Boxed predicate over an entity, used by [`Matcher::Predicate`].
-pub(crate) type Predicate<M> = Box<dyn Fn(&Entity<M>) -> bool + Send + Sync>;
+///
+/// Receives the [`LabelCatalog`] (empty when none was set) so a predicate
+/// can ask catalog-level questions — a label's tags or metadata — the same
+/// way a [`Matcher::Tag`] resolves through it.
+pub(crate) type Predicate<M> = Box<dyn Fn(&Entity<M>, &LabelCatalog) -> bool + Send + Sync>;
 
 /// What [`OperatorRegistry::resolve`] produces for a matched entity.
 pub(crate) struct Resolved<'a, M: Modality> {
@@ -34,7 +38,7 @@ pub(crate) enum Matcher<M: Modality> {
     /// Exact label-name match.
     Label(LabelRef),
     /// The entity's label carries this tag (resolved through the
-    /// [`LabelCatalog`]). Without a catalog, a tag matcher never matches.
+    /// [`LabelCatalog`]). An empty catalog never matches.
     Tag(HipStr<'static>),
     /// An arbitrary predicate over the entity.
     Predicate(Predicate<M>),
@@ -44,14 +48,14 @@ pub(crate) enum Matcher<M: Modality> {
 
 impl<M: Modality> Matcher<M> {
     /// Whether this matcher accepts `entity`, given the catalog used to
-    /// resolve tags.
-    fn matches(&self, entity: &Entity<M>, catalog: Option<&LabelCatalog>) -> bool {
+    /// resolve tags (and passed through to predicates).
+    fn matches(&self, entity: &Entity<M>, catalog: &LabelCatalog) -> bool {
         match self {
             Matcher::Label(label) => &entity.label == label,
             Matcher::Tag(tag) => catalog
-                .and_then(|c| c.get(&entity.label))
+                .get(&entity.label)
                 .is_some_and(|label| label.has_tag(tag.as_str())),
-            Matcher::Predicate(predicate) => predicate(entity),
+            Matcher::Predicate(predicate) => predicate(entity, catalog),
             Matcher::Always => true,
         }
     }
@@ -82,21 +86,22 @@ struct Rule<M: Modality> {
 /// matching operator. An entity that matches no rule is left untouched.
 pub(crate) struct OperatorRegistry<M: Modality> {
     rules: Vec<Rule<M>>,
-    catalog: Option<LabelCatalog>,
+    catalog: LabelCatalog,
 }
 
 impl<M: Modality> OperatorRegistry<M> {
-    /// An empty registry.
+    /// An empty registry, with an empty catalog.
     pub(crate) fn new() -> Self {
         Self {
             rules: Vec::new(),
-            catalog: None,
+            catalog: LabelCatalog::new(),
         }
     }
 
-    /// Set the catalog tag matchers resolve label names against.
+    /// Set the catalog tag matchers resolve label names against, and that
+    /// predicates receive.
     pub(crate) fn set_catalog(&mut self, catalog: LabelCatalog) {
-        self.catalog = Some(catalog);
+        self.catalog = catalog;
     }
 
     /// Append a rule pairing `matcher` with `operator`, with no attribution.
@@ -123,7 +128,7 @@ impl<M: Modality> OperatorRegistry<M> {
     pub(crate) fn resolve(&self, entity: &Entity<M>) -> Option<Resolved<'_, M>> {
         self.rules
             .iter()
-            .find(|rule| rule.matcher.matches(entity, self.catalog.as_ref()))
+            .find(|rule| rule.matcher.matches(entity, &self.catalog))
             .map(|rule| Resolved {
                 operator: &rule.operator,
                 matched_by: rule.matcher.to_rule_match(),

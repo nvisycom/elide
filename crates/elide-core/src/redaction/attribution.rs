@@ -1,7 +1,6 @@
 //! [`Attribution`]: the author-supplied "why" behind a redaction.
 
 use hipstr::HipStr;
-
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 

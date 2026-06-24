@@ -103,11 +103,40 @@ impl<M: Modality> Anonymizer<M> {
     /// Append a rule binding `operator` to every entity the `predicate`
     /// accepts. The predicate sees the entity's label, confidence,
     /// location, and provenance.
+    ///
+    /// Use [`with_catalog_predicate`] when the predicate also needs the
+    /// [`LabelCatalog`] (to resolve the entity's label to its tags or
+    /// metadata).
+    ///
+    /// [`with_catalog_predicate`]: Self::with_catalog_predicate
     #[must_use]
     pub fn with_predicate<O, P>(mut self, predicate: P, operator: O) -> Self
     where
         O: Operator<M> + 'static,
         P: Fn(&Entity<M>) -> bool + Send + Sync + 'static,
+    {
+        self.operators.push(
+            Matcher::Predicate(Box::new(move |e, _| predicate(e))),
+            operator,
+        );
+        self
+    }
+
+    /// Append a rule binding `operator` to every entity the `predicate`
+    /// accepts, where the predicate also receives the [`LabelCatalog`] —
+    /// empty when none was set — so it can resolve the entity's label to its
+    /// tags or metadata, the same source [`with_tag`] consults.
+    ///
+    /// The catalog-aware counterpart to [`with_predicate`].
+    ///
+    /// [`LabelCatalog`]: elide_core::entity::LabelCatalog
+    /// [`with_tag`]: Self::with_tag
+    /// [`with_predicate`]: Self::with_predicate
+    #[must_use]
+    pub fn with_catalog_predicate<O, P>(mut self, predicate: P, operator: O) -> Self
+    where
+        O: Operator<M> + 'static,
+        P: Fn(&Entity<M>, &LabelCatalog) -> bool + Send + Sync + 'static,
     {
         self.operators
             .push(Matcher::Predicate(Box::new(predicate)), operator);
