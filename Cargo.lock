@@ -956,11 +956,10 @@ dependencies = [
  "elide-llm",
  "elide-ner",
  "elide-ocr",
+ "elide-orchestration",
  "elide-pattern",
  "elide-redaction",
  "elide-stt",
- "erased-serde",
- "serde",
  "serde_json",
  "tokio",
  "zip",
@@ -1093,6 +1092,20 @@ dependencies = [
  "elide-core",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "elide-orchestration"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "elide-codec",
+ "elide-core",
+ "elide-detection",
+ "elide-redaction",
+ "erased-serde",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

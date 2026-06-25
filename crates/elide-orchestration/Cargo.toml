@@ -1,0 +1,54 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "elide-orchestration"
+description = "Document orchestration for the Elide toolkit: drive analysis + redaction across a multi-modal container"
+keywords = ["pii", "orchestration", "redaction", "document"]
+categories = ["text-processing"]
+readme = "README.md"
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+
+## Serialize a [`Report`] to a part-grouped JSON view for external review.
+serde = [
+    "dep:serde",
+    "dep:erased-serde",
+    "elide-core/serde",
+    "elide-detection/serde",
+    "elide-redaction/serde",
+    "elide-codec/serde",
+]
+
+[dependencies]
+# Internal crates
+elide-core = { workspace = true, features = [] }
+elide-detection = { workspace = true, features = [] }
+elide-redaction = { workspace = true, features = [] }
+elide-codec = { workspace = true, features = [] }
+
+# (De)serialization
+serde = { workspace = true, features = [], optional = true }
+erased-serde = { workspace = true, features = [], optional = true }
+
+# Primitive datatypes
+bytes = { workspace = true, features = [] }
+
+[dev-dependencies]
+# (De)serialization
+serde_json = { workspace = true, features = [] }

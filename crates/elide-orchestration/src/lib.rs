@@ -1,35 +1,6 @@
-//! [`Orchestrator`]: drive analysis + redaction across a whole document —
-//! its own body and the embedded parts of a multi-modal container (a
-//! DOCX's images, ahead a PDF's objects).
-//!
-//! The codec layer exposes a container's parts as opaque byte-blobs (it
-//! cannot decode or redact them — it has no recognizers and no registry).
-//! The `Orchestrator` is the toolkit-side driver that closes the loop: it
-//! holds a [`FormatRegistry`] and one analyze+anonymize pipeline per
-//! modality. It detects the document body through its own-modality
-//! pipeline and, for each container part, decodes the bytes and detects
-//! through the matching pipeline — then applies the (optionally edited)
-//! result back.
-//!
-//! Detection and redaction are two phases, so the entities can be
-//! inspected and edited in between:
-//!
-//! ```ignore
-//! let orchestrator = Orchestrator::new(&registry)
-//!     .with_modality::<Text>(text_analyzer, text_anonymizer, text_scope)
-//!     .with_modality::<Image>(image_analyzer, image_anonymizer, image_scope);
-//!
-//! let mut report = orchestrator.analyze_document(&mut docx).await?;
-//! report.entities::<Text>().unwrap().retain(|e| keep(e)); // drop a false positive
-//! orchestrator.apply(&mut docx, report).await?;
-//! ```
-//!
-//! [`anonymize_document`] is the one-call shorthand when no editing is
-//! needed. Scope is per-modality, registered alongside each pipeline; a
-//! body or part whose modality has no pipeline is left as-is.
-//!
-//! [`FormatRegistry`]: crate::codec::FormatRegistry
-//! [`anonymize_document`]: Orchestrator::anonymize_document
+#![forbid(unsafe_code)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc = include_str!("../README.md")]
 
 mod pipeline;
 mod report;
@@ -38,6 +9,7 @@ use std::any::TypeId;
 use std::collections::HashMap;
 
 use bytes::Bytes;
+use elide_codec::{DocumentHandle, FormatRegistry, PartId};
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
@@ -54,7 +26,6 @@ use self::pipeline::{AnalyzeOutcome, ErasedPipeline, ModalityPipeline};
 pub use self::report::EntityGroup;
 use self::report::PartReport;
 pub use self::report::Report;
-use crate::codec::{DocumentHandle, FormatRegistry, PartId};
 
 /// Drives analyze + redact across a document's body and its cross-modality
 /// container parts.

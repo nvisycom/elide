@@ -9,6 +9,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use bytes::Bytes;
+use elide_codec::{DocumentHandle, UntypedDocumentHandle};
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
@@ -17,7 +18,6 @@ use elide_detection::Analyzer;
 use elide_redaction::Anonymizer;
 
 use super::report::EntityGroup;
-use crate::codec::{DocumentHandle, UntypedDocumentHandle};
 
 /// The concrete analyze + redact pipeline for one modality `M`.
 pub(super) struct ModalityPipeline<M: Modality> {

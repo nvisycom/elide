@@ -32,7 +32,7 @@ default = ["pattern", "ner", "llm"]
 ## domain types. Recognizer crates (`pattern`/`ner`/`llm`) need serde
 ## structurally and pull it in regardless; `codec` forwards it when both
 ## are enabled.
-serde = ["dep:serde", "dep:erased-serde", "elide-core/serde", "elide-detection/serde", "elide-redaction/serde", "elide-codec?/serde"]
+serde = ["elide-core/serde", "elide-detection/serde", "elide-redaction/serde", "elide-codec?/serde", "elide-orchestration?/serde"]
 
 ## Re-export the pattern crate as `elide::recognition::pattern`.
 pattern = ["dep:elide-pattern"]
@@ -68,10 +68,11 @@ image = ["elide-core/image", "elide-redaction/image"]
 ## The `tabular` modality. Implied by the tabular codec formats.
 tabular = ["elide-core/tabular", "elide-redaction/tabular"]
 
-## Re-export the codec crate as `elide::codec`. On its own this enables
-## only the codec's default formats; use the per-modality or per-format
-## `codec-*` features below to pull in the shipped format handlers.
-codec = ["dep:elide-codec"]
+## Re-export the codec crate as `elide::codec` and the orchestration engine
+## (`Orchestrator`, `Report`) at the crate root. On its own this enables only
+## the codec's default formats; use the per-modality or per-format `codec-*`
+## features below to pull in the shipped format handlers.
+codec = ["dep:elide-codec", "dep:elide-orchestration"]
 
 ## Per-modality format groups (each aggregates its per-format features).
 codec-text = ["codec-txt", "codec-json", "codec-html", "codec-xml"]
@@ -116,18 +117,15 @@ elide-llm = { workspace = true, features = [], optional = true }
 elide-stt = { workspace = true, features = [], optional = true }
 elide-ocr = { workspace = true, features = [], optional = true }
 elide-codec = { workspace = true, features = [], optional = true }
+elide-orchestration = { workspace = true, features = [], optional = true }
 elide-redaction = { workspace = true, features = [] }
-
-# (De)serialization
-serde = { workspace = true, features = [], optional = true }
-erased-serde = { workspace = true, features = [], optional = true }
-
-# Primitive datatypes
-bytes = { workspace = true, features = [] }
 
 [dev-dependencies]
 # (De)serialization
 serde_json = { workspace = true, features = [] }
+
+# Primitive datatypes
+bytes = { workspace = true, features = [] }
 
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

@@ -3,8 +3,6 @@
 #![doc = include_str!("../README.md")]
 
 pub mod modality;
-#[cfg(feature = "codec")]
-mod orchestrator;
 
 /// Redaction: the [`Operator`] contract and the strategies that apply it.
 ///
@@ -157,13 +155,13 @@ pub use elide_core::{Error, ErrorKind, Result};
 pub use elide_core::{entity, primitive};
 #[doc(inline)]
 pub use elide_detection::Analyzer;
-#[doc(inline)]
-pub use elide_redaction::{Anonymizer, Deanonymizer};
-
 // Nameable so callers can state the `Vec<Entity<M>>: EntityGroup` bound on
 // the orchestrator's construction methods; hidden, an implementation detail.
 #[cfg(feature = "codec")]
 #[doc(hidden)]
-pub use self::orchestrator::EntityGroup;
+pub use elide_orchestration::EntityGroup;
 #[cfg(feature = "codec")]
-pub use self::orchestrator::{Orchestrator, Report};
+#[doc(inline)]
+pub use elide_orchestration::{Orchestrator, Report};
+#[doc(inline)]
+pub use elide_redaction::{Anonymizer, Deanonymizer};

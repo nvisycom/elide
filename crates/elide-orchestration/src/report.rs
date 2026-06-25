@@ -20,10 +20,9 @@
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 
+use elide_codec::{PartId, UntypedDocumentHandle};
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
-
-use crate::codec::{PartId, UntypedDocumentHandle};
 
 /// A type-erased, downcastable group of entities (a `Vec<Entity<M>>`).
 ///
