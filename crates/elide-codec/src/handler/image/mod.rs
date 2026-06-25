@@ -40,7 +40,7 @@ mod tests {
     use elide_core::modality::image::{Image, ImageLocation, ImageReplacement};
     use elide_core::modality::{DataReader, DataWriter};
     use elide_core::primitive::{BoundingBox, Color, Point};
-    use elide_core::redaction::Redactions;
+    use elide_core::operator::Redactions;
     use image::{DynamicImage, GenericImageView, RgbaImage};
 
     use super::macros::encode_image;

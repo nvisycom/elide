@@ -3,7 +3,7 @@
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::audio::{Audio, AudioData, AudioReplacement, Waveform};
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::operator::{LeakProfile, Operator, OperatorId};
 
 /// The broadcast censor-beep frequency, in hertz.
 const DEFAULT_HZ: f32 = 1000.0;

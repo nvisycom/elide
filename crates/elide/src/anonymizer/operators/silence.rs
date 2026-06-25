@@ -3,7 +3,7 @@
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::audio::{Audio, AudioData, AudioReplacement};
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::operator::{LeakProfile, Operator, OperatorId};
 
 /// Silence the matched audio interval, preserving its duration.
 ///

@@ -11,7 +11,7 @@ use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{DataReader, DataWriter};
 use elide_core::primitive::Confidence;
-use elide_core::redaction::Redactions;
+use elide_core::operator::Redactions;
 
 /// An in-memory read/write text document: reads byte ranges and applies a
 /// batch of substitutions, right-to-left so earlier offsets stay valid.

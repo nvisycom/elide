@@ -287,7 +287,7 @@ fn first_child_text(node: NodeRef<'_, Node>) -> Option<String> {
 mod tests {
     use elide_core::modality::DataWriter;
     use elide_core::modality::text::{TextLocation, TextReplacement};
-    use elide_core::redaction::Redactions;
+    use elide_core::operator::Redactions;
 
     use super::*;
     use crate::Handler;

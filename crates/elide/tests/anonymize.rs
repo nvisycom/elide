@@ -244,7 +244,7 @@ async fn anonymize_first_matching_rule_wins() {
 #[tokio::test]
 async fn plan_records_redaction_provenance_with_rule_and_attribution() {
     use elide_core::entity::provenance::EventKind;
-    use elide_core::redaction::{Attribution, RuleMatch};
+    use elide_core::entity::provenance::{Attribution, RuleMatch};
 
     let source = TextSource::new("a@b.com here");
     let mut entities = vec![entity("EMAIL_ADDRESS", (0, 7))];
@@ -285,7 +285,7 @@ async fn plan_records_redaction_provenance_with_rule_and_attribution() {
 #[tokio::test]
 async fn plan_records_fallback_rule_with_no_attribution() {
     use elide_core::entity::provenance::EventKind;
-    use elide_core::redaction::RuleMatch;
+    use elide_core::entity::provenance::RuleMatch;
 
     let source = TextSource::new("a@b.com");
     let mut entities = vec![entity("EMAIL_ADDRESS", (0, 7))];

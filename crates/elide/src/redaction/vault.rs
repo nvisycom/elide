@@ -1,13 +1,13 @@
 //! [`InMemoryVault`]: the batteries-included [`Vault`] backing.
 //!
-//! [`Vault`]: elide_core::redaction::Vault
+//! [`Vault`]: elide_core::operator::Vault
 
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::{Arc, Mutex};
 
 use elide_core::Result;
-use elide_core::redaction::Vault;
+use elide_core::operator::Vault;
 
 /// Process-local [`Vault`] backed by a locked [`HashMap`].
 ///
@@ -23,7 +23,7 @@ use elide_core::redaction::Vault;
 /// while keeping their surrogates consistent — cloning hands out another
 /// handle, never a separate copy.
 ///
-/// [`Vault`]: elide_core::redaction::Vault
+/// [`Vault`]: elide_core::operator::Vault
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryVault<K, V> {
     entries: Arc<Mutex<HashMap<K, V>>>,

@@ -4,7 +4,7 @@ use std::future::Future;
 
 use super::Modality;
 use crate::error::Result;
-use crate::redaction::Redactions;
+use crate::operator::Redactions;
 
 /// Applies a [`Redactions`] batch back into some target.
 ///

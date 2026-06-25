@@ -6,7 +6,7 @@ use elide_core::entity::Entity;
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::operator::{LeakProfile, Operator, OperatorId};
 
 /// Character-replacement masking operator.
 ///

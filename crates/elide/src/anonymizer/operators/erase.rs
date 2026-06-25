@@ -10,7 +10,7 @@ use elide_core::modality::image::{Image, ImageReplacement};
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextReplacement};
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::operator::{LeakProfile, Operator, OperatorId};
 
 /// Remove the matched entity entirely.
 ///

@@ -19,10 +19,10 @@ mod registry;
 use std::sync::Arc;
 
 use elide_core::Result;
-use elide_core::entity::provenance::Event;
+use elide_core::entity::provenance::{Attribution, Event};
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
 use elide_core::modality::{DataReader, DataWriter, Modality};
-use elide_core::redaction::{Attribution, Operator, Redactions};
+use elide_core::operator::{Operator, Redactions};
 use hipstr::HipStr;
 
 use self::registry::{Matcher, OperatorRegistry};
@@ -166,7 +166,7 @@ impl<M: Modality> Anonymizer<M> {
     ///         .because(Attribution::new("pci-dss-3.4").with_reason("PAN masking"));
     /// ```
     ///
-    /// [`Attribution`]: elide_core::redaction::Attribution
+    /// [`Attribution`]: elide_core::entity::provenance::Attribution
     #[must_use]
     pub fn because(mut self, attribution: impl Into<Attribution>) -> Self {
         self.operators.set_last_attribution(attribution.into());

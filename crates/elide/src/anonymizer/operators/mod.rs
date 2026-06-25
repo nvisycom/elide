@@ -21,9 +21,9 @@
 //! Cross-modality: [`Erase`] removes the entity in any modality, and
 //! [`Keep`] passes it through unchanged.
 //!
-//! [`Operator`]: elide_core::redaction::Operator
+//! [`Operator`]: elide_core::operator::Operator
 //! [`Replacement`]: elide_core::modality::Modality::Replacement
-//! [`Vault`]: elide_core::redaction::Vault
+//! [`Vault`]: elide_core::operator::Vault
 //! [`Generator`]: crate::redaction::generator::Generator
 //! [`Hash`]: struct@Hash
 //! [`DataReader`]: elide_core::modality::DataReader

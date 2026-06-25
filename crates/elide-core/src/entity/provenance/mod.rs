@@ -2,12 +2,16 @@
 //!
 //! [`Provenance`]: crate::entity::provenance::Provenance
 
+mod attribution;
 mod event;
+mod rule_match;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+pub use self::attribution::Attribution;
 pub use self::event::{Event, EventKind, ModelEvent, PatternEvent};
+pub use self::rule_match::RuleMatch;
 use crate::modality::Modality;
 use crate::primitive::Confidence;
 

@@ -6,7 +6,7 @@ use std::pin::Pin;
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::operator::{LeakProfile, Operator, OperatorId};
 
 /// Object-safe bridge over [`Operator`].
 ///

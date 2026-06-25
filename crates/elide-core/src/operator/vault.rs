@@ -35,7 +35,7 @@ use crate::Result;
 /// only ever stored as part of resolving a key, never blindly, so a
 /// stored entry always wins and consistency holds by construction.
 ///
-/// [`Operator`]: crate::redaction::Operator
+/// [`Operator`]: crate::operator::Operator
 /// [`get_or_try_insert_with`]: Vault::get_or_try_insert_with
 pub trait Vault<K, V: Clone + Send + Sync>: Send + Sync {
     /// Look up the value previously stored under `key`. Returns

@@ -26,7 +26,7 @@
 use elide_core::Result;
 use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter, Hint};
-use elide_core::redaction::Redactions;
+use elide_core::operator::Redactions;
 
 use crate::codec::Container;
 use crate::content::ContentData;

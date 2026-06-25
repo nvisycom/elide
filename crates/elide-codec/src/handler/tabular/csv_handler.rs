@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
 use elide_core::modality::text::{TextData, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter, Hint};
-use elide_core::redaction::Redactions;
+use elide_core::operator::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 
 use super::csv_loader::CsvLoader;

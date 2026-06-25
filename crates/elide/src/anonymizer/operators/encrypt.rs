@@ -8,7 +8,7 @@ use elide_core::entity::Entity;
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::redaction::{LeakProfile, Operator, OperatorId, ReversibleOperator};
+use elide_core::operator::{LeakProfile, Operator, OperatorId, ReversibleOperator};
 use elide_core::{Error, ErrorKind, Result};
 
 use crate::redaction::key_provider::KeyProvider;

@@ -7,7 +7,7 @@ use elide_core::modality::Modality;
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::redaction::{LeakProfile, Operator, OperatorId, Vault};
+use elide_core::operator::{LeakProfile, Operator, OperatorId, Vault};
 #[cfg(feature = "tabular")]
 use elide_core::{Error, ErrorKind};
 
@@ -46,10 +46,10 @@ use crate::redaction::generator::Generator;
 /// original lives in the vault. Whoever holds the vault can reverse it;
 /// without it the surrogate is just an opaque token.
 ///
-/// [`Vault`]: elide_core::redaction::Vault
+/// [`Vault`]: elide_core::operator::Vault
 /// [`Generator`]: crate::redaction::generator::Generator
 /// [`RandomToken`]: crate::redaction::generator::RandomToken
-/// [`get_or_try_insert_with`]: elide_core::redaction::Vault::get_or_try_insert_with
+/// [`get_or_try_insert_with`]: elide_core::operator::Vault::get_or_try_insert_with
 /// [coreference]: elide_core::entity::EntityCoRef
 /// [`Replace`]: super::Replace
 /// [`Hash`]: super::Hash

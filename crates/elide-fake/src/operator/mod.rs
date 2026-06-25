@@ -1,7 +1,7 @@
 //! [`Fake`]: locale-aware [`Operator`] that swaps detected
 //! entities for plausible fake values.
 //!
-//! [`Operator`]: elide_core::redaction::Operator
+//! [`Operator`]: elide_core::operator::Operator
 
 mod identity;
 
@@ -13,7 +13,7 @@ use elide_core::entity::Entity;
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::primitive::LanguageTag;
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::operator::{LeakProfile, Operator, OperatorId};
 use fake::rand::SeedableRng;
 use fake::rand::rngs::SmallRng;
 
@@ -46,7 +46,7 @@ use crate::locale::Locale;
 /// fake whose length doesn't need to match.
 ///
 /// Generic over the fallback operator type because
-/// [`elide_core::redaction::Operator`] is not dyn-compatible (its
+/// [`elide_core::operator::Operator`] is not dyn-compatible (its
 /// `anonymize` method returns `impl Future`), so a stored
 /// `Arc<dyn Operator<…>>` is not available. Each `Fake` instance
 /// binds one concrete fallback type at construction.

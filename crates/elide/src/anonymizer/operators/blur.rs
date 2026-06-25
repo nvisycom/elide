@@ -3,7 +3,7 @@
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::image::{Image, ImageData, ImageReplacement};
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::operator::{LeakProfile, Operator, OperatorId};
 
 /// Gaussian-blur the matched image region.
 ///
@@ -60,7 +60,7 @@ mod tests {
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::modality::image::{Image, ImageData, ImageLocation, ImageReplacement};
     use elide_core::primitive::{BoundingBox, Confidence, Dimensions, Point};
-    use elide_core::redaction::Operator;
+    use elide_core::operator::Operator;
 
     use super::super::{Blackbox, Pixelate};
     use super::Blur;

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::entity::Entity;
 use crate::error::Result;
 use crate::modality::Modality;
-use crate::redaction::OperatorId;
+use crate::operator::OperatorId;
 
 /// What a redacted output leaks about the original it replaced.
 ///
@@ -53,7 +53,7 @@ pub enum LeakProfile {
 ///
 /// [`Data`]: Modality::Data
 /// [`Replacement`]: Modality::Replacement
-/// [`ReversibleOperator`]: crate::redaction::ReversibleOperator
+/// [`ReversibleOperator`]: crate::operator::ReversibleOperator
 pub trait Operator<M: Modality>: Send + Sync {
     /// This operator's identity (name + version).
     fn id(&self) -> OperatorId;

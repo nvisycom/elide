@@ -9,7 +9,7 @@ use elide_core::modality::image::{Image, ImageData, ImageReplacement};
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::operator::{LeakProfile, Operator, OperatorId};
 
 /// Pass the matched entity through unchanged.
 ///
@@ -111,7 +111,7 @@ mod tests {
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
     use elide_core::primitive::Confidence;
-    use elide_core::redaction::Operator;
+    use elide_core::operator::Operator;
 
     use super::Keep;
 

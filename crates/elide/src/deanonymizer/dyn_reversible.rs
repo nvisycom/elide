@@ -7,7 +7,7 @@ use std::pin::Pin;
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
-use elide_core::redaction::ReversibleOperator;
+use elide_core::operator::ReversibleOperator;
 
 /// A boxed, pinned future recovering the original data (or `None`).
 type RecoverFuture<'a, M> =

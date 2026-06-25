@@ -43,7 +43,7 @@ impl TextRecognizable for Text {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::redaction::Redactions;
+    use crate::operator::Redactions;
 
     #[test]
     fn sort_by_position_orders_in_place() {

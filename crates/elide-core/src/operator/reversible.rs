@@ -6,7 +6,7 @@ use std::future::Future;
 use crate::entity::Entity;
 use crate::error::Result;
 use crate::modality::Modality;
-use crate::redaction::Operator;
+use crate::operator::Operator;
 
 /// Reversible redaction operator: recovers the original data it replaced.
 ///

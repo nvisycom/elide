@@ -26,7 +26,7 @@ use std::fmt;
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::{Chunk, DataReader, DataWriter, Modality, StreamDataReader};
-use elide_core::redaction::Redactions;
+use elide_core::operator::Redactions;
 
 use super::FormatId;
 use super::loader::DynHandler;

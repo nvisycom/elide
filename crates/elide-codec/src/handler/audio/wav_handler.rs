@@ -6,7 +6,7 @@ use std::io::Cursor;
 use bytes::Bytes;
 use elide_core::modality::audio::{Audio, AudioData, AudioLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
-use elide_core::redaction::Redactions;
+use elide_core::operator::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 

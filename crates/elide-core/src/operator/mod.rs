@@ -1,4 +1,4 @@
-//! Redaction: the operator contracts for hiding detected entities.
+//! Operator contracts: how a detected entity is hidden.
 //!
 //! An operator reads an [`Entity`] and the [`Data`] under it and
 //! *computes* a [`Replacement`] (mask, replace, hash, encrypt, blur, …)
@@ -8,26 +8,23 @@
 //! [`Operator`]; only reversible ones (encrypt → decrypt) additionally
 //! implement [`ReversibleOperator`].
 //!
-//! This module defines the operator contracts and the [`Redactions`]
-//! batch they feed into. Concrete operators and the label→operator
-//! registry that selects them live in `elide`.
+//! This module defines the operator contracts, the [`Redactions`] batch
+//! they feed into, and the [`Vault`] reversible operators store recovery
+//! data in. The redaction engine — the concrete operators and the
+//! label→operator registry that selects them — lives in `elide`.
 //!
 //! [`Entity`]: crate::entity::Entity
 //! [`Data`]: crate::modality::Modality::Data
 //! [`Replacement`]: crate::modality::Modality::Replacement
 
-mod attribution;
-mod operator;
+mod contract;
 mod operator_id;
 mod redactions;
 mod reversible;
-mod rule_match;
 mod vault;
 
-pub use self::attribution::Attribution;
-pub use self::operator::{LeakProfile, Operator};
+pub use self::contract::{LeakProfile, Operator};
 pub use self::operator_id::OperatorId;
 pub use self::redactions::Redactions;
 pub use self::reversible::ReversibleOperator;
-pub use self::rule_match::RuleMatch;
 pub use self::vault::Vault;

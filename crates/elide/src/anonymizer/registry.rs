@@ -9,9 +9,10 @@
 
 use std::sync::Arc;
 
+use elide_core::entity::provenance::{Attribution, RuleMatch};
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
 use elide_core::modality::Modality;
-use elide_core::redaction::{Attribution, Operator, RuleMatch};
+use elide_core::operator::Operator;
 use hipstr::HipStr;
 
 use super::dyn_operator::DynOperator;

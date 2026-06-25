@@ -8,7 +8,7 @@
 //! [`TextReplacement`] for the operator to reverse.
 //!
 //! [`Anonymizer`]: crate::Anonymizer
-//! [`ReversibleOperator`]: elide_core::redaction::ReversibleOperator
+//! [`ReversibleOperator`]: elide_core::operator::ReversibleOperator
 //! [`Encrypt`]: crate::redaction::operators::Encrypt
 //! [`Text`]: elide_core::modality::text::Text
 //! [`TextReplacement`]: elide_core::modality::text::TextReplacement
@@ -20,7 +20,7 @@ use elide_core::Result;
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::{TextData, TextReplacement};
 use elide_core::modality::{DataReader, DataWriter, Modality, TextRecognizable};
-use elide_core::redaction::{Redactions, ReversibleOperator};
+use elide_core::operator::{Redactions, ReversibleOperator};
 
 use self::registry::ReversibleRegistry;
 

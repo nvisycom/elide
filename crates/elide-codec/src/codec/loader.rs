@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use elide_core::Result;
 use elide_core::modality::{Chunk, DataReader, DataWriter, Modality};
-use elide_core::redaction::Redactions;
+use elide_core::operator::Redactions;
 
 use super::document::{DocumentHandle, UntypedDocumentHandle};
 use super::{Container, Handler};
