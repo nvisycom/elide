@@ -17,7 +17,7 @@ use elide_core::modality::text::{Text, TextData};
 use elide_core::primitive::LanguageTag;
 use elide_core::recognition::{Enricher, RecognizerContext};
 
-use super::lingua_detector::LinguaDetector;
+use crate::lingua_detector::LinguaDetector;
 
 /// Lingua-backed language-detection enricher.
 ///

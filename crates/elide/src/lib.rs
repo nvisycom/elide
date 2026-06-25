@@ -76,6 +76,12 @@ pub mod recognition {
         pub use elide_context::{Boost, BoostRule, Context, Enhanced, Enhancer};
     }
 
+    /// Language detection: resolve the language(s) of a piece of text for
+    /// language-aware recognizers and policies.
+    #[cfg(feature = "lingua")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "lingua")))]
+    #[doc(inline)]
+    pub use elide_lingua as lingua;
     /// LLM-mediated recognition: prompt a language or vision model over
     /// text and images.
     #[cfg(feature = "llm")]

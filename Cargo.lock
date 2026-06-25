@@ -954,6 +954,7 @@ dependencies = [
  "elide-context",
  "elide-core",
  "elide-fake",
+ "elide-lingua",
  "elide-llm",
  "elide-ner",
  "elide-ocr",
@@ -1041,6 +1042,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "elide-lingua"
+version = "0.1.0"
+dependencies = [
+ "elide-core",
+ "lingua",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "elide-llm"
 version = "0.1.0"
 dependencies = [
@@ -1067,10 +1078,8 @@ dependencies = [
  "derive_builder",
  "elide-core",
  "hipstr",
- "lingua",
  "serde",
  "tokio",
- "tracing",
  "uuid",
 ]
 

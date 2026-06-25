@@ -12,8 +12,8 @@ use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::primitive::LanguageTag;
 use elide_core::operator::{LeakProfile, Operator, OperatorId};
+use elide_core::primitive::LanguageTag;
 use fake::rand::SeedableRng;
 use fake::rand::rngs::SmallRng;
 

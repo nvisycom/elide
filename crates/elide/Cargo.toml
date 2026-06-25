@@ -38,6 +38,9 @@ serde = ["dep:serde", "dep:erased-serde", "elide-core/serde", "elide-codec?/serd
 pattern = ["dep:elide-pattern"]
 ## Re-export the NER crate as `elide::recognition::ner`.
 ner = ["dep:elide-ner"]
+## Re-export the lingua language-detection crate as
+## `elide::recognition::lingua`.
+lingua = ["dep:elide-lingua"]
 
 ## Re-export the LLM crate as `elide::recognition::llm`. Lean by default
 ## (the trait, recognizer, prompts, and — with `mock` — the stub backend);
@@ -105,6 +108,7 @@ elide-core = { workspace = true, features = [] }
 elide-context = { workspace = true, features = [] }
 elide-pattern = { workspace = true, features = [], optional = true }
 elide-ner = { workspace = true, features = [], optional = true }
+elide-lingua = { workspace = true, features = [], optional = true }
 elide-llm = { workspace = true, features = [], optional = true }
 elide-stt = { workspace = true, features = [], optional = true }
 elide-ocr = { workspace = true, features = [], optional = true }

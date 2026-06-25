@@ -4,8 +4,6 @@
 
 pub mod backend;
 pub mod decorator;
-#[cfg(feature = "lingua")]
-pub mod nlp;
 mod recognition;
 
 pub use self::recognition::{

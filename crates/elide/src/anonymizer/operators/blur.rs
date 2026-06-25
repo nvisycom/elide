@@ -59,8 +59,8 @@ mod tests {
     use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::modality::image::{Image, ImageData, ImageLocation, ImageReplacement};
-    use elide_core::primitive::{BoundingBox, Confidence, Dimensions, Point};
     use elide_core::operator::Operator;
+    use elide_core::primitive::{BoundingBox, Confidence, Dimensions, Point};
 
     use super::super::{Blackbox, Pixelate};
     use super::Blur;

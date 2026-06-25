@@ -3,8 +3,8 @@
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::image::{Image, ImageData, ImageReplacement};
-use elide_core::primitive::Color;
 use elide_core::operator::{LeakProfile, Operator, OperatorId};
+use elide_core::primitive::Color;
 
 /// Cover the matched image region with a solid color (black by default).
 ///

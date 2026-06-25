@@ -110,8 +110,8 @@ mod tests {
     use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
-    use elide_core::primitive::Confidence;
     use elide_core::operator::Operator;
+    use elide_core::primitive::Confidence;
 
     use super::Keep;
 

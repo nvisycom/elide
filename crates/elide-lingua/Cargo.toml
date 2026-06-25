@@ -1,9 +1,9 @@
 # https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [package]
-name = "elide-ner"
-description = "NER traits and language detection for the Elide toolkit"
-keywords = ["ner", "nlp", "pii"]
+name = "elide-lingua"
+description = "Lingua-backed language detection for the Elide toolkit"
+keywords = ["language-detection", "nlp", "lingua", "pii"]
 categories = ["text-processing"]
 readme = "README.md"
 
@@ -18,14 +18,6 @@ repository = { workspace = true }
 homepage = { workspace = true }
 documentation = { workspace = true }
 
-[features]
-## No features on by default: the NER traits ship bare. Enable `mock`
-## for the no-op backend.
-default = []
-
-## Ship the no-op `MockBackend` for tests, examples, and offline wiring.
-mock = []
-
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
@@ -34,18 +26,11 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Internal crates
 elide-core = { workspace = true, features = ["serde"] }
 
-# (De)serialization
-serde = { workspace = true, features = ["derive"] }
+# Natural language processing
+lingua = { workspace = true, features = [] }
 
-# Derive macros & error handling
-derive_builder = { workspace = true, features = [] }
-
-# Primitive datatypes
-uuid = { workspace = true, features = ["v7"] }
-hipstr = { workspace = true, features = [] }
-
-# Async runtime & parallelism
-async-trait = { workspace = true, features = [] }
+# Observability
+tracing = { workspace = true, features = [] }
 
 [dev-dependencies]
 # Async runtime & parallelism

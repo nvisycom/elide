@@ -5,7 +5,7 @@
 //! Owns the lingua detector and exposes one method,
 //! [`detect`], that returns a
 //! [`Vec<Language>`] in our ontology shape. Used by
-//! [`LinguaNlpEngine`].
+//! [`LinguaEnricher`].
 //!
 //! Construction takes either a candidate-language set or "all
 //! languages compiled into the lingua feature set"; the latter
@@ -13,7 +13,7 @@
 //!
 //! [`lingua`]: https://crates.io/crates/lingua
 //! [`detect`]: LinguaDetector::detect
-//! [`LinguaNlpEngine`]: super::LinguaNlpEngine
+//! [`LinguaEnricher`]: crate::LinguaEnricher
 
 use std::collections::HashSet;
 use std::fmt;
@@ -37,7 +37,7 @@ use lingua::{
 /// Internal helper for [`LinguaEnricher`], which builds a fresh detector
 /// per call; not part of the public API.
 ///
-/// [`LinguaEnricher`]: super::LinguaEnricher
+/// [`LinguaEnricher`]: crate::LinguaEnricher
 pub(crate) struct LinguaDetector {
     inner: LinguaInner,
 }
@@ -45,8 +45,10 @@ pub(crate) struct LinguaDetector {
 impl LinguaDetector {
     /// Construct a detector restricted to `tags`. Unrecognised tags (no
     /// matching ISO 639-1 primary subtag in lingua) are silently skipped.
-    /// Returns `None` when no tag matched; `LinguaNlpEngine` falls back to
+    /// Returns `None` when no tag matched; [`LinguaEnricher`] falls back to
     /// [`for_all_languages`] in that case.
+    ///
+    /// [`LinguaEnricher`]: crate::LinguaEnricher
     ///
     /// [`for_all_languages`]: Self::for_all_languages
     pub(crate) fn for_languages(tags: &[LanguageTag]) -> Option<Self> {
@@ -123,7 +125,7 @@ fn warn_once_unmappable(iso: &str, error: &str) {
     };
     if guard.insert(iso.to_owned()) {
         tracing::warn!(
-            target: "elide_ner::nlp::lingua",
+            target: "elide_lingua",
             iso_code = %iso,
             error = %error,
             "lingua ISO 639-1 code did not parse as a BCP-47 LanguageTag (logged once per process)",
