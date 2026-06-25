@@ -35,8 +35,10 @@ image = ["elide-core/image"]
 ## The `tabular` modality operators (`DropRow`, `DropColumn`).
 tabular = ["elide-core/tabular"]
 
-## The reversible `Encrypt` operator (AES-256-GCM) and its `KeyProvider`.
-crypto = ["dep:aes-gcm", "dep:base64"]
+## The one-way `Sha2Hash` operator (SHA-256 / SHA-512).
+sha2 = ["dep:sha2", "dep:hex"]
+## The reversible `AesEncrypt` operator (AES-256-GCM) and its `KeyProvider`.
+aes = ["dep:aes-gcm", "dep:base64"]
 ## The locale-aware `Fake` redaction operator based on the `fake` crate.
 fake = ["dep:elide-fake", "tabular"]
 
@@ -51,8 +53,8 @@ uuid = { workspace = true, features = ["v4"] }
 hipstr = { workspace = true, features = [] }
 
 # Encoding & hashing
-sha2 = { workspace = true, features = [] }
-hex = { workspace = true, features = [] }
+sha2 = { workspace = true, features = [], optional = true }
+hex = { workspace = true, features = [], optional = true }
 base64 = { workspace = true, features = ["std"], optional = true }
 
 # Cryptography

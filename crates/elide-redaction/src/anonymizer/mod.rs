@@ -13,7 +13,6 @@
 //! [`Replacement`]: elide_core::modality::Modality::Replacement
 
 mod dyn_operator;
-pub mod operators;
 mod registry;
 
 use std::sync::Arc;

@@ -1,4 +1,4 @@
-//! [`Encrypt`]: reversibly replace an entity with an AES-256-GCM ciphertext.
+//! [`AesEncrypt`]: reversibly replace an entity with an AES-256-GCM ciphertext.
 
 use aes_gcm::aead::{Aead, OsRng};
 use aes_gcm::{AeadCore, Aes256Gcm, KeyInit, Nonce};
@@ -11,7 +11,11 @@ use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::operator::{LeakProfile, Operator, OperatorId, ReversibleOperator};
 use elide_core::{Error, ErrorKind, Result};
 
-use crate::redaction::key_provider::KeyProvider;
+/// Length of an AES-256 key, in bytes.
+pub const KEY_LEN: usize = 32;
+
+/// A 256-bit AES key.
+pub type AesKey = [u8; KEY_LEN];
 
 /// AES-GCM nonce length, in bytes (96 bits, the standard).
 const NONCE_LEN: usize = 12;
@@ -25,19 +29,20 @@ const NONCE_LEN: usize = 12;
 /// recoverable by whoever holds the key, the basis for "redact for storage,
 /// decrypt for authorized viewing" flows.
 ///
-/// The key comes from a [`KeyProvider`] rather than the policy, so key
-/// material never lives in serialized rules.
+/// The [`AesKey`] is supplied at construction (from an env var, a secret-store
+/// fetch at startup, …), never as a policy field, so key material never
+/// lives in serialized rules.
 ///
 /// [`deanonymize`]: ReversibleOperator::deanonymize
-#[derive(Debug, Clone)]
-pub struct Encrypt<K> {
-    keys: K,
+#[derive(Clone)]
+pub struct AesEncrypt {
+    key: AesKey,
 }
 
-impl<K: KeyProvider> Encrypt<K> {
-    /// An encryptor drawing its key from `keys`.
-    pub fn new(keys: K) -> Self {
-        Self { keys }
+impl AesEncrypt {
+    /// An encryptor using `key`, a 256-bit AES key obtained out-of-band.
+    pub fn new(key: AesKey) -> Self {
+        Self { key }
     }
 
     /// Identity shared by every modality's impl.
@@ -45,9 +50,9 @@ impl<K: KeyProvider> Encrypt<K> {
         OperatorId::new("encrypt", "1.0.0")
     }
 
-    /// The cipher bound to the current key.
+    /// The cipher bound to this operator's key.
     fn cipher(&self) -> Aes256Gcm {
-        Aes256Gcm::new(self.keys.key().into())
+        Aes256Gcm::new((&self.key).into())
     }
 
     /// Encrypt `plaintext` to a base64 `nonce ++ ciphertext` blob.
@@ -96,7 +101,14 @@ impl<K: KeyProvider> Encrypt<K> {
     }
 }
 
-impl<K: KeyProvider> Operator<Text> for Encrypt<K> {
+impl std::fmt::Debug for AesEncrypt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never print key material.
+        f.debug_struct("AesEncrypt").finish_non_exhaustive()
+    }
+}
+
+impl Operator<Text> for AesEncrypt {
     fn id(&self) -> OperatorId {
         Self::id()
     }
@@ -113,7 +125,7 @@ impl<K: KeyProvider> Operator<Text> for Encrypt<K> {
     }
 }
 
-impl<K: KeyProvider> ReversibleOperator<Text> for Encrypt<K> {
+impl ReversibleOperator<Text> for AesEncrypt {
     async fn deanonymize(
         &self,
         _entity: &Entity<Text>,
@@ -124,7 +136,7 @@ impl<K: KeyProvider> ReversibleOperator<Text> for Encrypt<K> {
 }
 
 #[cfg(feature = "tabular")]
-impl<K: KeyProvider> Operator<Tabular> for Encrypt<K> {
+impl Operator<Tabular> for AesEncrypt {
     fn id(&self) -> OperatorId {
         Self::id()
     }
@@ -143,7 +155,7 @@ impl<K: KeyProvider> Operator<Tabular> for Encrypt<K> {
 }
 
 #[cfg(feature = "tabular")]
-impl<K: KeyProvider> ReversibleOperator<Tabular> for Encrypt<K> {
+impl ReversibleOperator<Tabular> for AesEncrypt {
     async fn deanonymize(
         &self,
         _entity: &Entity<Tabular>,
@@ -165,7 +177,6 @@ mod tests {
     use elide_core::primitive::Confidence;
 
     use super::*;
-    use crate::redaction::key_provider::StaticKey;
 
     fn entity() -> Entity<Text> {
         let location = TextLocation::new(0, 5);
@@ -183,8 +194,8 @@ mod tests {
         )
     }
 
-    fn encryptor() -> Encrypt<StaticKey> {
-        Encrypt::new(StaticKey::new([7u8; 32]))
+    fn encryptor() -> AesEncrypt {
+        AesEncrypt::new([7u8; 32])
     }
 
     #[tokio::test]
@@ -218,7 +229,7 @@ mod tests {
             .await
             .unwrap();
 
-        let other = Encrypt::new(StaticKey::new([9u8; 32]));
+        let other = AesEncrypt::new([9u8; 32]);
         assert_eq!(other.deanonymize(&e, &replacement).await.unwrap(), None);
     }
 }

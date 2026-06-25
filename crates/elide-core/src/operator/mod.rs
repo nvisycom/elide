@@ -8,10 +8,10 @@
 //! [`Operator`]; only reversible ones (encrypt → decrypt) additionally
 //! implement [`ReversibleOperator`].
 //!
-//! This module defines the operator contracts, the [`Redactions`] batch
-//! they feed into, and the [`Vault`] reversible operators store recovery
-//! data in. The redaction engine — the concrete operators and the
-//! label→operator registry that selects them — lives in `elide`.
+//! This module defines the operator contracts and the [`Redactions`]
+//! batch they feed into. The redaction engine — the concrete operators,
+//! the token vault they resolve through, and the label→operator registry
+//! that selects them — lives in `elide-redaction`.
 //!
 //! [`Entity`]: crate::entity::Entity
 //! [`Data`]: crate::modality::Modality::Data
@@ -20,14 +20,12 @@
 mod leak_profile;
 mod operator_id;
 mod redactions;
-mod vault;
 
 use std::future::Future;
 
 pub use self::leak_profile::LeakProfile;
 pub use self::operator_id::OperatorId;
 pub use self::redactions::Redactions;
-pub use self::vault::Vault;
 use crate::entity::Entity;
 use crate::error::Result;
 use crate::modality::Modality;

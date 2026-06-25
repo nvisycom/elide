@@ -8,22 +8,27 @@ mod orchestrator;
 
 /// Redaction: the [`Operator`] contract and the strategies that apply it.
 ///
-/// The shipped [`operators`], the default [`InMemoryVault`], the pseudonym
-/// [`generator`]s, and (feature `crypto`) the [`key_provider`]s, plus the
-/// core redaction vocabulary re-exported from [`elide_core::operator`]. The
+/// The shipped [`operators`], the [`vault`] backing (the default
+/// [`InMemoryVault`]), and the pseudonym [`generator`]s, plus the core
+/// redaction vocabulary re-exported from [`elide_core::operator`]. The
 /// [`Anonymizer`] / [`Deanonymizer`] engines that drive them are at the
 /// crate root. Re-exported from [`elide_redaction`].
 ///
 /// [`Operator`]: elide_core::operator::Operator
 /// [`operators`]: redaction::operators
-/// [`InMemoryVault`]: redaction::InMemoryVault
+/// [`vault`]: redaction::vault
+/// [`InMemoryVault`]: redaction::vault::InMemoryVault
 /// [`generator`]: redaction::generator
-/// [`key_provider`]: redaction::key_provider
 /// [`Anonymizer`]: crate::Anonymizer
 /// [`Deanonymizer`]: crate::Deanonymizer
 pub mod redaction {
+    // The core operator contract, re-surfaced through the redaction crate.
     #[doc(inline)]
-    pub use elide_redaction::redaction::*;
+    pub use elide_core::operator::{
+        LeakProfile, Operator, OperatorId, Redactions, ReversibleOperator,
+    };
+    #[doc(inline)]
+    pub use elide_redaction::{generator, operators, vault};
 }
 
 /// Deduplication: the [`Layer`] stages that reconcile detected entities.

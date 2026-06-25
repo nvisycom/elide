@@ -46,7 +46,7 @@ mod tests {
     use elide_core::primitive::Confidence;
 
     use super::*;
-    use crate::anonymizer::operators::DropColumn;
+    use crate::operators::DropColumn;
 
     fn entity() -> Entity<Tabular> {
         let location = TabularLocation::new(1, 0);

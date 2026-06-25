@@ -62,8 +62,7 @@ mod tests {
     use elide_core::operator::Operator;
     use elide_core::primitive::{BoundingBox, Confidence, Dimensions, Point};
 
-    use super::super::{Blackbox, Pixelate};
-    use super::Blur;
+    use super::super::{Blackbox, Blur, Pixelate};
 
     /// A 4x4 image entity with a small region, enough to drive an operator.
     fn image_entity() -> (Entity<Image>, ImageData) {

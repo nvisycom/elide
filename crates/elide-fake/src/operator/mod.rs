@@ -36,7 +36,7 @@ use crate::locale::Locale;
 /// — call `Fake` from a [`Text`] context and the fallback only
 /// needs `Operator<Text>`; call it from a [`Tabular`] context and
 /// it only needs `Operator<Tabular>`. Every built-in elide
-/// operator (`Mask`, `Replace`, `Erase`, `Hash`) implements both.
+/// operator (`Mask`, `Replace`, `Erase`, `Sha2Hash`) implements both.
 ///
 /// Structured labels (IBAN, payment card, postal code, phone,
 /// date-of-birth, etc.) always pattern-preserve the original — the

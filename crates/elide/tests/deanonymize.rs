@@ -1,9 +1,8 @@
 //! End-to-end reversibility test: encrypt entities in a document with the
 //! [`Anonymizer`], then recover the originals with the [`Deanonymizer`].
-#![cfg(feature = "crypto")]
+#![cfg(feature = "aes")]
 
-use elide::redaction::key_provider::StaticKey;
-use elide::redaction::operators::Encrypt;
+use elide::redaction::operators::AesEncrypt;
 use elide::{Anonymizer, Deanonymizer};
 use elide_core::Result;
 use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
@@ -55,7 +54,7 @@ fn entity(label: &str, start: usize, end: usize) -> Entity<Text> {
 
 #[tokio::test]
 async fn encrypt_then_decrypt_recovers_the_original_document() {
-    let key = StaticKey::new([42u8; 32]);
+    let key = [42u8; 32];
 
     //                            0         1         2
     //                            0123456789012345678901234
@@ -63,9 +62,9 @@ async fn encrypt_then_decrypt_recovers_the_original_document() {
     // "a@b.com" occupies bytes 6..13.
     let mut email = entity("EMAIL_ADDRESS", 6, 13);
 
-    // Encrypt under the label.
+    // AesEncrypt under the label.
     Anonymizer::<Text>::new()
-        .with_label(LabelRef::new("EMAIL_ADDRESS"), Encrypt::new(key.clone()))
+        .with_label(LabelRef::new("EMAIL_ADDRESS"), AesEncrypt::new(key))
         .anonymize(&mut doc, std::slice::from_mut(&mut email))
         .await
         .unwrap();
@@ -81,7 +80,7 @@ async fn encrypt_then_decrypt_recovers_the_original_document() {
 
     // Decrypt under the same label.
     Deanonymizer::<Text>::new()
-        .with_label(LabelRef::new("EMAIL_ADDRESS"), Encrypt::new(key))
+        .with_label(LabelRef::new("EMAIL_ADDRESS"), AesEncrypt::new(key))
         .deanonymize(&mut doc, std::slice::from_ref(&encrypted))
         .await
         .unwrap();
@@ -95,10 +94,7 @@ async fn wrong_key_leaves_the_ciphertext_in_place() {
     let mut secret = entity("TOKEN", 2, 8);
 
     Anonymizer::<Text>::new()
-        .with_label(
-            LabelRef::new("TOKEN"),
-            Encrypt::new(StaticKey::new([1u8; 32])),
-        )
+        .with_label(LabelRef::new("TOKEN"), AesEncrypt::new([1u8; 32]))
         .anonymize(&mut doc, std::slice::from_mut(&mut secret))
         .await
         .unwrap();
@@ -109,10 +105,7 @@ async fn wrong_key_leaves_the_ciphertext_in_place() {
     // A deanonymizer with the wrong key cannot recover, so it skips the
     // entity and leaves the ciphertext untouched.
     Deanonymizer::<Text>::new()
-        .with_label(
-            LabelRef::new("TOKEN"),
-            Encrypt::new(StaticKey::new([2u8; 32])),
-        )
+        .with_label(LabelRef::new("TOKEN"), AesEncrypt::new([2u8; 32]))
         .deanonymize(&mut doc, std::slice::from_ref(&encrypted))
         .await
         .unwrap();

@@ -1,7 +1,7 @@
 //! The [`Deanonymizer`] — the "recover" engine.
 //!
 //! The reverse of [`Anonymizer`]: per entity it resolves a
-//! [`ReversibleOperator`] (e.g. [`Encrypt`]), reads the replacement text the
+//! [`ReversibleOperator`] (e.g. [`AesEncrypt`]), reads the replacement text the
 //! document holds, recovers the original, and writes it back. Supported for
 //! modalities whose data and recoverable replacement are both text ([`Text`]
 //! and `Tabular`), where the stored value can be lifted back to a
@@ -9,7 +9,7 @@
 //!
 //! [`Anonymizer`]: crate::Anonymizer
 //! [`ReversibleOperator`]: elide_core::operator::ReversibleOperator
-//! [`Encrypt`]: crate::redaction::operators::Encrypt
+//! [`AesEncrypt`]: crate::operators::AesEncrypt
 //! [`Text`]: elide_core::modality::text::Text
 //! [`TextReplacement`]: elide_core::modality::text::TextReplacement
 

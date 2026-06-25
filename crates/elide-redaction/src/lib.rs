@@ -4,7 +4,13 @@
 
 mod anonymizer;
 mod deanonymizer;
-pub mod redaction;
+
+pub mod generator;
+pub mod operators;
+pub mod vault;
+
+#[doc(inline)]
+pub use elide_core::operator::*;
 
 pub use self::anonymizer::Anonymizer;
 pub use self::deanonymizer::Deanonymizer;

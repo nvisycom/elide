@@ -1,5 +1,5 @@
-//! The `Hash` operator: replace the matched value with a one-way SHA-2
-//! hash.
+//! The `Sha2Hash` operator: replace the matched value with a one-way
+//! SHA-2 hash.
 
 use bytes::Bytes;
 use elide_core::Result;
@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256, Sha512};
 
 /// Which SHA-2 variant to use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum HashAlgorithm {
+pub enum Sha2Algorithm {
     /// SHA-256 — 32-byte digest, 64-char hex.
     #[default]
     Sha256,
@@ -27,19 +27,19 @@ pub enum HashAlgorithm {
 /// attacks and makes equal plaintext hash differently across
 /// deployments.
 #[derive(Debug, Clone, Default)]
-pub struct Hash {
-    algorithm: HashAlgorithm,
+pub struct Sha2Hash {
+    algorithm: Sha2Algorithm,
     salt: Bytes,
 }
 
-impl Hash {
+impl Sha2Hash {
     /// Identity shared by every modality's impl.
     fn id() -> OperatorId {
         OperatorId::new("hash", "1.0.0")
     }
 
     /// A hash operator using `algorithm`, with no salt.
-    pub fn new(algorithm: HashAlgorithm) -> Self {
+    pub fn new(algorithm: Sha2Algorithm) -> Self {
         Self {
             algorithm,
             salt: Bytes::new(),
@@ -48,12 +48,12 @@ impl Hash {
 
     /// SHA-256, no salt — the common default.
     pub fn sha256() -> Self {
-        Self::new(HashAlgorithm::Sha256)
+        Self::new(Sha2Algorithm::Sha256)
     }
 
     /// SHA-512, no salt.
     pub fn sha512() -> Self {
-        Self::new(HashAlgorithm::Sha512)
+        Self::new(Sha2Algorithm::Sha512)
     }
 
     /// Attach a salt prepended to the value before hashing.
@@ -66,13 +66,13 @@ impl Hash {
     /// The lowercase hex digest of `value` under this operator.
     fn digest(&self, value: &str) -> String {
         match self.algorithm {
-            HashAlgorithm::Sha256 => hex::encode(
+            Sha2Algorithm::Sha256 => hex::encode(
                 Sha256::new()
                     .chain_update(&self.salt)
                     .chain_update(value.as_bytes())
                     .finalize(),
             ),
-            HashAlgorithm::Sha512 => hex::encode(
+            Sha2Algorithm::Sha512 => hex::encode(
                 Sha512::new()
                     .chain_update(&self.salt)
                     .chain_update(value.as_bytes())
@@ -82,9 +82,9 @@ impl Hash {
     }
 }
 
-impl Operator<Text> for Hash {
+impl Operator<Text> for Sha2Hash {
     fn id(&self) -> OperatorId {
-        Hash::id()
+        Sha2Hash::id()
     }
 
     fn leak_profile(&self) -> LeakProfile {
@@ -99,9 +99,9 @@ impl Operator<Text> for Hash {
 }
 
 #[cfg(feature = "tabular")]
-impl Operator<Tabular> for Hash {
+impl Operator<Tabular> for Sha2Hash {
     fn id(&self) -> OperatorId {
-        Hash::id()
+        Sha2Hash::id()
     }
 
     fn leak_profile(&self) -> LeakProfile {

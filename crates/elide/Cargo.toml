@@ -97,8 +97,10 @@ codec-docx = ["codec", "elide-codec/docx"]
 ## Ship the no-op mock backends in the re-exported recognizer crates.
 mock = ["elide-ner?/mock", "elide-llm?/mock", "elide-stt?/mock", "elide-ocr?/mock"]
 
-## The reversible `Encrypt` operator (AES-256-GCM) and its `KeyProvider`.
-crypto = ["elide-redaction/crypto"]
+## The one-way `Sha2Hash` operator (SHA-256 / SHA-512).
+sha2 = ["elide-redaction/sha2"]
+## The reversible `AesEncrypt` operator (AES-256-GCM) and its `KeyProvider`.
+aes = ["elide-redaction/aes"]
 ## The locale-aware `Fake` redaction operator based on the `fake` crate.
 fake = ["elide-redaction/fake"]
 

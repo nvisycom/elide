@@ -9,13 +9,17 @@
 //!
 //! The vault is generic over the key `K` as well as the value, so a
 //! caller can key on a *full identity* (collision-free by construction)
-//! rather than a lossy digest. The contract lives here; concrete backings
-//! (the in-memory default, a KV store, a KMS-backed blob) live in the
-//! toolkit crate.
+//! rather than a lossy digest. The contract lives here in [`mod`](self)
+//! alongside the batteries-included [`InMemoryVault`] backing; a durable
+//! backing (a KV store, a KMS-backed blob) is just another `impl`.
+
+mod memory;
 
 use std::future::Future;
 
-use crate::Result;
+use elide_core::Result;
+
+pub use self::memory::InMemoryVault;
 
 /// Token vault mapping keys of type `K` to cloneable values of type `V`.
 ///
@@ -35,7 +39,7 @@ use crate::Result;
 /// only ever stored as part of resolving a key, never blindly, so a
 /// stored entry always wins and consistency holds by construction.
 ///
-/// [`Operator`]: crate::operator::Operator
+/// [`Operator`]: elide_core::operator::Operator
 /// [`get_or_try_insert_with`]: Vault::get_or_try_insert_with
 pub trait Vault<K, V: Clone + Send + Sync>: Send + Sync {
     /// Look up the value previously stored under `key`. Returns

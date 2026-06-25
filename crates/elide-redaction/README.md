@@ -31,16 +31,17 @@ Anonymizer::new()
 ```
 
 The shipped operators model Presidio's set, generalised to be multimodal:
-`Mask`, `Replace`, `Hash`, `Pseudonymize`, `Erase`, and `Keep` work everywhere;
+`Mask`, `Replace`, `Pseudonymize`, `Erase`, and `Keep` work everywhere;
+`Sha2Hash` (feature `sha2`) replaces a value with a one-way SHA-2 digest;
 `DropRow`/`DropColumn` (tabular), `Blur`/`Pixelate`/`Blackbox` (image), and
-`Silence`/`Beep` (audio) are feature-gated by modality. The reversible `Encrypt`
-operator (feature `crypto`, AES-256-GCM) replaces a value with a ciphertext the
-`Deanonymizer` can recover given the key; the locale-aware `Fake` operator
-(feature `fake`) swaps in plausible synthetic values.
+`Silence`/`Beep` (audio) are feature-gated by modality. The reversible
+`AesEncrypt` operator (feature `aes`, AES-256-GCM) replaces a value with a
+ciphertext the `Deanonymizer` can recover given the key; the locale-aware
+`Fake` operator (feature `fake`) swaps in plausible synthetic values.
 
 Pseudonymization draws a stable surrogate per entity from a `generator`, kept
-consistent across coreferent mentions through a `Vault`; `crypto` keys come from
-a `key_provider`.
+consistent across coreferent mentions through a `vault`; `AesEncrypt` takes its
+256-bit `AesKey` directly at construction.
 
 ## Documentation
 

@@ -7,16 +7,17 @@ use elide_core::modality::Modality;
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::operator::{LeakProfile, Operator, OperatorId, Vault};
+use elide_core::operator::{LeakProfile, Operator, OperatorId};
 #[cfg(feature = "tabular")]
 use elide_core::{Error, ErrorKind};
 
-use crate::redaction::generator::Generator;
+use crate::generator::Generator;
+use crate::vault::Vault;
 
 /// Replace an entity with a consistent generated surrogate.
 ///
 /// The pseudonymizing operator: where [`Replace`] writes a fixed marker
-/// and [`Hash`] a digest, `Pseudonymize` substitutes a per-entity
+/// and `Sha2Hash` a digest, `Pseudonymize` substitutes a per-entity
 /// surrogate from a [`Generator`] and — crucially — replays the *same*
 /// surrogate every time that entity recurs. That consistency is what
 /// preserves a document's referential structure: "Alice told Bob, then
@@ -46,13 +47,12 @@ use crate::redaction::generator::Generator;
 /// original lives in the vault. Whoever holds the vault can reverse it;
 /// without it the surrogate is just an opaque token.
 ///
-/// [`Vault`]: elide_core::operator::Vault
-/// [`Generator`]: crate::redaction::generator::Generator
-/// [`RandomToken`]: crate::redaction::generator::RandomToken
-/// [`get_or_try_insert_with`]: elide_core::operator::Vault::get_or_try_insert_with
+/// [`Vault`]: crate::vault::Vault
+/// [`Generator`]: crate::generator::Generator
+/// [`RandomToken`]: crate::generator::RandomToken
+/// [`get_or_try_insert_with`]: crate::vault::Vault::get_or_try_insert_with
 /// [coreference]: elide_core::entity::EntityCoRef
 /// [`Replace`]: super::Replace
-/// [`Hash`]: super::Hash
 #[derive(Debug, Clone)]
 pub struct Pseudonymize<V, G> {
     vault: V,
@@ -158,8 +158,8 @@ mod tests {
     use elide_core::primitive::Confidence;
 
     use super::*;
-    use crate::redaction::InMemoryVault;
-    use crate::redaction::generator::RandomToken;
+    use crate::generator::RandomToken;
+    use crate::vault::InMemoryVault;
 
     fn entity(label: &str, coref: Option<&str>) -> Entity<Text> {
         let location = TextLocation::new(0, 1);
