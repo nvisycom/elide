@@ -17,7 +17,7 @@
 
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
-use elide_core::redaction::Redactions;
+use elide_core::operator::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 
 use super::RtfLoader;

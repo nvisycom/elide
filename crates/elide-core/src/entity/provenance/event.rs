@@ -6,9 +6,10 @@ use jiff::Timestamp;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use super::{Attribution, RuleMatch};
 use crate::modality::{Hint, Modality};
+use crate::operator::{LeakProfile, OperatorId};
 use crate::primitive::Confidence;
-use crate::redaction::{Attribution, LeakProfile, OperatorId, RuleMatch};
 
 /// One thing that happened to an entity, with its effect on confidence.
 ///

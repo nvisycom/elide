@@ -107,7 +107,7 @@ fn strip(span: Range<usize>, open: &str, close: &str) -> Option<Range<usize>> {
 mod tests {
     use elide_core::modality::DataWriter;
     use elide_core::modality::text::{TextLocation, TextReplacement};
-    use elide_core::redaction::Redactions;
+    use elide_core::operator::Redactions;
 
     use super::*;
     use crate::Handler;

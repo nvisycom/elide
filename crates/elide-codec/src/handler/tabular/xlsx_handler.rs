@@ -10,7 +10,7 @@
 use elide_core::modality::tabular::{Tabular, TabularLocation};
 use elide_core::modality::text::TextData;
 use elide_core::modality::{Chunk, DataReader, DataWriter};
-use elide_core::redaction::Redactions;
+use elide_core::operator::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 
 use super::xlsx_loader::XlsxLoader;

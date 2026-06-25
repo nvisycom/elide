@@ -268,7 +268,7 @@ fn recognizer_context_carries_annotations() {
 
 #[test]
 fn operator_trait_shape() {
-    use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+    use elide_core::operator::{LeakProfile, Operator, OperatorId};
 
     /// A trivial `[LABEL]`-style replace operator, to exercise the
     /// trait shape and the pure `Replacement` model.

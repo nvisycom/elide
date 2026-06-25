@@ -19,12 +19,10 @@ homepage = { workspace = true }
 documentation = { workspace = true }
 
 [features]
-## No features on by default: the NER traits ship bare. Enable `lingua`
-## for language detection, or `mock` for the no-op backend.
+## No features on by default: the NER traits ship bare. Enable `mock`
+## for the no-op backend.
 default = []
 
-## Language detection via the `lingua` crate.
-lingua = ["dep:lingua"]
 ## Ship the no-op `MockBackend` for tests, examples, and offline wiring.
 mock = []
 
@@ -48,12 +46,6 @@ hipstr = { workspace = true, features = [] }
 
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
-
-# Observability
-tracing = { workspace = true, features = [] }
-
-# Natural language processing
-lingua = { workspace = true, features = [], optional = true }
 
 [dev-dependencies]
 # Async runtime & parallelism

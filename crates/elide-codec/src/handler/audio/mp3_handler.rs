@@ -5,7 +5,7 @@ use bytes::Bytes;
 use elide_core::Result;
 use elide_core::modality::audio::{Audio, AudioData, AudioLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
-use elide_core::redaction::Redactions;
+use elide_core::operator::Redactions;
 
 use super::mp3_codec::{average_bitrate_bps, decode_to_pcm, duration_ms, encode_from_pcm};
 use super::mp3_loader::Mp3Loader;

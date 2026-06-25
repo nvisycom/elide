@@ -32,12 +32,15 @@ default = ["pattern", "ner", "llm"]
 ## domain types. Recognizer crates (`pattern`/`ner`/`llm`) need serde
 ## structurally and pull it in regardless; `codec` forwards it when both
 ## are enabled.
-serde = ["dep:serde", "dep:erased-serde", "elide-core/serde", "elide-codec?/serde"]
+serde = ["elide-core/serde", "elide-detection/serde", "elide-redaction/serde", "elide-codec?/serde", "elide-orchestration?/serde"]
 
 ## Re-export the pattern crate as `elide::recognition::pattern`.
 pattern = ["dep:elide-pattern"]
 ## Re-export the NER crate as `elide::recognition::ner`.
 ner = ["dep:elide-ner"]
+## Re-export the lingua language-detection crate as
+## `elide::recognition::lingua`.
+lingua = ["dep:elide-lingua"]
 
 ## Re-export the LLM crate as `elide::recognition::llm`. Lean by default
 ## (the trait, recognizer, prompts, and — with `mock` — the stub backend);
@@ -59,16 +62,17 @@ stt = ["dep:elide-stt", "audio"]
 ocr = ["dep:elide-ocr", "image"]
 
 ## The `audio` modality. Implied by the audio codec formats.
-audio = ["elide-core/audio"]
+audio = ["elide-core/audio", "elide-redaction/audio"]
 ## The `image` modality. Implied by the image codec formats.
-image = ["elide-core/image"]
+image = ["elide-core/image", "elide-redaction/image"]
 ## The `tabular` modality. Implied by the tabular codec formats.
-tabular = ["elide-core/tabular"]
+tabular = ["elide-core/tabular", "elide-redaction/tabular"]
 
-## Re-export the codec crate as `elide::codec`. On its own this enables
-## only the codec's default formats; use the per-modality or per-format
-## `codec-*` features below to pull in the shipped format handlers.
-codec = ["dep:elide-codec"]
+## Re-export the codec crate as `elide::codec` and the orchestration engine
+## (`Orchestrator`, `Report`) at the crate root. On its own this enables only
+## the codec's default formats; use the per-modality or per-format `codec-*`
+## features below to pull in the shipped format handlers.
+codec = ["dep:elide-codec", "dep:elide-orchestration"]
 
 ## Per-modality format groups (each aggregates its per-format features).
 codec-text = ["codec-txt", "codec-json", "codec-html", "codec-xml"]
@@ -94,49 +98,34 @@ codec-docx = ["codec", "elide-codec/docx"]
 ## Ship the no-op mock backends in the re-exported recognizer crates.
 mock = ["elide-ner?/mock", "elide-llm?/mock", "elide-stt?/mock", "elide-ocr?/mock"]
 
-## The reversible `Encrypt` operator (AES-256-GCM) and its `KeyProvider`.
-crypto = ["dep:aes-gcm", "dep:base64"]
-## The locale-aware `Fake` redaction operator based on the `fakers` crate.
-fake = ["dep:elide-fake", "tabular"]
+## The one-way `Sha2Hash` operator (SHA-256 / SHA-512).
+sha2 = ["elide-redaction/sha2"]
+## The reversible `AesEncrypt` operator (AES-256-GCM) and its `KeyProvider`.
+aes = ["elide-redaction/aes"]
+## The locale-aware `Fake` redaction operator based on the `fake` crate.
+fake = ["elide-redaction/fake"]
 
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }
 elide-context = { workspace = true, features = [] }
+elide-detection = { workspace = true, features = [] }
 elide-pattern = { workspace = true, features = [], optional = true }
 elide-ner = { workspace = true, features = [], optional = true }
+elide-lingua = { workspace = true, features = [], optional = true }
 elide-llm = { workspace = true, features = [], optional = true }
 elide-stt = { workspace = true, features = [], optional = true }
 elide-ocr = { workspace = true, features = [], optional = true }
 elide-codec = { workspace = true, features = [], optional = true }
-elide-fake = { workspace = true, features = [], optional = true }
-
-# (De)serialization
-serde = { workspace = true, features = [], optional = true }
-erased-serde = { workspace = true, features = [], optional = true }
-
-# Primitive datatypes
-bytes = { workspace = true, features = [] }
-uuid = { workspace = true, features = ["v4"] }
-hipstr = { workspace = true, features = [] }
-
-# Encoding & hashing
-sha2 = { workspace = true, features = [] }
-hex = { workspace = true, features = [] }
-base64 = { workspace = true, features = ["std"], optional = true }
-
-# Cryptography
-aes-gcm = { workspace = true, features = ["aes", "getrandom"], optional = true }
-
-# Async runtime & parallelism
-futures = { workspace = true, features = [] }
-
-# Observability
-tracing = { workspace = true, features = [] }
+elide-orchestration = { workspace = true, features = [], optional = true }
+elide-redaction = { workspace = true, features = [] }
 
 [dev-dependencies]
 # (De)serialization
 serde_json = { workspace = true, features = [] }
+
+# Primitive datatypes
+bytes = { workspace = true, features = [] }
 
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

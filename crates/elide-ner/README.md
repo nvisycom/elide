@@ -2,7 +2,7 @@
 
 [![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/elide/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/elide/actions/workflows/build.yml)
 
-Named-entity recognition and language detection for PII/PHI detection.
+Named-entity recognition for PII/PHI detection.
 
 ## Overview
 
@@ -15,10 +15,9 @@ or as a future local inference engine. A no-op backend ships built in for wiring
 and tests, and concrete inference backends live downstream.
 
 Raw backend labels are projected onto the toolkit's canonical label set, so
-consumers reason about one fixed taxonomy regardless of the upstream model. An
-optional language-detection feature resolves the language of a piece of text and
-carries that result alongside the input for language-aware recognizers and
-policies.
+consumers reason about one fixed taxonomy regardless of the upstream model.
+Language detection — resolving the language of a piece of text for language-aware
+recognizers and policies — lives in the separate `elide-lingua` crate.
 
 ## Documentation
 

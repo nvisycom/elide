@@ -2,14 +2,49 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 
-mod analyzer;
-mod anonymizer;
-mod deanonymizer;
-pub mod deduplication;
 pub mod modality;
-#[cfg(feature = "codec")]
-mod orchestrator;
-pub mod redaction;
+
+/// Redaction: the [`Operator`] contract and the strategies that apply it.
+///
+/// The shipped [`operators`], the [`vault`] backing (the default
+/// [`InMemoryVault`]), and the pseudonym [`generator`]s, plus the core
+/// redaction vocabulary re-exported from [`elide_core::operator`]. The
+/// [`Anonymizer`] / [`Deanonymizer`] engines that drive them are at the
+/// crate root. Re-exported from [`elide_redaction`].
+///
+/// [`Operator`]: elide_core::operator::Operator
+/// [`operators`]: redaction::operators
+/// [`vault`]: redaction::vault
+/// [`InMemoryVault`]: redaction::vault::InMemoryVault
+/// [`generator`]: redaction::generator
+/// [`Anonymizer`]: crate::Anonymizer
+/// [`Deanonymizer`]: crate::Deanonymizer
+pub mod redaction {
+    // The core operator contract, re-surfaced through the redaction crate.
+    #[doc(inline)]
+    pub use elide_core::operator::{
+        LeakProfile, Operator, OperatorId, Redactions, ReversibleOperator,
+    };
+    #[doc(inline)]
+    pub use elide_redaction::{generator, operators, vault};
+}
+
+/// Deduplication: the [`Layer`] stages that reconcile detected entities.
+///
+/// [`calibrate`], [`fuse`], [`resolve`], and [`filter`] each reshape or
+/// prune the working entity set; an [`Analyzer`] runs them in order after
+/// detection. Re-exported from [`elide_detection`].
+///
+/// [`Analyzer`]: crate::Analyzer
+/// [`Layer`]: elide_detection::Layer
+/// [`calibrate`]: elide_detection::calibrate
+/// [`fuse`]: elide_detection::fuse
+/// [`resolve`]: elide_detection::resolve
+/// [`filter`]: elide_detection::filter
+pub mod deduplication {
+    #[doc(inline)]
+    pub use elide_detection::{Layer, LayerOutput, calibrate, filter, fuse, resolve};
+}
 
 /// Codec: decode documents into modality payloads, then re-encode them.
 ///
@@ -76,6 +111,12 @@ pub mod recognition {
         pub use elide_context::{Boost, BoostRule, Context, Enhanced, Enhancer};
     }
 
+    /// Language detection: resolve the language(s) of a piece of text for
+    /// language-aware recognizers and policies.
+    #[cfg(feature = "lingua")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "lingua")))]
+    #[doc(inline)]
+    pub use elide_lingua as lingua;
     /// LLM-mediated recognition: prompt a language or vision model over
     /// text and images.
     #[cfg(feature = "llm")]
@@ -112,14 +153,15 @@ pub mod recognition {
 pub use elide_core::{Error, ErrorKind, Result};
 #[doc(inline)]
 pub use elide_core::{entity, primitive};
-
-pub use self::analyzer::Analyzer;
-pub use self::anonymizer::Anonymizer;
-pub use self::deanonymizer::Deanonymizer;
+#[doc(inline)]
+pub use elide_detection::Analyzer;
 // Nameable so callers can state the `Vec<Entity<M>>: EntityGroup` bound on
 // the orchestrator's construction methods; hidden, an implementation detail.
 #[cfg(feature = "codec")]
 #[doc(hidden)]
-pub use self::orchestrator::EntityGroup;
+pub use elide_orchestration::EntityGroup;
 #[cfg(feature = "codec")]
-pub use self::orchestrator::{Orchestrator, Report};
+#[doc(inline)]
+pub use elide_orchestration::{Orchestrator, Report};
+#[doc(inline)]
+pub use elide_redaction::{Anonymizer, Deanonymizer};

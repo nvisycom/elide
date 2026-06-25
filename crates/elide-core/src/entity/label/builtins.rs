@@ -17,6 +17,7 @@ use super::Label;
 
 macro_rules! label {
     ($vis:vis $ident:ident, $name:literal, $desc:literal, [ $($tag:literal),* $(,)? ]) => {
+        #[doc = $desc]
         $vis static $ident: LazyLock<Label> = LazyLock::new(|| {
             Label::from_static($name, Some($desc), &[$($tag),*])
         });

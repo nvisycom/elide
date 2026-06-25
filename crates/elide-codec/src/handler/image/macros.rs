@@ -149,7 +149,7 @@ macro_rules! impl_image_handler {
         impl ::elide_core::modality::DataWriter<::elide_core::modality::image::Image> for $handler {
             async fn write_at(
                 &mut self,
-                redactions: ::elide_core::redaction::Redactions<::elide_core::modality::image::Image>,
+                redactions: ::elide_core::operator::Redactions<::elide_core::modality::image::Image>,
             ) -> ::elide_core::Result<()> {
                 for (location, replacement) in redactions.into_iter() {
                     $crate::handler::image::redact::apply(

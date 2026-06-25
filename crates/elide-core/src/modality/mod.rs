@@ -124,7 +124,7 @@ pub trait ModalityLocation: Clone + fmt::Debug + Send + Sync + 'static {
 /// the entity and its data; the codec writes it back into the document.
 /// A near-empty marker, like the others.
 ///
-/// [`Operator`]: crate::redaction::Operator
+/// [`Operator`]: crate::operator::Operator
 pub trait ModalityReplacement: Clone + fmt::Debug + Send + Sync + 'static {}
 
 /// Medium that entities can be located within.

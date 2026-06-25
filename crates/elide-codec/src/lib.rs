@@ -15,7 +15,7 @@ pub use self::codec::{
 mod tests {
     use elide_core::modality::DataWriter;
     use elide_core::modality::text::{Text, TextLocation, TextReplacement};
-    use elide_core::redaction::Redactions;
+    use elide_core::operator::Redactions;
 
     use super::*;
 
@@ -110,7 +110,7 @@ mod csv_tests {
     use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
     use elide_core::modality::text::TextReplacement;
     use elide_core::modality::{DataWriter, StreamDataReader};
-    use elide_core::redaction::Redactions;
+    use elide_core::operator::Redactions;
 
     use super::*;
 

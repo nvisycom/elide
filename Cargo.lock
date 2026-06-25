@@ -947,28 +947,21 @@ checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 name = "elide"
 version = "0.1.0"
 dependencies = [
- "aes-gcm",
- "base64",
  "bytes",
  "elide-codec",
  "elide-context",
  "elide-core",
- "elide-fake",
+ "elide-detection",
+ "elide-lingua",
  "elide-llm",
  "elide-ner",
  "elide-ocr",
+ "elide-orchestration",
  "elide-pattern",
+ "elide-redaction",
  "elide-stt",
- "erased-serde",
- "futures",
- "hex",
- "hipstr",
- "serde",
  "serde_json",
- "sha2 0.11.0",
  "tokio",
- "tracing",
- "uuid",
  "zip",
 ]
 
@@ -1022,6 +1015,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "elide-detection"
+version = "0.1.0"
+dependencies = [
+ "elide-core",
+ "futures",
+ "tracing",
+]
+
+[[package]]
 name = "elide-examples"
 version = "0.1.0"
 dependencies = [
@@ -1038,6 +1040,16 @@ dependencies = [
  "fake",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "elide-lingua"
+version = "0.1.0"
+dependencies = [
+ "elide-core",
+ "lingua",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1067,10 +1079,8 @@ dependencies = [
  "derive_builder",
  "elide-core",
  "hipstr",
- "lingua",
  "serde",
  "tokio",
- "tracing",
  "uuid",
 ]
 
@@ -1082,6 +1092,20 @@ dependencies = [
  "elide-core",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "elide-orchestration"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "elide-codec",
+ "elide-core",
+ "elide-detection",
+ "elide-redaction",
+ "erased-serde",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1101,6 +1125,23 @@ dependencies = [
  "serde",
  "tokio",
  "toml",
+]
+
+[[package]]
+name = "elide-redaction"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "base64",
+ "bytes",
+ "elide-core",
+ "elide-fake",
+ "hex",
+ "hipstr",
+ "sha2 0.11.0",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
