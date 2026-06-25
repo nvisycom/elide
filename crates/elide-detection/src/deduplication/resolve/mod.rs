@@ -1,5 +1,7 @@
 //! Conflict resolution: breaking overlaps between entities of
-//! *different* labels (same-label overlaps are handled by fusion).
+//! *different* labels.
+//!
+//! Note, that same-label overlaps are handled by fusion.
 
 mod strategy;
 

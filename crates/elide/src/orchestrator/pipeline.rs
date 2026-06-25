@@ -13,10 +13,11 @@ use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::recognition::Scope;
+use elide_detection::Analyzer;
 
 use super::report::EntityGroup;
+use crate::Anonymizer;
 use crate::codec::{DocumentHandle, UntypedDocumentHandle};
-use crate::{Analyzer, Anonymizer};
 
 /// The concrete analyze + redact pipeline for one modality `M`.
 pub(super) struct ModalityPipeline<M: Modality> {

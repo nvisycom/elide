@@ -23,7 +23,7 @@ use futures::future;
 
 use self::dyn_enricher::DynEnricher;
 use self::dyn_recognizer::DynRecognizer;
-use crate::deduplication::{Layer, LayerPipeline};
+use crate::deduplication::Layer;
 
 /// The find engine: enrichers, recognizers, and deduplication, in one
 /// call.
@@ -53,7 +53,7 @@ use crate::deduplication::{Layer, LayerPipeline};
 pub struct Analyzer<M: Modality> {
     enrichers: Vec<Arc<dyn DynEnricher<M>>>,
     recognizers: Vec<Arc<dyn DynRecognizer<M>>>,
-    pipeline: LayerPipeline<M>,
+    layers: Vec<Arc<dyn Layer<M>>>,
 }
 
 impl<M: Modality> Analyzer<M> {
@@ -62,7 +62,7 @@ impl<M: Modality> Analyzer<M> {
         Self {
             enrichers: Vec::new(),
             recognizers: Vec::new(),
-            pipeline: LayerPipeline::new(),
+            layers: Vec::new(),
         }
     }
 
@@ -87,7 +87,7 @@ impl<M: Modality> Analyzer<M> {
     /// after detection.
     #[must_use]
     pub fn with_layer<L: Layer<M> + 'static>(mut self, layer: L) -> Self {
-        self.pipeline.push(layer);
+        self.layers.push(Arc::new(layer));
         self
     }
 
@@ -112,8 +112,28 @@ impl<M: Modality> Analyzer<M> {
         }
         let mut entities = self.recognize(&data, ctx).await?;
         ctx.stamp_languages(&mut entities);
-        let reduced = self.pipeline.run(entities);
+        let reduced = self.reduce(entities);
         Ok(Self::apply_exclusions(reduced, ctx.exclusions()))
+    }
+
+    /// Run every deduplication layer in order over `entities`, threading
+    /// each layer's kept output into the next and returning the survivors.
+    fn reduce(&self, mut entities: Vec<Entity<M>>) -> Vec<Entity<M>> {
+        let before = entities.len();
+        let mut dropped = 0usize;
+        for layer in &self.layers {
+            let output = layer.apply(entities);
+            dropped += output.dropped.len();
+            entities = output.kept;
+        }
+        tracing::debug!(
+            modality = M::NAME,
+            before,
+            after = entities.len(),
+            dropped,
+            "deduplication complete"
+        );
+        entities
     }
 
     /// Drop every entity whose location overlaps a caller [`Exclusion`].

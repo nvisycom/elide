@@ -953,6 +953,7 @@ dependencies = [
  "elide-codec",
  "elide-context",
  "elide-core",
+ "elide-detection",
  "elide-fake",
  "elide-lingua",
  "elide-llm",
@@ -961,7 +962,6 @@ dependencies = [
  "elide-pattern",
  "elide-stt",
  "erased-serde",
- "futures",
  "hex",
  "hipstr",
  "serde",
@@ -1020,6 +1020,15 @@ dependencies = [
  "serde",
  "type-map",
  "uuid",
+]
+
+[[package]]
+name = "elide-detection"
+version = "0.1.0"
+dependencies = [
+ "elide-core",
+ "futures",
+ "tracing",
 ]
 
 [[package]]

@@ -42,6 +42,7 @@ use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::recognition::Scope;
+use elide_detection::Analyzer;
 
 use self::pipeline::{AnalyzeOutcome, ErasedPipeline, ModalityPipeline};
 // `EntityGroup` is re-exported (not just `use`d) because the bound
@@ -52,8 +53,8 @@ use self::pipeline::{AnalyzeOutcome, ErasedPipeline, ModalityPipeline};
 pub use self::report::EntityGroup;
 use self::report::PartReport;
 pub use self::report::Report;
+use crate::Anonymizer;
 use crate::codec::{DocumentHandle, FormatRegistry, PartId};
-use crate::{Analyzer, Anonymizer};
 
 /// Drives analyze + redact across a document's body and its cross-modality
 /// container parts.

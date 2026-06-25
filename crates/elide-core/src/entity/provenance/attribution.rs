@@ -4,8 +4,8 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Author-supplied rationale for a redaction: the policy it enforces and an
-/// optional human-readable reason.
+/// Author-supplied rationale for a redaction: the policy it enforces and
+/// a reason.
 ///
 /// Where the matched selection rule answers *which rule fired*, an
 /// `Attribution` answers *under what authority* — a compliance clause, an

@@ -32,7 +32,7 @@ default = ["pattern", "ner", "llm"]
 ## domain types. Recognizer crates (`pattern`/`ner`/`llm`) need serde
 ## structurally and pull it in regardless; `codec` forwards it when both
 ## are enabled.
-serde = ["dep:serde", "dep:erased-serde", "elide-core/serde", "elide-codec?/serde"]
+serde = ["dep:serde", "dep:erased-serde", "elide-core/serde", "elide-detection/serde", "elide-codec?/serde"]
 
 ## Re-export the pattern crate as `elide::recognition::pattern`.
 pattern = ["dep:elide-pattern"]
@@ -106,6 +106,7 @@ fake = ["dep:elide-fake", "tabular"]
 # Internal crates
 elide-core = { workspace = true, features = [] }
 elide-context = { workspace = true, features = [] }
+elide-detection = { workspace = true, features = [] }
 elide-pattern = { workspace = true, features = [], optional = true }
 elide-ner = { workspace = true, features = [], optional = true }
 elide-lingua = { workspace = true, features = [], optional = true }
@@ -131,9 +132,6 @@ base64 = { workspace = true, features = ["std"], optional = true }
 
 # Cryptography
 aes-gcm = { workspace = true, features = ["aes", "getrandom"], optional = true }
-
-# Async runtime & parallelism
-futures = { workspace = true, features = [] }
 
 # Observability
 tracing = { workspace = true, features = [] }

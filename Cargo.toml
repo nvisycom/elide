@@ -5,6 +5,7 @@ resolver = "3"
 members = [
     "./crates/elide-core",
     "./crates/elide-context",
+    "./crates/elide-detection",
     "./crates/elide-pattern",
     "./crates/elide-ner",
     "./crates/elide-lingua",
@@ -38,6 +39,7 @@ documentation = "https://docs.rs/elide"
 # Internal crates
 elide-core = { path = "./crates/elide-core", version = "0.1.0" }
 elide-context = { path = "./crates/elide-context", version = "0.1.0" }
+elide-detection = { path = "./crates/elide-detection", version = "0.1.0" }
 elide-pattern = { path = "./crates/elide-pattern", version = "0.1.0" }
 elide-ner = { path = "./crates/elide-ner", version = "0.1.0" }
 elide-lingua = { path = "./crates/elide-lingua", version = "0.1.0" }

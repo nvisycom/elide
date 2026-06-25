@@ -2,14 +2,29 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 
-mod analyzer;
 mod anonymizer;
 mod deanonymizer;
-pub mod deduplication;
 pub mod modality;
 #[cfg(feature = "codec")]
 mod orchestrator;
 pub mod redaction;
+
+/// Deduplication: the [`Layer`] stages that reconcile detected entities.
+///
+/// [`calibrate`], [`fuse`], [`resolve`], and [`filter`] each reshape or
+/// prune the working entity set; an [`Analyzer`] runs them in order after
+/// detection. Re-exported from [`elide_detection`].
+///
+/// [`Analyzer`]: crate::Analyzer
+/// [`Layer`]: elide_detection::Layer
+/// [`calibrate`]: elide_detection::calibrate
+/// [`fuse`]: elide_detection::fuse
+/// [`resolve`]: elide_detection::resolve
+/// [`filter`]: elide_detection::filter
+pub mod deduplication {
+    #[doc(inline)]
+    pub use elide_detection::{Layer, LayerOutput, calibrate, filter, fuse, resolve};
+}
 
 /// Codec: decode documents into modality payloads, then re-encode them.
 ///
@@ -118,8 +133,9 @@ pub mod recognition {
 pub use elide_core::{Error, ErrorKind, Result};
 #[doc(inline)]
 pub use elide_core::{entity, primitive};
+#[doc(inline)]
+pub use elide_detection::Analyzer;
 
-pub use self::analyzer::Analyzer;
 pub use self::anonymizer::Anonymizer;
 pub use self::deanonymizer::Deanonymizer;
 // Nameable so callers can state the `Vec<Entity<M>>: EntityGroup` bound on
