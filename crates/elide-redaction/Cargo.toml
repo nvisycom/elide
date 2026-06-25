@@ -1,0 +1,66 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "elide-redaction"
+description = "Redaction engine for the Elide toolkit: the Anonymizer, Deanonymizer, and shipped operators"
+keywords = ["pii", "redaction", "anonymization", "masking"]
+categories = ["text-processing"]
+readme = "README.md"
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+
+## Derive `serde::{Serialize, Deserialize}` on the re-exported core types.
+serde = ["elide-core/serde"]
+
+## The `audio` modality operators (`Silence`, `Beep`).
+audio = ["elide-core/audio"]
+## The `image` modality operators (`Blur`, `Pixelate`, `Blackbox`).
+image = ["elide-core/image"]
+## The `tabular` modality operators (`DropRow`, `DropColumn`).
+tabular = ["elide-core/tabular"]
+
+## The reversible `Encrypt` operator (AES-256-GCM) and its `KeyProvider`.
+crypto = ["dep:aes-gcm", "dep:base64"]
+## The locale-aware `Fake` redaction operator based on the `fake` crate.
+fake = ["dep:elide-fake", "tabular"]
+
+[dependencies]
+# Internal crates
+elide-core = { workspace = true, features = [] }
+elide-fake = { workspace = true, features = [], optional = true }
+
+# Primitive datatypes
+bytes = { workspace = true, features = [] }
+uuid = { workspace = true, features = ["v4"] }
+hipstr = { workspace = true, features = [] }
+
+# Encoding & hashing
+sha2 = { workspace = true, features = [] }
+hex = { workspace = true, features = [] }
+base64 = { workspace = true, features = ["std"], optional = true }
+
+# Cryptography
+aes-gcm = { workspace = true, features = ["aes", "getrandom"], optional = true }
+
+# Observability
+tracing = { workspace = true, features = [] }
+
+[dev-dependencies]
+# Async runtime & parallelism
+tokio = { workspace = true, features = ["rt", "macros"] }

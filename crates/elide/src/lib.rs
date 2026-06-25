@@ -2,12 +2,29 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 
-mod anonymizer;
-mod deanonymizer;
 pub mod modality;
 #[cfg(feature = "codec")]
 mod orchestrator;
-pub mod redaction;
+
+/// Redaction: the [`Operator`] contract and the strategies that apply it.
+///
+/// The shipped [`operators`], the default [`InMemoryVault`], the pseudonym
+/// [`generator`]s, and (feature `crypto`) the [`key_provider`]s, plus the
+/// core redaction vocabulary re-exported from [`elide_core::operator`]. The
+/// [`Anonymizer`] / [`Deanonymizer`] engines that drive them are at the
+/// crate root. Re-exported from [`elide_redaction`].
+///
+/// [`Operator`]: elide_core::operator::Operator
+/// [`operators`]: redaction::operators
+/// [`InMemoryVault`]: redaction::InMemoryVault
+/// [`generator`]: redaction::generator
+/// [`key_provider`]: redaction::key_provider
+/// [`Anonymizer`]: crate::Anonymizer
+/// [`Deanonymizer`]: crate::Deanonymizer
+pub mod redaction {
+    #[doc(inline)]
+    pub use elide_redaction::redaction::*;
+}
 
 /// Deduplication: the [`Layer`] stages that reconcile detected entities.
 ///
@@ -135,9 +152,9 @@ pub use elide_core::{Error, ErrorKind, Result};
 pub use elide_core::{entity, primitive};
 #[doc(inline)]
 pub use elide_detection::Analyzer;
+#[doc(inline)]
+pub use elide_redaction::{Anonymizer, Deanonymizer};
 
-pub use self::anonymizer::Anonymizer;
-pub use self::deanonymizer::Deanonymizer;
 // Nameable so callers can state the `Vec<Entity<M>>: EntityGroup` bound on
 // the orchestrator's construction methods; hidden, an implementation detail.
 #[cfg(feature = "codec")]

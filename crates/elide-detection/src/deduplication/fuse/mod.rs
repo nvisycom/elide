@@ -1,6 +1,6 @@
 //! Fusion: combining co-located findings of the same label into one
-//! entity. 
-//! 
+//! entity.
+//!
 //! Holds the [`FusionStrategy`] (how scores combine), the
 //! [`GroupPredicate`] (which entities are "the same"), and the
 //! [`FuseLayer`] that drives them.

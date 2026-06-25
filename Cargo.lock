@@ -947,29 +947,22 @@ checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 name = "elide"
 version = "0.1.0"
 dependencies = [
- "aes-gcm",
- "base64",
  "bytes",
  "elide-codec",
  "elide-context",
  "elide-core",
  "elide-detection",
- "elide-fake",
  "elide-lingua",
  "elide-llm",
  "elide-ner",
  "elide-ocr",
  "elide-pattern",
+ "elide-redaction",
  "elide-stt",
  "erased-serde",
- "hex",
- "hipstr",
  "serde",
  "serde_json",
- "sha2 0.11.0",
  "tokio",
- "tracing",
- "uuid",
  "zip",
 ]
 
@@ -1119,6 +1112,23 @@ dependencies = [
  "serde",
  "tokio",
  "toml",
+]
+
+[[package]]
+name = "elide-redaction"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "base64",
+ "bytes",
+ "elide-core",
+ "elide-fake",
+ "hex",
+ "hipstr",
+ "sha2 0.11.0",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

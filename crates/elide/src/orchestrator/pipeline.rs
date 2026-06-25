@@ -14,9 +14,9 @@ use elide_core::entity::Entity;
 use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::recognition::Scope;
 use elide_detection::Analyzer;
+use elide_redaction::Anonymizer;
 
 use super::report::EntityGroup;
-use crate::Anonymizer;
 use crate::codec::{DocumentHandle, UntypedDocumentHandle};
 
 /// The concrete analyze + redact pipeline for one modality `M`.
