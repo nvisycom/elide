@@ -2,11 +2,11 @@
 //! `PHONE_NUMBER`s; the analyzer fuses them, and a `FilterLayer` drops a
 //! low-confidence stray.
 
-use elide::Analyzer;
-use elide::deduplication::calibrate::{CalibrateLayer, CalibrationMap};
-use elide::deduplication::filter::FilterLayer;
-use elide::deduplication::fuse::{FuseLayer, MaxConfidence};
-use elide::deduplication::resolve::{HighestConfidence, ResolveLayer};
+use elide::detection::Analyzer;
+use elide::detection::calibrate::{CalibrateLayer, CalibrationMap};
+use elide::detection::filter::FilterLayer;
+use elide::detection::fuse::{FuseLayer, MaxConfidence};
+use elide::detection::resolve::{HighestConfidence, ResolveLayer};
 use elide_core::Result;
 use elide_core::entity::provenance::{Event, EventKind, PatternEvent, Provenance};
 use elide_core::entity::{Entity, LabelRef};
@@ -122,7 +122,7 @@ async fn analyze_stamps_language_from_recognized_range() {
 
 #[test]
 fn calibrate_scales_by_originating_recognizer() {
-    use elide::deduplication::Layer;
+    use elide::detection::Layer;
 
     // "pattern" always fires at 1.0; calibrate it down by 0.5.
     let calibration: CalibrationMap = [("pattern", 0.5), ("ner", 0.8)].into_iter().collect();

@@ -10,7 +10,7 @@
 //!
 //! [`ImageData`]: elide_core::modality::image::ImageData
 //! [`artifacts`]: elide_core::recognition::RecognizerContext::artifacts
-//! [`OcrBackend`]: crate::backend::OcrBackend
+//! [`OcrBackend`]: crate::OcrBackend
 //! [`Image`]: elide_core::modality::image::Image
 //! [`TextRecognizable`]: elide_core::modality::TextRecognizable
 
@@ -20,7 +20,7 @@ use elide_core::Result;
 use elide_core::modality::image::{Image, ImageData, Layout};
 use elide_core::recognition::{Enricher, RecognizerContext};
 
-use crate::backend::{OcrBackend, OcrRequest};
+use crate::{OcrBackend, OcrRequest};
 
 /// An [`Enricher<Image>`] that OCRs the image and stamps the [`Layout`]
 /// onto the call's artifacts.
@@ -70,7 +70,7 @@ mod tests {
     use elide_core::recognition::Scope;
 
     use super::*;
-    use crate::backend::OcrResponse;
+    use crate::OcrResponse;
 
     fn loc(x: f64, y: f64, w: f64, h: f64) -> ImageLocation {
         ImageLocation::new(BoundingBox::from_origin_size(Point::new(x, y), w, h))

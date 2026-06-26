@@ -11,9 +11,10 @@
 //! modality differs.
 
 use elide::codec::{DocumentHandle, FormatRegistry};
-use elide::deduplication::filter::FilterLayer;
-use elide::deduplication::fuse::{FuseLayer, MaxConfidence};
-use elide::deduplication::resolve::{HighestConfidence, ResolveLayer};
+use elide::detection::Analyzer;
+use elide::detection::filter::FilterLayer;
+use elide::detection::fuse::{FuseLayer, MaxConfidence};
+use elide::detection::resolve::{HighestConfidence, ResolveLayer};
 use elide::entity::{Entity, builtins};
 #[cfg(feature = "stt")]
 use elide::modality::audio::Audio;
@@ -26,9 +27,9 @@ use elide::modality::{Modality, StreamDataReader, TextRecognizable};
 use elide::primitive::{ConfidenceThreshold, Language, LanguageTag};
 use elide::recognition::pattern::PatternRecognizer;
 use elide::recognition::{Recognizer, Scope};
-use elide::redaction::Operator;
 use elide::redaction::operators::{Erase, Mask, Replace};
-use elide::{Analyzer, Anonymizer, EntityGroup, Error, ErrorKind, Orchestrator, Report, Result};
+use elide::redaction::{Anonymizer, Operator};
+use elide::{EntityGroup, Error, ErrorKind, Orchestrator, Report, Result};
 
 /// Outcome of one end-to-end run: the entities that survived dedup and
 /// the re-encoded redacted document.
@@ -172,8 +173,7 @@ impl Fixture {
     /// [`Audio`]: elide::modality::audio::Audio
     #[cfg(feature = "stt")]
     pub async fn run_audio(&self) -> Result<PipelineOutcome<Audio>> {
-        use elide::recognition::stt::SttEnricher;
-        use elide::recognition::stt::backend::MockBackend;
+        use elide::enrichment::stt::{MockBackend, SttEnricher};
         use elide::redaction::operators::{Erase, Silence};
 
         let registry = FormatRegistry::with_builtin();
@@ -211,12 +211,11 @@ impl Fixture {
     /// unchanged. That still exercises the whole image codec + OCR pipeline
     /// wiring end to end.
     ///
-    /// [`OcrEnricher`]: elide::recognition::ocr::OcrEnricher
+    /// [`OcrEnricher`]: elide::enrichment::ocr::OcrEnricher
     /// [`Image`]: elide::modality::image::Image
     #[cfg(feature = "ocr")]
     pub async fn run_image(&self) -> Result<PipelineOutcome<Image>> {
-        use elide::recognition::ocr::OcrEnricher;
-        use elide::recognition::ocr::backend::MockBackend;
+        use elide::enrichment::ocr::{MockBackend, OcrEnricher};
         use elide::redaction::operators::Erase;
 
         let registry = FormatRegistry::with_builtin();
