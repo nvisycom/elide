@@ -11,9 +11,9 @@
 //! modality differs.
 
 use elide::codec::{DocumentHandle, FormatRegistry};
-use elide::deduplication::filter::FilterLayer;
-use elide::deduplication::fuse::{FuseLayer, MaxConfidence};
-use elide::deduplication::resolve::{HighestConfidence, ResolveLayer};
+use elide::detection::filter::FilterLayer;
+use elide::detection::fuse::{FuseLayer, MaxConfidence};
+use elide::detection::resolve::{HighestConfidence, ResolveLayer};
 use elide::entity::{Entity, builtins};
 #[cfg(feature = "stt")]
 use elide::modality::audio::Audio;

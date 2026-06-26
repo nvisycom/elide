@@ -29,9 +29,9 @@
 //! [`apply`]: elide::Orchestrator::apply
 
 use elide::codec::FormatRegistry;
-use elide::deduplication::filter::FilterLayer;
-use elide::deduplication::fuse::{FuseLayer, MaxConfidence};
-use elide::deduplication::resolve::{HighestConfidence, ResolveLayer};
+use elide::detection::filter::FilterLayer;
+use elide::detection::fuse::{FuseLayer, MaxConfidence};
+use elide::detection::resolve::{HighestConfidence, ResolveLayer};
 use elide::entity::builtins;
 use elide::modality::image::Image;
 use elide::modality::text::Text;

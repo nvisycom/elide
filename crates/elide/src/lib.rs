@@ -4,6 +4,19 @@
 
 pub mod modality;
 
+/// Language detection: resolve the language(s) of a piece of text for
+/// language-aware recognizers and policies.
+///
+/// A cross-cutting capability — it feeds recognition and redaction but is
+/// neither — so it sits at the crate root rather than under [`recognition`].
+/// Re-exported from [`elide_lingua`].
+///
+/// [`recognition`]: crate::recognition
+#[cfg(feature = "lingua")]
+#[cfg_attr(docsrs, doc(cfg(feature = "lingua")))]
+#[doc(inline)]
+pub use elide_lingua as lingua;
+
 /// Redaction: the [`Operator`] contract and the strategies that apply it.
 ///
 /// The shipped [`operators`], the [`vault`] backing (the default
@@ -29,11 +42,12 @@ pub mod redaction {
     pub use elide_redaction::{generator, operators, vault};
 }
 
-/// Deduplication: the [`Layer`] stages that reconcile detected entities.
+/// Detection: the deduplication [`Layer`] stages that reconcile the
+/// entities an [`Analyzer`] finds.
 ///
 /// [`calibrate`], [`fuse`], [`resolve`], and [`filter`] each reshape or
-/// prune the working entity set; an [`Analyzer`] runs them in order after
-/// detection. Re-exported from [`elide_detection`].
+/// prune the working entity set; an [`Analyzer`] (at the crate root) runs
+/// them in order after recognition. Re-exported from [`elide_detection`].
 ///
 /// [`Analyzer`]: crate::Analyzer
 /// [`Layer`]: elide_detection::Layer
@@ -41,7 +55,7 @@ pub mod redaction {
 /// [`fuse`]: elide_detection::fuse
 /// [`resolve`]: elide_detection::resolve
 /// [`filter`]: elide_detection::filter
-pub mod deduplication {
+pub mod detection {
     #[doc(inline)]
     pub use elide_detection::{Layer, LayerOutput, calibrate, filter, fuse, resolve};
 }
@@ -57,17 +71,19 @@ pub mod deduplication {
 #[cfg(feature = "codec")]
 #[cfg_attr(docsrs, doc(cfg(feature = "codec")))]
 pub mod codec {
+    // The glob brings the `content` and `handler` submodules along with the
+    // registry and handle types.
     #[doc(inline)]
     pub use elide_codec::*;
-    #[doc(inline)]
-    pub use elide_codec::{content, handler};
 }
 
 /// Recognition: the [`Recognizer`] contract and its implementations.
 ///
 /// Re-exports the core recognition vocabulary from
 /// [`elide_core::recognition`], and nests each shipped recognizer crate
-/// behind a feature: [`pattern`], [`ner`], [`llm`].
+/// behind a feature: [`pattern`], [`ner`], [`llm`]. Language detection,
+/// which feeds language-aware recognizers but is not itself recognition,
+/// lives in the top-level `lingua` module.
 ///
 /// [`Recognizer`]: elide_core::recognition::Recognizer
 /// [`pattern`]: recognition::pattern
@@ -111,12 +127,6 @@ pub mod recognition {
         pub use elide_context::{Boost, BoostRule, Context, Enhanced, Enhancer};
     }
 
-    /// Language detection: resolve the language(s) of a piece of text for
-    /// language-aware recognizers and policies.
-    #[cfg(feature = "lingua")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "lingua")))]
-    #[doc(inline)]
-    pub use elide_lingua as lingua;
     /// LLM-mediated recognition: prompt a language or vision model over
     /// text and images.
     #[cfg(feature = "llm")]
@@ -161,7 +171,48 @@ pub use elide_detection::Analyzer;
 #[doc(hidden)]
 pub use elide_orchestration::EntityGroup;
 #[cfg(feature = "codec")]
+#[cfg_attr(docsrs, doc(cfg(feature = "codec")))]
 #[doc(inline)]
 pub use elide_orchestration::{Orchestrator, Report};
 #[doc(inline)]
 pub use elide_redaction::{Anonymizer, Deanonymizer};
+
+/// The common imports for assembling a pipeline.
+///
+/// A `use elide::prelude::*;` brings the engines ([`Analyzer`],
+/// [`Anonymizer`], [`Deanonymizer`], and — with `codec` — `Orchestrator`),
+/// the error types, the [`Recognizer`]/[`Operator`]/[`Modality`] contracts
+/// and the [`Scope`] they run against, and the deduplication [`Layer`]s with
+/// their usual strategies. Concrete operators, recognizers, and backends are
+/// left out — they vary per use case and a few names collide — so import
+/// those from their modules ([`operators`], [`recognition`], …).
+///
+/// [`Analyzer`]: crate::Analyzer
+/// [`Anonymizer`]: crate::Anonymizer
+/// [`Deanonymizer`]: crate::Deanonymizer
+/// [`Recognizer`]: crate::recognition::Recognizer
+/// [`Operator`]: crate::redaction::Operator
+/// [`Modality`]: crate::modality::Modality
+/// [`Scope`]: crate::recognition::Scope
+/// [`Layer`]: crate::detection::Layer
+/// [`operators`]: crate::redaction::operators
+/// [`recognition`]: crate::recognition
+pub mod prelude {
+    #[doc(no_inline)]
+    pub use elide_core::recognition::{Recognizer, Scope};
+    #[doc(no_inline)]
+    pub use elide_core::{Error, ErrorKind, Result, modality::Modality};
+    #[doc(no_inline)]
+    pub use elide_detection::{
+        Analyzer, Layer,
+        calibrate::CalibrateLayer,
+        filter::FilterLayer,
+        fuse::{FuseLayer, MaxConfidence},
+        resolve::{HighestConfidence, ResolveLayer},
+    };
+    #[cfg(feature = "codec")]
+    #[doc(no_inline)]
+    pub use elide_orchestration::{Orchestrator, Report};
+    #[doc(no_inline)]
+    pub use elide_redaction::{Anonymizer, Deanonymizer, Operator};
+}
