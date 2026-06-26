@@ -1,7 +1,7 @@
 //! [`Report`]: the detected-but-not-yet-applied entities of a whole
-//! document, editable per modality before [`apply`].
+//! document, editable per modality before [`anonymize_with`].
 //!
-//! Detection (`analyze_document`) and redaction (`apply`) are split so a
+//! Detection (`analyze`) and redaction (`anonymize_with`) are split so a
 //! caller can inspect and edit the entities in between — drop a
 //! false-positive, retag, retarget a span. A document's entities span
 //! several coordinate systems (the body's modality, plus each container
@@ -15,7 +15,7 @@
 //! belongs to. The part id is the map key; each entity carries its own id,
 //! label, location, and confidence.
 //!
-//! [`apply`]: super::Orchestrator
+//! [`anonymize_with`]: super::Orchestrator::anonymize_with
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
@@ -63,29 +63,55 @@ pub trait MaybeErased {}
 #[cfg(not(feature = "serde"))]
 impl<T> MaybeErased for T {}
 
-/// One container part captured during analysis: its decoded handle (kept
-/// alive so `apply` can re-drive it) and its detected entities.
+/// One container part captured during analysis: its detected entities, the
+/// modality they belong to, and — for the same-process fast path — the
+/// decoded part handle.
 pub(super) struct PartReport {
-    /// The part's modality, for dispatching `apply` to the right pipeline.
+    /// The part's modality, the routing key for [`anonymize_with`]: it
+    /// re-fetches the part from the container and applies through the
+    /// pipeline registered for this modality.
+    ///
+    /// [`anonymize_with`]: super::Orchestrator::anonymize_with
     pub(super) modality: TypeId,
-    /// The decoded part handle, retained for the apply phase.
-    pub(super) handle: UntypedDocumentHandle,
+    /// The decoded part handle, retained from analysis as a same-process
+    /// cache. `Some` after [`analyze`] (so apply re-drives it directly with
+    /// no second decode); `None` for a [`Report`] built by hand or rebuilt
+    /// from serialized entities, where apply re-decodes the part from the
+    /// container instead.
+    ///
+    /// Never serialized — a live decoded document is not data.
+    ///
+    /// [`analyze`]: super::Orchestrator::analyze
+    pub(super) handle: Option<UntypedDocumentHandle>,
     /// The part's detected entities (a `Vec<Entity<P>>`).
     pub(super) entities: Box<dyn EntityGroup>,
 }
 
 /// The detected entities of a whole document, editable before apply.
 ///
-/// Returned by [`analyze_document`] and consumed by [`apply`]. Edit the
+/// Returned by [`analyze`] and consumed by [`anonymize_with`]. Edit the
 /// body entities of modality `M` with [`entities`], and a part's with
 /// [`part_entities`]; both hand back a `&mut Vec<Entity<_>>` you can
-/// filter, retag, or extend before applying. With the `serde` feature it
-/// serializes to a part-grouped `{ body, parts }` view.
+/// filter, retag, or extend before applying.
 ///
-/// [`analyze_document`]: super::Orchestrator::analyze_document
-/// [`apply`]: super::Orchestrator::apply
+/// A report is **pure entity data** — it carries no live document state, so
+/// it can be built from scratch ([`new`] + [`insert_body`] /
+/// [`insert_part`]) and, with the `serde` feature, serialized to a
+/// part-grouped `{ body, parts }` view, shipped elsewhere, and reconstructed
+/// there. To round-trip: serialize a report, edit the JSON, deserialize each
+/// group back into a `Vec<Entity<M>>` (the caller knows the modality), and
+/// rebuild with [`new`] + the `insert_*` methods. [`anonymize_with`] then
+/// re-decodes each part from the container it is applied to, so a rebuilt
+/// report redacts just as a freshly-analyzed one does.
+///
+/// [`analyze`]: super::Orchestrator::analyze
+/// [`anonymize_with`]: super::Orchestrator::anonymize_with
 /// [`entities`]: Report::entities
 /// [`part_entities`]: Report::part_entities
+/// [`new`]: Report::new
+/// [`insert_body`]: Report::insert_body
+/// [`insert_part`]: Report::insert_part
+#[derive(Default)]
 pub struct Report {
     /// The body's entities keyed by their modality's `TypeId`. A document
     /// has exactly one body modality, so this holds at most one entry.
@@ -95,11 +121,57 @@ pub struct Report {
 }
 
 impl Report {
-    pub(super) fn new() -> Self {
+    /// An empty report — no body, no parts. Fill it with [`insert_body`]
+    /// and [`insert_part`], or let [`analyze`] produce one.
+    ///
+    /// [`insert_body`]: Self::insert_body
+    /// [`insert_part`]: Self::insert_part
+    /// [`analyze`]: super::Orchestrator::analyze
+    pub fn new() -> Self {
         Self {
             body: None,
             parts: HashMap::new(),
         }
+    }
+
+    /// Set the body entities of modality `M`, replacing any already set.
+    ///
+    /// For rebuilding a report from out-of-band entities (e.g. deserialized
+    /// from a review tool). [`anonymize_with`] reads these back through the
+    /// `M` pipeline.
+    ///
+    /// [`anonymize_with`]: super::Orchestrator::anonymize_with
+    #[must_use]
+    pub fn insert_body<M: Modality>(mut self, entities: Vec<Entity<M>>) -> Self
+    where
+        Vec<Entity<M>>: EntityGroup,
+    {
+        self.body = Some((TypeId::of::<M>(), Box::new(entities)));
+        self
+    }
+
+    /// Set the entities of the container part `id`, as modality `P`,
+    /// replacing any already set for that part.
+    ///
+    /// For rebuilding a report from out-of-band entities. [`anonymize_with`]
+    /// re-decodes the part `id` from the container and applies these through
+    /// the `P` pipeline.
+    ///
+    /// [`anonymize_with`]: super::Orchestrator::anonymize_with
+    #[must_use]
+    pub fn insert_part<P: Modality>(mut self, id: PartId, entities: Vec<Entity<P>>) -> Self
+    where
+        Vec<Entity<P>>: EntityGroup,
+    {
+        self.parts.insert(
+            id,
+            PartReport {
+                modality: TypeId::of::<P>(),
+                handle: None,
+                entities: Box::new(entities),
+            },
+        );
+        self
     }
 
     /// The body entities of modality `M`, for inspection or editing.
@@ -185,11 +257,7 @@ mod tests {
         // The part-grouped `{ body, parts }` shape is exercised end to end
         // (with a real container) in the docx integration test; here we
         // check the body group and the empty-parts shape directly.
-        let mut report = Report::new();
-        report.body = Some((
-            TypeId::of::<Text>(),
-            Box::new(vec![text_entity("EMAIL_ADDRESS")]),
-        ));
+        let report = Report::new().insert_body::<Text>(vec![text_entity("EMAIL_ADDRESS")]);
 
         let value = serde_json::to_value(&report).unwrap();
         // body is an array carrying the entity's label; parts is an object.

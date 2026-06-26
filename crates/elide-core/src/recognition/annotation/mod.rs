@@ -7,8 +7,10 @@
 //! modality-native location plus the fields that make sense for their
 //! direction.
 
+mod annotations;
 mod exclusion;
 mod inclusion;
 
+pub use self::annotations::Annotations;
 pub use self::exclusion::Exclusion;
 pub use self::inclusion::Inclusion;

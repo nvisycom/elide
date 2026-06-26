@@ -102,7 +102,7 @@ mod tests {
     async fn enrich_stamps_readable_ocr_text() {
         let enricher = OcrEnricher::new(CannedBackend);
         let data = ImageData::new(b"image".to_vec(), Dimensions::new(100, 20));
-        let scope = Scope::<Image>::new();
+        let scope = Scope::new();
         let mut ctx = RecognizerContext::new(&scope);
 
         enricher.enrich(&data, &mut ctx).await.unwrap();

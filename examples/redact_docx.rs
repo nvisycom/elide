@@ -6,27 +6,27 @@
 //! example wires the [`Orchestrator`], which drives the body and every
 //! container part through the right per-modality pipeline:
 //!
-//! 1. [`FormatRegistry`] decodes the `.docx` into a
-//!    [`DocumentHandle<Text>`] (the body modality).
+//! 1. [`FormatRegistry`] decodes the `.docx` into an
+//!    [`UntypedDocumentHandle`].
 //! 2. An [`Orchestrator`] is assembled with a text pipeline for the body
 //!    and an image pipeline for the embedded media (mock LLM backend, so
 //!    the example runs offline — swap in a real backend to detect in
 //!    images).
-//! 3. [`analyze_document`] detects across the body *and* each part,
-//!    returning an editable [`Report`] that keeps the body's entities and
-//!    each part's entities separated. We print what was found, grouped by
-//!    part, then [`apply`] redacts everything and re-zips the package.
+//! 3. [`analyze`] detects across the body *and* each part, returning an
+//!    editable [`Report`] that keeps the body's entities and each part's
+//!    entities separated. We print what was found, grouped by part, then
+//!    [`anonymize_with`] redacts everything and re-zips the package.
 //! 4. We write the redacted `.docx` back out — a complete, drop-in
 //!    replacement package, only the redacted parts changed.
 //!
 //! Run with: `cargo run -p elide-examples --bin redact_docx`.
 //!
 //! [`redact_txt`]: ./redact_txt.rs
-//! [`DocumentHandle<Text>`]: elide::codec::DocumentHandle
+//! [`UntypedDocumentHandle`]: elide::codec::UntypedDocumentHandle
 //! [`Orchestrator`]: elide::Orchestrator
 //! [`Report`]: elide::Report
-//! [`analyze_document`]: elide::Orchestrator::analyze_document
-//! [`apply`]: elide::Orchestrator::apply
+//! [`analyze`]: elide::Orchestrator::analyze
+//! [`anonymize_with`]: elide::Orchestrator::anonymize_with
 
 use elide::prelude::operators::*;
 use elide::prelude::*;
@@ -40,31 +40,30 @@ const SAMPLE: &[u8] = include_bytes!("data/contact.docx");
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // 1. Decode the container through the codec layer.
+    // 1. Decode the container through the codec layer. The orchestrator
+    //    works on the untyped handle — it discovers the body's modality by
+    //    trial, so no `.into::<Text>()` turbofish is needed here.
     let registry = FormatRegistry::with_builtin();
-    let handle = registry.decode(SAMPLE, "docx").await?;
-    let mut document = handle
-        .into::<Text>()
-        .expect("the docx codec yields a text-body document");
+    let mut document = registry.decode(SAMPLE, "docx").await?;
 
-    // 2. Assemble the orchestrator: a text pipeline for the body, and an
-    //    image pipeline for the embedded media. Each modality brings its
-    //    own analyzer, anonymizer, and scope.
+    // 2. Assemble the orchestrator: one shared scope, plus a text pipeline
+    //    for the body and an image pipeline for the embedded media. The
+    //    scope is modality-free, so it is set once for every pipeline.
     let en = Language::asserted(LanguageTag::parse("en").unwrap());
-    let body_scope = Scope::new().with_language(en);
     let orchestrator = Orchestrator::new(&registry)
-        .with_modality::<Text>(build_analyzer()?, build_anonymizer(), body_scope)
-        .with_modality::<Image>(build_image_analyzer()?, Anonymizer::new(), Scope::new());
+        .with_scope(Scope::new().with_language(en))
+        .with_modality::<Text>(build_text_analyzer()?, build_text_anonymizer())
+        .with_modality::<Image>(build_image_analyzer()?, build_image_anonymizer());
 
     // 3. Detect across the body and every container part. The report keeps
     //    each part's findings separate so you can inspect (and edit) them
     //    before anything is redacted.
-    let mut report = orchestrator.analyze_document(&mut document).await?;
+    let mut report = orchestrator.analyze(&mut document).await?;
     print_report(&mut report);
 
     // 4. Apply the (here unedited) report: redact the body, redact each
     //    part, write the parts back, and re-encode the package.
-    orchestrator.apply(&mut document, report).await?;
+    orchestrator.anonymize_with(&mut document, report).await?;
     let encoded = document.encode()?;
 
     // 5. Write the redacted `.docx` out. That is the whole deliverable: a
@@ -105,7 +104,7 @@ fn print_report(report: &mut Report) {
 /// Build the body-text analyzer: the real built-in pattern recognizer
 /// (with context boosting) plus mock NER and LLM recognizers, behind the
 /// standard dedup pipeline.
-fn build_analyzer() -> Result<Analyzer<Text>> {
+fn build_text_analyzer() -> Result<Analyzer<Text>> {
     // Real built-in patterns + dictionaries, with context boosting.
     let patterns = PatternRecognizer::builder()
         .with_builtin_patterns()
@@ -139,7 +138,7 @@ fn build_analyzer() -> Result<Analyzer<Text>> {
 }
 
 /// Build the body anonymizer: an operator per label, plus a fallback.
-fn build_anonymizer() -> Anonymizer<Text> {
+fn build_text_anonymizer() -> Anonymizer<Text> {
     Anonymizer::new()
         .with_label(builtins::EMAIL_ADDRESS.to_ref(), Replace::new("[EMAIL]"))
         .with_label(builtins::PHONE_NUMBER.to_ref(), Replace::new("[PHONE]"))
@@ -167,4 +166,15 @@ fn build_image_analyzer() -> Result<Analyzer<Image>> {
         .with_default_prompt()
         .build()?;
     Ok(Analyzer::new().with_recognizer(recognizer))
+}
+
+/// Build the image anonymizer: blur a detected face, black out a signature,
+/// and clear anything else visual. Inert offline (the mock backend detects
+/// nothing), but it wires the image redaction operators the real backend
+/// would drive.
+fn build_image_anonymizer() -> Anonymizer<Image> {
+    Anonymizer::new()
+        .with_label(builtins::FACE.to_ref(), Blur::new(12.0))
+        .with_label(builtins::SIGNATURE.to_ref(), Blackbox::default())
+        .with_fallback(Erase)
 }

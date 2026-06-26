@@ -214,10 +214,10 @@ fn recognizer_context_scopes_by_language_and_country() {
 
     // Assertions live on the scope; the query methods live on the
     // context, which borrows the scope.
-    let scope: Scope<Text> = Scope::new()
+    let scope = Scope::new()
         .with_language(Language::asserted(en_us.clone()))
         .with_country(CountryCode::from_alpha2("US").unwrap());
-    let ctx = RecognizerContext::new(&scope);
+    let ctx: RecognizerContext<'_, Text> = RecognizerContext::new(&scope);
 
     // The asserted language is the primary one.
     assert_eq!(ctx.primary_language(), Some(&en_us));
@@ -237,7 +237,7 @@ fn recognizer_context_carries_annotations() {
     use elide_core::entity::LabelRef;
     use elide_core::modality::text::TextLocation;
     use elide_core::primitive::Confidence;
-    use elide_core::recognition::annotation::{Exclusion, Inclusion};
+    use elide_core::recognition::annotation::{Annotations, Exclusion, Inclusion};
     use elide_core::recognition::{RecognizerContext, Scope};
 
     let inclusion = Inclusion::new(TextLocation::new(0, 5))
@@ -245,10 +245,11 @@ fn recognizer_context_carries_annotations() {
         .with_label(LabelRef::new("PERSON"))
         .with_confidence(Confidence::new(0.9).unwrap());
     let exclusion = Exclusion::new(TextLocation::new(10, 20));
-    let scope: Scope<Text> = Scope::new()
+    let scope = Scope::new();
+    let annotations: Annotations<Text> = Annotations::new()
         .with_inclusions(vec![inclusion])
         .with_exclusions(vec![exclusion]);
-    let ctx = RecognizerContext::new(&scope);
+    let ctx = RecognizerContext::new(&scope).with_annotations(&annotations);
 
     assert_eq!(ctx.inclusions().len(), 1);
     assert_eq!(ctx.inclusions()[0].location, TextLocation::new(0, 5));

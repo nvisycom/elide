@@ -12,7 +12,7 @@ use elide_core::entity::builtins;
 use elide_core::modality::image::{Image, ImageData, ImageLocation};
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::primitive::{BoundingBox, Dimensions, Point};
-use elide_core::recognition::annotation::Inclusion;
+use elide_core::recognition::annotation::{Annotations, Inclusion};
 use elide_core::recognition::{RecognizerContext, Scope};
 use elide_llm::prompt::{Jinja2Prompt, Prompt};
 
@@ -32,10 +32,9 @@ fn text_prompt_renders_template() {
         .with_label(builtins::PERSON_NAME.to_ref());
 
     let data = TextData::new(body);
-    let scope = Scope::<Text>::new()
-        .with_inclusions(vec![inclusion])
-        .with_labels(vec!["medical".to_owned(), "gdpr-request".to_owned()]);
-    let ctx = RecognizerContext::new(&scope);
+    let scope = Scope::new().with_labels(vec!["medical".to_owned(), "gdpr-request".to_owned()]);
+    let annotations: Annotations<Text> = Annotations::new().with_inclusions(vec![inclusion]);
+    let ctx = RecognizerContext::new(&scope).with_annotations(&annotations);
 
     let rendered = prompt.build(&data, &ctx);
     assert!(rendered.contains(body), "source text missing: {rendered}");
@@ -74,10 +73,9 @@ fn image_prompt_renders_template() {
     .with_label(builtins::PERSON_NAME.to_ref());
 
     let data = ImageData::new(bytes, dims);
-    let scope = Scope::<Image>::new()
-        .with_inclusions(vec![inclusion])
-        .with_labels(vec!["badge".to_owned()]);
-    let ctx = RecognizerContext::new(&scope);
+    let scope = Scope::new().with_labels(vec!["badge".to_owned()]);
+    let annotations: Annotations<Image> = Annotations::new().with_inclusions(vec![inclusion]);
+    let ctx = RecognizerContext::new(&scope).with_annotations(&annotations);
 
     let rendered = prompt.build(&data, &ctx);
     assert!(

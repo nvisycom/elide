@@ -47,7 +47,41 @@ use crate::content::ContentData;
 /// [`TypeId`]: std::any::TypeId
 pub struct UntypedDocumentHandle {
     format_id: FormatId,
-    handle: Box<dyn Any + Send + Sync>,
+    handle: Box<dyn ErasedHandle>,
+}
+
+/// The modality-independent surface of a [`DocumentHandle<M>`], so an
+/// [`UntypedDocumentHandle`] can re-encode or reach a document's container
+/// parts without first committing to a modality. `Any` keeps the typed
+/// downcast (`into`/`is`/`take`/`downcast_mut`) available.
+trait ErasedHandle: Any + Send + Sync {
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+    fn into_any(self: Box<Self>) -> Box<dyn Any + Send + Sync>;
+    fn encode(&self) -> Result<ContentData>;
+    fn as_container_mut(&mut self) -> Option<&mut dyn Container>;
+}
+
+impl<M: Modality> ErasedHandle for DocumentHandle<M> {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn Any + Send + Sync> {
+        self
+    }
+
+    fn encode(&self) -> Result<ContentData> {
+        DocumentHandle::encode(self)
+    }
+
+    fn as_container_mut(&mut self) -> Option<&mut dyn Container> {
+        DocumentHandle::as_container_mut(self)
+    }
 }
 
 impl UntypedDocumentHandle {
@@ -66,7 +100,7 @@ impl UntypedDocumentHandle {
 
     /// Whether this handle carries modality `M`.
     pub fn is<M: Modality>(&self) -> bool {
-        self.handle.is::<DocumentHandle<M>>()
+        self.handle.as_any().is::<DocumentHandle<M>>()
     }
 
     /// Consume self, returning the typed [`DocumentHandle<M>`] if this
@@ -77,13 +111,94 @@ impl UntypedDocumentHandle {
     ///
     /// Returns `Err(self)` when the carried modality is not `M`.
     pub fn into<M: Modality>(self) -> Result<DocumentHandle<M>, Self> {
-        match self.handle.downcast::<DocumentHandle<M>>() {
-            Ok(handle) => Ok(*handle),
-            Err(handle) => Err(Self {
-                format_id: self.format_id,
-                handle,
-            }),
+        if !self.is::<M>() {
+            return Err(self);
         }
+        // The `is::<M>` check just passed, so the downcast holds.
+        Ok(*self
+            .handle
+            .into_any()
+            .downcast::<DocumentHandle<M>>()
+            .unwrap_or_else(|_| unreachable!("is::<M> guaranteed the modality")))
+    }
+
+    /// Borrow the typed [`DocumentHandle<M>`] mutably if this handle carries
+    /// modality `M`, else `None`. For reading from / detecting over a handle
+    /// without consuming it.
+    pub fn downcast_mut<M: Modality>(&mut self) -> Option<&mut DocumentHandle<M>> {
+        self.handle.as_any_mut().downcast_mut::<DocumentHandle<M>>()
+    }
+
+    /// Re-encode the carried handle back to [`ContentData`], without
+    /// committing to a modality.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the in-memory representation cannot be
+    /// re-encoded.
+    ///
+    /// [`ContentData`]: crate::content::ContentData
+    pub fn encode(&self) -> Result<ContentData> {
+        self.handle.encode()
+    }
+
+    /// This document as a [`Container`] of cross-modality sub-parts, if it
+    /// is one. `None` for a plain single-modality format. Reaches the parts
+    /// without committing to a modality.
+    ///
+    /// [`Container`]: crate::Container
+    pub fn as_container_mut(&mut self) -> Option<&mut dyn Container> {
+        self.handle.as_container_mut()
+    }
+
+    /// Move the typed [`DocumentHandle<M>`] out from behind a `&mut`,
+    /// leaving the untyped handle empty.
+    ///
+    /// For a caller that holds an `&mut UntypedDocumentHandle`, must run a
+    /// consuming operation on the typed handle (which takes the handle by
+    /// value), and then writes the result back with [`new`]. `None` on a
+    /// modality mismatch, leaving the handle untouched.
+    ///
+    /// [`new`]: Self::new
+    pub fn take<M: Modality>(&mut self) -> Option<DocumentHandle<M>> {
+        if !self.is::<M>() {
+            return None;
+        }
+        // The `is::<M>` check just passed, so the downcast holds.
+        let handle = std::mem::replace(&mut self.handle, Box::new(EmptyHandle));
+        Some(
+            *handle
+                .into_any()
+                .downcast::<DocumentHandle<M>>()
+                .unwrap_or_else(|_| unreachable!("is::<M> guaranteed the modality")),
+        )
+    }
+}
+
+/// Placeholder content left behind by [`UntypedDocumentHandle::take`]; never
+/// observed, since `take` immediately overwrites the slot or the caller
+/// writes a fresh handle back.
+struct EmptyHandle;
+
+impl ErasedHandle for EmptyHandle {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn Any + Send + Sync> {
+        self
+    }
+
+    fn encode(&self) -> Result<ContentData> {
+        unreachable!("encode on an emptied UntypedDocumentHandle")
+    }
+
+    fn as_container_mut(&mut self) -> Option<&mut dyn Container> {
+        None
     }
 }
 

@@ -17,7 +17,7 @@ use std::sync::Arc;
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::{Modality, ModalityLocation, StreamDataReader};
-use elide_core::recognition::annotation::Exclusion;
+use elide_core::recognition::annotation::{Annotations, Exclusion};
 use elide_core::recognition::{Enricher, Recognizer, RecognizerContext, Scope};
 use futures::future;
 
@@ -159,14 +159,34 @@ impl<M: Modality> Analyzer<M> {
     /// Analyze a single in-memory payload in the given scope.
     ///
     /// Runs the full analysis pipeline over `data`, with `scope` supplying
-    /// the caller's assertions (languages, jurisdictions, labels,
-    /// inclusions, exclusions).
-    /// Use [`analyze_stream`] for an I/O-backed source that yields many
-    /// chunks.
+    /// the caller's modality-free assertions (languages, jurisdictions,
+    /// labels, catalog). Use [`analyze_with`] to also pass per-modality
+    /// region [`Annotations`] (inclusions / exclusions), or
+    /// [`analyze_stream`] for an I/O-backed source that yields many chunks.
     ///
+    /// [`analyze_with`]: Self::analyze_with
     /// [`analyze_stream`]: Self::analyze_stream
-    pub async fn analyze(&self, data: M::Data, scope: &Scope<M>) -> Result<Vec<Entity<M>>> {
-        let mut ctx = RecognizerContext::new(scope);
+    /// [`Annotations`]: elide_core::recognition::annotation::Annotations
+    pub async fn analyze(&self, data: M::Data, scope: &Scope) -> Result<Vec<Entity<M>>> {
+        self.analyze_with(data, scope, &Annotations::new()).await
+    }
+
+    /// Analyze a single in-memory payload with both the `scope` and the
+    /// caller's per-request region [`Annotations`] (inclusions / exclusions).
+    ///
+    /// The region-aware counterpart to [`analyze`]: `annotations` is a
+    /// per-call input, not analyzer config, so it is passed here rather than
+    /// stored.
+    ///
+    /// [`analyze`]: Self::analyze
+    /// [`Annotations`]: elide_core::recognition::annotation::Annotations
+    pub async fn analyze_with(
+        &self,
+        data: M::Data,
+        scope: &Scope,
+        annotations: &Annotations<M>,
+    ) -> Result<Vec<Entity<M>>> {
+        let mut ctx = RecognizerContext::new(scope).with_annotations(annotations);
         self.analyze_core(data, &mut ctx).await
     }
 
@@ -183,24 +203,44 @@ impl<M: Modality> Analyzer<M> {
     /// This is the [`analyze`] counterpart for I/O-backed sources (a
     /// decoded codec document, say): the caller never sees a chunk or a
     /// recognizer-local coordinate. Deduplication runs per chunk, the
-    /// way [`analyze`] reduces a single payload.
+    /// way [`analyze`] reduces a single payload. Use [`analyze_stream_with`]
+    /// to also pass per-request region [`Annotations`].
     ///
     /// Returns the first enricher, recognizer, or read error.
     ///
     /// [`Chunk`]: elide_core::modality::Chunk
     /// [`analyze`]: Self::analyze
+    /// [`analyze_stream_with`]: Self::analyze_stream_with
+    /// [`Annotations`]: elide_core::recognition::annotation::Annotations
     /// [`lift`]: elide_core::modality::StreamDataReader::lift
-    pub async fn analyze_stream<S>(
+    pub async fn analyze_stream<S>(&self, source: &mut S, scope: &Scope) -> Result<Vec<Entity<M>>>
+    where
+        S: StreamDataReader<M>,
+    {
+        self.analyze_stream_with(source, scope, &Annotations::new())
+            .await
+    }
+
+    /// Analyze a streamed source with both the `scope` and the caller's
+    /// per-request region [`Annotations`]. The region-aware counterpart to
+    /// [`analyze_stream`].
+    ///
+    /// [`analyze_stream`]: Self::analyze_stream
+    /// [`Annotations`]: elide_core::recognition::annotation::Annotations
+    pub async fn analyze_stream_with<S>(
         &self,
         source: &mut S,
-        scope: &Scope<M>,
+        scope: &Scope,
+        annotations: &Annotations<M>,
     ) -> Result<Vec<Entity<M>>>
     where
         S: StreamDataReader<M>,
     {
         let mut out = Vec::new();
         while let Some(chunk) = source.read_next().await? {
-            let mut ctx = RecognizerContext::new(scope).with_context_hints(chunk.hints.clone());
+            let mut ctx = RecognizerContext::new(scope)
+                .with_annotations(annotations)
+                .with_context_hints(chunk.hints.clone());
             let entities = self.analyze_core(chunk.data.clone(), &mut ctx).await?;
             out.extend(
                 entities

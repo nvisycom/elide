@@ -68,13 +68,13 @@ mod tests {
     #[test]
     fn as_text_is_empty_without_a_transcript() {
         let data = AudioData::new(bytes::Bytes::new());
-        let scope = Scope::<Audio>::new();
-        let ctx = RecognizerContext::new(&scope);
+        let scope = Scope::new();
+        let ctx = RecognizerContext::<Audio>::new(&scope);
         assert_eq!(Audio::as_text(&data, &ctx.artifacts), "");
     }
 
     /// A context whose artifacts carry the phone-number transcript.
-    fn phone_context(scope: &Scope<Audio>) -> RecognizerContext<'_, Audio> {
+    fn phone_context(scope: &Scope) -> RecognizerContext<'_, Audio> {
         let segment =
             TranscriptSegment::new(TimeSpan::from_millis(0, 1_800), "Call Alice at 555-1234")
                 .with_words(vec![TranscriptWord::new(
@@ -89,7 +89,7 @@ mod tests {
     #[test]
     fn as_text_reads_the_transcript_artifact() {
         let data = AudioData::new(bytes::Bytes::new());
-        let scope = Scope::<Audio>::new();
+        let scope = Scope::new();
         let ctx = phone_context(&scope);
         assert_eq!(
             Audio::as_text(&data, &ctx.artifacts),
@@ -100,7 +100,7 @@ mod tests {
     #[test]
     fn locate_resolves_a_transcript_range_to_audio_time() {
         let data = AudioData::new(bytes::Bytes::new());
-        let scope = Scope::<Audio>::new();
+        let scope = Scope::new();
         let ctx = phone_context(&scope);
         // "555-1234" is at bytes 14..22.
         let loc = Audio::locate(14..22, &data, &ctx.artifacts).expect("range resolves");
@@ -111,8 +111,8 @@ mod tests {
     #[test]
     fn locate_without_transcript_is_none() {
         let data = AudioData::new(bytes::Bytes::new());
-        let scope = Scope::<Audio>::new();
-        let ctx = RecognizerContext::new(&scope);
+        let scope = Scope::new();
+        let ctx = RecognizerContext::<Audio>::new(&scope);
         // No transcript: the range can't be placed, so no location.
         assert!(Audio::locate(0..5, &data, &ctx.artifacts).is_none());
     }

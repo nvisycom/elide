@@ -98,6 +98,19 @@ pub struct Part {
 pub trait Container: Send + Sync {
     /// The redactable sub-parts, in no particular order. Each is decoded
     /// and driven independently by the orchestrator.
+    ///
+    /// **Stable snapshot.** `parts()` must be a side-effect-free view of the
+    /// container's *immutable source*, returning the same parts (same id,
+    /// bytes, and hint) every call until [`replace_part`] changes one. The
+    /// orchestrator relies on this: it may decode a part during analysis and
+    /// then decode it *again* at apply time (for a report rebuilt out of
+    /// band, with no cached handle), and both decodes must see identical
+    /// bytes. A `replace_part` must not alter what a *later* `parts()`
+    /// reports for *other* ids, and the redacted bytes a part holds must
+    /// surface only through the container's own re-encode, never back through
+    /// `parts()`.
+    ///
+    /// [`replace_part`]: Container::replace_part
     fn parts(&self) -> Vec<Part>;
 
     /// Replace the part identified by `id` with `bytes` (its redacted

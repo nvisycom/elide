@@ -10,7 +10,7 @@
 //! recognizer and the operators serve both — only the codec handle's
 //! modality differs.
 
-use elide::codec::{DocumentHandle, FormatRegistry};
+use elide::codec::{DocumentHandle, FormatRegistry, UntypedDocumentHandle};
 use elide::detection::Analyzer;
 use elide::detection::filter::FilterLayer;
 use elide::detection::fuse::{FuseLayer, MaxConfidence};
@@ -177,7 +177,7 @@ impl Fixture {
         use elide::redaction::operators::{Erase, Silence};
 
         let registry = FormatRegistry::with_builtin();
-        let mut document: DocumentHandle<Audio> = self.decode_as::<Audio>(&registry).await?;
+        let mut document = UntypedDocumentHandle::new(self.decode_as::<Audio>(&registry).await?);
 
         // The mock STT backend transcribes nothing, so recognition finds
         // nothing; the anonymizer would silence/erase any time spans it did.
@@ -187,15 +187,15 @@ impl Fixture {
             .with_fallback(Erase);
 
         let orchestrator =
-            Orchestrator::new(&registry).with_modality::<Audio>(analyzer, anonymizer, Scope::new());
+            Orchestrator::new(&registry).with_modality::<Audio>(analyzer, anonymizer);
 
-        let mut report = orchestrator.analyze_document(&mut document).await?;
+        let mut report = orchestrator.analyze(&mut document).await?;
         let entities: Vec<Entity<Audio>> = report
             .entities::<Audio>()
             .map(|e| e.to_vec())
             .unwrap_or_default();
         self.write_entities(&report);
-        orchestrator.apply(&mut document, report).await?;
+        orchestrator.anonymize_with(&mut document, report).await?;
 
         let redacted = document.encode()?.as_bytes().to_vec();
         self.write_redacted(&redacted);
@@ -219,7 +219,7 @@ impl Fixture {
         use elide::redaction::operators::Erase;
 
         let registry = FormatRegistry::with_builtin();
-        let mut document: DocumentHandle<Image> = self.decode_as::<Image>(&registry).await?;
+        let mut document = UntypedDocumentHandle::new(self.decode_as::<Image>(&registry).await?);
 
         // The mock OCR backend recognizes nothing, so recognition finds
         // nothing; the anonymizer would clear any regions it did.
@@ -227,15 +227,15 @@ impl Fixture {
         let anonymizer = Anonymizer::new().with_fallback(Erase);
 
         let orchestrator =
-            Orchestrator::new(&registry).with_modality::<Image>(analyzer, anonymizer, Scope::new());
+            Orchestrator::new(&registry).with_modality::<Image>(analyzer, anonymizer);
 
-        let mut report = orchestrator.analyze_document(&mut document).await?;
+        let mut report = orchestrator.analyze(&mut document).await?;
         let entities: Vec<Entity<Image>> = report
             .entities::<Image>()
             .map(|e| e.to_vec())
             .unwrap_or_default();
         self.write_entities(&report);
-        orchestrator.apply(&mut document, report).await?;
+        orchestrator.anonymize_with(&mut document, report).await?;
 
         let redacted = document.encode()?.as_bytes().to_vec();
         self.write_redacted(&redacted);
@@ -263,36 +263,32 @@ impl Fixture {
         Erase: Operator<M>,
     {
         let registry = FormatRegistry::with_builtin();
-        let mut document: DocumentHandle<M> = self.decode_as::<M>(&registry).await?;
+        let mut document = UntypedDocumentHandle::new(self.decode_as::<M>(&registry).await?);
 
         let en_tag = LanguageTag::parse("en")
             .map_err(|e| Error::new(ErrorKind::Validation, format!("invalid language tag: {e}")))?;
         let scope = Scope::new().with_language(Language::asserted(en_tag));
 
-        let orchestrator = Orchestrator::new(&registry).with_modality::<M>(
-            build_analyzer::<M>()?,
-            build_anonymizer::<M>(),
-            scope,
-        );
+        // One scope, shared across every modality pipeline.
+        let orchestrator = Orchestrator::new(&registry)
+            .with_scope(scope)
+            .with_modality::<M>(build_analyzer::<M>()?, build_anonymizer::<M>());
         // Drive embedded images too when the image recognizer is available.
         #[cfg(feature = "llm")]
-        let orchestrator = orchestrator.with_modality::<Image>(
-            build_image_analyzer()?,
-            Anonymizer::new(),
-            Scope::new(),
-        );
+        let orchestrator =
+            orchestrator.with_modality::<Image>(build_image_analyzer()?, Anonymizer::new());
 
         // Two phases so the entities surface for assertions: detect, copy
         // the body entities out, then apply with no editing.
-        let mut report = orchestrator.analyze_document(&mut document).await?;
+        let mut report = orchestrator.analyze(&mut document).await?;
         let entities: Vec<Entity<M>> = report
             .entities::<M>()
             .map(|e| e.to_vec())
             .unwrap_or_default();
         // Write the detected entities as JSON for inspection before the
-        // report is consumed by `apply`.
+        // report is consumed by `anonymize_with`.
         self.write_entities(&report);
-        orchestrator.apply(&mut document, report).await?;
+        orchestrator.anonymize_with(&mut document, report).await?;
 
         let redacted = document.encode()?.as_bytes().to_vec();
 

@@ -101,7 +101,7 @@ mod tests {
     async fn enrich_stamps_a_readable_transcript() {
         let enricher = SttEnricher::new(CannedBackend);
         let data = AudioData::new(b"audio".to_vec());
-        let scope = Scope::<Audio>::new();
+        let scope = Scope::new();
         let mut ctx = RecognizerContext::new(&scope);
 
         enricher.enrich(&data, &mut ctx).await.unwrap();
