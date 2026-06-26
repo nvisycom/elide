@@ -172,8 +172,8 @@ impl Fixture {
     /// [`Audio`]: elide::modality::audio::Audio
     #[cfg(feature = "stt")]
     pub async fn run_audio(&self) -> Result<PipelineOutcome<Audio>> {
-        use elide::recognition::stt::SttEnricher;
-        use elide::recognition::stt::backend::MockBackend;
+        use elide::enrichment::stt::SttEnricher;
+        use elide::enrichment::stt::backend::MockBackend;
         use elide::redaction::operators::{Erase, Silence};
 
         let registry = FormatRegistry::with_builtin();
@@ -211,12 +211,12 @@ impl Fixture {
     /// unchanged. That still exercises the whole image codec + OCR pipeline
     /// wiring end to end.
     ///
-    /// [`OcrEnricher`]: elide::recognition::ocr::OcrEnricher
+    /// [`OcrEnricher`]: elide::enrichment::ocr::OcrEnricher
     /// [`Image`]: elide::modality::image::Image
     #[cfg(feature = "ocr")]
     pub async fn run_image(&self) -> Result<PipelineOutcome<Image>> {
-        use elide::recognition::ocr::OcrEnricher;
-        use elide::recognition::ocr::backend::MockBackend;
+        use elide::enrichment::ocr::OcrEnricher;
+        use elide::enrichment::ocr::backend::MockBackend;
         use elide::redaction::operators::Erase;
 
         let registry = FormatRegistry::with_builtin();
