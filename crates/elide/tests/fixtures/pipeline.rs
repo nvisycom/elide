@@ -177,8 +177,7 @@ impl Fixture {
         use elide::redaction::operators::{Erase, Silence};
 
         let registry = FormatRegistry::with_builtin();
-        let mut document =
-            UntypedDocumentHandle::new(self.decode_as::<Audio>(&registry).await?);
+        let mut document = UntypedDocumentHandle::new(self.decode_as::<Audio>(&registry).await?);
 
         // The mock STT backend transcribes nothing, so recognition finds
         // nothing; the anonymizer would silence/erase any time spans it did.
@@ -220,8 +219,7 @@ impl Fixture {
         use elide::redaction::operators::Erase;
 
         let registry = FormatRegistry::with_builtin();
-        let mut document =
-            UntypedDocumentHandle::new(self.decode_as::<Image>(&registry).await?);
+        let mut document = UntypedDocumentHandle::new(self.decode_as::<Image>(&registry).await?);
 
         // The mock OCR backend recognizes nothing, so recognition finds
         // nothing; the anonymizer would clear any regions it did.

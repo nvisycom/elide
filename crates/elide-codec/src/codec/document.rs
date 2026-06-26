@@ -66,15 +66,19 @@ impl<M: Modality> ErasedHandle for DocumentHandle<M> {
     fn as_any(&self) -> &dyn Any {
         self
     }
+
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
+
     fn into_any(self: Box<Self>) -> Box<dyn Any + Send + Sync> {
         self
     }
+
     fn encode(&self) -> Result<ContentData> {
         DocumentHandle::encode(self)
     }
+
     fn as_container_mut(&mut self) -> Option<&mut dyn Container> {
         DocumentHandle::as_container_mut(self)
     }
@@ -180,15 +184,19 @@ impl ErasedHandle for EmptyHandle {
     fn as_any(&self) -> &dyn Any {
         self
     }
+
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
+
     fn into_any(self: Box<Self>) -> Box<dyn Any + Send + Sync> {
         self
     }
+
     fn encode(&self) -> Result<ContentData> {
         unreachable!("encode on an emptied UntypedDocumentHandle")
     }
+
     fn as_container_mut(&mut self) -> Option<&mut dyn Container> {
         None
     }

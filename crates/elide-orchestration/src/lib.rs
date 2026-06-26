@@ -173,9 +173,7 @@ impl<'r> Orchestrator<'r> {
         if let Some((modality, mut entities)) = body
             && let Some(pipeline) = self.pipelines.get(&modality)
         {
-            pipeline
-                .apply_in_place(document, entities.as_mut())
-                .await?;
+            pipeline.apply_in_place(document, entities.as_mut()).await?;
         }
 
         // The parts: redact each through its cached handle, or re-decode it
