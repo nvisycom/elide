@@ -12,7 +12,7 @@
 //!
 //! [`AudioData`]: elide_core::modality::audio::AudioData
 //! [`artifacts`]: elide_core::recognition::RecognizerContext::artifacts
-//! [`SttBackend`]: crate::backend::SttBackend
+//! [`SttBackend`]: crate::SttBackend
 //! [`Audio`]: elide_core::modality::audio::Audio
 //! [`TextRecognizable`]: elide_core::modality::TextRecognizable
 
@@ -22,7 +22,7 @@ use elide_core::Result;
 use elide_core::modality::audio::{Audio, AudioData, Transcription};
 use elide_core::recognition::{Enricher, RecognizerContext};
 
-use crate::backend::{SttBackend, SttRequest};
+use crate::{SttBackend, SttRequest};
 
 /// An [`Enricher<Audio>`] that transcribes the clip and stamps the
 /// [`Transcription`] onto the call's artifacts.
@@ -72,7 +72,7 @@ mod tests {
     use elide_core::recognition::Scope;
 
     use super::*;
-    use crate::backend::SttResponse;
+    use crate::SttResponse;
 
     /// Backend returning a fixed two-word segment with timings.
     #[derive(Clone)]

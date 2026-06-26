@@ -173,7 +173,7 @@ impl Fixture {
     #[cfg(feature = "stt")]
     pub async fn run_audio(&self) -> Result<PipelineOutcome<Audio>> {
         use elide::enrichment::stt::SttEnricher;
-        use elide::enrichment::stt::backend::MockBackend;
+        use elide::enrichment::stt::MockBackend;
         use elide::redaction::operators::{Erase, Silence};
 
         let registry = FormatRegistry::with_builtin();
@@ -216,7 +216,7 @@ impl Fixture {
     #[cfg(feature = "ocr")]
     pub async fn run_image(&self) -> Result<PipelineOutcome<Image>> {
         use elide::enrichment::ocr::OcrEnricher;
-        use elide::enrichment::ocr::backend::MockBackend;
+        use elide::enrichment::ocr::MockBackend;
         use elide::redaction::operators::Erase;
 
         let registry = FormatRegistry::with_builtin();
