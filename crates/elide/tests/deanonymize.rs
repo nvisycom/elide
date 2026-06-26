@@ -3,7 +3,7 @@
 #![cfg(feature = "aes")]
 
 use elide::redaction::operators::AesEncrypt;
-use elide::{Anonymizer, Deanonymizer};
+use elide::redaction::{Anonymizer, Deanonymizer};
 use elide_core::Result;
 use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
 use elide_core::entity::{Entity, LabelRef};

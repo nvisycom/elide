@@ -2,7 +2,7 @@
 //! `PHONE_NUMBER`s; the analyzer fuses them, and a `FilterLayer` drops a
 //! low-confidence stray.
 
-use elide::Analyzer;
+use elide::detection::Analyzer;
 use elide::detection::calibrate::{CalibrateLayer, CalibrationMap};
 use elide::detection::filter::FilterLayer;
 use elide::detection::fuse::{FuseLayer, MaxConfidence};

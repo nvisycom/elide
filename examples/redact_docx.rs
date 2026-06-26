@@ -28,20 +28,11 @@
 //! [`analyze_document`]: elide::Orchestrator::analyze_document
 //! [`apply`]: elide::Orchestrator::apply
 
-use elide::codec::FormatRegistry;
-use elide::detection::filter::FilterLayer;
-use elide::detection::fuse::{FuseLayer, MaxConfidence};
-use elide::detection::resolve::{HighestConfidence, ResolveLayer};
-use elide::entity::builtins;
-use elide::modality::image::Image;
-use elide::modality::text::Text;
-use elide::primitive::{ConfidenceThreshold, Language, LanguageTag};
-use elide::recognition::Scope;
+use elide::prelude::operators::*;
+use elide::prelude::*;
 use elide::recognition::llm::LlmRecognizer;
 use elide::recognition::ner::NerRecognizer;
 use elide::recognition::pattern::PatternRecognizer;
-use elide::redaction::operators::{Erase, Mask, Replace};
-use elide::{Analyzer, Anonymizer, Orchestrator, Report, Result};
 
 /// A real `.docx` package baked into the binary so the example is
 /// self-contained: body text plus one embedded image.

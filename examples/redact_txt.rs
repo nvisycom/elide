@@ -20,21 +20,17 @@
 //! Run with: `cargo run -p elide-examples --bin redact_txt`.
 //!
 //! [`DocumentHandle<Text>`]: elide::codec::DocumentHandle
-//! [`Analyzer::analyze_stream`]: elide::Analyzer::analyze_stream
-//! [`Anonymizer::anonymize`]: elide::Anonymizer::anonymize
+//! [`Analyzer::analyze_stream`]: elide::detection::Analyzer::analyze_stream
+//! [`Anonymizer::anonymize`]: elide::redaction::Anonymizer::anonymize
 //! [`PatternRecognizer`]: elide::recognition::pattern::PatternRecognizer
 //! [`NerRecognizer`]: elide::recognition::ner::NerRecognizer
 //! [`LlmRecognizer`]: elide::recognition::llm::LlmRecognizer
 
-use elide::codec::FormatRegistry;
-use elide::entity::builtins;
-use elide::modality::text::Text;
+use elide::prelude::operators::*;
 use elide::prelude::*;
-use elide::primitive::{ConfidenceThreshold, Language, LanguageTag};
 use elide::recognition::llm::LlmRecognizer;
 use elide::recognition::ner::NerRecognizer;
 use elide::recognition::pattern::PatternRecognizer;
-use elide::redaction::operators::{Erase, Keep, Mask, Replace};
 
 /// Sample document baked into the binary so the example is self-contained.
 const SAMPLE: &str = include_str!("data/sample.txt");
