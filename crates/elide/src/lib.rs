@@ -180,8 +180,8 @@ pub use elide_core::{entity, primitive};
 // drives detection *and* redaction across a whole document.
 //
 // `EntityGroup` is nameable so callers can state the
-// `Vec<Entity<M>>: EntityGroup` bound on the orchestrator's construction
-// methods; hidden, an implementation detail.
+// `Vec<Entity<M>>: EntityGroup` bound on the orchestrator's `with_modality`
+// and the report's `insert_*` methods; hidden, an implementation detail.
 #[cfg(feature = "codec")]
 #[doc(hidden)]
 pub use elide_orchestration::EntityGroup;

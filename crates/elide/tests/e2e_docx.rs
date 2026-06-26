@@ -79,3 +79,81 @@ async fn docx_detects_and_redacts() -> Result<()> {
     );
     Ok(())
 }
+
+/// A [`Report`] rebuilt from scratch — as a consumer would after serializing
+/// it, editing it elsewhere, and reconstructing it — redacts the same as a
+/// freshly-analyzed one. This is the cross-process path: the rebuilt report
+/// carries no cached part handles, so `anonymize_with` re-decodes each part
+/// from the container.
+#[cfg(feature = "serde")]
+#[tokio::test]
+async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
+    use elide::codec::{FormatRegistry, PartId};
+    use elide::detection::Analyzer;
+    use elide::modality::image::Image;
+    use elide::modality::text::Text;
+    use elide::recognition::Scope;
+    use elide::recognition::llm::LlmRecognizer;
+    use elide::recognition::pattern::PatternRecognizer;
+    use elide::redaction::Anonymizer;
+    use elide::redaction::operators::{Erase, Replace};
+    use elide::{Orchestrator, Report};
+
+    let registry = FormatRegistry::with_builtin();
+    let patterns = PatternRecognizer::builder()
+        .with_builtin_patterns()
+        .with_builtin_dictionaries()
+        .build_context_enhanced()?;
+    let anonymizer = Anonymizer::new()
+        .with_label(builtins::EMAIL_ADDRESS.to_ref(), Replace::new("[EMAIL]"))
+        .with_fallback(Erase);
+    let orchestrator = Orchestrator::new(&registry)
+        .with_modality::<Text>(
+            Analyzer::new().with_recognizer(patterns),
+            anonymizer,
+            Scope::new(),
+        )
+        .with_modality::<Image>(
+            Analyzer::new().with_recognizer(
+                LlmRecognizer::<Image>::builder()
+                    .with_name("mock-image")
+                    .with_mock_backend()
+                    .with_default_prompt()
+                    .build()?,
+            ),
+            Anonymizer::new(),
+            Scope::new(),
+        );
+
+    // Phase 1: analyze, then copy the entities out by modality — exactly what
+    // a caller can serialize and ship to another process.
+    let mut doc = registry.decode(FIXTURE.source, "docx").await?;
+    let mut report = orchestrator.analyze(&mut doc).await?;
+    let body = report
+        .entities::<Text>()
+        .map(|v| v.to_vec())
+        .unwrap_or_default();
+    let image_part = PartId::new(IMAGE_PART);
+    let part = report
+        .part_entities::<Image>(&image_part)
+        .map(|v| v.to_vec())
+        .unwrap_or_default();
+    assert!(!body.is_empty(), "the body should detect entities");
+
+    // Phase 2: rebuild a FRESH report from the copied entities (no cached
+    // handles), on a FRESH document handle, and apply. This forces the
+    // re-decode path — the proof a deserialized report still redacts.
+    let rebuilt = Report::new()
+        .insert_body::<Text>(body)
+        .insert_part::<Image>(image_part, part);
+    let mut doc2 = registry.decode(FIXTURE.source, "docx").await?;
+    orchestrator.anonymize_with(&mut doc2, rebuilt).await?;
+
+    let encoded = doc2.encode()?;
+    let redacted = String::from_utf8_lossy(encoded.as_bytes()).into_owned();
+    assert!(
+        !redacted.contains("alice.johnson@example.com"),
+        "a rebuilt report must still redact the body",
+    );
+    Ok(())
+}

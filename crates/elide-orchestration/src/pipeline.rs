@@ -4,7 +4,6 @@
 //!
 //! [`Orchestrator`]: super::Orchestrator
 
-use std::any::Any;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -51,7 +50,7 @@ where
 /// A boxed, pinned, `Send` future — the erased async return shape.
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// The result of offering a decoded part to a pipeline for analysis: the
+/// The result of offering a decoded handle to a pipeline for analysis: the
 /// pipeline either accepts it (its modality matched) and returns the
 /// detected entities boxed by modality, or rejects it (a different
 /// modality) and hands the handle back for another pipeline to try.
@@ -70,28 +69,45 @@ pub(super) enum AnalyzeOutcome {
 
 /// A type-erased pipeline the orchestrator stores per modality.
 ///
-/// The split phases:
-/// - [`analyze_part`] downcasts a decoded part to its modality `M`; on a
-///   match it detects entities and hands back the retained handle plus the
-///   boxed entities, else returns the handle untouched.
-/// - [`apply_part`] re-drives a retained part handle with its (possibly
-///   edited) boxed entities and re-encodes it to redacted bytes.
-/// - [`as_any`] recovers the concrete pipeline so the orchestrator can
-///   drive a document's own-modality body, whose `M` it knows statically.
+/// Every document part — the body and each container part — is an
+/// [`UntypedDocumentHandle`] offered to each pipeline until one matches by
+/// modality, so the orchestrator never needs to name the modality
+/// statically. The phases:
+/// - [`analyze`] takes an *owned* handle (a freshly-decoded container part);
+///   on a modality match it detects and hands back the handle plus the boxed
+///   entities, else returns the handle untouched for the next pipeline.
+/// - [`analyze_in_place`] borrows a handle (the document body the caller
+///   owns); on a match it detects and returns the boxed entities, else
+///   `None`.
+/// - [`apply_in_place`] re-drives a borrowed handle with its (possibly
+///   edited) boxed entities, redacting it in place — for the body, which the
+///   caller re-encodes itself.
+/// - [`apply_part`] does the same on an owned handle but re-encodes to
+///   redacted bytes — for a container part, spliced back into the container.
 ///
-/// [`analyze_part`]: ErasedPipeline::analyze_part
+/// [`analyze`]: ErasedPipeline::analyze
+/// [`analyze_in_place`]: ErasedPipeline::analyze_in_place
+/// [`apply_in_place`]: ErasedPipeline::apply_in_place
 /// [`apply_part`]: ErasedPipeline::apply_part
-/// [`as_any`]: ErasedPipeline::as_any
 pub(super) trait ErasedPipeline: Send + Sync {
-    fn analyze_part(&self, part: UntypedDocumentHandle) -> BoxFuture<'_, Result<AnalyzeOutcome>>;
+    fn analyze(&self, handle: UntypedDocumentHandle) -> BoxFuture<'_, Result<AnalyzeOutcome>>;
+
+    fn analyze_in_place<'a>(
+        &'a self,
+        handle: &'a mut UntypedDocumentHandle,
+    ) -> BoxFuture<'a, Result<Option<Box<dyn EntityGroup>>>>;
+
+    fn apply_in_place<'a>(
+        &'a self,
+        handle: &'a mut UntypedDocumentHandle,
+        entities: &'a mut dyn EntityGroup,
+    ) -> BoxFuture<'a, Result<()>>;
 
     fn apply_part<'a>(
         &'a self,
         handle: UntypedDocumentHandle,
         entities: &'a mut dyn EntityGroup,
     ) -> BoxFuture<'a, Result<Bytes>>;
-
-    fn as_any(&self) -> &dyn Any;
 }
 
 impl<M> ErasedPipeline for ModalityPipeline<M>
@@ -100,18 +116,53 @@ where
     Vec<Entity<M>>: EntityGroup,
     DocumentHandle<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
 {
-    fn analyze_part(&self, part: UntypedDocumentHandle) -> BoxFuture<'_, Result<AnalyzeOutcome>> {
+    fn analyze(&self, handle: UntypedDocumentHandle) -> BoxFuture<'_, Result<AnalyzeOutcome>> {
         Box::pin(async move {
-            let mut handle = match part.into::<M>() {
+            let mut handle = match handle.into::<M>() {
                 Ok(handle) => handle,
                 Err(returned) => return Ok(AnalyzeOutcome::Rejected(returned)),
             };
-            let entities = self.analyze(&mut handle).await?;
+            let entities = ModalityPipeline::analyze(self, &mut handle).await?;
             Ok(AnalyzeOutcome::Accepted {
                 modality: std::any::TypeId::of::<M>(),
                 handle: UntypedDocumentHandle::new(handle),
                 entities: Box::new(entities),
             })
+        })
+    }
+
+    fn analyze_in_place<'a>(
+        &'a self,
+        handle: &'a mut UntypedDocumentHandle,
+    ) -> BoxFuture<'a, Result<Option<Box<dyn EntityGroup>>>> {
+        Box::pin(async move {
+            let Some(typed) = handle.downcast_mut::<M>() else {
+                return Ok(None); // not this pipeline's modality
+            };
+            let entities = ModalityPipeline::analyze(self, typed).await?;
+            Ok(Some(Box::new(entities) as Box<dyn EntityGroup>))
+        })
+    }
+
+    fn apply_in_place<'a>(
+        &'a self,
+        handle: &'a mut UntypedDocumentHandle,
+        entities: &'a mut dyn EntityGroup,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            // The handle and entities were matched to this pipeline's `M` by
+            // the orchestrator (stored modality `TypeId`), so both downcasts
+            // hold. Take the typed handle out, redact, and put it back.
+            let mut typed = handle
+                .take::<M>()
+                .unwrap_or_else(|| unreachable!("apply_in_place handle modality mismatch"));
+            let entities = entities
+                .as_any_mut()
+                .downcast_mut::<Vec<Entity<M>>>()
+                .expect("apply_in_place entities modality mismatch");
+            self.apply(&mut typed, entities).await?;
+            *handle = UntypedDocumentHandle::new(typed);
+            Ok(())
         })
     }
 
@@ -121,8 +172,8 @@ where
         entities: &'a mut dyn EntityGroup,
     ) -> BoxFuture<'a, Result<Bytes>> {
         Box::pin(async move {
-            // The handle and entities were produced by this same pipeline
-            // in `analyze_part`, so both downcasts hold.
+            // The handle and entities were matched to this pipeline's `M`, so
+            // both downcasts hold.
             let mut handle = handle
                 .into::<M>()
                 .unwrap_or_else(|_| unreachable!("apply_part handle modality mismatch"));
@@ -133,9 +184,5 @@ where
             self.apply(&mut handle, entities).await?;
             Ok(handle.encode()?.to_bytes())
         })
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }
