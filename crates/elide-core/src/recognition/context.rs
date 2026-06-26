@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::entity::{Entity, LabelCatalog, LabelRef};
 use crate::modality::{Hint, Modality};
 use crate::primitive::{CountryCode, Language, LanguageTag, Languages};
-use crate::recognition::annotation::{Exclusion, Inclusion};
+use crate::recognition::annotation::{Annotations, Exclusion, Inclusion};
 use crate::recognition::{Artifacts, Scope};
 
 /// Per-payload context handed to a [`Recognizer`].
@@ -29,8 +29,16 @@ use crate::recognition::{Artifacts, Scope};
 /// [`artifacts`]: Self::artifacts
 #[derive(Debug)]
 pub struct RecognizerContext<'a, M: Modality> {
-    /// Caller-asserted scope for the analysis (shared, immutable).
-    scope: &'a Scope<M>,
+    /// Caller-asserted, modality-free scope for the analysis (shared,
+    /// immutable).
+    scope: &'a Scope,
+    /// Caller-supplied per-modality region annotations (inclusions /
+    /// exclusions). `None` (the default) means none asserted, read as empty
+    /// slices by [`inclusions`] / [`exclusions`].
+    ///
+    /// [`inclusions`]: Self::inclusions
+    /// [`exclusions`]: Self::exclusions
+    annotations: Option<&'a Annotations<M>>,
     /// Shared per-payload NLP enrichment (tokens, lemmas, …), keyed by
     /// type. An enricher computes it once; recognizers that want it read
     /// it back by type. Those that don't leave it empty.
@@ -53,15 +61,29 @@ pub struct RecognizerContext<'a, M: Modality> {
 }
 
 impl<'a, M: Modality> RecognizerContext<'a, M> {
-    /// Context over `scope` with empty working state.
+    /// Context over `scope` with empty working state and no region
+    /// annotations. Attach annotations with [`with_annotations`].
+    ///
+    /// [`with_annotations`]: Self::with_annotations
     #[must_use]
-    pub fn new(scope: &'a Scope<M>) -> Self {
+    pub fn new(scope: &'a Scope) -> Self {
         Self {
             scope,
+            annotations: None,
             artifacts: Artifacts::new(),
             detected_languages: Languages::default(),
             context_hints: Vec::new(),
         }
+    }
+
+    /// Attach the caller's per-modality [`Annotations`] (inclusion /
+    /// exclusion regions) for this analysis.
+    ///
+    /// [`Annotations`]: super::annotation::Annotations
+    #[must_use]
+    pub fn with_annotations(mut self, annotations: &'a Annotations<M>) -> Self {
+        self.annotations = Some(annotations);
+        self
     }
 
     /// Attach payload-local context [`Hint`]s (column headers, JSON keys,
@@ -78,20 +100,22 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
     ///
     /// [`Scope`]: super::Scope
     #[must_use]
-    pub fn scope(&self) -> &Scope<M> {
+    pub fn scope(&self) -> &Scope {
         self.scope
     }
 
-    /// Caller-asserted [`Inclusion`] regions for this analysis.
+    /// Caller-supplied [`Inclusion`] regions for this analysis, or an empty
+    /// slice when none were asserted.
     #[must_use]
     pub fn inclusions(&self) -> &[Inclusion<M>] {
-        &self.scope.inclusions
+        self.annotations.map_or(&[], |a| &a.inclusions)
     }
 
-    /// Caller-asserted [`Exclusion`] regions for this analysis.
+    /// Caller-supplied [`Exclusion`] regions for this analysis, or an empty
+    /// slice when none were asserted.
     #[must_use]
     pub fn exclusions(&self) -> &[Exclusion<M>] {
-        &self.scope.exclusions
+        self.annotations.map_or(&[], |a| &a.exclusions)
     }
 
     /// Caller-asserted document-level classification labels for this

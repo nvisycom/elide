@@ -92,7 +92,6 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
     use elide::detection::Analyzer;
     use elide::modality::image::Image;
     use elide::modality::text::Text;
-    use elide::recognition::Scope;
     use elide::recognition::llm::LlmRecognizer;
     use elide::recognition::pattern::PatternRecognizer;
     use elide::redaction::Anonymizer;
@@ -108,11 +107,7 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
         .with_label(builtins::EMAIL_ADDRESS.to_ref(), Replace::new("[EMAIL]"))
         .with_fallback(Erase);
     let orchestrator = Orchestrator::new(&registry)
-        .with_modality::<Text>(
-            Analyzer::new().with_recognizer(patterns),
-            anonymizer,
-            Scope::new(),
-        )
+        .with_modality::<Text>(Analyzer::new().with_recognizer(patterns), anonymizer)
         .with_modality::<Image>(
             Analyzer::new().with_recognizer(
                 LlmRecognizer::<Image>::builder()
@@ -122,7 +117,6 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
                     .build()?,
             ),
             Anonymizer::new(),
-            Scope::new(),
         );
 
     // Phase 1: analyze, then copy the entities out by modality — exactly what

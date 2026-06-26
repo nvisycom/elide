@@ -187,7 +187,7 @@ impl Fixture {
             .with_fallback(Erase);
 
         let orchestrator =
-            Orchestrator::new(&registry).with_modality::<Audio>(analyzer, anonymizer, Scope::new());
+            Orchestrator::new(&registry).with_modality::<Audio>(analyzer, anonymizer);
 
         let mut report = orchestrator.analyze(&mut document).await?;
         let entities: Vec<Entity<Audio>> = report
@@ -227,7 +227,7 @@ impl Fixture {
         let anonymizer = Anonymizer::new().with_fallback(Erase);
 
         let orchestrator =
-            Orchestrator::new(&registry).with_modality::<Image>(analyzer, anonymizer, Scope::new());
+            Orchestrator::new(&registry).with_modality::<Image>(analyzer, anonymizer);
 
         let mut report = orchestrator.analyze(&mut document).await?;
         let entities: Vec<Entity<Image>> = report
@@ -269,18 +269,14 @@ impl Fixture {
             .map_err(|e| Error::new(ErrorKind::Validation, format!("invalid language tag: {e}")))?;
         let scope = Scope::new().with_language(Language::asserted(en_tag));
 
-        let orchestrator = Orchestrator::new(&registry).with_modality::<M>(
-            build_analyzer::<M>()?,
-            build_anonymizer::<M>(),
-            scope,
-        );
+        // One scope, shared across every modality pipeline.
+        let orchestrator = Orchestrator::new(&registry)
+            .with_scope(scope)
+            .with_modality::<M>(build_analyzer::<M>()?, build_anonymizer::<M>());
         // Drive embedded images too when the image recognizer is available.
         #[cfg(feature = "llm")]
-        let orchestrator = orchestrator.with_modality::<Image>(
-            build_image_analyzer()?,
-            Anonymizer::new(),
-            Scope::new(),
-        );
+        let orchestrator =
+            orchestrator.with_modality::<Image>(build_image_analyzer()?, Anonymizer::new());
 
         // Two phases so the entities surface for assertions: detect, copy
         // the body entities out, then apply with no editing.

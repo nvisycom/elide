@@ -25,8 +25,9 @@ modality by trial, so the call site never names it:
 
 ```rust,ignore
 let orchestrator = Orchestrator::new(&registry)
-    .with_modality::<Text>(text_analyzer, text_anonymizer, text_scope)
-    .with_modality::<Image>(image_analyzer, image_anonymizer, image_scope);
+    .with_scope(scope)   // shared, modality-free — set once
+    .with_modality::<Text>(text_analyzer, text_anonymizer)
+    .with_modality::<Image>(image_analyzer, image_anonymizer);
 
 let mut doc = registry.decode(bytes, "docx").await?;   // UntypedDocumentHandle
 let mut report = orchestrator.analyze(&mut doc).await?;
@@ -34,9 +35,11 @@ report.entities::<Text>().unwrap().retain(|e| keep(e)); // drop a false positive
 orchestrator.anonymize_with(&mut doc, report).await?;
 ```
 
-`anonymize` is the one-call shorthand when no editing is needed. Scope is
-per-modality, registered alongside each pipeline; a body or part whose modality
-has no pipeline is left as-is.
+`anonymize` is the one-call shorthand when no editing is needed. The `Scope`
+(languages, jurisdictions, labels, catalog) is modality-free, so it is set once
+with `with_scope`; per-modality region annotations (inclusions / exclusions)
+are registered with `with_annotations::<M>`. A body or part whose modality has
+no pipeline is left as-is.
 
 The `Report` is **pure entity data** — it carries no live document state. So
 with the `serde` feature it serializes to a part-grouped view, and a review tool

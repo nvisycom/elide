@@ -34,8 +34,8 @@ async fn enhancer_boosts_matches_near_keyword_only() {
     // Two SSN-shaped numbers: one near the keyword, one not.
     let text = "First SSN: 123-45-6789. Unrelated number 987-65-4329 elsewhere.";
     let data = TextData::new(text.to_owned());
-    let scope = Scope::<Text>::new();
-    let ctx = RecognizerContext::new(&scope);
+    let scope = Scope::new();
+    let ctx = RecognizerContext::<Text>::new(&scope);
     let entities = recognizer.recognize(&data, &ctx).await.expect("recognize");
     assert_eq!(entities.len(), 2, "two SSN matches expected");
 
@@ -98,8 +98,8 @@ async fn bare_recognizer_works_without_enhancement() {
 
     let text = "SSN: 123-45-6789.";
     let data = TextData::new(text.to_owned());
-    let scope = Scope::<Text>::new();
-    let ctx = RecognizerContext::new(&scope);
+    let scope = Scope::new();
+    let ctx = RecognizerContext::<Text>::new(&scope);
     let entities = recognizer.recognize(&data, &ctx).await.expect("recognize");
 
     assert_eq!(entities.len(), 1, "one SSN match expected");

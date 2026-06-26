@@ -4,6 +4,7 @@
 //!
 //! [`Orchestrator`]: super::Orchestrator
 
+use std::any::Any;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -13,16 +14,23 @@ use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::recognition::Scope;
+use elide_core::recognition::annotation::Annotations;
 use elide_detection::Analyzer;
 use elide_redaction::Anonymizer;
 
 use super::report::EntityGroup;
 
 /// The concrete analyze + redact pipeline for one modality `M`.
+///
+/// The shared [`Scope`] lives on the orchestrator — it is modality-free, so
+/// one scope drives every pipeline. The per-modality region [`Annotations`]
+/// are `M::Location`-typed, so they live here, on the typed pipeline.
+///
+/// [`Annotations`]: elide_core::recognition::annotation::Annotations
 pub(super) struct ModalityPipeline<M: Modality> {
     pub(super) analyzer: Analyzer<M>,
     pub(super) anonymizer: Anonymizer<M>,
-    pub(super) scope: Scope<M>,
+    pub(super) annotations: Annotations<M>,
 }
 
 impl<M> ModalityPipeline<M>
@@ -32,8 +40,14 @@ where
 {
     /// Detect the entities in `handle` (in source coordinates), without
     /// redacting. The caller may edit the returned set before applying.
-    pub(super) async fn analyze(&self, handle: &mut DocumentHandle<M>) -> Result<Vec<Entity<M>>> {
-        self.analyzer.analyze_stream(handle, &self.scope).await
+    pub(super) async fn analyze(
+        &self,
+        handle: &mut DocumentHandle<M>,
+        scope: &Scope,
+    ) -> Result<Vec<Entity<M>>> {
+        self.analyzer
+            .analyze_stream_with(handle, scope, &self.annotations)
+            .await
     }
 
     /// Apply `entities` to `handle` in place: the redactions land in the
@@ -90,11 +104,16 @@ pub(super) enum AnalyzeOutcome {
 /// [`apply_in_place`]: ErasedPipeline::apply_in_place
 /// [`apply_part`]: ErasedPipeline::apply_part
 pub(super) trait ErasedPipeline: Send + Sync {
-    fn analyze(&self, handle: UntypedDocumentHandle) -> BoxFuture<'_, Result<AnalyzeOutcome>>;
+    fn analyze<'a>(
+        &'a self,
+        handle: UntypedDocumentHandle,
+        scope: &'a Scope,
+    ) -> BoxFuture<'a, Result<AnalyzeOutcome>>;
 
     fn analyze_in_place<'a>(
         &'a self,
         handle: &'a mut UntypedDocumentHandle,
+        scope: &'a Scope,
     ) -> BoxFuture<'a, Result<Option<Box<dyn EntityGroup>>>>;
 
     fn apply_in_place<'a>(
@@ -108,6 +127,11 @@ pub(super) trait ErasedPipeline: Send + Sync {
         handle: UntypedDocumentHandle,
         entities: &'a mut dyn EntityGroup,
     ) -> BoxFuture<'a, Result<Bytes>>;
+
+    /// Set this pipeline's region annotations from an erased
+    /// `Annotations<M>`. A no-op on a modality mismatch (the orchestrator
+    /// routes by `TypeId`, so it always matches in practice).
+    fn set_annotations(&mut self, annotations: Box<dyn Any + Send + Sync>);
 }
 
 impl<M> ErasedPipeline for ModalityPipeline<M>
@@ -116,13 +140,17 @@ where
     Vec<Entity<M>>: EntityGroup,
     DocumentHandle<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
 {
-    fn analyze(&self, handle: UntypedDocumentHandle) -> BoxFuture<'_, Result<AnalyzeOutcome>> {
+    fn analyze<'a>(
+        &'a self,
+        handle: UntypedDocumentHandle,
+        scope: &'a Scope,
+    ) -> BoxFuture<'a, Result<AnalyzeOutcome>> {
         Box::pin(async move {
             let mut handle = match handle.into::<M>() {
                 Ok(handle) => handle,
                 Err(returned) => return Ok(AnalyzeOutcome::Rejected(returned)),
             };
-            let entities = ModalityPipeline::analyze(self, &mut handle).await?;
+            let entities = ModalityPipeline::analyze(self, &mut handle, scope).await?;
             Ok(AnalyzeOutcome::Accepted {
                 modality: std::any::TypeId::of::<M>(),
                 handle: UntypedDocumentHandle::new(handle),
@@ -134,12 +162,13 @@ where
     fn analyze_in_place<'a>(
         &'a self,
         handle: &'a mut UntypedDocumentHandle,
+        scope: &'a Scope,
     ) -> BoxFuture<'a, Result<Option<Box<dyn EntityGroup>>>> {
         Box::pin(async move {
             let Some(typed) = handle.downcast_mut::<M>() else {
                 return Ok(None); // not this pipeline's modality
             };
-            let entities = ModalityPipeline::analyze(self, typed).await?;
+            let entities = ModalityPipeline::analyze(self, typed, scope).await?;
             Ok(Some(Box::new(entities) as Box<dyn EntityGroup>))
         })
     }
@@ -184,5 +213,11 @@ where
             self.apply(&mut handle, entities).await?;
             Ok(handle.encode()?.to_bytes())
         })
+    }
+
+    fn set_annotations(&mut self, annotations: Box<dyn Any + Send + Sync>) {
+        if let Ok(annotations) = annotations.downcast::<Annotations<M>>() {
+            self.annotations = *annotations;
+        }
     }
 }

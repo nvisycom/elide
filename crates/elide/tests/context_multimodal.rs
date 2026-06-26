@@ -47,8 +47,8 @@ async fn image_context_boosts_and_keeps_the_native_region() {
             LayoutWord::new(img_loc(0.0, 0.0, 40.0, 20.0), "ssn"),
             LayoutWord::new(img_loc(45.0, 0.0, 155.0, 20.0), "123-45-6789"),
         ]);
-    let scope = Scope::<Image>::new();
-    let mut ctx = RecognizerContext::new(&scope);
+    let scope = Scope::new();
+    let mut ctx = RecognizerContext::<Image>::new(&scope);
     ctx.artifacts.insert(Layout::new(vec![block]));
 
     let data = ImageData::new(bytes::Bytes::new(), Dimensions::new(200, 20));
@@ -86,8 +86,8 @@ async fn audio_context_boosts_and_keeps_the_native_timespan() {
             TranscriptWord::new(TimeSpan::from_millis(0, 300), "ssn"),
             TranscriptWord::new(TimeSpan::from_millis(400, 1500), "123-45-6789"),
         ]);
-    let scope = Scope::<Audio>::new();
-    let mut ctx = RecognizerContext::new(&scope);
+    let scope = Scope::new();
+    let mut ctx = RecognizerContext::<Audio>::new(&scope);
     ctx.artifacts.insert(Transcription::new(vec![segment]));
 
     let data = AudioData::new(bytes::Bytes::new());

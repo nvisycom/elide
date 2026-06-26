@@ -257,8 +257,8 @@ mod tests {
             .build()
             .expect("builder succeeds");
         let data = TextData::new("Alice Smith".to_owned());
-        let scope = Scope::<Text>::new();
-        let ctx = RecognizerContext::new(&scope);
+        let scope = Scope::new();
+        let ctx = RecognizerContext::<Text>::new(&scope);
         let out = rec.recognize(&data, &ctx).await.unwrap();
         assert!(out.is_empty());
     }
@@ -271,8 +271,8 @@ mod tests {
             .build()
             .expect("builder succeeds");
         let data = TextData::new("Alice Smith".to_owned());
-        let scope = Scope::<Text>::new();
-        let ctx = RecognizerContext::new(&scope);
+        let scope = Scope::new();
+        let ctx = RecognizerContext::<Text>::new(&scope);
         let out = rec.recognize(&data, &ctx).await.unwrap();
         assert!(out.is_empty());
     }
@@ -321,8 +321,8 @@ mod tests {
         // carrying descriptions for a zero-shot backend.
         let mut catalog = LabelCatalog::new();
         catalog.insert(Label::described("EMAIL", "an email address"));
-        let scope = Scope::<Text>::new().with_catalog(catalog);
-        let ctx = RecognizerContext::new(&scope);
+        let scope = Scope::new().with_catalog(catalog);
+        let ctx = RecognizerContext::<Text>::new(&scope);
         rec.recognize(&TextData::new("x".to_owned()), &ctx)
             .await
             .unwrap();
@@ -345,8 +345,8 @@ mod tests {
         // The catalog is present but the recognizer's own set overrides it.
         let mut catalog = LabelCatalog::new();
         catalog.insert(Label::described("EMAIL", "an email address"));
-        let scope = Scope::<Text>::new().with_catalog(catalog);
-        let ctx = RecognizerContext::new(&scope);
+        let scope = Scope::new().with_catalog(catalog);
+        let ctx = RecognizerContext::<Text>::new(&scope);
         rec.recognize(&TextData::new("x".to_owned()), &ctx)
             .await
             .unwrap();

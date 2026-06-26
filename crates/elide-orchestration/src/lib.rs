@@ -14,6 +14,7 @@ use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::recognition::Scope;
+use elide_core::recognition::annotation::Annotations;
 use elide_detection::Analyzer;
 use elide_redaction::Anonymizer;
 
@@ -47,16 +48,34 @@ pub use self::report::Report;
 pub struct Orchestrator<'r> {
     registry: &'r FormatRegistry,
     pipelines: HashMap<TypeId, Box<dyn ErasedPipeline>>,
+    scope: Scope,
 }
 
 impl<'r> Orchestrator<'r> {
     /// A new orchestrator that decodes parts through `registry`, with no
-    /// modality pipelines yet.
+    /// modality pipelines and an empty [`Scope`].
     pub fn new(registry: &'r FormatRegistry) -> Self {
         Self {
             registry,
             pipelines: HashMap::new(),
+            scope: Scope::new(),
         }
+    }
+
+    /// Set the [`Scope`] shared across every modality pipeline — the
+    /// caller's analysis-wide assertions (languages, jurisdictions, labels,
+    /// catalog, correlation id).
+    ///
+    /// A `Scope` is modality-free, so one drives the body and every
+    /// container part alike; no need to repeat it per [`with_modality`].
+    /// Per-modality region annotations (inclusions / exclusions) ride on
+    /// each pipeline's analyzer instead.
+    ///
+    /// [`with_modality`]: Self::with_modality
+    #[must_use]
+    pub fn with_scope(mut self, scope: Scope) -> Self {
+        self.scope = scope;
+        self
     }
 
     /// Register the analyze + redact pipeline for modality `M`. A part
@@ -64,12 +83,7 @@ impl<'r> Orchestrator<'r> {
     /// with no registered pipeline pass through untouched. Re-registering
     /// a modality replaces it.
     #[must_use]
-    pub fn with_modality<M>(
-        mut self,
-        analyzer: Analyzer<M>,
-        anonymizer: Anonymizer<M>,
-        scope: Scope<M>,
-    ) -> Self
+    pub fn with_modality<M>(mut self, analyzer: Analyzer<M>, anonymizer: Anonymizer<M>) -> Self
     where
         M: Modality,
         Vec<Entity<M>>: EntityGroup,
@@ -80,9 +94,26 @@ impl<'r> Orchestrator<'r> {
             Box::new(ModalityPipeline {
                 analyzer,
                 anonymizer,
-                scope,
+                annotations: Annotations::new(),
             }),
         );
+        self
+    }
+
+    /// Attach the caller's per-request region [`Annotations`] (inclusions /
+    /// exclusions) for modality `M`, threaded into that modality's pipeline
+    /// at analysis time. A no-op if no pipeline for `M` is registered.
+    ///
+    /// The modality-free policy is set once with [`with_scope`]; regions are
+    /// `M::Location`-typed, so they are registered per modality here.
+    ///
+    /// [`Annotations`]: elide_core::recognition::annotation::Annotations
+    /// [`with_scope`]: Self::with_scope
+    #[must_use]
+    pub fn with_annotations<M: Modality>(mut self, annotations: Annotations<M>) -> Self {
+        if let Some(pipeline) = self.pipelines.get_mut(&TypeId::of::<M>()) {
+            pipeline.set_annotations(Box::new(annotations));
+        }
         self
     }
 
@@ -109,7 +140,7 @@ impl<'r> Orchestrator<'r> {
         // matches analyzes it in place. The pipeline's key is the body's
         // modality `TypeId`.
         for (modality, pipeline) in &self.pipelines {
-            if let Some(entities) = pipeline.analyze_in_place(document).await? {
+            if let Some(entities) = pipeline.analyze_in_place(document, &self.scope).await? {
                 report.body = Some((*modality, entities));
                 break;
             }
@@ -125,7 +156,7 @@ impl<'r> Orchestrator<'r> {
             let mut handle = Some(handle);
             for pipeline in self.pipelines.values() {
                 let Some(taken) = handle.take() else { break };
-                match pipeline.analyze(taken).await? {
+                match pipeline.analyze(taken, &self.scope).await? {
                     AnalyzeOutcome::Accepted {
                         modality,
                         handle: retained,

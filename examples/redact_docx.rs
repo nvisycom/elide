@@ -46,14 +46,14 @@ async fn main() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
     let mut document = registry.decode(SAMPLE, "docx").await?;
 
-    // 2. Assemble the orchestrator: a text pipeline for the body, and an
-    //    image pipeline for the embedded media. Each modality brings its
-    //    own analyzer, anonymizer, and scope.
+    // 2. Assemble the orchestrator: one shared scope, plus a text pipeline
+    //    for the body and an image pipeline for the embedded media. The
+    //    scope is modality-free, so it is set once for every pipeline.
     let en = Language::asserted(LanguageTag::parse("en").unwrap());
-    let body_scope = Scope::new().with_language(en);
     let orchestrator = Orchestrator::new(&registry)
-        .with_modality::<Text>(build_analyzer()?, build_anonymizer(), body_scope)
-        .with_modality::<Image>(build_image_analyzer()?, Anonymizer::new(), Scope::new());
+        .with_scope(Scope::new().with_language(en))
+        .with_modality::<Text>(build_text_analyzer()?, build_text_anonymizer())
+        .with_modality::<Image>(build_image_analyzer()?, build_image_anonymizer());
 
     // 3. Detect across the body and every container part. The report keeps
     //    each part's findings separate so you can inspect (and edit) them
@@ -104,7 +104,7 @@ fn print_report(report: &mut Report) {
 /// Build the body-text analyzer: the real built-in pattern recognizer
 /// (with context boosting) plus mock NER and LLM recognizers, behind the
 /// standard dedup pipeline.
-fn build_analyzer() -> Result<Analyzer<Text>> {
+fn build_text_analyzer() -> Result<Analyzer<Text>> {
     // Real built-in patterns + dictionaries, with context boosting.
     let patterns = PatternRecognizer::builder()
         .with_builtin_patterns()
@@ -138,7 +138,7 @@ fn build_analyzer() -> Result<Analyzer<Text>> {
 }
 
 /// Build the body anonymizer: an operator per label, plus a fallback.
-fn build_anonymizer() -> Anonymizer<Text> {
+fn build_text_anonymizer() -> Anonymizer<Text> {
     Anonymizer::new()
         .with_label(builtins::EMAIL_ADDRESS.to_ref(), Replace::new("[EMAIL]"))
         .with_label(builtins::PHONE_NUMBER.to_ref(), Replace::new("[PHONE]"))
@@ -166,4 +166,15 @@ fn build_image_analyzer() -> Result<Analyzer<Image>> {
         .with_default_prompt()
         .build()?;
     Ok(Analyzer::new().with_recognizer(recognizer))
+}
+
+/// Build the image anonymizer: blur a detected face, black out a signature,
+/// and clear anything else visual. Inert offline (the mock backend detects
+/// nothing), but it wires the image redaction operators the real backend
+/// would drive.
+fn build_image_anonymizer() -> Anonymizer<Image> {
+    Anonymizer::new()
+        .with_label(builtins::FACE.to_ref(), Blur::new(12.0))
+        .with_label(builtins::SIGNATURE.to_ref(), Blackbox::default())
+        .with_fallback(Erase)
 }
