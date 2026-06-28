@@ -6,8 +6,10 @@ use elide_core::modality::{Modality, ModalityLocation, Overlap};
 use super::super::tiebreaker::{HighestConfidence, Tiebreaker};
 use super::{Disposition, Reconciler, Winner};
 
-/// How a [`Structural`] reconciler disposes of a *true* conflict — two
-/// confident, near-coincident, differently-labelled findings.
+/// How a [`Structural`] reconciler disposes of a *true* conflict.
+///
+/// A true conflict is two confident, near-coincident, differently-labelled
+/// findings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OnConflict {
     /// Pick a winner with the tiebreaker; drop and record the loser. Clean,
@@ -50,21 +52,17 @@ pub struct Structural<T = HighestConfidence> {
     pub on_conflict: OnConflict,
 }
 
-impl<T> Structural<T> {
-    /// A structural reconciler with the given parameters.
-    pub fn new(threshold: f32, margin: f32, tiebreaker: T, on_conflict: OnConflict) -> Self {
-        Self {
-            threshold,
-            margin,
-            tiebreaker,
-            on_conflict,
-        }
-    }
-}
-
 impl Structural<HighestConfidence> {
     /// The default: IoU threshold `0.5`, nesting margin `0.25`, ties to the
     /// higher confidence, true conflicts auto-resolved.
+    ///
+    /// Tune it with the `with_*` builders:
+    ///
+    /// ```ignore
+    /// Structural::standard()
+    ///     .with_threshold(0.7)
+    ///     .reviewing(); // surface true conflicts for human review
+    /// ```
     pub fn standard() -> Self {
         Self {
             threshold: 0.5,
@@ -73,20 +71,55 @@ impl Structural<HighestConfidence> {
             on_conflict: OnConflict::Resolve,
         }
     }
-
-    /// The standard parameters, but true conflicts are *contested* (surfaced
-    /// for the human edit step) instead of auto-resolved.
-    pub fn reviewing() -> Self {
-        Self {
-            on_conflict: OnConflict::Contest,
-            ..Self::standard()
-        }
-    }
 }
 
 impl Default for Structural<HighestConfidence> {
     fn default() -> Self {
         Self::standard()
+    }
+}
+
+impl<T> Structural<T> {
+    /// Set the IoU at or above which a non-nested overlap is a conflict.
+    #[must_use]
+    pub fn with_threshold(mut self, threshold: f32) -> Self {
+        self.threshold = threshold;
+        self
+    }
+
+    /// Set the nesting margin: a contained entity weaker than
+    /// `container − margin` is subsumed and dropped.
+    #[must_use]
+    pub fn with_margin(mut self, margin: f32) -> Self {
+        self.margin = margin;
+        self
+    }
+
+    /// Replace the tiebreaker that settles a resolved conflict, consuming and
+    /// returning `self` (the tiebreaker type changes).
+    #[must_use]
+    pub fn with_tiebreaker<T2>(self, tiebreaker: T2) -> Structural<T2> {
+        Structural {
+            threshold: self.threshold,
+            margin: self.margin,
+            tiebreaker,
+            on_conflict: self.on_conflict,
+        }
+    }
+
+    /// Auto-resolve true conflicts with the tiebreaker (the default).
+    #[must_use]
+    pub fn resolving(mut self) -> Self {
+        self.on_conflict = OnConflict::Resolve;
+        self
+    }
+
+    /// Surface true conflicts for the human edit step instead of
+    /// auto-resolving them.
+    #[must_use]
+    pub fn reviewing(mut self) -> Self {
+        self.on_conflict = OnConflict::Contest;
+        self
     }
 }
 

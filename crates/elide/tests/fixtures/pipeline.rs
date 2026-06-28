@@ -13,9 +13,7 @@
 use elide::codec::{DocumentHandle, FormatRegistry, UntypedDocumentHandle};
 use elide::detection::Analyzer;
 use elide::detection::filter::FilterLayer;
-use elide::detection::reconcile::ReconcileLayer;
-use elide::detection::reconcile::group::DiffLabelOverlap;
-use elide::detection::reconcile::reconciler::Structural;
+use elide::detection::reconcile::{Merging, ReconcileLayer, Structural};
 use elide::entity::{Entity, builtins};
 #[cfg(feature = "stt")]
 use elide::modality::audio::Audio;
@@ -79,8 +77,8 @@ pub fn build_analyzer<M: TextRecognizable>() -> Result<Analyzer<M>> {
 
     Ok(Analyzer::new()
         .with_recognizer(patterns)
-        .with_layer(ReconcileLayer::default())
-        .with_layer(ReconcileLayer::new(DiffLabelOverlap, Structural::default()))
+        .with_layer(ReconcileLayer::same_label(Merging::max()))
+        .with_layer(ReconcileLayer::cross_label(Structural::default()))
         .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE)))
 }
 

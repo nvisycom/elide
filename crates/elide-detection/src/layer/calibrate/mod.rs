@@ -11,8 +11,7 @@ use elide_core::primitive::Confidence;
 pub use self::map::CalibrationMap;
 use super::{Layer, LayerOutput};
 
-/// The calibration stage: scale each entity's confidence by the
-/// multiplier for its *originating* recognizer.
+/// The calibration stage: scale confidence by its recognizer's multiplier.
 ///
 /// The originating recognizer is the first detection in the entity's
 /// provenance — the one that produced the entity. Calibration is a

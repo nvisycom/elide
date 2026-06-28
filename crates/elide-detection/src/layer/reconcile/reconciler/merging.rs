@@ -4,13 +4,13 @@ use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 
 use super::{Disposition, Reconciler};
-use crate::layer::reconcile::scoring::{Max, Strategy};
+use crate::layer::reconcile::scoring::{Max, NoisyOr, Strategy};
 
-/// The merging reconciler: every grouped pair merges, scoring the combined
-/// confidence with a [`Strategy`].
+/// The merging reconciler: combine every grouped pair into one entity.
 ///
-/// The fusion behavior — combine co-located same-label findings into one
-/// entity. Generic over the scoring strategy `S`, chosen at construction.
+/// The fusion behavior — co-located same-label findings merge over the union
+/// of their spans, with confidence pooled by a [`Strategy`]. Generic over the
+/// scoring strategy `S`, chosen at construction.
 ///
 /// [`Strategy`]: crate::layer::reconcile::scoring::Strategy
 #[derive(Debug, Clone, Copy, Default)]
@@ -23,6 +23,22 @@ impl<S> Merging<S> {
     /// A merging reconciler scoring with `strategy`.
     pub fn new(strategy: S) -> Self {
         Self { strategy }
+    }
+}
+
+impl Merging<Max> {
+    /// A merging reconciler scoring by [`Max`] — the most confident finding
+    /// wins (the default).
+    pub fn max() -> Self {
+        Self::new(Max)
+    }
+}
+
+impl Merging<NoisyOr> {
+    /// A merging reconciler scoring by [`NoisyOr`] — agreeing detectors
+    /// accumulate evidence (`1 − ∏(1 − pᵢ)`).
+    pub fn noisy_or() -> Self {
+        Self::new(NoisyOr)
     }
 }
 

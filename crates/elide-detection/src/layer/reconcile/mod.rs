@@ -1,40 +1,37 @@
 //! Reconciliation: deciding what happens to overlapping entities.
 //!
 //! One layer, two axes. A [`GroupPredicate`](group::GroupPredicate) (`G`)
-//! decides *which* entities cluster, and a
-//! [`Reconciler`](reconciler::Reconciler) (`R`) decides *what to do* with a
-//! grouped pair. Fusion and cross-label resolution are two configurations of
-//! the same [`ReconcileLayer`]:
+//! decides *which* entities cluster, and a [`Reconciler`] (`R`) decides *what
+//! to do* with a grouped pair. Fusion and cross-label resolution are two
+//! configurations of the same [`ReconcileLayer`]:
 //!
-//! - fusion = `ReconcileLayer<`[`LabelOverlap`](group::LabelOverlap)`,
-//!   `[`Merging`](reconciler::Merging)`<…>>`
-//! - resolution = `ReconcileLayer<`[`DiffLabelOverlap`](group::DiffLabelOverlap)`,
-//!   `[`Structural`](reconciler::Structural)`<…>>`
+//! - fusion = `ReconcileLayer<`[`SameLabel`](group::SameLabel)`, `[`Merging`]`<…>>`
+//! - resolution = `ReconcileLayer<`[`CrossLabel`](group::CrossLabel)`, `[`Structural`]`<…>>`
 //!
-//! The pieces live in topic modules: [`group`] (the `G` axis), [`reconciler`]
-//! (the `R` axis and the shipped reconcilers), [`scoring`] (how [`Merging`]
+//! The [`Reconciler`]s — [`Merging`], [`Structural`], [`Exclusive`],
+//! [`Permissive`] — sit here at the root. The customization traits live in
+//! topic modules: [`group`] (the `G` axis), [`scoring`] (how [`Merging`]
 //! combines confidences), and [`tiebreaker`] (how conflicts pick a winner).
-//!
-//! [`Merging`]: reconciler::Merging
 
 pub mod group;
-pub mod reconciler;
 pub mod scoring;
 pub mod tiebreaker;
 
 mod fold;
+mod reconciler;
 
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 
 use self::fold::fold;
-use self::group::{GroupPredicate, LabelOverlap};
-use self::reconciler::{Merging, Reconciler};
-use self::scoring::Max;
+use self::group::{CrossLabel, GroupPredicate, SameLabel};
+pub use self::reconciler::{
+    Disposition, Exclusive, Merging, OnConflict, Permissive, Reconciler, Structural, Winner,
+};
 use super::{Layer, LayerOutput};
 
-/// The reconciliation stage: cluster entities by `group`, then dispose of
-/// each cluster's pairs with `reconciler`.
+/// The reconciliation stage: cluster overlapping entities, then dispose of
+/// each pair.
 ///
 /// Generic over the grouping `G` and the reconciler `R`, each chosen at
 /// construction. Same-label fusion and cross-label arbitration are both
@@ -53,11 +50,21 @@ impl<G, R> ReconcileLayer<G, R> {
     }
 }
 
-/// The standard same-label fusion pass: [`LabelOverlap`] + [`Merging`] scored
-/// by [`Max`](scoring::Max).
-impl Default for ReconcileLayer<LabelOverlap, Merging<Max>> {
-    fn default() -> Self {
-        Self::new(LabelOverlap, Merging::default())
+impl<R> ReconcileLayer<SameLabel, R> {
+    /// A reconcile layer over *same-label* overlaps — the fusion pass.
+    /// Clusters co-located findings of the same label and disposes of each
+    /// pair with `reconciler` (typically a [`Merging`]).
+    pub fn same_label(reconciler: R) -> Self {
+        Self::new(SameLabel, reconciler)
+    }
+}
+
+impl<R> ReconcileLayer<CrossLabel, R> {
+    /// A reconcile layer over *cross-label* overlaps — the conflict pass.
+    /// Clusters overlapping findings of different labels and disposes of each
+    /// pair with `reconciler` (typically a [`Structural`]).
+    pub fn cross_label(reconciler: R) -> Self {
+        Self::new(CrossLabel, reconciler)
     }
 }
 
@@ -115,8 +122,7 @@ mod tests {
     use elide_core::modality::text::{Text, TextLocation};
     use elide_core::primitive::Confidence;
 
-    use super::group::{DiffLabelOverlap, LabelOverlap};
-    use super::reconciler::{Merging, Permissive, Structural};
+    use super::group::{CrossLabel, SameLabel};
     use super::scoring::NoisyOr;
     use super::*;
 
@@ -136,14 +142,14 @@ mod tests {
         entity.provenance.events.iter().any(|e| f(&e.kind))
     }
 
-    // --- fusion (LabelOverlap + Merging) ---
+    // --- fusion (SameLabel + Merging) ---
 
     /// Same-label overlapping findings merge into one entity spanning their
     /// union, with the pooled confidence.
     #[test]
     fn merges_same_label_into_the_union() {
         let entities = vec![entity("EMAIL", 0, 10, 0.9), entity("EMAIL", 6, 25, 0.6)];
-        let out = ReconcileLayer::default().apply(entities);
+        let out = ReconcileLayer::same_label(Merging::max()).apply(entities);
         assert_eq!(out.kept.len(), 1);
         let s = &out.kept[0];
         assert_eq!((s.location.start, s.location.end), (0, 25));
@@ -155,25 +161,25 @@ mod tests {
     #[test]
     fn noisy_confidence_accumulates() {
         let entities = vec![entity("EMAIL", 0, 10, 0.6), entity("EMAIL", 0, 10, 0.6)];
-        let layer = ReconcileLayer::new(LabelOverlap, Merging::new(NoisyOr));
+        let layer = ReconcileLayer::new(SameLabel, Merging::new(NoisyOr));
         let out = layer.apply(entities);
         assert_eq!(out.kept.len(), 1);
         assert!((out.kept[0].confidence.get() - 0.84).abs() < 1e-5);
     }
 
-    /// Different labels never group under `LabelOverlap`, so fusion leaves a
+    /// Different labels never group under `SameLabel`, so fusion leaves a
     /// cross-label overlap alone.
     #[test]
     fn fusion_ignores_different_labels() {
         let entities = vec![entity("EMAIL", 0, 10, 0.9), entity("PHONE", 0, 10, 0.8)];
-        let out = ReconcileLayer::default().apply(entities);
+        let out = ReconcileLayer::same_label(Merging::max()).apply(entities);
         assert_eq!(out.kept.len(), 2);
     }
 
-    // --- resolution (DiffLabelOverlap + Structural) ---
+    // --- resolution (CrossLabel + Structural) ---
 
-    fn structural() -> ReconcileLayer<DiffLabelOverlap, Structural> {
-        ReconcileLayer::new(DiffLabelOverlap, Structural::default())
+    fn structural() -> ReconcileLayer<CrossLabel, Structural> {
+        ReconcileLayer::cross_label(Structural::default())
     }
 
     /// A nesting of different labels is a hierarchy — keep both.
@@ -226,7 +232,7 @@ mod tests {
             entity("PERSON_NAME", 0, 12, 0.9),
             entity("ORGANIZATION", 2, 14, 0.7),
         ];
-        let layer = ReconcileLayer::new(DiffLabelOverlap, Structural::reviewing());
+        let layer = ReconcileLayer::cross_label(Structural::standard().reviewing());
         let out = layer.apply(entities);
         assert_eq!(out.kept.len(), 2, "contest keeps both");
         assert!(out.dropped.is_empty());
@@ -242,7 +248,7 @@ mod tests {
             entity("PERSON_NAME", 0, 12, 0.9),
             entity("ORGANIZATION", 2, 14, 0.7),
         ];
-        let out = ReconcileLayer::new(DiffLabelOverlap, Permissive::new()).apply(entities);
+        let out = ReconcileLayer::cross_label(Permissive::new()).apply(entities);
         assert_eq!(out.kept.len(), 2);
         assert!(out.dropped.is_empty());
     }

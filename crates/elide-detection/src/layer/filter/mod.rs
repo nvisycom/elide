@@ -7,13 +7,12 @@ use elide_core::primitive::ConfidenceThreshold;
 
 use super::{Layer, LayerOutput};
 
-/// The filtering stage: drop entities whose label is not allowed or
-/// whose confidence falls below the threshold.
+/// The filtering stage: drop entities by label allow-list or confidence
+/// threshold.
 ///
 /// Both checks are optional and compose with AND — an entity must clear
-/// every configured filter to be kept. Unlike fusion and resolution this
-/// is plain configuration, not a strategy, so it is a struct rather than
-/// a trait.
+/// every configured filter to be kept. Unlike reconciliation this is plain
+/// configuration, not a strategy, so it is a struct rather than a trait.
 #[derive(Debug, Clone, Default)]
 pub struct FilterLayer {
     allowed_labels: Option<Vec<LabelRef>>,

@@ -20,7 +20,7 @@
 //!
 //! [`Analyzer`]: crate::Analyzer
 //! [`GroupPredicate`]: reconcile::group::GroupPredicate
-//! [`Reconciler`]: reconcile::reconciler::Reconciler
+//! [`Reconciler`]: reconcile::Reconciler
 
 pub mod calibrate;
 pub mod filter;

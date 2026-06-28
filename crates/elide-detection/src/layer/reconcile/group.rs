@@ -11,8 +11,8 @@ use elide_core::modality::{Modality, ModalityLocation};
 /// A *type*, the `G` parameter of [`ReconcileLayer`]. Grouping is two
 /// dimensions: a coarse [`bucket`] (a cheap `O(n)` equality partition) and a
 /// fine [`is_grouped`] (a pairwise refinement within a bucket). The crate
-/// ships [`LabelOverlap`] (same label, overlapping — the fusion default) and
-/// [`DiffLabelOverlap`] (different label, overlapping — the conflict default);
+/// ships [`SameLabel`] (same label, overlapping — the fusion default) and
+/// [`CrossLabel`] (different label, overlapping — the conflict default);
 /// a consumer can supply a value-aware or looser grouping.
 ///
 /// **Law:** `is_grouped(a, b)` implies `bucket(a) == bucket(b)`. The layer
@@ -44,9 +44,9 @@ pub trait GroupPredicate<M: Modality>: Send + Sync {
 /// The fusion grouping: co-located findings of the same label are the same
 /// finding. Buckets by label, so clustering is one pass per label.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct LabelOverlap;
+pub struct SameLabel;
 
-impl<M: Modality> GroupPredicate<M> for LabelOverlap {
+impl<M: Modality> GroupPredicate<M> for SameLabel {
     type Bucket = LabelRef;
 
     fn bucket(&self, entity: &Entity<M>) -> LabelRef {
@@ -67,9 +67,9 @@ impl<M: Modality> GroupPredicate<M> for LabelOverlap {
 /// compared). Cross-label tangles are small, so the `O(n²)` within-bucket
 /// scan is cheap in practice.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct DiffLabelOverlap;
+pub struct CrossLabel;
 
-impl<M: Modality> GroupPredicate<M> for DiffLabelOverlap {
+impl<M: Modality> GroupPredicate<M> for CrossLabel {
     type Bucket = ();
 
     fn bucket(&self, _entity: &Entity<M>) {}

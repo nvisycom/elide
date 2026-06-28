@@ -39,8 +39,8 @@ use crate::layer::Layer;
 ///     .with_enricher(lingua)
 ///     .with_recognizer(us_phone)
 ///     .with_recognizer(ner)
-///     .with_layer(ReconcileLayer::default())
-///     .with_layer(ReconcileLayer::new(DiffLabelOverlap, Structural::default()))
+///     .with_layer(ReconcileLayer::same_label(Merging::max()))
+///     .with_layer(ReconcileLayer::cross_label(Structural::default()))
 ///     .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE))
 ///     .analyze(data, &Scope::new())
 ///     .await?;

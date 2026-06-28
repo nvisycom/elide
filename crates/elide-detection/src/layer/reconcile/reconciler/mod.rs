@@ -1,5 +1,5 @@
-//! The [`Reconciler`] trait — the *what to do* axis of reconciliation — its
-//! [`Disposition`] outcome, and the shipped reconcilers.
+//! The [`Reconciler`] trait — the *what to do* axis — and the shipped
+//! reconcilers.
 //!
 //! A reconciler decides each grouped pair's fate. The crate ships [`Merging`]
 //! (combine same-label findings), [`Structural`] (geometry-aware cross-label

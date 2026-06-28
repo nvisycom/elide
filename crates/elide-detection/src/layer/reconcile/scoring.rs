@@ -1,5 +1,4 @@
-//! The [`Strategy`] trait — how a merged finding's confidence is scored — and
-//! the shipped strategies.
+//! The [`Strategy`] trait — how merged confidence is scored — and its impls.
 
 use elide_core::modality::Modality;
 use elide_core::primitive::Confidence;
@@ -14,7 +13,7 @@ use elide_core::primitive::Confidence;
 /// be associative for a cluster of three or more to combine consistently (both
 /// shipped strategies are).
 ///
-/// [`Merging`]: super::reconciler::Merging
+/// [`Merging`]: super::Merging
 pub trait Strategy<M: Modality>: Send + Sync {
     /// Stable name of the strategy, recorded in the fusion event.
     fn name(&self) -> &'static str;

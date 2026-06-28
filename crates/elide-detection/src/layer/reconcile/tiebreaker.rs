@@ -12,8 +12,8 @@ use elide_core::modality::{Modality, ModalityLocation};
 /// consumer can supply their own (recognizer priority, value-aware
 /// arbitration, …).
 ///
-/// [`Structural`]: super::reconciler::Structural
-/// [`Exclusive`]: super::reconciler::Exclusive
+/// [`Structural`]: super::Structural
+/// [`Exclusive`]: super::Exclusive
 pub trait Tiebreaker<M: Modality>: Send + Sync {
     /// Whether `a` should be kept over `b`. `true` keeps `a`, drops `b`.
     fn keeps_first(&self, a: &Entity<M>, b: &Entity<M>) -> bool;

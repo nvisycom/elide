@@ -99,8 +99,8 @@ fn build_analyzer() -> Result<Analyzer<Text>> {
         .with_recognizer(patterns)
         .with_recognizer(ner)
         .with_recognizer(llm)
-        .with_layer(ReconcileLayer::default())
-        .with_layer(ReconcileLayer::new(DiffLabelOverlap, Structural::default()))
+        .with_layer(ReconcileLayer::same_label(Merging::max()))
+        .with_layer(ReconcileLayer::cross_label(Structural::default()))
         .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE)))
 }
 
