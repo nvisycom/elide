@@ -10,7 +10,7 @@ the observation that no single recognition technique is adequate across all
 categories of personally identifiable information (PII), all content encodings,
 and all confidence regimes. Multiple recognizer families run concurrently
 against decomposed document fragments; their findings are lifted into a shared
-coordinate system and reconciled through a deterministic deduplication pipeline;
+coordinate system and reconciled through a deterministic layer pipeline;
 caller annotations then shape the surviving candidates into the reconciled set
 of entities the toolkit hands to redaction. This is the second paper in a series
 of three; ingestion and redaction are treated in their own papers.
@@ -53,7 +53,7 @@ recognizers concurrently and treats each as a hypothesis-generator rather than
 an authority. A recognizer is any component that inspects a payload and proposes
 the entities it believes are present, in coordinates local to the payload it
 saw. Its sole responsibility is that one act of recognition: a recognizer does
-not resolve conflicts, fuse across recognizers, or prune; it reports what it
+not reconcile across recognizers or prune; it reports what it
 sees and nothing more. Three families dominate the population.
 
 ### 2.1 Rule-Based Recognition
@@ -224,18 +224,18 @@ adjudicate them leave them alone. An include region amplifies a caller's belief
 about sensitivity without dictating the outcome.
 
 An exclude region marks a span that must not appear as a finding. Exclude
-regions are applied as a final filter, after deduplication, removing any
+regions are applied as a final filter, after reconciliation, removing any
 surviving entity whose location overlaps an excluded span regardless of which
 recognizer found it. They are how a caller corrects false positives without
 retraining a model or rewriting a rule.
 
-## 8. Deduplication and Conflict Resolution
+## 8. Reconciliation and Conflict Resolution
 
 The parallel evaluation of many recognizers against the same content produces a
 redundant candidate set. The same entity is often discovered by multiple
 recognizers; spans frequently overlap rather than coincide; class labels
 sometimes disagree; and the families do not even share a confidence scale. A
-layered reconciliation pipeline reduces this to a clean, deduplicated set.
+layered pipeline reduces this to a clean, reconciled set.
 
 Each stage is a pure, synchronous transform over the candidate set that returns
 the entities it kept and the entities it dropped. The stages are composed onto
@@ -245,17 +245,32 @@ the find engine in the order they should run. In their usual order, they are:
   so detectors with different score distributions are made comparable before
   anything is compared. A checksum-backed rule-based hit and a soft neural score
   do not mean the same thing at the same numeric value; calibration is what
-  makes the later stages' comparisons meaningful.
+  makes the later comparisons meaningful.
 
-- **Fuse.** Combines co-located findings of the _same_ label into a single
-  entity, accumulating every contributing detection in the survivor's
-  provenance. Fusion is not a simple maximum or average; it acknowledges that a
-  rule-based hit and a statistical hit on the same span are stronger evidence
-  than either alone.
+- **Reconcile.** Decides what happens to overlapping entities. One stage with
+  two axes: a _grouping_ chooses which entities cluster, and a _reconciler_
+  chooses what to do with each grouped pair — combine, keep, contest, or
+  resolve. Fusion (same-label) and cross-label arbitration are two
+  configurations of this one stage, run as two passes:
 
-- **Resolve.** Breaks overlaps between findings of _different_ labels, dropping
-  the loser. Class agreement is not required: a generic name detection that
-  overlaps a more specific identifier detection yields to the latter.
+  - _Same-label._ Co-located findings of the same label are clustered and
+    **merged** into one entity over the union of their spans, accumulating every
+    contributing detection in the survivor's provenance. The merged confidence
+    is pooled, not picked: a rule-based hit and a statistical hit on the same
+    span are stronger evidence than either alone (noisy-OR), though the
+    conservative default keeps the strongest single score.
+
+  - _Cross-label._ Overlaps between findings of different labels are read
+    _structurally_ rather than treated as automatic conflicts. A legitimate
+    nesting (a postal code inside an address) keeps both; a subsumed junk match
+    (a weak detection inside a much stronger one) is dropped; only a
+    near-coincident overlap is a true conflict. A true conflict is either
+    **resolved** — the loser dropped, its claim recorded on the winner's
+    provenance — or, because "what is this span?" is a meaning question, left
+    **contested**: both survive, each flagged, for the human edit step to
+    settle. The strict alternative resolves every overlap to one finding per
+    span; the permissive alternative keeps every overlap for downstream
+    handling.
 
 - **Filter.** Drops entities below a confidence threshold or outside an
   allow-list of labels. This is not noise rejection in the signal-processing
@@ -272,12 +287,9 @@ the find engine in the order they should run. In their usual order, they are:
          |
          v
 +------------------+
-|      fuse        |  merge same-label co-located findings
-+------------------+
-         |
-         v
-+------------------+
-|     resolve      |  break cross-label overlaps
+|    reconcile     |  cluster overlaps, then per pair:
+|                  |    merge same-label findings,
+|                  |    keep / contest / resolve cross-label
 +------------------+
          |
          v
@@ -290,11 +302,12 @@ the find engine in the order they should run. In their usual order, they are:
 ```
 
 Order matters. Calibration before everything else makes the subsequent
-comparisons commensurable. Fusing before resolving keeps concurring same-label
-evidence from being mistaken for a cross-label conflict. Filtering last means a
-low-confidence finding never displaces a high-confidence one on its way out. The
-pipeline is deterministic given the same inputs. After the stages run, the
-caller's exclude regions are applied as the final cull.
+comparisons commensurable. Merging same-label findings before arbitrating
+cross-label overlaps keeps concurring same-label evidence from being mistaken
+for a conflict. Filtering last means a low-confidence finding never displaces a
+high-confidence one on its way out. The pipeline is deterministic given the same
+inputs. After the stages run, the caller's exclude regions are applied as the
+final cull.
 
 ## 9. The Reconciled Entity Set
 
@@ -362,7 +375,7 @@ annotations accordingly.
 The architecture is open at every layer where recall can fail: recognizers can
 be added, rules extended, models replaced, enhancers and layers reconfigured.
 The closed surfaces are the ones that must be stable: the chunking and lifting
-model, the deduplication pipeline, and the shape of the entity. Stability in the
+model, the reconciliation pipeline, and the shape of the entity. Stability in the
 contracts is what allows pluralism in the recognizers.
 
 ## 11. Summary
@@ -370,7 +383,7 @@ contracts is what allows pluralism in the recognizers.
 Detection is the concurrent evaluation of many fallible recognizers against a
 chunked decomposition of a document, followed by an optional context-boost pass,
 followed by deterministic reconciliation of the findings through a
-calibrate-fuse-resolve-filter pipeline. Caller scope and annotations participate
+calibrate-reconcile-filter pipeline. Caller scope and annotations participate
 throughout. The product is an attributable set of entities, lifted into source
 coordinates, that the toolkit hands to redaction. The model is conservative
 about what it guarantees and generous about what it allows to be extended.

@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::modality::ModalityLocation;
+use crate::modality::{ModalityLocation, Overlap};
 
 /// Half-open `[start, end)` byte range within text content.
 ///
@@ -51,8 +51,33 @@ impl TextLocation {
 }
 
 impl ModalityLocation for TextLocation {
-    fn overlaps(&self, other: &Self) -> bool {
-        self.start < other.end && other.start < self.end
+    fn overlap(&self, other: &Self) -> Overlap {
+        if self.start >= other.end || other.start >= self.end {
+            return Overlap::Disjoint;
+        }
+        if self.start <= other.start && other.end <= self.end {
+            return Overlap::Contains;
+        }
+        if other.start <= self.start && self.end <= other.end {
+            return Overlap::ContainedBy;
+        }
+        let inter = self.end.min(other.end) - self.start.max(other.start);
+        let union = self.end.max(other.end) - self.start.min(other.start);
+        Overlap::Crossing {
+            iou: inter as f32 / union as f32,
+        }
+    }
+
+    fn union(&self, other: &Self) -> Option<Self> {
+        // A single byte range can't span two pages; require agreement.
+        if self.page != other.page {
+            return None;
+        }
+        Some(Self {
+            start: self.start.min(other.start),
+            end: self.end.max(other.end),
+            page: self.page,
+        })
     }
 
     fn span_cmp(&self, other: &Self) -> Ordering {
@@ -102,6 +127,49 @@ mod tests {
         };
         // Page 1 sorts before page 2 even with a larger offset.
         assert_eq!(early_page.position_cmp(&late_page), Ordering::Less);
+    }
+
+    #[test]
+    fn overlap_classifies_the_relationship() {
+        let a = TextLocation::new(0, 10);
+        // Disjoint.
+        assert_eq!(a.overlap(&TextLocation::new(10, 20)), Overlap::Disjoint);
+        // Nesting, both directions.
+        assert_eq!(a.overlap(&TextLocation::new(2, 8)), Overlap::Contains);
+        assert_eq!(TextLocation::new(2, 8).overlap(&a), Overlap::ContainedBy);
+        // Identical extent reads as containment.
+        assert_eq!(a.overlap(&a), Overlap::Contains);
+        // Crossing, with an IoU measure.
+        let Overlap::Crossing { iou } = a.overlap(&TextLocation::new(5, 15)) else {
+            panic!("expected crossing");
+        };
+        assert!((iou - 5.0 / 15.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn union_is_the_bounding_range() {
+        let a = TextLocation::new(0, 5);
+        let b = TextLocation::new(3, 12);
+        let u = a.union(&b).expect("same page");
+        assert_eq!((u.start, u.end), (0, 12));
+        // Reflexive.
+        assert_eq!(a.union(&a), Some(a.clone()));
+    }
+
+    #[test]
+    fn union_requires_same_page() {
+        let a = TextLocation {
+            start: 0,
+            end: 5,
+            page: Some(1),
+        };
+        let b = TextLocation {
+            start: 3,
+            end: 12,
+            page: Some(2),
+        };
+        // A single byte range can't span two pages.
+        assert_eq!(a.union(&b), None);
     }
 
     #[test]

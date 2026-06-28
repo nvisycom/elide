@@ -6,7 +6,7 @@
 //! order: enrich (sequential), recognize (concurrent), reduce (the
 //! layers), returning a clean entity set.
 //!
-//! [`Layer`]: crate::deduplication::Layer
+//! [`Layer`]: crate::layer::Layer
 //! [`analyze`]: Analyzer::analyze
 
 mod dyn_enricher;
@@ -23,7 +23,7 @@ use futures::future;
 
 use self::dyn_enricher::DynEnricher;
 use self::dyn_recognizer::DynRecognizer;
-use crate::deduplication::Layer;
+use crate::layer::Layer;
 
 /// The find engine: enrichers, recognizers, and deduplication, in one
 /// call.
@@ -39,8 +39,8 @@ use crate::deduplication::Layer;
 ///     .with_enricher(lingua)
 ///     .with_recognizer(us_phone)
 ///     .with_recognizer(ner)
-///     .with_layer(FuseLayer::new(MaxConfidence))
-///     .with_layer(ResolveLayer::new(HighestConfidence))
+///     .with_layer(ReconcileLayer::same_label(Merging::max()))
+///     .with_layer(ReconcileLayer::cross_label(Structural::default()))
 ///     .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE))
 ///     .analyze(data, &Scope::new())
 ///     .await?;

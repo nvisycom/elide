@@ -13,8 +13,7 @@
 use elide::codec::{DocumentHandle, FormatRegistry, UntypedDocumentHandle};
 use elide::detection::Analyzer;
 use elide::detection::filter::FilterLayer;
-use elide::detection::fuse::{FuseLayer, MaxConfidence};
-use elide::detection::resolve::{HighestConfidence, ResolveLayer};
+use elide::detection::reconcile::{Merging, ReconcileLayer, Structural};
 use elide::entity::{Entity, builtins};
 #[cfg(feature = "stt")]
 use elide::modality::audio::Audio;
@@ -78,8 +77,8 @@ pub fn build_analyzer<M: TextRecognizable>() -> Result<Analyzer<M>> {
 
     Ok(Analyzer::new()
         .with_recognizer(patterns)
-        .with_layer(FuseLayer::new(MaxConfidence))
-        .with_layer(ResolveLayer::new(HighestConfidence))
+        .with_layer(ReconcileLayer::same_label(Merging::max()))
+        .with_layer(ReconcileLayer::cross_label(Structural::default()))
         .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE)))
 }
 

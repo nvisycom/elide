@@ -20,7 +20,7 @@ use std::sync::Arc;
 use elide_core::Result;
 use elide_core::entity::provenance::{Attribution, Event};
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
-use elide_core::modality::{DataReader, DataWriter, Modality};
+use elide_core::modality::{DataReader, DataWriter, Modality, ModalityLocation};
 use elide_core::operator::{Operator, Redactions};
 use hipstr::HipStr;
 
@@ -179,55 +179,93 @@ impl<M: Modality> Anonymizer<M> {
     /// else the fallback), read the entity's value via
     /// [`DataReader::read_at`], and run the operator to produce a
     /// replacement. Entities whose label has no operator and no fallback
-    /// are skipped, as are entities whose location reads no data. Returns
-    /// the [`Redactions`] batch — inspect, serialize, or audit it, then
-    /// apply it yourself, or call [`anonymize`] to plan and apply in one
-    /// step.
+    /// are skipped, as are entities whose location reads no data.
+    ///
+    /// **Overlapping entities are merged.** Where a set of entities overlap
+    /// in the medium (a left-over nesting, or one a user re-introduced by
+    /// editing the report), redacting each separately would write competing
+    /// operators over the same bytes and corrupt the output. Instead the
+    /// overlapping set collapses to *one* redaction covering the
+    /// [union][union] of their spans, run by the **safest** operator among
+    /// them — the one whose output leaks least (highest [`LeakProfile`]).
+    /// Ties go to the wider span, then the earlier position. The absorbed
+    /// entities still record a redaction event noting they were merged, so
+    /// the report stays faithful. A purely mechanical safety step: it makes
+    /// no semantic choice about which *finding* is right — that is
+    /// detection's job.
+    ///
+    /// Returns the [`Redactions`] batch — inspect, serialize, or audit it,
+    /// then apply it yourself, or call [`anonymize`] to plan and apply in
+    /// one step.
     ///
     /// [`anonymize`]: Self::anonymize
+    /// [union]: elide_core::modality::ModalityLocation::union
+    /// [`LeakProfile`]: elide_core::operator::LeakProfile
     pub async fn plan(
         &self,
         entities: &mut [Entity<M>],
         reader: &impl DataReader<M>,
     ) -> Result<Redactions<M>> {
         let mut redactions = Redactions::new();
-        for entity in entities {
-            let Some(resolved) = self.operators.resolve(entity) else {
-                tracing::debug!(
-                    modality = M::NAME,
-                    label = entity.label.as_str(),
-                    "no operator for label; skipping",
-                );
+        for cluster in cluster_overlaps(entities) {
+            // Pick the safest operator in the cluster — the one that leaks
+            // least — to redact the whole overlapping span; ties go to the
+            // wider span, then the earlier position. A singleton cluster just
+            // resolves its one entity. `None` means no member had an operator.
+            let Some((winner, operator, matched_by, attribution)) = cluster
+                .iter()
+                .copied()
+                .filter_map(|i| self.operators.resolve(&entities[i]).map(|r| (i, r)))
+                .max_by(|(i, a), (j, b)| {
+                    a.operator
+                        .leak_profile()
+                        .cmp(&b.operator.leak_profile())
+                        .then_with(|| entities[*i].location.span_cmp(&entities[*j].location))
+                        .then_with(|| entities[*j].location.position_cmp(&entities[*i].location))
+                })
+                .map(|(i, r)| {
+                    (
+                        i,
+                        Arc::clone(r.operator),
+                        r.matched_by,
+                        r.attribution.cloned(),
+                    )
+                })
+            else {
                 continue;
             };
-            // Clone what we need so the registry borrow ends before we take
-            // `&mut entity` to record provenance below.
-            let operator = Arc::clone(resolved.operator);
-            let matched_by = resolved.matched_by;
-            let attribution = resolved.attribution.cloned();
-            let Some(data) = reader.read_at(&entity.location).await? else {
-                tracing::debug!(
-                    modality = M::NAME,
-                    label = entity.label.as_str(),
-                    "location read no data; skipping",
-                );
+
+            // Redact the union of every member's span. Clustering groups only
+            // entities that coalesce, so the fold never hits `None`; a
+            // singleton unions to itself.
+            let location = cluster
+                .iter()
+                .map(|&i| entities[i].location.clone())
+                .reduce(|acc, loc| {
+                    acc.union(&loc)
+                        .expect("cluster members coalesce by construction")
+                })
+                .expect("a cluster is never empty");
+            let Some(data) = reader.read_at(&location).await? else {
+                tracing::debug!(modality = M::NAME, "location read no data; skipping");
                 continue;
             };
-            let replacement = operator.anonymize_boxed(entity, &data).await?;
+            let replacement = operator.anonymize_boxed(&entities[winner], &data).await?;
 
-            // Record why and how this entity was redacted: the matched rule
-            // (automatic "why"), the operator identity + leak profile, and the
-            // rule's author-supplied attribution (the policy "why").
-            let event = Event::redaction(
-                operator.id(),
-                operator.leak_profile(),
-                entity.confidence,
-                matched_by,
-                attribution,
-            );
-            entity.provenance.record(event);
-
-            redactions.push(entity.location.clone(), replacement);
+            // Record the redaction on every member, so each entity's
+            // provenance reflects that this operator hid it.
+            for &i in &cluster {
+                let entity = &mut entities[i];
+                let event = Event::redaction(
+                    operator.id(),
+                    operator.leak_profile(),
+                    entity.confidence,
+                    matched_by.clone(),
+                    attribution.clone(),
+                );
+                entity.provenance.record(event);
+            }
+            redactions.push(location, replacement);
         }
         Ok(redactions)
     }
@@ -258,5 +296,174 @@ impl<M: Modality> Anonymizer<M> {
 impl<M: Modality> Default for Anonymizer<M> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Group entity indices that redact as one span, by single-linkage
+/// clustering: two entities join when they overlap *and* their locations
+/// [coalesce] into one span.
+///
+/// Each group is a `Vec` of indices into `entities`. Disjoint entities each
+/// form a singleton; a chain of pairwise links (A–B, B–C) lands in one
+/// group even if A and C don't touch, and an entity bridging two existing
+/// groups merges them. Two entities that overlap but can't coalesce (the
+/// same byte range on different pages, say) stay in separate groups, so
+/// every group's [`union`][coalesce] is well-defined — no member is ever
+/// dropped when the span is computed.
+///
+/// [coalesce]: ModalityLocation::union
+fn cluster_overlaps<M: Modality>(entities: &[Entity<M>]) -> Vec<Vec<usize>> {
+    // Two entities link only if they overlap and coalesce into one span, so
+    // every group folds to a single union with no member lost.
+    let links = |a: &M::Location, b: &M::Location| a.overlaps(b) && a.union(b).is_some();
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for i in 0..entities.len() {
+        let location = &entities[i].location;
+        // Every existing group holding an entity this one links to. With more
+        // than one, this entity bridges them, so they all merge.
+        let hit: Vec<usize> = (0..groups.len())
+            .filter(|&g| {
+                groups[g]
+                    .iter()
+                    .any(|&other| links(&entities[other].location, location))
+            })
+            .collect();
+        match hit.first().copied() {
+            None => groups.push(vec![i]),
+            Some(first) => {
+                groups[first].push(i);
+                // Remove the other bridged groups from the back so the lower
+                // indices (including `first`) stay valid, folding each in.
+                for &g in hit.iter().skip(1).rev() {
+                    let merged = groups.remove(g);
+                    groups[first].extend(merged);
+                }
+            }
+        }
+    }
+    groups
+}
+
+#[cfg(test)]
+mod tests {
+    use elide_core::entity::provenance::{Event, EventKind, PatternEvent, Provenance};
+    use elide_core::modality::text::{Text, TextData, TextLocation};
+    use elide_core::primitive::Confidence;
+
+    use super::*;
+    use crate::operators::{Erase, Replace};
+
+    /// In-memory text reader: slices the backing string by byte range.
+    struct StrReader(String);
+
+    impl DataReader<Text> for StrReader {
+        async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
+            Ok(self.0.get(location.start..location.end).map(TextData::new))
+        }
+    }
+
+    fn entity(label: &str, start: usize, end: usize) -> Entity<Text> {
+        let loc = TextLocation::new(start, end);
+        let confidence = Confidence::new(0.9).unwrap();
+        let event = Event::pattern("t", confidence, loc.clone(), PatternEvent::default());
+        Entity::new(
+            LabelRef::new(label),
+            loc,
+            confidence,
+            Provenance::new(event),
+        )
+    }
+
+    /// Disjoint entities each redact separately — the baseline behaviour.
+    #[tokio::test]
+    async fn disjoint_entities_redact_separately() {
+        let reader = StrReader("alice and bob".to_owned());
+        let mut entities = vec![entity("NAME", 0, 5), entity("NAME", 10, 13)];
+        let plan = Anonymizer::new()
+            .with_fallback(Replace::default())
+            .plan(&mut entities, &reader)
+            .await
+            .unwrap();
+        assert_eq!(plan.len(), 2, "two disjoint redactions");
+    }
+
+    /// Overlapping entities collapse to one redaction over the union span,
+    /// run by the safest (least-leaky) operator. `Erase` (Irrecoverable)
+    /// beats `Replace` (Partial).
+    #[tokio::test]
+    async fn overlap_merges_under_safest_operator() {
+        let reader = StrReader("0123456789abc".to_owned());
+        // NAME [0,5) → Replace (Partial); SSN [3,12) → Erase (Irrecoverable).
+        let mut entities = vec![entity("NAME", 0, 5), entity("SSN", 3, 12)];
+        let plan = Anonymizer::new()
+            .with_label(LabelRef::new("NAME"), Replace::default())
+            .with_label(LabelRef::new("SSN"), Erase)
+            .plan(&mut entities, &reader)
+            .await
+            .unwrap();
+
+        // One redaction over the union [0,12), by Erase → Removed.
+        assert_eq!(plan.len(), 1, "overlap collapses to one redaction");
+        let (location, replacement) = plan.iter().next().unwrap();
+        assert_eq!((location.start, location.end), (0, 12), "covers the union");
+        assert_eq!(replacement.value(), None, "Erase removes, not substitutes");
+
+        // Both entities record a redaction by the winning operator.
+        for entity in &entities {
+            let redacted = entity.provenance.events.iter().any(|e| {
+                matches!(&e.kind, EventKind::Redaction { operator, .. } if operator.name == "erase")
+            });
+            assert!(redacted, "every member records the erase redaction");
+        }
+    }
+
+    /// A transitive chain (A–B overlap, B–C overlap, A–C disjoint) still
+    /// collapses to one redaction spanning all three.
+    #[tokio::test]
+    async fn transitive_overlap_chain_merges() {
+        let reader = StrReader("0123456789abcdef".to_owned());
+        let mut entities = vec![entity("A", 0, 5), entity("B", 4, 9), entity("C", 8, 13)];
+        let plan = Anonymizer::new()
+            .with_fallback(Erase)
+            .plan(&mut entities, &reader)
+            .await
+            .unwrap();
+        assert_eq!(plan.len(), 1, "the chain collapses to one redaction");
+        let (location, _) = plan.iter().next().unwrap();
+        assert_eq!((location.start, location.end), (0, 13));
+    }
+
+    /// Two entities that overlap by byte range but sit on different pages
+    /// can't coalesce into one span, so they stay separate: each redacts on
+    /// its own and neither is dropped.
+    #[tokio::test]
+    async fn non_coalescible_overlap_stays_separate() {
+        let reader = StrReader("0123456789".to_owned());
+        // Same range, different page: overlaps() is true (page is ignored)
+        // but union() is None, so clustering must keep them apart.
+        let mut a = entity("A", 0, 5);
+        a.location.page = Some(1);
+        let mut b = entity("B", 0, 5);
+        b.location.page = Some(2);
+        let mut entities = vec![a, b];
+
+        let plan = Anonymizer::new()
+            .with_fallback(Erase)
+            .plan(&mut entities, &reader)
+            .await
+            .unwrap();
+
+        assert_eq!(plan.len(), 2, "different pages redact separately");
+        // Neither entity is silently dropped — both record a redaction.
+        for entity in &entities {
+            assert!(
+                entity
+                    .provenance
+                    .events
+                    .iter()
+                    .any(|e| matches!(&e.kind, EventKind::Redaction { .. })),
+                "every entity records its own redaction",
+            );
+        }
     }
 }

@@ -5,8 +5,7 @@
 use elide::detection::Analyzer;
 use elide::detection::calibrate::{CalibrateLayer, CalibrationMap};
 use elide::detection::filter::FilterLayer;
-use elide::detection::fuse::{FuseLayer, MaxConfidence};
-use elide::detection::resolve::{HighestConfidence, ResolveLayer};
+use elide::detection::reconcile::{Merging, ReconcileLayer, Structural};
 use elide_core::Result;
 use elide_core::entity::provenance::{Event, EventKind, PatternEvent, Provenance};
 use elide_core::entity::{Entity, LabelRef};
@@ -65,8 +64,8 @@ async fn analyze_fuses_resolves_filters() {
         .with_recognizer(a)
         .with_recognizer(b)
         .with_layer(CalibrateLayer::new(CalibrationMap::new())) // identity (empty)
-        .with_layer(FuseLayer::new(MaxConfidence))
-        .with_layer(ResolveLayer::new(HighestConfidence))
+        .with_layer(ReconcileLayer::same_label(Merging::max()))
+        .with_layer(ReconcileLayer::cross_label(Structural::default()))
         .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE));
 
     let mut entities = analyzer

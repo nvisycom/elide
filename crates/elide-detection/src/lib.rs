@@ -3,7 +3,7 @@
 #![doc = include_str!("../README.md")]
 
 mod analyzer;
-mod deduplication;
+mod layer;
 
 pub use self::analyzer::Analyzer;
-pub use self::deduplication::{Layer, LayerOutput, calibrate, filter, fuse, resolve};
+pub use self::layer::{Layer, LayerOutput, calibrate, filter, reconcile};

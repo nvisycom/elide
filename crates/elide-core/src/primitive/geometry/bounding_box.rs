@@ -6,6 +6,7 @@ use std::ops::Sub;
 use serde::{Deserialize, Serialize};
 
 use super::{Dimensions, PixelRegion, Polygon};
+use crate::modality::Overlap;
 
 /// Point in a 2-D coordinate space.
 ///
@@ -123,15 +124,54 @@ impl BoundingBox {
         self.width() * self.height()
     }
 
-    /// Whether this box overlaps `other`.
-    ///
-    /// Rectangle intersection: the boxes share interior area. Touching
-    /// edges alone do not count as overlapping.
+    /// Whether this box overlaps `other`: they share interior area.
+    /// Touching edges alone do not count.
     pub fn overlaps(&self, other: &Self) -> bool {
         self.min.x < other.max.x
             && other.min.x < self.max.x
             && self.min.y < other.max.y
             && other.min.y < self.max.y
+    }
+
+    /// Whether this box fully contains `other`.
+    pub fn contains(&self, other: &Self) -> bool {
+        self.min.x <= other.min.x
+            && self.min.y <= other.min.y
+            && other.max.x <= self.max.x
+            && other.max.y <= self.max.y
+    }
+
+    /// How this box sits against `other` — disjoint, one containing the
+    /// other, or crossing with an area-IoU measure.
+    pub fn overlap(&self, other: &Self) -> Overlap {
+        if !self.overlaps(other) {
+            return Overlap::Disjoint;
+        }
+        if self.contains(other) {
+            return Overlap::Contains;
+        }
+        if other.contains(self) {
+            return Overlap::ContainedBy;
+        }
+        let ix = (self.max.x.min(other.max.x) - self.min.x.max(other.min.x)).max(0.0);
+        let iy = (self.max.y.min(other.max.y) - self.min.y.max(other.min.y)).max(0.0);
+        let inter = ix * iy;
+        let union = self.area() + other.area() - inter;
+        Overlap::Crossing {
+            iou: if union <= 0.0 {
+                0.0
+            } else {
+                (inter / union) as f32
+            },
+        }
+    }
+
+    /// Smallest axis-aligned box covering both `self` and `other`.
+    pub fn union(&self, other: &Self) -> Self {
+        Self::new(
+            Point::new(self.min.x.min(other.min.x), self.min.y.min(other.min.y)),
+            Point::new(self.max.x.max(other.max.x), self.max.y.max(other.max.y)),
+        )
     }
 
     /// Box as a four-vertex [`Polygon`] (clockwise from the top-left
