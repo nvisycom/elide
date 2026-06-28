@@ -26,6 +26,10 @@ default = []
 ## Ship the no-op `MockBackend` for tests, examples, and offline wiring.
 mock = []
 
+## Derive `schemars::JsonSchema` on the public strategy enums
+## (`AlignmentMode`, `AggregationStrategy`) and the re-exported core types.
+schema = ["elide-core/schema", "dep:schemars"]
+
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
@@ -36,6 +40,7 @@ elide-core = { workspace = true, features = ["serde"] }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
+schemars = { workspace = true, features = [], optional = true }
 
 # Derive macros & error handling
 derive_builder = { workspace = true, features = [] }

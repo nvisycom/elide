@@ -1081,6 +1081,7 @@ dependencies = [
  "derive_builder",
  "elide-core",
  "hipstr",
+ "schemars",
  "serde",
  "tokio",
  "uuid",

@@ -1,6 +1,8 @@
 //! [`AggregationStrategy`]: how per-token NER predictions are collapsed
 //! into entity spans.
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// How adjacent token predictions merge into one span.
@@ -8,6 +10,7 @@ use serde::{Deserialize, Serialize};
 /// Names follow HuggingFace
 /// `transformers.pipeline(aggregation_strategy=...)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum AggregationStrategy {
     /// No aggregation: every token-level prediction becomes its own

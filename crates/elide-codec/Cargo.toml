@@ -33,6 +33,10 @@ default = ["txt"]
 ## to `elide-core` for consumers who serialize the entities a codec reads.
 serde = ["elide-core/serde"]
 
+## Derive `schemars::JsonSchema` on the re-exported core domain types.
+## Forwards to `elide-core`; the codec has no schema types of its own.
+schema = ["elide-core/schema"]
+
 ## The text-shaped formats.
 text = ["txt", "json", "html", "xml"]
 

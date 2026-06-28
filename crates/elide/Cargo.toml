@@ -34,6 +34,20 @@ default = ["pattern", "ner", "llm"]
 ## are enabled.
 serde = ["elide-core/serde", "elide-detection/serde", "elide-redaction/serde", "elide-codec?/serde", "elide-orchestration?/serde"]
 
+## Derive `schemars::JsonSchema` on the re-exported domain types, for
+## emitting JSON Schemas of the serialized model. Implies serde. Forwards to
+## the engine crates; the optional ones (`codec`/`orchestration`/`ner`) only
+## when they're enabled.
+schema = [
+    "serde",
+    "elide-core/schema",
+    "elide-detection/schema",
+    "elide-redaction/schema",
+    "elide-codec?/schema",
+    "elide-orchestration?/schema",
+    "elide-ner?/schema",
+]
+
 ## Re-export the pattern crate as `elide::recognition::pattern`.
 pattern = ["dep:elide-pattern"]
 ## Re-export the NER crate as `elide::recognition::ner`.
