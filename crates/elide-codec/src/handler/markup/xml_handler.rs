@@ -12,6 +12,7 @@
 //!
 //! [`ExtractedItem`]: super::ExtractedItem
 
+use std::cmp::Reverse;
 use std::ops::Range;
 
 use elide_core::modality::text::Text;
@@ -78,7 +79,7 @@ impl Encoder for XmlEncoder {
 /// length delta can't shift the spans of items earlier in the document.
 pub(crate) fn splice(raw: &str, items: &[XmlItem]) -> Result<String> {
     let mut ordered: Vec<&XmlItem> = items.iter().collect();
-    ordered.sort_by_key(|item| std::cmp::Reverse(item.address.0.start));
+    ordered.sort_by_key(|item| Reverse(item.address.0.start));
 
     let mut out = raw.to_owned();
     for item in ordered {

@@ -21,7 +21,7 @@
 //! [`TypeId`]: std::any::TypeId
 
 use std::any::{Any, type_name};
-use std::fmt;
+use std::{fmt, mem};
 
 use elide_core::Result;
 use elide_core::entity::Entity;
@@ -165,7 +165,7 @@ impl UntypedDocumentHandle {
             return None;
         }
         // The `is::<M>` check just passed, so the downcast holds.
-        let handle = std::mem::replace(&mut self.handle, Box::new(EmptyHandle));
+        let handle = mem::replace(&mut self.handle, Box::new(EmptyHandle));
         Some(
             *handle
                 .into_any()

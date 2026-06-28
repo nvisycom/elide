@@ -7,21 +7,22 @@
 //! along for diagnostics without widening the public enum. New failure
 //! modes can be added as kinds without breaking the struct's API.
 
-use std::error::Error as StdError;
 use std::fmt;
 
 /// Type-erased, thread-safe error cause.
 ///
 /// The boxed form a downstream recognizer or operator error is stored in
 /// when attached to an [`Error`] as its underlying source.
-pub type BoxError = Box<dyn StdError + Send + Sync + 'static>;
+pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// Error type returned across the core domain operations.
 ///
 /// Opaque by design: construct one with [`Error::new`] (kind + cause) or
 /// [`Error::from`] (kind only), inspect it with [`Error::kind`], and
-/// recover the cause, if any, with [`Error::into_source`] or the
-/// standard [`StdError::source`].
+/// recover the cause, if any, with [`Error::into_source`] or the standard
+/// [`source`].
+///
+/// [`source`]: std::error::Error::source
 pub struct Error {
     kind: ErrorKind,
     source: Option<BoxError>,
@@ -83,11 +84,11 @@ impl fmt::Debug for Error {
     }
 }
 
-impl StdError for Error {
-    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         self.source
             .as_ref()
-            .map(|s| s.as_ref() as &(dyn StdError + 'static))
+            .map(|s| s.as_ref() as &(dyn std::error::Error + 'static))
     }
 }
 

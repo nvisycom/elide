@@ -57,7 +57,7 @@ pub use elide_detection::{
     reconcile::{
         Merging, ReconcileLayer, Structural,
         group::{CrossLabel, SameLabel},
-        scoring::Max,
+        scoring::MaxConfidence,
     },
 };
 #[cfg(feature = "codec")]

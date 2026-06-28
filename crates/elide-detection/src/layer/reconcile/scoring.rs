@@ -1,21 +1,21 @@
-//! The [`Strategy`] trait — how merged confidence is scored — and its impls.
+//! The [`Scoring`] trait — how merged confidence is scored — and its impls.
 
 use elide_core::modality::Modality;
 use elide_core::primitive::Confidence;
 
 /// How two grouped confidences combine into the merged finding's score.
 ///
-/// A *type*, the `S` parameter of [`Merging`]. Some strategies *pick* an
-/// existing score ([`Max`]), others *compute* a new one ([`NoisyOr`]); the
-/// trait abstracts over both. The crate ships [`Max`] (the default) and
-/// [`NoisyOr`]; a consumer can implement their own. Scoring is pairwise — the
-/// [`Merging`] reconciler applies it to each merged pair — so a strategy must
-/// be associative for a cluster of three or more to combine consistently (both
-/// shipped strategies are).
+/// A *type*, the `S` parameter of [`Merging`]. Some scorings *pick* an existing
+/// score ([`MaxConfidence`]), others *compute* a new one ([`NoisyOrConfidence`]);
+/// the trait abstracts over both. The crate ships [`MaxConfidence`] (the
+/// default) and [`NoisyOrConfidence`]; a consumer can implement their own.
+/// Scoring is pairwise — the [`Merging`] reconciler applies it to each merged
+/// pair — so a scoring must be associative for a cluster of three or more to
+/// combine consistently (both shipped scorings are).
 ///
 /// [`Merging`]: super::Merging
-pub trait Strategy<M: Modality>: Send + Sync {
-    /// Stable name of the strategy, recorded in the fusion event.
+pub trait Scoring<M: Modality>: Send + Sync {
+    /// Stable name of the scoring, recorded in the fusion event.
     fn name(&self) -> &'static str;
 
     /// Combine two confidences into the merged score.
@@ -29,9 +29,9 @@ pub trait Strategy<M: Modality>: Send + Sync {
 /// recognizer's existing score, so it assumes nothing about the members being
 /// independent or their scores being comparable probabilities. Associative.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct Max;
+pub struct MaxConfidence;
 
-impl<M: Modality> Strategy<M> for Max {
+impl<M: Modality> Scoring<M> for MaxConfidence {
     fn name(&self) -> &'static str {
         "max"
     }
@@ -54,9 +54,9 @@ impl<M: Modality> Strategy<M> for Max {
 ///
 /// [`CalibrateLayer`]: crate::layer::calibrate::CalibrateLayer
 #[derive(Debug, Clone, Copy, Default)]
-pub struct NoisyOr;
+pub struct NoisyOrConfidence;
 
-impl<M: Modality> Strategy<M> for NoisyOr {
+impl<M: Modality> Scoring<M> for NoisyOrConfidence {
     fn name(&self) -> &'static str {
         "noisy_or"
     }

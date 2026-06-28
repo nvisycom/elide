@@ -1,5 +1,7 @@
 //! [`AesEncrypt`]: reversibly replace an entity with an AES-256-GCM ciphertext.
 
+use std::fmt;
+
 use aes_gcm::aead::{Aead, OsRng};
 use aes_gcm::{AeadCore, Aes256Gcm, KeyInit, Nonce};
 use base64::Engine;
@@ -101,8 +103,8 @@ impl AesEncrypt {
     }
 }
 
-impl std::fmt::Debug for AesEncrypt {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for AesEncrypt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Never print key material.
         f.debug_struct("AesEncrypt").finish_non_exhaustive()
     }

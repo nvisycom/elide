@@ -14,6 +14,7 @@
 //! reduces the partial-leaf offset translation to a single per-leaf walk
 //! of its escape table.
 
+use std::mem;
 use std::ops::Range;
 
 use elide_core::modality::text::{Text, TextData, TextLocation};
@@ -393,7 +394,7 @@ impl<'a> SlotParser<'a> {
     fn flush_passthrough(&mut self) {
         if !self.pending.is_empty() {
             self.slots
-                .push(Slot::Passthrough(std::mem::take(&mut self.pending)));
+                .push(Slot::Passthrough(mem::take(&mut self.pending)));
         }
     }
 

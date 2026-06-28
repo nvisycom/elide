@@ -4,6 +4,8 @@
 //! is replaced by its position in `XYZ` (`X→0`, `Y→1`, `Z→2`),
 //! then the same Mod 23 check used by [`super::nif`] applies.
 
+use std::iter;
+
 use super::nif::LETTERS;
 
 /// Return `true` when `value` is a valid NIE — `X`, `Y`, or `Z`
@@ -31,7 +33,7 @@ pub fn nie(value: &str) -> bool {
     if !letter.is_ascii_uppercase() {
         return false;
     }
-    let body: String = std::iter::once(char::from(b'0' + prefix_pos))
+    let body: String = iter::once(char::from(b'0' + prefix_pos))
         .chain(chars[1..8].iter().copied())
         .collect();
     let number: u64 = body.parse().unwrap_or(0);
