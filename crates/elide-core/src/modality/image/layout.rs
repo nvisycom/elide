@@ -14,6 +14,8 @@
 
 use std::ops::Range;
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -36,6 +38,7 @@ const BLOCK_SEPARATOR: &str = "\n";
 /// [`resolve`]: Self::resolve
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Layout {
     /// Blocks in reading order.
     blocks: Vec<LayoutBlock>,
@@ -48,6 +51,7 @@ pub struct Layout {
 /// broken into per-word boxes.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct LayoutBlock {
     /// Bounding region of the block in image coordinates.
     pub region: ImageLocation,
@@ -62,6 +66,7 @@ pub struct LayoutBlock {
 /// One word within a [`LayoutBlock`], with its own bounding box.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct LayoutWord {
     /// Bounding region of the word in image coordinates.
     pub region: ImageLocation,

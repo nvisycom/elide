@@ -1009,7 +1009,9 @@ dependencies = [
  "hipstr",
  "jiff",
  "oxilangtag",
+ "schemars",
  "serde",
+ "serde_json",
  "type-map",
  "uuid",
 ]

@@ -2,6 +2,8 @@
 
 use std::cmp::Ordering;
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +18,7 @@ use crate::primitive::{BoundingBox, Polygon};
 /// polygons), and an optional page number addresses multi-page documents.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ImageLocation {
     /// Axis-aligned bounding box of the region, in pixel coordinates.
     pub bounding_box: BoundingBox,

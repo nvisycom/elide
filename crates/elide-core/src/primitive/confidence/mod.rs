@@ -9,6 +9,8 @@ mod threshold;
 
 use std::fmt;
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +33,8 @@ pub use self::threshold::ConfidenceThreshold;
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(try_from = "f32", into = "f32"))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(with = "f32"))]
 pub struct Confidence(f32);
 
 impl Confidence {

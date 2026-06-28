@@ -3,6 +3,8 @@
 use std::cmp::Ordering;
 
 use hipstr::HipStr;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +29,7 @@ use crate::modality::{ModalityLocation, Overlap};
 /// [`column_name`]: Self::column_name
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct TabularLocation {
     /// Zero-based row index of the cell.
     pub row_index: u32,
@@ -51,12 +54,14 @@ pub struct TabularLocation {
         feature = "serde",
         serde(default, skip_serializing_if = "Option::is_none")
     )]
+    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub column_name: Option<HipStr<'static>>,
     /// Sheet name within a multi-sheet workbook, when known.
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "Option::is_none")
     )]
+    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub sheet_name: Option<HipStr<'static>>,
 }
 

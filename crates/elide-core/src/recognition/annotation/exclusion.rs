@@ -1,5 +1,7 @@
 //! [`Exclusion<M>`]: a caller-supplied region to leave untouched.
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +26,8 @@ use crate::modality::Modality;
     feature = "serde",
     serde(bound = "M::Location: Serialize + for<'a> Deserialize<'a>")
 )]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(bound = "M::Location: schemars::JsonSchema"))]
 pub struct Exclusion<M: Modality> {
     /// Region in modality-native coordinates.
     pub location: M::Location,

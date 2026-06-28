@@ -19,6 +19,8 @@ use std::fmt;
 use std::future::Future;
 
 use hipstr::HipStr;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -41,10 +43,13 @@ use crate::modality::Modality;
 /// ordering or comparison semantics to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct RecognizerId {
     /// Stable, human-readable recognizer name (e.g. `"us-ssn-pattern"`).
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub name: HipStr<'static>,
     /// Recognizer's version at the time it ran.
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub version: HipStr<'static>,
 }
 

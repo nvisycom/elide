@@ -1,5 +1,7 @@
 //! Axis-aligned bounding box in unit-square `0.0..=1.0` coordinates.
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -21,6 +23,7 @@ use super::{BoundingBox, Dimensions, Point};
 /// [`denormalize`]: Self::denormalize
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct UnitBoundingBox {
     /// Top-left x in `0.0..=1.0` (fraction of image width).
     pub x: f64,
