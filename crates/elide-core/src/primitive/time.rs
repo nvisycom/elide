@@ -5,6 +5,8 @@ use std::cmp::Ordering;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use crate::modality::Overlap;
+
 /// Microseconds per millisecond.
 const MICROS_PER_MILLI: u64 = 1_000;
 /// Microseconds per second.
@@ -111,6 +113,42 @@ impl TimeSpan {
     #[must_use]
     pub fn contains_micros(&self, micros: u64) -> bool {
         self.start_us <= micros && micros < self.end_us
+    }
+
+    /// Whether this span fully contains `other`.
+    #[must_use]
+    pub fn contains(&self, other: &Self) -> bool {
+        self.start_us <= other.start_us && other.end_us <= self.end_us
+    }
+
+    /// How this span sits against `other` — disjoint, one containing the
+    /// other, or crossing with an intersection-over-union measure.
+    #[must_use]
+    pub fn overlap(&self, other: &Self) -> Overlap {
+        if !self.overlaps(other) {
+            return Overlap::Disjoint;
+        }
+        if self.contains(other) {
+            return Overlap::Contains;
+        }
+        if other.contains(self) {
+            return Overlap::ContainedBy;
+        }
+        let inter = self.end_us.min(other.end_us) - self.start_us.max(other.start_us);
+        let union = self.end_us.max(other.end_us) - self.start_us.min(other.start_us);
+        Overlap::Crossing {
+            iou: inter as f32 / union as f32,
+        }
+    }
+
+    /// The smallest interval covering both `self` and `other`:
+    /// `[min(start), max(end))`.
+    #[must_use]
+    pub fn union(&self, other: &Self) -> Self {
+        Self::new(
+            self.start_us.min(other.start_us),
+            self.end_us.max(other.end_us),
+        )
     }
 
     /// Order by length: the longer interval is [`Greater`].

@@ -132,8 +132,8 @@ fn build_text_analyzer() -> Result<Analyzer<Text>> {
         .with_recognizer(patterns)
         .with_recognizer(ner)
         .with_recognizer(llm)
-        .with_layer(FuseLayer::new(MaxConfidence))
-        .with_layer(ResolveLayer::new(HighestConfidence))
+        .with_layer(ReconcileLayer::default())
+        .with_layer(ReconcileLayer::new(DiffLabelOverlap, Structural::default()))
         .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE)))
 }
 

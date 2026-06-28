@@ -6,7 +6,7 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::modality::ModalityLocation;
+use crate::modality::{ModalityLocation, Overlap};
 
 /// Cell-addressed location within tabular content.
 ///
@@ -115,14 +115,14 @@ impl TabularLocation {
 }
 
 impl ModalityLocation for TabularLocation {
-    fn overlaps(&self, other: &Self) -> bool {
+    fn overlap(&self, other: &Self) -> Overlap {
         // Different sheet or cell never overlaps, even at equal offsets.
         if !self.same_cell(other) {
-            return false;
+            return Overlap::Disjoint;
         }
-        // Within the same cell, two whole-cell or partially specified
-        // locations overlap unless their byte ranges are disjoint. A
-        // missing offset means "the whole cell", which overlaps anything.
+        // A missing offset means "the whole cell". Two sub-cell ranges
+        // compare by their bytes; anything involving a whole cell is handled
+        // by the containment rules below.
         match (
             self.start_offset,
             self.end_offset,
@@ -130,10 +130,59 @@ impl ModalityLocation for TabularLocation {
             other.end_offset,
         ) {
             (Some(a_start), Some(a_end), Some(b_start), Some(b_end)) => {
-                a_start < b_end && b_start < a_end
+                if a_start >= b_end || b_start >= a_end {
+                    return Overlap::Disjoint;
+                }
+                if a_start <= b_start && b_end <= a_end {
+                    return Overlap::Contains;
+                }
+                if b_start <= a_start && a_end <= b_end {
+                    return Overlap::ContainedBy;
+                }
+                let inter = a_end.min(b_end) - a_start.max(b_start);
+                let union = a_end.max(b_end) - a_start.min(b_start);
+                Overlap::Crossing {
+                    iou: inter as f32 / union as f32,
+                }
             }
-            _ => true,
+            // `self` is the whole cell: it contains the other (a sub-range,
+            // or — reflexively — another whole cell).
+            (None, _, _, _) | (_, None, _, _) => Overlap::Contains,
+            // `self` is a sub-range and `other` is the whole cell.
+            _ => Overlap::ContainedBy,
         }
+    }
+
+    fn union(&self, other: &Self) -> Option<Self> {
+        // A single redactable span can't cross cells; require the same one.
+        if !self.same_cell(other) {
+            return None;
+        }
+        // Union the intra-cell ranges; a whole-cell side (unset offsets)
+        // absorbs the other, so the union is the whole cell.
+        let range = match (
+            self.start_offset,
+            self.end_offset,
+            other.start_offset,
+            other.end_offset,
+        ) {
+            (Some(a_start), Some(a_end), Some(b_start), Some(b_end)) => {
+                Some((a_start.min(b_start), a_end.max(b_end)))
+            }
+            _ => None,
+        };
+        let mut location = Self::new(self.row_index, self.column_index);
+        if let Some((start, end)) = range {
+            location = location.with_range(start, end);
+        }
+        // Carry the cell's descriptive labels from `self`.
+        if let Some(name) = &self.column_name {
+            location = location.with_column_name(name.clone());
+        }
+        if let Some(sheet) = &self.sheet_name {
+            location = location.with_sheet_name(sheet.clone());
+        }
+        Some(location)
     }
 
     fn span_cmp(&self, other: &Self) -> Ordering {
@@ -217,6 +266,26 @@ mod tests {
         let a = TabularLocation::new(0, 0).with_range(0, 3);
         let b = TabularLocation::new(0, 0).with_range(4, 7);
         assert_eq!(a.position_cmp(&b), Ordering::Less);
+    }
+
+    #[test]
+    fn union_within_a_cell_bounds_the_ranges() {
+        let a = TabularLocation::new(2, 3).with_range(0, 5);
+        let b = TabularLocation::new(2, 3).with_range(4, 9);
+        let u = a.union(&b).expect("same cell");
+        assert_eq!((u.start_offset, u.end_offset), (Some(0), Some(9)));
+        // A whole-cell side absorbs the other into the whole cell.
+        let whole = TabularLocation::new(2, 3);
+        let u2 = whole.union(&a).expect("same cell");
+        assert_eq!((u2.start_offset, u2.end_offset), (None, None));
+    }
+
+    #[test]
+    fn union_across_cells_is_none() {
+        let a = TabularLocation::new(0, 0).with_range(0, 5);
+        let b = TabularLocation::new(0, 1).with_range(0, 5);
+        // A single redactable span can't cross two cells.
+        assert_eq!(a.union(&b), None);
     }
 
     #[test]

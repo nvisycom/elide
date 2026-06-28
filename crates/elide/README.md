@@ -2,18 +2,27 @@
 
 [![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/elide/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/elide/actions/workflows/build.yml)
 
-The umbrella facade: recognition, detection, redaction, and orchestration in
-one crate.
+Composable, multimodal toolkit for detecting and redacting sensitive data.
 
 ## Overview
 
-`elide` is a thin re-export facade over the toolkit's engine crates — the way
-the `burn` crate re-exports `burn-core`, `burn-tensor`, and friends. It runs a
-set of recognizers over content, reconciles their overlapping findings into a
-single set of entities (resolving conflicts, adjusting confidence, and dropping
-weak matches), and applies redaction operators that hide each entity in a chosen
-way, such as masking, replacing, hashing, or encrypting it — and, with the
-`codec` feature, drives that whole flow across multi-modal documents.
+Elide is a Rust toolkit for finding and removing PII and PHI from text, images,
+audio, and tabular data. It runs a set of recognizers over content — regex,
+dictionary, and checksum patterns; NER and LLM/VLM models behind pluggable
+backends — and reconciles their overlapping findings into a single set of
+entities, resolving conflicts, calibrating confidence, and dropping weak
+matches. It then applies redaction operators that hide each entity in a chosen
+way: mask, replace, hash, or encrypt text; blur or black-box image regions;
+silence audio; drop tabular rows and columns. Format codecs read, edit, and
+write whole documents (text, JSON, HTML, DOCX, images, audio, …), and the
+orchestrator drives the flow across the body and embedded parts of a
+multi-modal container.
+
+OCR and speech-to-text lift images and audio onto a text-recognizable surface,
+so the same recognizers apply across every modality through one entity model.
+Recognition, detection, redaction, and orchestration are independent engine
+crates; this crate is the umbrella that gathers them — and `elide-core` —
+behind one import, feature-gated so a consumer pulls in only what they use.
 
 ## Documentation
 

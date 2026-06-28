@@ -63,19 +63,18 @@ pub mod redaction {
 /// Detection: the [`Analyzer`] "find" engine and its deduplication layers.
 ///
 /// The [`Analyzer`] runs the enrichers and recognizers, then reconciles
-/// their findings through the [`Layer`] stages — [`calibrate`], [`fuse`],
-/// [`resolve`], [`filter`] — each reshaping or pruning the working entity
+/// their findings through the [`Layer`] stages — [`calibrate`],
+/// [`reconcile`], [`filter`] — each reshaping or pruning the working entity
 /// set. Re-exported from [`elide_detection`].
 ///
 /// [`Analyzer`]: detection::Analyzer
 /// [`Layer`]: elide_detection::Layer
 /// [`calibrate`]: elide_detection::calibrate
-/// [`fuse`]: elide_detection::fuse
-/// [`resolve`]: elide_detection::resolve
+/// [`reconcile`]: elide_detection::reconcile
 /// [`filter`]: elide_detection::filter
 pub mod detection {
     #[doc(inline)]
-    pub use elide_detection::{Analyzer, Layer, LayerOutput, calibrate, filter, fuse, resolve};
+    pub use elide_detection::{Analyzer, Layer, LayerOutput, calibrate, filter, reconcile};
 }
 
 /// Codec: decode documents into modality payloads, then re-encode them.
@@ -246,8 +245,12 @@ pub mod prelude {
         Analyzer, Layer,
         calibrate::CalibrateLayer,
         filter::FilterLayer,
-        fuse::{FuseLayer, MaxConfidence},
-        resolve::{HighestConfidence, ResolveLayer},
+        reconcile::{
+            ReconcileLayer,
+            group::{DiffLabelOverlap, LabelOverlap},
+            reconciler::{Merging, Structural},
+            scoring::Max,
+        },
     };
     #[cfg(feature = "codec")]
     #[doc(no_inline)]

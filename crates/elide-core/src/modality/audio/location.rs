@@ -6,7 +6,7 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::modality::ModalityLocation;
+use crate::modality::{ModalityLocation, Overlap};
 use crate::primitive::TimeSpan;
 
 /// A [`TimeSpan`] within audio content, with an optional speaker label.
@@ -61,10 +61,27 @@ impl AudioLocation {
 }
 
 impl ModalityLocation for AudioLocation {
-    fn overlaps(&self, other: &Self) -> bool {
-        // Time-span intersection; the speaker label is ignored, so two
+    fn overlap(&self, other: &Self) -> Overlap {
+        // Time-span relationship; the speaker label is ignored, so two
         // speakers talking over each other still overlap.
-        self.span.overlaps(&other.span)
+        self.span.overlap(&other.span)
+    }
+
+    fn union(&self, other: &Self) -> Option<Self> {
+        // The speaker is a diarization label over one shared timeline, not a
+        // coordinate space — overlapping spans always coalesce into one
+        // redactable time span, like [`TimeSpan::union`]. The speaker is
+        // carried only when both agree; a merged span across speakers honestly
+        // carries none.
+        //
+        // [`TimeSpan::union`]: crate::primitive::TimeSpan::union
+        let mut location = Self::new(self.span.union(&other.span));
+        if self.speaker_id == other.speaker_id
+            && let Some(speaker) = &self.speaker_id
+        {
+            location = location.with_speaker_id(speaker.clone());
+        }
+        Some(location)
     }
 
     fn span_cmp(&self, other: &Self) -> Ordering {

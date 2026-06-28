@@ -67,6 +67,33 @@ pub(crate) fn extension_or<'a>(filename: Option<&'a str>, fallback: &'a str) -> 
         .unwrap_or(fallback)
 }
 
+/// The spatial relationship between two locations.
+///
+/// The single answer a [`ModalityLocation`] computes about how it sits
+/// against another — every yes/no the deduplication pipeline branches on
+/// is read off this one value, so the intersection geometry is computed
+/// once rather than re-derived per question.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Overlap {
+    /// No shared extent — the two are separate findings.
+    Disjoint,
+    /// `self` fully contains `other`: every point of `other` lies within
+    /// `self` (a nesting, viewed from the container).
+    Contains,
+    /// `other` fully contains `self`: the mirror of [`Contains`].
+    ///
+    /// [`Contains`]: Overlap::Contains
+    ContainedBy,
+    /// The two overlap without either containing the other, coinciding by
+    /// `iou` (intersection-over-union, `0.0..=1.0`).
+    Crossing {
+        /// How much the two coincide, as intersection-over-union: near `1.0`
+        /// they claim substantially the same span (a true cross-label
+        /// conflict), near `0.0` they merely touch (two distinct findings).
+        iou: f32,
+    },
+}
+
 /// Location within a modality's medium: *where* an entity sits.
 ///
 /// The extension point that makes the model multimodal at the coordinate
@@ -74,24 +101,58 @@ pub(crate) fn extension_or<'a>(filename: Option<&'a str>, fallback: &'a str) -> 
 /// pixel box, an audio crate's time range.
 ///
 /// Beyond being a marker, a location must answer three spatial
-/// questions: whether it [`overlaps`] another (to group co-located
-/// findings and detect cross-label conflicts), how its extent
-/// [`compares`] to another's (to prefer the larger, more specific span
-/// when the deduplication pipeline resolves conflicts), and where it
-/// sits [*positionally*] (so a codec applies redactions in a stable
-/// document order). All three are intrinsic to what a location *is*, so
+/// questions: how it [*overlaps*] another (to group co-located findings,
+/// detect cross-label conflicts, and tell nesting from coincidence), how
+/// its extent [`compares`] to another's (to prefer the larger, more
+/// specific span when the deduplication pipeline resolves conflicts), and
+/// where it sits [*positionally*] (so a codec applies redactions in a
+/// stable document order). All are intrinsic to what a location *is*, so
 /// they live here rather than in a separate trait.
 ///
-/// [`overlaps`]: ModalityLocation::overlaps
+/// [*overlaps*]: ModalityLocation::overlap
 /// [`compares`]: ModalityLocation::span_cmp
 /// [*positionally*]: ModalityLocation::position_cmp
 pub trait ModalityLocation: Clone + fmt::Debug + Send + Sync + 'static {
-    /// Whether this location overlaps `other`.
+    /// How this location sits against `other` — disjoint, one containing
+    /// the other, or crossing with an [`iou`] measure.
     ///
-    /// Range intersection for text/audio, rectangle intersection for images,
-    /// and so on. Reflexive and symmetric. Touching-but-disjoint locations
-    /// (e.g. `0..5` and `5..10`) do *not* overlap.
-    fn overlaps(&self, other: &Self) -> bool;
+    /// The one geometry query: containment ([`Contains`]/[`ContainedBy`])
+    /// models a *nesting* (a postal code inside an address) the pipeline
+    /// keeps as a hierarchy, while a [`Crossing`] `iou` near `1.0` is two
+    /// recognizers claiming the same span — a true conflict — and near
+    /// `0.0` an incidental touch. `a.overlap(a)` is `Contains`.
+    ///
+    /// [`iou`]: Overlap::Crossing::iou
+    /// [`Contains`]: Overlap::Contains
+    /// [`ContainedBy`]: Overlap::ContainedBy
+    /// [`Crossing`]: Overlap::Crossing
+    fn overlap(&self, other: &Self) -> Overlap;
+
+    /// Whether this location overlaps `other` at all.
+    ///
+    /// A convenience over [`overlap`]: anything but [`Disjoint`]. Touching-
+    /// but-disjoint locations (e.g. `0..5` and `5..10`) do not overlap.
+    ///
+    /// [`overlap`]: ModalityLocation::overlap
+    /// [`Disjoint`]: Overlap::Disjoint
+    fn overlaps(&self, other: &Self) -> bool {
+        !matches!(self.overlap(other), Overlap::Disjoint)
+    }
+
+    /// The smallest single location covering both `self` and `other`, or
+    /// `None` when the two cannot coalesce into one redactable span.
+    ///
+    /// The bounding range/rectangle: `[min(start), max(end))` for
+    /// text/audio, the union rectangle for images. Returns `None` when the
+    /// two sit in *different containers* a single span can't cross — a
+    /// different line, cell, sheet, or page — because no one location can
+    /// cover both without spilling over unrelated content.
+    ///
+    /// The anonymizer uses this to collapse overlapping redactions: a set
+    /// of overlapping entities redacts as one span (the union) under the
+    /// safest operator, rather than writing competing operators over the
+    /// same bytes. Symmetric, and `a.union(a) == Some(a)`.
+    fn union(&self, other: &Self) -> Option<Self>;
 
     /// Order this location against `other` by extent.
     ///
@@ -132,42 +193,6 @@ pub trait ModalityReplacement: Clone + fmt::Debug + Send + Sync + 'static {}
 /// Implemented by a modality crate's marker type, binding the medium's
 /// [`Data`], [`Location`], and [`Replacement`] types together at compile
 /// time.
-///
-/// ```
-/// use elide_core::modality::{
-///     Modality, ModalityData, ModalityLocation, ModalityReplacement,
-/// };
-///
-/// #[derive(Clone, Debug)]
-/// struct TextData(String);
-/// impl ModalityData for TextData {}
-///
-/// #[derive(Clone, Debug)]
-/// struct TextSpan { start: usize, end: usize }
-/// impl ModalityLocation for TextSpan {
-///     fn overlaps(&self, o: &Self) -> bool {
-///         self.start < o.end && o.start < self.end
-///     }
-///     fn span_cmp(&self, o: &Self) -> std::cmp::Ordering {
-///         (self.end - self.start).cmp(&(o.end - o.start))
-///     }
-///     fn position_cmp(&self, o: &Self) -> std::cmp::Ordering {
-///         self.start.cmp(&o.start).then(self.end.cmp(&o.end))
-///     }
-/// }
-///
-/// #[derive(Clone, Debug)]
-/// enum TextReplacement { Substituted(String), Removed }
-/// impl ModalityReplacement for TextReplacement {}
-///
-/// struct Text;
-/// impl Modality for Text {
-///     type Data = TextData;
-///     type Location = TextSpan;
-///     type Replacement = TextReplacement;
-///     const NAME: &'static str = "text";
-/// }
-/// ```
 ///
 /// [`Data`]: Modality::Data
 /// [`Location`]: Modality::Location

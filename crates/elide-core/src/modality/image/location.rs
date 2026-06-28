@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::modality::ModalityLocation;
+use crate::modality::{ModalityLocation, Overlap};
 use crate::primitive::{BoundingBox, Polygon};
 
 /// Region within image content.
@@ -70,17 +70,36 @@ impl ImageLocation {
 }
 
 impl ModalityLocation for ImageLocation {
-    fn overlaps(&self, other: &Self) -> bool {
+    fn overlap(&self, other: &Self) -> Overlap {
         // Regions on different pages never overlap, even with identical
-        // coordinates. On the same page, compare exact shapes: a rotated
-        // or quadrilateral polygon is honored when present, so two boxes
-        // whose polygons don't actually intersect aren't false positives.
+        // coordinates.
         if self.page != other.page {
-            return false;
+            return Overlap::Disjoint;
         }
-        // Bounding-box test first as a cheap reject; polygons only narrow
-        // it, so a box miss is a definite miss.
-        self.bounding_box.overlaps(&other.bounding_box) && self.shape().overlaps(&other.shape())
+        // Exact shapes refine the bounding-box test: a rotated or
+        // quadrilateral polygon is honored when present, so two boxes whose
+        // polygons don't actually intersect aren't a false overlap.
+        if !self.shape().overlaps(&other.shape()) {
+            return Overlap::Disjoint;
+        }
+        // Containment and the IoU measure use the bounding box; exact
+        // polygon containment is not modelled.
+        self.bounding_box.overlap(&other.bounding_box)
+    }
+
+    fn union(&self, other: &Self) -> Option<Self> {
+        // A single region can't span two pages; require agreement.
+        if self.page != other.page {
+            return None;
+        }
+        // The union of two boxes is an axis-aligned rectangle, so any
+        // rotated/quadrilateral polygon is dropped — the bounding union is
+        // what gets redacted.
+        let mut location = Self::new(self.bounding_box.union(&other.bounding_box));
+        if let Some(page) = self.page {
+            location = location.with_page(page);
+        }
+        Some(location)
     }
 
     fn span_cmp(&self, other: &Self) -> Ordering {

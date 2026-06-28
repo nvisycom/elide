@@ -13,8 +13,9 @@
 use elide::codec::{DocumentHandle, FormatRegistry, UntypedDocumentHandle};
 use elide::detection::Analyzer;
 use elide::detection::filter::FilterLayer;
-use elide::detection::fuse::{FuseLayer, MaxConfidence};
-use elide::detection::resolve::{HighestConfidence, ResolveLayer};
+use elide::detection::reconcile::ReconcileLayer;
+use elide::detection::reconcile::group::DiffLabelOverlap;
+use elide::detection::reconcile::reconciler::Structural;
 use elide::entity::{Entity, builtins};
 #[cfg(feature = "stt")]
 use elide::modality::audio::Audio;
@@ -78,8 +79,8 @@ pub fn build_analyzer<M: TextRecognizable>() -> Result<Analyzer<M>> {
 
     Ok(Analyzer::new()
         .with_recognizer(patterns)
-        .with_layer(FuseLayer::new(MaxConfidence))
-        .with_layer(ResolveLayer::new(HighestConfidence))
+        .with_layer(ReconcileLayer::default())
+        .with_layer(ReconcileLayer::new(DiffLabelOverlap, Structural::default()))
         .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE)))
 }
 

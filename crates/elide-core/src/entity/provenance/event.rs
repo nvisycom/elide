@@ -7,6 +7,7 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use super::{Attribution, RuleMatch};
+use crate::entity::LabelRef;
 use crate::modality::{Hint, Modality};
 use crate::operator::{LeakProfile, OperatorId};
 use crate::primitive::Confidence;
@@ -99,6 +100,56 @@ impl<M: Modality> Event<M> {
             at: Timestamp::now(),
             reason: HipStr::default(),
             kind: EventKind::Deduplication { strategy },
+        }
+    }
+
+    /// Conflict-resolution event: a competing detection of a *different*
+    /// label over the same span was arbitrated against this entity, which
+    /// won. The loser is recorded here rather than dropped silently.
+    ///
+    /// The winner's confidence is unchanged (resolution does not rescale
+    /// it), so `before == after == confidence`.
+    pub fn conflict(
+        resolved_by: impl Into<HipStr<'static>>,
+        confidence: Confidence,
+        competing_label: LabelRef,
+        competing_confidence: Confidence,
+    ) -> Self {
+        let resolved_by = resolved_by.into();
+        Self {
+            source: resolved_by.clone(),
+            before: Some(confidence),
+            after: confidence,
+            at: Timestamp::now(),
+            reason: HipStr::default(),
+            kind: EventKind::Conflict {
+                competing_label,
+                competing_confidence,
+                resolved_by,
+            },
+        }
+    }
+
+    /// Contested event: a cross-label overlap left unresolved for human
+    /// review. Recorded on each entity of the pair, naming the other.
+    pub fn contested(
+        flagged_by: impl Into<HipStr<'static>>,
+        confidence: Confidence,
+        competing_label: LabelRef,
+        competing_confidence: Confidence,
+    ) -> Self {
+        let flagged_by = flagged_by.into();
+        Self {
+            source: flagged_by.clone(),
+            before: Some(confidence),
+            after: confidence,
+            at: Timestamp::now(),
+            reason: HipStr::default(),
+            kind: EventKind::Contested {
+                competing_label,
+                competing_confidence,
+                flagged_by,
+            },
         }
     }
 
@@ -225,6 +276,27 @@ pub enum EventKind<M: Modality> {
     Deduplication {
         /// Name of the fusion strategy that combined them.
         strategy: HipStr<'static>,
+    },
+    /// A competing detection of a different label over the same span was
+    /// resolved against this (winning) entity.
+    Conflict {
+        /// The label of the detection that lost arbitration.
+        competing_label: LabelRef,
+        /// The loser's confidence at resolution time.
+        competing_confidence: Confidence,
+        /// Name of the conflict policy that chose the winner.
+        resolved_by: HipStr<'static>,
+    },
+    /// A competing detection of a different label over the same span was left
+    /// *unresolved* — both entities survive, flagged for a human to settle.
+    /// Recorded on each entity of the contested pair, naming the other.
+    Contested {
+        /// The label of the competing detection.
+        competing_label: LabelRef,
+        /// The competing detection's confidence.
+        competing_confidence: Confidence,
+        /// Name of the policy that flagged the contest.
+        flagged_by: HipStr<'static>,
     },
     /// The entity's confidence was rescaled by a per-recognizer factor.
     Calibration {
