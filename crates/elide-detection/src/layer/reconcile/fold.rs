@@ -6,6 +6,7 @@ use elide_core::entity::provenance::Event;
 use elide_core::modality::{Modality, ModalityLocation};
 use elide_core::primitive::Confidence;
 
+use super::Cluster;
 use super::reconciler::{Disposition, Reconciler, Winner};
 use crate::layer::LayerOutput;
 
@@ -17,7 +18,7 @@ use crate::layer::LayerOutput;
 pub(super) fn fold<M, R>(
     reconciler: &R,
     mut entities: Vec<Entity<M>>,
-    clusters: Vec<Vec<usize>>,
+    clusters: Vec<Cluster>,
 ) -> LayerOutput<M>
 where
     M: Modality,

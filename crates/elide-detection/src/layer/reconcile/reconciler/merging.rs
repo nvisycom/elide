@@ -4,56 +4,56 @@ use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 
 use super::{Disposition, Reconciler};
-use crate::layer::reconcile::scoring::{Max, NoisyOr, Strategy};
+use crate::layer::reconcile::scoring::{MaxConfidence, NoisyOrConfidence, Scoring};
 
 /// The merging reconciler: combine every grouped pair into one entity.
 ///
 /// The fusion behavior — co-located same-label findings merge over the union
-/// of their spans, with confidence pooled by a [`Strategy`]. Generic over the
-/// scoring strategy `S`, chosen at construction.
+/// of their spans, with confidence combined by a [`Scoring`]. Generic over the
+/// scoring `S`, chosen at construction.
 ///
-/// [`Strategy`]: crate::layer::reconcile::scoring::Strategy
+/// [`Scoring`]: crate::layer::reconcile::scoring::Scoring
 #[derive(Debug, Clone, Copy, Default)]
-pub struct Merging<S = Max> {
+pub struct Merging<S = MaxConfidence> {
     /// How the pair's confidences combine into the merged score.
-    pub strategy: S,
+    pub scoring: S,
 }
 
 impl<S> Merging<S> {
-    /// A merging reconciler scoring with `strategy`.
-    pub fn new(strategy: S) -> Self {
-        Self { strategy }
+    /// A merging reconciler combining confidences with `scoring`.
+    pub fn new(scoring: S) -> Self {
+        Self { scoring }
     }
 }
 
-impl Merging<Max> {
-    /// A merging reconciler scoring by [`Max`] — the most confident finding
-    /// wins (the default).
+impl Merging<MaxConfidence> {
+    /// A merging reconciler scoring by [`MaxConfidence`] — the most confident
+    /// finding wins (the default).
     pub fn max() -> Self {
-        Self::new(Max)
+        Self::new(MaxConfidence)
     }
 }
 
-impl Merging<NoisyOr> {
-    /// A merging reconciler scoring by [`NoisyOr`] — agreeing detectors
-    /// accumulate evidence (`1 − ∏(1 − pᵢ)`).
+impl Merging<NoisyOrConfidence> {
+    /// A merging reconciler scoring by [`NoisyOrConfidence`] — agreeing
+    /// detectors accumulate evidence (`1 − ∏(1 − pᵢ)`).
     pub fn noisy_or() -> Self {
-        Self::new(NoisyOr)
+        Self::new(NoisyOrConfidence)
     }
 }
 
 impl<M, S> Reconciler<M> for Merging<S>
 where
     M: Modality,
-    S: Strategy<M>,
+    S: Scoring<M>,
 {
     fn decide(&self, a: &Entity<M>, b: &Entity<M>) -> Disposition {
         Disposition::Merge {
-            confidence: self.strategy.score(a.confidence, b.confidence),
+            confidence: self.scoring.score(a.confidence, b.confidence),
         }
     }
 
     fn name(&self) -> &'static str {
-        self.strategy.name()
+        self.scoring.name()
     }
 }

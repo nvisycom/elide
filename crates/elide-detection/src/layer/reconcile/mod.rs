@@ -20,6 +20,8 @@ pub mod tiebreaker;
 mod fold;
 mod reconciler;
 
+use std::collections::HashMap;
+
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 
@@ -29,6 +31,12 @@ pub use self::reconciler::{
     Disposition, Exclusive, Merging, OnConflict, Permissive, Reconciler, Structural, Winner,
 };
 use super::{Layer, LayerOutput};
+
+/// One cluster: the indices (into the working `entities`) of entities that
+/// single-linkage-grouped together — e.g. three overlapping `EMAIL`s become
+/// `[2, 5, 7]`. Clustering works on indices so entities aren't moved or cloned
+/// while groups are built and merged.
+pub(super) type Cluster = Vec<usize>;
 
 /// The reconciliation stage: cluster overlapping entities, then dispose of
 /// each pair.
@@ -75,20 +83,20 @@ where
     R: Reconciler<M>,
 {
     fn apply(&self, entities: Vec<Entity<M>>) -> LayerOutput<M> {
-        // Cluster by bucket (O(n)) then single-linkage by `is_grouped` within
-        // each bucket. The bucket bounds the search: entities with different
-        // buckets can never group (the trait law), so a clustered entity only
-        // scans groups sharing its bucket.
-        let mut buckets: Vec<(G::Bucket, Vec<Vec<usize>>)> = Vec::new();
+        // Bucket each entity (O(1) by `bucket`), then single-linkage by
+        // `is_grouped` within its bucket. The bucket bounds the search:
+        // entities with different buckets can never group (the trait law), so a
+        // clustered entity only scans groups sharing its bucket. Bucket
+        // iteration order doesn't affect the result — clusters are independent
+        // and the kept set is rebuilt in entity order.
+        // `Vec<Cluster>`, not `Cluster`: a bucket coarsely groups by label, but
+        // within it overlap clustering can yield *several* disjoint clusters
+        // (two overlapping emails here, two unrelated ones elsewhere) — each a
+        // separate `Cluster`. The bucket is the candidate set; overlap does the
+        // fine grouping.
+        let mut buckets: HashMap<G::Bucket, Vec<Cluster>> = HashMap::new();
         for (index, entity) in entities.iter().enumerate() {
-            let bucket = self.group.bucket(entity);
-            let groups = match buckets.iter_mut().find(|(b, _)| *b == bucket) {
-                Some((_, groups)) => groups,
-                None => {
-                    buckets.push((bucket, Vec::new()));
-                    &mut buckets.last_mut().expect("just pushed").1
-                }
-            };
+            let groups = buckets.entry(self.group.bucket(entity)).or_default();
             // Join every group this entity links to (single-linkage), merging
             // bridged groups; else start a new one.
             let hit: Vec<usize> = (0..groups.len())
@@ -110,8 +118,7 @@ where
             }
         }
 
-        let clusters: Vec<Vec<usize>> =
-            buckets.into_iter().flat_map(|(_, groups)| groups).collect();
+        let clusters: Vec<Cluster> = buckets.into_values().flatten().collect();
         fold(&self.reconciler, entities, clusters)
     }
 }
@@ -123,7 +130,7 @@ mod tests {
     use elide_core::primitive::Confidence;
 
     use super::group::{CrossLabel, SameLabel};
-    use super::scoring::NoisyOr;
+    use super::scoring::NoisyOrConfidence;
     use super::*;
 
     fn entity(label: &str, start: usize, end: usize, conf: f32) -> Entity<Text> {
@@ -157,11 +164,11 @@ mod tests {
         assert_eq!(s.confidence, Confidence::new(0.9).unwrap()); // max
     }
 
-    /// `NoisyOr` accumulates: two agreeing 0.6 witnesses → 0.84.
+    /// `NoisyOrConfidence` accumulates: two agreeing 0.6 witnesses → 0.84.
     #[test]
     fn noisy_confidence_accumulates() {
         let entities = vec![entity("EMAIL", 0, 10, 0.6), entity("EMAIL", 0, 10, 0.6)];
-        let layer = ReconcileLayer::new(SameLabel, Merging::new(NoisyOr));
+        let layer = ReconcileLayer::new(SameLabel, Merging::new(NoisyOrConfidence));
         let out = layer.apply(entities);
         assert_eq!(out.kept.len(), 1);
         assert!((out.kept[0].confidence.get() - 0.84).abs() < 1e-5);
