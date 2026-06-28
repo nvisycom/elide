@@ -19,7 +19,14 @@ fn entity_text_schema() {
     let schema = schema_for!(Entity<Text>);
     let json = serde_json::to_value(&schema).unwrap();
     let text = json.to_string();
-    for field in ["id", "label", "location", "confidence", "language", "provenance"] {
+    for field in [
+        "id",
+        "label",
+        "location",
+        "confidence",
+        "language",
+        "provenance",
+    ] {
         assert!(text.contains(field), "schema should mention `{field}`");
     }
 }

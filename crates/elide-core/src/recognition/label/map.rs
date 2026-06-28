@@ -30,7 +30,10 @@ use crate::entity::{LabelCatalog, LabelRef};
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(transparent))]
 pub struct LabelMap {
-    #[cfg_attr(feature = "schema", schemars(with = "std::collections::HashMap<String, LabelRef>"))]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "std::collections::HashMap<String, LabelRef>")
+    )]
     entries: HashMap<HipStr<'static>, LabelRef>,
 }
 

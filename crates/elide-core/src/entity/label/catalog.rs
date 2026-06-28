@@ -24,7 +24,10 @@ use super::{Label, LabelRef};
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(transparent))]
 pub struct LabelCatalog(
-    #[cfg_attr(feature = "schema", schemars(with = "std::collections::HashMap<String, Label>"))]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "std::collections::HashMap<String, Label>")
+    )]
     HashMap<HipStr<'static>, Label>,
 );
 

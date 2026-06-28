@@ -35,7 +35,10 @@ use crate::primitive::Confidence;
     serde(bound = "M::Location: Serialize + for<'a> Deserialize<'a>")
 )]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(bound = "M::Location: schemars::JsonSchema"))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(bound = "M::Location: schemars::JsonSchema")
+)]
 pub struct Inclusion<M: Modality> {
     /// Region in modality-native coordinates.
     pub location: M::Location,
