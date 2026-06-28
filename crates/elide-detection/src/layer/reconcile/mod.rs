@@ -43,7 +43,9 @@ pub(super) type Cluster = Vec<usize>;
 ///
 /// Generic over the grouping `G` and the reconciler `R`, each chosen at
 /// construction. Same-label fusion and cross-label arbitration are both
-/// expressed here; see the [module docs](self).
+/// expressed here; see the [module docs].
+///
+/// [module docs]: self
 #[derive(Debug, Clone)]
 pub struct ReconcileLayer<G, R> {
     group: G,

@@ -1,6 +1,8 @@
 //! Folding pairwise [`Disposition`]s over a cluster into kept/dropped
 //! entities.
 
+use std::mem;
+
 use elide_core::entity::Entity;
 use elide_core::entity::provenance::Event;
 use elide_core::modality::{Modality, ModalityLocation};
@@ -149,7 +151,7 @@ fn apply_merges<M: Modality>(
         if let Some(union) = entities[base].location.union(&entities[other].location) {
             entities[base].location = union;
         }
-        let other_events = std::mem::take(&mut entities[other].provenance.events);
+        let other_events = mem::take(&mut entities[other].provenance.events);
         entities[base].provenance.events.extend(other_events);
         entities[base].confidence = confidence;
         entities[base]

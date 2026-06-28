@@ -4,7 +4,7 @@
 //!
 //! [`Orchestrator`]: super::Orchestrator
 
-use std::any::Any;
+use std::any::{Any, TypeId};
 use std::future::Future;
 use std::pin::Pin;
 
@@ -73,7 +73,7 @@ pub(super) enum AnalyzeOutcome {
     /// handle, and its boxed `Vec<Entity<M>>` (recoverable as that
     /// modality).
     Accepted {
-        modality: std::any::TypeId,
+        modality: TypeId,
         handle: UntypedDocumentHandle,
         entities: Box<dyn EntityGroup>,
     },
@@ -152,7 +152,7 @@ where
             };
             let entities = ModalityPipeline::analyze(self, &mut handle, scope).await?;
             Ok(AnalyzeOutcome::Accepted {
-                modality: std::any::TypeId::of::<M>(),
+                modality: TypeId::of::<M>(),
                 handle: UntypedDocumentHandle::new(handle),
                 entities: Box::new(entities),
             })

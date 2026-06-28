@@ -2,6 +2,7 @@
 //! with `hound`, mutating the buffer, and re-encoding.
 
 use std::io::Cursor;
+use std::result;
 
 use bytes::Bytes;
 use elide_core::modality::audio::{Audio, AudioData, AudioLocation};
@@ -113,7 +114,7 @@ impl WavHandler {
             .map_err(|e| Error::new(ErrorKind::Validation, format!("WAV read failed: {e}")))?;
         let mut samples: Vec<S> = reader
             .samples::<S>()
-            .collect::<std::result::Result<_, _>>()
+            .collect::<result::Result<_, _>>()
             .map_err(|e| Error::new(ErrorKind::Validation, format!("WAV decode failed: {e}")))?;
 
         // Walk the position-sorted batch in reverse, applying

@@ -1,6 +1,7 @@
 //! Time-interval primitives for stream-addressed media.
 
 use std::cmp::Ordering;
+use std::fmt;
 
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
@@ -171,8 +172,8 @@ impl TimeSpan {
     }
 }
 
-impl std::fmt::Display for TimeSpan {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for TimeSpan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let secs = |us: u64| us as f64 / MICROS_PER_SECOND as f64;
         write!(
             f,

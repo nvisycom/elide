@@ -1,5 +1,7 @@
 //! WAV loader: validates the bytes parse as WAV, then wraps them.
 
+use std::io::Cursor;
+
 use elide_core::modality::audio::Audio;
 use elide_core::{Error, ErrorKind, Result};
 use hound::WavReader;
@@ -20,7 +22,7 @@ impl Loader<Audio> for WavLoader {
         let bytes = content.to_bytes();
         // Validate up front so a malformed clip fails at decode, not at
         // the first redaction.
-        WavReader::new(std::io::Cursor::new(bytes.clone()))
+        WavReader::new(Cursor::new(bytes.clone()))
             .map_err(|e| Error::new(ErrorKind::Validation, format!("not a valid WAV: {e}")))?;
         Ok(WavHandler::new(bytes))
     }

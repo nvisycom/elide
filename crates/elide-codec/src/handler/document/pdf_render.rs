@@ -14,6 +14,7 @@
 //! [`ThreadPool`]: rayon::ThreadPool
 
 use std::cell::RefCell;
+use std::fmt;
 use std::sync::LazyLock;
 
 use elide_core::modality::image::ImageData;
@@ -38,7 +39,7 @@ thread_local! {
 }
 
 /// Build a validation error from a PDFium failure.
-fn pdf_error(context: &str, err: impl std::fmt::Display) -> Error {
+fn pdf_error(context: &str, err: impl fmt::Display) -> Error {
     Error::new(ErrorKind::Validation, format!("{context}: {err}"))
 }
 
