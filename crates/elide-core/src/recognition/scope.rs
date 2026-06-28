@@ -1,6 +1,10 @@
 //! [`Scope`]: the caller-asserted, modality-independent scope of one
 //! analysis.
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::entity::LabelCatalog;
@@ -23,6 +27,8 @@ use crate::primitive::{CountryCode, Language, Languages};
 /// [`RecognizerContext`]: super::RecognizerContext
 /// [`Annotations`]: super::annotation::Annotations
 #[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Scope {
     /// Caller-asserted languages for the analysis. Empty means the caller
     /// asserted none, leaving detection (if an enricher runs) to fill in.

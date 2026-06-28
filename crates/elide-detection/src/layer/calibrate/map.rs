@@ -2,6 +2,11 @@
 
 use std::collections::HashMap;
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 /// Per-recognizer confidence multipliers applied before fusion.
 ///
 /// Maps a recognizer name to a scaling factor, compensating for
@@ -11,6 +16,10 @@ use std::collections::HashMap;
 /// before deduplication compares them. Recognizers absent from the map
 /// are left unchanged (implicit multiplier `1.0`).
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(transparent))]
 pub struct CalibrationMap(HashMap<String, f64>);
 
 impl CalibrationMap {

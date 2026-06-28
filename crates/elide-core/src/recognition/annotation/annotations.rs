@@ -1,6 +1,11 @@
 //! [`Annotations<M>`]: the caller's per-modality inclusion and exclusion
 //! regions for one analysis.
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use crate::modality::Modality;
 use crate::recognition::annotation::{Exclusion, Inclusion};
 
@@ -15,6 +20,16 @@ use crate::recognition::annotation::{Exclusion, Inclusion};
 ///
 /// [`Scope`]: super::super::Scope
 #[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(bound = "M::Location: Serialize + for<'a> Deserialize<'a>")
+)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(bound = "M::Location: schemars::JsonSchema")
+)]
 pub struct Annotations<M: Modality> {
     /// Caller-supplied candidate regions (each a region the caller believes
     /// may hold an entity, with an optional claimed label, name, and
