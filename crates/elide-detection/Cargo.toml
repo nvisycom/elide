@@ -28,6 +28,9 @@ default = []
 ## Derive `serde::{Serialize, Deserialize}` on the re-exported core types.
 serde = ["elide-core/serde"]
 
+## Derive `schemars::JsonSchema` on the re-exported core types.
+schema = ["elide-core/schema"]
+
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }

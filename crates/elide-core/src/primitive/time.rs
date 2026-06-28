@@ -2,6 +2,8 @@
 
 use std::cmp::Ordering;
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +33,7 @@ const MICROS_PER_SECOND: u64 = 1_000_000;
 /// [`as_millis`]: Self::start_millis
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct TimeSpan {
     /// Microseconds from the start of the stream where the interval begins.
     start_us: u64,

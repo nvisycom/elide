@@ -1,5 +1,7 @@
 //! [`LeakProfile`]: what an operator's output leaks about the original.
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +15,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub enum LeakProfile {
     /// The original value is recoverable from the output given the right
     /// metadata (encryption key, token vault, pseudonym map, or the

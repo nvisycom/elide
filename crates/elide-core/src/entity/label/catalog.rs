@@ -3,6 +3,8 @@
 use std::collections::HashMap;
 
 use hipstr::HipStr;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -19,7 +21,15 @@ use super::{Label, LabelRef};
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
-pub struct LabelCatalog(HashMap<HipStr<'static>, Label>);
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(transparent))]
+pub struct LabelCatalog(
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "std::collections::HashMap<String, Label>")
+    )]
+    HashMap<HipStr<'static>, Label>,
+);
 
 impl LabelCatalog {
     /// Empty catalog.

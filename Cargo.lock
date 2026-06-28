@@ -1009,7 +1009,9 @@ dependencies = [
  "hipstr",
  "jiff",
  "oxilangtag",
+ "schemars",
  "serde",
+ "serde_json",
  "type-map",
  "uuid",
 ]
@@ -1079,6 +1081,7 @@ dependencies = [
  "derive_builder",
  "elide-core",
  "hipstr",
+ "schemars",
  "serde",
  "tokio",
  "uuid",

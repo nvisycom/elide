@@ -1,5 +1,7 @@
 //! [`Inclusion<M>`]: a caller-supplied region that may hold an entity.
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +33,11 @@ use crate::primitive::Confidence;
 #[cfg_attr(
     feature = "serde",
     serde(bound = "M::Location: Serialize + for<'a> Deserialize<'a>")
+)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(bound = "M::Location: schemars::JsonSchema")
 )]
 pub struct Inclusion<M: Modality> {
     /// Region in modality-native coordinates.

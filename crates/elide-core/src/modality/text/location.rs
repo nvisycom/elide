@@ -2,6 +2,8 @@
 
 use std::cmp::Ordering;
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +16,7 @@ use crate::modality::{ModalityLocation, Overlap};
 /// comparison.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct TextLocation {
     /// Byte offset where the range starts.
     pub start: usize,

@@ -21,7 +21,9 @@ use celes::Country;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
-pub struct CountryCode(Country);
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(transparent))]
+pub struct CountryCode(#[cfg_attr(feature = "schema", schemars(with = "String"))] Country);
 
 impl CountryCode {
     /// Look up a country by its ISO 3166-1 alpha-2 code (e.g. `"US"`).

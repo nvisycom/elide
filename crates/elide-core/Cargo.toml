@@ -47,12 +47,18 @@ tabular = []
 ## and `oxilangtag` carry their serde impls unconditionally.)
 serde = ["dep:serde", "hipstr/serde", "jiff/serde", "uuid/serde", "bytes?/serde"]
 
+## Derive `schemars::JsonSchema` on the domain types, for emitting JSON
+## Schemas of the serialized model. Implies `serde`: the schema describes
+## the serde representation, and the derive reads serde attributes.
+schema = ["serde", "dep:schemars"]
+
 ## Test utilities (fixture helpers, builders, …).
 test-utils = []
 
 [dependencies]
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }
+schemars = { workspace = true, features = [], optional = true }
 
 # Derive macros & error handling
 derive_builder = { workspace = true, features = [] }
@@ -65,3 +71,6 @@ oxilangtag = { workspace = true, features = [] }
 celes = { workspace = true, features = [] }
 type-map = { workspace = true, features = [] }
 bytes = { workspace = true, features = [], optional = true }
+
+[dev-dependencies]
+serde_json = { workspace = true, features = [] }

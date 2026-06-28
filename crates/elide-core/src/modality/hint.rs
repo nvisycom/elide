@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +32,11 @@ use super::Modality;
     feature = "serde",
     serde(bound = "M::Location: Serialize + for<'a> Deserialize<'a>, \
                    M::Data: Serialize + for<'a> Deserialize<'a>")
+)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(bound = "M::Location: schemars::JsonSchema, M::Data: schemars::JsonSchema")
 )]
 pub struct Hint<M: Modality> {
     /// Where the hint text sits in the source (the header cell, the key).

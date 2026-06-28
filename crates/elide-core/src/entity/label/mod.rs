@@ -12,6 +12,8 @@ mod catalog;
 mod reference;
 
 use hipstr::HipStr;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -45,9 +47,13 @@ pub use self::reference::LabelRef;
 /// [`tags`]: Label::tags
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Label {
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     name: HipStr<'static>,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     description: Option<HipStr<'static>>,
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<String>"))]
     tags: Vec<HipStr<'static>>,
 }
 

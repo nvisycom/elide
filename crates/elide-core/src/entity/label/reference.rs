@@ -1,6 +1,8 @@
 //! [`LabelRef`] lightweight reference.
 
 use hipstr::HipStr;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +17,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
-pub struct LabelRef(HipStr<'static>);
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(transparent))]
+pub struct LabelRef(#[cfg_attr(feature = "schema", schemars(with = "String"))] HipStr<'static>);
 
 impl LabelRef {
     /// Reference a label by name.

@@ -1,5 +1,7 @@
 //! [`AudioReplacement`]: what an audio operator produces.
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -9,6 +11,7 @@ use crate::modality::ModalityReplacement;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub enum Waveform {
     /// Pure sine. The broadcast censor-beep convention: audible but smooth,
     /// with no harmonics to alias on resampling.
@@ -22,6 +25,7 @@ pub enum Waveform {
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub enum AudioReplacement {
     /// Replace the range with silence, preserving its duration so the
     /// timeline does not shift.

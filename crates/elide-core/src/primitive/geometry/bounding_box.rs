@@ -2,6 +2,8 @@
 
 use std::ops::Sub;
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +18,7 @@ use crate::modality::Overlap;
 /// model only requires the two scalars.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Point {
     /// Horizontal coordinate.
     pub x: f64,
@@ -65,6 +68,7 @@ impl Sub for Point {
 /// [`max`]: Self::max
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct BoundingBox {
     /// Minimum corner (top-left, conventionally).
     pub min: Point,

@@ -1,5 +1,7 @@
 //! Image or canvas dimensions in integer pixels.
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +16,7 @@ use serde::{Deserialize, Serialize};
 /// [`UnitBoundingBox::denormalize`]: super::UnitBoundingBox::denormalize
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Dimensions {
     /// Width in pixels.
     pub width: u32,

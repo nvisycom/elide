@@ -13,6 +13,8 @@
 use std::ops::Range;
 
 use hipstr::HipStr;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -36,6 +38,7 @@ const SEGMENT_SEPARATOR: &str = " ";
 /// [`resolve`]: Self::resolve
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Transcription {
     /// Segments in stream order.
     segments: Vec<TranscriptSegment>,
@@ -59,6 +62,7 @@ pub struct Transcription {
 /// a tighter span than the whole segment).
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct TranscriptSegment {
     /// Time span the segment covers within the stream.
     pub span: TimeSpan,
@@ -69,12 +73,14 @@ pub struct TranscriptSegment {
         feature = "serde",
         serde(default, skip_serializing_if = "Option::is_none")
     )]
+    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub speaker_id: Option<HipStr<'static>>,
     /// Detected language for this segment, when the backend reported one.
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "Option::is_none")
     )]
+    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub language: Option<LanguageTag>,
     /// Backend confidence in the segment, when reported.
     #[cfg_attr(
@@ -134,6 +140,7 @@ impl TranscriptSegment {
 /// One word within a [`TranscriptSegment`], with its own time span.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct TranscriptWord {
     /// Time span the word covers within the stream.
     pub span: TimeSpan,

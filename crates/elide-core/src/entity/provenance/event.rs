@@ -3,6 +3,8 @@
 
 use hipstr::HipStr;
 use jiff::Timestamp;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -34,9 +36,15 @@ use crate::primitive::Confidence;
     serde(bound = "M::Location: Serialize + for<'a> Deserialize<'a>, \
                    M::Data: Serialize + for<'a> Deserialize<'a>")
 )]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(bound = "M::Location: schemars::JsonSchema, M::Data: schemars::JsonSchema")
+)]
 pub struct Event<M: Modality> {
     /// Who produced this event: a recognizer name, a deduplication strategy,
     /// an operator, or whatever acted.
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub source: HipStr<'static>,
     /// Confidence before this event, if there was a prior value. `None` on
     /// the first (birth) event.
@@ -44,8 +52,10 @@ pub struct Event<M: Modality> {
     /// Confidence after this event.
     pub after: Confidence,
     /// When the event happened (UTC).
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub at: Timestamp,
     /// Free-text explanation of what the event did and why.
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub reason: HipStr<'static>,
     /// Kind of event, with its event-specific detail.
     pub kind: EventKind<M>,
@@ -256,6 +266,11 @@ impl<M: Modality> Event<M> {
                  M::Data: Serialize + for<'a> Deserialize<'a>"
     )
 )]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(bound = "M::Location: schemars::JsonSchema, M::Data: schemars::JsonSchema")
+)]
 #[non_exhaustive]
 pub enum EventKind<M: Modality> {
     /// A pattern or dictionary recognizer matched here.
@@ -275,6 +290,7 @@ pub enum EventKind<M: Modality> {
     /// Several detections were fused into one entity.
     Deduplication {
         /// Name of the fusion strategy that combined them.
+        #[cfg_attr(feature = "schema", schemars(with = "String"))]
         strategy: HipStr<'static>,
     },
     /// A competing detection of a different label over the same span was
@@ -285,6 +301,7 @@ pub enum EventKind<M: Modality> {
         /// The loser's confidence at resolution time.
         competing_confidence: Confidence,
         /// Name of the conflict policy that chose the winner.
+        #[cfg_attr(feature = "schema", schemars(with = "String"))]
         resolved_by: HipStr<'static>,
     },
     /// A competing detection of a different label over the same span was left
@@ -296,6 +313,7 @@ pub enum EventKind<M: Modality> {
         /// The competing detection's confidence.
         competing_confidence: Confidence,
         /// Name of the policy that flagged the contest.
+        #[cfg_attr(feature = "schema", schemars(with = "String"))]
         flagged_by: HipStr<'static>,
     },
     /// The entity's confidence was rescaled by a per-recognizer factor.
@@ -306,6 +324,7 @@ pub enum EventKind<M: Modality> {
     /// A context keyword near the entity lifted its confidence.
     Refinement {
         /// Keyword that fired the boost.
+        #[cfg_attr(feature = "schema", schemars(with = "String"))]
         keyword: HipStr<'static>,
         /// The located [`Hint`] the keyword fired from, when the match came
         /// from an out-of-band hint (a column header, a key) rather than
@@ -330,6 +349,7 @@ pub enum EventKind<M: Modality> {
         /// How much the output leaks about the original.
         leak_profile: LeakProfile,
         /// Identifier of the key needed to reverse it, if reversible.
+        #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
         key_id: Option<HipStr<'static>>,
         /// Which selection rule chose this operator — the automatic "why"
         /// (matched a label, a tag, a predicate, or the fallback).
@@ -343,12 +363,16 @@ pub enum EventKind<M: Modality> {
 /// Detail of a pattern/dictionary recognition.
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct PatternEvent {
     /// Name of the pattern that matched (e.g. `"ssn"`, `"email"`).
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub name: HipStr<'static>,
     /// Literal regex source that matched, when exposed.
+    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub regex: Option<HipStr<'static>>,
     /// Name of the validator that confirmed the match (e.g. `"luhn"`).
+    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub validator: Option<HipStr<'static>>,
     /// Whether contextual analysis (keyword co-occurrence) adjusted the
     /// score for this match.
@@ -358,10 +382,13 @@ pub struct PatternEvent {
 /// Detail of a model/NER recognition.
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ModelEvent {
     /// Model name (e.g. `"spacy-en-core-web-lg"`, `"gpt-4"`).
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub name: HipStr<'static>,
     /// Model version string, when known.
+    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub version: Option<HipStr<'static>>,
     /// Whether contextual analysis adjusted the score for this match.
     pub contextual: bool,

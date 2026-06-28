@@ -13,6 +13,8 @@ mod reference;
 
 use std::ops::Range;
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -54,6 +56,11 @@ use crate::primitive::{Confidence, LanguageTag};
     serde(bound = "M::Location: Serialize + for<'a> Deserialize<'a>, \
                    M::Data: Serialize + for<'a> Deserialize<'a>")
 )]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(bound = "M::Location: schemars::JsonSchema, M::Data: schemars::JsonSchema")
+)]
 pub struct Entity<M: Modality> {
     /// Stable unique identity for this entity (time-ordered UUIDv7), minted
     /// when the entity is assembled.
@@ -72,6 +79,7 @@ pub struct Entity<M: Modality> {
     pub coref: Option<EntityCoRef>,
     /// The language of this entity's surrounding text, when a recognizer
     /// resolved one. `None` when unknown or language-agnostic.
+    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub language: Option<LanguageTag>,
     /// Byte range of the match in the *recognized text* it was found in (the
     /// OCR layout text, the audio transcript, or the text payload itself) —

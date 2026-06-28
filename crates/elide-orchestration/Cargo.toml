@@ -35,6 +35,17 @@ serde = [
     "elide-codec/serde",
 ]
 
+## Derive `schemars::JsonSchema` on the re-exported core types. `Report`
+## itself serializes through `erased-serde` (a type-erased entity view) and
+## has no derivable schema; this forwards schema support to the engine
+## crates so a consumer can describe the entities a report carries.
+schema = [
+    "elide-core/schema",
+    "elide-detection/schema",
+    "elide-redaction/schema",
+    "elide-codec/schema",
+]
+
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }
