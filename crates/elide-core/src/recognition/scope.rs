@@ -28,6 +28,7 @@ use crate::primitive::{CountryCode, Language, Languages};
 /// [`Annotations`]: super::annotation::Annotations
 #[derive(Debug, Default, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Scope {
     /// Caller-asserted languages for the analysis. Empty means the caller
