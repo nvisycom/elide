@@ -36,10 +36,12 @@ pub struct Annotations<M: Modality> {
     /// confidence). Recognizers that adjudicate inclusions (typically
     /// LLM-based) fold these into detection to confirm, relocate, or reject
     /// each one; the rest ignore them.
+    #[cfg_attr(feature = "serde", serde(default))]
     pub inclusions: Vec<Inclusion<M>>,
     /// Caller-supplied protected regions. The analyzer drops any entity
     /// whose location overlaps an exclusion, regardless of which recognizer
     /// found it.
+    #[cfg_attr(feature = "serde", serde(default))]
     pub exclusions: Vec<Exclusion<M>>,
 }
 
