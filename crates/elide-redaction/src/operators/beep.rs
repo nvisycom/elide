@@ -63,6 +63,7 @@ impl Default for Beep {
     }
 }
 
+#[async_trait::async_trait]
 impl Operator<Audio> for Beep {
     fn id(&self) -> OperatorId {
         OperatorId::new("beep", "1.0.0")

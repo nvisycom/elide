@@ -27,6 +27,7 @@ impl TextSource {
     }
 }
 
+#[async_trait::async_trait]
 impl DataReader<Text> for TextSource {
     async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
         Ok(self.0.get(location.start..location.end).map(TextData::new))

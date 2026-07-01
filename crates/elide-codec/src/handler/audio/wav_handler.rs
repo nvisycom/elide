@@ -47,6 +47,7 @@ impl WavHandler {
     }
 }
 
+#[async_trait::async_trait]
 impl Handler<Audio> for WavHandler {
     fn format(&self) -> FormatId {
         FORMAT_ID.clone()
@@ -70,6 +71,7 @@ impl Handler<Audio> for WavHandler {
     }
 }
 
+#[async_trait::async_trait]
 impl DataReader<Audio> for WavHandler {
     async fn read_at(&self, _location: &AudioLocation) -> Result<Option<AudioData>> {
         // The whole clip is the addressable unit; a partial time range
@@ -78,6 +80,7 @@ impl DataReader<Audio> for WavHandler {
     }
 }
 
+#[async_trait::async_trait]
 impl DataWriter<Audio> for WavHandler {
     async fn write_at(&mut self, mut redactions: Redactions<Audio>) -> Result<()> {
         if redactions.is_empty() {

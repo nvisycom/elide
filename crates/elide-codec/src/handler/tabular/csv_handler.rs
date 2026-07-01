@@ -197,6 +197,7 @@ impl CsvHandler {
     }
 }
 
+#[async_trait::async_trait]
 impl Handler<Tabular> for CsvHandler {
     fn format(&self) -> FormatId {
         FORMAT_ID.clone()
@@ -266,6 +267,7 @@ impl Handler<Tabular> for CsvHandler {
     }
 }
 
+#[async_trait::async_trait]
 impl DataReader<Tabular> for CsvHandler {
     async fn read_at(&self, location: &TabularLocation) -> Result<Option<TextData>> {
         let Some(cell) = self.cell_at(location.row_index, location.column_index) else {
@@ -279,6 +281,7 @@ impl DataReader<Tabular> for CsvHandler {
     }
 }
 
+#[async_trait::async_trait]
 impl DataWriter<Tabular> for CsvHandler {
     async fn write_at(&mut self, mut redactions: Redactions<Tabular>) -> Result<()> {
         redactions.sort_by_position();

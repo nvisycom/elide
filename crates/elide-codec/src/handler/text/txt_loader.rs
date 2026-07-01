@@ -13,6 +13,7 @@ use crate::content::ContentData;
 #[derive(Debug)]
 pub(crate) struct TxtLoader;
 
+#[async_trait::async_trait]
 impl Loader<Text> for TxtLoader {
     type Handler = TxtHandler;
 

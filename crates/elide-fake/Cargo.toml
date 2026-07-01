@@ -26,6 +26,9 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Internal crates
 elide-core = { workspace = true, features = ["tabular"] }
 
+# Async
+async-trait = { workspace = true, features = [] }
+
 # Primitive datatypes
 uuid = { workspace = true, features = ["v4"] }
 

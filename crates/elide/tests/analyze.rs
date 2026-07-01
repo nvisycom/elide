@@ -36,6 +36,7 @@ fn detected(recognizer: &str, label: &str, loc: (usize, usize), conf: f32) -> En
 /// A recognizer that just replays a fixed entity list.
 struct Fixed(Vec<Entity<Text>>);
 
+#[async_trait::async_trait]
 impl Recognizer<Text> for Fixed {
     fn id(&self) -> RecognizerId {
         RecognizerId::new("fixed", "1.0.0")

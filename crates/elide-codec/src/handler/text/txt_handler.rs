@@ -44,6 +44,7 @@ pub(crate) struct TxtHandler {
     cursor: usize,
 }
 
+#[async_trait::async_trait]
 impl Handler<Text> for TxtHandler {
     fn format(&self) -> FormatId {
         FORMAT_ID.clone()
@@ -95,6 +96,7 @@ impl Handler<Text> for TxtHandler {
     }
 }
 
+#[async_trait::async_trait]
 impl DataReader<Text> for TxtHandler {
     async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
         let Some(i) = self.line_for(location.start) else {
@@ -111,6 +113,7 @@ impl DataReader<Text> for TxtHandler {
     }
 }
 
+#[async_trait::async_trait]
 impl DataWriter<Text> for TxtHandler {
     async fn write_at(&mut self, mut redactions: Redactions<Text>) -> Result<()> {
         // Apply right-to-left so each edit's length delta doesn't

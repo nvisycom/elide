@@ -50,6 +50,9 @@ fake = ["dep:elide-fake", "tabular"]
 elide-core = { workspace = true, features = [] }
 elide-fake = { workspace = true, features = [], optional = true }
 
+# Async
+async-trait = { workspace = true, features = [] }
+
 # Primitive datatypes
 bytes = { workspace = true, features = [] }
 uuid = { workspace = true, features = ["v4"] }

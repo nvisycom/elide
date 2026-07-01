@@ -12,8 +12,6 @@ use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::Modality;
 use elide_core::operator::ReversibleOperator;
 
-use super::dyn_reversible::DynReversible;
-
 /// How a rule decides whether it applies to an entity.
 enum Matcher {
     /// Exact label-name match.
@@ -34,7 +32,7 @@ impl Matcher {
 /// One rule: a matcher and the reversible operator to run when it accepts.
 struct Rule<M: Modality> {
     matcher: Matcher,
-    operator: Arc<dyn DynReversible<M>>,
+    operator: Arc<dyn ReversibleOperator<M>>,
 }
 
 /// Ordered list of reversal rules.
@@ -73,7 +71,7 @@ impl<M: Modality> ReversibleRegistry<M> {
 
     /// Resolve the operator for `entity`: the first rule whose matcher
     /// accepts it, or `None` when no rule matches.
-    pub(crate) fn resolve(&self, entity: &Entity<M>) -> Option<&Arc<dyn DynReversible<M>>> {
+    pub(crate) fn resolve(&self, entity: &Entity<M>) -> Option<&Arc<dyn ReversibleOperator<M>>> {
         self.rules
             .iter()
             .find(|rule| rule.matcher.matches(entity))

@@ -40,6 +40,7 @@ impl XlsxHandler {
     }
 }
 
+#[async_trait::async_trait]
 impl Handler<Tabular> for XlsxHandler {
     fn format(&self) -> FormatId {
         FORMAT_ID.clone()
@@ -60,12 +61,14 @@ impl Handler<Tabular> for XlsxHandler {
     // the identity default suffices.
 }
 
+#[async_trait::async_trait]
 impl DataReader<Tabular> for XlsxHandler {
     async fn read_at(&self, _location: &TabularLocation) -> Result<Option<TextData>> {
         Ok(None)
     }
 }
 
+#[async_trait::async_trait]
 impl DataWriter<Tabular> for XlsxHandler {
     async fn write_at(&mut self, _redactions: Redactions<Tabular>) -> Result<()> {
         Ok(())

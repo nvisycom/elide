@@ -19,6 +19,7 @@ use crate::handler::markup::xml_build_items;
 #[derive(Debug)]
 pub(crate) struct DocxLoader;
 
+#[async_trait::async_trait]
 impl Loader<Text> for DocxLoader {
     type Handler = DocxHandler;
 

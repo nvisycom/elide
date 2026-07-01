@@ -94,6 +94,7 @@ impl PdfHandler {
     }
 }
 
+#[async_trait::async_trait]
 impl Handler<Text> for PdfHandler {
     fn format(&self) -> FormatId {
         FORMAT_ID.clone()
@@ -118,12 +119,14 @@ impl Handler<Text> for PdfHandler {
     // the identity default suffices.
 }
 
+#[async_trait::async_trait]
 impl DataReader<Text> for PdfHandler {
     async fn read_at(&self, _location: &TextLocation) -> Result<Option<TextData>> {
         Ok(None)
     }
 }
 
+#[async_trait::async_trait]
 impl DataWriter<Text> for PdfHandler {
     async fn write_at(&mut self, _redactions: Redactions<Text>) -> Result<()> {
         Ok(())

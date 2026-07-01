@@ -46,6 +46,7 @@ pub(crate) struct HtmlLoader {
     pub style_policy: ScriptPolicy,
 }
 
+#[async_trait::async_trait]
 impl Loader<Text> for HtmlLoader {
     type Handler = HtmlHandler;
 

@@ -114,6 +114,7 @@ impl<F> Fake<F> {
     }
 }
 
+#[async_trait::async_trait]
 impl<F> Operator<Text> for Fake<F>
 where
     F: Operator<Text>,
@@ -143,6 +144,7 @@ where
     }
 }
 
+#[async_trait::async_trait]
 impl<F> Operator<Tabular> for Fake<F>
 where
     F: Operator<Tabular>,

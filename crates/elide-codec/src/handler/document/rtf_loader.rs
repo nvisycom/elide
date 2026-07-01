@@ -14,6 +14,7 @@ use crate::content::ContentData;
 #[derive(Debug)]
 pub(crate) struct RtfLoader;
 
+#[async_trait::async_trait]
 impl Loader<Text> for RtfLoader {
     type Handler = RtfHandler;
 

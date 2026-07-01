@@ -68,6 +68,7 @@ impl Replace {
     }
 }
 
+#[async_trait::async_trait]
 impl Operator<Text> for Replace {
     fn id(&self) -> OperatorId {
         Replace::id()
@@ -85,6 +86,7 @@ impl Operator<Text> for Replace {
 }
 
 #[cfg(feature = "tabular")]
+#[async_trait::async_trait]
 impl Operator<Tabular> for Replace {
     fn id(&self) -> OperatorId {
         Replace::id()

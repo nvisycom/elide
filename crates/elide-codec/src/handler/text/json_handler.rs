@@ -96,6 +96,7 @@ pub(crate) struct JsonHandler {
     cursor: usize,
 }
 
+#[async_trait::async_trait]
 impl Handler<Text> for JsonHandler {
     fn format(&self) -> FormatId {
         FORMAT_ID.clone()
@@ -148,6 +149,7 @@ impl Handler<Text> for JsonHandler {
     }
 }
 
+#[async_trait::async_trait]
 impl DataReader<Text> for JsonHandler {
     async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
         Ok(self
@@ -156,6 +158,7 @@ impl DataReader<Text> for JsonHandler {
     }
 }
 
+#[async_trait::async_trait]
 impl DataWriter<Text> for JsonHandler {
     async fn write_at(&mut self, redactions: Redactions<Text>) -> Result<()> {
         // Resolve every redaction against the **pre-mutation** slot

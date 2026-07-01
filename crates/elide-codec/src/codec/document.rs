@@ -28,8 +28,7 @@ use elide_core::entity::Entity;
 use elide_core::modality::{Chunk, DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::operator::Redactions;
 
-use super::FormatId;
-use super::loader::DynHandler;
+use super::{FormatId, Handler};
 use crate::codec::Container;
 use crate::content::ContentData;
 
@@ -226,14 +225,13 @@ impl fmt::Debug for UntypedDocumentHandle {
 /// [`DataWriter`]: elide_core::modality::DataWriter
 pub struct DocumentHandle<M: Modality> {
     format_id: FormatId,
-    handler: Box<dyn DynHandler<M>>,
+    handler: Box<dyn Handler<M>>,
 }
 
 impl<M: Modality> DocumentHandle<M> {
     /// Wrap a handler and a format id into a typed handle. Used by codec
-    /// loaders; the handler is boxed through the crate-private
-    /// object-safe bridge.
-    pub(crate) fn new(format_id: FormatId, handler: Box<dyn DynHandler<M>>) -> Self {
+    /// loaders.
+    pub(crate) fn new(format_id: FormatId, handler: Box<dyn Handler<M>>) -> Self {
         Self { format_id, handler }
     }
 
@@ -272,18 +270,21 @@ impl<M: Modality> fmt::Debug for DocumentHandle<M> {
     }
 }
 
+#[async_trait::async_trait]
 impl<M: Modality> DataReader<M> for DocumentHandle<M> {
     async fn read_at(&self, location: &M::Location) -> Result<Option<M::Data>> {
         self.handler.read_at(location).await
     }
 }
 
+#[async_trait::async_trait]
 impl<M: Modality> DataWriter<M> for DocumentHandle<M> {
     async fn write_at(&mut self, redactions: Redactions<M>) -> Result<()> {
         self.handler.write_at(redactions).await
     }
 }
 
+#[async_trait::async_trait]
 impl<M: Modality> StreamDataReader<M> for DocumentHandle<M> {
     async fn read_next(&mut self) -> Result<Option<Chunk<M>>> {
         self.handler.read_next().await

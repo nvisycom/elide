@@ -42,6 +42,7 @@ impl OcrEnricher {
     }
 }
 
+#[async_trait::async_trait]
 impl Enricher<Image> for OcrEnricher {
     async fn enrich(&self, data: &ImageData, ctx: &mut RecognizerContext<'_, Image>) -> Result<()> {
         // Already OCR'd (e.g. a second enricher pass): leave it.

@@ -157,6 +157,7 @@ impl<E: Encoder> ExtractHandler<E> {
     }
 }
 
+#[async_trait::async_trait]
 impl<E: Encoder> Handler<Text> for ExtractHandler<E> {
     fn format(&self) -> FormatId {
         self.format_id.clone()
@@ -210,6 +211,7 @@ impl<E: Encoder> Handler<Text> for ExtractHandler<E> {
     }
 }
 
+#[async_trait::async_trait]
 impl<E: Encoder> DataReader<Text> for ExtractHandler<E> {
     async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
         let Some(i) = self.item_for(location.start) else {
@@ -229,6 +231,7 @@ impl<E: Encoder> DataReader<Text> for ExtractHandler<E> {
     }
 }
 
+#[async_trait::async_trait]
 impl<E: Encoder> DataWriter<Text> for ExtractHandler<E> {
     async fn write_at(&mut self, mut redactions: Redactions<Text>) -> Result<()> {
         // Apply right-to-left so each edit's length delta doesn't

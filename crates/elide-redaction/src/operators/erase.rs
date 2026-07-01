@@ -28,6 +28,7 @@ impl Erase {
     }
 }
 
+#[async_trait::async_trait]
 impl Operator<Text> for Erase {
     fn id(&self) -> OperatorId {
         Erase::id()
@@ -47,6 +48,7 @@ impl Operator<Text> for Erase {
 }
 
 #[cfg(feature = "tabular")]
+#[async_trait::async_trait]
 impl Operator<Tabular> for Erase {
     fn id(&self) -> OperatorId {
         Erase::id()
@@ -67,6 +69,7 @@ impl Operator<Tabular> for Erase {
 }
 
 #[cfg(feature = "audio")]
+#[async_trait::async_trait]
 impl Operator<Audio> for Erase {
     fn id(&self) -> OperatorId {
         Erase::id()
@@ -86,6 +89,7 @@ impl Operator<Audio> for Erase {
 }
 
 #[cfg(feature = "image")]
+#[async_trait::async_trait]
 impl Operator<Image> for Erase {
     fn id(&self) -> OperatorId {
         Erase::id()

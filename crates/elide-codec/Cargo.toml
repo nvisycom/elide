@@ -124,6 +124,9 @@ internal_document = []
 # Internal crates
 elide-core = { workspace = true, features = [] }
 
+# Async traits
+async-trait = { workspace = true, features = [] }
+
 # (De)serialization
 serde_json = { workspace = true, features = [], optional = true }
 csv = { workspace = true, features = [], optional = true }

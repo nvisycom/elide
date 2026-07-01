@@ -9,9 +9,6 @@
 //! [`Layer`]: crate::layer::Layer
 //! [`analyze`]: Analyzer::analyze
 
-mod dyn_enricher;
-mod dyn_recognizer;
-
 use std::sync::Arc;
 
 use elide_core::Result;
@@ -21,8 +18,6 @@ use elide_core::recognition::annotation::{Annotations, Exclusion};
 use elide_core::recognition::{Enricher, Recognizer, RecognizerContext, Scope};
 use futures::future;
 
-use self::dyn_enricher::DynEnricher;
-use self::dyn_recognizer::DynRecognizer;
 use crate::layer::Layer;
 
 /// The find engine: enrichers, recognizers, and deduplication, in one
@@ -51,8 +46,8 @@ use crate::layer::Layer;
 /// [`with_layer`]: Analyzer::with_layer
 /// [`analyze`]: Analyzer::analyze
 pub struct Analyzer<M: Modality> {
-    enrichers: Vec<Arc<dyn DynEnricher<M>>>,
-    recognizers: Vec<Arc<dyn DynRecognizer<M>>>,
+    enrichers: Vec<Arc<dyn Enricher<M>>>,
+    recognizers: Vec<Arc<dyn Recognizer<M>>>,
     layers: Vec<Arc<dyn Layer<M>>>,
 }
 
@@ -108,7 +103,7 @@ impl<M: Modality> Analyzer<M> {
         ctx: &mut RecognizerContext<'_, M>,
     ) -> Result<Vec<Entity<M>>> {
         for enricher in &self.enrichers {
-            enricher.enrich_boxed(&data, ctx).await?;
+            enricher.enrich(&data, ctx).await?;
         }
         let mut entities = self.recognize(&data, ctx).await?;
         ctx.stamp_languages(&mut entities);
@@ -268,7 +263,7 @@ impl<M: Modality> Analyzer<M> {
         let futures = self
             .recognizers
             .iter()
-            .map(|recognizer| recognizer.recognize_boxed(data, ctx));
+            .map(|recognizer| recognizer.recognize(data, ctx));
         let mut entities = Vec::new();
         for found in future::join_all(futures).await {
             entities.extend(found?);

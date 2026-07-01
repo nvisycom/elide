@@ -174,6 +174,7 @@ impl NerRecognizerBuilder {
     }
 }
 
+#[async_trait::async_trait]
 impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
     fn id(&self) -> RecognizerId {
         RecognizerId::new(self.name.clone(), env!("CARGO_PKG_VERSION"))

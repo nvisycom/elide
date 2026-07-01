@@ -275,6 +275,7 @@ fn operator_trait_shape() {
     /// trait shape and the pure `Replacement` model.
     struct Replace;
 
+    #[async_trait::async_trait]
     impl Operator<Text> for Replace {
         fn id(&self) -> OperatorId {
             OperatorId::new("replace", "1.0.0")

@@ -14,6 +14,7 @@ use crate::content::ContentData;
 #[derive(Debug)]
 pub(crate) struct XlsxLoader;
 
+#[async_trait::async_trait]
 impl Loader<Tabular> for XlsxLoader {
     type Handler = XlsxHandler;
 

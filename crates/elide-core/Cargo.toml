@@ -56,6 +56,9 @@ schema = ["serde", "dep:schemars"]
 test-utils = []
 
 [dependencies]
+# Async
+async-trait = { workspace = true, features = [] }
+
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }
 schemars = { workspace = true, features = [], optional = true }

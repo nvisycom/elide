@@ -15,8 +15,6 @@ use elide_core::modality::Modality;
 use elide_core::operator::Operator;
 use hipstr::HipStr;
 
-use super::dyn_operator::DynOperator;
-
 /// Boxed predicate over an entity, used by [`Matcher::Predicate`].
 ///
 /// Receives the [`LabelCatalog`] (empty when none was set) so a predicate
@@ -27,7 +25,7 @@ pub(crate) type Predicate<M> = Box<dyn Fn(&Entity<M>, &LabelCatalog) -> bool + S
 /// What [`OperatorRegistry::resolve`] produces for a matched entity.
 pub(crate) struct Resolved<'a, M: Modality> {
     /// The operator the matched rule binds.
-    pub(crate) operator: &'a Arc<dyn DynOperator<M>>,
+    pub(crate) operator: &'a Arc<dyn Operator<M>>,
     /// A summary of *which* rule matched (the automatic "why").
     pub(crate) matched_by: RuleMatch,
     /// The matched rule's author-supplied attribution (the policy "why").
@@ -77,7 +75,7 @@ impl<M: Modality> Matcher<M> {
 /// an optional author-supplied [`Attribution`] (the policy "why").
 struct Rule<M: Modality> {
     matcher: Matcher<M>,
-    operator: Arc<dyn DynOperator<M>>,
+    operator: Arc<dyn Operator<M>>,
     attribution: Option<Attribution>,
 }
 

@@ -44,6 +44,7 @@ impl SttEnricher {
     }
 }
 
+#[async_trait::async_trait]
 impl Enricher<Audio> for SttEnricher {
     async fn enrich(&self, data: &AudioData, ctx: &mut RecognizerContext<'_, Audio>) -> Result<()> {
         // Already transcribed (e.g. a second enricher pass): leave it.

@@ -12,7 +12,6 @@
 //! [`plan`]: Anonymizer::plan
 //! [`Replacement`]: elide_core::modality::Modality::Replacement
 
-mod dyn_operator;
 mod registry;
 
 use std::sync::Arc;
@@ -250,7 +249,7 @@ impl<M: Modality> Anonymizer<M> {
                 tracing::debug!(modality = M::NAME, "location read no data; skipping");
                 continue;
             };
-            let replacement = operator.anonymize_boxed(&entities[winner], &data).await?;
+            let replacement = operator.anonymize(&entities[winner], &data).await?;
 
             // Record the redaction on every member, so each entity's
             // provenance reflects that this operator hid it.
@@ -356,6 +355,7 @@ mod tests {
     /// In-memory text reader: slices the backing string by byte range.
     struct StrReader(String);
 
+    #[async_trait::async_trait]
     impl DataReader<Text> for StrReader {
         async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
             Ok(self.0.get(location.start..location.end).map(TextData::new))

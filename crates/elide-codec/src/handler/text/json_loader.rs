@@ -14,6 +14,7 @@ use crate::content::ContentData;
 #[derive(Debug)]
 pub(crate) struct JsonLoader;
 
+#[async_trait::async_trait]
 impl Loader<Text> for JsonLoader {
     type Handler = JsonHandler;
 

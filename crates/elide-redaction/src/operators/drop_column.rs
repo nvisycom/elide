@@ -18,6 +18,7 @@ use elide_core::operator::{LeakProfile, Operator, OperatorId};
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DropColumn;
 
+#[async_trait::async_trait]
 impl Operator<Tabular> for DropColumn {
     fn id(&self) -> OperatorId {
         OperatorId::new("drop_column", "1.0.0")

@@ -85,6 +85,7 @@ impl Mask {
     }
 }
 
+#[async_trait::async_trait]
 impl Operator<Text> for Mask {
     fn id(&self) -> OperatorId {
         Mask::id()
@@ -101,6 +102,7 @@ impl Operator<Text> for Mask {
 }
 
 #[cfg(feature = "tabular")]
+#[async_trait::async_trait]
 impl Operator<Tabular> for Mask {
     fn id(&self) -> OperatorId {
         Mask::id()

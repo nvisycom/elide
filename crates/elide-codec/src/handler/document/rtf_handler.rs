@@ -47,6 +47,7 @@ impl RtfHandler {
     }
 }
 
+#[async_trait::async_trait]
 impl Handler<Text> for RtfHandler {
     fn format(&self) -> FormatId {
         FORMAT_ID.clone()
@@ -67,12 +68,14 @@ impl Handler<Text> for RtfHandler {
     // the identity default suffices.
 }
 
+#[async_trait::async_trait]
 impl DataReader<Text> for RtfHandler {
     async fn read_at(&self, _location: &TextLocation) -> Result<Option<TextData>> {
         Ok(None)
     }
 }
 
+#[async_trait::async_trait]
 impl DataWriter<Text> for RtfHandler {
     async fn write_at(&mut self, _redactions: Redactions<Text>) -> Result<()> {
         Ok(())

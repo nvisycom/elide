@@ -110,6 +110,7 @@ impl fmt::Debug for AesEncrypt {
     }
 }
 
+#[async_trait::async_trait]
 impl Operator<Text> for AesEncrypt {
     fn id(&self) -> OperatorId {
         Self::id()
@@ -127,6 +128,7 @@ impl Operator<Text> for AesEncrypt {
     }
 }
 
+#[async_trait::async_trait]
 impl ReversibleOperator<Text> for AesEncrypt {
     async fn deanonymize(
         &self,
@@ -138,6 +140,7 @@ impl ReversibleOperator<Text> for AesEncrypt {
 }
 
 #[cfg(feature = "tabular")]
+#[async_trait::async_trait]
 impl Operator<Tabular> for AesEncrypt {
     fn id(&self) -> OperatorId {
         Self::id()
@@ -157,6 +160,7 @@ impl Operator<Tabular> for AesEncrypt {
 }
 
 #[cfg(feature = "tabular")]
+#[async_trait::async_trait]
 impl ReversibleOperator<Tabular> for AesEncrypt {
     async fn deanonymize(
         &self,

@@ -16,12 +16,14 @@ use elide_core::primitive::Confidence;
 /// batch of substitutions, right-to-left so earlier offsets stay valid.
 struct TextDoc(String);
 
+#[async_trait::async_trait]
 impl DataReader<Text> for TextDoc {
     async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
         Ok(self.0.get(location.start..location.end).map(TextData::new))
     }
 }
 
+#[async_trait::async_trait]
 impl DataWriter<Text> for TextDoc {
     async fn write_at(&mut self, mut redactions: Redactions<Text>) -> Result<()> {
         redactions.sort_by_position();
