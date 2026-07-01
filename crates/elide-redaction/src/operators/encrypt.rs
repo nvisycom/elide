@@ -2,8 +2,8 @@
 
 use std::fmt;
 
-use aes_gcm::aead::{Aead, OsRng};
-use aes_gcm::{AeadCore, Aes256Gcm, KeyInit, Nonce};
+use aes_gcm::aead::{Aead, Generate, Nonce};
+use aes_gcm::{Aes256Gcm, KeyInit};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use elide_core::entity::Entity;
@@ -59,7 +59,7 @@ impl AesEncrypt {
 
     /// Encrypt `plaintext` to a base64 `nonce ++ ciphertext` blob.
     fn encrypt_str(&self, plaintext: &str) -> Result<String> {
-        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+        let nonce = Nonce::<Aes256Gcm>::generate();
         let ciphertext = self
             .cipher()
             .encrypt(&nonce, plaintext.as_bytes())
@@ -89,8 +89,12 @@ impl AesEncrypt {
             return Ok(None);
         }
         let (nonce, ciphertext) = blob.split_at(NONCE_LEN);
+        let Ok(nonce) = Nonce::<Aes256Gcm>::try_from(nonce) else {
+            // Length was checked above, so this is unreachable in practice.
+            return Ok(None);
+        };
 
-        match self.cipher().decrypt(Nonce::from_slice(nonce), ciphertext) {
+        match self.cipher().decrypt(&nonce, ciphertext) {
             // Authentication failed or wrong key: not recoverable here.
             Err(_) => Ok(None),
             Ok(plaintext) => {

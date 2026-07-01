@@ -84,7 +84,7 @@ sha2 = { version = "0.11", features = [] }
 hex = { version = "0.4", features = [] }
 
 # Cryptography
-aes-gcm = { version = "0.10", features = [] }
+aes-gcm = { version = "0.11", features = [] }
 
 # Async runtime & parallelism
 tokio = { version = "1.50", features = [] }
@@ -112,7 +112,7 @@ phonenumber = { version = "0.3", default-features = false }
 # Markup parsing
 scraper = { version = "0.27", features = [] }
 ego-tree = { version = "0.11", features = [] }
-quick-xml = { version = "0.40", features = [] }
+quick-xml = { version = "0.41", features = [] }
 
 # Compression
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
