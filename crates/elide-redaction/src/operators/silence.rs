@@ -16,6 +16,7 @@ use elide_core::operator::{LeakProfile, Operator, OperatorId};
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Silence;
 
+#[async_trait::async_trait]
 impl Operator<Audio> for Silence {
     fn id(&self) -> OperatorId {
         OperatorId::new("silence", "1.0.0")

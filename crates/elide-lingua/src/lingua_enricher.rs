@@ -69,6 +69,7 @@ impl Default for LinguaEnricher {
     }
 }
 
+#[async_trait::async_trait]
 impl Enricher<Text> for LinguaEnricher {
     async fn enrich(&self, data: &TextData, ctx: &mut RecognizerContext<'_, Text>) -> Result<()> {
         // A caller-asserted language is authoritative; skip detection.

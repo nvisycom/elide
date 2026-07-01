@@ -26,6 +26,9 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Internal crates
 elide-core = { workspace = true, features = ["serde"] }
 
+# Async
+async-trait = { workspace = true, features = [] }
+
 # Natural language processing
 lingua = { workspace = true, features = [] }
 

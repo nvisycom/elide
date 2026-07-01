@@ -7,9 +7,9 @@
 //!   the inherited read/write and lift). The streamed unit is
 //!   [`elide_core::modality::Chunk`].
 //! - `loader`: *how raw bytes become a handle*. [`Loader<M>`]
-//!   (per-modality decoder). The registry-side erasure machinery
-//!   (`DynHandler`, `ErasedLoader`, `erase`) is crate-internal and wired
-//!   through [`Format::new`] / [`Format::decode`].
+//!   (per-modality decoder). The registry-side modality-erasure machinery
+//!   (`ErasedLoader`, `erase`) is crate-internal and wired through
+//!   [`Format::new`] / [`Format::decode`].
 //! - `document`: *the decoded handle*. [`DocumentHandle<M>`] (typed) and
 //!   [`UntypedDocumentHandle`] (modality-erased, recovered by `TypeId`).
 //! - `registry`: *the lookup engine*. [`FormatRegistry`] indexes

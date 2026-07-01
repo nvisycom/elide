@@ -16,7 +16,6 @@ mod label;
 mod scope;
 
 use std::fmt;
-use std::future::Future;
 
 use hipstr::HipStr;
 #[cfg(feature = "schema")]
@@ -88,6 +87,7 @@ impl fmt::Display for RecognizerId {
 ///
 /// [`Entity`]: crate::entity::Entity
 /// [`Event`]: crate::entity::provenance::Event
+#[async_trait::async_trait]
 pub trait Recognizer<M>: Send + Sync
 where
     M: Modality,
@@ -97,9 +97,9 @@ where
 
     /// Inspect `data` in the given context and return the recognized
     /// entities, in modality-local coordinates.
-    fn recognize(
+    async fn recognize(
         &self,
         data: &M::Data,
         ctx: &RecognizerContext<'_, M>,
-    ) -> impl Future<Output = Result<Vec<Entity<M>>>> + Send;
+    ) -> Result<Vec<Entity<M>>>;
 }

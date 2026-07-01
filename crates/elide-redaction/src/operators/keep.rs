@@ -34,6 +34,7 @@ impl Keep {
     }
 }
 
+#[async_trait::async_trait]
 impl Operator<Text> for Keep {
     fn id(&self) -> OperatorId {
         Keep::id()
@@ -49,6 +50,7 @@ impl Operator<Text> for Keep {
 }
 
 #[cfg(feature = "tabular")]
+#[async_trait::async_trait]
 impl Operator<Tabular> for Keep {
     fn id(&self) -> OperatorId {
         Keep::id()
@@ -68,6 +70,7 @@ impl Operator<Tabular> for Keep {
 }
 
 #[cfg(feature = "image")]
+#[async_trait::async_trait]
 impl Operator<Image> for Keep {
     fn id(&self) -> OperatorId {
         Keep::id()
@@ -87,6 +90,7 @@ impl Operator<Image> for Keep {
 }
 
 #[cfg(feature = "audio")]
+#[async_trait::async_trait]
 impl Operator<Audio> for Keep {
     fn id(&self) -> OperatorId {
         Keep::id()

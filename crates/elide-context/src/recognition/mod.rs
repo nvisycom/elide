@@ -54,6 +54,7 @@ impl<R> Enhanced<R> {
     }
 }
 
+#[async_trait::async_trait]
 impl<M, R> Recognizer<M> for Enhanced<R>
 where
     M: TextRecognizable,

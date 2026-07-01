@@ -27,6 +27,9 @@ rustdoc-args = ["--cfg", "docsrs"]
 elide-context = { workspace = true, features = [] }
 elide-core = { workspace = true, features = ["serde"] }
 
+# Async
+async-trait = { workspace = true, features = [] }
+
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
 toml = { workspace = true, features = ["parse"] }

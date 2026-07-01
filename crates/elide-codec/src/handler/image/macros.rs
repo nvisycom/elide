@@ -81,6 +81,7 @@ macro_rules! impl_image_handler {
             }
         }
 
+        #[::async_trait::async_trait]
         impl crate::Handler<::elide_core::modality::image::Image> for $handler {
             fn format(&self) -> crate::FormatId {
                 FORMAT_ID.clone()
@@ -121,6 +122,7 @@ macro_rules! impl_image_handler {
             }
         }
 
+        #[::async_trait::async_trait]
         impl ::elide_core::modality::DataReader<::elide_core::modality::image::Image> for $handler {
             async fn read_at(
                 &self,
@@ -146,6 +148,7 @@ macro_rules! impl_image_handler {
             }
         }
 
+        #[::async_trait::async_trait]
         impl ::elide_core::modality::DataWriter<::elide_core::modality::image::Image> for $handler {
             async fn write_at(
                 &mut self,
@@ -167,6 +170,7 @@ macro_rules! impl_image_handler {
         #[derive(Debug)]
         pub(crate) struct $loader;
 
+        #[::async_trait::async_trait]
         impl crate::Loader<::elide_core::modality::image::Image> for $loader {
             type Handler = $handler;
 

@@ -33,6 +33,7 @@ use crate::handler::extract::{ExtractHandler, ExtractedItem};
 #[derive(Debug)]
 pub(crate) struct XmlLoader;
 
+#[async_trait::async_trait]
 impl Loader<Text> for XmlLoader {
     type Handler = XmlHandler;
 

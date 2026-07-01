@@ -1,8 +1,6 @@
 //! Reading traits: [`DataReader`] (random access at a location) and
 //! [`StreamDataReader`] (sequential streaming + lift).
 
-use std::future::Future;
-
 use super::{Chunk, Modality};
 use crate::entity::Entity;
 use crate::error::Result;
@@ -30,13 +28,11 @@ use crate::error::Result;
 /// [`Location`]: Modality::Location
 /// [`read_at`]: DataReader::read_at
 /// [`DataWriter`]: super::DataWriter
+#[async_trait::async_trait]
 pub trait DataReader<M: Modality>: Send + Sync {
     /// Data at `location`: `Ok(Some(data))` on a hit, `Ok(None)` when the
     /// location addresses nothing, `Err` when the read fails.
-    fn read_at(
-        &self,
-        location: &M::Location,
-    ) -> impl Future<Output = Result<Option<M::Data>>> + Send;
+    async fn read_at(&self, location: &M::Location) -> Result<Option<M::Data>>;
 }
 
 /// Streams a source as [`Chunk`]s and lifts locations to source coordinates.
@@ -62,10 +58,11 @@ pub trait DataReader<M: Modality>: Send + Sync {
 /// [`Chunk`]: super::Chunk
 /// [`read_next`]: StreamDataReader::read_next
 /// [`lift`]: StreamDataReader::lift
+#[async_trait::async_trait]
 pub trait StreamDataReader<M: Modality>: Send {
     /// Advance the cursor and yield the next [`Chunk`], or `Ok(None)` at
     /// end-of-stream. Propagates the source's decode error.
-    fn read_next(&mut self) -> impl Future<Output = Result<Option<Chunk<M>>>> + Send;
+    async fn read_next(&mut self) -> Result<Option<Chunk<M>>>;
 
     /// Map `entity`, whose location addresses `chunk`'s decoded payload,
     /// to a source-coordinate entity.

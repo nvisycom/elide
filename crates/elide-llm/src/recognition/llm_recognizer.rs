@@ -137,6 +137,7 @@ impl<M: LlmModality> LlmRecognizerBuilder<M> {
     }
 }
 
+#[async_trait::async_trait]
 impl<M: LlmModality> Recognizer<M> for LlmRecognizer<M> {
     fn id(&self) -> RecognizerId {
         self.recognizer_id()

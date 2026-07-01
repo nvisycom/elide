@@ -13,7 +13,6 @@
 //! [`Text`]: elide_core::modality::text::Text
 //! [`TextReplacement`]: elide_core::modality::text::TextReplacement
 
-mod dyn_reversible;
 mod registry;
 
 use elide_core::Result;
@@ -105,7 +104,7 @@ where
             // The document holds the replacement text as data; lift it back
             // to the modality's replacement so the operator can reverse it.
             let current = M::Replacement::from(TextReplacement::substituted(data.as_str()));
-            let Some(original) = operator.deanonymize_boxed(entity, &current).await? else {
+            let Some(original) = operator.deanonymize(entity, &current).await? else {
                 tracing::debug!(
                     modality = M::NAME,
                     label = entity.label.as_str(),

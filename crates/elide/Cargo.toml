@@ -134,6 +134,10 @@ elide-codec = { workspace = true, features = [], optional = true }
 elide-orchestration = { workspace = true, features = [], optional = true }
 elide-redaction = { workspace = true, features = [] }
 
+# Async — re-exported as `elide::async_trait` so consumers implementing the
+# async traits (Recognizer, Operator, …) need no direct dep.
+async-trait = { workspace = true, features = [] }
+
 [dev-dependencies]
 # (De)serialization
 serde_json = { workspace = true, features = [] }

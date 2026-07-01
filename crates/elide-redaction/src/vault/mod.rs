@@ -15,8 +15,6 @@
 
 mod memory;
 
-use std::future::Future;
-
 use elide_core::Result;
 
 pub use self::memory::InMemoryVault;
@@ -41,10 +39,11 @@ pub use self::memory::InMemoryVault;
 ///
 /// [`Operator`]: elide_core::operator::Operator
 /// [`get_or_try_insert_with`]: Vault::get_or_try_insert_with
+#[async_trait::async_trait]
 pub trait Vault<K, V: Clone + Send + Sync>: Send + Sync {
     /// Look up the value previously stored under `key`. Returns
     /// `Ok(None)` for unknown keys; reserve `Err` for backend failures.
-    fn get(&self, key: &K) -> impl Future<Output = Result<Option<V>>> + Send;
+    async fn get(&self, key: &K) -> Result<Option<V>>;
 
     /// Return the value under `key`, or compute one with `init`, store it,
     /// and return that. The value already present always wins, so repeated
@@ -55,7 +54,7 @@ pub trait Vault<K, V: Clone + Send + Sync>: Send + Sync {
     /// lock to make the check-and-insert atomic, so it must not itself
     /// touch the vault or otherwise block. An [`Err`] from `init`
     /// propagates and stores nothing.
-    fn get_or_try_insert_with<F>(&self, key: K, init: F) -> impl Future<Output = Result<V>> + Send
+    async fn get_or_try_insert_with<F>(&self, key: K, init: F) -> Result<V>
     where
         F: FnOnce() -> Result<V> + Send;
 }

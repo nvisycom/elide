@@ -37,6 +37,7 @@ impl Default for Blackbox {
     }
 }
 
+#[async_trait::async_trait]
 impl Operator<Image> for Blackbox {
     fn id(&self) -> OperatorId {
         OperatorId::new("blackbox", "1.0.0")

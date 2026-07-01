@@ -26,6 +26,9 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Internal crates
 elide-core = { workspace = true, features = [] }
 
+# Async
+async-trait = { workspace = true, features = [] }
+
 # Primitive datatypes
 hipstr = { workspace = true, features = [] }
 

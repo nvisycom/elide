@@ -28,6 +28,7 @@ impl Default for CsvLoader {
     }
 }
 
+#[async_trait::async_trait]
 impl Loader<Tabular> for CsvLoader {
     type Handler = CsvHandler;
 

@@ -947,6 +947,7 @@ checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 name = "elide"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "bytes",
  "elide-codec",
  "elide-context",
@@ -969,6 +970,7 @@ dependencies = [
 name = "elide-codec"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "bytes",
  "csv",
  "ego-tree",
@@ -994,6 +996,7 @@ dependencies = [
 name = "elide-context"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "elide-core",
  "hipstr",
  "unicode-segmentation",
@@ -1003,6 +1006,7 @@ dependencies = [
 name = "elide-core"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "bytes",
  "celes",
  "derive_builder",
@@ -1020,6 +1024,7 @@ dependencies = [
 name = "elide-detection"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "elide-core",
  "futures",
  "schemars",
@@ -1039,6 +1044,7 @@ dependencies = [
 name = "elide-fake"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "elide",
  "elide-core",
  "fake",
@@ -1050,6 +1056,7 @@ dependencies = [
 name = "elide-lingua"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "elide-core",
  "lingua",
  "tokio",
@@ -1118,6 +1125,7 @@ name = "elide-pattern"
 version = "0.1.0"
 dependencies = [
  "aho-corasick",
+ "async-trait",
  "bs58",
  "csv",
  "derive_builder",
@@ -1137,6 +1145,7 @@ name = "elide-redaction"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
+ "async-trait",
  "base64",
  "bytes",
  "elide-core",

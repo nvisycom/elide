@@ -37,6 +37,7 @@ impl<K, V> InMemoryVault<K, V> {
     }
 }
 
+#[async_trait::async_trait]
 impl<K, V> Vault<K, V> for InMemoryVault<K, V>
 where
     K: Eq + Hash + Send + Sync,

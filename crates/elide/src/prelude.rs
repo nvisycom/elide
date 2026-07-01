@@ -25,6 +25,8 @@
 //! [`operators`]: crate::redaction::operators
 //! [`recognition`]: crate::recognition
 
+#[doc(no_inline)]
+pub use async_trait::async_trait;
 #[cfg(feature = "codec")]
 #[doc(no_inline)]
 pub use elide_codec::FormatRegistry;

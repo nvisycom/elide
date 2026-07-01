@@ -21,8 +21,6 @@
 //! [`read_next`]: Handler::read_next
 //! [`lift`]: Handler::lift
 
-use std::future::Future;
-
 use elide_core::Result;
 use elide_core::modality::{Chunk, DataReader, DataWriter, Modality};
 
@@ -42,10 +40,8 @@ use crate::content::ContentData;
 /// The handler owns the streaming cursor; concurrent iteration of the
 /// same handle is not supported (only one `&mut self`).
 ///
-/// Async methods return `impl Future` (RPITIT). The registry stores
-/// handlers behind a crate-private object-safe bridge that boxes those
-/// futures, so the public surface stays allocation-free for direct
-/// callers.
+/// The one async method (`read_next`) is boxed via `#[async_trait]`, so a
+/// handler stores directly behind `Box<dyn Handler<M>>`.
 ///
 /// [`DataReader`]: elide_core::modality::DataReader
 /// [`DataWriter`]: elide_core::modality::DataWriter
@@ -53,6 +49,7 @@ use crate::content::ContentData;
 /// [`encode`]: Handler::encode
 /// [`read_next`]: Handler::read_next
 /// [`lift`]: Handler::lift
+#[async_trait::async_trait]
 pub trait Handler<M: Modality>: DataReader<M> + DataWriter<M> + Send + Sync + 'static {
     /// Stable id of the format this handler represents (e.g.
     /// `"elide.text.txt"`). Cheap to clone.
@@ -68,7 +65,7 @@ pub trait Handler<M: Modality>: DataReader<M> + DataWriter<M> + Send + Sync + 's
 
     /// Advance the cursor and yield the next chunk, or `None` at
     /// end-of-stream.
-    fn read_next(&mut self) -> impl Future<Output = Result<Option<Chunk<M>>>> + Send;
+    async fn read_next(&mut self) -> Result<Option<Chunk<M>>>;
 
     /// Promote a `local` location, expressed in `chunk`'s own coordinate
     /// system, to a source-global [`M::Location`].

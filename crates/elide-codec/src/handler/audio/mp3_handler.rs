@@ -43,6 +43,7 @@ impl Mp3Handler {
     }
 }
 
+#[async_trait::async_trait]
 impl Handler<Audio> for Mp3Handler {
     fn format(&self) -> FormatId {
         FORMAT_ID.clone()
@@ -66,12 +67,14 @@ impl Handler<Audio> for Mp3Handler {
     }
 }
 
+#[async_trait::async_trait]
 impl DataReader<Audio> for Mp3Handler {
     async fn read_at(&self, _location: &AudioLocation) -> Result<Option<AudioData>> {
         Ok(Some(AudioData::new(self.bytes.clone())))
     }
 }
 
+#[async_trait::async_trait]
 impl DataWriter<Audio> for Mp3Handler {
     async fn write_at(&mut self, mut redactions: Redactions<Audio>) -> Result<()> {
         if redactions.is_empty() {

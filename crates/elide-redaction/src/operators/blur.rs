@@ -34,6 +34,7 @@ impl Default for Blur {
     }
 }
 
+#[async_trait::async_trait]
 impl Operator<Image> for Blur {
     fn id(&self) -> OperatorId {
         OperatorId::new("blur", "1.0.0")

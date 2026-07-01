@@ -14,6 +14,7 @@ use crate::content::ContentData;
 #[derive(Debug)]
 pub(crate) struct Mp3Loader;
 
+#[async_trait::async_trait]
 impl Loader<Audio> for Mp3Loader {
     type Handler = Mp3Handler;
 

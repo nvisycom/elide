@@ -21,8 +21,6 @@ mod leak_profile;
 mod operator_id;
 mod redactions;
 
-use std::future::Future;
-
 pub use self::leak_profile::LeakProfile;
 pub use self::operator_id::OperatorId;
 pub use self::redactions::Redactions;
@@ -51,6 +49,7 @@ use crate::modality::Modality;
 ///
 /// [`Data`]: Modality::Data
 /// [`Replacement`]: Modality::Replacement
+#[async_trait::async_trait]
 pub trait Operator<M: Modality>: Send + Sync {
     /// This operator's identity (name + version).
     fn id(&self) -> OperatorId;
@@ -61,11 +60,7 @@ pub trait Operator<M: Modality>: Send + Sync {
 
     /// Compute the replacement for `entity`, reading its underlying `data`.
     /// Pure: produces the instruction, does not apply it.
-    fn anonymize(
-        &self,
-        entity: &Entity<M>,
-        data: &M::Data,
-    ) -> impl Future<Output = Result<M::Replacement>> + Send;
+    async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement>;
 }
 
 /// Reversible redaction operator: recovers the original data it replaced.
@@ -86,12 +81,13 @@ pub trait Operator<M: Modality>: Send + Sync {
 /// [`id`]: Operator::id
 /// [`Replacement`]: Modality::Replacement
 /// [`Data`]: Modality::Data
+#[async_trait::async_trait]
 pub trait ReversibleOperator<M: Modality>: Operator<M> {
     /// Recover the original data for `entity` from its `replacement`, or
     /// `None` if it cannot be reversed.
-    fn deanonymize(
+    async fn deanonymize(
         &self,
         entity: &Entity<M>,
         replacement: &M::Replacement,
-    ) -> impl Future<Output = Result<Option<M::Data>>> + Send;
+    ) -> Result<Option<M::Data>>;
 }

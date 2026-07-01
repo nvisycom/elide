@@ -1,7 +1,5 @@
 //! [`DataWriter`] trait: applying a batch of replacements.
 
-use std::future::Future;
-
 use super::Modality;
 use crate::error::Result;
 use crate::operator::Redactions;
@@ -24,7 +22,8 @@ use crate::operator::Redactions;
 /// reverse). The first failure aborts the batch.
 ///
 /// [`DataReader`]: super::DataReader
+#[async_trait::async_trait]
 pub trait DataWriter<M: Modality>: Send + Sync {
     /// Apply every `(location, replacement)` pair in `redactions`.
-    fn write_at(&mut self, redactions: Redactions<M>) -> impl Future<Output = Result<()>> + Send;
+    async fn write_at(&mut self, redactions: Redactions<M>) -> Result<()>;
 }

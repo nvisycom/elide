@@ -45,6 +45,7 @@ impl PdfLoader {
     }
 }
 
+#[async_trait::async_trait]
 impl Loader<Text> for PdfLoader {
     type Handler = PdfHandler;
 

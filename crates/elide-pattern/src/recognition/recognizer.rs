@@ -447,6 +447,7 @@ impl PatternRecognizer {
     }
 }
 
+#[async_trait::async_trait]
 impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
     fn id(&self) -> RecognizerId {
         RecognizerId::new("elide-pattern", env!("CARGO_PKG_VERSION"))

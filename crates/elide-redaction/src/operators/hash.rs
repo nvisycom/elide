@@ -82,6 +82,7 @@ impl Sha2Hash {
     }
 }
 
+#[async_trait::async_trait]
 impl Operator<Text> for Sha2Hash {
     fn id(&self) -> OperatorId {
         Sha2Hash::id()
@@ -99,6 +100,7 @@ impl Operator<Text> for Sha2Hash {
 }
 
 #[cfg(feature = "tabular")]
+#[async_trait::async_trait]
 impl Operator<Tabular> for Sha2Hash {
     fn id(&self) -> OperatorId {
         Sha2Hash::id()

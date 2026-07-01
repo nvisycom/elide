@@ -85,6 +85,7 @@ fn seed<M: Modality>(entity: &Entity<M>, data: &TextData) -> String {
     )
 }
 
+#[async_trait::async_trait]
 impl<V, G> Operator<Text> for Pseudonymize<V, G>
 where
     V: Vault<Key, TextReplacement>,
@@ -111,6 +112,7 @@ where
 }
 
 #[cfg(feature = "tabular")]
+#[async_trait::async_trait]
 impl<V, G> Operator<Tabular> for Pseudonymize<V, G>
 where
     V: Vault<Key, TextReplacement>,

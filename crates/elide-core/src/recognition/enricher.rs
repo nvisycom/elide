@@ -1,7 +1,5 @@
 //! [`Enricher<M>`]: the pre-recognition context-enrichment contract.
 
-use std::future::Future;
-
 use crate::error::Result;
 use crate::modality::Modality;
 use crate::recognition::RecognizerContext;
@@ -18,6 +16,7 @@ use crate::recognition::RecognizerContext;
 /// because a later enricher (or a recognizer) may depend on what an
 /// earlier one wrote. An analyzer runs its enrichers in order, then hands
 /// the payload and enriched context to its recognizers.
+#[async_trait::async_trait]
 pub trait Enricher<M>: Send + Sync
 where
     M: Modality,
@@ -28,9 +27,5 @@ where
     ///
     /// Returns an error when enrichment fails (e.g. a detection backend is
     /// unreachable). A failed enricher aborts the call before recognition.
-    fn enrich(
-        &self,
-        data: &M::Data,
-        ctx: &mut RecognizerContext<'_, M>,
-    ) -> impl Future<Output = Result<()>> + Send;
+    async fn enrich(&self, data: &M::Data, ctx: &mut RecognizerContext<'_, M>) -> Result<()>;
 }

@@ -35,6 +35,7 @@ impl Default for Pixelate {
     }
 }
 
+#[async_trait::async_trait]
 impl Operator<Image> for Pixelate {
     fn id(&self) -> OperatorId {
         OperatorId::new("pixelate", "1.0.0")
