@@ -93,7 +93,7 @@ codec-text = ["codec-txt", "codec-json", "codec-html", "codec-xml"]
 codec-tabular = ["codec-csv", "codec-xlsx"]
 codec-image = ["codec-png", "codec-jpeg", "codec-tiff"]
 codec-audio = ["codec-wav", "codec-mp3"]
-codec-document = ["codec-docx"]
+codec-document = ["codec-docx", "codec-pdf", "codec-rtf"]
 
 ## Per-format handlers.
 codec-txt = ["codec", "elide-codec/txt"]
@@ -108,6 +108,8 @@ codec-tiff = ["codec", "image", "elide-codec/tiff"]
 codec-wav = ["codec", "audio", "elide-codec/wav"]
 codec-mp3 = ["codec", "audio", "elide-codec/mp3"]
 codec-docx = ["codec", "elide-codec/docx"]
+codec-pdf = ["codec", "elide-codec/pdf"]
+codec-rtf = ["codec", "elide-codec/rtf"]
 
 ## Ship the no-op mock backends in the re-exported recognizer crates.
 mock = ["elide-ner?/mock", "elide-llm?/mock", "elide-stt?/mock", "elide-ocr?/mock"]
