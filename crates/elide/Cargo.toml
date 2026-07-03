@@ -109,6 +109,11 @@ codec-wav = ["codec", "audio", "elide-codec/wav"]
 codec-mp3 = ["codec", "audio", "elide-codec/mp3"]
 codec-docx = ["codec", "elide-codec/docx"]
 codec-pdf = ["codec", "elide-codec/pdf"]
+## PDF page rendering for OCR of scanned/image-only PDFs. Requires the native
+## PDFium library present at runtime (see `scripts/install-pdfium.sh`); pulls
+## `pdfium-render` + `rayon` + the image stack. Opt-in on its own — not part of
+## `codec-document` — so the document group stays free of native deps.
+codec-pdf-render = ["codec-pdf", "elide-codec/pdf-render"]
 codec-rtf = ["codec", "elide-codec/rtf"]
 
 ## Ship the no-op mock backends in the re-exported recognizer crates.
