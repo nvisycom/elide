@@ -38,7 +38,16 @@ allow = [
     "Zlib",
 ]
 
-exceptions = []
+# LGPL-3.0, accepted only for the opt-in `mp3` codec feature (off by default,
+# so absent from the graph deny checks by default; surfaces under
+# `--all-features`). MP3 *encoding* has no permissively-licensed, production
+# quality alternative in the ecosystem — LAME (libmp3lame) is effectively the
+# only option, and every substitute (incl. Shine) is also LGPL. The obligation
+# is satisfiable for proprietary use via dynamic/separate linking.
+exceptions = [
+    { name = "mp3lame-encoder", allow = ["LGPL-3.0"] },
+    { name = "mp3lame-sys", allow = ["LGPL-3.0"] },
+]
 
 [bans]
 multiple-versions = "warn"
