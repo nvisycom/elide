@@ -1,5 +1,7 @@
 //! [`PatternRecognizer`] and its builder.
 
+use std::result::Result as StdResult;
+
 use aho_corasick::{AhoCorasick, MatchKind};
 use elide_context::matching::SubstringMatcher;
 use elide_context::{BoostRule, Enhanced, Enhancer};
@@ -9,7 +11,11 @@ use elide_core::modality::TextRecognizable;
 use elide_core::primitive::LanguageTag;
 use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
 use elide_core::{Error, ErrorKind, Result};
-use regex::RegexSet;
+// The external `regex` crate is aliased throughout because `Regex` is already
+// this crate's rule type (`super::regex::Regex`, imported below).
+use regex::{
+    Error as CompiledRegexError, Regex as CompiledRegex, RegexBuilder, RegexSet, RegexSetBuilder,
+};
 
 use super::compiled::{CompiledDictionary, CompiledPattern, RawMatch, has_word_boundaries};
 use super::dictionary::Dictionary;
@@ -84,6 +90,20 @@ pub struct PatternRecognizerBuilder {
     patterns: Vec<Regex>,
     dictionaries: Vec<Dictionary>,
     validators: Option<ValidatorRegistry>,
+    /// Compiled-automaton byte budget applied to every variant regex and
+    /// to the shared [`RegexSet`]. `None` leaves the `regex` crate default
+    /// (~10 MB) in place.
+    size_limit: Option<usize>,
+    /// Lazy-DFA cache byte budget applied likewise. `None` leaves the
+    /// `regex` crate default in place.
+    dfa_size_limit: Option<usize>,
+    /// Cap on the total number of dictionary terms across every registered
+    /// dictionary (the Aho-Corasick automaton is shared). `None` is
+    /// unbounded.
+    term_count_limit: Option<usize>,
+    /// Cap on the total bytes of all dictionary terms across every
+    /// dictionary. `None` is unbounded.
+    term_bytes_limit: Option<usize>,
 }
 
 impl PatternRecognizerBuilder {
@@ -142,6 +162,65 @@ impl PatternRecognizerBuilder {
     #[must_use]
     pub fn with_validators(mut self, registry: ValidatorRegistry) -> Self {
         self.validators = Some(registry);
+        self
+    }
+
+    /// Cap the compiled-automaton size, in bytes, of every variant regex
+    /// **and** of the shared [`RegexSet`] union.
+    ///
+    /// A caller can bound each regex *source* it supplies, but many
+    /// individually-small sources still union into one large `RegexSet`
+    /// whose compiled size can only be bounded here. [`build`] fails with a
+    /// validation error when a regex or the union exceeds the limit.
+    ///
+    /// Unset by default — the `regex` crate's own default budget (~10 MB)
+    /// applies, so behavior is unchanged unless a limit is set.
+    ///
+    /// [`build`]: Self::build
+    #[must_use]
+    pub fn with_size_limit(mut self, bytes: usize) -> Self {
+        self.size_limit = Some(bytes);
+        self
+    }
+
+    /// Cap the lazy-DFA cache size, in bytes, of every variant regex and the
+    /// shared [`RegexSet`]. This bounds match-time memory (the DFA is built
+    /// on demand while scanning) rather than compile-time automaton size.
+    ///
+    /// Unset by default — the `regex` crate's own default applies.
+    #[must_use]
+    pub fn with_dfa_size_limit(mut self, bytes: usize) -> Self {
+        self.dfa_size_limit = Some(bytes);
+        self
+    }
+
+    /// Cap the total number of dictionary terms across **every** registered
+    /// dictionary — they compile into one shared Aho-Corasick automaton, so
+    /// the limit is a recognizer-wide aggregate, not per-dictionary.
+    ///
+    /// Dictionaries are literal-match (no regex backtracking surface); this
+    /// bounds compile cost and automaton memory, not a match-time hazard.
+    /// [`build`] fails with a validation error when the total is exceeded.
+    ///
+    /// Unbounded by default.
+    ///
+    /// [`build`]: Self::build
+    #[must_use]
+    pub fn with_term_count_limit(mut self, max: usize) -> Self {
+        self.term_count_limit = Some(max);
+        self
+    }
+
+    /// Cap the total bytes of all dictionary terms across every dictionary —
+    /// a finer proxy for automaton size than raw term count. [`build`] fails
+    /// with a validation error when the sum of term lengths exceeds `max`.
+    ///
+    /// Unbounded by default.
+    ///
+    /// [`build`]: Self::build
+    #[must_use]
+    pub fn with_term_bytes_limit(mut self, max: usize) -> Self {
+        self.term_bytes_limit = Some(max);
         self
     }
 
@@ -247,7 +326,7 @@ impl PatternRecognizerBuilder {
 
         for pattern in &self.patterns {
             for variant in &pattern.variants {
-                let regex = ::regex::Regex::new(&variant.regex).map_err(|e| {
+                let regex = self.compile_regex(&variant.regex).map_err(|e| {
                     Error::new(
                         ErrorKind::Validation,
                         format!("pattern `{}`: invalid regex: {e}", pattern.name),
@@ -278,11 +357,36 @@ impl PatternRecognizerBuilder {
         let regex_set = if regex_sources.is_empty() {
             None
         } else {
-            Some(RegexSet::new(&regex_sources).map_err(|e| {
+            let mut builder = RegexSetBuilder::new(&regex_sources);
+            if let Some(bytes) = self.size_limit {
+                builder.size_limit(bytes);
+            }
+            if let Some(bytes) = self.dfa_size_limit {
+                builder.dfa_size_limit(bytes);
+            }
+            Some(builder.build().map_err(|e| {
                 Error::new(ErrorKind::Validation, format!("compiling regex set: {e}"))
             })?)
         };
         Ok((compiled, regex_set))
+    }
+
+    /// Compile one regex source, honoring the builder's optional
+    /// [`size_limit`]/[`dfa_size_limit`]. Unset limits leave the `regex`
+    /// crate defaults untouched, so an unconfigured builder compiles exactly
+    /// as before.
+    ///
+    /// [`size_limit`]: Self::with_size_limit
+    /// [`dfa_size_limit`]: Self::with_dfa_size_limit
+    fn compile_regex(&self, source: &str) -> StdResult<CompiledRegex, CompiledRegexError> {
+        let mut builder = RegexBuilder::new(source);
+        if let Some(bytes) = self.size_limit {
+            builder.size_limit(bytes);
+        }
+        if let Some(bytes) = self.dfa_size_limit {
+            builder.dfa_size_limit(bytes);
+        }
+        builder.build()
     }
 
     /// Compile every dictionary into a [`CompiledDictionary`]
@@ -340,6 +444,30 @@ impl PatternRecognizerBuilder {
                 countries: dict.countries.clone(),
                 word_boundary: dict.word_boundary,
             });
+        }
+
+        // Bound the shared automaton before building it: the count and the
+        // total term bytes are recognizer-wide aggregates across every
+        // dictionary. Unset limits skip the check.
+        if let Some(max) = self.term_count_limit
+            && all_terms.len() > max
+        {
+            return Err(Error::new(
+                ErrorKind::Validation,
+                format!(
+                    "dictionary term count {} exceeds limit {max}",
+                    all_terms.len()
+                ),
+            ));
+        }
+        if let Some(max) = self.term_bytes_limit {
+            let total: usize = all_terms.iter().map(String::len).sum();
+            if total > max {
+                return Err(Error::new(
+                    ErrorKind::Validation,
+                    format!("dictionary term bytes {total} exceeds limit {max}"),
+                ));
+            }
         }
 
         let aho = if all_terms.is_empty() {
