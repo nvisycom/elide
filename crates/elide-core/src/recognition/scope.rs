@@ -41,15 +41,18 @@ pub struct Scope {
     /// don't lose detections. A document spanning several jurisdictions
     /// can assert all of them; a rule runs when any one matches.
     pub countries: Vec<CountryCode>,
-    /// Document-level classification labels (e.g. `"medical"`,
+    /// Document-level classification tags (e.g. `"medical"`,
     /// `"gdpr-request"`). Recognizers may use these to bias their behavior
     /// for domain-specific terms; those that don't ignore the field.
     ///
-    /// Distinct from [`catalog`]: these classify the
-    /// *document*, whereas the catalog names the entity *types* to emit.
+    /// Named `tags`, not `labels`, to keep "label" reserved for the entity
+    /// taxonomy ([`LabelRef`]/[`LabelCatalog`]): these classify the
+    /// *document*, whereas [`catalog`] names the entity *types* to emit.
     ///
     /// [`catalog`]: Self::catalog
-    pub labels: Vec<String>,
+    /// [`LabelRef`]: crate::entity::LabelRef
+    /// [`LabelCatalog`]: crate::entity::LabelCatalog
+    pub tags: Vec<String>,
     /// The entity types recognizers are asked to emit. A zero-shot NER
     /// model requests exactly this set; an LLM prompt lists it as the
     /// labels to find. Empty means "the recognizer's own default" — a
@@ -67,7 +70,7 @@ impl Scope {
         Self {
             languages: Languages::default(),
             countries: Vec::new(),
-            labels: Vec::new(),
+            tags: Vec::new(),
             catalog: LabelCatalog::new(),
             correlation_id: None,
         }
@@ -101,10 +104,10 @@ impl Scope {
         self
     }
 
-    /// Attach document-level classification labels.
+    /// Attach document-level classification tags (e.g. `"medical"`).
     #[must_use]
-    pub fn with_labels(mut self, labels: Vec<String>) -> Self {
-        self.labels = labels;
+    pub fn with_tags(mut self, tags: Vec<String>) -> Self {
+        self.tags = tags;
         self
     }
 

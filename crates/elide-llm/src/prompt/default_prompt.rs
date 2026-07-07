@@ -34,7 +34,7 @@ impl Prompt<Text> for DefaultPrompt {
         TextPromptBuilder::new(
             data.text.as_str(),
             ctx.inclusions(),
-            ctx.labels(),
+            ctx.tags(),
             &target_labels,
         )
         .build()
@@ -44,6 +44,6 @@ impl Prompt<Text> for DefaultPrompt {
 impl Prompt<Image> for DefaultPrompt {
     fn build(&self, _data: &ImageData, ctx: &RecognizerContext<'_, Image>) -> String {
         let target_labels = ctx.target_labels();
-        ImagePromptBuilder::new(ctx.inclusions(), ctx.labels(), &target_labels).build()
+        ImagePromptBuilder::new(ctx.inclusions(), ctx.tags(), &target_labels).build()
     }
 }

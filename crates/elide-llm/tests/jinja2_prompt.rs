@@ -32,15 +32,15 @@ fn text_prompt_renders_template() {
         .with_label(builtins::PERSON_NAME.to_ref());
 
     let data = TextData::new(body);
-    let scope = Scope::new().with_labels(vec!["medical".to_owned(), "gdpr-request".to_owned()]);
+    let scope = Scope::new().with_tags(vec!["medical".to_owned(), "gdpr-request".to_owned()]);
     let annotations: Annotations<Text> = Annotations::new().with_inclusions(vec![inclusion]);
     let ctx = RecognizerContext::new(&scope).with_annotations(&annotations);
 
     let rendered = prompt.build(&data, &ctx);
     assert!(rendered.contains(body), "source text missing: {rendered}");
     assert!(
-        rendered.contains("Document labels: medical, gdpr-request"),
-        "labels `| join` filter not applied: {rendered}",
+        rendered.contains("Document tags: medical, gdpr-request"),
+        "tags `| join` filter not applied: {rendered}",
     );
     assert!(
         rendered.contains("Uploader hints:"),
@@ -73,14 +73,14 @@ fn image_prompt_renders_template() {
     .with_label(builtins::PERSON_NAME.to_ref());
 
     let data = ImageData::new(bytes, dims);
-    let scope = Scope::new().with_labels(vec!["badge".to_owned()]);
+    let scope = Scope::new().with_tags(vec!["badge".to_owned()]);
     let annotations: Annotations<Image> = Annotations::new().with_inclusions(vec![inclusion]);
     let ctx = RecognizerContext::new(&scope).with_annotations(&annotations);
 
     let rendered = prompt.build(&data, &ctx);
     assert!(
         rendered.contains("Tags: badge"),
-        "labels `| join` not rendered: {rendered}",
+        "tags `| join` not rendered: {rendered}",
     );
     assert!(
         rendered.contains("uploader-face (person_name): bbox=[10.0,20.0,100.0x50.0]"),

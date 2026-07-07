@@ -36,7 +36,7 @@ pub trait Prompt<M>: Send + Sync + 'static
 where
     M: Modality,
 {
-    /// Render the user prompt for `data` in `ctx`. Fold in hints, labels,
+    /// Render the user prompt for `data` in `ctx`. Fold in hints, tags,
     /// and any instruction the model needs; the source payload (text,
     /// image bytes) is attached to the provider message by the backend.
     fn build(&self, data: &M::Data, ctx: &RecognizerContext<'_, M>) -> String;

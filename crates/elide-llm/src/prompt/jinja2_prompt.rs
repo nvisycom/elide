@@ -10,7 +10,7 @@
 //!
 //! - `hints`: list of `{ name, kind, value, snippet }` (text) or
 //!   `{ name, kind, bbox: { x, y, width, height } }` (image)
-//! - `labels`: document context labels
+//! - `tags`: document classification tags (e.g. `medical`)
 //! - `target_labels`: the entity types to emit
 //! - `text`: the source text (text modality only)
 
@@ -105,7 +105,7 @@ impl Prompt<Text> for Jinja2Prompt<Text> {
         self.render(context! {
             text => text,
             hints => hints,
-            labels => ctx.labels().to_vec(),
+            tags => ctx.tags().to_vec(),
             target_labels => target_label_names(ctx),
         })
     }
@@ -132,7 +132,7 @@ impl Prompt<Image> for Jinja2Prompt<Image> {
             .collect();
         self.render(context! {
             hints => hints,
-            labels => ctx.labels().to_vec(),
+            tags => ctx.tags().to_vec(),
             target_labels => target_label_names(ctx),
         })
     }

@@ -118,14 +118,14 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
         self.annotations.map_or(&[], |a| &a.exclusions)
     }
 
-    /// Caller-asserted document-level classification labels for this
+    /// Caller-asserted document-level classification tags for this
     /// analysis (e.g. `"medical"`). Distinct from the entity types to emit
     /// — those are [`target_labels`].
     ///
     /// [`target_labels`]: Self::target_labels
     #[must_use]
-    pub fn labels(&self) -> &[String] {
-        &self.scope.labels
+    pub fn tags(&self) -> &[String] {
+        &self.scope.tags
     }
 
     /// The [`LabelCatalog`] of entity types recognizers are asked to emit.

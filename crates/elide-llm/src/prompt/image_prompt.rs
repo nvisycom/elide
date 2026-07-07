@@ -11,19 +11,19 @@ use elide_core::recognition::annotation::Inclusion;
 /// Builds user prompts for the image detect pass.
 pub(super) struct ImagePromptBuilder<'a> {
     inclusions: &'a [Inclusion<Image>],
-    labels: &'a [String],
+    tags: &'a [String],
     target_labels: &'a [LabelRef],
 }
 
 impl<'a> ImagePromptBuilder<'a> {
     pub fn new(
         inclusions: &'a [Inclusion<Image>],
-        labels: &'a [String],
+        tags: &'a [String],
         target_labels: &'a [LabelRef],
     ) -> Self {
         Self {
             inclusions,
-            labels,
+            tags,
             target_labels,
         }
     }
@@ -48,11 +48,11 @@ impl<'a> ImagePromptBuilder<'a> {
             ));
         }
 
-        if !self.labels.is_empty() {
-            let labels = self.labels.join(", ");
+        if !self.tags.is_empty() {
+            let tags = self.tags.join(", ");
             prompt.push_str(&format!(
-                "\n\nDocument context labels (adjust sensitivity to domain-specific \
-                 visual content accordingly): {labels}."
+                "\n\nDocument context tags (adjust sensitivity to domain-specific \
+                 visual content accordingly): {tags}."
             ));
         }
 
