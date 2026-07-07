@@ -18,7 +18,7 @@ const SNIPPET_HALF_WIDTH: usize = 80;
 pub(super) struct TextPromptBuilder<'a> {
     text: &'a str,
     inclusions: &'a [Inclusion<Text>],
-    labels: &'a [String],
+    tags: &'a [String],
     target_labels: &'a [LabelRef],
 }
 
@@ -26,13 +26,13 @@ impl<'a> TextPromptBuilder<'a> {
     pub fn new(
         text: &'a str,
         inclusions: &'a [Inclusion<Text>],
-        labels: &'a [String],
+        tags: &'a [String],
         target_labels: &'a [LabelRef],
     ) -> Self {
         Self {
             text,
             inclusions,
-            labels,
+            tags,
             target_labels,
         }
     }
@@ -62,11 +62,11 @@ impl<'a> TextPromptBuilder<'a> {
             ));
         }
 
-        if !self.labels.is_empty() {
-            let labels = self.labels.join(", ");
+        if !self.tags.is_empty() {
+            let tags = self.tags.join(", ");
             prompt.push_str(&format!(
-                "\n\nDocument context labels (adjust sensitivity to \
-                 domain-specific terms accordingly): {labels}."
+                "\n\nDocument context tags (adjust sensitivity to \
+                 domain-specific terms accordingly): {tags}."
             ));
         }
 

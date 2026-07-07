@@ -4,7 +4,7 @@ Document text:
 {{ text }}
 ---
 {% if target_labels %}Emit only: {{ target_labels | join(", ") }}{% endif %}
-{% if labels %}Document labels: {{ labels | join(", ") }}{% endif %}
+{% if tags %}Document tags: {{ tags | join(", ") }}{% endif %}
 {% if hints %}Uploader hints:
 {% for h in hints %}- {{ h.name }} ({{ h.kind }}): value={{ h.value }} | snippet="{{ h.snippet }}"
 {% endfor %}{% endif %}
