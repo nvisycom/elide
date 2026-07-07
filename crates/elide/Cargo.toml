@@ -48,21 +48,24 @@ schema = [
     "elide-ner?/schema",
 ]
 
-## Re-export the pattern crate as `elide::recognition::pattern`.
+## Re-export the pattern recognizer crate.
 pattern = ["dep:elide-pattern"]
-## Re-export the NER crate as `elide::recognition::ner`.
+## Re-export the NER recognizer crate.
 ner = ["dep:elide-ner"]
-## Re-export the lingua language-detection crate as
-## `elide::recognition::lingua`.
+## Re-export the lingua language-detection crate.
 lingua = ["dep:elide-lingua"]
 
-## Re-export the LLM crate as `elide::recognition::llm`. Lean by default
-## (the trait, recognizer, prompts, and — with `mock` — the stub backend);
-## add `llm-rig` or a provider feature for the rig-backed network backend.
+## Re-export the LLM recognizer crate. Lean by default (the trait, recognizer,
+## prompts, and — with `mock` — the stub backend); add `llm-rig` or a provider
+## feature for the rig-backed network backend.
 llm = ["dep:elide-llm"]
 ## The rig-backed `RigBackend` and its HTTP stack in the re-exported LLM
 ## crate.
 llm-rig = ["llm", "elide-llm/rig"]
+## The `Jinja2Prompt` template-driven prompt builder, so a caller can load
+## detect-pass prompts from `.j2` templates without depending on `elide-llm`
+## directly.
+llm-jinja2 = ["llm", "elide-llm/jinja2"]
 ## The OpenAI GPT provider for the rig LLM backend (implies `llm-rig`).
 llm-openai = ["llm", "elide-llm/openai-gpt"]
 ## The Anthropic Claude provider for the rig LLM backend (implies `llm-rig`).
@@ -70,9 +73,9 @@ llm-anthropic = ["llm", "elide-llm/anthropic-claude"]
 ## The Google Gemini provider for the rig LLM backend (implies `llm-rig`).
 llm-gemini = ["llm", "elide-llm/google-gemini"]
 
-## Re-export the SST crate as `elide::recognition::stt`.
+## Re-export the STT (speech-to-text) recognizer crate.
 stt = ["dep:elide-stt", "audio"]
-## Re-export the OCR crate as `elide::recognition::ocr`.
+## Re-export the OCR recognizer crate.
 ocr = ["dep:elide-ocr", "image"]
 
 ## The `audio` modality. Implied by the audio codec formats.
@@ -82,10 +85,10 @@ image = ["elide-core/image", "elide-redaction/image"]
 ## The `tabular` modality. Implied by the tabular codec formats.
 tabular = ["elide-core/tabular", "elide-redaction/tabular"]
 
-## Re-export the codec crate as `elide::codec` and the orchestration engine
-## (`Orchestrator`, `Report`) at the crate root. On its own this enables only
-## the codec's default formats; use the per-modality or per-format `codec-*`
-## features below to pull in the shipped format handlers.
+## Re-export the codec crate and the orchestration engine (`Orchestrator`,
+## `Report`). On its own this enables only the codec's default formats; use the
+## per-modality or per-format `codec-*` features below to pull in the shipped
+## format handlers.
 codec = ["dep:elide-codec", "dep:elide-orchestration"]
 
 ## Per-modality format groups (each aggregates its per-format features).
@@ -141,8 +144,8 @@ elide-codec = { workspace = true, features = [], optional = true }
 elide-orchestration = { workspace = true, features = [], optional = true }
 elide-redaction = { workspace = true, features = [] }
 
-# Async — re-exported as `elide::async_trait` so consumers implementing the
-# async traits (Recognizer, Operator, …) need no direct dep.
+# Async — re-exported so consumers implementing the async traits (Recognizer,
+# Operator, …) need no direct dep.
 async-trait = { workspace = true, features = [] }
 
 [dev-dependencies]
