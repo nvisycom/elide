@@ -96,7 +96,7 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
     use elide::recognition::pattern::PatternRecognizer;
     use elide::redaction::Anonymizer;
     use elide::redaction::operators::{Erase, Replace};
-    use elide::{Orchestrator, Report};
+    use elide::{Directives, Orchestrator, Report};
 
     let registry = FormatRegistry::with_builtin();
     let patterns = PatternRecognizer::builder()
@@ -122,7 +122,7 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
     // Phase 1: analyze, then copy the entities out by modality — exactly what
     // a caller can serialize and ship to another process.
     let mut doc = registry.decode(FIXTURE.source, "docx").await?;
-    let mut report = orchestrator.analyze(&mut doc).await?;
+    let mut report = orchestrator.analyze(&mut doc, &Directives::new()).await?;
     let body = report
         .entities::<Text>()
         .map(|v| v.to_vec())

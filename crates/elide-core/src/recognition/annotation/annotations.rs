@@ -19,7 +19,11 @@ use crate::recognition::annotation::{Exclusion, Inclusion};
 /// common case.
 ///
 /// [`Scope`]: super::super::Scope
-#[derive(Debug, Default, Clone)]
+// `Default` and `Clone` are manual (not derived): `derive` would add spurious
+// `M: Default` / `M: Clone` bounds, but `M` is a zero-size marker. The fields'
+// `Vec`s clone/default via the location's own bound. (See the same pattern on
+// `Inclusion` / `Exclusion`.)
+#[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     feature = "serde",
@@ -43,6 +47,21 @@ pub struct Annotations<M: Modality> {
     /// found it.
     #[cfg_attr(feature = "serde", serde(default))]
     pub exclusions: Vec<Exclusion<M>>,
+}
+
+impl<M: Modality> Clone for Annotations<M> {
+    fn clone(&self) -> Self {
+        Self {
+            inclusions: self.inclusions.clone(),
+            exclusions: self.exclusions.clone(),
+        }
+    }
+}
+
+impl<M: Modality> Default for Annotations<M> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<M: Modality> Annotations<M> {

@@ -2,6 +2,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 
+mod directives;
 mod pipeline;
 mod report;
 
@@ -14,10 +15,10 @@ use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::recognition::Scope;
-use elide_core::recognition::annotation::Annotations;
 use elide_detection::Analyzer;
 use elide_redaction::Anonymizer;
 
+pub use self::directives::Directives;
 use self::pipeline::{AnalyzeOutcome, ErasedPipeline, ModalityPipeline};
 // `EntityGroup` is re-exported (not just `use`d) because the bound
 // `Vec<Entity<M>>: EntityGroup` appears on public methods (`with_modality`,
@@ -62,16 +63,18 @@ impl<'r> Orchestrator<'r> {
         }
     }
 
-    /// Set the [`Scope`] shared across every modality pipeline — the
-    /// caller's analysis-wide assertions (languages, jurisdictions, labels,
-    /// catalog, correlation id).
+    /// Set the run-wide default [`Scope`] shared across every modality
+    /// pipeline — the caller's analysis-wide assertions (languages,
+    /// jurisdictions, tags, catalog, correlation id).
     ///
     /// A `Scope` is modality-free, so one drives the body and every
-    /// container part alike; no need to repeat it per [`with_modality`].
-    /// Per-modality region annotations (inclusions / exclusions) ride on
-    /// each pipeline's analyzer instead.
+    /// container part alike; no need to repeat it per [`with_modality`]. A
+    /// single analysis can override it with [`Directives::with_scope`], and
+    /// supplies its region annotations on the same [`Directives`] passed to
+    /// [`analyze`].
     ///
     /// [`with_modality`]: Self::with_modality
+    /// [`analyze`]: Self::analyze
     #[must_use]
     pub fn with_scope(mut self, scope: Scope) -> Self {
         self.scope = scope;
@@ -94,32 +97,20 @@ impl<'r> Orchestrator<'r> {
             Box::new(ModalityPipeline {
                 analyzer,
                 anonymizer,
-                annotations: Annotations::new(),
             }),
         );
-        self
-    }
-
-    /// Attach the caller's per-request region [`Annotations`] (inclusions /
-    /// exclusions) for modality `M`, threaded into that modality's pipeline
-    /// at analysis time. A no-op if no pipeline for `M` is registered.
-    ///
-    /// The modality-free policy is set once with [`with_scope`]; regions are
-    /// `M::Location`-typed, so they are registered per modality here.
-    ///
-    /// [`Annotations`]: elide_core::recognition::annotation::Annotations
-    /// [`with_scope`]: Self::with_scope
-    #[must_use]
-    pub fn with_annotations<M: Modality>(mut self, annotations: Annotations<M>) -> Self {
-        if let Some(pipeline) = self.pipelines.get_mut(&TypeId::of::<M>()) {
-            pipeline.set_annotations(Box::new(annotations));
-        }
         self
     }
 
     /// Detect the entities of a whole document without redacting: its body
     /// *and* every container part whose modality has a registered pipeline.
     /// Returns an editable [`Report`] to hand to [`anonymize_with`].
+    ///
+    /// `directives` carries the caller's per-analysis inputs: the region
+    /// [`Annotations`] for each modality present in the document, and an
+    /// optional [`Scope`] override for this call (falling back to the
+    /// orchestrator's run-wide [`with_scope`] default). Pass
+    /// [`Directives::new`] for none.
     ///
     /// The body is offered to each pipeline until one matches its modality;
     /// that pipeline analyzes it. Then, if `document` is a container, each
@@ -130,17 +121,29 @@ impl<'r> Orchestrator<'r> {
     ///
     /// Edit the report ([`entities`], [`part_entities`]) before applying.
     ///
+    /// [`Annotations`]: elide_core::recognition::annotation::Annotations
+    /// [`with_scope`]: Self::with_scope
     /// [`anonymize_with`]: Self::anonymize_with
     /// [`entities`]: Report::entities
     /// [`part_entities`]: Report::part_entities
-    pub async fn analyze(&self, document: &mut UntypedDocumentHandle) -> Result<Report> {
+    pub async fn analyze(
+        &self,
+        document: &mut UntypedDocumentHandle,
+        directives: &Directives,
+    ) -> Result<Report> {
         let mut report = Report::new();
+        // Per-call scope override wins; else the run-wide default.
+        let scope = directives.scope.as_ref().unwrap_or(&self.scope);
+        let annotations = &directives.annotations;
 
         // The body: offer it to each pipeline; the first whose modality
         // matches analyzes it in place. The pipeline's key is the body's
         // modality `TypeId`.
         for (modality, pipeline) in &self.pipelines {
-            if let Some(entities) = pipeline.analyze_in_place(document, &self.scope).await? {
+            if let Some(entities) = pipeline
+                .analyze_in_place(document, scope, annotations)
+                .await?
+            {
                 report.body = Some((*modality, entities));
                 break;
             }
@@ -156,7 +159,7 @@ impl<'r> Orchestrator<'r> {
             let mut handle = Some(handle);
             for pipeline in self.pipelines.values() {
                 let Some(taken) = handle.take() else { break };
-                match pipeline.analyze(taken, &self.scope).await? {
+                match pipeline.analyze(taken, scope, annotations).await? {
                     AnalyzeOutcome::Accepted {
                         modality,
                         handle: retained,
@@ -267,8 +270,12 @@ impl<'r> Orchestrator<'r> {
     ///
     /// [`analyze`]: Self::analyze
     /// [`anonymize_with`]: Self::anonymize_with
-    pub async fn anonymize(&self, document: &mut UntypedDocumentHandle) -> Result<()> {
-        let report = self.analyze(document).await?;
+    pub async fn anonymize(
+        &self,
+        document: &mut UntypedDocumentHandle,
+        directives: &Directives,
+    ) -> Result<()> {
+        let report = self.analyze(document, directives).await?;
         self.anonymize_with(document, report).await
     }
 }
