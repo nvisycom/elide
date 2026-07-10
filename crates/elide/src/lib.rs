@@ -36,6 +36,6 @@ pub use elide_orchestration::EntityGroup;
 #[cfg(feature = "codec")]
 #[cfg_attr(docsrs, doc(cfg(feature = "codec")))]
 #[doc(inline)]
-pub use elide_orchestration::{Orchestrator, Report};
+pub use elide_orchestration::{Directives, Orchestrator, Report};
 
 pub mod prelude;
