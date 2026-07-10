@@ -24,10 +24,10 @@ use elide_core::recognition::{Enricher, RecognizerContext};
 
 use crate::{SttBackend, SttRequest};
 
-/// An [`Enricher<Audio>`] that transcribes the clip and stamps the
-/// [`Transcription`] onto the call's artifacts.
+/// An [`Enricher<Audio>`] that transcribes the clip.
 ///
-/// Holds an `Arc<dyn SttBackend>`; cloning shares the backend. Registered on
+/// Stamps the resulting [`Transcription`] onto the call's artifacts. Holds an
+/// `Arc<dyn SttBackend>`; cloning shares the backend. Registered on
 /// an `Analyzer<Audio>` ahead of its recognizers, the same way a language
 /// detector is registered on a text analyzer.
 #[derive(Clone)]

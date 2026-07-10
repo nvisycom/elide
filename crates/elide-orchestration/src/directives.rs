@@ -48,12 +48,11 @@ impl AnnotationSet {
     }
 }
 
-/// The caller's inputs for one [`analyze`] call: per-modality region
-/// annotations plus an optional [`Scope`] override.
+/// The per-analysis inputs the caller supplies for one [`analyze`] call.
 ///
-/// The annotations describe regions in this document. The scope, when set,
-/// overrides the orchestrator's run-wide [`with_scope`] default for this call
-/// only.
+/// Region annotations marking regions in this document, plus an optional
+/// [`Scope`] that, when set, replaces the orchestrator's run-wide
+/// [`with_scope`] default for this call only.
 ///
 /// [`analyze`]: super::Orchestrator::analyze
 /// [`with_scope`]: super::Orchestrator::with_scope
@@ -121,7 +120,9 @@ mod tests {
     #[test]
     fn later_with_replaces_same_modality() {
         let set = AnnotationSet::default()
-            .with(Annotations::<Text>::new().with_exclusion(Exclusion::new(TextLocation::new(0, 5))))
+            .with(
+                Annotations::<Text>::new().with_exclusion(Exclusion::new(TextLocation::new(0, 5))),
+            )
             .with(Annotations::<Text>::new()); // replaces
         assert!(set.get::<Text>().exclusions.is_empty(), "second with wins");
     }

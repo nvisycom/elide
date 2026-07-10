@@ -9,14 +9,13 @@ use serde::{Deserialize, Serialize};
 use crate::modality::Modality;
 use crate::recognition::annotation::{Exclusion, Inclusion};
 
-/// Caller-supplied region annotations for a modality `M`, the per-medium
-/// companion to the modality-free [`Scope`].
+/// Caller-supplied region annotations for a modality `M`.
 ///
-/// Regions are `M::Location`-typed (a text byte range, an image bounding
-/// box, an audio time span), so unlike the [`Scope`] policy they can't be
-/// shared across modalities — they attach to the analyzer of *their*
-/// modality. An empty `Annotations` (the default) asserts no regions, the
-/// common case.
+/// The per-medium companion to the modality-free [`Scope`]. Regions are
+/// `M::Location`-typed (a text byte range, an image bounding box, an audio
+/// time span), so unlike the [`Scope`] policy they can't be shared across
+/// modalities — they attach to the analyzer of *their* modality. An empty
+/// `Annotations` (the default) asserts no regions, the common case.
 ///
 /// [`Scope`]: super::super::Scope
 // `Default` and `Clone` are manual (not derived): `derive` would add spurious

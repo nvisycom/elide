@@ -7,8 +7,10 @@ use hipstr::HipStr;
 use super::{KeywordMatcher, SubstringMatcher};
 use crate::io::Token;
 
-/// Lemma-aware matcher. Compares each lemma in `tokens` against
-/// the keyword list with ASCII case-insensitive equality.
+/// Lemma-aware [`KeywordMatcher`].
+///
+/// Compares each lemma in `tokens` against the keyword list with ASCII
+/// case-insensitive equality.
 ///
 /// Falls back to [`SubstringMatcher`] semantics when `tokens` is
 /// empty (no shared NLP artifact was produced) so the enhancer

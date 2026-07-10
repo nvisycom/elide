@@ -22,10 +22,10 @@ use elide_core::recognition::{Enricher, RecognizerContext};
 
 use crate::{OcrBackend, OcrRequest};
 
-/// An [`Enricher<Image>`] that OCRs the image and stamps the [`Layout`]
-/// onto the call's artifacts.
+/// An [`Enricher<Image>`] that OCRs the image.
 ///
-/// Holds an `Arc<dyn OcrBackend>`; cloning shares the backend. Registered on
+/// Stamps the resulting [`Layout`] onto the call's artifacts. Holds an
+/// `Arc<dyn OcrBackend>`; cloning shares the backend. Registered on
 /// an `Analyzer<Image>` ahead of its recognizers, the same way a language
 /// detector is registered on a text analyzer.
 #[derive(Clone)]

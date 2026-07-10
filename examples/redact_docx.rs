@@ -58,7 +58,9 @@ async fn main() -> Result<()> {
     // 3. Detect across the body and every container part. The report keeps
     //    each part's findings separate so you can inspect (and edit) them
     //    before anything is redacted.
-    let mut report = orchestrator.analyze(&mut document, &Directives::new()).await?;
+    let mut report = orchestrator
+        .analyze(&mut document, &Directives::new())
+        .await?;
     print_report(&mut report);
 
     // 4. Apply the (here unedited) report: redact the body, redact each
