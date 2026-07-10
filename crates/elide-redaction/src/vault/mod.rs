@@ -1,5 +1,4 @@
-//! [`Vault<K, V>`]: the pluggable token-vault contract a recoverable
-//! operator resolves keys through.
+//! [`Vault<K, V>`]: the pluggable token-vault contract.
 //!
 //! A vault is the out-of-band map a recoverable operator leans on: a
 //! token replaces the original in the document, and the token resolves

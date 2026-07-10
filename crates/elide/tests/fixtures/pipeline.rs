@@ -188,7 +188,9 @@ impl Fixture {
         let orchestrator =
             Orchestrator::new(&registry).with_modality::<Audio>(analyzer, anonymizer);
 
-        let mut report = orchestrator.analyze(&mut document, &Directives::new()).await?;
+        let mut report = orchestrator
+            .analyze(&mut document, &Directives::new())
+            .await?;
         let entities: Vec<Entity<Audio>> = report
             .entities::<Audio>()
             .map(|e| e.to_vec())
@@ -228,7 +230,9 @@ impl Fixture {
         let orchestrator =
             Orchestrator::new(&registry).with_modality::<Image>(analyzer, anonymizer);
 
-        let mut report = orchestrator.analyze(&mut document, &Directives::new()).await?;
+        let mut report = orchestrator
+            .analyze(&mut document, &Directives::new())
+            .await?;
         let entities: Vec<Entity<Image>> = report
             .entities::<Image>()
             .map(|e| e.to_vec())
@@ -279,7 +283,9 @@ impl Fixture {
 
         // Two phases so the entities surface for assertions: detect, copy
         // the body entities out, then apply with no editing.
-        let mut report = orchestrator.analyze(&mut document, &Directives::new()).await?;
+        let mut report = orchestrator
+            .analyze(&mut document, &Directives::new())
+            .await?;
         let entities: Vec<Entity<M>> = report
             .entities::<M>()
             .map(|e| e.to_vec())

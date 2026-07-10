@@ -29,10 +29,10 @@ pub use self::report::EntityGroup;
 use self::report::PartReport;
 pub use self::report::Report;
 
-/// Drives analyze + redact across a document's body and its cross-modality
-/// container parts.
+/// Drives analyze + redact across a whole document.
 ///
-/// Built with one [`with_modality`] call per modality the caller wants
+/// Covers the body and its cross-modality container parts. Built with one
+/// [`with_modality`] call per modality the caller wants
 /// redacted, then run over an [`UntypedDocumentHandle`] with [`analyze`] +
 /// [`anonymize_with`] (or the [`anonymize`] shorthand). The document's
 /// modality is never named at the call site: the body and every container
