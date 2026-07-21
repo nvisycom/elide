@@ -14,6 +14,7 @@ target/
 **/*.rs.bk
 *.pdb
 rustc-ice-*.txt
+rust_out
 
 # Generated files
 *.pem
