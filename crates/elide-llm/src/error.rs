@@ -48,6 +48,13 @@ impl From<CompletionError> for Error {
                 Self::Response(Box::new(err))
             }
             CompletionError::UrlError(_) => Self::Request(Box::new(err)),
+            // `CompletionError` is `#[non_exhaustive]`, so a `rig` upgrade can
+            // add a variant the compiler won't flag here. The warn is the cue
+            // to classify it above.
+            _ => {
+                tracing::warn!(error = %err, "unmapped rig CompletionError variant");
+                Self::Request(Box::new(err))
+            }
         }
     }
 }
