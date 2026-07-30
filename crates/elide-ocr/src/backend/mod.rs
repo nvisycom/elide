@@ -53,6 +53,20 @@ pub trait OcrBackend: Send + Sync + 'static {
     ///
     /// Returns the underlying transport / parse / inference error.
     async fn recognize(&self, request: OcrRequest<'_>) -> Result<OcrResponse>;
+
+    /// Batched recognize. Defaults to a sequential fan-out;
+    /// backends with native batching should override.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first error encountered.
+    async fn recognize_batch(&self, requests: &[OcrRequest<'_>]) -> Result<Vec<OcrResponse>> {
+        let mut out = Vec::with_capacity(requests.len());
+        for req in requests {
+            out.push(self.recognize(req.clone()).await?);
+        }
+        Ok(out)
+    }
 }
 
 #[cfg(test)]
