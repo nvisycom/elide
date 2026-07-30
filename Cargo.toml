@@ -79,7 +79,7 @@ celes = { version = "2.8", features = [] }
 type-map = { version = "0.5", features = [] }
 
 # Encoding & hashing
-base64 = { version = "0.22", features = [] }
+base64 = { version = "0.23", features = [] }
 sha2 = { version = "0.11", features = [] }
 hex = { version = "0.4", features = [] }
 
