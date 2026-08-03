@@ -130,7 +130,7 @@ symphonia = { version = "0.6", default-features = false, features = ["wav", "pcm
 mp3lame-encoder = { version = "0.2", features = [] }
 
 # AI & LLM frameworks
-rig = { version = "0.40", default-features = false, features = [] }
+rig = { version = "0.41", default-features = false, features = [] }
 
 # Templating & schema
 minijinja = { version = "2.5", features = [] }
