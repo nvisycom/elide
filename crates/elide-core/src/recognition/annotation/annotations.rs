@@ -31,7 +31,7 @@ use crate::recognition::annotation::{Exclusion, Inclusion};
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(bound = "M::Location: schemars::JsonSchema")
+    schemars(bound = "M: schemars::JsonSchema, M::Location: schemars::JsonSchema", rename = "{M}Annotations")
 )]
 pub struct Annotations<M: Modality> {
     /// Caller-supplied candidate regions (each a region the caller believes

@@ -36,7 +36,10 @@ use super::Modality;
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(bound = "M::Location: schemars::JsonSchema, M::Data: schemars::JsonSchema")
+    schemars(
+        bound = "M: schemars::JsonSchema, M::Location: schemars::JsonSchema, M::Data: schemars::JsonSchema",
+        rename = "{M}Hint"
+    )
 )]
 pub struct Hint<M: Modality> {
     /// Where the hint text sits in the source (the header cell, the key).

@@ -16,6 +16,7 @@ use crate::recognition::Artifacts;
 /// Text modality: data is [`TextData`], locations are
 /// [`TextLocation`] byte ranges, replacements are [`TextReplacement`].
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Text;
 
 impl Modality for Text {

@@ -46,7 +46,10 @@ use crate::primitive::Confidence;
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(bound = "M::Location: schemars::JsonSchema, M::Data: schemars::JsonSchema")
+    schemars(
+        bound = "M: schemars::JsonSchema, M::Location: schemars::JsonSchema, M::Data: schemars::JsonSchema",
+        rename = "{M}Provenance"
+    )
 )]
 pub struct Provenance<M: Modality> {
     /// Events, in the order they happened.

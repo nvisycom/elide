@@ -17,6 +17,7 @@ use crate::recognition::Artifacts;
 /// Audio modality: data is [`AudioData`], locations are
 /// [`AudioLocation`] time ranges, replacements are [`AudioReplacement`].
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Audio;
 
 impl Modality for Audio {
