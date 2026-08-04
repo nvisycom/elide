@@ -48,7 +48,7 @@ impl Handler<Tabular> for XlsxHandler {
 
     fn encode(&self) -> Result<ContentData> {
         Err(Error::new(
-            ErrorKind::Validation,
+            ErrorKind::CapabilityUnavailable,
             "XLSX re-encoding is not yet supported",
         ))
     }

@@ -90,7 +90,7 @@ impl Term {
         let mut entries = Vec::new();
         for row in reader.records() {
             let row =
-                row.map_err(|e| Error::new(ErrorKind::Validation, format!("terms CSV: {e}")))?;
+                row.map_err(|e| Error::new(ErrorKind::Configuration, format!("terms CSV: {e}")))?;
             for (col_idx, cell) in row.iter().enumerate() {
                 let trimmed = cell.trim();
                 if !trimmed.is_empty() {

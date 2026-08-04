@@ -43,11 +43,11 @@ pub(super) fn probe_channels(bytes: &Bytes) -> Result<u16> {
             FormatOptions::default(),
             MetadataOptions::default(),
         )
-        .map_err(|e| Error::new(ErrorKind::Validation, format!("MP3 probe failed: {e}")))?;
+        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("MP3 probe failed: {e}")))?;
 
     let track = reader
         .default_track(TrackType::Audio)
-        .ok_or_else(|| Error::new(ErrorKind::Validation, "MP3 stream has no audio track"))?;
+        .ok_or_else(|| Error::new(ErrorKind::MalformedInput, "MP3 stream has no audio track"))?;
 
     let channels = track
         .codec_params
@@ -55,10 +55,10 @@ pub(super) fn probe_channels(bytes: &Bytes) -> Result<u16> {
         .and_then(|p| p.audio())
         .and_then(|a| a.channels.as_ref())
         .map(|c| c.count())
-        .ok_or_else(|| Error::new(ErrorKind::Validation, "MP3 track is missing channel info"))?;
+        .ok_or_else(|| Error::new(ErrorKind::MalformedInput, "MP3 track is missing channel info"))?;
 
     u16::try_from(channels)
-        .map_err(|_| Error::new(ErrorKind::Validation, "MP3 channel count exceeds u16"))
+        .map_err(|_| Error::new(ErrorKind::MalformedInput, "MP3 channel count exceeds u16"))
 }
 
 /// Decode the whole MP3 to interleaved f32 PCM.
@@ -74,36 +74,36 @@ pub(super) fn decode_to_pcm(bytes: &Bytes) -> Result<DecodedMp3> {
             FormatOptions::default(),
             MetadataOptions::default(),
         )
-        .map_err(|e| Error::new(ErrorKind::Validation, format!("MP3 probe failed: {e}")))?;
+        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("MP3 probe failed: {e}")))?;
 
     let track = reader
         .default_track(TrackType::Audio)
-        .ok_or_else(|| Error::new(ErrorKind::Validation, "MP3 stream has no audio track"))?;
+        .ok_or_else(|| Error::new(ErrorKind::MalformedInput, "MP3 stream has no audio track"))?;
     let track_id = track.id;
 
     let audio_params = track
         .codec_params
         .as_ref()
         .and_then(|p| p.audio())
-        .ok_or_else(|| Error::new(ErrorKind::Validation, "MP3 track is missing audio params"))?
+        .ok_or_else(|| Error::new(ErrorKind::MalformedInput, "MP3 track is missing audio params"))?
         .clone();
 
     let sample_rate = audio_params
         .sample_rate
-        .ok_or_else(|| Error::new(ErrorKind::Validation, "MP3 track is missing a sample rate"))?;
+        .ok_or_else(|| Error::new(ErrorKind::MalformedInput, "MP3 track is missing a sample rate"))?;
     let channels = audio_params
         .channels
         .as_ref()
         .map(|c| c.count())
-        .ok_or_else(|| Error::new(ErrorKind::Validation, "MP3 track is missing channel info"))?;
+        .ok_or_else(|| Error::new(ErrorKind::MalformedInput, "MP3 track is missing channel info"))?;
     let channels_u16 = u16::try_from(channels)
-        .map_err(|_| Error::new(ErrorKind::Validation, "MP3 channel count exceeds u16"))?;
+        .map_err(|_| Error::new(ErrorKind::MalformedInput, "MP3 channel count exceeds u16"))?;
 
     let mut decoder = get_codecs()
         .make_audio_decoder(&audio_params, &AudioDecoderOptions::default())
         .map_err(|e| {
             Error::new(
-                ErrorKind::Validation,
+                ErrorKind::MalformedInput,
                 format!("MP3 decoder init failed: {e}"),
             )
         })?;
@@ -116,7 +116,7 @@ pub(super) fn decode_to_pcm(bytes: &Bytes) -> Result<DecodedMp3> {
             Err(SymError::IoError(io_err)) if io_err.kind() == IoErrorKind::UnexpectedEof => break,
             Err(e) => {
                 return Err(Error::new(
-                    ErrorKind::Validation,
+                    ErrorKind::MalformedInput,
                     format!("MP3 packet read failed: {e}"),
                 ));
             }
@@ -131,7 +131,7 @@ pub(super) fn decode_to_pcm(bytes: &Bytes) -> Result<DecodedMp3> {
             Err(SymError::DecodeError(_)) => continue,
             Err(e) => {
                 return Err(Error::new(
-                    ErrorKind::Validation,
+                    ErrorKind::MalformedInput,
                     format!("MP3 decode failed: {e}"),
                 ));
             }
@@ -195,43 +195,43 @@ pub(super) fn encode_from_pcm(
     let bitrate = snap_bitrate(bitrate_bps);
 
     let mut builder =
-        Builder::new().ok_or_else(|| Error::new(ErrorKind::Redaction, "LAME builder failed"))?;
+        Builder::new().ok_or_else(|| Error::new(ErrorKind::Processing, "LAME builder failed"))?;
     builder
         .set_sample_rate(sample_rate)
-        .map_err(|e| Error::new(ErrorKind::Validation, format!("LAME sample-rate: {e:?}")))?;
+        .map_err(|e| Error::new(ErrorKind::Processing, format!("LAME sample-rate: {e:?}")))?;
     builder
         .set_num_channels(channels as u8)
-        .map_err(|e| Error::new(ErrorKind::Validation, format!("LAME channels: {e:?}")))?;
+        .map_err(|e| Error::new(ErrorKind::Processing, format!("LAME channels: {e:?}")))?;
     builder
         .set_brate(bitrate)
-        .map_err(|e| Error::new(ErrorKind::Validation, format!("LAME bitrate: {e:?}")))?;
+        .map_err(|e| Error::new(ErrorKind::Processing, format!("LAME bitrate: {e:?}")))?;
     builder
         .set_quality(mp3lame_encoder::Quality::Good)
-        .map_err(|e| Error::new(ErrorKind::Validation, format!("LAME quality: {e:?}")))?;
+        .map_err(|e| Error::new(ErrorKind::Processing, format!("LAME quality: {e:?}")))?;
 
     let mut encoder = builder
         .build()
-        .map_err(|e| Error::new(ErrorKind::Redaction, format!("LAME init failed: {e:?}")))?;
+        .map_err(|e| Error::new(ErrorKind::Processing, format!("LAME init failed: {e:?}")))?;
 
     let frames = samples.len() / channels.max(1) as usize;
     let mut out = Vec::<u8>::with_capacity(mp3lame_encoder::max_required_buffer_size(frames));
     match channels {
         1 => encoder
             .encode_to_vec(MonoPcm(samples), &mut out)
-            .map_err(|e| Error::new(ErrorKind::Redaction, format!("LAME encode: {e:?}")))?,
+            .map_err(|e| Error::new(ErrorKind::Processing, format!("LAME encode: {e:?}")))?,
         2 => encoder
             .encode_to_vec(InterleavedPcm(samples), &mut out)
-            .map_err(|e| Error::new(ErrorKind::Redaction, format!("LAME encode: {e:?}")))?,
+            .map_err(|e| Error::new(ErrorKind::Processing, format!("LAME encode: {e:?}")))?,
         n => {
             return Err(Error::new(
-                ErrorKind::Validation,
+                ErrorKind::Processing,
                 format!("LAME supports 1 or 2 channels, got {n}"),
             ));
         }
     };
     encoder
         .flush_to_vec::<FlushNoGap>(&mut out)
-        .map_err(|e| Error::new(ErrorKind::Redaction, format!("LAME flush: {e:?}")))?;
+        .map_err(|e| Error::new(ErrorKind::Processing, format!("LAME flush: {e:?}")))?;
     Ok(out)
 }
 

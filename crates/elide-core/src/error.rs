@@ -59,10 +59,11 @@ impl From<ErrorKind> for Error {
 
 impl From<derive_builder::UninitializedFieldError> for Error {
     /// Bridge `derive_builder`'s missing-required-field error into a
-    /// [`ErrorKind::Validation`] failure, so generated builders that declare
-    /// `build_fn(error = "Error")` fail with the crate-wide error type.
+    /// [`ErrorKind::Configuration`] failure, so generated builders that
+    /// declare `build_fn(error = "Error")` fail with the crate-wide error
+    /// type.
     fn from(err: derive_builder::UninitializedFieldError) -> Self {
-        Self::new(ErrorKind::Validation, err)
+        Self::new(ErrorKind::Configuration, err)
     }
 }
 
@@ -94,29 +95,62 @@ impl std::error::Error for Error {
 
 /// Coarse category of [`Error`], suitable for matching.
 ///
-/// Deliberately small and `#[non_exhaustive]`: `elide-core` defines types
-/// and traits, so most failures here are validation errors and the
-/// fusion failures `elide` may surface. Recognizer and operator
-/// implementations in downstream crates carry their own richer context
-/// and convert into [`Error`] at the trait boundary, tagging it with the
-/// matching kind.
+/// Deliberately small and `#[non_exhaustive]`: it names the *kind* of
+/// failure a caller can branch on — is the input corrupt, the config
+/// wrong, a capability missing, an external service at fault — while the
+/// boxed cause carries the detail. Downstream crates convert their richer
+/// errors into an [`Error`] at the trait boundary, tagging it with the
+/// kind that fits.
+///
+/// The distinctions worth branching on:
+///
+/// - [`MalformedInput`] vs [`Configuration`]: bad *content* the caller fed
+///   in (a corrupt file) versus a bad *rule* the caller wrote (an invalid
+///   regex). One means "fix the document", the other "fix your setup".
+/// - [`CapabilityUnavailable`]: the request is well-formed but the
+///   component that would serve it is absent — match this to fall back or
+///   report "unsupported" rather than "malformed".
+/// - [`Provider`] vs [`Transport`]: an external service answered with an
+///   error versus was never reached — the first is not retryable, the
+///   second often is.
+///
+/// [`MalformedInput`]: Self::MalformedInput
+/// [`Configuration`]: Self::Configuration
+/// [`CapabilityUnavailable`]: Self::CapabilityUnavailable
+/// [`Provider`]: Self::Provider
+/// [`Transport`]: Self::Transport
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ErrorKind {
-    /// A value was outside its permitted range (e.g. a confidence outside
-    /// `0.0..=1.0`).
-    OutOfRange,
-    /// A merge was attempted over an empty set of detections.
-    EmptyMerge,
-    /// A group of detections could not be reconciled into one entity.
-    Merge,
+    /// The content being processed is corrupt or unreadable: a malformed
+    /// document, invalid UTF-8, an audio stream missing its track params.
+    /// The caller's *input* is at fault, not their configuration.
+    MalformedInput,
+    /// A caller-supplied rule or configuration is invalid: a bad regex, a
+    /// malformed rule file (TOML/CSV), a prompt template that won't parse,
+    /// a builder missing a required field. The caller's *setup* is at
+    /// fault, not the input it was run over.
+    Configuration,
+    /// A valid operation failed while running: an encoder rejected its
+    /// input, an encrypt/decrypt step failed. Distinct from
+    /// [`MalformedInput`]: the inputs were well-formed, the operation
+    /// itself did not complete.
+    ///
+    /// [`MalformedInput`]: Self::MalformedInput
+    Processing,
+    /// A requested capability is not wired up: no codec registered for a
+    /// format, no backend for a modality, no handler for a container part.
+    /// Distinct from [`Configuration`]: the request is well-formed, but the
+    /// component that would serve it is absent (a feature left unbuilt, a
+    /// slot never configured), so a caller can match this to fall back or
+    /// report "unsupported" rather than "misconfigured".
+    ///
+    /// [`Configuration`]: Self::Configuration
+    CapabilityUnavailable,
     /// A recognizer failed while inspecting content.
     Recognition,
-    /// An operator failed while transforming content.
+    /// A redaction operator failed while transforming content.
     Redaction,
-    /// A configuration or rule was malformed: a bad regex, an unknown
-    /// validator, a builder missing a required field.
-    Validation,
     /// An external provider (an LLM service, a hosted model) returned an
     /// error response.
     Provider,
@@ -129,12 +163,12 @@ impl ErrorKind {
     /// Stable, human-readable description of the kind.
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::OutOfRange => "value out of range",
-            Self::EmptyMerge => "cannot merge an empty set of detections",
-            Self::Merge => "detections could not be merged",
+            Self::MalformedInput => "input is malformed",
+            Self::Configuration => "configuration is invalid",
+            Self::Processing => "processing failed",
+            Self::CapabilityUnavailable => "required capability is unavailable",
             Self::Recognition => "recognition failed",
             Self::Redaction => "redaction failed",
-            Self::Validation => "validation failed",
             Self::Provider => "provider returned an error",
             Self::Transport => "transport failure",
         }

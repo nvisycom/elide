@@ -15,7 +15,7 @@ use elide_core::{Error, ErrorKind, Result};
 ///
 /// # Errors
 ///
-/// Returns a validation error if either endpoint falls mid-character.
+/// Returns a redaction error if either endpoint falls mid-character.
 pub(crate) fn replace_range(buf: &mut String, value: &str, range: Range<usize>) -> Result<()> {
     let s = range.start.min(buf.len());
     let e = range.end.min(buf.len());
@@ -24,7 +24,7 @@ pub(crate) fn replace_range(buf: &mut String, value: &str, range: Range<usize>) 
     }
     if !buf.is_char_boundary(s) || !buf.is_char_boundary(e) {
         return Err(Error::new(
-            ErrorKind::Validation,
+            ErrorKind::Redaction,
             format!(
                 "redaction offset falls mid-character (start={}, end={}, len={})",
                 range.start,

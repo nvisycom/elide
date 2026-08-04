@@ -187,7 +187,7 @@ impl Dictionary {
     /// [`metadata_from_toml`]: Self::metadata_from_toml
     pub fn from_toml(raw: &str) -> Result<Self> {
         toml::from_str(raw)
-            .map_err(|e| Error::new(ErrorKind::Validation, format!("dictionary TOML: {e}")))
+            .map_err(|e| Error::new(ErrorKind::Configuration, format!("dictionary TOML: {e}")))
     }
 
     /// Parse dictionary metadata from a sidecar TOML source.
@@ -206,7 +206,7 @@ impl Dictionary {
     pub fn metadata_from_toml(raw: &str) -> Result<DictionaryBuilder> {
         let metadata: DictionaryMetadata = toml::from_str(raw).map_err(|e| {
             Error::new(
-                ErrorKind::Validation,
+                ErrorKind::Configuration,
                 format!("dictionary metadata TOML: {e}"),
             )
         })?;

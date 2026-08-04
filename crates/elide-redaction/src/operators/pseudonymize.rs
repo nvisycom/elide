@@ -142,7 +142,7 @@ where
                 match self.generator.generate(&entity.label, &seed) {
                     TabularReplacement::Cell(replacement) => Ok(replacement),
                     _ => Err(Error::new(
-                        ErrorKind::Validation,
+                        ErrorKind::Redaction,
                         "pseudonymize generator must produce a cell surrogate",
                     )),
                 }

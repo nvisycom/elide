@@ -206,8 +206,9 @@ impl FormatRegistry {
     ///
     /// # Errors
     ///
-    /// Returns a validation error when no format is registered for
-    /// `extension`; otherwise propagates the loader's decode error.
+    /// Returns [`ErrorKind::CapabilityUnavailable`] when no format is
+    /// registered for `extension`; otherwise propagates the loader's decode
+    /// error.
     pub async fn decode(
         &self,
         content: impl Into<ContentData>,
@@ -215,7 +216,7 @@ impl FormatRegistry {
     ) -> Result<UntypedDocumentHandle> {
         let format = self.by_extension(extension).ok_or_else(|| {
             Error::new(
-                ErrorKind::Validation,
+                ErrorKind::CapabilityUnavailable,
                 format!("no codec registered for extension `{extension}`"),
             )
         })?;
@@ -228,9 +229,9 @@ impl FormatRegistry {
     ///
     /// # Errors
     ///
-    /// Returns a validation error when the content carries neither a
-    /// resolvable filename extension nor a known content type; otherwise
-    /// propagates the loader's decode error.
+    /// Returns [`ErrorKind::CapabilityUnavailable`] when the content carries
+    /// neither a resolvable filename extension nor a known content type;
+    /// otherwise propagates the loader's decode error.
     ///
     /// [`extension`]: ContentData::extension
     /// [`content_type`]: ContentData::content_type
@@ -247,7 +248,7 @@ impl FormatRegistry {
         });
         let Some(format_id) = format_id else {
             return Err(Error::new(
-                ErrorKind::Validation,
+                ErrorKind::CapabilityUnavailable,
                 "content carries no resolvable filename extension or content type",
             ));
         };

@@ -38,9 +38,9 @@ thread_local! {
     static RENDERER: RefCell<Option<PdfRenderer>> = const { RefCell::new(None) };
 }
 
-/// Build a validation error from a PDFium failure.
+/// Build a malformed-input error from a PDFium failure.
 fn pdf_error(context: &str, err: impl fmt::Display) -> Error {
-    Error::new(ErrorKind::Validation, format!("{context}: {err}"))
+    Error::new(ErrorKind::MalformedInput, format!("{context}: {err}"))
 }
 
 /// Render every page of a PDF to a PNG-encoded [`ImageData`] at `dpi`,
@@ -108,7 +108,14 @@ impl PdfRenderer {
     fn new() -> Result<Self> {
         let bindings = Pdfium::bind_to_system_library()
             .or_else(|_| Pdfium::bind_to_library("libpdfium"))
-            .map_err(|e| pdf_error("failed to load PDFium library", e))?;
+            // The library being absent is a missing capability (the host has
+            // no PDFium), not a malformed PDF.
+            .map_err(|e| {
+                Error::new(
+                    ErrorKind::CapabilityUnavailable,
+                    format!("failed to load PDFium library: {e}"),
+                )
+            })?;
         Ok(Self {
             pdfium: Pdfium::new(bindings),
         })

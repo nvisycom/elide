@@ -328,7 +328,7 @@ impl PatternRecognizerBuilder {
             for variant in &pattern.variants {
                 let regex = self.compile_regex(&variant.regex).map_err(|e| {
                     Error::new(
-                        ErrorKind::Validation,
+                        ErrorKind::Configuration,
                         format!("pattern `{}`: invalid regex: {e}", pattern.name),
                     )
                 })?;
@@ -336,7 +336,7 @@ impl PatternRecognizerBuilder {
                     None => None,
                     Some(name) => Some(validators.resolve(name).ok_or_else(|| {
                         Error::new(
-                            ErrorKind::Validation,
+                            ErrorKind::Configuration,
                             format!("pattern `{}`: unknown validator `{}`", pattern.name, name),
                         )
                     })?),
@@ -365,7 +365,7 @@ impl PatternRecognizerBuilder {
                 builder.dfa_size_limit(bytes);
             }
             Some(builder.build().map_err(|e| {
-                Error::new(ErrorKind::Validation, format!("compiling regex set: {e}"))
+                Error::new(ErrorKind::Configuration, format!("compiling regex set: {e}"))
             })?)
         };
         Ok((compiled, regex_set))
@@ -401,7 +401,7 @@ impl PatternRecognizerBuilder {
         for dict in &self.dictionaries {
             if let Err(reason) = dict.scoring.validate() {
                 return Err(Error::new(
-                    ErrorKind::Validation,
+                    ErrorKind::Configuration,
                     format!("dictionary `{}`: {reason}", dict.name),
                 ));
             }
@@ -423,7 +423,7 @@ impl PatternRecognizerBuilder {
                             .column
                             .map_or_else(|| "no column".to_owned(), |c| format!("column {c}"));
                         Error::new(
-                            ErrorKind::Validation,
+                            ErrorKind::Configuration,
                             format!(
                                 "dictionary `{}`: term `{}` ({column_desc}) has no score in \
                                  dictionary scoring",
@@ -453,7 +453,7 @@ impl PatternRecognizerBuilder {
             && all_terms.len() > max
         {
             return Err(Error::new(
-                ErrorKind::Validation,
+                ErrorKind::Configuration,
                 format!(
                     "dictionary term count {} exceeds limit {max}",
                     all_terms.len()
@@ -464,7 +464,7 @@ impl PatternRecognizerBuilder {
             let total: usize = all_terms.iter().map(String::len).sum();
             if total > max {
                 return Err(Error::new(
-                    ErrorKind::Validation,
+                    ErrorKind::Configuration,
                     format!("dictionary term bytes {total} exceeds limit {max}"),
                 ));
             }
@@ -486,7 +486,7 @@ impl PatternRecognizerBuilder {
                     .build(&all_terms)
                     .map_err(|e| {
                         Error::new(
-                            ErrorKind::Validation,
+                            ErrorKind::Configuration,
                             format!("compiling dictionary automaton: {e}"),
                         )
                     })?,

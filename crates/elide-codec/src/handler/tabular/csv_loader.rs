@@ -46,7 +46,7 @@ impl Loader<Tabular> for CsvLoader {
         let headers = if self.has_headers {
             let record = reader
                 .headers()
-                .map_err(|e| Error::new(ErrorKind::Validation, format!("CSV header: {e}")))?;
+                .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("CSV header: {e}")))?;
             Some(record.iter().map(String::from).collect())
         } else {
             None
@@ -55,7 +55,7 @@ impl Loader<Tabular> for CsvLoader {
         let mut rows = Vec::new();
         for record in reader.records() {
             let record =
-                record.map_err(|e| Error::new(ErrorKind::Validation, format!("CSV row: {e}")))?;
+                record.map_err(|e| Error::new(ErrorKind::MalformedInput, format!("CSV row: {e}")))?;
             rows.push(record.iter().map(String::from).collect());
         }
 

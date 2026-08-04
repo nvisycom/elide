@@ -52,7 +52,7 @@ impl Variant {
         let regex = regex.into();
         if let Err(e) = ::regex::Regex::new(&regex) {
             return Err(Error::new(
-                ErrorKind::Validation,
+                ErrorKind::Configuration,
                 format!("invalid regex: {e}"),
             ));
         }
@@ -176,6 +176,6 @@ impl Regex {
     /// missing required fields.
     pub fn from_toml(raw: &str) -> Result<Self> {
         toml::from_str(raw)
-            .map_err(|e| Error::new(ErrorKind::Validation, format!("regex rule TOML: {e}")))
+            .map_err(|e| Error::new(ErrorKind::Configuration, format!("regex rule TOML: {e}")))
     }
 }

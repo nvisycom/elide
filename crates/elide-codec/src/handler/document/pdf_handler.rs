@@ -102,7 +102,7 @@ impl Handler<Text> for PdfHandler {
 
     fn encode(&self) -> Result<ContentData> {
         Err(Error::new(
-            ErrorKind::Validation,
+            ErrorKind::CapabilityUnavailable,
             "PDF re-encoding is not yet supported",
         ))
     }
@@ -161,7 +161,7 @@ impl Container for PdfHandler {
         // requires re-encoding the PDF, which is not supported yet (see
         // `encode`). So no part is writable today.
         Err(Error::new(
-            ErrorKind::Validation,
+            ErrorKind::CapabilityUnavailable,
             format!("pdf replace_part: `{id}` is not a writable part"),
         ))
     }

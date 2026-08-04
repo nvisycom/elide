@@ -50,7 +50,7 @@ pub fn build_http_client(config: &HttpConfig) -> Result<ClientWithMiddleware> {
         .build()
         .map_err(|e| {
             Error::new(
-                ErrorKind::Validation,
+                ErrorKind::Configuration,
                 format!("failed to build HTTP client: {e}"),
             )
         })?;

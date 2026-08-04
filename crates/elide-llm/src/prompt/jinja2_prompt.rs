@@ -54,7 +54,7 @@ impl<M> Jinja2Prompt<M> {
         env.add_template_owned("prompt", template.into())
             .map_err(|e| {
                 Error::new(
-                    ErrorKind::Validation,
+                    ErrorKind::Configuration,
                     format!("template compile error: {e}"),
                 )
             })?;
@@ -72,7 +72,7 @@ impl<M> Jinja2Prompt<M> {
     /// fails to compile.
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self> {
         let raw = fs::read_to_string(path.as_ref())
-            .map_err(|e| Error::new(ErrorKind::Validation, format!("reading prompt file: {e}")))?;
+            .map_err(|e| Error::new(ErrorKind::Configuration, format!("reading prompt file: {e}")))?;
         Self::from_template(raw)
     }
 
