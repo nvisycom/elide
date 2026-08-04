@@ -19,29 +19,12 @@ projects.
 
 ## Features
 
-- **Multimodal**: detect and redact across text, images, audio, and tabular data
-  through one entity model; OCR and speech-to-text lift images and audio into a
-  text-recognizable surface so the same recognizers apply
-- **Pattern detection**: regex, dictionary, and checksum recognizers find
-  structured PII and PHI across many common formats and jurisdictions
-- **Model-driven recognition**: NER with language detection, and LLM/VLM
-  recognizers (text and image) behind a pluggable backend, alongside the pattern
-  recognizers
-- **Context-aware scoring**: nearby keywords lift the confidence of ambiguous
-  matches, so weak findings clear the threshold only when their surroundings
-  support them
-- **Deduplication**: overlapping findings from multiple recognizers reconcile
-  into a single set of entities, with conflict resolution and confidence
-  calibration
-- **Redaction operators**: mask, replace, hash, or encrypt text; blur or
-  black-box image regions; silence or beep audio; drop tabular rows and columns,
-  and more. Reversible options (encrypt, pseudonymize) record what is needed to
-  restore the original
-- **Format codecs**: read, edit, and write documents (text, JSON, HTML, DOCX,
-  PDF, images, audio, CSV, and more) with faithful round-tripping that changes
-  only the redacted parts
-- **Provenance-first model**: every entity carries its full audit trail of how
-  it was found, scored, and hidden
+- **Multimodal:** Detect and redact across text, images, audio, and tabular data through one entity model
+- **Pattern & Model Detection:** Regex, dictionary, and checksum recognizers alongside NER and LLM/VLM recognition
+- **Context-Aware Scoring:** Nearby keywords lift ambiguous matches, and overlapping findings deduplicate into one entity set
+- **Redaction Operators:** Mask, replace, hash, encrypt, blur, silence, or drop — with reversible encrypt and pseudonymize
+- **Format Codecs:** Round-trip PDF, DOCX, HTML, JSON, CSV, images, and audio, changing only the redacted parts
+- **Provenance-First:** Every entity carries its full audit trail of how it was found, scored, and hidden
 
 Everything is feature-gated: take only the modalities, recognizers, and codecs
 you need.
