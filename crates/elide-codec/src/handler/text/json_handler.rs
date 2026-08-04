@@ -366,7 +366,7 @@ pub(super) fn parse_slots(src: &str) -> Result<Vec<Slot>> {
     p.flush_passthrough();
     if p.pos != src.len() {
         return Err(Error::new(
-            ErrorKind::Validation,
+            ErrorKind::MalformedInput,
             format!("trailing bytes after JSON value at offset {}", p.pos),
         ));
     }
@@ -424,7 +424,7 @@ impl<'a> SlotParser<'a> {
     fn consume_punct(&mut self, c: u8) -> Result<()> {
         if self.peek() != Some(c) {
             return Err(Error::new(
-                ErrorKind::Validation,
+                ErrorKind::MalformedInput,
                 format!("expected {:?} at offset {}", c as char, self.pos),
             ));
         }
@@ -455,11 +455,11 @@ impl<'a> SlotParser<'a> {
                 Ok(())
             }
             Some(b) => Err(Error::new(
-                ErrorKind::Validation,
+                ErrorKind::MalformedInput,
                 format!("unexpected byte {b:#x} at offset {}", self.pos),
             )),
             None => Err(Error::new(
-                ErrorKind::Validation,
+                ErrorKind::MalformedInput,
                 "unexpected end of input".to_string(),
             )),
         }
@@ -498,7 +498,7 @@ impl<'a> SlotParser<'a> {
                 }
                 _ => {
                     return Err(Error::new(
-                        ErrorKind::Validation,
+                        ErrorKind::MalformedInput,
                         format!("expected ',' or '}}' at offset {}", self.pos),
                     ));
                 }
@@ -529,7 +529,7 @@ impl<'a> SlotParser<'a> {
                 }
                 _ => {
                     return Err(Error::new(
-                        ErrorKind::Validation,
+                        ErrorKind::MalformedInput,
                         format!("expected ',' or ']' at offset {}", self.pos),
                     ));
                 }
@@ -540,7 +540,7 @@ impl<'a> SlotParser<'a> {
     fn parse_string_leaf(&mut self, kind: LeafKind) -> Result<Leaf> {
         if self.peek() != Some(b'"') {
             return Err(Error::new(
-                ErrorKind::Validation,
+                ErrorKind::MalformedInput,
                 format!("expected '\"' at offset {}", self.pos),
             ));
         }
@@ -572,7 +572,7 @@ impl<'a> SlotParser<'a> {
                         Some(b'f') => value.push('\u{000c}'),
                         Some(b'u') => {
                             return Err(Error::new(
-                                ErrorKind::Validation,
+                                ErrorKind::MalformedInput,
                                 format!(
                                     "JSON \\u escapes are not supported in redaction codec \
                                      (offset {})",
@@ -582,7 +582,7 @@ impl<'a> SlotParser<'a> {
                         }
                         Some(other) => {
                             return Err(Error::new(
-                                ErrorKind::Validation,
+                                ErrorKind::MalformedInput,
                                 format!(
                                     "invalid escape \\{} at offset {}",
                                     other as char, self.pos
@@ -591,7 +591,7 @@ impl<'a> SlotParser<'a> {
                         }
                         None => {
                             return Err(Error::new(
-                                ErrorKind::Validation,
+                                ErrorKind::MalformedInput,
                                 "unterminated escape at end of input".to_string(),
                             ));
                         }
@@ -604,14 +604,14 @@ impl<'a> SlotParser<'a> {
                     // escape table.
                     let rest = &self.src[ch_start..];
                     let ch = rest.chars().next().ok_or_else(|| {
-                        Error::new(ErrorKind::Validation, "unterminated string".to_string())
+                        Error::new(ErrorKind::MalformedInput, "unterminated string".to_string())
                     })?;
                     value.push(ch);
                     self.pos += ch.len_utf8();
                 }
                 None => {
                     return Err(Error::new(
-                        ErrorKind::Validation,
+                        ErrorKind::MalformedInput,
                         "unterminated string".to_string(),
                     ));
                 }
@@ -632,7 +632,7 @@ impl<'a> SlotParser<'a> {
         }
         if start == self.pos {
             return Err(Error::new(
-                ErrorKind::Validation,
+                ErrorKind::MalformedInput,
                 format!("expected scalar at offset {start}"),
             ));
         }

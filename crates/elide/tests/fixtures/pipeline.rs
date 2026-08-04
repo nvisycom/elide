@@ -269,7 +269,7 @@ impl Fixture {
         let mut document = UntypedDocumentHandle::new(self.decode_as::<M>(&registry).await?);
 
         let en_tag = LanguageTag::parse("en")
-            .map_err(|e| Error::new(ErrorKind::Validation, format!("invalid language tag: {e}")))?;
+            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("invalid language tag: {e}")))?;
         let scope = Scope::new().with_language(Language::asserted(en_tag));
 
         // One scope, shared across every modality pipeline.
@@ -310,7 +310,7 @@ impl Fixture {
         let untyped = registry.decode(self.source, self.extension).await?;
         untyped.into::<M>().map_err(|_| {
             Error::new(
-                ErrorKind::Validation,
+                ErrorKind::CapabilityUnavailable,
                 format!(
                     "{} did not resolve to the {} modality",
                     self.extension,

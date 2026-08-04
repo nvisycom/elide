@@ -23,7 +23,7 @@ impl Loader<Audio> for Mp3Loader {
         let channels = probe_channels(&bytes)?;
         if channels > 2 {
             return Err(Error::new(
-                ErrorKind::Validation,
+                ErrorKind::MalformedInput,
                 format!("MP3 has {channels} channels; only mono and stereo are supported"),
             ));
         }

@@ -24,7 +24,7 @@ impl Loader<Audio> for WavLoader {
         // Validate up front so a malformed clip fails at decode, not at
         // the first redaction.
         WavReader::new(Cursor::new(bytes.clone()))
-            .map_err(|e| Error::new(ErrorKind::Validation, format!("not a valid WAV: {e}")))?;
+            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("not a valid WAV: {e}")))?;
         Ok(WavHandler::new(bytes))
     }
 }

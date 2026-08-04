@@ -97,7 +97,7 @@ impl DataWriter<Audio> for WavHandler {
             (SampleFormat::Float, 32) => self.redact_typed::<f32>(spec, &redactions)?,
             (fmt, bits) => {
                 return Err(Error::new(
-                    ErrorKind::Validation,
+                    ErrorKind::MalformedInput,
                     format!("unsupported WAV sample format {fmt:?} at {bits} bits"),
                 ));
             }
@@ -114,11 +114,11 @@ impl WavHandler {
         S: hound::Sample + Default + Clone + redact::ToneSample,
     {
         let mut reader = WavReader::new(Cursor::new(self.bytes.clone()))
-            .map_err(|e| Error::new(ErrorKind::Validation, format!("WAV read failed: {e}")))?;
+            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("WAV read failed: {e}")))?;
         let mut samples: Vec<S> = reader
             .samples::<S>()
             .collect::<result::Result<_, _>>()
-            .map_err(|e| Error::new(ErrorKind::Validation, format!("WAV decode failed: {e}")))?;
+            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("WAV decode failed: {e}")))?;
 
         // Walk the position-sorted batch in reverse, applying
         // right-to-left so a `Removed` span doesn't shift the sample
@@ -136,14 +136,14 @@ impl WavHandler {
         let mut buf = Cursor::new(Vec::new());
         {
             let mut writer = WavWriter::new(&mut buf, spec)
-                .map_err(|e| Error::new(ErrorKind::Validation, format!("WAV write failed: {e}")))?;
+                .map_err(|e| Error::new(ErrorKind::Processing, format!("WAV write failed: {e}")))?;
             for sample in samples {
                 writer.write_sample(sample).map_err(|e| {
-                    Error::new(ErrorKind::Validation, format!("WAV encode failed: {e}"))
+                    Error::new(ErrorKind::Processing, format!("WAV encode failed: {e}"))
                 })?;
             }
             writer.finalize().map_err(|e| {
-                Error::new(ErrorKind::Validation, format!("WAV finalize failed: {e}"))
+                Error::new(ErrorKind::Processing, format!("WAV finalize failed: {e}"))
             })?;
         }
         self.bytes = Bytes::from(buf.into_inner());
@@ -155,7 +155,7 @@ impl WavHandler {
 /// the encoded bytes.
 fn wav_spec(bytes: &Bytes) -> Result<WavSpec> {
     let reader = WavReader::new(Cursor::new(bytes.clone()))
-        .map_err(|e| Error::new(ErrorKind::Validation, format!("not a valid WAV: {e}")))?;
+        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("not a valid WAV: {e}")))?;
     Ok(reader.spec())
 }
 

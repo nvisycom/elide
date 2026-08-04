@@ -59,7 +59,7 @@ pub(crate) fn build_items(raw: &str) -> Result<Vec<XmlItem>> {
     loop {
         let event = reader
             .read_event()
-            .map_err(|e| Error::new(ErrorKind::Validation, format!("malformed XML: {e}")))?;
+            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("malformed XML: {e}")))?;
         // The event occupies raw bytes `[last, pos)`.
         let span = last..reader.buffer_position() as usize;
         last = span.end;

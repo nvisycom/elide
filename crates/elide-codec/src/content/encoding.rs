@@ -15,12 +15,12 @@ impl TextEncoding {
     ///
     /// # Errors
     ///
-    /// Returns a validation error when the bytes are not valid for this
+    /// Returns a malformed-input error when the bytes are not valid for this
     /// encoding.
     pub fn decode_bytes(self, bytes: &[u8]) -> Result<String> {
         match self {
             Self::Utf8 => String::from_utf8(bytes.to_vec())
-                .map_err(|e| Error::new(ErrorKind::Validation, format!("invalid UTF-8: {e}"))),
+                .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("invalid UTF-8: {e}"))),
         }
     }
 }

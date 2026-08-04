@@ -63,7 +63,7 @@ impl AesEncrypt {
         let ciphertext = self
             .cipher()
             .encrypt(&nonce, plaintext.as_bytes())
-            .map_err(|_| Error::new(ErrorKind::Validation, "encryption failed"))?;
+            .map_err(|_| Error::new(ErrorKind::Redaction, "encryption failed"))?;
 
         // Prepend the nonce so the replacement is self-describing.
         let mut blob = Vec::with_capacity(NONCE_LEN + ciphertext.len());
@@ -99,7 +99,7 @@ impl AesEncrypt {
             Err(_) => Ok(None),
             Ok(plaintext) => {
                 let text = String::from_utf8(plaintext).map_err(|_| {
-                    Error::new(ErrorKind::Validation, "decrypted bytes are not UTF-8")
+                    Error::new(ErrorKind::Redaction, "decrypted bytes are not UTF-8")
                 })?;
                 Ok(Some(TextData::new(text)))
             }

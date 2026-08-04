@@ -55,7 +55,7 @@ impl Handler<Text> for RtfHandler {
 
     fn encode(&self) -> Result<ContentData> {
         Err(Error::new(
-            ErrorKind::Validation,
+            ErrorKind::CapabilityUnavailable,
             "RTF re-encoding is not yet supported",
         ))
     }

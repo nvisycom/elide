@@ -23,7 +23,7 @@ pub(crate) fn encode_image(
     let mut buf = Cursor::new(Vec::new());
     img.write_to(&mut buf, fmt).map_err(|e| {
         elide_core::Error::new(
-            elide_core::ErrorKind::Validation,
+            elide_core::ErrorKind::Processing,
             format!("image encode failed: {e}"),
         )
     })?;
@@ -180,7 +180,7 @@ macro_rules! impl_image_handler {
             ) -> ::elide_core::Result<$handler> {
                 let image = ::image::load_from_memory(content.as_bytes()).map_err(|e| {
                     ::elide_core::Error::new(
-                        ::elide_core::ErrorKind::Validation,
+                        ::elide_core::ErrorKind::MalformedInput,
                         format!(concat!($format_id, " decode failed: {}"), e),
                     )
                 })?;

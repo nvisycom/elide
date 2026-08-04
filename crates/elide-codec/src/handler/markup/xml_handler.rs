@@ -91,7 +91,7 @@ pub(crate) fn splice(raw: &str, items: &[XmlItem]) -> Result<String> {
         // panic in `replace_range`.
         if end > out.len() || start > end {
             return Err(Error::new(
-                ErrorKind::Validation,
+                ErrorKind::Processing,
                 format!(
                     "xml splice span {start}..{end} out of bounds (len {})",
                     out.len()
@@ -100,7 +100,7 @@ pub(crate) fn splice(raw: &str, items: &[XmlItem]) -> Result<String> {
         }
         if !out.is_char_boundary(start) || !out.is_char_boundary(end) {
             return Err(Error::new(
-                ErrorKind::Validation,
+                ErrorKind::Processing,
                 format!("xml splice span {start}..{end} falls mid-character"),
             ));
         }

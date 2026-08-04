@@ -23,7 +23,7 @@ use symphonia::default::get_probe;
 ///
 /// # Errors
 ///
-/// Returns a validation error when the container can't be probed or the
+/// Returns a malformed-input error when the container can't be probed or the
 /// first track lacks the timebase/duration metadata needed to compute a
 /// duration.
 pub(super) fn probe_duration_ms(bytes: &Bytes, extension_hint: &str) -> Result<u64> {
@@ -39,27 +39,27 @@ pub(super) fn probe_duration_ms(bytes: &Bytes, extension_hint: &str) -> Result<u
             FormatOptions::default(),
             MetadataOptions::default(),
         )
-        .map_err(|e| Error::new(ErrorKind::Validation, format!("audio probe failed: {e}")))?;
+        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("audio probe failed: {e}")))?;
 
     let track = reader
         .tracks()
         .first()
-        .ok_or_else(|| Error::new(ErrorKind::Validation, "audio probe returned no tracks"))?;
+        .ok_or_else(|| Error::new(ErrorKind::MalformedInput, "audio probe returned no tracks"))?;
 
     let time_base = track
         .time_base
-        .ok_or_else(|| Error::new(ErrorKind::Validation, "audio track is missing a timebase"))?;
+        .ok_or_else(|| Error::new(ErrorKind::MalformedInput, "audio track is missing a timebase"))?;
     let duration = track
         .duration
-        .ok_or_else(|| Error::new(ErrorKind::Validation, "audio track is missing a duration"))?;
+        .ok_or_else(|| Error::new(ErrorKind::MalformedInput, "audio track is missing a duration"))?;
 
     // `Track::duration` is timebase ticks (u64); `calc_time` takes a
     // signed `Timestamp` in the same unit, anchored at zero.
     let ticks = i64::try_from(duration.get())
-        .map_err(|_| Error::new(ErrorKind::Validation, "audio duration overflowed i64 ticks"))?;
+        .map_err(|_| Error::new(ErrorKind::MalformedInput, "audio duration overflowed i64 ticks"))?;
     let time = time_base.calc_time(Timestamp::new(ticks)).ok_or_else(|| {
         Error::new(
-            ErrorKind::Validation,
+            ErrorKind::MalformedInput,
             "audio duration overflowed on conversion",
         )
     })?;
@@ -67,7 +67,7 @@ pub(super) fn probe_duration_ms(bytes: &Bytes, extension_hint: &str) -> Result<u
     let ms = time.as_nanos() / 1_000_000;
     u64::try_from(ms).map_err(|_| {
         Error::new(
-            ErrorKind::Validation,
+            ErrorKind::MalformedInput,
             "audio duration is negative or overflowed",
         )
     })

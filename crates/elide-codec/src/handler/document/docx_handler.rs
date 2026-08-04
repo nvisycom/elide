@@ -78,39 +78,39 @@ impl Encoder for DocxEncoder {
         //    replaced media part becomes its redacted bytes, and every
         //    other entry is copied through verbatim.
         let mut reader = ZipArchive::new(Cursor::new(self.archive.as_ref()))
-            .map_err(|e| Error::new(ErrorKind::Validation, format!("malformed docx zip: {e}")))?;
+            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("malformed docx zip: {e}")))?;
         let mut out = ZipWriter::new(Cursor::new(Vec::new()));
 
         for i in 0..reader.len() {
             let mut entry = reader
                 .by_index(i)
-                .map_err(|e| Error::new(ErrorKind::Validation, format!("docx entry {i}: {e}")))?;
+                .map_err(|e| Error::new(ErrorKind::Processing, format!("docx entry {i}: {e}")))?;
             let name = entry.name().to_owned();
             let options = SimpleFileOptions::default().compression_method(entry.compression());
             out.start_file(&name, options).map_err(|e| {
-                Error::new(ErrorKind::Validation, format!("docx repack {name}: {e}"))
+                Error::new(ErrorKind::Processing, format!("docx repack {name}: {e}"))
             })?;
             if name == BODY_PART {
                 out.write_all(body.as_bytes())
-                    .map_err(|e| Error::new(ErrorKind::Validation, format!("docx body: {e}")))?;
+                    .map_err(|e| Error::new(ErrorKind::Processing, format!("docx body: {e}")))?;
             } else if let Some(redacted) = self.replacements.get(&name) {
                 out.write_all(redacted).map_err(|e| {
-                    Error::new(ErrorKind::Validation, format!("docx media {name}: {e}"))
+                    Error::new(ErrorKind::Processing, format!("docx media {name}: {e}"))
                 })?;
             } else {
                 let mut buf = Vec::with_capacity(entry.size() as usize);
                 entry.read_to_end(&mut buf).map_err(|e| {
-                    Error::new(ErrorKind::Validation, format!("docx read {name}: {e}"))
+                    Error::new(ErrorKind::Processing, format!("docx read {name}: {e}"))
                 })?;
                 out.write_all(&buf).map_err(|e| {
-                    Error::new(ErrorKind::Validation, format!("docx copy {name}: {e}"))
+                    Error::new(ErrorKind::Processing, format!("docx copy {name}: {e}"))
                 })?;
             }
         }
 
         let cursor = out
             .finish()
-            .map_err(|e| Error::new(ErrorKind::Validation, format!("docx finalize: {e}")))?;
+            .map_err(|e| Error::new(ErrorKind::Processing, format!("docx finalize: {e}")))?;
         Ok(ContentData::new(Bytes::from(cursor.into_inner())))
     }
 
@@ -153,7 +153,7 @@ impl Container for DocxEncoder {
     fn replace_part(&mut self, id: &PartId, bytes: Bytes) -> Result<()> {
         if !id.as_str().starts_with(MEDIA_PREFIX) {
             return Err(Error::new(
-                ErrorKind::Validation,
+                ErrorKind::MalformedInput,
                 format!("docx replace_part: `{id}` is not a media part"),
             ));
         }

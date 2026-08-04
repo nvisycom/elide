@@ -92,7 +92,7 @@ impl ContentData {
     ///
     /// # Errors
     ///
-    /// Returns a validation error when the bytes are not valid for the
+    /// Returns a malformed-input error when the bytes are not valid for the
     /// encoding.
     ///
     /// [`encoding`]: Self::encoding
@@ -175,19 +175,19 @@ impl ContentData {
     ///
     /// # Errors
     ///
-    /// Returns a validation error when the range end is past the content
+    /// Returns a malformed-input error when the range end is past the content
     /// length or its start exceeds its end.
     pub fn slice(&self, range: Range<usize>) -> Result<Bytes> {
         let Range { start, end } = range;
         if end > self.data.len() {
             return Err(Error::new(
-                ErrorKind::Validation,
+                ErrorKind::MalformedInput,
                 format!("slice end {end} exceeds content length {}", self.data.len()),
             ));
         }
         if start > end {
             return Err(Error::new(
-                ErrorKind::Validation,
+                ErrorKind::MalformedInput,
                 format!("slice start {start} is greater than end {end}"),
             ));
         }

@@ -24,7 +24,7 @@ impl Loader<Text> for JsonLoader {
         // but with a friendlier error path. Reject here so callers get a
         // single decode-time validation point.
         serde_json::from_str::<serde_json::Value>(&text)
-            .map_err(|e| Error::new(ErrorKind::Validation, format!("invalid JSON: {e}")))?;
+            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("invalid JSON: {e}")))?;
         Ok(JsonHandler::from_source_string(text))
     }
 }

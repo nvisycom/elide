@@ -102,8 +102,8 @@ impl From<Error> for CoreError {
             Error::Provider(_) => ErrorKind::Provider,
             // A bad reply is a recognition-time failure.
             Error::Response(_) => ErrorKind::Recognition,
-            // Request construction is caller-side validation.
-            Error::Request(_) => ErrorKind::Validation,
+            // Request construction is caller-side configuration.
+            Error::Request(_) => ErrorKind::Configuration,
         };
         CoreError::new(kind, err)
     }
