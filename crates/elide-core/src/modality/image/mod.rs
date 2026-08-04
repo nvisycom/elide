@@ -17,6 +17,7 @@ use crate::recognition::Artifacts;
 /// Image modality: data is [`ImageData`], locations are
 /// [`ImageLocation`] regions, replacements are [`ImageReplacement`].
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Image;
 
 impl Modality for Image {

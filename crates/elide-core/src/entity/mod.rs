@@ -59,7 +59,10 @@ use crate::primitive::{Confidence, LanguageTag};
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(bound = "M::Location: schemars::JsonSchema, M::Data: schemars::JsonSchema")
+    schemars(
+        bound = "M: schemars::JsonSchema, M::Location: schemars::JsonSchema, M::Data: schemars::JsonSchema",
+        rename = "{M}Entity"
+    )
 )]
 pub struct Entity<M: Modality> {
     /// Stable unique identity for this entity (time-ordered UUIDv7), minted

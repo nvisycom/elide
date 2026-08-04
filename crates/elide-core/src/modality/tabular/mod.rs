@@ -23,6 +23,7 @@ use crate::recognition::Artifacts;
 /// replacements are [`TabularReplacement`]; only [`TabularLocation`] is
 /// tabular-specific.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Tabular;
 
 impl Modality for Tabular {

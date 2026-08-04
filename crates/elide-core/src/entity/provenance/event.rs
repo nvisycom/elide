@@ -39,7 +39,10 @@ use crate::primitive::Confidence;
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(bound = "M::Location: schemars::JsonSchema, M::Data: schemars::JsonSchema")
+    schemars(
+        bound = "M: schemars::JsonSchema, M::Location: schemars::JsonSchema, M::Data: schemars::JsonSchema",
+        rename = "{M}Event"
+    )
 )]
 pub struct Event<M: Modality> {
     /// Who produced this event: a recognizer name, a deduplication strategy,
@@ -269,7 +272,10 @@ impl<M: Modality> Event<M> {
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(bound = "M::Location: schemars::JsonSchema, M::Data: schemars::JsonSchema")
+    schemars(
+        bound = "M: schemars::JsonSchema, M::Location: schemars::JsonSchema, M::Data: schemars::JsonSchema",
+        rename = "{M}EventKind"
+    )
 )]
 #[non_exhaustive]
 pub enum EventKind<M: Modality> {

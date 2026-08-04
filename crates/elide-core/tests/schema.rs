@@ -75,3 +75,19 @@ fn scope_schema() {
 fn annotations_schema() {
     let _ = schema_for!(Annotations<Text>);
 }
+
+/// Generic types carry the modality in their schema name, so two modalities'
+/// schemas do not collide into `Provenance` / `Provenance2` in a combined
+/// OpenAPI document. See the `schemars(rename = "{M}...")` on these types.
+#[cfg(feature = "image")]
+#[test]
+fn generic_schema_names_carry_modality_prefix() {
+    use elide_core::entity::provenance::Provenance;
+    use elide_core::modality::image::Image;
+    use schemars::JsonSchema;
+
+    assert_eq!(Entity::<Text>::schema_name(), "TextEntity");
+    assert_eq!(Entity::<Image>::schema_name(), "ImageEntity");
+    assert_eq!(Provenance::<Text>::schema_name(), "TextProvenance");
+    assert_eq!(Provenance::<Image>::schema_name(), "ImageProvenance");
+}
