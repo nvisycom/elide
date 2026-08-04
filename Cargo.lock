@@ -1043,6 +1043,7 @@ dependencies = [
  "rig",
  "schemars",
  "serde",
+ "serde_json",
  "thiserror",
  "tracing",
  "unicode-normalization",

@@ -12,16 +12,15 @@ use elide_core::Result;
 use elide_core::modality::image::{Image, ImageData};
 use elide_core::modality::text::Text;
 use rig::OneOrMany;
-use rig::agent::{Agent, AgentBuilder};
 use rig::client::CompletionClient;
-use rig::completion::{CompletionModel, Message};
+use rig::completion::Message;
 use rig::extractor::ExtractorBuilder;
 use rig::message::{ImageMediaType, UserContent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub use self::config::RigConfig;
-use self::dispatch::{RigAgent, dispatch};
+use self::dispatch::{RigModel, dispatch};
 use super::http::{HttpConfig, build_http_client};
 use super::{LlmBackend, LlmRequest, LlmResponse};
 use crate::error::Error;
@@ -38,7 +37,7 @@ const TARGET: &str = "elide_llm::backend::rig";
 /// [`new`]: Self::new
 /// [`new_with_config`]: Self::new_with_config
 pub struct RigBackend {
-    agent: RigAgent,
+    model: RigModel,
     config: RigConfig,
     model_name: String,
 }
@@ -69,36 +68,32 @@ impl RigBackend {
             ..HttpConfig::default()
         })?;
 
-        let preamble = config.preamble.as_deref();
-        let agent = match &provider {
+        let model = match &provider {
             #[cfg(feature = "openai-gpt")]
             Provider::OpenAi(p) => {
                 let client = p.openai_client(http)?;
                 let model = client.completions_api().completion_model(p.model.as_str());
-                RigAgent::OpenAi(build_agent(model, &config, preamble))
+                RigModel::OpenAi(model)
             }
             #[cfg(feature = "anthropic-claude")]
             Provider::Anthropic(p) => {
                 let client = p.anthropic_client(http)?;
-                let model = client.completion_model(p.model.as_str());
-                RigAgent::Anthropic(build_agent(model, &config, preamble))
+                RigModel::Anthropic(client.completion_model(p.model.as_str()))
             }
             #[cfg(feature = "google-gemini")]
             Provider::Gemini(p) => {
                 let client = p.gemini_client(http)?;
-                let model = client.completion_model(p.model.as_str());
-                RigAgent::Gemini(build_agent(model, &config, preamble))
+                RigModel::Gemini(client.completion_model(p.model.as_str()))
             }
             Provider::Ollama(p) => {
                 let client = p.ollama_client(http)?;
-                let model = client.completion_model(p.model.as_str());
-                RigAgent::Ollama(build_agent(model, &config, preamble))
+                RigModel::Ollama(client.completion_model(p.model.as_str()))
             }
         };
 
         let model_name = provider.model().to_owned();
         Ok(RigBackend {
-            agent,
+            model,
             config,
             model_name,
         })
@@ -115,8 +110,14 @@ impl RigBackend {
         T: JsonSchema + for<'a> Deserialize<'a> + Serialize + Send + Sync + 'static,
     {
         let preamble = self.config.preamble.clone();
-        dispatch!(&self.agent, |agent| {
-            let mut builder = ExtractorBuilder::<_, T>::new((*agent.model).clone());
+        let max_tokens = self.config.max_tokens;
+        // `ExtractorBuilder` has no `temperature` setter, so pass it through
+        // `additional_params` — rig merges these into the provider request.
+        let params = serde_json::json!({ "temperature": self.config.temperature });
+        dispatch!(&self.model, |model| {
+            let mut builder = ExtractorBuilder::<_, T>::new(model.clone())
+                .max_tokens(max_tokens)
+                .additional_params(params);
             if let Some(p) = preamble.as_deref() {
                 builder = builder.preamble(p);
             }
@@ -170,16 +171,3 @@ fn image_message(prompt: &str, data: &ImageData) -> Message {
     Message::User { content }
 }
 
-fn build_agent<M: CompletionModel>(
-    model: M,
-    config: &RigConfig,
-    preamble: Option<&str>,
-) -> Agent<M> {
-    let mut b = AgentBuilder::new(model)
-        .temperature(config.temperature)
-        .max_tokens(config.max_tokens);
-    if let Some(p) = preamble {
-        b = b.preamble(p);
-    }
-    b.build()
-}

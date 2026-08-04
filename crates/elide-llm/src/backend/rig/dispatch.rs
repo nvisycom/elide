@@ -1,11 +1,10 @@
-//! Private rig-agent dispatch enum + macro.
+//! Private rig completion-model dispatch enum + macro.
 //!
-//! Wraps the four provider-specific `rig::Agent<M>` instances behind
-//! one enum so the rest of [`super`] can call them uniformly without
-//! caring which provider produced the agent.
+//! Wraps the four provider-specific `rig` completion models behind one
+//! enum so the rest of [`super`] can build an extractor from them
+//! uniformly without caring which provider produced the model.
 
 use reqwest_middleware::ClientWithMiddleware;
-use rig::agent::Agent;
 #[cfg(feature = "anthropic-claude")]
 use rig::providers::anthropic::completion::CompletionModel as AnthropicCompletionModel;
 #[cfg(feature = "google-gemini")]
@@ -14,26 +13,26 @@ use rig::providers::ollama::CompletionModel as OllamaCompletionModel;
 #[cfg(feature = "openai-gpt")]
 use rig::providers::openai::completion::CompletionModel as OpenAiCompletionModel;
 
-pub(super) enum RigAgent {
+pub(super) enum RigModel {
     #[cfg(feature = "openai-gpt")]
-    OpenAi(Agent<OpenAiCompletionModel<ClientWithMiddleware>>),
+    OpenAi(OpenAiCompletionModel<ClientWithMiddleware>),
     #[cfg(feature = "anthropic-claude")]
-    Anthropic(Agent<AnthropicCompletionModel<ClientWithMiddleware>>),
+    Anthropic(AnthropicCompletionModel<ClientWithMiddleware>),
     #[cfg(feature = "google-gemini")]
-    Gemini(Agent<GeminiCompletionModel<ClientWithMiddleware>>),
-    Ollama(Agent<OllamaCompletionModel<ClientWithMiddleware>>),
+    Gemini(GeminiCompletionModel<ClientWithMiddleware>),
+    Ollama(OllamaCompletionModel<ClientWithMiddleware>),
 }
 
 macro_rules! dispatch {
-    ($inner:expr, |$agent:ident| $body:expr) => {
+    ($inner:expr, |$model:ident| $body:expr) => {
         match $inner {
             #[cfg(feature = "openai-gpt")]
-            $crate::backend::rig::dispatch::RigAgent::OpenAi($agent) => $body,
+            $crate::backend::rig::dispatch::RigModel::OpenAi($model) => $body,
             #[cfg(feature = "anthropic-claude")]
-            $crate::backend::rig::dispatch::RigAgent::Anthropic($agent) => $body,
+            $crate::backend::rig::dispatch::RigModel::Anthropic($model) => $body,
             #[cfg(feature = "google-gemini")]
-            $crate::backend::rig::dispatch::RigAgent::Gemini($agent) => $body,
-            $crate::backend::rig::dispatch::RigAgent::Ollama($agent) => $body,
+            $crate::backend::rig::dispatch::RigModel::Gemini($model) => $body,
+            $crate::backend::rig::dispatch::RigModel::Ollama($model) => $body,
         }
     };
 }
