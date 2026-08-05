@@ -90,6 +90,7 @@ async fn docx_detects_and_redacts() -> Result<()> {
 async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
     use elide::codec::{FormatRegistry, PartId};
     use elide::detection::Analyzer;
+    use elide::entity::provenance::EventKind;
     use elide::modality::image::Image;
     use elide::modality::text::Text;
     use elide::recognition::llm::LlmRecognizer;
@@ -141,7 +142,7 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
         .insert_body::<Text>(body)
         .insert_part::<Image>(image_part, part);
     let mut doc2 = registry.decode(FIXTURE.source, "docx").await?;
-    orchestrator.anonymize_with(&mut doc2, rebuilt).await?;
+    let mut applied = orchestrator.anonymize_with(&mut doc2, rebuilt).await?;
 
     let encoded = doc2.encode()?;
     let redacted = String::from_utf8_lossy(encoded.as_bytes()).into_owned();
@@ -149,5 +150,23 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
         !redacted.contains("alice.johnson@example.com"),
         "a rebuilt report must still redact the body",
     );
+
+    // The returned report carries the audit even on the re-decode path (this
+    // report had no cached handles): the applied body entities each end with
+    // a redaction event.
+    let audited = applied
+        .entities::<Text>()
+        .map(|v| v.to_vec())
+        .unwrap_or_default();
+    assert!(!audited.is_empty(), "the applied body should surface entities");
+    for entity in &audited {
+        assert!(
+            matches!(
+                entity.provenance.events.last().map(|e| &e.kind),
+                Some(EventKind::Redaction { .. })
+            ),
+            "each applied entity's final provenance event is its redaction",
+        );
+    }
     Ok(())
 }

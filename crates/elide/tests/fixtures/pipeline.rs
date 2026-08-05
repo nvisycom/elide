@@ -33,8 +33,13 @@ use elide::{Directives, EntityGroup, Error, ErrorKind, Orchestrator, Report, Res
 /// Outcome of one end-to-end run: the entities that survived dedup and
 /// the re-encoded redacted document.
 pub struct PipelineOutcome<M: Modality> {
-    /// Entities detected and reconciled, in source coordinates.
+    /// Entities detected and reconciled, in source coordinates. The
+    /// pre-redaction snapshot, taken before `anonymize_with` runs.
     pub entities: Vec<Entity<M>>,
+    /// The body entities recovered from the report `anonymize_with`
+    /// returns: the same entities, now each carrying a redaction event in
+    /// its provenance. Empty when no body pipeline ran.
+    pub audited: Vec<Entity<M>>,
     /// Re-encoded document after redaction, as raw bytes. For text
     /// formats this is UTF-8 — use [`redacted_text`];
     /// for container formats (DOCX) it is the rebuilt package — use
@@ -196,11 +201,19 @@ impl Fixture {
             .map(|e| e.to_vec())
             .unwrap_or_default();
         self.write_entities(&report);
-        orchestrator.anonymize_with(&mut document, report).await?;
+        let mut applied = orchestrator.anonymize_with(&mut document, report).await?;
+        let audited: Vec<Entity<Audio>> = applied
+            .entities::<Audio>()
+            .map(|e| e.to_vec())
+            .unwrap_or_default();
 
         let redacted = document.encode()?.as_bytes().to_vec();
         self.write_redacted(&redacted);
-        Ok(PipelineOutcome { entities, redacted })
+        Ok(PipelineOutcome {
+            entities,
+            audited,
+            redacted,
+        })
     }
 
     /// Run the pipeline as the [`Image`] modality (`png`, `jpeg`, `tiff`).
@@ -238,11 +251,19 @@ impl Fixture {
             .map(|e| e.to_vec())
             .unwrap_or_default();
         self.write_entities(&report);
-        orchestrator.anonymize_with(&mut document, report).await?;
+        let mut applied = orchestrator.anonymize_with(&mut document, report).await?;
+        let audited: Vec<Entity<Image>> = applied
+            .entities::<Image>()
+            .map(|e| e.to_vec())
+            .unwrap_or_default();
 
         let redacted = document.encode()?.as_bytes().to_vec();
         self.write_redacted(&redacted);
-        Ok(PipelineOutcome { entities, redacted })
+        Ok(PipelineOutcome {
+            entities,
+            audited,
+            redacted,
+        })
     }
 
     /// Decode this fixture as modality `M`, redact it through the master
@@ -293,12 +314,22 @@ impl Fixture {
         // Write the detected entities as JSON for inspection before the
         // report is consumed by `anonymize_with`.
         self.write_entities(&report);
-        orchestrator.anonymize_with(&mut document, report).await?;
+        let mut applied = orchestrator.anonymize_with(&mut document, report).await?;
+        // The returned report's entities now carry the redaction event —
+        // the post-redaction audit trail.
+        let audited: Vec<Entity<M>> = applied
+            .entities::<M>()
+            .map(|e| e.to_vec())
+            .unwrap_or_default();
 
         let redacted = document.encode()?.as_bytes().to_vec();
 
         self.write_redacted(&redacted);
-        Ok(PipelineOutcome { entities, redacted })
+        Ok(PipelineOutcome {
+            entities,
+            audited,
+            redacted,
+        })
     }
 
     /// Decode this fixture's bytes and recover the [`DocumentHandle`] as
