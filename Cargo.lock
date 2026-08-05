@@ -1085,6 +1085,7 @@ dependencies = [
  "erased-serde",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
