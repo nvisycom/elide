@@ -194,18 +194,24 @@ impl<'r> Orchestrator<'r> {
     /// re-decoded from `document`'s container by its id. So `document` must
     /// be the same document the report describes.
     ///
+    /// Returns the report, now applied: redaction stamps a redaction event
+    /// into each entity's provenance, so the returned report's entities carry
+    /// the full audit trail (recognition through redaction) — serialize it to
+    /// hand the audit to a caller. The report's cached part handles are spent
+    /// by applying and are not part of that serialized view.
+    ///
     /// [`analyze`]: Self::analyze
     pub async fn anonymize_with(
         &self,
         document: &mut UntypedDocumentHandle,
-        report: Report,
-    ) -> Result<()> {
-        let Report { body, parts } = report;
-
+        mut report: Report,
+    ) -> Result<Report> {
         // The body: apply its edited entities in place through the matching
-        // pipeline (recovered by the stored modality `TypeId`).
-        if let Some((modality, mut entities)) = body
-            && let Some(pipeline) = self.pipelines.get(&modality)
+        // pipeline (recovered by the stored modality `TypeId`). Applying
+        // mutates the entities — each gains a redaction event — so it happens
+        // on `report`'s own groups, which are returned as the audit trail.
+        if let Some((modality, entities)) = report.body.as_mut()
+            && let Some(pipeline) = self.pipelines.get(modality)
         {
             pipeline.apply_in_place(document, entities.as_mut()).await?;
         }
@@ -214,7 +220,7 @@ impl<'r> Orchestrator<'r> {
         // from the container when the report carries no handle. Collect the
         // redacted bytes first, then splice them back in.
         let mut redactions: Vec<(PartId, Bytes)> = Vec::new();
-        for (id, mut part) in parts {
+        for (id, part) in &mut report.parts {
             let Some(pipeline) = self.pipelines.get(&part.modality) else {
                 continue; // pipeline for this modality is gone
             };
@@ -223,21 +229,21 @@ impl<'r> Orchestrator<'r> {
                 // No cached handle (rebuilt/deserialized report): re-decode
                 // the part from the container by its id.
                 None => {
-                    let Some(decoded) = self.redecode_part(document, &id).await? else {
+                    let Some(decoded) = self.redecode_part(document, id).await? else {
                         continue; // part gone, or no codec for it
                     };
                     decoded
                 }
             };
             let bytes = pipeline.apply_part(handle, part.entities.as_mut()).await?;
-            redactions.push((id, bytes));
+            redactions.push((id.clone(), bytes));
         }
         if let Some(c) = document.as_container_mut() {
             for (id, bytes) in redactions {
                 c.replace_part(&id, bytes)?;
             }
         }
-        Ok(())
+        Ok(report)
     }
 
     /// Re-decode the container part `id` from `document` into a handle, or
@@ -262,7 +268,9 @@ impl<'r> Orchestrator<'r> {
     }
 
     /// Convenience: [`analyze`] then [`anonymize_with`] with no editing
-    /// step — redact the whole document in one call.
+    /// step — redact the whole document in one call. Returns the applied
+    /// [`Report`], whose entities carry the full audit trail (recognition
+    /// through redaction).
     ///
     /// Use the two phases directly when you need to inspect or edit the
     /// detected entities (drop a false positive, retag) between detection
@@ -274,7 +282,7 @@ impl<'r> Orchestrator<'r> {
         &self,
         document: &mut UntypedDocumentHandle,
         directives: &Directives,
-    ) -> Result<()> {
+    ) -> Result<Report> {
         let report = self.analyze(document, directives).await?;
         self.anonymize_with(document, report).await
     }
