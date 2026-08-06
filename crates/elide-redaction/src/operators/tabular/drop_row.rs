@@ -15,7 +15,7 @@ use elide_core::operator::{LeakProfile, Operator, OperatorId};
 ///
 /// The header row is never dropped — that would strip the table's schema.
 ///
-/// [`Erase`]: super::Erase
+/// [`Erase`]: crate::operators::Erase
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DropRow;
 

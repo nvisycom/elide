@@ -2,7 +2,7 @@
 //!
 //! A [`Label`] is a kind of sensitive information identified by a stable
 //! lowercase [`id`] (`"phone_number"`), with a localized human
-//! [`Localization`] (display name + description) per language. Detections
+//! [`LabelLocale`] (display name + description) per language. Detections
 //! and entities don't carry the full label; they carry a lightweight
 //! [`LabelRef`] (the id only), and the localizations live once in a
 //! [`LabelCatalog`]. This keeps the per-detection footprint small while
@@ -16,8 +16,6 @@ pub mod builtins;
 mod catalog;
 mod reference;
 
-use std::collections::HashMap;
-
 use hipstr::HipStr;
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
@@ -26,9 +24,9 @@ use serde::{Deserialize, Serialize};
 
 pub use self::catalog::LabelCatalog;
 pub use self::reference::LabelRef;
-use crate::primitive::LanguageTag;
+use crate::primitive::{LanguageTag, LocalizedText};
 
-// `Localization` is public API (part of a `Label`); re-exported at the
+// `LabelLocale` is public API (part of a `Label`); re-exported at the
 // module root below.
 
 /// A label's human-facing text in one language: a display name and an
@@ -42,7 +40,7 @@ use crate::primitive::LanguageTag;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
-pub struct Localization {
+pub struct LabelLocale {
     /// Short natural-language display name (e.g. `"phone number"`). What a
     /// zero-shot NER model matches on and an LLM prompt surfaces.
     #[cfg_attr(feature = "schema", schemars(with = "String"))]
@@ -54,7 +52,7 @@ pub struct Localization {
     pub description: Option<HipStr<'static>>,
 }
 
-impl Localization {
+impl LabelLocale {
     /// A localization with just a display name, no description.
     pub fn new(name: impl Into<HipStr<'static>>) -> Self {
         Self {
@@ -76,7 +74,7 @@ impl Localization {
 }
 
 /// Kind of sensitive information: a stable [`id`], per-language
-/// [`Localization`]s, and zero or more tags.
+/// [`LabelLocale`]s, and zero or more tags.
 ///
 /// # Identity
 ///
@@ -110,11 +108,7 @@ impl Localization {
 pub struct Label {
     #[cfg_attr(feature = "schema", schemars(with = "String"))]
     id: HipStr<'static>,
-    #[cfg_attr(
-        feature = "schema",
-        schemars(with = "std::collections::HashMap<String, Localization>")
-    )]
-    localizations: HashMap<LanguageTag, Localization>,
+    localizations: LocalizedText<LabelLocale>,
     #[cfg_attr(feature = "schema", schemars(with = "Vec<String>"))]
     tags: Vec<HipStr<'static>>,
 }
@@ -126,11 +120,9 @@ impl Label {
     ///
     /// [`with_localization`]: Self::with_localization
     pub fn new(id: impl Into<HipStr<'static>>, name: impl Into<HipStr<'static>>) -> Self {
-        let mut localizations = HashMap::new();
-        localizations.insert(LanguageTag::english(), Localization::new(name));
         Self {
             id: id.into(),
-            localizations,
+            localizations: LocalizedText::new(LabelLocale::new(name)),
             tags: Vec::new(),
         }
     }
@@ -148,26 +140,24 @@ impl Label {
         description: Option<&'static str>,
         tags: &'static [&'static str],
     ) -> Self {
-        let localization = Localization {
+        let localization = LabelLocale {
             name: HipStr::from_static(name),
             description: description.map(HipStr::from_static),
         };
-        let mut localizations = HashMap::new();
-        localizations.insert(LanguageTag::english(), localization);
         Self {
             id: id.into(),
-            localizations,
+            localizations: LocalizedText::new(localization),
             tags: tags.iter().copied().map(HipStr::from_static).collect(),
         }
     }
 
-    /// Add (or replace) the [`Localization`] for `language`, returning
+    /// Add (or replace) the [`LabelLocale`] for `language`, returning
     /// `self` for chaining.
     #[must_use]
     pub fn with_localization(
         mut self,
         language: LanguageTag,
-        localization: Localization,
+        localization: LabelLocale,
     ) -> Self {
         self.localizations.insert(language, localization);
         self
@@ -189,15 +179,12 @@ impl Label {
         self.id.as_str()
     }
 
-    /// The [`Localization`] for `language`, falling back to English, then to
+    /// The [`LabelLocale`] for `language`, falling back to English, then to
     /// any localization present. The constructors always seed English, so
     /// this is `Some` for any label they built; it is `None` only for a
     /// label deserialized with an empty localization map.
-    pub fn localization(&self, language: &LanguageTag) -> Option<&Localization> {
-        self.localizations
-            .get(language)
-            .or_else(|| self.localizations.get(&LanguageTag::english()))
-            .or_else(|| self.localizations.values().next())
+    pub fn localization(&self, language: &LanguageTag) -> Option<&LabelLocale> {
+        self.localizations.resolve(language)
     }
 
     /// Display name in `language` (English fallback), or `""` for a label
@@ -271,7 +258,7 @@ mod tests {
     fn requested_language_wins_over_english() {
         let fr = LanguageTag::parse("fr").unwrap();
         let label = Label::new("phone_number", "phone number")
-            .with_localization(fr.clone(), Localization::new("numéro de téléphone"));
+            .with_localization(fr.clone(), LabelLocale::new("numéro de téléphone"));
         assert_eq!(label.name(&fr), "numéro de téléphone");
         assert_eq!(label.name(&LanguageTag::english()), "phone number");
     }
@@ -283,7 +270,7 @@ mod tests {
         // to empty/None rather than panicking.
         let label = Label {
             id: HipStr::from_static("orphan"),
-            localizations: HashMap::new(),
+            localizations: LocalizedText::from_iter(std::iter::empty()),
             tags: Vec::new(),
         };
         assert_eq!(label.name(&LanguageTag::english()), "");

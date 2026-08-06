@@ -14,7 +14,7 @@ use elide_core::operator::{LeakProfile, Operator, OperatorId};
 /// label or to a predicate over the column name; any match in the column
 /// removes it for all records.
 ///
-/// [`DropRow`]: super::DropRow
+/// [`DropRow`]: crate::operators::DropRow
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DropColumn;
 

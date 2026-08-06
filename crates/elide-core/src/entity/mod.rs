@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub use self::builder::EntityBuilder;
-pub use self::label::{Label, LabelCatalog, LabelRef, Localization, builtins};
+pub use self::label::{Label, LabelCatalog, LabelRef, LabelLocale, builtins};
 use self::provenance::Provenance;
 pub use self::reference::{EntityCoRef, EntityRef};
 use crate::modality::Modality;

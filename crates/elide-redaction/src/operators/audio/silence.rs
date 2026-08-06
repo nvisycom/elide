@@ -12,7 +12,7 @@ use elide_core::operator::{LeakProfile, Operator, OperatorId};
 /// sensitive audio is gone. Contrast [`Erase`], which cuts the interval out
 /// and shortens the clip.
 ///
-/// [`Erase`]: super::Erase
+/// [`Erase`]: crate::operators::Erase
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Silence;
 

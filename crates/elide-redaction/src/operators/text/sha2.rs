@@ -10,15 +10,7 @@ use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::operator::{LeakProfile, Operator, OperatorId};
 use sha2::{Digest, Sha256, Sha512};
 
-/// Which SHA-2 variant to use.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum Sha2Algorithm {
-    /// SHA-256 — 32-byte digest, 64-char hex.
-    #[default]
-    Sha256,
-    /// SHA-512 — 64-byte digest, 128-char hex.
-    Sha512,
-}
+use crate::operators::Sha2Algorithm;
 
 /// One-way SHA-2 hash operator.
 ///

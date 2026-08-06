@@ -7,7 +7,9 @@
 //! these to scope themselves to a language.
 
 mod detection;
+mod localized;
 mod tag;
 
 pub use self::detection::{Language, LanguageProvenance, LanguageSpan, Languages};
+pub use self::localized::LocalizedText;
 pub use self::tag::LanguageTag;
