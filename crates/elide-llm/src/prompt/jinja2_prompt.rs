@@ -157,8 +157,10 @@ fn snippet_around(text: &str, range: Range<usize>) -> &str {
     &text[lo..hi]
 }
 
-/// The catalog's target labels as plain names, for the `{{ target_labels
-/// }}` template variable.
+/// The catalog's target label ids, for the `{{ target_labels }}` template
+/// variable. Ids (not localized names) so a custom template keys on the
+/// stable identifier the model must return; the template author controls
+/// their own wording and localization.
 fn target_label_names<M: Modality>(ctx: &RecognizerContext<'_, M>) -> Vec<String> {
     ctx.target_labels()
         .iter()

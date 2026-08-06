@@ -1,15 +1,22 @@
 //! Entity labels: the taxonomy of what an entity *is*.
 //!
-//! A [`Label`] is a named kind of sensitive information ("PHONE_NUMBER")
-//! with an optional human description. Detections and entities don't
-//! carry the full label; they carry a lightweight [`LabelRef`] (the
-//! name only), and the descriptions live once in a [`LabelCatalog`].
-//! This keeps the per-detection footprint small while still letting a
-//! consumer resolve a reference back to its full definition.
+//! A [`Label`] is a kind of sensitive information identified by a stable
+//! lowercase [`id`] (`"phone_number"`), with a localized human
+//! [`Localization`] (display name + description) per language. Detections
+//! and entities don't carry the full label; they carry a lightweight
+//! [`LabelRef`] (the id only), and the localizations live once in a
+//! [`LabelCatalog`]. This keeps the per-detection footprint small while
+//! still letting a consumer resolve a reference back to its full,
+//! localized definition — the NER label set and LLM prompt render the
+//! display name and description in the analysis language.
+//!
+//! [`id`]: Label::id
 
 pub mod builtins;
 mod catalog;
 mod reference;
+
+use std::collections::HashMap;
 
 use hipstr::HipStr;
 #[cfg(feature = "schema")]
@@ -19,55 +26,44 @@ use serde::{Deserialize, Serialize};
 
 pub use self::catalog::LabelCatalog;
 pub use self::reference::LabelRef;
+use crate::primitive::LanguageTag;
 
-/// Kind of sensitive information: a name, an optional description, and
-/// zero or more tags.
+// `Localization` is public API (part of a `Label`); re-exported at the
+// module root below.
+
+/// A label's human-facing text in one language: a display name and an
+/// optional fuller description.
 ///
-/// Names are conventionally `SCREAMING_SNAKE_CASE` (`"PHONE_NUMBER"`),
-/// matching Presidio, but this is convention, not enforcement. The
-/// taxonomy is open: a [`Label`] can be minted for any name a recognizer
-/// or configuration needs.
-///
-/// # Identity
-///
-/// Labels are identified by [`name`]; selectors match by name. Note that
-/// derived equality is *structural*: two labels with the same name but
-/// different descriptions or tags are not `==`. Code that wants
-/// name-only equality should compare [`name`] explicitly.
-///
-/// # Tags
-///
-/// [`tags`] is a free-form list of short identifiers policy selectors
-/// can match against. Built-in labels carry category tags
-/// (`personal_identity`, `contact_info`, `financial`, …) plus
-/// cross-cutting tags where applicable (`pii`, `phi`, `pci`). Custom
-/// labels can ship with zero tags.
-///
-/// [`name`]: Label::name
-/// [`tags`]: Label::tags
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// The `name` is a short, natural-language phrase (`"phone number"`) — the
+/// label a zero-shot NER model like GLiNER matches on, and the primary
+/// text an LLM prompt shows. The `description` is optional extra guidance
+/// for backends that consume it (GLiNER-2.0's bi-encoder, an LLM); leave
+/// it `None` when the name alone is clear.
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
-pub struct Label {
+pub struct Localization {
+    /// Short natural-language display name (e.g. `"phone number"`). What a
+    /// zero-shot NER model matches on and an LLM prompt surfaces.
     #[cfg_attr(feature = "schema", schemars(with = "String"))]
-    name: HipStr<'static>,
+    pub name: HipStr<'static>,
+    /// Optional fuller description, for description-capable backends
+    /// (GLiNER-2.0, LLM). `None` when the name suffices.
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
     #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
-    description: Option<HipStr<'static>>,
-    #[cfg_attr(feature = "schema", schemars(with = "Vec<String>"))]
-    tags: Vec<HipStr<'static>>,
+    pub description: Option<HipStr<'static>>,
 }
 
-impl Label {
-    /// Label with just a name, no description, and no tags.
+impl Localization {
+    /// A localization with just a display name, no description.
     pub fn new(name: impl Into<HipStr<'static>>) -> Self {
         Self {
             name: name.into(),
             description: None,
-            tags: Vec::new(),
         }
     }
 
-    /// Label with a name and a human-readable description.
+    /// A localization with a display name and a fuller description.
     pub fn described(
         name: impl Into<HipStr<'static>>,
         description: impl Into<HipStr<'static>>,
@@ -75,24 +71,106 @@ impl Label {
         Self {
             name: name.into(),
             description: Some(description.into()),
+        }
+    }
+}
+
+/// Kind of sensitive information: a stable [`id`], per-language
+/// [`Localization`]s, and zero or more tags.
+///
+/// # Identity
+///
+/// Labels are identified by [`id`] — a stable lowercase `snake_case`
+/// string (`"phone_number"`), never localized, and the catalog key that a
+/// [`LabelRef`] resolves through. Selectors match by id. Derived equality
+/// is *structural*: two labels with the same id but different
+/// localizations or tags are not `==`; compare [`id`] for identity.
+///
+/// # Localization
+///
+/// The display name and description are localized per [`LanguageTag`].
+/// English (`"en"`) is required at construction and is the fallback when a
+/// requested locale is absent, so [`localization`] always returns some
+/// text — NER and LLM read the analysis language's name and description to
+/// prompt the model, keyed by the stable id.
+///
+/// # Tags
+///
+/// [`tags`] is a free-form list of short identifiers policy selectors can
+/// match against. Built-in labels carry category tags (`personal_identity`,
+/// `contact_info`, `financial`, …) plus cross-cutting tags where applicable
+/// (`pii`, `phi`, `pci`). Custom labels can ship with zero tags.
+///
+/// [`id`]: Label::id
+/// [`localization`]: Label::localization
+/// [`tags`]: Label::tags
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Label {
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    id: HipStr<'static>,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "std::collections::HashMap<String, Localization>")
+    )]
+    localizations: HashMap<LanguageTag, Localization>,
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<String>"))]
+    tags: Vec<HipStr<'static>>,
+}
+
+impl Label {
+    /// Label with a stable `id` and its English display `name`. Add a
+    /// description with [`with_localization`], or other languages with it
+    /// too.
+    ///
+    /// [`with_localization`]: Self::with_localization
+    pub fn new(id: impl Into<HipStr<'static>>, name: impl Into<HipStr<'static>>) -> Self {
+        let mut localizations = HashMap::new();
+        localizations.insert(LanguageTag::english(), Localization::new(name));
+        Self {
+            id: id.into(),
+            localizations,
             tags: Vec::new(),
         }
     }
 
-    /// Construct a label entirely from `&'static str` literals.
+    /// Construct a built-in label: its `id`, English display `name`, an
+    /// optional `description`, and `tags`.
     ///
-    /// Used by the [`builtins`] catalog so the strings live in static
-    /// storage and construction is just one `Vec::from` per built-in.
+    /// The `name`, `description`, and `tags` are `&'static str` literals so
+    /// they live in static storage; the `id` is taken by value because the
+    /// [`builtins`] macro derives it (lowercased) from the constant's
+    /// identifier at init.
     pub fn from_static(
+        id: impl Into<HipStr<'static>>,
         name: &'static str,
         description: Option<&'static str>,
         tags: &'static [&'static str],
     ) -> Self {
-        Self {
+        let localization = Localization {
             name: HipStr::from_static(name),
             description: description.map(HipStr::from_static),
+        };
+        let mut localizations = HashMap::new();
+        localizations.insert(LanguageTag::english(), localization);
+        Self {
+            id: id.into(),
+            localizations,
             tags: tags.iter().copied().map(HipStr::from_static).collect(),
         }
+    }
+
+    /// Add (or replace) the [`Localization`] for `language`, returning
+    /// `self` for chaining.
+    #[must_use]
+    pub fn with_localization(
+        mut self,
+        language: LanguageTag,
+        localization: Localization,
+    ) -> Self {
+        self.localizations.insert(language, localization);
+        self
     }
 
     /// Attach tags, replacing any already set.
@@ -106,14 +184,38 @@ impl Label {
         self
     }
 
-    /// Label's name.
-    pub fn name(&self) -> &str {
-        self.name.as_str()
+    /// Label's stable identifier (the catalog key), never localized.
+    pub fn id(&self) -> &str {
+        self.id.as_str()
     }
 
-    /// Label's description, if any.
-    pub fn description(&self) -> Option<&str> {
-        self.description.as_deref()
+    /// The [`Localization`] for `language`, falling back to English, then to
+    /// any localization present. The constructors always seed English, so
+    /// this is `Some` for any label they built; it is `None` only for a
+    /// label deserialized with an empty localization map.
+    pub fn localization(&self, language: &LanguageTag) -> Option<&Localization> {
+        self.localizations
+            .get(language)
+            .or_else(|| self.localizations.get(&LanguageTag::english()))
+            .or_else(|| self.localizations.values().next())
+    }
+
+    /// Display name in `language` (English fallback), or `""` for a label
+    /// with no localizations at all. See [`localization`].
+    ///
+    /// [`localization`]: Self::localization
+    pub fn name(&self, language: &LanguageTag) -> &str {
+        self.localization(language)
+            .map_or("", |loc| loc.name.as_str())
+    }
+
+    /// Description in `language` (English fallback), if the localization
+    /// carries one. See [`localization`].
+    ///
+    /// [`localization`]: Self::localization
+    pub fn description(&self, language: &LanguageTag) -> Option<&str> {
+        self.localization(language)
+            .and_then(|loc| loc.description.as_deref())
     }
 
     /// Label's tags.
@@ -127,23 +229,65 @@ impl Label {
         self.tags.iter().any(|t| t == tag)
     }
 
-    /// Lightweight [`LabelRef`] to this label, by name.
+    /// Lightweight [`LabelRef`] to this label, by [`id`].
     ///
-    /// `to_` rather than `as_`: this clones the name into an owned
+    /// `to_` rather than `as_`: this clones the id into an owned
     /// [`LabelRef`] (a value conversion), it does not borrow.
+    ///
+    /// [`id`]: Self::id
     #[must_use]
     pub fn to_ref(&self) -> LabelRef {
-        LabelRef::new(self.name.clone())
+        LabelRef::new(self.id.clone())
     }
 
-    /// Label's name as an owned string (for catalog keying).
-    fn name_owned(&self) -> HipStr<'static> {
-        self.name.clone()
+    /// Label's id as an owned string (for catalog keying).
+    fn id_owned(&self) -> HipStr<'static> {
+        self.id.clone()
     }
 }
 
 impl From<&Label> for LabelRef {
     fn from(label: &Label) -> Self {
         label.to_ref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::primitive::LanguageTag;
+
+    use super::*;
+
+    #[test]
+    fn localization_falls_back_to_english() {
+        let fr = LanguageTag::parse("fr").unwrap();
+        let label = Label::new("phone_number", "phone number");
+        // No French localization → English fallback.
+        assert_eq!(label.name(&fr), "phone number");
+        assert!(label.description(&fr).is_none());
+    }
+
+    #[test]
+    fn requested_language_wins_over_english() {
+        let fr = LanguageTag::parse("fr").unwrap();
+        let label = Label::new("phone_number", "phone number")
+            .with_localization(fr.clone(), Localization::new("numéro de téléphone"));
+        assert_eq!(label.name(&fr), "numéro de téléphone");
+        assert_eq!(label.name(&LanguageTag::english()), "phone number");
+    }
+
+    #[test]
+    fn empty_localizations_never_panics() {
+        // A label deserialized with no localizations (constructors always
+        // seed English, but serde does not enforce it): the accessors degrade
+        // to empty/None rather than panicking.
+        let label = Label {
+            id: HipStr::from_static("orphan"),
+            localizations: HashMap::new(),
+            tags: Vec::new(),
+        };
+        assert_eq!(label.name(&LanguageTag::english()), "");
+        assert!(label.description(&LanguageTag::english()).is_none());
+        assert!(label.localization(&LanguageTag::english()).is_none());
     }
 }

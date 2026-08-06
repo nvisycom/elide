@@ -6,11 +6,12 @@ use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Lightweight reference to a [`Label`], carrying only its name.
+/// Lightweight reference to a [`Label`], carrying only its id.
 ///
 /// This is what detections and entities hold: cloning is cheap (short
-/// names inline into the [`HipStr`]), and the full [`Label`], with its
-/// description, is resolved on demand from a [`LabelCatalog`].
+/// ids inline into the [`HipStr`]), and the full [`Label`], with its
+/// localized names and descriptions, is resolved on demand from a
+/// [`LabelCatalog`].
 ///
 /// [`Label`]: crate::entity::Label
 /// [`LabelCatalog`]: crate::entity::LabelCatalog
@@ -22,7 +23,7 @@ use serde::{Deserialize, Serialize};
 pub struct LabelRef(#[cfg_attr(feature = "schema", schemars(with = "String"))] HipStr<'static>);
 
 impl LabelRef {
-    /// Reference a label by name.
+    /// Reference a label by id.
     pub fn new(name: impl Into<HipStr<'static>>) -> Self {
         Self(name.into())
     }

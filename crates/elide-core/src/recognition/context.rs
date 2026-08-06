@@ -4,7 +4,7 @@
 
 use uuid::Uuid;
 
-use crate::entity::{Entity, LabelCatalog, LabelRef};
+use crate::entity::{Entity, Label, LabelCatalog, LabelRef};
 use crate::modality::{Hint, Modality};
 use crate::primitive::{CountryCode, Language, LanguageTag, Languages};
 use crate::recognition::annotation::{Annotations, Exclusion, Inclusion};
@@ -139,12 +139,23 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
 
     /// The entity types to emit, as [`LabelRef`]s — the catalog's labels.
     /// Convenience over [`catalog`] for recognizers that
-    /// only need the names.
+    /// only need the ids.
     ///
     /// [`catalog`]: Self::catalog
     #[must_use]
     pub fn target_labels(&self) -> Vec<LabelRef> {
         self.scope.catalog.refs().collect()
+    }
+
+    /// The entity types to emit, as full [`Label`]s, so a prompt or backend
+    /// can render each label's localized display name and description in
+    /// this call's [`primary_language`] (English fallback) while still
+    /// keying on the stable id. The catalog's labels, cloned.
+    ///
+    /// [`primary_language`]: Self::primary_language
+    #[must_use]
+    pub fn target_label_defs(&self) -> Vec<Label> {
+        self.scope.catalog.iter().cloned().collect()
     }
 
     /// Correlation id, if the caller set one.

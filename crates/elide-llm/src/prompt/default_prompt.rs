@@ -30,12 +30,13 @@ pub struct DefaultPrompt;
 
 impl Prompt<Text> for DefaultPrompt {
     fn build(&self, data: &TextData, ctx: &RecognizerContext<'_, Text>) -> String {
-        let target_labels = ctx.target_labels();
+        let target_labels = ctx.target_label_defs();
         TextPromptBuilder::new(
             data.text.as_str(),
             ctx.inclusions(),
             ctx.tags(),
             &target_labels,
+            ctx.primary_language(),
         )
         .build()
     }
@@ -43,7 +44,13 @@ impl Prompt<Text> for DefaultPrompt {
 
 impl Prompt<Image> for DefaultPrompt {
     fn build(&self, _data: &ImageData, ctx: &RecognizerContext<'_, Image>) -> String {
-        let target_labels = ctx.target_labels();
-        ImagePromptBuilder::new(ctx.inclusions(), ctx.tags(), &target_labels).build()
+        let target_labels = ctx.target_label_defs();
+        ImagePromptBuilder::new(
+            ctx.inclusions(),
+            ctx.tags(),
+            &target_labels,
+            ctx.primary_language(),
+        )
+        .build()
     }
 }

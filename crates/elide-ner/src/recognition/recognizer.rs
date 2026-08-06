@@ -185,24 +185,21 @@ impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
         data: &M::Data,
         ctx: &RecognizerContext<'_, M>,
     ) -> Result<Vec<Entity<M>>> {
-        // The effective target labels, as full `Label`s (name +
-        // description) so a zero-shot backend like GLiNER 2.0 gets the
-        // descriptions: the recognizer's own configured set overrides when
-        // present, else the run-wide catalog from the scope. Descriptions
-        // for the override path are resolved against the catalog; a label
-        // absent from it falls back to a description-less `Label`. Empty
-        // leaves the backend to emit whatever it natively produces.
+        // The effective target labels, as full `Label`s (localized name +
+        // optional description) so a zero-shot backend like GLiNER gets the
+        // localized text in the analysis language: the recognizer's own
+        // configured set overrides when present, else the run-wide catalog
+        // from the scope. For the override path each label is resolved
+        // against the catalog; a supported label absent from the catalog is
+        // dropped (there is no localized definition to send — better to omit
+        // it than to fabricate one from its id). Empty leaves the backend to
+        // emit whatever it natively produces.
         let effective_labels: Vec<Label> = if self.supported_labels.is_empty() {
             ctx.catalog().iter().cloned().collect()
         } else {
             self.supported_labels
                 .iter()
-                .map(|r| {
-                    ctx.catalog()
-                        .get(r)
-                        .cloned()
-                        .unwrap_or_else(|| Label::new(r.as_str()))
-                })
+                .filter_map(|r| ctx.catalog().get(r).cloned())
                 .collect()
         };
         let labels = if effective_labels.is_empty() {
@@ -239,8 +236,9 @@ impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use elide_core::entity::{LabelCatalog, builtins};
+    use elide_core::entity::{LabelCatalog, Localization, builtins};
     use elide_core::modality::text::{Text, TextData};
+    use elide_core::primitive::LanguageTag;
     use elide_core::recognition::Scope;
 
     use super::*;
@@ -298,10 +296,11 @@ mod tests {
         }
 
         async fn recognize(&self, request: NerRequest<'_>) -> Result<NerResponse> {
+            let en = LanguageTag::english();
             *self.seen.lock().unwrap() = request.labels.map(|labels| {
                 labels
                     .iter()
-                    .map(|l| (l.name().to_owned(), l.description().is_some()))
+                    .map(|l| (l.name(&en).to_owned(), l.description(&en).is_some()))
                     .collect()
             });
             Ok(NerResponse::default())
@@ -321,7 +320,10 @@ mod tests {
         // No `with_supported_labels`: the scope's catalog drives the labels,
         // carrying descriptions for a zero-shot backend.
         let mut catalog = LabelCatalog::new();
-        catalog.insert(Label::described("EMAIL", "an email address"));
+        catalog.insert(Label::new("email", "email address").with_localization(
+            LanguageTag::english(),
+            Localization::described("email address", "an email address"),
+        ));
         let scope = Scope::new().with_catalog(catalog);
         let ctx = RecognizerContext::<Text>::new(&scope);
         rec.recognize(&TextData::new("x".to_owned()), &ctx)
@@ -329,11 +331,11 @@ mod tests {
             .unwrap();
 
         let seen = seen.lock().unwrap().clone().expect("labels were sent");
-        assert_eq!(seen, vec![("EMAIL".to_owned(), true)]);
+        assert_eq!(seen, vec![("email address".to_owned(), true)]);
     }
 
     #[tokio::test]
-    async fn supported_labels_override_the_catalog() {
+    async fn supported_labels_select_a_subset_of_the_catalog() {
         let backend = CapturingBackend::default();
         let seen = backend.seen.clone();
         let rec = NerRecognizer::builder()
@@ -343,17 +345,45 @@ mod tests {
             .build()
             .expect("builder succeeds");
 
-        // The catalog is present but the recognizer's own set overrides it.
+        // The catalog carries both; the recognizer's own set restricts to
+        // just person_name, resolved to its catalog definition.
         let mut catalog = LabelCatalog::new();
-        catalog.insert(Label::described("EMAIL", "an email address"));
+        catalog.insert(Label::new("email", "email address"));
+        catalog.insert((*builtins::PERSON_NAME).clone());
         let scope = Scope::new().with_catalog(catalog);
         let ctx = RecognizerContext::<Text>::new(&scope);
         rec.recognize(&TextData::new("x".to_owned()), &ctx)
             .await
             .unwrap();
 
+        let en = LanguageTag::english();
         let seen = seen.lock().unwrap().clone().expect("labels were sent");
         let names: Vec<&str> = seen.iter().map(|(n, _)| n.as_str()).collect();
-        assert_eq!(names, vec![builtins::PERSON_NAME.name()]);
+        assert_eq!(names, vec![builtins::PERSON_NAME.name(&en)]);
+    }
+
+    #[tokio::test]
+    async fn supported_label_absent_from_catalog_is_dropped() {
+        let backend = CapturingBackend::default();
+        let seen = backend.seen.clone();
+        let rec = NerRecognizer::builder()
+            .with_name("test")
+            .with_backend(backend)
+            .with_supported_labels(vec![builtins::PERSON_NAME.to_ref()])
+            .build()
+            .expect("builder succeeds");
+
+        // person_name is not in the catalog, so there is no localized
+        // definition to send — it is dropped, not fabricated from its id.
+        let mut catalog = LabelCatalog::new();
+        catalog.insert(Label::new("email", "email address"));
+        let scope = Scope::new().with_catalog(catalog);
+        let ctx = RecognizerContext::<Text>::new(&scope);
+        rec.recognize(&TextData::new("x".to_owned()), &ctx)
+            .await
+            .unwrap();
+
+        // No resolvable labels → the request carries `labels: None`.
+        assert!(seen.lock().unwrap().is_none());
     }
 }

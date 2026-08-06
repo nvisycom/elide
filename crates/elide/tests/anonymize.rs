@@ -168,12 +168,8 @@ async fn anonymize_selects_by_tag() {
     // A catalog gives labels their tags; the tag rule then matches any
     // entity whose label carries "financial".
     let mut catalog = LabelCatalog::new();
-    catalog.insert(Label::from_static(
-        "payment_card",
-        None,
-        &["financial", "pci"],
-    ));
-    catalog.insert(Label::from_static("person_name", None, &["pii"]));
+    catalog.insert(Label::new("payment_card", "payment card").with_tags(["financial", "pci"]));
+    catalog.insert(Label::new("person_name", "person name").with_tags(["pii"]));
 
     let items = Anonymizer::<Text>::new()
         .with_catalog(catalog)
@@ -201,8 +197,8 @@ async fn catalog_predicate_resolves_tags_through_the_catalog() {
     ];
 
     let mut catalog = LabelCatalog::new();
-    catalog.insert(Label::from_static("payment_card", None, &["financial"]));
-    catalog.insert(Label::from_static("person_name", None, &["pii"]));
+    catalog.insert(Label::new("payment_card", "payment card").with_tags(["financial"]));
+    catalog.insert(Label::new("person_name", "person name").with_tags(["pii"]));
 
     // A catalog-aware predicate resolves the entity's label to its tags —
     // the same source `with_tag` consults, but expressed as a predicate.

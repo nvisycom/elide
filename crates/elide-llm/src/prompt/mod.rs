@@ -12,12 +12,42 @@
 //! [`LlmRecognizer`]: crate::LlmRecognizer
 //! [`LlmRecognizerBuilder::with_prompt`]: crate::recognition::LlmRecognizerBuilder::with_prompt
 
+use elide_core::entity::Label;
 use elide_core::modality::Modality;
+use elide_core::primitive::LanguageTag;
 use elide_core::recognition::RecognizerContext;
 
 mod default_prompt;
 mod image_prompt;
 mod text_prompt;
+
+/// The target-label instruction shared by the text and image prompts.
+///
+/// Renders each label as `id (Localized name): Localized description.` in
+/// `language` (English fallback), telling the model to return the stable
+/// **id** as each detection's label while the localized name and
+/// description guide what to find. Empty `labels` yields an empty string
+/// (no restriction line).
+fn target_labels_block(labels: &[Label], language: Option<&LanguageTag>) -> String {
+    if labels.is_empty() {
+        return String::new();
+    }
+    // Fall back to English when the call has no known language.
+    let lang = language.cloned().unwrap_or_else(LanguageTag::english);
+    let mut block = String::from(
+        "\n\nEmit only these entity types. Return the id (before the \
+         parenthesis) as each detection's `label`:",
+    );
+    for label in labels {
+        match label.description(&lang) {
+            Some(desc) => {
+                block.push_str(&format!("\n- {} ({}): {}", label.id(), label.name(&lang), desc));
+            }
+            None => block.push_str(&format!("\n- {} ({})", label.id(), label.name(&lang))),
+        }
+    }
+    block
+}
 
 #[cfg(feature = "jinja2")]
 mod jinja2_prompt;

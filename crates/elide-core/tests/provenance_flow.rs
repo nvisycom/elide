@@ -5,7 +5,7 @@
 
 use elide_core::Result;
 use elide_core::entity::provenance::{Event, EventKind, ModelEvent, PatternEvent, Provenance};
-use elide_core::entity::{Entity, EntityCoRef, Label, LabelCatalog, LabelRef};
+use elide_core::entity::{Entity, EntityCoRef, Label, LabelCatalog, LabelRef, Localization};
 use elide_core::modality::Modality;
 use elide_core::primitive::{Confidence, ConfidenceThreshold, CountryCode, Language, LanguageTag};
 
@@ -113,19 +113,23 @@ fn two_recognizers_fuse_into_one() {
 #[test]
 fn label_catalog_resolves_refs() {
     let catalog: LabelCatalog = [
-        Label::described("PHONE_NUMBER", "A telephone number"),
-        Label::new("EMAIL_ADDRESS"),
+        Label::new("phone_number", "phone number").with_localization(
+            LanguageTag::english(),
+            Localization::described("phone number", "A telephone number"),
+        ),
+        Label::new("email_address", "email address"),
     ]
     .into_iter()
     .collect();
 
-    let phone = LabelRef::new("PHONE_NUMBER");
+    let en = LanguageTag::english();
+    let phone = LabelRef::new("phone_number");
     assert_eq!(
-        catalog.get(&phone).and_then(Label::description),
+        catalog.get(&phone).and_then(|l| l.description(&en)),
         Some("A telephone number")
     );
-    assert!(catalog.contains(&LabelRef::new("EMAIL_ADDRESS")));
-    assert!(!catalog.contains(&LabelRef::new("SSN")));
+    assert!(catalog.contains(&LabelRef::new("email_address")));
+    assert!(!catalog.contains(&LabelRef::new("ssn")));
 
     // Modality name is a type-level constant.
     assert_eq!(<Text as Modality>::NAME, "text");

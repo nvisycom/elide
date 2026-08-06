@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::str::FromStr;
+use std::sync::LazyLock;
 
 use hipstr::HipStr;
 use oxilangtag::LanguageTag as RawLanguageTag;
@@ -53,6 +54,24 @@ impl LanguageTag {
     /// Full tag as a string slice.
     pub fn as_str(&self) -> &str {
         self.0.as_str()
+    }
+
+    /// The canonical English tag (`"en"`).
+    ///
+    /// The conventional default across the workspace: the language every
+    /// localized [`Label`] is required to carry, and the fallback when a
+    /// requested locale is absent. English leads NER and LLM coverage, so it
+    /// is the safe universal baseline.
+    ///
+    /// [`Label`]: crate::entity::Label
+    pub fn english() -> Self {
+        // Parse once (BCP 47 validation) and clone the cached tag — `"en"`
+        // inlines into `HipStr`, so the clone does not allocate. This is a
+        // hot-path helper (the localization fallback calls it per label).
+        static ENGLISH: LazyLock<LanguageTag> = LazyLock::new(|| {
+            LanguageTag::parse(HipStr::from_static("en")).expect("`en` is a valid language tag")
+        });
+        ENGLISH.clone()
     }
 
     /// Whether this tag matches `other` at the primary-language level.

@@ -6,9 +6,12 @@
 
 use std::ops::Range;
 
-use elide_core::entity::LabelRef;
+use elide_core::entity::Label;
 use elide_core::modality::text::Text;
+use elide_core::primitive::LanguageTag;
 use elide_core::recognition::annotation::Inclusion;
+
+use super::target_labels_block;
 
 /// Snippet window (in bytes) emitted on each side of an inclusion's
 /// range so the LLM has surrounding context for judgement.
@@ -19,7 +22,8 @@ pub(super) struct TextPromptBuilder<'a> {
     text: &'a str,
     inclusions: &'a [Inclusion<Text>],
     tags: &'a [String],
-    target_labels: &'a [LabelRef],
+    target_labels: &'a [Label],
+    language: Option<&'a LanguageTag>,
 }
 
 impl<'a> TextPromptBuilder<'a> {
@@ -27,13 +31,15 @@ impl<'a> TextPromptBuilder<'a> {
         text: &'a str,
         inclusions: &'a [Inclusion<Text>],
         tags: &'a [String],
-        target_labels: &'a [LabelRef],
+        target_labels: &'a [Label],
+        language: Option<&'a LanguageTag>,
     ) -> Self {
         Self {
             text,
             inclusions,
             tags,
             target_labels,
+            language,
         }
     }
 
@@ -49,18 +55,7 @@ impl<'a> TextPromptBuilder<'a> {
         prompt.push_str(self.text);
         prompt.push_str("\n---");
 
-        if !self.target_labels.is_empty() {
-            let types = self
-                .target_labels
-                .iter()
-                .map(LabelRef::as_str)
-                .collect::<Vec<_>>()
-                .join(", ");
-            prompt.push_str(&format!(
-                "\n\nEmit only these entity types (use the exact names for \
-                 label): {types}."
-            ));
-        }
+        prompt.push_str(&target_labels_block(self.target_labels, self.language));
 
         if !self.tags.is_empty() {
             let tags = self.tags.join(", ");

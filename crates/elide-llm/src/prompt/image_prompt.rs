@@ -4,27 +4,33 @@
 //! [`DefaultPrompt`]: super::DefaultPrompt
 //! [`Prompt<Image>`]: super::Prompt
 
-use elide_core::entity::LabelRef;
+use elide_core::entity::Label;
 use elide_core::modality::image::Image;
+use elide_core::primitive::LanguageTag;
 use elide_core::recognition::annotation::Inclusion;
+
+use super::target_labels_block;
 
 /// Builds user prompts for the image detect pass.
 pub(super) struct ImagePromptBuilder<'a> {
     inclusions: &'a [Inclusion<Image>],
     tags: &'a [String],
-    target_labels: &'a [LabelRef],
+    target_labels: &'a [Label],
+    language: Option<&'a LanguageTag>,
 }
 
 impl<'a> ImagePromptBuilder<'a> {
     pub fn new(
         inclusions: &'a [Inclusion<Image>],
         tags: &'a [String],
-        target_labels: &'a [LabelRef],
+        target_labels: &'a [Label],
+        language: Option<&'a LanguageTag>,
     ) -> Self {
         Self {
             inclusions,
             tags,
             target_labels,
+            language,
         }
     }
 
@@ -35,18 +41,7 @@ impl<'a> ImagePromptBuilder<'a> {
              with an \"entities\" key whose value is an array of detections.",
         );
 
-        if !self.target_labels.is_empty() {
-            let types = self
-                .target_labels
-                .iter()
-                .map(LabelRef::as_str)
-                .collect::<Vec<_>>()
-                .join(", ");
-            prompt.push_str(&format!(
-                "\n\nEmit only these entity types (use the exact names for \
-                 label): {types}."
-            ));
-        }
+        prompt.push_str(&target_labels_block(self.target_labels, self.language));
 
         if !self.tags.is_empty() {
             let tags = self.tags.join(", ");
