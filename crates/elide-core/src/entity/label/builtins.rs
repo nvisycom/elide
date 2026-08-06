@@ -2,8 +2,15 @@
 //!
 //! Each constant carries a category tag (`personal_identity`,
 //! `financial`, …) plus cross-cutting tags where applicable (`pii`,
-//! `phi`, `pci`). Selectors can match by label id *or* by tag without
-//! the workspace modelling categories as a separate enum.
+//! `phi`, `pci`, `sad` for PCI sensitive authentication data). Selectors
+//! can match by label id *or* by tag without the workspace modelling
+//! categories as a separate enum.
+//!
+//! Tags name *what the data is*, not which law governs it: mapping a
+//! category to a regulatory regime (GDPR Article 9, HIPAA Safe Harbor, …)
+//! is a policy-layer concern, so a compliance profile selects the relevant
+//! category tags itself rather than the catalog carrying regulation-citation
+//! tags.
 //!
 //! Every label's id is its constant's identifier, lowercased
 //! (`PHONE_NUMBER` → `"phone_number"`); the display `name` is the
@@ -62,12 +69,14 @@ label!(pub DATE_OF_BIRTH, "date of birth", ["personal_identity", "pii"]);
 rich_label!(pub GOVERNMENT_ID, "government-issued identification number", "A government-issued identification number such as a US SSN, Canadian SIN, Indian Aadhaar, or other national identity number.", ["personal_identity", "pii"]);
 rich_label!(pub TAX_ID, "tax identification number", "A taxpayer identification number such as a US ITIN or EIN, a VAT number, or another jurisdiction's tax id.", ["personal_identity", "pii"]);
 label!(pub DRIVERS_LICENSE, "driver's license number", ["personal_identity", "pii"]);
+rich_label!(pub CERTIFICATE_NUMBER, "certificate or license number", "A regulated identifier issued by a professional, licensing, or certifying body — e.g. a DEA registration number, medical license, bar number, or notary commission.", ["personal_identity", "pii"]);
 label!(pub PASSPORT_NUMBER, "passport number", ["personal_identity", "pii"]);
 label!(pub NATIONAL_INSURANCE_NUMBER, "national insurance or social-security equivalent", ["personal_identity", "pii"]);
 label!(pub VEHICLE_ID, "vehicle identification number", ["personal_identity"]);
 label!(pub LICENSE_PLATE, "license plate number", ["personal_identity"]);
 label!(pub EMAIL_ADDRESS, "email address", ["contact_info", "pii"]);
 label!(pub PHONE_NUMBER, "phone number", ["contact_info", "pii"]);
+label!(pub FAX_NUMBER, "fax number", ["contact_info", "pii"]);
 label!(pub ADDRESS, "physical or mailing address", ["contact_info", "pii"]);
 label!(pub POSTAL_CODE, "postal or ZIP code", ["contact_info"]);
 label!(pub URL, "URL or hyperlink", ["contact_info"]);
@@ -78,8 +87,11 @@ label!(pub RELIGION, "religious affiliation", ["demographic", "pii"]);
 label!(pub NATIONALITY, "nationality", ["demographic", "pii"]);
 label!(pub CITIZENSHIP, "citizenship status", ["demographic", "pii"]);
 label!(pub LANGUAGE, "language or dialect spoken", ["demographic"]);
+label!(pub POLITICAL_OPINION, "political opinion or affiliation", ["demographic", "pii"]);
+label!(pub TRADE_UNION_MEMBERSHIP, "trade-union membership", ["demographic", "pii"]);
+label!(pub SEXUAL_ORIENTATION, "sexual orientation", ["demographic", "pii"]);
 label!(pub PAYMENT_CARD, "payment card number", ["financial", "pci", "pii"]);
-label!(pub CARD_SECURITY_CODE, "payment card security code", ["financial", "pci"]);
+label!(pub CARD_SECURITY_CODE, "payment card security code", ["financial", "pci", "sad"]);
 label!(pub CARD_EXPIRY, "payment card expiration date", ["financial", "pci"]);
 label!(pub BANK_ACCOUNT, "bank account number", ["financial", "pii"]);
 label!(pub BANK_ROUTING, "bank routing or transit number", ["financial"]);
@@ -97,6 +109,7 @@ label!(pub FINGERPRINT, "fingerprint biometric data", ["biometric", "pii"]);
 label!(pub VOICEPRINT, "voiceprint biometric data", ["biometric", "pii"]);
 label!(pub RETINA_SCAN, "retina scan biometric data", ["biometric", "pii"]);
 label!(pub FACIAL_GEOMETRY, "facial geometry biometric data", ["biometric", "pii"]);
+label!(pub GENETIC_DATA, "genetic data", ["biometric", "pii"]);
 label!(pub PASSWORD, "password", ["credentials", "secret"]);
 label!(pub API_KEY, "API key", ["credentials", "secret"]);
 label!(pub AUTH_TOKEN, "authentication token", ["credentials", "secret"]);
@@ -132,12 +145,14 @@ pub(super) static BUILT_INS: &[&LazyLock<Label>] = &[
     &GOVERNMENT_ID,
     &TAX_ID,
     &DRIVERS_LICENSE,
+    &CERTIFICATE_NUMBER,
     &PASSPORT_NUMBER,
     &NATIONAL_INSURANCE_NUMBER,
     &VEHICLE_ID,
     &LICENSE_PLATE,
     &EMAIL_ADDRESS,
     &PHONE_NUMBER,
+    &FAX_NUMBER,
     &ADDRESS,
     &POSTAL_CODE,
     &URL,
@@ -148,6 +163,9 @@ pub(super) static BUILT_INS: &[&LazyLock<Label>] = &[
     &NATIONALITY,
     &CITIZENSHIP,
     &LANGUAGE,
+    &POLITICAL_OPINION,
+    &TRADE_UNION_MEMBERSHIP,
+    &SEXUAL_ORIENTATION,
     &PAYMENT_CARD,
     &CARD_SECURITY_CODE,
     &CARD_EXPIRY,
@@ -167,6 +185,7 @@ pub(super) static BUILT_INS: &[&LazyLock<Label>] = &[
     &VOICEPRINT,
     &RETINA_SCAN,
     &FACIAL_GEOMETRY,
+    &GENETIC_DATA,
     &PASSWORD,
     &API_KEY,
     &AUTH_TOKEN,
@@ -221,5 +240,59 @@ mod tests {
         // A `rich_label!` carries a description; a plain `label!` does not.
         assert!(GOVERNMENT_ID.description(&en).is_some());
         assert!(PERSON_NAME.description(&en).is_none());
+    }
+
+    #[test]
+    fn special_category_labels_ship_as_data_categories() {
+        let en = LanguageTag::english();
+
+        // The categories GDPR Art. 9 covers that the catalog previously
+        // lacked. They carry ordinary *data-category* tags (demographic,
+        // biometric) — no regulation-citation tag, since mapping a category
+        // to a legal regime is a policy-layer concern.
+        assert_eq!(POLITICAL_OPINION.id(), "political_opinion");
+        assert_eq!(POLITICAL_OPINION.name(&en), "political opinion or affiliation");
+        assert!(POLITICAL_OPINION.has_tag("demographic"));
+
+        assert_eq!(TRADE_UNION_MEMBERSHIP.id(), "trade_union_membership");
+        assert!(TRADE_UNION_MEMBERSHIP.has_tag("demographic"));
+
+        assert_eq!(SEXUAL_ORIENTATION.id(), "sexual_orientation");
+        assert!(SEXUAL_ORIENTATION.has_tag("demographic"));
+
+        assert_eq!(GENETIC_DATA.id(), "genetic_data");
+        assert!(GENETIC_DATA.has_tag("biometric"));
+
+        // No regulation-citation tag leaked onto the taxonomy.
+        for label in [&*POLITICAL_OPINION, &TRADE_UNION_MEMBERSHIP, &SEXUAL_ORIENTATION, &GENETIC_DATA] {
+            assert!(!label.has_tag("article_9"), "regulatory tags belong to the policy layer");
+        }
+    }
+
+    #[test]
+    fn sad_tag_isolates_sensitive_authentication_data() {
+        use super::super::LabelCatalog;
+
+        // PCI SAD (must never be stored post-auth) is a subset of PCI scope;
+        // the `sad` tag isolates it from the rest.
+        let sad = LabelCatalog::with_builtins().filter_tag("sad");
+        assert!(sad.contains(&CARD_SECURITY_CODE.to_ref()));
+        // `sad` is additive on top of the existing PCI/financial tags.
+        assert!(CARD_SECURITY_CODE.has_tag("pci") && CARD_SECURITY_CODE.has_tag("sad"));
+        // The PAN is PCI but not SAD (it may be stored, masked).
+        assert!(PAYMENT_CARD.has_tag("pci") && !PAYMENT_CARD.has_tag("sad"));
+    }
+
+    #[test]
+    fn hipaa_fax_and_certificate_labels_ship() {
+        let en = LanguageTag::english();
+
+        assert_eq!(FAX_NUMBER.id(), "fax_number");
+        assert_eq!(FAX_NUMBER.name(&en), "fax number");
+        assert!(FAX_NUMBER.has_tag("contact_info") && FAX_NUMBER.has_tag("pii"));
+
+        assert_eq!(CERTIFICATE_NUMBER.id(), "certificate_number");
+        // `certificate_number` is ambiguous, so it ships with a description.
+        assert!(CERTIFICATE_NUMBER.description(&en).is_some());
     }
 }
