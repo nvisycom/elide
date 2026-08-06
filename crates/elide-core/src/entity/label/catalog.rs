@@ -85,10 +85,70 @@ impl LabelCatalog {
     pub fn refs(&self) -> impl Iterator<Item = LabelRef> + '_ {
         self.0.values().map(|label| label.to_ref())
     }
+
+    /// Every label in the catalog carrying `tag`.
+    ///
+    /// A taxonomy filter, not a policy: built-in labels carry cross-cutting
+    /// tags (`pii`, `phi`, `pci`, …), so `tagged("phi")` yields the health
+    /// identifiers a caller's regulatory profile might target. The caller
+    /// decides what to do with them.
+    pub fn tagged<'a>(&'a self, tag: &'a str) -> impl Iterator<Item = &'a Label> + 'a {
+        self.0.values().filter(move |label| label.has_tag(tag))
+    }
+
+    /// A [`LabelRef`] for every label carrying `tag` — the ref-only
+    /// counterpart to [`tagged`].
+    ///
+    /// [`tagged`]: Self::tagged
+    pub fn refs_tagged<'a>(&'a self, tag: &'a str) -> impl Iterator<Item = LabelRef> + 'a {
+        self.tagged(tag).map(|label| label.to_ref())
+    }
+
+    /// A new catalog holding only the labels carrying `tag`.
+    ///
+    /// The owned-subset form of [`tagged`], for a caller that wants to drive
+    /// a run with just one category — e.g. build the sub-catalog of `phi`
+    /// labels, then hand it to an analyzer or anonymizer.
+    ///
+    /// [`tagged`]: Self::tagged
+    #[must_use]
+    pub fn filter_tag(&self, tag: &str) -> Self {
+        self.tagged(tag).cloned().collect()
+    }
 }
 
 impl FromIterator<Label> for LabelCatalog {
     fn from_iter<I: IntoIterator<Item = Label>>(labels: I) -> Self {
         Self(labels.into_iter().map(|l| (l.id_owned(), l)).collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::builtins;
+    use super::*;
+
+    #[test]
+    fn tag_filter_selects_matching_labels() {
+        let catalog = LabelCatalog::with_builtins();
+
+        // Every `tagged` label carries the tag, and only those.
+        assert!(catalog.tagged("phi").all(|l| l.has_tag("phi")));
+        let phi_count = catalog.tagged("phi").count();
+        assert!(phi_count > 0, "built-ins include phi-tagged labels");
+
+        // The owned sub-catalog holds exactly the tagged labels, keyed by id.
+        let phi = catalog.filter_tag("phi");
+        assert_eq!(phi.len(), phi_count);
+        assert!(phi.iter().all(|l| l.has_tag("phi")));
+        assert!(phi.contains(&builtins::MEDICAL_ID.to_ref()));
+        assert!(!phi.contains(&builtins::EMAIL_ADDRESS.to_ref()));
+
+        // The ref-only form agrees with `tagged`.
+        assert_eq!(catalog.refs_tagged("phi").count(), phi_count);
+
+        // An unknown tag yields nothing.
+        assert_eq!(catalog.tagged("nonexistent").count(), 0);
+        assert!(catalog.filter_tag("nonexistent").is_empty());
     }
 }
