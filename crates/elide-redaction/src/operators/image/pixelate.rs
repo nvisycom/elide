@@ -12,8 +12,8 @@ use elide_core::operator::{LeakProfile, Operator, OperatorId};
 /// still keeping the region's footprint visible. Contrast [`Blackbox`],
 /// which hides it behind a solid fill.
 ///
-/// [`Blur`]: super::Blur
-/// [`Blackbox`]: super::Blackbox
+/// [`Blur`]: crate::operators::Blur
+/// [`Blackbox`]: crate::operators::Blackbox
 #[derive(Debug, Clone, Copy)]
 pub struct Pixelate {
     /// Side length of each mosaic block, in pixels. Larger blocks are

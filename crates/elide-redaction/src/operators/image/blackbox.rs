@@ -13,9 +13,9 @@ use elide_core::primitive::Color;
 /// keeps it present but opaque. Contrast [`Blur`] / [`Pixelate`], which
 /// leave the region's content partly perceptible.
 ///
-/// [`Erase`]: super::Erase
-/// [`Blur`]: super::Blur
-/// [`Pixelate`]: super::Pixelate
+/// [`Erase`]: crate::operators::Erase
+/// [`Blur`]: crate::operators::Blur
+/// [`Pixelate`]: crate::operators::Pixelate
 #[derive(Debug, Clone, Copy)]
 pub struct Blackbox {
     /// Fill color the codec rasterizes over the region.

@@ -52,7 +52,7 @@ use crate::vault::Vault;
 /// [`RandomToken`]: crate::generator::RandomToken
 /// [`get_or_try_insert_with`]: crate::vault::Vault::get_or_try_insert_with
 /// [coreference]: elide_core::entity::EntityCoRef
-/// [`Replace`]: super::Replace
+/// [`Replace`]: crate::operators::Replace
 #[derive(Debug, Clone)]
 pub struct Pseudonymize<V, G> {
     vault: V,

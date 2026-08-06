@@ -12,7 +12,7 @@ use elide_core::operator::{LeakProfile, Operator, OperatorId};
 /// Common for faces and license plates in low-stakes contexts. Contrast
 /// [`Blackbox`], which hides the region behind a solid fill.
 ///
-/// [`Blackbox`]: super::Blackbox
+/// [`Blackbox`]: crate::operators::Blackbox
 #[derive(Debug, Clone, Copy)]
 pub struct Blur {
     /// Standard deviation of the Gaussian kernel, in pixels. Larger is
@@ -63,7 +63,7 @@ mod tests {
     use elide_core::operator::Operator;
     use elide_core::primitive::{BoundingBox, Confidence, Dimensions, Point};
 
-    use super::super::{Blackbox, Blur, Pixelate};
+    use crate::operators::{Blackbox, Blur, Pixelate};
 
     /// A 4x4 image entity with a small region, enough to drive an operator.
     fn image_entity() -> (Entity<Image>, ImageData) {

@@ -18,7 +18,7 @@ const DEFAULT_AMPLITUDE: f32 = 0.5;
 /// the timeline does not shift, but the redacted span is audibly marked.
 /// Defaults to a 1 kHz sine at half amplitude, the broadcast convention.
 ///
-/// [`Silence`]: super::Silence
+/// [`Silence`]: crate::operators::Silence
 #[derive(Debug, Clone, Copy)]
 pub struct Beep {
     /// Tone frequency, in hertz.

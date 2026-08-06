@@ -236,7 +236,7 @@ impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use elide_core::entity::{LabelCatalog, Localization, builtins};
+    use elide_core::entity::{LabelCatalog, LabelLocale, builtins};
     use elide_core::modality::text::{Text, TextData};
     use elide_core::primitive::LanguageTag;
     use elide_core::recognition::Scope;
@@ -322,7 +322,7 @@ mod tests {
         let mut catalog = LabelCatalog::new();
         catalog.insert(Label::new("email", "email address").with_localization(
             LanguageTag::english(),
-            Localization::described("email address", "an email address"),
+            LabelLocale::described("email address", "an email address"),
         ));
         let scope = Scope::new().with_catalog(catalog);
         let ctx = RecognizerContext::<Text>::new(&scope);

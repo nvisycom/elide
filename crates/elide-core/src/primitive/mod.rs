@@ -27,7 +27,9 @@ mod time;
 
 pub use self::confidence::{Confidence, ConfidenceThreshold};
 pub use self::geometry::{BoundingBox, Dimensions, PixelRegion, Point, Polygon, UnitBoundingBox};
-pub use self::language::{Language, LanguageProvenance, LanguageSpan, LanguageTag, Languages};
+pub use self::language::{
+    Language, LanguageProvenance, LanguageSpan, LanguageTag, Languages, LocalizedText,
+};
 pub use self::region::CountryCode;
 pub use self::rendering::{Color, Dpi};
 pub use self::time::TimeSpan;

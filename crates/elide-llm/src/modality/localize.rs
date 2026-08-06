@@ -1,4 +1,4 @@
-//! Localization: map a [`TextCandidate`] to a byte range in the
+//! Candidate localization: map a [`TextCandidate`] to a byte range in the
 //! source text using its `context` hint.
 //!
 //! Both context and source are normalized (NFC + whitespace

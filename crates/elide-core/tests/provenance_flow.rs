@@ -5,7 +5,7 @@
 
 use elide_core::Result;
 use elide_core::entity::provenance::{Event, EventKind, ModelEvent, PatternEvent, Provenance};
-use elide_core::entity::{Entity, EntityCoRef, Label, LabelCatalog, LabelRef, Localization};
+use elide_core::entity::{Entity, EntityCoRef, Label, LabelCatalog, LabelRef, LabelLocale};
 use elide_core::modality::Modality;
 use elide_core::primitive::{Confidence, ConfidenceThreshold, CountryCode, Language, LanguageTag};
 
@@ -115,7 +115,7 @@ fn label_catalog_resolves_refs() {
     let catalog: LabelCatalog = [
         Label::new("phone_number", "phone number").with_localization(
             LanguageTag::english(),
-            Localization::described("phone number", "A telephone number"),
+            LabelLocale::described("phone number", "A telephone number"),
         ),
         Label::new("email_address", "email address"),
     ]
