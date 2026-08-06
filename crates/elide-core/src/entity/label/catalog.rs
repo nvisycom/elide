@@ -11,9 +11,10 @@ use serde::{Deserialize, Serialize};
 use super::builtins::BUILT_INS;
 use super::{Label, LabelRef};
 
-/// Registry of [`Label`]s, keyed by name.
+/// Registry of [`Label`]s, keyed by id.
 ///
-/// Holds the authoritative definitions (names + descriptions) for a run.
+/// Holds the authoritative definitions (localized names + descriptions)
+/// for a run.
 /// A [`LabelRef`] carried on a detection or entity is resolved back to
 /// its full [`Label`] with [`get`].
 ///
@@ -39,7 +40,7 @@ impl LabelCatalog {
 
     /// Catalog pre-populated with every built-in label.
     ///
-    /// Walks [`builtins::BUILT_INS`] and registers each constant by name.
+    /// Walks [`builtins::BUILT_INS`] and registers each constant by id.
     /// Register custom labels alongside the built-ins with [`insert`].
     ///
     /// [`builtins::BUILT_INS`]: super::builtins
@@ -48,10 +49,10 @@ impl LabelCatalog {
         BUILT_INS.iter().map(|label| (**label).clone()).collect()
     }
 
-    /// Insert a label, returning the previous definition for its name, if
+    /// Insert a label, returning the previous definition for its id, if
     /// any.
     pub fn insert(&mut self, label: Label) -> Option<Label> {
-        self.0.insert(label.name_owned(), label)
+        self.0.insert(label.id_owned(), label)
     }
 
     /// Resolve a reference to its full label definition.
@@ -88,6 +89,6 @@ impl LabelCatalog {
 
 impl FromIterator<Label> for LabelCatalog {
     fn from_iter<I: IntoIterator<Item = Label>>(labels: I) -> Self {
-        Self(labels.into_iter().map(|l| (l.name_owned(), l)).collect())
+        Self(labels.into_iter().map(|l| (l.id_owned(), l)).collect())
     }
 }

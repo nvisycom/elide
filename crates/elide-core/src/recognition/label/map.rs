@@ -43,12 +43,12 @@ impl LabelMap {
         Self::default()
     }
 
-    /// Identity map over every label name in `catalog`: each name maps to
+    /// Identity map over every label id in `catalog`: each id maps to
     /// a [`LabelRef`] of itself.
     ///
     /// Convenience for a boundary whose model already emits canonical label
-    /// names (or has been calibrated to): [`get`] passes those labels
-    /// through unchanged, and any name absent from `catalog` returns
+    /// ids (or has been calibrated to): [`get`] passes those labels
+    /// through unchanged, and any id absent from `catalog` returns
     /// `None`.
     ///
     /// [`get`]: Self::get
@@ -56,7 +56,7 @@ impl LabelMap {
     pub fn canonical(catalog: &LabelCatalog) -> Self {
         catalog
             .iter()
-            .map(|label| (label.name().to_owned(), LabelRef::new(label.name())))
+            .map(|label| (label.id().to_owned(), LabelRef::new(label.id())))
             .collect()
     }
 
