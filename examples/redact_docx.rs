@@ -142,20 +142,20 @@ fn build_text_analyzer() -> Result<Analyzer<Text>> {
 /// Build the body anonymizer: an operator per label, plus a fallback.
 fn build_text_anonymizer() -> Anonymizer<Text> {
     Anonymizer::new()
-        .with_label(builtins::EMAIL_ADDRESS.to_ref(), Replace::new("[EMAIL]"))
-        .with_label(builtins::PHONE_NUMBER.to_ref(), Replace::new("[PHONE]"))
-        .with_label(builtins::IBAN.to_ref(), Replace::new("[IBAN]"))
-        .with_label(
+        .with(Rule::label(builtins::EMAIL_ADDRESS.to_ref(), Replace::new("[EMAIL]")))
+        .with(Rule::label(builtins::PHONE_NUMBER.to_ref(), Replace::new("[PHONE]")))
+        .with(Rule::label(builtins::IBAN.to_ref(), Replace::new("[IBAN]")))
+        .with(Rule::label(
             builtins::GOVERNMENT_ID.to_ref(),
             Replace::new("[GOVERNMENT_ID]"),
-        )
-        .with_label(builtins::IP_ADDRESS.to_ref(), Replace::new("[IP]"))
+        ))
+        .with(Rule::label(builtins::IP_ADDRESS.to_ref(), Replace::new("[IP]")))
         // Keep the last four digits of a card visible, mask the rest.
-        .with_label(
+        .with(Rule::label(
             builtins::PAYMENT_CARD.to_ref(),
             Mask::stars().with_keep_suffix(4),
-        )
-        .with_fallback(Erase)
+        ))
+        .with(Rule::fallback(Erase))
 }
 
 /// Build the image analyzer backed by the mock LLM. It detects nothing
@@ -176,7 +176,7 @@ fn build_image_analyzer() -> Result<Analyzer<Image>> {
 /// would drive.
 fn build_image_anonymizer() -> Anonymizer<Image> {
     Anonymizer::new()
-        .with_label(builtins::FACE.to_ref(), Blur::new(12.0))
-        .with_label(builtins::SIGNATURE.to_ref(), Blackbox::default())
-        .with_fallback(Erase)
+        .with(Rule::label(builtins::FACE.to_ref(), Blur::new(12.0)))
+        .with(Rule::label(builtins::SIGNATURE.to_ref(), Blackbox::default()))
+        .with(Rule::fallback(Erase))
 }

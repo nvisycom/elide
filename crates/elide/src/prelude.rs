@@ -66,4 +66,4 @@ pub use elide_detection::{
 #[doc(no_inline)]
 pub use elide_orchestration::{Directives, Orchestrator, Report};
 #[doc(no_inline)]
-pub use elide_redaction::{Anonymizer, Deanonymizer, Operator, operators};
+pub use elide_redaction::{Anonymizer, Deanonymizer, Operator, Rule, operators};

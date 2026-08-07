@@ -27,7 +27,7 @@ use elide::primitive::{ConfidenceThreshold, Language, LanguageTag};
 use elide::recognition::pattern::PatternRecognizer;
 use elide::recognition::{Recognizer, Scope};
 use elide::redaction::operators::{Erase, Mask, Replace};
-use elide::redaction::{Anonymizer, Operator};
+use elide::redaction::{Anonymizer, Rule, Operator};
 use elide::{Directives, EntityGroup, Error, ErrorKind, Orchestrator, Report, Result};
 
 /// Outcome of one end-to-end run: the entities that survived dedup and
@@ -96,22 +96,22 @@ where
     Erase: Operator<M>,
 {
     Anonymizer::new()
-        .with_label(
+        .with(Rule::label(
             builtins::EMAIL_ADDRESS.to_ref(),
             Replace::new("[email_address]"),
-        )
-        .with_label(
+        ))
+        .with(Rule::label(
             builtins::PHONE_NUMBER.to_ref(),
             Replace::new("[phone_number]"),
-        )
-        .with_label(builtins::IBAN.to_ref(), Replace::new("[iban]"))
-        .with_label(
+        ))
+        .with(Rule::label(builtins::IBAN.to_ref(), Replace::new("[iban]")))
+        .with(Rule::label(
             builtins::GOVERNMENT_ID.to_ref(),
             Replace::new("[government_id]"),
-        )
-        .with_label(builtins::IP_ADDRESS.to_ref(), Replace::new("[ip_address]"))
-        .with_label(builtins::PAYMENT_CARD.to_ref(), Mask::stars())
-        .with_fallback(Erase)
+        ))
+        .with(Rule::label(builtins::IP_ADDRESS.to_ref(), Replace::new("[ip_address]")))
+        .with(Rule::label(builtins::PAYMENT_CARD.to_ref(), Mask::stars()))
+        .with(Rule::fallback(Erase))
 }
 
 /// Build an image analyzer backed by the mock LLM (detects nothing) — the
@@ -187,8 +187,8 @@ impl Fixture {
         // nothing; the anonymizer would silence/erase any time spans it did.
         let analyzer = Analyzer::new().with_enricher(SttEnricher::new(MockBackend));
         let anonymizer = Anonymizer::new()
-            .with_label(builtins::PHONE_NUMBER.to_ref(), Silence)
-            .with_fallback(Erase);
+            .with(Rule::label(builtins::PHONE_NUMBER.to_ref(), Silence))
+            .with(Rule::fallback(Erase));
 
         let orchestrator =
             Orchestrator::new(&registry).with_modality::<Audio>(analyzer, anonymizer);
@@ -238,7 +238,7 @@ impl Fixture {
         // The mock OCR backend recognizes nothing, so recognition finds
         // nothing; the anonymizer would clear any regions it did.
         let analyzer = Analyzer::new().with_enricher(OcrEnricher::new(MockBackend));
-        let anonymizer = Anonymizer::new().with_fallback(Erase);
+        let anonymizer = Anonymizer::new().with(Rule::fallback(Erase));
 
         let orchestrator =
             Orchestrator::new(&registry).with_modality::<Image>(analyzer, anonymizer);
