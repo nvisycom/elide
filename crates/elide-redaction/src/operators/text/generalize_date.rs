@@ -9,6 +9,10 @@ use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::operator::{LeakProfile, Operator, OperatorId};
 use elide_core::Result;
 use jiff::civil::{Date, DateTime, Time};
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::operators::TryOperator;
 
@@ -17,6 +21,9 @@ use crate::operators::TryOperator;
 /// Every rendering is an ISO-8601 form, so the output is locale-independent
 /// by construction — no localized month names or week markers to configure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub enum DateGranularity {
     /// Year only: `1987-03-14` → `1987`. The HIPAA Safe Harbor default —
     /// §164.514(b)(2)(i)(C) keeps year but drops finer date elements.
@@ -38,6 +45,9 @@ pub enum DateGranularity {
 /// guess would silently emit a plausible-but-wrong month. The policy
 /// author, who knows the corpus's convention, sets it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub enum DateStyle {
     /// ISO-8601 only: `1987-03-14`, `1987-03-14T09:32:15`. The unambiguous
     /// default.

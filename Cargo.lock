@@ -1123,6 +1123,8 @@ dependencies = [
  "hipstr",
  "hmac",
  "jiff",
+ "schemars",
+ "serde",
  "sha2 0.11.0",
  "tokio",
  "tracing",
