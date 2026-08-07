@@ -63,6 +63,44 @@ pub trait Operator<M: Modality>: Send + Sync {
     async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement>;
 }
 
+#[async_trait::async_trait]
+impl<M, T> Operator<M> for Box<T>
+where
+    M: Modality,
+    T: Operator<M> + ?Sized,
+{
+    fn id(&self) -> OperatorId {
+        (**self).id()
+    }
+
+    fn leak_profile(&self) -> LeakProfile {
+        (**self).leak_profile()
+    }
+
+    async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
+        (**self).anonymize(entity, data).await
+    }
+}
+
+#[async_trait::async_trait]
+impl<M, T> Operator<M> for std::sync::Arc<T>
+where
+    M: Modality,
+    T: Operator<M> + ?Sized,
+{
+    fn id(&self) -> OperatorId {
+        (**self).id()
+    }
+
+    fn leak_profile(&self) -> LeakProfile {
+        (**self).leak_profile()
+    }
+
+    async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
+        (**self).anonymize(entity, data).await
+    }
+}
+
 /// Reversible redaction operator: recovers the original data it replaced.
 ///
 /// A supertrait extension of [`Operator`]: a `ReversibleOperator` is
