@@ -21,6 +21,8 @@ mod leak_profile;
 mod operator_id;
 mod redactions;
 
+use std::sync::Arc;
+
 pub use self::leak_profile::LeakProfile;
 pub use self::operator_id::OperatorId;
 pub use self::redactions::Redactions;
@@ -83,7 +85,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<M, T> Operator<M> for std::sync::Arc<T>
+impl<M, T> Operator<M> for Arc<T>
 where
     M: Modality,
     T: Operator<M> + ?Sized,
@@ -128,4 +130,34 @@ pub trait ReversibleOperator<M: Modality>: Operator<M> {
         entity: &Entity<M>,
         replacement: &M::Replacement,
     ) -> Result<Option<M::Data>>;
+}
+
+#[async_trait::async_trait]
+impl<M, T> ReversibleOperator<M> for Box<T>
+where
+    M: Modality,
+    T: ReversibleOperator<M> + ?Sized,
+{
+    async fn deanonymize(
+        &self,
+        entity: &Entity<M>,
+        replacement: &M::Replacement,
+    ) -> Result<Option<M::Data>> {
+        (**self).deanonymize(entity, replacement).await
+    }
+}
+
+#[async_trait::async_trait]
+impl<M, T> ReversibleOperator<M> for Arc<T>
+where
+    M: Modality,
+    T: ReversibleOperator<M> + ?Sized,
+{
+    async fn deanonymize(
+        &self,
+        entity: &Entity<M>,
+        replacement: &M::Replacement,
+    ) -> Result<Option<M::Data>> {
+        (**self).deanonymize(entity, replacement).await
+    }
 }
