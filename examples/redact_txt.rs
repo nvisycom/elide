@@ -110,18 +110,18 @@ fn build_anonymizer() -> Anonymizer<Text> {
         // A weak detection (below the baseline threshold) is kept as-is,
         // before any label rule can fire. Order matters: the first
         // matching rule wins.
-        .with_predicate(
+        .with(Rule::predicate(
             |e| !ConfidenceThreshold::BASELINE.passes(e.confidence),
             Keep,
-        )
-        .with_label(builtins::EMAIL_ADDRESS.to_ref(), Replace::new("[EMAIL]"))
-        .with_label(builtins::PHONE_NUMBER.to_ref(), Replace::new("[PHONE]"))
-        .with_label(builtins::URL.to_ref(), Replace::new("[URL]"))
+        ))
+        .with(Rule::label(builtins::EMAIL_ADDRESS.to_ref(), Replace::new("[EMAIL]")))
+        .with(Rule::label(builtins::PHONE_NUMBER.to_ref(), Replace::new("[PHONE]")))
+        .with(Rule::label(builtins::URL.to_ref(), Replace::new("[URL]")))
         // Keep the last four digits of a card visible, mask the rest.
-        .with_label(
+        .with(Rule::label(
             builtins::PAYMENT_CARD.to_ref(),
             Mask::stars().with_keep_suffix(4),
-        )
+        ))
         // Anything else we detect gets fully removed.
-        .with_fallback(Erase)
+        .with(Rule::fallback(Erase))
 }

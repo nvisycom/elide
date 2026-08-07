@@ -95,7 +95,7 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
     use elide::modality::text::Text;
     use elide::recognition::llm::LlmRecognizer;
     use elide::recognition::pattern::PatternRecognizer;
-    use elide::redaction::Anonymizer;
+    use elide::redaction::{Anonymizer, Rule};
     use elide::redaction::operators::{Erase, Replace};
     use elide::{Directives, Orchestrator, Report};
 
@@ -105,8 +105,8 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
         .with_builtin_dictionaries()
         .build_context_enhanced()?;
     let anonymizer = Anonymizer::new()
-        .with_label(builtins::EMAIL_ADDRESS.to_ref(), Replace::new("[EMAIL]"))
-        .with_fallback(Erase);
+        .with(Rule::label(builtins::EMAIL_ADDRESS.to_ref(), Replace::new("[EMAIL]")))
+        .with(Rule::fallback(Erase));
     let orchestrator = Orchestrator::new(&registry)
         .with_modality::<Text>(Analyzer::new().with_recognizer(patterns), anonymizer)
         .with_modality::<Image>(

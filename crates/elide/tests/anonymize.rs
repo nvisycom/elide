@@ -2,7 +2,7 @@
 //! operators, reading values through a `DataReader`, with a fallback for
 //! unmapped labels.
 
-use elide::redaction::Anonymizer;
+use elide::redaction::{Anonymizer, Rule};
 use elide::redaction::operators::{Erase, Keep, Mask, Replace};
 use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
 use elide_core::entity::{Entity, EntityCoRef, Label, LabelCatalog, LabelRef};
@@ -37,11 +37,11 @@ async fn anonymize_resolves_label_to_operator_with_fallback() {
     ];
 
     let anonymizer = Anonymizer::<Text>::new()
-        .with_label(
+        .with(Rule::label(
             LabelRef::new("PHONE_NUMBER"),
             Mask::stars().with_keep_suffix(4),
-        )
-        .with_fallback(Erase);
+        ))
+        .with(Rule::fallback(Erase));
 
     let items = anonymizer
         .plan(&mut entities, &source)
@@ -64,7 +64,7 @@ async fn anonymize_replace_renders_label_and_value() {
     let mut entities = vec![entity("PERSON", (6, 11))]; // "Alice"
 
     let items = Anonymizer::<Text>::new()
-        .with_label(LabelRef::new("PERSON"), Replace::new("<{label}:{value}>"))
+        .with(Rule::label(LabelRef::new("PERSON"), Replace::new("<{label}:{value}>")))
         .plan(&mut entities, &source)
         .await
         .unwrap()
@@ -87,7 +87,7 @@ async fn anonymize_replace_threads_coref_through_template() {
     ];
 
     let items = Anonymizer::<Text>::new()
-        .with_label(LabelRef::new("PERSON"), Replace::new("[{label}:{coref}]"))
+        .with(Rule::label(LabelRef::new("PERSON"), Replace::new("[{label}:{coref}]")))
         .plan(&mut entities, &source)
         .await
         .unwrap()
@@ -106,7 +106,7 @@ async fn anonymize_replace_coref_empty_when_unset() {
     let mut entities = vec![entity("PERSON", (6, 11))]; // "Alice", no coref
 
     let items = Anonymizer::<Text>::new()
-        .with_label(LabelRef::new("PERSON"), Replace::new("[{label}:{coref}]"))
+        .with(Rule::label(LabelRef::new("PERSON"), Replace::new("[{label}:{coref}]")))
         .plan(&mut entities, &source)
         .await
         .unwrap()
@@ -142,8 +142,8 @@ async fn anonymize_predicate_gates_on_confidence() {
     // fallback.
     let cutoff = ConfidenceThreshold::clamped(0.5);
     let items = Anonymizer::<Text>::new()
-        .with_predicate(move |e| !cutoff.passes(e.confidence), Keep)
-        .with_fallback(Erase)
+        .with(Rule::predicate(move |e| !cutoff.passes(e.confidence), Keep))
+        .with(Rule::fallback(Erase))
         .plan(&mut entities, &source)
         .await
         .unwrap()
@@ -173,8 +173,8 @@ async fn anonymize_selects_by_tag() {
 
     let items = Anonymizer::<Text>::new()
         .with_catalog(catalog)
-        .with_tag("financial", Mask::stars())
-        .with_fallback(Erase)
+        .with(Rule::tag("financial", Mask::stars()))
+        .with(Rule::fallback(Erase))
         .plan(&mut entities, &source)
         .await
         .unwrap()
@@ -204,11 +204,11 @@ async fn catalog_predicate_resolves_tags_through_the_catalog() {
     // the same source `with_tag` consults, but expressed as a predicate.
     let items = Anonymizer::<Text>::new()
         .with_catalog(catalog)
-        .with_catalog_predicate(
+        .with(Rule::catalog_predicate(
             |e, cat| cat.get(&e.label).is_some_and(|l| l.has_tag("financial")),
             Mask::stars(),
-        )
-        .with_fallback(Erase)
+        ))
+        .with(Rule::fallback(Erase))
         .plan(&mut entities, &source)
         .await
         .unwrap()
@@ -226,8 +226,8 @@ async fn anonymize_first_matching_rule_wins() {
 
     // Two rules match the same entity; the earlier one wins.
     let items = Anonymizer::<Text>::new()
-        .with_label(LabelRef::new("EMAIL_ADDRESS"), Replace::new("[FIRST]"))
-        .with_label(LabelRef::new("EMAIL_ADDRESS"), Replace::new("[SECOND]"))
+        .with(Rule::label(LabelRef::new("EMAIL_ADDRESS"), Replace::new("[FIRST]")))
+        .with(Rule::label(LabelRef::new("EMAIL_ADDRESS"), Replace::new("[SECOND]")))
         .plan(&mut entities, &source)
         .await
         .unwrap()
@@ -245,8 +245,10 @@ async fn plan_records_redaction_provenance_with_rule_and_attribution() {
     let mut entities = vec![entity("EMAIL_ADDRESS", (0, 7))];
 
     Anonymizer::<Text>::new()
-        .with_label(LabelRef::new("EMAIL_ADDRESS"), Replace::new("[X]"))
-        .because(Attribution::new("gdpr-art-17").with_reason("right to erasure"))
+        .with(
+            Rule::label(LabelRef::new("EMAIL_ADDRESS"), Replace::new("[X]"))
+                .because(Attribution::new("gdpr-art-17").with_description("right to erasure")),
+        )
         .plan(&mut entities, &source)
         .await
         .unwrap();
@@ -271,10 +273,10 @@ async fn plan_records_redaction_provenance_with_rule_and_attribution() {
     assert_eq!(operator.name, "replace");
     // Automatic why: matched the exact-label rule.
     assert_eq!(matched_by, RuleMatch::Label(LabelRef::new("EMAIL_ADDRESS")));
-    // Author why: the attribution the decorator carried.
+    // Author why: the attribution the rule carried.
     let attribution = attribution.expect("attribution recorded");
-    assert_eq!(attribution.policy_id, "gdpr-art-17");
-    assert_eq!(attribution.reason.as_deref(), Some("right to erasure"));
+    assert_eq!(attribution.name, "gdpr-art-17");
+    assert_eq!(attribution.description.as_deref(), Some("right to erasure"));
 }
 
 #[tokio::test]
@@ -286,7 +288,7 @@ async fn plan_records_fallback_rule_with_no_attribution() {
 
     // A bare operator via the fallback rule: matched_by is Fallback, no attribution.
     Anonymizer::<Text>::new()
-        .with_fallback(Erase)
+        .with(Rule::fallback(Erase))
         .plan(&mut entities, &source)
         .await
         .unwrap();
@@ -310,16 +312,15 @@ async fn plan_records_fallback_rule_with_no_attribution() {
 }
 
 #[tokio::test]
-async fn because_accepts_a_bare_policy_id() {
+async fn because_accepts_a_bare_name() {
     use elide_core::entity::provenance::EventKind;
 
     let source = TextSource::new("a@b.com");
     let mut entities = vec![entity("EMAIL_ADDRESS", (0, 7))];
 
-    // `.because` takes `Into<Attribution>`: a bare &str is the policy id, no reason.
+    // `.because` takes `Into<Attribution>`: a bare &str is the name, no description.
     Anonymizer::<Text>::new()
-        .with_label(LabelRef::new("EMAIL_ADDRESS"), Replace::new("[X]"))
-        .because("pci-dss-3.4")
+        .with(Rule::label(LabelRef::new("EMAIL_ADDRESS"), Replace::new("[X]")).because("pci-dss-3.4"))
         .plan(&mut entities, &source)
         .await
         .unwrap();
@@ -333,6 +334,6 @@ async fn because_accepts_a_bare_policy_id() {
             _ => None,
         })
         .expect("attribution recorded");
-    assert_eq!(attribution.policy_id, "pci-dss-3.4");
-    assert!(attribution.reason.is_none());
+    assert_eq!(attribution.name, "pci-dss-3.4");
+    assert!(attribution.description.is_none());
 }

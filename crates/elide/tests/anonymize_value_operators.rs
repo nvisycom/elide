@@ -5,7 +5,7 @@
 //! real `Anonymizer::plan` path so the label→operator resolution and the
 //! `DataReader` slice are exercised, not just the operator in isolation.
 
-use elide::redaction::Anonymizer;
+use elide::redaction::{Anonymizer, Rule};
 use elide::redaction::operators::{
     Clamp, DateGranularity, GeneralizeDate, HmacHash, Keep, Truncate, WithFallback,
 };
@@ -45,7 +45,7 @@ async fn generalize_reduces_a_birthdate_to_the_year() {
     //                                  0123456789012345
     let source = TextSource::new("DOB: 1987-03-14");
     let anonymizer = Anonymizer::<Text>::new()
-        .with_label(LabelRef::new("date_of_birth"), GeneralizeDate::new(DateGranularity::Year));
+        .with(Rule::label(LabelRef::new("date_of_birth"), GeneralizeDate::new(DateGranularity::Year)));
 
     let out = plan_one(anonymizer, &source, entity("date_of_birth", (5, 15))).await;
     assert_eq!(out, TextReplacement::substituted("1987"));
@@ -55,7 +55,7 @@ async fn generalize_reduces_a_birthdate_to_the_year() {
 async fn generalize_erases_an_unparseable_value_by_default() {
     let source = TextSource::new("DOB: sometime");
     let anonymizer = Anonymizer::<Text>::new()
-        .with_label(LabelRef::new("date_of_birth"), GeneralizeDate::new(DateGranularity::Year));
+        .with(Rule::label(LabelRef::new("date_of_birth"), GeneralizeDate::new(DateGranularity::Year)));
 
     let out = plan_one(anonymizer, &source, entity("date_of_birth", (5, 13))).await;
     assert_eq!(out, TextReplacement::Removed, "unparseable date erases");
@@ -65,7 +65,7 @@ async fn generalize_erases_an_unparseable_value_by_default() {
 async fn clamp_caps_an_age_at_the_hipaa_ceiling() {
     let source = TextSource::new("age 94");
     let anonymizer = Anonymizer::<Text>::new()
-        .with_label(LabelRef::new("age"), Clamp::new().with_ceiling(90.0, "90 or older"));
+        .with(Rule::label(LabelRef::new("age"), Clamp::new().with_ceiling(90.0, "90 or older")));
 
     let out = plan_one(anonymizer, &source, entity("age", (4, 6))).await;
     assert_eq!(out, TextReplacement::substituted("90 or older"));
@@ -75,7 +75,7 @@ async fn clamp_caps_an_age_at_the_hipaa_ceiling() {
 async fn clamp_passes_an_in_range_age_through() {
     let source = TextSource::new("age 73");
     let anonymizer = Anonymizer::<Text>::new()
-        .with_label(LabelRef::new("age"), Clamp::new().with_ceiling(90.0, "90 or older"));
+        .with(Rule::label(LabelRef::new("age"), Clamp::new().with_ceiling(90.0, "90 or older")));
 
     let out = plan_one(anonymizer, &source, entity("age", (4, 6))).await;
     assert_eq!(out, TextReplacement::substituted("73"));
@@ -87,7 +87,7 @@ async fn truncate_shortens_a_pan_to_bin_plus_last_four() {
     //                            0123456789012345
     let source = TextSource::new("4111111111111234");
     let anonymizer = Anonymizer::<Text>::new()
-        .with_label(LabelRef::new("payment_card"), Truncate::new(6, 4));
+        .with(Rule::label(LabelRef::new("payment_card"), Truncate::new(6, 4)));
 
     let out = plan_one(anonymizer, &source, entity("payment_card", (0, 16))).await;
     // 16 chars in, 10 out: the middle six are physically gone, not masked.
@@ -100,13 +100,13 @@ async fn hmac_tokenizes_a_pan_deterministically() {
     let key = b"deployment-secret".to_vec();
 
     let a = plan_one(
-        Anonymizer::<Text>::new().with_label(LabelRef::new("payment_card"), HmacHash::sha256(key.clone())),
+        Anonymizer::<Text>::new().with(Rule::label(LabelRef::new("payment_card"), HmacHash::sha256(key.clone()))),
         &source,
         entity("payment_card", (0, 16)),
     )
     .await;
     let b = plan_one(
-        Anonymizer::<Text>::new().with_label(LabelRef::new("payment_card"), HmacHash::sha256(key)),
+        Anonymizer::<Text>::new().with(Rule::label(LabelRef::new("payment_card"), HmacHash::sha256(key))),
         &source,
         entity("payment_card", (0, 16)),
     )
@@ -127,13 +127,13 @@ async fn hmac_tokenizes_a_pan_deterministically() {
 async fn hmac_digest_changes_with_the_key() {
     let source = TextSource::new("4111111111111234");
     let a = plan_one(
-        Anonymizer::<Text>::new().with_label(LabelRef::new("payment_card"), HmacHash::sha256(b"key-a".to_vec())),
+        Anonymizer::<Text>::new().with(Rule::label(LabelRef::new("payment_card"), HmacHash::sha256(b"key-a".to_vec()))),
         &source,
         entity("payment_card", (0, 16)),
     )
     .await;
     let b = plan_one(
-        Anonymizer::<Text>::new().with_label(LabelRef::new("payment_card"), HmacHash::sha256(b"key-b".to_vec())),
+        Anonymizer::<Text>::new().with(Rule::label(LabelRef::new("payment_card"), HmacHash::sha256(b"key-b".to_vec()))),
         &source,
         entity("payment_card", (0, 16)),
     )
@@ -149,7 +149,7 @@ async fn clamp_renders_the_bucket_in_the_entity_language() {
     let bucket = LocalizedText::new("90 or older".to_owned())
         .with(LanguageTag::parse("fr").unwrap(), "90 ou plus".to_owned());
     let anonymizer = Anonymizer::<Text>::new()
-        .with_label(LabelRef::new("age"), Clamp::new().with_ceiling(90.0, bucket));
+        .with(Rule::label(LabelRef::new("age"), Clamp::new().with_ceiling(90.0, bucket)));
 
     let mut fr_entity = entity("age", (5, 7));
     fr_entity.language = Some(LanguageTag::parse("fr").unwrap());
@@ -162,10 +162,10 @@ async fn generalize_with_fallback_keeps_unparseable_intact() {
     // A custom fallback (Keep) runs when GeneralizeDate declines the value,
     // instead of the bare operator's safe default (erase).
     let source = TextSource::new("DOB: n/a");
-    let anonymizer = Anonymizer::<Text>::new().with_label(
+    let anonymizer = Anonymizer::<Text>::new().with(Rule::label(
         LabelRef::new("date_of_birth"),
         WithFallback::new(GeneralizeDate::new(DateGranularity::Year), Keep),
-    );
+    ));
 
     let out = plan_one(anonymizer, &source, entity("date_of_birth", (5, 8))).await;
     assert_eq!(out, TextReplacement::substituted("n/a"));

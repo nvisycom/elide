@@ -13,48 +13,57 @@
 //! [`Replacement`]: elide_core::modality::Modality::Replacement
 
 mod registry;
+mod rule;
 
 use std::sync::Arc;
 
 use elide_core::Result;
-use elide_core::entity::provenance::{Attribution, Event};
-use elide_core::entity::{Entity, LabelCatalog, LabelRef};
+use elide_core::entity::provenance::Event;
+use elide_core::entity::{Entity, LabelCatalog};
 use elide_core::modality::{DataReader, DataWriter, Modality, ModalityLocation};
 use elide_core::operator::{Operator, Redactions};
-use hipstr::HipStr;
 
-use self::registry::{Matcher, OperatorRegistry};
+pub use self::rule::Rule;
+use self::registry::OperatorRegistry;
+
+/// An operator stored in a [`Rule`], type-erased and shared.
+pub(crate) type SharedOperator<M> = Arc<dyn Operator<M>>;
+
+/// Boxed predicate over an entity, used by [`Matcher::Predicate`].
+///
+/// Receives the [`LabelCatalog`] (empty when none was set) so a predicate
+/// can ask catalog-level questions — a label's tags or metadata — the same
+/// way a [`Matcher::Tag`] resolves through it.
+pub(crate) type Predicate<M> = Box<dyn Fn(&Entity<M>, &LabelCatalog) -> bool + Send + Sync>;
 
 /// The hide engine: selects an operator per entity and computes its
 /// replacement.
 ///
-/// Generic over the [`Modality`] `M`. Selection is an *ordered list of
-/// rules*, tried top to bottom with the first match winning: bind an
-/// operator to an exact label with [`with_label`], to a label tag with
-/// [`with_tag`] (which needs a catalog, see [`with_catalog`]), to an
-/// arbitrary predicate with [`with_predicate`], or as a catch-all with
-/// [`with_fallback`]. [`anonymize`] resolves and runs the operators,
-/// applying the replacements back into the target.
+/// Generic over the [`Modality`] `M`. Selection is an *ordered list of*
+/// [`Rule`]s, tried top to bottom with the first match winning. Add each
+/// rule with [`with`](Self::with) (or several with [`with_multiple`]); a rule
+/// binds an operator to an exact label, a label tag (which needs a catalog,
+/// see [`with_catalog`]), an arbitrary predicate, or a catch-all fallback,
+/// and optionally carries a policy [`Attribution`]. [`anonymize`] resolves
+/// and runs the operators, applying the replacements back into the target.
 ///
 /// ```ignore
 /// Anonymizer::new()
 ///     .with_catalog(LabelCatalog::with_builtins())
 ///     // Order matters: a weak detection is kept as-is before any
 ///     // label or tag rule can fire.
-///     .with_predicate(|e| !ConfidenceThreshold::BASELINE.passes(e.confidence), Keep)
-///     .with_label(LabelRef::new("EMAIL_ADDRESS"), Replace::default())
-///     .with_tag("financial", Mask::stars())
-///     .with_fallback(Erase)
+///     .with(Rule::predicate(|e| !ConfidenceThreshold::BASELINE.passes(e.confidence), Keep))
+///     .with(Rule::label(LabelRef::new("EMAIL_ADDRESS"), Replace::default()))
+///     .with(Rule::tag("financial", Mask::stars()))
+///     .with(Rule::fallback(Erase))
 ///     .anonymize(&mut document, &entities)
 ///     .await?;
 /// ```
 ///
-/// [`with_label`]: Anonymizer::with_label
-/// [`with_tag`]: Anonymizer::with_tag
-/// [`with_predicate`]: Anonymizer::with_predicate
-/// [`with_fallback`]: Anonymizer::with_fallback
+/// [`with_multiple`]: Anonymizer::with_multiple
 /// [`with_catalog`]: Anonymizer::with_catalog
 /// [`anonymize`]: Anonymizer::anonymize
+/// [`Attribution`]: elide_core::entity::provenance::Attribution
 pub struct Anonymizer<M: Modality> {
     operators: OperatorRegistry<M>,
 }
@@ -67,107 +76,55 @@ impl<M: Modality> Anonymizer<M> {
         }
     }
 
-    /// Set the [`LabelCatalog`] that [`with_tag`] rules resolve label
+    /// Set the [`LabelCatalog`] that [tag rules](Rule::tag) resolve label
     /// names against. Without it, tag rules never match.
-    ///
-    /// [`with_tag`]: Self::with_tag
     #[must_use]
     pub fn with_catalog(mut self, catalog: LabelCatalog) -> Self {
         self.operators.set_catalog(catalog);
         self
     }
 
-    /// Append a rule binding `operator` to an exact label.
-    #[must_use]
-    pub fn with_label<O: Operator<M> + 'static>(mut self, label: LabelRef, operator: O) -> Self {
-        self.operators.push(Matcher::Label(label), operator);
-        self
-    }
-
-    /// Append a rule binding `operator` to every entity whose label
-    /// carries `tag`. Requires a catalog set via [`with_catalog`].
+    /// Append a selection [`Rule`] to the ordered list.
     ///
-    /// [`with_catalog`]: Self::with_catalog
-    #[must_use]
-    pub fn with_tag<O: Operator<M> + 'static>(
-        mut self,
-        tag: impl Into<HipStr<'static>>,
-        operator: O,
-    ) -> Self {
-        self.operators.push(Matcher::Tag(tag.into()), operator);
-        self
-    }
-
-    /// Append a rule binding `operator` to every entity the `predicate`
-    /// accepts. The predicate sees the entity's label, confidence,
-    /// location, and provenance.
-    ///
-    /// Use [`with_catalog_predicate`] when the predicate also needs the
-    /// [`LabelCatalog`] (to resolve the entity's label to its tags or
-    /// metadata).
-    ///
-    /// [`with_catalog_predicate`]: Self::with_catalog_predicate
-    #[must_use]
-    pub fn with_predicate<O, P>(mut self, predicate: P, operator: O) -> Self
-    where
-        O: Operator<M> + 'static,
-        P: Fn(&Entity<M>) -> bool + Send + Sync + 'static,
-    {
-        self.operators.push(
-            Matcher::Predicate(Box::new(move |e, _| predicate(e))),
-            operator,
-        );
-        self
-    }
-
-    /// Append a rule binding `operator` to every entity the `predicate`
-    /// accepts, where the predicate also receives the [`LabelCatalog`] —
-    /// empty when none was set — so it can resolve the entity's label to its
-    /// tags or metadata, the same source [`with_tag`] consults.
-    ///
-    /// The catalog-aware counterpart to [`with_predicate`].
-    ///
-    /// [`LabelCatalog`]: elide_core::entity::LabelCatalog
-    /// [`with_tag`]: Self::with_tag
-    /// [`with_predicate`]: Self::with_predicate
-    #[must_use]
-    pub fn with_catalog_predicate<O, P>(mut self, predicate: P, operator: O) -> Self
-    where
-        O: Operator<M> + 'static,
-        P: Fn(&Entity<M>, &LabelCatalog) -> bool + Send + Sync + 'static,
-    {
-        self.operators
-            .push(Matcher::Predicate(Box::new(predicate)), operator);
-        self
-    }
-
-    /// Append a catch-all rule: `operator` runs for every entity not
-    /// matched by an earlier rule. Equivalent to a predicate that always
-    /// accepts, so any rule after it is unreachable.
-    #[must_use]
-    pub fn with_fallback<O: Operator<M> + 'static>(mut self, operator: O) -> Self {
-        self.operators.push(Matcher::Always, operator);
-        self
-    }
-
-    /// Attribute the most-recently-added rule to a policy: the [`Attribution`]
-    /// (a bare policy id, or one built with a reason) is recorded on the
-    /// redaction provenance of every entity this rule redacts, the *why*
-    /// alongside the matched rule.
-    ///
-    /// Chains onto a rule builder; a no-op if no rule has been added yet:
+    /// Rules are tried top to bottom, first match wins. Build a rule with
+    /// one of the [`Rule`] constructors and optionally attribute it with
+    /// [`Rule::because`]:
     ///
     /// ```ignore
     /// Anonymizer::new()
-    ///     .with_label(EMAIL, Replace::default()).because("gdpr-art-17")
-    ///     .with_tag("financial", Mask::stars())
-    ///         .because(Attribution::new("pci-dss-3.4").with_reason("PAN masking"));
+    ///     .with(Rule::label(EMAIL, Replace::default()).because("gdpr-art-17"))
+    ///     .with(Rule::tag("financial", Mask::stars()))
+    ///     .with(Rule::fallback(Erase));
+    /// ```
+    #[must_use]
+    pub fn with(mut self, rule: Rule<M>) -> Self {
+        self.operators.push(rule);
+        self
+    }
+
+    /// Append several [`Rule`]s in order — the batch counterpart to
+    /// [`with`](Self::with).
+    ///
+    /// Handy when a policy layer holds a `Vec<Rule<M>>`, or for a single
+    /// logical rule that fans out across labels under one shared
+    /// [`Attribution`]: build each entry with the same `.because(attr)` (a
+    /// cheap clone) and add them together. Every entity a rule redacts
+    /// records that rule's attribution, so the shared attribution is what a
+    /// reviewer traces back to "which rule fired".
+    ///
+    /// ```ignore
+    /// let attr = Attribution::new("hipaa-safe-harbor");
+    /// Anonymizer::new().with_multiple([
+    ///     Rule::label(DATE_OF_BIRTH, GeneralizeDate::new(Year)).because(attr.clone()),
+    ///     Rule::label(AGE, Clamp::new().with_ceiling(90.0, "90 or older")).because(attr.clone()),
+    ///     Rule::label(PERSON_NAME, Erase).because(attr),
+    /// ]);
     /// ```
     ///
     /// [`Attribution`]: elide_core::entity::provenance::Attribution
     #[must_use]
-    pub fn because(mut self, attribution: impl Into<Attribution>) -> Self {
-        self.operators.set_last_attribution(attribution.into());
+    pub fn with_multiple(mut self, rules: impl IntoIterator<Item = Rule<M>>) -> Self {
+        self.operators.extend(rules);
         self
     }
 
@@ -345,6 +302,7 @@ fn cluster_overlaps<M: Modality>(entities: &[Entity<M>]) -> Vec<Vec<usize>> {
 
 #[cfg(test)]
 mod tests {
+    use elide_core::entity::LabelRef;
     use elide_core::entity::provenance::{Event, EventKind, PatternEvent, Provenance};
     use elide_core::modality::text::{Text, TextData, TextLocation};
     use elide_core::primitive::Confidence;
@@ -380,7 +338,7 @@ mod tests {
         let reader = StrReader("alice and bob".to_owned());
         let mut entities = vec![entity("NAME", 0, 5), entity("NAME", 10, 13)];
         let plan = Anonymizer::new()
-            .with_fallback(Replace::default())
+            .with(Rule::fallback(Replace::default()))
             .plan(&mut entities, &reader)
             .await
             .unwrap();
@@ -396,8 +354,8 @@ mod tests {
         // NAME [0,5) → Replace (Partial); SSN [3,12) → Erase (Irrecoverable).
         let mut entities = vec![entity("NAME", 0, 5), entity("SSN", 3, 12)];
         let plan = Anonymizer::new()
-            .with_label(LabelRef::new("NAME"), Replace::default())
-            .with_label(LabelRef::new("SSN"), Erase)
+            .with(Rule::label(LabelRef::new("NAME"), Replace::default()))
+            .with(Rule::label(LabelRef::new("SSN"), Erase))
             .plan(&mut entities, &reader)
             .await
             .unwrap();
@@ -424,7 +382,7 @@ mod tests {
         let reader = StrReader("0123456789abcdef".to_owned());
         let mut entities = vec![entity("A", 0, 5), entity("B", 4, 9), entity("C", 8, 13)];
         let plan = Anonymizer::new()
-            .with_fallback(Erase)
+            .with(Rule::fallback(Erase))
             .plan(&mut entities, &reader)
             .await
             .unwrap();
@@ -448,7 +406,7 @@ mod tests {
         let mut entities = vec![a, b];
 
         let plan = Anonymizer::new()
-            .with_fallback(Erase)
+            .with(Rule::fallback(Erase))
             .plan(&mut entities, &reader)
             .await
             .unwrap();
@@ -482,8 +440,8 @@ mod tests {
 
         let mut entities = vec![entity("NAME", 0, 5), entity("SECRET", 6, 9)];
         let plan = Anonymizer::new()
-            .with_label(LabelRef::new("NAME"), boxed)
-            .with_label(LabelRef::new("SECRET"), arced)
+            .with(Rule::label(LabelRef::new("NAME"), boxed))
+            .with(Rule::label(LabelRef::new("SECRET"), arced))
             .plan(&mut entities, &reader)
             .await
             .unwrap();

@@ -3,7 +3,7 @@
 #![cfg(feature = "aes")]
 
 use elide::redaction::operators::AesEncrypt;
-use elide::redaction::{Anonymizer, Deanonymizer};
+use elide::redaction::{Anonymizer, Deanonymizer, Rule};
 use elide_core::Result;
 use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
 use elide_core::entity::{Entity, LabelRef};
@@ -66,7 +66,7 @@ async fn encrypt_then_decrypt_recovers_the_original_document() {
 
     // AesEncrypt under the label.
     Anonymizer::<Text>::new()
-        .with_label(LabelRef::new("EMAIL_ADDRESS"), AesEncrypt::with_key(key.to_vec()))
+        .with(Rule::label(LabelRef::new("EMAIL_ADDRESS"), AesEncrypt::with_key(key.to_vec())))
         .anonymize(&mut doc, std::slice::from_mut(&mut email))
         .await
         .unwrap();
@@ -96,7 +96,7 @@ async fn wrong_key_leaves_the_ciphertext_in_place() {
     let mut secret = entity("TOKEN", 2, 8);
 
     Anonymizer::<Text>::new()
-        .with_label(LabelRef::new("TOKEN"), AesEncrypt::with_key([1u8; 32].to_vec()))
+        .with(Rule::label(LabelRef::new("TOKEN"), AesEncrypt::with_key([1u8; 32].to_vec())))
         .anonymize(&mut doc, std::slice::from_mut(&mut secret))
         .await
         .unwrap();
