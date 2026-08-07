@@ -25,11 +25,14 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 default = []
 
-## Derive `serde::{Serialize, Deserialize}` on the re-exported core types.
-serde = ["elide-core/serde"]
+## Derive `serde::{Serialize, Deserialize}` on the re-exported core types and
+## the operator config value enums (`Sha2Algorithm`, `DateGranularity`,
+## `DateStyle`), so a policy layer can serialize operator configuration.
+serde = ["dep:serde", "elide-core/serde"]
 
-## Derive `schemars::JsonSchema` on the re-exported core types.
-schema = ["elide-core/schema"]
+## Derive `schemars::JsonSchema` on the re-exported core types and the
+## operator config value enums, for emitting a JSON Schema of that config.
+schema = ["dep:schemars", "serde", "elide-core/schema"]
 
 ## The `audio` modality operators (`Silence`, `Beep`).
 audio = ["elide-core/audio"]
@@ -56,6 +59,10 @@ elide-fake = { workspace = true, features = [], optional = true }
 
 # Async
 async-trait = { workspace = true, features = [] }
+
+# (De)serialization
+serde = { workspace = true, features = ["derive"], optional = true }
+schemars = { workspace = true, features = [], optional = true }
 
 # Primitive datatypes
 bytes = { workspace = true, features = [] }
