@@ -50,9 +50,6 @@ jobs:
       - name: Cache cargo registry and build
         uses: Swatinem/rust-cache@v2
 
-      - name: Install C toolchain (libmp3lame for the mp3 codec)
-        run: make install-deps
-
       - name: Cargo check
         run: cargo check --workspace
 
@@ -76,9 +73,6 @@ jobs:
       - name: Cache cargo registry and build
         uses: Swatinem/rust-cache@v2
 
-      - name: Install C toolchain (libmp3lame for the mp3 codec)
-        run: make install-deps
-
       - name: Clippy
         run: cargo clippy --workspace -- -D warnings
 
@@ -99,9 +93,6 @@ jobs:
 
       - name: Cache cargo registry and build
         uses: Swatinem/rust-cache@v2
-
-      - name: Install C toolchain (libmp3lame for the mp3 codec)
-        run: make install-deps
 
       # Build docs the way docs.rs publishes them: all features + `docsrs`.
       # `+nightly` overrides the stable pin in rust-toolchain.toml — the
@@ -127,9 +118,6 @@ jobs:
 
       - name: Cache cargo registry and build
         uses: Swatinem/rust-cache@v2
-
-      - name: Install C toolchain (libmp3lame for the mp3 codec)
-        run: make install-deps
 
       - name: Run tests
         run: cargo test --workspace
