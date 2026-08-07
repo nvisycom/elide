@@ -144,3 +144,31 @@ impl<M: Modality> Default for Deanonymizer<M> {
         Self::new()
     }
 }
+
+#[cfg(all(test, feature = "aes"))]
+mod tests {
+    use std::sync::Arc;
+
+    use elide_core::entity::LabelRef;
+    use elide_core::modality::text::Text;
+    use elide_core::operator::ReversibleOperator;
+
+    use crate::Deanonymizer;
+    use crate::operators::AesEncrypt;
+
+    /// A dynamically built reversible trait object flows into the builder:
+    /// `ReversibleOperator` is implemented for `Box<dyn ReversibleOperator>`
+    /// and `Arc<dyn ReversibleOperator>`, so neither needs unwrapping. That
+    /// this compiles is the assertion.
+    #[test]
+    fn boxed_and_arced_reversible_trait_objects_satisfy_the_builder() {
+        let boxed: Box<dyn ReversibleOperator<Text>> =
+            Box::new(AesEncrypt::with_key([0u8; 32].to_vec()));
+        let arced: Arc<dyn ReversibleOperator<Text>> =
+            Arc::new(AesEncrypt::with_key([1u8; 32].to_vec()));
+
+        let _ = Deanonymizer::<Text>::new()
+            .with_label(LabelRef::new("EMAIL_ADDRESS"), boxed)
+            .with_fallback(arced);
+    }
+}

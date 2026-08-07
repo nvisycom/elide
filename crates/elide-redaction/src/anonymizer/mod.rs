@@ -466,4 +466,28 @@ mod tests {
             );
         }
     }
+
+    /// A trait object built dynamically (as a policy layer would from
+    /// config) flows straight into the builder: `Operator` is implemented
+    /// for `Box<dyn Operator>` and `Arc<dyn Operator>`, so neither needs
+    /// unwrapping to a concrete type first.
+    #[tokio::test]
+    async fn boxed_and_arced_trait_objects_are_operators() {
+        use std::sync::Arc;
+
+        let reader = StrReader("alice bob".to_owned());
+
+        let boxed: Box<dyn Operator<Text>> = Box::new(Replace::default());
+        let arced: Arc<dyn Operator<Text>> = Arc::new(Erase);
+
+        let mut entities = vec![entity("NAME", 0, 5), entity("SECRET", 6, 9)];
+        let plan = Anonymizer::new()
+            .with_label(LabelRef::new("NAME"), boxed)
+            .with_label(LabelRef::new("SECRET"), arced)
+            .plan(&mut entities, &reader)
+            .await
+            .unwrap();
+
+        assert_eq!(plan.len(), 2, "both trait-object operators ran");
+    }
 }
