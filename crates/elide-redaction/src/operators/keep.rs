@@ -19,7 +19,7 @@ use elide_core::operator::{LeakProfile, Operator, OperatorId};
 /// shows up in the audit trail.
 ///
 /// Works across modalities — a text/tabular span stays verbatim, an image
-/// region or audio range is left untouched. Like the other operators, `Keep`
+/// region or audio range is left untouched. Like the other operators, [`Keep`]
 /// is implemented per modality, so the one type serves every modality.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Keep;

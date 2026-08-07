@@ -16,7 +16,7 @@ use elide_core::operator::{LeakProfile, Operator, OperatorId};
 ///
 /// The strongest treatment: no trace of the value, its shape, or its extent
 /// remains — text drops the characters, audio cuts the interval, an image
-/// clears the region. One `Erase` serves every medium, with a per-modality
+/// clears the region. One [`Erase`] serves every medium, with a per-modality
 /// [`Operator`] impl that maps to that modality's "removed" replacement.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Erase;

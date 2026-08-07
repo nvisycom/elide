@@ -39,7 +39,7 @@ impl Replace {
         OperatorId::new("replace", "1.0.0")
     }
 
-    /// A `Replace` with the given template (see the type docs for
+    /// A [`Replace`] with the given template (see the type docs for
     /// placeholder syntax).
     pub fn new(template: impl Into<String>) -> Self {
         Self {

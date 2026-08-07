@@ -15,8 +15,8 @@ use crate::recognition::Artifacts;
 /// **not** constrain the [`Replacement`] type, so a modality that recognizes
 /// over text but redacts in its own medium qualifies.
 ///
-/// `Text` and `Tabular` project their payload identically (their payload
-/// *is* `TextData`). A medium whose recognizable text is not its payload —
+/// [`Text`] and `Tabular` project their payload identically (their payload
+/// *is* [`TextData`]). A medium whose recognizable text is not its payload —
 /// audio, whose transcript an enricher stamps onto the call's [`Artifacts`] —
 /// reads it from there instead. Both methods receive the chunk `data` *and*
 /// the [`Artifacts`] so each modality draws from wherever its text and
@@ -26,6 +26,8 @@ use crate::recognition::Artifacts;
 /// [`locate`]: TextRecognizable::locate
 /// [`Replacement`]: Modality::Replacement
 /// [`Artifacts`]: crate::recognition::Artifacts
+/// [`Text`]: crate::modality::text::Text
+/// [`TextData`]: crate::modality::text::TextData
 pub trait TextRecognizable: Modality + Sized {
     /// View the recognizable text a recognizer inspects.
     ///

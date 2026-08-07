@@ -4,7 +4,7 @@
 //! [`NerRequest::labels`] = `Some(...)`) and fixed-label backends
 //! (labels baked into the model, `labels = None`). Backends emit
 //! canonical [`NerSpan`]s. Wrap a backend with a [`decorator`] to scale or
-//! drop selected labels. The `mock`-gated `MockBackend` (returns no spans;
+//! drop selected labels. The `mock`-gated [`MockBackend`] (returns no spans;
 //! test/example stub) ships here; concrete inference backends live
 //! downstream.
 //!

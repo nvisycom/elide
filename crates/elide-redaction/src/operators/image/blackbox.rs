@@ -9,7 +9,7 @@ use elide_core::primitive::Color;
 /// Cover the matched image region with a solid color (black by default).
 ///
 /// The legal-redaction look: a visible "something was here" box. Distinct
-/// from [`Erase`], which removes the region structurally — `Blackbox`
+/// from [`Erase`], which removes the region structurally — [`Blackbox`]
 /// keeps it present but opaque. Contrast [`Blur`] / [`Pixelate`], which
 /// leave the region's content partly perceptible.
 ///

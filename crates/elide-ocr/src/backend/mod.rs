@@ -6,7 +6,7 @@
 //! turns a request (image bytes + optional hints) into a response of
 //! recognized [`LayoutBlock`]s — the core OCR type, so a backend's output
 //! drops straight onto the call's artifacts with no remapping. The
-//! `mock`-gated `MockBackend` (returns no blocks; test/example stub) ships
+//! `mock`-gated [`MockBackend`] (returns no blocks; test/example stub) ships
 //! here; concrete engine backends live downstream.
 //!
 //! [`LayoutBlock`]: elide_core::modality::image::LayoutBlock

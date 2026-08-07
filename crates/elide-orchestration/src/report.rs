@@ -318,7 +318,7 @@ impl Report {
     }
 
     /// The [`PartId`]s of the container parts the report carries, paired
-    /// with each part's modality `TypeId` — for a caller enumerating what's
+    /// with each part's modality [`TypeId`] — for a caller enumerating what's
     /// editable.
     pub fn part_ids(&self) -> impl Iterator<Item = (&PartId, TypeId)> {
         self.parts.iter().map(|(id, p)| (id, p.modality))

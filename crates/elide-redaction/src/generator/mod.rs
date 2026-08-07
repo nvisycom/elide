@@ -17,7 +17,7 @@ pub use self::random::RandomToken;
 /// A generator need not be deterministic: a caller that needs the same
 /// entity to render consistently across mentions layers a vault over the
 /// generator, so per-cluster consistency comes from there, not from
-/// `generate`. The `seed` is the cluster identity to derive from when
+/// [`generate`](Self::generate). The `seed` is the cluster identity to derive from when
 /// wanted (a coreference id, or the original value), and ignorable
 /// otherwise.
 ///

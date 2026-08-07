@@ -9,7 +9,7 @@ use elide_core::operator::{LeakProfile, Operator, OperatorId};
 /// Drop the entire row a matched entity sits in.
 ///
 /// A structural treatment, not a cell edit: where [`Erase`] blanks one
-/// cell's text, `DropRow` removes the whole record. Useful for "this row
+/// cell's text, [`DropRow`] removes the whole record. Useful for "this row
 /// names a sanctioned individual — drop it entirely". Any match in a row
 /// drops that row, so the table shrinks by one record per matched row.
 ///

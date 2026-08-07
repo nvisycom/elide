@@ -15,7 +15,7 @@ use crate::recognition::annotation::{Exclusion, Inclusion};
 /// `M::Location`-typed (a text byte range, an image bounding box, an audio
 /// time span), so unlike the [`Scope`] policy they can't be shared across
 /// modalities — they attach to the analyzer of *their* modality. An empty
-/// `Annotations` (the default) asserts no regions, the common case.
+/// [`Annotations`] (the default) asserts no regions, the common case.
 ///
 /// [`Scope`]: super::super::Scope
 // `Default` and `Clone` are manual (not derived): `derive` would add spurious

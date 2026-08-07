@@ -11,9 +11,9 @@ use super::Dimensions;
 /// within an image.
 ///
 /// The integer counterpart to [`BoundingBox`], which
-/// holds floating-point corners. Where a `BoundingBox` is a recognizer's
+/// holds floating-point corners. Where a [`BoundingBox`] is a recognizer's
 /// or caller's possibly-fractional, possibly-out-of-bounds claim, a
-/// `PixelRegion` is the concrete set of pixels a codec actually reads or
+/// [`PixelRegion`] is the concrete set of pixels a codec actually reads or
 /// paints: every field is a valid index, and `x + width <= image width`
 /// (likewise for height). Produced by [`BoundingBox::to_pixels`].
 ///
