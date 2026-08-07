@@ -94,9 +94,7 @@ jobs:
       - name: Cache cargo registry and build
         uses: Swatinem/rust-cache@v2
 
-      # Build docs the way docs.rs publishes them: all features + `docsrs`.
-      # `+nightly` overrides the stable pin in rust-toolchain.toml — the
-      # `docsrs` cfg enables `feature(doc_cfg)`, which is nightly-only.
+      # Build docs the way docs.rs publishes them: all features and docsrs +nightly
       - name: Cargo doc
         run: cargo +nightly doc --workspace --no-deps --all-features
         env:
