@@ -107,10 +107,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # Nightly: the `docsrs` cfg enables `feature(doc_cfg)`.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
+        uses: dtolnay/rust-toolchain@nightly
 
       - name: Cache cargo registry and build
         uses: actions/cache@v6
@@ -125,15 +124,13 @@ jobs:
       - name: Install C toolchain (libmp3lame for the mp3 codec)
         run: make install-deps
 
+      # Build docs the way docs.rs publishes them: all features + `docsrs`.
+      # `+nightly` overrides the stable pin in rust-toolchain.toml — the
+      # `docsrs` cfg enables `feature(doc_cfg)`, which is nightly-only.
       - name: Cargo doc
-        run: cargo doc --workspace --no-deps
+        run: cargo +nightly doc --workspace --no-deps --all-features
         env:
-          RUSTDOCFLAGS: "-D warnings"
-
-      - name: Cargo doc (all features)
-        run: cargo doc --workspace --no-deps --all-features
-        env:
-          RUSTDOCFLAGS: "-D warnings"
+          RUSTDOCFLAGS: "--cfg docsrs -D warnings"
 
   test:
     name: Test
