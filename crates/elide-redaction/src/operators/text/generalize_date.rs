@@ -60,7 +60,7 @@ pub enum DateStyle {
 /// keeps the input value's own convention (dashes for ISO, slashes for US),
 /// so the redacted value still reads naturally in its source document.
 ///
-/// `GeneralizeDate` only reasons about dates, so it is a [`TryOperator`]: a
+/// [`GeneralizeDate`] only reasons about dates, so it is a [`TryOperator`]: a
 /// value that doesn't parse as a date, or has too little precision for the
 /// target granularity (a bare date asked to reduce to
 /// [`Hour`](DateGranularity::Hour)), is *declined*. Used directly as an

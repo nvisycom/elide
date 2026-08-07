@@ -15,7 +15,7 @@ use crate::entity::{LabelCatalog, LabelRef};
 ///
 /// A model may emit labels in its own vocabulary (`"PER"`, `"LOC"`,
 /// `"B-ORG"`) rather than the canonical taxonomy the rest of the toolkit
-/// speaks (`"person_name"`, `"location"`, `"organization"`). A `LabelMap`
+/// speaks (`"person_name"`, `"location"`, `"organization"`). A [`LabelMap`]
 /// maps each raw string to its canonical [`LabelRef`].
 ///
 /// It is a utility for the *boundary* that adapts such a model — a NER

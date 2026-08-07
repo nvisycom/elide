@@ -47,7 +47,7 @@ pub fn format() -> Format {
 }
 
 /// The OOXML media directory whose entries are embedded binary parts
-/// (images). The `Container` impl exposes these for out-of-band redaction.
+/// (images). The [`Container`] impl exposes these for out-of-band redaction.
 pub(super) const MEDIA_PREFIX: &str = "word/media/";
 
 /// Re-packs a DOCX: splice the redacted body items back into the body XML,

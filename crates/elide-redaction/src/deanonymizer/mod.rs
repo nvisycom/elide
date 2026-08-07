@@ -4,13 +4,14 @@
 //! [`ReversibleOperator`] (e.g. [`AesEncrypt`]), reads the replacement text the
 //! document holds, recovers the original, and writes it back. Supported for
 //! modalities whose data and recoverable replacement are both text ([`Text`]
-//! and `Tabular`), where the stored value can be lifted back to a
+//! and [`Tabular`]), where the stored value can be lifted back to a
 //! [`TextReplacement`] for the operator to reverse.
 //!
 //! [`Anonymizer`]: crate::Anonymizer
 //! [`ReversibleOperator`]: elide_core::operator::ReversibleOperator
 //! [`AesEncrypt`]: crate::operators::AesEncrypt
 //! [`Text`]: elide_core::modality::text::Text
+//! [`Tabular`]: elide_core::modality::tabular::Tabular
 //! [`TextReplacement`]: elide_core::modality::text::TextReplacement
 
 mod registry;
@@ -72,9 +73,10 @@ impl<M: Modality> Deanonymizer<M> {
 
 /// Recovery for a text-backed modality: the stored replacement is text, so
 /// it lifts to a [`TextReplacement`] (and into `M::Replacement`) the operator
-/// can reverse. Implemented for [`Text`] and `Tabular`.
+/// can reverse. Implemented for [`Text`] and [`Tabular`].
 ///
 /// [`Text`]: elide_core::modality::text::Text
+/// [`Tabular`]: elide_core::modality::tabular::Tabular
 impl<M> Deanonymizer<M>
 where
     M: TextRecognizable<Data = TextData>,

@@ -88,7 +88,7 @@ fn format_threshold(n: f64) -> String {
 /// renders `"90+"`, and `with_ceiling_fmt(90.0, "{n} or older")` renders
 /// `"90 or older"`. A derived label is the same in every language.
 ///
-/// `Clamp` only reasons about numbers, so it is a [`TryOperator`]: a value
+/// [`Clamp`] only reasons about numbers, so it is a [`TryOperator`]: a value
 /// that doesn't parse as one is *declined*, not erased-by-fiat. Used
 /// directly as an [`Operator`] it erases a declined value (the safe
 /// default); wrap it in [`WithFallback`] to choose a different treatment.

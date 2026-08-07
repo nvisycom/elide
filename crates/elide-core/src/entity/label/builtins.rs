@@ -18,7 +18,7 @@
 //!
 //! The `BUILT_INS` slice indexes every constant for the
 //! [`LabelCatalog::with_builtins`] constructor; the constants themselves
-//! are public (e.g. `builtins::PERSON_NAME`).
+//! are public (e.g. [`PERSON_NAME`]).
 //!
 //! [`LabelCatalog::with_builtins`]: super::LabelCatalog::with_builtins
 

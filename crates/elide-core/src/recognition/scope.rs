@@ -16,7 +16,7 @@ use crate::primitive::{CountryCode, Language, Languages};
 /// analyzer, which borrows it into a fresh [`RecognizerContext`] per
 /// payload. It holds only what the *caller* asserts about the analysis as a
 /// whole — languages, jurisdictions, document labels, the target catalog, a
-/// correlation id — none of which depends on the medium, so one `Scope`
+/// correlation id — none of which depends on the medium, so one [`Scope`]
 /// drives a text, image, or audio analysis alike.
 ///
 /// Per-medium regions (caller-supplied inclusions and exclusions, which are

@@ -17,7 +17,7 @@ use crate::vault::Vault;
 /// Replace an entity with a consistent generated surrogate.
 ///
 /// The pseudonymizing operator: where [`Replace`] writes a fixed marker
-/// and `Sha2Hash` a digest, `Pseudonymize` substitutes a per-entity
+/// and [`Sha2Hash`] a digest, [`Pseudonymize`] substitutes a per-entity
 /// surrogate from a [`Generator`] and — crucially — replays the *same*
 /// surrogate every time that entity recurs. That consistency is what
 /// preserves a document's referential structure: "Alice told Bob, then
@@ -53,6 +53,7 @@ use crate::vault::Vault;
 /// [`get_or_try_insert_with`]: crate::vault::Vault::get_or_try_insert_with
 /// [coreference]: elide_core::entity::EntityCoRef
 /// [`Replace`]: crate::operators::Replace
+/// [`Sha2Hash`]: crate::operators::Sha2Hash
 #[derive(Debug, Clone)]
 pub struct Pseudonymize<V, G> {
     vault: V,

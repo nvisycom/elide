@@ -12,11 +12,13 @@
 //!
 //! Modality-specific recognition artifacts live with their modality:
 //! [`Transcription`] under
-//! `modality::audio`, [`Layout`] under
-//! `modality::image`.
+//! [`modality::audio`], [`Layout`] under
+//! [`modality::image`].
 //!
 //! [`Transcription`]: crate::modality::audio::Transcription
 //! [`Layout`]: crate::modality::image::Layout
+//! [`modality::audio`]: crate::modality::audio
+//! [`modality::image`]: crate::modality::image
 
 mod confidence;
 mod geometry;

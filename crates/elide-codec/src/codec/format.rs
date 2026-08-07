@@ -3,7 +3,7 @@
 //! - [`FormatId`]: stable string identifier (e.g. `"elide.text.txt"`).
 //!   Open namespace, no central enum.
 //! - [`Format`]: descriptor the [`FormatRegistry`] indexes by id /
-//!   extension / content type. Bundles a `FormatId`, the modality name
+//!   extension / content type. Bundles a [`FormatId`], the modality name
 //!   it produces, lookup keys, and an erased loader that decodes bytes
 //!   into a typed handle.
 //!
@@ -63,7 +63,7 @@ impl AsRef<str> for FormatId {
 ///
 /// Construct via [`Format::new`]; read the parts via the accessor
 /// methods. The fields are crate-private so the constructor stays the
-/// only path that produces a `Format`: that way the modality name is
+/// only path that produces a [`Format`]: that way the modality name is
 /// always derived from the loader's modality and never hand-set, and
 /// the loader is erased internally.
 ///

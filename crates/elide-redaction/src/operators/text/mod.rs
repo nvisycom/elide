@@ -2,11 +2,13 @@
 //!
 //! Each operates on the text slice under an entity. The value-editing
 //! operators ([`Mask`], [`Replace`], [`Truncate`], [`Clamp`],
-//! `GeneralizeDate`, `Sha2Hash`, `HmacHash`, [`AesEncrypt`],
-//! [`Pseudonymize`]) also implement `Operator<Tabular>` — a table cell is
+//! [`GeneralizeDate`], [`Sha2Hash`], [`HmacHash`], [`AesEncrypt`],
+//! [`Pseudonymize`]) also implement [`Operator`]`<Tabular>` — a table cell is
 //! text, so the same logic serves both, with a thin cell adapter. The
 //! shipped operators are re-exported from [`operators`](super), the public
 //! surface; this module is an internal grouping.
+//!
+//! [`Operator`]: elide_core::operator::Operator
 
 mod clamp;
 #[cfg(feature = "aes")]

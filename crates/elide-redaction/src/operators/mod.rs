@@ -4,13 +4,13 @@
 //! [`DataReader`] produced) and returns a modality [`Replacement`].
 //!
 //! Text and tabular: [`Mask`], [`Replace`], [`Truncate`] (physically drop
-//! the middle of a value, distinct from `Mask`), and [`Pseudonymize`] (a
+//! the middle of a value, distinct from [`Mask`]), and [`Pseudonymize`] (a
 //! consistent synthetic value per entity, drawn from a [`Generator`] and
 //! kept stable across mentions through a [`Vault`], so coreferent mentions
 //! all read the same surrogate).
 //!
 //! Value reduction: [`Clamp`] collapses out-of-range numbers into a
-//! (localized) bucket label; `GeneralizeDate` (feature `datetime`) reduces
+//! (localized) bucket label; [`GeneralizeDate`] (feature `datetime`) reduces
 //! a date/timestamp to a coarser ISO-8601 granularity. Both only apply to
 //! values of their shape, so both are a [`TryOperator`] — a value they
 //! can't parse is *declined* rather than erased by fiat. [`WithFallback`]
@@ -18,19 +18,19 @@
 //! declines, so a caller composes their own treatment for the leftover
 //! values.
 //!
-//! Hashing (feature `sha2`): `Sha2Hash` replaces the value with a one-way
-//! SHA-2 digest. Keyed hashing (feature `hmac`): `HmacHash` replaces it
+//! Hashing (feature `sha2`): [`Sha2Hash`] replaces the value with a one-way
+//! SHA-2 digest. Keyed hashing (feature `hmac`): [`HmacHash`] replaces it
 //! with a keyed HMAC-SHA-2 digest, whose key stays secret. Both pick a
 //! width from the shared [`Sha2Algorithm`].
 //!
-//! Tabular (feature `tabular`): `DropRow`, `DropColumn` — structural drops
+//! Tabular (feature `tabular`): [`DropRow`], [`DropColumn`] — structural drops
 //! that remove a whole record or field rather than editing a cell.
 //!
-//! Image (feature `image`): `Blur`, `Pixelate`, `Blackbox`.
+//! Image (feature `image`): [`Blur`], [`Pixelate`], [`Blackbox`].
 //!
-//! Audio (feature `audio`): `Silence`, `Beep`.
+//! Audio (feature `audio`): [`Silence`], [`Beep`].
 //!
-//! Reversible (feature `aes`): `AesEncrypt` (AES-256-GCM) replaces the
+//! Reversible (feature `aes`): [`AesEncrypt`] (AES-256-GCM) replaces the
 //! value with a ciphertext recoverable given the key.
 //!
 //! Cross-modality: [`Erase`] removes the entity in any modality, and

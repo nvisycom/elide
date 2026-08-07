@@ -14,7 +14,7 @@ use elide_core::{Error, ErrorKind, Result};
 /// of characters and discarding the middle.
 ///
 /// Unlike [`Mask`], which overwrites the middle with a mask character and
-/// keeps the original length, `Truncate` *shortens* the string: the
+/// keeps the original length, [`Truncate`] *shortens* the string: the
 /// dropped characters leave no placeholder. This is the shape PCI DSS
 /// v4.0.1 §3.5.1 requires for a stored PAN rendered unreadable by
 /// truncation — `"411111"` (BIN only), not `"4111********1234"`.

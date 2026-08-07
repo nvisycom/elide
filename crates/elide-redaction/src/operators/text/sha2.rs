@@ -1,4 +1,4 @@
-//! The `Sha2Hash` operator: replace the matched value with a one-way
+//! The [`Sha2Hash`] operator: replace the matched value with a one-way
 //! SHA-2 hash.
 
 use bytes::Bytes;
