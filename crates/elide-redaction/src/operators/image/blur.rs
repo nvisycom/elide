@@ -4,6 +4,8 @@ use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::image::{Image, ImageData, ImageReplacement};
 use elide_core::operator::{LeakProfile, Operator, OperatorId};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 /// Gaussian-blur the matched image region.
 ///
@@ -14,6 +16,8 @@ use elide_core::operator::{LeakProfile, Operator, OperatorId};
 ///
 /// [`Blackbox`]: crate::operators::Blackbox
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Blur {
     /// Standard deviation of the Gaussian kernel, in pixels. Larger is
     /// blurrier (and harder to reverse).

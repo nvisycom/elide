@@ -17,8 +17,6 @@ mod catalog;
 mod reference;
 
 use hipstr::HipStr;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -39,7 +37,7 @@ use crate::primitive::{LanguageTag, LocalizedText};
 /// it `None` when the name alone is clear.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct LabelLocale {
     /// Short natural-language display name (e.g. `"phone number"`). What a
     /// zero-shot NER model matches on and an LLM prompt surfaces.
@@ -104,7 +102,7 @@ impl LabelLocale {
 /// [`tags`]: Label::tags
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Label {
     #[cfg_attr(feature = "schema", schemars(with = "String"))]
     id: HipStr<'static>,

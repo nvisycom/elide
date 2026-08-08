@@ -8,6 +8,8 @@ use elide_core::entity::Entity;
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::operator::{LeakProfile, Operator, OperatorId};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use elide_core::{Error, ErrorKind, Result};
 
 /// Physically truncate the value, keeping a leading and/or trailing run
@@ -27,6 +29,8 @@ use elide_core::{Error, ErrorKind, Result};
 ///
 /// [`Mask`]: crate::operators::Mask
 #[derive(Debug, Clone, Copy, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Truncate {
     keep_prefix: usize,
     keep_suffix: usize,

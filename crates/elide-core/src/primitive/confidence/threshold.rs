@@ -2,8 +2,6 @@
 
 use std::fmt;
 
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -19,7 +17,7 @@ use super::Confidence;
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(try_from = "f32", into = "f32"))]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(with = "f32"))]
 pub struct ConfidenceThreshold(f32);
 

@@ -1,8 +1,6 @@
 //! [`TextData`]: the text payload a recognizer inspects.
 
 use hipstr::HipStr;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -19,7 +17,7 @@ use crate::modality::ModalityData;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(transparent))]
 pub struct TextData {
     /// Text content.

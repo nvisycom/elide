@@ -16,10 +16,10 @@ use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::recognition::Scope;
 use elide_core::recognition::annotation::Annotations;
 use elide_detection::Analyzer;
-use elide_redaction::Anonymizer;
+use elide_redaction::{Anonymizer, Selection};
 
 use super::directives::AnnotationSet;
-use super::report::EntityGroup;
+use super::report::{EntityGroup, SelectionGroup};
 
 /// The concrete analyze + redact pipeline for one modality `M`.
 ///
@@ -60,6 +60,15 @@ where
         entities: &mut [Entity<M>],
     ) -> Result<()> {
         self.anonymizer.anonymize(handle, entities).await
+    }
+
+    /// Resolve the reviewable operator selections for `entities`, without
+    /// reading any document data — the [`Anonymizer::select`] pass surfaced
+    /// through the pipeline.
+    ///
+    /// [`Anonymizer::select`]: elide_redaction::Anonymizer::select
+    pub(super) fn select(&self, entities: &[Entity<M>]) -> Vec<Selection<M>> {
+        self.anonymizer.select(entities)
     }
 }
 
@@ -131,6 +140,12 @@ pub(super) trait ErasedPipeline: Send + Sync {
         handle: UntypedDocumentHandle,
         entities: &'a mut dyn EntityGroup,
     ) -> BoxFuture<'a, Result<Bytes>>;
+
+    /// Resolve the operator selections for a group of this pipeline's
+    /// entities, boxed erased. Reads no data — it is the `select` pass, not
+    /// apply. `entities` was matched to this pipeline's modality by the
+    /// orchestrator, so the downcast holds.
+    fn select(&self, entities: &dyn EntityGroup) -> Box<dyn SelectionGroup>;
 }
 
 impl<M> ErasedPipeline for ModalityPipeline<M>
@@ -216,5 +231,15 @@ where
             self.apply(&mut handle, entities).await?;
             Ok(handle.encode()?.to_bytes())
         })
+    }
+
+    fn select(&self, entities: &dyn EntityGroup) -> Box<dyn SelectionGroup> {
+        // Matched to this pipeline's `M` by the orchestrator, so the downcast
+        // holds.
+        let entities = entities
+            .as_any()
+            .downcast_ref::<Vec<Entity<M>>>()
+            .expect("select entities modality mismatch");
+        Box::new(ModalityPipeline::select(self, entities))
     }
 }

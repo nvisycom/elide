@@ -5,6 +5,8 @@ use elide_core::entity::Entity;
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::TextData;
 use elide_core::operator::{LeakProfile, Operator, OperatorId};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 /// Drop the entire row a matched entity sits in.
 ///
@@ -17,6 +19,8 @@ use elide_core::operator::{LeakProfile, Operator, OperatorId};
 ///
 /// [`Erase`]: crate::operators::Erase
 #[derive(Debug, Clone, Copy, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DropRow;
 
 #[async_trait::async_trait]

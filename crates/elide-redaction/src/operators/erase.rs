@@ -11,6 +11,8 @@ use elide_core::modality::image::{Image, ImageReplacement};
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextReplacement};
 use elide_core::operator::{LeakProfile, Operator, OperatorId};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 /// Remove the matched entity entirely.
 ///
@@ -19,6 +21,8 @@ use elide_core::operator::{LeakProfile, Operator, OperatorId};
 /// clears the region. One [`Erase`] serves every medium, with a per-modality
 /// [`Operator`] impl that maps to that modality's "removed" replacement.
 #[derive(Debug, Clone, Copy, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Erase;
 
 impl Erase {

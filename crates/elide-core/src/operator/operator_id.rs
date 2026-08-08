@@ -3,8 +3,6 @@
 use std::fmt;
 
 use hipstr::HipStr;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -18,7 +16,7 @@ use serde::{Deserialize, Serialize};
 /// [`RecognizerId`]: crate::recognition::RecognizerId
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct OperatorId {
     /// Stable operator name (e.g. `"mask"`, `"aes-gcm-encrypt"`).
     #[cfg_attr(feature = "schema", schemars(with = "String"))]

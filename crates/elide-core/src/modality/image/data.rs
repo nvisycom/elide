@@ -4,8 +4,6 @@
 
 use bytes::Bytes;
 use hipstr::HipStr;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -22,7 +20,7 @@ use crate::primitive::Dimensions;
 /// [`Image`]: super::Image
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ImageData {
     /// Encoded image bytes. Skipped by serde: the bytes are the raw payload,
     /// not metadata, and a serialized report (entities, provenance) has no

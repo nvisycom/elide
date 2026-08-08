@@ -15,79 +15,30 @@
 //! belongs to. The part id is the map key; each entity carries its own id,
 //! label, location, and confidence.
 //!
+//! The type-erased storage ([`EntityGroup`] / [`SelectionGroup`]) lives in
+//! [`group`], the per-group report entries ([`BodyReport`] / [`PartReport`])
+//! in [`entry`], and the serde wire view in `serialize`.
+//!
+//! [`BodyReport`]: entry::BodyReport
+//! [`PartReport`]: entry::PartReport
 //! [`anonymize_with`]: super::Orchestrator::anonymize_with
 
-use std::any::{Any, TypeId};
+mod entry;
+mod group;
+#[cfg(feature = "serde")]
+mod serialize;
+
+use std::any::TypeId;
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 
-use elide_codec::{PartId, UntypedDocumentHandle};
+use elide_codec::PartId;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 use uuid::Uuid;
 
-/// A type-erased, downcastable group of entities (a `Vec<Entity<M>>`).
-///
-/// An implementation detail of the report's storage, surfaced only because
-/// it appears as a bound (`Vec<Entity<M>>: EntityGroup`) on the
-/// orchestrator's construction methods. Lets groups of different
-/// modalities sit together while each stays recoverable by downcast; under
-/// the `serde` feature it is additionally erased-serializable.
-#[doc(hidden)]
-pub trait EntityGroup: Send + Sync + MaybeErased {
-    fn as_any(&self) -> &dyn Any;
-    fn as_any_mut(&mut self) -> &mut dyn Any;
-}
-
-impl<M: Modality> EntityGroup for Vec<Entity<M>>
-where
-    Vec<Entity<M>>: MaybeErased,
-{
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-}
-
-// `MaybeErased` carries the serde-conditional capability in one place: it
-// is `erased_serde::Serialize` with serde on, and a vacuous marker with it
-// off. So `EntityGroup` and its construction sites need no `#[cfg]`.
-#[cfg(feature = "serde")]
-#[doc(hidden)]
-pub use erased_serde::Serialize as MaybeErased;
-
-#[cfg(not(feature = "serde"))]
-#[doc(hidden)]
-pub trait MaybeErased {}
-#[cfg(not(feature = "serde"))]
-impl<T> MaybeErased for T {}
-
-/// One container part captured during analysis: its detected entities, the
-/// modality they belong to, and — for the same-process fast path — the
-/// decoded part handle.
-pub(super) struct PartReport {
-    /// The part's modality, the routing key for [`anonymize_with`]: it
-    /// re-fetches the part from the container and applies through the
-    /// pipeline registered for this modality.
-    ///
-    /// [`anonymize_with`]: super::Orchestrator::anonymize_with
-    pub(super) modality: TypeId,
-    /// The decoded part handle, retained from analysis as a same-process
-    /// cache. `Some` after [`analyze`] (so apply re-drives it directly with
-    /// no second decode); `None` for a [`Report`] built by hand or rebuilt
-    /// from serialized entities, where apply re-decodes the part from the
-    /// container instead.
-    ///
-    /// Never serialized — a live decoded document is not data.
-    ///
-    /// [`analyze`]: super::Orchestrator::analyze
-    pub(super) handle: Option<UntypedDocumentHandle>,
-    /// The part's detected entities (a `Vec<Entity<P>>`).
-    pub(super) entities: Box<dyn EntityGroup>,
-}
+pub(crate) use self::entry::{BodyReport, PartReport};
+pub use self::group::{EntityGroup, SelectionGroup};
 
 /// The detected entities of a whole document, editable before apply.
 ///
@@ -125,11 +76,11 @@ pub(super) struct PartReport {
 /// [`insert_part`]: Report::insert_part
 #[derive(Default)]
 pub struct Report {
-    /// The body's entities keyed by their modality's `TypeId`. A document
-    /// has exactly one body modality, so this holds at most one entry.
-    pub(super) body: Option<(TypeId, Box<dyn EntityGroup>)>,
+    /// The document body's entry, if a body pipeline ran. A document has
+    /// exactly one body, so this holds at most one [`BodyReport`].
+    pub(crate) body: Option<BodyReport>,
     /// Each container part's entry, keyed by its [`PartId`].
-    pub(super) parts: HashMap<PartId, PartReport>,
+    pub(crate) parts: HashMap<PartId, PartReport>,
 }
 
 impl Report {
@@ -158,7 +109,10 @@ impl Report {
     where
         Vec<Entity<M>>: EntityGroup,
     {
-        self.body = Some((TypeId::of::<M>(), Box::new(entities)));
+        self.body = Some(BodyReport {
+            modality: TypeId::of::<M>(),
+            entities: Box::new(entities),
+        });
         self
     }
 
@@ -190,11 +144,11 @@ impl Report {
     /// Returns `None` if the document's body is a different modality (or
     /// no body pipeline ran).
     pub fn entities<M: Modality>(&mut self) -> Option<&mut Vec<Entity<M>>> {
-        let (type_id, boxed) = self.body.as_mut()?;
-        if *type_id != TypeId::of::<M>() {
+        let body = self.body.as_mut()?;
+        if body.modality != TypeId::of::<M>() {
             return None;
         }
-        boxed.as_any_mut().downcast_mut::<Vec<Entity<M>>>()
+        body.entities.as_any_mut().downcast_mut::<Vec<Entity<M>>>()
     }
 
     /// One body entity of modality `M`, by its [`id`]. Returns `None` if the
@@ -325,35 +279,7 @@ impl Report {
     }
 }
 
-#[cfg(feature = "serde")]
-impl serde::Serialize for Report {
-    /// Serialize to `{ body: [entities], parts: { id: [entities] } }`.
-    /// `body` is null when no body pipeline ran.
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeStruct;
-
-        // Adapt an erased group to a Serialize value.
-        struct Group<'a>(&'a dyn EntityGroup);
-        impl serde::Serialize for Group<'_> {
-            fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-                erased_serde::serialize(self.0, s)
-            }
-        }
-
-        let parts: HashMap<&str, Group<'_>> = self
-            .parts
-            .iter()
-            .map(|(id, p)| (id.as_str(), Group(p.entities.as_ref())))
-            .collect();
-
-        let mut state = serializer.serialize_struct("Report", 2)?;
-        state.serialize_field("body", &self.body.as_ref().map(|(_, g)| Group(g.as_ref())))?;
-        state.serialize_field("parts", &parts)?;
-        state.end()
-    }
-}
-
-#[cfg(all(test, feature = "serde"))]
+#[cfg(test)]
 mod tests {
     use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
     use elide_core::entity::{Entity, LabelRef};
@@ -362,6 +288,7 @@ mod tests {
 
     use super::*;
 
+    /// A minimal text entity carrying `label`, for building reports under test.
     fn text_entity(label: &str) -> Entity<Text> {
         let loc = TextLocation::new(0, 4);
         let event = Event::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
@@ -371,24 +298,6 @@ mod tests {
             Confidence::MAX,
             Provenance::new(event),
         )
-    }
-
-    #[test]
-    fn serializes_body_to_grouped_view() {
-        // The part-grouped `{ body, parts }` shape is exercised end to end
-        // (with a real container) in the docx integration test; here we
-        // check the body group and the empty-parts shape directly.
-        let report = Report::new().insert_body::<Text>(vec![text_entity("EMAIL_ADDRESS")]);
-
-        let value = serde_json::to_value(&report).unwrap();
-        // body is an array carrying the entity's label; parts is an object.
-        assert_eq!(value["body"][0]["label"], "EMAIL_ADDRESS");
-        assert!(value["parts"].is_object());
-        assert_eq!(value["parts"].as_object().unwrap().len(), 0);
-
-        // No body pipeline ran → body is null.
-        let empty = serde_json::to_value(Report::new()).unwrap();
-        assert!(empty["body"].is_null());
     }
 
     #[test]
@@ -466,8 +375,7 @@ mod tests {
     fn try_for_each_body_mut_breaks_early() {
         let a = text_entity("EMAIL_ADDRESS");
         let target = a.id;
-        let mut report =
-            Report::new().insert_body::<Text>(vec![a, text_entity("PHONE_NUMBER")]);
+        let mut report = Report::new().insert_body::<Text>(vec![a, text_entity("PHONE_NUMBER")]);
 
         // Break carries a value out and halts the walk at the first match.
         let mut visited = 0;
@@ -494,8 +402,8 @@ mod tests {
     #[test]
     fn for_each_part_mut_visits_a_part() {
         let part = PartId::new("word/media/image1.png");
-        let mut report = Report::new()
-            .insert_part::<Text>(part.clone(), vec![text_entity("EMAIL_ADDRESS")]);
+        let mut report =
+            Report::new().insert_part::<Text>(part.clone(), vec![text_entity("EMAIL_ADDRESS")]);
 
         let mut count = 0;
         report.for_each_part_mut::<Text>(&part, |_| count += 1);

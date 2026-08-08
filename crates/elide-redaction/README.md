@@ -19,13 +19,13 @@ target in one step; `plan` stops a step short and hands back the `Redactions`
 batch for inspection or deferred application.
 
 ```rust,ignore
-use elide_redaction::Anonymizer;
-use elide_redaction::redaction::operators::{Mask, Replace, Erase};
+use elide_redaction::operators::{Erase, Mask, Replace};
+use elide_redaction::{Anonymizer, Rule};
 
 Anonymizer::new()
-    .with_label(EMAIL_ADDRESS, Replace::default())
-    .with_tag("financial", Mask::stars())
-    .with_fallback(Erase)
+    .with(Rule::label(EMAIL_ADDRESS, Replace::default()))
+    .with(Rule::tag("financial", Mask::stars()))
+    .with(Rule::fallback(Erase))
     .anonymize(&mut document, &mut entities)
     .await?;
 ```

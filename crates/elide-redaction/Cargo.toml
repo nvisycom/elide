@@ -26,12 +26,14 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 
 ## Derive `serde::{Serialize, Deserialize}` on the re-exported core types and
-## the operator config value enums (`Sha2Algorithm`, `DateGranularity`,
-## `DateStyle`), so a policy layer can serialize operator configuration.
-serde = ["dep:serde", "elide-core/serde"]
+## the operators' policy config (their own fields and the config value enums
+## `Sha2Algorithm`, `DateGranularity`, `DateStyle`), so a policy layer can
+## serialize operator configuration. Runtime capabilities (a `KeyProvider`, a
+## vault) are never part of that config and never serialize.
+serde = ["dep:serde", "elide-core/serde", "bytes/serde"]
 
 ## Derive `schemars::JsonSchema` on the re-exported core types and the
-## operator config value enums, for emitting a JSON Schema of that config.
+## operators' policy config, for emitting a JSON Schema of that config.
 schema = ["dep:schemars", "serde", "elide-core/schema"]
 
 ## The `audio` modality operators (`Silence`, `Beep`).

@@ -1,8 +1,6 @@
 //! [`RuleMatch`]: which kind of selection rule chose an operator.
 
 use hipstr::HipStr;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -25,7 +23,7 @@ use crate::entity::LabelRef;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum RuleMatch {
     /// Matched an exact label rule.
     Label(LabelRef),

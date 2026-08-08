@@ -1,7 +1,7 @@
 # https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [package]
-name = "elide-orchestration"
+name = "elide-engine"
 description = "Document orchestration for the Elide toolkit: drive analysis + redaction across a multi-modal container"
 keywords = ["pii", "orchestration", "redaction", "document"]
 categories = ["text-processing"]

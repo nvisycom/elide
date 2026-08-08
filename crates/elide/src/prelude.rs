@@ -64,6 +64,6 @@ pub use elide_detection::{
 };
 #[cfg(feature = "codec")]
 #[doc(no_inline)]
-pub use elide_orchestration::{Directives, Orchestrator, Report};
+pub use elide_engine::{Directives, Orchestrator, Report};
 #[doc(no_inline)]
 pub use elide_redaction::{Anonymizer, Deanonymizer, Operator, Rule, operators};

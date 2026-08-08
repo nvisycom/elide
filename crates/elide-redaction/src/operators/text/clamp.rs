@@ -6,6 +6,8 @@ use elide_core::entity::Entity;
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::operator::{LeakProfile, Operator, OperatorId};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use elide_core::primitive::{LanguageTag, LocalizedText};
 use elide_core::Result;
 use hipstr::HipStr;
@@ -20,13 +22,21 @@ use crate::operators::TryOperator;
 /// the caller doesn't repeat the number — `"{n}+"` renders `"90+"` for a
 /// ceiling of `90`.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 enum Bucket {
     /// A caller-provided, localizable label.
-    Explicit(LocalizedText<HipStr<'static>>),
+    Explicit(
+        #[cfg_attr(
+            feature = "schema",
+            schemars(with = "std::collections::HashMap<elide_core::primitive::LanguageTag, String>")
+        )]
+        LocalizedText<HipStr<'static>>,
+    ),
     /// A format template with `{n}` standing in for the threshold, e.g.
     /// `"{n}+"` or `"{n} or older"`. Rendered the same in every language
     /// (it's derived from the number, not written per-locale).
-    Derived(HipStr<'static>),
+    Derived(#[cfg_attr(feature = "schema", schemars(with = "String"))] HipStr<'static>),
 }
 
 /// Default ceiling template: `90` → `"90+"`.
@@ -110,6 +120,8 @@ fn format_threshold(n: f64) -> String {
 /// assert_eq!(auto.render("94", None), Some("90+".to_owned()));
 /// ```
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Clamp {
     ceiling: Option<(f64, Bucket)>,
     floor: Option<(f64, Bucket)>,

@@ -4,6 +4,8 @@ use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::audio::{Audio, AudioData, AudioReplacement, Waveform};
 use elide_core::operator::{LeakProfile, Operator, OperatorId};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 /// The broadcast censor-beep frequency, in hertz.
 const DEFAULT_HZ: f32 = 1000.0;
@@ -20,6 +22,8 @@ const DEFAULT_AMPLITUDE: f32 = 0.5;
 ///
 /// [`Silence`]: crate::operators::Silence
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Beep {
     /// Tone frequency, in hertz.
     hz: f32,

@@ -10,6 +10,8 @@ use elide_core::modality::image::{Image, ImageData, ImageReplacement};
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::operator::{LeakProfile, Operator, OperatorId};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 /// Pass the matched entity through unchanged.
 ///
@@ -22,6 +24,8 @@ use elide_core::operator::{LeakProfile, Operator, OperatorId};
 /// region or audio range is left untouched. Like the other operators, [`Keep`]
 /// is implemented per modality, so the one type serves every modality.
 #[derive(Debug, Clone, Copy, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Keep;
 
 /// The original value is unchanged: strictly the most leaky profile.

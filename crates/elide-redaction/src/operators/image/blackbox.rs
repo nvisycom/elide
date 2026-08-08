@@ -4,6 +4,8 @@ use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::image::{Image, ImageData, ImageReplacement};
 use elide_core::operator::{LeakProfile, Operator, OperatorId};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use elide_core::primitive::Color;
 
 /// Cover the matched image region with a solid color (black by default).
@@ -17,6 +19,8 @@ use elide_core::primitive::Color;
 /// [`Blur`]: crate::operators::Blur
 /// [`Pixelate`]: crate::operators::Pixelate
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Blackbox {
     /// Fill color the codec rasterizes over the region.
     color: Color,

@@ -1,8 +1,6 @@
 //! [`Attribution`]: the author-supplied "why" behind a redaction.
 
 use hipstr::HipStr;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -25,7 +23,7 @@ use serde::{Deserialize, Serialize};
 /// [`Redaction`]: crate::entity::provenance::EventKind::Redaction
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Attribution {
     /// The policy's name (e.g. `"gdpr-art-17"`, `"hipaa-safe-harbor"`).
     #[cfg_attr(feature = "schema", schemars(with = "String"))]

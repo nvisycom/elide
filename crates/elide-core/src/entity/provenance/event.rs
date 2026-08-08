@@ -3,8 +3,6 @@
 
 use hipstr::HipStr;
 use jiff::Timestamp;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -36,7 +34,7 @@ use crate::primitive::Confidence;
     serde(bound = "M::Location: Serialize + for<'a> Deserialize<'a>, \
                    M::Data: Serialize + for<'a> Deserialize<'a>")
 )]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
     schemars(
@@ -269,7 +267,7 @@ impl<M: Modality> Event<M> {
                  M::Data: Serialize + for<'a> Deserialize<'a>"
     )
 )]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
     schemars(
@@ -369,7 +367,7 @@ pub enum EventKind<M: Modality> {
 /// Detail of a pattern/dictionary recognition.
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PatternEvent {
     /// Name of the pattern that matched (e.g. `"ssn"`, `"email"`).
     #[cfg_attr(feature = "schema", schemars(with = "String"))]
@@ -388,7 +386,7 @@ pub struct PatternEvent {
 /// Detail of a model/NER recognition.
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ModelEvent {
     /// Model name (e.g. `"spacy-en-core-web-lg"`, `"gpt-4"`).
     #[cfg_attr(feature = "schema", schemars(with = "String"))]

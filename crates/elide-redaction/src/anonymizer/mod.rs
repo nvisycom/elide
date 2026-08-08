@@ -1,19 +1,24 @@
 //! The [`Anonymizer`] — the "hide" engine.
 //!
 //! The redaction counterpart to [`Analyzer`]: an ordered list of
-//! selection rules plus two entry points. [`anonymize`] picks each
-//! entity's operator, computes its [`Replacement`], and applies the batch
-//! back into the target in one step; [`plan`] stops a step short and
-//! hands back the [`Redactions`] batch for inspection or deferred
-//! application.
+//! selection rules plus its entry points. [`select`] resolves each
+//! entity's operator into a reviewable [`Selection`] without touching the
+//! data; [`anonymize`] selects, computes each [`Replacement`], and applies
+//! the batch back into the target in one step; [`plan`] stops a step short
+//! and hands back the [`Redactions`] batch for inspection or deferred
+//! application; [`anonymize_selections`] applies a (possibly reviewed) set
+//! of selections whose operators a caller-supplied resolver rebuilds.
 //!
 //! [`Analyzer`]: crate::Analyzer
+//! [`select`]: Anonymizer::select
 //! [`anonymize`]: Anonymizer::anonymize
+//! [`anonymize_selections`]: Anonymizer::anonymize_selections
 //! [`plan`]: Anonymizer::plan
 //! [`Replacement`]: elide_core::modality::Modality::Replacement
 
 mod registry;
 mod rule;
+mod selection;
 
 use std::sync::Arc;
 
@@ -24,6 +29,7 @@ use elide_core::modality::{DataReader, DataWriter, Modality, ModalityLocation};
 use elide_core::operator::{Operator, Redactions};
 
 pub use self::rule::Rule;
+pub use self::selection::Selection;
 use self::registry::OperatorRegistry;
 
 /// An operator stored in a [`Rule`], type-erased and shared.
@@ -128,47 +134,47 @@ impl<M: Modality> Anonymizer<M> {
         self
     }
 
-    /// Plan the redaction for every entity, reading each one's value from
-    /// `reader`, without applying anything.
+    /// Resolve the reviewable operator [`Selection`] for every entity,
+    /// without reading any data.
     ///
-    /// For each entity: resolve the operator for its label (its mapping,
-    /// else the fallback), read the entity's value via
-    /// [`DataReader::read_at`], and run the operator to produce a
-    /// replacement. Entities whose label has no operator and no fallback
-    /// are skipped, as are entities whose location reads no data.
+    /// This is the *decision* half of redaction, split out so it can be
+    /// inspected — and later overridden — before anything is applied. For
+    /// each overlap cluster it resolves the winning operator (see the merge
+    /// rule below) and emits one `Selection` naming that operator, the
+    /// entities it covers, the rule that matched, and any policy attribution.
+    /// No document data is touched: `select` never reads the medium, so it is
+    /// cheap to run and safe to run speculatively (e.g. to review picks for
+    /// several audiences from one detection).
+    ///
+    /// Entities whose label has no operator and no fallback are skipped — no
+    /// `Selection` is emitted for them.
     ///
     /// **Overlapping entities are merged.** Where a set of entities overlap
     /// in the medium (a left-over nesting, or one a user re-introduced by
     /// editing the report), redacting each separately would write competing
     /// operators over the same bytes and corrupt the output. Instead the
-    /// overlapping set collapses to *one* redaction covering the
+    /// overlapping set collapses to *one* [`Selection`] covering the
     /// [union][union] of their spans, run by the **safest** operator among
     /// them — the one whose output leaks least (highest [`LeakProfile`]).
-    /// Ties go to the wider span, then the earlier position. The absorbed
-    /// entities still record a redaction event noting they were merged, so
-    /// the report stays faithful. A purely mechanical safety step: it makes
-    /// no semantic choice about which *finding* is right — that is
-    /// detection's job.
+    /// Ties go to the wider span, then the earlier position. A purely
+    /// mechanical safety step: it makes no semantic choice about which
+    /// *finding* is right — that is detection's job.
     ///
-    /// Returns the [`Redactions`] batch — inspect, serialize, or audit it,
-    /// then apply it yourself, or call [`anonymize`] to plan and apply in
-    /// one step.
+    /// Feed the result to [`anonymize_selections`] to apply it, optionally
+    /// after review. [`anonymize`] runs `select` and applies in one step.
     ///
+    /// [`anonymize_selections`]: Self::anonymize_selections
     /// [`anonymize`]: Self::anonymize
     /// [union]: elide_core::modality::ModalityLocation::union
     /// [`LeakProfile`]: elide_core::operator::LeakProfile
-    pub async fn plan(
-        &self,
-        entities: &mut [Entity<M>],
-        reader: &impl DataReader<M>,
-    ) -> Result<Redactions<M>> {
-        let mut redactions = Redactions::new();
+    pub fn select(&self, entities: &[Entity<M>]) -> Vec<Selection<M>> {
+        let mut selections = Vec::new();
         for cluster in cluster_overlaps(entities) {
             // Pick the safest operator in the cluster — the one that leaks
             // least — to redact the whole overlapping span; ties go to the
             // wider span, then the earlier position. A singleton cluster just
             // resolves its one entity. `None` means no member had an operator.
-            let Some((winner, operator, matched_by, attribution)) = cluster
+            let Some((operator, matched_by, attribution)) = cluster
                 .iter()
                 .copied()
                 .filter_map(|i| self.operators.resolve(&entities[i]).map(|r| (i, r)))
@@ -179,29 +185,160 @@ impl<M: Modality> Anonymizer<M> {
                         .then_with(|| entities[*i].location.span_cmp(&entities[*j].location))
                         .then_with(|| entities[*j].location.position_cmp(&entities[*i].location))
                 })
-                .map(|(i, r)| {
-                    (
-                        i,
-                        Arc::clone(r.operator),
-                        r.matched_by,
-                        r.attribution.cloned(),
-                    )
-                })
+                .map(|(_, r)| (Arc::clone(r.operator), r.matched_by, r.attribution.cloned()))
             else {
                 continue;
             };
 
+            let covered = cluster.iter().map(|&i| entities[i].id).collect();
+            selections.push(Selection::new(operator, covered, matched_by, attribution));
+        }
+        selections
+    }
+
+    /// Plan the redaction for every entity, reading each one's value from
+    /// `reader`, without applying anything.
+    ///
+    /// The composition of [`select`] (resolve the operator per redaction)
+    /// and reading + running each operator to produce its replacement, minus
+    /// the final write. Entities whose location reads no data are skipped.
+    /// Every entity a redaction covers records a [`Redaction`] event on its
+    /// provenance, so the report stays faithful even for entities that were
+    /// merged into another's span.
+    ///
+    /// Returns the [`Redactions`] batch — inspect, serialize, or audit it,
+    /// then apply it yourself, or call [`anonymize`] to plan and apply in
+    /// one step.
+    ///
+    /// [`select`]: Self::select
+    /// [`anonymize`]: Self::anonymize
+    /// [`Redaction`]: elide_core::entity::provenance::EventKind::Redaction
+    pub async fn plan(
+        &self,
+        entities: &mut [Entity<M>],
+        reader: &impl DataReader<M>,
+    ) -> Result<Redactions<M>> {
+        let selections = self.select(entities);
+        self.execute(entities, &selections, reader, |s| Ok(Arc::clone(s.operator())))
+            .await
+    }
+
+    /// Hide every entity by applying its operator's replacement back into
+    /// `target`.
+    ///
+    /// The complete redaction step: [`select`]s each entity's operator,
+    /// reads its value from `target`, runs the operator, and hands the batch
+    /// to [`DataWriter::write_at`] so `target` owns the *how* and *ordering*
+    /// of applying it. `target` is both the reader and the writer —
+    /// typically a decoded codec document. Entities must already be in
+    /// `target`'s coordinate system.
+    ///
+    /// Use [`select`] + [`anonymize_selections`] instead when the picks must
+    /// be reviewed (or round-tripped) between selection and application, or
+    /// [`plan`] when you need the [`Redactions`] batch without applying it.
+    ///
+    /// [`select`]: Self::select
+    /// [`anonymize_selections`]: Self::anonymize_selections
+    /// [`plan`]: Self::plan
+    pub async fn anonymize<T>(&self, target: &mut T, entities: &mut [Entity<M>]) -> Result<()>
+    where
+        T: DataReader<M> + DataWriter<M>,
+    {
+        let selections = self.select(entities);
+        let redactions = self
+            .execute(entities, &selections, target, |s| Ok(Arc::clone(s.operator())))
+            .await?;
+        target.write_at(redactions).await
+    }
+
+    /// Apply a set of (possibly reviewed) [`Selection`]s back into `target`.
+    ///
+    /// The apply half of the reviewable path: where [`select`] produced the
+    /// picks and a reviewer may have edited them, this runs each selection's
+    /// operator and writes the result. Because a round-tripped selection has
+    /// lost its live operator (a trait object does not survive
+    /// serialization), `resolve` rebuilds the operator for each selection —
+    /// typically from its [`operator_id`] and config through an operator
+    /// registry the caller wired with any runtime capabilities (keys, a
+    /// vault). For the in-process path, `resolve` can simply hand back the
+    /// operator the selection still carries.
+    ///
+    /// Every entity a selection covers records a [`Redaction`] event, so
+    /// provenance stays faithful for merged entities too.
+    ///
+    /// [`select`]: Self::select
+    /// [`operator_id`]: Selection::operator_id
+    /// [`Redaction`]: elide_core::entity::provenance::EventKind::Redaction
+    pub async fn anonymize_selections<T, R>(
+        &self,
+        target: &mut T,
+        entities: &mut [Entity<M>],
+        selections: &[Selection<M>],
+        resolve: R,
+    ) -> Result<()>
+    where
+        T: DataReader<M> + DataWriter<M>,
+        R: Fn(&Selection<M>) -> Result<Arc<dyn Operator<M>>>,
+    {
+        let redactions = self.execute(entities, selections, target, resolve).await?;
+        target.write_at(redactions).await
+    }
+
+    /// Read, run, and record each selection, returning the [`Redactions`]
+    /// batch without writing it — the shared core of [`plan`], [`anonymize`],
+    /// and [`anonymize_selections`].
+    ///
+    /// For each selection: rebuild its operator via `resolve`, union the
+    /// spans of the entities it covers, read that span, run the operator, and
+    /// record a [`Redaction`] event on every covered entity. Selections whose
+    /// span reads no data are skipped.
+    ///
+    /// [`plan`]: Self::plan
+    /// [`anonymize`]: Self::anonymize
+    /// [`anonymize_selections`]: Self::anonymize_selections
+    /// [`Redaction`]: elide_core::entity::provenance::EventKind::Redaction
+    async fn execute<R>(
+        &self,
+        entities: &mut [Entity<M>],
+        selections: &[Selection<M>],
+        reader: &impl DataReader<M>,
+        resolve: R,
+    ) -> Result<Redactions<M>>
+    where
+        R: Fn(&Selection<M>) -> Result<Arc<dyn Operator<M>>>,
+    {
+        // Map entity ids back to their slice index so a selection (which
+        // names its entities by id) can reach their locations and provenance.
+        let index: std::collections::HashMap<_, _> = entities
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (e.id, i))
+            .collect();
+
+        let mut redactions = Redactions::new();
+        for selection in selections {
+            // The entity indices this selection covers, in slice order.
+            let members: Vec<usize> = selection
+                .entities()
+                .iter()
+                .filter_map(|id| index.get(id).copied())
+                .collect();
+            let Some(&winner) = members.first() else {
+                continue;
+            };
+            let operator = resolve(selection)?;
+
             // Redact the union of every member's span. Clustering groups only
             // entities that coalesce, so the fold never hits `None`; a
             // singleton unions to itself.
-            let location = cluster
+            let location = members
                 .iter()
                 .map(|&i| entities[i].location.clone())
                 .reduce(|acc, loc| {
                     acc.union(&loc)
-                        .expect("cluster members coalesce by construction")
+                        .expect("selection members coalesce by construction")
                 })
-                .expect("a cluster is never empty");
+                .expect("a selection covers at least one entity");
             let Some(data) = reader.read_at(&location).await? else {
                 tracing::debug!(modality = M::NAME, "location read no data; skipping");
                 continue;
@@ -210,42 +347,20 @@ impl<M: Modality> Anonymizer<M> {
 
             // Record the redaction on every member, so each entity's
             // provenance reflects that this operator hid it.
-            for &i in &cluster {
+            for &i in &members {
                 let entity = &mut entities[i];
                 let event = Event::redaction(
                     operator.id(),
                     operator.leak_profile(),
                     entity.confidence,
-                    matched_by.clone(),
-                    attribution.clone(),
+                    selection.matched_by().clone(),
+                    selection.attribution().cloned(),
                 );
                 entity.provenance.record(event);
             }
             redactions.push(location, replacement);
         }
         Ok(redactions)
-    }
-
-    /// Hide every entity by applying its operator's replacement back into
-    /// `target`.
-    ///
-    /// The complete redaction step: [`plan`]s each entity's replacement
-    /// (reading its value from `target`), then hands the batch to
-    /// [`DataWriter::write_at`] so `target` owns the *how* and *ordering*
-    /// of applying it. `target` is both the reader and the writer —
-    /// typically a decoded codec document. Entities must already be in
-    /// `target`'s coordinate system.
-    ///
-    /// Use [`plan`] instead when you need the [`Redactions`] batch before
-    /// (or instead of) applying it.
-    ///
-    /// [`plan`]: Self::plan
-    pub async fn anonymize<T>(&self, target: &mut T, entities: &mut [Entity<M>]) -> Result<()>
-    where
-        T: DataReader<M> + DataWriter<M>,
-    {
-        let redactions = self.plan(entities, target).await?;
-        target.write_at(redactions).await
     }
 }
 
@@ -310,13 +425,22 @@ mod tests {
     use super::*;
     use crate::operators::{Erase, Replace};
 
-    /// In-memory text reader: slices the backing string by byte range.
+    /// In-memory text reader: slices the backing string by byte range. Also
+    /// a no-op [`DataWriter`] so the apply-path entry points that write can be
+    /// exercised without a full codec document.
     struct StrReader(String);
 
     #[async_trait::async_trait]
     impl DataReader<Text> for StrReader {
         async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
             Ok(self.0.get(location.start..location.end).map(TextData::new))
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl DataWriter<Text> for StrReader {
+        async fn write_at(&mut self, _redactions: Redactions<Text>) -> Result<()> {
+            Ok(())
         }
     }
 
@@ -447,5 +571,101 @@ mod tests {
             .unwrap();
 
         assert_eq!(plan.len(), 2, "both trait-object operators ran");
+    }
+
+    /// `select` resolves one [`Selection`] per redaction, naming the winning
+    /// operator and the entities it covers — without reading any data.
+    #[tokio::test]
+    async fn select_resolves_one_selection_per_redaction() {
+        let entities = vec![entity("NAME", 0, 5), entity("URL", 10, 13)];
+        let anonymizer = Anonymizer::new()
+            .with(Rule::label(LabelRef::new("NAME"), Erase))
+            .with(Rule::label(LabelRef::new("URL"), Replace::default()));
+
+        let selections = anonymizer.select(&entities);
+
+        assert_eq!(selections.len(), 2, "one selection per disjoint entity");
+        // Each selection covers exactly its own entity, by id.
+        for (selection, entity) in selections.iter().zip(&entities) {
+            assert_eq!(selection.entities(), [entity.id]);
+        }
+    }
+
+    /// Overlapping entities collapse into one [`Selection`] over both ids,
+    /// won by the safest operator — the selection mirrors the merge that
+    /// `plan`/`anonymize` apply.
+    #[tokio::test]
+    async fn select_merges_overlap_into_one_selection() {
+        // NAME [0,5) → Replace (Partial); SSN [3,12) → Erase (Irrecoverable).
+        let entities = vec![entity("NAME", 0, 5), entity("SSN", 3, 12)];
+        let anonymizer = Anonymizer::new()
+            .with(Rule::label(LabelRef::new("NAME"), Replace::default()))
+            .with(Rule::label(LabelRef::new("SSN"), Erase));
+
+        let selections = anonymizer.select(&entities);
+
+        assert_eq!(selections.len(), 1, "overlap collapses to one selection");
+        let selection = &selections[0];
+        assert_eq!(selection.operator_id().name, "erase", "safest operator wins");
+        assert_eq!(selection.entities().len(), 2, "covers both merged entities");
+        assert!(selection.entities().contains(&entities[0].id));
+        assert!(selection.entities().contains(&entities[1].id));
+    }
+
+    /// `anonymize_selections` applies a set of selections, rebuilding each
+    /// operator through the caller's resolver — here the in-process case,
+    /// where the resolver hands back the live operator the selection carries.
+    #[tokio::test]
+    async fn anonymize_selections_applies_via_resolver() {
+        let mut target = StrReader("alice and bob".to_owned());
+        let mut entities = vec![entity("NAME", 0, 5), entity("NAME", 10, 13)];
+        let anonymizer = Anonymizer::new().with(Rule::fallback(Erase));
+
+        let selections = anonymizer.select(&entities);
+        anonymizer
+            .anonymize_selections(&mut target, &mut entities, &selections, |s| {
+                Ok(Arc::clone(s.operator()))
+            })
+            .await
+            .unwrap();
+        // Both selections applied; each covered entity recorded the redaction
+        // the resolver ran.
+        for entity in &entities {
+            assert!(
+                entity
+                    .provenance
+                    .events
+                    .iter()
+                    .any(|e| matches!(&e.kind, EventKind::Redaction { .. })),
+                "each covered entity records its redaction",
+            );
+        }
+    }
+
+    /// A resolver may substitute a *different* operator than the one selected
+    /// — the mechanism a round-tripped, reviewer-edited selection rides on.
+    /// The recorded provenance reflects the operator the resolver returned.
+    #[tokio::test]
+    async fn resolver_substitutes_the_operator() {
+        let mut target = StrReader("alice".to_owned());
+        let mut entities = vec![entity("NAME", 0, 5)];
+        // Selection picks Replace...
+        let anonymizer = Anonymizer::new()
+            .with(Rule::label(LabelRef::new("NAME"), Replace::default()));
+        let selections = anonymizer.select(&entities);
+        assert_eq!(selections[0].operator_id().name, "replace");
+
+        // ...but the resolver runs Erase instead.
+        anonymizer
+            .anonymize_selections(&mut target, &mut entities, &selections, |_s| {
+                Ok(Arc::new(Erase) as Arc<dyn Operator<Text>>)
+            })
+            .await
+            .unwrap();
+
+        let ran_erase = entities[0].provenance.events.iter().any(|e| {
+            matches!(&e.kind, EventKind::Redaction { operator, .. } if operator.name == "erase")
+        });
+        assert!(ran_erase, "provenance records the resolver's operator, not the selected one");
     }
 }

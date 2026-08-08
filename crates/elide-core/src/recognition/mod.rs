@@ -18,8 +18,6 @@ mod scope;
 use std::fmt;
 
 use hipstr::HipStr;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -42,7 +40,7 @@ use crate::modality::Modality;
 /// ordering or comparison semantics to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RecognizerId {
     /// Stable, human-readable recognizer name (e.g. `"us-ssn-pattern"`).
     #[cfg_attr(feature = "schema", schemars(with = "String"))]

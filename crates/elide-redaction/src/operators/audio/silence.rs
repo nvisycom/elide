@@ -4,6 +4,8 @@ use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::audio::{Audio, AudioData, AudioReplacement};
 use elide_core::operator::{LeakProfile, Operator, OperatorId};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 /// Silence the matched audio interval, preserving its duration.
 ///
@@ -14,6 +16,8 @@ use elide_core::operator::{LeakProfile, Operator, OperatorId};
 ///
 /// [`Erase`]: crate::operators::Erase
 #[derive(Debug, Clone, Copy, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Silence;
 
 #[async_trait::async_trait]
