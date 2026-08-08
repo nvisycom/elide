@@ -13,6 +13,8 @@ use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::operator::{LeakProfile, Operator, OperatorId, ReversibleOperator};
 use elide_core::{Error, ErrorKind, Result};
+#[cfg(feature = "serde")]
+use serde::Serialize;
 
 use crate::operators::{KeyProvider, StaticKey};
 
@@ -41,8 +43,17 @@ const NONCE_LEN: usize = 12;
 /// apply time, not a silent truncation.
 ///
 /// [`deanonymize`]: ReversibleOperator::deanonymize
+/// `AesEncrypt` carries no policy config: its whole behavior is the secret
+/// key, which never serializes. It therefore serializes to an empty object,
+/// and the [`KeyProvider`] is re-wired at construction when a selection is
+/// rebuilt. `Serialize` only: the skipped provider has no default to
+/// deserialize back into.
 #[derive(Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AesEncrypt {
+    #[cfg_attr(feature = "serde", serde(skip))]
+    #[cfg_attr(feature = "schema", schemars(skip))]
     keys: Arc<dyn KeyProvider>,
 }
 

@@ -13,6 +13,8 @@ use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::operator::{LeakProfile, Operator, OperatorId};
 use elide_core::Result;
 use hmac::{Hmac, KeyInit, Mac};
+#[cfg(feature = "serde")]
+use serde::Serialize;
 use sha2::{Sha256, Sha512};
 
 use crate::operators::{KeyProvider, Sha2Algorithm, StaticKey};
@@ -33,9 +35,17 @@ use crate::operators::{KeyProvider, Sha2Algorithm, StaticKey};
 /// from serialized policy.
 ///
 /// [`Sha2Hash`]: crate::operators::Sha2Hash
+/// Only the policy config (`algorithm`) serializes; the [`KeyProvider`] is
+/// skipped — key material is never part of serialized policy and is re-wired
+/// at construction when a selection is rebuilt. `Serialize` only: the skipped
+/// provider has no default to deserialize back into.
 #[derive(Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HmacHash {
     algorithm: Sha2Algorithm,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    #[cfg_attr(feature = "schema", schemars(skip))]
     keys: Arc<dyn KeyProvider>,
 }
 
