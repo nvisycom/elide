@@ -13,8 +13,7 @@ const DEFAULT_HZ: f32 = 1000.0;
 /// painful and never clips.
 const DEFAULT_AMPLITUDE: f32 = 0.5;
 
-/// Overlay a tone (the broadcast "bleep") over the matched audio range,
-/// preserving its duration.
+/// Overlay a tone (the broadcast "bleep") over the matched audio range.
 ///
 /// More obvious to a listener than [`Silence`] that something was removed —
 /// the timeline does not shift, but the redacted span is audibly marked.

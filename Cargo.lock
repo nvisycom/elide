@@ -1052,6 +1052,7 @@ dependencies = [
  "async-trait",
  "derive_builder",
  "elide-core",
+ "hipstr",
  "minijinja",
  "reqwest-middleware",
  "reqwest-retry",

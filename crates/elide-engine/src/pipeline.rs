@@ -53,22 +53,24 @@ where
     }
 
     /// Apply `entities` to `handle` in place: the redactions land in the
-    /// handle, ready for its eventual `encode`.
+    /// handle, ready for its eventual `encode`. `scope` is passed to selection
+    /// so scope-aware rules can branch on request context.
     pub(super) async fn apply(
         &self,
         handle: &mut DocumentHandle<M>,
         entities: &mut [Entity<M>],
+        scope: &Scope,
     ) -> Result<()> {
-        self.anonymizer.anonymize(handle, entities).await
+        self.anonymizer.anonymize(handle, entities, scope).await
     }
 
-    /// Resolve the reviewable operator selections for `entities`, without
-    /// reading any document data — the [`Anonymizer::select`] pass surfaced
-    /// through the pipeline.
+    /// Resolve the reviewable operator selections for `entities` under `scope`,
+    /// without reading any document data — the [`Anonymizer::select`] pass
+    /// surfaced through the pipeline.
     ///
     /// [`Anonymizer::select`]: elide_redaction::Anonymizer::select
-    pub(super) fn select(&self, entities: &[Entity<M>]) -> Vec<Selection<M>> {
-        self.anonymizer.select(entities)
+    pub(super) fn select(&self, entities: &[Entity<M>], scope: &Scope) -> Vec<Selection<M>> {
+        self.anonymizer.select(entities, scope)
     }
 }
 
@@ -133,19 +135,21 @@ pub(super) trait ErasedPipeline: Send + Sync {
         &'a self,
         handle: &'a mut UntypedDocumentHandle,
         entities: &'a mut dyn EntityGroup,
+        scope: &'a Scope,
     ) -> BoxFuture<'a, Result<()>>;
 
     fn apply_part<'a>(
         &'a self,
         handle: UntypedDocumentHandle,
         entities: &'a mut dyn EntityGroup,
+        scope: &'a Scope,
     ) -> BoxFuture<'a, Result<Bytes>>;
 
     /// Resolve the operator selections for a group of this pipeline's
-    /// entities, boxed erased. Reads no data — it is the `select` pass, not
-    /// apply. `entities` was matched to this pipeline's modality by the
-    /// orchestrator, so the downcast holds.
-    fn select(&self, entities: &dyn EntityGroup) -> Box<dyn SelectionGroup>;
+    /// entities under `scope`, boxed erased. Reads no data — it is the
+    /// `select` pass, not apply. `entities` was matched to this pipeline's
+    /// modality by the orchestrator, so the downcast holds.
+    fn select(&self, entities: &dyn EntityGroup, scope: &Scope) -> Box<dyn SelectionGroup>;
 }
 
 impl<M> ErasedPipeline for ModalityPipeline<M>
@@ -195,6 +199,7 @@ where
         &'a self,
         handle: &'a mut UntypedDocumentHandle,
         entities: &'a mut dyn EntityGroup,
+        scope: &'a Scope,
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             // The handle and entities were matched to this pipeline's `M` by
@@ -207,7 +212,7 @@ where
                 .as_any_mut()
                 .downcast_mut::<Vec<Entity<M>>>()
                 .expect("apply_in_place entities modality mismatch");
-            self.apply(&mut typed, entities).await?;
+            self.apply(&mut typed, entities, scope).await?;
             *handle = UntypedDocumentHandle::new(typed);
             Ok(())
         })
@@ -217,6 +222,7 @@ where
         &'a self,
         handle: UntypedDocumentHandle,
         entities: &'a mut dyn EntityGroup,
+        scope: &'a Scope,
     ) -> BoxFuture<'a, Result<Bytes>> {
         Box::pin(async move {
             // The handle and entities were matched to this pipeline's `M`, so
@@ -228,18 +234,18 @@ where
                 .as_any_mut()
                 .downcast_mut::<Vec<Entity<M>>>()
                 .expect("apply_part entities modality mismatch");
-            self.apply(&mut handle, entities).await?;
+            self.apply(&mut handle, entities, scope).await?;
             Ok(handle.encode()?.to_bytes())
         })
     }
 
-    fn select(&self, entities: &dyn EntityGroup) -> Box<dyn SelectionGroup> {
+    fn select(&self, entities: &dyn EntityGroup, scope: &Scope) -> Box<dyn SelectionGroup> {
         // Matched to this pipeline's `M` by the orchestrator, so the downcast
         // holds.
         let entities = entities
             .as_any()
             .downcast_ref::<Vec<Entity<M>>>()
             .expect("select entities modality mismatch");
-        Box::new(ModalityPipeline::select(self, entities))
+        Box::new(ModalityPipeline::select(self, entities, scope))
     }
 }

@@ -20,19 +20,11 @@ use elide_redaction::Anonymizer;
 
 pub use self::directives::Directives;
 use self::pipeline::{AnalyzeOutcome, ErasedPipeline, ModalityPipeline};
-// `EntityGroup` is re-exported (not just `use`d) because the bound
-// `Vec<Entity<M>>: EntityGroup` appears on public methods (`with_modality`,
-// `Report::insert_*`), so callers must be able to name it. Hidden from the
-// docs: it is an implementation detail of the report's storage.
-#[doc(hidden)]
-pub use self::report::EntityGroup;
 use self::report::{BodyReport, PartReport};
-pub use self::report::Report;
-// `SelectionGroup` is the erased return type of `select_body`/`select_part`,
-// so callers must be able to name it. Hidden from the docs like `EntityGroup`:
-// it is an implementation detail of how selections are carried.
-#[doc(hidden)]
-pub use self::report::SelectionGroup;
+// `EntityGroup` is the bound on the construction methods; `SelectionGroup` is
+// the erased return type of `select_body`/`select_part` — both are named in
+// public signatures, so callers must be able to reach them.
+pub use self::report::{EntityGroup, Report, SelectionGroup};
 
 /// Drives analyze + redact across a whole document.
 ///
@@ -222,7 +214,7 @@ impl<'r> Orchestrator<'r> {
             && let Some(pipeline) = self.pipelines.get(&body.modality)
         {
             pipeline
-                .apply_in_place(document, body.entities.as_mut())
+                .apply_in_place(document, body.entities.as_mut(), &self.scope)
                 .await?;
         }
 
@@ -245,7 +237,9 @@ impl<'r> Orchestrator<'r> {
                     decoded
                 }
             };
-            let bytes = pipeline.apply_part(handle, part.entities.as_mut()).await?;
+            let bytes = pipeline
+                .apply_part(handle, part.entities.as_mut(), &self.scope)
+                .await?;
             redactions.push((id.clone(), bytes));
         }
         if let Some(c) = document.as_container_mut() {
@@ -269,27 +263,40 @@ impl<'r> Orchestrator<'r> {
     /// report is left unchanged. Apply the picks with [`anonymize_with`] (which
     /// re-runs selection internally as part of redacting).
     ///
+    /// `scope` is the request [`Scope`] selection runs under — the seam for
+    /// per-audience redaction: call this once per audience (a different
+    /// `scope.metadata.audience` each time) against the *same* [`Report`] to
+    /// produce a different plan per audience from one detection. Pass the
+    /// orchestrator's own [scope](Self::with_scope) when there's no per-request
+    /// override.
+    ///
+    /// [`Scope`]: elide_core::recognition::Scope
     /// [`Selection`]: elide_redaction::Selection
     /// [`anonymize_with`]: Self::anonymize_with
-    pub fn select_body(&self, report: &Report) -> Option<Box<dyn SelectionGroup>> {
+    pub fn select_body(&self, report: &Report, scope: &Scope) -> Option<Box<dyn SelectionGroup>> {
         let body = report.body.as_ref()?;
         let pipeline = self.pipelines.get(&body.modality)?;
-        Some(pipeline.select(body.entities.as_ref()))
+        Some(pipeline.select(body.entities.as_ref(), scope))
     }
 
     /// Resolve the operator [`Selection`]s the pipeline for container part `id`
-    /// would apply to that part's detected entities — the part counterpart to
-    /// [`select_body`].
+    /// would apply to that part's detected entities under `scope` — the part
+    /// counterpart to [`select_body`].
     ///
     /// `None` for an unknown part, or when no pipeline is registered for the
     /// part's modality. Reads no data and leaves the report unchanged.
     ///
     /// [`Selection`]: elide_redaction::Selection
     /// [`select_body`]: Self::select_body
-    pub fn select_part(&self, report: &Report, id: &PartId) -> Option<Box<dyn SelectionGroup>> {
+    pub fn select_part(
+        &self,
+        report: &Report,
+        id: &PartId,
+        scope: &Scope,
+    ) -> Option<Box<dyn SelectionGroup>> {
         let part = report.parts.get(id)?;
         let pipeline = self.pipelines.get(&part.modality)?;
-        Some(pipeline.select(part.entities.as_ref()))
+        Some(pipeline.select(part.entities.as_ref(), scope))
     }
 
     /// Re-decode the container part `id` from `document` into a handle, or

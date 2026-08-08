@@ -10,7 +10,7 @@ use elide_core::entity::LabelRef;
 use elide_core::Result;
 use zeroize::Zeroizing;
 
-/// Supplies secret key material at apply time, keyed by the entity's label.
+/// Supplies secret key material, keyed by label.
 ///
 /// The shared key-supply abstraction for the keyed operators — [`HmacHash`]
 /// (keyed hash) and [`AesEncrypt`] (reversible encryption). The provider is

@@ -7,6 +7,7 @@ use elide_core::entity::provenance::{Attribution, RuleMatch};
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
 use elide_core::modality::Modality;
 use elide_core::operator::Operator;
+use elide_core::recognition::Scope;
 use hipstr::HipStr;
 
 use super::{Predicate, SharedOperator};
@@ -22,7 +23,7 @@ pub(crate) enum Matcher<M: Modality> {
     /// The entity's label carries this tag (resolved through the catalog).
     /// An empty catalog never matches.
     Tag(HipStr<'static>),
-    /// An arbitrary predicate over the entity (and the catalog).
+    /// An arbitrary predicate over the entity (with the catalog and scope).
     Predicate(Predicate<M>),
     /// Matches every entity — the catch-all fallback.
     Always,
@@ -30,14 +31,16 @@ pub(crate) enum Matcher<M: Modality> {
 
 impl<M: Modality> Matcher<M> {
     /// Whether this matcher accepts `entity`, given the catalog used to
-    /// resolve tags (and passed through to predicates).
-    fn matches(&self, entity: &Entity<M>, catalog: &LabelCatalog) -> bool {
+    /// resolve tags and the run [`Scope`] (both passed through to predicates).
+    ///
+    /// [`Scope`]: elide_core::recognition::Scope
+    fn matches(&self, entity: &Entity<M>, catalog: &LabelCatalog, scope: &Scope) -> bool {
         match self {
             Matcher::Label(label) => &entity.label == label,
             Matcher::Tag(tag) => catalog
                 .get(&entity.label)
                 .is_some_and(|label| label.has_tag(tag.as_str())),
-            Matcher::Predicate(predicate) => predicate(entity, catalog),
+            Matcher::Predicate(predicate) => predicate(entity, catalog, scope),
             Matcher::Always => true,
         }
     }
@@ -105,14 +108,20 @@ impl<M: Modality> Rule<M> {
 
     /// A rule binding `operator` to every entity `predicate` accepts. The
     /// predicate sees the entity's label, confidence, location, and
-    /// provenance. Use [`catalog_predicate`](Self::catalog_predicate) when
-    /// it also needs the [`LabelCatalog`].
+    /// provenance. Use [`catalog_predicate`](Self::catalog_predicate) when it
+    /// also needs the [`LabelCatalog`], or [`scope_predicate`](Self::scope_predicate)
+    /// when it needs the run [`Scope`].
+    ///
+    /// [`Scope`]: elide_core::recognition::Scope
     pub fn predicate<O, P>(predicate: P, operator: O) -> Self
     where
         O: Operator<M> + 'static,
         P: Fn(&Entity<M>) -> bool + Send + Sync + 'static,
     {
-        Self::new(Matcher::Predicate(Box::new(move |e, _| predicate(e))), operator)
+        Self::new(
+            Matcher::Predicate(Box::new(move |e, _, _| predicate(e))),
+            operator,
+        )
     }
 
     /// A rule binding `operator` to every entity `predicate` accepts, where
@@ -123,7 +132,40 @@ impl<M: Modality> Rule<M> {
         O: Operator<M> + 'static,
         P: Fn(&Entity<M>, &LabelCatalog) -> bool + Send + Sync + 'static,
     {
-        Self::new(Matcher::Predicate(Box::new(predicate)), operator)
+        Self::new(
+            Matcher::Predicate(Box::new(move |e, catalog, _| predicate(e, catalog))),
+            operator,
+        )
+    }
+
+    /// A rule binding `operator` to every entity `predicate` accepts, where
+    /// `predicate` also receives the run [`Scope`] — the scope-aware
+    /// counterpart to [`predicate`](Self::predicate).
+    ///
+    /// This is how one detected document is redacted differently per request
+    /// context: a predicate reads `scope.metadata.audience` (or `purpose`,
+    /// `tags`, `languages`, `countries`) and selects a different operator
+    /// accordingly. Selection runs once per [`Scope`], so the same analyzed
+    /// entities produce a different plan for each audience.
+    ///
+    /// ```ignore
+    /// // Auditors see more of a card than support agents do.
+    /// Rule::scope_predicate(
+    ///     |_entity, scope| scope.metadata.audience.iter().any(|a| a == "auditor"),
+    ///     Mask::stars().with_keep_prefix(6).with_keep_suffix(4),
+    /// )
+    /// ```
+    ///
+    /// [`Scope`]: elide_core::recognition::Scope
+    pub fn scope_predicate<O, P>(predicate: P, operator: O) -> Self
+    where
+        O: Operator<M> + 'static,
+        P: Fn(&Entity<M>, &Scope) -> bool + Send + Sync + 'static,
+    {
+        Self::new(
+            Matcher::Predicate(Box::new(move |e, _, scope| predicate(e, scope))),
+            operator,
+        )
     }
 
     /// A catch-all rule: `operator` runs for every entity not matched by an
@@ -154,8 +196,8 @@ impl<M: Modality> Rule<M> {
     }
 
     /// Whether this rule's matcher accepts `entity` (for the registry).
-    pub(crate) fn matches(&self, entity: &Entity<M>, catalog: &LabelCatalog) -> bool {
-        self.matcher.matches(entity, catalog)
+    pub(crate) fn matches(&self, entity: &Entity<M>, catalog: &LabelCatalog, scope: &Scope) -> bool {
+        self.matcher.matches(entity, catalog, scope)
     }
 
     /// The provenance summary of this rule's matcher (for the registry).

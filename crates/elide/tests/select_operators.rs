@@ -20,6 +20,7 @@ use elide::recognition::llm::LlmRecognizer;
 use elide::recognition::pattern::PatternRecognizer;
 use elide::redaction::operators::{Erase, Replace};
 use elide::redaction::{Anonymizer, Rule, Selection};
+use elide::recognition::Scope;
 use elide::{Directives, Orchestrator, Report, Result};
 
 const SAMPLE: &[u8] = include_bytes!("testdata/sample.docx");
@@ -58,7 +59,7 @@ async fn select_body_resolves_reviewable_picks() -> Result<()> {
 
     // The erased group downcasts back to the body modality's selections.
     let group = orchestrator
-        .select_body(&report)
+        .select_body(&report, &Scope::default())
         .expect("body pipeline is registered");
     let selections = group
         .as_any()
@@ -100,7 +101,7 @@ async fn select_part_resolves_a_container_part() -> Result<()> {
     let report = Report::new().insert_part::<Image>(image.clone(), Vec::new());
 
     let group = orchestrator
-        .select_part(&report, &image)
+        .select_part(&report, &image, &Scope::default())
         .expect("the image part routes to the image pipeline");
     let selections = group
         .as_any()
@@ -125,12 +126,12 @@ async fn select_returns_none_when_nothing_routes() -> Result<()> {
 
     assert!(
         orchestrator
-            .select_part(&report, &PartId::new("nope/missing.bin"))
+            .select_part(&report, &PartId::new("nope/missing.bin"), &Scope::default())
             .is_none(),
         "an unknown part routes to no pipeline",
     );
     assert!(
-        orchestrator.select_body(&Report::new()).is_none(),
+        orchestrator.select_body(&Report::new(), &Scope::default()).is_none(),
         "a report with no body has nothing to select",
     );
     Ok(())
