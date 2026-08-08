@@ -2,6 +2,7 @@
 //!
 //! [`Recognizer`]: super::Recognizer
 
+use hipstr::HipStr;
 use uuid::Uuid;
 
 use crate::entity::{Entity, Label, LabelCatalog, LabelRef};
@@ -124,8 +125,23 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
     ///
     /// [`target_labels`]: Self::target_labels
     #[must_use]
-    pub fn tags(&self) -> &[String] {
-        &self.scope.tags
+    pub fn tags(&self) -> &[HipStr<'static>] {
+        &self.scope.metadata.tags
+    }
+
+    /// The caller-asserted business purpose driving this request (e.g.
+    /// `"fraud_detection"`), or `None` if unasserted. A recognizer may bias
+    /// detection on it.
+    #[must_use]
+    pub fn purpose(&self) -> Option<&HipStr<'static>> {
+        self.scope.metadata.purpose.as_ref()
+    }
+
+    /// Who the redacted output is for (e.g. `"auditor"`). A recognizer may
+    /// bias detection on it.
+    #[must_use]
+    pub fn audience(&self) -> &[HipStr<'static>] {
+        &self.scope.metadata.audience
     }
 
     /// The [`LabelCatalog`] of entity types recognizers are asked to emit.

@@ -25,15 +25,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 default = []
 
-## Derive `serde::{Serialize, Deserialize}` on the re-exported core types and
-## the operators' policy config (their own fields and the config value enums
-## `Sha2Algorithm`, `DateGranularity`, `DateStyle`), so a policy layer can
-## serialize operator configuration. Runtime capabilities (a `KeyProvider`, a
-## vault) are never part of that config and never serialize.
+## Derive `serde::{Serialize, Deserialize}` on the re-exported types.
 serde = ["dep:serde", "elide-core/serde", "bytes/serde"]
 
-## Derive `schemars::JsonSchema` on the re-exported core types and the
-## operators' policy config, for emitting a JSON Schema of that config.
+## Derive `schemars::JsonSchema` on the re-exported types.
 schema = ["dep:schemars", "serde", "elide-core/schema"]
 
 ## The `audio` modality operators (`Silence`, `Beep`).
@@ -88,3 +83,8 @@ tracing = { workspace = true, features = [] }
 [dev-dependencies]
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["rt", "macros"] }
+
+# Reversibility round-trip through the AesEncrypt operator.
+[[test]]
+name = "deanonymize"
+required-features = ["aes"]

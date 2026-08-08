@@ -12,8 +12,7 @@ use elide_core::operator::{LeakProfile, Operator, OperatorId};
 use serde::{Deserialize, Serialize};
 use elide_core::{Error, ErrorKind, Result};
 
-/// Physically truncate the value, keeping a leading and/or trailing run
-/// of characters and discarding the middle.
+/// Physically truncate the value, keeping a leading and/or trailing run.
 ///
 /// Unlike [`Mask`], which overwrites the middle with a mask character and
 /// keeps the original length, [`Truncate`] *shortens* the string: the

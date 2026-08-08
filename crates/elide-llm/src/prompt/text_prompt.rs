@@ -6,6 +6,7 @@
 
 use std::ops::Range;
 
+use hipstr::HipStr;
 use elide_core::entity::Label;
 use elide_core::modality::text::Text;
 use elide_core::primitive::LanguageTag;
@@ -21,7 +22,7 @@ const SNIPPET_HALF_WIDTH: usize = 80;
 pub(super) struct TextPromptBuilder<'a> {
     text: &'a str,
     inclusions: &'a [Inclusion<Text>],
-    tags: &'a [String],
+    tags: &'a [HipStr<'static>],
     target_labels: &'a [Label],
     language: Option<&'a LanguageTag>,
 }
@@ -30,7 +31,7 @@ impl<'a> TextPromptBuilder<'a> {
     pub fn new(
         text: &'a str,
         inclusions: &'a [Inclusion<Text>],
-        tags: &'a [String],
+        tags: &'a [HipStr<'static>],
         target_labels: &'a [Label],
         language: Option<&'a LanguageTag>,
     ) -> Self {

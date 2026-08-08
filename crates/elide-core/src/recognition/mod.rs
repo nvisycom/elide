@@ -25,7 +25,7 @@ pub use self::artifacts::Artifacts;
 pub use self::context::RecognizerContext;
 pub use self::enricher::Enricher;
 pub use self::label::LabelMap;
-pub use self::scope::Scope;
+pub use self::scope::{Scope, ScopeMetadata};
 use crate::entity::Entity;
 use crate::error::Result;
 use crate::modality::Modality;

@@ -1,6 +1,7 @@
 //! [`Scope`]: the caller-asserted, modality-independent scope of one
-//! analysis.
+//! analysis, and its free-form [`ScopeMetadata`].
 
+use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -24,6 +25,56 @@ use crate::primitive::{CountryCode, Language, Languages};
 ///
 /// [`RecognizerContext`]: super::RecognizerContext
 /// [`Annotations`]: super::annotation::Annotations
+/// Free-form, caller-asserted request context: the *document* it is about and
+/// the *request* driving it.
+///
+/// Three axes of opaque classification strings elide neither ships nor
+/// interprets — a downstream policy layer chooses what `"medical"` or
+/// `"fraud_detection"` or `"auditor"` mean. They are read in two places: a
+/// recognizer may bias its detection on them (the LLM prompt lists them so the
+/// model attends to the right terms), and a scope-aware operator predicate may
+/// branch on them at selection time (redact the same document differently per
+/// [`audience`]).
+///
+/// - [`tags`] classify the *document* (`"medical"`, `"gdpr-request"`).
+/// - [`purpose`] is why the request exists (`"fraud_detection"`).
+/// - [`audience`] is who the redacted output is for (`"support_agent"`,
+///   `"auditor"`) — the axis PCI-style "same document, two masks" branches on.
+///
+/// [`tags`]: Self::tags
+/// [`purpose`]: Self::purpose
+/// [`audience`]: Self::audience
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ScopeMetadata {
+    /// Document-level classification tags (e.g. `"medical"`,
+    /// `"gdpr-request"`). Recognizers may use these to bias their behavior
+    /// for domain-specific terms; those that don't ignore the field.
+    ///
+    /// Named `tags`, not `labels`, to keep "label" reserved for the entity
+    /// taxonomy ([`LabelRef`]/[`LabelCatalog`]): these classify the
+    /// *document*, whereas the scope's catalog names the entity *types* to
+    /// emit.
+    ///
+    /// [`LabelRef`]: crate::entity::LabelRef
+    /// [`LabelCatalog`]: crate::entity::LabelCatalog
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<String>"))]
+    pub tags: Vec<HipStr<'static>>,
+    /// The caller-asserted business purpose driving this request (e.g.
+    /// `"fraud_detection"`, `"gdpr_erasure_request"`). A scope-aware operator
+    /// predicate may skip or swap a rule based on it; a recognizer may bias
+    /// detection on it. `None` when the caller asserts no purpose.
+    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
+    pub purpose: Option<HipStr<'static>>,
+    /// Who the redacted output is for (e.g. `"support_agent"`, `"auditor"`).
+    /// The axis a per-audience redaction branches on: one detected document,
+    /// selected differently per audience. May hold several.
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<String>"))]
+    pub audience: Vec<HipStr<'static>>,
+}
+
 #[derive(Debug, Default, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
@@ -39,18 +90,9 @@ pub struct Scope {
     /// don't lose detections. A document spanning several jurisdictions
     /// can assert all of them; a rule runs when any one matches.
     pub countries: Vec<CountryCode>,
-    /// Document-level classification tags (e.g. `"medical"`,
-    /// `"gdpr-request"`). Recognizers may use these to bias their behavior
-    /// for domain-specific terms; those that don't ignore the field.
-    ///
-    /// Named `tags`, not `labels`, to keep "label" reserved for the entity
-    /// taxonomy ([`LabelRef`]/[`LabelCatalog`]): these classify the
-    /// *document*, whereas [`catalog`] names the entity *types* to emit.
-    ///
-    /// [`catalog`]: Self::catalog
-    /// [`LabelRef`]: crate::entity::LabelRef
-    /// [`LabelCatalog`]: crate::entity::LabelCatalog
-    pub tags: Vec<String>,
+    /// Free-form request context — document tags, request purpose, and the
+    /// output audience. See [`ScopeMetadata`].
+    pub metadata: ScopeMetadata,
     /// The entity types recognizers are asked to emit. A zero-shot NER
     /// model requests exactly this set; an LLM prompt lists it as the
     /// labels to find. Empty means "the recognizer's own default" — a
@@ -68,7 +110,7 @@ impl Scope {
         Self {
             languages: Languages::default(),
             countries: Vec::new(),
-            tags: Vec::new(),
+            metadata: ScopeMetadata::default(),
             catalog: LabelCatalog::new(),
             correlation_id: None,
         }
@@ -102,10 +144,37 @@ impl Scope {
         self
     }
 
-    /// Attach document-level classification tags (e.g. `"medical"`).
+    /// Attach document-level classification [tags](ScopeMetadata::tags)
+    /// (e.g. `"medical"`).
     #[must_use]
-    pub fn with_tags(mut self, tags: Vec<String>) -> Self {
-        self.tags = tags;
+    pub fn with_tags(mut self, tags: impl IntoIterator<Item = impl Into<HipStr<'static>>>) -> Self {
+        self.metadata.tags = tags.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Assert the business [purpose](ScopeMetadata::purpose) driving this
+    /// request (e.g. `"fraud_detection"`).
+    #[must_use]
+    pub fn with_purpose(mut self, purpose: impl Into<HipStr<'static>>) -> Self {
+        self.metadata.purpose = Some(purpose.into());
+        self
+    }
+
+    /// Set the [audience](ScopeMetadata::audience) the redacted output is for
+    /// (e.g. `"auditor"`) — the axis a per-audience redaction branches on.
+    #[must_use]
+    pub fn with_audience(
+        mut self,
+        audience: impl IntoIterator<Item = impl Into<HipStr<'static>>>,
+    ) -> Self {
+        self.metadata.audience = audience.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Replace the whole [`ScopeMetadata`] block at once.
+    #[must_use]
+    pub fn with_metadata(mut self, metadata: ScopeMetadata) -> Self {
+        self.metadata = metadata;
         self
     }
 

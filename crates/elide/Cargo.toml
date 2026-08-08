@@ -165,11 +165,6 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 # Container formats
 zip = { workspace = true }
 
-# Value-shaping operators behind their feature gates.
-[[test]]
-name = "anonymize_operators"
-required-features = ["datetime", "hmac"]
-
 # The orchestrator's reviewable `select` seam over a container.
 [[test]]
 name = "select_operators"

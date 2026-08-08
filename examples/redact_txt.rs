@@ -59,7 +59,9 @@ async fn main() -> Result<()> {
 
     // 5. Redact: apply each entity's operator back into the document,
     //    then re-encode.
-    anonymizer.anonymize(&mut document, &mut entities).await?;
+    anonymizer
+        .anonymize(&mut document, &mut entities, &scope)
+        .await?;
     let encoded = document.encode()?;
     let redacted = String::from_utf8_lossy(encoded.as_bytes());
 

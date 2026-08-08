@@ -4,6 +4,7 @@
 //! [`DefaultPrompt`]: super::DefaultPrompt
 //! [`Prompt<Image>`]: super::Prompt
 
+use hipstr::HipStr;
 use elide_core::entity::Label;
 use elide_core::modality::image::Image;
 use elide_core::primitive::LanguageTag;
@@ -14,7 +15,7 @@ use super::target_labels_block;
 /// Builds user prompts for the image detect pass.
 pub(super) struct ImagePromptBuilder<'a> {
     inclusions: &'a [Inclusion<Image>],
-    tags: &'a [String],
+    tags: &'a [HipStr<'static>],
     target_labels: &'a [Label],
     language: Option<&'a LanguageTag>,
 }
@@ -22,7 +23,7 @@ pub(super) struct ImagePromptBuilder<'a> {
 impl<'a> ImagePromptBuilder<'a> {
     pub fn new(
         inclusions: &'a [Inclusion<Image>],
-        tags: &'a [String],
+        tags: &'a [HipStr<'static>],
         target_labels: &'a [Label],
         language: Option<&'a LanguageTag>,
     ) -> Self {

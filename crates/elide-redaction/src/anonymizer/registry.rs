@@ -10,6 +10,7 @@
 use elide_core::entity::provenance::{Attribution, RuleMatch};
 use elide_core::entity::{Entity, LabelCatalog};
 use elide_core::modality::Modality;
+use elide_core::recognition::Scope;
 
 use super::{Rule, SharedOperator};
 
@@ -60,11 +61,11 @@ impl<M: Modality> OperatorRegistry<M> {
     /// Resolve the operator for `entity`: the first rule whose matcher
     /// accepts it, with a [`RuleMatch`] summary of *why* it matched and the
     /// rule's [`Attribution`] (the policy "why"), or `None` when no rule
-    /// matches.
-    pub(crate) fn resolve(&self, entity: &Entity<M>) -> Option<Resolved<'_, M>> {
+    /// matches. `scope` is passed to scope-aware predicate rules.
+    pub(crate) fn resolve(&self, entity: &Entity<M>, scope: &Scope) -> Option<Resolved<'_, M>> {
         self.rules
             .iter()
-            .find(|rule| rule.matches(entity, &self.catalog))
+            .find(|rule| rule.matches(entity, &self.catalog, scope))
             .map(|rule| Resolved {
                 operator: rule.operator(),
                 matched_by: rule.to_rule_match(),

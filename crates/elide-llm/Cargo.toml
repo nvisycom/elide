@@ -72,6 +72,7 @@ tracing = { workspace = true, features = [] }
 
 # Text processing
 unicode-normalization = { workspace = true, features = [] }
+hipstr = { workspace = true, features = [] }
 
 # AI & LLM frameworks
 rig = { workspace = true, features = ["derive", "reqwest-middleware"], optional = true }
