@@ -27,7 +27,7 @@ use elide::primitive::{ConfidenceThreshold, Language, LanguageTag};
 use elide::recognition::pattern::PatternRecognizer;
 use elide::recognition::{Recognizer, Scope};
 use elide::redaction::operators::{Erase, Mask, Replace};
-use elide::redaction::{Anonymizer, Rule, Operator};
+use elide::redaction::{Anonymizer, Operator, Rule};
 use elide::{Directives, EntityGroup, Error, ErrorKind, Orchestrator, Report, Result};
 
 /// Outcome of one end-to-end run: the entities that survived dedup and
@@ -109,7 +109,10 @@ where
             builtins::GOVERNMENT_ID.to_ref(),
             Replace::new("[government_id]"),
         ))
-        .with(Rule::label(builtins::IP_ADDRESS.to_ref(), Replace::new("[ip_address]")))
+        .with(Rule::label(
+            builtins::IP_ADDRESS.to_ref(),
+            Replace::new("[ip_address]"),
+        ))
         .with(Rule::label(builtins::PAYMENT_CARD.to_ref(), Mask::stars()))
         .with(Rule::fallback(Erase))
 }
@@ -289,8 +292,12 @@ impl Fixture {
         let registry = FormatRegistry::with_builtin();
         let mut document = UntypedDocumentHandle::new(self.decode_as::<M>(&registry).await?);
 
-        let en_tag = LanguageTag::parse("en")
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("invalid language tag: {e}")))?;
+        let en_tag = LanguageTag::parse("en").map_err(|e| {
+            Error::new(
+                ErrorKind::MalformedInput,
+                format!("invalid language tag: {e}"),
+            )
+        })?;
         let scope = Scope::new().with_language(Language::asserted(en_tag));
 
         // One scope, shared across every modality pipeline.

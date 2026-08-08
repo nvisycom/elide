@@ -118,7 +118,9 @@ impl WavHandler {
         let mut samples: Vec<S> = reader
             .samples::<S>()
             .collect::<result::Result<_, _>>()
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("WAV decode failed: {e}")))?;
+            .map_err(|e| {
+                Error::new(ErrorKind::MalformedInput, format!("WAV decode failed: {e}"))
+            })?;
 
         // Walk the position-sorted batch in reverse, applying
         // right-to-left so a `Removed` span doesn't shift the sample

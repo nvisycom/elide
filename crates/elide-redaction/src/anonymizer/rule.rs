@@ -12,6 +12,31 @@ use hipstr::HipStr;
 
 use super::{Predicate, SharedOperator};
 
+/// The context a [predicate rule](Rule::predicate) matches against.
+///
+/// A read-only bundle of everything a matcher can branch on: the
+/// [`entity`](Self::entity) under test, the [`catalog`](Self::catalog) that
+/// resolves a label's tags and metadata (empty when none was set), and the
+/// run [`scope`](Self::scope) carrying request context (purpose, audience,
+/// tags, languages, countries). A predicate reads whichever fields it needs
+/// and ignores the rest; new context lands here without changing any
+/// predicate's signature.
+///
+/// [`Scope`]: elide_core::recognition::Scope
+#[non_exhaustive]
+pub struct MatchContext<'a, M: Modality> {
+    /// The entity being matched — its label, confidence, location, and
+    /// provenance.
+    pub entity: &'a Entity<M>,
+    /// The label catalog, for tag- and metadata-aware matching. Empty when
+    /// no catalog was set on the anonymizer.
+    pub catalog: &'a LabelCatalog,
+    /// The caller-asserted request [`Scope`], for scope-aware matching.
+    ///
+    /// [`Scope`]: elide_core::recognition::Scope
+    pub scope: &'a Scope,
+}
+
 /// How a [`Rule`] decides whether it applies to an entity.
 ///
 /// An exact label, a label tag (resolved through the [`LabelCatalog`]), an
@@ -40,7 +65,11 @@ impl<M: Modality> Matcher<M> {
             Matcher::Tag(tag) => catalog
                 .get(&entity.label)
                 .is_some_and(|label| label.has_tag(tag.as_str())),
-            Matcher::Predicate(predicate) => predicate(entity, catalog, scope),
+            Matcher::Predicate(predicate) => predicate(&MatchContext {
+                entity,
+                catalog,
+                scope,
+            }),
             Matcher::Always => true,
         }
     }
@@ -106,66 +135,34 @@ impl<M: Modality> Rule<M> {
         Self::new(Matcher::Tag(tag.into()), operator)
     }
 
-    /// A rule binding `operator` to every entity `predicate` accepts. The
-    /// predicate sees the entity's label, confidence, location, and
-    /// provenance. Use [`catalog_predicate`](Self::catalog_predicate) when it
-    /// also needs the [`LabelCatalog`], or [`scope_predicate`](Self::scope_predicate)
-    /// when it needs the run [`Scope`].
+    /// A rule binding `operator` to every entity `predicate` accepts.
     ///
-    /// [`Scope`]: elide_core::recognition::Scope
-    pub fn predicate<O, P>(predicate: P, operator: O) -> Self
-    where
-        O: Operator<M> + 'static,
-        P: Fn(&Entity<M>) -> bool + Send + Sync + 'static,
-    {
-        Self::new(
-            Matcher::Predicate(Box::new(move |e, _, _| predicate(e))),
-            operator,
-        )
-    }
-
-    /// A rule binding `operator` to every entity `predicate` accepts, where
-    /// `predicate` also receives the [`LabelCatalog`] (empty when none was
-    /// set) — the catalog-aware counterpart to [`predicate`](Self::predicate).
-    pub fn catalog_predicate<O, P>(predicate: P, operator: O) -> Self
-    where
-        O: Operator<M> + 'static,
-        P: Fn(&Entity<M>, &LabelCatalog) -> bool + Send + Sync + 'static,
-    {
-        Self::new(
-            Matcher::Predicate(Box::new(move |e, catalog, _| predicate(e, catalog))),
-            operator,
-        )
-    }
-
-    /// A rule binding `operator` to every entity `predicate` accepts, where
-    /// `predicate` also receives the run [`Scope`] — the scope-aware
-    /// counterpart to [`predicate`](Self::predicate).
+    /// The predicate receives a [`MatchContext`] — the entity under test plus the
+    /// [`LabelCatalog`] and run [`Scope`] — and reads whichever fields it
+    /// needs. A confidence gate touches only `cx.entity`; a scope-aware rule
+    /// reads `cx.scope`; a tag-aware one reads `cx.catalog`.
     ///
-    /// This is how one detected document is redacted differently per request
-    /// context: a predicate reads `scope.metadata.audience` (or `purpose`,
-    /// `tags`, `languages`, `countries`) and selects a different operator
-    /// accordingly. Selection runs once per [`Scope`], so the same analyzed
-    /// entities produce a different plan for each audience.
+    /// Scope-aware matching is how one detected document is redacted
+    /// differently per request context: a predicate branches on
+    /// `cx.scope.metadata.audience` (or `purpose`, `tags`, `languages`,
+    /// `countries`) and the caller runs selection once per [`Scope`], so the
+    /// same analyzed entities produce a different plan for each audience.
     ///
     /// ```ignore
     /// // Auditors see more of a card than support agents do.
-    /// Rule::scope_predicate(
-    ///     |_entity, scope| scope.metadata.audience.iter().any(|a| a == "auditor"),
+    /// Rule::predicate(
+    ///     |cx| cx.scope.metadata.audience.iter().any(|a| a == "auditor"),
     ///     Mask::stars().with_keep_prefix(6).with_keep_suffix(4),
     /// )
     /// ```
     ///
     /// [`Scope`]: elide_core::recognition::Scope
-    pub fn scope_predicate<O, P>(predicate: P, operator: O) -> Self
+    pub fn predicate<O, P>(predicate: P, operator: O) -> Self
     where
         O: Operator<M> + 'static,
-        P: Fn(&Entity<M>, &Scope) -> bool + Send + Sync + 'static,
+        P: Fn(&MatchContext<'_, M>) -> bool + Send + Sync + 'static,
     {
-        Self::new(
-            Matcher::Predicate(Box::new(move |e, _, scope| predicate(e, scope))),
-            operator,
-        )
+        Self::new(Matcher::Predicate(Box::new(predicate)), operator)
     }
 
     /// A catch-all rule: `operator` runs for every entity not matched by an
@@ -196,7 +193,12 @@ impl<M: Modality> Rule<M> {
     }
 
     /// Whether this rule's matcher accepts `entity` (for the registry).
-    pub(crate) fn matches(&self, entity: &Entity<M>, catalog: &LabelCatalog, scope: &Scope) -> bool {
+    pub(crate) fn matches(
+        &self,
+        entity: &Entity<M>,
+        catalog: &LabelCatalog,
+        scope: &Scope,
+    ) -> bool {
         self.matcher.matches(entity, catalog, scope)
     }
 

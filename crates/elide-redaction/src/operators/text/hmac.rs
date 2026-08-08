@@ -6,12 +6,12 @@
 use std::fmt;
 use std::sync::Arc;
 
+use elide_core::Result;
 use elide_core::entity::{Entity, LabelRef};
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::operator::{LeakProfile, Operator, OperatorId};
-use elide_core::Result;
 use hmac::{Hmac, KeyInit, Mac};
 #[cfg(feature = "serde")]
 use serde::Serialize;
@@ -152,7 +152,12 @@ mod tests {
 
     fn entity(label: &str) -> Entity<Text> {
         let location = TextLocation::new(0, 5);
-        let event = Event::pattern("t", Confidence::MAX, location.clone(), PatternEvent::default());
+        let event = Event::pattern(
+            "t",
+            Confidence::MAX,
+            location.clone(),
+            PatternEvent::default(),
+        );
         Entity::new(
             LabelRef::new(label),
             location,
@@ -165,8 +170,14 @@ mod tests {
     async fn digest_is_stable_for_a_fixed_key() {
         let op = HmacHash::sha256(b"secret-key".to_vec());
         let e = entity("payment_card");
-        let a = op.anonymize(&e, &TextData::new("4111111111111234")).await.unwrap();
-        let b = op.anonymize(&e, &TextData::new("4111111111111234")).await.unwrap();
+        let a = op
+            .anonymize(&e, &TextData::new("4111111111111234"))
+            .await
+            .unwrap();
+        let b = op
+            .anonymize(&e, &TextData::new("4111111111111234"))
+            .await
+            .unwrap();
         assert_eq!(a, b, "same key + value must tokenize identically");
     }
 
@@ -174,8 +185,14 @@ mod tests {
     async fn digest_changes_with_the_key() {
         let e = entity("payment_card");
         let value = TextData::new("4111111111111234");
-        let a = HmacHash::sha256(b"key-a".to_vec()).anonymize(&e, &value).await.unwrap();
-        let b = HmacHash::sha256(b"key-b".to_vec()).anonymize(&e, &value).await.unwrap();
+        let a = HmacHash::sha256(b"key-a".to_vec())
+            .anonymize(&e, &value)
+            .await
+            .unwrap();
+        let b = HmacHash::sha256(b"key-b".to_vec())
+            .anonymize(&e, &value)
+            .await
+            .unwrap();
         assert_ne!(a, b, "a different key must yield a different digest");
     }
 
@@ -186,8 +203,14 @@ mod tests {
         // are a property of the sha2 crate, so we don't assert them here.)
         let e = entity("payment_card");
         let value = TextData::new("4111111111111234");
-        let s256 = HmacHash::sha256(b"k".to_vec()).anonymize(&e, &value).await.unwrap();
-        let s512 = HmacHash::sha512(b"k".to_vec()).anonymize(&e, &value).await.unwrap();
+        let s256 = HmacHash::sha256(b"k".to_vec())
+            .anonymize(&e, &value)
+            .await
+            .unwrap();
+        let s512 = HmacHash::sha512(b"k".to_vec())
+            .anonymize(&e, &value)
+            .await
+            .unwrap();
         assert_ne!(s256, s512, "the two algorithms must not collide");
     }
 
@@ -203,6 +226,9 @@ mod tests {
         let value = TextData::new("same-value");
         let a = op.anonymize(&entity("payment_card"), &value).await.unwrap();
         let b = op.anonymize(&entity("ssn"), &value).await.unwrap();
-        assert_ne!(a, b, "distinct labels draw distinct keys, so distinct digests");
+        assert_ne!(
+            a, b,
+            "distinct labels draw distinct keys, so distinct digests"
+        );
     }
 }

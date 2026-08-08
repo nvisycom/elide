@@ -71,8 +71,12 @@ impl<M> Jinja2Prompt<M> {
     /// Returns a validation error when the file is missing or the template
     /// fails to compile.
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self> {
-        let raw = fs::read_to_string(path.as_ref())
-            .map_err(|e| Error::new(ErrorKind::Configuration, format!("reading prompt file: {e}")))?;
+        let raw = fs::read_to_string(path.as_ref()).map_err(|e| {
+            Error::new(
+                ErrorKind::Configuration,
+                format!("reading prompt file: {e}"),
+            )
+        })?;
         Self::from_template(raw)
     }
 

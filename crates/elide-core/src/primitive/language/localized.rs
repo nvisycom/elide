@@ -111,14 +111,20 @@ mod tests {
     #[test]
     fn requested_language_wins() {
         let text = LocalizedText::new("ninety or older").with(fr(), "quatre-vingt-dix ou plus");
-        assert_eq!(text.resolve(&fr()).map(String::as_str), Some("quatre-vingt-dix ou plus"));
+        assert_eq!(
+            text.resolve(&fr()).map(String::as_str),
+            Some("quatre-vingt-dix ou plus")
+        );
     }
 
     #[test]
     fn falls_back_to_english_when_absent() {
         let text: LocalizedText<String> = LocalizedText::new("ninety or older");
         // No French entry → English.
-        assert_eq!(text.resolve(&fr()).map(String::as_str), Some("ninety or older"));
+        assert_eq!(
+            text.resolve(&fr()).map(String::as_str),
+            Some("ninety or older")
+        );
     }
 
     #[test]

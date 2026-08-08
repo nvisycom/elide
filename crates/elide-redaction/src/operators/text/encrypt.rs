@@ -228,7 +228,12 @@ mod tests {
 
     fn entity() -> Entity<Text> {
         let location = TextLocation::new(0, 5);
-        let event = Event::pattern("t", Confidence::MAX, location.clone(), PatternEvent::default());
+        let event = Event::pattern(
+            "t",
+            Confidence::MAX,
+            location.clone(),
+            PatternEvent::default(),
+        );
         Entity::new(
             LabelRef::new("email_address"),
             location,
@@ -308,12 +313,22 @@ mod tests {
         let card = {
             let loc = TextLocation::new(0, 5);
             let event = Event::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
-            Entity::<Text>::new(LabelRef::new("payment_card"), loc, Confidence::MAX, Provenance::new(event))
+            Entity::<Text>::new(
+                LabelRef::new("payment_card"),
+                loc,
+                Confidence::MAX,
+                Provenance::new(event),
+            )
         };
         let ssn = {
             let loc = TextLocation::new(0, 5);
             let event = Event::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
-            Entity::<Text>::new(LabelRef::new("ssn"), loc, Confidence::MAX, Provenance::new(event))
+            Entity::<Text>::new(
+                LabelRef::new("ssn"),
+                loc,
+                Confidence::MAX,
+                Provenance::new(event),
+            )
         };
 
         let replacement = op.anonymize(&card, &TextData::new("secret")).await.unwrap();

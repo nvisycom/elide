@@ -67,42 +67,38 @@ mod with_fallback;
 #[cfg_attr(docsrs, doc(cfg(feature = "fake")))]
 pub use elide_fake::Fake;
 
-// Text (and tabular-cell) operators.
-pub use self::text::{Clamp, Mask, Pseudonymize, Replace, Truncate};
+// Audio interval operators.
+#[cfg(feature = "audio")]
+pub use self::audio::{Beep, Silence};
+// Cross-modality and shared.
+pub use self::erase::Erase;
+// Image region operators.
+#[cfg(feature = "image")]
+pub use self::image::{Blackbox, Blur, Pixelate};
+pub use self::keep::Keep;
+/// The key-supply abstraction shared by [`HmacHash`] and [`AesEncrypt`].
+#[cfg(any(feature = "hmac", feature = "aes"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "hmac", feature = "aes"))))]
+pub use self::key_provider::{KeyProvider, StaticKey};
+/// The SHA-2 digest width shared by [`Sha2Hash`] and [`HmacHash`].
+#[cfg(any(feature = "sha2", feature = "hmac"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "sha2", feature = "hmac"))))]
+pub use self::sha2_algorithm::Sha2Algorithm;
+// Tabular structural operators.
+#[cfg(feature = "tabular")]
+pub use self::tabular::{DropColumn, DropRow};
 #[cfg(feature = "aes")]
 #[cfg_attr(docsrs, doc(cfg(feature = "aes")))]
 pub use self::text::AesEncrypt;
-#[cfg(feature = "datetime")]
-#[cfg_attr(docsrs, doc(cfg(feature = "datetime")))]
-pub use self::text::{DateGranularity, DateStyle, GeneralizeDate};
 #[cfg(feature = "hmac")]
 #[cfg_attr(docsrs, doc(cfg(feature = "hmac")))]
 pub use self::text::HmacHash;
 #[cfg(feature = "sha2")]
 #[cfg_attr(docsrs, doc(cfg(feature = "sha2")))]
 pub use self::text::Sha2Hash;
-
-// Tabular structural operators.
-#[cfg(feature = "tabular")]
-pub use self::tabular::{DropColumn, DropRow};
-
-// Image region operators.
-#[cfg(feature = "image")]
-pub use self::image::{Blackbox, Blur, Pixelate};
-
-// Audio interval operators.
-#[cfg(feature = "audio")]
-pub use self::audio::{Beep, Silence};
-
-// Cross-modality and shared.
-pub use self::erase::Erase;
-pub use self::keep::Keep;
-/// The key-supply abstraction shared by [`HmacHash`] and [`AesEncrypt`].
-#[cfg(any(feature = "hmac", feature = "aes"))]
-#[cfg_attr(docsrs, doc(cfg(any(feature = "hmac", feature = "aes"))))]
-pub use self::key_provider::{KeyProvider, StaticKey};
+// Text (and tabular-cell) operators.
+pub use self::text::{Clamp, Mask, Pseudonymize, Replace, Truncate};
+#[cfg(feature = "datetime")]
+#[cfg_attr(docsrs, doc(cfg(feature = "datetime")))]
+pub use self::text::{DateGranularity, DateStyle, GeneralizeDate};
 pub use self::with_fallback::{TryOperator, WithFallback};
-/// The SHA-2 digest width shared by [`Sha2Hash`] and [`HmacHash`].
-#[cfg(any(feature = "sha2", feature = "hmac"))]
-#[cfg_attr(docsrs, doc(cfg(any(feature = "sha2", feature = "hmac"))))]
-pub use self::sha2_algorithm::Sha2Algorithm;

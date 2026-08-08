@@ -23,10 +23,10 @@
 //! [`Clamp`]: super::Clamp
 //! [`GeneralizeDate`]: super::GeneralizeDate
 
+use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 use elide_core::operator::{LeakProfile, Operator, OperatorId};
-use elide_core::Result;
 
 /// An [`Operator`] that may decline to apply to a given value.
 ///
@@ -107,7 +107,9 @@ where
     fn leak_profile(&self) -> LeakProfile {
         // A value could take either path, so the profile a caller can
         // *rely on* is the leakier (smaller) of the two.
-        self.primary.leak_profile().min(self.fallback.leak_profile())
+        self.primary
+            .leak_profile()
+            .min(self.fallback.leak_profile())
     }
 
     async fn anonymize(&self, entity: &Entity<M>, data: &M::Data) -> Result<M::Replacement> {
@@ -129,8 +131,8 @@ fn composite_id(primary: &OperatorId, fallback: &OperatorId) -> OperatorId {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
     use elide_core::entity::LabelRef;
+    use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
     use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
     use elide_core::primitive::Confidence;
 
@@ -139,7 +141,12 @@ mod tests {
 
     fn entity() -> Entity<Text> {
         let location = TextLocation::new(0, 3);
-        let event = Event::pattern("t", Confidence::MAX, location.clone(), PatternEvent::default());
+        let event = Event::pattern(
+            "t",
+            Confidence::MAX,
+            location.clone(),
+            PatternEvent::default(),
+        );
         Entity::new(
             LabelRef::new("age"),
             location,

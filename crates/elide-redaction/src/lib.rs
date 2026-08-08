@@ -12,5 +12,5 @@ pub mod vault;
 #[doc(inline)]
 pub use elide_core::operator::*;
 
-pub use self::anonymizer::{Anonymizer, Rule, Selection};
+pub use self::anonymizer::{Anonymizer, MatchContext, Rule, Selection, SelectionView};
 pub use self::deanonymizer::Deanonymizer;

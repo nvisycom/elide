@@ -5,7 +5,6 @@
 use elide_core::entity::LabelRef;
 use elide_core::modality::text::Text;
 use elide_core::recognition::Scope;
-
 use elide_redaction::operators::AesEncrypt;
 use elide_redaction::{Anonymizer, Deanonymizer, Rule};
 
@@ -24,8 +23,15 @@ async fn encrypt_then_decrypt_recovers_the_original_document() {
 
     // AesEncrypt under the label.
     Anonymizer::<Text>::new()
-        .with(Rule::label(LabelRef::new("EMAIL_ADDRESS"), AesEncrypt::with_key(key.to_vec())))
-        .anonymize(&mut doc, std::slice::from_mut(&mut email), &Scope::default())
+        .with(Rule::label(
+            LabelRef::new("EMAIL_ADDRESS"),
+            AesEncrypt::with_key(key.to_vec()),
+        ))
+        .anonymize(
+            &mut doc,
+            std::slice::from_mut(&mut email),
+            &Scope::default(),
+        )
         .await
         .unwrap();
 
@@ -40,7 +46,10 @@ async fn encrypt_then_decrypt_recovers_the_original_document() {
 
     // Decrypt under the same label.
     Deanonymizer::<Text>::new()
-        .with_label(LabelRef::new("EMAIL_ADDRESS"), AesEncrypt::with_key(key.to_vec()))
+        .with_label(
+            LabelRef::new("EMAIL_ADDRESS"),
+            AesEncrypt::with_key(key.to_vec()),
+        )
         .deanonymize(&mut doc, std::slice::from_ref(&encrypted))
         .await
         .unwrap();
@@ -54,8 +63,15 @@ async fn wrong_key_leaves_the_ciphertext_in_place() {
     let mut secret = entity("TOKEN", (2, 8));
 
     Anonymizer::<Text>::new()
-        .with(Rule::label(LabelRef::new("TOKEN"), AesEncrypt::with_key([1u8; 32].to_vec())))
-        .anonymize(&mut doc, std::slice::from_mut(&mut secret), &Scope::default())
+        .with(Rule::label(
+            LabelRef::new("TOKEN"),
+            AesEncrypt::with_key([1u8; 32].to_vec()),
+        ))
+        .anonymize(
+            &mut doc,
+            std::slice::from_mut(&mut secret),
+            &Scope::default(),
+        )
         .await
         .unwrap();
     let encrypted_doc = doc.0.clone();
@@ -65,7 +81,10 @@ async fn wrong_key_leaves_the_ciphertext_in_place() {
     // A deanonymizer with the wrong key cannot recover, so it skips the entity
     // and leaves the ciphertext untouched.
     Deanonymizer::<Text>::new()
-        .with_label(LabelRef::new("TOKEN"), AesEncrypt::with_key([2u8; 32].to_vec()))
+        .with_label(
+            LabelRef::new("TOKEN"),
+            AesEncrypt::with_key([2u8; 32].to_vec()),
+        )
         .deanonymize(&mut doc, std::slice::from_ref(&encrypted))
         .await
         .unwrap();

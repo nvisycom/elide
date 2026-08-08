@@ -17,7 +17,9 @@
 //!
 //! The type-erased storage ([`EntityGroup`] / [`SelectionGroup`]) lives in
 //! [`group`], the per-group report entries ([`BodyReport`] / [`PartReport`])
-//! in [`entry`], and the serde wire view in `serialize`.
+//! in [`entry`], the whole-document selection aggregate
+//! ([`DocumentSelections`]) in `selections`, and the serde wire view in
+//! `serialize`.
 //!
 //! [`BodyReport`]: entry::BodyReport
 //! [`PartReport`]: entry::PartReport
@@ -25,6 +27,7 @@
 
 mod entry;
 mod group;
+mod selections;
 #[cfg(feature = "serde")]
 mod serialize;
 
@@ -39,6 +42,7 @@ use uuid::Uuid;
 
 pub(crate) use self::entry::{BodyReport, PartReport};
 pub use self::group::{EntityGroup, SelectionGroup};
+pub use self::selections::DocumentSelections;
 
 /// The detected entities of a whole document, editable before apply.
 ///
@@ -340,7 +344,11 @@ mod tests {
                 .part_entity_mut::<Text>(&PartId::new("nope"), id)
                 .is_none()
         );
-        assert!(report.part_entity_mut::<Text>(&part, Uuid::now_v7()).is_none());
+        assert!(
+            report
+                .part_entity_mut::<Text>(&part, Uuid::now_v7())
+                .is_none()
+        );
     }
 
     #[test]

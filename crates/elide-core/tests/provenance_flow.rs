@@ -5,7 +5,7 @@
 
 use elide_core::Result;
 use elide_core::entity::provenance::{Event, EventKind, ModelEvent, PatternEvent, Provenance};
-use elide_core::entity::{Entity, EntityCoRef, Label, LabelCatalog, LabelRef, LabelLocale};
+use elide_core::entity::{Entity, EntityCoRef, Label, LabelCatalog, LabelLocale, LabelRef};
 use elide_core::modality::Modality;
 use elide_core::primitive::{Confidence, ConfidenceThreshold, CountryCode, Language, LanguageTag};
 

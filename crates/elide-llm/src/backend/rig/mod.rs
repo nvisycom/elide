@@ -170,4 +170,3 @@ fn image_message(prompt: &str, data: &ImageData) -> Message {
     .expect("two content items");
     Message::User { content }
 }
-

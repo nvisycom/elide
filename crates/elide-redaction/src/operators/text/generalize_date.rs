@@ -2,12 +2,12 @@
 //! (year, year-month, or hour), preserving analytical utility while
 //! removing identifier-level precision.
 
+use elide_core::Result;
 use elide_core::entity::Entity;
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::operator::{LeakProfile, Operator, OperatorId};
-use elide_core::Result;
 use jiff::civil::{Date, DateTime, Time};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -307,16 +307,31 @@ mod tests {
         let g = GeneralizeDate::new(DateGranularity::Hour);
         // Uppercase T, lowercase t, and the space-separated extended form
         // are all valid ISO separators jiff accepts.
-        assert_eq!(g.render("1987-03-14T09:00:00"), Some("1987-03-14T09".to_owned()));
-        assert_eq!(g.render("1987-03-14t09:00:00"), Some("1987-03-14T09".to_owned()));
-        assert_eq!(g.render("1987-03-14 09:00:00"), Some("1987-03-14T09".to_owned()));
+        assert_eq!(
+            g.render("1987-03-14T09:00:00"),
+            Some("1987-03-14T09".to_owned())
+        );
+        assert_eq!(
+            g.render("1987-03-14t09:00:00"),
+            Some("1987-03-14T09".to_owned())
+        );
+        assert_eq!(
+            g.render("1987-03-14 09:00:00"),
+            Some("1987-03-14T09".to_owned())
+        );
         // Minute precision (no seconds) is accepted too.
-        assert_eq!(g.render("1987-03-14T09:32"), Some("1987-03-14T09".to_owned()));
+        assert_eq!(
+            g.render("1987-03-14T09:32"),
+            Some("1987-03-14T09".to_owned())
+        );
     }
 
     #[test]
     fn unparseable_is_declined() {
-        assert_eq!(GeneralizeDate::new(DateGranularity::Year).render("not a date"), None);
+        assert_eq!(
+            GeneralizeDate::new(DateGranularity::Year).render("not a date"),
+            None
+        );
     }
 
     #[test]
@@ -355,7 +370,10 @@ mod tests {
         );
         // A minute-precision timestamp (no seconds) still reduces — the time
         // part is parsed as a jiff Time, which accepts HH:MM.
-        assert_eq!(g.render("03/14/1987 09:32"), Some("03/14/1987 09".to_owned()));
+        assert_eq!(
+            g.render("03/14/1987 09:32"),
+            Some("03/14/1987 09".to_owned())
+        );
         // A bare US date has no time, so Hour declines it.
         assert_eq!(g.render("03/14/1987"), None);
     }
@@ -372,13 +390,18 @@ mod tests {
     async fn bare_operator_erases_a_declined_value() {
         // The Operator impl (not just `render`): a declined value takes the
         // safe default of erasure when the operator is used on its own.
-        use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
         use elide_core::entity::LabelRef;
+        use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
         use elide_core::modality::text::TextLocation;
         use elide_core::primitive::Confidence;
 
         let location = TextLocation::new(0, 8);
-        let event = Event::pattern("t", Confidence::MAX, location.clone(), PatternEvent::default());
+        let event = Event::pattern(
+            "t",
+            Confidence::MAX,
+            location.clone(),
+            PatternEvent::default(),
+        );
         let e: Entity<Text> = Entity::new(
             LabelRef::new("date_of_birth"),
             location,

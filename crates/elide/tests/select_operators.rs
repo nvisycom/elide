@@ -1,12 +1,17 @@
 //! The orchestrator's reviewable `select` seam: resolve the operator picks
-//! for a document's body and parts without redacting.
+//! for a whole document — body and parts — without redacting.
 //!
-//! `select_body` / `select_part` run the anonymizer's rules over a report's
-//! detected entities and hand back the picks (which operator hides which
-//! entity, and why) as an erased [`SelectionGroup`] — the artifact a review
-//! layer downcasts, inspects, and serializes before anything is applied. This
-//! exercises that seam over a real multi-part container.
+//! [`select`] runs the anonymizer's rules over a report's detected entities and
+//! hands back the picks (which operator hides which entity, and why) as a
+//! [`DocumentSelections`] mirroring the report's body/parts shape. Each group is
+//! an erased [`SelectionGroup`] a review layer inspects before anything is
+//! applied: downcast it to the live picks for the in-process apply path, or take
+//! [`views`] for the serializable, modality-free projection a review layer
+//! ships. This exercises that seam over a real multi-part container.
 //!
+//! [`select`]: elide::Orchestrator::select
+//! [`views`]: elide::SelectionGroup::views
+//! [`DocumentSelections`]: elide::DocumentSelections
 //! [`SelectionGroup`]: elide::SelectionGroup
 
 mod fixtures;
@@ -16,11 +21,11 @@ use elide::detection::Analyzer;
 use elide::entity::builtins;
 use elide::modality::image::Image;
 use elide::modality::text::Text;
+use elide::recognition::Scope;
 use elide::recognition::llm::LlmRecognizer;
 use elide::recognition::pattern::PatternRecognizer;
 use elide::redaction::operators::{Erase, Replace};
 use elide::redaction::{Anonymizer, Rule, Selection};
-use elide::recognition::Scope;
 use elide::{Directives, Orchestrator, Report, Result};
 
 const SAMPLE: &[u8] = include_bytes!("testdata/sample.docx");
@@ -34,7 +39,10 @@ fn orchestrator(registry: &FormatRegistry) -> Result<Orchestrator<'_>> {
         .with_builtin_dictionaries()
         .build_context_enhanced()?;
     let text = Anonymizer::new()
-        .with(Rule::label(builtins::EMAIL_ADDRESS.to_ref(), Replace::new("[EMAIL]")))
+        .with(Rule::label(
+            builtins::EMAIL_ADDRESS.to_ref(),
+            Replace::new("[EMAIL]"),
+        ))
         .with(Rule::fallback(Erase));
     let image = LlmRecognizer::<Image>::builder()
         .with_name("mock-image")
@@ -46,93 +54,111 @@ fn orchestrator(registry: &FormatRegistry) -> Result<Orchestrator<'_>> {
         .with_modality::<Image>(Analyzer::new().with_recognizer(image), Anonymizer::new()))
 }
 
-/// `select_body` resolves one pick per redaction over the body's entities,
-/// reading no data and leaving the report untouched. Each pick names an
-/// operator from the configured rules and covers at least one entity.
+/// `select` resolves one pick per redaction over the body's entities, reading
+/// no data and leaving the report untouched. Each pick names an operator from
+/// the configured rules and covers at least one entity.
 #[tokio::test]
-async fn select_body_resolves_reviewable_picks() -> Result<()> {
+async fn select_resolves_reviewable_body_picks() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
     let orchestrator = orchestrator(&registry)?;
 
     let mut doc = registry.decode(SAMPLE, "docx").await?;
     let report = orchestrator.analyze(&mut doc, &Directives::new()).await?;
 
-    // The erased group downcasts back to the body modality's selections.
-    let group = orchestrator
-        .select_body(&report, &Scope::default())
+    let selections = orchestrator.select(&report, &Scope::default());
+    // The erased body group downcasts back to the body modality's selections.
+    let group = selections
+        .body
+        .as_ref()
         .expect("body pipeline is registered");
-    let selections = group
+    let body = group
         .as_any()
         .downcast_ref::<Vec<Selection<Text>>>()
         .expect("body selections are Text");
-    assert!(!selections.is_empty(), "the body resolves operator picks");
+    assert!(!body.is_empty(), "the body resolves operator picks");
 
-    for selection in selections {
-        let op = selection.operator_id().name.as_str();
+    for selection in body {
+        let op = selection.operator_id();
+        let name = op.name.as_str();
         assert!(
-            op == "replace" || op == "erase",
-            "each pick is one of the configured operators, got {op}",
+            name == "replace" || name == "erase",
+            "each pick is one of the configured operators, got {name}",
         );
         assert!(!selection.entities().is_empty(), "a pick covers entities");
     }
     // The fixture's email addresses route to the replace rule.
     assert!(
-        selections
-            .iter()
+        body.iter()
             .any(|s| s.operator_id().name.as_str() == "replace"),
         "the email rule fires on the fixture's addresses",
+    );
+
+    // The whole document projects to serializable, modality-free views without a
+    // downcast — the seam a review layer ships over a wire.
+    let views = selections.views();
+    assert_eq!(
+        views.len(),
+        body.len(),
+        "one view per body pick (no parts here)"
+    );
+    assert!(
+        views
+            .iter()
+            .any(|v| v.operator_id.name.as_str() == "replace"),
+        "views carry the same operator identities",
     );
     Ok(())
 }
 
-/// `select_part` routes through the pipeline of any part the report carries,
-/// returning that part's picks as an `Image` selection group. Built directly
-/// from a rebuilt report so the part is present regardless of what the mock
-/// image backend detected during analysis.
+/// `select` routes each container part the report carries through its pipeline,
+/// keying the picks by [`PartId`]. Built directly from a rebuilt report so the
+/// part is present regardless of what the mock image backend detected.
 #[tokio::test]
-async fn select_part_resolves_a_container_part() -> Result<()> {
+async fn select_resolves_container_parts() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
     let orchestrator = orchestrator(&registry)?;
 
-    // A report carrying one image part with a single detected face — the pick
+    // A report carrying one image part with no detected entities — the pick
     // routes through the image pipeline (Anonymizer::new(), no rules → no
     // operator), so the group is present and empty.
     let image = PartId::new(IMAGE_PART);
     let report = Report::new().insert_part::<Image>(image.clone(), Vec::new());
 
-    let group = orchestrator
-        .select_part(&report, &image, &Scope::default())
+    let selections = orchestrator.select(&report, &Scope::default());
+    assert!(selections.body.is_none(), "the rebuilt report has no body");
+    let group = selections
+        .parts
+        .get(&image)
         .expect("the image part routes to the image pipeline");
-    let selections = group
+    let part = group
         .as_any()
         .downcast_ref::<Vec<Selection<Image>>>()
         .expect("image-part selections are Image");
     assert!(
-        selections.is_empty(),
+        part.is_empty(),
         "no entities on the part → no picks, but the group is present",
     );
     Ok(())
 }
 
-/// `select_*` returns `None` when nothing routes: an unknown part id, and a
-/// report with no body.
+/// `select` yields an empty [`DocumentSelections`] when nothing routes: no body
+/// and no part with a registered pipeline.
 #[tokio::test]
-async fn select_returns_none_when_nothing_routes() -> Result<()> {
+async fn select_is_empty_when_nothing_routes() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
     let orchestrator = orchestrator(&registry)?;
 
-    let mut doc = registry.decode(SAMPLE, "docx").await?;
-    let report = orchestrator.analyze(&mut doc, &Directives::new()).await?;
-
+    // An unknown part modality never matched a pipeline; an empty report has no
+    // body. Either way `select` returns an empty aggregate, not an error.
+    let selections = orchestrator.select(&Report::new(), &Scope::default());
     assert!(
-        orchestrator
-            .select_part(&report, &PartId::new("nope/missing.bin"), &Scope::default())
-            .is_none(),
-        "an unknown part routes to no pipeline",
+        selections.body.is_none(),
+        "a report with no body has nothing to select"
     );
+    assert!(selections.parts.is_empty(), "no parts, no part picks");
     assert!(
-        orchestrator.select_body(&Report::new(), &Scope::default()).is_none(),
-        "a report with no body has nothing to select",
+        selections.views().is_empty(),
+        "an empty selection projects to no views"
     );
     Ok(())
 }

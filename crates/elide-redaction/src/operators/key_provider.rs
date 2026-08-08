@@ -6,8 +6,8 @@
 
 use std::fmt;
 
-use elide_core::entity::LabelRef;
 use elide_core::Result;
+use elide_core::entity::LabelRef;
 use zeroize::Zeroizing;
 
 /// Supplies secret key material, keyed by label.
