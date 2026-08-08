@@ -399,9 +399,9 @@ mod tests {
     use elide_core::entity::provenance::{Event, EventKind, PatternEvent, Provenance, RuleMatch};
     use elide_core::modality::text::{Text, TextData, TextLocation};
     use elide_core::primitive::Confidence;
+    use elide_operator::operators::{Erase, Mask, Replace};
 
     use super::*;
-    use crate::operators::{Erase, Mask, Replace};
 
     /// In-memory text reader: slices the backing string by byte range. Also
     /// a no-op [`DataWriter`] so the apply-path entry points that write can be

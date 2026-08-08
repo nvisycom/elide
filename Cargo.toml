@@ -14,6 +14,7 @@ members = [
     "./crates/elide-ocr",
     "./crates/elide-codec",
     "./crates/elide-fake",
+    "./crates/elide-operator",
     "./crates/elide-redaction",
     "./crates/elide-engine",
     "./crates/elide",
@@ -50,6 +51,7 @@ elide-stt = { path = "./crates/elide-stt", version = "0.1.0" }
 elide-ocr = { path = "./crates/elide-ocr", version = "0.1.0" }
 elide-codec = { path = "./crates/elide-codec", version = "0.1.0" }
 elide-fake = { path = "./crates/elide-fake", version = "0.1.0" }
+elide-operator = { path = "./crates/elide-operator", version = "0.1.0" }
 elide-redaction = { path = "./crates/elide-redaction", version = "0.1.0" }
 elide-engine = { path = "./crates/elide-engine", version = "0.1.0" }
 elide = { path = "./crates/elide", version = "0.1.0" }

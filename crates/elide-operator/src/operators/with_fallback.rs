@@ -68,7 +68,7 @@ pub trait TryOperator<M: Modality>: Operator<M> {
 /// for the leftover values:
 ///
 /// ```
-/// # use elide_redaction::operators::{Clamp, Erase, WithFallback};
+/// # use elide_operator::operators::{Clamp, Erase, WithFallback};
 /// // Ages: cap at 90, and erase anything that isn't a number.
 /// let op = WithFallback::new(Clamp::new().with_ceiling(90.0, "90 or older"), Erase);
 /// # let _ = op;

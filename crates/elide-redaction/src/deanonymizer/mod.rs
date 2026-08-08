@@ -1,7 +1,7 @@
 //! The [`Deanonymizer`] — the "recover" engine.
 //!
 //! The reverse of [`Anonymizer`]: per entity it resolves a
-//! [`ReversibleOperator`] (e.g. [`AesEncrypt`]), reads the replacement text the
+//! [`ReversibleOperator`] (e.g. `AesEncrypt`), reads the replacement text the
 //! document holds, recovers the original, and writes it back. Supported for
 //! modalities whose data and recoverable replacement are both text ([`Text`]
 //! and [`Tabular`]), where the stored value can be lifted back to a
@@ -9,7 +9,6 @@
 //!
 //! [`Anonymizer`]: crate::Anonymizer
 //! [`ReversibleOperator`]: elide_core::operator::ReversibleOperator
-//! [`AesEncrypt`]: crate::operators::AesEncrypt
 //! [`Text`]: elide_core::modality::text::Text
 //! [`Tabular`]: elide_core::modality::tabular::Tabular
 //! [`TextReplacement`]: elide_core::modality::text::TextReplacement
@@ -145,16 +144,16 @@ impl<M: Modality> Default for Deanonymizer<M> {
     }
 }
 
-#[cfg(all(test, feature = "aes"))]
+#[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
     use elide_core::entity::LabelRef;
     use elide_core::modality::text::Text;
     use elide_core::operator::ReversibleOperator;
+    use elide_operator::operators::AesEncrypt;
 
     use crate::Deanonymizer;
-    use crate::operators::AesEncrypt;
 
     /// A dynamically built reversible trait object flows into the builder:
     /// `ReversibleOperator` is implemented for `Box<dyn ReversibleOperator>`

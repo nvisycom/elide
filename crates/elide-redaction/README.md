@@ -2,46 +2,51 @@
 
 [![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/elide/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/elide/actions/workflows/build.yml)
 
-The redaction engine for PII/PHI: the `Anonymizer`, `Deanonymizer`, and the
-shipped operators.
+The redaction engine for PII/PHI: the `Anonymizer` and `Deanonymizer` that
+select and apply operators.
 
 ## Overview
 
 Once entities are detected, they have to be hidden — and the *how* is a policy
 decision: mask a phone number, replace an email, encrypt a record number so it
-can be recovered, drop a whole table row. This crate is the "hide" engine.
+can be recovered, drop a whole table row. This crate is the "hide" engine: it
+*selects* an operator per entity and *applies* it. The operators themselves —
+the strategies — live in [`elide-operator`], so the engine can be depended on
+without the operator library, and vice versa.
 
 `Anonymizer` is the redaction counterpart to the detection `Analyzer`. It holds
-an ordered list of selection rules (bind an operator to a label, a tag, a
-predicate, or a catch-all fallback) and two entry points: `anonymize` picks each
-entity's operator, computes its replacement, and applies the batch back into the
-target in one step; `plan` stops a step short and hands back the `Redactions`
-batch for inspection or deferred application.
+an ordered list of selection `Rule`s (bind an operator to a label, a tag, a
+predicate over a `MatchContext`, or a catch-all fallback) and two paths:
+
+- `select` runs the rules and hands back a reviewable `Selection` per redaction
+  (which operator won, why, over which entities) without reading any data — the
+  decision phase, inspectable and editable before anything is applied. Take a
+  `Selection::view` for a serializable `SelectionView`.
+- `anonymize` selects, computes each `Replacement`, and applies the batch back
+  into the target in one step. `anonymize_selections` applies a (possibly
+  reviewed) set of selections.
+
+`Deanonymizer` reverses a reversible operator (`AesEncrypt`) given the key,
+recovering the original value.
 
 ```rust,ignore
-use elide_redaction::operators::{Erase, Mask, Replace};
+use elide_operator::operators::{Erase, Mask, Replace};
 use elide_redaction::{Anonymizer, Rule};
 
 Anonymizer::new()
     .with(Rule::label(EMAIL_ADDRESS, Replace::default()))
     .with(Rule::tag("financial", Mask::stars()))
     .with(Rule::fallback(Erase))
-    .anonymize(&mut document, &mut entities)
+    .anonymize(&mut document, &mut entities, &scope)
     .await?;
 ```
 
-The shipped operators model Presidio's set, generalised to be multimodal:
-`Mask`, `Replace`, `Pseudonymize`, `Erase`, and `Keep` work everywhere;
-`Sha2Hash` (feature `sha2`) replaces a value with a one-way SHA-2 digest;
-`DropRow`/`DropColumn` (tabular), `Blur`/`Pixelate`/`Blackbox` (image), and
-`Silence`/`Beep` (audio) are feature-gated by modality. The reversible
-`AesEncrypt` operator (feature `aes`, AES-256-GCM) replaces a value with a
-ciphertext the `Deanonymizer` can recover given the key; the locale-aware
-`Fake` operator (feature `fake`) swaps in plausible synthetic values.
+The engine is generic over the `Operator` trait (re-exported from `elide-core`)
+and never names a concrete operator, so it carries no operator features — those
+live on [`elide-operator`]. The `elide` facade re-exports both under
+`elide::redaction` so a caller reaches the engine and the operators together.
 
-Pseudonymization draws a stable surrogate per entity from a `generator`, kept
-consistent across coreferent mentions through a `vault`; `AesEncrypt` takes its
-256-bit `AesKey` directly at construction.
+[`elide-operator`]: ../elide-operator
 
 ## Documentation
 
