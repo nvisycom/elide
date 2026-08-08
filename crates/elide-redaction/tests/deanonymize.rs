@@ -1,11 +1,10 @@
 //! End-to-end reversibility test: encrypt entities in a document with the
 //! [`Anonymizer`], then recover the originals with the [`Deanonymizer`].
-#![cfg(feature = "aes")]
 
 use elide_core::entity::LabelRef;
 use elide_core::modality::text::Text;
 use elide_core::recognition::Scope;
-use elide_redaction::operators::AesEncrypt;
+use elide_operator::operators::AesEncrypt;
 use elide_redaction::{Anonymizer, Deanonymizer, Rule};
 
 mod fixtures;

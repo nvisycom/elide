@@ -10,7 +10,7 @@ use elide_core::entity::{EntityCoRef, Label, LabelCatalog, LabelRef};
 use elide_core::modality::text::Text;
 use elide_core::primitive::{Confidence, ConfidenceThreshold};
 use elide_core::recognition::Scope;
-use elide_redaction::operators::{Erase, Keep, Mask, Replace};
+use elide_operator::operators::{Erase, Keep, Mask, Replace};
 use elide_redaction::{Anonymizer, Rule};
 use fixtures::{TextDoc, anonymize_one, entity, entity_conf};
 

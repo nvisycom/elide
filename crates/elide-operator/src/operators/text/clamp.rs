@@ -110,7 +110,7 @@ fn format_threshold(n: f64) -> String {
 /// # Example
 ///
 /// ```
-/// # use elide_redaction::operators::Clamp;
+/// # use elide_operator::operators::Clamp;
 /// // Explicit label:
 /// let cap = Clamp::new().with_ceiling(90.0, "90 or older");
 /// assert_eq!(cap.render("94", None), Some("90 or older".to_owned())); // language: None → English

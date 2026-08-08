@@ -925,6 +925,7 @@ dependencies = [
  "elide-llm",
  "elide-ner",
  "elide-ocr",
+ "elide-operator",
  "elide-pattern",
  "elide-redaction",
  "elide-stt",
@@ -1091,6 +1092,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "elide-operator"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "async-trait",
+ "base64 0.23.0",
+ "bytes",
+ "elide-core",
+ "elide-fake",
+ "hex",
+ "hipstr",
+ "hmac",
+ "jiff",
+ "schemars",
+ "serde",
+ "sha2 0.11.0",
+ "tokio",
+ "tracing",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "elide-pattern"
 version = "0.1.0"
 dependencies = [
@@ -1114,23 +1138,15 @@ dependencies = [
 name = "elide-redaction"
 version = "0.1.0"
 dependencies = [
- "aes-gcm",
  "async-trait",
- "base64 0.23.0",
- "bytes",
  "elide-core",
- "elide-fake",
- "hex",
+ "elide-operator",
  "hipstr",
- "hmac",
- "jiff",
  "schemars",
  "serde",
- "sha2 0.11.0",
  "tokio",
  "tracing",
  "uuid",
- "zeroize",
 ]
 
 [[package]]

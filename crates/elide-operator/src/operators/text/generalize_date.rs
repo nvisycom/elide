@@ -80,7 +80,7 @@ pub enum DateStyle {
 /// # Example
 ///
 /// ```
-/// # use elide_redaction::operators::{GeneralizeDate, DateGranularity};
+/// # use elide_operator::operators::{GeneralizeDate, DateGranularity};
 /// let g = GeneralizeDate::new(DateGranularity::Year);
 /// assert_eq!(g.render("1987-03-14"), Some("1987".to_owned()));
 /// assert_eq!(g.render("not a date"), None); // declined
