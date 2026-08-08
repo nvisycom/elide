@@ -1,11 +1,11 @@
-//! [`Selection`]: the pending, reviewable operator pick for one redaction.
+//! [`Selection`]: the operator pick for one redaction.
 //!
 //! Where [`Rule`] is the *policy* ("this matcher binds this operator"), a
 //! `Selection` is the *decision* that policy produced for a concrete
 //! redaction: which operator won, why it matched, under what authority, and
-//! over which entities. [`Anonymizer::select`] computes one per redaction
-//! before anything is applied, so a reviewer can inspect — and later
-//! override — the pick between detection and redaction.
+//! over which entities. [`Anonymizer::select`] computes one per redaction —
+//! after overlaps are merged and conflicts resolved — so a caller can inspect
+//! and edit the picks before [`anonymize_selections`] applies them.
 //!
 //! A `Selection` is deliberately *leaner* than the [`Redaction`] event it
 //! eventually produces: it carries only what is needed to make and review a
@@ -14,6 +14,7 @@
 //!
 //! [`Rule`]: super::Rule
 //! [`Anonymizer::select`]: super::Anonymizer::select
+//! [`anonymize_selections`]: super::Anonymizer::anonymize_selections
 //! [`Redaction`]: elide_core::entity::provenance::EventKind::Redaction
 
 use std::sync::Arc;
@@ -21,53 +22,34 @@ use std::sync::Arc;
 use elide_core::entity::provenance::{Attribution, RuleMatch};
 use elide_core::modality::Modality;
 use elide_core::operator::{Operator, OperatorId};
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::Serialize;
 use uuid::Uuid;
 
-/// Whether a [`Selection`] was resolved by the rules or set by a reviewer.
+/// The operator pick for one redaction.
 ///
-/// The distinction is load-bearing at apply time. When overlapping entities
-/// collapse into one redaction, the automatic winner is the *safest* operator
-/// among them — but an [`Override`](Origin::Override) is honored **verbatim**:
-/// clustering never swaps a reviewer's chosen operator for a "safer" one.
-///
-/// [`Selection`]: crate::Selection
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-pub enum Origin {
-    /// Resolved by the anonymizer's rules — the default.
-    Auto,
-    /// Set by a reviewer, overriding the automatic pick. Pinned through
-    /// clustering.
-    Override,
-}
-
-/// A pending, reviewable operator pick for one redaction.
-///
-/// One `Selection` corresponds to one redaction the anonymizer will perform:
-/// a single operator run over one (possibly merged) span. It names the
+/// One `Selection` is one redaction the anonymizer will perform: a single
+/// operator run over one (possibly merged) span. It names the
 /// [`operator`](Self::operator_id) that won, the [`entities`](Self::entities)
 /// it covers (more than one when overlapping detections were merged), the
-/// [rule](Self::matched_by) that chose it, any policy
-/// [`attribution`](Self::attribution), and whether the pick is
-/// [automatic or an override](Self::origin).
+/// [rule](Self::matched_by) that chose it, and any policy
+/// [`attribution`](Self::attribution). Overlaps are already merged and
+/// conflicts resolved by the time a `Selection` exists, so apply just runs
+/// each one — it never re-clusters. A caller may swap a selection's operator
+/// between [`select`] and apply to override the pick; apply runs whatever the
+/// selection carries.
 ///
 /// # Serialization
 ///
 /// A `Selection` is `Serialize` — it emits its *policy* view (operator id,
-/// which rule matched, attribution, origin, covered entities) so a review
-/// tool can display the pick. It is **not** `Deserialize`: the live operator
-/// it carries cannot be reconstructed by serde alone (an operator's config
-/// and any runtime capabilities it needs are rebuilt through a registry, not
-/// deserialized in place). A round-tripped selection is therefore rebuilt
-/// from its serialized policy, not deserialized back into this type directly.
+/// which rule matched, attribution, covered entities) so a review tool can
+/// display the pick. It is **not** `Deserialize`: the live operator it carries
+/// cannot be reconstructed by serde alone (an operator's config and any
+/// runtime capabilities it needs are rebuilt through a registry, not
+/// deserialized in place). A round-tripped selection is therefore rebuilt from
+/// its serialized policy, not deserialized back into this type directly.
 ///
-/// [`Anonymizer::select`]: super::Anonymizer::select
+/// [`select`]: super::Anonymizer::select
 // NOTE: no `JsonSchema` derive yet. `Selection` serializes only its policy
 // view today; a wire-complete, schema-emitting form (operator id + config)
 // lands with operator config-serialization. See issue #165.
@@ -89,14 +71,12 @@ pub struct Selection<M: Modality> {
     matched_by: RuleMatch,
     /// The matched rule's policy rationale, when it carried one.
     attribution: Option<Attribution>,
-    /// Whether this pick was resolved automatically or set by a reviewer.
-    origin: Origin,
 }
 
 impl<M: Modality> Selection<M> {
-    /// Build an automatic selection: the operator the rules resolved, the
-    /// entities it covers, and the provenance of *why* it matched.
-    pub(crate) fn automatic(
+    /// Build a selection: the operator the rules resolved, the entities it
+    /// covers, and the provenance of *why* it matched.
+    pub(crate) fn new(
         operator: Arc<dyn Operator<M>>,
         entities: Vec<Uuid>,
         matched_by: RuleMatch,
@@ -109,7 +89,6 @@ impl<M: Modality> Selection<M> {
             entities,
             matched_by,
             attribution,
-            origin: Origin::Auto,
         }
     }
 
@@ -136,10 +115,5 @@ impl<M: Modality> Selection<M> {
     /// The matched rule's policy attribution, if any.
     pub fn attribution(&self) -> Option<&Attribution> {
         self.attribution.as_ref()
-    }
-
-    /// Whether this pick was resolved automatically or set by a reviewer.
-    pub fn origin(&self) -> Origin {
-        self.origin
     }
 }

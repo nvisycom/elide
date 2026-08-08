@@ -29,7 +29,7 @@ use elide_core::modality::{DataReader, DataWriter, Modality, ModalityLocation};
 use elide_core::operator::{Operator, Redactions};
 
 pub use self::rule::Rule;
-pub use self::selection::{Origin, Selection};
+pub use self::selection::Selection;
 use self::registry::OperatorRegistry;
 
 /// An operator stored in a [`Rule`], type-erased and shared.
@@ -191,12 +191,7 @@ impl<M: Modality> Anonymizer<M> {
             };
 
             let covered = cluster.iter().map(|&i| entities[i].id).collect();
-            selections.push(Selection::automatic(
-                operator,
-                covered,
-                matched_by,
-                attribution,
-            ));
+            selections.push(Selection::new(operator, covered, matched_by, attribution));
         }
         selections
     }
@@ -593,7 +588,6 @@ mod tests {
         // Each selection covers exactly its own entity, by id.
         for (selection, entity) in selections.iter().zip(&entities) {
             assert_eq!(selection.entities(), [entity.id]);
-            assert_eq!(selection.origin(), Origin::Auto);
         }
     }
 
