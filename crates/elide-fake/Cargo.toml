@@ -26,14 +26,12 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Internal crates
 elide-core = { workspace = true, features = ["tabular"] }
 
-# Async
-async-trait = { workspace = true, features = [] }
-
 # Primitive datatypes
 uuid = { workspace = true, features = ["v4"] }
-
-# Fake-data generation
 fake = { workspace = true, features = [] }
+
+# Async runtime & parallelism
+async-trait = { workspace = true, features = [] }
 
 [dev-dependencies]
 # Internal crates — the facade, for the shipped operators the tests use as

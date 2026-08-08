@@ -64,6 +64,9 @@ serde_json = { workspace = true, features = [], optional = true }
 derive_builder = { workspace = true, features = [] }
 thiserror = { workspace = true, features = [], optional = true }
 
+# Primitive datatypes
+hipstr = { workspace = true, features = [] }
+
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
 
@@ -72,7 +75,6 @@ tracing = { workspace = true, features = [] }
 
 # Text processing
 unicode-normalization = { workspace = true, features = [] }
-hipstr = { workspace = true, features = [] }
 
 # AI & LLM frameworks
 rig = { workspace = true, features = ["derive", "reqwest-middleware"], optional = true }

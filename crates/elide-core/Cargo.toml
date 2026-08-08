@@ -56,9 +56,6 @@ schema = ["serde", "dep:schemars"]
 test-utils = []
 
 [dependencies]
-# Async
-async-trait = { workspace = true, features = [] }
-
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }
 schemars = { workspace = true, features = [], optional = true }
@@ -75,5 +72,9 @@ celes = { workspace = true, features = [] }
 type-map = { workspace = true, features = [] }
 bytes = { workspace = true, features = [], optional = true }
 
+# Async runtime & parallelism
+async-trait = { workspace = true, features = [] }
+
 [dev-dependencies]
+# (De)serialization
 serde_json = { workspace = true, features = [] }

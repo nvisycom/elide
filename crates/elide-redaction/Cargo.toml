@@ -41,9 +41,6 @@ tabular = ["elide-core/tabular"]
 # Internal crates
 elide-core = { workspace = true, features = [] }
 
-# Async
-async-trait = { workspace = true, features = [] }
-
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }
 schemars = { workspace = true, features = [], optional = true }
@@ -54,6 +51,9 @@ hipstr = { workspace = true, features = [] }
 
 # Observability
 tracing = { workspace = true, features = [] }
+
+# Async runtime & parallelism
+async-trait = { workspace = true, features = [] }
 
 [dev-dependencies]
 # Internal crates

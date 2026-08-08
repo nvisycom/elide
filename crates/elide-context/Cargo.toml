@@ -26,11 +26,11 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Internal crates
 elide-core = { workspace = true, features = [] }
 
-# Async
-async-trait = { workspace = true, features = [] }
-
 # Primitive datatypes
 hipstr = { workspace = true, features = [] }
 
 # Text processing
 unicode-segmentation = { workspace = true, features = [] }
+
+# Async runtime & parallelism
+async-trait = { workspace = true, features = [] }

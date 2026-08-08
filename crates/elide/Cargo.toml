@@ -150,7 +150,8 @@ elide-engine = { workspace = true, features = [], optional = true }
 elide-operator = { workspace = true, features = [] }
 elide-redaction = { workspace = true, features = [] }
 
-# Async — re-exported so consumers implementing the async traits (Recognizer,
+# Async runtime & parallelism
+# Re-exported so consumers implementing the async traits (Recognizer,
 # Operator, …) need no direct dep.
 async-trait = { workspace = true, features = [] }
 
@@ -164,7 +165,7 @@ bytes = { workspace = true, features = [] }
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
-# Container formats
+# Compression
 zip = { workspace = true }
 
 # The orchestrator's reviewable `select` seam over a container.

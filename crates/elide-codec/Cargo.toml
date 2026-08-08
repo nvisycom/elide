@@ -124,9 +124,6 @@ internal_document = []
 # Internal crates
 elide-core = { workspace = true, features = [] }
 
-# Async traits
-async-trait = { workspace = true, features = [] }
-
 # (De)serialization
 serde_json = { workspace = true, features = [], optional = true }
 csv = { workspace = true, features = [], optional = true }
@@ -138,6 +135,10 @@ bytes = { workspace = true, features = [] }
 sha2 = { workspace = true, features = [] }
 hex = { workspace = true, features = [] }
 
+# Async runtime & parallelism
+async-trait = { workspace = true, features = [] }
+rayon = { workspace = true, features = [], optional = true }
+
 # Observability
 tracing = { workspace = true, features = [] }
 
@@ -146,16 +147,15 @@ scraper = { workspace = true, features = [], optional = true }
 ego-tree = { workspace = true, features = [], optional = true }
 quick-xml = { workspace = true, features = [], optional = true }
 
-# Container formats
+# Compression
 zip = { workspace = true, optional = true }
 
 # Image processing
 image = { workspace = true, features = [], optional = true }
 imageproc = { workspace = true, features = [], optional = true }
 
-# PDF rendering (native PDFium; behind `pdf-render`)
+# Rendering
 pdfium-render = { workspace = true, features = [], optional = true }
-rayon = { workspace = true, features = [], optional = true }
 
 # Audio processing
 hound = { workspace = true, features = [], optional = true }
