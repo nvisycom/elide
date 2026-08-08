@@ -54,8 +54,7 @@ impl<M: Modality> Matcher<M> {
     }
 }
 
-/// One selection rule: a matcher, the operator to run when it matches, and
-/// an optional policy [`Attribution`].
+/// A matcher, the operator it runs, and an optional policy [`Attribution`].
 ///
 /// A [`Rule`] is a self-contained, first-class value: build it, attribute
 /// it with [`because`](Self::because), and hand it to [`Anonymizer::with`]
