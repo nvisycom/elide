@@ -8,6 +8,8 @@ use elide_core::entity::Entity;
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::operator::{LeakProfile, Operator, OperatorId};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256, Sha512};
 
 use crate::operators::Sha2Algorithm;
@@ -19,6 +21,8 @@ use crate::operators::Sha2Algorithm;
 /// attacks and makes equal plaintext hash differently across
 /// deployments.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Sha2Hash {
     algorithm: Sha2Algorithm,
     salt: Bytes,

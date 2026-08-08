@@ -1,8 +1,6 @@
 //! [`Sha2Algorithm`]: the SHA-2 digest width shared by the hashing
 //! operators.
 
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +15,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum Sha2Algorithm {
     /// SHA-256 — 32-byte digest, 64-char hex.
     #[default]

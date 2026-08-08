@@ -7,6 +7,8 @@ use elide_core::modality::Modality;
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::operator::{LeakProfile, Operator, OperatorId};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 /// Substitute the matched span with a template string.
 ///
@@ -29,6 +31,8 @@ use elide_core::operator::{LeakProfile, Operator, OperatorId};
 ///
 /// [`EntityCoRef`]: elide_core::entity::EntityCoRef
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Replace {
     template: String,
 }

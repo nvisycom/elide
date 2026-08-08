@@ -7,6 +7,8 @@ use elide_core::entity::Entity;
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::operator::{LeakProfile, Operator, OperatorId};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 /// Character-replacement masking operator.
 ///
@@ -20,6 +22,8 @@ use elide_core::operator::{LeakProfile, Operator, OperatorId};
 /// Common patterns: mask everything ([`Mask::stars`]); show the last 4
 /// of a card (`Mask::stars().with_keep_suffix(4)`).
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Mask {
     mask_char: char,
     keep_prefix: usize,

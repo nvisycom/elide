@@ -4,6 +4,8 @@ use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::image::{Image, ImageData, ImageReplacement};
 use elide_core::operator::{LeakProfile, Operator, OperatorId};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 /// Mosaic-pixelate the matched image region.
 ///
@@ -15,6 +17,8 @@ use elide_core::operator::{LeakProfile, Operator, OperatorId};
 /// [`Blur`]: crate::operators::Blur
 /// [`Blackbox`]: crate::operators::Blackbox
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Pixelate {
     /// Side length of each mosaic block, in pixels. Larger blocks are
     /// coarser (and harder to reverse).
