@@ -41,8 +41,12 @@ impl Loader<Text> for DocxLoader {
 
 /// Read `word/document.xml` out of the package as a UTF-8 string.
 fn read_body(archive: &[u8]) -> Result<String> {
-    let mut zip = ZipArchive::new(Cursor::new(archive))
-        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("malformed docx zip: {e}")))?;
+    let mut zip = ZipArchive::new(Cursor::new(archive)).map_err(|e| {
+        Error::new(
+            ErrorKind::MalformedInput,
+            format!("malformed docx zip: {e}"),
+        )
+    })?;
     let mut part = zip.by_name(BODY_PART).map_err(|_| {
         Error::new(
             ErrorKind::MalformedInput,
@@ -50,8 +54,12 @@ fn read_body(archive: &[u8]) -> Result<String> {
         )
     })?;
     let mut body = String::with_capacity(part.size() as usize);
-    part.read_to_string(&mut body)
-        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("docx body not UTF-8: {e}")))?;
+    part.read_to_string(&mut body).map_err(|e| {
+        Error::new(
+            ErrorKind::MalformedInput,
+            format!("docx body not UTF-8: {e}"),
+        )
+    })?;
     Ok(body)
 }
 

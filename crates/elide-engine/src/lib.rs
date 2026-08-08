@@ -21,10 +21,10 @@ use elide_redaction::Anonymizer;
 pub use self::directives::Directives;
 use self::pipeline::{AnalyzeOutcome, ErasedPipeline, ModalityPipeline};
 use self::report::{BodyReport, PartReport};
-// `EntityGroup` is the bound on the construction methods; `SelectionGroup` is
-// the erased return type of `select_body`/`select_part` — both are named in
-// public signatures, so callers must be able to reach them.
-pub use self::report::{EntityGroup, Report, SelectionGroup};
+// `EntityGroup` is the bound on the construction methods; `DocumentSelections`
+// is `select`'s return type, and its groups are erased `SelectionGroup`s — all
+// named in public signatures, so callers must be able to reach them.
+pub use self::report::{DocumentSelections, EntityGroup, Report, SelectionGroup};
 
 /// Drives analyze + redact across a whole document.
 ///
@@ -250,18 +250,24 @@ impl<'r> Orchestrator<'r> {
         Ok(report)
     }
 
-    /// Resolve the operator [`Selection`]s the body's pipeline would apply to
-    /// its detected entities, without reading any document data or redacting.
+    /// Resolve the operator [`Selection`]s the pipelines would apply to a
+    /// whole document's detected entities — the body and every container part
+    /// — without reading any document data or redacting.
     ///
-    /// The `select` pass surfaced at the document level: it runs the body
-    /// pipeline's rules over the report's body entities and returns the picks
-    /// (which operator hides which entity, and why), boxed erased so a review
-    /// layer can serialize and inspect them before applying. `None` when the
-    /// report has no body, or no pipeline is registered for its modality.
+    /// The reviewable decision phase surfaced at the document level: it runs
+    /// each pipeline's rules over the matching entities in `report` and returns
+    /// the picks (which operator hides which entity, and why) as a
+    /// [`DocumentSelections`], mirroring the report's own body/parts shape.
+    /// Each group is boxed erased so a review layer can inspect it or project
+    /// it to serializable [`views`](DocumentSelections::views) before applying.
+    /// The body is absent when the report has no body or no pipeline is
+    /// registered for its modality; a part is absent when no pipeline covers
+    /// its modality.
     ///
-    /// Selection reads no data, so this is cheap and side-effect-free; the
-    /// report is left unchanged. Apply the picks with [`anonymize_with`] (which
-    /// re-runs selection internally as part of redacting).
+    /// Selection reads no data, so this is cheap and side-effect-free — every
+    /// part is resolved together at no I/O cost — and the report is left
+    /// unchanged. Apply the picks with [`anonymize_with`] (which re-runs
+    /// selection internally as part of redacting).
     ///
     /// `scope` is the request [`Scope`] selection runs under — the seam for
     /// per-audience redaction: call this once per audience (a different
@@ -273,30 +279,20 @@ impl<'r> Orchestrator<'r> {
     /// [`Scope`]: elide_core::recognition::Scope
     /// [`Selection`]: elide_redaction::Selection
     /// [`anonymize_with`]: Self::anonymize_with
-    pub fn select_body(&self, report: &Report, scope: &Scope) -> Option<Box<dyn SelectionGroup>> {
-        let body = report.body.as_ref()?;
-        let pipeline = self.pipelines.get(&body.modality)?;
-        Some(pipeline.select(body.entities.as_ref(), scope))
-    }
-
-    /// Resolve the operator [`Selection`]s the pipeline for container part `id`
-    /// would apply to that part's detected entities under `scope` — the part
-    /// counterpart to [`select_body`].
-    ///
-    /// `None` for an unknown part, or when no pipeline is registered for the
-    /// part's modality. Reads no data and leaves the report unchanged.
-    ///
-    /// [`Selection`]: elide_redaction::Selection
-    /// [`select_body`]: Self::select_body
-    pub fn select_part(
-        &self,
-        report: &Report,
-        id: &PartId,
-        scope: &Scope,
-    ) -> Option<Box<dyn SelectionGroup>> {
-        let part = report.parts.get(id)?;
-        let pipeline = self.pipelines.get(&part.modality)?;
-        Some(pipeline.select(part.entities.as_ref(), scope))
+    pub fn select(&self, report: &Report, scope: &Scope) -> DocumentSelections {
+        let body = report.body.as_ref().and_then(|body| {
+            let pipeline = self.pipelines.get(&body.modality)?;
+            Some(pipeline.select(body.entities.as_ref(), scope))
+        });
+        let parts = report
+            .parts
+            .iter()
+            .filter_map(|(id, part)| {
+                let pipeline = self.pipelines.get(&part.modality)?;
+                Some((id.clone(), pipeline.select(part.entities.as_ref(), scope)))
+            })
+            .collect();
+        DocumentSelections { body, parts }
     }
 
     /// Re-decode the container part `id` from `document` into a handle, or

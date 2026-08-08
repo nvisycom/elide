@@ -39,24 +39,39 @@ pub(super) fn probe_duration_ms(bytes: &Bytes, extension_hint: &str) -> Result<u
             FormatOptions::default(),
             MetadataOptions::default(),
         )
-        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("audio probe failed: {e}")))?;
+        .map_err(|e| {
+            Error::new(
+                ErrorKind::MalformedInput,
+                format!("audio probe failed: {e}"),
+            )
+        })?;
 
     let track = reader
         .tracks()
         .first()
         .ok_or_else(|| Error::new(ErrorKind::MalformedInput, "audio probe returned no tracks"))?;
 
-    let time_base = track
-        .time_base
-        .ok_or_else(|| Error::new(ErrorKind::MalformedInput, "audio track is missing a timebase"))?;
-    let duration = track
-        .duration
-        .ok_or_else(|| Error::new(ErrorKind::MalformedInput, "audio track is missing a duration"))?;
+    let time_base = track.time_base.ok_or_else(|| {
+        Error::new(
+            ErrorKind::MalformedInput,
+            "audio track is missing a timebase",
+        )
+    })?;
+    let duration = track.duration.ok_or_else(|| {
+        Error::new(
+            ErrorKind::MalformedInput,
+            "audio track is missing a duration",
+        )
+    })?;
 
     // `Track::duration` is timebase ticks (u64); `calc_time` takes a
     // signed `Timestamp` in the same unit, anchored at zero.
-    let ticks = i64::try_from(duration.get())
-        .map_err(|_| Error::new(ErrorKind::MalformedInput, "audio duration overflowed i64 ticks"))?;
+    let ticks = i64::try_from(duration.get()).map_err(|_| {
+        Error::new(
+            ErrorKind::MalformedInput,
+            "audio duration overflowed i64 ticks",
+        )
+    })?;
     let time = time_base.calc_time(Timestamp::new(ticks)).ok_or_else(|| {
         Error::new(
             ErrorKind::MalformedInput,

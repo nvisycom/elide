@@ -95,8 +95,8 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
     use elide::modality::text::Text;
     use elide::recognition::llm::LlmRecognizer;
     use elide::recognition::pattern::PatternRecognizer;
-    use elide::redaction::{Anonymizer, Rule};
     use elide::redaction::operators::{Erase, Replace};
+    use elide::redaction::{Anonymizer, Rule};
     use elide::{Directives, Orchestrator, Report};
 
     let registry = FormatRegistry::with_builtin();
@@ -105,7 +105,10 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
         .with_builtin_dictionaries()
         .build_context_enhanced()?;
     let anonymizer = Anonymizer::new()
-        .with(Rule::label(builtins::EMAIL_ADDRESS.to_ref(), Replace::new("[EMAIL]")))
+        .with(Rule::label(
+            builtins::EMAIL_ADDRESS.to_ref(),
+            Replace::new("[EMAIL]"),
+        ))
         .with(Rule::fallback(Erase));
     let orchestrator = Orchestrator::new(&registry)
         .with_modality::<Text>(Analyzer::new().with_recognizer(patterns), anonymizer)
@@ -158,7 +161,10 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
         .entities::<Text>()
         .map(|v| v.to_vec())
         .unwrap_or_default();
-    assert!(!audited.is_empty(), "the applied body should surface entities");
+    assert!(
+        !audited.is_empty(),
+        "the applied body should surface entities"
+    );
     for entity in &audited {
         assert!(
             matches!(

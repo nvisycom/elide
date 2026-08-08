@@ -5,16 +5,14 @@
 
 mod fixtures;
 
-use fixtures::{TextDoc, anonymize_one, entity, entity_conf};
-
 use elide_core::entity::provenance::{Attribution, EventKind, RuleMatch};
 use elide_core::entity::{EntityCoRef, Label, LabelCatalog, LabelRef};
 use elide_core::modality::text::Text;
 use elide_core::primitive::{Confidence, ConfidenceThreshold};
 use elide_core::recognition::Scope;
-
 use elide_redaction::operators::{Erase, Keep, Mask, Replace};
 use elide_redaction::{Anonymizer, Rule};
+use fixtures::{TextDoc, anonymize_one, entity, entity_conf};
 
 // --- label / tag / predicate / fallback resolution ------------------------
 
@@ -45,8 +43,10 @@ async fn anonymize_resolves_label_to_operator_with_fallback() {
 #[tokio::test]
 async fn anonymize_replace_renders_label_and_value() {
     let out = anonymize_one(
-        Anonymizer::<Text>::new()
-            .with(Rule::label(LabelRef::new("PERSON"), Replace::new("<{label}:{value}>"))),
+        Anonymizer::<Text>::new().with(Rule::label(
+            LabelRef::new("PERSON"),
+            Replace::new("<{label}:{value}>"),
+        )),
         "name: Alice",
         entity("PERSON", (6, 11)), // "Alice"
     )
@@ -67,20 +67,28 @@ async fn anonymize_replace_threads_coref_through_template() {
     ];
 
     Anonymizer::<Text>::new()
-        .with(Rule::label(LabelRef::new("PERSON"), Replace::new("[{label}:{coref}]")))
+        .with(Rule::label(
+            LabelRef::new("PERSON"),
+            Replace::new("[{label}:{coref}]"),
+        ))
         .anonymize(&mut doc, &mut entities, &Scope::default())
         .await
         .unwrap();
 
     // Coreferent mentions render to the same token; Bob's is distinct.
-    assert_eq!(doc.0, "[PERSON:alice] told [PERSON:bob] [PERSON:alice] left");
+    assert_eq!(
+        doc.0,
+        "[PERSON:alice] told [PERSON:bob] [PERSON:alice] left"
+    );
 }
 
 #[tokio::test]
 async fn anonymize_replace_coref_empty_when_unset() {
     let out = anonymize_one(
-        Anonymizer::<Text>::new()
-            .with(Rule::label(LabelRef::new("PERSON"), Replace::new("[{label}:{coref}]"))),
+        Anonymizer::<Text>::new().with(Rule::label(
+            LabelRef::new("PERSON"),
+            Replace::new("[{label}:{coref}]"),
+        )),
         "name: Alice",
         entity("PERSON", (6, 11)), // "Alice", no coref
     )
@@ -113,7 +121,10 @@ async fn anonymize_predicate_gates_on_confidence() {
     // catch-all. Order matters: the predicate rule precedes the fallback.
     let cutoff = ConfidenceThreshold::clamped(0.5);
     Anonymizer::<Text>::new()
-        .with(Rule::predicate(move |e| !cutoff.passes(e.confidence), Keep))
+        .with(Rule::predicate(
+            move |cx| !cutoff.passes(cx.entity.confidence),
+            Keep,
+        ))
         .with(Rule::fallback(Erase))
         .anonymize(&mut doc, &mut entities, &Scope::default())
         .await
@@ -165,8 +176,12 @@ async fn catalog_predicate_resolves_tags_through_the_catalog() {
     // same source `with_tag` consults, but expressed as a predicate.
     Anonymizer::<Text>::new()
         .with_catalog(catalog)
-        .with(Rule::catalog_predicate(
-            |e, cat| cat.get(&e.label).is_some_and(|l| l.has_tag("financial")),
+        .with(Rule::predicate(
+            |cx| {
+                cx.catalog
+                    .get(&cx.entity.label)
+                    .is_some_and(|l| l.has_tag("financial"))
+            },
             Mask::stars(),
         ))
         .with(Rule::fallback(Erase))
@@ -182,8 +197,14 @@ async fn anonymize_first_matching_rule_wins() {
     // Two rules match the same entity; the earlier one wins.
     let out = anonymize_one(
         Anonymizer::<Text>::new()
-            .with(Rule::label(LabelRef::new("EMAIL_ADDRESS"), Replace::new("[FIRST]")))
-            .with(Rule::label(LabelRef::new("EMAIL_ADDRESS"), Replace::new("[SECOND]"))),
+            .with(Rule::label(
+                LabelRef::new("EMAIL_ADDRESS"),
+                Replace::new("[FIRST]"),
+            ))
+            .with(Rule::label(
+                LabelRef::new("EMAIL_ADDRESS"),
+                Replace::new("[SECOND]"),
+            )),
         "a@b.com",
         entity("EMAIL_ADDRESS", (0, 7)),
     )
@@ -270,7 +291,9 @@ async fn because_accepts_a_bare_name() {
 
     // `.because` takes `Into<Attribution>`: a bare &str is the name, no description.
     Anonymizer::<Text>::new()
-        .with(Rule::label(LabelRef::new("EMAIL_ADDRESS"), Replace::new("[X]")).because("pci-dss-3.4"))
+        .with(
+            Rule::label(LabelRef::new("EMAIL_ADDRESS"), Replace::new("[X]")).because("pci-dss-3.4"),
+        )
         .anonymize(&mut doc, &mut entities, &Scope::default())
         .await
         .unwrap();

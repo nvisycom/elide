@@ -45,7 +45,10 @@ pub struct LabelLocale {
     pub name: HipStr<'static>,
     /// Optional fuller description, for description-capable backends
     /// (GLiNER-2.0, LLM). `None` when the name suffices.
-    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub description: Option<HipStr<'static>>,
 }
@@ -152,11 +155,7 @@ impl Label {
     /// Add (or replace) the [`LabelLocale`] for `language`, returning
     /// `self` for chaining.
     #[must_use]
-    pub fn with_localization(
-        mut self,
-        language: LanguageTag,
-        localization: LabelLocale,
-    ) -> Self {
+    pub fn with_localization(mut self, language: LanguageTag, localization: LabelLocale) -> Self {
         self.localizations.insert(language, localization);
         self
     }
@@ -239,9 +238,8 @@ impl From<&Label> for LabelRef {
 
 #[cfg(test)]
 mod tests {
-    use crate::primitive::LanguageTag;
-
     use super::*;
+    use crate::primitive::LanguageTag;
 
     #[test]
     fn localization_falls_back_to_english() {

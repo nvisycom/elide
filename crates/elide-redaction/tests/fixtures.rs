@@ -12,7 +12,6 @@ use elide_core::modality::{DataReader, DataWriter};
 use elide_core::operator::Redactions;
 use elide_core::primitive::Confidence;
 use elide_core::recognition::Scope;
-
 use elide_redaction::Anonymizer;
 
 /// An in-memory read/write text document: reads byte ranges and applies a
@@ -50,7 +49,12 @@ pub fn entity(label: &str, loc: (usize, usize)) -> Entity<Text> {
 /// Build an entity at an explicit confidence, for confidence-gated selection.
 pub fn entity_conf(label: &str, loc: (usize, usize), confidence: Confidence) -> Entity<Text> {
     let location = TextLocation::new(loc.0, loc.1);
-    let event = Event::pattern("test", confidence, location.clone(), PatternEvent::default());
+    let event = Event::pattern(
+        "test",
+        confidence,
+        location.clone(),
+        PatternEvent::default(),
+    );
     Entity::new(
         LabelRef::new(label.to_owned()),
         location,

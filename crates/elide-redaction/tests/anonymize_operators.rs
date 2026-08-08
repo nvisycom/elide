@@ -6,13 +6,11 @@
 
 mod fixtures;
 
-use fixtures::{anonymize_one, entity};
-
 use elide_core::entity::LabelRef;
 use elide_core::modality::text::Text;
-
 use elide_redaction::operators::{Clamp, Keep};
 use elide_redaction::{Anonymizer, Rule};
+use fixtures::{anonymize_one, entity};
 
 // --- value-shaping operators ---------------------------------------------
 
@@ -55,8 +53,10 @@ async fn generalize_erases_an_unparseable_value_by_default() {
 #[tokio::test]
 async fn clamp_caps_an_age_at_the_hipaa_ceiling() {
     let out = anonymize_one(
-        Anonymizer::<Text>::new()
-            .with(Rule::label(LabelRef::new("age"), Clamp::new().with_ceiling(90.0, "90 or older"))),
+        Anonymizer::<Text>::new().with(Rule::label(
+            LabelRef::new("age"),
+            Clamp::new().with_ceiling(90.0, "90 or older"),
+        )),
         "age 94",
         entity("age", (4, 6)),
     )
@@ -67,8 +67,10 @@ async fn clamp_caps_an_age_at_the_hipaa_ceiling() {
 #[tokio::test]
 async fn clamp_passes_an_in_range_age_through() {
     let out = anonymize_one(
-        Anonymizer::<Text>::new()
-            .with(Rule::label(LabelRef::new("age"), Clamp::new().with_ceiling(90.0, "90 or older"))),
+        Anonymizer::<Text>::new().with(Rule::label(
+            LabelRef::new("age"),
+            Clamp::new().with_ceiling(90.0, "90 or older"),
+        )),
         "age 73",
         entity("age", (4, 6)),
     )
@@ -83,8 +85,10 @@ async fn truncate_shortens_a_pan_to_bin_plus_last_four() {
     //                    0               1
     //                    0123456789012345
     let out = anonymize_one(
-        Anonymizer::<Text>::new()
-            .with(Rule::label(LabelRef::new("payment_card"), Truncate::new(6, 4))),
+        Anonymizer::<Text>::new().with(Rule::label(
+            LabelRef::new("payment_card"),
+            Truncate::new(6, 4),
+        )),
         "4111111111111234",
         entity("payment_card", (0, 16)),
     )
@@ -100,15 +104,19 @@ async fn hmac_tokenizes_a_pan_deterministically() {
 
     let key = b"deployment-secret".to_vec();
     let a = anonymize_one(
-        Anonymizer::<Text>::new()
-            .with(Rule::label(LabelRef::new("payment_card"), HmacHash::sha256(key.clone()))),
+        Anonymizer::<Text>::new().with(Rule::label(
+            LabelRef::new("payment_card"),
+            HmacHash::sha256(key.clone()),
+        )),
         "4111111111111234",
         entity("payment_card", (0, 16)),
     )
     .await;
     let b = anonymize_one(
-        Anonymizer::<Text>::new()
-            .with(Rule::label(LabelRef::new("payment_card"), HmacHash::sha256(key))),
+        Anonymizer::<Text>::new().with(Rule::label(
+            LabelRef::new("payment_card"),
+            HmacHash::sha256(key),
+        )),
         "4111111111111234",
         entity("payment_card", (0, 16)),
     )
@@ -127,15 +135,19 @@ async fn hmac_digest_changes_with_the_key() {
     use elide_redaction::operators::HmacHash;
 
     let a = anonymize_one(
-        Anonymizer::<Text>::new()
-            .with(Rule::label(LabelRef::new("payment_card"), HmacHash::sha256(b"key-a".to_vec()))),
+        Anonymizer::<Text>::new().with(Rule::label(
+            LabelRef::new("payment_card"),
+            HmacHash::sha256(b"key-a".to_vec()),
+        )),
         "4111111111111234",
         entity("payment_card", (0, 16)),
     )
     .await;
     let b = anonymize_one(
-        Anonymizer::<Text>::new()
-            .with(Rule::label(LabelRef::new("payment_card"), HmacHash::sha256(b"key-b".to_vec()))),
+        Anonymizer::<Text>::new().with(Rule::label(
+            LabelRef::new("payment_card"),
+            HmacHash::sha256(b"key-b".to_vec()),
+        )),
         "4111111111111234",
         entity("payment_card", (0, 16)),
     )
@@ -157,8 +169,10 @@ async fn clamp_renders_the_bucket_in_the_entity_language() {
     fr_entity.language = Some(LanguageTag::parse("fr").unwrap());
 
     let out = anonymize_one(
-        Anonymizer::<Text>::new()
-            .with(Rule::label(LabelRef::new("age"), Clamp::new().with_ceiling(90.0, bucket))),
+        Anonymizer::<Text>::new().with(Rule::label(
+            LabelRef::new("age"),
+            Clamp::new().with_ceiling(90.0, bucket),
+        )),
         "âge 94",
         fr_entity,
     )

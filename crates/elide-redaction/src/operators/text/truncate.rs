@@ -8,9 +8,9 @@ use elide_core::entity::Entity;
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::operator::{LeakProfile, Operator, OperatorId};
+use elide_core::{Error, ErrorKind, Result};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use elide_core::{Error, ErrorKind, Result};
 
 /// Physically truncate the value, keeping a leading and/or trailing run.
 ///
@@ -129,12 +129,18 @@ mod tests {
 
     #[test]
     fn prefix_only_keeps_the_bin() {
-        assert_eq!(Truncate::prefix(6).render("4111111111111234").unwrap(), "411111");
+        assert_eq!(
+            Truncate::prefix(6).render("4111111111111234").unwrap(),
+            "411111"
+        );
     }
 
     #[test]
     fn suffix_only_keeps_the_tail() {
-        assert_eq!(Truncate::suffix(4).render("4111111111111234").unwrap(), "1234");
+        assert_eq!(
+            Truncate::suffix(4).render("4111111111111234").unwrap(),
+            "1234"
+        );
     }
 
     #[test]

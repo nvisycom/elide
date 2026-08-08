@@ -27,7 +27,10 @@ use crate::modality::Modality;
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
-    schemars(bound = "M: schemars::JsonSchema, M::Location: schemars::JsonSchema", rename = "{M}Exclusion")
+    schemars(
+        bound = "M: schemars::JsonSchema, M::Location: schemars::JsonSchema",
+        rename = "{M}Exclusion"
+    )
 )]
 pub struct Exclusion<M: Modality> {
     /// Region in modality-native coordinates.

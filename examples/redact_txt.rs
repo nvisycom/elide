@@ -113,11 +113,17 @@ fn build_anonymizer() -> Anonymizer<Text> {
         // before any label rule can fire. Order matters: the first
         // matching rule wins.
         .with(Rule::predicate(
-            |e| !ConfidenceThreshold::BASELINE.passes(e.confidence),
+            |cx| !ConfidenceThreshold::BASELINE.passes(cx.entity.confidence),
             Keep,
         ))
-        .with(Rule::label(builtins::EMAIL_ADDRESS.to_ref(), Replace::new("[EMAIL]")))
-        .with(Rule::label(builtins::PHONE_NUMBER.to_ref(), Replace::new("[PHONE]")))
+        .with(Rule::label(
+            builtins::EMAIL_ADDRESS.to_ref(),
+            Replace::new("[EMAIL]"),
+        ))
+        .with(Rule::label(
+            builtins::PHONE_NUMBER.to_ref(),
+            Replace::new("[PHONE]"),
+        ))
         .with(Rule::label(builtins::URL.to_ref(), Replace::new("[URL]")))
         // Keep the last four digits of a card visible, mask the rest.
         .with(Rule::label(

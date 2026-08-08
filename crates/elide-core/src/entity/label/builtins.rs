@@ -217,9 +217,8 @@ pub(super) static BUILT_INS: &[&LazyLock<Label>] = &[
 
 #[cfg(test)]
 mod tests {
-    use crate::primitive::LanguageTag;
-
     use super::*;
+    use crate::primitive::LanguageTag;
 
     #[test]
     fn well_known_built_ins_have_expected_ids_names_and_tags() {
@@ -251,7 +250,10 @@ mod tests {
         // biometric) — no regulation-citation tag, since mapping a category
         // to a legal regime is a policy-layer concern.
         assert_eq!(POLITICAL_OPINION.id(), "political_opinion");
-        assert_eq!(POLITICAL_OPINION.name(&en), "political opinion or affiliation");
+        assert_eq!(
+            POLITICAL_OPINION.name(&en),
+            "political opinion or affiliation"
+        );
         assert!(POLITICAL_OPINION.has_tag("demographic"));
 
         assert_eq!(TRADE_UNION_MEMBERSHIP.id(), "trade_union_membership");
@@ -264,8 +266,16 @@ mod tests {
         assert!(GENETIC_DATA.has_tag("biometric"));
 
         // No regulation-citation tag leaked onto the taxonomy.
-        for label in [&*POLITICAL_OPINION, &TRADE_UNION_MEMBERSHIP, &SEXUAL_ORIENTATION, &GENETIC_DATA] {
-            assert!(!label.has_tag("article_9"), "regulatory tags belong to the policy layer");
+        for label in [
+            &*POLITICAL_OPINION,
+            &TRADE_UNION_MEMBERSHIP,
+            &SEXUAL_ORIENTATION,
+            &GENETIC_DATA,
+        ] {
+            assert!(
+                !label.has_tag("article_9"),
+                "regulatory tags belong to the policy layer"
+            );
         }
     }
 

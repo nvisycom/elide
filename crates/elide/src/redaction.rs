@@ -18,5 +18,6 @@
 pub use elide_core::operator::{LeakProfile, Operator, OperatorId, Redactions, ReversibleOperator};
 #[doc(inline)]
 pub use elide_redaction::{
-    Anonymizer, Deanonymizer, Rule, Selection, generator, operators, vault,
+    Anonymizer, Deanonymizer, MatchContext, Rule, Selection, SelectionView, generator, operators,
+    vault,
 };

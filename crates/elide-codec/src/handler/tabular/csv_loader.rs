@@ -54,8 +54,8 @@ impl Loader<Tabular> for CsvLoader {
 
         let mut rows = Vec::new();
         for record in reader.records() {
-            let record =
-                record.map_err(|e| Error::new(ErrorKind::MalformedInput, format!("CSV row: {e}")))?;
+            let record = record
+                .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("CSV row: {e}")))?;
             rows.push(record.iter().map(String::from).collect());
         }
 

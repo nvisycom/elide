@@ -365,7 +365,10 @@ impl PatternRecognizerBuilder {
                 builder.dfa_size_limit(bytes);
             }
             Some(builder.build().map_err(|e| {
-                Error::new(ErrorKind::Configuration, format!("compiling regex set: {e}"))
+                Error::new(
+                    ErrorKind::Configuration,
+                    format!("compiling regex set: {e}"),
+                )
             })?)
         };
         Ok((compiled, regex_set))

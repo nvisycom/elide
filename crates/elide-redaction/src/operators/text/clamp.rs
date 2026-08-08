@@ -1,16 +1,16 @@
 //! [`Clamp`]: collapse a numeric value above a ceiling or below a floor
 //! into a bucket label, passing the middle range through unchanged.
 
+use elide_core::Result;
 use elide_core::entity::Entity;
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::operator::{LeakProfile, Operator, OperatorId};
+use elide_core::primitive::{LanguageTag, LocalizedText};
+use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use elide_core::primitive::{LanguageTag, LocalizedText};
-use elide_core::Result;
-use hipstr::HipStr;
 
 use crate::operators::TryOperator;
 
@@ -29,7 +29,9 @@ enum Bucket {
     Explicit(
         #[cfg_attr(
             feature = "schema",
-            schemars(with = "std::collections::HashMap<elide_core::primitive::LanguageTag, String>")
+            schemars(
+                with = "std::collections::HashMap<elide_core::primitive::LanguageTag, String>"
+            )
         )]
         LocalizedText<HipStr<'static>>,
     ),
@@ -221,11 +223,7 @@ impl Clamp {
         // compare false against every bound, so without this filter they
         // would fall through and pass the raw input string back unredacted —
         // a leak. Reject them so they decline (and erase by default) instead.
-        let number = value
-            .trim()
-            .parse::<f64>()
-            .ok()
-            .filter(|n| n.is_finite())?;
+        let number = value.trim().parse::<f64>().ok().filter(|n| n.is_finite())?;
         if let Some((ceiling, bucket)) = &self.ceiling
             && number >= *ceiling
         {
@@ -336,7 +334,10 @@ mod tests {
 
     #[test]
     fn non_numeric_is_declined() {
-        assert_eq!(Clamp::new().with_ceiling(90.0, "x").render("N/A", None), None);
+        assert_eq!(
+            Clamp::new().with_ceiling(90.0, "x").render("N/A", None),
+            None
+        );
     }
 
     #[test]
@@ -399,8 +400,8 @@ mod tests {
     fn bucket_is_rendered_in_the_entity_language() {
         // A localized ceiling bucket: French document gets the French text,
         // an unlisted language falls back to English.
-        let bucket = LocalizedText::new(HipStr::from("90 or older"))
-            .with(fr(), HipStr::from("90 ou plus"));
+        let bucket =
+            LocalizedText::new(HipStr::from("90 or older")).with(fr(), HipStr::from("90 ou plus"));
         let op = Clamp::new().with_ceiling(90.0, bucket);
         assert_eq!(op.render("94", Some(&fr())), Some("90 ou plus".to_owned()));
         assert_eq!(op.render("94", None), Some("90 or older".to_owned()));
@@ -412,15 +413,24 @@ mod tests {
     async fn bare_operator_erases_a_declined_value() {
         // The Operator impl (not just `render`): a declined value takes the
         // safe default of erasure when the operator is used on its own.
-        use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
         use elide_core::entity::LabelRef;
+        use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
         use elide_core::modality::text::TextLocation;
         use elide_core::primitive::Confidence;
 
         let location = TextLocation::new(0, 3);
-        let event = Event::pattern("t", Confidence::MAX, location.clone(), PatternEvent::default());
-        let e: Entity<Text> =
-            Entity::new(LabelRef::new("age"), location, Confidence::MAX, Provenance::new(event));
+        let event = Event::pattern(
+            "t",
+            Confidence::MAX,
+            location.clone(),
+            PatternEvent::default(),
+        );
+        let e: Entity<Text> = Entity::new(
+            LabelRef::new("age"),
+            location,
+            Confidence::MAX,
+            Provenance::new(event),
+        );
         let out = Operator::<Text>::anonymize(
             &Clamp::new().with_ceiling(90.0, "x"),
             &e,

@@ -55,7 +55,12 @@ pub(super) fn probe_channels(bytes: &Bytes) -> Result<u16> {
         .and_then(|p| p.audio())
         .and_then(|a| a.channels.as_ref())
         .map(|c| c.count())
-        .ok_or_else(|| Error::new(ErrorKind::MalformedInput, "MP3 track is missing channel info"))?;
+        .ok_or_else(|| {
+            Error::new(
+                ErrorKind::MalformedInput,
+                "MP3 track is missing channel info",
+            )
+        })?;
 
     u16::try_from(channels)
         .map_err(|_| Error::new(ErrorKind::MalformedInput, "MP3 channel count exceeds u16"))
@@ -85,17 +90,30 @@ pub(super) fn decode_to_pcm(bytes: &Bytes) -> Result<DecodedMp3> {
         .codec_params
         .as_ref()
         .and_then(|p| p.audio())
-        .ok_or_else(|| Error::new(ErrorKind::MalformedInput, "MP3 track is missing audio params"))?
+        .ok_or_else(|| {
+            Error::new(
+                ErrorKind::MalformedInput,
+                "MP3 track is missing audio params",
+            )
+        })?
         .clone();
 
-    let sample_rate = audio_params
-        .sample_rate
-        .ok_or_else(|| Error::new(ErrorKind::MalformedInput, "MP3 track is missing a sample rate"))?;
+    let sample_rate = audio_params.sample_rate.ok_or_else(|| {
+        Error::new(
+            ErrorKind::MalformedInput,
+            "MP3 track is missing a sample rate",
+        )
+    })?;
     let channels = audio_params
         .channels
         .as_ref()
         .map(|c| c.count())
-        .ok_or_else(|| Error::new(ErrorKind::MalformedInput, "MP3 track is missing channel info"))?;
+        .ok_or_else(|| {
+            Error::new(
+                ErrorKind::MalformedInput,
+                "MP3 track is missing channel info",
+            )
+        })?;
     let channels_u16 = u16::try_from(channels)
         .map_err(|_| Error::new(ErrorKind::MalformedInput, "MP3 channel count exceeds u16"))?;
 

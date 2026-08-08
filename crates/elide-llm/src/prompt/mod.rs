@@ -41,7 +41,12 @@ fn target_labels_block(labels: &[Label], language: Option<&LanguageTag>) -> Stri
     for label in labels {
         match label.description(&lang) {
             Some(desc) => {
-                block.push_str(&format!("\n- {} ({}): {}", label.id(), label.name(&lang), desc));
+                block.push_str(&format!(
+                    "\n- {} ({}): {}",
+                    label.id(),
+                    label.name(&lang),
+                    desc
+                ));
             }
             None => block.push_str(&format!("\n- {} ({})", label.id(), label.name(&lang))),
         }

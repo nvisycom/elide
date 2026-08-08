@@ -6,16 +6,14 @@
 
 mod fixtures;
 
-use fixtures::{TextDoc, entity};
-
-use elide_core::entity::provenance::EventKind;
 use elide_core::entity::LabelRef;
+use elide_core::entity::provenance::EventKind;
 use elide_core::modality::text::Text;
 use elide_core::operator::Operator;
 use elide_core::recognition::Scope;
-
 use elide_redaction::operators::{Erase, Replace};
 use elide_redaction::{Anonymizer, Rule};
+use fixtures::{TextDoc, entity};
 
 // --- clustering & overlap -------------------------------------------------
 
@@ -66,7 +64,11 @@ async fn overlap_merges_under_safest_operator() {
 #[tokio::test]
 async fn transitive_overlap_chain_merges() {
     let mut doc = TextDoc("0123456789abcdef".to_owned());
-    let mut entities = vec![entity("A", (0, 5)), entity("B", (4, 9)), entity("C", (8, 13))];
+    let mut entities = vec![
+        entity("A", (0, 5)),
+        entity("B", (4, 9)),
+        entity("C", (8, 13)),
+    ];
     Anonymizer::new()
         .with(Rule::fallback(Erase))
         .anonymize(&mut doc, &mut entities, &Scope::default())

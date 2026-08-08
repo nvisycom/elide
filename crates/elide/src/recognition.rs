@@ -17,7 +17,8 @@
 // pre-recognition concern and live in the `enrichment` module.
 #[doc(inline)]
 pub use elide_core::recognition::{
-    Artifacts, LabelMap, Recognizer, RecognizerContext, RecognizerId, Scope, annotation,
+    Artifacts, LabelMap, Recognizer, RecognizerContext, RecognizerId, Scope, ScopeMetadata,
+    annotation,
 };
 
 /// Context-enhanced recognition: keyword-boosted confidence over another
@@ -51,7 +52,28 @@ pub use elide_core::recognition::{
 /// [`BoostRule`]: elide_context::BoostRule
 pub mod context {
     #[doc(inline)]
-    pub use elide_context::{Boost, BoostRule, Context, Enhanced, Enhancer};
+    pub use elide_context::{
+        Boost, BoostRule, Context, DEFAULT_BOOST, DEFAULT_PREFIX_WORDS, DEFAULT_SUFFIX_WORDS,
+        Enhanced, Enhancer, Token, Tokens,
+    };
+
+    /// Keyword matching for the [`Enhancer`]: the [`KeywordMatcher`] contract
+    /// and its shipped implementations.
+    ///
+    /// `Enhancer::new` takes any [`KeywordMatcher`]; pass a
+    /// [`SubstringMatcher`] (case-insensitive substring hits) or a
+    /// [`LemmaMatcher`] (lemma-aware, matched over [`Token`]s). Re-exported
+    /// from [`elide_context::matching`].
+    ///
+    /// [`Enhancer`]: elide_context::Enhancer
+    /// [`Token`]: elide_context::Token
+    /// [`KeywordMatcher`]: elide_context::matching::KeywordMatcher
+    /// [`SubstringMatcher`]: elide_context::matching::SubstringMatcher
+    /// [`LemmaMatcher`]: elide_context::matching::LemmaMatcher
+    pub mod matching {
+        #[doc(inline)]
+        pub use elide_context::matching::{KeywordMatcher, LemmaMatcher, SubstringMatcher};
+    }
 }
 
 /// LLM-mediated recognition: prompt a language or vision model over

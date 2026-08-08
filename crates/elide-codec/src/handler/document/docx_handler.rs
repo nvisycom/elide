@@ -77,8 +77,12 @@ impl Encoder for DocxEncoder {
         // 2. Rebuild the zip: the body part becomes the redacted XML, a
         //    replaced media part becomes its redacted bytes, and every
         //    other entry is copied through verbatim.
-        let mut reader = ZipArchive::new(Cursor::new(self.archive.as_ref()))
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("malformed docx zip: {e}")))?;
+        let mut reader = ZipArchive::new(Cursor::new(self.archive.as_ref())).map_err(|e| {
+            Error::new(
+                ErrorKind::MalformedInput,
+                format!("malformed docx zip: {e}"),
+            )
+        })?;
         let mut out = ZipWriter::new(Cursor::new(Vec::new()));
 
         for i in 0..reader.len() {
