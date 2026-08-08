@@ -53,9 +53,6 @@ fake = ["dep:elide-fake", "tabular"]
 elide-core = { workspace = true, features = [] }
 elide-fake = { workspace = true, features = [], optional = true }
 
-# Async
-async-trait = { workspace = true, features = [] }
-
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }
 schemars = { workspace = true, features = [], optional = true }
@@ -76,8 +73,8 @@ base64 = { workspace = true, features = ["std"], optional = true }
 aes-gcm = { workspace = true, features = ["aes", "getrandom"], optional = true }
 zeroize = { workspace = true, features = [], optional = true }
 
-# Observability
-tracing = { workspace = true, features = [] }
+# Async runtime & parallelism
+async-trait = { workspace = true, features = [] }
 
 [dev-dependencies]
 # Async runtime & parallelism

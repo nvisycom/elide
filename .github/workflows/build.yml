@@ -10,6 +10,7 @@ on:
       - "examples/**"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "rustfmt.toml"
       - ".github/workflows/build.yml"
       - "Makefile"
   pull_request:
@@ -21,6 +22,7 @@ on:
       - "examples/**"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "rustfmt.toml"
       - ".github/workflows/build.yml"
       - "Makefile"
   workflow_dispatch:
@@ -34,6 +36,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo +nightly fmt --all --check
+
   check:
     name: Check
     runs-on: ubuntu-latest
@@ -142,3 +160,20 @@ jobs:
 
       - name: Build release
         run: cargo build --release
+
+  machete:
+    name: Machete
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install cargo-machete
+        run: cargo binstall cargo-machete --no-confirm --no-symlinks
+
+      - name: Run machete
+        run: cargo machete

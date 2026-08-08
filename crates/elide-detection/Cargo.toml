@@ -43,7 +43,6 @@ schemars = { workspace = true, features = [], optional = true }
 
 # Async runtime & parallelism
 futures = { workspace = true, features = [] }
-async-trait = { workspace = true, features = [] }
 
 # Observability
 tracing = { workspace = true, features = [] }
