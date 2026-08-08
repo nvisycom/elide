@@ -920,11 +920,11 @@ dependencies = [
  "elide-context",
  "elide-core",
  "elide-detection",
+ "elide-engine",
  "elide-lingua",
  "elide-llm",
  "elide-ner",
  "elide-ocr",
- "elide-orchestration",
  "elide-pattern",
  "elide-redaction",
  "elide-stt",
@@ -1000,6 +1000,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "elide-engine"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "elide-codec",
+ "elide-core",
+ "elide-detection",
+ "elide-redaction",
+ "erased-serde",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "elide-examples"
 version = "0.1.0"
 dependencies = [
@@ -1071,21 +1086,6 @@ dependencies = [
  "async-trait",
  "elide-core",
  "tokio",
- "uuid",
-]
-
-[[package]]
-name = "elide-orchestration"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "elide-codec",
- "elide-core",
- "elide-detection",
- "elide-redaction",
- "erased-serde",
- "serde",
- "serde_json",
  "uuid",
 ]
 

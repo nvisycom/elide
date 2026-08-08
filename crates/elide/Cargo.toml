@@ -32,7 +32,7 @@ default = ["pattern", "ner", "llm"]
 ## domain types. Recognizer crates (`pattern`/`ner`/`llm`) need serde
 ## structurally and pull it in regardless; `codec` forwards it when both
 ## are enabled.
-serde = ["elide-core/serde", "elide-detection/serde", "elide-redaction/serde", "elide-codec?/serde", "elide-orchestration?/serde"]
+serde = ["elide-core/serde", "elide-detection/serde", "elide-redaction/serde", "elide-codec?/serde", "elide-engine?/serde"]
 
 ## Derive `schemars::JsonSchema` on the re-exported domain types, for
 ## emitting JSON Schemas of the serialized model. Implies serde. Forwards to
@@ -44,7 +44,7 @@ schema = [
     "elide-detection/schema",
     "elide-redaction/schema",
     "elide-codec?/schema",
-    "elide-orchestration?/schema",
+    "elide-engine?/schema",
     "elide-ner?/schema",
 ]
 
@@ -89,7 +89,7 @@ tabular = ["elide-core/tabular", "elide-redaction/tabular"]
 ## `Report`). On its own this enables only the codec's default formats; use the
 ## per-modality or per-format `codec-*` features below to pull in the shipped
 ## format handlers.
-codec = ["dep:elide-codec", "dep:elide-orchestration"]
+codec = ["dep:elide-codec", "dep:elide-engine"]
 
 ## Per-modality format groups (each aggregates its per-format features).
 codec-text = ["codec-txt", "codec-json", "codec-html", "codec-xml"]
@@ -145,7 +145,7 @@ elide-llm = { workspace = true, features = [], optional = true }
 elide-stt = { workspace = true, features = [], optional = true }
 elide-ocr = { workspace = true, features = [], optional = true }
 elide-codec = { workspace = true, features = [], optional = true }
-elide-orchestration = { workspace = true, features = [], optional = true }
+elide-engine = { workspace = true, features = [], optional = true }
 elide-redaction = { workspace = true, features = [] }
 
 # Async — re-exported so consumers implementing the async traits (Recognizer,
@@ -167,8 +167,13 @@ zip = { workspace = true }
 
 # Value-shaping operators behind their feature gates.
 [[test]]
-name = "anonymize_value_operators"
+name = "anonymize_operators"
 required-features = ["datetime", "hmac"]
+
+# The orchestrator's reviewable `select` seam over a container.
+[[test]]
+name = "select_operators"
+required-features = ["codec-docx", "codec-png", "llm", "mock", "serde"]
 
 # Codec round-trip e2e tests
 [[test]]
