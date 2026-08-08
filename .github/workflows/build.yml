@@ -44,8 +44,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # Nightly: `rustfmt.toml` uses unstable options (`group_imports`,
-      # `imports_granularity`, `reorder_impl_items`) that only apply on nightly.
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@nightly
         with:
