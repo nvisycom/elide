@@ -13,8 +13,6 @@
 use std::ops::Range;
 
 use hipstr::HipStr;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -38,7 +36,7 @@ const SEGMENT_SEPARATOR: &str = " ";
 /// [`resolve`]: Self::resolve
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Transcription {
     /// Segments in stream order.
     segments: Vec<TranscriptSegment>,
@@ -62,7 +60,7 @@ pub struct Transcription {
 /// a tighter span than the whole segment).
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TranscriptSegment {
     /// Time span the segment covers within the stream.
     pub span: TimeSpan,
@@ -140,7 +138,7 @@ impl TranscriptSegment {
 /// One word within a [`TranscriptSegment`], with its own time span.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TranscriptWord {
     /// Time span the word covers within the stream.
     pub span: TimeSpan,

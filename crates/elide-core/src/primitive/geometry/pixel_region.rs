@@ -1,7 +1,5 @@
 //! [`PixelRegion`]: an axis-aligned rectangle in integer pixel space.
 
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -21,7 +19,7 @@ use super::Dimensions;
 /// [`BoundingBox::to_pixels`]: super::BoundingBox::to_pixels
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PixelRegion {
     /// Left edge, in pixels from the image origin.
     pub x: u32,

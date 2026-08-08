@@ -6,8 +6,6 @@ mod attribution;
 mod event;
 mod rule_match;
 
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -43,7 +41,7 @@ use crate::primitive::Confidence;
     serde(bound = "M::Location: Serialize + for<'a> Deserialize<'a>, \
                    M::Data: Serialize + for<'a> Deserialize<'a>")
 )]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
     schemars(

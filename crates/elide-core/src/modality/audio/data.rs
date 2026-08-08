@@ -4,8 +4,6 @@
 
 use bytes::Bytes;
 use hipstr::HipStr;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -25,7 +23,7 @@ use crate::modality::{ModalityData, extension_or};
 /// [`artifacts`]: crate::recognition::RecognizerContext::artifacts
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AudioData {
     /// Encoded audio bytes. Skipped by serde: the bytes are the raw payload,
     /// not metadata, and a serialized report has no need to carry the audio

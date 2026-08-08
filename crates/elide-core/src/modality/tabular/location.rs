@@ -3,8 +3,6 @@
 use std::cmp::Ordering;
 
 use hipstr::HipStr;
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -29,7 +27,7 @@ use crate::modality::{ModalityLocation, Overlap};
 /// [`column_name`]: Self::column_name
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TabularLocation {
     /// Zero-based row index of the cell.
     pub row_index: u32,

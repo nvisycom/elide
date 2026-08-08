@@ -1,8 +1,6 @@
 //! [`Scope`]: the caller-asserted, modality-independent scope of one
 //! analysis.
 
-#[cfg(feature = "schema")]
-use schemars::JsonSchema;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -29,7 +27,7 @@ use crate::primitive::{CountryCode, Language, Languages};
 #[derive(Debug, Default, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Scope {
     /// Caller-asserted languages for the analysis. Empty means the caller
     /// asserted none, leaving detection (if an enricher runs) to fill in.
