@@ -22,12 +22,31 @@ pub struct LabelRef(#[cfg_attr(feature = "schema", schemars(with = "String"))] H
 
 impl LabelRef {
     /// Reference a label by id.
+    ///
+    /// Accepts any id source — a `&'static str`, an owned `String`, a
+    /// [`HipStr`]. For a `&'static str` literal known at compile time, prefer
+    /// [`from_static`](Self::from_static), which is `const`.
     pub fn new(name: impl Into<HipStr<'static>>) -> Self {
         Self(name.into())
     }
 
+    /// Reference a label by a static id, in a `const` context.
+    ///
+    /// The `const` counterpart to [`new`](Self::new) for a `&'static str`
+    /// literal, so a `LabelRef` can be a `const`/`static` item with no runtime
+    /// construction:
+    ///
+    /// ```
+    /// # use elide_core::entity::LabelRef;
+    /// const EMAIL: LabelRef = LabelRef::from_static("EMAIL_ADDRESS");
+    /// assert_eq!(EMAIL.as_str(), "EMAIL_ADDRESS");
+    /// ```
+    pub const fn from_static(name: &'static str) -> Self {
+        Self(HipStr::from_static(name))
+    }
+
     /// Referenced label's name.
-    pub fn as_str(&self) -> &str {
+    pub const fn as_str(&self) -> &str {
         self.0.as_str()
     }
 }
