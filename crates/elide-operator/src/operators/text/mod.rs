@@ -32,7 +32,7 @@ pub use self::generalize_date::{DateGranularity, DateStyle, GeneralizeDate};
 #[cfg(feature = "hmac")]
 pub use self::hmac::HmacHash;
 pub use self::mask::Mask;
-pub use self::pseudonymize::Pseudonymize;
+pub use self::pseudonymize::{Pseudonymize, PseudonymizeKey};
 pub use self::replace::Replace;
 #[cfg(feature = "sha2")]
 pub use self::sha2::Sha2Hash;
