@@ -4,7 +4,7 @@
 # accepted by the validator.
 
 name = "es-nif"
-label = "government_id"
+labels = ["government_id"]
 countries = ["ES"]
 languages = ["es"]
 context = [

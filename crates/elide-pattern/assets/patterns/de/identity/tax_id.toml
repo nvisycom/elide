@@ -3,7 +3,7 @@
 # Check digit at pos 11 via ISO 7064 Mod 11, 10. No leading zero.
 
 name = "de-tax-id"
-label = "tax_id"
+labels = ["tax_id"]
 countries = ["DE"]
 languages = ["de"]
 context = [

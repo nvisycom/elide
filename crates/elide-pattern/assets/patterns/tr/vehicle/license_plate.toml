@@ -3,7 +3,7 @@
 # Civilian format per Karayolları Trafik Kanunu Madde 23.
 
 name = "tr-license-plate"
-label = "license_plate"
+labels = ["license_plate"]
 countries = ["TR"]
 languages = ["tr"]
 context = [

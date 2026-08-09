@@ -4,7 +4,7 @@
 # applies to the last 10 digits.
 
 name = "se-personnummer"
-label = "government_id"
+labels = ["government_id"]
 countries = ["SE"]
 languages = ["sv"]
 context = [

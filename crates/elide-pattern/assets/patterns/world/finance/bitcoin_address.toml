@@ -2,7 +2,7 @@
 # checksum-validated) and Bech32/Bech32m segwit + Taproot (`bc1…`).
 
 name = "bitcoin-address"
-label = "crypto_address"
+labels = ["crypto_address"]
 
 # Legacy Base58 addresses (P2PKH `1…`, P2SH `3…`) carry a
 # four-byte double-SHA256 checksum that the `crypto.btc`

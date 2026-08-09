@@ -3,7 +3,7 @@
 # Rendering is `NNN NNN NNN`.
 
 name = "au-tfn"
-label = "tax_id"
+labels = ["tax_id"]
 countries = ["AU"]
 languages = ["en"]
 context = [

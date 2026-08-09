@@ -5,7 +5,7 @@
 # strong context.
 
 name = "us-drivers-license"
-label = "drivers_license"
+labels = ["drivers_license"]
 countries = ["US"]
 languages = ["en"]
 context = [

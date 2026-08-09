@@ -3,7 +3,7 @@
 # province code.
 
 name = "tr-posta-kodu"
-label = "postal_code"
+labels = ["postal_code"]
 countries = ["TR"]
 languages = ["tr"]
 context = [

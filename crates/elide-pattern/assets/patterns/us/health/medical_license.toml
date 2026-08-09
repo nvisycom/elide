@@ -9,7 +9,7 @@
 # legitimate matches.
 
 name = "us-medical-license"
-label = "medical_id"
+labels = ["medical_id"]
 countries = ["US"]
 languages = ["en"]
 context = [

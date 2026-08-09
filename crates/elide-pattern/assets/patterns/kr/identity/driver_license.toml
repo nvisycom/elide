@@ -5,7 +5,7 @@
 # is not publicly disclosed.
 
 name = "kr-driver-license"
-label = "drivers_license"
+labels = ["drivers_license"]
 countries = ["KR"]
 languages = ["ko"]
 context = [

@@ -1,4 +1,4 @@
 name = "currencies"
-label = "currency"
+labels = ["currency"]
 languages = ["en"]
 score = 0.4

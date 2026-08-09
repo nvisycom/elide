@@ -4,7 +4,7 @@
 # `80840` + the 10 digits.
 
 name = "us-npi"
-label = "medical_id"
+labels = ["medical_id"]
 countries = ["US"]
 languages = ["en"]
 context = [

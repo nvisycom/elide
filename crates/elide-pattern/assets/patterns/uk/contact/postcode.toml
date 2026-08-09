@@ -3,7 +3,7 @@
 # Reference: https://en.wikipedia.org/wiki/Postcodes_in_the_United_Kingdom
 
 name = "uk-postcode"
-label = "postal_code"
+labels = ["postal_code"]
 countries = ["GB"]
 languages = ["en"]
 context = [

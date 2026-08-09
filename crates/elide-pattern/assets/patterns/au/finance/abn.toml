@@ -4,7 +4,7 @@
 # 89. The conventional rendering is `NN NNN NNN NNN`.
 
 name = "au-abn"
-label = "company_id"
+labels = ["company_id"]
 countries = ["AU"]
 languages = ["en"]
 context = [

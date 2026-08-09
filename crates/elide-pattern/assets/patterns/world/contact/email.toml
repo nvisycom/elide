@@ -5,7 +5,7 @@
 # similar are caught.
 
 name = "email"
-label = "email_address"
+labels = ["email_address"]
 
 [[variants]]
 regex = '''\b(?:[!#$%&'*+\-/=?^_`{|}~\w]|[!#$%&'*+\-/=?^_`{|}~\w][!#$%&'*+\-/=?^_`{|}~.\w]{0,}[!#$%&'*+\-/=?^_`{|}~\w])@\w+(?:[-.]\w+)*\.\w+(?:[-.]\w+)*\b'''

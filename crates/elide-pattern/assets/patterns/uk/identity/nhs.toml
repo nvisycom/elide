@@ -1,7 +1,7 @@
 # UK National Health Service number.
 
 name = "uk-nhs"
-label = "medical_id"
+labels = ["medical_id"]
 countries = ["GB"]
 languages = ["en"]
 context = [

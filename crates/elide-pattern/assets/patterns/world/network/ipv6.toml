@@ -7,7 +7,7 @@
 # dedup pipeline downstream.
 
 name = "ipv6"
-label = "ip_address"
+labels = ["ip_address"]
 
 # IPv4-mapped IPv6 (::ffff:0:0:1.2.3.4 et al).
 [[variants]]

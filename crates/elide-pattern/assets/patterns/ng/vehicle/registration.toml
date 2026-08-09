@@ -3,7 +3,7 @@
 # year/batch code. Optional hyphen or space separator.
 
 name = "ng-vehicle-registration"
-label = "license_plate"
+labels = ["license_plate"]
 countries = ["NG"]
 languages = ["en"]
 context = [

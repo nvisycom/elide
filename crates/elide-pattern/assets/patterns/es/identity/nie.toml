@@ -3,7 +3,7 @@
 # the modulo).
 
 name = "es-nie"
-label = "government_id"
+labels = ["government_id"]
 countries = ["ES"]
 languages = ["es"]
 context = [

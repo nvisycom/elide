@@ -4,7 +4,7 @@
 # `pl.regon`.
 
 name = "pl-regon"
-label = "company_id"
+labels = ["company_id"]
 countries = ["PL"]
 languages = ["pl"]
 context = [

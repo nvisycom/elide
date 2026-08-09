@@ -3,7 +3,7 @@
 # ICAO Doc 9303 check digit. Issued by the Bundesdruckerei.
 
 name = "de-passport"
-label = "passport_number"
+labels = ["passport_number"]
 countries = ["DE"]
 languages = ["de"]
 context = [

@@ -3,7 +3,7 @@
 # rendering is `NNN NNN NNN`.
 
 name = "au-acn"
-label = "company_id"
+labels = ["company_id"]
 countries = ["AU"]
 languages = ["en"]
 context = [

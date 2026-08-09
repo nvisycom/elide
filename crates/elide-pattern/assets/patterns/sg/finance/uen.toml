@@ -7,7 +7,7 @@
 #   + 4 digits + check letter).
 
 name = "sg-uen"
-label = "company_id"
+labels = ["company_id"]
 countries = ["SG"]
 languages = ["en"]
 context = [

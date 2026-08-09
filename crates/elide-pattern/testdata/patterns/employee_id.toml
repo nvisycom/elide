@@ -1,5 +1,5 @@
 name = "internal-employee-id"
-label = "internal_id"
+labels = ["internal_id"]
 
 [[variants]]
 regex = "\\bEMP-\\d{5}\\b"

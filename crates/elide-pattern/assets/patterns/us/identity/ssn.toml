@@ -4,7 +4,7 @@
 # Context-keyword boost is expected to lift legitimate matches.
 
 name = "ssn"
-label = "government_id"
+labels = ["government_id"]
 countries = ["US"]
 context = ["social security", "ssn", "tax id", "taxpayer identification"]
 

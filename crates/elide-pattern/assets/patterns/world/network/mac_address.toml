@@ -5,7 +5,7 @@
 # - Cisco dot-form: `0000.0000.0000` (three 4-hex-digit groups).
 
 name = "mac-address"
-label = "mac_address"
+labels = ["mac_address"]
 
 [[variants]]
 regex = "\\b(?:[0-9A-Fa-f]{2}[:\\-]){5}[0-9A-Fa-f]{2}\\b"

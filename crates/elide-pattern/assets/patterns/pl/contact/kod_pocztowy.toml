@@ -3,7 +3,7 @@
 # all values are assigned).
 
 name = "pl-kod-pocztowy"
-label = "postal_code"
+labels = ["postal_code"]
 countries = ["PL"]
 languages = ["pl"]
 context = [

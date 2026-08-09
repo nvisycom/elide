@@ -5,7 +5,7 @@
 # a length-based fallback regex would otherwise pick up.
 
 name = "credit-card"
-label = "payment_card"
+labels = ["payment_card"]
 
 [context]
 en = ["card", "credit", "debit", "payment", "visa", "mastercard", "amex"]

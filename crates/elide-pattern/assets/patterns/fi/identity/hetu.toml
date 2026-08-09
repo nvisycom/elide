@@ -5,7 +5,7 @@
 # `0123456789ABCDEFHJKLMNPRSTUVWXY`).
 
 name = "fi-hetu"
-label = "government_id"
+labels = ["government_id"]
 countries = ["FI"]
 languages = ["fi", "sv"]
 context = [

@@ -6,7 +6,7 @@
 # downstream confidence thresholds.
 
 name = "us-bank-account"
-label = "bank_account"
+labels = ["bank_account"]
 countries = ["US"]
 languages = ["en"]
 context = [

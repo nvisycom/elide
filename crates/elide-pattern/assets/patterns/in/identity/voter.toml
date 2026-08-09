@@ -4,7 +4,7 @@
 # + restricted-set 2nd char + letter + 7 digits.
 
 name = "in-voter"
-label = "government_id"
+labels = ["government_id"]
 countries = ["IN"]
 languages = ["en", "hi"]
 context = [

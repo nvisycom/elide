@@ -3,7 +3,7 @@
 # No published checksum.
 
 name = "sg-postal-code"
-label = "postal_code"
+labels = ["postal_code"]
 countries = ["SG"]
 languages = ["en"]
 context = [

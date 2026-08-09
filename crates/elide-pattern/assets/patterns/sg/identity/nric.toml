@@ -4,7 +4,7 @@
 # algorithm with prefix-specific letter tables.
 
 name = "sg-nric"
-label = "government_id"
+labels = ["government_id"]
 countries = ["SG"]
 languages = ["en"]
 context = [

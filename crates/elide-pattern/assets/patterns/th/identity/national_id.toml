@@ -4,7 +4,7 @@
 # 13th is a weighted Mod-11 check digit.
 
 name = "th-national-id"
-label = "government_id"
+labels = ["government_id"]
 countries = ["TH"]
 languages = ["th"]
 context = [

@@ -5,7 +5,7 @@
 # `ACDEFGHJKMNPQRTUVWXY` (excludes S, L, O, I, B, Z).
 
 name = "us-mbi"
-label = "medical_id"
+labels = ["medical_id"]
 countries = ["US"]
 languages = ["en"]
 context = [

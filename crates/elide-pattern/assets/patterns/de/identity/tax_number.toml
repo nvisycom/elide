@@ -4,7 +4,7 @@
 # common renderings. No checksum is publicly documented.
 
 name = "de-tax-number"
-label = "tax_id"
+labels = ["tax_id"]
 countries = ["DE"]
 languages = ["de"]
 context = [

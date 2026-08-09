@@ -3,7 +3,7 @@
 # Gesundheitskarte). Check digit per § 290 SGB V Anlage 1.
 
 name = "de-health-insurance"
-label = "insurance_id"
+labels = ["insurance_id"]
 countries = ["DE"]
 languages = ["de"]
 context = [

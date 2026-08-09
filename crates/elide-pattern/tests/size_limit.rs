@@ -21,7 +21,7 @@ fn heavy_rule() -> Regex {
         .collect();
     Regex::builder()
         .with_name("heavy")
-        .with_label(builtins::GOVERNMENT_ID.to_ref())
+        .with_labels(vec![builtins::GOVERNMENT_ID.to_ref()])
         .with_variants(variants)
         .build()
         .expect("rule builds")
@@ -73,7 +73,7 @@ fn dict_of(n: usize) -> Dictionary {
     let terms: Vec<Term> = (0..n).map(|i| Term::new(format!("term{i}"))).collect();
     Dictionary::builder()
         .with_name("d")
-        .with_label(builtins::GOVERNMENT_ID.to_ref())
+        .with_labels(vec![builtins::GOVERNMENT_ID.to_ref()])
         .with_terms(terms)
         .build()
         .expect("dictionary builds")

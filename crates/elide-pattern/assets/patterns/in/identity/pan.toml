@@ -3,7 +3,7 @@
 # character encodes the entity type per IT Department spec.
 
 name = "in-pan"
-label = "tax_id"
+labels = ["tax_id"]
 countries = ["IN"]
 languages = ["en", "hi"]
 context = [

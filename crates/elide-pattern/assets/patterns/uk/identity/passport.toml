@@ -6,7 +6,7 @@
 # legitimate matches.
 
 name = "uk-passport"
-label = "passport_number"
+labels = ["passport_number"]
 countries = ["GB"]
 languages = ["en"]
 context = [

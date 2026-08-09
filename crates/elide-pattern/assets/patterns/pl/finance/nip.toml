@@ -4,7 +4,7 @@
 # `XXX-XXX-XX-XX` and `XXX-XX-XX-XXX` separator renderings.
 
 name = "pl-nip"
-label = "tax_id"
+labels = ["tax_id"]
 countries = ["PL"]
 languages = ["pl"]
 context = [

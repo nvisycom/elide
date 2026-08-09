@@ -5,7 +5,7 @@
 # rather than the regex.
 
 name = "uk-nino"
-label = "national_insurance_number"
+labels = ["national_insurance_number"]
 countries = ["GB"]
 languages = ["en"]
 context = ["national insurance", "ni number", "nino"]

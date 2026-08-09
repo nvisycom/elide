@@ -4,7 +4,7 @@
 # or `NNNN NNNNN N N` (with issue number).
 
 name = "au-medicare"
-label = "insurance_id"
+labels = ["insurance_id"]
 countries = ["AU"]
 languages = ["en"]
 context = [

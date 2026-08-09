@@ -3,7 +3,7 @@
 # formula adds 13 instead of 11.
 
 name = "kr-frn"
-label = "government_id"
+labels = ["government_id"]
 countries = ["KR"]
 languages = ["ko"]
 context = [
