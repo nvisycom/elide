@@ -3,7 +3,7 @@
 # 53-99 are unassigned.
 
 name = "es-codigo-postal"
-label = "postal_code"
+labels = ["postal_code"]
 countries = ["ES"]
 languages = ["es"]
 context = [

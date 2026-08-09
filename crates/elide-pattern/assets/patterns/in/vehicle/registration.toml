@@ -4,7 +4,7 @@
 # the canonical structural pattern + RTO/registration context.
 
 name = "in-vehicle-registration"
-label = "license_plate"
+labels = ["license_plate"]
 countries = ["IN"]
 languages = ["en", "hi"]
 context = [

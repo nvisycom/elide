@@ -4,7 +4,7 @@
 # but legacy IDs remain in wide circulation.
 
 name = "es-cif"
-label = "company_id"
+labels = ["company_id"]
 countries = ["ES"]
 languages = ["es"]
 context = [

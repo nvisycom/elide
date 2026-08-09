@@ -4,7 +4,7 @@
 # checksum.
 
 name = "kr-passport"
-label = "passport_number"
+labels = ["passport_number"]
 countries = ["KR"]
 languages = ["ko"]
 context = [

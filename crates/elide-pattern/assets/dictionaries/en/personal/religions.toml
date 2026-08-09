@@ -1,4 +1,4 @@
 name = "religions"
-label = "religion"
+labels = ["religion"]
 languages = ["en"]
 score = 0.4

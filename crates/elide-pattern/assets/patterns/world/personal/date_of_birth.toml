@@ -3,7 +3,7 @@
 # the context boost lifts hits near birth-related keywords.
 
 name = "date_of_birth"
-label = "date_of_birth"
+labels = ["date_of_birth"]
 
 [context]
 en = ["birth", "born", "dob", "birthday", "date of birth"]

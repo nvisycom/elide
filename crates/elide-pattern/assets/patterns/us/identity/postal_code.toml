@@ -2,7 +2,7 @@
 # (`12345` or `12345-6789`). Validated by `us.postal_code`.
 
 name = "us-postal-code"
-label = "postal_code"
+labels = ["postal_code"]
 countries = ["US"]
 context = [
   "zip",

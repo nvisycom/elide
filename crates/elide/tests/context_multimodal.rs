@@ -24,7 +24,7 @@ fn ssn_recognizer() -> impl Recognizer<Image> + Recognizer<Audio> {
         .with_score(Confidence::clamped(0.5));
     let regex = Regex::builder()
         .with_name("ssn")
-        .with_label(LabelRef::new("US_SSN"))
+        .with_labels(vec![LabelRef::new("US_SSN")])
         .with_context(vec!["ssn".to_owned()])
         .with_variants(vec![variant])
         .build()

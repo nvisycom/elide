@@ -3,7 +3,7 @@
 # Civile format issued post-2013).
 
 name = "it-driving-licence"
-label = "drivers_license"
+labels = ["drivers_license"]
 countries = ["IT"]
 languages = ["it"]
 context = [

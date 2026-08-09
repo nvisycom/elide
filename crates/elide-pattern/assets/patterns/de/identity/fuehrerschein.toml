@@ -6,7 +6,7 @@
 # is wired.
 
 name = "de-fuehrerschein"
-label = "drivers_license"
+labels = ["drivers_license"]
 countries = ["DE"]
 languages = ["de"]
 context = [

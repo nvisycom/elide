@@ -3,7 +3,7 @@
 # Validated by `iban` (per-country length + mod-97 checksum).
 
 name = "iban"
-label = "iban"
+labels = ["iban"]
 context = ["iban", "bank", "account", "transfer", "swift"]
 
 [[variants]]

@@ -2,7 +2,7 @@
 # checksum. Validator rejects the all-zero sentinel.
 
 name = "it-vat-code"
-label = "tax_id"
+labels = ["tax_id"]
 countries = ["IT"]
 languages = ["it"]
 context = [

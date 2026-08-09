@@ -3,7 +3,7 @@
 # reserved.
 
 name = "se-postnummer"
-label = "postal_code"
+labels = ["postal_code"]
 countries = ["SE"]
 languages = ["sv"]
 context = [

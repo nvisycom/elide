@@ -7,7 +7,7 @@
 # - Suffix (1963-1983): 3 letters + 1-3 digits + year letter
 
 name = "uk-vehicle-registration"
-label = "license_plate"
+labels = ["license_plate"]
 countries = ["GB"]
 languages = ["en"]
 context = [

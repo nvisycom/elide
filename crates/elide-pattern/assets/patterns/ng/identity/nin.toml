@@ -3,7 +3,7 @@
 # The trailing digit is a Verhoeff checksum.
 
 name = "ng-nin"
-label = "government_id"
+labels = ["government_id"]
 countries = ["NG"]
 languages = ["en"]
 context = [

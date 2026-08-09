@@ -3,7 +3,7 @@
 # followed by 1-6 digits.
 
 name = "de-handelsregister"
-label = "company_id"
+labels = ["company_id"]
 countries = ["DE"]
 languages = ["de"]
 context = [

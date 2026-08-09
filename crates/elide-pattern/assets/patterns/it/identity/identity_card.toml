@@ -4,7 +4,7 @@
 # and rely on the context-keyword boost.
 
 name = "it-identity-card"
-label = "government_id"
+labels = ["government_id"]
 countries = ["IT"]
 languages = ["it"]
 context = [

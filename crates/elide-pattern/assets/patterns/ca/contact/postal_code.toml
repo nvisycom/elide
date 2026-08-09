@@ -3,7 +3,7 @@
 # the first letter; Canada Post Address Standard).
 
 name = "ca-postal-code"
-label = "postal_code"
+labels = ["postal_code"]
 countries = ["CA"]
 languages = ["en", "fr"]
 context = [

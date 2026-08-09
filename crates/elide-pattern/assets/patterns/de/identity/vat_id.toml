@@ -4,7 +4,7 @@
 # Whitespace and dashes are stripped before validation.
 
 name = "de-vat-id"
-label = "tax_id"
+labels = ["tax_id"]
 countries = ["DE"]
 languages = ["de"]
 context = [

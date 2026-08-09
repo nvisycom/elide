@@ -4,7 +4,7 @@
 # Service spec.
 
 name = "kr-brn"
-label = "company_id"
+labels = ["company_id"]
 countries = ["KR"]
 languages = ["ko"]
 context = [

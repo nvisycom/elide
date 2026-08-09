@@ -3,7 +3,7 @@
 # lifts hits near passport-related keywords.
 
 name = "us-passport"
-label = "passport_number"
+labels = ["passport_number"]
 countries = ["US"]
 context = [
   "passport",

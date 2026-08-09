@@ -7,7 +7,7 @@
 #   checksum.
 
 name = "us-bank-routing"
-label = "bank_routing"
+labels = ["bank_routing"]
 countries = ["US"]
 languages = ["en"]
 context = [

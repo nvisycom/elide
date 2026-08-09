@@ -5,7 +5,7 @@
 # day + year digit + 2 initial chars (or 9) + check + 2 letters.
 
 name = "uk-driving-licence"
-label = "drivers_license"
+labels = ["drivers_license"]
 countries = ["GB"]
 languages = ["en"]
 context = [

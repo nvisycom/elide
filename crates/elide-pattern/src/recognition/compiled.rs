@@ -52,7 +52,9 @@ pub(super) struct RawMatch {
 pub(super) struct CompiledPattern {
     /// Pattern name (e.g. `"ssn"`). Surfaced in trail provenance.
     pub pattern_name: String,
-    pub label: LabelRef,
+    /// Candidate labels, most-specific first. The recognizer resolves one
+    /// against the request catalog before emitting.
+    pub labels: Vec<LabelRef>,
     pub regex: Regex,
     pub score: Confidence,
     pub validator: Option<Arc<dyn Validator>>,
@@ -65,10 +67,12 @@ pub(super) struct CompiledPattern {
 }
 
 impl CompiledPattern {
-    /// A [`RawMatch`] for a regex hit at `range`, for the recognizer to place.
-    pub(super) fn raw_match(&self, range: Range<usize>) -> RawMatch {
+    /// A [`RawMatch`] for a regex hit at `range` under the resolved `label`
+    /// (the first candidate the request catalog declared), for the recognizer
+    /// to place.
+    pub(super) fn raw_match(&self, label: LabelRef, range: Range<usize>) -> RawMatch {
         RawMatch {
-            label: self.label.clone(),
+            label,
             confidence: self.score,
             range,
             pattern: PatternEvent {
@@ -90,7 +94,9 @@ impl CompiledPattern {
 /// emission metadata.
 pub(super) struct CompiledDictionary {
     pub name: String,
-    pub label: LabelRef,
+    /// Candidate labels, most-specific first. The recognizer resolves one
+    /// against the request catalog before emitting.
+    pub labels: Vec<LabelRef>,
     /// First term-id (inclusive) for this dictionary inside the
     /// shared automaton.
     pub term_start: usize,
@@ -113,11 +119,17 @@ pub(super) struct CompiledDictionary {
 }
 
 impl CompiledDictionary {
-    /// A [`RawMatch`] for an Aho-Corasick dictionary hit at `range` with the
-    /// resolved per-term `score`, for the recognizer to place.
-    pub(super) fn raw_match(&self, score: Confidence, range: Range<usize>) -> RawMatch {
+    /// A [`RawMatch`] for an Aho-Corasick dictionary hit at `range` under the
+    /// resolved `label` (the first candidate the request catalog declared) with
+    /// the resolved per-term `score`, for the recognizer to place.
+    pub(super) fn raw_match(
+        &self,
+        label: LabelRef,
+        score: Confidence,
+        range: Range<usize>,
+    ) -> RawMatch {
         RawMatch {
-            label: self.label.clone(),
+            label,
             confidence: score,
             range,
             pattern: PatternEvent {

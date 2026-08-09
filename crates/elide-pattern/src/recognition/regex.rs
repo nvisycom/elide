@@ -89,14 +89,23 @@ fn default_score() -> Confidence {
     Confidence::MAX
 }
 
-/// Regex detection rule: one label, optional keyword boosts, and
-/// one or more [`Variant`]s.
+/// Regex detection rule: one or more candidate labels, optional keyword
+/// boosts, and one or more [`Variant`]s.
 ///
-/// A rule groups several regex strategies under a single entity
-/// type plus a shared context-keyword list. Every variant emits
-/// the same [`label`]; context keywords are harvested by
-/// [`PatternRecognizer`] into a wrapping boost layer and are
-/// never read by the rule itself.
+/// A rule groups several regex strategies under a shared entity-type
+/// candidate list plus a shared context-keyword list. Every variant emits
+/// the same [label](Regex::labels); context keywords are harvested by
+/// [`PatternRecognizer`] into a wrapping boost layer and are never read by the
+/// rule itself.
+///
+/// # Candidate labels
+///
+/// [`labels`](Regex::labels) is an ordered list, most-specific first. At
+/// recognize time the rule emits the **first** candidate the request's
+/// [catalog](elide_core::recognition::RecognizerContext::catalog) declares, so
+/// one pattern can serve consumers that opted into a fine-grained label and
+/// those that only enabled a coarser one. A rule that emits a single label
+/// carries a one-element list.
 ///
 /// # Examples
 ///
@@ -112,14 +121,13 @@ fn default_score() -> Confidence {
 ///
 /// let ssn = Regex::builder()
 ///     .with_name("ssn")
-///     .with_label(builtins::GOVERNMENT_ID.to_ref())
+///     .with_labels(vec![builtins::GOVERNMENT_ID.to_ref()])
 ///     .with_context(vec!["ssn".to_owned(), "social security".to_owned()])
 ///     .with_variants(vec![variant])
 ///     .build()
 ///     .expect("ssn rule builds");
 /// ```
 ///
-/// [`label`]: Regex::label
 /// [`PatternRecognizer`]: super::PatternRecognizer
 #[derive(Debug, Clone, PartialEq, Builder, Deserialize)]
 #[builder(
@@ -132,8 +140,10 @@ pub struct Regex {
     /// Human-readable identifier surfaced in trail provenance (e.g.
     /// `"ssn"`, `"credit_card"`).
     pub name: String,
-    /// Entity label every variant emits.
-    pub label: LabelRef,
+    /// Candidate entity labels, most-specific first. The recognizer emits the
+    /// first candidate the request catalog declares. In TOML: `labels =
+    /// ["specific", "general"]` (a single-candidate rule is `labels = ["x"]`).
+    pub labels: Vec<LabelRef>,
     /// Context keywords that lift confidence when one of them
     /// appears near a match. Either a flat list applied
     /// regardless of language, or a per-language map.
@@ -162,7 +172,7 @@ pub struct Regex {
 impl Regex {
     /// Start a chainable builder.
     ///
-    /// Required fields: `name`, `label`, `variants`.
+    /// Required fields: `name`, `labels`, `variants`.
     #[must_use]
     pub fn builder() -> RegexBuilder {
         RegexBuilder::default()

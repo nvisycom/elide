@@ -4,7 +4,7 @@
 # carry the checksum; later issues use a random tail.
 
 name = "kr-rrn"
-label = "government_id"
+labels = ["government_id"]
 countries = ["KR"]
 languages = ["ko"]
 context = [

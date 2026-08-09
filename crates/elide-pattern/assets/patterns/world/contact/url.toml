@@ -2,7 +2,7 @@
 # host and path, stopping at whitespace.
 
 name = "url"
-label = "url"
+labels = ["url"]
 
 [[variants]]
 regex = "\\bhttps?://[^\\s/$.?#][^\\s]*\\b"

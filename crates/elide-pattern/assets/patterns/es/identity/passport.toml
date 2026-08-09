@@ -3,7 +3,7 @@
 # context-keyword boost.
 
 name = "es-passport"
-label = "passport_number"
+labels = ["passport_number"]
 countries = ["ES"]
 languages = ["es"]
 context = [

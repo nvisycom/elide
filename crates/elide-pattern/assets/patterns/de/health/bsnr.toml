@@ -3,7 +3,7 @@
 # under § 75 Abs. 7 SGB V. Appears on Rezepte and billing records.
 
 name = "de-bsnr"
-label = "medical_id"
+labels = ["medical_id"]
 countries = ["DE"]
 languages = ["de"]
 context = [

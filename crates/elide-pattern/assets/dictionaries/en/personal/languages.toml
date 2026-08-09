@@ -1,5 +1,5 @@
 name = "languages"
-label = "language"
+labels = ["language"]
 languages = ["en"]
 
 # column 0 = long-form names (`English`, `Spanish`, ...)

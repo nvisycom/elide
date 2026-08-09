@@ -3,7 +3,7 @@
 # sequence + `Z` literal + base-36 weighted check digit.
 
 name = "in-gstin"
-label = "tax_id"
+labels = ["tax_id"]
 countries = ["IN"]
 languages = ["en", "hi"]
 context = [

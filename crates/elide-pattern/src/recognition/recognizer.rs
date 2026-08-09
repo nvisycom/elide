@@ -79,6 +79,20 @@ impl PatternRecognizer {
     }
 }
 
+/// The label a rule emits under `catalog`: the first candidate (most-specific
+/// first) the catalog declares, so one rule serves consumers that opted into a
+/// fine-grained label and those that only enabled a coarser one.
+///
+/// An empty catalog declares nothing, so it accepts every candidate; the first
+/// is returned, preserving the bare recognizer's behaviour when no policy has
+/// narrowed the label set.
+fn resolve_label<'a>(candidates: &'a [LabelRef], catalog: &LabelCatalog) -> Option<&'a LabelRef> {
+    if catalog.is_empty() {
+        return candidates.first();
+    }
+    candidates.iter().find(|l| catalog.contains(l))
+}
+
 /// Accumulator of rules + validator registry for [`PatternRecognizer`].
 ///
 /// Patterns and dictionaries are stored as authored — compilation
@@ -224,16 +238,19 @@ impl PatternRecognizerBuilder {
         self
     }
 
-    /// Drop every pattern and dictionary whose label is not
+    /// Drop every pattern and dictionary none of whose candidate labels are
     /// declared in `catalog`.
     ///
-    /// The engine uses this to build a per-request recognizer from
-    /// a workspace-wide template — rules that would emit labels no
-    /// policy declared never run.
+    /// The engine uses this to build a per-request recognizer from a
+    /// workspace-wide template — rules that could emit no label any policy
+    /// declared never run. A rule is kept when *any* of its candidates is in
+    /// the catalog; at recognize time it emits the first one that is.
     #[must_use]
     pub fn filter_by_catalog(mut self, catalog: &LabelCatalog) -> Self {
-        self.patterns.retain(|p| catalog.contains(&p.label));
-        self.dictionaries.retain(|d| catalog.contains(&d.label));
+        self.patterns
+            .retain(|p| p.labels.iter().any(|l| catalog.contains(l)));
+        self.dictionaries
+            .retain(|d| d.labels.iter().any(|l| catalog.contains(l)));
         self
     }
 
@@ -344,7 +361,7 @@ impl PatternRecognizerBuilder {
                 regex_sources.push(variant.regex.clone());
                 compiled.push(CompiledPattern {
                     pattern_name: pattern.name.clone(),
-                    label: pattern.label.clone(),
+                    labels: pattern.labels.clone(),
                     regex,
                     score: variant.score,
                     validator,
@@ -439,7 +456,7 @@ impl PatternRecognizerBuilder {
             let term_end = all_terms.len();
             compiled.push(CompiledDictionary {
                 name: dict.name.clone(),
-                label: dict.label.clone(),
+                labels: dict.labels.clone(),
                 term_start,
                 term_end,
                 term_scores,
@@ -526,6 +543,10 @@ impl PatternRecognizerBuilder {
     /// dictionary that declares a non-empty context. Global
     /// keywords carry `language = None`; per-language keywords
     /// carry `Some(tag)`.
+    ///
+    /// A rule with several candidate labels contributes its keywords under
+    /// *each* candidate, so whichever label the request catalog resolves the
+    /// match to still gets its neighbourhood boost.
     fn context_keywords(
         &self,
     ) -> impl Iterator<Item = (&LabelRef, Option<&LanguageTag>, &[String])> {
@@ -536,7 +557,7 @@ impl PatternRecognizerBuilder {
             .flat_map(|p| {
                 p.context
                     .iter()
-                    .map(move |(lang, kws)| (&p.label, lang, kws))
+                    .flat_map(move |(lang, kws)| p.labels.iter().map(move |l| (l, lang, kws)))
             });
         let dict_keywords = self
             .dictionaries
@@ -545,7 +566,7 @@ impl PatternRecognizerBuilder {
             .flat_map(|d| {
                 d.context
                     .iter()
-                    .map(move |(lang, kws)| (&d.label, lang, kws))
+                    .flat_map(move |(lang, kws)| d.labels.iter().map(move |l| (l, lang, kws)))
             });
         pattern_keywords.chain(dict_keywords)
     }
@@ -601,6 +622,12 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
                 if !ctx.applies_to_country(&pat.countries) {
                     continue;
                 }
+                // The label this rule emits under the request catalog. `None`
+                // when the caller enabled none of its candidates, so the rule
+                // contributes nothing this call.
+                let Some(label) = resolve_label(&pat.labels, ctx.catalog()) else {
+                    continue;
+                };
                 let validation_ctx = ValidationContext {
                     countries: ctx.scope().countries.clone(),
                     language: ctx.primary_language().cloned(),
@@ -612,7 +639,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
                         continue;
                     }
                     if let Some(entity) =
-                        self.build_entity::<M>(pat.raw_match(m.range()), data, ctx)
+                        self.build_entity::<M>(pat.raw_match(label.clone(), m.range()), data, ctx)
                     {
                         entities.push(entity);
                     }
@@ -632,13 +659,16 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
                 if !ctx.applies_to_country(&dict.countries) {
                     continue;
                 }
+                let Some(label) = resolve_label(&dict.labels, ctx.catalog()) else {
+                    continue;
+                };
                 let range = mat.range();
                 if dict.word_boundary && !has_word_boundaries(text, range.clone()) {
                     continue;
                 }
                 let score = dict.term_scores[term_id - dict.term_start];
                 if let Some(entity) =
-                    self.build_entity::<M>(dict.raw_match(score, range), data, ctx)
+                    self.build_entity::<M>(dict.raw_match(label.clone(), score, range), data, ctx)
                 {
                     entities.push(entity);
                 }

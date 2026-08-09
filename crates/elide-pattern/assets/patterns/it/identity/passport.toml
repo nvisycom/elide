@@ -2,7 +2,7 @@
 # format). No published checksum, so the score stays weak.
 
 name = "it-passport"
-label = "passport_number"
+labels = ["passport_number"]
 countries = ["IT"]
 languages = ["it"]
 context = [

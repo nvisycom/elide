@@ -2,7 +2,7 @@
 # reserved as test sentinels and never assigned.
 
 name = "de-plz"
-label = "postal_code"
+labels = ["postal_code"]
 countries = ["DE"]
 languages = ["de"]
 context = [

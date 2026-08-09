@@ -3,7 +3,7 @@
 # ≥ 2 to distinguish from personnummer; Luhn checksum.
 
 name = "se-organisationsnummer"
-label = "company_id"
+labels = ["company_id"]
 countries = ["SE"]
 languages = ["sv"]
 context = [

@@ -6,7 +6,7 @@
 # - Legacy (pre-2010): letter `T` + 8 digits. No ICAO checksum.
 
 name = "de-id-card"
-label = "government_id"
+labels = ["government_id"]
 countries = ["DE"]
 languages = ["de"]
 context = [

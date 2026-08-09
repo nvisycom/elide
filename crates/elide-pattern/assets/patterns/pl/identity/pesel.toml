@@ -5,7 +5,7 @@
 # Ergänzung).
 
 name = "pl-pesel"
-label = "government_id"
+labels = ["government_id"]
 countries = ["PL"]
 languages = ["pl"]
 context = [

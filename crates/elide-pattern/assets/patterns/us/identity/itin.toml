@@ -4,7 +4,7 @@
 # IRS-published ranges. No checksum.
 
 name = "us-itin"
-label = "tax_id"
+labels = ["tax_id"]
 countries = ["US"]
 languages = ["en"]
 context = [

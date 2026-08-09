@@ -4,7 +4,7 @@
 # Multiple variants cover hyphen, space, and Umlaut renderings.
 
 name = "de-kfz"
-label = "license_plate"
+labels = ["license_plate"]
 countries = ["DE"]
 languages = ["de"]
 context = [

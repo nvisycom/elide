@@ -2,7 +2,7 @@
 # with optional fractional separator, `Z`, or numeric UTC offset.
 
 name = "datetime"
-label = "date_time"
+labels = ["date_time"]
 
 [context]
 en = ["timestamp", "created", "modified", "logged", "at", "time"]

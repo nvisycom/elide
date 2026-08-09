@@ -6,7 +6,7 @@
 # in `it.fiscal_code`.
 
 name = "it-fiscal-code"
-label = "tax_id"
+labels = ["tax_id"]
 countries = ["IT"]
 languages = ["it"]
 context = [

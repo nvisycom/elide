@@ -3,7 +3,7 @@
 # a palindrome; Verhoeff checksum.
 
 name = "in-aadhaar"
-label = "government_id"
+labels = ["government_id"]
 countries = ["IN"]
 languages = ["en", "hi"]
 context = [

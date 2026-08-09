@@ -3,7 +3,7 @@
 # assignments). No published checksum.
 
 name = "th-postal-code"
-label = "postal_code"
+labels = ["postal_code"]
 countries = ["TH"]
 languages = ["th"]
 context = [

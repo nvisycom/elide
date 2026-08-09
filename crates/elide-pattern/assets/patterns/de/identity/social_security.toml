@@ -3,7 +3,7 @@
 # digit per VKVV § 4 (Deutsche Rentenversicherung).
 
 name = "de-social-security"
-label = "national_insurance_number"
+labels = ["national_insurance_number"]
 countries = ["DE"]
 languages = ["de"]
 context = [

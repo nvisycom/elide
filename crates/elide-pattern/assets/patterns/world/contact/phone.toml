@@ -3,7 +3,7 @@
 # Loose by design; the `phone` validator confirms parseability.
 
 name = "phone"
-label = "phone_number"
+labels = ["phone_number"]
 
 [context]
 en = ["phone", "call", "mobile", "tel", "fax", "contact"]

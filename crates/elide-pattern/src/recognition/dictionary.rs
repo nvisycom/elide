@@ -96,7 +96,7 @@ impl Default for Scoring {
 ///
 /// let dictionary = Dictionary::builder()
 ///     .with_name("nationalities")
-///     .with_label(builtins::NATIONALITY.to_ref())
+///     .with_labels(vec![builtins::NATIONALITY.to_ref()])
 ///     .with_terms(vec![
 ///         Term::new("German"),
 ///         Term::new("French"),
@@ -118,8 +118,10 @@ pub struct Dictionary {
     /// Human-readable identifier surfaced in trail provenance
     /// (e.g. `"nationalities"`).
     pub name: String,
-    /// Entity label every match emits.
-    pub label: LabelRef,
+    /// Candidate entity labels, most-specific first. The recognizer emits the
+    /// first candidate the request catalog declares; a single-candidate
+    /// dictionary carries a one-element list.
+    pub labels: Vec<LabelRef>,
     /// Literal terms to scan for. Compiled into the shared
     /// Aho-Corasick automaton at recognizer-build time.
     pub terms: Vec<Term>,
@@ -167,7 +169,7 @@ fn default_word_boundary() -> bool {
 impl Dictionary {
     /// Start a chainable builder.
     ///
-    /// Required fields: `name`, `label`, `terms`.
+    /// Required fields: `name`, `labels`, `terms`.
     #[must_use]
     pub fn builder() -> DictionaryBuilder {
         DictionaryBuilder::default()
@@ -212,7 +214,7 @@ impl Dictionary {
         })?;
         let mut builder = Dictionary::builder()
             .with_name(metadata.name)
-            .with_label(metadata.label);
+            .with_labels(metadata.labels);
         if let Some(scoring) = metadata.score {
             builder = builder.with_scoring(scoring);
         }
@@ -235,7 +237,7 @@ impl Dictionary {
 #[derive(Debug, Clone, Deserialize)]
 struct DictionaryMetadata {
     name: String,
-    label: LabelRef,
+    labels: Vec<LabelRef>,
     #[serde(default)]
     score: Option<Scoring>,
     #[serde(default)]
