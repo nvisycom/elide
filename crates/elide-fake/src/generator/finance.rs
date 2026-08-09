@@ -25,12 +25,6 @@ pub(super) fn amount<R: RngExt + ?Sized>(locale: Locale, rng: &mut R) -> String 
     format!("{whole}{sep}{frac:02}")
 }
 
-/// Plain integer in `0..=10_000`.
-pub(super) fn quantity<R: RngExt + ?Sized>(rng: &mut R) -> String {
-    let n: u32 = (0..=10_000u32).fake_with_rng(rng);
-    n.to_string()
-}
-
 fn decimal_separator(locale: Locale) -> char {
     match locale {
         Locale::DeDe | Locale::NlNl | Locale::FrFr | Locale::ItIt | Locale::PtPt | Locale::PtBr => {

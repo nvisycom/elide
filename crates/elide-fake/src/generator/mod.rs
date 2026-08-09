@@ -86,7 +86,6 @@ impl<'a> Context<'a> {
             // finance (free-form subset)
             "currency" => finance::currency_code(l, rng),
             "amount" => finance::amount(l, rng),
-            "quantity" => finance::quantity(rng),
 
             // finance (structured)
             "iban" | "payment_card" | "card_security_code" | "card_expiry" | "bank_account"
