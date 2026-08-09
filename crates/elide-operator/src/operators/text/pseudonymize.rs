@@ -73,9 +73,24 @@ impl<V, G> Pseudonymize<V, G> {
     }
 }
 
-/// The vault key for an entity: its label paired with the cluster seed
-/// (coreference id when present, else the original value).
-type Key = (LabelRef, String);
+/// The vault key a [`Pseudonymize`] operator looks surrogates up under: an
+/// entity's label paired with its cluster seed (coreference id when present,
+/// else the original value).
+///
+/// Folding the label into the key lets one vault back several `Pseudonymize`
+/// operators without their surrogates colliding across labels. It is named in
+/// the operator's [`Vault`] bound — `V: Vault<PseudonymizeKey, TextReplacement>`
+/// — so a caller wiring a custom vault for `Pseudonymize` can spell that bound.
+///
+/// [`Vault`]: crate::vault::Vault
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PseudonymizeKey {
+    /// The entity's label — the class the surrogate belongs to.
+    pub label: LabelRef,
+    /// The cluster seed: the coreference id when present, else the original
+    /// value. Equal seeds under the same label share one surrogate.
+    pub seed: String,
+}
 
 /// The cluster seed for an entity: its coreference id when present, else its
 /// original value.
@@ -89,7 +104,7 @@ fn seed<M: Modality>(entity: &Entity<M>, data: &TextData) -> String {
 #[async_trait::async_trait]
 impl<V, G> Operator<Text> for Pseudonymize<V, G>
 where
-    V: Vault<Key, TextReplacement>,
+    V: Vault<PseudonymizeKey, TextReplacement>,
     G: Generator<Text>,
 {
     fn id(&self) -> OperatorId {
@@ -104,7 +119,10 @@ where
 
     async fn anonymize(&self, entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
         let seed = seed(entity, data);
-        let key = (entity.label.clone(), seed.clone());
+        let key = PseudonymizeKey {
+            label: entity.label.clone(),
+            seed: seed.clone(),
+        };
 
         self.vault
             .get_or_try_insert_with(key, || Ok(self.generator.generate(&entity.label, &seed)))
@@ -116,7 +134,7 @@ where
 #[async_trait::async_trait]
 impl<V, G> Operator<Tabular> for Pseudonymize<V, G>
 where
-    V: Vault<Key, TextReplacement>,
+    V: Vault<PseudonymizeKey, TextReplacement>,
     G: Generator<Tabular>,
 {
     fn id(&self) -> OperatorId {
@@ -133,7 +151,10 @@ where
         data: &TextData,
     ) -> Result<TabularReplacement> {
         let seed = seed(entity, data);
-        let key = (entity.label.clone(), seed.clone());
+        let key = PseudonymizeKey {
+            label: entity.label.clone(),
+            seed: seed.clone(),
+        };
 
         // The vault stores the text surrogate; unwrap the generator's cell
         // treatment to get it (a surrogate generator never drops structure).

@@ -97,7 +97,7 @@ pub use self::text::HmacHash;
 #[cfg_attr(docsrs, doc(cfg(feature = "sha2")))]
 pub use self::text::Sha2Hash;
 // Text (and tabular-cell) operators.
-pub use self::text::{Clamp, Mask, Pseudonymize, Replace, Truncate};
+pub use self::text::{Clamp, Mask, Pseudonymize, PseudonymizeKey, Replace, Truncate};
 #[cfg(feature = "datetime")]
 #[cfg_attr(docsrs, doc(cfg(feature = "datetime")))]
 pub use self::text::{DateGranularity, DateStyle, GeneralizeDate};
