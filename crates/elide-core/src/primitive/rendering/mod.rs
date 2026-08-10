@@ -3,6 +3,8 @@
 
 mod color;
 mod dpi;
+mod ocr_mode;
 
 pub use self::color::Color;
 pub use self::dpi::Dpi;
+pub use self::ocr_mode::OcrMode;
