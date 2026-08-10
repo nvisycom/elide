@@ -21,8 +21,6 @@ mod docx_handler;
 #[cfg(feature = "docx")]
 mod docx_loader;
 #[cfg(feature = "pdf")]
-mod ocr_mode;
-#[cfg(feature = "pdf")]
 mod pdf_handler;
 #[cfg(feature = "pdf")]
 mod pdf_loader;
@@ -33,12 +31,13 @@ mod rtf_handler;
 #[cfg(feature = "rtf")]
 mod rtf_loader;
 
+#[cfg(feature = "pdf")]
+pub use elide_core::primitive::OcrMode;
+
 #[cfg(feature = "docx")]
 pub use self::docx_handler::format as docx_format;
 #[cfg(feature = "docx")]
 pub(crate) use self::docx_loader::DocxLoader;
-#[cfg(feature = "pdf")]
-pub use self::ocr_mode::OcrMode;
 #[cfg(feature = "pdf")]
 pub use self::pdf_handler::format as pdf_format;
 #[cfg(feature = "pdf-render")]

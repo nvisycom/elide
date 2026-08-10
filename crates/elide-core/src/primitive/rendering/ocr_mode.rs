@@ -1,12 +1,15 @@
-//! How a document loader treats OCR when a format can carry both a text
-//! layer and page images (e.g. PDF).
+//! [`OcrMode`]: how a document loader treats OCR when a format can carry both
+//! a text layer and page images (e.g. PDF).
 //!
 //! The three states mirror what established tools converge on — OCRmyPDF
 //! (`--skip-text` / `--force-ocr`), Docling (`do_ocr` / `force_full_page_ocr`),
 //! and unstructured (`auto` / `ocr_only`): extract text where present, force
 //! rendering where the text layer is wrong or missing, or never render.
 
-use elide_core::primitive::Dpi;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
+use super::Dpi;
 
 /// Policy for turning a document's pages into images for OCR.
 ///
@@ -16,9 +19,15 @@ use elide_core::primitive::Dpi;
 /// text-layer parser that drives that decision is not in place yet, so today
 /// only [`Force`] actually renders.
 ///
+/// Serializes with an internal `kind` tag (`{"kind": "auto"}`,
+/// `{"kind": "force", "dpi": 300}`, `{"kind": "never"}`).
+///
 /// [`Auto`]: OcrMode::Auto
 /// [`Force`]: OcrMode::Force
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "kind", rename_all = "snake_case"))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum OcrMode {
     /// Use the text layer where it exists and render pages for OCR only
     /// where it is absent. The detection lands with the text-layer parser;
@@ -37,9 +46,17 @@ pub enum OcrMode {
 }
 
 impl OcrMode {
-    /// Render at [`Dpi::OCR`], the usual resolution for downstream OCR.
+    /// Render at [`Dpi::OCR`] (300), the usual resolution for downstream OCR.
+    ///
+    /// Sugar for [`force_at`](Self::force_at) at the default OCR resolution;
+    /// use `force_at` to render at a different [`Dpi`].
     pub const fn force() -> Self {
-        Self::Force { dpi: Dpi::OCR }
+        Self::force_at(Dpi::OCR)
+    }
+
+    /// Render at `dpi`, ignoring any text layer.
+    pub const fn force_at(dpi: Dpi) -> Self {
+        Self::Force { dpi }
     }
 
     /// The [`Dpi`] to render at, or `None` when this mode renders nothing.
@@ -65,5 +82,25 @@ mod tests {
         assert_eq!(OcrMode::force().render_dpi(), Some(Dpi::OCR));
         assert_eq!(OcrMode::Auto.render_dpi(), None);
         assert_eq!(OcrMode::Never.render_dpi(), None);
+    }
+
+    #[test]
+    fn force_at_renders_at_the_given_dpi() {
+        let dpi = Dpi::new(150);
+        assert_eq!(OcrMode::force_at(dpi).render_dpi(), Some(dpi));
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serializes_with_an_internal_kind_tag() {
+        let cases = [
+            (OcrMode::Auto, r#"{"kind":"auto"}"#),
+            (OcrMode::force(), r#"{"kind":"force","dpi":300}"#),
+            (OcrMode::Never, r#"{"kind":"never"}"#),
+        ];
+        for (mode, wire) in cases {
+            assert_eq!(serde_json::to_string(&mode).unwrap(), wire);
+            assert_eq!(serde_json::from_str::<OcrMode>(wire).unwrap(), mode);
+        }
     }
 }
