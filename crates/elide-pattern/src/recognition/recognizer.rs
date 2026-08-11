@@ -79,18 +79,21 @@ impl PatternRecognizer {
     }
 }
 
-/// The label a rule emits under `catalog`: the first candidate (most-specific
-/// first) the catalog declares, so one rule serves consumers that opted into a
-/// fine-grained label and those that only enabled a coarser one.
+/// The label a rule emits under `catalog`: the most-specific candidate the
+/// catalog declares, else the most-specific candidate overall.
 ///
-/// An empty catalog declares nothing, so it accepts every candidate; the first
-/// is returned, preserving the bare recognizer's behaviour when no policy has
-/// narrowed the label set.
+/// A rule always emits *something* so the reconcile layers see every match and
+/// can use a strong-but-out-of-catalog detection (a checksum-validated IBAN) to
+/// subsume a weak in-catalog one nested inside it (a loose `drivers_license`
+/// prefix). Restricting the output to the catalog is a downstream filter run
+/// *after* reconciliation, so suppression evidence is not discarded before it
+/// can be used. An empty catalog narrows nothing, so the most-specific
+/// candidate wins.
 fn resolve_label<'a>(candidates: &'a [LabelRef], catalog: &LabelCatalog) -> Option<&'a LabelRef> {
-    if catalog.is_empty() {
-        return candidates.first();
-    }
-    candidates.iter().find(|l| catalog.contains(l))
+    candidates
+        .iter()
+        .find(|l| catalog.contains(l))
+        .or_else(|| candidates.first())
 }
 
 /// Accumulator of rules + validator registry for [`PatternRecognizer`].
