@@ -108,7 +108,11 @@ impl<M: Modality> Analyzer<M> {
         let mut entities = self.recognize(&data, ctx).await?;
         ctx.stamp_languages(&mut entities);
         let reduced = self.reduce(entities);
-        Ok(Self::apply_exclusions(reduced, ctx.exclusions()))
+        // Restrict the *output* to the requested catalog only after
+        // reconciliation, so a strong out-of-catalog detection can subsume a
+        // weak in-catalog one nested inside it before being culled itself.
+        let in_catalog = ctx.catalog().retain_declared(reduced);
+        Ok(Self::apply_exclusions(in_catalog, ctx.exclusions()))
     }
 
     /// Run every deduplication layer in order over `entities`, threading

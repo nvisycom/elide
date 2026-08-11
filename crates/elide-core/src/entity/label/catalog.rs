@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use super::builtins::BUILT_INS;
 use super::{Label, LabelRef};
+use crate::entity::Entity;
+use crate::modality::Modality;
 
 /// Registry of [`Label`]s, keyed by id.
 ///
@@ -61,6 +63,28 @@ impl LabelCatalog {
     /// Whether the catalog defines a label for `label`.
     pub fn contains(&self, label: &LabelRef) -> bool {
         self.0.contains_key(label.as_str())
+    }
+
+    /// Keep only the entities whose label this catalog declares, dropping the
+    /// rest.
+    ///
+    /// The output-restriction counterpart to [`contains`](Self::contains): a
+    /// detection pipeline may emit entities the caller did not ask for (so a
+    /// strong out-of-catalog match can still subsume a weak in-catalog one
+    /// during reconciliation) and cull them here, after reconciliation, so only
+    /// the requested types reach the caller. An **empty** catalog declares no
+    /// restriction, so every entity is kept.
+    pub fn retain_declared<M>(&self, entities: Vec<Entity<M>>) -> Vec<Entity<M>>
+    where
+        M: Modality,
+    {
+        if self.is_empty() {
+            return entities;
+        }
+        entities
+            .into_iter()
+            .filter(|entity| self.contains(&entity.label))
+            .collect()
     }
 
     /// Number of labels in the catalog.
@@ -148,5 +172,29 @@ mod tests {
         // An unknown tag yields nothing.
         assert_eq!(catalog.tagged("nonexistent").count(), 0);
         assert!(catalog.filter_tag("nonexistent").is_empty());
+    }
+
+    #[test]
+    fn retain_declared_keeps_only_in_catalog_labels() {
+        use crate::entity::provenance::{Event, PatternEvent, Provenance};
+        use crate::modality::text::{Text, TextLocation};
+        use crate::primitive::Confidence;
+
+        fn entity(label: &str) -> Entity<Text> {
+            let loc = TextLocation::new(0, 1);
+            let conf = Confidence::new(0.9).unwrap();
+            let event = Event::pattern("t", conf, loc.clone(), PatternEvent::default());
+            Entity::new(LabelRef::new(label), loc, conf, Provenance::new(event))
+        }
+
+        let catalog: LabelCatalog = [Label::new("email_address", "email")].into_iter().collect();
+        let kept = catalog.retain_declared(vec![entity("email_address"), entity("iban")]);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].label, LabelRef::new("email_address"));
+
+        // An empty catalog restricts nothing.
+        let unrestricted =
+            LabelCatalog::new().retain_declared(vec![entity("email_address"), entity("iban")]);
+        assert_eq!(unrestricted.len(), 2);
     }
 }

@@ -77,13 +77,16 @@ async fn catalog_with_only_the_coarse_label_falls_back_to_it() {
 }
 
 #[tokio::test]
-async fn catalog_with_neither_candidate_emits_nothing() {
+async fn catalog_with_neither_candidate_emits_the_most_specific() {
     let recognizer = address_recognizer();
-    // A catalog that declares an unrelated label enables none of the rule's
-    // candidates, so the match contributes no entity.
+    // A catalog that declares none of the rule's candidates still gets the
+    // most-specific one: the recognizer always emits, so reconciliation can use
+    // a strong out-of-catalog match to subsume a weak in-catalog one nested in
+    // it. Restricting the output to the catalog is a downstream, post-reconcile
+    // concern (`LabelCatalog::retain_declared`), not the recognizer's job.
     let scope = Scope::new().with_catalog(catalog_of(&[&builtins::EMAIL_ADDRESS.to_ref()]));
-    let data = TextData::new("12 Main St".to_owned());
-    let ctx = RecognizerContext::<Text>::new(&scope);
-    let entities = recognizer.recognize(&data, &ctx).await.expect("recognize");
-    assert!(entities.is_empty(), "no enabled candidate, no entity");
+    assert_eq!(
+        emitted_label(&recognizer, &scope).await,
+        builtins::STREET_ADDRESS.to_ref(),
+    );
 }

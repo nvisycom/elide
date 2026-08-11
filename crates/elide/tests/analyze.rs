@@ -141,3 +141,53 @@ fn calibrate_scales_by_originating_recognizer() {
     assert_eq!(out.kept[1].confidence, Confidence::new(0.8).unwrap());
     assert_eq!(out.kept[2].confidence, Confidence::new(0.9).unwrap());
 }
+
+/// A strong out-of-catalog detection reconciles first, subsuming a weak
+/// in-catalog match nested inside it, and is only then culled from the output
+/// by the request catalog. This is the `IBAN`-covers-`GB29` case: the caller's
+/// catalog excludes `IBAN` but the recognizer still emits it, so reconciliation
+/// can use it to drop the loose `DRIVERS_LICENSE` prefix before the catalog
+/// restriction removes the `IBAN` itself.
+#[tokio::test]
+async fn out_of_catalog_container_subsumes_then_is_culled() {
+    use elide_core::entity::{Label, LabelCatalog};
+
+    // A validated IBAN (0.85) fully containing a loose driver's-license
+    // prefix (0.4), plus an in-catalog SSN elsewhere.
+    let recognizer = Fixed(vec![
+        detected("pattern", "IBAN", (0, 27), 0.85),
+        detected("pattern", "DRIVERS_LICENSE", (0, 4), 0.4),
+        detected("pattern", "GOVERNMENT_ID", (40, 51), 0.85),
+    ]);
+
+    // Catalog declares the two in-catalog labels, not IBAN.
+    let catalog: LabelCatalog = [
+        Label::new("DRIVERS_LICENSE", "driver's license"),
+        Label::new("GOVERNMENT_ID", "government id"),
+    ]
+    .into_iter()
+    .collect();
+
+    let analyzer = Analyzer::<Text>::new()
+        .with_recognizer(recognizer)
+        .with_layer(ReconcileLayer::same_label(Merging::max()))
+        .with_layer(ReconcileLayer::cross_label(Structural::default()))
+        .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE));
+
+    let scope = Scope::new().with_catalog(catalog);
+    let entities = analyzer.analyze(TextData::new(""), &scope).await.unwrap();
+
+    let labels: Vec<&str> = entities.iter().map(|e| e.label.as_str()).collect();
+    // The nested driver's-license prefix was subsumed by the IBAN.
+    assert!(
+        !labels.contains(&"DRIVERS_LICENSE"),
+        "GB29 must not survive"
+    );
+    // The IBAN did its job then dropped out (not in catalog).
+    assert!(
+        !labels.contains(&"IBAN"),
+        "out-of-catalog IBAN must not be output"
+    );
+    // The in-catalog SSN survives.
+    assert_eq!(labels, ["GOVERNMENT_ID"]);
+}
