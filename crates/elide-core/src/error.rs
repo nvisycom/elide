@@ -49,6 +49,21 @@ impl Error {
     pub fn into_source(self) -> Option<BoxError> {
         self.source
     }
+
+    /// Whether retrying the failed operation unchanged could plausibly
+    /// succeed. A property of this error's [`kind`](Self::kind).
+    ///
+    /// Only transport-layer failures ([`ErrorKind::Transport`]) are treated as
+    /// retryable: a network hiccup or timeout may clear on a second attempt.
+    /// Every other kind is deterministic (a malformed document, a bad rule, a
+    /// missing capability, or an external service that answered with an error
+    /// via [`ErrorKind::Provider`]) and will fail the same way again, so a
+    /// caller should surface it rather than loop.
+    ///
+    /// See [`ErrorKind::is_retryable`] for the per-kind classification.
+    pub fn is_retryable(&self) -> bool {
+        self.kind.is_retryable()
+    }
 }
 
 impl From<ErrorKind> for Error {
@@ -173,6 +188,28 @@ impl ErrorKind {
             Self::Transport => "transport failure",
         }
     }
+
+    /// Whether an operation that failed with this kind could plausibly
+    /// succeed if retried unchanged.
+    ///
+    /// Only [`Transport`](Self::Transport) is retryable: a network failure or
+    /// timeout may be transient. Every other kind is deterministic: the same
+    /// input, rule, or absent capability fails identically on a retry, and a
+    /// [`Provider`](Self::Provider) that answered with an error is reporting a
+    /// decision, not a transient fault. The `match` is exhaustive so a new
+    /// kind must state its retryability rather than default silently.
+    pub const fn is_retryable(self) -> bool {
+        match self {
+            Self::Transport => true,
+            Self::MalformedInput
+            | Self::Configuration
+            | Self::Processing
+            | Self::CapabilityUnavailable
+            | Self::Recognition
+            | Self::Redaction
+            | Self::Provider => false,
+        }
+    }
 }
 
 impl fmt::Display for ErrorKind {
@@ -183,3 +220,30 @@ impl fmt::Display for ErrorKind {
 
 /// Convenience alias for results in this crate.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_transport_is_retryable() {
+        assert!(ErrorKind::Transport.is_retryable());
+        for kind in [
+            ErrorKind::MalformedInput,
+            ErrorKind::Configuration,
+            ErrorKind::Processing,
+            ErrorKind::CapabilityUnavailable,
+            ErrorKind::Recognition,
+            ErrorKind::Redaction,
+            ErrorKind::Provider,
+        ] {
+            assert!(!kind.is_retryable(), "{kind} should not be retryable");
+        }
+    }
+
+    #[test]
+    fn error_retryability_follows_its_kind() {
+        assert!(Error::from(ErrorKind::Transport).is_retryable());
+        assert!(!Error::from(ErrorKind::Provider).is_retryable());
+    }
+}
