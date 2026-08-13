@@ -7,7 +7,7 @@ use hipstr::HipStr;
 use serde::{Deserialize, Serialize};
 
 use super::builtins::BUILT_INS;
-use super::{Label, LabelRef};
+use super::{Category, Label, LabelRef};
 use crate::entity::Entity;
 use crate::modality::Modality;
 
@@ -85,6 +85,37 @@ impl LabelCatalog {
             .into_iter()
             .filter(|entity| self.contains(&entity.label))
             .collect()
+    }
+
+    /// The [`Category`] of `label`, resolved through this catalog.
+    ///
+    /// `None` when the catalog does not define `label`, or defines it without a
+    /// category.
+    pub fn category(&self, label: &LabelRef) -> Option<&Category> {
+        self.get(label).and_then(Label::category)
+    }
+
+    /// Group `entities` by the [`Category`] of their label, resolved through
+    /// this catalog.
+    ///
+    /// The grouping key is `Option<`[`Category`]`>`: an entity whose label the
+    /// catalog does not define, or defines without a category, lands under
+    /// `None`. Order within each group follows the input order. Useful for
+    /// organizing a detection or redaction report into sections by kind
+    /// (financial, health, identity, …).
+    pub fn group_by_category<M>(
+        &self,
+        entities: impl IntoIterator<Item = Entity<M>>,
+    ) -> HashMap<Option<Category>, Vec<Entity<M>>>
+    where
+        M: Modality,
+    {
+        let mut groups: HashMap<Option<Category>, Vec<Entity<M>>> = HashMap::new();
+        for entity in entities {
+            let category = self.category(&entity.label).cloned();
+            groups.entry(category).or_default().push(entity);
+        }
+        groups
     }
 
     /// Number of labels in the catalog.
@@ -196,5 +227,54 @@ mod tests {
         let unrestricted =
             LabelCatalog::new().retain_declared(vec![entity("email_address"), entity("iban")]);
         assert_eq!(unrestricted.len(), 2);
+    }
+
+    #[test]
+    fn group_by_category_buckets_entities_by_their_labels_category() {
+        use crate::entity::provenance::{Event, PatternEvent, Provenance};
+        use crate::modality::text::{Text, TextLocation};
+        use crate::primitive::Confidence;
+
+        fn entity(label: &str) -> Entity<Text> {
+            let loc = TextLocation::new(0, 1);
+            let conf = Confidence::new(0.9).unwrap();
+            let event = Event::pattern("t", conf, loc.clone(), PatternEvent::default());
+            Entity::new(LabelRef::new(label), loc, conf, Provenance::new(event))
+        }
+
+        let catalog: LabelCatalog = [
+            Label::new("iban", "iban").with_category(Category::new("financial")),
+            Label::new("payment_card", "card").with_category(Category::new("financial")),
+            Label::new("email_address", "email").with_category(Category::new("contact")),
+            Label::new("misc", "misc"), // no category
+        ]
+        .into_iter()
+        .collect();
+
+        let groups = catalog.group_by_category(vec![
+            entity("iban"),
+            entity("payment_card"),
+            entity("email_address"),
+            entity("misc"),
+            entity("unknown"), // not in the catalog at all
+        ]);
+
+        assert_eq!(groups[&Some(Category::new("financial"))].len(), 2);
+        assert_eq!(groups[&Some(Category::new("contact"))].len(), 1);
+        // Uncategorized (`misc`) and unknown (`unknown`) share the None bucket.
+        assert_eq!(groups[&None].len(), 2);
+    }
+
+    #[test]
+    fn category_resolves_a_ref_through_the_catalog() {
+        let catalog = LabelCatalog::with_builtins();
+        assert_eq!(
+            catalog
+                .category(&builtins::IBAN.to_ref())
+                .map(Category::as_str),
+            Some("financial"),
+        );
+        // Unknown ref -> no category.
+        assert!(catalog.category(&LabelRef::new("nope")).is_none());
     }
 }

@@ -1,16 +1,17 @@
 //! Built-in [`Label`] constants.
 //!
-//! Each constant carries a category tag (`personal_identity`,
-//! `financial`, …) plus cross-cutting tags where applicable (`pii`,
-//! `phi`, `pci`, `sad` for PCI sensitive authentication data). Selectors
-//! can match by label id *or* by tag without the workspace modelling
-//! categories as a separate enum.
+//! Each constant carries a [`Category`](super::Category) (`identity`,
+//! `financial`, `health`, …), the coarse group it belongs to for organizing
+//! detected entities, plus
+//! cross-cutting tags where applicable (`pii`, `phi`, `pci`, `sad` for PCI
+//! sensitive authentication data). Selectors can match by label id, by tag, or
+//! group by category.
 //!
-//! Tags name *what the data is*, not which law governs it: mapping a
-//! category to a regulatory regime (GDPR Article 9, HIPAA Safe Harbor, …)
-//! is a policy-layer concern, so a compliance profile selects the relevant
-//! category tags itself rather than the catalog carrying regulation-citation
-//! tags.
+//! Category and tags both name *what the data is*, not which law governs it:
+//! mapping a category to a regulatory regime (GDPR Article 9, HIPAA Safe
+//! Harbor, …) is a policy-layer concern, so a compliance profile selects the
+//! relevant categories or tags itself rather than the catalog carrying
+//! regulation-citation tags.
 //!
 //! Every label's id is its constant's identifier, lowercased
 //! (`PHONE_NUMBER` → `"phone_number"`); the display `name` is the
@@ -31,13 +32,14 @@ use super::Label;
 /// `LazyLock<Label>` constant per entry *and* the `BUILT_INS` slice indexing
 /// them all, so the two can never fall out of sync.
 ///
-/// Each entry is `NAME = "display name"[ : "description"], [tags…];`. The
-/// optional `: "description"` makes it a rich label (a description for
-/// description-capable backends); without it the name stands alone. The id is
-/// the constant's identifier lowercased (`PHONE_NUMBER` becomes
-/// `"phone_number"`), the same lowercase string the shipped pattern-rule
-/// `.toml` assets reference in their `label` field, so a rule's emitted
-/// [`LabelRef`] resolves against this label.
+/// Each entry is `NAME @ category = "display name"[ : "description"], [tags…];`.
+/// The `@ category` is the label's coarse group; the optional `: "description"`
+/// makes it a rich label (a description for description-capable backends);
+/// `[tags…]` are cross-cutting sensitivity markers (`pii`, `phi`, …), the
+/// category excluded. The id is the constant's identifier lowercased
+/// (`PHONE_NUMBER` becomes `"phone_number"`), the same lowercase string the
+/// shipped pattern-rule `.toml` assets reference in their `label` field, so a
+/// rule's emitted [`LabelRef`] resolves against this label.
 ///
 /// `// group` comments in the table are ordinary comments; they organize the
 /// entries visually but don't affect what is generated.
@@ -46,7 +48,7 @@ use super::Label;
 macro_rules! labels {
     (
         $(
-            $ident:ident = $name:literal $(: $desc:literal)? , [ $($tag:literal),* $(,)? ] ;
+            $ident:ident @ $category:literal = $name:literal $(: $desc:literal)? , [ $($tag:literal),* $(,)? ] ;
         )*
     ) => {
         $(
@@ -59,6 +61,7 @@ macro_rules! labels {
                     stringify!($ident).to_ascii_lowercase(),
                     $name,
                     description,
+                    $category,
                     &[$($tag),*],
                 )
             });
@@ -75,151 +78,150 @@ macro_rules! labels {
 }
 
 labels! {
-    // Personal identity
-    PERSON_NAME = "person name", ["personal_identity", "pii"];
-    DATE_OF_BIRTH = "date of birth", ["personal_identity", "pii"];
-    GOVERNMENT_ID = "government-issued identification number"
+    // Identity: names and identity documents.
+    PERSON_NAME @ "identity" = "person name", ["pii"];
+    DATE_OF_BIRTH @ "identity" = "date of birth", ["pii"];
+    GOVERNMENT_ID @ "identity" = "government-issued identification number"
         : "Government-issued identification number such as a US SSN, Canadian SIN, Indian Aadhaar, or other national identity number.",
-        ["personal_identity", "pii"];
-    TAX_ID = "tax identification number"
+        ["pii"];
+    TAX_ID @ "identity" = "tax identification number"
         : "Taxpayer identification number such as a US ITIN or EIN, a VAT number, or another jurisdiction's tax id.",
-        ["personal_identity", "pii"];
-    DRIVERS_LICENSE = "driver's license number", ["personal_identity", "pii"];
-    CERTIFICATE_NUMBER = "certificate or license number"
+        ["pii"];
+    DRIVERS_LICENSE @ "identity" = "driver's license number", ["pii"];
+    CERTIFICATE_NUMBER @ "identity" = "certificate or license number"
         : "Regulated identifier issued by a professional, licensing, or certifying body, such as a DEA registration number, medical license, bar number, or notary commission.",
-        ["personal_identity", "pii"];
-    PASSPORT_NUMBER = "passport number", ["personal_identity", "pii"];
-    NATIONAL_INSURANCE_NUMBER = "national insurance or social-security equivalent", ["personal_identity", "pii"];
-    VEHICLE_ID = "vehicle identification number", ["personal_identity", "pii"];
-    LICENSE_PLATE = "license plate number", ["personal_identity", "pii"];
+        ["pii"];
+    PASSPORT_NUMBER @ "identity" = "passport number", ["pii"];
+    NATIONAL_INSURANCE_NUMBER @ "identity" = "national insurance or social-security equivalent", ["pii"];
+    VEHICLE_ID @ "identity" = "vehicle identification number", ["pii"];
+    LICENSE_PLATE @ "identity" = "license plate number", ["pii"];
+    SIGNATURE @ "identity" = "handwritten signature", ["pii"];
 
-    // Contact information
-    EMAIL_ADDRESS = "email address", ["contact_info", "pii"];
-    PHONE_NUMBER = "phone number", ["contact_info", "pii"];
-    FAX_NUMBER = "fax number", ["contact_info", "pii"];
-    ADDRESS = "physical or mailing address", ["contact_info", "pii"];
-    STREET_ADDRESS = "street address line"
+    // Contact: ways to reach a person.
+    EMAIL_ADDRESS @ "contact" = "email address", ["pii"];
+    PHONE_NUMBER @ "contact" = "phone number", ["pii"];
+    FAX_NUMBER @ "contact" = "fax number", ["pii"];
+    ADDRESS @ "contact" = "physical or mailing address", ["pii"];
+    STREET_ADDRESS @ "contact" = "street address line"
         : "The street line of a physical address (number, street name, unit), excluding town/city, state, and postal code. The finest-grained slice of an address split by geographic granularity.",
-        ["contact_info", "pii"];
-    CITY = "town or city name", ["contact_info", "pii"];
-    STATE = "state or province", ["contact_info"];
-    COUNTRY = "country name", ["contact_info"];
-    POSTAL_CODE = "postal or ZIP code", ["contact_info"];
-    COMMUNICATIONS_CONTENT = "communication message content"
+        ["pii"];
+    POSTAL_CODE @ "contact" = "postal or ZIP code", [];
+    COMMUNICATIONS_CONTENT @ "contact" = "communication message content"
         : "Free-form body content of a personal communication (mail, email, SMS, or chat message), as distinct from the header identifiers (address, phone) that route it.",
-        ["contact_info", "pii"];
+        ["pii"];
 
-    // Demographic
-    AGE = "age value", ["demographic", "pii"];
-    GENDER = "gender identity", ["demographic", "pii"];
-    ETHNICITY = "racial or ethnic background", ["demographic", "pii"];
-    RELIGION = "religious affiliation", ["demographic", "pii"];
-    NATIONALITY = "nationality", ["demographic", "pii"];
-    CITIZENSHIP = "citizenship status", ["demographic", "pii"];
-    LANGUAGE = "language or dialect spoken", ["demographic"];
-    POLITICAL_OPINION = "political opinion or affiliation", ["demographic", "pii"];
-    TRADE_UNION_MEMBERSHIP = "trade-union membership", ["demographic", "pii"];
-    SEXUAL_ORIENTATION = "sexual orientation", ["demographic", "pii"];
-    SEX_LIFE = "sex-life information"
-        : "Narrative content describing a person's sex life, as distinct from sexual-orientation identity.",
-        ["demographic", "pii"];
-    EDUCATION_RECORD = "education record entry"
-        : "Grade, transcript, disciplinary, or enrollment record for a person.",
-        ["demographic", "pii"];
-    INFERENCE = "profile inference"
-        : "Model-derived characteristic inferred about a person to build a profile (preferences, psychological trends, predispositions, aptitudes), rather than a surface-level entity.",
-        ["demographic", "pii"];
-
-    // Financial
-    PAYMENT_CARD = "payment card number", ["financial", "pci", "pii"];
-    CARD_SECURITY_CODE = "payment card security code", ["financial", "pci", "sad"];
-    CARD_TRACK_DATA = "payment card track data"
-        : "Magnetic-stripe or chip track data (Track 1 / Track 2 contents) from a payment card. Sensitive authentication data that must not be retained after authorization.",
-        ["financial", "pci", "sad"];
-    PIN_BLOCK = "payment card PIN or PIN block"
-        : "Payment card PIN or encrypted PIN block. Sensitive authentication data that must not be retained after authorization.",
-        ["financial", "pci", "sad"];
-    CARD_EXPIRY = "payment card expiration date", ["financial", "pci"];
-    BANK_ACCOUNT = "bank account number", ["financial", "pii"];
-    BANK_ROUTING = "bank routing or transit number", ["financial"];
-    IBAN = "international bank account number", ["financial", "pii"];
-    SWIFT_CODE = "SWIFT/BIC code", ["financial"];
-    CRYPTO_ADDRESS = "cryptocurrency wallet address", ["financial", "pii"];
-    CURRENCY = "currency code or symbol", ["financial"];
-    AMOUNT = "monetary amount", ["financial"];
-
-    // Health
-    MEDICAL_ID = "medical record number", ["health", "phi", "pii"];
-    INSURANCE_ID = "health insurance identifier", ["health", "phi", "pii"];
-    PRESCRIPTION_ID = "prescription identifier or medication regimen", ["health", "phi"];
-    DIAGNOSIS = "medical diagnosis or condition", ["health", "phi"];
-    MEDICATION = "medication name", ["health", "phi"];
-    HEALTH_NARRATIVE = "health narrative text"
-        : "Free-form clinical or therapy text that reveals a person's physical or mental health status without being a specific identifier, diagnosis, or medication, such as vital readings, appointment context, care plans, or therapist references.",
-        ["health", "phi"];
-
-    // Biometric
-    FINGERPRINT = "fingerprint biometric data", ["biometric", "pii"];
-    VOICEPRINT = "voiceprint biometric data", ["biometric", "pii"];
-    RETINA_SCAN = "retina scan biometric data", ["biometric", "pii"];
-    FACIAL_GEOMETRY = "facial geometry biometric data", ["biometric", "pii"];
-    GENETIC_DATA = "genetic data", ["biometric", "pii"];
-
-    // Credentials
-    PASSWORD = "password", ["credentials", "secret"];
-    SECURITY_QUESTION_ANSWER = "account security question or answer"
-        : "Knowledge-based challenge question or its answer used to recover or verify an account.",
-        ["credentials", "secret"];
-    API_KEY = "API key", ["credentials", "secret"];
-    AUTH_TOKEN = "authentication token", ["credentials", "secret"];
-    PRIVATE_KEY = "private cryptographic key", ["credentials", "secret"];
-
-    // Network identifiers
-    URL = "URL or hyperlink", ["network_identifier"];
-    IP_ADDRESS = "IP address", ["network_identifier", "pii"];
-    MAC_ADDRESS = "MAC address", ["network_identifier", "pii"];
-    DEVICE_ID = "device identifier", ["network_identifier", "pii"];
-    USERNAME = "username or handle", ["network_identifier", "pii"];
-
-    // Location
-    COORDINATES = "GPS coordinates", ["location", "pii"];
-    PRECISE_GEOLOCATION = "precise geolocation"
+    // Geographic: places and geolocation.
+    CITY @ "geographic" = "town or city name", ["pii"];
+    STATE @ "geographic" = "state or province", [];
+    COUNTRY @ "geographic" = "country name", [];
+    COORDINATES @ "geographic" = "GPS coordinates", ["pii"];
+    PRECISE_GEOLOCATION @ "geographic" = "precise geolocation"
         : "Geolocation pinpointing a person to a small radius (roughly a city block or finer), as distinct from an approximate or region-level location.",
-        ["location", "pii"];
-    GEOLOCATION_METADATA = "geolocation metadata", ["location", "pii"];
+        ["pii"];
+    GEOLOCATION_METADATA @ "geographic" = "geolocation metadata", ["pii"];
 
-    // Visual
-    FACE = "human face detected in an image or video frame", ["visual", "pii"];
-    HANDWRITING = "handwritten text", ["visual"];
-    SIGNATURE = "handwritten signature", ["visual", "pii"];
-    LOGO = "brand or organisation logo", ["visual"];
-    BARCODE = "barcode or QR code", ["visual"];
+    // Demographic: personal attributes.
+    AGE @ "demographic" = "age value", ["pii"];
+    GENDER @ "demographic" = "gender identity", ["pii"];
+    NATIONALITY @ "demographic" = "nationality", ["pii"];
+    CITIZENSHIP @ "demographic" = "citizenship status", ["pii"];
+    LANGUAGE @ "demographic" = "language or dialect spoken", [];
 
-    // Organization
-    ORGANIZATION_NAME = "organization or company name", ["organization"];
-    COMPANY_ID = "public company-registry identifier", ["organization"];
-    DEPARTMENT_NAME = "department or business-unit name", ["organization"];
-    FACILITY_NAME = "physical facility or location name", ["organization"];
-    CASE_NUMBER = "case, matter, or docket number", ["organization"];
-    INTERNAL_ID = "operator-defined internal identifier", ["organization"];
-    OCCUPATION = "occupation or job title", ["organization"];
-    PRODUCT = "product name", ["organization"];
+    // Protected characteristic: special-category attributes.
+    ETHNICITY @ "protected_characteristic" = "racial or ethnic background", ["pii"];
+    RELIGION @ "protected_characteristic" = "religious affiliation", ["pii"];
+    POLITICAL_OPINION @ "protected_characteristic" = "political opinion or affiliation", ["pii"];
+    TRADE_UNION_MEMBERSHIP @ "protected_characteristic" = "trade-union membership", ["pii"];
+    SEXUAL_ORIENTATION @ "protected_characteristic" = "sexual orientation", ["pii"];
+    SEX_LIFE @ "protected_characteristic" = "sex-life information"
+        : "Narrative content describing a person's sex life, as distinct from sexual-orientation identity.",
+        ["pii"];
 
-    // Temporal
-    DATE_TIME = "date or time value", ["temporal"];
-    INDIVIDUAL_DATE = "individual-associated date"
+    // Financial: money and payment instruments.
+    PAYMENT_CARD @ "financial" = "payment card number", ["pci", "pii"];
+    CARD_SECURITY_CODE @ "financial" = "payment card security code", ["pci", "sad"];
+    CARD_TRACK_DATA @ "financial" = "payment card track data"
+        : "Magnetic-stripe or chip track data (Track 1 / Track 2 contents) from a payment card. Sensitive authentication data that must not be retained after authorization.",
+        ["pci", "sad"];
+    PIN_BLOCK @ "financial" = "payment card PIN or PIN block"
+        : "Payment card PIN or encrypted PIN block. Sensitive authentication data that must not be retained after authorization.",
+        ["pci", "sad"];
+    CARD_EXPIRY @ "financial" = "payment card expiration date", ["pci"];
+    BANK_ACCOUNT @ "financial" = "bank account number", ["pii"];
+    BANK_ROUTING @ "financial" = "bank routing or transit number", [];
+    IBAN @ "financial" = "international bank account number", ["pii"];
+    SWIFT_CODE @ "financial" = "SWIFT/BIC code", [];
+    CRYPTO_ADDRESS @ "financial" = "cryptocurrency wallet address", ["pii"];
+    CURRENCY @ "financial" = "currency code or symbol", [];
+    AMOUNT @ "financial" = "monetary amount", [];
+
+    // Health: medical and health-status information.
+    MEDICAL_ID @ "health" = "medical record number", ["phi", "pii"];
+    INSURANCE_ID @ "health" = "health insurance identifier", ["phi", "pii"];
+    PRESCRIPTION_ID @ "health" = "prescription identifier or medication regimen", ["phi"];
+    DIAGNOSIS @ "health" = "medical diagnosis or condition", ["phi"];
+    MEDICATION @ "health" = "medication name", ["phi"];
+    HEALTH_NARRATIVE @ "health" = "health narrative text"
+        : "Free-form clinical or therapy text that reveals a person's physical or mental health status without being a specific identifier, diagnosis, or medication, such as vital readings, appointment context, care plans, or therapist references.",
+        ["phi"];
+
+    // Biometric: biometric identifiers.
+    FINGERPRINT @ "biometric" = "fingerprint biometric data", ["pii"];
+    VOICEPRINT @ "biometric" = "voiceprint biometric data", ["pii"];
+    RETINA_SCAN @ "biometric" = "retina scan biometric data", ["pii"];
+    FACIAL_GEOMETRY @ "biometric" = "facial geometry biometric data", ["pii"];
+    GENETIC_DATA @ "biometric" = "genetic data", ["pii"];
+    FACE @ "biometric" = "human face detected in an image or video frame", ["pii"];
+
+    // Credentials: secrets and authentication.
+    PASSWORD @ "credentials" = "password", ["secret"];
+    SECURITY_QUESTION_ANSWER @ "credentials" = "account security question or answer"
+        : "Knowledge-based challenge question or its answer used to recover or verify an account.",
+        ["secret"];
+    API_KEY @ "credentials" = "API key", ["secret"];
+    AUTH_TOKEN @ "credentials" = "authentication token", ["secret"];
+    PRIVATE_KEY @ "credentials" = "private cryptographic key", ["secret"];
+
+    // Network: device and network identifiers.
+    URL @ "network" = "URL or hyperlink", [];
+    IP_ADDRESS @ "network" = "IP address", ["pii"];
+    MAC_ADDRESS @ "network" = "MAC address", ["pii"];
+    DEVICE_ID @ "network" = "device identifier", ["pii"];
+    USERNAME @ "network" = "username or handle", ["pii"];
+
+    // Organization: organizations and business entities.
+    ORGANIZATION_NAME @ "organization" = "organization or company name", [];
+    COMPANY_ID @ "organization" = "public company-registry identifier", [];
+    DEPARTMENT_NAME @ "organization" = "department or business-unit name", [];
+    FACILITY_NAME @ "organization" = "physical facility or location name", [];
+    CASE_NUMBER @ "organization" = "case, matter, or docket number", [];
+    INTERNAL_ID @ "organization" = "operator-defined internal identifier", [];
+    OCCUPATION @ "organization" = "occupation or job title", [];
+    PRODUCT @ "organization" = "product name", [];
+    LOGO @ "organization" = "brand or organisation logo", [];
+
+    // Contextual: dates, events, derived data, and the catch-all.
+    DATE_TIME @ "contextual" = "date or time value", [];
+    HANDWRITING @ "contextual" = "handwritten text", [];
+    BARCODE @ "contextual" = "barcode or QR code", [];
+    INDIVIDUAL_DATE @ "contextual" = "individual-associated date"
         : "Date directly relating to a natural person (birth, admission, discharge, death, or service date), as distinct from a bare calendar date such as an invoice or meeting date.",
-        ["temporal", "pii"];
-    EVENT = "named event reference", ["temporal"];
-
-    // Miscellaneous
-    UNRESOLVED = "unresolved entity"
+        ["pii"];
+    EVENT @ "contextual" = "named event reference", [];
+    EDUCATION_RECORD @ "contextual" = "education record entry"
+        : "Grade, transcript, disciplinary, or enrollment record for a person.",
+        ["pii"];
+    INFERENCE @ "contextual" = "profile inference"
+        : "Model-derived characteristic inferred about a person to build a profile (preferences, psychological trends, predispositions, aptitudes), rather than a surface-level entity.",
+        ["pii"];
+    UNRESOLVED @ "contextual" = "unresolved entity"
         : "Sensitive entity whose specific type has not been resolved; a catch-all for detections that do not fit a more precise label.",
-        ["unresolved"];
+        [];
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::Category;
     use super::*;
     use crate::primitive::LanguageTag;
 
@@ -231,13 +233,19 @@ mod tests {
         // GLiNER-style natural-language phrase.
         assert_eq!(PAYMENT_CARD.id(), "payment_card");
         assert_eq!(PAYMENT_CARD.name(&en), "payment card number");
-        assert!(PAYMENT_CARD.has_tag("financial"));
+        assert_eq!(
+            PAYMENT_CARD.category().map(Category::as_str),
+            Some("financial")
+        );
         assert!(PAYMENT_CARD.has_tag("pci"));
         assert!(PAYMENT_CARD.has_tag("pii"));
 
         assert_eq!(PERSON_NAME.id(), "person_name");
         assert_eq!(PERSON_NAME.name(&en), "person name");
-        assert!(PERSON_NAME.has_tag("personal_identity"));
+        assert_eq!(
+            PERSON_NAME.category().map(Category::as_str),
+            Some("identity")
+        );
 
         // A rich entry (`: "…"`) carries a description; a plain one does not.
         assert!(GOVERNMENT_ID.description(&en).is_some());
@@ -256,41 +264,38 @@ mod tests {
     }
 
     #[test]
-    fn special_category_labels_ship_as_data_categories() {
+    fn special_category_labels_ship_with_a_category() {
         let en = LanguageTag::english();
 
-        // The categories GDPR Art. 9 covers that the catalog previously
-        // lacked. They carry ordinary *data-category* tags (demographic,
-        // biometric), no regulation-citation tag, since mapping a category
-        // to a legal regime is a policy-layer concern.
+        // The special-category attributes GDPR Art. 9 covers group under
+        // `protected_characteristic`; the category names *what the data is*,
+        // never a regulatory regime (that mapping is a policy-layer concern).
         assert_eq!(POLITICAL_OPINION.id(), "political_opinion");
         assert_eq!(
             POLITICAL_OPINION.name(&en),
             "political opinion or affiliation"
         );
-        assert!(POLITICAL_OPINION.has_tag("demographic"));
 
-        assert_eq!(TRADE_UNION_MEMBERSHIP.id(), "trade_union_membership");
-        assert!(TRADE_UNION_MEMBERSHIP.has_tag("demographic"));
-
-        assert_eq!(SEXUAL_ORIENTATION.id(), "sexual_orientation");
-        assert!(SEXUAL_ORIENTATION.has_tag("demographic"));
-
-        assert_eq!(GENETIC_DATA.id(), "genetic_data");
-        assert!(GENETIC_DATA.has_tag("biometric"));
-
-        // No regulation-citation tag leaked onto the taxonomy.
         for label in [
             &*POLITICAL_OPINION,
             &TRADE_UNION_MEMBERSHIP,
             &SEXUAL_ORIENTATION,
-            &GENETIC_DATA,
+            &ETHNICITY,
+            &RELIGION,
+            &SEX_LIFE,
         ] {
-            assert!(
-                !label.has_tag("article_9"),
-                "regulatory tags belong to the policy layer"
+            assert_eq!(
+                label.category().map(Category::as_str),
+                Some("protected_characteristic"),
             );
+            // No regulation-citation tag leaked onto the taxonomy.
+            assert!(!label.has_tag("article_9"));
         }
+
+        assert_eq!(
+            GENETIC_DATA.category().map(Category::as_str),
+            Some("biometric")
+        );
     }
 
     #[test]
@@ -315,7 +320,8 @@ mod tests {
 
         assert_eq!(FAX_NUMBER.id(), "fax_number");
         assert_eq!(FAX_NUMBER.name(&en), "fax number");
-        assert!(FAX_NUMBER.has_tag("contact_info") && FAX_NUMBER.has_tag("pii"));
+        assert_eq!(FAX_NUMBER.category().map(Category::as_str), Some("contact"));
+        assert!(FAX_NUMBER.has_tag("pii"));
 
         assert_eq!(CERTIFICATE_NUMBER.id(), "certificate_number");
         // `certificate_number` is ambiguous, so it ships with a description.
@@ -327,14 +333,33 @@ mod tests {
         let en = LanguageTag::english();
 
         // The address blob splits by granularity so a survivor set can keep
-        // coarser components (state) while dropping finer ones (street).
-        for label in [&*STREET_ADDRESS, &CITY, &STATE, &COUNTRY] {
-            assert!(label.has_tag("contact_info"));
+        // coarser components (state) while dropping finer ones (street). The
+        // street line stays a contact identifier; town/state/country are
+        // geographic.
+        assert_eq!(
+            STREET_ADDRESS.category().map(Category::as_str),
+            Some("contact")
+        );
+        for label in [&*CITY, &STATE, &COUNTRY] {
+            assert_eq!(label.category().map(Category::as_str), Some("geographic"));
         }
         assert_eq!(STREET_ADDRESS.id(), "street_address");
         assert!(STREET_ADDRESS.description(&en).is_some());
         // State and country survive coarser cuts, so they aren't tagged `pii`.
         assert!(!STATE.has_tag("pii"));
         assert!(!COUNTRY.has_tag("pii"));
+    }
+
+    #[test]
+    fn built_ins_all_carry_a_category() {
+        // Every shipped label has a category, so grouping never lands a
+        // built-in in the uncategorized bucket.
+        for label in BUILT_INS {
+            assert!(
+                label.category().is_some(),
+                "built-in `{}` has no category",
+                label.id(),
+            );
+        }
     }
 }
