@@ -14,6 +14,7 @@
 
 pub mod builtins;
 mod catalog;
+mod category;
 mod reference;
 
 use hipstr::HipStr;
@@ -21,6 +22,7 @@ use hipstr::HipStr;
 use serde::{Deserialize, Serialize};
 
 pub use self::catalog::LabelCatalog;
+pub use self::category::Category;
 pub use self::reference::LabelRef;
 use crate::primitive::{LanguageTag, LocalizedText};
 
@@ -75,7 +77,7 @@ impl LabelLocale {
 }
 
 /// Kind of sensitive information: a stable [`id`], per-language
-/// [`LabelLocale`]s, and zero or more tags.
+/// [`LabelLocale`]s, an optional [`category`], and zero or more tags.
 ///
 /// # Identity
 ///
@@ -93,15 +95,21 @@ impl LabelLocale {
 /// text — NER and LLM read the analysis language's name and description to
 /// prompt the model, keyed by the stable id.
 ///
-/// # Tags
+/// # Category and tags
 ///
-/// [`tags`] is a free-form list of short identifiers policy selectors can
-/// match against. Built-in labels carry category tags (`personal_identity`,
-/// `contact_info`, `financial`, …) plus cross-cutting tags where applicable
-/// (`pii`, `phi`, `pci`). Custom labels can ship with zero tags.
+/// [`category`] is the single coarse group a label belongs to (`financial`,
+/// `health`, `identity`, …), for organizing detected entities by kind. Built-in
+/// labels ship with one; a custom label has none unless set.
+///
+/// [`tags`] is a free-form list of *cross-cutting* markers a policy selector
+/// matches against — sensitivity flags a label may carry several of (`pii`,
+/// `phi`, `pci`, `sad`, `secret`). Distinct from the category: a label has at
+/// most one category but any number of tags. Custom labels can ship with zero
+/// of either.
 ///
 /// [`id`]: Label::id
 /// [`localization`]: Label::localization
+/// [`category`]: Label::category
 /// [`tags`]: Label::tags
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -110,6 +118,11 @@ pub struct Label {
     #[cfg_attr(feature = "schema", schemars(with = "String"))]
     id: HipStr<'static>,
     localizations: LocalizedText<LabelLocale>,
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    category: Option<Category>,
     #[cfg_attr(feature = "schema", schemars(with = "Vec<String>"))]
     tags: Vec<HipStr<'static>>,
 }
@@ -124,21 +137,23 @@ impl Label {
         Self {
             id: id.into(),
             localizations: LocalizedText::new(LabelLocale::new(name)),
+            category: None,
             tags: Vec::new(),
         }
     }
 
     /// Construct a built-in label: its `id`, English display `name`, an
-    /// optional `description`, and `tags`.
+    /// optional `description`, a `category`, and cross-cutting `tags`.
     ///
-    /// The `name`, `description`, and `tags` are `&'static str` literals so
-    /// they live in static storage; the `id` is taken by value because the
-    /// [`builtins`] macro derives it (lowercased) from the constant's
-    /// identifier at init.
+    /// The `name`, `description`, `category`, and `tags` are `&'static str`
+    /// literals so they live in static storage; the `id` is taken by value
+    /// because the [`builtins`] macro derives it (lowercased) from the
+    /// constant's identifier at init.
     pub fn from_static(
         id: impl Into<HipStr<'static>>,
         name: &'static str,
         description: Option<&'static str>,
+        category: &'static str,
         tags: &'static [&'static str],
     ) -> Self {
         let localization = LabelLocale {
@@ -148,6 +163,7 @@ impl Label {
         Self {
             id: id.into(),
             localizations: LocalizedText::new(localization),
+            category: Some(Category::from_static(category)),
             tags: tags.iter().copied().map(HipStr::from_static).collect(),
         }
     }
@@ -157,6 +173,13 @@ impl Label {
     #[must_use]
     pub fn with_localization(mut self, language: LanguageTag, localization: LabelLocale) -> Self {
         self.localizations.insert(language, localization);
+        self
+    }
+
+    /// Set the [`Category`] this label groups under, replacing any already set.
+    #[must_use]
+    pub fn with_category(mut self, category: Category) -> Self {
+        self.category = Some(category);
         self
     }
 
@@ -174,6 +197,11 @@ impl Label {
     /// Label's stable identifier (the catalog key), never localized.
     pub fn id(&self) -> &str {
         self.id.as_str()
+    }
+
+    /// The coarse [`Category`] this label groups under, if any.
+    pub fn category(&self) -> Option<&Category> {
+        self.category.as_ref()
     }
 
     /// The [`LabelLocale`] for `language`, falling back to English, then to
@@ -267,6 +295,7 @@ mod tests {
         let label = Label {
             id: HipStr::from_static("orphan"),
             localizations: LocalizedText::from_iter(std::iter::empty()),
+            category: None,
             tags: Vec::new(),
         };
         assert_eq!(label.name(&LanguageTag::english()), "");

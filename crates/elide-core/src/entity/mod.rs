@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub use self::builder::EntityBuilder;
-pub use self::label::{Label, LabelCatalog, LabelLocale, LabelRef, builtins};
+pub use self::label::{Category, Label, LabelCatalog, LabelLocale, LabelRef, builtins};
 use self::provenance::Provenance;
 pub use self::reference::{EntityCoRef, EntityRef};
 use crate::modality::Modality;
