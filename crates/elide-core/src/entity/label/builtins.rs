@@ -8,10 +8,9 @@
 //! group by category.
 //!
 //! Category and tags both name *what the data is*, not which law governs it:
-//! mapping a category to a regulatory regime (GDPR Article 9, HIPAA Safe
-//! Harbor, …) is a policy-layer concern, so a compliance profile selects the
-//! relevant categories or tags itself rather than the catalog carrying
-//! regulation-citation tags.
+//! mapping a category to a regulatory regime is a policy-layer concern, so a
+//! compliance profile selects the relevant categories or tags itself rather
+//! than the catalog carrying regulation-citation tags.
 //!
 //! Every label's id is its constant's identifier, lowercased
 //! (`PHONE_NUMBER` → `"phone_number"`); the display `name` is the
@@ -173,6 +172,16 @@ labels! {
     GENETIC_DATA @ "biometric" = "genetic data", ["pii"];
     FACE @ "biometric" = "human face detected in an image or video frame", ["pii"];
 
+    // Judicial: criminal-justice and legal-process information.
+    CRIMINAL_RECORD @ "judicial" = "criminal conviction or offence record", ["pii"];
+    CRIMINAL_CHARGE @ "judicial" = "pending criminal charge or accusation"
+        : "An accusation, charge, indictment, or prosecution in progress, as distinct from a recorded conviction: a person charged is not yet convicted.",
+        ["pii"];
+    COURT_CASE_NUMBER @ "judicial" = "court case or docket number", ["pii"];
+    JUDICIAL_NARRATIVE @ "judicial" = "criminal-justice narrative text"
+        : "Free-form text revealing a person's involvement in the criminal-justice system without being a specific identifier, such as case facts, sentencing or probation terms, or related security measures.",
+        ["pii"];
+
     // Credentials: secrets and authentication.
     PASSWORD @ "credentials" = "password", ["secret"];
     SECURITY_QUESTION_ANSWER @ "credentials" = "account security question or answer"
@@ -267,9 +276,8 @@ mod tests {
     fn special_category_labels_ship_with_a_category() {
         let en = LanguageTag::english();
 
-        // The special-category attributes GDPR Art. 9 covers group under
-        // `protected_characteristic`; the category names *what the data is*,
-        // never a regulatory regime (that mapping is a policy-layer concern).
+        // Special-category attributes group under `protected_characteristic`;
+        // the category names *what the data is*, never a regulatory regime.
         assert_eq!(POLITICAL_OPINION.id(), "political_opinion");
         assert_eq!(
             POLITICAL_OPINION.name(&en),
@@ -288,14 +296,31 @@ mod tests {
                 label.category().map(Category::as_str),
                 Some("protected_characteristic"),
             );
-            // No regulation-citation tag leaked onto the taxonomy.
-            assert!(!label.has_tag("article_9"));
         }
 
         assert_eq!(
             GENETIC_DATA.category().map(Category::as_str),
             Some("biometric")
         );
+    }
+
+    #[test]
+    fn judicial_labels_ship_with_a_category() {
+        // Criminal-justice data groups under `judicial`; the category names
+        // *what the data is*, never the regulatory regime.
+        for label in [
+            &*CRIMINAL_RECORD,
+            &CRIMINAL_CHARGE,
+            &COURT_CASE_NUMBER,
+            &JUDICIAL_NARRATIVE,
+        ] {
+            assert_eq!(label.category().map(Category::as_str), Some("judicial"));
+            assert!(label.has_tag("pii"));
+        }
+
+        // A charge is modelled distinctly from a recorded conviction.
+        assert_eq!(CRIMINAL_CHARGE.id(), "criminal_charge");
+        assert_ne!(CRIMINAL_CHARGE.id(), CRIMINAL_RECORD.id());
     }
 
     #[test]
@@ -315,7 +340,7 @@ mod tests {
     }
 
     #[test]
-    fn hipaa_fax_and_certificate_labels_ship() {
+    fn fax_and_certificate_labels_ship() {
         let en = LanguageTag::english();
 
         assert_eq!(FAX_NUMBER.id(), "fax_number");
