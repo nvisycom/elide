@@ -166,6 +166,15 @@ pub enum ErrorKind {
     Recognition,
     /// A redaction operator failed while transforming content.
     Redaction,
+    /// A tamper-evident structure failed verification: an entity's audit
+    /// trail (an [`AuditLog`]) no longer matches its recorded hashes, so it
+    /// was edited, reordered, or truncated after the fact. Distinct from
+    /// [`MalformedInput`]: the structure is well-formed, but its integrity
+    /// guarantee is broken.
+    ///
+    /// [`AuditLog`]: crate::entity::audit::AuditLog
+    /// [`MalformedInput`]: Self::MalformedInput
+    Integrity,
     /// An external provider (an LLM service, a hosted model) returned an
     /// error response.
     Provider,
@@ -184,6 +193,7 @@ impl ErrorKind {
             Self::CapabilityUnavailable => "required capability is unavailable",
             Self::Recognition => "recognition failed",
             Self::Redaction => "redaction failed",
+            Self::Integrity => "integrity verification failed",
             Self::Provider => "provider returned an error",
             Self::Transport => "transport failure",
         }
@@ -207,6 +217,7 @@ impl ErrorKind {
             | Self::CapabilityUnavailable
             | Self::Recognition
             | Self::Redaction
+            | Self::Integrity
             | Self::Provider => false,
         }
     }
@@ -235,6 +246,7 @@ mod tests {
             ErrorKind::CapabilityUnavailable,
             ErrorKind::Recognition,
             ErrorKind::Redaction,
+            ErrorKind::Integrity,
             ErrorKind::Provider,
         ] {
             assert!(!kind.is_retryable(), "{kind} should not be retryable");

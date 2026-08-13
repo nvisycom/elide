@@ -1,12 +1,12 @@
 //! Detection: recognizers and the entities they emit.
 //!
 //! A [`Recognizer`] inspects content and emits entities, each carrying a
-//! recognition [`Event`] in its provenance (its location, confidence,
+//! recognition [`AuditEvent`] in its provenance (its location, confidence,
 //! and pattern/model detail). When several recognizers find the same
 //! thing, a fusion step (in `elide`) combines their entities into
 //! one, concatenating their events and appending a deduplication event.
 //!
-//! [`Event`]: crate::entity::provenance::Event
+//! [`AuditEvent`]: crate::entity::audit::AuditEvent
 
 pub mod annotation;
 mod artifacts;
@@ -70,7 +70,7 @@ impl fmt::Display for RecognizerId {
 ///
 /// Modelled on Presidio's `EntityRecognizer`, generalised to be
 /// multimodal (keyed on the [`Modality`] `M`) and provenance-first (the
-/// emitted [`Entity`]s carry a recognition [`Event`] in their
+/// emitted [`Entity`]s carry a recognition [`AuditEvent`] in their
 /// provenance).
 ///
 /// A recognizer does **not** resolve conflicts or fuse across
@@ -84,7 +84,7 @@ impl fmt::Display for RecognizerId {
 /// and annotation hints), and returns the entities it found.
 ///
 /// [`Entity`]: crate::entity::Entity
-/// [`Event`]: crate::entity::provenance::Event
+/// [`AuditEvent`]: crate::entity::audit::AuditEvent
 #[async_trait::async_trait]
 pub trait Recognizer<M>: Send + Sync
 where

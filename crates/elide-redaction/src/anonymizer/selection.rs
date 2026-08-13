@@ -24,11 +24,11 @@
 //! [`Rule`]: super::Rule
 //! [`Anonymizer::select`]: super::Anonymizer::select
 //! [`anonymize_selections`]: super::Anonymizer::anonymize_selections
-//! [`Redaction`]: elide_core::entity::provenance::EventKind::Redaction
+//! [`Redaction`]: elide_core::entity::audit::AuditKind::Redaction
 
 use std::sync::Arc;
 
-use elide_core::entity::provenance::{Attribution, RuleMatch};
+use elide_core::entity::audit::{Attribution, RuleMatch};
 use elide_core::modality::Modality;
 use elide_core::operator::{Operator, OperatorId};
 #[cfg(feature = "serde")]

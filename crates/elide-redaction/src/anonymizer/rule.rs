@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use elide_core::entity::provenance::{Attribution, RuleMatch};
+use elide_core::entity::audit::{Attribution, RuleMatch};
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
 use elide_core::modality::Modality;
 use elide_core::operator::Operator;
@@ -176,7 +176,7 @@ impl<M: Modality> Rule<M> {
     /// provenance of every entity this rule redacts — the *why* alongside
     /// the matched rule.
     ///
-    /// [`Attribution`]: elide_core::entity::provenance::Attribution
+    /// [`Attribution`]: elide_core::entity::audit::Attribution
     pub fn because(mut self, attribution: impl Into<Attribution>) -> Self {
         self.attribution = Some(attribution.into());
         self

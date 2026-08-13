@@ -391,12 +391,12 @@ mod tests {
         // The Operator impl (not just `render`): a declined value takes the
         // safe default of erasure when the operator is used on its own.
         use elide_core::entity::LabelRef;
-        use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
+        use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
         use elide_core::modality::text::TextLocation;
         use elide_core::primitive::Confidence;
 
         let location = TextLocation::new(0, 8);
-        let event = Event::pattern(
+        let event = AuditEvent::pattern(
             "t",
             Confidence::MAX,
             location.clone(),
@@ -406,7 +406,7 @@ mod tests {
             LabelRef::new("date_of_birth"),
             location,
             Confidence::MAX,
-            Provenance::new(event),
+            AuditLog::new(event),
         );
         let out = Operator::<Text>::anonymize(
             &GeneralizeDate::new(DateGranularity::Year),

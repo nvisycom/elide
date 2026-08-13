@@ -217,12 +217,10 @@ impl Enhancer {
         Some(Boost {
             entity_index,
             source,
-            before,
-            after,
+            confidence: after,
             keyword,
             hint_index,
             keyword_range,
-            amount: rule.boost.get(),
         })
     }
 
@@ -283,10 +281,8 @@ pub struct Boost {
     /// Event source tag (`"context"` for a window match, `"context-hint"`
     /// for a hint match).
     pub source: &'static str,
-    /// Confidence before the lift.
-    pub before: Confidence,
-    /// Confidence after the lift.
-    pub after: Confidence,
+    /// The entity's confidence once the keyword boost is applied.
+    pub confidence: Confidence,
     /// Representative keyword (the rule's first).
     pub keyword: HipStr<'static>,
     /// Index of the matched hint into the context hints, or `None` for an
@@ -300,6 +296,4 @@ pub struct Boost {
     ///
     /// [`locate`]: elide_core::modality::TextRecognizable::locate
     pub keyword_range: Option<Range<usize>>,
-    /// The boost amount applied, as a bare `f32` (for the reason string).
-    pub amount: f32,
 }

@@ -90,7 +90,7 @@ async fn docx_detects_and_redacts() -> Result<()> {
 async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
     use elide::codec::{FormatRegistry, PartId};
     use elide::detection::Analyzer;
-    use elide::entity::provenance::EventKind;
+    use elide::entity::audit::AuditKind;
     use elide::modality::image::Image;
     use elide::modality::text::Text;
     use elide::recognition::llm::LlmRecognizer;
@@ -168,8 +168,8 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
     for entity in &audited {
         assert!(
             matches!(
-                entity.provenance.events.last().map(|e| &e.kind),
-                Some(EventKind::Redaction { .. })
+                entity.audit.events().last().map(|e| &e.kind),
+                Some(AuditKind::Redaction { .. })
             ),
             "each applied entity's final provenance event is its redaction",
         );

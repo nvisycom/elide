@@ -6,8 +6,8 @@
 mod fixtures;
 
 use elide::Result;
+use elide::entity::audit::AuditKind;
 use elide::entity::builtins;
-use elide::entity::provenance::EventKind;
 use fixtures::asserts::{
     assert_label_present, assert_pii_removed, assert_preserved, assert_tokens_present,
 };
@@ -74,12 +74,12 @@ async fn txt_detects_and_redacts() -> Result<()> {
     );
     for entity in &outcome.audited {
         let last = entity
-            .provenance
-            .events
+            .audit
+            .events()
             .last()
             .expect("an applied entity has at least one event");
         assert!(
-            matches!(last.kind, EventKind::Redaction { .. }),
+            matches!(last.kind, AuditKind::Redaction { .. }),
             "the final provenance event of a redacted entity is its redaction, got {:?}",
             last.kind,
         );

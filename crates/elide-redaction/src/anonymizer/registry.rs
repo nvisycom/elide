@@ -7,7 +7,7 @@
 //! ordered list expresses every selection policy with no hidden
 //! precedence between kinds.
 
-use elide_core::entity::provenance::{Attribution, RuleMatch};
+use elide_core::entity::audit::{Attribution, RuleMatch};
 use elide_core::entity::{Entity, LabelCatalog};
 use elide_core::modality::Modality;
 use elide_core::recognition::Scope;

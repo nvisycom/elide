@@ -9,7 +9,7 @@ use std::ops::Range;
 
 use elide_context::matching::SubstringMatcher;
 use elide_context::{BoostRule, Context, Enhancer};
-use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
+use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::{Text, TextLocation};
 use elide_core::primitive::Confidence;
@@ -18,13 +18,13 @@ use elide_core::primitive::Confidence;
 fn entity(label: &LabelRef, range: Range<usize>, score: f32) -> Entity<Text> {
     let confidence = Confidence::new(score).unwrap();
     let location = TextLocation::new(range.start, range.end);
-    let event = Event::pattern(
+    let event = AuditEvent::pattern(
         "test",
         confidence,
         location.clone(),
         PatternEvent::default(),
     );
-    let mut entity = Entity::new(label.clone(), location, confidence, Provenance::new(event));
+    let mut entity = Entity::new(label.clone(), location, confidence, AuditLog::new(event));
     entity.recognized_range = Some(range);
     entity
 }

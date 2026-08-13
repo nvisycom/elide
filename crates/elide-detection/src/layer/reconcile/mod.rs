@@ -126,7 +126,7 @@ where
 }
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::provenance::{Event, EventKind, PatternEvent, Provenance};
+    use elide_core::entity::audit::{AuditEvent, AuditKind, AuditLog, PatternEvent};
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::modality::text::{Text, TextLocation};
     use elide_core::primitive::Confidence;
@@ -138,17 +138,12 @@ mod tests {
     fn entity(label: &str, start: usize, end: usize, conf: f32) -> Entity<Text> {
         let loc = TextLocation::new(start, end);
         let confidence = Confidence::new(conf).unwrap();
-        let event = Event::pattern("t", confidence, loc.clone(), PatternEvent::default());
-        Entity::new(
-            LabelRef::new(label),
-            loc,
-            confidence,
-            Provenance::new(event),
-        )
+        let event = AuditEvent::pattern("t", confidence, loc.clone(), PatternEvent::default());
+        Entity::new(LabelRef::new(label), loc, confidence, AuditLog::new(event))
     }
 
-    fn has_kind(entity: &Entity<Text>, f: impl Fn(&EventKind<Text>) -> bool) -> bool {
-        entity.provenance.events.iter().any(|e| f(&e.kind))
+    fn has_kind(entity: &Entity<Text>, f: impl Fn(&AuditKind<Text>) -> bool) -> bool {
+        entity.audit.events().iter().any(|e| f(&e.kind))
     }
 
     // --- fusion (SameLabel + Merging) ---
@@ -229,7 +224,7 @@ mod tests {
         assert_eq!(out.kept[0].label, LabelRef::new("PERSON_NAME"));
         assert!(has_kind(&out.kept[0], |k| matches!(
             k,
-            EventKind::Conflict { competing_label, .. } if *competing_label == LabelRef::new("ORGANIZATION")
+            AuditKind::Conflict { competing_label, .. } if *competing_label == LabelRef::new("ORGANIZATION")
         )));
     }
 
@@ -246,7 +241,7 @@ mod tests {
         assert_eq!(out.kept.len(), 2, "contest keeps both");
         assert!(out.dropped.is_empty());
         for e in &out.kept {
-            assert!(has_kind(e, |k| matches!(k, EventKind::Contested { .. })));
+            assert!(has_kind(e, |k| matches!(k, AuditKind::Contested { .. })));
         }
     }
 

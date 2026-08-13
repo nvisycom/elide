@@ -16,7 +16,7 @@
 
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::entity::provenance::Event;
+use elide_core::entity::audit::AuditEvent;
 use elide_core::modality::TextRecognizable;
 use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
 
@@ -104,22 +104,13 @@ where
                 (None, None) => None,
             };
             let entity = &mut entities[boost.entity_index];
-            let label = entity.label.clone();
-            entity.provenance.record(
-                Event::refinement(
-                    boost.source,
-                    boost.before,
-                    boost.after,
-                    boost.keyword,
-                    hint,
-                    location,
-                )
-                .with_reason(format!(
-                    "context keyword near `{}` (+{:.3})",
-                    label.as_str(),
-                    boost.amount,
-                )),
-            );
+            entity.audit.record(AuditEvent::refinement(
+                boost.source,
+                boost.confidence,
+                boost.keyword,
+                hint,
+                location,
+            ));
         }
         Ok(entities)
     }

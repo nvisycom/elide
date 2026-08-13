@@ -19,7 +19,10 @@
 //! [`group`], the per-group report entries ([`BodyReport`] / [`PartReport`])
 //! in [`entry`], the whole-document selection aggregate
 //! ([`DocumentSelections`]) in `selections`, and the serde wire view in
-//! `serialize`.
+//! `serialize`. Each entity carries its own tamper-evident audit trail
+//! ([`AuditLog`]) natively, so there is no separate document-level audit type.
+//!
+//! [`AuditLog`]: elide_core::entity::audit::AuditLog
 //!
 //! [`BodyReport`]: entry::BodyReport
 //! [`PartReport`]: entry::PartReport
@@ -285,7 +288,7 @@ impl Report {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
+    use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::modality::text::{Text, TextLocation};
     use elide_core::primitive::Confidence;
@@ -295,12 +298,12 @@ mod tests {
     /// A minimal text entity carrying `label`, for building reports under test.
     fn text_entity(label: &str) -> Entity<Text> {
         let loc = TextLocation::new(0, 4);
-        let event = Event::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
+        let event = AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
         Entity::new(
             LabelRef::new(label),
             loc,
             Confidence::MAX,
-            Provenance::new(event),
+            AuditLog::new(event),
         )
     }
 

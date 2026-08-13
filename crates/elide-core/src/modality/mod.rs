@@ -174,6 +174,16 @@ pub trait ModalityLocation: Clone + fmt::Debug + Send + Sync + 'static {
     /// [`Less`]: std::cmp::Ordering::Less
     /// [`span_cmp`]: ModalityLocation::span_cmp
     fn position_cmp(&self, other: &Self) -> Ordering;
+
+    /// This location's identifying coordinates as a stable byte string.
+    ///
+    /// Lets an entity's audit trail hash *where* a detection matched without
+    /// serializing the location, so the tamper-evident digest covers the
+    /// modality's coordinates (a text span, a pixel box, a time range) with no
+    /// `serde` bound. Implementations encode the fields that define the location
+    /// (start/end offsets, box corners, …) in a fixed order, so the same
+    /// location always yields the same bytes.
+    fn hash(&self) -> Vec<u8>;
 }
 
 /// Instruction a codec applies to hide an entity.

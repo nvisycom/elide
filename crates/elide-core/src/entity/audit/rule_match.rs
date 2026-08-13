@@ -18,7 +18,7 @@ use crate::entity::LabelRef;
 /// closure into provenance, so [`Predicate`] records only that a predicate
 /// matched, not which one.
 ///
-/// [`Redaction`]: crate::entity::provenance::EventKind::Redaction
+/// [`Redaction`]: crate::entity::audit::AuditKind::Redaction
 /// [`Predicate`]: RuleMatch::Predicate
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -33,4 +33,26 @@ pub enum RuleMatch {
     Predicate,
     /// Matched the catch-all fallback.
     Fallback,
+}
+
+impl RuleMatch {
+    /// Fold this rule match's identifying bytes into `out`, for the audit hash.
+    pub(crate) fn hash(&self, out: &mut Vec<u8>) {
+        match self {
+            Self::Label(label) => {
+                out.push(0);
+                let bytes = label.as_str().as_bytes();
+                out.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+                out.extend_from_slice(bytes);
+            }
+            Self::Tag(tag) => {
+                out.push(1);
+                let bytes = tag.as_bytes();
+                out.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+                out.extend_from_slice(bytes);
+            }
+            Self::Predicate => out.push(2),
+            Self::Fallback => out.push(3),
+        }
+    }
 }

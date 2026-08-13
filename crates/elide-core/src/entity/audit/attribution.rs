@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 /// UUID, a jurisdiction) is that layer's concern — it can encode it in the
 /// name or carry it separately.
 ///
-/// [`Redaction`]: crate::entity::provenance::EventKind::Redaction
+/// [`Redaction`]: crate::entity::audit::AuditKind::Redaction
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

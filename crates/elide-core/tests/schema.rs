@@ -8,7 +8,7 @@
 #![cfg(feature = "schema")]
 
 use elide_core::entity::Entity;
-use elide_core::entity::provenance::Event;
+use elide_core::entity::audit::AuditEvent;
 use elide_core::modality::text::{Text, TextLocation};
 use elide_core::recognition::Scope;
 use elide_core::recognition::annotation::Annotations;
@@ -21,14 +21,7 @@ fn entity_text_schema() {
     let schema = schema_for!(Entity<Text>);
     let json = serde_json::to_value(&schema).unwrap();
     let text = json.to_string();
-    for field in [
-        "id",
-        "label",
-        "location",
-        "confidence",
-        "language",
-        "provenance",
-    ] {
+    for field in ["id", "label", "location", "confidence", "language", "audit"] {
         assert!(text.contains(field), "schema should mention `{field}`");
     }
 }
@@ -41,11 +34,11 @@ fn text_location_schema() {
     assert!(json.to_string().contains("start"));
 }
 
-/// The provenance `Event<M>` (rich enum with external-string and bound cases)
+/// The audit `AuditEvent<M>` (rich enum with external-string and bound cases)
 /// generates without panicking.
 #[test]
 fn event_schema() {
-    let _ = schema_for!(Event<Text>);
+    let _ = schema_for!(AuditEvent<Text>);
 }
 
 #[cfg(feature = "image")]
@@ -77,17 +70,17 @@ fn annotations_schema() {
 }
 
 /// Generic types carry the modality in their schema name, so two modalities'
-/// schemas do not collide into `Provenance` / `Provenance2` in a combined
+/// schemas do not collide into `AuditLog` / `AuditLog2` in a combined
 /// OpenAPI document. See the `schemars(rename = "{M}...")` on these types.
 #[cfg(feature = "image")]
 #[test]
 fn generic_schema_names_carry_modality_prefix() {
-    use elide_core::entity::provenance::Provenance;
+    use elide_core::entity::audit::AuditLog;
     use elide_core::modality::image::Image;
     use schemars::JsonSchema;
 
     assert_eq!(Entity::<Text>::schema_name(), "TextEntity");
     assert_eq!(Entity::<Image>::schema_name(), "ImageEntity");
-    assert_eq!(Provenance::<Text>::schema_name(), "TextProvenance");
-    assert_eq!(Provenance::<Image>::schema_name(), "ImageProvenance");
+    assert_eq!(AuditLog::<Text>::schema_name(), "TextAuditLog");
+    assert_eq!(AuditLog::<Image>::schema_name(), "ImageAuditLog");
 }

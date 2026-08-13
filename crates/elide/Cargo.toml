@@ -161,6 +161,7 @@ serde_json = { workspace = true, features = [] }
 
 # Primitive datatypes
 bytes = { workspace = true, features = [] }
+uuid = { workspace = true, features = ["v4"] }
 
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
@@ -205,3 +206,7 @@ required-features = ["codec-mp3", "stt", "mock", "serde"]
 [[test]]
 name = "e2e_png"
 required-features = ["codec-png", "ocr", "mock", "serde"]
+
+[[test]]
+name = "audit"
+required-features = ["serde"]

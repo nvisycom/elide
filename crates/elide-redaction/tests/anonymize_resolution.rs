@@ -5,7 +5,7 @@
 
 mod fixtures;
 
-use elide_core::entity::provenance::{Attribution, EventKind, RuleMatch};
+use elide_core::entity::audit::{Attribution, AuditKind, RuleMatch};
 use elide_core::entity::{EntityCoRef, Label, LabelCatalog, LabelRef};
 use elide_core::modality::text::Text;
 use elide_core::primitive::{Confidence, ConfidenceThreshold};
@@ -230,11 +230,11 @@ async fn anonymize_records_redaction_provenance_with_rule_and_attribution() {
 
     // The entity now carries a Redaction event describing *why* and *how*.
     let redaction = entities[0]
-        .provenance
-        .events
+        .audit
+        .events()
         .iter()
         .find_map(|e| match &e.kind {
-            EventKind::Redaction {
+            AuditKind::Redaction {
                 operator,
                 matched_by,
                 attribution,
@@ -267,11 +267,11 @@ async fn anonymize_records_fallback_rule_with_no_attribution() {
         .unwrap();
 
     let (matched_by, attribution) = entities[0]
-        .provenance
-        .events
+        .audit
+        .events()
         .iter()
         .find_map(|e| match &e.kind {
-            EventKind::Redaction {
+            AuditKind::Redaction {
                 matched_by,
                 attribution,
                 ..
@@ -299,11 +299,11 @@ async fn because_accepts_a_bare_name() {
         .unwrap();
 
     let attribution = entities[0]
-        .provenance
-        .events
+        .audit
+        .events()
         .iter()
         .find_map(|e| match &e.kind {
-            EventKind::Redaction { attribution, .. } => attribution.clone(),
+            AuditKind::Redaction { attribution, .. } => attribution.clone(),
             _ => None,
         })
         .expect("attribution recorded");

@@ -4,7 +4,7 @@
 mod map;
 
 use elide_core::entity::Entity;
-use elide_core::entity::provenance::Event;
+use elide_core::entity::audit::AuditEvent;
 use elide_core::modality::Modality;
 use elide_core::primitive::Confidence;
 
@@ -40,7 +40,7 @@ impl<M: Modality> Layer<M> for CalibrateLayer {
             // The originating recognizer is the source of the first
             // recognition event in the entity's provenance.
             let multiplier = entity
-                .provenance
+                .audit
                 .recognizers()
                 .next()
                 .and_then(|e| self.calibration.get(e.source.as_str()));
@@ -49,9 +49,7 @@ impl<M: Modality> Layer<M> for CalibrateLayer {
                 let before = entity.confidence;
                 let after = Confidence::clamped((before.get() as f64 * m) as f32);
                 entity.confidence = after;
-                entity
-                    .provenance
-                    .record(Event::calibration(before, after, m));
+                entity.audit.record(AuditEvent::calibration(after, m));
             }
         }
 

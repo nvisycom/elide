@@ -4,7 +4,7 @@
 use std::mem;
 
 use elide_core::entity::Entity;
-use elide_core::entity::provenance::Event;
+use elide_core::entity::audit::AuditEvent;
 use elide_core::modality::{Modality, ModalityLocation};
 use elide_core::primitive::Confidence;
 
@@ -89,13 +89,13 @@ fn record_conflicts<M: Modality>(
         if dropped[winner] {
             continue; // winner later lost elsewhere; its claim travels nowhere
         }
-        let event = Event::conflict(
+        let event = AuditEvent::conflict(
             name.to_owned(),
             entities[winner].confidence,
             entities[loser].label.clone(),
             entities[loser].confidence,
         );
-        entities[winner].provenance.record(event);
+        entities[winner].audit.record(event);
     }
 }
 
@@ -110,20 +110,20 @@ fn record_contests<M: Modality>(
         if dropped[a] || dropped[b] {
             continue;
         }
-        let on_a = Event::contested(
+        let on_a = AuditEvent::contested(
             name.to_owned(),
             entities[a].confidence,
             entities[b].label.clone(),
             entities[b].confidence,
         );
-        let on_b = Event::contested(
+        let on_b = AuditEvent::contested(
             name.to_owned(),
             entities[b].confidence,
             entities[a].label.clone(),
             entities[a].confidence,
         );
-        entities[a].provenance.record(on_a);
-        entities[b].provenance.record(on_b);
+        entities[a].audit.record(on_a);
+        entities[b].audit.record(on_b);
     }
 }
 
@@ -147,16 +147,21 @@ fn apply_merges<M: Modality>(
         } else {
             (j, i)
         };
-        let before = entities[base].confidence;
         if let Some(union) = entities[base].location.union(&entities[other].location) {
             entities[base].location = union;
         }
-        let other_events = mem::take(&mut entities[other].provenance.events);
-        entities[base].provenance.events.extend(other_events);
+        // Join the two trails as a DAG: the fusion event names both trails'
+        // heads as its parents, so neither trail is re-linked and no false
+        // linear order is imposed between them.
+        let base_head = entities[base].audit.head_hash();
+        let other_head = entities[other].audit.head_hash();
+        let other_events = mem::take(&mut entities[other].audit).into_events();
+        entities[base].audit.absorb(other_events);
         entities[base].confidence = confidence;
-        entities[base]
-            .provenance
-            .record(Event::deduplication(name.to_owned(), before, confidence));
+        entities[base].audit.record_fusion(
+            AuditEvent::deduplication(name.to_owned(), confidence),
+            [base_head, other_head],
+        );
         dropped[other] = true;
     }
 }

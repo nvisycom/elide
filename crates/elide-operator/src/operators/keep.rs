@@ -115,7 +115,7 @@ impl Operator<Audio> for Keep {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
+    use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
     use elide_core::operator::Operator;
@@ -125,7 +125,7 @@ mod tests {
 
     fn text_entity() -> Entity<Text> {
         let location = TextLocation::new(0, 5);
-        let event = Event::pattern(
+        let event = AuditEvent::pattern(
             "t",
             Confidence::MAX,
             location.clone(),
@@ -135,7 +135,7 @@ mod tests {
             LabelRef::new("AMOUNT"),
             location,
             Confidence::MAX,
-            Provenance::new(event),
+            AuditLog::new(event),
         )
     }
 
@@ -156,7 +156,7 @@ mod tests {
 
         let bbox = BoundingBox::from_origin_size(Point::new(0.0, 0.0), 2.0, 2.0);
         let location = ImageLocation::new(bbox);
-        let event = Event::pattern(
+        let event = AuditEvent::pattern(
             "t",
             Confidence::MAX,
             location.clone(),
@@ -166,7 +166,7 @@ mod tests {
             LabelRef::new("FACE"),
             location,
             Confidence::MAX,
-            Provenance::new(event),
+            AuditLog::new(event),
         );
         let data = ImageData::new(vec![0u8; 4], Dimensions::new(4, 4));
 

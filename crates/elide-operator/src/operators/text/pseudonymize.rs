@@ -176,7 +176,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
+    use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
     use elide_core::entity::{EntityCoRef, LabelRef};
     use elide_core::modality::text::{Text, TextLocation};
     use elide_core::primitive::Confidence;
@@ -187,7 +187,7 @@ mod tests {
 
     fn entity(label: &str, coref: Option<&str>) -> Entity<Text> {
         let location = TextLocation::new(0, 1);
-        let event = Event::pattern(
+        let event = AuditEvent::pattern(
             "t",
             Confidence::MAX,
             location.clone(),
@@ -197,7 +197,7 @@ mod tests {
             LabelRef::new(label),
             location,
             Confidence::MAX,
-            Provenance::new(event),
+            AuditLog::new(event),
         );
         match coref {
             Some(c) => entity.with_coref(EntityCoRef::new(c.to_owned())),

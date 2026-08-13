@@ -17,7 +17,7 @@ use std::collections::HashSet;
 use async_trait::async_trait;
 use elide_core::Result;
 use elide_core::entity::LabelRef;
-use elide_core::entity::provenance::ModelEvent;
+use elide_core::entity::audit::ModelEvent;
 
 use crate::backend::{NerBackend, NerRequest, NerResponse};
 

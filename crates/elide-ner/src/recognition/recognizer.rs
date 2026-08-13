@@ -21,7 +21,7 @@
 use std::sync::Arc;
 
 use derive_builder::Builder;
-use elide_core::entity::provenance::{Event, ModelEvent};
+use elide_core::entity::audit::{AuditEvent, ModelEvent};
 use elide_core::entity::{Entity, Label, LabelRef};
 use elide_core::modality::TextRecognizable;
 use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
@@ -110,7 +110,7 @@ impl NerRecognizer {
     /// `recognized_range`. Drops the match (`None`) when its range can't be
     /// placed in the medium (an OCR/transcript range no enrichment covers).
     ///
-    /// [`Model`]: elide_core::entity::provenance::EventKind::Model
+    /// [`Model`]: elide_core::entity::audit::AuditKind::Model
     fn build_entity<M: TextRecognizable>(
         &self,
         span: &NerSpan,
@@ -120,8 +120,7 @@ impl NerRecognizer {
     ) -> Option<Entity<M>> {
         let range = span.offset.clone();
         let location = M::locate(range.clone(), data, &ctx.artifacts)?;
-        let reason = format!("recognizer `{}` identified {}", self.name, label.as_str());
-        let event = Event::model(
+        let event = AuditEvent::model(
             "ner",
             span.confidence,
             location.clone(),
@@ -129,8 +128,7 @@ impl NerRecognizer {
                 name: self.name.clone(),
                 ..ModelEvent::default()
             },
-        )
-        .with_reason(reason);
+        );
         Some(
             Entity::builder()
                 .with_label(label)

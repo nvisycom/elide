@@ -16,7 +16,7 @@ pub use self::threshold::ConfidenceThreshold;
 
 /// Confidence score in the closed range `0.0..=1.0`.
 ///
-/// Carried by every provenance [`Event`] (the `before`/`after` of a
+/// Carried by every provenance [`AuditEvent`] (the `before`/`after` of a
 /// recognition, fusion, or calibration) and by the effective confidence
 /// of an [`Entity`]. The newtype enforces the range at construction so
 /// no downstream code has to defend against values outside `[0, 1]`.
@@ -26,7 +26,7 @@ pub use self::threshold::ConfidenceThreshold;
 /// *cutoff* configured to filter scores. Compare the two with
 /// [`ConfidenceThreshold::passes`].
 ///
-/// [`Event`]: crate::entity::provenance::Event
+/// [`AuditEvent`]: crate::entity::audit::AuditEvent
 /// [`Entity`]: crate::entity::Entity
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

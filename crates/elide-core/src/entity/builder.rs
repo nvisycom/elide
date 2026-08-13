@@ -5,7 +5,7 @@ use std::ops::Range;
 use uuid::Uuid;
 
 use super::{Entity, EntityCoRef, LabelRef};
-use crate::entity::provenance::{Event, Provenance};
+use crate::entity::audit::{AuditEvent, AuditLog};
 use crate::modality::Modality;
 use crate::primitive::{Confidence, LanguageTag};
 
@@ -21,14 +21,14 @@ use crate::primitive::{Confidence, LanguageTag};
 /// # use elide_core::entity::{Entity, EntityBuilder, LabelRef};
 /// # use elide_core::modality::text::{Text, TextLocation};
 /// # use elide_core::primitive::Confidence;
-/// # use elide_core::entity::provenance::{Event, PatternEvent};
+/// # use elide_core::entity::audit::{AuditEvent, PatternEvent};
 /// let location = TextLocation::new(0, 11);
 /// let confidence = Confidence::clamped(0.8);
 /// let entity: Entity<Text> = EntityBuilder::new()
 ///     .with_label(LabelRef::new("US_SSN"))
 ///     .with_location(location.clone())
 ///     .with_confidence(confidence)
-///     .with_event(Event::pattern("pattern", confidence, location, PatternEvent::default()))
+///     .with_event(AuditEvent::pattern("pattern", confidence, location, PatternEvent::default()))
 ///     .build()
 ///     .unwrap();
 /// ```
@@ -47,7 +47,7 @@ pub struct EntityBuilder<M: Modality> {
     coref: Option<EntityCoRef>,
     language: Option<LanguageTag>,
     recognized_range: Option<Range<usize>>,
-    events: Vec<Event<M>>,
+    events: Vec<AuditEvent<M>>,
 }
 
 impl<M: Modality> EntityBuilder<M> {
@@ -115,26 +115,31 @@ impl<M: Modality> EntityBuilder<M> {
         self
     }
 
-    /// Append a provenance event. Events accumulate in order.
+    /// Append an audit event. Events accumulate in order.
     #[must_use]
-    pub fn with_event(mut self, event: Event<M>) -> Self {
+    pub fn with_event(mut self, event: AuditEvent<M>) -> Self {
         self.events.push(event);
         self
     }
 
-    /// Append several provenance events.
+    /// Append several audit events.
     #[must_use]
-    pub fn with_events(mut self, events: impl IntoIterator<Item = Event<M>>) -> Self {
+    pub fn with_events(mut self, events: impl IntoIterator<Item = AuditEvent<M>>) -> Self {
         self.events.extend(events);
         self
     }
 
     /// Assemble the entity.
     ///
-    /// Returns [`None`] when `label`, `location`, or `confidence` was not
-    /// set. The id defaults to a fresh UUIDv7; provenance is built from the
-    /// accumulated events (empty if none were added).
+    /// Returns [`None`] when `label`, `location`, or `confidence` was not set.
+    /// The id defaults to a fresh UUIDv7; the audit trail is built by recording
+    /// the accumulated events in order (empty if none were added), each linked
+    /// to the one before it.
     pub fn build(self) -> Option<Entity<M>> {
+        let mut audit = AuditLog::default();
+        for event in self.events {
+            audit.record(event);
+        }
         Some(Entity {
             id: self.id.unwrap_or_else(Uuid::now_v7),
             label: self.label?,
@@ -143,9 +148,7 @@ impl<M: Modality> EntityBuilder<M> {
             coref: self.coref,
             language: self.language,
             recognized_range: self.recognized_range,
-            provenance: Provenance {
-                events: self.events,
-            },
+            audit,
         })
     }
 }
