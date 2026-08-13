@@ -93,7 +93,7 @@ impl Operator<Audio> for Beep {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
+    use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::modality::audio::{AudioData, AudioLocation};
     use elide_core::primitive::{Confidence, TimeSpan};
@@ -102,7 +102,7 @@ mod tests {
 
     fn audio_entity() -> Entity<Audio> {
         let location = AudioLocation::new(TimeSpan::from_millis(0, 100));
-        let event = Event::pattern(
+        let event = AuditEvent::pattern(
             "t",
             Confidence::MAX,
             location.clone(),
@@ -112,7 +112,7 @@ mod tests {
             LabelRef::new("PERSON"),
             location,
             Confidence::MAX,
-            Provenance::new(event),
+            AuditLog::new(event),
         )
     }
 

@@ -6,7 +6,7 @@ use std::cmp::Ordering;
 use serde::{Deserialize, Serialize};
 
 use crate::modality::{ModalityLocation, Overlap};
-use crate::primitive::{BoundingBox, Polygon};
+use crate::primitive::{BoundingBox, Point, Polygon};
 
 /// Region within image content.
 ///
@@ -117,6 +117,34 @@ impl ModalityLocation for ImageLocation {
             .cmp(&other.page.unwrap_or(0))
             .then(self.bounding_box.min.y.total_cmp(&other.bounding_box.min.y))
             .then(self.bounding_box.min.x.total_cmp(&other.bounding_box.min.x))
+    }
+
+    fn hash(&self) -> Vec<u8> {
+        fn point(bytes: &mut Vec<u8>, p: &Point) {
+            bytes.extend_from_slice(&p.x.to_bits().to_le_bytes());
+            bytes.extend_from_slice(&p.y.to_bits().to_le_bytes());
+        }
+        let mut bytes = Vec::new();
+        point(&mut bytes, &self.bounding_box.min);
+        point(&mut bytes, &self.bounding_box.max);
+        match &self.polygon {
+            Some(polygon) => {
+                bytes.push(1);
+                bytes.extend_from_slice(&(polygon.vertices().len() as u64).to_le_bytes());
+                for vertex in polygon.vertices() {
+                    point(&mut bytes, vertex);
+                }
+            }
+            None => bytes.push(0),
+        }
+        match self.page {
+            Some(page) => {
+                bytes.push(1);
+                bytes.extend_from_slice(&page.to_le_bytes());
+            }
+            None => bytes.push(0),
+        }
+        bytes
     }
 }
 

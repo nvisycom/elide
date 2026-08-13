@@ -3,11 +3,11 @@
 //! that confidence is boosted, and a [`Refinement`] step is
 //! appended only for matches that had a nearby keyword.
 //!
-//! [`Refinement`]: elide_core::entity::provenance::EventKind::Refinement
+//! [`Refinement`]: elide_core::entity::audit::AuditKind::Refinement
 //! [`Enhanced`]: elide_context::Enhanced
 
+use elide_core::entity::audit::AuditKind;
 use elide_core::entity::builtins;
-use elide_core::entity::provenance::EventKind;
 use elide_core::modality::text::{Text, TextData};
 use elide_core::primitive::Confidence;
 use elide_core::recognition::{Recognizer, RecognizerContext, Scope};
@@ -50,10 +50,10 @@ async fn enhancer_boosts_matches_near_keyword_only() {
         "near-keyword match should be boosted",
     );
     assert!(
-        near.provenance
-            .events
+        near.audit
+            .events()
             .iter()
-            .any(|e| matches!(e.kind, EventKind::Refinement { .. })),
+            .any(|e| matches!(e.kind, AuditKind::Refinement { .. })),
         "near-keyword match should have a Refinement step",
     );
 
@@ -67,10 +67,10 @@ async fn enhancer_boosts_matches_near_keyword_only() {
         "far-from-keyword match should not be boosted",
     );
     assert!(
-        !far.provenance
-            .events
+        !far.audit
+            .events()
             .iter()
-            .any(|e| matches!(e.kind, EventKind::Refinement { .. })),
+            .any(|e| matches!(e.kind, AuditKind::Refinement { .. })),
         "far-from-keyword match should have no Refinement step",
     );
 }
@@ -108,10 +108,10 @@ async fn bare_recognizer_works_without_enhancement() {
     assert!((entity.confidence.get() - 0.6).abs() < f32::EPSILON);
     assert!(
         !entity
-            .provenance
-            .events
+            .audit
+            .events()
             .iter()
-            .any(|e| matches!(e.kind, EventKind::Refinement { .. })),
+            .any(|e| matches!(e.kind, AuditKind::Refinement { .. })),
         "bare recognizer must not record any Refinement",
     );
 }

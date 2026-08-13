@@ -85,6 +85,7 @@ base64 = { version = "0.23", features = [] }
 sha2 = { version = "0.11", features = [] }
 hmac = { version = "0.13", features = [] }
 hex = { version = "0.4", features = [] }
+blake3 = { version = "1.8", features = [] }
 
 # Cryptography
 aes-gcm = { version = "0.11", features = [] }

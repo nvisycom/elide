@@ -5,7 +5,7 @@ use std::result::Result as StdResult;
 use aho_corasick::{AhoCorasick, MatchKind};
 use elide_context::matching::SubstringMatcher;
 use elide_context::{BoostRule, Enhanced, Enhancer};
-use elide_core::entity::provenance::Event;
+use elide_core::entity::audit::AuditEvent;
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::LanguageTag;
@@ -587,8 +587,7 @@ impl PatternRecognizer {
         ctx: &RecognizerContext<'_, M>,
     ) -> Option<Entity<M>> {
         let location = M::locate(raw.range.clone(), data, &ctx.artifacts)?;
-        let event = Event::pattern("pattern", raw.confidence, location.clone(), raw.pattern)
-            .with_reason(raw.reason);
+        let event = AuditEvent::pattern("pattern", raw.confidence, location.clone(), raw.pattern);
         Some(
             Entity::builder()
                 .with_label(raw.label)

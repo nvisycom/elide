@@ -207,15 +207,15 @@ mod tests {
 
     #[test]
     fn retain_declared_keeps_only_in_catalog_labels() {
-        use crate::entity::provenance::{Event, PatternEvent, Provenance};
+        use crate::entity::audit::{AuditEvent, AuditLog, PatternEvent};
         use crate::modality::text::{Text, TextLocation};
         use crate::primitive::Confidence;
 
         fn entity(label: &str) -> Entity<Text> {
             let loc = TextLocation::new(0, 1);
             let conf = Confidence::new(0.9).unwrap();
-            let event = Event::pattern("t", conf, loc.clone(), PatternEvent::default());
-            Entity::new(LabelRef::new(label), loc, conf, Provenance::new(event))
+            let event = AuditEvent::pattern("t", conf, loc.clone(), PatternEvent::default());
+            Entity::new(LabelRef::new(label), loc, conf, AuditLog::new(event))
         }
 
         let catalog: LabelCatalog = [Label::new("email_address", "email")].into_iter().collect();
@@ -231,15 +231,15 @@ mod tests {
 
     #[test]
     fn group_by_category_buckets_entities_by_their_labels_category() {
-        use crate::entity::provenance::{Event, PatternEvent, Provenance};
+        use crate::entity::audit::{AuditEvent, AuditLog, PatternEvent};
         use crate::modality::text::{Text, TextLocation};
         use crate::primitive::Confidence;
 
         fn entity(label: &str) -> Entity<Text> {
             let loc = TextLocation::new(0, 1);
             let conf = Confidence::new(0.9).unwrap();
-            let event = Event::pattern("t", conf, loc.clone(), PatternEvent::default());
-            Entity::new(LabelRef::new(label), loc, conf, Provenance::new(event))
+            let event = AuditEvent::pattern("t", conf, loc.clone(), PatternEvent::default());
+            Entity::new(LabelRef::new(label), loc, conf, AuditLog::new(event))
         }
 
         let catalog: LabelCatalog = [

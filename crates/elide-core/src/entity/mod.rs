@@ -6,9 +6,9 @@
 //! module also defines the entity's building blocks: the [`Label`]
 //! taxonomy and the [`EntityRef`] / [`EntityCoRef`] reference types.
 
+pub mod audit;
 mod builder;
 mod label;
-pub mod provenance;
 mod reference;
 
 use std::ops::Range;
@@ -17,9 +17,9 @@ use std::ops::Range;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use self::audit::AuditLog;
 pub use self::builder::EntityBuilder;
 pub use self::label::{Category, Label, LabelCatalog, LabelLocale, LabelRef, builtins};
-use self::provenance::Provenance;
 pub use self::reference::{EntityCoRef, EntityRef};
 use crate::modality::Modality;
 use crate::primitive::{Confidence, LanguageTag};
@@ -34,17 +34,17 @@ use crate::primitive::{Confidence, LanguageTag};
 /// # Birth and fusion
 ///
 /// A recognizer emits an entity directly, carrying a single recognition
-/// [`Event`] (its own finding) in the entity's [`provenance`]. When
+/// [`AuditEvent`] (its own finding) in the entity's [`audit`] trail. When
 /// several recognizers find the same thing, a fusion step (in
 /// `elide`) combines their entities into one: the survivor's
 /// [`location`] and [`confidence`] are the *fused* values, and every
 /// contributing recognition event, plus a deduplication event, is
-/// retained in its provenance. The entity therefore carries its full
+/// retained in its audit trail. The entity therefore carries its full
 /// audit trail with it.
 ///
 /// [`Location`]: Modality::Location
-/// [`Event`]: crate::entity::provenance::Event
-/// [`provenance`]: Entity::provenance
+/// [`AuditEvent`]: crate::entity::audit::AuditEvent
+/// [`audit`]: Entity::audit
 /// [`location`]: Entity::location
 /// [`confidence`]: Entity::confidence
 #[derive(Debug, Clone)]
@@ -87,7 +87,7 @@ pub struct Entity<M: Modality> {
     /// the stable key back into that enrichment artifact, where the rich
     /// context lives (which OCR block, which speaker) that the geometric
     /// [`location`] cannot hold. `None` for entities not found via text
-    /// recognition (e.g. a VLM box). Provenance, not a coordinate: redaction
+    /// recognition (e.g. a VLM box). An audit key, not a coordinate: redaction
     /// uses [`location`]; an audit uses this with the artifact.
     ///
     /// [`location`]: Entity::location
@@ -96,17 +96,17 @@ pub struct Entity<M: Modality> {
         serde(default, skip_serializing_if = "Option::is_none")
     )]
     pub recognized_range: Option<Range<usize>>,
-    /// Detection audit trail: every contributing detection and the fusion
-    /// event, if any.
-    pub provenance: Provenance<M>,
+    /// Tamper-evident audit trail: every contributing detection, the fusion
+    /// event if any, and the redaction that hid it, as a hash-linked DAG.
+    pub audit: AuditLog<M>,
 }
 
 impl<M: Modality> Entity<M> {
-    /// Assemble an entity from its location, confidence, and provenance.
+    /// Assemble an entity from its location, confidence, and audit trail.
     ///
     /// Mints a fresh time-ordered [`id`] and leaves [`coref`] unset. Called
-    /// by a recognizer (with a single-detection provenance) or by the fusion
-    /// step in `elide` (with a fused, multi-detection provenance).
+    /// by a recognizer (with a single-detection trail) or by the fusion step
+    /// in `elide` (with a fused, multi-detection trail).
     ///
     /// [`id`]: Entity::id
     /// [`coref`]: Entity::coref
@@ -114,7 +114,7 @@ impl<M: Modality> Entity<M> {
         label: LabelRef,
         location: M::Location,
         confidence: Confidence,
-        provenance: Provenance<M>,
+        audit: AuditLog<M>,
     ) -> Self {
         Self {
             id: Uuid::now_v7(),
@@ -124,7 +124,7 @@ impl<M: Modality> Entity<M> {
             coref: None,
             language: None,
             recognized_range: None,
-            provenance,
+            audit,
         }
     }
 

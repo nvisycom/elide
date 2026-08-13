@@ -132,7 +132,7 @@ fn composite_id(primary: &OperatorId, fallback: &OperatorId) -> OperatorId {
 #[cfg(test)]
 mod tests {
     use elide_core::entity::LabelRef;
-    use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
+    use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
     use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
     use elide_core::primitive::Confidence;
 
@@ -141,7 +141,7 @@ mod tests {
 
     fn entity() -> Entity<Text> {
         let location = TextLocation::new(0, 3);
-        let event = Event::pattern(
+        let event = AuditEvent::pattern(
             "t",
             Confidence::MAX,
             location.clone(),
@@ -151,7 +151,7 @@ mod tests {
             LabelRef::new("age"),
             location,
             Confidence::MAX,
-            Provenance::new(event),
+            AuditLog::new(event),
         )
     }
 

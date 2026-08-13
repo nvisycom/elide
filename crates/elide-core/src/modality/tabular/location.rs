@@ -217,6 +217,40 @@ impl ModalityLocation for TabularLocation {
                     .cmp(&other.end_offset.unwrap_or(0)),
             )
     }
+
+    fn hash(&self) -> Vec<u8> {
+        fn offset(bytes: &mut Vec<u8>, o: Option<usize>) {
+            match o {
+                Some(value) => {
+                    bytes.push(1);
+                    bytes.extend_from_slice(&(value as u64).to_le_bytes());
+                }
+                None => bytes.push(0),
+            }
+        }
+        fn name(bytes: &mut Vec<u8>, n: &Option<HipStr<'static>>) {
+            match n {
+                Some(value) => {
+                    // Length-prefix the string so two adjacent names cannot be
+                    // re-split into the same bytes (e.g. `("a", "bc")` vs
+                    // `("a\x01b", "c")`); a bare presence byte is ambiguous when
+                    // the value itself can contain that byte.
+                    bytes.push(1);
+                    bytes.extend_from_slice(&(value.len() as u64).to_le_bytes());
+                    bytes.extend_from_slice(value.as_bytes());
+                }
+                None => bytes.push(0),
+            }
+        }
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&self.row_index.to_le_bytes());
+        bytes.extend_from_slice(&self.column_index.to_le_bytes());
+        offset(&mut bytes, self.start_offset);
+        offset(&mut bytes, self.end_offset);
+        name(&mut bytes, &self.column_name);
+        name(&mut bytes, &self.sheet_name);
+        bytes
+    }
 }
 
 #[cfg(test)]

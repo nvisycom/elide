@@ -143,7 +143,7 @@ impl Operator<Tabular> for HmacHash {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
+    use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
     use elide_core::modality::text::TextLocation;
     use elide_core::primitive::Confidence;
     use zeroize::Zeroizing;
@@ -152,7 +152,7 @@ mod tests {
 
     fn entity(label: &str) -> Entity<Text> {
         let location = TextLocation::new(0, 5);
-        let event = Event::pattern(
+        let event = AuditEvent::pattern(
             "t",
             Confidence::MAX,
             location.clone(),
@@ -162,7 +162,7 @@ mod tests {
             LabelRef::new(label),
             location,
             Confidence::MAX,
-            Provenance::new(event),
+            AuditLog::new(event),
         )
     }
 

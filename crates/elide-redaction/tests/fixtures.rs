@@ -5,7 +5,7 @@
 #![allow(dead_code)]
 
 use elide_core::Result;
-use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
+use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{DataReader, DataWriter};
@@ -49,7 +49,7 @@ pub fn entity(label: &str, loc: (usize, usize)) -> Entity<Text> {
 /// Build an entity at an explicit confidence, for confidence-gated selection.
 pub fn entity_conf(label: &str, loc: (usize, usize), confidence: Confidence) -> Entity<Text> {
     let location = TextLocation::new(loc.0, loc.1);
-    let event = Event::pattern(
+    let event = AuditEvent::pattern(
         "test",
         confidence,
         location.clone(),
@@ -59,7 +59,7 @@ pub fn entity_conf(label: &str, loc: (usize, usize), confidence: Confidence) -> 
         LabelRef::new(label.to_owned()),
         location,
         confidence,
-        Provenance::new(event),
+        AuditLog::new(event),
     )
 }
 

@@ -7,7 +7,7 @@
 mod fixtures;
 
 use elide_core::entity::LabelRef;
-use elide_core::entity::provenance::EventKind;
+use elide_core::entity::audit::AuditKind;
 use elide_core::modality::text::Text;
 use elide_core::operator::Operator;
 use elide_core::recognition::Scope;
@@ -52,8 +52,8 @@ async fn overlap_merges_under_safest_operator() {
 
     // Both entities record a redaction by the winning operator.
     for entity in &entities {
-        let redacted = entity.provenance.events.iter().any(|e| {
-            matches!(&e.kind, EventKind::Redaction { operator, .. } if operator.name == "erase")
+        let redacted = entity.audit.events().iter().any(|e| {
+            matches!(&e.kind, AuditKind::Redaction { operator, .. } if operator.name == "erase")
         });
         assert!(redacted, "every member records the erase redaction");
     }
@@ -102,10 +102,10 @@ async fn non_coalescible_overlap_stays_separate() {
     for entity in &entities {
         assert!(
             entity
-                .provenance
-                .events
+                .audit
+                .events()
                 .iter()
-                .any(|e| matches!(&e.kind, EventKind::Redaction { .. })),
+                .any(|e| matches!(&e.kind, AuditKind::Redaction { .. })),
             "every entity records its own redaction",
         );
     }

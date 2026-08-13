@@ -17,7 +17,7 @@ mod ocr_request;
 mod ocr_response;
 
 use elide_core::Result;
-use elide_core::entity::provenance::ModelEvent;
+use elide_core::entity::audit::ModelEvent;
 
 #[cfg(any(test, feature = "mock"))]
 #[cfg_attr(docsrs, doc(cfg(feature = "mock")))]

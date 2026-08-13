@@ -1,7 +1,7 @@
 //! [`LlmModality`] for [`Image`]: scale each candidate's normalised box to
 //! pixel space and build the entity.
 
-use elide_core::entity::provenance::{Event, ModelEvent};
+use elide_core::entity::audit::{AuditEvent, ModelEvent};
 use elide_core::entity::{Entity, EntityCoRef, LabelRef};
 use elide_core::modality::image::{Image, ImageData, ImageLocation};
 use elide_core::primitive::{Confidence, UnitBoundingBox};
@@ -24,8 +24,7 @@ impl LlmModality for Image {
             };
             let bbox = UnitBoundingBox::from(d.bbox).denormalize(dims);
             let location = ImageLocation::new(bbox);
-            let reason = format!("llm-image identified {}", label.as_str());
-            let event = Event::model(
+            let event = AuditEvent::model(
                 "llm-image",
                 confidence,
                 location.clone(),
@@ -33,8 +32,7 @@ impl LlmModality for Image {
                     name: "llm-image".into(),
                     ..ModelEvent::default()
                 },
-            )
-            .with_reason(reason);
+            );
             let mut builder = Entity::builder()
                 .with_label(label)
                 .with_location(location)

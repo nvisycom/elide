@@ -5,7 +5,7 @@
 //! - [`Point`], [`BoundingBox`], and [`Polygon`] for spatial spans;
 //! - [`LanguageTag`], a validated BCP 47 language tag;
 //! - [`CountryCode`], an ISO 3166-1 country;
-//! - [`TimeSpan`], a microsecond `[start, end)` interval in a stream.
+//! - [`TimeSpan`], a microsecond `[start, end)` interval in a stream;
 //!
 //! Each wraps a well-validated representation so an invalid value cannot
 //! be constructed and downstream code never has to re-check.

@@ -7,7 +7,7 @@ use elide::detection::calibrate::{CalibrateLayer, CalibrationMap};
 use elide::detection::filter::FilterLayer;
 use elide::detection::reconcile::{Merging, ReconcileLayer, Structural};
 use elide_core::Result;
-use elide_core::entity::provenance::{Event, EventKind, PatternEvent, Provenance};
+use elide_core::entity::audit::{AuditEvent, AuditKind, AuditLog, PatternEvent};
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::primitive::{Confidence, ConfidenceThreshold};
 use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId, Scope};
@@ -21,7 +21,7 @@ fn detected(recognizer: &str, label: &str, loc: (usize, usize), conf: f32) -> En
     let label = LabelRef::new(label.to_owned());
     let location = TextLocation::new(loc.0, loc.1);
     let confidence = Confidence::new(conf).unwrap();
-    let event = Event::pattern(
+    let event = AuditEvent::pattern(
         recognizer.to_owned(),
         confidence,
         location.clone(),
@@ -30,7 +30,7 @@ fn detected(recognizer: &str, label: &str, loc: (usize, usize), conf: f32) -> En
             ..PatternEvent::default()
         },
     );
-    Entity::new(label, location, confidence, Provenance::new(event))
+    Entity::new(label, location, confidence, AuditLog::new(event))
 }
 
 /// A recognizer that just replays a fixed entity list.
@@ -83,15 +83,15 @@ async fn analyze_fuses_resolves_filters() {
     // recognitions plus a deduplication event.
     assert_eq!(phone.confidence, Confidence::new(0.95).unwrap());
     assert_eq!(phone.location, TextLocation::new(10, 23));
-    assert_eq!(phone.provenance.recognizers().count(), 2);
+    assert_eq!(phone.audit.recognizers().count(), 2);
     // The trail: 2 recognition events + 1 deduplication event.
-    assert_eq!(phone.provenance.events.len(), 3);
-    let last = phone.provenance.events.last().unwrap();
+    assert_eq!(phone.audit.events().len(), 3);
+    let last = phone.audit.events().last().unwrap();
     assert!(matches!(
         last.kind,
-        EventKind::Deduplication { ref strategy } if strategy == "max"
+        AuditKind::Deduplication { ref strategy } if strategy == "max"
     ));
-    assert_eq!(phone.provenance.final_confidence(), Some(phone.confidence));
+    assert_eq!(phone.audit.final_confidence(), Some(phone.confidence));
 }
 
 #[tokio::test]

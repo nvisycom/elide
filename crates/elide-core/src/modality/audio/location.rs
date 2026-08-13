@@ -96,6 +96,23 @@ impl ModalityLocation for AudioLocation {
         // same start sorts before a longer one.
         self.span.position_cmp(&other.span)
     }
+
+    fn hash(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&self.span.start_micros().to_le_bytes());
+        bytes.extend_from_slice(&self.span.end_micros().to_le_bytes());
+        match &self.speaker_id {
+            Some(speaker) => {
+                // Length-prefix so the variable-length speaker id cannot be
+                // confused with any following field's bytes.
+                bytes.push(1);
+                bytes.extend_from_slice(&(speaker.len() as u64).to_le_bytes());
+                bytes.extend_from_slice(speaker.as_bytes());
+            }
+            None => bytes.push(0),
+        }
+        bytes
+    }
 }
 
 #[cfg(test)]

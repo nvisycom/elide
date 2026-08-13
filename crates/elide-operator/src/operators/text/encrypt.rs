@@ -219,7 +219,7 @@ impl ReversibleOperator<Tabular> for AesEncrypt {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::provenance::{Event, PatternEvent, Provenance};
+    use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
     use elide_core::modality::text::TextLocation;
     use elide_core::primitive::Confidence;
     use zeroize::Zeroizing;
@@ -228,7 +228,7 @@ mod tests {
 
     fn entity() -> Entity<Text> {
         let location = TextLocation::new(0, 5);
-        let event = Event::pattern(
+        let event = AuditEvent::pattern(
             "t",
             Confidence::MAX,
             location.clone(),
@@ -238,7 +238,7 @@ mod tests {
             LabelRef::new("email_address"),
             location,
             Confidence::MAX,
-            Provenance::new(event),
+            AuditLog::new(event),
         )
     }
 
@@ -312,22 +312,24 @@ mod tests {
 
         let card = {
             let loc = TextLocation::new(0, 5);
-            let event = Event::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
+            let event =
+                AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
             Entity::<Text>::new(
                 LabelRef::new("payment_card"),
                 loc,
                 Confidence::MAX,
-                Provenance::new(event),
+                AuditLog::new(event),
             )
         };
         let ssn = {
             let loc = TextLocation::new(0, 5);
-            let event = Event::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
+            let event =
+                AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
             Entity::<Text>::new(
                 LabelRef::new("ssn"),
                 loc,
                 Confidence::MAX,
-                Provenance::new(event),
+                AuditLog::new(event),
             )
         };
 

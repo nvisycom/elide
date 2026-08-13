@@ -9,7 +9,7 @@
 #![cfg(all(feature = "ocr", feature = "stt"))]
 
 use elide::entity::LabelRef;
-use elide::entity::provenance::EventKind;
+use elide::entity::audit::AuditKind;
 use elide::modality::audio::{Audio, AudioData, TranscriptSegment, TranscriptWord, Transcription};
 use elide::modality::image::{Image, ImageData, ImageLocation, Layout, LayoutBlock, LayoutWord};
 use elide::primitive::{BoundingBox, Confidence, ConfidenceThreshold, Dimensions, Point, TimeSpan};
@@ -66,11 +66,11 @@ async fn image_context_boosts_and_keeps_the_native_region() {
     // The boost's provenance resolves the *keyword* to its own region — the
     // "ssn" word box at x=0..40, distinct from the match's box at x=45.
     let kw = entity
-        .provenance
-        .events
+        .audit
+        .events()
         .iter()
         .find_map(|e| match &e.kind {
-            EventKind::Refinement { location, .. } => location.clone(),
+            AuditKind::Refinement { location, .. } => location.clone(),
             _ => None,
         })
         .expect("an in-text refinement with a resolved keyword location");
@@ -103,11 +103,11 @@ async fn audio_context_boosts_and_keeps_the_native_timespan() {
     // The boost's provenance resolves the *keyword* to its own time span —
     // "ssn" at 0..300 ms, before the match's span at 400 ms.
     let kw = entity
-        .provenance
-        .events
+        .audit
+        .events()
         .iter()
         .find_map(|e| match &e.kind {
-            EventKind::Refinement { location, .. } => location.clone(),
+            AuditKind::Refinement { location, .. } => location.clone(),
             _ => None,
         })
         .expect("an in-text refinement with a resolved keyword location");

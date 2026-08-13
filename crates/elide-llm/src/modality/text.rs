@@ -1,7 +1,7 @@
 //! [`LlmModality`] for [`Text`]: localize each text candidate into a byte
 //! range and build the entity.
 
-use elide_core::entity::provenance::{Event, ModelEvent};
+use elide_core::entity::audit::{AuditEvent, ModelEvent};
 use elide_core::entity::{Entity, EntityCoRef, LabelRef};
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::primitive::Confidence;
@@ -25,8 +25,7 @@ impl LlmModality for Text {
                 continue;
             };
             let location = TextLocation::new(l.start_offset, l.end_offset);
-            let reason = format!("llm-ner identified {}", label.as_str());
-            let event = Event::model(
+            let event = AuditEvent::model(
                 "llm-ner",
                 confidence,
                 location.clone(),
@@ -34,8 +33,7 @@ impl LlmModality for Text {
                     name: "llm-ner".into(),
                     ..ModelEvent::default()
                 },
-            )
-            .with_reason(reason);
+            );
 
             let mut builder = Entity::builder()
                 .with_label(label)

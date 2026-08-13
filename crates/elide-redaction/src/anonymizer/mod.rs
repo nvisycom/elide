@@ -21,7 +21,7 @@ mod selection;
 use std::sync::Arc;
 
 use elide_core::Result;
-use elide_core::entity::provenance::Event;
+use elide_core::entity::audit::AuditEvent;
 use elide_core::entity::{Entity, LabelCatalog};
 use elide_core::modality::{DataReader, DataWriter, Modality, ModalityLocation};
 use elide_core::operator::{Operator, Redactions};
@@ -71,7 +71,7 @@ pub(crate) type Predicate<M> = Box<dyn Fn(&MatchContext<'_, M>) -> bool + Send +
 /// [`with_multiple`]: Anonymizer::with_multiple
 /// [`with_catalog`]: Anonymizer::with_catalog
 /// [`anonymize`]: Anonymizer::anonymize
-/// [`Attribution`]: elide_core::entity::provenance::Attribution
+/// [`Attribution`]: elide_core::entity::audit::Attribution
 pub struct Anonymizer<M: Modality> {
     operators: OperatorRegistry<M>,
 }
@@ -129,7 +129,7 @@ impl<M: Modality> Anonymizer<M> {
     /// ]);
     /// ```
     ///
-    /// [`Attribution`]: elide_core::entity::provenance::Attribution
+    /// [`Attribution`]: elide_core::entity::audit::Attribution
     #[must_use]
     pub fn with_multiple(mut self, rules: impl IntoIterator<Item = Rule<M>>) -> Self {
         self.operators.extend(rules);
@@ -253,7 +253,7 @@ impl<M: Modality> Anonymizer<M> {
     ///
     /// [`select`]: Self::select
     /// [`operator_id`]: SelectionView::operator_id
-    /// [`Redaction`]: elide_core::entity::provenance::EventKind::Redaction
+    /// [`Redaction`]: elide_core::entity::audit::AuditKind::Redaction
     pub async fn anonymize_selections<T>(
         &self,
         target: &mut T,
@@ -278,7 +278,7 @@ impl<M: Modality> Anonymizer<M> {
     ///
     /// [`anonymize`]: Self::anonymize
     /// [`anonymize_selections`]: Self::anonymize_selections
-    /// [`Redaction`]: elide_core::entity::provenance::EventKind::Redaction
+    /// [`Redaction`]: elide_core::entity::audit::AuditKind::Redaction
     async fn execute(
         &self,
         entities: &mut [Entity<M>],
@@ -327,14 +327,14 @@ impl<M: Modality> Anonymizer<M> {
             // provenance reflects that this operator hid it.
             for &i in &members {
                 let entity = &mut entities[i];
-                let event = Event::redaction(
+                let event = AuditEvent::redaction(
                     operator.id(),
                     operator.leak_profile(),
                     entity.confidence,
                     selection.matched_by().clone(),
                     selection.attribution().cloned(),
                 );
-                entity.provenance.record(event);
+                entity.audit.record(event);
             }
             redactions.push(location, replacement);
         }
@@ -396,7 +396,7 @@ fn cluster_overlaps<M: Modality>(entities: &[Entity<M>]) -> Vec<Vec<usize>> {
 #[cfg(test)]
 mod tests {
     use elide_core::entity::LabelRef;
-    use elide_core::entity::provenance::{Event, EventKind, PatternEvent, Provenance, RuleMatch};
+    use elide_core::entity::audit::{AuditEvent, AuditKind, AuditLog, PatternEvent, RuleMatch};
     use elide_core::modality::text::{Text, TextData, TextLocation};
     use elide_core::primitive::Confidence;
     use elide_operator::operators::{Erase, Mask, Replace};
@@ -425,13 +425,8 @@ mod tests {
     fn entity(label: &str, start: usize, end: usize) -> Entity<Text> {
         let loc = TextLocation::new(start, end);
         let confidence = Confidence::new(0.9).unwrap();
-        let event = Event::pattern("t", confidence, loc.clone(), PatternEvent::default());
-        Entity::new(
-            LabelRef::new(label),
-            loc,
-            confidence,
-            Provenance::new(event),
-        )
+        let event = AuditEvent::pattern("t", confidence, loc.clone(), PatternEvent::default());
+        Entity::new(LabelRef::new(label), loc, confidence, AuditLog::new(event))
     }
 
     /// `select` resolves one [`Selection`] per redaction, naming the winning
@@ -529,10 +524,10 @@ mod tests {
         for entity in &entities {
             assert!(
                 entity
-                    .provenance
-                    .events
+                    .audit
+                    .events()
                     .iter()
-                    .any(|e| matches!(&e.kind, EventKind::Redaction { .. })),
+                    .any(|e| matches!(&e.kind, AuditKind::Redaction { .. })),
                 "each covered entity records its redaction",
             );
         }
@@ -569,8 +564,8 @@ mod tests {
             .await
             .unwrap();
 
-        let ran_erase = entities[0].provenance.events.iter().any(|e| {
-            matches!(&e.kind, EventKind::Redaction { operator, .. } if operator.name == "erase")
+        let ran_erase = entities[0].audit.events().iter().any(|e| {
+            matches!(&e.kind, AuditKind::Redaction { operator, .. } if operator.name == "erase")
         });
         assert!(
             ran_erase,

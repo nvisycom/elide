@@ -95,6 +95,20 @@ impl ModalityLocation for TextLocation {
             .then(self.start.cmp(&other.start))
             .then(self.end.cmp(&other.end))
     }
+
+    fn hash(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&(self.start as u64).to_le_bytes());
+        bytes.extend_from_slice(&(self.end as u64).to_le_bytes());
+        match self.page {
+            Some(page) => {
+                bytes.push(1);
+                bytes.extend_from_slice(&page.to_le_bytes());
+            }
+            None => bytes.push(0),
+        }
+        bytes
+    }
 }
 
 #[cfg(test)]

@@ -66,7 +66,7 @@ impl Enricher<Audio> for SttEnricher {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::provenance::ModelEvent;
+    use elide_core::entity::audit::ModelEvent;
     use elide_core::modality::TextRecognizable;
     use elide_core::modality::audio::{TranscriptSegment, TranscriptWord};
     use elide_core::primitive::TimeSpan;

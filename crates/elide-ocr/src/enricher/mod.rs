@@ -64,7 +64,7 @@ impl Enricher<Image> for OcrEnricher {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::provenance::ModelEvent;
+    use elide_core::entity::audit::ModelEvent;
     use elide_core::modality::TextRecognizable;
     use elide_core::modality::image::{ImageLocation, LayoutBlock, LayoutWord};
     use elide_core::primitive::{BoundingBox, Dimensions, Point};

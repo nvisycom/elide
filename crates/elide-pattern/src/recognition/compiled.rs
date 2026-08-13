@@ -20,7 +20,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use elide_core::entity::LabelRef;
-use elide_core::entity::provenance::PatternEvent;
+use elide_core::entity::audit::PatternEvent;
 use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
 use regex::Regex;
 
@@ -36,7 +36,6 @@ pub(super) struct RawMatch {
     pub confidence: Confidence,
     pub range: Range<usize>,
     pub pattern: PatternEvent,
-    pub reason: String,
 }
 
 /// One compiled regex slot: a single `(pattern, variant)` pair,
@@ -84,7 +83,6 @@ impl CompiledPattern {
                     .map(|_| self.pattern_name.clone().into()),
                 contextual: false,
             },
-            reason: format!("pattern `{}` matched", self.pattern_name),
         }
     }
 }
@@ -137,7 +135,6 @@ impl CompiledDictionary {
                 contextual: false,
                 ..PatternEvent::default()
             },
-            reason: format!("dictionary `{}` matched", self.name),
         }
     }
 }
