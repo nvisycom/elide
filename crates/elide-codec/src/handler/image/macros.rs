@@ -11,9 +11,13 @@
 
 /// Encode a [`DynamicImage`] to bytes in `fmt`.
 ///
-/// Shared by every generated handler's `encode`/`read_next`/`read_at`.
+/// Shared by every generated handler's `encode`/`read_next`/`read_at`, so it
+/// is gated on the same set of formats as [`impl_image_handler!`] — a build
+/// that pulls `internal_image` without any concrete image format (e.g.
+/// `pdf-render`, which only decodes/redacts embedded images) never encodes.
 ///
 /// [`DynamicImage`]: image::DynamicImage
+#[cfg(any(feature = "png", feature = "jpeg", feature = "tiff"))]
 pub(crate) fn encode_image(
     img: &image::DynamicImage,
     fmt: image::ImageFormat,
@@ -33,8 +37,8 @@ pub(crate) fn encode_image(
 /// Stamp out the handler, loader, and `format()` for one image format.
 ///
 /// Only defined when at least one image format is enabled; `internal_image`
-/// can also be pulled on its own (e.g. by `pdf-render`, which reuses
-/// [`encode_image`] without any format handler).
+/// can also be pulled on its own (e.g. by `pdf-render`, which decodes and
+/// redacts a PDF's embedded images without instantiating a format handler).
 #[cfg(any(feature = "png", feature = "jpeg", feature = "tiff"))]
 macro_rules! impl_image_handler {
     (

@@ -19,8 +19,10 @@ mod fixtures;
 
 use elide::Result;
 use elide::codec::FormatRegistry;
+use elide::codec::handler::pdf_format_with;
 use elide::modality::StreamDataReader;
 use elide::modality::text::Text;
+use elide::primitive::RasterMode;
 use fixtures::pipeline::Fixture;
 
 const FIXTURE: Fixture = Fixture {
@@ -47,7 +49,11 @@ async fn extracted_text(pdf: &[u8]) -> Result<String> {
 #[tokio::test]
 #[ignore = "requires the native PDFium library at runtime"]
 async fn raster_redaction_emits_a_sanitised_image_pdf() -> Result<()> {
-    let outcome = FIXTURE.run().await?;
+    // Swap the built-in (glyph-delete) PDF handler for the raster one, which
+    // flattens every page and emits a fresh image-only PDF.
+    let registry = FormatRegistry::with_builtin()
+        .with_replaced_format(pdf_format_with(RasterMode::always()));
+    let outcome = FIXTURE.run_with(registry).await?;
 
     // The born-digital text layer detected the PII (the analysis ran over the
     // observation text before redaction).

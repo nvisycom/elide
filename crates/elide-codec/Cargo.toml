@@ -51,10 +51,9 @@ document = ["docx", "pdf", "rtf"]
 
 ## DOCX: OOXML text extraction and byte-faithful redaction come from the
 ## standalone `elide-docx` crate; this codec adapts it to the `Handler`
-## contract (via the shared `ExtractHandler`, hence `internal_extract`) and
-## reads embedded media out of the package (`zip`) to expose through the
-## container surface.
-docx = ["internal_document", "internal_extract", "dep:elide-docx", "dep:zip"]
+## contract (via the shared `ExtractHandler`, hence `internal_extract`).
+## Embedded media surfaces through `elide-docx`'s typed extraction.
+docx = ["internal_document", "internal_extract", "dep:elide-docx"]
 
 ## PDF: born-digital text extraction and redaction come from the standalone
 ## `elide-pdf` crate; this codec adapts it to the `Handler` contract.
@@ -154,9 +153,6 @@ tracing = { workspace = true, features = [] }
 scraper = { workspace = true, features = [], optional = true }
 ego-tree = { workspace = true, features = [], optional = true }
 quick-xml = { workspace = true, features = [], optional = true }
-
-# Compression
-zip = { workspace = true, optional = true }
 
 # Image processing
 image = { workspace = true, features = [], optional = true }

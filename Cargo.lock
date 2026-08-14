@@ -1018,7 +1018,6 @@ dependencies = [
  "symphonia",
  "tokio",
  "tracing",
- "zip",
 ]
 
 [[package]]

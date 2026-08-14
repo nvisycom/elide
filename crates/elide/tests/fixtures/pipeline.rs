@@ -154,9 +154,18 @@ pub struct Fixture {
 
 impl Fixture {
     /// Run the pipeline as the [`Text`] modality (`txt`, `json`, `html`,
-    /// and a DOCX's body).
+    /// and a DOCX's body), over the default built-in registry.
     pub async fn run(&self) -> Result<PipelineOutcome<Text>> {
-        self.run_typed::<Text>().await
+        self.run_typed::<Text>(FormatRegistry::with_builtin()).await
+    }
+
+    /// Run the [`Text`] pipeline over a caller-supplied `registry`, so a
+    /// test can swap in a customized format (e.g. the raster PDF handler
+    /// via [`pdf_format_with`]).
+    ///
+    /// [`pdf_format_with`]: elide::codec::handler::pdf_format_with
+    pub async fn run_with(&self, registry: FormatRegistry) -> Result<PipelineOutcome<Text>> {
+        self.run_typed::<Text>(registry).await
     }
 
     /// Run the pipeline as the [`Tabular`] modality (`csv`).
@@ -164,7 +173,8 @@ impl Fixture {
     /// [`Tabular`]: elide::modality::tabular::Tabular
     #[cfg(feature = "codec-csv")]
     pub async fn run_tabular(&self) -> Result<PipelineOutcome<Tabular>> {
-        self.run_typed::<Tabular>().await
+        self.run_typed::<Tabular>(FormatRegistry::with_builtin())
+            .await
     }
 
     /// Run the pipeline as the [`Audio`] modality (`wav`, `mp3`).
@@ -279,7 +289,7 @@ impl Fixture {
     /// a container fixture's embedded media is driven too. Registering the
     /// image modality is format-neutral: it only fires for a document that
     /// actually has image parts (a DOCX), and is inert for the rest.
-    async fn run_typed<M>(&self) -> Result<PipelineOutcome<M>>
+    async fn run_typed<M>(&self, registry: FormatRegistry) -> Result<PipelineOutcome<M>>
     where
         M: TextRecognizable,
         Entity<M>: Clone,
@@ -289,7 +299,6 @@ impl Fixture {
         Mask: Operator<M>,
         Erase: Operator<M>,
     {
-        let registry = FormatRegistry::with_builtin();
         let mut document = UntypedDocumentHandle::new(self.decode_as::<M>(&registry).await?);
 
         let en_tag = LanguageTag::parse("en").map_err(|e| {
