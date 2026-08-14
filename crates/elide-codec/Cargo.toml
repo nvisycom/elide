@@ -57,10 +57,10 @@ document = ["docx", "pdf", "rtf"]
 docx = ["internal_document", "internal_extract", "dep:elide-docx", "dep:zip"]
 
 ## PDF: born-digital text extraction and redaction come from the standalone
-## `elide-pdf` crate; this codec adapts it to the `Handler` contract. Enables
-## `elide-pdf/image` for embedded-image redaction (surfaced through the
-## container only when an image codec — `internal_image` — is also present).
-pdf = ["internal_document", "dep:elide-pdf", "elide-pdf/image"]
+## `elide-pdf` crate; this codec adapts it to the `Handler` contract.
+## Embedded-image redaction (`elide-pdf/image`) is pulled by `internal_image`
+## instead, so a text-only PDF build does not compile the `image` stack.
+pdf = ["internal_document", "dep:elide-pdf"]
 
 ## PDF page rendering to images (for OCR), via `elide-pdf`'s native PDFium
 ## path. Off by default and separate from `pdf` because it needs the PDFium
@@ -108,7 +108,11 @@ xlsx = ["internal_tabular"]
 # enabled", the gate for the shared per-modality infrastructure. Not meant
 # to be enabled directly. `internal_tabular` also pulls `internal_text`
 # because tabular cells reuse the text-redaction helper.
-internal_image = ["elide-core/image", "dep:image", "dep:imageproc"]
+# `elide-pdf?/image` enables PDF embedded-image redaction only when `elide-pdf`
+# is already a dependency (i.e. the `pdf` feature is on) — so an image build
+# without `pdf` doesn't force `elide-pdf` in, and a text-only `pdf` build
+# doesn't compile the image stack.
+internal_image = ["elide-core/image", "dep:image", "dep:imageproc", "elide-pdf?/image"]
 internal_audio = ["elide-core/audio"]
 internal_tabular = ["elide-core/tabular", "internal_text"]
 internal_text = []

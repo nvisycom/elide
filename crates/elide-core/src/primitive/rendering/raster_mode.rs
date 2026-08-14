@@ -38,6 +38,9 @@ pub enum RasterMode {
     /// Always render pages to images at the given [`Dpi`], ignoring any text
     /// layer. For documents whose text layer is missing, garbled, or a
     /// watermark.
+    // `alias = "force"` accepts config persisted under this type's former name
+    // (`OcrMode`), whose variant serialised as `{"kind": "force"}`.
+    #[cfg_attr(feature = "serde", serde(alias = "force"))]
     Always {
         /// Resolution to render pages at; [`Dpi::OCR`] (300) is typical.
         dpi: Dpi,
@@ -103,5 +106,13 @@ mod tests {
             assert_eq!(serde_json::to_string(&mode).unwrap(), wire);
             assert_eq!(serde_json::from_str::<RasterMode>(wire).unwrap(), mode);
         }
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn deserializes_the_former_force_tag() {
+        // Config persisted under the old `OcrMode` name used `"force"`.
+        let mode: RasterMode = serde_json::from_str(r#"{"kind":"force","dpi":300}"#).unwrap();
+        assert_eq!(mode, RasterMode::always());
     }
 }
