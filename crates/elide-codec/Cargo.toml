@@ -57,8 +57,10 @@ document = ["docx", "pdf", "rtf"]
 docx = ["internal_document", "internal_extract", "dep:elide-docx", "dep:zip"]
 
 ## PDF: born-digital text extraction and redaction come from the standalone
-## `elide-pdf` crate; this codec adapts it to the `Handler` contract.
-pdf = ["internal_document", "dep:elide-pdf"]
+## `elide-pdf` crate; this codec adapts it to the `Handler` contract. Enables
+## `elide-pdf/image` for embedded-image redaction (surfaced through the
+## container only when an image codec — `internal_image` — is also present).
+pdf = ["internal_document", "dep:elide-pdf", "elide-pdf/image"]
 
 ## PDF page rendering to images (for OCR), via `elide-pdf`'s native PDFium
 ## path. Off by default and separate from `pdf` because it needs the PDFium
@@ -115,10 +117,11 @@ internal_text = []
 # reuse the text-redaction helper.
 internal_extract = ["internal_text"]
 # The rich-document container machinery (`handler::document`): the
-# modality-neutral part surface shared by the document formats. Pulls
-# `internal_extract` for the shared `ExtractHandler` the DOCX/PDF adapters
-# drive; each format's own parsing lives in its dedicated crate.
-internal_document = ["internal_extract"]
+# modality-neutral part surface shared by the document formats. Each
+# format brings its own engine — DOCX drives the shared `ExtractHandler`
+# (so `docx` also enables `internal_extract`), while PDF uses its own
+# bespoke handler — and each format's parsing lives in its dedicated crate.
+internal_document = []
 
 [dependencies]
 # Internal crates
@@ -163,3 +166,5 @@ mp3lame-encoder = { workspace = true, features = [], optional = true }
 [dev-dependencies]
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["macros", "rt"] }
+# Build minimal PDF fixtures for the PDF handler's container tests.
+lopdf = { workspace = true, default-features = false }

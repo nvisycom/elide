@@ -2,8 +2,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 
-pub mod block;
-pub mod image;
+pub mod extract;
+pub mod inspect;
+pub mod redact;
 #[cfg(feature = "render")]
 pub mod render;
 

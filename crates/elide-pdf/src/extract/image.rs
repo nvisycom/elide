@@ -1,5 +1,5 @@
-//! [`Embedding`] and [`ImageReplacement`]: a PDF's embedded images, surfaced
-//! for redaction and addressed by a typed [`ImageId`].
+//! [`Embedding`]: a PDF's embedded images, surfaced for extraction and
+//! addressed by a typed [`ImageId`].
 
 use bytes::Bytes;
 #[cfg(feature = "serde")]
@@ -9,8 +9,7 @@ use serde::{Deserialize, Serialize};
 /// (object number and generation).
 ///
 /// A newtype so an embedding is never addressed by a bare tuple: extraction
-/// hands these back on every [`Embedding`], and an [`ImageReplacement`] targets
-/// one.
+/// hands these back on every [`Embedding`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ImageId {
@@ -33,6 +32,7 @@ impl ImageId {
     }
 
     /// This id as a lopdf `ObjectId` pair.
+    #[cfg(feature = "image")]
     pub(crate) fn object(self) -> (u32, u16) {
         (self.number, self.generation)
     }
@@ -90,18 +90,4 @@ pub struct Embedding {
     pub height: u32,
     /// The image's raw stream bytes (a cheap ref-counted share).
     pub bytes: Bytes,
-}
-
-/// One image replacement: overwrite the image XObject `id`'s stream content
-/// with `bytes` (e.g. a blank or blacked-out image of the same dimensions).
-///
-/// The caller is responsible for supplying bytes valid for the image's
-/// encoding; the simplest redaction replaces the stream with an opaque block.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct ImageReplacement {
-    /// The image to replace.
-    pub id: ImageId,
-    /// The new stream bytes for the image.
-    pub bytes: Vec<u8>,
 }

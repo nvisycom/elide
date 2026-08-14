@@ -10,7 +10,7 @@ use std::sync::LazyLock;
 use image::{GenericImageView, ImageFormat};
 use pdfium_render::prelude::*;
 
-use super::RenderedPage;
+use super::{Glyph, GlyphSource, PageObservation, PixelRect, RenderedPage};
 use crate::error::{Error, Result};
 
 /// Dedicated single-thread pool for PDFium operations.
@@ -35,6 +35,20 @@ pub(super) fn render(pdf_bytes: Vec<u8>, scale: f32) -> Result<Vec<RenderedPage>
                 *slot = Some(Binding::new()?);
             }
             slot.as_ref().unwrap().render_all(&pdf_bytes, scale)
+        })
+    })
+}
+
+/// Observe every page of `pdf_bytes` at `scale`: render it to RGB8 pixels and
+/// extract its text-layer glyphs in rendered-pixel space, on the dedicated
+/// PDFium thread.
+pub(crate) fn observe(pdf_bytes: Vec<u8>, scale: f32) -> Result<Vec<PageObservation>> {
+    PDF_POOL.install(move || {
+        RENDERER.with_borrow_mut(|slot| {
+            if slot.is_none() {
+                *slot = Some(Binding::new()?);
+            }
+            slot.as_ref().unwrap().observe_all(&pdf_bytes, scale)
         })
     })
 }
@@ -81,5 +95,81 @@ impl Binding {
             });
         }
         Ok(pages)
+    }
+
+    /// Render each page to RGB8 pixels and extract its text-layer glyphs in
+    /// rendered-pixel space (top-left origin), converting PDFium's point boxes
+    /// (bottom-left origin) with the page's point→pixel scale and a Y-flip.
+    fn observe_all(&self, pdf_bytes: &[u8], scale: f32) -> Result<Vec<PageObservation>> {
+        let document = self
+            .pdfium
+            .load_pdf_from_byte_slice(pdf_bytes, None)
+            .map_err(|e| Error::invalid_document(format!("failed to load PDF: {e}")))?;
+        let config = PdfRenderConfig::new().scale_page_by_factor(scale);
+
+        let mut observations = Vec::new();
+        for (index, page) in document.pages().iter().enumerate() {
+            let bitmap = page
+                .render_with_config(&config)
+                .map_err(|e| Error::invalid_document(format!("failed to render PDF page: {e}")))?;
+            let image = bitmap
+                .as_image()
+                .map_err(|e| {
+                    Error::invalid_document(format!("failed to convert PDF page bitmap: {e}"))
+                })?
+                .into_rgb8();
+            let (width, height) = image.dimensions();
+            let pixels = image.into_raw();
+
+            // Point→pixel scale per axis, from the actual rendered dimensions
+            // against the page's point size (robust to any rounding PDFium does).
+            let page_w = page.width().value.max(f32::MIN_POSITIVE);
+            let page_h = page.height().value.max(f32::MIN_POSITIVE);
+            let scale_x = width as f32 / page_w;
+            let scale_y = height as f32 / page_h;
+
+            let mut text = String::new();
+            let mut glyphs = Vec::new();
+            // Running UTF-16 offset, so `start`/`end` share the page text's
+            // coordinate system without re-counting the whole string per char.
+            let mut utf16_offset: u32 = 0;
+            if let Ok(page_text) = page.text() {
+                for ch in page_text.chars().iter() {
+                    let Some(c) = ch.unicode_char() else {
+                        continue; // no glyph text (e.g. a control char)
+                    };
+                    let start = utf16_offset;
+                    text.push(c);
+                    utf16_offset += c.len_utf16() as u32;
+                    let end = utf16_offset;
+                    if let Ok(b) = ch.loose_bounds() {
+                        glyphs.push(Glyph {
+                            start,
+                            end,
+                            rect: PixelRect::from_points(
+                                b.left().value,
+                                b.bottom().value,
+                                b.right().value,
+                                b.top().value,
+                                page_h,
+                                scale_x,
+                                scale_y,
+                            ),
+                            source: GlyphSource::Text,
+                        });
+                    }
+                }
+            }
+
+            observations.push(PageObservation {
+                page: (index as u32) + 1,
+                width,
+                height,
+                text,
+                glyphs,
+                pixels,
+            });
+        }
+        Ok(observations)
     }
 }

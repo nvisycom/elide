@@ -1,17 +1,18 @@
 //! PDF loader: extract page text via [`elide_pdf`] and produce the handler.
 //!
-//! With the `pdf-render` feature the loader also carries an [`OcrMode`]: under
-//! [`OcrMode::Force`] it rasterises every page to an image up front, so a
-//! scanned PDF can feed the image/OCR pipeline even with no text layer.
+//! Redaction defaults to glyph deletion (keeps a selectable text layer). With
+//! the `pdf-render` feature the loader carries a [`RasterMode`]; under
+//! [`RasterMode::Always`] it observes pages for raster redaction (flatten to a
+//! fresh image-only PDF) instead.
 //!
-//! [`OcrMode`]: super::OcrMode
-//! [`OcrMode::Force`]: super::OcrMode::Force
+//! [`RasterMode`]: super::RasterMode
+//! [`RasterMode::Always`]: super::RasterMode::Always
 
 use elide_core::Result;
 use elide_core::modality::text::Text;
 
 #[cfg(feature = "pdf-render")]
-use super::OcrMode;
+use super::RasterMode;
 use super::pdf_handler::{PdfHandler, PdfPage, pdf_error};
 use crate::Loader;
 use crate::content::ContentData;
@@ -20,10 +21,10 @@ use crate::content::ContentData;
 /// optional page-rendering path (feature `pdf-render`).
 #[derive(Debug, Default)]
 pub(crate) struct PdfLoader {
-    /// How to treat OCR: whether to render pages to images on decode. Only
-    /// meaningful with the `pdf-render` feature, which can actually render.
+    /// Whether redaction flattens pages to images (raster) instead of the
+    /// default glyph deletion. Only meaningful with the `pdf-render` feature.
     #[cfg(feature = "pdf-render")]
-    ocr: OcrMode,
+    raster: RasterMode,
 }
 
 impl PdfLoader {
@@ -32,12 +33,12 @@ impl PdfLoader {
         Self::default()
     }
 
-    /// A loader that renders pages for OCR per the given [`OcrMode`].
+    /// A loader with an explicit [`RasterMode`] (feature `pdf-render`).
     ///
-    /// [`OcrMode`]: super::OcrMode
+    /// [`RasterMode`]: super::RasterMode
     #[cfg(feature = "pdf-render")]
-    pub(crate) fn with_ocr(ocr: OcrMode) -> Self {
-        Self { ocr }
+    pub(crate) fn with_raster(raster: RasterMode) -> Self {
+        Self { raster }
     }
 }
 
@@ -48,55 +49,53 @@ impl Loader<Text> for PdfLoader {
     async fn decode(&self, content: ContentData) -> Result<PdfHandler> {
         let document = content.to_bytes();
 
-        // Force-OCR: rasterise the pages up front for the image/OCR pipeline.
+        // `RasterMode::Always` (feature `pdf-render`): observe each page —
+        // its text comes from the renderer alongside its glyph geometry — so
+        // redaction on encode fills the detected pixels and emits a fresh
+        // image-only PDF (the flatten guarantee, no selectable text).
         #[cfg(feature = "pdf-render")]
-        if let Some(dpi) = self.ocr.render_dpi() {
-            let pages = render_pages(&document, dpi.scale_factor())?;
-            return Ok(PdfHandler::rendered(document, pages));
+        if self.raster.render_dpi().is_some() {
+            let observations = observe_pages(&document)?;
+            let pages = pages_from_texts(observations.iter().map(|o| (o.page, o.text.clone())));
+            return Ok(PdfHandler::raster(document, pages, observations));
         }
 
-        // Text path: extract each page's born-digital text into stream pages.
-        let extraction = elide_pdf::Pdf::open(&document)
-            .map_err(pdf_error)?
-            .extract();
-        let mut pages = Vec::with_capacity(extraction.blocks.len());
-        let mut offset = 0usize;
-        for block in extraction.blocks {
-            let text = block.text.to_string();
-            let len = text.len();
-            pages.push(PdfPage {
-                number: block.page,
-                text,
-                start: offset,
-            });
-            offset += len;
-        }
+        // Default (`Auto`/`Never`, and the whole pure-Rust build): glyph
+        // deletion. The page text comes from `page_texts` — the same walk
+        // `redact_text` uses — so a detection's character span maps to the
+        // glyphs it drew. On encode the glyphs are deleted and
+        // annotations/metadata stripped, keeping a selectable text layer.
+        let pdf = elide_pdf::Pdf::open(&document).map_err(pdf_error)?;
+        let pages = pages_from_texts(pdf.page_texts().map_err(pdf_error)?);
         Ok(PdfHandler::text(document, pages))
     }
 }
 
-/// Render every page of `document` to an [`ImageData`] at `scale`, via
-/// [`elide_pdf`]'s `render` feature, converting each PNG-encoded page.
-#[cfg(feature = "pdf-render")]
-fn render_pages(
-    document: &[u8],
-    scale: f32,
-) -> Result<Vec<elide_core::modality::image::ImageData>> {
-    use elide_core::modality::image::ImageData;
-    use elide_core::primitive::Dimensions;
-    use elide_pdf::render::PdfRender;
+/// Assemble [`PdfPage`]s from `(page number, text)` pairs, assigning each its
+/// start offset in the concatenated text stream.
+fn pages_from_texts(texts: impl IntoIterator<Item = (u32, String)>) -> Vec<PdfPage> {
+    let mut pages = Vec::new();
+    let mut offset = 0usize;
+    for (number, text) in texts {
+        let len = text.len();
+        pages.push(PdfPage {
+            number,
+            text,
+            start: offset,
+        });
+        offset += len;
+    }
+    pages
+}
 
-    let rendered = elide_pdf::Pdf::open(document)
-        .map_err(pdf_error)?
-        .render(scale)
-        .map_err(pdf_error)?;
-    Ok(rendered
-        .into_iter()
-        .map(|page| {
-            ImageData::new(
-                bytes::Bytes::from(page.png),
-                Dimensions::new(page.width, page.height),
-            )
-        })
-        .collect())
+/// Observe every page for raster redaction: render it to pixels and extract its
+/// text-layer glyph geometry, so the page text and glyph boxes share one
+/// coordinate system.
+#[cfg(feature = "pdf-render")]
+fn observe_pages(document: &[u8]) -> Result<Vec<elide_pdf::render::PageObservation>> {
+    // A default render scale; higher scales trade output size for fidelity.
+    const RASTER_SCALE: f32 = 2.0;
+    elide_pdf::Pdf::open(document)
+        .and_then(|pdf| pdf.observe(RASTER_SCALE))
+        .map_err(pdf_error)
 }

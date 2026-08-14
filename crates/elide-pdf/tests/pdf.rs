@@ -1,12 +1,11 @@
-//! Extract + rewrite over a minimal born-digital PDF built with lopdf.
+//! Extract text + images from minimal born-digital PDFs built with lopdf.
 
-use elide_pdf::block::Replacement;
 use elide_pdf::{ErrorKind, Pdf};
 use lopdf::content::{Content, Operation};
 use lopdf::{Document, Object, Stream, dictionary};
 
 /// A one-page PDF whose content stream draws `text` with a Courier font, so
-/// the text layer is extractable and rewritable.
+/// the text layer is extractable.
 fn text_pdf(text: &str) -> Vec<u8> {
     let mut doc = Document::with_version("1.5");
     let pages_id = doc.new_object_id();
@@ -76,7 +75,7 @@ fn a_text_page_has_no_issues() {
 
 #[test]
 fn a_textless_page_is_flagged_needs_ocr() {
-    use elide_pdf::block::IssueKind;
+    use elide_pdf::extract::IssueKind;
 
     // A one-page PDF whose content stream draws no text.
     let mut doc = Document::with_version("1.5");
@@ -104,50 +103,15 @@ fn a_textless_page_is_flagged_needs_ocr() {
 }
 
 #[test]
-fn rewrite_replaces_born_digital_text() {
-    let pdf = text_pdf("Alice");
-    let out = Pdf::open(&pdf)
-        .unwrap()
-        .rewrite(&[Replacement::new(1, "Alice", "[NAME]")])
-        .unwrap();
-
-    // Re-extract the rewritten document: the original is gone, replacement present.
-    let after = Pdf::open(&out).unwrap().extract();
-    let text: String = after.blocks.iter().map(|b| b.text.as_str()).collect();
-    assert!(text.contains("[NAME]"), "not redacted: {text}");
-    assert!(!text.contains("Alice"), "original survived: {text}");
-}
-
-#[test]
-fn empty_rewrite_resaves_unchanged() {
-    let pdf = text_pdf("Alice");
-    let out = Pdf::open(&pdf).unwrap().rewrite(&[]).unwrap();
-    let after = Pdf::open(&out).unwrap().extract();
-    assert!(after.blocks.iter().any(|b| b.text.contains("Alice")));
-}
-
-#[test]
-fn rewrite_is_fail_closed_when_text_absent() {
-    let pdf = text_pdf("Alice");
-    let err = Pdf::open(&pdf)
-        .unwrap()
-        .rewrite(&[Replacement::new(1, "Bob", "[NAME]")])
-        .unwrap_err();
-    assert_eq!(err.kind(), ErrorKind::UnsafeRewrite);
-}
-
-#[test]
 fn not_a_pdf_is_invalid_document() {
     let err = Pdf::open(b"this is not a pdf").unwrap_err();
     assert_eq!(err.kind(), ErrorKind::InvalidDocument);
 }
 
 /// A one-page PDF carrying `text` and one embedded image XObject (a tiny raw
-/// RGB image), so embedding extraction and replacement can be exercised.
-///
-/// Returns the document bytes, the image XObject's id, and the page's content
-/// stream id (a stream that is *not* an image, for fail-closed tests).
-fn image_pdf(text: &str, image: &[u8]) -> (Vec<u8>, (u32, u16), (u32, u16)) {
+/// RGB image), so embedding extraction can be exercised. Returns the document
+/// bytes and the image XObject's id.
+fn image_pdf(text: &str, image: &[u8]) -> (Vec<u8>, (u32, u16)) {
     use lopdf::Dictionary;
 
     let mut doc = Document::with_version("1.5");
@@ -195,13 +159,13 @@ fn image_pdf(text: &str, image: &[u8]) -> (Vec<u8>, (u32, u16), (u32, u16)) {
 
     let mut out = Vec::new();
     doc.save_to(&mut out).unwrap();
-    (out, image_id, content_id)
+    (out, image_id)
 }
 
 #[test]
 fn extracts_embedded_images() {
     let pixels = vec![255u8; 2 * 2 * 3];
-    let (pdf, image_id, _) = image_pdf("Alice", &pixels);
+    let (pdf, image_id) = image_pdf("Alice", &pixels);
     let extraction = Pdf::open(&pdf).unwrap().extract();
 
     assert_eq!(extraction.embeddings.len(), 1);
@@ -209,65 +173,8 @@ fn extracts_embedded_images() {
     assert_eq!((emb.id.number, emb.id.generation), image_id);
     assert_eq!(emb.width, 2);
     assert_eq!(emb.height, 2);
-    assert_eq!(emb.kind, elide_pdf::image::EmbeddingKind::Raw);
+    assert_eq!(emb.kind, elide_pdf::extract::EmbeddingKind::Raw);
     assert_eq!(emb.bytes.as_ref(), pixels.as_slice());
-}
-
-#[test]
-fn rewrite_with_images_replaces_stream_content() {
-    let pixels = vec![255u8; 2 * 2 * 3];
-    let (pdf, _, _) = image_pdf("Alice", &pixels);
-    let extraction = Pdf::open(&pdf).unwrap().extract();
-    let id = extraction.embeddings[0].id;
-
-    let blanked = vec![0u8; 2 * 2 * 3];
-    let out = Pdf::open(&pdf)
-        .unwrap()
-        .rewrite_with_images(
-            &[],
-            &[elide_pdf::image::ImageReplacement {
-                id,
-                bytes: blanked.clone(),
-            }],
-        )
-        .unwrap();
-
-    let after = Pdf::open(&out).unwrap().extract();
-    assert_eq!(after.embeddings[0].bytes.as_ref(), blanked.as_slice());
-    assert_ne!(after.embeddings[0].bytes.as_ref(), pixels.as_slice());
-}
-
-#[test]
-fn rewrite_with_images_is_fail_closed_on_unknown_id() {
-    let (pdf, _, _) = image_pdf("Alice", &[255u8; 12]);
-    let err = Pdf::open(&pdf)
-        .unwrap()
-        .rewrite_with_images(
-            &[],
-            &[elide_pdf::image::ImageReplacement {
-                id: elide_pdf::image::ImageId::new(9999, 0),
-                bytes: vec![0u8; 12],
-            }],
-        )
-        .unwrap_err();
-    assert_eq!(err.kind(), ErrorKind::UnsafeRewrite);
-}
-
-#[test]
-fn rewrite_with_images_is_fail_closed_on_non_image_stream() {
-    // Target the page's content stream — a stream, but not an image XObject.
-    let (pdf, _, content_id) = image_pdf("Alice", &[255u8; 12]);
-    let err = Pdf::open(&pdf)
-        .unwrap()
-        .rewrite_with_images(
-            &[],
-            &[elide_pdf::image::ImageReplacement {
-                id: elide_pdf::image::ImageId::new(content_id.0, content_id.1),
-                bytes: vec![0u8; 12],
-            }],
-        )
-        .unwrap_err();
-    assert_eq!(err.kind(), ErrorKind::UnsafeRewrite);
 }
 
 #[test]

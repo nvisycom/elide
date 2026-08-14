@@ -1,12 +1,24 @@
-//! PDF-to-image rendering via PDFium, behind the `render` feature.
+//! PDF page rendering via PDFium, and raster redaction built on it — behind the
+//! `render` feature.
 //!
-//! Rendering rasterises whole pages to images (for OCR of scanned or
-//! image-only PDFs). It requires the PDFium shared library at runtime (see
-//! `scripts/install-pdfium.sh`); the whole module is behind the `render`
-//! feature so the default build needs no native library.
+//! Rendering rasterises whole pages to images (for OCR of scanned or image-only
+//! PDFs, and for the raster redaction that flattens a page to a sanitised
+//! image). The glyph geometry here — in rendered-pixel space — is the bridge
+//! between a detected text span and the pixels the redaction overwrites. It all
+//! requires the PDFium shared library at runtime (see
+//! `scripts/install-pdfium.sh`); the module is behind the `render` feature so
+//! the default build needs no native library.
+//!
+//! The geometry types carry no elide dependency, so the crate stays standalone.
 
+mod emit;
+mod geometry;
 mod pdfium;
+mod raster;
 
+pub use self::emit::Certificate;
+pub use self::geometry::{Glyph, GlyphSource, PageObservation, PixelRect};
+pub use self::raster::Detection;
 use crate::Pdf;
 use crate::error::Result;
 
@@ -24,13 +36,7 @@ pub struct RenderedPage {
     pub height: u32,
 }
 
-/// Rasterising a PDF's pages to images.
-///
-/// Implemented for [`Pdf`] under the `render` feature. It is a trait so the
-/// native rendering capability is a distinct, opt-in extension of the core
-/// text-extraction API rather than an inherent method.
-#[cfg_attr(docsrs, doc(cfg(feature = "render")))]
-pub trait PdfRender {
+impl Pdf {
     /// Render every page of the document to a PNG image at `scale` (1.0 is the
     /// page's natural size; e.g. 2.0 doubles resolution).
     ///
@@ -39,7 +45,7 @@ pub trait PdfRender {
     /// library at runtime.
     ///
     /// The pristine bytes the document was opened from are rendered, so a
-    /// rewrite is not reflected; to rasterise a rewritten document, re-open its
+    /// redaction is not reflected; to rasterise a redacted document, re-open its
     /// output bytes and render that.
     ///
     /// # Errors
@@ -47,14 +53,30 @@ pub trait PdfRender {
     /// [`ErrorKind::InvalidDocument`](crate::ErrorKind::InvalidDocument) if
     /// PDFium cannot load or render the document (or the native library is
     /// unavailable).
-    fn render(&self, scale: f32) -> Result<Vec<RenderedPage>>;
-}
-
-impl PdfRender for Pdf {
-    fn render(&self, scale: f32) -> Result<Vec<RenderedPage>> {
+    #[cfg_attr(docsrs, doc(cfg(feature = "render")))]
+    pub fn render(&self, scale: f32) -> Result<Vec<RenderedPage>> {
         // Render the pristine bytes this document was opened from — not a lopdf
         // re-serialisation, which can degrade the scanned or malformed PDFs OCR
         // most needs — on the dedicated PDFium thread.
-        pdfium::render(self.source().to_vec(), scale)
+        pdfium::render(self.source_bytes().to_vec(), scale)
+    }
+
+    /// Observe every page at `scale`: render it to RGB8 pixels and extract its
+    /// text-layer glyphs in rendered-pixel space.
+    ///
+    /// This is the input to raster redaction: each [`PageObservation`] carries
+    /// the pixels to overwrite, the page text detection runs over, and the
+    /// glyph boxes that map a detected UTF-16 span back to pixels. A page with
+    /// no text layer yields an observation with pixels but no glyphs — a caller
+    /// supplies OCR glyphs for those.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::InvalidDocument`](crate::ErrorKind::InvalidDocument) if
+    /// PDFium cannot load or render the document (or the native library is
+    /// unavailable).
+    #[cfg_attr(docsrs, doc(cfg(feature = "render")))]
+    pub fn observe(&self, scale: f32) -> Result<Vec<PageObservation>> {
+        pdfium::observe(self.source_bytes().to_vec(), scale)
     }
 }

@@ -30,7 +30,7 @@ mod rtf_handler;
 mod rtf_loader;
 
 #[cfg(feature = "pdf")]
-pub use elide_core::primitive::OcrMode;
+pub use elide_core::primitive::RasterMode;
 
 #[cfg(feature = "docx")]
 pub use self::docx_handler::format as docx_format;

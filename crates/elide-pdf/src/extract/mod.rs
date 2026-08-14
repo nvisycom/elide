@@ -1,11 +1,13 @@
-//! The units of PDF text extraction and redaction: [`Extraction`], its
-//! [`Block`]s and [`Issue`]s, and the [`Replacement`] applied on rewrite.
+//! The units of PDF extraction: the [`Extraction`] result and its [`Block`]s,
+//! [`Issue`]s, and embedded-image types ([`Embedding`], [`ImageId`]).
+
+mod image;
 
 use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::image::Embedding;
+pub use self::image::{Embedding, EmbeddingKind, ImageId};
 
 /// The result of [`Pdf::extract`](crate::Pdf::extract): per-page text blocks,
 /// the embedded images surfaced for redaction, and any [`issues`](Extraction::issues)
@@ -30,37 +32,6 @@ pub struct Block {
     pub page: u32,
     /// The page's extracted text.
     pub text: HipStr<'static>,
-}
-
-/// One text replacement: on `page`, replace occurrences of `find` with
-/// `replace`.
-///
-/// PDF text is addressed by `(page, text)` rather than a byte span, because it
-/// lives in content-stream drawing operators.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Replacement {
-    /// 1-based page number to rewrite.
-    pub page: u32,
-    /// The text to find on the page.
-    pub find: HipStr<'static>,
-    /// The text to write in its place.
-    pub replace: HipStr<'static>,
-}
-
-impl Replacement {
-    /// A replacement of `find` with `replace` on `page`.
-    pub fn new(
-        page: u32,
-        find: impl Into<HipStr<'static>>,
-        replace: impl Into<HipStr<'static>>,
-    ) -> Self {
-        Self {
-            page,
-            find: find.into(),
-            replace: replace.into(),
-        }
-    }
 }
 
 /// A page that [`Pdf::extract`](crate::Pdf::extract) recovered no text from, so

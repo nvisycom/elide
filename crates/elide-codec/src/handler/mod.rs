@@ -49,7 +49,7 @@ pub use self::document::pdf_format_with;
 pub use self::document::rtf_format;
 #[cfg(feature = "pdf")]
 #[cfg_attr(docsrs, doc(cfg(feature = "pdf")))]
-pub use self::document::{OcrMode, pdf_format};
+pub use self::document::{RasterMode, pdf_format};
 #[cfg(feature = "jpeg")]
 #[cfg_attr(docsrs, doc(cfg(feature = "jpeg")))]
 pub use self::image::jpeg_format;

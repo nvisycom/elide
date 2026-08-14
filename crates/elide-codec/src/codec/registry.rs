@@ -124,7 +124,7 @@ impl FormatRegistry {
     ///
     /// ```ignore
     /// let registry = FormatRegistry::with_builtin()
-    ///     .with_replaced_format(handler::pdf_format_with(OcrMode::Force))
+    ///     .with_replaced_format(handler::pdf_format_with(RasterMode::always()))
     ///     .with_replaced_format(handler::html_format_with(ScanText, Skip));
     /// ```
     ///

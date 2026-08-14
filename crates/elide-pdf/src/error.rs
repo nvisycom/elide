@@ -27,9 +27,16 @@ impl Error {
         Self::new(ErrorKind::InvalidDocument, message)
     }
 
-    /// An [`ErrorKind::UnsafeRewrite`] error.
+    /// An [`ErrorKind::UnsafeRewrite`] error: a redaction is refused rather than
+    /// applied unsafely. Used by every redaction path (glyph deletion, raster,
+    /// image write-back).
     pub(crate) fn unsafe_rewrite(message: impl Into<String>) -> Self {
         Self::new(ErrorKind::UnsafeRewrite, message)
+    }
+
+    /// An [`ErrorKind::LimitExceeded`] error.
+    pub(crate) fn limit_exceeded(message: impl Into<String>) -> Self {
+        Self::new(ErrorKind::LimitExceeded, message)
     }
 
     /// The matchable failure category.
@@ -47,8 +54,10 @@ pub enum ErrorKind {
     /// Parsing exceeded a configured bound (decompressed size), refused to
     /// protect against a decompression bomb.
     LimitExceeded,
-    /// A rewrite could not be applied safely: a target text was not found on
-    /// its page, or the content stream could not be rewritten. The rewrite is
-    /// refused rather than emitting a partially-redacted document.
+    /// A redaction could not be applied safely and was refused rather than
+    /// emitting a partially-redacted document — for example a page draws text
+    /// with a font whose encoding cannot be decoded (so its glyphs cannot be
+    /// located for deletion), an image replacement names a non-image object, or
+    /// a raster page's pixels do not match its dimensions.
     UnsafeRewrite,
 }
