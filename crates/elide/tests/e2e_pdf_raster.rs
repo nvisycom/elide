@@ -51,8 +51,8 @@ async fn extracted_text(pdf: &[u8]) -> Result<String> {
 async fn raster_redaction_emits_a_sanitised_image_pdf() -> Result<()> {
     // Swap the built-in (glyph-delete) PDF handler for the raster one, which
     // flattens every page and emits a fresh image-only PDF.
-    let registry = FormatRegistry::with_builtin()
-        .with_replaced_format(pdf_format_with(RasterMode::always()));
+    let registry =
+        FormatRegistry::with_builtin().with_replaced_format(pdf_format_with(RasterMode::always()));
     let outcome = FIXTURE.run_with(registry).await?;
 
     // The born-digital text layer detected the PII (the analysis ran over the
