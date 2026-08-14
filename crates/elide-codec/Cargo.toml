@@ -49,24 +49,23 @@ xml = ["internal_extract", "dep:quick-xml"]
 ## The rich-document formats.
 document = ["docx", "pdf", "rtf"]
 
-## DOCX: a zip of OOXML. Body text in `word/document.xml` is extracted and
-## spliced through the shared XML engine; `zip` opens and rebuilds the
-## package. Pulls `xml` for extraction, `internal_document` for the
-## container surface, and `zip` for the package.
-docx = ["xml", "internal_document", "dep:zip"]
+## DOCX: OOXML text extraction and byte-faithful redaction come from the
+## standalone `elide-docx` crate; this codec adapts it to the `Handler`
+## contract (via the shared `ExtractHandler`, hence `internal_extract`) and
+## reads embedded media out of the package (`zip`) to expose through the
+## container surface.
+docx = ["internal_document", "internal_extract", "dep:elide-docx", "dep:zip"]
 
-## PDF: a container of page text and image XObjects in its own indirect-
-## object format (not a zip). Pulls `internal_document` for the container
-## surface; the object parser is its own dep.
-pdf = ["internal_document"]
+## PDF: born-digital text extraction and redaction come from the standalone
+## `elide-pdf` crate; this codec adapts it to the `Handler` contract.
+pdf = ["internal_document", "dep:elide-pdf"]
 
-## PDF page rendering to images (for OCR), via the native PDFium shared
-## library. Off by default and separate from `pdf` because it needs the
-## PDFium `.so`/`.dylib` present at runtime (see `scripts/install-pdfium.sh`).
-## Pulls `pdf` (the loader/handler it extends) and `internal_image` (to
-## re-encode rendered pages as `ImageData`), plus `pdfium-render` and
-## `rayon` (the dedicated single-thread render pool).
-pdf-render = ["pdf", "internal_image", "dep:pdfium-render", "dep:rayon"]
+## PDF page rendering to images (for OCR), via `elide-pdf`'s native PDFium
+## path. Off by default and separate from `pdf` because it needs the PDFium
+## `.so`/`.dylib` present at runtime (see `scripts/install-pdfium.sh`). Pulls
+## `pdf` (the loader/handler it extends), `internal_image` (to re-encode
+## rendered pages as `ImageData`), and forwards to `elide-pdf/render`.
+pdf-render = ["pdf", "internal_image", "elide-pdf/render"]
 
 ## RTF: flat rich text (control words and groups), a leaf text handler
 ## alongside the other document formats.
@@ -116,13 +115,16 @@ internal_text = []
 # reuse the text-redaction helper.
 internal_extract = ["internal_text"]
 # The rich-document container machinery (`handler::document`): the
-# modality-neutral part surface shared by the document formats. No dep of
-# its own; each format pulls its own parser.
-internal_document = []
+# modality-neutral part surface shared by the document formats. Pulls
+# `internal_extract` for the shared `ExtractHandler` the DOCX/PDF adapters
+# drive; each format's own parsing lives in its dedicated crate.
+internal_document = ["internal_extract"]
 
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }
+elide-docx = { workspace = true, features = [], optional = true }
+elide-pdf = { workspace = true, features = [], optional = true }
 
 # (De)serialization
 serde_json = { workspace = true, features = [], optional = true }
@@ -137,7 +139,6 @@ hex = { workspace = true, features = [] }
 
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
-rayon = { workspace = true, features = [], optional = true }
 
 # Observability
 tracing = { workspace = true, features = [] }
@@ -153,9 +154,6 @@ zip = { workspace = true, optional = true }
 # Image processing
 image = { workspace = true, features = [], optional = true }
 imageproc = { workspace = true, features = [], optional = true }
-
-# Rendering
-pdfium-render = { workspace = true, features = [], optional = true }
 
 # Audio processing
 hound = { workspace = true, features = [], optional = true }

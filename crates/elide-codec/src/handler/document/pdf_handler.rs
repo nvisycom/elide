@@ -1,22 +1,20 @@
-//! PDF handler: a stub today.
+//! PDF handler: adapts the standalone [`elide_pdf`] engine to the codec's
+//! [`Handler`] contract.
 //!
-//! Decoding succeeds (so the format resolves and round-trips through the
-//! registry), but no PDF content is parsed yet: streaming yields nothing,
-//! reads return nothing, redaction is a no-op, `encode` reports that
-//! re-serialization is unsupported, and the [`Container`] surface exposes
-//! no parts. A real implementation (a PDF object parser to read page text
-//! and image XObjects, a writer to re-emit) will replace this when PDF
-//! extraction lands.
+//! Each page's born-digital text is streamed as one [`Chunk`]; a redaction on
+//! that chunk records a `(find, replace)` edit for the page, and [`encode`]
+//! applies them through [`Pdf::rewrite`](elide_pdf::Pdf::rewrite), which owns the PDF round-trip.
+//! Fail-closed: if a targeted text can't be located on its page, the rewrite is
+//! refused rather than emitting a document where it survives.
 //!
-//! Unlike DOCX, a PDF is *not* a zip: it is a flat file of indirect
-//! objects with a cross-reference table, and embedded images live as
-//! stream objects (image XObjects), not package entries. So PDF brings its
-//! own object parser rather than reusing the zip-based container plumbing;
-//! only the modality-neutral [`Container`]/[`Part`]/[`PartId`] surface is
-//! shared with DOCX.
+//! Unlike DOCX, a PDF is *not* a zip and its text is not byte-addressable, so
+//! redaction targets `(page, text)` rather than a byte span.
 //!
-//! [`Part`]: crate::codec::Part
-//! [`PartId`]: crate::codec::PartId
+//! Under the `pdf-render` feature and [`OcrMode::Force`], pages are also
+//! rasterised on decode and surface as image parts for the OCR pipeline.
+//!
+//! [`encode`]: Handler::encode
+//! [`OcrMode::Force`]: super::OcrMode::Force
 
 use bytes::Bytes;
 #[cfg(feature = "pdf-render")]
@@ -38,8 +36,8 @@ pub const FORMAT_ID: FormatId = FormatId::new("elide.document.pdf");
 
 /// [`Format`] descriptor registered into [`FormatRegistry`].
 ///
-/// Decodes on the plain text path (no page rendering). To rasterise pages
-/// for OCR, build the format with [`format_with`] instead.
+/// Decodes on the born-digital text path (no page rendering). To rasterise
+/// pages for OCR, build the format with [`format_with`] instead.
 ///
 /// [`FormatRegistry`]: crate::FormatRegistry
 pub fn format() -> Format {
@@ -63,34 +61,69 @@ pub fn format_with(ocr: OcrMode) -> Format {
         .with_content_types(["application/pdf"])
 }
 
-/// Stub text handler that may also carry pages rendered for OCR.
+/// One page's text and where it sits in the concatenated text stream.
+#[derive(Debug, Clone)]
+pub(crate) struct PdfPage {
+    /// 1-based page number.
+    pub(crate) number: u32,
+    /// The page's current (possibly redacted) text.
+    pub(crate) text: String,
+    /// Start offset of this page in the concatenated stream.
+    pub(crate) start: usize,
+}
+
+/// PDF text handler backed by [`elide_pdf`].
 ///
-/// Text parsing is still a stub (no chunks, no parts). When the loader runs
-/// under [`OcrMode::Force`], it rasterises the pages up front and hands them
-/// here as [`ImageData`]; those ride along for the image/OCR pipeline to
-/// consume (the part/media hookup lands with XObject extraction).
-///
-/// [`OcrMode::Force`]: super::OcrMode::Force
+/// Streams each page's text as a chunk, records per-page redactions, and on
+/// [`encode`](Handler::encode) rewrites the born-digital text layer.
 #[derive(Debug, Default)]
 pub(crate) struct PdfHandler {
+    /// The original document bytes, retained so [`elide_pdf`] rewrites and
+    /// re-serialises from the true source.
+    pub(crate) document: Bytes,
+    /// Extracted pages, in page order, with stream offsets for `read_next`.
+    pub(crate) pages: Vec<PdfPage>,
+    /// Read cursor over `pages`.
+    pub(crate) cursor: usize,
+    /// Recorded text edits: `(page, find, replace)`, applied at encode.
+    pub(crate) edits: Vec<elide_pdf::block::Replacement>,
     /// Pages rasterised for OCR, present only under the `pdf-render` feature
-    /// and [`OcrMode::Force`]; empty on the plain text path.
+    /// and [`OcrMode::Force`]; empty on the text path.
     ///
     /// [`OcrMode::Force`]: super::OcrMode::Force
     #[cfg(feature = "pdf-render")]
-    pages: Vec<ImageData>,
+    pub(crate) rendered: Vec<ImageData>,
 }
 
 impl PdfHandler {
-    /// A handler with no rendered pages (the plain text path).
-    pub(crate) fn new() -> Self {
-        Self::default()
+    /// A text handler over the extracted `pages` of `document`.
+    pub(crate) fn text(document: Bytes, pages: Vec<PdfPage>) -> Self {
+        Self {
+            document,
+            pages,
+            cursor: 0,
+            edits: Vec::new(),
+            #[cfg(feature = "pdf-render")]
+            rendered: Vec::new(),
+        }
     }
 
     /// A handler carrying pages rasterised for OCR.
     #[cfg(feature = "pdf-render")]
-    pub(crate) fn with_pages(pages: Vec<ImageData>) -> Self {
-        Self { pages }
+    pub(crate) fn rendered(document: Bytes, rendered: Vec<ImageData>) -> Self {
+        Self {
+            document,
+            rendered,
+            ..Self::default()
+        }
+    }
+
+    /// The page whose stream range contains `offset`, and the offset within it.
+    fn page_at(&self, offset: usize) -> Option<(&PdfPage, usize)> {
+        self.pages
+            .iter()
+            .find(|p| offset >= p.start && offset < p.start + p.text.len())
+            .map(|p| (p, offset - p.start))
     }
 }
 
@@ -101,48 +134,94 @@ impl Handler<Text> for PdfHandler {
     }
 
     fn encode(&self) -> Result<ContentData> {
-        Err(Error::new(
-            ErrorKind::CapabilityUnavailable,
-            "PDF re-encoding is not yet supported",
-        ))
+        if self.edits.is_empty() {
+            return Ok(ContentData::new(self.document.clone()));
+        }
+        let out = elide_pdf::Pdf::open(&self.document)
+            .and_then(|pdf| pdf.rewrite(&self.edits))
+            .map_err(pdf_error)?;
+        Ok(ContentData::new(Bytes::from(out)))
     }
 
     async fn read_next(&mut self) -> Result<Option<Chunk<Text>>> {
-        Ok(None)
+        if self.cursor >= self.pages.len() {
+            return Ok(None);
+        }
+        let page = &self.pages[self.cursor];
+        let chunk = Chunk {
+            location: TextLocation {
+                start: page.start,
+                end: page.start + page.text.len(),
+                page: Some(page.number),
+            },
+            data: TextData::new(page.text.clone()),
+            hints: Vec::new(),
+        };
+        self.cursor += 1;
+        Ok(Some(chunk))
+    }
+
+    fn lift(&self, chunk: &Chunk<Text>, local: TextLocation) -> Option<TextLocation> {
+        let base = chunk.location.start;
+        let start = base + local.start;
+        let end = base + local.end;
+        if start > end || end > chunk.location.end {
+            return None;
+        }
+        Some(TextLocation {
+            start,
+            end,
+            page: chunk.location.page,
+        })
     }
 
     fn as_container_mut(&mut self) -> Option<&mut dyn Container> {
         Some(self)
     }
-
-    // No `lift` override: the stub yields no chunks, so it is never called;
-    // the identity default suffices.
 }
 
 #[async_trait::async_trait]
 impl DataReader<Text> for PdfHandler {
-    async fn read_at(&self, _location: &TextLocation) -> Result<Option<TextData>> {
-        Ok(None)
+    async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
+        let Some((page, local)) = self.page_at(location.start) else {
+            return Ok(None);
+        };
+        let local_end = location.end - page.start;
+        Ok(page.text.get(local..local_end).map(TextData::new))
     }
 }
 
 #[async_trait::async_trait]
 impl DataWriter<Text> for PdfHandler {
-    async fn write_at(&mut self, _redactions: Redactions<Text>) -> Result<()> {
+    async fn write_at(&mut self, redactions: Redactions<Text>) -> Result<()> {
+        for (location, replacement) in redactions.into_iter() {
+            let Some((page, local)) = self.page_at(location.start) else {
+                continue;
+            };
+            let local_end = location.end - page.start;
+            let Some(find) = page.text.get(local..local_end) else {
+                continue;
+            };
+            self.edits.push(elide_pdf::block::Replacement::new(
+                page.number,
+                find.to_owned(),
+                // `Removed` replaces with nothing.
+                replacement.value().unwrap_or_default().to_owned(),
+            ));
+        }
         Ok(())
     }
 }
 
 impl Container for PdfHandler {
     fn parts(&self) -> Vec<Part> {
-        // Pages rendered for OCR (under the `pdf-render` feature and
-        // `OcrMode::Force`) surface as image parts: the orchestrator decodes
-        // each PNG back to an `Image` and drives the OCR pipeline over it,
-        // exactly like DOCX media parts. Without rendering this is empty —
-        // XObject extraction of native PDF images is still to come.
+        // Pages rendered for OCR (under `pdf-render` and `OcrMode::Force`)
+        // surface as image parts for the OCR pipeline. On the text path there
+        // are none: born-digital text is handled directly, and native XObject
+        // image extraction is still to come.
         #[cfg(feature = "pdf-render")]
         {
-            self.pages
+            self.rendered
                 .iter()
                 .enumerate()
                 .map(|(index, page)| Part {
@@ -157,9 +236,8 @@ impl Container for PdfHandler {
     }
 
     fn replace_part(&mut self, id: &PartId, _bytes: Bytes) -> Result<()> {
-        // Rendered pages are detection-only inputs: folding redactions back
-        // requires re-encoding the PDF, which is not supported yet (see
-        // `encode`). So no part is writable today.
+        // Rendered pages are detection-only inputs; folding a redacted page
+        // image back into the PDF is a raster-rewrite path not supported here.
         Err(Error::new(
             ErrorKind::CapabilityUnavailable,
             format!("pdf replace_part: `{id}` is not a writable part"),
@@ -167,70 +245,13 @@ impl Container for PdfHandler {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::Loader;
-
-    #[tokio::test]
-    async fn stub_decodes_but_exposes_nothing() {
-        let mut h = PdfLoader::new()
-            .decode(ContentData::new(Bytes::from_static(b"%PDF-1.7")))
-            .await
-            .unwrap();
-        assert_eq!(h.format().as_str(), "elide.document.pdf");
-        // No text, no reads, redaction is a no-op, encode is unsupported.
-        assert!(h.read_next().await.unwrap().is_none());
-        assert!(h.read_at(&TextLocation::new(0, 0)).await.unwrap().is_none());
-        assert!(h.encode().is_err());
-        // It is a container, but exposes no parts and rejects replacements.
-        assert!(h.parts().is_empty());
-        assert!(
-            h.replace_part(&PartId::new("anything"), Bytes::new())
-                .is_err()
-        );
-    }
-
-    // The OCR-forcing format builds, and the `Auto` path decodes without
-    // rendering (so no native library is needed here).
-    #[cfg(feature = "pdf-render")]
-    #[tokio::test]
-    async fn auto_mode_decodes_without_rendering() {
-        use super::super::OcrMode;
-
-        let _ = format_with(OcrMode::force());
-
-        let h = PdfLoader::with_ocr(OcrMode::Auto)
-            .decode(ContentData::new(Bytes::from_static(b"%PDF-1.7")))
-            .await
-            .unwrap();
-        assert!(h.parts().is_empty());
-    }
-
-    // The `Force` decode path renders via the native PDFium library, absent
-    // in CI — ignored by default; run with `--ignored` where PDFium is
-    // installed (see `scripts/install-pdfium.sh`). Renders a minimal
-    // one-page PDF and checks a page image came back.
-    #[cfg(feature = "pdf-render")]
-    #[tokio::test]
-    #[ignore = "requires the native PDFium shared library at runtime"]
-    async fn force_mode_renders_pages() {
-        use super::super::OcrMode;
-
-        const MINIMAL_PDF: &[u8] = b"%PDF-1.4\n\
-            1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n\
-            2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n\
-            3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\n\
-            trailer<</Root 1 0 R>>\n%%EOF";
-
-        let h = PdfLoader::with_ocr(OcrMode::force())
-            .decode(ContentData::new(Bytes::from_static(MINIMAL_PDF)))
-            .await
-            .unwrap();
-        // The rendered page surfaces as a decodable image part.
-        let parts = h.parts();
-        assert_eq!(parts.len(), 1);
-        assert_eq!(parts[0].hint, "png");
-        assert!(!parts[0].bytes.is_empty());
-    }
+/// Map an [`elide_pdf`] error into the codec's error type.
+pub(super) fn pdf_error(err: elide_pdf::Error) -> Error {
+    use elide_pdf::ErrorKind as PdfKind;
+    let kind = match err.kind() {
+        PdfKind::InvalidDocument | PdfKind::LimitExceeded => ErrorKind::MalformedInput,
+        PdfKind::UnsafeRewrite => ErrorKind::Processing,
+        _ => ErrorKind::Processing,
+    };
+    Error::new(kind, err.to_string())
 }

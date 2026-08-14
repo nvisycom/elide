@@ -12,6 +12,8 @@ members = [
     "./crates/elide-llm",
     "./crates/elide-stt",
     "./crates/elide-ocr",
+    "./crates/elide-docx",
+    "./crates/elide-pdf",
     "./crates/elide-codec",
     "./crates/elide-fake",
     "./crates/elide-operator",
@@ -49,6 +51,8 @@ elide-lingua = { path = "./crates/elide-lingua", version = "0.1.0" }
 elide-llm = { path = "./crates/elide-llm", version = "0.1.0" }
 elide-stt = { path = "./crates/elide-stt", version = "0.1.0" }
 elide-ocr = { path = "./crates/elide-ocr", version = "0.1.0" }
+elide-docx = { path = "./crates/elide-docx", version = "0.1.0" }
+elide-pdf = { path = "./crates/elide-pdf", version = "0.1.0" }
 elide-codec = { path = "./crates/elide-codec", version = "0.1.0" }
 elide-fake = { path = "./crates/elide-fake", version = "0.1.0" }
 elide-operator = { path = "./crates/elide-operator", version = "0.1.0" }
@@ -118,6 +122,7 @@ phonenumber = { version = "0.3", default-features = false }
 scraper = { version = "0.27", features = [] }
 ego-tree = { version = "0.11", features = [] }
 quick-xml = { version = "0.41", features = [] }
+lopdf = { version = "0.44", default-features = false }
 
 # Compression
 zip = { version = "8.6", default-features = false, features = ["deflate"] }

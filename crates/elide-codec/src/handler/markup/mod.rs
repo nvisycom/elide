@@ -35,6 +35,4 @@ pub use self::html_loader::ScriptPolicy;
 #[cfg(feature = "xml")]
 pub use self::xml_handler::format as xml_format;
 #[cfg(feature = "xml")]
-pub(crate) use self::xml_handler::{XmlItem, XmlSpan, splice as xml_splice};
-#[cfg(feature = "xml")]
-pub(crate) use self::xml_loader::{XmlLoader, build_items as xml_build_items};
+pub(crate) use self::xml_loader::XmlLoader;

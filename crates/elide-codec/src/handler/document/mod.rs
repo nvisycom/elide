@@ -24,8 +24,6 @@ mod docx_loader;
 mod pdf_handler;
 #[cfg(feature = "pdf")]
 mod pdf_loader;
-#[cfg(feature = "pdf-render")]
-mod pdf_render;
 #[cfg(feature = "rtf")]
 mod rtf_handler;
 #[cfg(feature = "rtf")]

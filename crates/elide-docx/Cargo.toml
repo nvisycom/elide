@@ -1,0 +1,55 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "elide-docx"
+description = "Standalone DOCX (OOXML) text extraction and byte-faithful redaction: bytes in, bytes out"
+keywords = ["docx", "ooxml", "redaction", "extraction", "elide"]
+categories = ["parsing", "text-processing"]
+readme = "README.md"
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+## No default features: the crate is a self-contained bytes-in/bytes-out
+## library with no elide dependencies.
+default = []
+
+## Derive `serde::{Serialize, Deserialize}` on the extraction/coverage model,
+## so a caller can ship an extraction result across a boundary.
+serde = ["dep:serde"]
+
+[dependencies]
+# (De)serialization
+serde = { workspace = true, features = ["derive"], optional = true }
+
+# Derive macros & error handling
+thiserror = { workspace = true, features = [] }
+
+# Primitive datatypes
+# Inline-or-shared strings, so a part path or text block clones cheaply.
+hipstr = { workspace = true, features = [] }
+# Ref-counted byte buffers, so a part's bytes clone and surface without copying.
+bytes = { workspace = true, features = [] }
+
+# Markup parsing
+quick-xml = { workspace = true, features = [] }
+
+# Compression
+zip = { workspace = true }
+
+[dev-dependencies]
+# (De)serialization
+serde_json = { workspace = true, features = [] }
