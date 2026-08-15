@@ -19,6 +19,8 @@ mod raster;
 pub use self::emit::Certificate;
 pub use self::geometry::{Glyph, GlyphSource, PageObservation, PixelRect};
 pub use self::raster::Detection;
+#[cfg(feature = "test-utils")]
+pub use self::raster::verify_raster_coverage;
 use crate::Pdf;
 use crate::error::Result;
 

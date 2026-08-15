@@ -217,7 +217,7 @@ fn certificate_binds_source_pages_and_output() {
 fn rejects_a_mismatched_pixel_buffer() {
     let pdf = Pdf::open(&source_pdf()).unwrap();
     let mut obs = observation();
-    obs.pixels.truncate(5); // no longer width*height*3
+    obs.pixels.truncate(5); // a buffer that is not width*height*3
     let err = pdf.redact_raster(vec![obs], &[], [0, 0, 0]).unwrap_err();
     assert_eq!(err.kind(), elide_pdf::ErrorKind::UnsafeRewrite);
 }
@@ -227,6 +227,56 @@ fn rejects_a_detection_on_an_absent_page() {
     let pdf = Pdf::open(&source_pdf()).unwrap();
     let err = pdf
         .redact_raster(vec![observation()], &[Detection::new(9, 0, 1)], [0, 0, 0])
+        .unwrap_err();
+    assert_eq!(err.kind(), elide_pdf::ErrorKind::UnsafeRewrite);
+}
+
+/// Fill the detected glyph boxes on `pages` in place with `fill`, the same
+/// pixel edit `redact_raster` performs before emitting — so a caller can then
+/// assert the fill actually covered every detected region.
+#[cfg(feature = "test-utils")]
+fn fill_detected(pages: &mut [PageObservation], detections: &[Detection], fill: [u8; 3]) {
+    for page in pages.iter_mut() {
+        for det in detections.iter().filter(|d| d.page == page.page) {
+            for glyph in page
+                .glyphs
+                .iter()
+                .filter(|g| g.start < det.end && g.end > det.start)
+            {
+                let rect = glyph.rect;
+                for y in rect.y..rect.y.saturating_add(rect.height).min(page.height) {
+                    for x in rect.x..rect.x.saturating_add(rect.width).min(page.width) {
+                        let i = ((y as usize) * (page.width as usize) + x as usize) * 3;
+                        page.pixels[i..i + 3].copy_from_slice(&fill);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "test-utils")]
+#[test]
+fn verify_raster_coverage_accepts_a_fully_filled_page() {
+    use elide_pdf::render::verify_raster_coverage;
+
+    let fill = [0, 0, 0];
+    let detections = [Detection::new(1, 1, 3)];
+    let mut pages = vec![observation()];
+    fill_detected(&mut pages, &detections, fill);
+
+    // Every detected glyph box is painted, so verification passes.
+    verify_raster_coverage(&pages, &detections, fill).expect("filled regions verify");
+}
+
+#[cfg(feature = "test-utils")]
+#[test]
+fn verify_raster_coverage_catches_an_unpainted_region() {
+    use elide_pdf::render::verify_raster_coverage;
+
+    // The observation is never filled, so a detection's box still shows the
+    // original white pixels — verification must fail closed.
+    let err = verify_raster_coverage(&[observation()], &[Detection::new(1, 1, 3)], [0, 0, 0])
         .unwrap_err();
     assert_eq!(err.kind(), elide_pdf::ErrorKind::UnsafeRewrite);
 }

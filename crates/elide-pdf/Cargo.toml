@@ -42,6 +42,10 @@ image = ["dep:image", "lopdf/embed_image"]
 ## `scripts/install-pdfium.sh`); pulls `pdfium-render`, `rayon`, and `image`.
 render = ["dep:pdfium-render", "dep:rayon", "dep:image", "dep:sha2"]
 
+## Verification helpers for tests: confirm a raster redaction actually painted
+## the pixels it claimed. Pulls `render`.
+test-utils = ["render"]
+
 [dependencies]
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }
