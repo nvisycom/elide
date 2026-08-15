@@ -10,7 +10,7 @@ mod rule_match;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-pub use self::attribution::Attribution;
+pub use self::attribution::{Attribution, AttributionKind};
 pub use self::event::{AuditEvent, AuditKind, ModelEvent, PatternEvent};
 pub use self::hash::AuditHash;
 pub use self::rule_match::RuleMatch;

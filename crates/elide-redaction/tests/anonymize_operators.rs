@@ -12,8 +12,6 @@ use elide_operator::operators::{Clamp, Keep};
 use elide_redaction::{Anonymizer, Rule};
 use fixtures::{anonymize_one, entity};
 
-// --- value-shaping operators ---------------------------------------------
-
 #[tokio::test]
 async fn generalize_reduces_a_birthdate_to_the_year() {
     use elide_operator::operators::{DateGranularity, GeneralizeDate};
