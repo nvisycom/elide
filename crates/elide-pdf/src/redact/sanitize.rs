@@ -94,28 +94,43 @@ pub(super) fn sanitize(doc: &mut Document) {
     }
 }
 
-/// The doomed ids that are still referenced by an object *not* in `doomed`
-/// (nor the trailer, already cleared of the stripped keys). Such an object is
-/// shared with surviving content and must be kept.
+/// The doomed ids that are still reachable from surviving content, and so must
+/// be kept. A doomed object referenced by an object *not* in `doomed` (or by the
+/// trailer, already cleared of the stripped keys) is shared with surviving
+/// content; and so is every doomed object reachable *from* such an object — the
+/// full closure, so keeping a shared object never leaves it with a dangling
+/// reference to a doomed descendant that was removed.
 pub(super) fn referenced_from_survivors(
     doc: &Document,
     doomed: &BTreeSet<ObjectId>,
 ) -> BTreeSet<ObjectId> {
+    // Seed with the doomed objects directly referenced by any survivor or the
+    // trailer, then walk the closure: every doomed object reachable from a kept
+    // one is also shared (a kept parent still points at it), so it must be kept
+    // too, or removing it would leave that parent with a dangling reference.
     let mut kept = BTreeSet::new();
-    for (id, object) in &doc.objects {
-        if doomed.contains(id) {
-            continue;
-        }
-        for referenced in object_references(object) {
-            if doomed.contains(&referenced) {
-                kept.insert(referenced);
-            }
+    let mut stack: Vec<ObjectId> = Vec::new();
+
+    let survivor_refs = doc
+        .objects
+        .iter()
+        .filter(|(id, _)| !doomed.contains(id))
+        .flat_map(|(_, object)| object_references(object))
+        .chain(dict_references(&doc.trailer));
+    for referenced in survivor_refs {
+        if doomed.contains(&referenced) && kept.insert(referenced) {
+            stack.push(referenced);
         }
     }
-    // Also treat trailer references (e.g. `/Root`) as surviving.
-    for referenced in dict_references(&doc.trailer) {
-        if doomed.contains(&referenced) {
-            kept.insert(referenced);
+
+    while let Some(id) = stack.pop() {
+        let Ok(object) = doc.get_object(id) else {
+            continue;
+        };
+        for referenced in object_references(object) {
+            if doomed.contains(&referenced) && kept.insert(referenced) {
+                stack.push(referenced);
+            }
         }
     }
     kept
@@ -195,5 +210,58 @@ fn referenced_ids(value: &Object) -> Vec<ObjectId> {
         Object::Array(a) => a.iter().flat_map(referenced_ids).collect(),
         Object::Dictionary(d) => d.iter().flat_map(|(_, v)| referenced_ids(v)).collect(),
         _ => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lopdf::dictionary;
+
+    use super::*;
+
+    /// A dictionary object holding a single `/Kid` reference to `child`.
+    fn parent_of(child: ObjectId) -> Object {
+        Object::Dictionary(dictionary! { "Kid" => Object::Reference(child) })
+    }
+
+    #[test]
+    fn keeps_the_whole_shared_closure_not_just_the_first_hop() {
+        // survivor -> a -> b, with both a and b doomed. Keeping only the
+        // directly-referenced `a` while deleting `b` would leave `a` with a
+        // dangling reference; the closure must keep both.
+        let mut doc = Document::with_version("1.5");
+        let b = doc.add_object(Object::Dictionary(dictionary! {}));
+        let a = doc.add_object(parent_of(b));
+        let survivor = doc.add_object(parent_of(a));
+
+        let doomed: BTreeSet<ObjectId> = [a, b].into_iter().collect();
+        // `survivor` is not doomed, so it anchors the closure.
+        assert!(!doomed.contains(&survivor));
+
+        let kept = referenced_from_survivors(&doc, &doomed);
+        assert!(kept.contains(&a), "the directly-referenced object is kept");
+        assert!(
+            kept.contains(&b),
+            "a doomed object reachable only through another kept object must \
+             also be kept, or the retained parent dangles"
+        );
+    }
+
+    #[test]
+    fn a_doomed_object_no_survivor_references_is_not_kept() {
+        // survivor -> a; b hangs off a but nothing outside `doomed` reaches it,
+        // and a is doomed, so the closure keeps a (shared) but drops b.
+        let mut doc = Document::with_version("1.5");
+        let unreferenced = doc.add_object(Object::Dictionary(dictionary! {}));
+        let a = doc.add_object(Object::Dictionary(dictionary! {}));
+        let _survivor = doc.add_object(parent_of(a));
+
+        let doomed: BTreeSet<ObjectId> = [a, unreferenced].into_iter().collect();
+        let kept = referenced_from_survivors(&doc, &doomed);
+        assert!(kept.contains(&a));
+        assert!(
+            !kept.contains(&unreferenced),
+            "a doomed object no survivor reaches is removed"
+        );
     }
 }

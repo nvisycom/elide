@@ -77,7 +77,12 @@ if [ -z "$EXPECTED_SHA" ]; then
 	echo "no pinned sha256 for platform '${PLATFORM}' at ${PDFIUM_TAG}; refusing to install an unverified binary" >&2
 	exit 1
 fi
-echo "${EXPECTED_SHA}  ${ARCHIVE}" | sha256sum -c -
+# `sha256sum` on Linux, `shasum -a 256` on macOS (where sha256sum is absent).
+if command -v sha256sum >/dev/null 2>&1; then
+	echo "${EXPECTED_SHA}  ${ARCHIVE}" | sha256sum -c -
+else
+	echo "${EXPECTED_SHA}  ${ARCHIVE}" | shasum -a 256 -c -
+fi
 
 tar xz -C "$WORKDIR" -f "$ARCHIVE"
 

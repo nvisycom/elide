@@ -45,7 +45,17 @@ pub(super) fn decode_glyphs(encoding: &Encoding, bytes: &[u8]) -> Result<Vec<Gly
                     }
                     code = (code << 8) | bytes[i + len - 1] as u32;
                     if let Some(utf16) = cmap.get(code, len as u8) {
-                        text = Some(String::from_utf16_lossy(&utf16));
+                        // Fail closed on malformed CMap data (e.g. an unpaired
+                        // surrogate): a lossy `�` would misrepresent the source
+                        // text and could make a PII character undetectable.
+                        let decoded = String::from_utf16(&utf16).map_err(|_| {
+                            Error::unsafe_rewrite(
+                                "text drawn with a code whose CMap mapping is not \
+                                 valid UTF-16; its glyph cannot be reliably decoded \
+                                 for redaction",
+                            )
+                        })?;
+                        text = Some(decoded);
                         consumed = len;
                         break;
                     }
