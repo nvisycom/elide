@@ -38,7 +38,7 @@ PLATFORM="${1:-${PDFIUM_PLATFORM:-$(detect_platform)}}"
 # Pin a specific pdfium-binaries release rather than the mutable `latest`, so
 # the download is reproducible and can be checksum-verified. Bump PDFIUM_TAG
 # and the matching per-platform sha256s below together.
-PDFIUM_TAG="chromium/6996"
+PDFIUM_TAG="chromium/7999"
 BASE_URL="https://github.com/bblanchon/pdfium-binaries/releases/download/${PDFIUM_TAG}"
 URL="${BASE_URL}/pdfium-${PLATFORM}.tgz"
 
@@ -47,10 +47,10 @@ URL="${BASE_URL}/pdfium-${PLATFORM}.tgz"
 # for each downloaded archive). An empty value means the platform is not pinned
 # and installation is refused for it.
 declare -A PDFIUM_SHA256=(
-	[linux-x64]="68b381b87efed539f2e33ae1e280304c9a42643a878cc296c1d66a93b0cb4335"
-	[linux-arm64]="edc2c169430a9c12a590f85f6615827e9b6eebe59b90e4a2188fde8c17dc4a60"
-	[mac-x64]="66162d9aa0b059fbd9e54a47a62cbd582cc6ab8caee0829f2252d9bcd4750e88"
-	[mac-arm64]="1b103d5ebfd8f7b5720ca9ba76888e7efaa80678a49c8f3da3b0ac64ba5c90fb"
+	[linux-x64]="c3af580f9df0fef9545b44115bc5ea440f286956b5f231df69fb373b8efc4f69"
+	[linux-arm64]="a19862a36e2b2da3c3fb43f0deef45fbbc331f58cd47943782ae4bd9db4c66d9"
+	[mac-x64]="4b924d948d2ec4863435d375a94541b4003c59f8adc28cc5e4236b0ab81a355d"
+	[mac-arm64]="e214ee33f22b2204daa765a545aee1e425d88448e6154dac95c6a06206b7437f"
 )
 
 # Library filename and install dir differ per OS: Linux ships libpdfium.so
