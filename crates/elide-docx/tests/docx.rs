@@ -139,6 +139,24 @@ fn part_kind_classifies_from_path() {
         PartKind::Metadata
     );
     assert_eq!(PartPath::new("word/settings.xml").kind(), PartKind::Other);
+    assert_eq!(
+        PartPath::new("word/charts/chart1.xml").kind(),
+        PartKind::Chart
+    );
+    assert_eq!(
+        PartPath::new("word/diagrams/data1.xml").kind(),
+        PartKind::Diagram
+    );
+    assert_eq!(
+        PartPath::new("word/glossary/document.xml").kind(),
+        PartKind::Glossary
+    );
+    assert_eq!(
+        PartPath::new("word/glossary/header1.xml").kind(),
+        PartKind::Glossary
+    );
+    assert!(PartKind::Chart.is_text());
+    assert!(PartKind::Diagram.is_text());
 }
 
 #[test]
@@ -237,6 +255,80 @@ fn rewrite_is_fail_closed_on_overlap() {
 }
 
 #[test]
+fn rewrite_escapes_xml_metacharacters_and_reopens() {
+    // A replacement whose text carries XML metacharacters must be escaped so the
+    // rewritten package is still well-formed and re-opens.
+    let docx = sample_docx("Alice");
+    let extraction = Docx::open(&docx).unwrap().extract();
+    let block = extraction
+        .blocks
+        .iter()
+        .find(|b| b.text == "Alice")
+        .unwrap();
+    let replacement = Replacement::for_block(block, "<x> & <y>");
+
+    let out = Docx::open(&docx).unwrap().rewrite(&[replacement]).unwrap();
+
+    // The escaped text is in the body, the raw metacharacters are not, and the
+    // package re-opens and parses.
+    let body = part_text(&out, BODY_PART);
+    assert!(body.contains("&lt;x&gt; &amp; &lt;y&gt;"), "body: {body}");
+    assert!(!body.contains("<x>"), "body: {body}");
+    let reopened = Docx::open(&out).unwrap().extract();
+    assert!(reopened.issues.is_empty(), "issues: {:?}", reopened.issues);
+    assert!(reopened.blocks.iter().any(|b| b.text == "<x> & <y>"));
+}
+
+#[test]
+fn extraction_decodes_entities_and_round_trips() {
+    // Entity-encoded source text is surfaced decoded, and a round-trip rewrite
+    // re-opens and parses.
+    let docx = sample_docx("Alice &amp; Bob");
+    let extraction = Docx::open(&docx).unwrap().extract();
+    assert!(
+        extraction.blocks.iter().any(|b| b.text == "Alice & Bob"),
+        "blocks: {:?}",
+        extraction.blocks
+    );
+
+    let block = extraction
+        .blocks
+        .iter()
+        .find(|b| b.text == "Alice & Bob")
+        .unwrap();
+    let out = Docx::open(&docx)
+        .unwrap()
+        .rewrite(&[Replacement::for_block(block, "[NAME]")])
+        .unwrap();
+    let reopened = Docx::open(&out).unwrap().extract();
+    assert!(reopened.issues.is_empty(), "issues: {:?}", reopened.issues);
+    assert!(reopened.blocks.iter().any(|b| b.text == "[NAME]"));
+}
+
+#[test]
+fn rewrite_is_fail_closed_on_broken_comment_framing() {
+    // A replacement spliced into a comment that would break `<!-- -->` framing
+    // is refused rather than emitted as broken XML.
+    let body = format!(
+        r#"<?xml version="1.0"?><w:document><w:body><!-- {} --></w:body></w:document>"#,
+        "redact-me"
+    );
+    let docx = docx_with(&[(BODY_PART, body.as_bytes())]);
+    let extraction = Docx::open(&docx).unwrap().extract();
+    let block = extraction
+        .blocks
+        .iter()
+        .find(|b| b.text.contains("redact-me"))
+        .unwrap();
+
+    let err = Docx::open(&docx)
+        .unwrap()
+        .rewrite(&[Replacement::for_block(block, "a--b")])
+        .unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::UnsafeRewrite);
+}
+
+#[test]
 fn rewrite_is_fail_closed_on_unknown_part() {
     let docx = sample_docx("Alice");
     let err = Docx::open(&docx)
@@ -262,6 +354,49 @@ fn rewrite_rejects_targeting_a_binary_part_as_text() {
             end: 1,
             text: "x".into(),
         }])
+        .unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::UnsafeRewrite);
+}
+
+#[test]
+fn part_replacement_rejects_protected_part() {
+    // A binary replacement must not clobber the body or content-types manifest.
+    let docx = sample_docx("Alice");
+    for protected in [BODY_PART, "[Content_Types].xml"] {
+        let err = Docx::open(&docx)
+            .unwrap()
+            .rewrite_with_parts(
+                &[],
+                &[PartReplacement {
+                    part: PartPath::new(protected),
+                    bytes: b"junk".to_vec(),
+                }],
+            )
+            .unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::UnsafeRewrite, "part: {protected}");
+    }
+}
+
+#[test]
+fn part_replacement_conflicting_with_text_splice_is_rejected() {
+    // A text splice and a binary replacement on the same part is a conflicting
+    // instruction and is refused.
+    let docx = docx_with(&[
+        (BODY_PART, text_part("Alice").as_bytes()),
+        ("word/header1.xml", text_part("Bob").as_bytes()),
+    ]);
+    let extraction = Docx::open(&docx).unwrap().extract();
+    let block = extraction.blocks.iter().find(|b| b.text == "Bob").unwrap();
+
+    let err = Docx::open(&docx)
+        .unwrap()
+        .rewrite_with_parts(
+            &[Replacement::for_block(block, "[NAME]")],
+            &[PartReplacement {
+                part: PartPath::new("word/header1.xml"),
+                bytes: b"junk".to_vec(),
+            }],
+        )
         .unwrap_err();
     assert_eq!(err.kind(), ErrorKind::UnsafeRewrite);
 }

@@ -1,16 +1,30 @@
 //! [`StoredPart`]: one package part, read once and classified, with the XML
 //! text extraction and splicing it supports.
 
+use std::borrow::Cow;
 use std::ops::Range;
 
 use bytes::Bytes;
 use hipstr::HipStr;
 use quick_xml::Reader;
+use quick_xml::escape::{partial_escape, unescape};
 use quick_xml::events::Event;
 
 use crate::block::{Block, IssueKind, Replacement};
 use crate::error::{Error, Result};
 use crate::part::{PartKind, PartPath};
+
+/// The XML event a text span lives inside, which determines how a replacement
+/// spliced into it must be escaped or framed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BlockKind {
+    /// Character data of a `Text` event: escape `<`, `>`, `&`.
+    Text,
+    /// Body of a `<!-- ... -->` comment: reject `--` and a trailing `-`.
+    Comment,
+    /// Body of a `<![CDATA[ ... ]]>` section: reject `]]>`.
+    Cdata,
+}
 
 /// One package part: its path, its kind, and its bytes, retained for extraction
 /// and a byte-faithful re-pack.
@@ -54,33 +68,25 @@ impl StoredPart {
     ///
     /// Each text/comment/CDATA event's inner bytes (delimiters stripped) become
     /// a block addressed by this part and its byte span; whitespace-only runs
-    /// are dropped.
+    /// are dropped. A block's `text` is the decoded logical text (entities like
+    /// `&amp;` resolved) while its span stays raw, so splicing lands on the
+    /// original bytes.
     pub(super) fn text_blocks(&self) -> std::result::Result<Vec<Block>, IssueKind> {
         let raw = self.as_text()?;
-        let mut reader = Reader::from_str(raw);
         let mut blocks = Vec::new();
-        let mut last = 0usize;
-
-        loop {
-            let event = reader.read_event().map_err(|_| IssueKind::MalformedXml)?;
-            let span = last..reader.buffer_position() as usize;
-            last = span.end;
-
-            let inner = match event {
-                Event::Eof => break,
-                Event::Text(_) => non_blank(raw, span),
-                Event::Comment(_) => strip(span, "<!--", "-->"),
-                Event::CData(_) => strip(span, "<![CDATA[", "]]>"),
-                _ => None,
+        for (span, kind) in text_spans(raw).map_err(|_| IssueKind::MalformedXml)? {
+            let text: Cow<'_, str> = match kind {
+                BlockKind::Text => {
+                    unescape(&raw[span.clone()]).map_err(|_| IssueKind::MalformedXml)?
+                }
+                BlockKind::Comment | BlockKind::Cdata => Cow::Borrowed(&raw[span.clone()]),
             };
-            if let Some(inner) = inner {
-                blocks.push(Block {
-                    part: self.path.clone(),
-                    text: HipStr::from(&raw[inner.clone()]).into_owned(),
-                    start: inner.start,
-                    end: inner.end,
-                });
-            }
+            blocks.push(Block {
+                part: self.path.clone(),
+                text: HipStr::from(text).into_owned(),
+                start: span.start,
+                end: span.end,
+            });
         }
         Ok(blocks)
     }
@@ -120,15 +126,120 @@ impl StoredPart {
             prev_end = r.end;
         }
 
+        // Recover each span's event kind so the replacement text is escaped as
+        // text content, or validated against comment/CDATA framing, before it
+        // enters the byte stream.
+        let spans = text_spans(raw)
+            .map_err(|_| Error::invalid_xml(format!("part `{}` malformed XML", self.path)))?;
+
         let mut out = String::with_capacity(raw.len());
         let mut cursor = 0usize;
         for r in ordered {
+            let kind = span_kind(&spans, r.start, r.end).ok_or_else(|| {
+                Error::unsafe_rewrite(format!(
+                    "span {}..{} is not a text span in `{}`",
+                    r.start, r.end, r.part
+                ))
+            })?;
+            let safe = escape_for(kind, &r.text, r)?;
             out.push_str(&raw[cursor..r.start]);
-            out.push_str(&r.text);
+            out.push_str(&safe);
             cursor = r.end;
         }
         out.push_str(&raw[cursor..]);
         Ok(out)
+    }
+}
+
+/// The text/comment/CDATA spans of `raw`, each with its inner byte range
+/// (delimiters stripped) and the [`BlockKind`] it belongs to; whitespace-only
+/// text runs are dropped. Errs on malformed XML.
+///
+/// quick-xml emits a separate [`Event::GeneralRef`] for each `&entity;`, so a
+/// logical text run splits into `Text`/`GeneralRef` events; a contiguous run of
+/// them is coalesced into one `Text` span (covering the entity bytes) so
+/// unescaping the whole span yields the decoded logical text.
+fn text_spans(raw: &str) -> std::result::Result<Vec<(Range<usize>, BlockKind)>, ()> {
+    let mut reader = Reader::from_str(raw);
+    let mut spans = Vec::new();
+    let mut last = 0usize;
+    let mut run: Option<Range<usize>> = None;
+
+    loop {
+        let event = reader.read_event().map_err(|_| ())?;
+        let span = last..reader.buffer_position() as usize;
+        last = span.end;
+
+        match event {
+            // Extend (or open) the current text run across text and entities.
+            Event::Text(_) | Event::GeneralRef(_) => {
+                run = Some(run.map_or(span.clone(), |r| r.start..span.end));
+                continue;
+            }
+            // Any other event ends the run; flush it before handling this event.
+            _ => flush_text_run(raw, &mut run, &mut spans),
+        }
+
+        let found = match event {
+            Event::Eof => break,
+            Event::Comment(_) => strip(span, "<!--", "-->").map(|s| (s, BlockKind::Comment)),
+            Event::CData(_) => strip(span, "<![CDATA[", "]]>").map(|s| (s, BlockKind::Cdata)),
+            _ => None,
+        };
+        if let Some(found) = found {
+            spans.push(found);
+        }
+    }
+    Ok(spans)
+}
+
+/// Emit the pending text run as a `Text` span unless it is whitespace-only, then
+/// clear it.
+fn flush_text_run(
+    raw: &str,
+    run: &mut Option<Range<usize>>,
+    spans: &mut Vec<(Range<usize>, BlockKind)>,
+) {
+    if let Some(span) = run.take()
+        && let Some(span) = non_blank(raw, span)
+    {
+        spans.push((span, BlockKind::Text));
+    }
+}
+
+/// The [`BlockKind`] of the span exactly covering `start..end`, if `start..end`
+/// is one of the recorded text spans.
+fn span_kind(spans: &[(Range<usize>, BlockKind)], start: usize, end: usize) -> Option<BlockKind> {
+    spans
+        .iter()
+        .find(|(s, _)| s.start <= start && end <= s.end)
+        .map(|(_, kind)| *kind)
+}
+
+/// Escape or validate `text` for splicing into a span of `kind`. Text content is
+/// XML-escaped; a comment or CDATA replacement that would break its framing is a
+/// fail-closed [`Error::unsafe_rewrite`].
+fn escape_for<'a>(kind: BlockKind, text: &'a str, r: &Replacement) -> Result<Cow<'a, str>> {
+    match kind {
+        BlockKind::Text => Ok(partial_escape(text)),
+        BlockKind::Comment => {
+            if text.contains("--") || text.ends_with('-') {
+                return Err(Error::unsafe_rewrite(format!(
+                    "replacement `{}` breaks comment framing in `{}`",
+                    text, r.part
+                )));
+            }
+            Ok(Cow::Borrowed(text))
+        }
+        BlockKind::Cdata => {
+            if text.contains("]]>") {
+                return Err(Error::unsafe_rewrite(format!(
+                    "replacement `{}` breaks CDATA framing in `{}`",
+                    text, r.part
+                )));
+            }
+            Ok(Cow::Borrowed(text))
+        }
     }
 }
 

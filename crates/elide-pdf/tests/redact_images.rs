@@ -90,7 +90,8 @@ fn replaces_an_image_with_a_redacted_one() {
 
 #[test]
 fn is_fail_closed_on_a_non_image_object() {
-    let (pdf, _) = image_pdf(&[255u8; 12], 2, 2);
+    let white = vec![255u8; 2 * 2 * 3];
+    let (pdf, _) = image_pdf(&white, 2, 2);
     let err = Pdf::open(&pdf)
         .unwrap()
         .redact_images(&[ImageReplacement {

@@ -40,7 +40,9 @@ pub struct Extraction {
 pub struct Block {
     /// The package part this text is in.
     pub part: PartPath,
-    /// The text as it appears in the source (verbatim slice of the span).
+    /// The block's logical text, with XML entities decoded (e.g. `&amp;` reads
+    /// as `&`), so recognizers match the text a reader sees. The byte
+    /// [`span`](Block::span) still addresses the raw source range.
     pub text: HipStr<'static>,
     /// Start of the byte range within the part's XML.
     pub start: usize,

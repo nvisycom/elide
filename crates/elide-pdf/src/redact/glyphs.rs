@@ -10,6 +10,8 @@
 
 use lopdf::Encoding;
 
+use crate::error::{Error, Result};
+
 /// One decoded glyph within an operand's bytes.
 pub(super) struct Glyph {
     /// Start of the glyph's code within the operand string.
@@ -21,7 +23,11 @@ pub(super) struct Glyph {
 }
 
 /// Split `bytes` into glyphs under `encoding`.
-pub(super) fn decode_glyphs(encoding: &Encoding, bytes: &[u8]) -> Vec<Glyph> {
+///
+/// Fails closed: a code that does not decode under the font's encoding is an
+/// unmatchable glyph — it could not be located for deletion, so the whole
+/// redaction is refused rather than leaving that text silently in place.
+pub(super) fn decode_glyphs(encoding: &Encoding, bytes: &[u8]) -> Result<Vec<Glyph>> {
     match encoding {
         // Composite font: consume variable-length codes through the CMap, one
         // glyph per successful lookup — the same greedy consumption the CMap
@@ -44,26 +50,38 @@ pub(super) fn decode_glyphs(encoding: &Encoding, bytes: &[u8]) -> Vec<Glyph> {
                         break;
                     }
                 }
-                // A code with no mapping is consumed as one byte with empty text,
-                // keeping byte offsets exact.
-                let consumed = consumed.max(1);
+                let Some(text) = text else {
+                    return Err(Error::unsafe_rewrite(
+                        "text drawn with a code that has no CMap mapping; \
+                         its glyph cannot be located for redaction",
+                    ));
+                };
                 glyphs.push(Glyph {
                     byte_start: i,
                     byte_end: i + consumed,
-                    text: text.unwrap_or_default(),
+                    text,
                 });
                 i += consumed;
             }
-            glyphs
+            Ok(glyphs)
         }
-        // Simple font: one byte per glyph. Decode each byte on its own.
+        // Simple font: one byte per glyph. Decode each byte on its own; a byte
+        // that does not decode is likewise an unmatchable glyph.
         _ => bytes
             .iter()
             .enumerate()
-            .map(|(i, &b)| Glyph {
-                byte_start: i,
-                byte_end: i + 1,
-                text: encoding.bytes_to_string(&[b]).unwrap_or_default(),
+            .map(|(i, &b)| {
+                let text = encoding.bytes_to_string(&[b]).map_err(|_| {
+                    Error::unsafe_rewrite(
+                        "text drawn with a byte that does not decode under its font; \
+                         its glyph cannot be located for redaction",
+                    )
+                })?;
+                Ok(Glyph {
+                    byte_start: i,
+                    byte_end: i + 1,
+                    text,
+                })
             })
             .collect(),
     }

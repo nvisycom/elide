@@ -15,10 +15,18 @@
 use super::{Glyph, PageObservation, PixelRect, emit};
 use crate::error::{Error, Result};
 
-/// A detected span to redact on a page: a UTF-16 range into the page's text.
+/// A detected span to redact on a page: a **UTF-16 code-unit** range into the
+/// page's text, matched against the rendered [`glyphs`](PageObservation::glyphs).
 ///
-/// The range selects the [`glyphs`](PageObservation::glyphs) whose boxes are
-/// filled. Spans are matched against the same UTF-16 offsets the glyphs carry.
+/// The range selects the glyphs whose boxes are filled; spans are matched
+/// against the same UTF-16 offsets the glyphs carry.
+///
+/// This is **not** interchangeable with [`redact::Detection`](crate::redact::Detection):
+/// that one's `start`/`end` are Unicode *character* offsets into a page's text
+/// for the text-layer rewrite, whereas these are UTF-16 code-unit offsets into a
+/// rendered [`PageObservation`]'s text. The two constructors look identical but
+/// carry different offset units — pass the offsets that belong to this raster
+/// path, not character offsets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Detection {
     /// 1-based page number the span is on.
@@ -30,7 +38,8 @@ pub struct Detection {
 }
 
 impl Detection {
-    /// A detection of `[start, end)` on `page`.
+    /// A detection of `[start, end)` on `page`, where `start`/`end` are UTF-16
+    /// code-unit offsets into the rendered page's text.
     pub fn new(page: u32, start: u32, end: u32) -> Self {
         Self { page, start, end }
     }

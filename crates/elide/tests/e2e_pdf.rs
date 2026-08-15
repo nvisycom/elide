@@ -39,6 +39,17 @@ const FIXTURE: Fixture = Fixture {
     extension: "pdf",
 };
 
+/// The six PII values the `sample.pdf` fixture carries, none of which may
+/// survive redaction.
+const PII: [&str; 6] = [
+    "alice.johnson@example.com",
+    "555-0142",
+    "4111 1111 1111 1111",
+    "GB29 NWBK 6016 1331 9268 19",
+    "123-45-6789",
+    "192.168.1.42",
+];
+
 #[tokio::test]
 async fn born_digital_pdf_detects_and_redacts() -> Result<()> {
     let outcome = FIXTURE.run().await?;
@@ -62,17 +73,16 @@ async fn born_digital_pdf_detects_and_redacts() -> Result<()> {
     // the guarantee asserted here is that the originals are gone — not that a
     // replacement token was inserted.
     let redacted = extracted_text(&outcome.redacted).await?;
-    assert_pii_removed(
-        &redacted,
-        &[
-            "alice.johnson@example.com",
-            "555-0142",
-            "4111 1111 1111 1111",
-            "GB29 NWBK 6016 1331 9268 19",
-            "123-45-6789",
-            "192.168.1.42",
-        ],
-    );
+    assert_pii_removed(&redacted, &PII);
+
+    // Also assert the PII is absent from the raw output bytes. On the glyph
+    // path the content stream is FlateDecode-compressed, so this is a weaker
+    // check than the decoded one above — but it catches any PII that survives
+    // uncompressed (annotations, metadata, an unfiltered stream).
+    let raw = String::from_utf8_lossy(&outcome.redacted);
+    for pii in PII {
+        assert!(!raw.contains(pii), "PII survived in raw output: {pii}");
+    }
 
     // The applied report carries the post-redaction audit.
     assert!(

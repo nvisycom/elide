@@ -14,6 +14,13 @@ use crate::block::{Embedding, Extraction, Issue, PartReplacement, Replacement};
 use crate::error::{Error, Result};
 use crate::part::{PartKind, PartPath};
 
+/// The largest a single package part may be. A zip entry may claim any
+/// uncompressed size, so extraction is capped and the read is bounded to this
+/// many bytes to refuse allocation-DoS and zip-bomb parts. 512 MiB comfortably
+/// exceeds any legitimate WordprocessingML part while staying far below memory
+/// a decompressed bomb would demand.
+const MAX_PART_BYTES: u64 = 512 * 1024 * 1024;
+
 /// An opened DOCX package: every part read once and classified, ready to
 /// [`extract`](Docx::extract) the text of every text-bearing part or
 /// [`rewrite`](Docx::rewrite) them back to bytes.
@@ -42,15 +49,24 @@ impl Docx {
         let mut parts = Vec::with_capacity(zip.len());
         let mut has_body = false;
         for i in 0..zip.len() {
-            let mut entry = zip
+            let entry = zip
                 .by_index(i)
                 .map_err(|e| Error::invalid_archive(format!("bad zip entry: {e}")))?;
             let path = PartPath::from(entry.name());
             has_body |= path.kind() == PartKind::Body;
-            let mut buf = Vec::with_capacity(entry.size() as usize);
-            entry
+            // Reserve only up to the cap (the entry's claimed size may lie), and
+            // bound the read so a zip bomb cannot inflate past it.
+            let claimed = entry.size().min(MAX_PART_BYTES);
+            let mut buf = Vec::with_capacity(claimed as usize);
+            let read = entry
+                .take(MAX_PART_BYTES + 1)
                 .read_to_end(&mut buf)
                 .map_err(|e| Error::invalid_archive(format!("part `{path}` unreadable: {e}")))?;
+            if read as u64 > MAX_PART_BYTES {
+                return Err(Error::invalid_archive(format!(
+                    "part `{path}` exceeds {MAX_PART_BYTES}-byte limit"
+                )));
+            }
             parts.push(StoredPart::new(path, Bytes::from(buf)));
         }
 
@@ -136,11 +152,15 @@ impl Docx {
         replacements: &[Replacement],
         parts: &[PartReplacement],
     ) -> Result<Vec<u8>> {
+        // Index every stored part once for O(1) lookup during validation.
+        let index: HashMap<&PartPath, &StoredPart> =
+            self.parts.iter().map(|p| (p.path(), p)).collect();
+
         // Group text replacements by part, validating each names an existing
         // text-bearing part.
         let mut by_part: HashMap<&PartPath, Vec<&Replacement>> = HashMap::new();
         for r in replacements {
-            let Some(part) = self.part(&r.part) else {
+            let Some(part) = index.get(&r.part) else {
                 return Err(Error::unsafe_rewrite(format!(
                     "replacement names unknown part `{}`",
                     r.part
@@ -155,12 +175,25 @@ impl Docx {
             by_part.entry(&r.part).or_default().push(r);
         }
 
-        // Index binary part replacements, validating each names an existing part.
+        // Index binary part replacements, validating each names an existing part
+        // that is neither structural nor already targeted by a text splice.
         let mut part_bytes: HashMap<&PartPath, &[u8]> = HashMap::new();
         for pr in parts {
-            if self.part(&pr.part).is_none() {
+            if !index.contains_key(&pr.part) {
                 return Err(Error::unsafe_rewrite(format!(
                     "part replacement names unknown part `{}`",
+                    pr.part
+                )));
+            }
+            if pr.part.is_protected() {
+                return Err(Error::unsafe_rewrite(format!(
+                    "part replacement targets protected structural part `{}`",
+                    pr.part
+                )));
+            }
+            if by_part.contains_key(&pr.part) {
+                return Err(Error::unsafe_rewrite(format!(
+                    "part `{}` has both a text splice and a binary replacement",
                     pr.part
                 )));
             }
@@ -188,10 +221,5 @@ impl Docx {
             .finish()
             .map_err(|e| Error::invalid_package(format!("repack failed: {e}")))?;
         Ok(cursor.into_inner())
-    }
-
-    /// The stored part at `path`, if present.
-    fn part(&self, path: &PartPath) -> Option<&StoredPart> {
-        self.parts.iter().find(|p| p.path() == path)
     }
 }

@@ -73,6 +73,10 @@ impl Loader<Text> for PdfLoader {
 
 /// Assemble [`PdfPage`]s from `(page number, text)` pairs, assigning each its
 /// start offset in the concatenated text stream.
+///
+/// Pages are separated by [`PAGE_SEPARATOR`] in the stream coordinate space: the
+/// cumulative offset advances by each page's length *plus* the separator width,
+/// so no detected span can straddle two pages (which encode would then drop).
 fn pages_from_texts(texts: impl IntoIterator<Item = (u32, String)>) -> Vec<PdfPage> {
     let mut pages = Vec::new();
     let mut offset = 0usize;
@@ -83,10 +87,14 @@ fn pages_from_texts(texts: impl IntoIterator<Item = (u32, String)>) -> Vec<PdfPa
             text,
             start: offset,
         });
-        offset += len;
+        offset += len + PAGE_SEPARATOR.len();
     }
     pages
 }
+
+/// The gap inserted between consecutive pages in the concatenated stream so a
+/// detection cannot span a page boundary.
+const PAGE_SEPARATOR: &str = "\n";
 
 /// Observe every page for raster redaction: render it to pixels and extract its
 /// text-layer glyph geometry, so the page text and glyph boxes share one

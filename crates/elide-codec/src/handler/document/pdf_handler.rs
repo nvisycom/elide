@@ -286,7 +286,9 @@ impl DataReader<Text> for PdfHandler {
         let Some((page, local)) = self.page_at(location.start) else {
             return Ok(None);
         };
-        let local_end = location.end - page.start;
+        let Some(local_end) = location.end.checked_sub(page.start) else {
+            return Ok(None);
+        };
         Ok(page.text.get(local..local_end).map(TextData::new))
     }
 }
@@ -302,12 +304,13 @@ impl DataWriter<Text> for PdfHandler {
             // counts a mode needs are computed.
             let Some((page_idx, local, local_end)) =
                 self.pages.iter().enumerate().find_map(|(idx, page)| {
-                    (location.start >= page.start && location.start < page.start + page.text.len())
-                        .then(|| {
-                            let local = location.start - page.start;
-                            let local_end = location.end - page.start;
-                            (idx, local, local_end)
-                        })
+                    if location.start < page.start || location.start >= page.start + page.text.len()
+                    {
+                        return None;
+                    }
+                    let local = location.start - page.start;
+                    let local_end = location.end.checked_sub(page.start)?;
+                    Some((idx, local, local_end))
                 })
             else {
                 continue;
@@ -378,6 +381,15 @@ impl Container for PdfHandler {
     }
 
     fn replace_part(&mut self, id: &PartId, bytes: Bytes) -> Result<()> {
+        // In raster mode the output is a flattened image-only PDF, so no
+        // per-image replacement is surfaced or applied — reject fail-closed
+        // before accepting any bytes.
+        if self.mode.is_raster() {
+            return Err(Error::new(
+                ErrorKind::MalformedInput,
+                format!("pdf replace_part: `{id}` is not accepted in raster mode"),
+            ));
+        }
         #[cfg(feature = "internal_image")]
         {
             // Accept only ids naming an image the container surfaced, validated
@@ -580,6 +592,33 @@ mod tests {
             .replace_part(
                 &PartId::from("img-9999-0".to_string()),
                 Bytes::from(black_png()),
+            )
+            .unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+    }
+}
+
+#[cfg(all(test, feature = "pdf-render"))]
+mod raster_tests {
+    use bytes::Bytes;
+    use elide_core::ErrorKind;
+
+    use super::{PdfHandler, PdfPage};
+    use crate::codec::{Container, PartId};
+
+    /// A raster handler built from empty observations (no PDFium needed):
+    /// `parts()` surfaces nothing and `replace_part` rejects any id, since the
+    /// raster path flattens every page and never accepts a per-image replacement.
+    #[test]
+    fn raster_surfaces_no_parts_and_rejects_replacement() {
+        let mut handler = PdfHandler::raster(Bytes::new(), Vec::<PdfPage>::new(), Vec::new());
+
+        assert!(handler.parts().is_empty());
+
+        let err = handler
+            .replace_part(
+                &PartId::from("img-1-0".to_string()),
+                Bytes::from_static(b"x"),
             )
             .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::MalformedInput);

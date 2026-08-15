@@ -34,6 +34,14 @@ impl PartPath {
     pub fn kind(&self) -> PartKind {
         PartKind::of(self.as_str())
     }
+
+    /// Whether this is a structural part a binary
+    /// [`PartReplacement`](crate::block::PartReplacement) must never overwrite:
+    /// the document body or the content-types manifest. Clobbering either would
+    /// corrupt the package rather than redact it.
+    pub fn is_protected(&self) -> bool {
+        self.kind() == PartKind::Body || self.as_str() == "[Content_Types].xml"
+    }
 }
 
 impl fmt::Display for PartPath {

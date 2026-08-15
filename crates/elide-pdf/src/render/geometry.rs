@@ -58,10 +58,21 @@ impl PixelRect {
     ) -> Self {
         // Y-flip: a point's distance from the page *bottom* becomes a pixel's
         // distance from the image *top*.
-        let px = (left * scale_x).max(0.0).floor();
-        let py = ((page_height - top) * scale_y).max(0.0).floor();
-        let pw = ((right - left).max(0.0) * scale_x).ceil();
-        let ph = ((top - bottom).max(0.0) * scale_y).ceil();
+        //
+        // Compute each scaled edge, then floor the origin and ceil the far edge
+        // independently: the size is the ceiled far edge minus the floored
+        // origin, so a box straddling pixel boundaries covers every pixel it
+        // touches (e.g. x 10.5..11.4 covers pixels 10 and 11), not just the
+        // ones a single ceiled width would span.
+        let left_px = (left * scale_x).max(0.0);
+        let right_px = (right * scale_x).max(0.0).max(left_px);
+        let top_px = ((page_height - top) * scale_y).max(0.0);
+        let bottom_px = ((page_height - bottom) * scale_y).max(0.0).max(top_px);
+
+        let px = left_px.floor();
+        let py = top_px.floor();
+        let pw = right_px.ceil() - px;
+        let ph = bottom_px.ceil() - py;
         Self::new(px as u32, py as u32, pw as u32, ph as u32)
     }
 }
@@ -143,6 +154,17 @@ mod tests {
         let r = PixelRect::from_points(10.4, 0.0, 20.6, 5.5, 100.0, 1.0, 1.0);
         assert_eq!(r.x, 10); // floor(10.4)
         assert!(r.x as f32 + r.width as f32 >= 20.6, "right edge covered");
+    }
+
+    #[test]
+    fn from_points_covers_both_straddled_pixels() {
+        // A box from x 10.5 to 11.4 touches pixel 10 and pixel 11. Deriving the
+        // width from the ceiled far edge minus the floored origin covers both,
+        // where a single ceiled width (ceil(0.9) = 1) would cover only pixel 10.
+        let r = PixelRect::from_points(10.5, 0.0, 11.4, 1.0, 100.0, 1.0, 1.0);
+        assert_eq!(r.x, 10, "origin floors to pixel 10");
+        assert_eq!(r.width, 2, "covers pixels 10 and 11");
+        assert!(r.x + r.width >= 12, "right edge past pixel 11");
     }
 
     #[test]

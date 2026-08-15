@@ -13,6 +13,18 @@ use pdfium_render::prelude::*;
 use super::{Glyph, GlyphSource, PageObservation, PixelRect, RenderedPage};
 use crate::error::{Error, Result};
 
+/// Maximum number of pages [`observe_all`](Binding::observe_all) will render.
+/// Each page retains a full RGB8 buffer, so an unbounded page count is a memory
+/// DoS vector; 10,000 matches the inspection page bound and covers any real
+/// document.
+const MAX_PAGES: usize = 10_000;
+
+/// Maximum rendered width or height, in pixels, of any single page. A page
+/// buffer is `width * height * 3` bytes, so this caps one page near 3 GiB at the
+/// extreme (100k x 100k) — well beyond any legitimate render, while refusing a
+/// malicious page that demands unbounded memory.
+const MAX_PAGE_DIMENSION_PX: u32 = 100_000;
+
 /// Dedicated single-thread pool for PDFium operations.
 static PDF_POOL: LazyLock<rayon::ThreadPool> = LazyLock::new(|| {
     rayon::ThreadPoolBuilder::new()
@@ -107,6 +119,13 @@ impl Binding {
             .map_err(|e| Error::invalid_document(format!("failed to load PDF: {e}")))?;
         let config = PdfRenderConfig::new().scale_page_by_factor(scale);
 
+        let page_count = document.pages().len() as usize;
+        if page_count > MAX_PAGES {
+            return Err(Error::invalid_document(format!(
+                "document has {page_count} pages, over the {MAX_PAGES}-page render limit"
+            )));
+        }
+
         let mut observations = Vec::new();
         for (index, page) in document.pages().iter().enumerate() {
             let bitmap = page
@@ -119,6 +138,13 @@ impl Binding {
                 })?
                 .into_rgb8();
             let (width, height) = image.dimensions();
+            if width > MAX_PAGE_DIMENSION_PX || height > MAX_PAGE_DIMENSION_PX {
+                return Err(Error::invalid_document(format!(
+                    "page {} renders to {width}x{height} px, over the \
+                     {MAX_PAGE_DIMENSION_PX}px per-side render limit",
+                    index + 1
+                )));
+            }
             let pixels = image.into_raw();
 
             // Point→pixel scale per axis, from the actual rendered dimensions

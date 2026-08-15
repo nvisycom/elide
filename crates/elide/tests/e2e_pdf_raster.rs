@@ -72,7 +72,14 @@ async fn raster_redaction_emits_a_sanitised_image_pdf() -> Result<()> {
 
     // And specifically none of the fixture's PII appears as bytes anywhere.
     let raw = String::from_utf8_lossy(&outcome.redacted);
-    for pii in ["alice.johnson@example.com", "123-45-6789", "192.168.1.42"] {
+    for pii in [
+        "alice.johnson@example.com",
+        "555-0142",
+        "4111 1111 1111 1111",
+        "GB29 NWBK 6016 1331 9268 19",
+        "123-45-6789",
+        "192.168.1.42",
+    ] {
         assert!(!raw.contains(pii), "PII survived in output: {pii}");
     }
     Ok(())

@@ -19,6 +19,7 @@ use std::ops::Range;
 use bytes::Bytes;
 use elide_core::modality::text::Text;
 use elide_core::{Error, ErrorKind, Result};
+use elide_docx::block::Embedding;
 use elide_docx::part::PartPath;
 
 use super::DocxLoader;
@@ -61,9 +62,14 @@ pub fn format() -> Format {
 #[derive(Debug)]
 pub(crate) struct DocxEncoder {
     /// The original package bytes, retained so [`elide_docx`] can re-pack every
-    /// unredacted part unchanged, and so the [`Container`] surface can list the
-    /// embedded media.
+    /// unredacted part unchanged.
     pub(super) archive: Bytes,
+    /// The binary embeddings surfaced for redaction, cached at decode so the
+    /// [`Container`] surface lists them and [`replace_part`](Container::replace_part)
+    /// validates ids without re-extracting the archive.
+    ///
+    /// [`Container`]: crate::codec::Container
+    pub(super) embeddings: Vec<Embedding>,
     /// Redacted replacements for media parts, keyed by zip entry name, filled
     /// through the [`Container`] surface.
     ///
@@ -110,13 +116,9 @@ impl Container for DocxEncoder {
     fn parts(&self) -> Vec<Part> {
         // Surface every binary embedding the engine classifies — images
         // (`word/media/`), embedded objects (`word/embeddings/`), and fonts
-        // (`word/fonts/`) — rather than re-scanning the zip for one prefix.
-        let Ok(docx) = elide_docx::Docx::open(&self.archive) else {
-            return Vec::new();
-        };
-        docx.extract()
-            .embeddings
-            .into_iter()
+        // (`word/fonts/`) — from the set cached at decode.
+        self.embeddings
+            .iter()
             .map(|embedding| {
                 let name = embedding.part.as_str().to_owned();
                 let hint = name
@@ -125,7 +127,7 @@ impl Container for DocxEncoder {
                     .unwrap_or_default();
                 Part {
                     id: name.into(),
-                    bytes: embedding.bytes,
+                    bytes: embedding.bytes.clone(),
                     hint,
                 }
             })
@@ -133,9 +135,8 @@ impl Container for DocxEncoder {
     }
 
     fn replace_part(&mut self, id: &PartId, bytes: Bytes) -> Result<()> {
-        // Accept any part the engine surfaces as a binary embedding; reject
-        // anything else so a caller can't smuggle bytes into a text/structure
-        // part through this surface.
+        // Reject anything that isn't a binary embedding so a caller can't
+        // smuggle bytes into a text/structure part through this surface.
         let is_embedding = PartPath::new(id.as_str().to_owned())
             .kind()
             .embedding()
@@ -144,6 +145,19 @@ impl Container for DocxEncoder {
             return Err(Error::new(
                 ErrorKind::MalformedInput,
                 format!("docx replace_part: `{id}` is not an embedded media part"),
+            ));
+        }
+        // And reject ids that name no embedding the document actually carries,
+        // validated against the set cached at decode — an unknown id must not
+        // be silently stored and dropped on rewrite.
+        let is_known = self
+            .embeddings
+            .iter()
+            .any(|embedding| embedding.part.as_str() == id.as_str());
+        if !is_known {
+            return Err(Error::new(
+                ErrorKind::MalformedInput,
+                format!("docx replace_part: `{id}` is not a known embedded media part"),
             ));
         }
         self.replacements.insert(id.as_str().to_owned(), bytes);

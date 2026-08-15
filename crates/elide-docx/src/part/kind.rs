@@ -5,9 +5,11 @@ use serde::{Deserialize, Serialize};
 
 /// What a package part is, which determines how it is handled.
 ///
-/// The text-bearing WordprocessingML parts ([`Body`](PartKind::Body),
-/// [`Header`](PartKind::Header), …) share the `w:t` run text model and are
-/// extracted and redacted the same way. [`Embedding`](PartKind::Embedding)
+/// The text-bearing parts ([`Body`](PartKind::Body),
+/// [`Header`](PartKind::Header), …) are extracted and redacted the same way: the
+/// WordprocessingML stories via the `w:t` run text model, and
+/// [`Chart`](PartKind::Chart) / [`Diagram`](PartKind::Diagram) via the
+/// user-visible text of their own schemas. [`Embedding`](PartKind::Embedding)
 /// parts are binary (images, embedded objects) and are surfaced for redaction
 /// as bytes. Everything else is structure or metadata carried through
 /// unchanged.
@@ -31,8 +33,13 @@ pub enum PartKind {
     Endnotes,
     /// Comment text (`word/comments.xml`).
     Comments,
-    /// A glossary / building-block document (`word/glossary/document.xml`).
+    /// A glossary / building-block document and its headers and footers
+    /// (`word/glossary/document.xml`, `word/glossary/header{n}.xml`, …).
     Glossary,
+    /// Chart text: axis titles, data labels, captions (`word/charts/chart{n}.xml`).
+    Chart,
+    /// SmartArt / diagram text (`word/diagrams/data{n}.xml`).
+    Diagram,
     /// A binary embedding (image, embedded object, font).
     Embedding(EmbeddingKind),
     /// Document metadata (`docProps/*`).
@@ -49,7 +56,11 @@ impl PartKind {
         if path == "word/document.xml" {
             return Self::Body;
         }
-        if path == "word/glossary/document.xml" {
+        // Glossary story parts: the document and its own headers and footers.
+        if path == "word/glossary/document.xml"
+            || Self::is_numbered(path, "word/glossary/header", ".xml")
+            || Self::is_numbered(path, "word/glossary/footer", ".xml")
+        {
             return Self::Glossary;
         }
         if Self::is_numbered(path, "word/header", ".xml") {
@@ -67,6 +78,14 @@ impl PartKind {
         if path == "word/comments.xml" {
             return Self::Comments;
         }
+        // Chart and diagram parts carry user-visible text under their own
+        // schemas; the extractor reads their text/comment/CDATA events too.
+        if Self::is_numbered(path, "word/charts/chart", ".xml") {
+            return Self::Chart;
+        }
+        if Self::is_numbered(path, "word/diagrams/data", ".xml") {
+            return Self::Diagram;
+        }
         // Binary embeddings.
         if let Some(kind) = EmbeddingKind::of(path) {
             return Self::Embedding(kind);
@@ -78,8 +97,8 @@ impl PartKind {
         Self::Other
     }
 
-    /// Whether this part carries redactable `w:t` run text (body, header,
-    /// footer, notes, comments, glossary).
+    /// Whether this part carries redactable text (body, header, footer, notes,
+    /// comments, glossary, and the text of charts and diagrams).
     pub fn is_text(self) -> bool {
         matches!(
             self,
@@ -90,6 +109,8 @@ impl PartKind {
                 | Self::Endnotes
                 | Self::Comments
                 | Self::Glossary
+                | Self::Chart
+                | Self::Diagram
         )
     }
 

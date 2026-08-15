@@ -43,8 +43,10 @@ impl Pdf {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::InvalidDocument`](crate::ErrorKind::InvalidDocument) if the
-    /// bytes are not a readable PDF.
+    /// - [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if the
+    ///   input exceeds [`MAX_DOCUMENT_BYTES`](Pdf::MAX_DOCUMENT_BYTES);
+    /// - [`ErrorKind::InvalidDocument`](crate::ErrorKind::InvalidDocument) if the
+    ///   bytes are not a readable PDF.
     pub fn open(document: &[u8]) -> Result<Self> {
         Self::open_with_limit(document, Self::DEFAULT_MAX_PAGE_BYTES)
     }
@@ -53,8 +55,10 @@ impl Pdf {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::InvalidDocument`](crate::ErrorKind::InvalidDocument) if the
-    /// bytes are not a readable PDF.
+    /// - [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if the
+    ///   input exceeds [`MAX_DOCUMENT_BYTES`](Pdf::MAX_DOCUMENT_BYTES);
+    /// - [`ErrorKind::InvalidDocument`](crate::ErrorKind::InvalidDocument) if the
+    ///   bytes are not a readable PDF.
     pub fn open_with_limit(document: &[u8], max_page_bytes: NonZeroUsize) -> Result<Self> {
         if document.len() > Self::MAX_DOCUMENT_BYTES {
             return Err(Error::limit_exceeded(format!(
@@ -123,12 +127,20 @@ impl Pdf {
                     if !seen_images.insert(id) {
                         continue;
                     }
+                    // Dimensions that are negative or exceed `u32::MAX` are not
+                    // a real raster to redact; skip the image rather than coerce
+                    // a bogus zero/truncated size into the extraction.
+                    let (Ok(width), Ok(height)) =
+                        (u32::try_from(image.width), u32::try_from(image.height))
+                    else {
+                        continue;
+                    };
                     embeddings.push(Embedding {
                         id,
                         page,
                         kind: EmbeddingKind::from_filters(image.filters.as_deref()),
-                        width: image.width.max(0) as u32,
-                        height: image.height.max(0) as u32,
+                        width,
+                        height,
                         bytes: Bytes::copy_from_slice(image.content),
                     });
                 }

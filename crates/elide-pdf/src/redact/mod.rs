@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 use lopdf::content::Content;
 use lopdf::{Encoding, Object};
 
-use self::glyphs::{Glyph, decode_glyphs};
+use self::glyphs::decode_glyphs;
 #[cfg(feature = "image")]
 pub use self::images::ImageReplacement;
 use crate::Pdf;
@@ -59,25 +59,120 @@ struct PageText {
     per_char: Vec<Option<GlyphRef>>,
 }
 
-/// Address of a string that draws text: `(operation index, operand index,
-/// item index within a `TJ` array or `None` for a `Tj` string)`.
-type StringAddr = (usize, usize, Option<usize>);
-
-/// Glyph byte ranges to delete, grouped by the string they live in.
-type Deletions = BTreeMap<StringAddr, Vec<(usize, usize)>>;
-
-/// Where a character's glyph lives: which content operation, which operand,
-/// which string *within* that operand (for a `TJ` array), and the glyph's byte
-/// range within that string.
-#[derive(Debug, Clone, Copy)]
-struct GlyphRef {
+/// Address of the string that draws text: which content operation, which
+/// operand, and which string *within* that operand (for a `TJ` array, or `None`
+/// for a plain `Tj` string).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct GlyphSite {
     op: usize,
     operand: usize,
     /// Index of the string within a `TJ` array operand, or `None` for a plain
     /// `Tj` string operand.
     item: Option<usize>,
+}
+
+/// Glyph byte ranges to delete, grouped by the string they live in.
+type Deletions = BTreeMap<GlyphSite, Vec<(usize, usize)>>;
+
+/// Where a character's glyph lives: the string that drew it and the glyph's byte
+/// range within that string.
+#[derive(Debug, Clone, Copy)]
+struct GlyphRef {
+    site: GlyphSite,
     byte_start: usize,
     byte_end: usize,
+}
+
+/// A page's text under construction, char for char aligned with the per-char
+/// glyph map: [`push_char`](TextRun::push_char) appends a decoded character with
+/// its originating glyph, [`push_gap`](TextRun::push_gap) a synthetic space with
+/// no glyph.
+struct TextRun<'a> {
+    text: &'a mut String,
+    per_char: &'a mut Vec<Option<GlyphRef>>,
+}
+
+impl TextRun<'_> {
+    /// Append a decoded character tagged with the glyph that drew it.
+    fn push_char(&mut self, ch: char, glyph: GlyphRef) {
+        self.text.push(ch);
+        self.per_char.push(Some(glyph));
+    }
+
+    /// Append a synthetic space (a word gap or `TJ`-array trailing space) that
+    /// no glyph drew.
+    fn push_gap(&mut self) {
+        self.text.push(' ');
+        self.per_char.push(None);
+    }
+
+    /// Append the text a `Tj`/`TJ` operand list draws, recording each character's
+    /// originating glyph. Mirrors lopdf's `collect_text`: a `TJ` array's strings
+    /// are decoded in order, and a large-negative kerning number inserts a space
+    /// (with no glyph).
+    fn show_text(&mut self, enc: &Encoding, operands: &[Object], op: usize) -> Result<()> {
+        for (operand, value) in operands.iter().enumerate() {
+            match value {
+                Object::String(bytes, _) => {
+                    let site = GlyphSite {
+                        op,
+                        operand,
+                        item: None,
+                    };
+                    self.push_glyphs(enc, bytes, site)?;
+                }
+                Object::Array(arr) => {
+                    // A `TJ` array interleaves strings with kerning adjustments (in
+                    // thousandths of an em, negated). A large-negative adjustment is
+                    // a word gap and reads as a space. The exact threshold is not
+                    // font-metric-precise, but it deliberately mirrors lopdf's own
+                    // text extraction so the page text `page_texts` returns — the
+                    // string a caller runs detection over — matches character for
+                    // character; the `per_char` glyph map is built in the same pass
+                    // with the same rule, so a detected span stays aligned with the
+                    // glyphs that drew it. The array is then followed by a trailing
+                    // space, also matching lopdf.
+                    const WORD_GAP_KERN: f64 = -100.0;
+                    for (item_idx, item) in arr.iter().enumerate() {
+                        match item {
+                            Object::String(bytes, _) => {
+                                let site = GlyphSite {
+                                    op,
+                                    operand,
+                                    item: Some(item_idx),
+                                };
+                                self.push_glyphs(enc, bytes, site)?;
+                            }
+                            Object::Integer(i) if (*i as f64) < WORD_GAP_KERN => self.push_gap(),
+                            Object::Real(f) if (*f as f64) < WORD_GAP_KERN => self.push_gap(),
+                            _ => {}
+                        }
+                    }
+                    self.push_gap();
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Decode `bytes` into glyphs and append their characters, each tagged with
+    /// the glyph that drew it.
+    fn push_glyphs(&mut self, enc: &Encoding, bytes: &[u8], site: GlyphSite) -> Result<()> {
+        for glyph in decode_glyphs(enc, bytes)? {
+            for ch in glyph.text.chars() {
+                self.push_char(
+                    ch,
+                    GlyphRef {
+                        site,
+                        byte_start: glyph.byte_start,
+                        byte_end: glyph.byte_end,
+                    },
+                );
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Pdf {
@@ -134,7 +229,7 @@ impl Pdf {
                 for ch in d.start..d.end {
                     if let Some(Some(g)) = page.per_char.get(ch) {
                         to_delete
-                            .entry((g.op, g.operand, g.item))
+                            .entry(g.site)
                             .or_default()
                             .push((g.byte_start, g.byte_end));
                     }
@@ -190,28 +285,40 @@ impl Pdf {
 
             let mut text = String::new();
             let mut per_char: Vec<Option<GlyphRef>> = Vec::new();
+            let mut run = TextRun {
+                text: &mut text,
+                per_char: &mut per_char,
+            };
             // The current font's resolved encoding: `None` before any `Tf`, or
-            // `Some(None)` when the selected font could not be decoded.
+            // `Some(None)` when the selected font could not be decoded or names
+            // a font absent from the page's resources.
+            const UNRESOLVED: &Option<Encoding> = &None;
             let mut current: Option<&Option<Encoding>> = None;
 
             for (op_idx, op) in content.operations.iter().enumerate() {
                 match op.operator.as_str() {
                     "Tf" => {
                         if let Some(Object::Name(name)) = op.operands.first() {
-                            current = encodings.get(name);
+                            // A `Tf` naming a font not in the resources is an
+                            // unresolved selection, held as `Some(None)` so the
+                            // next text op fails closed rather than reading as
+                            // "no font selected".
+                            current = Some(encodings.get(name).unwrap_or(UNRESOLVED));
                         }
                     }
                     "Tj" | "TJ" => match current {
                         Some(Some(enc)) => {
-                            show_text(enc, &op.operands, op_idx, &mut text, &mut per_char);
+                            run.show_text(enc, &op.operands, op_idx)?;
                         }
-                        // Text drawn under a font we could not decode: fail
-                        // closed — its glyphs cannot be located for deletion, so
-                        // redacting this document would silently leave them in.
+                        // Text drawn under a font we could not decode or resolve:
+                        // fail closed — its glyphs cannot be located for
+                        // deletion, so redacting this document would silently
+                        // leave them in.
                         Some(None) => {
                             return Err(Error::unsafe_rewrite(format!(
                                 "page {page} draws text with a font whose encoding \
-                                 could not be decoded; its text cannot be redacted"
+                                 could not be decoded or was not found in the page \
+                                 resources; its text cannot be redacted"
                             )));
                         }
                         // No font selected yet (malformed stream): skip.
@@ -232,102 +339,14 @@ impl Pdf {
     }
 }
 
-/// Append the text a `Tj`/`TJ` operand list draws, recording each character's
-/// originating glyph. Mirrors lopdf's `collect_text`: a `TJ` array's strings are
-/// decoded in order, and a large-negative kerning number inserts a space (with
-/// no glyph).
-fn show_text(
-    enc: &Encoding,
-    operands: &[Object],
-    op_idx: usize,
-    text: &mut String,
-    per_char: &mut Vec<Option<GlyphRef>>,
-) {
-    for (operand_idx, operand) in operands.iter().enumerate() {
-        match operand {
-            Object::String(bytes, _) => {
-                push_glyphs(enc, bytes, op_idx, operand_idx, None, text, per_char);
-            }
-            Object::Array(arr) => {
-                // A `TJ` array interleaves strings with kerning adjustments (in
-                // thousandths of an em, negated). A large-negative adjustment is
-                // a word gap and reads as a space. The exact threshold is not
-                // font-metric-precise, but it deliberately mirrors lopdf's own
-                // text extraction so the page text `page_texts` returns — the
-                // string a caller runs detection over — matches character for
-                // character; the `per_char` glyph map is built in the same pass
-                // with the same rule, so a detected span stays aligned with the
-                // glyphs that drew it. The array is then followed by a trailing
-                // space, also matching lopdf.
-                const WORD_GAP_KERN: f64 = -100.0;
-                for (item_idx, item) in arr.iter().enumerate() {
-                    match item {
-                        Object::String(bytes, _) => push_glyphs(
-                            enc,
-                            bytes,
-                            op_idx,
-                            operand_idx,
-                            Some(item_idx),
-                            text,
-                            per_char,
-                        ),
-                        Object::Integer(i) if (*i as f64) < WORD_GAP_KERN => {
-                            text.push(' ');
-                            per_char.push(None);
-                        }
-                        Object::Real(f) if (*f as f64) < WORD_GAP_KERN => {
-                            text.push(' ');
-                            per_char.push(None);
-                        }
-                        _ => {}
-                    }
-                }
-                text.push(' ');
-                per_char.push(None);
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Decode `bytes` into glyphs and append their characters, each tagged with the
-/// glyph that drew it.
-fn push_glyphs(
-    enc: &Encoding,
-    bytes: &[u8],
-    op: usize,
-    operand: usize,
-    item: Option<usize>,
-    text: &mut String,
-    per_char: &mut Vec<Option<GlyphRef>>,
-) {
-    for glyph in decode_glyphs(enc, bytes) {
-        let Glyph {
-            byte_start,
-            byte_end,
-            text: gt,
-        } = glyph;
-        for ch in gt.chars() {
-            text.push(ch);
-            per_char.push(Some(GlyphRef {
-                op,
-                operand,
-                item,
-                byte_start,
-                byte_end,
-            }));
-        }
-    }
-}
-
 /// Remove the marked glyph byte ranges from each exact string, high-to-low so
 /// earlier offsets stay valid.
 fn apply_deletions(content: &mut Content, to_delete: &Deletions) {
-    for (&(op_idx, operand_idx, item), ranges) in to_delete {
-        let Some(op) = content.operations.get_mut(op_idx) else {
+    for (&GlyphSite { op, operand, item }, ranges) in to_delete {
+        let Some(op) = content.operations.get_mut(op) else {
             continue;
         };
-        let target: Option<&mut Vec<u8>> = match (op.operands.get_mut(operand_idx), item) {
+        let target: Option<&mut Vec<u8>> = match (op.operands.get_mut(operand), item) {
             (Some(Object::String(bytes, _)), None) => Some(bytes),
             (Some(Object::Array(arr)), Some(k)) => match arr.get_mut(k) {
                 Some(Object::String(bytes, _)) => Some(bytes),
@@ -336,9 +355,23 @@ fn apply_deletions(content: &mut Content, to_delete: &Deletions) {
             _ => None,
         };
         if let Some(bytes) = target {
-            let mut sorted: Vec<(usize, usize)> = ranges.clone();
-            sorted.sort_unstable_by_key(|&(start, _)| std::cmp::Reverse(start));
-            for (s, e) in sorted {
+            // The same glyph range can be collected more than once (a ligature
+            // whose one code spans several detected characters, or overlapping
+            // detections). Merge overlapping/adjacent ranges so each byte span
+            // is drained exactly once — draining a span twice would corrupt the
+            // string by consuming later, still-valid bytes.
+            let mut merged: Vec<(usize, usize)> = ranges.clone();
+            merged.sort_unstable();
+            merged.dedup();
+            let mut coalesced: Vec<(usize, usize)> = Vec::with_capacity(merged.len());
+            for (s, e) in merged {
+                match coalesced.last_mut() {
+                    Some(last) if s <= last.1 => last.1 = last.1.max(e),
+                    _ => coalesced.push((s, e)),
+                }
+            }
+            // Drain high-to-low so earlier offsets stay valid.
+            for &(s, e) in coalesced.iter().rev() {
                 if e <= bytes.len() && s < e {
                     bytes.drain(s..e);
                 }

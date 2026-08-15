@@ -44,6 +44,23 @@ fn digest_hex(bytes: &[u8]) -> String {
 /// new Catalog and page tree — so no source object, metadata, or prior revision
 /// survives.
 pub(super) fn emit(source: &[u8], pages: Vec<PageObservation>) -> Result<(Vec<u8>, Certificate)> {
+    // A document with no pages, or a page with a zero dimension, yields a
+    // degenerate PDF (empty page tree, or a zero-area MediaBox / image XObject).
+    // Refuse both before building anything.
+    if pages.is_empty() {
+        return Err(Error::invalid_document(
+            "cannot emit a PDF with no pages".to_string(),
+        ));
+    }
+    for page in &pages {
+        if page.width == 0 || page.height == 0 {
+            return Err(Error::invalid_document(format!(
+                "page {} has a zero dimension ({}x{})",
+                page.page, page.width, page.height
+            )));
+        }
+    }
+
     let mut doc = lopdf::Document::with_version("1.7");
     let pages_id = doc.new_object_id();
 

@@ -220,31 +220,34 @@ fn xfa_entry_count(xfa: Option<&Object>) -> u32 {
 /// that extra marker is not counted as a superseded revision.
 fn retained_bytes(source: &[u8]) -> (u32, u64) {
     const EOF: &[u8] = b"%%EOF";
-    let mut positions = Vec::new();
+    // Only the marker count and the last marker's position are needed, so track
+    // those directly rather than retaining every position.
+    let mut markers = 0usize;
+    let mut last_marker = 0usize;
     let mut i = 0;
     while i + EOF.len() <= source.len() {
         if &source[i..i + EOF.len()] == EOF {
-            positions.push(i);
+            markers += 1;
+            last_marker = i;
             i += EOF.len();
         } else {
             i += 1;
         }
     }
-    if positions.is_empty() {
+    if markers == 0 {
         return (0, 0);
     }
 
     // `%%EOF` markers beyond the first mark appended revisions — but a
     // linearized file's first-page section adds one `%%EOF` that is part of the
     // same (single) revision, so discount it.
-    let markers = positions.len();
     let linearization_markers = usize::from(is_linearized(source));
     let revisions = markers
         .saturating_sub(1)
         .saturating_sub(linearization_markers)
         .min(u32::MAX as usize) as u32;
 
-    let last = positions[markers - 1] + EOF.len();
+    let last = last_marker + EOF.len();
     let trailing = source[last..]
         .iter()
         .filter(|b| !b.is_ascii_whitespace())

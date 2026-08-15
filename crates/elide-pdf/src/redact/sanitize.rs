@@ -54,13 +54,9 @@ pub(super) fn sanitize(doc: &mut Document) {
     doc.trailer.remove(b"Info");
 
     // Metadata stream (`/Metadata` in the catalog).
-    let meta_id = doc
-        .catalog()
-        .and_then(|c| c.get(b"Metadata"))
-        .and_then(Object::as_reference)
-        .ok();
-    if let Some(meta_id) = meta_id {
-        collect_owned(doc, meta_id, &mut doomed);
+    let meta = doc.catalog().and_then(|c| c.get(b"Metadata")).ok().cloned();
+    if let Some(meta) = meta {
+        collect_entry(doc, &meta, &mut doomed);
     }
     if let Ok(catalog) = doc.catalog_mut() {
         catalog.remove(b"Metadata");
@@ -77,13 +73,9 @@ pub(super) fn sanitize(doc: &mut Document) {
         b"OpenAction",
         b"AA",
     ] {
-        let owned = doc
-            .catalog()
-            .and_then(|c| c.get(key))
-            .and_then(Object::as_reference)
-            .ok();
-        if let Some(id) = owned {
-            collect_owned(doc, id, &mut doomed);
+        let entry = doc.catalog().and_then(|c| c.get(key)).ok().cloned();
+        if let Some(entry) = entry {
+            collect_entry(doc, &entry, &mut doomed);
         }
         if let Ok(catalog) = doc.catalog_mut() {
             catalog.remove(key);
@@ -105,7 +97,10 @@ pub(super) fn sanitize(doc: &mut Document) {
 /// The doomed ids that are still referenced by an object *not* in `doomed`
 /// (nor the trailer, already cleared of the stripped keys). Such an object is
 /// shared with surviving content and must be kept.
-fn referenced_from_survivors(doc: &Document, doomed: &BTreeSet<ObjectId>) -> BTreeSet<ObjectId> {
+pub(super) fn referenced_from_survivors(
+    doc: &Document,
+    doomed: &BTreeSet<ObjectId>,
+) -> BTreeSet<ObjectId> {
     let mut kept = BTreeSet::new();
     for (id, object) in &doc.objects {
         if doomed.contains(id) {
@@ -153,21 +148,42 @@ fn resolve_array(doc: &Document, object: &Object) -> Option<Vec<ObjectId>> {
     Some(array.iter().filter_map(|o| o.as_reference().ok()).collect())
 }
 
+/// Mark a catalog entry's owned subtree for deletion. An indirect reference
+/// dooms the referenced object and everything under it; an inline *dictionary*
+/// is removed with its catalog key, so only the objects it references are doomed
+/// (recursively).
+///
+/// An inline array is deliberately *not* treated as an owned subtree: a
+/// destination array such as `/OpenAction [page /FitH]` references a live page,
+/// not owned content, and following it would doom the document. The
+/// survivor-reference guard would not recover it, since the whole page tree can
+/// become doomed transitively (a page's `/Parent` back-pointer included).
+fn collect_entry(doc: &Document, entry: &Object, doomed: &mut BTreeSet<ObjectId>) {
+    match entry {
+        Object::Reference(id) => collect_owned(doc, *id, doomed),
+        Object::Dictionary(dict) => {
+            for id in dict_references(dict) {
+                collect_owned(doc, id, doomed);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Mark `id` and the whole subtree of objects it references for deletion,
 /// recursively. A shared object that also belongs to surviving content is
 /// pruned back later (see [`referenced_from_survivors`]), so this can gather the
 /// full subtree without fear of collateral damage — e.g. an annotation's
 /// appearance stream and everything *it* references, at any depth.
 fn collect_owned(doc: &Document, id: ObjectId, doomed: &mut BTreeSet<ObjectId>) {
-    if !doomed.insert(id) {
-        return;
-    }
-    let children = match doc.get_object(id) {
-        Ok(object) => object_references(object),
-        Err(_) => Vec::new(),
-    };
-    for child in children {
-        collect_owned(doc, child, doomed);
+    let mut worklist = vec![id];
+    while let Some(id) = worklist.pop() {
+        if !doomed.insert(id) {
+            continue;
+        }
+        if let Ok(object) = doc.get_object(id) {
+            worklist.extend(object_references(object));
+        }
     }
 }
 

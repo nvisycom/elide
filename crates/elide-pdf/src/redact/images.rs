@@ -11,8 +11,11 @@
 //! `embed_image`) to build the XObject; the default build carries no image
 //! dependency.
 
-use lopdf::Object;
+use std::collections::BTreeSet;
 
+use lopdf::{Object, ObjectId};
+
+use super::sanitize::referenced_from_survivors;
 use crate::error::{Error, Result};
 use crate::extract::ImageId;
 
@@ -50,6 +53,16 @@ impl crate::Pdf {
     pub fn redact_images(&self, replacements: &[ImageReplacement]) -> Result<Vec<u8>> {
         let mut doc = self.doc.clone();
 
+        // The original images' sub-objects that encode pixel content — soft
+        // masks, stencil masks, alternate representations — become orphaned when
+        // the rebuilt XObject drops these dict keys. They must be deleted (else
+        // `save_to` still serialises them, leaving a mask that carries the
+        // sensitive shape in the bytes), but only if no *surviving* object still
+        // references them: a mask shared with a retained object would corrupt
+        // the PDF if removed. So gather candidates now, insert all replacements,
+        // then prune with a survivor-reference guard.
+        let mut orphans: BTreeSet<ObjectId> = BTreeSet::new();
+
         for replacement in replacements {
             let id = replacement.id.object();
 
@@ -65,19 +78,13 @@ impl crate::Pdf {
                 )));
             }
 
-            // The original image's sub-objects that encode pixel content — a
-            // soft mask, a stencil mask, or alternate representations — must be
-            // deleted, not left orphaned: the rebuilt XObject drops these dict
-            // keys, but `save_to` still serialises unreferenced objects, so a
-            // soft mask carrying the sensitive shape would survive in the bytes.
-            let orphans: Vec<(u32, u16)> = old
-                .map(|s| {
+            if let Some(stream) = old {
+                orphans.extend(
                     [b"SMask".as_slice(), b"Mask", b"Alternates"]
                         .iter()
-                        .filter_map(|key| s.dict.get(key).and_then(Object::as_reference).ok())
-                        .collect()
-                })
-                .unwrap_or_default();
+                        .filter_map(|key| stream.dict.get(key).and_then(Object::as_reference).ok()),
+                );
+            }
 
             // Rebuild a valid image XObject from the encoded bytes (lopdf sets
             // the dictionary — dimensions, colour space, filter — to match).
@@ -88,8 +95,14 @@ impl crate::Pdf {
                 ))
             })?;
             doc.objects.insert(id, Object::Stream(stream));
-            for orphan in orphans {
-                doc.objects.remove(&orphan);
+        }
+
+        // With every replacement inserted, an orphan still referenced from a
+        // surviving object is shared and must be kept; delete only the rest.
+        let referenced_by_survivors = referenced_from_survivors(&doc, &orphans);
+        for orphan in &orphans {
+            if !referenced_by_survivors.contains(orphan) {
+                doc.objects.remove(orphan);
             }
         }
 
