@@ -141,6 +141,38 @@ jobs:
       - name: Run tests (all features)
         run: cargo test --workspace --all-features
 
+  render:
+    name: Render (PDFium)
+    runs-on: ubuntu-latest
+    needs: check
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@v2
+
+      # The `pdf-render` / `ocr` paths need the native PDFium library at
+      # runtime; their tests are `#[ignore]`d so the default suite stays
+      # native-dependency-free. Install PDFium and run them explicitly.
+      - name: Install PDFium
+        run: sudo ./scripts/install-pdfium.sh
+
+      - name: Run render tests (ignored, need PDFium)
+        run: >
+          cargo test -p elide --features codec-pdf-render,mock,serde
+          --test e2e_pdf_raster -- --ignored
+
   build:
     name: Build
     runs-on: ubuntu-latest

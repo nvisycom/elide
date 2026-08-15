@@ -1,0 +1,89 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "elide-pdf"
+description = "Standalone PDF text extraction and born-digital redaction: bytes in, bytes out"
+keywords = ["pdf", "redaction", "extraction", "lopdf", "elide"]
+categories = ["parsing", "text-processing"]
+readme = "README.md"
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+## No default features: born-digital text extraction and redaction via a
+## pure-Rust parser, no native dependency.
+default = []
+
+## Derive `serde::{Serialize, Deserialize}` on the extraction/coverage model.
+serde = ["dep:serde"]
+
+## Redact embedded images by replacing an image XObject's stream with new
+## (redacted) bytes, rebuilding a valid XObject from an encoded PNG/JPEG.
+## Pure-Rust; pulls the `image` crate (via lopdf's `embed_image`) to build the
+## XObject. Off by default so a text-only build stays lean.
+image = ["dep:image", "lopdf/embed_image"]
+
+## Render pages to images (for OCR of scanned/image-only PDFs) via the native
+## PDFium shared library. Off by default: the default build is pure-Rust with
+## no native dependency. Requires the PDFium `.so`/`.dylib` at runtime (see
+## `scripts/install-pdfium.sh`); pulls `pdfium-render`, `rayon`, and `image`.
+render = ["dep:pdfium-render", "dep:rayon", "dep:image", "dep:sha2"]
+
+## Verification helpers for tests: confirm a raster redaction actually painted
+## the pixels it claimed. Pulls `render`.
+test-utils = ["render"]
+
+[dependencies]
+# (De)serialization
+serde = { workspace = true, features = ["derive"], optional = true }
+
+# Derive macros & error handling
+thiserror = { workspace = true, features = [] }
+
+# Primitive datatypes
+# Inline-or-shared strings, so extracted page text and a replacement's find /
+# replace clone cheaply.
+hipstr = { workspace = true, features = [] }
+# Ref-counted byte buffers, so an extracted image's bytes clone without copying.
+bytes = { workspace = true, features = [] }
+
+# Async runtime & parallelism
+# The dedicated single-thread PDFium render pool (feature `render`).
+rayon = { workspace = true, features = [], optional = true }
+
+# Image processing
+# PNG-encode rendered pages (feature `render`).
+image = { workspace = true, features = [], optional = true }
+
+# Cryptography
+# SHA-256 binding of the source, page pixels, and raster output (feature
+# `render`), so a raster redaction's provenance is verifiable.
+sha2 = { workspace = true, features = [], optional = true }
+
+# Document parsing
+# Pure-Rust PDF parsing; default-features off drops the chrono/jiff/rayon/time
+# extras this crate does not need.
+lopdf = { workspace = true, default-features = false }
+
+# Rendering
+# The native PDFium binding (feature `render`).
+pdfium-render = { workspace = true, features = [], optional = true }
+
+[dev-dependencies]
+# Build minimal PDF fixtures in tests.
+lopdf = { workspace = true, default-features = false }
+# Encode redacted image fixtures for the `image` feature's tests.
+image = { workspace = true, features = ["png"] }

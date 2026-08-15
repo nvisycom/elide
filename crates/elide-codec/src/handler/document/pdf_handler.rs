@@ -1,34 +1,38 @@
-//! PDF handler: a stub today.
+//! PDF handler: adapts the standalone [`elide_pdf`] engine to the codec's
+//! [`Handler`] contract.
 //!
-//! Decoding succeeds (so the format resolves and round-trips through the
-//! registry), but no PDF content is parsed yet: streaming yields nothing,
-//! reads return nothing, redaction is a no-op, `encode` reports that
-//! re-serialization is unsupported, and the [`Container`] surface exposes
-//! no parts. A real implementation (a PDF object parser to read page text
-//! and image XObjects, a writer to re-emit) will replace this when PDF
-//! extraction lands.
+//! Each page's text is streamed as one [`Chunk`]; a redaction on that chunk is
+//! recorded and applied on [`encode`] per the handler's [`RedactMode`]:
 //!
-//! Unlike DOCX, a PDF is *not* a zip: it is a flat file of indirect
-//! objects with a cross-reference table, and embedded images live as
-//! stream objects (image XObjects), not package entries. So PDF brings its
-//! own object parser rather than reusing the zip-based container plumbing;
-//! only the modality-neutral [`Container`]/[`Part`]/[`PartId`] surface is
-//! shared with DOCX.
+//! - **Glyph deletion** (default, pure-Rust): the detected glyphs are deleted
+//!   from the content streams and annotations/metadata stripped, keeping a
+//!   selectable text layer with the detected spans gone
+//!   ([`Pdf::redact_text`](elide_pdf::Pdf::redact_text)).
+//! - **Raster** (feature `pdf-render`, [`RasterMode::Always`]): the page text
+//!   comes from [`Pdf::observe`](elide_pdf::Pdf::observe) alongside its glyph
+//!   geometry, so a redaction's span maps to pixel boxes; encode fills them and
+//!   emits a fresh image-only PDF — the text layer is gone entirely.
 //!
-//! [`Part`]: crate::codec::Part
-//! [`PartId`]: crate::codec::PartId
+//! [`encode`]: Handler::encode
+//! [`RasterMode::Always`]: super::RasterMode::Always
 
 use bytes::Bytes;
-#[cfg(feature = "pdf-render")]
-use elide_core::modality::image::ImageData;
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::operator::Redactions;
 use elide_core::{Error, ErrorKind, Result};
-
+use elide_pdf::Pdf;
+#[cfg(feature = "internal_image")]
+use elide_pdf::extract::{EmbeddingKind, ImageId};
+use elide_pdf::redact::Detection;
+#[cfg(feature = "internal_image")]
+use elide_pdf::redact::ImageReplacement;
 #[cfg(feature = "pdf-render")]
-use super::OcrMode;
+use elide_pdf::render::{Detection as RasterDetection, PageObservation};
+
 use super::PdfLoader;
+#[cfg(feature = "pdf-render")]
+use super::RasterMode;
 use crate::codec::{Container, Part, PartId};
 use crate::content::ContentData;
 use crate::{Format, FormatId, Handler};
@@ -38,8 +42,8 @@ pub const FORMAT_ID: FormatId = FormatId::new("elide.document.pdf");
 
 /// [`Format`] descriptor registered into [`FormatRegistry`].
 ///
-/// Decodes on the plain text path (no page rendering). To rasterise pages
-/// for OCR, build the format with [`format_with`] instead.
+/// Decodes on the glyph-deletion redaction path. To flatten pages to images
+/// instead, build the format with [`format_with`] and [`RasterMode::Always`].
 ///
 /// [`FormatRegistry`]: crate::FormatRegistry
 pub fn format() -> Format {
@@ -48,49 +52,133 @@ pub fn format() -> Format {
         .with_content_types(["application/pdf"])
 }
 
-/// [`Format`] descriptor that rasterises PDF pages for OCR per `ocr`.
+/// [`Format`] descriptor with an explicit [`RasterMode`].
 ///
-/// Mirrors the force-OCR switch other tools expose (OCRmyPDF `--force-ocr`,
-/// Docling `force_full_page_ocr`): under [`OcrMode::Force`] every page is
-/// rendered to an image on decode for the image/OCR pipeline.
+/// Under [`RasterMode::Always`] redaction flattens every page to an image
+/// (a fresh image-only PDF); [`Auto`](RasterMode::Auto) and
+/// [`Never`](RasterMode::Never) use the default glyph-deletion path.
 ///
-/// [`OcrMode::Force`]: super::OcrMode::Force
+/// [`RasterMode::Always`]: super::RasterMode::Always
 #[cfg(feature = "pdf-render")]
 #[cfg_attr(docsrs, doc(cfg(feature = "pdf-render")))]
-pub fn format_with(ocr: OcrMode) -> Format {
-    Format::new::<Text, _>(FORMAT_ID.clone(), PdfLoader::with_ocr(ocr))
+pub fn format_with(raster: RasterMode) -> Format {
+    Format::new::<Text, _>(FORMAT_ID.clone(), PdfLoader::with_raster(raster))
         .with_extensions(["pdf"])
         .with_content_types(["application/pdf"])
 }
 
-/// Stub text handler that may also carry pages rendered for OCR.
+/// One page's text and where it sits in the concatenated text stream.
+#[derive(Debug, Clone)]
+pub(crate) struct PdfPage {
+    /// 1-based page number.
+    pub(crate) number: u32,
+    /// The page's current (possibly redacted) text.
+    pub(crate) text: String,
+    /// Start offset of this page in the concatenated stream.
+    pub(crate) start: usize,
+}
+
+/// How a [`PdfHandler`] applies recorded redactions on encode.
+#[derive(Debug, Default)]
+pub(crate) enum RedactMode {
+    /// Glyph deletion via [`Pdf::redact_text`](elide_pdf::Pdf::redact_text): the
+    /// detected glyphs are removed and annotations/metadata stripped, keeping a
+    /// selectable text layer. The default pure-Rust redaction path.
+    #[default]
+    GlyphDelete,
+    /// Raster redaction (feature `pdf-render`): the page text comes from
+    /// [`Pdf::observe`](elide_pdf::Pdf::observe), so a redaction's span maps
+    /// directly to glyph pixel boxes; encode fills them and emits a fresh
+    /// image-only PDF.
+    #[cfg(feature = "pdf-render")]
+    Raster {
+        /// Per-page observations (text, glyph boxes, pixels) from `observe`.
+        observations: Vec<PageObservation>,
+        /// Recorded pixel-span detections, applied at encode.
+        detections: Vec<RasterDetection>,
+    },
+}
+
+impl RedactMode {
+    /// Whether redaction flattens pages to images (raster) rather than deleting
+    /// glyphs in place.
+    fn is_raster(&self) -> bool {
+        !matches!(self, RedactMode::GlyphDelete)
+    }
+}
+
+/// PDF text handler backed by [`elide_pdf`].
 ///
-/// Text parsing is still a stub (no chunks, no parts). When the loader runs
-/// under [`OcrMode::Force`], it rasterises the pages up front and hands them
-/// here as [`ImageData`]; those ride along for the image/OCR pipeline to
-/// consume (the part/media hookup lands with XObject extraction).
-///
-/// [`OcrMode::Force`]: super::OcrMode::Force
+/// Streams each page's text as a chunk, records per-page redactions, and on
+/// [`encode`](Handler::encode) applies them per its [`RedactMode`].
 #[derive(Debug, Default)]
 pub(crate) struct PdfHandler {
-    /// Pages rasterised for OCR, present only under the `pdf-render` feature
-    /// and [`OcrMode::Force`]; empty on the plain text path.
+    /// The original document bytes, retained so [`elide_pdf`] re-serialises from
+    /// the true source.
+    pub(crate) document: Bytes,
+    /// Extracted pages, in page order, with stream offsets for `read_next`.
+    pub(crate) pages: Vec<PdfPage>,
+    /// Read cursor over `pages`.
+    pub(crate) cursor: usize,
+    /// Recorded glyph-deletion detections (per-page character spans), applied at
+    /// encode in [`RedactMode::GlyphDelete`].
+    pub(crate) deletions: Vec<Detection>,
+    /// The ids of the embedded images the [`Container`] surfaces as redactable
+    /// (a decodable file), cached at decode so [`replace_part`](Container::replace_part)
+    /// validates without re-extracting the document.
     ///
-    /// [`OcrMode::Force`]: super::OcrMode::Force
-    #[cfg(feature = "pdf-render")]
-    pages: Vec<ImageData>,
+    /// [`replace_part`]: Container::replace_part
+    #[cfg(feature = "internal_image")]
+    pub(crate) redactable_image_ids: std::collections::BTreeSet<ImageId>,
+    /// Redacted replacement images, keyed by their XObject id, filled through
+    /// the [`Container`] surface and applied on encode. Only meaningful with an
+    /// image codec (`internal_image`) able to redact the surfaced images.
+    #[cfg(feature = "internal_image")]
+    pub(crate) image_replacements: std::collections::HashMap<ImageId, Bytes>,
+    /// How recorded redactions are applied on encode.
+    pub(crate) mode: RedactMode,
 }
 
 impl PdfHandler {
-    /// A handler with no rendered pages (the plain text path).
-    pub(crate) fn new() -> Self {
-        Self::default()
+    /// A glyph-deletion handler over the extracted `pages`: redaction deletes
+    /// the detected glyphs, keeping a selectable text layer, and strips
+    /// annotations and metadata. The default (pure-Rust) redaction path.
+    pub(crate) fn text(document: Bytes, pages: Vec<PdfPage>) -> Self {
+        Self {
+            #[cfg(feature = "internal_image")]
+            redactable_image_ids: redactable_image_ids(&document),
+            document,
+            pages,
+            mode: RedactMode::GlyphDelete,
+            ..Self::default()
+        }
     }
 
-    /// A handler carrying pages rasterised for OCR.
+    /// A raster-redaction handler: `pages` carry the observation text (offsets
+    /// into `observations`' glyphs), redacted by pixel fill on encode.
     #[cfg(feature = "pdf-render")]
-    pub(crate) fn with_pages(pages: Vec<ImageData>) -> Self {
-        Self { pages }
+    pub(crate) fn raster(
+        document: Bytes,
+        pages: Vec<PdfPage>,
+        observations: Vec<PageObservation>,
+    ) -> Self {
+        Self {
+            document,
+            pages,
+            mode: RedactMode::Raster {
+                observations,
+                detections: Vec::new(),
+            },
+            ..Self::default()
+        }
+    }
+
+    /// The page whose stream range contains `offset`, and the offset within it.
+    fn page_at(&self, offset: usize) -> Option<(&PdfPage, usize)> {
+        self.pages
+            .iter()
+            .find(|p| offset >= p.start && offset < p.start + p.text.len())
+            .map(|p| (p, offset - p.start))
     }
 }
 
@@ -101,136 +189,438 @@ impl Handler<Text> for PdfHandler {
     }
 
     fn encode(&self) -> Result<ContentData> {
-        Err(Error::new(
-            ErrorKind::CapabilityUnavailable,
-            "PDF re-encoding is not yet supported",
-        ))
+        match &self.mode {
+            RedactMode::GlyphDelete => {
+                #[cfg(feature = "internal_image")]
+                let has_images = !self.image_replacements.is_empty();
+                #[cfg(not(feature = "internal_image"))]
+                let has_images = false;
+                if self.deletions.is_empty() && !has_images {
+                    return Ok(ContentData::new(self.document.clone()));
+                }
+
+                // Delete the detected glyphs and strip annotations/metadata,
+                // keeping a selectable text layer. (`mut` is used only when the
+                // image fold below is compiled in.)
+                #[cfg_attr(not(feature = "internal_image"), allow(unused_mut))]
+                let mut out = Pdf::open(&self.document)
+                    .and_then(|pdf| pdf.redact_text(&self.deletions))
+                    .map_err(pdf_error)?;
+
+                // Then fold in any redacted embedded images.
+                #[cfg(feature = "internal_image")]
+                if has_images {
+                    let replacements: Vec<ImageReplacement> = self
+                        .image_replacements
+                        .iter()
+                        .map(|(&id, bytes)| ImageReplacement {
+                            id,
+                            image: bytes.to_vec(),
+                        })
+                        .collect();
+                    out = Pdf::open(&out)
+                        .and_then(|pdf| pdf.redact_images(&replacements))
+                        .map_err(pdf_error)?;
+                }
+
+                Ok(ContentData::new(Bytes::from(out)))
+            }
+            #[cfg(feature = "pdf-render")]
+            RedactMode::Raster {
+                observations,
+                detections,
+            } => {
+                if detections.is_empty() {
+                    return Ok(ContentData::new(self.document.clone()));
+                }
+                // Fill the detected glyph boxes and emit a fresh image-only PDF
+                // — the strong redaction guarantee. Black fill.
+                let (out, _certificate) = Pdf::open(&self.document)
+                    .and_then(|pdf| pdf.redact_raster(observations.clone(), detections, [0, 0, 0]))
+                    .map_err(pdf_error)?;
+                Ok(ContentData::new(Bytes::from(out)))
+            }
+        }
     }
 
     async fn read_next(&mut self) -> Result<Option<Chunk<Text>>> {
-        Ok(None)
+        if self.cursor >= self.pages.len() {
+            return Ok(None);
+        }
+        let page = &self.pages[self.cursor];
+        let chunk = Chunk {
+            location: TextLocation {
+                start: page.start,
+                end: page.start + page.text.len(),
+                page: Some(page.number),
+            },
+            data: TextData::new(page.text.clone()),
+            hints: Vec::new(),
+        };
+        self.cursor += 1;
+        Ok(Some(chunk))
+    }
+
+    fn lift(&self, chunk: &Chunk<Text>, local: TextLocation) -> Option<TextLocation> {
+        let base = chunk.location.start;
+        let start = base + local.start;
+        let end = base + local.end;
+        if start > end || end > chunk.location.end {
+            return None;
+        }
+        Some(TextLocation {
+            start,
+            end,
+            page: chunk.location.page,
+        })
     }
 
     fn as_container_mut(&mut self) -> Option<&mut dyn Container> {
         Some(self)
     }
-
-    // No `lift` override: the stub yields no chunks, so it is never called;
-    // the identity default suffices.
 }
 
 #[async_trait::async_trait]
 impl DataReader<Text> for PdfHandler {
-    async fn read_at(&self, _location: &TextLocation) -> Result<Option<TextData>> {
-        Ok(None)
+    async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
+        let Some((page, local)) = self.page_at(location.start) else {
+            return Ok(None);
+        };
+        let Some(local_end) = location.end.checked_sub(page.start) else {
+            return Ok(None);
+        };
+        Ok(page.text.get(local..local_end).map(TextData::new))
     }
 }
 
 #[async_trait::async_trait]
 impl DataWriter<Text> for PdfHandler {
-    async fn write_at(&mut self, _redactions: Redactions<Text>) -> Result<()> {
+    async fn write_at(&mut self, redactions: Redactions<Text>) -> Result<()> {
+        for (location, _replacement) in redactions.into_iter() {
+            // Resolve the redaction to the index of the page it falls on and its
+            // byte range within that page's text. Both modes address glyphs by
+            // span, not replacement text; the span is measured per mode below
+            // (char offsets for glyph deletion, UTF-16 for raster) so only the
+            // counts a mode needs are computed.
+            let Some((page_idx, local, local_end)) =
+                self.pages.iter().enumerate().find_map(|(idx, page)| {
+                    if location.start < page.start || location.start >= page.start + page.text.len()
+                    {
+                        return None;
+                    }
+                    let local = location.start - page.start;
+                    let local_end = location.end.checked_sub(page.start)?;
+                    Some((idx, local, local_end))
+                })
+            else {
+                continue;
+            };
+            let page = &self.pages[page_idx];
+            if page.text.get(local..local_end).is_none() {
+                continue; // range not on a char boundary
+            }
+            let page_number = page.number;
+
+            // Measure the span for the active mode only, then drop the page
+            // borrow before recording (so the sink can be borrowed mutably).
+            if self.mode.is_raster() {
+                #[cfg(feature = "pdf-render")]
+                {
+                    let start = page.text[..local].encode_utf16().count() as u32;
+                    let end = page.text[..local_end].encode_utf16().count() as u32;
+                    if let RedactMode::Raster { detections, .. } = &mut self.mode {
+                        detections.push(RasterDetection::new(page_number, start, end));
+                    }
+                }
+            } else {
+                let start = page.text[..local].chars().count();
+                let end = page.text[..local_end].chars().count();
+                self.deletions.push(Detection::new(page_number, start, end));
+            }
+        }
         Ok(())
     }
 }
 
 impl Container for PdfHandler {
+    /// Surface each redactable embedded image XObject as a [`Part`] for the
+    /// image pipeline.
+    ///
+    /// Only with an image codec (`internal_image`) able to decode and redact the
+    /// images, and only on the glyph-deletion path — the raster path flattens
+    /// every page to an image, so surfacing images for separate redaction would
+    /// be redundant. Only images whose bytes are a decodable file are surfaced
+    /// (see [`embedding_hint`]).
     fn parts(&self) -> Vec<Part> {
-        // Pages rendered for OCR (under the `pdf-render` feature and
-        // `OcrMode::Force`) surface as image parts: the orchestrator decodes
-        // each PNG back to an `Image` and drives the OCR pipeline over it,
-        // exactly like DOCX media parts. Without rendering this is empty —
-        // XObject extraction of native PDF images is still to come.
-        #[cfg(feature = "pdf-render")]
+        #[cfg(feature = "internal_image")]
         {
-            self.pages
-                .iter()
-                .enumerate()
-                .map(|(index, page)| Part {
-                    id: PartId::from(format!("page-{index}")),
-                    bytes: page.bytes.clone(),
-                    hint: "png".to_string(),
+            // In raster mode the whole page is flattened, so per-image redaction
+            // is redundant — surface nothing.
+            #[cfg(feature = "pdf-render")]
+            if matches!(self.mode, RedactMode::Raster { .. }) {
+                return Vec::new();
+            }
+            let Ok(pdf) = Pdf::open(&self.document) else {
+                return Vec::new();
+            };
+            pdf.extract()
+                .embeddings
+                .into_iter()
+                .filter_map(|embedding| {
+                    let hint = embedding_hint(embedding.kind)?;
+                    Some(Part {
+                        id: image_part_id(embedding.id).into(),
+                        bytes: embedding.bytes,
+                        hint: hint.to_string(),
+                    })
                 })
                 .collect()
         }
-        #[cfg(not(feature = "pdf-render"))]
+        #[cfg(not(feature = "internal_image"))]
         Vec::new()
     }
 
-    fn replace_part(&mut self, id: &PartId, _bytes: Bytes) -> Result<()> {
-        // Rendered pages are detection-only inputs: folding redactions back
-        // requires re-encoding the PDF, which is not supported yet (see
-        // `encode`). So no part is writable today.
+    fn replace_part(&mut self, id: &PartId, bytes: Bytes) -> Result<()> {
+        // In raster mode the output is a flattened image-only PDF, so no
+        // per-image replacement is surfaced or applied — reject fail-closed
+        // before accepting any bytes.
+        if self.mode.is_raster() {
+            return Err(Error::new(
+                ErrorKind::MalformedInput,
+                format!("pdf replace_part: `{id}` is not accepted in raster mode"),
+            ));
+        }
+        #[cfg(feature = "internal_image")]
+        {
+            // Accept only ids naming an image the container surfaced, validated
+            // against the cached id set (no re-extraction per call).
+            let image_id = parse_image_part_id(id.as_str())
+                .filter(|id| self.redactable_image_ids.contains(id));
+            if let Some(image_id) = image_id {
+                self.image_replacements.insert(image_id, bytes);
+                return Ok(());
+            }
+        }
+        #[cfg(not(feature = "internal_image"))]
+        let _ = bytes;
         Err(Error::new(
-            ErrorKind::CapabilityUnavailable,
-            format!("pdf replace_part: `{id}` is not a writable part"),
+            ErrorKind::MalformedInput,
+            format!("pdf replace_part: `{id}` is not a redactable embedded image"),
         ))
     }
 }
 
-#[cfg(test)]
+/// The ids of every embedded image whose bytes are a decodable file (see
+/// [`embedding_hint`]) — the set the container will surface and accept back.
+#[cfg(feature = "internal_image")]
+fn redactable_image_ids(document: &[u8]) -> std::collections::BTreeSet<ImageId> {
+    let Ok(pdf) = Pdf::open(document) else {
+        return std::collections::BTreeSet::new();
+    };
+    pdf.extract()
+        .embeddings
+        .iter()
+        .filter(|e| embedding_hint(e.kind).is_some())
+        .map(|e| e.id)
+        .collect()
+}
+
+/// The [`PartId`] string for an image XObject: `"img-{number}-{generation}"`.
+#[cfg(feature = "internal_image")]
+fn image_part_id(id: ImageId) -> String {
+    format!("img-{}-{}", id.number, id.generation)
+}
+
+/// Parse an image [`PartId`] string back into an [`ImageId`](elide_pdf::extract::ImageId).
+#[cfg(feature = "internal_image")]
+fn parse_image_part_id(s: &str) -> Option<ImageId> {
+    let rest = s.strip_prefix("img-")?;
+    let (number, generation) = rest.split_once('-')?;
+    Some(ImageId::new(number.parse().ok()?, generation.parse().ok()?))
+}
+
+/// A filename-extension hint for an embedded image whose *raw stream bytes* are
+/// a self-contained image file the orchestrator can decode, or `None` when they
+/// are not.
+///
+/// An [`Embedding`](elide_pdf::extract::Embedding)'s bytes are the raw XObject
+/// stream. For a JPEG (`DCTDecode`) or JPEG 2000 (`JPXDecode`) image those bytes
+/// *are* a standalone `.jpg`/`.jp2` file that decodes directly. For the other
+/// kinds — raw/`FlateDecode` samples, CCITT fax, JBIG2 — the bytes are filter-
+/// specific pixel data that only means anything alongside the XObject's
+/// dictionary, so they are **not** a decodable file. Surfacing those with a
+/// bogus extension would have the pipeline fail to decode and silently skip
+/// them; returning `None` keeps them out of the container entirely, so their
+/// non-redaction is an explicit (currently unsupported) case rather than a
+/// silent miss.
+#[cfg(feature = "internal_image")]
+fn embedding_hint(kind: EmbeddingKind) -> Option<&'static str> {
+    match kind {
+        EmbeddingKind::Jpeg => Some("jpg"),
+        EmbeddingKind::Jpeg2000 => Some("jp2"),
+        // Raw/Flate/CCITT/JBIG2: the stream bytes are not a self-contained
+        // image file. Not surfaced (redacting these is not yet supported).
+        EmbeddingKind::CcittFax | EmbeddingKind::Jbig2 | EmbeddingKind::Raw => None,
+        _ => None,
+    }
+}
+
+/// Map an [`elide_pdf`] error into the codec's error type.
+pub(super) fn pdf_error(err: elide_pdf::Error) -> Error {
+    use elide_pdf::ErrorKind as PdfKind;
+    let kind = match err.kind() {
+        PdfKind::InvalidDocument | PdfKind::LimitExceeded => ErrorKind::MalformedInput,
+        PdfKind::UnsafeRewrite => ErrorKind::Processing,
+        _ => ErrorKind::Processing,
+    };
+    Error::new(kind, err.to_string())
+}
+
+#[cfg(all(test, feature = "internal_image"))]
 mod tests {
-    use super::*;
-    use crate::Loader;
+    use bytes::Bytes;
+    use elide_core::ErrorKind;
+    use elide_pdf::Pdf;
+    use elide_pdf::extract::ImageId;
+    use lopdf::content::{Content, Operation};
+    use lopdf::{Dictionary, Document, Object, Stream, dictionary};
 
-    #[tokio::test]
-    async fn stub_decodes_but_exposes_nothing() {
-        let mut h = PdfLoader::new()
-            .decode(ContentData::new(Bytes::from_static(b"%PDF-1.7")))
-            .await
+    use super::{FORMAT_ID, PdfHandler, PdfPage, image_part_id, parse_image_part_id};
+    use crate::Handler;
+    use crate::codec::{Container, PartId};
+
+    /// A JPEG-encoded image of a solid colour, as bytes (a self-contained
+    /// `.jpg` file, so the container surfaces it — see `embedding_hint`).
+    fn jpeg(rgb: [u8; 3]) -> Vec<u8> {
+        let img = image::RgbImage::from_pixel(8, 8, image::Rgb(rgb));
+        let mut out = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut out, image::ImageFormat::Jpeg)
             .unwrap();
-        assert_eq!(h.format().as_str(), "elide.document.pdf");
-        // No text, no reads, redaction is a no-op, encode is unsupported.
-        assert!(h.read_next().await.unwrap().is_none());
-        assert!(h.read_at(&TextLocation::new(0, 0)).await.unwrap().is_none());
-        assert!(h.encode().is_err());
-        // It is a container, but exposes no parts and rejects replacements.
-        assert!(h.parts().is_empty());
-        assert!(
-            h.replace_part(&PartId::new("anything"), Bytes::new())
-                .is_err()
-        );
+        out.into_inner()
     }
 
-    // The OCR-forcing format builds, and the `Auto` path decodes without
-    // rendering (so no native library is needed here).
-    #[cfg(feature = "pdf-render")]
-    #[tokio::test]
-    async fn auto_mode_decodes_without_rendering() {
-        use super::super::OcrMode;
-
-        let _ = format_with(OcrMode::force());
-
-        let h = PdfLoader::with_ocr(OcrMode::Auto)
-            .decode(ContentData::new(Bytes::from_static(b"%PDF-1.7")))
-            .await
-            .unwrap();
-        assert!(h.parts().is_empty());
+    /// A one-page PDF with a single embedded JPEG (`DCTDecode`) image XObject —
+    /// the kind whose raw stream bytes are a decodable file. Returns the
+    /// document bytes and the image's `(number, generation)` id.
+    fn image_pdf() -> (Vec<u8>, (u32, u16)) {
+        let mut doc = Document::with_version("1.5");
+        let pages_id = doc.new_object_id();
+        let jpeg = jpeg([255, 255, 255]);
+        let mut img = Dictionary::new();
+        img.set("Type", Object::Name(b"XObject".to_vec()));
+        img.set("Subtype", Object::Name(b"Image".to_vec()));
+        img.set("Width", Object::Integer(8));
+        img.set("Height", Object::Integer(8));
+        img.set("ColorSpace", Object::Name(b"DeviceRGB".to_vec()));
+        img.set("BitsPerComponent", Object::Integer(8));
+        img.set("Filter", Object::Name(b"DCTDecode".to_vec()));
+        let image_id = doc.add_object(Stream::new(img, jpeg));
+        let res = doc.add_object(dictionary! { "XObject" => dictionary! { "Im1" => image_id } });
+        let content = Content {
+            operations: vec![Operation::new("Do", vec![Object::Name(b"Im1".to_vec())])],
+        };
+        let cid = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
+        let page = doc.add_object(dictionary! {
+            "Type" => "Page", "Parent" => pages_id, "Contents" => cid, "Resources" => res,
+        });
+        let pages = dictionary! {
+            "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1,
+            "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
+        };
+        doc.objects.insert(pages_id, Object::Dictionary(pages));
+        let cat = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+        doc.trailer.set("Root", cat);
+        let mut out = Vec::new();
+        doc.save_to(&mut out).unwrap();
+        (out, image_id)
     }
 
-    // The `Force` decode path renders via the native PDFium library, absent
-    // in CI — ignored by default; run with `--ignored` where PDFium is
-    // installed (see `scripts/install-pdfium.sh`). Renders a minimal
-    // one-page PDF and checks a page image came back.
-    #[cfg(feature = "pdf-render")]
-    #[tokio::test]
-    #[ignore = "requires the native PDFium shared library at runtime"]
-    async fn force_mode_renders_pages() {
-        use super::super::OcrMode;
-
-        const MINIMAL_PDF: &[u8] = b"%PDF-1.4\n\
-            1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n\
-            2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n\
-            3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\n\
-            trailer<</Root 1 0 R>>\n%%EOF";
-
-        let h = PdfLoader::with_ocr(OcrMode::force())
-            .decode(ContentData::new(Bytes::from_static(MINIMAL_PDF)))
-            .await
+    fn black_png() -> Vec<u8> {
+        let img = image::RgbImage::from_pixel(2, 2, image::Rgb([0, 0, 0]));
+        let mut out = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut out, image::ImageFormat::Png)
             .unwrap();
-        // The rendered page surfaces as a decodable image part.
-        let parts = h.parts();
+        out.into_inner()
+    }
+
+    #[test]
+    fn part_id_round_trips() {
+        let id = ImageId::new(7, 3);
+        assert_eq!(parse_image_part_id(&image_part_id(id)), Some(id));
+        assert_eq!(parse_image_part_id("not-an-image"), None);
+    }
+
+    #[test]
+    fn container_surfaces_and_replaces_an_image() {
+        let (pdf, image_id) = image_pdf();
+        let mut handler = PdfHandler::text(Bytes::from(pdf), Vec::<PdfPage>::new());
+
+        // parts() surfaces the one embedded image.
+        let parts = handler.parts();
         assert_eq!(parts.len(), 1);
-        assert_eq!(parts[0].hint, "png");
-        assert!(!parts[0].bytes.is_empty());
+        assert_eq!(
+            parts[0].id.as_str(),
+            format!("img-{}-{}", image_id.0, image_id.1)
+        );
+
+        // Fold a redacted (black) image back through the container.
+        let part_id = parts[0].id.clone();
+        handler
+            .replace_part(&part_id, Bytes::from(black_png()))
+            .unwrap();
+
+        // Encode applies it: the output's image bytes differ from the original.
+        let original = jpeg([255, 255, 255]);
+        let encoded = handler.encode().unwrap();
+        let after = Pdf::open(encoded.as_bytes()).unwrap().extract();
+        assert_eq!(after.embeddings.len(), 1);
+        assert_ne!(
+            after.embeddings[0].bytes.as_ref(),
+            original.as_slice(),
+            "image was not redacted"
+        );
+        assert_eq!(handler.format(), FORMAT_ID.clone());
+    }
+
+    #[test]
+    fn replace_part_rejects_an_unknown_id() {
+        let (pdf, _) = image_pdf();
+        let mut handler = PdfHandler::text(Bytes::from(pdf), Vec::<PdfPage>::new());
+        let err = handler
+            .replace_part(
+                &PartId::from("img-9999-0".to_string()),
+                Bytes::from(black_png()),
+            )
+            .unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+    }
+}
+
+#[cfg(all(test, feature = "pdf-render"))]
+mod raster_tests {
+    use bytes::Bytes;
+    use elide_core::ErrorKind;
+
+    use super::{PdfHandler, PdfPage};
+    use crate::codec::{Container, PartId};
+
+    /// A raster handler built from empty observations (no PDFium needed):
+    /// `parts()` surfaces nothing and `replace_part` rejects any id, since the
+    /// raster path flattens every page and never accepts a per-image replacement.
+    #[test]
+    fn raster_surfaces_no_parts_and_rejects_replacement() {
+        let mut handler = PdfHandler::raster(Bytes::new(), Vec::<PdfPage>::new(), Vec::new());
+
+        assert!(handler.parts().is_empty());
+
+        let err = handler
+            .replace_part(
+                &PartId::from("img-1-0".to_string()),
+                Bytes::from_static(b"x"),
+            )
+            .unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
     }
 }

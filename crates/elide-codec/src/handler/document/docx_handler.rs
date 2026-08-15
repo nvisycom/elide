@@ -1,39 +1,49 @@
-//! DOCX handler side: the [`DocxHandler`] type, its [`Format`]
-//! descriptor, and the [`DocxEncoder`] that re-packs the zip after the
-//! body XML has been redacted.
+//! DOCX handler side: adapts the standalone [`elide_docx`] engine to the
+//! codec's [`Handler`] contract.
 //!
-//! The handler *is* an [`ExtractHandler`] over the items extracted from
-//! `word/document.xml`. Redaction edits those item values in place; on
-//! encode, [`DocxEncoder`] splices them back into the body XML and
-//! rebuilds the zip, copying every other entry through unchanged so the
-//! container round-trips byte-for-byte except for the redacted text.
+//! The handler *is* an [`ExtractHandler`] over the text blocks
+//! [`Docx::extract`](elide_docx::Docx::extract) recovers from every
+//! text-bearing part (body, headers, footers, notes, comments). Each block's
+//! [`Address`] is its part plus its byte span, so redaction edits the block
+//! value in place; on encode, [`DocxEncoder`] turns the edits into
+//! [`elide_docx::block::Replacement`]s (plus any redacted media parts) and calls
+//! [`Docx::rewrite_with_parts`](elide_docx::Docx::rewrite_with_parts), which
+//! owns the package round-trip.
 //!
 //! [`ExtractHandler`]: crate::handler::extract::ExtractHandler
+//! [`Address`]: crate::handler::extract::Encoder::Address
 
 use std::collections::HashMap;
-use std::io::{Cursor, Read, Write};
+use std::ops::Range;
 
 use bytes::Bytes;
 use elide_core::modality::text::Text;
 use elide_core::{Error, ErrorKind, Result};
-use zip::write::SimpleFileOptions;
-use zip::{ZipArchive, ZipWriter};
+use elide_docx::block::Embedding;
+use elide_docx::part::PartPath;
 
 use super::DocxLoader;
 use crate::codec::{Container, Part, PartId};
 use crate::content::ContentData;
-use crate::handler::extract::{Encoder, ExtractHandler};
-use crate::handler::markup::{XmlItem, XmlSpan, xml_splice};
+use crate::handler::extract::{Encoder, ExtractHandler, ExtractedItem};
 use crate::{Format, FormatId};
 
 /// Stable [`FormatId`] for the DOCX codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.document.docx");
 
-/// The OOXML part holding the main document body text.
-pub(super) const BODY_PART: &str = "word/document.xml";
-
 /// Handler type for loaded DOCX content.
 pub(crate) type DocxHandler = ExtractHandler<DocxEncoder>;
+
+/// The address of a DOCX text block: which package part it is in, and its byte
+/// span within that part's XML, as reported by
+/// [`Docx::extract`](elide_docx::Docx::extract).
+#[derive(Debug, Clone)]
+pub(crate) struct DocxAddress {
+    /// The part the block belongs to.
+    pub(crate) part: PartPath,
+    /// The block's byte span within the part's XML.
+    pub(crate) span: Range<usize>,
+}
 
 /// [`Format`] descriptor registered into [`FormatRegistry`].
 ///
@@ -46,76 +56,55 @@ pub fn format() -> Format {
         ])
 }
 
-/// The OOXML media directory whose entries are embedded binary parts
-/// (images). The [`Container`] impl exposes these for out-of-band redaction.
-pub(super) const MEDIA_PREFIX: &str = "word/media/";
-
-/// Re-packs a DOCX: splice the redacted body items back into the body XML,
-/// fold in any replaced media parts, and copy every other entry through
-/// verbatim.
+/// Re-packs a DOCX by delegating to [`Docx::rewrite_with_parts`](elide_docx::Docx::rewrite_with_parts): the
+/// redacted body blocks become text replacements and any redacted media parts
+/// travel alongside.
 #[derive(Debug)]
 pub(crate) struct DocxEncoder {
-    /// The original package bytes, retained so non-text parts (media,
-    /// metadata, relationships) re-pack unchanged.
+    /// The original package bytes, retained so [`elide_docx`] can re-pack every
+    /// unredacted part unchanged.
     pub(super) archive: Bytes,
-    /// The raw `word/document.xml` string the items were extracted from.
-    pub(super) body_raw: String,
-    /// Redacted replacements for media parts, keyed by zip entry name,
-    /// filled through the [`Container`] surface.
+    /// The binary embeddings surfaced for redaction, cached at decode so the
+    /// [`Container`] surface lists them and [`replace_part`](Container::replace_part)
+    /// validates ids without re-extracting the archive.
+    ///
+    /// [`Container`]: crate::codec::Container
+    pub(super) embeddings: Vec<Embedding>,
+    /// Redacted replacements for media parts, keyed by zip entry name, filled
+    /// through the [`Container`] surface.
     ///
     /// [`Container`]: crate::codec::Container
     pub(super) replacements: HashMap<String, Bytes>,
 }
 
 impl Encoder for DocxEncoder {
-    type Address = XmlSpan;
+    type Address = DocxAddress;
 
-    fn encode(&self, items: &[XmlItem]) -> Result<ContentData> {
-        // 1. Splice the redacted item values back into the body XML.
-        let body = xml_splice(&self.body_raw, items)?;
+    fn encode(&self, items: &[ExtractedItem<DocxAddress>]) -> Result<ContentData> {
+        // Each item's (current) value overwrites its source byte span in its
+        // part's XML. `elide_docx` validates and applies these fail-closed.
+        let text_replacements: Vec<elide_docx::block::Replacement> = items
+            .iter()
+            .map(|item| elide_docx::block::Replacement {
+                part: item.address.part.clone(),
+                start: item.address.span.start,
+                end: item.address.span.end,
+                text: item.value.clone().into(),
+            })
+            .collect();
+        let media: Vec<elide_docx::block::PartReplacement> = self
+            .replacements
+            .iter()
+            .map(|(name, bytes)| elide_docx::block::PartReplacement {
+                part: PartPath::new(name.clone()),
+                bytes: bytes.to_vec(),
+            })
+            .collect();
 
-        // 2. Rebuild the zip: the body part becomes the redacted XML, a
-        //    replaced media part becomes its redacted bytes, and every
-        //    other entry is copied through verbatim.
-        let mut reader = ZipArchive::new(Cursor::new(self.archive.as_ref())).map_err(|e| {
-            Error::new(
-                ErrorKind::MalformedInput,
-                format!("malformed docx zip: {e}"),
-            )
-        })?;
-        let mut out = ZipWriter::new(Cursor::new(Vec::new()));
-
-        for i in 0..reader.len() {
-            let mut entry = reader
-                .by_index(i)
-                .map_err(|e| Error::new(ErrorKind::Processing, format!("docx entry {i}: {e}")))?;
-            let name = entry.name().to_owned();
-            let options = SimpleFileOptions::default().compression_method(entry.compression());
-            out.start_file(&name, options).map_err(|e| {
-                Error::new(ErrorKind::Processing, format!("docx repack {name}: {e}"))
-            })?;
-            if name == BODY_PART {
-                out.write_all(body.as_bytes())
-                    .map_err(|e| Error::new(ErrorKind::Processing, format!("docx body: {e}")))?;
-            } else if let Some(redacted) = self.replacements.get(&name) {
-                out.write_all(redacted).map_err(|e| {
-                    Error::new(ErrorKind::Processing, format!("docx media {name}: {e}"))
-                })?;
-            } else {
-                let mut buf = Vec::with_capacity(entry.size() as usize);
-                entry.read_to_end(&mut buf).map_err(|e| {
-                    Error::new(ErrorKind::Processing, format!("docx read {name}: {e}"))
-                })?;
-                out.write_all(&buf).map_err(|e| {
-                    Error::new(ErrorKind::Processing, format!("docx copy {name}: {e}"))
-                })?;
-            }
-        }
-
-        let cursor = out
-            .finish()
-            .map_err(|e| Error::new(ErrorKind::Processing, format!("docx finalize: {e}")))?;
-        Ok(ContentData::new(Bytes::from(cursor.into_inner())))
+        let out = elide_docx::Docx::open(&self.archive)
+            .and_then(|docx| docx.rewrite_with_parts(&text_replacements, &media))
+            .map_err(docx_error)?;
+        Ok(ContentData::new(Bytes::from(out)))
     }
 
     fn as_container_mut(&mut self) -> Option<&mut dyn Container> {
@@ -125,43 +114,66 @@ impl Encoder for DocxEncoder {
 
 impl Container for DocxEncoder {
     fn parts(&self) -> Vec<Part> {
-        let Ok(mut zip) = ZipArchive::new(Cursor::new(self.archive.as_ref())) else {
-            return Vec::new();
-        };
-        let mut parts = Vec::new();
-        for i in 0..zip.len() {
-            let Ok(mut entry) = zip.by_index(i) else {
-                continue;
-            };
-            let name = entry.name().to_owned();
-            if !name.starts_with(MEDIA_PREFIX) {
-                continue;
-            }
-            let mut buf = Vec::with_capacity(entry.size() as usize);
-            if entry.read_to_end(&mut buf).is_err() {
-                continue;
-            }
-            let hint = name
-                .rsplit_once('.')
-                .map(|(_, e)| e.to_owned())
-                .unwrap_or_default();
-            parts.push(Part {
-                id: name.into(),
-                bytes: Bytes::from(buf),
-                hint,
-            });
-        }
-        parts
+        // Surface every binary embedding the engine classifies — images
+        // (`word/media/`), embedded objects (`word/embeddings/`), and fonts
+        // (`word/fonts/`) — from the set cached at decode.
+        self.embeddings
+            .iter()
+            .map(|embedding| {
+                let name = embedding.part.as_str().to_owned();
+                let hint = name
+                    .rsplit_once('.')
+                    .map(|(_, e)| e.to_owned())
+                    .unwrap_or_default();
+                Part {
+                    id: name.into(),
+                    bytes: embedding.bytes.clone(),
+                    hint,
+                }
+            })
+            .collect()
     }
 
     fn replace_part(&mut self, id: &PartId, bytes: Bytes) -> Result<()> {
-        if !id.as_str().starts_with(MEDIA_PREFIX) {
+        // Reject anything that isn't a binary embedding so a caller can't
+        // smuggle bytes into a text/structure part through this surface.
+        let is_embedding = PartPath::new(id.as_str().to_owned())
+            .kind()
+            .embedding()
+            .is_some();
+        if !is_embedding {
             return Err(Error::new(
                 ErrorKind::MalformedInput,
-                format!("docx replace_part: `{id}` is not a media part"),
+                format!("docx replace_part: `{id}` is not an embedded media part"),
+            ));
+        }
+        // And reject ids that name no embedding the document actually carries,
+        // validated against the set cached at decode — an unknown id must not
+        // be silently stored and dropped on rewrite.
+        let is_known = self
+            .embeddings
+            .iter()
+            .any(|embedding| embedding.part.as_str() == id.as_str());
+        if !is_known {
+            return Err(Error::new(
+                ErrorKind::MalformedInput,
+                format!("docx replace_part: `{id}` is not a known embedded media part"),
             ));
         }
         self.replacements.insert(id.as_str().to_owned(), bytes);
         Ok(())
     }
+}
+
+/// Map an [`elide_docx`] error into the codec's error type.
+pub(super) fn docx_error(err: elide_docx::Error) -> Error {
+    use elide_docx::ErrorKind as DocxKind;
+    let kind = match err.kind() {
+        DocxKind::InvalidArchive | DocxKind::InvalidPackage | DocxKind::InvalidXml => {
+            ErrorKind::MalformedInput
+        }
+        DocxKind::UnsafeRewrite => ErrorKind::Processing,
+        _ => ErrorKind::Processing,
+    };
+    Error::new(kind, err.to_string())
 }

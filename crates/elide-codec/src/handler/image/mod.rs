@@ -12,9 +12,9 @@
 //! [`ImageReplacement`]: elide_core::modality::image::ImageReplacement
 
 pub(crate) mod macros;
-// Redaction painting is only reached through the format handlers; without
-// any image format enabled (e.g. `pdf-render` pulling `internal_image` just
-// for `encode_image`), it has no caller.
+// Redaction painting is only reached through the format handlers; a build that
+// pulls `internal_image` without any concrete image format (e.g. `pdf-render`,
+// which decodes/redacts a PDF's embedded images) has no caller.
 #[cfg(any(feature = "png", feature = "jpeg", feature = "tiff"))]
 pub(crate) mod redact;
 

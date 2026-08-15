@@ -15,7 +15,12 @@ db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 unmaintained = "all"
 yanked = "deny"
-ignore = []
+ignore = [
+    # `paste` is unmaintained (no vulnerability). It is a deep transitive dep
+    # of `image` (image -> exr -> pulp -> paste) with no workspace-level
+    # control; nothing to act on until the upstream image stack drops it.
+    "RUSTSEC-2024-0436",
+]
 
 [licenses]
 confidence-threshold = 0.8

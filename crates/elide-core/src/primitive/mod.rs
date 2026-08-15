@@ -33,5 +33,5 @@ pub use self::language::{
     Language, LanguageProvenance, LanguageSpan, LanguageTag, Languages, LocalizedText,
 };
 pub use self::region::CountryCode;
-pub use self::rendering::{Color, Dpi, OcrMode};
+pub use self::rendering::{Color, Dpi, RasterMode};
 pub use self::time::TimeSpan;

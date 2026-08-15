@@ -208,5 +208,13 @@ name = "e2e_png"
 required-features = ["codec-png", "ocr", "mock", "serde"]
 
 [[test]]
+name = "e2e_pdf"
+required-features = ["codec-pdf", "mock", "serde"]
+
+[[test]]
+name = "e2e_pdf_raster"
+required-features = ["codec-pdf-render", "mock", "serde"]
+
+[[test]]
 name = "audit"
 required-features = ["serde"]
