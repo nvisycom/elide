@@ -5,7 +5,7 @@
 
 mod fixtures;
 
-use elide_core::entity::audit::{Attribution, AuditKind, RuleMatch};
+use elide_core::entity::audit::{Attribution, AttributionKind, AuditKind, RuleMatch};
 use elide_core::entity::{EntityCoRef, Label, LabelCatalog, LabelRef};
 use elide_core::modality::text::Text;
 use elide_core::primitive::{Confidence, ConfidenceThreshold};
@@ -13,8 +13,6 @@ use elide_core::recognition::Scope;
 use elide_operator::operators::{Erase, Keep, Mask, Replace};
 use elide_redaction::{Anonymizer, Rule};
 use fixtures::{TextDoc, anonymize_one, entity, entity_conf};
-
-// --- label / tag / predicate / fallback resolution ------------------------
 
 #[tokio::test]
 async fn anonymize_resolves_label_to_operator_with_fallback() {
@@ -212,8 +210,6 @@ async fn anonymize_first_matching_rule_wins() {
     assert_eq!(out, "[FIRST]");
 }
 
-// --- provenance / attribution --------------------------------------------
-
 #[tokio::test]
 async fn anonymize_records_redaction_provenance_with_rule_and_attribution() {
     let mut doc = TextDoc("a@b.com here".to_owned());
@@ -222,7 +218,7 @@ async fn anonymize_records_redaction_provenance_with_rule_and_attribution() {
     Anonymizer::<Text>::new()
         .with(
             Rule::label(LabelRef::new("EMAIL_ADDRESS"), Replace::new("[X]"))
-                .because(Attribution::new("gdpr-art-17").with_description("right to erasure")),
+                .because(Attribution::freeform("gdpr-art-17").with_description("right to erasure")),
         )
         .anonymize(&mut doc, &mut entities, &Scope::default())
         .await
@@ -250,8 +246,11 @@ async fn anonymize_records_redaction_provenance_with_rule_and_attribution() {
     assert_eq!(matched_by, RuleMatch::Label(LabelRef::new("EMAIL_ADDRESS")));
     // Author why: the attribution the rule carried.
     let attribution = attribution.expect("attribution recorded");
-    assert_eq!(attribution.name, "gdpr-art-17");
-    assert_eq!(attribution.description.as_deref(), Some("right to erasure"));
+    let AttributionKind::Freeform { name, description } = attribution.kind else {
+        panic!("expected a freeform attribution");
+    };
+    assert_eq!(name, "gdpr-art-17");
+    assert_eq!(description.as_deref(), Some("right to erasure"));
 }
 
 #[tokio::test]
@@ -307,6 +306,53 @@ async fn because_accepts_a_bare_name() {
             _ => None,
         })
         .expect("attribution recorded");
-    assert_eq!(attribution.name, "pci-dss-3.4");
-    assert!(attribution.description.is_none());
+    // A bare name builds a freeform attribution with no description.
+    let AttributionKind::Freeform { name, description } = attribution.kind else {
+        panic!("a bare name builds a freeform attribution");
+    };
+    assert_eq!(name, "pci-dss-3.4");
+    assert!(description.is_none());
+}
+
+#[tokio::test]
+async fn because_records_a_cited_attribution_with_a_source_id() {
+    use uuid::Uuid;
+
+    let mut doc = TextDoc("a@b.com".to_owned());
+    let mut entities = vec![entity("EMAIL_ADDRESS", (0, 7))];
+
+    let source = Uuid::now_v7();
+    Anonymizer::<Text>::new()
+        .with(
+            Rule::label(LabelRef::new("EMAIL_ADDRESS"), Replace::new("[X]")).because(
+                Attribution::cited("GDPR", "Art. 17(1)", "data subject requested erasure")
+                    .with_source_id(source),
+            ),
+        )
+        .anonymize(&mut doc, &mut entities, &Scope::default())
+        .await
+        .unwrap();
+
+    let attribution = entities[0]
+        .audit
+        .events()
+        .iter()
+        .find_map(|e| match &e.kind {
+            AuditKind::Redaction { attribution, .. } => attribution.clone(),
+            _ => None,
+        })
+        .expect("attribution recorded");
+
+    assert_eq!(attribution.source_id, Some(source));
+    let AttributionKind::Cited {
+        authority,
+        citation,
+        rationale,
+    } = attribution.kind
+    else {
+        panic!("expected a cited attribution");
+    };
+    assert_eq!(authority, "GDPR");
+    assert_eq!(citation, "Art. 17(1)");
+    assert_eq!(rationale, "data subject requested erasure");
 }

@@ -276,13 +276,13 @@ impl<M: Modality> AuditEvent<M> {
 
 /// Append a length-prefixed byte string, so concatenated fields cannot be
 /// confused across a boundary (e.g. `"ab" + "c"` differs from `"a" + "bc"`).
-fn put_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
+pub(super) fn put_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
     out.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
     out.extend_from_slice(bytes);
 }
 
 /// Append an optional byte string: a presence byte, then the value if present.
-fn put_opt(out: &mut Vec<u8>, value: Option<&[u8]>) {
+pub(super) fn put_opt(out: &mut Vec<u8>, value: Option<&[u8]>) {
     match value {
         Some(bytes) => {
             out.push(1);
@@ -375,8 +375,7 @@ impl<M: Modality> AuditKind<M> {
                 match attribution {
                     Some(attribution) => {
                         out.push(1);
-                        put_bytes(out, attribution.name.as_bytes());
-                        put_opt(out, attribution.description.as_ref().map(|s| s.as_bytes()));
+                        attribution.hash(out);
                     }
                     None => out.push(0),
                 }

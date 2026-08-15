@@ -146,8 +146,6 @@ mod tests {
         entity.audit.events().iter().any(|e| f(&e.kind))
     }
 
-    // --- fusion (SameLabel + Merging) ---
-
     /// Same-label overlapping findings merge into one entity spanning their
     /// union, with the pooled confidence.
     #[test]
@@ -179,8 +177,6 @@ mod tests {
         let out = ReconcileLayer::same_label(Merging::max()).apply(entities);
         assert_eq!(out.kept.len(), 2);
     }
-
-    // --- resolution (CrossLabel + Structural) ---
 
     fn structural() -> ReconcileLayer<CrossLabel, Structural> {
         ReconcileLayer::cross_label(Structural::default())

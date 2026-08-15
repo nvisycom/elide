@@ -121,7 +121,7 @@ impl<M: Modality> Anonymizer<M> {
     /// reviewer traces back to "which rule fired".
     ///
     /// ```ignore
-    /// let attr = Attribution::new("hipaa-safe-harbor");
+    /// let attr = Attribution::freeform("hipaa-safe-harbor");
     /// Anonymizer::new().with_multiple([
     ///     Rule::label(DATE_OF_BIRTH, GeneralizeDate::new(Year)).because(attr.clone()),
     ///     Rule::label(AGE, Clamp::new().with_ceiling(90.0, "90 or older")).because(attr.clone()),

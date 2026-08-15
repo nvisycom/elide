@@ -15,8 +15,6 @@ use elide_operator::operators::{Erase, Replace};
 use elide_redaction::{Anonymizer, Rule};
 use fixtures::{TextDoc, entity};
 
-// --- clustering & overlap -------------------------------------------------
-
 /// Disjoint entities each redact separately — the baseline behaviour.
 #[tokio::test]
 async fn disjoint_entities_redact_separately() {
