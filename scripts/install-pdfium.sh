@@ -42,16 +42,18 @@ PDFIUM_TAG="chromium/7999"
 BASE_URL="https://github.com/bblanchon/pdfium-binaries/releases/download/${PDFIUM_TAG}"
 URL="${BASE_URL}/pdfium-${PLATFORM}.tgz"
 
-# Expected SHA-256 of each pinned `pdfium-${PLATFORM}.tgz` for ${PDFIUM_TAG}.
+# Expected SHA-256 of the pinned `pdfium-${PLATFORM}.tgz` for ${PDFIUM_TAG}.
 # When bumping PDFIUM_TAG, recompute these (e.g. `sha256sum pdfium-<platform>.tgz`
-# for each downloaded archive). An empty value means the platform is not pinned
-# and installation is refused for it.
-declare -A PDFIUM_SHA256=(
-	[linux-x64]="c3af580f9df0fef9545b44115bc5ea440f286956b5f231df69fb373b8efc4f69"
-	[linux-arm64]="a19862a36e2b2da3c3fb43f0deef45fbbc331f58cd47943782ae4bd9db4c66d9"
-	[mac-x64]="4b924d948d2ec4863435d375a94541b4003c59f8adc28cc5e4236b0ab81a355d"
-	[mac-arm64]="e214ee33f22b2204daa765a545aee1e425d88448e6154dac95c6a06206b7437f"
-)
+# for each downloaded archive). A `case` — not a `declare -A` associative array —
+# so this runs under macOS's system Bash 3.2. An unlisted platform yields an
+# empty value and installation is refused for it.
+case "$PLATFORM" in
+	linux-x64) EXPECTED_SHA="c3af580f9df0fef9545b44115bc5ea440f286956b5f231df69fb373b8efc4f69" ;;
+	linux-arm64) EXPECTED_SHA="a19862a36e2b2da3c3fb43f0deef45fbbc331f58cd47943782ae4bd9db4c66d9" ;;
+	mac-x64) EXPECTED_SHA="4b924d948d2ec4863435d375a94541b4003c59f8adc28cc5e4236b0ab81a355d" ;;
+	mac-arm64) EXPECTED_SHA="e214ee33f22b2204daa765a545aee1e425d88448e6154dac95c6a06206b7437f" ;;
+	*) EXPECTED_SHA="" ;;
+esac
 
 # Library filename and install dir differ per OS: Linux ships libpdfium.so
 # and refreshes the loader cache with ldconfig; macOS ships libpdfium.dylib
@@ -72,7 +74,6 @@ curl -fsSL "$URL" -o "$ARCHIVE"
 # Verify the download against the pinned checksum. A missing expected value
 # means the platform is not pinned yet; fail closed rather than install an
 # unverified binary.
-EXPECTED_SHA="${PDFIUM_SHA256[$PLATFORM]:-}"
 if [ -z "$EXPECTED_SHA" ]; then
 	echo "no pinned sha256 for platform '${PLATFORM}' at ${PDFIUM_TAG}; refusing to install an unverified binary" >&2
 	exit 1
