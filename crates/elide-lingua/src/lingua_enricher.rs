@@ -13,7 +13,7 @@
 //! [`lingua`]: https://crates.io/crates/lingua
 
 use elide_core::Result;
-use elide_core::modality::text::{Text, TextData};
+use elide_core::modality::TextRecognizable;
 use elide_core::primitive::LanguageTag;
 use elide_core::recognition::{Enricher, RecognizerContext};
 
@@ -69,14 +69,21 @@ impl Default for LinguaEnricher {
     }
 }
 
+/// Detects language over any [`TextRecognizable`] modality — `Text` and
+/// `Tabular` project their payload as text identically, and an audio transcript
+/// is read from the call's artifacts — so the same enricher scopes a text,
+/// tabular (CSV/XLSX), or transcript pipeline to its detected language.
 #[async_trait::async_trait]
-impl Enricher<Text> for LinguaEnricher {
-    async fn enrich(&self, data: &TextData, ctx: &mut RecognizerContext<'_, Text>) -> Result<()> {
+impl<M: TextRecognizable> Enricher<M> for LinguaEnricher {
+    async fn enrich(&self, data: &M::Data, ctx: &mut RecognizerContext<'_, M>) -> Result<()> {
         // A caller-asserted language is authoritative; skip detection.
         if ctx.has_asserted_language() {
             return Ok(());
         }
-        for detection in self.detector().detect(data.text.as_str())? {
+        // Detect into an owned list first so the immutable borrow of the payload
+        // text ends before `detect_language` takes `&mut ctx`.
+        let detections = self.detector().detect(M::as_text(data, &ctx.artifacts))?;
+        for detection in detections {
             ctx.detect_language(detection);
         }
         Ok(())
@@ -85,7 +92,8 @@ impl Enricher<Text> for LinguaEnricher {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::modality::text::TextData;
+    use elide_core::modality::tabular::Tabular;
+    use elide_core::modality::text::{Text, TextData};
     use elide_core::primitive::Language;
     use elide_core::recognition::Scope;
 
@@ -95,7 +103,21 @@ mod tests {
     async fn detects_english_onto_input() {
         let data = TextData::new("The quick brown fox jumps over the lazy dog.");
         let scope = Scope::new();
-        let mut ctx = RecognizerContext::new(&scope);
+        let mut ctx = RecognizerContext::<Text>::new(&scope);
+        LinguaEnricher::unrestricted()
+            .enrich(&data, &mut ctx)
+            .await
+            .unwrap();
+        assert_eq!(ctx.primary_language().unwrap().primary_language(), "en");
+    }
+
+    #[tokio::test]
+    async fn detects_onto_a_tabular_payload() {
+        // Tabular cells are text, so the same enricher scopes a CSV/XLSX
+        // pipeline to its detected language.
+        let data = TextData::new("The quick brown fox jumps over the lazy dog.");
+        let scope = Scope::new();
+        let mut ctx = RecognizerContext::<Tabular>::new(&scope);
         LinguaEnricher::unrestricted()
             .enrich(&data, &mut ctx)
             .await
@@ -108,7 +130,7 @@ mod tests {
         let de: LanguageTag = "de".parse().unwrap();
         let data = TextData::new("The quick brown fox");
         let scope = Scope::new().with_language(Language::asserted(de));
-        let mut ctx = RecognizerContext::new(&scope);
+        let mut ctx = RecognizerContext::<Text>::new(&scope);
         LinguaEnricher::unrestricted()
             .enrich(&data, &mut ctx)
             .await

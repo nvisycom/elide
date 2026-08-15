@@ -36,5 +36,8 @@ tracing = { workspace = true, features = [] }
 lingua = { workspace = true, features = [] }
 
 [dev-dependencies]
+# Internal crates
+elide-core = { workspace = true, features = ["serde", "tabular"] }
+
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["macros", "rt"] }
