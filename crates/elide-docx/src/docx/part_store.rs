@@ -10,7 +10,7 @@ use quick_xml::Reader;
 use quick_xml::escape::{partial_escape, unescape};
 use quick_xml::events::Event;
 
-use crate::block::{Block, IssueKind, Replacement};
+use crate::block::{Block, IssueKind, OffsetMap, OffsetRun, Replacement};
 use crate::error::{Error, Result};
 use crate::part::{PartKind, PartPath};
 
@@ -75,17 +75,27 @@ impl StoredPart {
         let raw = self.as_text()?;
         let mut blocks = Vec::new();
         for (span, kind) in text_spans(raw).map_err(|_| IssueKind::MalformedXml)? {
-            let text: Cow<'_, str> = match kind {
+            let (text, offsets): (Cow<'_, str>, OffsetMap) = match kind {
                 BlockKind::Text => {
-                    unescape(&raw[span.clone()]).map_err(|_| IssueKind::MalformedXml)?
+                    let decoded =
+                        unescape(&raw[span.clone()]).map_err(|_| IssueKind::MalformedXml)?;
+                    let offsets = offset_map(&raw[span.clone()], span.start)
+                        .map_err(|_| IssueKind::MalformedXml)?;
+                    (decoded, offsets)
                 }
-                BlockKind::Comment | BlockKind::Cdata => Cow::Borrowed(&raw[span.clone()]),
+                // A comment or CDATA body is byte-identical to its raw source, so
+                // the map is a single identity run over the whole span.
+                BlockKind::Comment | BlockKind::Cdata => (
+                    Cow::Borrowed(&raw[span.clone()]),
+                    OffsetMap::identity(span.start, span.len()),
+                ),
             };
             blocks.push(Block {
                 part: self.path.clone(),
                 text: HipStr::from(text).into_owned(),
                 start: span.start,
                 end: span.end,
+                offsets,
             });
         }
         Ok(blocks)
@@ -149,6 +159,67 @@ impl StoredPart {
         out.push_str(&raw[cursor..]);
         Ok(out)
     }
+}
+
+/// Build the decoded-to-raw [`OffsetMap`] for a `Text` span whose raw bytes are
+/// `slice` and whose part-absolute start is `base`.
+///
+/// The map interleaves identity stretches — where decoded and raw advance
+/// one-for-one — with an atomic entity run per `&...;`. Each entity is unescaped
+/// on its own to learn its decoded length (numeric refs `&#38;`/`&#x26;` and
+/// named refs alike), which is how much of the decoded text the whole raw
+/// reference stands for. Errs on an entity `unescape` rejects, matching the
+/// whole-span decode.
+fn offset_map(slice: &str, base: usize) -> std::result::Result<OffsetMap, ()> {
+    let bytes = slice.as_bytes();
+    let mut runs = Vec::new();
+    let mut raw = 0usize; // slice-local raw cursor past the last entity
+    let mut decoded = 0usize; // block-local decoded cursor past the last entity
+
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] != b'&' {
+            i += 1;
+            continue;
+        }
+        // Find this entity's terminating `;`; a `&` with no `;` is literal text
+        // (unescape leaves it untouched), so it stays inside the current run.
+        let Some(semi_rel) = slice[i + 1..].find(';') else {
+            i += 1;
+            continue;
+        };
+        let end = i + 1 + semi_rel + 1;
+        let token = &slice[i..end];
+        let entity_decoded = unescape(token).map_err(|_| ())?;
+
+        // Close the identity stretch up to the entity, emit the atomic entity
+        // run, then step both cursors past it.
+        let identity_len = i - raw;
+        if identity_len > 0 {
+            runs.push(OffsetRun::identity(
+                decoded..decoded + identity_len,
+                base + raw..base + i,
+            ));
+            decoded += identity_len;
+        }
+        runs.push(OffsetRun::entity(
+            decoded..decoded + entity_decoded.len(),
+            base + i..base + end,
+        ));
+        decoded += entity_decoded.len();
+        raw = end;
+        i = end;
+    }
+
+    // Flush the trailing identity stretch past the last entity.
+    if raw < bytes.len() {
+        let identity_len = bytes.len() - raw;
+        runs.push(OffsetRun::identity(
+            decoded..decoded + identity_len,
+            base + raw..base + bytes.len(),
+        ));
+    }
+    Ok(OffsetMap::new(runs))
 }
 
 /// The text/comment/CDATA spans of `raw`, each with its inner byte range
@@ -253,4 +324,65 @@ fn strip(span: Range<usize>, open: &str, close: &str) -> Option<Range<usize>> {
     let start = span.start.checked_add(open.len())?;
     let end = span.end.checked_sub(close.len())?;
     (start <= end).then_some(start..end)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identity_slice_is_a_single_run() {
+        let map = offset_map("Alice Bob", 0).unwrap();
+        assert_eq!(map.runs(), &[OffsetRun::identity(0..9, 0..9)]);
+    }
+
+    #[test]
+    fn a_named_entity_becomes_an_atomic_run_between_identity_runs() {
+        // "Alice &amp; Bob" (15 raw bytes) decodes to "Alice & Bob" (11 bytes).
+        let slice = "Alice &amp; Bob";
+        let map = offset_map(slice, 0).unwrap();
+        assert_eq!(
+            map.runs(),
+            &[
+                OffsetRun::identity(0..6, 0..6),
+                OffsetRun::entity(6..7, 6..11),
+                OffsetRun::identity(7..11, 11..15),
+            ]
+        );
+        // The whole decoded text maps back to the full raw slice incl. `&amp;`,
+        // as one contiguous range.
+        assert_eq!(map.raw_ranges(0..11), vec![0..15]);
+        // A base offset is folded straight into the raw ranges.
+        let based = offset_map(slice, 100).unwrap();
+        assert_eq!(based.raw_ranges(0..11), vec![100..115]);
+    }
+
+    #[test]
+    fn numeric_and_hex_char_refs_map_like_named_ones() {
+        // `&#38;` and `&#x26;` both decode to `&` (1 byte) but are 5 / 6 raw
+        // bytes; the whole decoded text maps back to the full raw slice.
+        let dec = offset_map("A&#38;B", 0).unwrap();
+        assert_eq!(dec.raw_ranges(0..3), vec![0..7]);
+        // Just the decoded `&` (offset 1) maps to the entity's raw bytes.
+        assert_eq!(dec.raw_ranges(1..2), vec![1..6]);
+        let hex = offset_map("A&#x26;B", 0).unwrap();
+        assert_eq!(hex.raw_ranges(0..3), vec![0..8]);
+        assert_eq!(hex.raw_ranges(1..2), vec![1..7]);
+    }
+
+    #[test]
+    fn a_bare_ampersand_without_semicolon_stays_in_one_run() {
+        // Not an entity reference, so decoded and raw stay identical throughout.
+        let map = offset_map("a & b", 0).unwrap();
+        assert_eq!(map.runs(), &[OffsetRun::identity(0..5, 0..5)]);
+    }
+
+    #[test]
+    fn a_range_crossing_one_entity_pulls_its_whole_raw() {
+        // Decoded "e & B" straddles the entity in "Alice &amp; Bob".
+        let map = offset_map("Alice &amp; Bob", 0).unwrap();
+        // decoded "e"(4) .. " B"(9) → identity tail [4..6] + whole `&amp;`
+        // [6..11] + identity head [11..13], all contiguous → one range.
+        assert_eq!(map.raw_ranges(4..9), vec![4..13]);
+    }
 }

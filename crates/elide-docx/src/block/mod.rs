@@ -3,6 +3,7 @@
 //! [`PartReplacement`] applied on rewrite — each addressed by a typed
 //! [`PartPath`].
 
+mod offset;
 mod replacement;
 
 use std::ops::Range;
@@ -12,6 +13,7 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+pub use self::offset::{OffsetMap, OffsetRun};
 pub use self::replacement::{PartReplacement, Replacement};
 use crate::part::{EmbeddingKind, PartPath};
 
@@ -48,6 +50,11 @@ pub struct Block {
     pub start: usize,
     /// End of the byte range (exclusive).
     pub end: usize,
+    /// The decoded-to-raw byte correspondence: how a byte offset into
+    /// [`text`](Block::text) maps back to a part-absolute raw byte range,
+    /// accounting for entity substitutions. Its raw offsets are absolute in the
+    /// part, so they line up with [`span`](Block::span).
+    pub offsets: OffsetMap,
 }
 
 impl Block {

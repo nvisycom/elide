@@ -78,20 +78,24 @@ pub(crate) trait Encoder: Send + Sync + 'static {
     /// Returns an error when the document cannot be re-serialized.
     fn encode(&self, items: &[ExtractedItem<Self::Address>]) -> Result<ContentData>;
 
-    /// The exact raw source byte range that `local` (a byte range within
+    /// The exact raw source byte range(s) that `local` (a byte range within
     /// `item`'s decoded value) came from, when the encoder addresses items by a
-    /// source span and its value is a verbatim source slice.
+    /// source span.
     ///
-    /// Returns `None` by default: an encoder whose address is not a source byte
-    /// span (an ordinal node index), or whose value is a decoded form, has no
-    /// exact source pre-image to offer. The markup encoders override this — their
-    /// value *is* the raw slice, so the mapping is an offset add.
+    /// Usually one range, but a decoded range that crosses an entity
+    /// substitution (a DOCX `&amp;`) maps back to several non-contiguous raw
+    /// runs, so the return is a `Vec`. Empty means the encoder has no exact
+    /// source pre-image to offer, the default: an address that is not a source
+    /// byte span (an ordinal node index) cannot map back. The markup encoders
+    /// return 0-or-1 — their value *is* the raw slice, so the mapping is an
+    /// offset add; the DOCX encoder returns 1-or-more via its per-block offset
+    /// map.
     fn source_span(
         &self,
         _item: &ExtractedItem<Self::Address>,
         _local: Range<usize>,
-    ) -> Option<SourceRef> {
-        None
+    ) -> Vec<SourceRef> {
+        Vec::new()
     }
 
     /// This encoder as a [`Container`] of cross-modality sub-parts, if the
@@ -213,12 +217,16 @@ impl<E: Encoder> Handler<Text> for ExtractHandler<E> {
         if start > end || end > chunk.location.range.end {
             return None;
         }
-        // The exact raw source range this finding came from, when the encoder
-        // can map it (markup, whose item value is a verbatim source slice).
-        let source = self.item_for(base).and_then(|i| {
-            self.encoder
-                .source_span(&self.items[i], local.range.start..local.range.end)
-        });
+        // The exact raw source range(s) this finding came from, when the encoder
+        // can map them (markup, whose item value is a verbatim source slice;
+        // DOCX, via its per-block offset map). Empty when it cannot.
+        let source = self
+            .item_for(base)
+            .map(|i| {
+                self.encoder
+                    .source_span(&self.items[i], local.range.start..local.range.end)
+            })
+            .unwrap_or_default();
         Some(
             TextLocation::new(start, end)
                 .with_page(chunk.location.page)

@@ -13,7 +13,7 @@ use elide_core::primitive::{Confidence, ConfidenceThreshold};
 use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId, Scope};
 
 mod fixtures;
-use fixtures::{Text, TextData, TextLocation};
+use fixtures::{SourceRef, Text, TextData, TextLocation};
 
 /// Builds an entity carrying one recognition event, the way a recognizer
 /// would.
@@ -31,6 +31,20 @@ fn detected(recognizer: &str, label: &str, loc: (usize, usize), conf: f32) -> En
         },
     );
     Entity::new(label, location, confidence, AuditLog::new(event))
+}
+
+/// Like [`detected`], but the location also carries a raw source reference — the
+/// pointer a source-mapping codec (markup, DOCX) attaches on lift.
+fn detected_with_source(
+    recognizer: &str,
+    label: &str,
+    loc: (usize, usize),
+    conf: f32,
+    source: SourceRef,
+) -> Entity<Text> {
+    let mut entity = detected(recognizer, label, loc, conf);
+    entity.location = entity.location.with_source([source]);
+    entity
 }
 
 /// A recognizer that just replays a fixed entity list.
@@ -92,6 +106,49 @@ async fn analyze_fuses_resolves_filters() {
         AuditKind::Deduplication { ref strategy } if strategy == "max"
     ));
     assert_eq!(phone.audit.final_confidence(), Some(phone.confidence));
+}
+
+#[tokio::test]
+async fn fusion_keeps_both_operands_source_refs() {
+    // Two overlapping detections of the same label, each carrying a distinct raw
+    // source reference (as a markup/DOCX codec would attach). Reconciliation
+    // fuses them; the surviving entity must keep *both* source refs, normalized
+    // — so a client can still point at every source run behind the fused span.
+    let a = Fixed(vec![detected_with_source(
+        "pattern",
+        "PHONE_NUMBER",
+        (10, 22),
+        0.8,
+        SourceRef::in_part(200..212, "word/document.xml"),
+    )]);
+    let b = Fixed(vec![detected_with_source(
+        "ner",
+        "PHONE_NUMBER",
+        (10, 23),
+        0.95,
+        SourceRef::in_part(300..313, "word/header1.xml"),
+    )]);
+
+    let analyzer = Analyzer::<Text>::new()
+        .with_recognizer(a)
+        .with_recognizer(b)
+        .with_layer(ReconcileLayer::same_label(Merging::max()));
+
+    let mut entities = analyzer
+        .analyze(TextData::new(""), &Scope::new())
+        .await
+        .unwrap();
+
+    assert_eq!(entities.len(), 1);
+    let phone = entities.pop().unwrap();
+    // Both source refs survive the fusion, in canonical (part-then-range) order.
+    assert_eq!(
+        phone.location.source,
+        vec![
+            SourceRef::in_part(200..212, "word/document.xml"),
+            SourceRef::in_part(300..313, "word/header1.xml"),
+        ]
+    );
 }
 
 #[tokio::test]

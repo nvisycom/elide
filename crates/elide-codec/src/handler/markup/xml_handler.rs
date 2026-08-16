@@ -67,15 +67,19 @@ impl Encoder for XmlEncoder {
         Ok(ContentData::new(out.into_bytes().into()))
     }
 
-    fn source_span(&self, item: &XmlItem, local: Range<usize>) -> Option<SourceRef> {
+    fn source_span(&self, item: &XmlItem, local: Range<usize>) -> Vec<SourceRef> {
         // The item's value is the verbatim source slice at its `XmlSpan`, so a
         // byte offset into the value is the same offset into the source span —
         // the mapping is a simple add, bounded by the span's end. Single file:
-        // no part.
+        // no part. At most one range: the value carries no entity to split on.
         let base = &item.address.0;
-        let start = base.start.checked_add(local.start)?;
-        let end = base.start.checked_add(local.end)?;
-        (start <= end && end <= base.end).then_some(SourceRef::new(start..end))
+        let mapped = base
+            .start
+            .checked_add(local.start)
+            .zip(base.start.checked_add(local.end))
+            .filter(|&(start, end)| start <= end && end <= base.end)
+            .map(|(start, end)| SourceRef::new(start..end));
+        mapped.into_iter().collect()
     }
 }
 

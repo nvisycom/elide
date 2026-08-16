@@ -6,7 +6,7 @@
 
 use elide_core::Result;
 use elide_core::modality::DataReader;
-pub use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
+pub use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation, TextReplacement};
 
 // The codec round-trip driver and its asserts need the codec + mock
 // features; gate them so the non-codec tests (`analyze`, `anonymize`)
