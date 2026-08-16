@@ -13,7 +13,7 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-pub use self::offset::{OffsetMap, OffsetRun};
+pub use self::offset::{OffsetMap, OffsetRun, RunKind};
 pub use self::replacement::{PartReplacement, Replacement};
 use crate::part::{EmbeddingKind, PartPath};
 

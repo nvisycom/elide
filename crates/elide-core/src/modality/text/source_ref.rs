@@ -61,9 +61,8 @@ impl SourceRef {
 
 /// Canonical total order: by part, then range start, then range end.
 /// `Range<usize>` is not `Ord`, so this is defined by hand rather than derived.
-/// It is the single source of truth [`normalize`](SourceRef::normalize) orders
-/// and dedups by, and that [`TextLocation`](super::TextLocation)'s hash folds in
-/// order.
+/// It is the single source of truth `normalize` orders and dedups by, and that
+/// [`TextLocation`](super::TextLocation)'s hash folds in order.
 impl Ord for SourceRef {
     fn cmp(&self, other: &Self) -> Ordering {
         self.part
