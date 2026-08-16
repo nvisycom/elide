@@ -80,11 +80,14 @@ pub(crate) fn build_items(raw: &str, config: MarkupConfig<'_>) -> Result<Vec<Xml
     // tags — is ignored until the *matching* close, so nested elements or a
     // stray end tag cannot leak the body or pop the skip early.
     let mut skip: Option<SkipRegion> = None;
-    let mut last = 0usize;
+    // quick-xml reports positions relative to the text *after* a leading BOM,
+    // but our spans index the original bytes, so shift every span past the BOM.
+    let bom = bom_len(raw);
+    let mut last = bom;
 
     loop {
         let event = reader.read_event().map_err(malformed)?;
-        let span = last..reader.buffer_position() as usize;
+        let span = last..reader.buffer_position() as usize + bom;
         last = span.end;
 
         // Inside a skipped subtree, only the skip element's *own* open/close
@@ -208,6 +211,13 @@ fn malformed(e: quick_xml::Error) -> Error {
     Error::new(ErrorKind::MalformedInput, format!("malformed markup: {e}"))
 }
 
+/// The byte length of a leading UTF-8 BOM (`U+FEFF`), or 0 if absent. quick-xml
+/// skips it and reports positions past it, so spans over the original bytes must
+/// add it back.
+fn bom_len(raw: &str) -> usize {
+    if raw.starts_with('\u{feff}') { 3 } else { 0 }
+}
+
 /// The start tag's lowercased local name (HTML is case-insensitive; lowercasing
 /// makes `<SCRIPT>` and `<P>` match too).
 fn local_name(e: &BytesStart<'_>) -> String {
@@ -323,6 +333,20 @@ mod tests {
             let h = load(raw).await;
             assert_eq!(encoded(&h), raw, "round-trip changed: {raw:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn a_leading_bom_does_not_shift_extracted_text() {
+        // quick-xml reports positions past a leading BOM; the extractor must add
+        // it back so the streamed text is exact (not shifted into garbage) and a
+        // recognizer can match it.
+        let raw = "\u{feff}<?xml version=\"1.0\"?><r>alice@example.com</r>";
+        let mut h = load(raw).await;
+        let vs = values(&mut h).await;
+        assert!(
+            vs.iter().any(|v| v == "alice@example.com"),
+            "BOM shifted the extracted text: {vs:?}"
+        );
     }
 
     #[tokio::test]

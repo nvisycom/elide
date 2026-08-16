@@ -1,6 +1,7 @@
 //! [`Docx`]: an opened DOCX package, extracted and rewritten in place.
 
 mod part_store;
+mod xml_span;
 
 use std::collections::HashMap;
 use std::io::{Cursor, Read, Write};
@@ -92,7 +93,7 @@ impl Docx {
         let mut issues = Vec::new();
 
         for part in &self.parts {
-            if part.kind().is_text() {
+            if part.kind().is_redactable() {
                 // Partial-success: a part that fails to parse yields no blocks
                 // and is recorded as an issue rather than failing the whole
                 // extraction.
@@ -166,7 +167,7 @@ impl Docx {
                     r.part
                 )));
             };
-            if !part.kind().is_text() {
+            if !part.kind().is_redactable() {
                 return Err(Error::unsafe_rewrite(format!(
                     "replacement names non-text part `{}`",
                     r.part

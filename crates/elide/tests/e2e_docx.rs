@@ -2,8 +2,14 @@
 //!
 //! A container format: the body XML is redacted as text and the embedded
 //! image is driven by the orchestrator's image pipeline (mock LLM, detects
-//! nothing), while the rest of the package (relationships, content-types)
-//! passes through unchanged.
+//! nothing), while the content-types manifest passes through unchanged.
+//!
+//! The fixture is shaped like a real generator (docx.js) output: its XML parts
+//! carry a leading UTF-8 BOM, so detection must find the body PII against the
+//! true byte offsets rather than shift off them; and its two emails live both
+//! in the body and as external hyperlink `mailto:` targets in
+//! `word/_rels/document.xml.rels`, so redaction must reach the targets in the
+//! relationships part, not just the body.
 
 mod fixtures;
 
@@ -20,6 +26,7 @@ const FIXTURE: Fixture = Fixture {
 
 const BODY_PART: &str = "word/document.xml";
 const IMAGE_PART: &str = "word/media/image1.png";
+const RELS_PART: &str = "word/_rels/document.xml.rels";
 
 #[tokio::test]
 async fn docx_detects_and_redacts() -> Result<()> {
@@ -65,17 +72,27 @@ async fn docx_detects_and_redacts() -> Result<()> {
         ],
     );
 
-    // The embedded image survives as a valid PNG, and the structural parts
-    // are still present.
+    // The two emails are also external hyperlink `mailto:` targets in the
+    // relationships part. Redaction must reach them there — the part survives,
+    // but the plaintext addresses are gone and the redaction token is in their
+    // place.
+    let rels = outcome
+        .part(RELS_PART)
+        .expect("relationships part must survive");
+    let rels = String::from_utf8(rels).expect("relationships XML is UTF-8");
+    assert_pii_removed(
+        &rels,
+        &["alice.johnson@example.com", "bob.smith@example.com"],
+    );
+    assert_tokens_present(&rels, &["[email_address]"]);
+
+    // The embedded image survives as a valid PNG, and the content-types
+    // manifest is still present.
     let image = outcome.part(IMAGE_PART).expect("image part present");
     assert_eq!(&image[..8], b"\x89PNG\r\n\x1a\n", "image part is not a PNG");
     assert!(
         outcome.part("[Content_Types].xml").is_some(),
         "content-types part must survive",
-    );
-    assert!(
-        outcome.part("word/_rels/document.xml.rels").is_some(),
-        "relationships part must survive",
     );
     Ok(())
 }
