@@ -43,7 +43,7 @@ async fn enhancer_boosts_matches_near_keyword_only() {
     // window and gets boosted by the Enhanced<PatternRecognizer> wrapper.
     let near = entities
         .iter()
-        .find(|e| &text[e.location.start..e.location.end] == "123-45-6789")
+        .find(|e| &text[e.location.range.start..e.location.range.end] == "123-45-6789")
         .expect("near match present");
     assert!(
         near.confidence.get() > 0.6,
@@ -60,7 +60,7 @@ async fn enhancer_boosts_matches_near_keyword_only() {
     // Second match is well outside the window → untouched.
     let far = entities
         .iter()
-        .find(|e| &text[e.location.start..e.location.end] == "987-65-4329")
+        .find(|e| &text[e.location.range.start..e.location.range.end] == "987-65-4329")
         .expect("far match present");
     assert!(
         (far.confidence.get() - 0.6).abs() < f32::EPSILON,

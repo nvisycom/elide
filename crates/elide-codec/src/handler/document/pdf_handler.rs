@@ -249,11 +249,8 @@ impl Handler<Text> for PdfHandler {
         }
         let page = &self.pages[self.cursor];
         let chunk = Chunk {
-            location: TextLocation {
-                start: page.start,
-                end: page.start + page.text.len(),
-                page: Some(page.number),
-            },
+            location: TextLocation::new(page.start, page.start + page.text.len())
+                .with_page(Some(page.number)),
             data: TextData::new(page.text.clone()),
             hints: Vec::new(),
         };
@@ -262,17 +259,15 @@ impl Handler<Text> for PdfHandler {
     }
 
     fn lift(&self, chunk: &Chunk<Text>, local: TextLocation) -> Option<TextLocation> {
-        let base = chunk.location.start;
-        let start = base + local.start;
-        let end = base + local.end;
-        if start > end || end > chunk.location.end {
+        let base = chunk.location.range.start;
+        let start = base + local.range.start;
+        let end = base + local.range.end;
+        if start > end || end > chunk.location.range.end {
             return None;
         }
-        Some(TextLocation {
-            start,
-            end,
-            page: chunk.location.page,
-        })
+        // PDF text has no flat source byte coordinate (glyph runs in content
+        // streams), so no source range is carried.
+        Some(TextLocation::new(start, end).with_page(chunk.location.page))
     }
 
     fn as_container_mut(&mut self) -> Option<&mut dyn Container> {
@@ -283,10 +278,10 @@ impl Handler<Text> for PdfHandler {
 #[async_trait::async_trait]
 impl DataReader<Text> for PdfHandler {
     async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
-        let Some((page, local)) = self.page_at(location.start) else {
+        let Some((page, local)) = self.page_at(location.range.start) else {
             return Ok(None);
         };
-        let Some(local_end) = location.end.checked_sub(page.start) else {
+        let Some(local_end) = location.range.end.checked_sub(page.start) else {
             return Ok(None);
         };
         Ok(page.text.get(local..local_end).map(TextData::new))
@@ -304,12 +299,13 @@ impl DataWriter<Text> for PdfHandler {
             // counts a mode needs are computed.
             let Some((page_idx, local, local_end)) =
                 self.pages.iter().enumerate().find_map(|(idx, page)| {
-                    if location.start < page.start || location.start >= page.start + page.text.len()
+                    if location.range.start < page.start
+                        || location.range.start >= page.start + page.text.len()
                     {
                         return None;
                     }
-                    let local = location.start - page.start;
-                    let local_end = location.end.checked_sub(page.start)?;
+                    let local = location.range.start - page.start;
+                    let local_end = location.range.end.checked_sub(page.start)?;
                     Some((idx, local, local_end))
                 })
             else {

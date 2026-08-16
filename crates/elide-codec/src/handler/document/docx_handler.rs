@@ -17,9 +17,9 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use bytes::Bytes;
-use elide_core::modality::text::Text;
+use elide_core::modality::text::{SourceRef, Text};
 use elide_core::{Error, ErrorKind, Result};
-use elide_docx::block::Embedding;
+use elide_docx::block::{Embedding, OffsetMap};
 use elide_docx::part::PartPath;
 
 use super::DocxLoader;
@@ -43,6 +43,9 @@ pub(crate) struct DocxAddress {
     pub(crate) part: PartPath,
     /// The block's byte span within the part's XML.
     pub(crate) span: Range<usize>,
+    /// The block's decoded-to-raw offset map, so a byte range into the decoded
+    /// value can be translated back to its exact raw source range(s).
+    pub(crate) offsets: OffsetMap,
 }
 
 /// [`Format`] descriptor registered into [`FormatRegistry`].
@@ -105,6 +108,23 @@ impl Encoder for DocxEncoder {
             .and_then(|docx| docx.rewrite_with_parts(&text_replacements, &media))
             .map_err(docx_error)?;
         Ok(ContentData::new(Bytes::from(out)))
+    }
+
+    fn source_span(
+        &self,
+        item: &ExtractedItem<DocxAddress>,
+        local: Range<usize>,
+    ) -> Vec<SourceRef> {
+        // Translate the decoded-value range back to its raw source range(s) via
+        // the block's offset map (already part-absolute), tagging each with the
+        // part it lives in. A range crossing an entity yields several runs.
+        let part = item.address.part.as_str();
+        item.address
+            .offsets
+            .raw_ranges(local)
+            .into_iter()
+            .map(|range| SourceRef::in_part(range, part))
+            .collect()
     }
 
     fn as_container_mut(&mut self) -> Option<&mut dyn Container> {
@@ -176,4 +196,118 @@ pub(super) fn docx_error(err: elide_docx::Error) -> Error {
         _ => ErrorKind::Processing,
     };
     Error::new(kind, err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Cursor, Write};
+
+    use elide_core::modality::text::{SourceRef, TextLocation};
+    use zip::write::SimpleFileOptions;
+    use zip::{CompressionMethod, ZipWriter};
+
+    use super::*;
+    use crate::content::ContentData;
+    use crate::handler::document::DocxLoader;
+    use crate::{Handler, Loader};
+
+    const BODY_PART: &str = "word/document.xml";
+
+    /// A minimal one-part `.docx` whose body carries `body_text` in a `w:t` run.
+    fn docx_with_body(body_text: &str) -> ContentData {
+        let body = format!(
+            r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>{body_text}</w:t></w:r></w:p></w:body></w:document>"#
+        );
+        let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
+        let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        let mut put = |name: &str, bytes: &[u8]| {
+            zip.start_file(name, opts).unwrap();
+            zip.write_all(bytes).unwrap();
+        };
+        put("[Content_Types].xml", br#"<?xml version="1.0"?><Types/>"#);
+        put("_rels/.rels", br#"<?xml version="1.0"?><Relationships/>"#);
+        put(BODY_PART, body.as_bytes());
+        ContentData::new(zip.finish().unwrap().into_inner().into())
+    }
+
+    /// Read chunks until the one whose decoded text equals `value`.
+    async fn chunk_for(
+        handler: &mut DocxHandler,
+        value: &str,
+    ) -> elide_core::modality::Chunk<Text> {
+        loop {
+            let chunk = handler.read_next().await.unwrap().unwrap();
+            if chunk.data.as_str() == value {
+                break chunk;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn source_span_maps_a_finding_across_an_entity_including_its_raw_bytes() {
+        // The body text is `Alice &amp; Bob`, decoded to `Alice & Bob`. A finding
+        // over the whole decoded text must point back at the raw bytes including
+        // the `&amp;` — one contiguous raw range, entity bytes and all.
+        let raw = r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Alice &amp; Bob</w:t></w:r></w:p></w:body></w:document>"#;
+        let mut handler = DocxLoader
+            .decode(docx_with_body("Alice &amp; Bob"))
+            .await
+            .unwrap();
+        let chunk = chunk_for(&mut handler, "Alice & Bob").await;
+
+        // Decoded "Alice & Bob" is 11 bytes; lift the whole value.
+        let lifted = handler
+            .lift(&chunk, TextLocation::new(0, 11))
+            .expect("in bounds");
+
+        let head = raw.find("Alice").unwrap();
+        let tail_end = raw.find("</w:t>").unwrap();
+        assert_eq!(
+            lifted.source,
+            vec![SourceRef::in_part(head..tail_end, BODY_PART)]
+        );
+        // The single range spans the entity: `&amp;` is inside it, not a hole.
+        assert_eq!(&raw[head..tail_end], "Alice &amp; Bob");
+    }
+
+    #[tokio::test]
+    async fn source_span_of_just_the_decoded_entity_char_is_the_entity_raw() {
+        // Redacting only the decoded `&` (offset 6..7) must point at all 5 raw
+        // bytes of `&amp;`, never an empty or partial range.
+        let raw = r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Alice &amp; Bob</w:t></w:r></w:p></w:body></w:document>"#;
+        let mut handler = DocxLoader
+            .decode(docx_with_body("Alice &amp; Bob"))
+            .await
+            .unwrap();
+        let chunk = chunk_for(&mut handler, "Alice & Bob").await;
+
+        let lifted = handler
+            .lift(&chunk, TextLocation::new(6, 7))
+            .expect("in bounds");
+        let amp = raw.find("&amp;").unwrap();
+        assert_eq!(
+            lifted.source,
+            vec![SourceRef::in_part(amp..amp + "&amp;".len(), BODY_PART)]
+        );
+    }
+
+    #[tokio::test]
+    async fn source_span_of_a_finding_before_the_entity_is_one_run() {
+        let raw = r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Alice &amp; Bob</w:t></w:r></w:p></w:body></w:document>"#;
+        let mut handler = DocxLoader
+            .decode(docx_with_body("Alice &amp; Bob"))
+            .await
+            .unwrap();
+        let chunk = chunk_for(&mut handler, "Alice & Bob").await;
+
+        // Decoded "Alice" is 0..5, wholly before the entity → a single raw run.
+        let lifted = handler
+            .lift(&chunk, TextLocation::new(0, 5))
+            .expect("in bounds");
+        let head = raw.find("Alice").unwrap();
+        assert_eq!(
+            lifted.source,
+            vec![SourceRef::in_part(head..head + 5, BODY_PART)]
+        );
+    }
 }

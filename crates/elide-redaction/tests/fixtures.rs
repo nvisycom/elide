@@ -21,7 +21,10 @@ pub struct TextDoc(pub String);
 #[async_trait::async_trait]
 impl DataReader<Text> for TextDoc {
     async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
-        Ok(self.0.get(location.start..location.end).map(TextData::new))
+        Ok(self
+            .0
+            .get(location.range.start..location.range.end)
+            .map(TextData::new))
     }
 }
 
@@ -34,7 +37,8 @@ impl DataWriter<Text> for TextDoc {
                 TextReplacement::Substituted(s) => s.as_str(),
                 TextReplacement::Removed => "",
             };
-            self.0.replace_range(location.start..location.end, value);
+            self.0
+                .replace_range(location.range.start..location.range.end, value);
         }
         Ok(())
     }

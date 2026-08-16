@@ -51,6 +51,7 @@ impl Loader<Text> for DocxLoader {
                 address: DocxAddress {
                     part: block.part,
                     span: block.start..block.end,
+                    offsets: block.offsets,
                 },
                 hints: Vec::new(),
             })

@@ -95,7 +95,7 @@ impl Prompt<Text> for Jinja2Prompt<Text> {
             .inclusions()
             .iter()
             .map(|h| {
-                let range = h.location.start..h.location.end;
+                let range = h.location.range.start..h.location.range.end;
                 let value = value_at(text, range.clone());
                 let snippet = snippet_around(text, range);
                 context! {
