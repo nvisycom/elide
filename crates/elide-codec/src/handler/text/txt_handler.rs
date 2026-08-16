@@ -68,11 +68,7 @@ impl Handler<Text> for TxtHandler {
         let line = &self.lines[i];
         self.cursor += 1;
         Ok(Some(Chunk {
-            location: TextLocation {
-                start,
-                end,
-                ..Default::default()
-            },
+            location: TextLocation::new(start, end),
             data: TextData::new(line.clone()),
             hints: Vec::new(),
         }))
@@ -82,33 +78,31 @@ impl Handler<Text> for TxtHandler {
         // TXT chunks are byte-for-byte slices of source, so lifting is an
         // identity offset add of the chunk-local range against the chunk's
         // start, bounded by its end.
-        let base = chunk.location.start;
-        let start = base + local.start;
-        let end = base + local.end;
-        if start > end || end > chunk.location.end {
+        let base = chunk.location.range.start;
+        let start = base + local.range.start;
+        let end = base + local.range.end;
+        if start > end || end > chunk.location.range.end {
             return None;
         }
-        Some(TextLocation {
-            start,
-            end,
-            page: chunk.location.page,
-        })
+        // Plain text: the decoded stream *is* the source, so `start`/`end`
+        // already address the source; no separate source range is carried.
+        Some(TextLocation::new(start, end).with_page(chunk.location.page))
     }
 }
 
 #[async_trait::async_trait]
 impl DataReader<Text> for TxtHandler {
     async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
-        let Some(i) = self.line_for(location.start) else {
+        let Some(i) = self.line_for(location.range.start) else {
             return Ok(None);
         };
         let line_start = self.line_starts[i];
         let line_end = self.line_starts[i + 1] - 1;
-        if location.end > line_end {
+        if location.range.end > line_end {
             return Ok(None); // crosses a line boundary
         }
-        let local_start = location.start - line_start;
-        let local_end = location.end - line_start;
+        let local_start = location.range.start - line_start;
+        let local_end = location.range.end - line_start;
         Ok(self.lines[i].get(local_start..local_end).map(TextData::new))
     }
 }
@@ -186,16 +180,16 @@ impl TxtHandler {
     }
 
     fn redact_one(&mut self, location: &TextLocation, replacement: &TextReplacement) -> Result<()> {
-        let Some(i) = self.line_for(location.start) else {
+        let Some(i) = self.line_for(location.range.start) else {
             return Ok(());
         };
         let line_start = self.line_starts[i];
         let line_end = self.line_starts[i + 1] - 1;
-        if location.end > line_end {
+        if location.range.end > line_end {
             return Ok(());
         }
-        let local_start = location.start - line_start;
-        let local_end = location.end - line_start;
+        let local_start = location.range.start - line_start;
+        let local_end = location.range.end - line_start;
         let value = replacement.value().unwrap_or_default();
         let before_len = self.lines[i].len();
         redact::replace_range(&mut self.lines[i], value, local_start..local_end)?;
@@ -230,12 +224,12 @@ mod tests {
     async fn stream_yields_each_line() -> Result<()> {
         let mut h = handler("hello\nworld\n");
         let first = h.read_next().await?.unwrap();
-        assert_eq!(first.location.start, 0);
-        assert_eq!(first.location.end, 5);
+        assert_eq!(first.location.range.start, 0);
+        assert_eq!(first.location.range.end, 5);
         assert_eq!(first.data.as_str(), "hello");
         let second = h.read_next().await?.unwrap();
-        assert_eq!(second.location.start, 6);
-        assert_eq!(second.location.end, 11);
+        assert_eq!(second.location.range.start, 6);
+        assert_eq!(second.location.range.end, 11);
         assert_eq!(second.data.as_str(), "world");
         assert!(h.read_next().await?.is_none());
         Ok(())
@@ -247,8 +241,8 @@ mod tests {
         let _first = h.read_next().await?.unwrap();
         let second = h.read_next().await?.unwrap();
         let lifted = h.lift(&second, TextLocation::new(1, 4)).expect("in bounds");
-        assert_eq!(lifted.start, 7);
-        assert_eq!(lifted.end, 10);
+        assert_eq!(lifted.range.start, 7);
+        assert_eq!(lifted.range.end, 10);
         Ok(())
     }
 
@@ -256,8 +250,7 @@ mod tests {
     async fn read_returns_line() -> Result<()> {
         let h = handler("hello\nworld\n");
         let loc = TextLocation {
-            start: 6,
-            end: 11,
+            range: 6..11,
             ..Default::default()
         };
         assert_eq!(h.read_at(&loc).await?.unwrap().as_str(), "world");
@@ -268,8 +261,7 @@ mod tests {
     async fn read_cross_line_returns_none() -> Result<()> {
         let h = handler("hello\nworld\n");
         let loc = TextLocation {
-            start: 3,
-            end: 8,
+            range: 3..8,
             ..Default::default()
         };
         assert!(h.read_at(&loc).await?.is_none());
@@ -282,8 +274,7 @@ mod tests {
         let mut rs = Redactions::new();
         rs.push(
             TextLocation {
-                start: 6,
-                end: 11,
+                range: 6..11,
                 ..Default::default()
             },
             TextReplacement::substituted("[REDACTED]"),
@@ -299,16 +290,14 @@ mod tests {
         let mut rs = Redactions::new();
         rs.push(
             TextLocation {
-                start: 12,
-                end: 19,
+                range: 12..19,
                 ..Default::default()
             },
             TextReplacement::substituted("[C]"),
         );
         rs.push(
             TextLocation {
-                start: 0,
-                end: 5,
+                range: 0..5,
                 ..Default::default()
             },
             TextReplacement::substituted("[A]"),
@@ -324,8 +313,7 @@ mod tests {
         let mut rs = Redactions::new();
         rs.push(
             TextLocation {
-                start: 999,
-                end: 1000,
+                range: 999..1000,
                 ..Default::default()
             },
             TextReplacement::substituted("nope"),
@@ -355,8 +343,7 @@ mod tests {
         let mut rs = Redactions::new();
         rs.push(
             TextLocation {
-                start: 0,
-                end: 5,
+                range: 0..5,
                 ..Default::default()
             },
             TextReplacement::substituted("[X]"),

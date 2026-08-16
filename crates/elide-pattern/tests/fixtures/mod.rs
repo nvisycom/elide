@@ -32,13 +32,16 @@ pub async fn scan(text: &str) -> (String, Vec<Entity<Text>>) {
 pub fn assert_match(text: &str, entities: &[Entity<Text>], label: LabelRef, needle: &str) {
     let hit = entities
         .iter()
-        .any(|e| e.label == label && &text[e.location.start..e.location.end] == needle);
+        .any(|e| e.label == label && &text[e.location.range.start..e.location.range.end] == needle);
     assert!(
         hit,
         "expected `{needle}` as {label:?}; got: {:?}",
         entities
             .iter()
-            .map(|e| (e.label.clone(), &text[e.location.start..e.location.end]))
+            .map(|e| (
+                e.label.clone(),
+                &text[e.location.range.start..e.location.range.end]
+            ))
             .collect::<Vec<_>>()
     );
 }

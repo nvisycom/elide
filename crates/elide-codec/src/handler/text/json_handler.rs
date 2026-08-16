@@ -120,11 +120,7 @@ impl Handler<Text> for JsonHandler {
             self.cursor += 1;
             if let Slot::Leaf(leaf) = slot {
                 return Ok(Some(Chunk {
-                    location: TextLocation {
-                        start,
-                        end: start + leaf.serialized.len(),
-                        ..Default::default()
-                    },
+                    location: TextLocation::new(start, start + leaf.serialized.len()),
                     data: TextData::new(leaf.value.clone()),
                     hints: leaf.hints.clone(),
                 }));
@@ -139,13 +135,11 @@ impl Handler<Text> for JsonHandler {
         // offset (a `\"` / `\\` pair is 2 source bytes for 1 value byte).
         let (idx, leaf) = self.find_leaf(&chunk.location)?;
         let slot_start = self.offset_of(idx);
-        let source_start = value_to_source_offset(leaf, slot_start, local.start)?;
-        let source_end = value_to_source_offset(leaf, slot_start, local.end)?;
-        Some(TextLocation {
-            start: source_start,
-            end: source_end,
-            page: chunk.location.page,
-        })
+        let source_start = value_to_source_offset(leaf, slot_start, local.range.start)?;
+        let source_end = value_to_source_offset(leaf, slot_start, local.range.end)?;
+        // `start`/`end` are already source offsets (mapped through the escape
+        // table above), so no separate source range is carried.
+        Some(TextLocation::new(source_start, source_end).with_page(chunk.location.page))
     }
 }
 
@@ -171,7 +165,7 @@ impl DataWriter<Text> for JsonHandler {
         let mut slot_offset = 0usize;
         let mut slot_iter = self.slots.iter().enumerate().peekable();
         let mut items: Vec<_> = redactions.into_iter().collect();
-        items.sort_by_key(|(loc, _)| loc.start);
+        items.sort_by_key(|(loc, _)| loc.range.start);
         for (loc, replacement) in items {
             // Advance the slot cursor to the slot containing `loc`. Slot
             // offsets are monotonic, so a single forward sweep resolves
@@ -182,10 +176,10 @@ impl DataWriter<Text> for JsonHandler {
                     Slot::Leaf(l) => l.serialized.len(),
                 };
                 let slot_end = slot_offset + len;
-                if loc.start < slot_end {
+                if loc.range.start < slot_end {
                     if let Slot::Leaf(leaf) = slot
                         && let Some((value_start, value_end)) =
-                            translate_to_value(leaf, slot_offset, loc.start..loc.end)
+                            translate_to_value(leaf, slot_offset, loc.range.start..loc.range.end)
                     {
                         let value = replacement.value().unwrap_or_default().to_owned();
                         plan.push((idx, value_start, value_end, value));
@@ -242,8 +236,8 @@ impl JsonHandler {
             };
             let slot_end = offset + len;
             if let Slot::Leaf(leaf) = slot
-                && location.start >= offset
-                && location.end <= slot_end
+                && location.range.start >= offset
+                && location.range.end <= slot_end
             {
                 return Some((idx, leaf));
             }
@@ -677,7 +671,7 @@ mod tests {
         let mut offsets = Vec::new();
         while let Some(c) = h.read_next().await? {
             if c.data.as_str() == "same" {
-                offsets.push(c.location.start);
+                offsets.push(c.location.range.start);
             }
         }
         assert_eq!(offsets.len(), 2);
@@ -852,8 +846,8 @@ mod tests {
             .lift(&chunk, TextLocation::new(value_start, value_end))
             .expect("range is in bounds");
         let expected_start = src.find("alice").unwrap();
-        assert_eq!(source_loc.start, expected_start);
-        assert_eq!(source_loc.end, expected_start + "alice".len());
+        assert_eq!(source_loc.range.start, expected_start);
+        assert_eq!(source_loc.range.end, expected_start + "alice".len());
         Ok(())
     }
 
@@ -875,8 +869,8 @@ mod tests {
             .lift(&chunk, TextLocation::new(value_start, value_end))
             .expect("range is in bounds");
         let expected_start = src.find("bar").unwrap();
-        assert_eq!(source_loc.start, expected_start);
-        assert_eq!(source_loc.end, expected_start + "bar".len());
+        assert_eq!(source_loc.range.start, expected_start);
+        assert_eq!(source_loc.range.end, expected_start + "bar".len());
         Ok(())
     }
 

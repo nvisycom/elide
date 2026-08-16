@@ -1,47 +1,76 @@
 //! [`TextLocation`]: a byte range within text content.
 
 use std::cmp::Ordering;
+use std::ops::Range;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use super::SourceRef;
 use crate::modality::{ModalityLocation, Overlap};
 
 /// Half-open `[start, end)` byte range within text content.
 ///
-/// Ordering and overlap consider only `(start, end)`; the optional page
-/// number is carried for codecs that page their text but does not affect
-/// comparison.
+/// Ordering and overlap consider only the `range`; the optional page number is
+/// carried for codecs that page their text but does not affect comparison.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TextLocation {
-    /// Byte offset where the range starts.
-    pub start: usize,
-    /// Byte offset where the range ends (exclusive).
-    pub end: usize,
+    /// Byte range within the (decoded) text content.
+    #[cfg_attr(feature = "schema", schemars(with = "Range<usize>"))]
+    pub range: Range<usize>,
     /// 1-based page number, when known.
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "Option::is_none")
     )]
     pub page: Option<u32>,
+    /// The exact raw source ranges this decoded span came from, for codecs whose
+    /// decoded text differs from the source (XML/HTML/DOCX, where entities are
+    /// decoded). Empty when the source equals the decoded text (plain text,
+    /// JSON, CSV) or has no byte-source coordinate (rendered/scanned formats).
+    ///
+    /// Usually one range; a reconciled span that fused several source runs (or a
+    /// span crossing an escape) carries several, kept distinct rather than merged
+    /// across gaps. Sorted, deduplicated.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Vec::is_empty")
+    )]
+    pub source: Vec<SourceRef>,
 }
 
 impl TextLocation {
-    /// Location covering `start..end`, page unset.
+    /// Location covering `start..end`, page unset and no source range.
     pub fn new(start: usize, end: usize) -> Self {
         Self {
-            start,
-            end,
+            range: start..end,
             page: None,
+            source: Vec::new(),
         }
     }
 
-    /// Byte length of the range (`end - start`).
+    /// Set the 1-based page number, consuming and returning `self`.
+    #[must_use]
+    pub fn with_page(mut self, page: Option<u32>) -> Self {
+        self.page = page;
+        self
+    }
+
+    /// Attach the exact raw source references, consuming and returning `self`.
+    /// Normalizes them (sorted, deduplicated).
+    #[must_use]
+    pub fn with_source(mut self, source: impl IntoIterator<Item = SourceRef>) -> Self {
+        self.source = source.into_iter().collect();
+        SourceRef::normalize(&mut self.source);
+        self
+    }
+
+    /// Byte length of the range.
     #[must_use]
     pub const fn len(&self) -> usize {
-        self.end.saturating_sub(self.start)
+        self.range.end.saturating_sub(self.range.start)
     }
 
     /// Whether the range is empty (zero length).
@@ -53,17 +82,18 @@ impl TextLocation {
 
 impl ModalityLocation for TextLocation {
     fn overlap(&self, other: &Self) -> Overlap {
-        if self.start >= other.end || other.start >= self.end {
+        let (a, b) = (&self.range, &other.range);
+        if a.start >= b.end || b.start >= a.end {
             return Overlap::Disjoint;
         }
-        if self.start <= other.start && other.end <= self.end {
+        if a.start <= b.start && b.end <= a.end {
             return Overlap::Contains;
         }
-        if other.start <= self.start && self.end <= other.end {
+        if b.start <= a.start && a.end <= b.end {
             return Overlap::ContainedBy;
         }
-        let inter = self.end.min(other.end) - self.start.max(other.start);
-        let union = self.end.max(other.end) - self.start.min(other.start);
+        let inter = a.end.min(b.end) - a.start.max(b.start);
+        let union = a.end.max(b.end) - a.start.min(b.start);
         Overlap::Crossing {
             iou: inter as f32 / union as f32,
         }
@@ -74,10 +104,17 @@ impl ModalityLocation for TextLocation {
         if self.page != other.page {
             return None;
         }
+        // The fused decoded span covers both operands' source ranges. Keep them
+        // as distinct ranges — merged runs and escape-split spans are genuinely
+        // non-contiguous in the raw bytes — normalized so the result is
+        // order-independent.
+        let mut source = self.source.clone();
+        source.extend_from_slice(&other.source);
+        SourceRef::normalize(&mut source);
         Some(Self {
-            start: self.start.min(other.start),
-            end: self.end.max(other.end),
+            range: self.range.start.min(other.range.start)..self.range.end.max(other.range.end),
             page: self.page,
+            source,
         })
     }
 
@@ -92,20 +129,37 @@ impl ModalityLocation for TextLocation {
         self.page
             .unwrap_or(0)
             .cmp(&other.page.unwrap_or(0))
-            .then(self.start.cmp(&other.start))
-            .then(self.end.cmp(&other.end))
+            .then(self.range.start.cmp(&other.range.start))
+            .then(self.range.end.cmp(&other.range.end))
     }
 
     fn hash(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(&(self.start as u64).to_le_bytes());
-        bytes.extend_from_slice(&(self.end as u64).to_le_bytes());
+        bytes.extend_from_slice(&(self.range.start as u64).to_le_bytes());
+        bytes.extend_from_slice(&(self.range.end as u64).to_le_bytes());
         match self.page {
             Some(page) => {
                 bytes.push(1);
                 bytes.extend_from_slice(&page.to_le_bytes());
             }
             None => bytes.push(0),
+        }
+        // Fold the raw source refs in (count, then each range and part), so
+        // tampering with the source pointer breaks the chain. `source` is
+        // normalized, so the byte sequence is stable regardless of how the refs
+        // were accumulated.
+        bytes.extend_from_slice(&(self.source.len() as u64).to_le_bytes());
+        for src in &self.source {
+            bytes.extend_from_slice(&(src.range.start as u64).to_le_bytes());
+            bytes.extend_from_slice(&(src.range.end as u64).to_le_bytes());
+            match &src.part {
+                Some(part) => {
+                    bytes.push(1);
+                    bytes.extend_from_slice(&(part.len() as u64).to_le_bytes());
+                    bytes.extend_from_slice(part.as_bytes());
+                }
+                None => bytes.push(0),
+            }
         }
         bytes
     }
@@ -130,16 +184,8 @@ mod tests {
 
     #[test]
     fn position_cmp_orders_pages_before_offsets() {
-        let early_page = TextLocation {
-            start: 100,
-            end: 110,
-            page: Some(1),
-        };
-        let late_page = TextLocation {
-            start: 0,
-            end: 5,
-            page: Some(2),
-        };
+        let early_page = TextLocation::new(100, 110).with_page(Some(1));
+        let late_page = TextLocation::new(0, 5).with_page(Some(2));
         // Page 1 sorts before page 2 even with a larger offset.
         assert_eq!(early_page.position_cmp(&late_page), Ordering::Less);
     }
@@ -166,23 +212,15 @@ mod tests {
         let a = TextLocation::new(0, 5);
         let b = TextLocation::new(3, 12);
         let u = a.union(&b).expect("same page");
-        assert_eq!((u.start, u.end), (0, 12));
+        assert_eq!(u.range, 0..12);
         // Reflexive.
         assert_eq!(a.union(&a), Some(a.clone()));
     }
 
     #[test]
     fn union_requires_same_page() {
-        let a = TextLocation {
-            start: 0,
-            end: 5,
-            page: Some(1),
-        };
-        let b = TextLocation {
-            start: 3,
-            end: 12,
-            page: Some(2),
-        };
+        let a = TextLocation::new(0, 5).with_page(Some(1));
+        let b = TextLocation::new(3, 12).with_page(Some(2));
         // A single byte range can't span two pages.
         assert_eq!(a.union(&b), None);
     }
@@ -195,5 +233,42 @@ mod tests {
         assert_eq!(long_early.position_cmp(&short_late), Ordering::Less);
         // ...but by extent it is the larger span.
         assert_eq!(long_early.span_cmp(&short_late), Ordering::Greater);
+    }
+
+    fn span(start: usize, end: usize) -> SourceRef {
+        SourceRef::new(start..end)
+    }
+
+    #[test]
+    fn with_source_normalizes_sorted_and_deduped() {
+        let loc = TextLocation::new(0, 10).with_source([span(5, 8), span(1, 3), span(5, 8)]);
+        // Sorted by start, exact duplicate dropped.
+        assert_eq!(loc.source, vec![span(1, 3), span(5, 8)]);
+    }
+
+    #[test]
+    fn union_concatenates_and_normalizes_source() {
+        let a = TextLocation::new(0, 5).with_source([span(10, 12)]);
+        let b = TextLocation::new(3, 9).with_source([span(2, 4), span(10, 12)]);
+        let u = a.union(&b).expect("same page");
+        // Non-contiguous source ranges kept distinct; the shared one deduped.
+        assert_eq!(u.source, vec![span(2, 4), span(10, 12)]);
+    }
+
+    #[test]
+    fn hash_covers_the_source_ranges() {
+        let bare = TextLocation::new(0, 5);
+        let with = TextLocation::new(0, 5).with_source([span(2, 4)]);
+        // Same decoded span, different source pointer → different hash, so
+        // tampering with the source is detectable.
+        assert_ne!(bare.hash(), with.hash());
+    }
+
+    #[test]
+    fn hash_is_stable_regardless_of_source_order() {
+        let a = TextLocation::new(0, 5).with_source([span(2, 4), span(10, 12)]);
+        let b = TextLocation::new(0, 5).with_source([span(10, 12), span(2, 4)]);
+        // Normalized, so accumulation order does not change the hash.
+        assert_eq!(a.hash(), b.hash());
     }
 }

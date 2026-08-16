@@ -3,12 +3,14 @@
 mod data;
 mod location;
 mod replacement;
+mod source_ref;
 
 use std::ops::Range;
 
 pub use self::data::TextData;
 pub use self::location::TextLocation;
 pub use self::replacement::TextReplacement;
+pub use self::source_ref::SourceRef;
 use super::Modality;
 use super::text_recognizable::TextRecognizable;
 use crate::recognition::Artifacts;
@@ -56,7 +58,7 @@ mod tests {
 
         batch.sort_by_position();
 
-        let starts: Vec<usize> = batch.iter().map(|(loc, _)| loc.start).collect();
+        let starts: Vec<usize> = batch.iter().map(|(loc, _)| loc.range.start).collect();
         assert_eq!(starts, [0, 10, 20]);
     }
 }

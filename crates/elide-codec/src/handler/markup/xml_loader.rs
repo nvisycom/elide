@@ -350,6 +350,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn lift_carries_the_exact_source_span() {
+        use elide_core::modality::text::SourceRef;
+
+        // Text preceded by tags: the chunk's stream offset differs from the raw
+        // byte offset, so `source` must point at the raw bytes, not the stream.
+        let raw = "<root><name>Alice Carter</name></root>";
+        let mut h = load(raw).await;
+        let chunk = loop {
+            let c = h.read_next().await.unwrap().unwrap();
+            if c.data.as_str() == "Alice Carter" {
+                break c;
+            }
+        };
+        // Redact "Carter" — value-local [6, 12).
+        let lifted = h.lift(&chunk, TextLocation::new(6, 12)).expect("in bounds");
+        // "Carter" sits at raw bytes 18..24 in the document.
+        let want = "<root><name>Alice Carter".find("Carter").unwrap();
+        assert_eq!(
+            lifted.source,
+            vec![SourceRef::new(want..want + "Carter".len())]
+        );
+        assert_eq!(&raw[want..want + 6], "Carter");
+    }
+
+    #[tokio::test]
     async fn redact_text_node() {
         let raw = "<root><name>Alice</name></root>";
         let mut h = load(raw).await;
@@ -409,8 +434,8 @@ mod tests {
         };
         let at = chunk.data.as_str().find("alice@example.com").unwrap();
         let loc = TextLocation::new(
-            chunk.location.start + at,
-            chunk.location.start + at + "alice@example.com".len(),
+            chunk.location.range.start + at,
+            chunk.location.range.start + at + "alice@example.com".len(),
         );
         let mut rs = Redactions::new();
         rs.push(loc, TextReplacement::substituted("[EMAIL]"));
@@ -551,8 +576,8 @@ mod tests {
         };
         let at = chunk.data.as_str().find("alice@example.com").unwrap();
         let loc = TextLocation::new(
-            chunk.location.start + at,
-            chunk.location.start + at + "alice@example.com".len(),
+            chunk.location.range.start + at,
+            chunk.location.range.start + at + "alice@example.com".len(),
         );
         let mut rs = Redactions::new();
         rs.push(loc, TextReplacement::substituted("[EMAIL]"));

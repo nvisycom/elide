@@ -154,7 +154,7 @@ mod tests {
         let out = ReconcileLayer::same_label(Merging::max()).apply(entities);
         assert_eq!(out.kept.len(), 1);
         let s = &out.kept[0];
-        assert_eq!((s.location.start, s.location.end), (0, 25));
+        assert_eq!((s.location.range.start, s.location.range.end), (0, 25));
         assert_eq!(s.label, LabelRef::new("EMAIL"));
         assert_eq!(s.confidence, Confidence::new(0.9).unwrap()); // max
     }

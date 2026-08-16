@@ -23,8 +23,10 @@
 //! [`Handler`]: crate::Handler
 //! [`Address`]: Encoder::Address
 
+use std::ops::Range;
+
 use elide_core::Result;
-use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
+use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter, Hint};
 use elide_core::operator::Redactions;
 
@@ -75,6 +77,22 @@ pub(crate) trait Encoder: Send + Sync + 'static {
     ///
     /// Returns an error when the document cannot be re-serialized.
     fn encode(&self, items: &[ExtractedItem<Self::Address>]) -> Result<ContentData>;
+
+    /// The exact raw source byte range that `local` (a byte range within
+    /// `item`'s decoded value) came from, when the encoder addresses items by a
+    /// source span and its value is a verbatim source slice.
+    ///
+    /// Returns `None` by default: an encoder whose address is not a source byte
+    /// span (an ordinal node index), or whose value is a decoded form, has no
+    /// exact source pre-image to offer. The markup encoders override this — their
+    /// value *is* the raw slice, so the mapping is an offset add.
+    fn source_span(
+        &self,
+        _item: &ExtractedItem<Self::Address>,
+        _local: Range<usize>,
+    ) -> Option<SourceRef> {
+        None
+    }
 
     /// This encoder as a [`Container`] of cross-modality sub-parts, if the
     /// format is a container (DOCX). The default is `None`; a plain
@@ -138,16 +156,16 @@ impl<E: Encoder> ExtractHandler<E> {
     }
 
     fn redact_one(&mut self, location: &TextLocation, replacement: &TextReplacement) -> Result<()> {
-        let Some(i) = self.item_for(location.start) else {
+        let Some(i) = self.item_for(location.range.start) else {
             return Ok(());
         };
         let item_start = self.item_starts[i];
         let item_end = self.item_starts[i + 1];
-        if location.end > item_end {
+        if location.range.end > item_end {
             return Ok(());
         }
-        let local_start = location.start - item_start;
-        let local_end = location.end - item_start;
+        let local_start = location.range.start - item_start;
+        let local_end = location.range.end - item_start;
         let value = replacement.value().unwrap_or_default();
         let before_len = self.items[i].value.len();
         redact::replace_range(&mut self.items[i].value, value, local_start..local_end)?;
@@ -179,11 +197,7 @@ impl<E: Encoder> Handler<Text> for ExtractHandler<E> {
         let hints = item.hints.clone();
         self.cursor += 1;
         Ok(Some(Chunk {
-            location: TextLocation {
-                start,
-                end,
-                ..Default::default()
-            },
+            location: TextLocation::new(start, end),
             data,
             hints,
         }))
@@ -193,17 +207,23 @@ impl<E: Encoder> Handler<Text> for ExtractHandler<E> {
         // Items are byte-for-byte the recognizer's view, so lifting is an
         // identity offset add of the chunk-local range against the chunk's
         // start, bounded by its end.
-        let base = chunk.location.start;
-        let start = base + local.start;
-        let end = base + local.end;
-        if start > end || end > chunk.location.end {
+        let base = chunk.location.range.start;
+        let start = base + local.range.start;
+        let end = base + local.range.end;
+        if start > end || end > chunk.location.range.end {
             return None;
         }
-        Some(TextLocation {
-            start,
-            end,
-            page: chunk.location.page,
-        })
+        // The exact raw source range this finding came from, when the encoder
+        // can map it (markup, whose item value is a verbatim source slice).
+        let source = self.item_for(base).and_then(|i| {
+            self.encoder
+                .source_span(&self.items[i], local.range.start..local.range.end)
+        });
+        Some(
+            TextLocation::new(start, end)
+                .with_page(chunk.location.page)
+                .with_source(source),
+        )
     }
 
     fn as_container_mut(&mut self) -> Option<&mut dyn Container> {
@@ -214,16 +234,16 @@ impl<E: Encoder> Handler<Text> for ExtractHandler<E> {
 #[async_trait::async_trait]
 impl<E: Encoder> DataReader<Text> for ExtractHandler<E> {
     async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
-        let Some(i) = self.item_for(location.start) else {
+        let Some(i) = self.item_for(location.range.start) else {
             return Ok(None);
         };
         let item_start = self.item_starts[i];
         let item_end = self.item_starts[i + 1];
-        if location.end > item_end {
+        if location.range.end > item_end {
             return Ok(None);
         }
-        let local_start = location.start - item_start;
-        let local_end = location.end - item_start;
+        let local_start = location.range.start - item_start;
+        let local_end = location.range.end - item_start;
         Ok(self.items[i]
             .value
             .get(local_start..local_end)

@@ -72,7 +72,7 @@ impl<'a> TextPromptBuilder<'a> {
                  Use them as priors when scoring candidates. Hints:",
             );
             for (i, h) in self.inclusions.iter().enumerate() {
-                let range = h.location.start..h.location.end;
+                let range = h.location.range.start..h.location.range.end;
                 let value = value_at(self.text, range.clone());
                 let snippet = snippet_around(self.text, range);
                 let name = h.name.as_deref().unwrap_or("");
