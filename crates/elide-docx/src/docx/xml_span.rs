@@ -245,19 +245,9 @@ pub(super) fn relationship_spans(raw: &str) -> std::result::Result<Vec<Span>, ()
 
     let mut reader = Reader::from_str(raw);
     let mut spans = Vec::new();
-    // quick-xml reports positions relative to the source *after* a leading BOM,
-    // but spans index the original bytes, so shift each element span past it.
-    let bom = bom_len(raw);
-    let mut last = bom;
 
     loop {
-        let event = reader.read_event().map_err(|_| ())?;
-        // The element's full byte span, `<Relationship ... />` and all, so the
-        // `Target` value can be located within its own bytes.
-        let elem_span = last..reader.buffer_position() as usize + bom;
-        last = elem_span.end;
-
-        let elem = match event {
+        let elem = match reader.read_event().map_err(|_| ())? {
             Event::Eof => break,
             Event::Empty(e) | Event::Start(e) => e,
             _ => continue,
@@ -266,25 +256,25 @@ pub(super) fn relationship_spans(raw: &str) -> std::result::Result<Vec<Span>, ()
             continue;
         }
 
-        // Scan the element's attributes once for the hyperlink type and the
-        // external mode; a span is emitted only when the relationship is an
-        // external hyperlink, and only then is the `Target` value located.
+        // Scan the element's attributes once for the hyperlink type, the external
+        // mode, and the `Target` value's source range — the latter derived from
+        // the value bytes quick-xml borrowed straight out of `raw`. A span is
+        // emitted only when the relationship is an external hyperlink.
         let mut is_hyperlink = false;
         let mut is_external = false;
-        let mut has_target = false;
+        let mut target: Option<Range<usize>> = None;
         for attr in elem.attributes() {
             let attr = attr.map_err(|_| ())?;
             match attr.key.local_name().as_ref() {
                 b"Type" => is_hyperlink = attr.value.as_ref() == HYPERLINK_TYPE.as_bytes(),
                 b"TargetMode" => is_external = attr.value.as_ref() == b"External",
-                b"Target" => has_target = true,
+                b"Target" => target = Some(sub_slice_range(raw, &attr.value)?),
                 _ => {}
             }
         }
         if is_hyperlink
             && is_external
-            && has_target
-            && let Some(range) = target_value_range(raw, elem_span)
+            && let Some(range) = target
         {
             spans.push(Span::new(range, BlockKind::Attribute));
         }
@@ -292,58 +282,25 @@ pub(super) fn relationship_spans(raw: &str) -> std::result::Result<Vec<Span>, ()
     Ok(spans)
 }
 
+/// The byte range of `value` within `raw`, where `value` is a slice quick-xml
+/// borrowed out of `raw` (its attribute values are un-unescaped borrows of the
+/// source). Errs — fail-closed — if `value` is not a sub-slice of `raw`, so a
+/// caller surfaces the part as an issue rather than dropping a redaction.
+fn sub_slice_range(raw: &str, value: &[u8]) -> std::result::Result<Range<usize>, ()> {
+    let base = raw.as_ptr() as usize;
+    let start = (value.as_ptr() as usize).checked_sub(base).ok_or(())?;
+    let end = start.checked_add(value.len()).ok_or(())?;
+    if end > raw.len() {
+        return Err(());
+    }
+    Ok(start..end)
+}
+
 /// The byte length of a leading UTF-8 BOM (`U+FEFF`), or 0 if absent. quick-xml
 /// skips it and reports positions past it, so spans over the original bytes must
 /// add it back.
 fn bom_len(raw: &str) -> usize {
     if raw.starts_with('\u{feff}') { 3 } else { 0 }
-}
-
-/// The absolute byte range of the `Target` attribute *value* within `element` (a
-/// byte span into `raw`) — the bytes between its quotes, exclusive. `None` if the
-/// element has no well-formed `Target` attribute.
-///
-/// Anchored on the `Target` name token: it must be followed (per XML `Eq ::= S?
-/// '=' S?`) by an `=`, optional whitespace, then a `"` or `'`, so the value is
-/// located unambiguously — never a stray occurrence of the same bytes elsewhere
-/// in the element — and either quote style closes it. Called only after
-/// quick-xml has confirmed a `Target` attribute is present.
-fn target_value_range(raw: &str, element: Range<usize>) -> Option<Range<usize>> {
-    const NAME: &str = "Target";
-    let slice = &raw[element.clone()];
-
-    // Walk `Target` occurrences; the attribute is the one followed by `Eq ::= S?
-    // '=' S?` and an opening quote. `cursor` is kept as a running slice-local
-    // byte offset so the value's position is exact.
-    let mut cursor = 0;
-    loop {
-        cursor += slice[cursor..].find(NAME)? + NAME.len();
-        // Skip whitespace, then require `=`; otherwise this was `TargetMode` or a
-        // `Target` inside a value, so resume the search past it.
-        let after_ws = cursor + leading_whitespace(&slice[cursor..]);
-        let Some(rest) = slice[after_ws..].strip_prefix('=') else {
-            continue;
-        };
-        let value_open = after_ws + 1 + leading_whitespace(rest);
-        let Some(quote) = slice[value_open..].chars().next().filter(is_quote) else {
-            continue;
-        };
-
-        let value_start = value_open + 1; // past the opening quote
-        let len = slice[value_start..].find(quote)?;
-        let start = element.start + value_start;
-        return Some(start..start + len);
-    }
-}
-
-/// Whether `c` is an XML attribute-value quote character.
-fn is_quote(c: &char) -> bool {
-    *c == '"' || *c == '\''
-}
-
-/// The byte length of the leading ASCII-whitespace run of `s`.
-fn leading_whitespace(s: &str) -> usize {
-    s.len() - s.trim_start().len()
 }
 
 /// Emit the pending text run as a `Text` span unless it is whitespace-only, then
@@ -494,6 +451,21 @@ mod tests {
         let spans = relationship_spans(raw).unwrap();
         assert_eq!(spans.len(), 1);
         assert_eq!(&raw[spans[0].range.clone()], "mailto:c@example.com");
+    }
+
+    #[test]
+    fn relationship_target_ignores_a_target_substring_inside_another_value() {
+        // A preceding attribute's value literally contains `Target='foo'`. The
+        // walk must step over that value opaquely and take the real `Target`, not
+        // the `foo` buried in the other attribute.
+        let raw = concat!(
+            r#"<Relationships>"#,
+            r#"<Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Title="see Target='foo'" Target="mailto:real@example.com" TargetMode="External" Id="rIdT"/>"#,
+            r#"</Relationships>"#,
+        );
+        let spans = relationship_spans(raw).unwrap();
+        assert_eq!(spans.len(), 1);
+        assert_eq!(&raw[spans[0].range.clone()], "mailto:real@example.com");
     }
 
     #[test]
