@@ -40,6 +40,9 @@ impl MarkupConfig<'static> {
 impl<'a> MarkupConfig<'a> {
     /// Lenient parsing with the caller's `block_elements` (sibling-hint groups)
     /// and `skip_body_elements` (bodies not to scan) vocabularies.
+    ///
+    /// Only HTML parses leniently; XML is always strict.
+    #[cfg(feature = "html")]
     pub(super) fn lenient(
         block_elements: &'a [&'a str],
         skip_body_elements: &'a [&'a str],

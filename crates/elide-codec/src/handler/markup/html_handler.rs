@@ -1,8 +1,8 @@
 //! HTML handler side: the [`Format`] descriptor for HTML.
 //!
 //! HTML runs on the XML markup engine — the same byte-span tokenize-and-splice
-//! [`XmlEncoder`] and [`ExtractHandler`] — configured leniently (see
-//! [`MarkupConfig::html`](super::xml_handler::MarkupConfig)). There is no
+//! `XmlEncoder` and `ExtractHandler` — configured leniently (see
+//! [`MarkupConfig::lenient`](super::config::MarkupConfig::lenient)). There is no
 //! separate HTML handler or encoder type; [`HtmlHandler`] is the XML handler,
 //! and this module supplies only the [`Format`] and its `<script>` / `<style>`
 //! policy entry points.

@@ -25,7 +25,7 @@ use elide_core::modality::Hint;
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::{Error, ErrorKind, Result};
 use quick_xml::Reader;
-use quick_xml::events::{BytesStart, Event};
+use quick_xml::events::{BytesEnd, BytesStart, Event};
 
 use super::config::MarkupConfig;
 use super::xml_handler::{FORMAT_ID, XmlEncoder, XmlHandler, XmlItem, XmlSpan};
@@ -70,10 +70,14 @@ pub(crate) fn build_items(raw: &str, config: MarkupConfig<'_>) -> Result<Vec<Xml
     // Text-node items, recorded with their engine-space span so a second pass
     // can attach sibling hints once every text node's span is known.
     let mut text_items: Vec<TextRecord> = Vec::new();
-    // The open-element stack: each frame is (lowercased name, index into
-    // `text_items` where this element's text children begin), so we can group a
-    // text node with the others under its nearest block ancestor.
+    // The open-element stack: each frame names the element and where its text
+    // children begin, so a block element can group them for sibling hints.
     let mut stack: Vec<Frame> = Vec::new();
+    // A skipped subtree (an HTML `<script>`/`<style>` the caller does not scan)
+    // is opaque: while inside one, all content — text and any markup-like inner
+    // tags — is ignored until the *matching* close, so nested elements or a
+    // stray end tag cannot leak the body or pop the skip early.
+    let mut skip: Option<SkipRegion> = None;
     let mut last = 0usize;
     // Running engine-space offset (the cumulative length of item values), the
     // coordinate a chunk carries and a hint resolves against.
@@ -84,16 +88,38 @@ pub(crate) fn build_items(raw: &str, config: MarkupConfig<'_>) -> Result<Vec<Xml
         let span = last..reader.buffer_position() as usize;
         last = span.end;
 
+        // Inside a skipped subtree, only the skip element's *own* open/close
+        // depth is tracked; every other event — text, nested tags, a stray end
+        // tag for some other element — is opaque, so it cannot leak the body or
+        // pop the skip early.
+        if let Some(region) = &mut skip {
+            match event {
+                Event::Eof => break,
+                Event::Start(ref e) if local_name(e) == region.name => region.depth += 1,
+                Event::End(ref e) if end_name(e) == region.name => {
+                    region.depth -= 1;
+                    if region.depth == 0 {
+                        skip = None;
+                    }
+                }
+                _ => {}
+            }
+            continue;
+        }
+
         match event {
             Event::Eof => break,
             Event::Start(ref e) => {
                 emit_attributes(raw, e, &mut items, &mut offset);
                 let name = local_name(e);
-                stack.push(Frame {
-                    skip_body: config.skips_body(&name),
-                    name,
-                    text_start: text_items.len(),
-                });
+                if config.skips_body(&name) {
+                    skip = Some(SkipRegion { name, depth: 1 });
+                } else {
+                    stack.push(Frame {
+                        name,
+                        text_start: text_items.len(),
+                    });
+                }
             }
             Event::Empty(ref e) => {
                 // A self-closing element: attributes only, no body, no frame.
@@ -110,12 +136,6 @@ pub(crate) fn build_items(raw: &str, config: MarkupConfig<'_>) -> Result<Vec<Xml
             }
             Event::Text(_) => {
                 if let Some(inner) = non_blank(raw, span.clone()) {
-                    // Inside a skipped body (an HTML `<script>`/`<style>` the
-                    // caller does not scan), emit nothing: the text is neither
-                    // an item nor part of the engine-space stream.
-                    if in_skipped_body(&stack) {
-                        continue;
-                    }
                     let value = raw[inner.clone()].to_owned();
                     let engine = offset..offset + value.len();
                     offset = engine.end;
@@ -169,23 +189,28 @@ struct TextRecord {
 struct Frame {
     name: String,
     text_start: usize,
-    /// Whether this element's body text is skipped (not emitted).
-    skip_body: bool,
 }
 
-/// Whether the innermost open element's body is skipped, so its text must not
-/// enter the stream.
-fn in_skipped_body(stack: &[Frame]) -> bool {
-    matches!(stack.last(), Some(f) if f.skip_body)
+/// The active skipped subtree: the element whose body is opaque, and the open
+/// depth of that same element name, so a nested `<script>` inside a `<script>`
+/// (or a stray close) resolves to the matching close.
+struct SkipRegion {
+    name: String,
+    depth: usize,
 }
 
 fn malformed(e: quick_xml::Error) -> Error {
     Error::new(ErrorKind::MalformedInput, format!("malformed markup: {e}"))
 }
 
-/// The element's lowercased local name (HTML is case-insensitive; lowercasing
+/// The start tag's lowercased local name (HTML is case-insensitive; lowercasing
 /// makes `<SCRIPT>` and `<P>` match too).
 fn local_name(e: &BytesStart<'_>) -> String {
+    String::from_utf8_lossy(e.local_name().as_ref()).to_ascii_lowercase()
+}
+
+/// The end tag's lowercased local name, matched against an open skip element.
+fn end_name(e: &BytesEnd<'_>) -> String {
     String::from_utf8_lossy(e.local_name().as_ref()).to_ascii_lowercase()
 }
 
@@ -194,11 +219,14 @@ fn local_name(e: &BytesStart<'_>) -> String {
 /// through verbatim, so a `mailto:` URL has its email matched in place.
 fn emit_attributes(raw: &str, e: &BytesStart<'_>, items: &mut Vec<XmlItem>, offset: &mut usize) {
     for attr in e.attributes().with_checks(false).flatten() {
-        // quick-xml borrows an unescaped value directly out of the source
-        // buffer, so its slice position *is* the source span. A value with
-        // entities decodes to an owned buffer with no source position; such
-        // attributes are left un-redactable (rare, and never a plain-text PII
-        // carrier) rather than guessed at.
+        // `Attribute::value` is the *raw* on-the-wire bytes, entity spellings
+        // intact (decoding happens only through `unescape_value`, which we never
+        // call — the engine redacts raw slices). Over a `Reader::from_str`, the
+        // value borrows straight out of the source buffer, so its slice position
+        // *is* the source span — even for an entity-bearing value. `Cow::Owned`
+        // only arises for a non-borrowed value (no source position); it is a
+        // defensive guard, and such an attribute is left un-redactable rather
+        // than guessed at.
         let Cow::Borrowed(bytes) = attr.value else {
             continue;
         };
@@ -251,6 +279,13 @@ fn strip(span: Range<usize>, open: &str, close: &str) -> Option<Range<usize>> {
     (start <= end).then_some(start..end)
 }
 
+/// Cap on block-group size for sibling hints. The fan-out is one hint per pair
+/// of records, so a pathological block with thousands of text runs would emit
+/// millions of hints. Context boosting adds little once a group is this large
+/// (the sentence-fragment case it targets has a handful of runs), so a bigger
+/// group is left un-hinted rather than risk quadratic blow-up.
+const MAX_SIBLING_HINT_GROUP: usize = 64;
+
 /// Give each text record in a block group one hint per *other* record in the
 /// group, located at that sibling's engine-space span — the surrounding prose a
 /// context boost points back at when a sentence is split across inline wrappers.
@@ -260,7 +295,7 @@ fn attach_sibling_hints(group: &mut [TextRecord]) {
         .filter(|r| !r.text.is_empty())
         .map(|r| (r.engine.clone(), r.text.clone()))
         .collect();
-    if siblings.len() < 2 {
+    if siblings.len() < 2 || siblings.len() > MAX_SIBLING_HINT_GROUP {
         return;
     }
     for record in group.iter_mut() {
@@ -305,8 +340,10 @@ mod tests {
             .expect("xml decode succeeds")
     }
 
-    /// Build a handler over `raw` with an explicit config (for the HTML paths).
-    fn handler_with(raw: &str, config: MarkupConfig) -> XmlHandler {
+    /// Build a handler over `raw` with an explicit config (for the lenient
+    /// HTML-style paths).
+    #[cfg(feature = "html")]
+    fn handler_with(raw: &str, config: MarkupConfig<'_>) -> XmlHandler {
         let items = build_items(raw, config).expect("markup decode succeeds");
         ExtractHandler::new(
             FORMAT_ID.clone(),
@@ -432,16 +469,20 @@ mod tests {
         assert_eq!(encoded(&h), "<p>contact [EMAIL] today</p>");
     }
 
-    // --- lenient (HTML-style) paths over the same engine -----------------
+    // Lenient (HTML-style) paths over the same engine. Gated on `html`: the
+    // lenient config only exists when HTML is compiled.
 
     /// A small block vocabulary for the engine's lenient-mode tests; the real
     /// HTML block set is exercised in the HTML loader's own tests.
+    #[cfg(feature = "html")]
     const TEST_BLOCKS: &[&str] = &["p", "div"];
 
+    #[cfg(feature = "html")]
     fn html(raw: &str) -> XmlHandler {
         handler_with(raw, MarkupConfig::lenient(TEST_BLOCKS, &[]))
     }
 
+    #[cfg(feature = "html")]
     #[tokio::test]
     async fn html_tolerates_bare_ampersand_and_round_trips() {
         for raw in [
@@ -456,6 +497,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "html")]
     #[tokio::test]
     async fn html_redacts_text_and_attribute() {
         let raw = r#"<html><body><img alt="alice@example.com"><p>Bob</p></body></html>"#;
@@ -484,6 +526,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "html")]
     #[tokio::test]
     async fn skipped_body_vs_scanned_body() {
         let raw = r#"<html><body><script>var a="alice@example.com";</script></body></html>"#;
@@ -505,6 +548,64 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "html")]
+    #[tokio::test]
+    async fn skipped_body_stays_opaque_through_nested_and_stray_markup() {
+        // A skipped body is opaque: markup-like inner tags and a stray end tag
+        // inside it must not leak its text or pop the skip early.
+        let cases = [
+            // Nested element inside the skipped script.
+            r#"<p>ok</p><script>var a; <b>alice@example.com</b> more;</script><p>after</p>"#,
+            // Stray end tag inside the skipped script.
+            r#"<p>ok</p><script>a; </div> alice@example.com;</script><p>after</p>"#,
+            // Nested same-name element: the inner </script> must not end the skip
+            // before the outer content is consumed.
+            r#"<p>ok</p><script>x<script>alice@example.com</script>y</script><p>after</p>"#,
+        ];
+        for raw in cases {
+            let mut h = handler_with(raw, MarkupConfig::lenient(TEST_BLOCKS, &["script"]));
+            let vs = values(&mut h).await;
+            assert!(
+                !vs.iter().any(|v| v.contains("alice@example.com")),
+                "skipped body leaked for {raw:?}: {vs:?}"
+            );
+            // The surrounding text is still seen and the skip closed cleanly.
+            assert!(vs.iter().any(|v| v == "ok"), "pre-text missing: {raw:?}");
+            assert!(
+                vs.iter().any(|v| v == "after"),
+                "post-text missing: {raw:?}"
+            );
+        }
+    }
+
+    #[cfg(feature = "html")]
+    #[tokio::test]
+    async fn redaction_after_a_skipped_script_is_byte_faithful() {
+        // Redacting text that follows a skipped script leaves the script and all
+        // other markup byte-identical, changing only the targeted span.
+        let raw = r#"<p><script>var a="keep@x.com";</script>mail alice@example.com</p>"#;
+        let mut h = handler_with(raw, MarkupConfig::lenient(TEST_BLOCKS, &["script"]));
+        let chunk = loop {
+            let c = h.read_next().await.unwrap().unwrap();
+            if c.data.as_str().contains("alice@example.com") {
+                break c;
+            }
+        };
+        let at = chunk.data.as_str().find("alice@example.com").unwrap();
+        let loc = TextLocation::new(
+            chunk.location.start + at,
+            chunk.location.start + at + "alice@example.com".len(),
+        );
+        let mut rs = Redactions::new();
+        rs.push(loc, TextReplacement::substituted("[EMAIL]"));
+        h.write_at(rs).await.unwrap();
+        assert_eq!(
+            encoded(&h),
+            r#"<p><script>var a="keep@x.com";</script>mail [EMAIL]</p>"#
+        );
+    }
+
+    #[cfg(feature = "html")]
     #[tokio::test]
     async fn html_sibling_hints_across_inline_wrapper() {
         // A card number split by an inline <code> wrapper: each text chunk

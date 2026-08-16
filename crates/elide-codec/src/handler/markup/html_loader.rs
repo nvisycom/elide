@@ -8,8 +8,8 @@
 //! `<script>` / `<style>` bodies not to scan. Everything downstream —
 //! streaming, redaction, byte-faithful splice — is the XML handler.
 
+use elide_core::Result;
 use elide_core::modality::text::Text;
-use elide_core::{Error, ErrorKind, Result};
 
 use super::config::MarkupConfig;
 use super::html_handler::{FORMAT_ID, HtmlHandler};
@@ -22,31 +22,41 @@ use crate::handler::extract::ExtractHandler;
 
 /// HTML block-level elements: their text children form one sibling-hint group,
 /// so prose split across inline wrappers (`Card <code>4111…</code> on file`)
-/// still surfaces the surrounding context to a boost. Names are lowercased.
+/// still surfaces the surrounding context to a boost. Names are lowercased and
+/// sorted. Membership is a linear scan (see `MarkupConfig::is_block`), fine for
+/// a list this size checked once per closing tag.
 const BLOCK_ELEMENTS: &[&str] = &[
-    "p",
+    "address",
+    "article",
+    "aside",
+    "blockquote",
+    "caption",
+    "dd",
     "div",
-    "li",
-    "td",
-    "th",
+    "dl",
+    "dt",
+    "figcaption",
+    "footer",
+    "form",
     "h1",
     "h2",
     "h3",
     "h4",
     "h5",
     "h6",
-    "blockquote",
-    "dt",
-    "dd",
-    "section",
-    "article",
-    "aside",
     "header",
-    "footer",
+    "li",
     "main",
     "nav",
-    "figcaption",
-    "caption",
+    "ol",
+    "p",
+    "pre",
+    "section",
+    "table",
+    "td",
+    "th",
+    "tr",
+    "ul",
 ];
 
 /// Loader for HTML files. Produces one [`HtmlHandler`] per input.
@@ -82,8 +92,8 @@ impl Loader<Text> for HtmlLoader {
         let text = content.decode()?;
         let skip = self.skip_body_elements();
         let config = MarkupConfig::lenient(BLOCK_ELEMENTS, &skip);
-        let items = build_items(&text, config)
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("malformed HTML: {e}")))?;
+        // `build_items` already reports a `MalformedInput` parse error.
+        let items = build_items(&text, config)?;
         Ok(ExtractHandler::new(
             FORMAT_ID.clone(),
             XmlEncoder { raw: text },
