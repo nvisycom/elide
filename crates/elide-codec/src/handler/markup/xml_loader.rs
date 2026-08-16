@@ -18,7 +18,6 @@
 //! [`XmlEncoder`]: super::XmlEncoder
 //! [`MarkupConfig`]: super::config::MarkupConfig
 
-use std::borrow::Cow;
 use std::ops::Range;
 
 use elide_core::modality::Hint;
@@ -28,10 +27,11 @@ use quick_xml::Reader;
 use quick_xml::events::{BytesEnd, BytesStart, Event};
 
 use super::config::MarkupConfig;
-use super::xml_handler::{FORMAT_ID, XmlEncoder, XmlHandler, XmlItem, XmlSpan};
+use super::stream::{MarkupSink, MarkupSource};
+use super::xml_handler::{FORMAT_ID, XmlEncoder, XmlHandler, XmlItem};
 use crate::Loader;
 use crate::content::ContentData;
-use crate::handler::extract::{ExtractHandler, ExtractedItem};
+use crate::handler::extract::ExtractHandler;
 
 /// Loader for XML files. Produces one [`XmlHandler`] per input.
 #[derive(Debug)]
@@ -56,6 +56,7 @@ impl Loader<Text> for XmlLoader {
 /// the HTML loader (lenient config) and for container formats that run the
 /// engine over a part.
 pub(crate) fn build_items(raw: &str, config: MarkupConfig<'_>) -> Result<Vec<XmlItem>> {
+    let source = MarkupSource::new(raw);
     let mut reader = Reader::from_str(raw);
     let cfg = reader.config_mut();
     if config.lenient {
@@ -66,9 +67,10 @@ pub(crate) fn build_items(raw: &str, config: MarkupConfig<'_>) -> Result<Vec<Xml
         cfg.allow_dangling_amp = true;
     }
 
-    let mut items = Vec::new();
-    // Text-node items, recorded with their engine-space span so a second pass
-    // can attach sibling hints once every text node's span is known.
+    // The growing item stream (offset kept in step by `Items::push`).
+    let mut items = MarkupSink::new();
+    // Text-node records, kept with their engine-space span so a second pass can
+    // attach sibling hints once every text node's span is known.
     let mut text_items: Vec<TextRecord> = Vec::new();
     // The open-element stack: each frame names the element and where its text
     // children begin, so a block element can group them for sibling hints.
@@ -79,9 +81,6 @@ pub(crate) fn build_items(raw: &str, config: MarkupConfig<'_>) -> Result<Vec<Xml
     // stray end tag cannot leak the body or pop the skip early.
     let mut skip: Option<SkipRegion> = None;
     let mut last = 0usize;
-    // Running engine-space offset (the cumulative length of item values), the
-    // coordinate a chunk carries and a hint resolves against.
-    let mut offset = 0usize;
 
     loop {
         let event = reader.read_event().map_err(malformed)?;
@@ -110,8 +109,8 @@ pub(crate) fn build_items(raw: &str, config: MarkupConfig<'_>) -> Result<Vec<Xml
         match event {
             Event::Eof => break,
             Event::Start(ref e) => {
-                for inner in attribute_spans(raw, e, config.lenient)? {
-                    push_span(raw, inner, &mut items, &mut offset);
+                for inner in source.attribute_spans(e, config.lenient)? {
+                    items.push(source.slice(inner.clone()).to_owned(), inner);
                 }
                 let name = local_name(e);
                 if config.skips_body(&name) {
@@ -125,8 +124,8 @@ pub(crate) fn build_items(raw: &str, config: MarkupConfig<'_>) -> Result<Vec<Xml
             }
             Event::Empty(ref e) => {
                 // A self-closing element: attributes only, no body, no frame.
-                for inner in attribute_spans(raw, e, config.lenient)? {
-                    push_span(raw, inner, &mut items, &mut offset);
+                for inner in source.attribute_spans(e, config.lenient)? {
+                    items.push(source.slice(inner.clone()).to_owned(), inner);
                 }
             }
             Event::End(_) => {
@@ -139,28 +138,26 @@ pub(crate) fn build_items(raw: &str, config: MarkupConfig<'_>) -> Result<Vec<Xml
                 }
             }
             Event::Text(_) => {
-                if let Some(inner) = non_blank(raw, span.clone()) {
-                    let value = raw[inner.clone()].to_owned();
-                    let engine = offset..offset + value.len();
-                    offset = engine.end;
-                    let item_index = items.len();
-                    items.push(span_item(value, inner));
+                if let Some(inner) = source.non_blank(span.clone()) {
+                    let value = source.slice(inner.clone()).to_owned();
+                    let engine = items.offset()..items.offset() + value.len();
+                    let item_index = items.push(value, inner);
                     text_items.push(TextRecord {
                         item_index,
                         engine,
-                        text: raw[span].trim().to_owned(),
+                        text: source.slice(span).trim().to_owned(),
                         pending_hints: Vec::new(),
                     });
                 }
             }
             Event::Comment(_) => {
                 if let Some(inner) = strip(span, "<!--", "-->") {
-                    push_span(raw, inner, &mut items, &mut offset);
+                    items.push(source.slice(inner.clone()).to_owned(), inner);
                 }
             }
             Event::CData(_) => {
                 if let Some(inner) = strip(span, "<![CDATA[", "]]>") {
-                    push_span(raw, inner, &mut items, &mut offset);
+                    items.push(source.slice(inner.clone()).to_owned(), inner);
                 }
             }
             _ => {}
@@ -175,8 +172,12 @@ pub(crate) fn build_items(raw: &str, config: MarkupConfig<'_>) -> Result<Vec<Xml
         }
     }
 
-    apply_text_hints(&mut items, &text_items);
-    Ok(items)
+    items.apply_hints(
+        text_items
+            .into_iter()
+            .map(|r| (r.item_index, r.pending_hints)),
+    );
+    Ok(items.into_items())
 }
 
 /// A text node's place in the item stream, its engine-space span, and its
@@ -218,85 +219,6 @@ fn end_name(e: &BytesEnd<'_>) -> String {
     String::from_utf8_lossy(e.local_name().as_ref()).to_ascii_lowercase()
 }
 
-/// The source byte spans of an element's redactable attribute values — the inner
-/// bytes between the quotes — so the caller emits them like any other span.
-/// Values pass through verbatim, so a `mailto:` URL has its email matched in
-/// place.
-///
-/// Strict XML validates attributes (rejecting e.g. a duplicate key) and reports
-/// an [`AttrError`] as [`ErrorKind::MalformedInput`]; lenient HTML turns
-/// validation off and skips an unparseable attribute rather than failing.
-///
-/// [`AttrError`]: quick_xml::events::attributes::AttrError
-fn attribute_spans(raw: &str, e: &BytesStart<'_>, lenient: bool) -> Result<Vec<Range<usize>>> {
-    let mut spans = Vec::new();
-    for attr in e.attributes().with_checks(!lenient) {
-        let attr = match attr {
-            Ok(attr) => attr,
-            // Lenient parsing tolerates a malformed attribute; strict XML does
-            // not — a duplicate key or unquoted value is a malformed document.
-            Err(_) if lenient => continue,
-            Err(e) => {
-                return Err(Error::new(
-                    ErrorKind::MalformedInput,
-                    format!("malformed attribute: {e}"),
-                ));
-            }
-        };
-        // `Attribute::value` is the *raw* on-the-wire bytes, entity spellings
-        // intact (decoding happens only through `unescape_value`, which we never
-        // call — the engine redacts raw slices). Over a `Reader::from_str`, the
-        // value borrows straight out of the source buffer, so its slice position
-        // *is* the source span — even for an entity-bearing value. `Cow::Owned`
-        // only arises for a non-borrowed value (no source position); it is a
-        // defensive guard, and such an attribute is left un-redactable rather
-        // than guessed at.
-        let Cow::Borrowed(bytes) = attr.value else {
-            continue;
-        };
-        let Some(inner) = slice_span(raw, bytes) else {
-            continue;
-        };
-        if raw[inner.clone()].trim().is_empty() {
-            continue;
-        }
-        spans.push(inner);
-    }
-    Ok(spans)
-}
-
-/// The byte range that `slice` — a subslice borrowed out of `raw` — occupies in
-/// `raw`, or `None` if it is not a valid in-bounds char-aligned subslice.
-fn slice_span(raw: &str, slice: &[u8]) -> Option<Range<usize>> {
-    let base = raw.as_ptr() as usize;
-    let start = (slice.as_ptr() as usize).checked_sub(base)?;
-    let end = start.checked_add(slice.len())?;
-    (end <= raw.len() && raw.is_char_boundary(start) && raw.is_char_boundary(end))
-        .then_some(start..end)
-}
-
-/// Push an item for the verbatim source slice at `inner`, advancing the
-/// engine-space offset.
-fn push_span(raw: &str, inner: Range<usize>, items: &mut Vec<XmlItem>, offset: &mut usize) {
-    let value = raw[inner.clone()].to_owned();
-    *offset += value.len();
-    items.push(span_item(value, inner));
-}
-
-/// Return `span` unless it covers only whitespace.
-fn non_blank(raw: &str, span: Range<usize>) -> Option<Range<usize>> {
-    (!raw[span.clone()].trim().is_empty()).then_some(span)
-}
-
-/// Build an item whose value is `value`, addressed by source `span`.
-fn span_item(value: String, span: Range<usize>) -> XmlItem {
-    ExtractedItem {
-        value,
-        address: XmlSpan(span),
-        hints: Vec::new(),
-    }
-}
-
 /// Narrow `span` by its `open`/`close` delimiters, returning the inner range.
 fn strip(span: Range<usize>, open: &str, close: &str) -> Option<Range<usize>> {
     let start = span.start.checked_add(open.len())?;
@@ -336,15 +258,6 @@ fn attach_sibling_hints(group: &mut [TextRecord]) {
             .collect::<Vec<_>>();
         if !hints.is_empty() {
             record.pending_hints = hints;
-        }
-    }
-}
-
-/// Move each text record's accumulated hints onto its item.
-fn apply_text_hints(items: &mut [XmlItem], text_items: &[TextRecord]) {
-    for record in text_items {
-        if !record.pending_hints.is_empty() {
-            items[record.item_index].hints = record.pending_hints.clone();
         }
     }
 }

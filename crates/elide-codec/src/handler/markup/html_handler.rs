@@ -10,7 +10,6 @@
 use elide_core::modality::text::Text;
 
 use super::HtmlLoader;
-use super::script_policy::ScriptPolicy;
 use super::xml_handler::XmlHandler;
 use crate::{Format, FormatId};
 
@@ -19,6 +18,16 @@ pub const FORMAT_ID: FormatId = FormatId::new("elide.text.html");
 
 /// Handler type for loaded HTML content: the XML markup engine's handler.
 pub(crate) type HtmlHandler = XmlHandler;
+
+/// How the HTML loader handles a `<script>` or `<style>` element body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ScriptPolicy {
+    /// Skip the element body entirely; it never enters the detection stream.
+    #[default]
+    Skip,
+    /// Treat the element body as plain text and scan it like a text node.
+    ScanText,
+}
 
 /// [`Format`] descriptor registered into [`FormatRegistry`].
 ///
