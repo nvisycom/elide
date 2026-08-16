@@ -54,6 +54,7 @@ document = ["docx", "pdf", "rtf"]
 ## contract (via the shared `ExtractHandler`, hence `internal_extract`).
 ## Embedded media surfaces through `elide-office`'s typed extraction.
 docx = ["internal_document", "internal_extract", "dep:elide-office"]
+pptx = ["internal_document", "internal_extract", "dep:elide-office"]
 
 ## PDF: born-digital text extraction and redaction come from the standalone
 ## `elide-pdf` crate; this codec adapts it to the `Handler` contract.

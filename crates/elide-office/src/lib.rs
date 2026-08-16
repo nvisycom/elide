@@ -4,6 +4,7 @@
 
 pub mod docx;
 pub mod opc;
+pub mod pptx;
 pub mod xlsx;
 
 mod error;

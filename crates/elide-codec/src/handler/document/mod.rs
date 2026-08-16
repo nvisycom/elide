@@ -24,6 +24,10 @@ mod docx_loader;
 mod pdf_handler;
 #[cfg(feature = "pdf")]
 mod pdf_loader;
+#[cfg(feature = "pptx")]
+mod pptx_handler;
+#[cfg(feature = "pptx")]
+mod pptx_loader;
 #[cfg(feature = "rtf")]
 mod rtf_handler;
 #[cfg(feature = "rtf")]
@@ -42,6 +46,10 @@ pub use self::pdf_handler::format as pdf_format;
 pub use self::pdf_handler::format_with as pdf_format_with;
 #[cfg(feature = "pdf")]
 pub(crate) use self::pdf_loader::PdfLoader;
+#[cfg(feature = "pptx")]
+pub use self::pptx_handler::format as pptx_format;
+#[cfg(feature = "pptx")]
+pub(crate) use self::pptx_loader::PptxLoader;
 #[cfg(feature = "rtf")]
 pub use self::rtf_handler::format as rtf_format;
 #[cfg(feature = "rtf")]
