@@ -19,7 +19,7 @@ use elide::entity::{Entity, builtins};
 use elide::modality::audio::Audio;
 #[cfg(any(feature = "llm", feature = "ocr"))]
 use elide::modality::image::Image;
-#[cfg(feature = "codec-csv")]
+#[cfg(feature = "tabular")]
 use elide::modality::tabular::Tabular;
 use elide::modality::text::Text;
 use elide::modality::{Modality, StreamDataReader, TextRecognizable};
@@ -171,7 +171,7 @@ impl Fixture {
     /// Run the pipeline as the [`Tabular`] modality (`csv`).
     ///
     /// [`Tabular`]: elide::modality::tabular::Tabular
-    #[cfg(feature = "codec-csv")]
+    #[cfg(feature = "tabular")]
     pub async fn run_tabular(&self) -> Result<PipelineOutcome<Tabular>> {
         self.run_typed::<Tabular>(FormatRegistry::with_builtin())
             .await
