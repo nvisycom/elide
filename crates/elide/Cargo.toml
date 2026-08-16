@@ -193,7 +193,7 @@ required-features = ["codec-csv", "mock", "serde"]
 
 [[test]]
 name = "e2e_xlsx"
-required-features = ["codec-xlsx", "mock", "serde"]
+required-features = ["codec-xlsx", "codec-xml", "mock", "serde"]
 
 [[test]]
 name = "e2e_docx"

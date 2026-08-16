@@ -9,6 +9,8 @@
 //! byte-faithfully by [`elide_office`], de-sharing any shared-string cell that
 //! was redacted so other cells keep the pooled value.
 
+use std::collections::HashMap;
+
 use bytes::Bytes;
 use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
 use elide_core::modality::text::{TextData, TextReplacement};
@@ -18,6 +20,7 @@ use elide_core::{Error, ErrorKind, Result};
 use elide_office::xlsx::{CellEdit, Xlsx};
 
 use super::xlsx_loader::XlsxLoader;
+use crate::codec::{Container, Part, PartId};
 use crate::content::ContentData;
 use crate::handler::redact;
 use crate::{Format, FormatId, Handler};
@@ -49,6 +52,11 @@ pub(crate) struct XlsxCell {
 
 /// Handler for a decoded XLSX workbook. Each cell is independently addressable
 /// via a [`TabularLocation`] scoped by sheet name.
+///
+/// A workbook also holds non-cell text — cell comments and drawing/chart text —
+/// in its own XML parts. Those are surfaced through the [`Container`] surface as
+/// `xml`-hinted parts the orchestrator drives with the markup pipeline, and their
+/// redacted bytes fold back into the re-packed workbook on encode.
 #[derive(Debug)]
 pub(crate) struct XlsxHandler {
     /// The original package bytes, retained so [`elide_office`] re-packs every
@@ -58,15 +66,28 @@ pub(crate) struct XlsxHandler {
     cells: Vec<XlsxCell>,
     /// Streaming cursor into `cells`.
     cursor: usize,
+    /// The non-cell text parts (comments, drawings, charts), path → bytes, cached
+    /// at decode so the [`Container`] surface lists them without re-opening.
+    text_parts: Vec<(String, Bytes)>,
+    /// Redacted bytes for text parts, keyed by part path, filled through
+    /// [`Container::replace_part`] and folded in on encode.
+    replacements: HashMap<String, Bytes>,
 }
 
 impl XlsxHandler {
-    /// Wrap the workbook's `archive` bytes and its extracted `cells`.
-    pub(crate) fn new(archive: Bytes, cells: Vec<XlsxCell>) -> Self {
+    /// Wrap the workbook's `archive` bytes, its extracted `cells`, and its
+    /// non-cell `text_parts`.
+    pub(crate) fn new(
+        archive: Bytes,
+        cells: Vec<XlsxCell>,
+        text_parts: Vec<(String, Bytes)>,
+    ) -> Self {
         Self {
             archive,
             cells,
             cursor: 0,
+            text_parts,
+            replacements: HashMap::new(),
         }
     }
 
@@ -124,8 +145,15 @@ impl Handler<Tabular> for XlsxHandler {
                 text: cell.text.clone(),
             })
             .collect();
+        // The redacted non-cell text parts (comments, drawings, charts) fold in
+        // alongside the cell edits for one byte-faithful re-pack.
+        let part_edits: Vec<(String, Vec<u8>)> = self
+            .replacements
+            .iter()
+            .map(|(path, bytes)| (path.clone(), bytes.to_vec()))
+            .collect();
         let bytes = Xlsx::open(&self.archive)
-            .and_then(|xlsx| xlsx.rewrite(&edits))
+            .and_then(|xlsx| xlsx.rewrite_with_parts(&edits, &part_edits))
             .map_err(xlsx_error)?;
         Ok(ContentData::new(Bytes::from(bytes)))
     }
@@ -161,6 +189,38 @@ impl Handler<Tabular> for XlsxHandler {
             location = location.with_sheet_name(sheet.clone());
         }
         Some(location)
+    }
+
+    fn as_container_mut(&mut self) -> Option<&mut dyn Container> {
+        Some(self)
+    }
+}
+
+impl Container for XlsxHandler {
+    fn parts(&self) -> Vec<Part> {
+        // Surface every non-cell text part (comments, drawings, charts) as an
+        // `xml`-hinted blob the orchestrator decodes with the markup pipeline.
+        self.text_parts
+            .iter()
+            .map(|(path, bytes)| Part {
+                id: path.clone().into(),
+                bytes: bytes.clone(),
+                hint: "xml".to_owned(),
+            })
+            .collect()
+    }
+
+    fn replace_part(&mut self, id: &PartId, bytes: Bytes) -> Result<()> {
+        // Only a part the workbook actually surfaced can be replaced, so a caller
+        // can't smuggle bytes into a cell or structure part through this surface.
+        if !self.text_parts.iter().any(|(path, _)| path == id.as_str()) {
+            return Err(Error::new(
+                ErrorKind::MalformedInput,
+                format!("xlsx replace_part: `{id}` is not a text-bearing part"),
+            ));
+        }
+        self.replacements.insert(id.as_str().to_owned(), bytes);
+        Ok(())
     }
 }
 
@@ -302,5 +362,65 @@ mod tests {
             TabularReplacement::DropRow,
         );
         assert!(h.write_at(batch).await.is_err());
+    }
+
+    const SAMPLE2: &[u8] = include_bytes!("../../../../elide-office/tests/testdata/sample2.xlsx");
+
+    #[tokio::test]
+    async fn exposes_non_cell_text_parts_as_xml_container_parts() {
+        let mut h = XlsxLoader
+            .decode(ContentData::new(Bytes::from_static(SAMPLE2)))
+            .await
+            .unwrap();
+        let container = h.as_container_mut().expect("xlsx is a container");
+        let parts = container.parts();
+        // The comment and drawing parts are surfaced as xml-hinted blobs.
+        assert!(
+            parts
+                .iter()
+                .any(|p| p.id.as_str() == "xl/comments1.xml" && p.hint == "xml"),
+            "comment part not surfaced: {parts:?}"
+        );
+        assert!(
+            parts
+                .iter()
+                .any(|p| p.id.as_str() == "xl/drawings/drawing1.xml" && p.hint == "xml"),
+        );
+    }
+
+    #[tokio::test]
+    async fn replace_part_folds_redacted_text_into_the_encode() {
+        let mut h = XlsxLoader
+            .decode(ContentData::new(Bytes::from_static(SAMPLE2)))
+            .await
+            .unwrap();
+        let redacted = Bytes::from_static(
+            br#"<?xml version="1.0"?><comments><commentList><comment ref="A1"><text><r><t>[EMAIL]</t></r></text></comment></commentList></comments>"#,
+        );
+        {
+            let container = h.as_container_mut().unwrap();
+            container
+                .replace_part(&PartId::from("xl/comments1.xml"), redacted.clone())
+                .unwrap();
+            // An id the workbook does not surface is refused.
+            assert!(
+                container
+                    .replace_part(&PartId::from("xl/nope.xml"), redacted.clone())
+                    .is_err()
+            );
+        }
+        let out = h.encode().unwrap();
+        let comment = read_part(out.as_bytes(), "xl/comments1.xml");
+        assert!(String::from_utf8_lossy(&comment).contains("[EMAIL]"));
+        assert!(!String::from_utf8_lossy(&comment).contains("carol@example.com"));
+    }
+
+    fn read_part(bytes: &[u8], name: &str) -> Vec<u8> {
+        use std::io::Read;
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec())).unwrap();
+        let mut entry = zip.by_name(name).unwrap();
+        let mut buf = Vec::new();
+        entry.read_to_end(&mut buf).unwrap();
+        buf
     }
 }

@@ -69,6 +69,32 @@ async fn xlsx_detects_and_redacts_every_part() -> Result<()> {
     Ok(())
 }
 
+const FIXTURE2: Fixture = Fixture {
+    path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/sample2.xlsx"),
+    source: include_bytes!("testdata/sample2.xlsx"),
+    extension: "xlsx",
+};
+
+/// The non-cell PII: an email in a cell comment, a phone in a drawing's text.
+const NON_CELL_PII: &[&str] = &["carol@example.com", "+1 (510) 555-0199"];
+
+#[tokio::test]
+async fn xlsx_redacts_comment_and_drawing_text() -> Result<()> {
+    // The workbook's comment and drawing parts are surfaced as XML container
+    // parts and driven through the markup pipeline by the orchestrator, so their
+    // PII is redacted alongside the cells.
+    let outcome = FIXTURE2.run_tabular().await?;
+
+    for part in part_names(&outcome.redacted) {
+        let bytes = outcome.part(&part).expect("listed part is readable");
+        let text = String::from_utf8_lossy(&bytes);
+        for pii in NON_CELL_PII {
+            assert!(!text.contains(pii), "PII `{pii}` survived in part `{part}`");
+        }
+    }
+    Ok(())
+}
+
 /// Every entry name in the redacted zip, so the leak scan covers all parts.
 fn part_names(zip_bytes: &[u8]) -> Vec<String> {
     let mut archive =
