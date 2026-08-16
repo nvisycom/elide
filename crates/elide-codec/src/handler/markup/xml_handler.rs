@@ -1,14 +1,12 @@
-//! XML handler side: the [`XmlHandler`] type, its [`Format`] descriptor,
-//! and the [`XmlEncoder`] that re-serializes a mutated [`ExtractedItem`]
-//! stream back into XML.
+//! XML handler side: the [`XmlHandler`] type, its [`Format`] descriptor, and the
+//! [`XmlEncoder`] that re-serializes a mutated [`ExtractedItem`] stream — the
+//! shared markup engine HTML runs on too.
 //!
-//! Unlike the HTML encoder (which rebuilds a DOM), the XML encoder
-//! preserves the document **verbatim**: it splices each item's current
-//! value back at its recorded source byte span into the retained raw
+//! The encoder preserves the document **verbatim**: it splices each item's
+//! current value back at its recorded source byte span into the retained raw
 //! string, leaving the declaration, whitespace, attribute quoting, and
 //! everything outside the redacted spans byte-identical. Splices apply
-//! right-to-left so an earlier edit's length delta never shifts a later
-//! span.
+//! right-to-left so an earlier edit's length delta never shifts a later span.
 //!
 //! [`ExtractedItem`]: super::ExtractedItem
 
@@ -26,7 +24,7 @@ use crate::{Format, FormatId};
 /// Stable [`FormatId`] for the XML codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.text.xml");
 
-/// Handler type for loaded XML content.
+/// Handler type for loaded XML (and HTML) content.
 pub(crate) type XmlHandler = ExtractHandler<XmlEncoder>;
 
 /// An XML [`ExtractedItem`] addressed by the source byte span its

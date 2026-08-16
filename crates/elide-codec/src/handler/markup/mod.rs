@@ -17,21 +17,27 @@
 //! [`ExtractHandler`]: crate::handler::extract::ExtractHandler
 //! [`Encoder`]: crate::handler::extract::Encoder
 
+// XML is the shared markup engine; `html` enables `xml`, so the engine, config,
+// and XML modules compile whenever any markup format is on.
+#[cfg(feature = "xml")]
+mod config;
 #[cfg(feature = "html")]
 mod html_handler;
 #[cfg(feature = "html")]
 mod html_loader;
+#[cfg(feature = "xml")]
+mod stream;
 #[cfg(feature = "xml")]
 mod xml_handler;
 #[cfg(feature = "xml")]
 mod xml_loader;
 
 #[cfg(feature = "html")]
-pub use self::html_handler::{format as html_format, format_with as html_format_with};
+pub use self::html_handler::{
+    ScriptPolicy, format as html_format, format_with as html_format_with,
+};
 #[cfg(feature = "html")]
 pub(crate) use self::html_loader::HtmlLoader;
-#[cfg(feature = "html")]
-pub use self::html_loader::ScriptPolicy;
 #[cfg(feature = "xml")]
 pub use self::xml_handler::format as xml_format;
 #[cfg(feature = "xml")]
