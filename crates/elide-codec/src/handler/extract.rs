@@ -212,8 +212,8 @@ impl<E: Encoder> Handler<Text> for ExtractHandler<E> {
         // identity offset add of the chunk-local range against the chunk's
         // start, bounded by its end.
         let base = chunk.location.range.start;
-        let start = base + local.range.start;
-        let end = base + local.range.end;
+        let start = base.checked_add(local.range.start)?;
+        let end = base.checked_add(local.range.end)?;
         if start > end || end > chunk.location.range.end {
             return None;
         }

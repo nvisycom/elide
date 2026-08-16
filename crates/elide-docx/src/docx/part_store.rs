@@ -385,4 +385,29 @@ mod tests {
         // [6..11] + identity head [11..13], all contiguous → one range.
         assert_eq!(map.raw_ranges(4..9), vec![4..13]);
     }
+
+    #[test]
+    fn text_blocks_decodes_an_entity_and_maps_it_back_to_raw() {
+        // Whole path: a body part whose text run carries `&amp;`. `text_blocks`
+        // must decode it to `a & b` and attach an offset map whose `raw_ranges`
+        // over the whole decoded text covers the raw `&amp;`.
+        let xml = "<w:document><w:t>a &amp; b</w:t></w:document>";
+        let part = StoredPart::new(PartPath::from("word/document.xml"), Bytes::from(xml));
+        let blocks = part.text_blocks().expect("decodes");
+
+        let block = blocks
+            .iter()
+            .find(|b| b.text == "a & b")
+            .expect("the decoded text run is present");
+        // The raw slice `a &amp; b` (9 bytes) starts after `<w:document><w:t>`.
+        let raw_start = xml.find("a &amp; b").unwrap();
+        assert_eq!(block.start, raw_start);
+        assert_eq!(block.end, raw_start + "a &amp; b".len());
+        // The whole decoded span maps back to the whole raw slice, entity and
+        // all — one contiguous range.
+        assert_eq!(
+            block.offsets.raw_ranges(0..block.text.len()),
+            vec![raw_start..raw_start + "a &amp; b".len()]
+        );
+    }
 }
