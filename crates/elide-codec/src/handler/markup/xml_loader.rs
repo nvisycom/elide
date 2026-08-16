@@ -110,7 +110,9 @@ pub(crate) fn build_items(raw: &str, config: MarkupConfig<'_>) -> Result<Vec<Xml
         match event {
             Event::Eof => break,
             Event::Start(ref e) => {
-                emit_attributes(raw, e, &mut items, &mut offset);
+                for inner in attribute_spans(raw, e, config.lenient)? {
+                    push_span(raw, inner, &mut items, &mut offset);
+                }
                 let name = local_name(e);
                 if config.skips_body(&name) {
                     skip = Some(SkipRegion { name, depth: 1 });
@@ -123,7 +125,9 @@ pub(crate) fn build_items(raw: &str, config: MarkupConfig<'_>) -> Result<Vec<Xml
             }
             Event::Empty(ref e) => {
                 // A self-closing element: attributes only, no body, no frame.
-                emit_attributes(raw, e, &mut items, &mut offset);
+                for inner in attribute_spans(raw, e, config.lenient)? {
+                    push_span(raw, inner, &mut items, &mut offset);
+                }
             }
             Event::End(_) => {
                 if let Some(frame) = stack.pop() {
@@ -214,11 +218,31 @@ fn end_name(e: &BytesEnd<'_>) -> String {
     String::from_utf8_lossy(e.local_name().as_ref()).to_ascii_lowercase()
 }
 
-/// Emit one item per attribute value with a text-bearing value, addressed by the
-/// value's inner byte span (between the quotes) in the source. Values pass
-/// through verbatim, so a `mailto:` URL has its email matched in place.
-fn emit_attributes(raw: &str, e: &BytesStart<'_>, items: &mut Vec<XmlItem>, offset: &mut usize) {
-    for attr in e.attributes().with_checks(false).flatten() {
+/// The source byte spans of an element's redactable attribute values — the inner
+/// bytes between the quotes — so the caller emits them like any other span.
+/// Values pass through verbatim, so a `mailto:` URL has its email matched in
+/// place.
+///
+/// Strict XML validates attributes (rejecting e.g. a duplicate key) and reports
+/// an [`AttrError`] as [`ErrorKind::MalformedInput`]; lenient HTML turns
+/// validation off and skips an unparseable attribute rather than failing.
+///
+/// [`AttrError`]: quick_xml::events::attributes::AttrError
+fn attribute_spans(raw: &str, e: &BytesStart<'_>, lenient: bool) -> Result<Vec<Range<usize>>> {
+    let mut spans = Vec::new();
+    for attr in e.attributes().with_checks(!lenient) {
+        let attr = match attr {
+            Ok(attr) => attr,
+            // Lenient parsing tolerates a malformed attribute; strict XML does
+            // not — a duplicate key or unquoted value is a malformed document.
+            Err(_) if lenient => continue,
+            Err(e) => {
+                return Err(Error::new(
+                    ErrorKind::MalformedInput,
+                    format!("malformed attribute: {e}"),
+                ));
+            }
+        };
         // `Attribute::value` is the *raw* on-the-wire bytes, entity spellings
         // intact (decoding happens only through `unescape_value`, which we never
         // call — the engine redacts raw slices). Over a `Reader::from_str`, the
@@ -236,8 +260,9 @@ fn emit_attributes(raw: &str, e: &BytesStart<'_>, items: &mut Vec<XmlItem>, offs
         if raw[inner.clone()].trim().is_empty() {
             continue;
         }
-        push_span(raw, inner, items, offset);
+        spans.push(inner);
     }
+    Ok(spans)
 }
 
 /// The byte range that `slice` — a subslice borrowed out of `raw` — occupies in
@@ -401,6 +426,17 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn strict_xml_rejects_a_duplicate_attribute() {
+        // A duplicate attribute key is malformed XML; strict parsing refuses it.
+        let raw = r#"<root id="a" id="b"/>"#;
+        let err = XmlLoader
+            .decode(ContentData::from_text(raw))
+            .await
+            .expect_err("duplicate attribute must be rejected");
+        assert_eq!(err.kind(), elide_core::ErrorKind::MalformedInput);
+    }
+
+    #[tokio::test]
     async fn redact_text_node() {
         let raw = "<root><name>Alice</name></root>";
         let mut h = load(raw).await;
@@ -495,6 +531,15 @@ mod tests {
             let h = html(raw);
             assert_eq!(encoded(&h), raw, "html round-trip changed: {raw:?}");
         }
+    }
+
+    #[cfg(feature = "html")]
+    #[tokio::test]
+    async fn lenient_html_tolerates_a_duplicate_attribute() {
+        // What strict XML rejects, lenient HTML accepts and round-trips.
+        let raw = r#"<img id="a" id="b">"#;
+        let h = handler_with(raw, MarkupConfig::lenient(TEST_BLOCKS, &[]));
+        assert_eq!(encoded(&h), raw);
     }
 
     #[cfg(feature = "html")]
