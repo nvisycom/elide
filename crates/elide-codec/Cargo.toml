@@ -43,8 +43,8 @@ text = ["txt", "json", "html", "xml"]
 ## Individual text formats.
 txt = ["internal_text"]
 json = ["internal_text", "dep:serde_json"]
-html = ["internal_extract", "dep:scraper", "dep:ego-tree"]
 xml = ["internal_extract", "dep:quick-xml"]
+html = ["xml"]
 
 ## The rich-document formats.
 document = ["docx", "pdf", "rtf"]
@@ -150,8 +150,6 @@ async-trait = { workspace = true, features = [] }
 tracing = { workspace = true, features = [] }
 
 # Markup parsing
-scraper = { workspace = true, features = [], optional = true }
-ego-tree = { workspace = true, features = [], optional = true }
 quick-xml = { workspace = true, features = [], optional = true }
 
 # Image processing
