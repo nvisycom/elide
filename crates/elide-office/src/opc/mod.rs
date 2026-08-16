@@ -102,6 +102,24 @@ impl<C: PartClassifier> Package<C> {
         self.parts.iter().any(|p| p.path().as_str() == path)
     }
 
+    /// The raw bytes of the part at `path`, or `None` if the package has no such
+    /// part. A cheap ref-counted share of the retained buffer, for a facade that
+    /// parses a part's own structure (e.g. XLSX reading its shared-string table
+    /// and sheet cells) before deciding what to redact.
+    pub fn part_bytes(&self, path: &str) -> Option<Bytes> {
+        self.parts
+            .iter()
+            .find(|p| p.path().as_str() == path)
+            .map(|p| p.bytes())
+    }
+
+    /// The paths of every part in the package, in archive order — so a facade can
+    /// discover its parts (e.g. XLSX enumerating `xl/worksheets/sheet*.xml`)
+    /// without assuming fixed names.
+    pub fn part_paths(&self) -> impl Iterator<Item = &PartPath> {
+        self.parts.iter().map(|p| p.path())
+    }
+
     /// Extract the redactable text and embedded media of the package.
     ///
     /// Each [`Block`] is addressed by its part and an exact byte span into that
