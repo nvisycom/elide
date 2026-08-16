@@ -19,8 +19,9 @@ impl Loader<Tabular> for XlsxLoader {
 
     async fn decode(&self, content: ContentData) -> Result<XlsxHandler> {
         let archive = content.to_bytes();
-        let cells = Xlsx::open(&archive)
-            .and_then(|xlsx| xlsx.extract())
+        let workbook = Xlsx::open(&archive).map_err(xlsx_error)?;
+        let cells = workbook
+            .extract()
             .map_err(xlsx_error)?
             .into_iter()
             .map(|cell| XlsxCell {
@@ -30,6 +31,7 @@ impl Loader<Tabular> for XlsxLoader {
                 text: cell.text.as_str().to_owned(),
             })
             .collect();
-        Ok(XlsxHandler::new(archive, cells))
+        let text_parts = workbook.text_parts();
+        Ok(XlsxHandler::new(archive, cells, text_parts))
     }
 }

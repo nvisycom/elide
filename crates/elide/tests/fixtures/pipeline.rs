@@ -317,6 +317,13 @@ impl Fixture {
         #[cfg(feature = "llm")]
         let orchestrator =
             orchestrator.with_modality::<Image>(build_image_analyzer()?, Anonymizer::new());
+        // A container's text sub-parts (an XLSX comment or drawing, surfaced as
+        // an XML part) are the Text modality, so register a Text pipeline to
+        // drive them. When the body modality already is Text this re-registers
+        // the same pipeline, which is a no-op; when it is Tabular it adds the
+        // pipeline the container parts need.
+        let orchestrator = orchestrator
+            .with_modality::<Text>(build_analyzer::<Text>()?, build_anonymizer::<Text>());
 
         // Two phases so the entities surface for assertions: detect, copy
         // the body entities out, then apply with no editing.

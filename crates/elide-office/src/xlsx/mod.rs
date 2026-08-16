@@ -16,6 +16,7 @@ mod workbook;
 use std::collections::HashMap;
 use std::ops::Range;
 
+use bytes::Bytes;
 use quick_xml::escape::escape;
 
 use self::sheet::{CellSource, parse_cells};
@@ -37,7 +38,9 @@ struct SheetClassifier;
 impl PartClassifier for SheetClassifier {
     fn role(&self, path: &PartPath) -> PartRole {
         let path = path.as_str();
-        if is_worksheet(path) || path == SHARED_STRINGS_PART {
+        if is_relationships(path) {
+            PartRole::RelationshipTargets
+        } else if is_worksheet(path) || path == SHARED_STRINGS_PART || is_extra_text_part(path) {
             PartRole::ElementText
         } else if let Some(kind) = embedding_kind(path) {
             PartRole::Binary(kind)
@@ -57,6 +60,23 @@ impl PartClassifier for SheetClassifier {
 /// Whether `path` is a worksheet part (`xl/worksheets/sheet*.xml`).
 fn is_worksheet(path: &str) -> bool {
     path.starts_with("xl/worksheets/") && path.ends_with(".xml")
+}
+
+/// Whether `path` is a relationships part (`*/_rels/*.rels`), whose external
+/// hyperlink targets carry the same user data as the cells.
+fn is_relationships(path: &str) -> bool {
+    path.ends_with(".rels")
+}
+
+/// Whether `path` is a non-cell text-bearing part beyond the worksheets and the
+/// shared-string table: cell comments, and the text of drawings and charts. Each
+/// holds user-visible text (`<t>` / `a:t`) redacted through the shared markup
+/// path rather than the cell model.
+fn is_extra_text_part(path: &str) -> bool {
+    (path.starts_with("xl/comments") || path.starts_with("xl/threadedComments/"))
+        && path.ends_with(".xml")
+        || path.starts_with("xl/drawings/") && path.ends_with(".xml")
+        || path.starts_with("xl/charts/") && path.ends_with(".xml")
 }
 
 /// The [`EmbeddingKind`] of a binary media part, if `path` names one.
@@ -195,6 +215,25 @@ impl Xlsx {
     /// - [`ErrorKind::UnsafeRewrite`](crate::ErrorKind::UnsafeRewrite) if an edit
     ///   cannot be applied.
     pub fn rewrite(&self, edits: &[CellEdit]) -> Result<Vec<u8>> {
+        self.rewrite_with_parts(edits, &[])
+    }
+
+    /// Rewrite cell `edits` *and* replace whole non-cell text parts with
+    /// `part_bytes` (each a part path mapped to its already-redacted bytes, e.g. a
+    /// comment or drawing part redacted through the markup pipeline), re-packing
+    /// every other part byte-for-byte.
+    ///
+    /// A part replacement naming a part the workbook does not carry, or a cell
+    /// part, is refused fail-closed.
+    ///
+    /// # Errors
+    ///
+    /// As [`rewrite`](Xlsx::rewrite).
+    pub fn rewrite_with_parts(
+        &self,
+        edits: &[CellEdit],
+        part_bytes: &[(String, Vec<u8>)],
+    ) -> Result<Vec<u8>> {
         // Group edits by the sheet part they land in, keyed by (row, column).
         let mut by_part: HashMap<String, HashMap<(u32, u32), &CellEdit>> = HashMap::new();
         for edit in edits {
@@ -234,7 +273,45 @@ impl Xlsx {
             replacements.push(pruned);
         }
 
+        // Fold in the externally-redacted non-cell text parts. Each must name a
+        // text part the workbook carries and must not collide with a cell part.
+        for (part, bytes) in part_bytes {
+            if !is_extra_text_part(part) {
+                return Err(Error::unsafe_rewrite(format!(
+                    "part replacement targets non-text part `{part}`"
+                )));
+            }
+            if self.package.part_bytes(part).is_none() {
+                return Err(Error::unsafe_rewrite(format!(
+                    "part replacement names unknown part `{part}`"
+                )));
+            }
+            replacements.push(PartReplacement {
+                part: PartPath::from(part.clone()),
+                bytes: bytes.clone(),
+            });
+        }
+
         self.package.rewrite_with_parts(&[], &replacements)
+    }
+
+    /// The non-cell text-bearing parts of the workbook — cell comments, and the
+    /// text of drawings and charts — each as its part path and raw bytes.
+    ///
+    /// These hold user-visible text (`<t>` / `a:t`) that is redacted through the
+    /// shared markup pipeline rather than the cell model, so a container surface
+    /// exposes them for the orchestrator to drive and hands their redacted bytes
+    /// back to [`rewrite_with_parts`](Xlsx::rewrite_with_parts).
+    pub fn text_parts(&self) -> Vec<(String, Bytes)> {
+        self.package
+            .part_paths()
+            .filter(|path| is_extra_text_part(path.as_str()))
+            .filter_map(|path| {
+                self.package
+                    .part_bytes(path.as_str())
+                    .map(|bytes| (path.as_str().to_owned(), bytes))
+            })
+            .collect()
     }
 
     /// Blank every shared-string entry that, after the de-share edits in
@@ -601,6 +678,53 @@ mod tests {
             read_part(&out, "xl/worksheets/sheet2.xml"),
             read_part(SAMPLE, "xl/worksheets/sheet2.xml"),
         );
+    }
+
+    /// A second workbook carrying non-cell text: a cell comment
+    /// (`xl/comments1.xml`) and a drawing (`xl/drawings/drawing1.xml`), each with
+    /// PII.
+    const SAMPLE2: &[u8] = include_bytes!("../../tests/testdata/sample2.xlsx");
+
+    #[test]
+    fn text_parts_lists_comments_and_drawings() {
+        let xlsx = Xlsx::open(SAMPLE2).unwrap();
+        let parts: Vec<String> = xlsx.text_parts().into_iter().map(|(p, _)| p).collect();
+        assert!(
+            parts.contains(&"xl/comments1.xml".to_owned()),
+            "comment part missing: {parts:?}"
+        );
+        assert!(
+            parts.contains(&"xl/drawings/drawing1.xml".to_owned()),
+            "drawing part missing: {parts:?}"
+        );
+        // The sheet and structural parts are not text parts.
+        assert!(!parts.iter().any(|p| p.starts_with("xl/worksheets/")));
+    }
+
+    #[test]
+    fn a_text_part_replacement_round_trips_byte_faithfully() {
+        let xlsx = Xlsx::open(SAMPLE2).unwrap();
+        let redacted = br#"<?xml version="1.0"?><comments><commentList><comment ref="A1"><text><r><t>[EMAIL]</t></r></text></comment></commentList></comments>"#;
+        let out = xlsx
+            .rewrite_with_parts(&[], &[("xl/comments1.xml".to_owned(), redacted.to_vec())])
+            .unwrap();
+        // The replaced part carries the new bytes; another part is untouched.
+        assert_eq!(read_part(&out, "xl/comments1.xml"), redacted);
+        assert_eq!(
+            read_part(&out, "xl/drawings/drawing1.xml"),
+            read_part(SAMPLE2, "xl/drawings/drawing1.xml"),
+        );
+    }
+
+    #[test]
+    fn a_part_replacement_naming_a_non_text_part_is_refused() {
+        let xlsx = Xlsx::open(SAMPLE2).unwrap();
+        // A worksheet is a cell part, not a text part surfaced this way.
+        let err = xlsx.rewrite_with_parts(
+            &[],
+            &[("xl/worksheets/sheet1.xml".to_owned(), b"<x/>".to_vec())],
+        );
+        assert!(err.is_err());
     }
 
     /// Read one part's bytes out of an XLSX zip.
