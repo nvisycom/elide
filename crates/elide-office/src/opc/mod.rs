@@ -102,22 +102,22 @@ impl<C: PartClassifier> Package<C> {
         self.parts.iter().any(|p| p.path().as_str() == path)
     }
 
-    /// The raw bytes of the part at `path`, or `None` if the package has no such
-    /// part. A cheap ref-counted share of the retained buffer, for a facade that
-    /// parses a part's own structure (e.g. XLSX reading its shared-string table
-    /// and sheet cells) before deciding what to redact.
+    /// The raw bytes of the part at `path`, or `None` when the package has no
+    /// such part. A cheap ref-counted share of the retained buffer, so a facade
+    /// can parse a part's own structure (e.g. XLSX reading its shared-string
+    /// table and sheet cells) before deciding what to redact.
     pub fn part_bytes(&self, path: &str) -> Option<Bytes> {
         self.parts
             .iter()
             .find(|p| p.path().as_str() == path)
-            .map(|p| p.bytes())
+            .map(StoredPart::bytes)
     }
 
-    /// The paths of every part in the package, in archive order — so a facade can
-    /// discover its parts (e.g. XLSX enumerating `xl/worksheets/sheet*.xml`)
-    /// without assuming fixed names.
+    /// The paths of every part, in archive order, so a facade can discover its
+    /// parts (e.g. XLSX enumerating `xl/worksheets/sheet*.xml`) without assuming
+    /// fixed names.
     pub fn part_paths(&self) -> impl Iterator<Item = &PartPath> {
-        self.parts.iter().map(|p| p.path())
+        self.parts.iter().map(StoredPart::path)
     }
 
     /// Extract the redactable text and embedded media of the package.

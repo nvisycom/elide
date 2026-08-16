@@ -3,8 +3,10 @@
 //!
 //! Cells hold text, so tabular handlers reuse [`TextData`] as the chunk
 //! payload and [`TextReplacement`] as the replacement; only the location
-//! is tabular (a `(row, column)` address with an optional intra-cell byte
-//! range). CSV is fully supported; XLSX is a stub awaiting a parser.
+//! is tabular (a `(row, column)` address, with a sheet name for a
+//! multi-sheet workbook, and an optional intra-cell byte range). CSV parses
+//! and rewrites rows directly; XLSX reads and redacts workbook cells over
+//! the shared [`elide_office`] package engine.
 //!
 //! [`TextData`]: elide_core::modality::text::TextData
 //! [`TextReplacement`]: elide_core::modality::text::TextReplacement

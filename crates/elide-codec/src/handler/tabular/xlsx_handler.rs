@@ -1,20 +1,25 @@
-//! XLSX handler: a stub today.
+//! XLSX handler: holds the workbook's cells and streams them one at a time,
+//! with intra-cell random-access reads and redactions.
 //!
-//! Decoding succeeds (so the format resolves and round-trips through the
-//! registry), but no spreadsheet content is parsed yet: streaming yields
-//! nothing, reads return nothing, redaction is a no-op, and `encode`
-//! reports that re-serialization is unsupported. A real parser
-//! (`calamine` to read, a writer crate to re-emit) will replace this when
-//! spreadsheet extraction lands.
+//! A cell holds text, so a [`TabularReplacement`]'s cell treatment applies
+//! through the shared text-redaction helper. Only the *location* is tabular: a
+//! `(sheet, row, column)` address with an optional intra-cell byte range. On
+//! [`encode`](Handler::encode) the edited cells become
+//! [`CellEdit`](elide_office::xlsx::CellEdit)s and the workbook is re-packed
+//! byte-faithfully by [`elide_office`], de-sharing any shared-string cell that
+//! was redacted so other cells keep the pooled value.
 
-use elide_core::modality::tabular::{Tabular, TabularLocation};
-use elide_core::modality::text::TextData;
-use elide_core::modality::{Chunk, DataReader, DataWriter};
+use bytes::Bytes;
+use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
+use elide_core::modality::text::{TextData, TextReplacement};
+use elide_core::modality::{Chunk, DataReader, DataWriter, Hint};
 use elide_core::operator::Redactions;
 use elide_core::{Error, ErrorKind, Result};
+use elide_office::xlsx::{CellEdit, Xlsx};
 
 use super::xlsx_loader::XlsxLoader;
 use crate::content::ContentData;
+use crate::handler::redact;
 use crate::{Format, FormatId, Handler};
 
 /// Stable [`FormatId`] for the XLSX codec.
@@ -29,14 +34,72 @@ pub fn format() -> Format {
         .with_content_types(["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"])
 }
 
-/// Stub handler: holds nothing and exposes no cells. See the module docs.
-#[derive(Debug, Default)]
-pub(crate) struct XlsxHandler;
+/// One extracted cell: its sheet, zero-based coordinates, and current text.
+#[derive(Debug, Clone)]
+pub(crate) struct XlsxCell {
+    /// Display name of the sheet the cell is on.
+    pub(crate) sheet: String,
+    /// Zero-based row index.
+    pub(crate) row: u32,
+    /// Zero-based column index.
+    pub(crate) column: u32,
+    /// The cell's text, mutated in place as redactions apply.
+    pub(crate) text: String,
+}
+
+/// Handler for a decoded XLSX workbook. Each cell is independently addressable
+/// via a [`TabularLocation`] scoped by sheet name.
+#[derive(Debug)]
+pub(crate) struct XlsxHandler {
+    /// The original package bytes, retained so [`elide_office`] re-packs every
+    /// unedited part unchanged on encode.
+    archive: Bytes,
+    /// The workbook's text-bearing cells, in extraction order.
+    cells: Vec<XlsxCell>,
+    /// Streaming cursor into `cells`.
+    cursor: usize,
+}
 
 impl XlsxHandler {
-    /// An empty stub handler.
-    pub(crate) fn new() -> Self {
-        Self
+    /// Wrap the workbook's `archive` bytes and its extracted `cells`.
+    pub(crate) fn new(archive: Bytes, cells: Vec<XlsxCell>) -> Self {
+        Self {
+            archive,
+            cells,
+            cursor: 0,
+        }
+    }
+
+    /// The index of the cell at `(sheet, row, column)`, if one exists.
+    fn cell_index(&self, sheet: Option<&str>, row: u32, column: u32) -> Option<usize> {
+        self.cells.iter().position(|c| {
+            c.row == row && c.column == column && sheet.is_none_or(|name| c.sheet == name)
+        })
+    }
+
+    /// The cell text at `location`, if the cell exists.
+    fn cell_at(&self, location: &TabularLocation) -> Option<&str> {
+        let sheet = location.sheet_name.as_deref();
+        let index = self.cell_index(sheet, location.row_index, location.column_index)?;
+        Some(self.cells[index].text.as_str())
+    }
+
+    /// Apply one cell edit at `location`, replacing its intra-cell range (or the
+    /// whole cell when no range is set) with the replacement text.
+    fn redact_one(
+        &mut self,
+        location: &TabularLocation,
+        replacement: &TextReplacement,
+    ) -> Result<()> {
+        let sheet = location.sheet_name.as_deref();
+        let Some(index) = self.cell_index(sheet, location.row_index, location.column_index) else {
+            return Ok(());
+        };
+        let cell = &mut self.cells[index];
+        let start = location.start_offset.unwrap_or(0);
+        let end = location.end_offset.unwrap_or(cell.text.len());
+        let value = replacement.value().unwrap_or_default();
+        redact::replace_range(&mut cell.text, value, start..end)
     }
 }
 
@@ -47,32 +110,108 @@ impl Handler<Tabular> for XlsxHandler {
     }
 
     fn encode(&self) -> Result<ContentData> {
-        Err(Error::new(
-            ErrorKind::CapabilityUnavailable,
-            "XLSX re-encoding is not yet supported",
-        ))
+        // Re-open the retained package and rewrite every cell as an edit; the
+        // engine splices in-place inline cells and de-shares shared ones,
+        // re-packing the rest byte-faithfully. Feeding an unchanged cell back is
+        // harmless (it splices its own text), so all cells are sent.
+        let edits: Vec<CellEdit> = self
+            .cells
+            .iter()
+            .map(|cell| CellEdit {
+                sheet: cell.sheet.clone(),
+                row: cell.row,
+                column: cell.column,
+                text: cell.text.clone(),
+            })
+            .collect();
+        let bytes = Xlsx::open(&self.archive)
+            .and_then(|xlsx| xlsx.rewrite(&edits))
+            .map_err(xlsx_error)?;
+        Ok(ContentData::new(Bytes::from(bytes)))
     }
 
     async fn read_next(&mut self) -> Result<Option<Chunk<Tabular>>> {
-        Ok(None)
+        if self.cursor >= self.cells.len() {
+            return Ok(None);
+        }
+        let cell = &self.cells[self.cursor];
+        self.cursor += 1;
+        let location =
+            TabularLocation::new(cell.row, cell.column).with_sheet_name(cell.sheet.clone());
+        Ok(Some(Chunk {
+            location,
+            data: TextData::new(cell.text.clone()),
+            hints: Vec::<Hint<Tabular>>::new(),
+        }))
     }
 
-    // No `lift` override: the stub yields no chunks, so it is never called;
-    // the identity default suffices.
+    fn lift(&self, chunk: &Chunk<Tabular>, local: TabularLocation) -> Option<TabularLocation> {
+        // `local` carries the chunk-local intra-cell range in its offsets; its
+        // row/column/sheet are placeholders. Re-anchor onto the chunk's cell.
+        let cell = self.cell_at(&chunk.location)?;
+        let start = local.start_offset.unwrap_or(0);
+        let end = local.end_offset.unwrap_or(cell.len());
+        if start > end || end > cell.len() {
+            return None;
+        }
+        let mut location =
+            TabularLocation::new(chunk.location.row_index, chunk.location.column_index)
+                .with_range(start, end);
+        if let Some(sheet) = &chunk.location.sheet_name {
+            location = location.with_sheet_name(sheet.clone());
+        }
+        Some(location)
+    }
 }
 
 #[async_trait::async_trait]
 impl DataReader<Tabular> for XlsxHandler {
-    async fn read_at(&self, _location: &TabularLocation) -> Result<Option<TextData>> {
-        Ok(None)
+    async fn read_at(&self, location: &TabularLocation) -> Result<Option<TextData>> {
+        let Some(cell) = self.cell_at(location) else {
+            return Ok(None);
+        };
+        match (location.start_offset, location.end_offset) {
+            (Some(start), Some(end)) => Ok(cell.get(start..end).map(TextData::new)),
+            _ => Ok(Some(TextData::new(cell.to_owned()))),
+        }
     }
 }
 
 #[async_trait::async_trait]
 impl DataWriter<Tabular> for XlsxHandler {
-    async fn write_at(&mut self, _redactions: Redactions<Tabular>) -> Result<()> {
+    async fn write_at(&mut self, mut redactions: Redactions<Tabular>) -> Result<()> {
+        redactions.sort_by_position();
+        // Right-to-left so an edit's length delta does not move earlier
+        // intra-cell offsets in the same cell.
+        for (location, replacement) in redactions.into_iter().rev() {
+            match replacement {
+                TabularReplacement::Cell(cell) => self.redact_one(&location, &cell)?,
+                // A whole-row or whole-column drop would renumber every `r=`
+                // reference across the sheet; that structural rewrite is not yet
+                // supported, so refuse it rather than silently keep the data.
+                TabularReplacement::DropRow | TabularReplacement::DropColumn => {
+                    return Err(Error::new(
+                        ErrorKind::CapabilityUnavailable,
+                        "XLSX structural row/column drops are not yet supported",
+                    ));
+                }
+            }
+        }
         Ok(())
     }
+}
+
+/// Map an [`elide_office`] error into the codec's error type.
+pub(crate) fn xlsx_error(err: elide_office::Error) -> Error {
+    use elide_office::ErrorKind as OfficeKind;
+    let kind = match err.kind() {
+        OfficeKind::InvalidArchive | OfficeKind::InvalidPackage | OfficeKind::InvalidXml => {
+            ErrorKind::MalformedInput
+        }
+        OfficeKind::UnsafeRewrite => ErrorKind::Processing,
+        _ => ErrorKind::Processing,
+    };
+    Error::new(kind, err.to_string())
 }
 
 #[cfg(test)]
@@ -80,21 +219,88 @@ mod tests {
     use super::*;
     use crate::Loader;
 
+    const SAMPLE: &[u8] = include_bytes!("../../../../elide-office/tests/testdata/sample.xlsx");
+
+    async fn load() -> XlsxHandler {
+        XlsxLoader
+            .decode(ContentData::new(Bytes::from_static(SAMPLE)))
+            .await
+            .unwrap()
+    }
+
     #[tokio::test]
-    async fn stub_decodes_but_exposes_nothing() {
-        let mut h = XlsxLoader
-            .decode(ContentData::new(bytes::Bytes::from_static(b"PK\x03\x04")))
+    async fn streams_cells_with_sheet_scoped_locations() {
+        let mut h = load().await;
+        let mut seen = Vec::new();
+        while let Some(chunk) = h.read_next().await.unwrap() {
+            seen.push((
+                chunk.location.sheet_name.as_deref().map(str::to_owned),
+                chunk.location.row_index,
+                chunk.location.column_index,
+                chunk.data.as_str().to_owned(),
+            ));
+        }
+        assert!(seen.contains(&(
+            Some("Customers".to_owned()),
+            1,
+            0,
+            "alice@example.com".to_owned()
+        )));
+        assert!(seen.contains(&(Some("Customers".to_owned()), 1, 1, "123-45-6789".to_owned())));
+        assert!(seen.contains(&(
+            Some("Notes".to_owned()),
+            0,
+            0,
+            "alice@example.com".to_owned()
+        )));
+    }
+
+    #[tokio::test]
+    async fn read_at_slices_intra_cell_range() {
+        let h = load().await;
+        // Customers!A2 = "alice@example.com"; bytes 0..5 = "alice".
+        let loc = TabularLocation::new(1, 0)
+            .with_sheet_name("Customers")
+            .with_range(0, 5);
+        assert_eq!(h.read_at(&loc).await.unwrap().unwrap().as_str(), "alice");
+    }
+
+    #[tokio::test]
+    async fn redact_and_encode_removes_pii_and_de_shares() {
+        let mut h = load().await;
+        let mut batch: Redactions<Tabular> = Redactions::new();
+        // Redact only Customers!A2 (alice). Notes!A1 shares the pool entry.
+        batch.push(
+            TabularLocation::new(1, 0).with_sheet_name("Customers"),
+            TabularReplacement::Cell(TextReplacement::substituted("[EMAIL]")),
+        );
+        h.write_at(batch).await.unwrap();
+        let out = h.encode().unwrap();
+
+        // The redacted output is a valid workbook whose Customers!A2 is gone but
+        // whose Notes!A1 (sharing the pool) still reads alice.
+        let reopened = XlsxLoader
+            .decode(ContentData::new(out.to_bytes()))
             .await
             .unwrap();
-        assert_eq!(h.format().as_str(), "elide.tabular.xlsx");
-        // No cells, no reads, redaction is a no-op, encode is unsupported.
-        assert!(h.read_next().await.unwrap().is_none());
-        assert!(
-            h.read_at(&TabularLocation::new(0, 0))
-                .await
-                .unwrap()
-                .is_none()
+        let a2 = reopened
+            .cell_at(&TabularLocation::new(1, 0).with_sheet_name("Customers"))
+            .unwrap();
+        assert_eq!(a2, "[EMAIL]");
+        let notes = reopened
+            .cell_at(&TabularLocation::new(0, 0).with_sheet_name("Notes"))
+            .unwrap();
+        assert_eq!(notes, "alice@example.com");
+    }
+
+    #[tokio::test]
+    async fn structural_drops_are_refused() {
+        let mut h = load().await;
+        let mut batch: Redactions<Tabular> = Redactions::new();
+        batch.push(
+            TabularLocation::new(1, 0).with_sheet_name("Customers"),
+            TabularReplacement::DropRow,
         );
-        assert!(h.encode().is_err());
+        assert!(h.write_at(batch).await.is_err());
     }
 }
