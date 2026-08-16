@@ -40,6 +40,11 @@ pub enum PartKind {
     Chart,
     /// SmartArt / diagram text (`word/diagrams/data{n}.xml`).
     Diagram,
+    /// A relationships part (`*/_rels/*.rels`). Structure, but its external
+    /// hyperlink relationships carry user-visible target URLs (`mailto:`,
+    /// `https://…`) that hold the same PII as the body, so its `Target`
+    /// attribute values are redacted.
+    Relationships,
     /// A binary embedding (image, embedded object, font).
     Embedding(EmbeddingKind),
     /// Document metadata (`docProps/*`).
@@ -86,6 +91,11 @@ impl PartKind {
         if Self::is_numbered(path, "word/diagrams/data", ".xml") {
             return Self::Diagram;
         }
+        // Relationships parts: `_rels/.rels` and `<dir>/_rels/<name>.rels`. Their
+        // external hyperlink targets carry user PII, so they are redacted.
+        if Self::is_relationships(path) {
+            return Self::Relationships;
+        }
         // Binary embeddings.
         if let Some(kind) = EmbeddingKind::of(path) {
             return Self::Embedding(kind);
@@ -97,8 +107,13 @@ impl PartKind {
         Self::Other
     }
 
-    /// Whether this part carries redactable text (body, header, footer, notes,
-    /// comments, glossary, and the text of charts and diagrams).
+    /// Whether this part carries redactable *element* text (body, header,
+    /// footer, notes, comments, glossary, and the text of charts and diagrams) —
+    /// the text/comment/CDATA event model.
+    ///
+    /// This is narrower than [`is_redactable`](PartKind::is_redactable):
+    /// [`Relationships`](PartKind::Relationships) parts are redactable but hold
+    /// their PII in attribute values, not element text.
     pub fn is_text(self) -> bool {
         matches!(
             self,
@@ -114,12 +129,27 @@ impl PartKind {
         )
     }
 
+    /// Whether this part yields redactable text of any kind: the element text of
+    /// an [`is_text`](PartKind::is_text) part, or the external hyperlink targets
+    /// of a [`Relationships`](PartKind::Relationships) part. This is the gate
+    /// extraction and rewrite use to decide a part is text-splice territory.
+    pub fn is_redactable(self) -> bool {
+        self.is_text() || matches!(self, Self::Relationships)
+    }
+
     /// The [`EmbeddingKind`] when this part is an embedding.
     pub fn embedding(self) -> Option<EmbeddingKind> {
         match self {
             Self::Embedding(kind) => Some(kind),
             _ => None,
         }
+    }
+
+    /// Whether `path` is a relationships part: the package root `_rels/.rels`,
+    /// or a `<dir>/_rels/<name>.rels` sidecar. Both live in a `_rels/` directory
+    /// and end in `.rels`, which uniquely identifies the OPC relationships parts.
+    fn is_relationships(path: &str) -> bool {
+        path.ends_with(".rels") && (path == "_rels/.rels" || path.contains("/_rels/"))
     }
 
     /// Whether `path` is `{prefix}{n}{suffix}` for some run of digits `n`
@@ -164,5 +194,40 @@ impl EmbeddingKind {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relationships_parts_are_classified_and_redactable() {
+        // The package root rels and a part's sidecar rels are both relationships.
+        for path in ["_rels/.rels", "word/_rels/document.xml.rels"] {
+            assert_eq!(PartKind::of(path), PartKind::Relationships, "{path}");
+            assert!(PartKind::of(path).is_redactable(), "{path}");
+            // They hold attribute text, not element text, so they are redactable
+            // but not `is_text`.
+            assert!(!PartKind::of(path).is_text(), "{path}");
+        }
+    }
+
+    #[test]
+    fn a_non_rels_part_is_not_a_relationships_part() {
+        // A path merely containing `_rels` but not ending in `.rels`, and an
+        // ordinary XML part, are both left as `Other`.
+        assert_eq!(PartKind::of("word/settings.xml"), PartKind::Other);
+        assert_eq!(PartKind::of("word/_rels/document.xml"), PartKind::Other);
+    }
+
+    #[test]
+    fn is_redactable_covers_every_text_part_and_relationships() {
+        assert!(PartKind::Body.is_redactable());
+        assert!(PartKind::Relationships.is_redactable());
+        // Structure and binary parts are not.
+        assert!(!PartKind::Other.is_redactable());
+        assert!(!PartKind::Metadata.is_redactable());
+        assert!(!PartKind::Embedding(EmbeddingKind::Image).is_redactable());
     }
 }

@@ -1,30 +1,13 @@
 //! [`StoredPart`]: one package part, read once and classified, with the XML
 //! text extraction and splicing it supports.
 
-use std::borrow::Cow;
-use std::ops::Range;
-
 use bytes::Bytes;
 use hipstr::HipStr;
-use quick_xml::Reader;
-use quick_xml::escape::{partial_escape, unescape};
-use quick_xml::events::Event;
 
-use crate::block::{Block, IssueKind, OffsetMap, OffsetRun, Replacement};
+use super::xml_span::{Span, relationship_spans, text_spans};
+use crate::block::{Block, IssueKind, Replacement};
 use crate::error::{Error, Result};
 use crate::part::{PartKind, PartPath};
-
-/// The XML event a text span lives inside, which determines how a replacement
-/// spliced into it must be escaped or framed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BlockKind {
-    /// Character data of a `Text` event: escape `<`, `>`, `&`.
-    Text,
-    /// Body of a `<!-- ... -->` comment: reject `--` and a trailing `-`.
-    Comment,
-    /// Body of a `<![CDATA[ ... ]]>` section: reject `]]>`.
-    Cdata,
-}
 
 /// One package part: its path, its kind, and its bytes, retained for extraction
 /// and a byte-faithful re-pack.
@@ -63,42 +46,42 @@ impl StoredPart {
         std::str::from_utf8(&self.bytes).map_err(|_| IssueKind::NotUtf8)
     }
 
-    /// The redactable text [`Block`]s of this (text-bearing) part, or the
+    /// The redactable text [`Block`]s of this (redactable) part, or the
     /// [`IssueKind`] that prevented extraction.
     ///
-    /// Each text/comment/CDATA event's inner bytes (delimiters stripped) become
-    /// a block addressed by this part and its byte span; whitespace-only runs
-    /// are dropped. A block's `text` is the decoded logical text (entities like
-    /// `&amp;` resolved) while its span stays raw, so splicing lands on the
-    /// original bytes.
+    /// For an [`is_text`](PartKind::is_text) part, each text/comment/CDATA
+    /// event's inner bytes (delimiters stripped) become a block addressed by
+    /// this part and its byte span; whitespace-only runs are dropped. For a
+    /// [`Relationships`](PartKind::Relationships) part, each external hyperlink
+    /// `Target` attribute value becomes a block. A block's `text` is the decoded
+    /// logical text (entities like `&amp;` resolved) while its span stays raw, so
+    /// splicing lands on the original bytes.
     pub(super) fn text_blocks(&self) -> std::result::Result<Vec<Block>, IssueKind> {
         let raw = self.as_text()?;
         let mut blocks = Vec::new();
-        for (span, kind) in text_spans(raw).map_err(|_| IssueKind::MalformedXml)? {
-            let (text, offsets): (Cow<'_, str>, OffsetMap) = match kind {
-                BlockKind::Text => {
-                    let decoded =
-                        unescape(&raw[span.clone()]).map_err(|_| IssueKind::MalformedXml)?;
-                    let offsets = offset_map(&raw[span.clone()], span.start)
-                        .map_err(|_| IssueKind::MalformedXml)?;
-                    (decoded, offsets)
-                }
-                // A comment or CDATA body is byte-identical to its raw source, so
-                // the map is a single identity run over the whole span.
-                BlockKind::Comment | BlockKind::Cdata => (
-                    Cow::Borrowed(&raw[span.clone()]),
-                    OffsetMap::identity(span.start, span.len()),
-                ),
-            };
+        for span in self.spans(raw).map_err(|_| IssueKind::MalformedXml)? {
+            let (text, offsets) = span.decode(raw).map_err(|_| IssueKind::MalformedXml)?;
             blocks.push(Block {
                 part: self.path.clone(),
                 text: HipStr::from(text).into_owned(),
-                start: span.start,
-                end: span.end,
+                start: span.range.start,
+                end: span.range.end,
                 offsets,
             });
         }
         Ok(blocks)
+    }
+
+    /// The redactable spans of `raw`, chosen by this part's kind: the
+    /// text/comment/CDATA spans of an [`is_text`](PartKind::is_text) part, or the
+    /// external hyperlink `Target` values of a
+    /// [`Relationships`](PartKind::Relationships) part. Errs on malformed XML.
+    fn spans(&self, raw: &str) -> std::result::Result<Vec<Span>, ()> {
+        if self.kind == PartKind::Relationships {
+            relationship_spans(raw)
+        } else {
+            text_spans(raw)
+        }
     }
 
     /// Splice `replacements` into this part's XML, leaving every byte outside a
@@ -136,22 +119,23 @@ impl StoredPart {
             prev_end = r.end;
         }
 
-        // Recover each span's event kind so the replacement text is escaped as
-        // text content, or validated against comment/CDATA framing, before it
-        // enters the byte stream.
-        let spans = text_spans(raw)
+        // Recover each span's event kind so the replacement text is escaped for
+        // its context (text content, attribute value) or validated against
+        // comment/CDATA framing, before it enters the byte stream.
+        let spans = self
+            .spans(raw)
             .map_err(|_| Error::invalid_xml(format!("part `{}` malformed XML", self.path)))?;
 
         let mut out = String::with_capacity(raw.len());
         let mut cursor = 0usize;
         for r in ordered {
-            let kind = span_kind(&spans, r.start, r.end).ok_or_else(|| {
+            let span = Span::covering(&spans, r.start, r.end).ok_or_else(|| {
                 Error::unsafe_rewrite(format!(
                     "span {}..{} is not a text span in `{}`",
                     r.start, r.end, r.part
                 ))
             })?;
-            let safe = escape_for(kind, &r.text, r)?;
+            let safe = span.escape(&r.text, r)?;
             out.push_str(&raw[cursor..r.start]);
             out.push_str(&safe);
             cursor = r.end;
@@ -161,230 +145,9 @@ impl StoredPart {
     }
 }
 
-/// Build the decoded-to-raw [`OffsetMap`] for a `Text` span whose raw bytes are
-/// `slice` and whose part-absolute start is `base`.
-///
-/// The map interleaves identity stretches — where decoded and raw advance
-/// one-for-one — with an atomic entity run per `&...;`. Each entity is unescaped
-/// on its own to learn its decoded length (numeric refs `&#38;`/`&#x26;` and
-/// named refs alike), which is how much of the decoded text the whole raw
-/// reference stands for. Errs on an entity `unescape` rejects, matching the
-/// whole-span decode.
-fn offset_map(slice: &str, base: usize) -> std::result::Result<OffsetMap, ()> {
-    let bytes = slice.as_bytes();
-    let mut runs = Vec::new();
-    let mut raw = 0usize; // slice-local raw cursor past the last entity
-    let mut decoded = 0usize; // block-local decoded cursor past the last entity
-
-    let mut i = 0usize;
-    while i < bytes.len() {
-        if bytes[i] != b'&' {
-            i += 1;
-            continue;
-        }
-        // Find this entity's terminating `;`; a `&` with no `;` is literal text
-        // (unescape leaves it untouched), so it stays inside the current run.
-        let Some(semi_rel) = slice[i + 1..].find(';') else {
-            i += 1;
-            continue;
-        };
-        let end = i + 1 + semi_rel + 1;
-        let token = &slice[i..end];
-        let entity_decoded = unescape(token).map_err(|_| ())?;
-
-        // Close the identity stretch up to the entity, emit the atomic entity
-        // run, then step both cursors past it.
-        let identity_len = i - raw;
-        if identity_len > 0 {
-            runs.push(OffsetRun::identity(
-                decoded..decoded + identity_len,
-                base + raw..base + i,
-            ));
-            decoded += identity_len;
-        }
-        runs.push(OffsetRun::entity(
-            decoded..decoded + entity_decoded.len(),
-            base + i..base + end,
-        ));
-        decoded += entity_decoded.len();
-        raw = end;
-        i = end;
-    }
-
-    // Flush the trailing identity stretch past the last entity.
-    if raw < bytes.len() {
-        let identity_len = bytes.len() - raw;
-        runs.push(OffsetRun::identity(
-            decoded..decoded + identity_len,
-            base + raw..base + bytes.len(),
-        ));
-    }
-    Ok(OffsetMap::new(runs))
-}
-
-/// The text/comment/CDATA spans of `raw`, each with its inner byte range
-/// (delimiters stripped) and the [`BlockKind`] it belongs to; whitespace-only
-/// text runs are dropped. Errs on malformed XML.
-///
-/// quick-xml emits a separate [`Event::GeneralRef`] for each `&entity;`, so a
-/// logical text run splits into `Text`/`GeneralRef` events; a contiguous run of
-/// them is coalesced into one `Text` span (covering the entity bytes) so
-/// unescaping the whole span yields the decoded logical text.
-fn text_spans(raw: &str) -> std::result::Result<Vec<(Range<usize>, BlockKind)>, ()> {
-    let mut reader = Reader::from_str(raw);
-    let mut spans = Vec::new();
-    let mut last = 0usize;
-    let mut run: Option<Range<usize>> = None;
-
-    loop {
-        let event = reader.read_event().map_err(|_| ())?;
-        let span = last..reader.buffer_position() as usize;
-        last = span.end;
-
-        match event {
-            // Extend (or open) the current text run across text and entities.
-            Event::Text(_) | Event::GeneralRef(_) => {
-                run = Some(run.map_or(span.clone(), |r| r.start..span.end));
-                continue;
-            }
-            // Any other event ends the run; flush it before handling this event.
-            _ => flush_text_run(raw, &mut run, &mut spans),
-        }
-
-        let found = match event {
-            Event::Eof => break,
-            Event::Comment(_) => strip(span, "<!--", "-->").map(|s| (s, BlockKind::Comment)),
-            Event::CData(_) => strip(span, "<![CDATA[", "]]>").map(|s| (s, BlockKind::Cdata)),
-            _ => None,
-        };
-        if let Some(found) = found {
-            spans.push(found);
-        }
-    }
-    Ok(spans)
-}
-
-/// Emit the pending text run as a `Text` span unless it is whitespace-only, then
-/// clear it.
-fn flush_text_run(
-    raw: &str,
-    run: &mut Option<Range<usize>>,
-    spans: &mut Vec<(Range<usize>, BlockKind)>,
-) {
-    if let Some(span) = run.take()
-        && let Some(span) = non_blank(raw, span)
-    {
-        spans.push((span, BlockKind::Text));
-    }
-}
-
-/// The [`BlockKind`] of the span exactly covering `start..end`, if `start..end`
-/// is one of the recorded text spans.
-fn span_kind(spans: &[(Range<usize>, BlockKind)], start: usize, end: usize) -> Option<BlockKind> {
-    spans
-        .iter()
-        .find(|(s, _)| s.start <= start && end <= s.end)
-        .map(|(_, kind)| *kind)
-}
-
-/// Escape or validate `text` for splicing into a span of `kind`. Text content is
-/// XML-escaped; a comment or CDATA replacement that would break its framing is a
-/// fail-closed [`Error::unsafe_rewrite`].
-fn escape_for<'a>(kind: BlockKind, text: &'a str, r: &Replacement) -> Result<Cow<'a, str>> {
-    match kind {
-        BlockKind::Text => Ok(partial_escape(text)),
-        BlockKind::Comment => {
-            if text.contains("--") || text.ends_with('-') {
-                return Err(Error::unsafe_rewrite(format!(
-                    "replacement `{}` breaks comment framing in `{}`",
-                    text, r.part
-                )));
-            }
-            Ok(Cow::Borrowed(text))
-        }
-        BlockKind::Cdata => {
-            if text.contains("]]>") {
-                return Err(Error::unsafe_rewrite(format!(
-                    "replacement `{}` breaks CDATA framing in `{}`",
-                    text, r.part
-                )));
-            }
-            Ok(Cow::Borrowed(text))
-        }
-    }
-}
-
-/// Keep `span` unless it covers only whitespace.
-fn non_blank(raw: &str, span: Range<usize>) -> Option<Range<usize>> {
-    (!raw[span.clone()].trim().is_empty()).then_some(span)
-}
-
-/// Narrow `span` by its `open`/`close` delimiters to the inner range.
-fn strip(span: Range<usize>, open: &str, close: &str) -> Option<Range<usize>> {
-    let start = span.start.checked_add(open.len())?;
-    let end = span.end.checked_sub(close.len())?;
-    (start <= end).then_some(start..end)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn identity_slice_is_a_single_run() {
-        let map = offset_map("Alice Bob", 0).unwrap();
-        assert_eq!(map.runs(), &[OffsetRun::identity(0..9, 0..9)]);
-    }
-
-    #[test]
-    fn a_named_entity_becomes_an_atomic_run_between_identity_runs() {
-        // "Alice &amp; Bob" (15 raw bytes) decodes to "Alice & Bob" (11 bytes).
-        let slice = "Alice &amp; Bob";
-        let map = offset_map(slice, 0).unwrap();
-        assert_eq!(
-            map.runs(),
-            &[
-                OffsetRun::identity(0..6, 0..6),
-                OffsetRun::entity(6..7, 6..11),
-                OffsetRun::identity(7..11, 11..15),
-            ]
-        );
-        // The whole decoded text maps back to the full raw slice incl. `&amp;`,
-        // as one contiguous range.
-        assert_eq!(map.raw_ranges(0..11), vec![0..15]);
-        // A base offset is folded straight into the raw ranges.
-        let based = offset_map(slice, 100).unwrap();
-        assert_eq!(based.raw_ranges(0..11), vec![100..115]);
-    }
-
-    #[test]
-    fn numeric_and_hex_char_refs_map_like_named_ones() {
-        // `&#38;` and `&#x26;` both decode to `&` (1 byte) but are 5 / 6 raw
-        // bytes; the whole decoded text maps back to the full raw slice.
-        let dec = offset_map("A&#38;B", 0).unwrap();
-        assert_eq!(dec.raw_ranges(0..3), vec![0..7]);
-        // Just the decoded `&` (offset 1) maps to the entity's raw bytes.
-        assert_eq!(dec.raw_ranges(1..2), vec![1..6]);
-        let hex = offset_map("A&#x26;B", 0).unwrap();
-        assert_eq!(hex.raw_ranges(0..3), vec![0..8]);
-        assert_eq!(hex.raw_ranges(1..2), vec![1..7]);
-    }
-
-    #[test]
-    fn a_bare_ampersand_without_semicolon_stays_in_one_run() {
-        // Not an entity reference, so decoded and raw stay identical throughout.
-        let map = offset_map("a & b", 0).unwrap();
-        assert_eq!(map.runs(), &[OffsetRun::identity(0..5, 0..5)]);
-    }
-
-    #[test]
-    fn a_range_crossing_one_entity_pulls_its_whole_raw() {
-        // Decoded "e & B" straddles the entity in "Alice &amp; Bob".
-        let map = offset_map("Alice &amp; Bob", 0).unwrap();
-        // decoded "e"(4) .. " B"(9) → identity tail [4..6] + whole `&amp;`
-        // [6..11] + identity head [11..13], all contiguous → one range.
-        assert_eq!(map.raw_ranges(4..9), vec![4..13]);
-    }
 
     #[test]
     fn text_blocks_decodes_an_entity_and_maps_it_back_to_raw() {
@@ -408,6 +171,152 @@ mod tests {
         assert_eq!(
             block.offsets.raw_ranges(0..block.text.len()),
             vec![raw_start..raw_start + "a &amp; b".len()]
+        );
+    }
+
+    #[test]
+    fn text_blocks_handles_a_leading_bom() {
+        // A leading UTF-8 BOM (as docx.js emits) must not shift the recorded
+        // spans: the decoded text is exact and its span still indexes the true
+        // raw bytes, so a redaction lands on — and a recognizer matches — the
+        // right text.
+        let xml = "\u{feff}<w:document><w:t>alice@example.com</w:t></w:document>";
+        let part = StoredPart::new(PartPath::from("word/document.xml"), Bytes::from(xml));
+        let blocks = part.text_blocks().expect("decodes");
+
+        let block = blocks
+            .iter()
+            .find(|b| b.text == "alice@example.com")
+            .expect("the text run is extracted intact despite the BOM");
+        // The span indexes the original (BOM-prefixed) bytes exactly.
+        assert_eq!(&xml[block.start..block.end], "alice@example.com");
+    }
+
+    /// A relationships part with one external hyperlink and several internal
+    /// relationships, shaped like a real `word/_rels/document.xml.rels`.
+    const RELS: &str = concat!(
+        r#"<?xml version="1.0" encoding="utf-8"?>"#,
+        r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#,
+        r#"<Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml" Id="rId1"/>"#,
+        r#"<Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="mailto:alice@example.com" TargetMode="External" Id="rIdA"/>"#,
+        r#"</Relationships>"#,
+    );
+
+    #[test]
+    fn relationship_blocks_extracts_only_the_external_hyperlink_target() {
+        let part = StoredPart::new(
+            PartPath::from("word/_rels/document.xml.rels"),
+            Bytes::from(RELS),
+        );
+        let blocks = part.text_blocks().expect("decodes");
+
+        // The internal `styles.xml` relationship is not a hyperlink target, so
+        // only the one external hyperlink surfaces.
+        assert_eq!(blocks.len(), 1, "only the hyperlink target: {blocks:?}");
+        let block = &blocks[0];
+        assert_eq!(block.text, "mailto:alice@example.com");
+        // The span covers the value between the quotes, exclusive of them.
+        assert_eq!(&RELS[block.start..block.end], "mailto:alice@example.com");
+    }
+
+    #[test]
+    fn relationship_blocks_ignores_an_internal_hyperlink() {
+        // A hyperlink relationship without `TargetMode="External"` points inside
+        // the package (an internal anchor / bookmark target), not a user URL, so
+        // it is not surfaced for redaction.
+        let rels = concat!(
+            r#"<?xml version="1.0"?><Relationships>"#,
+            r#"<Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="bookmark_anchor" Id="rIdX"/>"#,
+            r#"</Relationships>"#,
+        );
+        let part = StoredPart::new(
+            PartPath::from("word/_rels/document.xml.rels"),
+            Bytes::from(rels),
+        );
+        assert!(part.text_blocks().expect("decodes").is_empty());
+    }
+
+    #[test]
+    fn relationship_target_round_trips_through_a_splice() {
+        let part = StoredPart::new(
+            PartPath::from("word/_rels/document.xml.rels"),
+            Bytes::from(RELS),
+        );
+        let block = &part.text_blocks().expect("decodes")[0];
+        let replacement = Replacement::for_block(block, "mailto:[EMAIL]");
+        let out = part.splice(&[&replacement]).expect("splices");
+
+        // The original email is gone; the redacted target sits in its place, and
+        // every other byte (the internal relationship, the ids) is untouched.
+        assert!(!out.contains("alice@example.com"), "email leaked: {out}");
+        assert!(
+            out.contains(r#"Target="mailto:[EMAIL]""#),
+            "no redacted target: {out}"
+        );
+        assert!(
+            out.contains(r#"Target="styles.xml""#),
+            "internal rel changed: {out}"
+        );
+    }
+
+    #[test]
+    fn relationship_blocks_handle_a_leading_bom() {
+        // The real docx.js `.rels` carries a BOM; the extracted span must still
+        // index the true bytes so the splice lands on the target value.
+        let rels = format!("\u{feff}{RELS}");
+        let part = StoredPart::new(
+            PartPath::from("word/_rels/document.xml.rels"),
+            Bytes::from(rels.clone()),
+        );
+        let block = &part.text_blocks().expect("decodes")[0];
+        assert_eq!(&rels[block.start..block.end], "mailto:alice@example.com");
+    }
+
+    #[test]
+    fn relationship_target_is_anchored_past_targetmode_and_single_quotes() {
+        // `TargetMode` precedes `Target`, `Target` is single-quoted, and there is
+        // space around its `=` (all valid XML). The extracted span must be the
+        // `Target` value, not a mis-match on the `TargetMode` prefix or the wrong
+        // quote character.
+        let rels = concat!(
+            r#"<?xml version="1.0"?><Relationships>"#,
+            r#"<Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" TargetMode="External" Target = 'mailto:carol@example.com' Id="rIdC"/>"#,
+            r#"</Relationships>"#,
+        );
+        let part = StoredPart::new(
+            PartPath::from("word/_rels/document.xml.rels"),
+            Bytes::from(rels),
+        );
+        let blocks = part.text_blocks().expect("decodes");
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].text, "mailto:carol@example.com");
+        assert_eq!(
+            &rels[blocks[0].start..blocks[0].end],
+            "mailto:carol@example.com"
+        );
+    }
+
+    #[test]
+    fn relationship_target_decodes_and_maps_an_escaped_value() {
+        // A `Target` carrying an XML entity (`&amp;` inside a query string) must
+        // decode for the recognizer, while its span still covers the raw bytes so
+        // a splice replaces the whole escaped value.
+        let rels = concat!(
+            r#"<?xml version="1.0"?><Relationships>"#,
+            r#"<Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://x.example/?a=1&amp;b=2" TargetMode="External" Id="rIdE"/>"#,
+            r#"</Relationships>"#,
+        );
+        let part = StoredPart::new(
+            PartPath::from("word/_rels/document.xml.rels"),
+            Bytes::from(rels),
+        );
+        let block = &part.text_blocks().expect("decodes")[0];
+        // Decoded logical text has the literal `&`.
+        assert_eq!(block.text, "https://x.example/?a=1&b=2");
+        // The raw span covers the still-escaped bytes, entity and all.
+        assert_eq!(
+            &rels[block.start..block.end],
+            "https://x.example/?a=1&amp;b=2"
         );
     }
 }
