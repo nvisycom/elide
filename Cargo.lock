@@ -958,7 +958,7 @@ dependencies = [
  "bytes",
  "csv",
  "elide-core",
- "elide-docx",
+ "elide-office",
  "elide-pdf",
  "hex",
  "hound",
@@ -1014,19 +1014,6 @@ dependencies = [
  "schemars",
  "serde",
  "tracing",
-]
-
-[[package]]
-name = "elide-docx"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "hipstr",
- "quick-xml",
- "serde",
- "serde_json",
- "thiserror",
- "zip",
 ]
 
 [[package]]
@@ -1118,6 +1105,19 @@ dependencies = [
  "elide-core",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "elide-office"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "hipstr",
+ "quick-xml",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "zip",
 ]
 
 [[package]]

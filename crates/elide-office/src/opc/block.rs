@@ -3,9 +3,6 @@
 //! [`PartReplacement`] applied on rewrite — each addressed by a typed
 //! [`PartPath`].
 
-mod offset;
-mod replacement;
-
 use std::ops::Range;
 
 use bytes::Bytes;
@@ -13,11 +10,10 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-pub use self::offset::{OffsetMap, OffsetRun, RunKind};
-pub use self::replacement::{PartReplacement, Replacement};
-use crate::part::{EmbeddingKind, PartPath};
+use crate::opc::offset::OffsetMap;
+use crate::opc::part::PartPath;
 
-/// The result of [`Docx::extract`](crate::Docx::extract): the redactable text
+/// The result of extracting a package: the redactable text
 /// [`blocks`](Extraction::blocks) of every text-bearing part, the binary
 /// [`embeddings`](Extraction::embeddings) surfaced for redaction, and any
 /// [`issues`](Extraction::issues) that left a part un-extracted.
@@ -64,6 +60,23 @@ impl Block {
     }
 }
 
+/// The kind of binary embedding a part holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(Serialize, Deserialize),
+    serde(rename_all = "snake_case")
+)]
+#[non_exhaustive]
+pub enum EmbeddingKind {
+    /// An embedded image (e.g. `word/media/*`).
+    Image,
+    /// An embedded object / OLE package (e.g. `word/embeddings/*`).
+    Object,
+    /// An embedded font (e.g. `word/fonts/*`).
+    Font,
+}
+
 /// One binary embedding surfaced for redaction (an image, embedded object, or
 /// font), addressed by its part.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,8 +90,8 @@ pub struct Embedding {
     pub bytes: Bytes,
 }
 
-/// A text-bearing part that [`Docx::extract`](crate::Docx::extract) could not
-/// read, so its text is **not** covered by the extracted blocks.
+/// A text-bearing part that extraction could not read, so its text is **not**
+/// covered by the extracted blocks.
 ///
 /// Extraction is partial-success: a corrupt or non-UTF-8 part does not fail the
 /// whole document, but it also yields no blocks. An `Issue` records that gap so
@@ -106,4 +119,45 @@ pub enum IssueKind {
     NotUtf8,
     /// The part's XML could not be parsed.
     MalformedXml,
+}
+
+/// One text replacement: overwrite the bytes `[start, end)` of `part`'s XML
+/// with `text`.
+///
+/// The span is a byte range into the named part's XML, as carried on a
+/// [`Block`] from the same part.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Replacement {
+    /// The part to rewrite.
+    pub part: PartPath,
+    /// Start of the byte range to overwrite.
+    pub start: usize,
+    /// End of the byte range to overwrite (exclusive).
+    pub end: usize,
+    /// The text to write in place of the span.
+    pub text: HipStr<'static>,
+}
+
+impl Replacement {
+    /// A replacement overwriting `block`'s span with `text`.
+    pub fn for_block(block: &Block, text: impl Into<HipStr<'static>>) -> Self {
+        Self {
+            part: block.part.clone(),
+            start: block.start,
+            end: block.end,
+            text: text.into(),
+        }
+    }
+}
+
+/// One binary part replacement: overwrite `part`'s bytes with `bytes` (e.g. a
+/// redacted image).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct PartReplacement {
+    /// The part to replace.
+    pub part: PartPath,
+    /// The new bytes for the part.
+    pub bytes: Vec<u8>,
 }

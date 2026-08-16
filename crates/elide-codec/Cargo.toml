@@ -50,10 +50,10 @@ html = ["xml"]
 document = ["docx", "pdf", "rtf"]
 
 ## DOCX: OOXML text extraction and byte-faithful redaction come from the
-## standalone `elide-docx` crate; this codec adapts it to the `Handler`
+## standalone `elide-office` crate; this codec adapts it to the `Handler`
 ## contract (via the shared `ExtractHandler`, hence `internal_extract`).
-## Embedded media surfaces through `elide-docx`'s typed extraction.
-docx = ["internal_document", "internal_extract", "dep:elide-docx"]
+## Embedded media surfaces through `elide-office`'s typed extraction.
+docx = ["internal_document", "internal_extract", "dep:elide-office"]
 
 ## PDF: born-digital text extraction and redaction come from the standalone
 ## `elide-pdf` crate; this codec adapts it to the `Handler` contract.
@@ -129,7 +129,7 @@ internal_document = []
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }
-elide-docx = { workspace = true, features = [], optional = true }
+elide-office = { workspace = true, features = [], optional = true }
 elide-pdf = { workspace = true, features = [], optional = true }
 
 # (De)serialization

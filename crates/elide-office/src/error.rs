@@ -5,7 +5,7 @@ use thiserror::Error as ThisError;
 /// Convenience alias for this crate's results.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// A DOCX extraction or rewrite failure, carrying a matchable
+/// An OOXML extraction or rewrite failure, carrying a matchable
 /// [`kind`](Error::kind) and a human-readable message.
 ///
 /// The kind is stable and coarse so a caller can branch (retry, reject,
@@ -57,8 +57,8 @@ impl Error {
 pub enum ErrorKind {
     /// The bytes are not a readable zip archive.
     InvalidArchive,
-    /// The archive is a zip but not a well-formed DOCX package (missing the
-    /// body part, or its required structure).
+    /// The archive is a zip but not a well-formed OOXML package (missing a
+    /// required part, or its required structure).
     InvalidPackage,
     /// A part that should be XML failed to parse, or its text is not UTF-8.
     InvalidXml,

@@ -12,7 +12,7 @@ members = [
     "./crates/elide-llm",
     "./crates/elide-stt",
     "./crates/elide-ocr",
-    "./crates/elide-docx",
+    "./crates/elide-office",
     "./crates/elide-pdf",
     "./crates/elide-codec",
     "./crates/elide-fake",
@@ -51,7 +51,7 @@ elide-lingua = { path = "./crates/elide-lingua", version = "0.1.0" }
 elide-llm = { path = "./crates/elide-llm", version = "0.1.0" }
 elide-stt = { path = "./crates/elide-stt", version = "0.1.0" }
 elide-ocr = { path = "./crates/elide-ocr", version = "0.1.0" }
-elide-docx = { path = "./crates/elide-docx", version = "0.1.0" }
+elide-office = { path = "./crates/elide-office", version = "0.1.0" }
 elide-pdf = { path = "./crates/elide-pdf", version = "0.1.0" }
 elide-codec = { path = "./crates/elide-codec", version = "0.1.0" }
 elide-fake = { path = "./crates/elide-fake", version = "0.1.0" }

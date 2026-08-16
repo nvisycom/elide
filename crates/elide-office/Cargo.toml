@@ -1,9 +1,9 @@
 # https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [package]
-name = "elide-docx"
-description = "Standalone DOCX (OOXML) text extraction and byte-faithful redaction: bytes in, bytes out"
-keywords = ["docx", "ooxml", "redaction", "extraction", "elide"]
+name = "elide-office"
+description = "Office Open XML (DOCX today; XLSX/PPTX planned) text extraction and byte-faithful redaction: bytes in, bytes out"
+keywords = ["ooxml", "docx", "office", "redaction", "extraction"]
 categories = ["parsing", "text-processing"]
 readme = "README.md"
 

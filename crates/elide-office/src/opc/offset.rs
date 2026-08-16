@@ -1,15 +1,14 @@
-//! [`OffsetMap`]: the decoded-to-raw byte correspondence for one [`Block`].
+//! [`OffsetMap`]: the decoded-to-raw byte correspondence for one
+//! [`Block`](crate::opc::Block).
 //!
-//! A block's [`text`](super::Block::text) is the *decoded* logical text (XML
+//! A block's [`text`](crate::opc::Block::text) is the *decoded* logical text (XML
 //! entities like `&amp;` resolved to `&`), while its byte
-//! [`span`](super::Block::span) addresses the *raw* source. Entities compress —
-//! `&amp;` is 5 raw bytes but 1 decoded byte — so a decoded offset is not a raw
-//! offset once an entity has been passed. The map records the correspondence as
-//! a list of contiguous [`runs`](OffsetRun): identity stretches where decoded and
-//! raw advance one-for-one, and atomic entity runs that map a decoded entity
-//! character onto its whole raw reference.
-//!
-//! [`Block`]: super::Block
+//! [`span`](crate::opc::Block::span) addresses the *raw* source. Entities
+//! compress — `&amp;` is 5 raw bytes but 1 decoded byte — so a decoded offset is
+//! not a raw offset once an entity has been passed. The map records the
+//! correspondence as a list of contiguous [`runs`](OffsetRun): identity
+//! stretches where decoded and raw advance one-for-one, and atomic entity runs
+//! that map a decoded entity character onto its whole raw reference.
 
 use std::ops::Range;
 
