@@ -182,7 +182,7 @@ required-features = ["codec-pdf-render", "mock", "serde"]
 
 [[test]]
 name = "format_txt"
-required-features = ["codec-txt", "mock", "serde"]
+required-features = ["codec-txt", "ner", "mock", "serde"]
 
 [[test]]
 name = "format_json"

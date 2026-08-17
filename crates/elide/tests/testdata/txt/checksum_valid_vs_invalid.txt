@@ -1,0 +1,19 @@
+Checksum validation is what separates a real identifier from a number that
+merely has the right shape. Each pair below is one value that passes its
+checksum (must be detected) and one that matches the same regex but fails
+the checksum (must be rejected). This is why the detectors carry validators
+and not just length-based regexes.
+
+Payment cards (Luhn):
+  valid   payment card 4111 1111 1111 1111
+  invalid payment card 4111 1111 1111 1112
+
+IBAN (mod-97):
+  valid   IBAN GB29 NWBK 6016 1331 9268 19
+  invalid IBAN GB29 NWBK 6016 1331 9268 18
+
+A second valid card for good measure: payment card 5555 5555 5555 4444.
+An Amex that also passes Luhn: payment card 3782 822463 10005.
+
+The invalid values above must survive un-redacted: the regex found them, the
+validator threw them back.

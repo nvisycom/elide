@@ -44,12 +44,15 @@ temp/
 .claude
 CLAUDE.md
 
-# E2E-test artifacts: generated redacted documents and serialized audit
-# reports. The dirs are tracked (via .gitkeep); their contents are not.
+# E2E-test artifacts
 **/testdata/audits/*
 !**/testdata/audits/.gitkeep
 **/testdata/results/*
 !**/testdata/results/.gitkeep
+**/testdata/**/audits/*
+!**/testdata/**/audits/.gitkeep
+**/testdata/**/results/*
+!**/testdata/**/results/.gitkeep
 
 # Example output
 examples/data/*.redacted.*

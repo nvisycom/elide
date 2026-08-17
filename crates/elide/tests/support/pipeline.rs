@@ -98,16 +98,33 @@ impl<M: Modality> PipelineOutcome<M> {
 }
 
 /// Build the detection side: the real built-in pattern recognizer (with
-/// context boosting), behind the standard dedup pipeline. Generic over any
-/// text-payload modality the patterns serve.
+/// context boosting) plus — when the `ner` feature is on — the NER
+/// recognizer, behind the standard dedup pipeline. Generic over any
+/// text-payload modality the recognizers serve.
+///
+/// The NER recognizer rides a mock backend that finds nothing today, so
+/// name/organization/address fixtures round-trip un-redacted for now; the
+/// pipeline shape is already the intended one, so those fixtures light up
+/// unchanged once a real backend is configured.
 pub fn build_analyzer<M: TextRecognizable>() -> Result<Analyzer<M>> {
     let patterns = PatternRecognizer::builder()
         .with_builtin_patterns()
         .with_builtin_dictionaries()
         .build_context_enhanced()?;
 
-    Ok(Analyzer::new()
-        .with_recognizer(patterns)
+    let analyzer = Analyzer::new().with_recognizer(patterns);
+
+    #[cfg(feature = "ner")]
+    let analyzer = {
+        use elide::recognition::ner::NerRecognizer;
+        let ner = NerRecognizer::builder()
+            .with_name("mock-ner")
+            .with_mock_backend()
+            .build()?;
+        analyzer.with_recognizer(ner)
+    };
+
+    Ok(analyzer
         .with_layer(ReconcileLayer::same_label(Merging::max()))
         .with_layer(ReconcileLayer::cross_label(Structural::default()))
         .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE)))

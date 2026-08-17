@@ -1,0 +1,16 @@
+When the same sensitive value appears many times, redaction must treat every
+occurrence the same way — one value, one consistent replacement — so the
+document stays internally coherent after redaction.
+
+The primary contact is priya.rao@example.com. Copy priya.rao@example.com on
+every thread, and if priya.rao@example.com bounces, fall back to the shared
+inbox. All three mentions of priya.rao@example.com are the same address.
+
+The escalation line is +1 (415) 555-0142. Ring +1 (415) 555-0142 twice; if
++1 (415) 555-0142 is busy, leave a message.
+
+A different address, sam.diaz@example.com, appears once and is its own
+entity, distinct from priya.rao@example.com.
+
+After redaction, the two addresses must map to two distinct tokens, each
+address rendered the same everywhere it occurs.

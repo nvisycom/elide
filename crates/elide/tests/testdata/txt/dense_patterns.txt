@@ -1,0 +1,22 @@
+Contact and credentials dump for the detection bench. Every value below is
+a strong, self-identifying pattern that fires on its own shape — no nearby
+keyword is needed to reach the detection threshold.
+
+Email: dana.well@example.com
+Second email: ops-team@example.org
+URL: https://portal.example.com/account/settings?ref=welcome
+IPv4: 192.0.2.44
+IPv6: 2001:db8::8a2e:370:7334
+MAC: 3c:22:fb:8a:1e:9d
+
+AWS access key id: AKIAIOSFODNN7EXAMPLE
+GitHub token: ghp_16C7e42F292c6912E7710c838347Ae178B4a
+Stripe secret key: sk_test_00000000000000000000000000
+PEM header: -----BEGIN RSA PRIVATE KEY-----
+
+IBAN: GB29 NWBK 6016 1331 9268 19
+SWIFT/BIC: NWBKGB2L
+Bitcoin: 1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2
+Ethereum: 0x52908400098527886E0F7030069857D2E4169EE7
+
+The prose around these values is ordinary and must survive untouched.

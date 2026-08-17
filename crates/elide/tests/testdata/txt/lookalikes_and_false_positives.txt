@@ -1,0 +1,14 @@
+Precision means not flagging things that merely resemble sensitive data.
+Every value below has a weak, PII-ish shape but is something mundane, and
+with no context keyword to vouch for it, the pipeline must leave it alone.
+(Strong self-identifying shapes like emails or IPv4 addresses are excluded
+here — they fire on their own by design and belong in dense_patterns.txt.)
+
+The bracket 000123456789 identifies the replacement part in the catalog.
+Batch 000987654321 shipped from the east warehouse on Tuesday.
+Aisle 000555 holds the seasonal overstock near the loading dock.
+The discontinued variant is unit 000456000456 in the parts list.
+
+These are catalog numbers, batch ids, aisle labels, and part codes — weak
+shapes with no card, account, or ID keyword nearby, so a precise pipeline
+redacts none of them.
