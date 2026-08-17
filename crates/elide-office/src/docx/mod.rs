@@ -17,14 +17,14 @@ struct WordClassifier;
 
 impl PartClassifier for WordClassifier {
     fn role(&self, path: &PartPath) -> PartRole {
-        PartKind::of(path.as_str()).role()
+        PartKind::of(path).role()
     }
 
     fn is_protected(&self, path: &PartPath) -> bool {
         // The document body and the content-types manifest carry the package's
         // structure; clobbering either corrupts the document rather than
         // redacting it.
-        PartKind::of(path.as_str()) == PartKind::Body || path.as_str() == "[Content_Types].xml"
+        PartKind::of(path) == PartKind::Body || path.as_str() == "[Content_Types].xml"
     }
 }
 

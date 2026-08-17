@@ -31,6 +31,48 @@ impl PartPath {
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
+
+    /// The path's file extension: the text after the last `.` of the final path
+    /// segment, as written, or `None` if the final segment has no `.`. Use
+    /// [`has_extension`](Self::has_extension) for a case-insensitive check.
+    ///
+    /// The OPC content-types manifest keys on this extension, and it treats a
+    /// leading-dot name as extension-only: `_rels/.rels` has extension `rels`
+    /// (matching `<Default Extension="rels">`), so this does too.
+    pub fn extension(&self) -> Option<&str> {
+        self.as_str()
+            .rsplit('/')
+            .next()
+            .unwrap_or_default()
+            .rsplit_once('.')
+            .map(|(_, ext)| ext)
+    }
+
+    /// Whether the final path segment has extension `ext`, compared
+    /// case-insensitively (e.g. `has_extension("xml")` for `document.xml`).
+    pub fn has_extension(&self, ext: &str) -> bool {
+        self.extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case(ext))
+    }
+
+    /// Whether the path lies within the directory `dir` (a `/`-terminated or bare
+    /// prefix), i.e. `dir/...`. `in_dir("xl/media")` matches `xl/media/image1.png`
+    /// but not `xl/media.xml`.
+    pub fn in_dir(&self, dir: &str) -> bool {
+        let dir = dir.strip_suffix('/').unwrap_or(dir);
+        self.as_str()
+            .strip_prefix(dir)
+            .is_some_and(|rest| rest.starts_with('/'))
+    }
+
+    /// Whether this is an OPC relationships part: the package root `_rels/.rels`,
+    /// or a `<dir>/_rels/<name>.rels` sidecar. Both live in a `_rels/` directory
+    /// and end in `.rels`, which uniquely identifies the OPC relationships parts
+    /// across every OOXML format.
+    pub fn is_relationships(&self) -> bool {
+        self.has_extension("rels")
+            && (self.as_str() == "_rels/.rels" || self.as_str().contains("/_rels/"))
+    }
 }
 
 impl fmt::Display for PartPath {
@@ -96,5 +138,55 @@ pub trait PartClassifier {
     /// whose bytes hold the package's structure.
     fn is_protected(&self, _path: &PartPath) -> bool {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extension_is_the_suffix_of_the_final_segment() {
+        // The raw suffix is returned as written; case-insensitive matching is
+        // `has_extension`'s job.
+        assert_eq!(
+            PartPath::from("xl/media/image1.PNG").extension(),
+            Some("PNG")
+        );
+        assert_eq!(PartPath::from("word/document.xml").extension(), Some("xml"));
+        // A dotless segment has no extension, even under a dotted directory.
+        assert_eq!(PartPath::from("a.b/plain").extension(), None);
+        // A leading dot on the segment is treated as extension-only (OPC keys on
+        // `rels` for `_rels/.rels`).
+        assert_eq!(PartPath::from("_rels/.rels").extension(), Some("rels"));
+    }
+
+    #[test]
+    fn has_extension_is_case_insensitive() {
+        assert!(PartPath::from("xl/media/image1.PNG").has_extension("png"));
+        assert!(PartPath::from("word/document.xml").has_extension("XML"));
+        assert!(!PartPath::from("word/document.xml").has_extension("rels"));
+    }
+
+    #[test]
+    fn in_dir_matches_only_a_directory_prefix() {
+        let media = PartPath::from("xl/media/image1.png");
+        assert!(media.in_dir("xl/media"));
+        assert!(media.in_dir("xl/media/")); // trailing slash accepted
+        assert!(media.in_dir("xl"));
+        // A sibling file that merely shares the prefix text is not inside it.
+        assert!(!PartPath::from("xl/media.xml").in_dir("xl/media"));
+        assert!(!media.in_dir("ppt"));
+    }
+
+    #[test]
+    fn is_relationships_matches_root_and_sidecar_rels_only() {
+        assert!(PartPath::from("_rels/.rels").is_relationships());
+        assert!(PartPath::from("word/_rels/document.xml.rels").is_relationships());
+        assert!(PartPath::from("xl/worksheets/_rels/sheet1.xml.rels").is_relationships());
+        // A file merely ending in `.rels` but not in a `_rels/` dir is not one —
+        // the loose `ends_with(".rels")` check would wrongly accept this.
+        assert!(!PartPath::from("data/foo.rels").is_relationships());
+        assert!(!PartPath::from("word/document.xml").is_relationships());
     }
 }

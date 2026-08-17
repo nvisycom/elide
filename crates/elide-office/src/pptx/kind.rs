@@ -4,7 +4,7 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::opc::{EmbeddingKind, PartRole};
+use crate::opc::{EmbeddingKind, PartPath, PartRole};
 
 /// What a PresentationML package part is, which determines how it is handled.
 ///
@@ -52,8 +52,9 @@ pub enum PartKind {
 }
 
 impl PartKind {
-    /// Classify the part at `path` from its package path.
-    pub fn of(path: &str) -> Self {
+    /// Classify `part` from its package path.
+    pub fn of(part: &PartPath) -> Self {
+        let path = part.as_str();
         if path == "ppt/presentation.xml" {
             return Self::Presentation;
         }
@@ -85,10 +86,10 @@ impl PartKind {
         {
             return Self::Chart;
         }
-        if Self::is_relationships(path) {
+        if part.is_relationships() {
             return Self::Relationships;
         }
-        if let Some(kind) = embedding_kind(path) {
+        if let Some(kind) = embedding_kind(part) {
             return Self::Embedding(kind);
         }
         if path.starts_with("docProps/") {
@@ -123,12 +124,6 @@ impl PartKind {
         }
     }
 
-    /// Whether `path` is a relationships part: the package root `_rels/.rels`, or
-    /// a `<dir>/_rels/<name>.rels` sidecar.
-    fn is_relationships(path: &str) -> bool {
-        path.ends_with(".rels") && (path == "_rels/.rels" || path.contains("/_rels/"))
-    }
-
     /// Whether `path` is `{prefix}{n}{suffix}` for some run of digits `n`.
     fn is_numbered(path: &str, prefix: &str, suffix: &str) -> bool {
         let Some(rest) = path.strip_prefix(prefix) else {
@@ -141,11 +136,13 @@ impl PartKind {
     }
 }
 
-/// The [`EmbeddingKind`] of a binary media part, if `path` names one.
-fn embedding_kind(path: &str) -> Option<EmbeddingKind> {
-    if path.starts_with("ppt/media/") {
+/// The [`EmbeddingKind`] of a binary media part, if `part` names one. PowerPoint
+/// keeps images and media under `ppt/media/` and embedded objects under
+/// `ppt/embeddings/`.
+fn embedding_kind(part: &PartPath) -> Option<EmbeddingKind> {
+    if part.in_dir("ppt/media") {
         Some(EmbeddingKind::Image)
-    } else if path.starts_with("ppt/embeddings/") {
+    } else if part.in_dir("ppt/embeddings") {
         Some(EmbeddingKind::Object)
     } else {
         None
@@ -156,31 +153,30 @@ fn embedding_kind(path: &str) -> Option<EmbeddingKind> {
 mod tests {
     use super::*;
 
+    /// The kind of the part at `path`.
+    fn kind(path: &str) -> PartKind {
+        PartKind::of(&PartPath::from(path))
+    }
+
     #[test]
     fn classifies_presentationml_parts() {
-        assert_eq!(PartKind::of("ppt/presentation.xml"), PartKind::Presentation);
-        assert_eq!(PartKind::of("ppt/slides/slide1.xml"), PartKind::Slide);
+        assert_eq!(kind("ppt/presentation.xml"), PartKind::Presentation);
+        assert_eq!(kind("ppt/slides/slide1.xml"), PartKind::Slide);
         assert_eq!(
-            PartKind::of("ppt/slideLayouts/slideLayout2.xml"),
+            kind("ppt/slideLayouts/slideLayout2.xml"),
             PartKind::SlideLayout
         );
+        assert_eq!(kind("ppt/notesSlides/notesSlide1.xml"), PartKind::Notes);
+        assert_eq!(kind("ppt/comments/comment1.xml"), PartKind::Comments);
         assert_eq!(
-            PartKind::of("ppt/notesSlides/notesSlide1.xml"),
-            PartKind::Notes
-        );
-        assert_eq!(
-            PartKind::of("ppt/comments/comment1.xml"),
-            PartKind::Comments
-        );
-        assert_eq!(
-            PartKind::of("ppt/slides/_rels/slide1.xml.rels"),
+            kind("ppt/slides/_rels/slide1.xml.rels"),
             PartKind::Relationships
         );
         assert_eq!(
-            PartKind::of("ppt/media/image1.png"),
+            kind("ppt/media/image1.png"),
             PartKind::Embedding(EmbeddingKind::Image)
         );
-        assert_eq!(PartKind::of("ppt/theme/theme1.xml"), PartKind::Other);
+        assert_eq!(kind("ppt/theme/theme1.xml"), PartKind::Other);
     }
 
     #[test]

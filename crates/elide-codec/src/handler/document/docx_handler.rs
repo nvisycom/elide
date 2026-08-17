@@ -157,7 +157,9 @@ impl Container for DocxEncoder {
     fn replace_part(&mut self, id: &PartId, bytes: Bytes) -> Result<()> {
         // Reject anything that isn't a binary embedding so a caller can't
         // smuggle bytes into a text/structure part through this surface.
-        let is_embedding = PartKind::of(id.as_str()).embedding().is_some();
+        let is_embedding = PartKind::of(&PartPath::from(id.as_str()))
+            .embedding()
+            .is_some();
         if !is_embedding {
             return Err(Error::new(
                 ErrorKind::MalformedInput,

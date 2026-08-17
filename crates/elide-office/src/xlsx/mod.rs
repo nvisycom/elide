@@ -37,10 +37,12 @@ struct SheetClassifier;
 
 impl PartClassifier for SheetClassifier {
     fn role(&self, path: &PartPath) -> PartRole {
-        let path = path.as_str();
-        if is_relationships(path) {
+        if path.is_relationships() {
             PartRole::RelationshipTargets
-        } else if is_worksheet(path) || path == SHARED_STRINGS_PART || is_extra_text_part(path) {
+        } else if is_worksheet(path)
+            || path.as_str() == SHARED_STRINGS_PART
+            || is_extra_text_part(path)
+        {
             PartRole::ElementText
         } else if let Some(kind) = embedding_kind(path) {
             PartRole::Binary(kind)
@@ -57,43 +59,39 @@ impl PartClassifier for SheetClassifier {
     }
 }
 
-/// Whether `path` is a worksheet part (`xl/worksheets/sheet*.xml`).
-fn is_worksheet(path: &str) -> bool {
-    path.starts_with("xl/worksheets/") && path.ends_with(".xml")
+/// Whether `part` is a worksheet part (`xl/worksheets/sheet*.xml`).
+fn is_worksheet(part: &PartPath) -> bool {
+    part.in_dir("xl/worksheets") && part.has_extension("xml")
 }
 
-/// Whether `path` is a relationships part (`*/_rels/*.rels`), whose external
-/// hyperlink targets carry the same user data as the cells.
-fn is_relationships(path: &str) -> bool {
-    path.ends_with(".rels")
-}
-
-/// Whether `path` is a non-cell text-bearing part beyond the worksheets and the
+/// Whether `part` is a non-cell text-bearing part beyond the worksheets and the
 /// shared-string table: cell comments, and the text of drawings and charts. Each
 /// holds user-visible text (`<t>` / `a:t`) redacted through the shared markup
 /// path rather than the cell model.
-fn is_extra_text_part(path: &str) -> bool {
-    (path.starts_with("xl/comments") || path.starts_with("xl/threadedComments/"))
-        && path.ends_with(".xml")
-        || path.starts_with("xl/drawings/") && path.ends_with(".xml")
-        || path.starts_with("xl/charts/") && path.ends_with(".xml")
+fn is_extra_text_part(part: &PartPath) -> bool {
+    let path = part.as_str();
+    ((path.starts_with("xl/comments") || part.in_dir("xl/threadedComments"))
+        && part.has_extension("xml"))
+        || (part.in_dir("xl/drawings") && part.has_extension("xml"))
+        || (part.in_dir("xl/charts") && part.has_extension("xml"))
 }
 
-/// Whether `path` is a part the handler surfaces for out-of-band markup
-/// redaction: the non-cell text parts, plus relationships parts (whose external
-/// hyperlink `Target` values carry the same PII as the cells and are redacted as
-/// XML attribute values). This is the gate for both what
-/// [`text_parts`](Xlsx::text_parts) exposes and what
-/// [`rewrite_with_parts`](Xlsx::rewrite_with_parts) accepts.
-fn is_surfaced_text_part(path: &str) -> bool {
-    is_extra_text_part(path) || is_relationships(path)
+/// Whether `part` is one the handler surfaces for out-of-band markup redaction:
+/// the non-cell text parts, plus relationships parts (whose external hyperlink
+/// `Target` values carry the same PII as the cells and are redacted as XML
+/// attribute values). The gate for both what [`text_parts`](Xlsx::text_parts)
+/// exposes and what [`rewrite_with_parts`](Xlsx::rewrite_with_parts) accepts.
+fn is_surfaced_text_part(part: &PartPath) -> bool {
+    is_extra_text_part(part) || part.is_relationships()
 }
 
-/// The [`EmbeddingKind`] of a binary media part, if `path` names one.
-fn embedding_kind(path: &str) -> Option<EmbeddingKind> {
-    if path.starts_with("xl/media/") {
+/// The [`EmbeddingKind`] of a binary media part, if `part` names one. Excel keeps
+/// images and media under `xl/media/` and embedded objects under
+/// `xl/embeddings/`.
+fn embedding_kind(part: &PartPath) -> Option<EmbeddingKind> {
+    if part.in_dir("xl/media") {
         Some(EmbeddingKind::Image)
-    } else if path.starts_with("xl/embeddings/") {
+    } else if part.in_dir("xl/embeddings") {
         Some(EmbeddingKind::Object)
     } else {
         None
@@ -286,7 +284,7 @@ impl Xlsx {
         // Fold in the externally-redacted non-cell text parts. Each must name a
         // text part the workbook carries and must not collide with a cell part.
         for (part, bytes) in part_bytes {
-            if !is_surfaced_text_part(part) {
+            if !is_surfaced_text_part(&PartPath::from(part.clone())) {
                 return Err(Error::unsafe_rewrite(format!(
                     "part replacement targets non-text part `{part}`"
                 )));
@@ -318,7 +316,7 @@ impl Xlsx {
     pub fn text_parts(&self) -> Vec<(String, Bytes)> {
         self.package
             .part_paths()
-            .filter(|path| is_surfaced_text_part(path.as_str()))
+            .filter(|path| is_surfaced_text_part(path))
             .filter_map(|path| {
                 self.package
                     .part_bytes(path.as_str())

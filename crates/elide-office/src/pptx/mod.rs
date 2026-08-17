@@ -23,15 +23,14 @@ struct SlideClassifier;
 
 impl PartClassifier for SlideClassifier {
     fn role(&self, path: &PartPath) -> PartRole {
-        PartKind::of(path.as_str()).role()
+        PartKind::of(path).role()
     }
 
     fn is_protected(&self, path: &PartPath) -> bool {
         // The presentation part and the content-types manifest carry the
         // package's structure; clobbering either corrupts the presentation
         // rather than redacting it.
-        PartKind::of(path.as_str()) == PartKind::Presentation
-            || path.as_str() == "[Content_Types].xml"
+        PartKind::of(path) == PartKind::Presentation || path.as_str() == "[Content_Types].xml"
     }
 }
 

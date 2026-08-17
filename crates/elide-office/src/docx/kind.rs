@@ -4,7 +4,7 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::opc::{EmbeddingKind, PartRole};
+use crate::opc::{EmbeddingKind, PartPath, PartRole};
 
 /// What a package part is in a WordprocessingML document, which determines how
 /// it is handled.
@@ -58,8 +58,9 @@ pub enum PartKind {
 }
 
 impl PartKind {
-    /// Classify the part at `path` from its package path.
-    pub fn of(path: &str) -> Self {
+    /// Classify `part` from its package path.
+    pub fn of(part: &PartPath) -> Self {
+        let path = part.as_str();
         // Text-bearing WordprocessingML parts.
         if path == "word/document.xml" {
             return Self::Body;
@@ -94,16 +95,13 @@ impl PartKind {
         if Self::is_numbered(path, "word/diagrams/data", ".xml") {
             return Self::Diagram;
         }
-        // Relationships parts: `_rels/.rels` and `<dir>/_rels/<name>.rels`. Their
-        // external hyperlink targets carry user PII, so they are redacted.
-        if Self::is_relationships(path) {
+        // Relationships parts carry external hyperlink targets that hold user PII.
+        if part.is_relationships() {
             return Self::Relationships;
         }
-        // Binary embeddings.
-        if let Some(kind) = embedding_of(path) {
+        if let Some(kind) = embedding_of(part) {
             return Self::Embedding(kind);
         }
-        // Metadata.
         if path.starts_with("docProps/") {
             return Self::Metadata;
         }
@@ -167,13 +165,6 @@ impl PartKind {
         }
     }
 
-    /// Whether `path` is a relationships part: the package root `_rels/.rels`,
-    /// or a `<dir>/_rels/<name>.rels` sidecar. Both live in a `_rels/` directory
-    /// and end in `.rels`, which uniquely identifies the OPC relationships parts.
-    fn is_relationships(path: &str) -> bool {
-        path.ends_with(".rels") && (path == "_rels/.rels" || path.contains("/_rels/"))
-    }
-
     /// Whether `path` is `{prefix}{n}{suffix}` for some run of digits `n`
     /// (e.g. `word/header2.xml` for prefix `word/header`, suffix `.xml`).
     fn is_numbered(path: &str, prefix: &str, suffix: &str) -> bool {
@@ -187,13 +178,15 @@ impl PartKind {
     }
 }
 
-/// Classify the binary embedding at `path`, or `None` if it is not one.
-fn embedding_of(path: &str) -> Option<EmbeddingKind> {
-    if path.starts_with("word/media/") {
+/// Classify the binary embedding at `part`, or `None` if it is not one. Word
+/// keeps images under `word/media/`, embedded objects under `word/embeddings/`,
+/// and fonts under `word/fonts/`.
+fn embedding_of(part: &PartPath) -> Option<EmbeddingKind> {
+    if part.in_dir("word/media") {
         Some(EmbeddingKind::Image)
-    } else if path.starts_with("word/embeddings/") {
+    } else if part.in_dir("word/embeddings") {
         Some(EmbeddingKind::Object)
-    } else if path.starts_with("word/fonts/") {
+    } else if part.in_dir("word/fonts") {
         Some(EmbeddingKind::Font)
     } else {
         None
@@ -204,15 +197,20 @@ fn embedding_of(path: &str) -> Option<EmbeddingKind> {
 mod tests {
     use super::*;
 
+    /// The kind of the part at `path`.
+    fn kind(path: &str) -> PartKind {
+        PartKind::of(&PartPath::from(path))
+    }
+
     #[test]
     fn relationships_parts_are_classified_and_redactable() {
         // The package root rels and a part's sidecar rels are both relationships.
         for path in ["_rels/.rels", "word/_rels/document.xml.rels"] {
-            assert_eq!(PartKind::of(path), PartKind::Relationships, "{path}");
-            assert!(PartKind::of(path).is_redactable(), "{path}");
+            assert_eq!(kind(path), PartKind::Relationships, "{path}");
+            assert!(kind(path).is_redactable(), "{path}");
             // They hold attribute text, not element text, so they are redactable
             // but not `is_text`.
-            assert!(!PartKind::of(path).is_text(), "{path}");
+            assert!(!kind(path).is_text(), "{path}");
         }
     }
 
@@ -220,8 +218,8 @@ mod tests {
     fn a_non_rels_part_is_not_a_relationships_part() {
         // A path merely containing `_rels` but not ending in `.rels`, and an
         // ordinary XML part, are both left as `Other`.
-        assert_eq!(PartKind::of("word/settings.xml"), PartKind::Other);
-        assert_eq!(PartKind::of("word/_rels/document.xml"), PartKind::Other);
+        assert_eq!(kind("word/settings.xml"), PartKind::Other);
+        assert_eq!(kind("word/_rels/document.xml"), PartKind::Other);
     }
 
     #[test]
