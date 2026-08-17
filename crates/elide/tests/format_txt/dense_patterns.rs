@@ -54,6 +54,7 @@ async fn detects_every_strong_pattern() -> Result<()> {
             "NWBKGB2L",
             "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2",
             "0x52908400098527886E0F7030069857D2E4169EE7",
+            "THISISNOTAREALKEYitisatestfixtureblobAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         ],
     );
     Ok(())
