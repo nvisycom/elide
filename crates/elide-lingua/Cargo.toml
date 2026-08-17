@@ -23,11 +23,12 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-## No language models by default: `lingua` compiles one model per language,
-## and the full set is large, so a caller opts into the coverage it needs.
-## Detection over a set with no models loaded resolves to nothing — pick
-## `common` for the usual set or `all` for every language `lingua` ships.
-default = []
+## English only by default. `lingua` compiles one model per language and the
+## full set is large, so the default stays minimal; a caller opts into wider
+## coverage with `common` (the major world languages) or `all` (every language
+## `lingua` ships). English is the floor rather than an empty set because
+## `lingua` itself does not compile with zero language models.
+default = ["lingua/english"]
 
 ## The most widely-used languages — a practical default for documents whose
 ## language is one of the major world/business languages. Keeps the model
