@@ -5,14 +5,12 @@
 //! image round-trips unchanged — exercising the whole image + OCR path on
 //! real PNG bytes.
 
-mod fixtures;
-
+use crate::support::pipeline::Fixture;
 use elide::Result;
-use fixtures::pipeline::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/sample.png"),
-    source: include_bytes!("testdata/sample.png"),
+    source: include_bytes!("../testdata/sample.png"),
     extension: "png",
 };
 

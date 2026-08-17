@@ -5,14 +5,12 @@
 //! clip round-trips unchanged — exercising the whole audio path on real
 //! WAV bytes.
 
-mod fixtures;
-
+use crate::support::pipeline::Fixture;
 use elide::Result;
-use fixtures::pipeline::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/sample.wav"),
-    source: include_bytes!("testdata/sample.wav"),
+    source: include_bytes!("../testdata/sample.wav"),
     extension: "wav",
 };
 

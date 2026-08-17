@@ -1,28 +1,25 @@
-//! End-to-end CSV codec round-trip: decode → analyze → anonymize → encode.
+//! End-to-end HTML codec round-trip: decode → analyze → anonymize → encode.
 //!
-//! The handler redacts PII per cell while the table structure (header row,
-//! delimiters, non-sensitive cells) passes through unchanged.
+//! The handler redacts PII in text nodes and attribute values while the tag
+//! structure passes through unchanged.
 
-mod fixtures;
-
-use elide::Result;
-use elide::entity::builtins;
-use fixtures::asserts::{
+use crate::support::asserts::{
     assert_label_present, assert_pii_removed, assert_preserved, assert_tokens_present,
 };
-use fixtures::pipeline::Fixture;
+use crate::support::pipeline::Fixture;
+use elide::Result;
+use elide::entity::builtins;
 
 const FIXTURE: Fixture = Fixture {
-    path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/sample.csv"),
-    source: include_bytes!("testdata/sample.csv"),
-    extension: "csv",
+    path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/sample.html"),
+    source: include_bytes!("../testdata/sample.html"),
+    extension: "html",
 };
 
 #[tokio::test]
-async fn csv_detects_and_redacts() -> Result<()> {
-    let outcome = FIXTURE.run_tabular().await?;
+async fn html_detects_and_redacts() -> Result<()> {
+    let outcome = FIXTURE.run().await?;
 
-    // Every sensitive column is detected across both data rows.
     for label in [
         builtins::EMAIL_ADDRESS.to_ref(),
         builtins::PHONE_NUMBER.to_ref(),
@@ -34,16 +31,14 @@ async fn csv_detects_and_redacts() -> Result<()> {
         assert_label_present(&outcome.entities, &label);
     }
 
-    // Both rows' sensitive values are gone from the re-encoded CSV.
+    // PII is gone from element text, including the values that also
+    // appear in attributes and the comment.
     assert_pii_removed(
         &outcome.redacted_text(),
         &[
             "alice.johnson@example.com",
-            "bob.smith@example.com",
             "+1 (415) 555-0142",
-            "+1 (510) 555-0199",
             "4111 1111 1111 1111",
-            "5555 5555 5555 4444",
             "GB29 NWBK 6016 1331 9268 19",
             "123-45-6789",
             "192.168.1.42",
@@ -61,14 +56,10 @@ async fn csv_detects_and_redacts() -> Result<()> {
         ],
     );
 
-    // CSV structure survives: header row and non-sensitive name cells stay.
+    // Markup structure survives: tags and non-sensitive text stay.
     assert_preserved(
         &outcome.redacted_text(),
-        &[
-            "name,email,phone,card,iban,ssn,host",
-            "Alice Johnson,",
-            "Bob Smith,",
-        ],
+        &["<html", "<body>", "<h1>Customer onboarding</h1>", "Best,"],
     );
     Ok(())
 }

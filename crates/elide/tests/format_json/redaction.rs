@@ -3,18 +3,16 @@
 //! The handler redacts PII in string values while the surrounding structure
 //! (keys, braces, array shape) passes through unchanged.
 
-mod fixtures;
-
-use elide::Result;
-use elide::entity::builtins;
-use fixtures::asserts::{
+use crate::support::asserts::{
     assert_label_present, assert_pii_removed, assert_preserved, assert_tokens_present,
 };
-use fixtures::pipeline::Fixture;
+use crate::support::pipeline::Fixture;
+use elide::Result;
+use elide::entity::builtins;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/sample.json"),
-    source: include_bytes!("testdata/sample.json"),
+    source: include_bytes!("../testdata/sample.json"),
     extension: "json",
 };
 

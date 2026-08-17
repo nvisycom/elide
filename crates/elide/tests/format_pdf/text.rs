@@ -5,16 +5,14 @@
 //! directly; the shipped patterns find the PII and the anonymizer rewrites it
 //! in the re-encoded document.
 
-mod fixtures;
-
+use crate::support::asserts::{assert_label_present, assert_pii_removed};
+use crate::support::pipeline::Fixture;
 use elide::Result;
 use elide::codec::FormatRegistry;
 use elide::entity::audit::AuditKind;
 use elide::entity::builtins;
 use elide::modality::StreamDataReader;
 use elide::modality::text::Text;
-use fixtures::asserts::{assert_label_present, assert_pii_removed};
-use fixtures::pipeline::Fixture;
 
 /// Re-decode a redacted PDF through the public registry and reassemble its
 /// born-digital text. The re-encoded content stream is FlateDecode-compressed,
@@ -35,7 +33,7 @@ async fn extracted_text(pdf: &[u8]) -> Result<String> {
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/sample.pdf"),
-    source: include_bytes!("testdata/sample.pdf"),
+    source: include_bytes!("../testdata/sample.pdf"),
     extension: "pdf",
 };
 
