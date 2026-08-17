@@ -8,10 +8,10 @@ must stay undetected.
 Please debit the payment card 4111 1111 1111 1111 on file for the renewal.
 The checking account 000123456789 is where the direct deposit should land.
 His US social security number is 123-45-6789 for the tax filing.
-Her passport number is 340020013 and expires next spring.
+Her passport number is C31195855 and expires next spring.
 The driver license D1234563 was issued by the state last year.
 Mail it to postal code 90210 for the west-coast branch.
-The API key sk_test_context_9f8e7d6c5b4a is scoped to the sandbox only.
+The API key ctx_9f8e7d6c5b4a2b1c0d9e is scoped to the sandbox only.
 Wire it via IBAN GB29 NWBK 6016 1331 9268 19 to settle the invoice.
 
 None of these keywords ("payment card", "account", "social security",

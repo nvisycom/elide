@@ -41,10 +41,10 @@ async fn context_lifts_weak_values_over_threshold() -> Result<()> {
             "4111 1111 1111 1111",
             "000123456789",
             "123-45-6789",
-            "340020013",
+            "C31195855",
             "D1234563",
             "90210",
-            "sk_test_context_9f8e7d6c5b4a",
+            "ctx_9f8e7d6c5b4a2b1c0d9e",
             "GB29 NWBK 6016 1331 9268 19",
         ],
     );
