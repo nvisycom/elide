@@ -23,7 +23,9 @@ use self::sheet::{CellSource, parse_cells};
 use self::strings::{parse_shared_strings, shared_string_items};
 use self::workbook::{Sheet, resolve_sheets};
 use crate::error::{Error, Result};
-use crate::opc::{EmbeddingKind, Package, PartClassifier, PartPath, PartReplacement, PartRole};
+use crate::opc::{
+    EmbeddingKind, Package, PartClassifier, PartPath, PartReplacement, PartRole, media_kind,
+};
 
 /// The well-known part path of the workbook and its shared-string table.
 const WORKBOOK_PART: &str = "xl/workbook.xml";
@@ -82,7 +84,7 @@ fn is_extra_text_part(path: &str) -> bool {
 /// The [`EmbeddingKind`] of a binary media part, if `path` names one.
 fn embedding_kind(path: &str) -> Option<EmbeddingKind> {
     if path.starts_with("xl/media/") {
-        Some(EmbeddingKind::Image)
+        Some(media_kind(path))
     } else if path.starts_with("xl/embeddings/") {
         Some(EmbeddingKind::Object)
     } else {

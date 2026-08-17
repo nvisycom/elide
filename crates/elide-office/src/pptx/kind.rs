@@ -4,7 +4,7 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::opc::{EmbeddingKind, PartRole};
+use crate::opc::{EmbeddingKind, PartRole, media_kind};
 
 /// What a PresentationML package part is, which determines how it is handled.
 ///
@@ -146,9 +146,14 @@ impl PartKind {
 }
 
 /// The [`EmbeddingKind`] of a binary media part, if `path` names one.
+///
+/// `ppt/media/` mixes images, audio, and video, so the kind is taken from the
+/// file extension (a slide's embedded `.mp3` is [`Audio`], not an image).
+///
+/// [`Audio`]: EmbeddingKind::Audio
 fn embedding_kind(path: &str) -> Option<EmbeddingKind> {
     if path.starts_with("ppt/media/") {
-        Some(EmbeddingKind::Image)
+        Some(media_kind(path))
     } else if path.starts_with("ppt/embeddings/") {
         Some(EmbeddingKind::Object)
     } else {
@@ -189,6 +194,16 @@ mod tests {
         assert_eq!(
             PartKind::of("ppt/media/image1.png"),
             PartKind::Embedding(EmbeddingKind::Image)
+        );
+        // A slide's `ppt/media/` dir also holds audio and video, classified by
+        // extension so an embedded clip surfaces as media, not as an image.
+        assert_eq!(
+            PartKind::of("ppt/media/media1.mp3"),
+            PartKind::Embedding(EmbeddingKind::Audio)
+        );
+        assert_eq!(
+            PartKind::of("ppt/media/media2.mp4"),
+            PartKind::Embedding(EmbeddingKind::Video)
         );
         assert_eq!(PartKind::of("ppt/theme/theme1.xml"), PartKind::Other);
     }
