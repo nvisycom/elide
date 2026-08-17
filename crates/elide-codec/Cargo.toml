@@ -47,7 +47,7 @@ xml = ["internal_extract", "dep:quick-xml"]
 html = ["xml"]
 
 ## The rich-document formats.
-document = ["docx", "pdf", "rtf"]
+document = ["docx", "pptx", "pdf", "rtf"]
 
 ## DOCX: OOXML text extraction and byte-faithful redaction come from the
 ## standalone `elide-office` crate; this codec adapts it to the `Handler`

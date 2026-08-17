@@ -34,7 +34,8 @@ pub enum PartKind {
     Notes,
     /// A handout master (`ppt/handoutMasters/handoutMaster{n}.xml`).
     HandoutMaster,
-    /// Comment text (`ppt/comments/*.xml`, modern or legacy).
+    /// Comment text (`ppt/comments/*.xml` classic, or
+    /// `ppt/threadedComments/*.xml` threaded).
     Comments,
     /// Chart text (`ppt/charts/chart{n}.xml`) or a diagram's data
     /// (`ppt/diagrams/data{n}.xml`).
@@ -74,10 +75,13 @@ impl PartKind {
         if Self::is_numbered(path, "ppt/handoutMasters/handoutMaster", ".xml") {
             return Self::HandoutMaster;
         }
-        // Comments come in a modern (`ppt/comments/`) and a legacy
-        // (`ppt/commentAuthors.xml` is authors-only, so only the comment parts)
-        // layout; both hold the comment text.
-        if path.starts_with("ppt/comments/") && path.ends_with(".xml") {
+        // Comments come in three layouts, all holding the comment text: the
+        // classic per-slide `ppt/comments/`, and the modern threaded
+        // `ppt/threadedComments/` (PowerPoint 2021+). `ppt/commentAuthors.xml`
+        // is authors-only, so only the comment parts themselves are matched.
+        if (path.starts_with("ppt/comments/") || path.starts_with("ppt/threadedComments/"))
+            && path.ends_with(".xml")
+        {
             return Self::Comments;
         }
         if Self::is_numbered(path, "ppt/charts/chart", ".xml")
@@ -170,6 +174,12 @@ mod tests {
         );
         assert_eq!(
             PartKind::of("ppt/comments/comment1.xml"),
+            PartKind::Comments
+        );
+        // Threaded comments (PowerPoint 2021+) carry comment text too, so they
+        // must classify as text-bearing — not fall through to `Other` and leak.
+        assert_eq!(
+            PartKind::of("ppt/threadedComments/threadedComment1.xml"),
             PartKind::Comments
         );
         assert_eq!(
