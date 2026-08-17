@@ -17,9 +17,9 @@ useDefault = true
 
 [allowlist]
 description = "Synthetic secret-shaped values in the detection test corpus"
-# Any `testdata` tree, plus the per-format test drivers that inline the same
-# fixture values in their assertions. These hold only synthetic canaries.
+# Any `testdata` tree, plus any test source (`tests/` drivers inline the same
+# fixture values in their assertions). These hold only synthetic canaries.
 paths = [
   '''(^|/)testdata/''',
-  '''crates/elide/tests/format_.*\.rs''',
+  '''(^|/)tests/''',
 ]
