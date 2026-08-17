@@ -128,11 +128,12 @@ impl TxtHandler {
 
     fn redact_one(&mut self, location: &TextLocation, replacement: &TextReplacement) -> Result<()> {
         let range = location.range.start..location.range.end;
-        // A location that runs past the end or lands off a UTF-8 boundary is
-        // skipped rather than panicking: a detector may report a range that no
-        // longer aligns after an earlier splice, and a redaction must never
-        // corrupt bytes.
-        if range.end > self.text.len()
+        // An inverted, out-of-bounds, or non-UTF-8-boundary range is skipped
+        // rather than panicking: a detector may report a range that no longer
+        // aligns after an earlier splice, and a redaction must never corrupt
+        // bytes. `replace_range` panics on an inverted range, so guard it here.
+        if range.start > range.end
+            || range.end > self.text.len()
             || !self.text.is_char_boundary(range.start)
             || !self.text.is_char_boundary(range.end)
         {
@@ -154,8 +155,15 @@ fn paragraph_blocks(text: &str) -> Vec<Range<usize>> {
     let mut offset = 0usize;
     let mut current: Option<Range<usize>> = None;
     for line in text.split_inclusive('\n') {
-        let trimmed_len = line.trim_end_matches('\n').len();
-        let content_end = offset + trimmed_len;
+        // Drop a trailing `\r\n` or `\n` as one line ending, so a CRLF file
+        // does not carry a stray `\r` at each block's end (internal CRLF bytes
+        // in a multi-line block are kept — only the terminator is trimmed).
+        let ending = if line.ends_with("\r\n") {
+            2
+        } else {
+            usize::from(line.ends_with('\n'))
+        };
+        let content_end = offset + line.len() - ending;
         let is_blank = text[offset..content_end].trim().is_empty();
         if is_blank {
             if let Some(block) = current.take() {
@@ -222,6 +230,20 @@ mod tests {
     async fn blank_and_whitespace_only_lines_are_skipped() {
         let cs = chunks("\n\nleading blanks\nsecond\n   \n").await;
         assert_eq!(cs, vec![(2, 23, "leading blanks\nsecond".to_string())]);
+    }
+
+    #[tokio::test]
+    async fn crlf_line_endings_are_not_carried_into_a_block() {
+        // A CRLF terminator is trimmed whole — no stray `\r` at the block end —
+        // while an internal CRLF between the block's lines is kept.
+        let cs = chunks("first\r\nsecond\r\n\r\nthird\r\n").await;
+        assert_eq!(
+            cs,
+            vec![
+                (0, 13, "first\r\nsecond".to_string()),
+                (17, 22, "third".to_string()),
+            ]
+        );
     }
 
     #[tokio::test]
