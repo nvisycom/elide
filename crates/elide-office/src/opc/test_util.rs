@@ -42,20 +42,29 @@ pub fn part_names(package: &[u8]) -> Vec<String> {
 /// to `(name, text)`. These parts carry all of a document's text; binary
 /// parts (fonts, images, media) hold none and are skipped, so a leak scan
 /// over the result covers every part that could carry text PII.
+///
+/// A text part that is not valid UTF-8 **panics** rather than being
+/// dropped: silently omitting a part a leak scan can't read would let PII
+/// in that part pass unseen — the same false-pass this module exists to
+/// prevent. UTF-8 is also the only encoding the package engine itself
+/// accepts (a non-UTF-8 part fails extraction as `NotUtf8`), so an
+/// undecodable part here is a malformed fixture, not an encoding the
+/// product supports.
 pub fn text_parts(package: &[u8]) -> Vec<(String, String)> {
-    let mut zip = match ZipArchive::new(Cursor::new(package)) {
-        Ok(zip) => zip,
-        Err(_) => return Vec::new(),
-    };
+    let mut zip = ZipArchive::new(Cursor::new(package)).expect("package is a valid zip container");
     (0..zip.len())
         .filter_map(|i| {
-            let mut entry = zip.by_index(i).ok()?;
+            let mut entry = zip.by_index(i).expect("zip entry index in range");
             let name = entry.name().to_owned();
             if !(name.ends_with(".xml") || name.ends_with(".rels")) {
                 return None;
             }
-            let mut text = String::new();
-            entry.read_to_string(&mut text).ok()?;
+            let mut bytes = Vec::new();
+            entry
+                .read_to_end(&mut bytes)
+                .unwrap_or_else(|e| panic!("read part `{name}`: {e}"));
+            let text = String::from_utf8(bytes)
+                .unwrap_or_else(|_| panic!("text part `{name}` is not valid UTF-8"));
             Some((name, text))
         })
         .collect()
