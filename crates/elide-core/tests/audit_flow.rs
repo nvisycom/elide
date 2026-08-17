@@ -270,6 +270,16 @@ fn a_detected_language_never_filters() {
     assert!(ctx.applies_to_asserted_language(&de_scope));
     // The old asserted-OR-detected filter WOULD suppress it (detected es ≠ de).
     assert!(!ctx.applies_to_language(&de_scope));
+
+    // `asserted_languages` excludes the detected one — the caller asserted
+    // nothing — so per-language context selection stays permissive rather than
+    // keying on the (unreliable) detected `es`.
+    assert!(ctx.asserted_languages().is_empty());
+    assert_eq!(
+        ctx.ranked_languages().len(),
+        1,
+        "detection is still recorded"
+    );
 }
 
 #[test]

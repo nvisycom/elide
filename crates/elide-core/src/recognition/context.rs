@@ -219,6 +219,25 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
         all
     }
 
+    /// The caller-*asserted* language tags for this call — the scope's
+    /// languages only, *excluding* anything a detector added.
+    ///
+    /// Use this where a *detected* language must not participate because
+    /// detection is unreliable on the input (short, word-poor chunks resolve
+    /// to arbitrary languages): selecting which per-language context to
+    /// activate keys on this, so a misdetected chunk language can't deactivate
+    /// the context whose keyword actually sits in the text. Empty when the
+    /// caller asserted no language, which callers read as "any".
+    #[must_use]
+    pub fn asserted_languages(&self) -> Vec<&LanguageTag> {
+        self.scope
+            .languages
+            .as_slice()
+            .iter()
+            .map(|l| &l.language)
+            .collect()
+    }
+
     /// Single most likely language tag for this call, or `None` when no
     /// language is known.
     #[must_use]

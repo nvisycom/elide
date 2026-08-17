@@ -84,11 +84,17 @@ where
             .iter()
             .map(|h| M::as_text(&h.data, &ctx.artifacts))
             .collect();
-        // Every asserted/detected language, most likely first, so a per-language
-        // context rule fires when any of them matches — a document covering
-        // several languages activates each one's context, not just the primary.
-        let languages: Vec<&LanguageTag> =
-            ctx.ranked_languages().iter().map(|l| &l.language).collect();
+        // Only *asserted* languages select which per-language context fires; a
+        // *detected* language does not. Detection is unreliable on the short,
+        // word-poor chunks a codec emits (a lone `Card: 4111…` cell resolves to
+        // an arbitrary language), and a misdetected chunk language would
+        // deactivate the very context whose keyword sits in the text. With no
+        // asserted language the list is empty, which the enhancer reads as
+        // permissive — every per-language context is active, so the keyword
+        // that actually appears (`card`, `tarjeta`, `Kreditkarte`, …) fires
+        // regardless of the surrounding language. Activating a language's
+        // context is harmless when its keyword is absent.
+        let languages: Vec<&LanguageTag> = ctx.asserted_languages();
         let mut context = Context::new(text)
             .with_hints(&hint_texts)
             .with_languages(&languages);
