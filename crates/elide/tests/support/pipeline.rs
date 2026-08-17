@@ -130,6 +130,27 @@ pub fn build_analyzer<M: TextRecognizable>() -> Result<Analyzer<M>> {
         .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE)))
 }
 
+/// The [`Text`] analyzer with the mock LLM recognizer added on top of
+/// [`build_analyzer`]'s pattern + NER. The LLM recognizer is bound to
+/// [`LlmModality`], which `Text` satisfies but `Tabular` does not (see
+/// `testdata/BUGS.md` B9), so only `Text` pipelines can carry it today; a
+/// container's tabular body still drives its text sub-parts through this
+/// `Text` pipeline.
+///
+/// Like the mock NER, the mock LLM finds nothing today — it makes the
+/// pipeline shape the intended one, so LLM-tier fixtures light up unchanged
+/// once a real backend is configured.
+#[cfg(feature = "llm")]
+pub fn build_text_analyzer() -> Result<Analyzer<Text>> {
+    use elide::recognition::llm::LlmRecognizer;
+    let llm = LlmRecognizer::builder()
+        .with_name("mock-llm")
+        .with_mock_backend()
+        .with_default_prompt()
+        .build()?;
+    Ok(build_analyzer::<Text>()?.with_recognizer(llm))
+}
+
 /// Build the redaction side: one operator per label the shipped patterns
 /// emit, so assertions can spot the replacement tokens, plus a fallback.
 pub fn build_anonymizer<M: TextRecognizable>() -> Anonymizer<M>
@@ -365,8 +386,12 @@ impl Fixture {
         // drive them. When the body modality already is Text this re-registers
         // the same pipeline, which is a no-op; when it is Tabular it adds the
         // pipeline the container parts need.
-        let orchestrator = orchestrator
-            .with_modality::<Text>(build_analyzer::<Text>()?, build_anonymizer::<Text>());
+        #[cfg(feature = "llm")]
+        let text_analyzer = build_text_analyzer()?;
+        #[cfg(not(feature = "llm"))]
+        let text_analyzer = build_analyzer::<Text>()?;
+        let orchestrator =
+            orchestrator.with_modality::<Text>(text_analyzer, build_anonymizer::<Text>());
 
         // Two phases so the entities surface for assertions: detect, copy
         // the body entities out, then apply with no editing.
