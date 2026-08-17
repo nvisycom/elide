@@ -33,6 +33,9 @@ async fn checksum_gates_detection() -> Result<()> {
             "4111 1111 1111 1111",
             "GB29 NWBK 6016 1331 9268 19",
             "5555 5555 5555 4444",
+            // The Amex 4-6-5 grouping is a valid card and must be redacted too,
+            // not just non-postal (checked below).
+            "3782 822463 10005",
         ],
     );
 
