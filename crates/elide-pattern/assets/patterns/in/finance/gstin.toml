@@ -6,7 +6,9 @@ name = "in-gstin"
 labels = ["tax_id"]
 countries = ["IN"]
 languages = ["en", "hi"]
-context = [
+
+[context]
+keywords = [
   "gstin",
   "gst",
   "goods and services tax",

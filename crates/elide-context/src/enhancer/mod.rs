@@ -87,7 +87,13 @@ impl Enhancer {
         let mut buckets: HashMap<LabelRef, Vec<BoostRule>> = HashMap::new();
         for rule in rules {
             let bucket = buckets.entry(rule.label.clone()).or_default();
-            if let Some(existing) = bucket.iter_mut().find(|r| r.language == rule.language) {
+            // Merge only rules that share both language scope and match mode;
+            // a word-boundary rule and a substring rule for the same label stay
+            // distinct so each keyword set keeps its intended matching.
+            if let Some(existing) = bucket
+                .iter_mut()
+                .find(|r| r.language == rule.language && r.word_boundary == rule.word_boundary)
+            {
                 existing.merge(rule);
             } else {
                 bucket.push(rule);
@@ -194,11 +200,11 @@ impl Enhancer {
         // native location for it, symmetric with the hint's own location.
         let (source, hint_index, keyword_range) = if let Some(keyword_range) = window {
             (EVENT_SOURCE_WINDOW, None, Some(keyword_range))
-        } else if let Some(i) = ctx
-            .hints
-            .iter()
-            .position(|h| self.matcher.any_match(h, &[], &rule.keywords).is_some())
-        {
+        } else if let Some(i) = ctx.hints.iter().position(|h| {
+            self.matcher
+                .any_match(h, &[], &rule.keywords)
+                .is_some_and(|m| !rule.word_boundary || on_word_boundaries(h, &m))
+        }) {
             (EVENT_SOURCE_HINT, Some(i), None)
         } else {
             return None;
@@ -263,8 +269,25 @@ impl Enhancer {
         let m = self
             .matcher
             .any_match(snippet, tokens_in_window, &rule.keywords)?;
+        if rule.word_boundary && !on_word_boundaries(snippet, &m) {
+            return None;
+        }
         Some(window_offset + m.start..window_offset + m.end)
     }
+}
+
+/// Whether the byte range `m` of `text` sits on word boundaries — the
+/// characters immediately before and after are not word characters
+/// (Unicode alphanumerics or `_`). Mirrors a regex `\b…\b` around a keyword,
+/// so `"AUD"` matches the token `AUD` but not the `aud` inside `audit`.
+fn on_word_boundaries(text: &str, m: &Range<usize>) -> bool {
+    let is_word = |c: char| c.is_alphanumeric() || c == '_';
+    let before_ok = text[..m.start]
+        .chars()
+        .next_back()
+        .is_none_or(|c| !is_word(c));
+    let after_ok = text[m.end..].chars().next().is_none_or(|c| !is_word(c));
+    before_ok && after_ok
 }
 
 /// One confidence lift the enhancer applied, for the caller to record in

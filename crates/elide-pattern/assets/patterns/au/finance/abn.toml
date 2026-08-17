@@ -7,7 +7,9 @@ name = "au-abn"
 labels = ["company_id"]
 countries = ["AU"]
 languages = ["en"]
-context = [
+
+[context]
+keywords = [
   "australian business number",
   "abn",
   "abr",

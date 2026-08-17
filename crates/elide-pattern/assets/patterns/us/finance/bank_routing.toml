@@ -10,7 +10,9 @@ name = "us-bank-routing"
 labels = ["bank_routing"]
 countries = ["US"]
 languages = ["en"]
-context = [
+
+[context]
+keywords = [
   "routing",
   "aba",
   "rtn",

@@ -6,7 +6,9 @@ name = "tr-posta-kodu"
 labels = ["postal_code"]
 countries = ["TR"]
 languages = ["tr"]
-context = [
+
+[context]
+keywords = [
   "posta kodu",
   "ptt",
   "adres",

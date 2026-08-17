@@ -4,7 +4,9 @@
 name = "us-postal-code"
 labels = ["postal_code"]
 countries = ["US"]
-context = [
+
+[context]
+keywords = [
   "zip",
   "zip code",
   "zipcode",

@@ -7,7 +7,9 @@ name = "es-nif"
 labels = ["government_id"]
 countries = ["ES"]
 languages = ["es"]
-context = [
+
+[context]
+keywords = [
   "documento nacional de identidad",
   "número de identificación fiscal",
   "dni",

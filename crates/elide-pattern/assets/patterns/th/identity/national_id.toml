@@ -7,7 +7,9 @@ name = "th-national-id"
 labels = ["government_id"]
 countries = ["TH"]
 languages = ["th"]
-context = [
+
+[context]
+keywords = [
   "เลขประจำตัวประชาชน",
   "เลขบัตรประชาชน",
   "บัตรประจำตัวประชาชน",

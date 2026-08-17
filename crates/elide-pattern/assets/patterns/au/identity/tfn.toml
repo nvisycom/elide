@@ -6,7 +6,9 @@ name = "au-tfn"
 labels = ["tax_id"]
 countries = ["AU"]
 languages = ["en"]
-context = [
+
+[context]
+keywords = [
   "tax file number",
   "tfn",
   "australian taxation office",

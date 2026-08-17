@@ -6,7 +6,9 @@
 name = "ssn"
 labels = ["government_id"]
 countries = ["US"]
-context = ["social security", "ssn", "tax id", "taxpayer identification"]
+
+[context]
+keywords = ["social security", "ssn", "tax id", "taxpayer identification"]
 
 [[variants]]
 regex = '\b(\d{3})[- .](\d{2})[- .](\d{4})\b'

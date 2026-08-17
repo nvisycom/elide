@@ -7,7 +7,9 @@ name = "pl-nip"
 labels = ["tax_id"]
 countries = ["PL"]
 languages = ["pl"]
-context = [
+
+[context]
+keywords = [
   "nip",
   "numer identyfikacji podatkowej",
   "identyfikacja podatkowa",

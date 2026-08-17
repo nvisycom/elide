@@ -18,6 +18,7 @@ use regex::{
 };
 
 use super::compiled::{CompiledDictionary, CompiledPattern, RawMatch, has_word_boundaries};
+use super::context::Matching;
 use super::dictionary::Dictionary;
 use super::regex::Regex;
 use crate::shipped;
@@ -94,6 +95,19 @@ fn resolve_label<'a>(candidates: &'a [LabelRef], catalog: &LabelCatalog) -> Opti
         .iter()
         .find(|l| catalog.contains(l))
         .or_else(|| candidates.first())
+}
+
+/// One `(label, language)` context slice harvested from a pattern or
+/// dictionary, ready to become a [`BoostRule`].
+struct ContextKeywords<'a> {
+    /// The label the keywords boost.
+    label: &'a LabelRef,
+    /// Language scope; `None` is language-agnostic.
+    language: Option<&'a LanguageTag>,
+    /// The keyword literals to search for near a match.
+    keywords: &'a [String],
+    /// Whole-word vs substring matching for these keywords.
+    matching: Matching,
 }
 
 /// Accumulator of rules + validator registry for [`PatternRecognizer`].
@@ -529,47 +543,86 @@ impl PatternRecognizerBuilder {
     ///
     /// [`Context`]: super::Context
     fn build_enhancer(&self) -> Enhancer {
-        let boost_rules: Vec<BoostRule> = self
+        // Inline keyword context (Global / PerLanguage lists, and any inline
+        // keywords a `Sourced` context carries).
+        let mut boost_rules: Vec<BoostRule> = self
             .context_keywords()
-            .map(|(label, language, keywords)| {
-                let rule = BoostRule::for_label(label.clone(), keywords.iter().cloned());
-                match language {
+            .map(|ck| {
+                let rule = BoostRule::new(ck.label.clone(), ck.keywords.iter().cloned())
+                    .with_word_boundary(ck.matching == Matching::Word);
+                match ck.language {
                     Some(lang) => rule.with_language(lang.clone()),
                     None => rule,
                 }
             })
             .collect();
+
+        // Dictionary-sourced context: a pattern whose `[context]` names
+        // dictionaries borrows their terms as boost keywords for its own
+        // labels — e.g. a `monetary_amount` pattern lifts a number beside any
+        // currency name from the `currencies` dictionary.
+        for pattern in self.patterns.iter() {
+            let names = pattern.context.dictionaries();
+            if names.is_empty() {
+                continue;
+            }
+            let terms: Vec<String> = self
+                .dictionaries
+                .iter()
+                .filter(|d| names.contains(&d.name))
+                .flat_map(|d| d.terms.iter().map(|t| t.term.clone()))
+                .collect();
+            if terms.is_empty() {
+                continue;
+            }
+            let word_boundary = pattern.context.matching() == Matching::Word;
+            for label in &pattern.labels {
+                boost_rules.push(
+                    BoostRule::new(label.clone(), terms.iter().cloned())
+                        .with_word_boundary(word_boundary),
+                );
+            }
+        }
+
         Enhancer::new(boost_rules, SubstringMatcher)
     }
 
-    /// Yield `(label, language, keywords)` for every pattern and
-    /// dictionary that declares a non-empty context. Global
-    /// keywords carry `language = None`; per-language keywords
-    /// carry `Some(tag)`.
+    /// Yield one [`ContextKeywords`] for every `(label, language)` context a
+    /// pattern or dictionary declares.
     ///
     /// A rule with several candidate labels contributes its keywords under
     /// *each* candidate, so whichever label the request catalog resolves the
     /// match to still gets its neighbourhood boost.
-    fn context_keywords(
-        &self,
-    ) -> impl Iterator<Item = (&LabelRef, Option<&LanguageTag>, &[String])> {
+    fn context_keywords(&self) -> impl Iterator<Item = ContextKeywords<'_>> {
         let pattern_keywords = self
             .patterns
             .iter()
             .filter(|p| !p.context.is_empty())
             .flat_map(|p| {
-                p.context
-                    .iter()
-                    .flat_map(move |(lang, kws)| p.labels.iter().map(move |l| (l, lang, kws)))
+                let matching = p.context.matching();
+                p.context.iter().flat_map(move |(language, keywords)| {
+                    p.labels.iter().map(move |label| ContextKeywords {
+                        label,
+                        language,
+                        keywords,
+                        matching,
+                    })
+                })
             });
         let dict_keywords = self
             .dictionaries
             .iter()
             .filter(|d| !d.context.is_empty())
             .flat_map(|d| {
-                d.context
-                    .iter()
-                    .flat_map(move |(lang, kws)| d.labels.iter().map(move |l| (l, lang, kws)))
+                let matching = d.context.matching();
+                d.context.iter().flat_map(move |(language, keywords)| {
+                    d.labels.iter().map(move |label| ContextKeywords {
+                        label,
+                        language,
+                        keywords,
+                        matching,
+                    })
+                })
             });
         pattern_keywords.chain(dict_keywords)
     }

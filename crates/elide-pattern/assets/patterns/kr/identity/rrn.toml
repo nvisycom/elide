@@ -7,7 +7,9 @@ name = "kr-rrn"
 labels = ["government_id"]
 countries = ["KR"]
 languages = ["ko"]
-context = [
+
+[context]
+keywords = [
   "rrn",
   "주민등록번호",
   "주민번호",

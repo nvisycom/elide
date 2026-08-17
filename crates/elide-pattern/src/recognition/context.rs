@@ -34,43 +34,133 @@ use serde::Deserialize;
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, From)]
 #[serde(untagged)]
 pub enum Context {
-    /// One flat keyword list applied regardless of the per-call
-    /// language hint.
-    Global(Vec<String>),
+    /// Keywords applied regardless of the per-call language hint: inline
+    /// literals, terms drawn from named dictionaries, or both. In TOML a
+    /// `[context]` table with `keywords` and/or `dictionaries`.
+    Global(Sourced),
     /// Per-language keyword lists. The enhancer picks the entry
     /// matching `RecognizerContext.language`, or unions every list
     /// when no hint is set.
     PerLanguage(HashMap<LanguageTag, Vec<String>>),
 }
 
+/// A language-agnostic context keyword set: inline literals plus the terms of
+/// named dictionaries.
+///
+/// The dictionaries' terms are resolved into the keyword set at
+/// recognizer-build time — so a `monetary_amount` pattern can borrow every
+/// currency name from the `currencies` dictionary without restating them
+/// inline:
+///
+/// ```toml
+/// [context]
+/// keywords = ["total", "balance"]       # optional inline keywords
+/// dictionaries = ["currencies"]         # plus dictionary-sourced terms
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Sourced {
+    /// Inline keywords applied regardless of language, merged with the
+    /// dictionary terms.
+    #[serde(default)]
+    pub keywords: Vec<String>,
+    /// Names of dictionaries whose terms join the keyword set. The
+    /// dictionaries must be registered on the same builder; an unknown
+    /// name contributes nothing.
+    #[serde(default)]
+    pub dictionaries: Vec<String>,
+    /// How a keyword matches the surrounding text. Defaults to
+    /// [`Matching::Word`] (whole-word); set `match = "substring"` in TOML to
+    /// let a keyword fire inside a longer word (`ssn` in `yourSSN`).
+    #[serde(default, rename = "match")]
+    pub matching: Matching,
+}
+
+/// How a context keyword matches the surrounding text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Matching {
+    /// The keyword must match on word boundaries — `AUD` matches the token
+    /// `AUD` but not the `aud` inside `audit`. The safe default.
+    #[default]
+    Word,
+    /// The keyword may match inside a longer word — `ssn` fires in `yourSSN`.
+    Substring,
+}
+
 impl Context {
-    /// Return `true` when no keywords are declared in any scope.
+    /// Return `true` when this context contributes no keywords at all —
+    /// no inline keywords **and** no dictionary sources.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         match self {
-            Self::Global(kws) => kws.is_empty(),
+            Self::Global(s) => s.keywords.is_empty() && s.dictionaries.is_empty(),
             Self::PerLanguage(map) => map.values().all(Vec::is_empty),
         }
     }
 
-    /// Iterate over `(language, keywords)` pairs.
+    /// Iterate over the *inline* `(language, keywords)` pairs.
     ///
-    /// [`Global`] yields one entry with `language = None`;
+    /// [`Global`] yields its inline keywords with `language = None` (its
+    /// dictionary terms are resolved separately — see [`dictionaries`]);
     /// [`PerLanguage`] yields one entry per language.
     ///
     /// [`Global`]: Self::Global
     /// [`PerLanguage`]: Self::PerLanguage
+    /// [`dictionaries`]: Self::dictionaries
     pub fn iter(&self) -> ContextIter<'_> {
         match self {
-            Self::Global(kws) => ContextIter::Global(Some(kws.as_slice())),
+            Self::Global(s) => ContextIter::Global(Some(s.keywords.as_slice())),
             Self::PerLanguage(map) => ContextIter::PerLanguage(map.iter()),
+        }
+    }
+
+    /// The names of the dictionaries this context sources keywords from, if
+    /// any. Non-empty only for a [`Global`] context declaring `dictionaries`;
+    /// the recognizer resolves each name against its registered dictionaries
+    /// and merges their terms into the boost keyword set at build time.
+    ///
+    /// [`Global`]: Self::Global
+    #[must_use]
+    pub fn dictionaries(&self) -> &[String] {
+        match self {
+            Self::Global(s) => &s.dictionaries,
+            Self::PerLanguage(_) => &[],
+        }
+    }
+
+    /// How this context's keywords match the surrounding text. A [`Global`]
+    /// context carries its declared mode; a [`PerLanguage`] context always
+    /// matches on word boundaries.
+    ///
+    /// [`Global`]: Self::Global
+    /// [`PerLanguage`]: Self::PerLanguage
+    #[must_use]
+    pub fn matching(&self) -> Matching {
+        match self {
+            Self::Global(s) => s.matching,
+            Self::PerLanguage(_) => Matching::Word,
         }
     }
 }
 
 impl Default for Context {
     fn default() -> Self {
-        Self::Global(Vec::new())
+        Self::Global(Sourced::default())
+    }
+}
+
+impl From<Vec<String>> for Context {
+    /// A bare keyword list becomes a language-agnostic [`Global`] context with
+    /// no dictionary sources — the ergonomic path for building a context from
+    /// keywords in code.
+    ///
+    /// [`Global`]: Self::Global
+    fn from(keywords: Vec<String>) -> Self {
+        Self::Global(Sourced {
+            keywords,
+            ..Sourced::default()
+        })
     }
 }
 
@@ -95,44 +185,37 @@ impl<'a> Iterator for ContextIter<'a> {
 mod tests {
     use super::*;
 
-    #[derive(Deserialize)]
-    struct Wrap {
-        context: Context,
+    fn global(keywords: &[&str], dictionaries: &[&str]) -> Context {
+        Context::Global(Sourced {
+            keywords: keywords.iter().map(|s| (*s).to_owned()).collect(),
+            dictionaries: dictionaries.iter().map(|s| (*s).to_owned()).collect(),
+            ..Sourced::default()
+        })
     }
 
     #[test]
-    fn parses_flat_array_as_global() {
-        let toml = r#"context = ["a", "b"]"#;
-        let w: Wrap = toml::from_str(toml).unwrap();
-        assert_eq!(w.context, Context::Global(vec!["a".into(), "b".into()]));
+    fn dictionaries_accessor_returns_the_sources() {
+        // A Global context surfaces its dictionary names; a PerLanguage context
+        // sources no dictionaries.
+        assert_eq!(
+            global(&["total"], &["currencies", "cryptocurrencies"]).dictionaries(),
+            ["currencies", "cryptocurrencies"]
+        );
+        let mut map = HashMap::new();
+        map.insert(LanguageTag::parse("en").unwrap(), vec!["card".to_owned()]);
+        assert!(Context::PerLanguage(map).dictionaries().is_empty());
     }
 
     #[test]
-    fn parses_table_as_per_language() {
-        let toml = r#"
-            [context]
-            en = ["card"]
-            es = ["tarjeta"]
-        "#;
-        let w: Wrap = toml::from_str(toml).unwrap();
-        let map = match w.context {
-            Context::PerLanguage(m) => m,
-            _ => panic!("expected PerLanguage"),
-        };
-        assert_eq!(map.len(), 2);
-        assert_eq!(
-            map.get(&LanguageTag::parse("en").unwrap()).unwrap(),
-            &vec!["card".to_owned()]
-        );
-        assert_eq!(
-            map.get(&LanguageTag::parse("es").unwrap()).unwrap(),
-            &vec!["tarjeta".to_owned()]
-        );
+    fn is_empty_only_when_no_keywords_and_no_dictionaries() {
+        assert!(global(&[], &[]).is_empty());
+        assert!(!global(&["a"], &[]).is_empty());
+        assert!(!global(&[], &["currencies"]).is_empty());
     }
 
     #[test]
     fn iter_global_yields_one_none_entry() {
-        let ctx = Context::Global(vec!["a".into(), "b".into()]);
+        let ctx = global(&["a", "b"], &[]);
         let collected: Vec<_> = ctx
             .iter()
             .map(|(lang, kws)| (lang.cloned(), kws.to_vec()))

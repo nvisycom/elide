@@ -6,7 +6,9 @@ name = "se-postnummer"
 labels = ["postal_code"]
 countries = ["SE"]
 languages = ["sv"]
-context = [
+
+[context]
+keywords = [
   "postnummer",
   "post",
   "postnord",

@@ -6,7 +6,9 @@ name = "ng-nin"
 labels = ["government_id"]
 countries = ["NG"]
 languages = ["en"]
-context = [
+
+[context]
+keywords = [
   "nin",
   "national identification number",
   "national identity number",

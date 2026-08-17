@@ -8,7 +8,9 @@ name = "pl-pesel"
 labels = ["government_id"]
 countries = ["PL"]
 languages = ["pl"]
-context = [
+
+[context]
+keywords = [
   "pesel",
   "numer pesel",
   "numer ewidencyjny",

@@ -41,6 +41,10 @@ shipped_pattern!(
     fn bitcoin_address from "../../../assets/patterns/world/finance/bitcoin_address.toml"
 );
 shipped_pattern!(
+    /// Monetary amounts (money-formatted numbers), boosted by currency context.
+    fn monetary_amount from "../../../assets/patterns/world/finance/monetary_amount.toml"
+);
+shipped_pattern!(
     /// Credit-card numbers, Luhn-validated.
     fn credit_card from "../../../assets/patterns/world/finance/credit_card.toml"
 );
@@ -91,6 +95,7 @@ pub fn all() -> Vec<Regex> {
         github_token(),
         private_key(),
         stripe_key(),
+        monetary_amount(),
         bitcoin_address(),
         credit_card(),
         ethereum_address(),

@@ -7,7 +7,9 @@ name = "in-voter"
 labels = ["government_id"]
 countries = ["IN"]
 languages = ["en", "hi"]
-context = [
+
+[context]
+keywords = [
   "voter",
   "voter id",
   "epic",

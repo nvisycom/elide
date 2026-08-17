@@ -6,7 +6,9 @@ name = "es-codigo-postal"
 labels = ["postal_code"]
 countries = ["ES"]
 languages = ["es"]
-context = [
+
+[context]
+keywords = [
   "código postal",
   "codigo postal",
   "cp",

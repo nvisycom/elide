@@ -5,7 +5,9 @@ name = "de-plz"
 labels = ["postal_code"]
 countries = ["DE"]
 languages = ["de"]
-context = [
+
+[context]
+keywords = [
   "postleitzahl",
   "plz",
   "postanschrift",

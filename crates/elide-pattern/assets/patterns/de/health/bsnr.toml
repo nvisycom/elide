@@ -6,7 +6,9 @@ name = "de-bsnr"
 labels = ["medical_id"]
 countries = ["DE"]
 languages = ["de"]
-context = [
+
+[context]
+keywords = [
   "betriebsstättennummer",
   "betriebsstätten-nummer",
   "bsnr",

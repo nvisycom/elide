@@ -7,7 +7,9 @@ name = "se-personnummer"
 labels = ["government_id"]
 countries = ["SE"]
 languages = ["sv"]
-context = [
+
+[context]
+keywords = [
   "personnummer",
   "svenskt personnummer",
   "personlig identitet",

@@ -70,55 +70,55 @@ pub struct BoostRule {
     /// keyword fires. Clamped at the [`Confidence`] ceiling on
     /// apply.
     pub boost: Confidence,
+    /// Whether a keyword must match on word boundaries. With the default
+    /// `true`, the keyword `"AUD"` matches the token `AUD` but not the
+    /// `aud` inside `audit`; set `false` for permissive substring matching
+    /// (a keyword firing inside a longer word, e.g. `ssn` in `yourSSN`).
+    pub word_boundary: bool,
 }
 
 impl BoostRule {
-    /// Construct a rule for `label` with explicit window radii
-    /// and `boost`. The rule is language-agnostic; use
-    /// [`with_language`] to scope it. Most callers want
-    /// [`BoostRule::for_label`] instead, which bakes in the default
-    /// window / boost values.
+    /// Construct a rule for `label` with the crate's default window radii
+    /// ([`DEFAULT_PREFIX_WORDS`] / [`DEFAULT_SUFFIX_WORDS`]), default
+    /// [`boost`](DEFAULT_BOOST), and word-boundary matching. The rule is
+    /// language-agnostic; override any knob with the `with_*` setters
+    /// ([`with_window`], [`with_boost`], [`with_language`],
+    /// [`with_word_boundary`]).
     ///
+    /// [`with_window`]: Self::with_window
+    /// [`with_boost`]: Self::with_boost
     /// [`with_language`]: Self::with_language
+    /// [`with_word_boundary`]: Self::with_word_boundary
     #[must_use]
     pub fn new(
         label: LabelRef,
         keywords: impl IntoIterator<Item = impl Into<HipStr<'static>>>,
-        prefix_words: usize,
-        suffix_words: usize,
-        boost: Confidence,
     ) -> Self {
         Self {
             label,
             language: None,
             keywords: keywords.into_iter().map(Into::into).collect(),
-            prefix_words,
-            suffix_words,
-            boost,
+            prefix_words: DEFAULT_PREFIX_WORDS,
+            suffix_words: DEFAULT_SUFFIX_WORDS,
+            boost: Confidence::clamped(DEFAULT_BOOST),
+            word_boundary: true,
         }
     }
 
-    /// Construct a rule for `label` using the crate's default
-    /// [`prefix_words`], [`suffix_words`], and [`boost`]
-    /// constants. This is the common case: recognizers building
-    /// their own boost rules from declared keywords don't need to
-    /// think about tuning knobs.
-    ///
-    /// [`prefix_words`]: DEFAULT_PREFIX_WORDS
-    /// [`suffix_words`]: DEFAULT_SUFFIX_WORDS
-    /// [`boost`]: DEFAULT_BOOST
+    /// Set the window radii (words before / after the match) the keywords are
+    /// searched within.
     #[must_use]
-    pub fn for_label(
-        label: LabelRef,
-        keywords: impl IntoIterator<Item = impl Into<HipStr<'static>>>,
-    ) -> Self {
-        Self::new(
-            label,
-            keywords,
-            DEFAULT_PREFIX_WORDS,
-            DEFAULT_SUFFIX_WORDS,
-            Confidence::clamped(DEFAULT_BOOST),
-        )
+    pub fn with_window(mut self, prefix_words: usize, suffix_words: usize) -> Self {
+        self.prefix_words = prefix_words;
+        self.suffix_words = suffix_words;
+        self
+    }
+
+    /// Set the additive boost applied when a keyword fires.
+    #[must_use]
+    pub fn with_boost(mut self, boost: Confidence) -> Self {
+        self.boost = boost;
+        self
     }
 
     /// Scope this rule to a single language.
@@ -129,6 +129,14 @@ impl BoostRule {
     #[must_use]
     pub fn with_language(mut self, language: LanguageTag) -> Self {
         self.language = Some(language);
+        self
+    }
+
+    /// Set whether keywords match on word boundaries (`true`, the default) or
+    /// as permissive substrings (`false`).
+    #[must_use]
+    pub fn with_word_boundary(mut self, word_boundary: bool) -> Self {
+        self.word_boundary = word_boundary;
         self
     }
 

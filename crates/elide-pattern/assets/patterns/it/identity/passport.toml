@@ -5,7 +5,9 @@ name = "it-passport"
 labels = ["passport_number"]
 countries = ["IT"]
 languages = ["it"]
-context = [
+
+[context]
+keywords = [
   "passaporto",
   "passaporto italiano",
   "passaporto elettronico",

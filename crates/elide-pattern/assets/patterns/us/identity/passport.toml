@@ -5,7 +5,9 @@
 name = "us-passport"
 labels = ["passport_number"]
 countries = ["US"]
-context = [
+
+[context]
+keywords = [
   "passport",
   "passport#",
   "travel document",

@@ -6,7 +6,9 @@ name = "th-postal-code"
 labels = ["postal_code"]
 countries = ["TH"]
 languages = ["th"]
-context = [
+
+[context]
+keywords = [
   "รหัสไปรษณีย์",
   "ไปรษณีย์",
   "ที่อยู่",

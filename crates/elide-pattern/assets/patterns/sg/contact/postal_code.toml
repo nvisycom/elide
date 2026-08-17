@@ -6,7 +6,9 @@ name = "sg-postal-code"
 labels = ["postal_code"]
 countries = ["SG"]
 languages = ["en"]
-context = [
+
+[context]
+keywords = [
   "postal code",
   "singapore post",
   "singpost",

@@ -7,7 +7,9 @@ name = "au-medicare"
 labels = ["insurance_id"]
 countries = ["AU"]
 languages = ["en"]
-context = [
+
+[context]
+keywords = [
   "medicare",
   "medicare card",
   "medicare number",

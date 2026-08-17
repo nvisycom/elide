@@ -6,7 +6,9 @@ name = "tr-tckn"
 labels = ["government_id"]
 countries = ["TR"]
 languages = ["tr"]
-context = [
+
+[context]
+keywords = [
   "tc kimlik",
   "kimlik no",
   "kimlik numarası",

@@ -6,7 +6,9 @@ name = "ng-vehicle-registration"
 labels = ["license_plate"]
 countries = ["NG"]
 languages = ["en"]
-context = [
+
+[context]
+keywords = [
   "plate number",
   "vehicle registration",
   "license plate",

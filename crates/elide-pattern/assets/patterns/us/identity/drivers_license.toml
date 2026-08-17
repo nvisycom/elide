@@ -8,7 +8,9 @@ name = "us-drivers-license"
 labels = ["drivers_license"]
 countries = ["US"]
 languages = ["en"]
-context = [
+
+[context]
+keywords = [
   "driver",
   "drivers",
   "driver's",

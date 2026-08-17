@@ -9,7 +9,9 @@ name = "it-fiscal-code"
 labels = ["tax_id"]
 countries = ["IT"]
 languages = ["it"]
-context = [
+
+[context]
+keywords = [
   "codice fiscale",
   "cf",
   "c.f.",

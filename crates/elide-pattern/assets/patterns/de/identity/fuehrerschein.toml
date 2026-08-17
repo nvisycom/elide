@@ -9,7 +9,9 @@ name = "de-fuehrerschein"
 labels = ["drivers_license"]
 countries = ["DE"]
 languages = ["de"]
-context = [
+
+[context]
+keywords = [
   "führerscheinnummer",
   "führerschein",
   "fahrerlaubnis",

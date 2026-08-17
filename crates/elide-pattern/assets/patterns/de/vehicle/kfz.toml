@@ -7,7 +7,9 @@ name = "de-kfz"
 labels = ["license_plate"]
 countries = ["DE"]
 languages = ["de"]
-context = [
+
+[context]
+keywords = [
   "kennzeichen",
   "kfz-kennzeichen",
   "kfz kennzeichen",

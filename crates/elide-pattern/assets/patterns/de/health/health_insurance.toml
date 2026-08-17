@@ -6,7 +6,9 @@ name = "de-health-insurance"
 labels = ["insurance_id"]
 countries = ["DE"]
 languages = ["de"]
-context = [
+
+[context]
+keywords = [
   "krankenversicherungsnummer",
   "krankenversichertennummer",
   "versichertennummer",

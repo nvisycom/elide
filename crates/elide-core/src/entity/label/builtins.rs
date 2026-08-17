@@ -152,7 +152,7 @@ labels! {
     SWIFT_CODE @ "financial" = "SWIFT/BIC code", [];
     CRYPTO_ADDRESS @ "financial" = "cryptocurrency wallet address", ["pii"];
     CURRENCY @ "financial" = "currency code or symbol", [];
-    AMOUNT @ "financial" = "monetary amount", [];
+    MONETARY_AMOUNT @ "financial" = "monetary amount", [];
 
     // Health: medical and health-status information.
     MEDICAL_ID @ "health" = "medical record number", ["phi", "pii"];

@@ -5,7 +5,9 @@ name = "it-vat-code"
 labels = ["tax_id"]
 countries = ["IT"]
 languages = ["it"]
-context = [
+
+[context]
+keywords = [
   "partita iva",
   "piva",
   "p.iva",

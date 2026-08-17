@@ -7,7 +7,9 @@ name = "de-lanr"
 labels = ["medical_id"]
 countries = ["DE"]
 languages = ["de"]
-context = [
+
+[context]
+keywords = [
   "arztnummer",
   "lanr",
   "lebenslange arztnummer",

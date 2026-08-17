@@ -6,7 +6,9 @@ name = "de-social-security"
 labels = ["national_insurance_number"]
 countries = ["DE"]
 languages = ["de"]
-context = [
+
+[context]
+keywords = [
   "rentenversicherungsnummer",
   "sozialversicherungsnummer",
   "versicherungsnummer",

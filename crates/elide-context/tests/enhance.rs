@@ -32,7 +32,7 @@ fn entity(label: &LabelRef, range: Range<usize>, score: f32) -> Entity<Text> {
 #[test]
 fn keyword_in_window_boosts_and_records_refinement() {
     let ssn = LabelRef::new("US_SSN");
-    let rule = BoostRule::for_label(ssn.clone(), ["social security"]);
+    let rule = BoostRule::new(ssn.clone(), ["social security"]);
     let enhancer = Enhancer::new([rule], SubstringMatcher);
 
     //          0         1         2
@@ -58,7 +58,7 @@ fn keyword_in_window_boosts_and_records_refinement() {
 #[test]
 fn no_keyword_leaves_entity_untouched() {
     let ssn = LabelRef::new("US_SSN");
-    let rule = BoostRule::for_label(ssn.clone(), ["social security"]);
+    let rule = BoostRule::new(ssn.clone(), ["social security"]);
     let enhancer = Enhancer::new([rule], SubstringMatcher);
 
     let text = "the number is 123-45-6789";
@@ -73,7 +73,7 @@ fn no_keyword_leaves_entity_untouched() {
 #[test]
 fn out_of_band_hint_boosts_via_hint_path() {
     let ssn = LabelRef::new("US_SSN");
-    let rule = BoostRule::for_label(ssn.clone(), ["ssn"]);
+    let rule = BoostRule::new(ssn.clone(), ["ssn"]);
     let enhancer = Enhancer::new([rule], SubstringMatcher);
 
     // No keyword in the text, but the column header is supplied as a hint.

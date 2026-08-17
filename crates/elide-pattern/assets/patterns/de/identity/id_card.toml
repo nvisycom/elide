@@ -9,7 +9,9 @@ name = "de-id-card"
 labels = ["government_id"]
 countries = ["DE"]
 languages = ["de"]
-context = [
+
+[context]
+keywords = [
   "personalausweis",
   "ausweis",
   "personalausweisnummer",

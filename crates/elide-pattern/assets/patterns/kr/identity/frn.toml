@@ -6,7 +6,9 @@ name = "kr-frn"
 labels = ["government_id"]
 countries = ["KR"]
 languages = ["ko"]
-context = [
+
+[context]
+keywords = [
   "frn",
   "외국인등록번호",
   "외국인번호",

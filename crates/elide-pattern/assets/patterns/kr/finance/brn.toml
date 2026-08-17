@@ -7,7 +7,9 @@ name = "kr-brn"
 labels = ["company_id"]
 countries = ["KR"]
 languages = ["ko"]
-context = [
+
+[context]
+keywords = [
   "brn",
   "사업자등록번호",
   "사업자번호",
