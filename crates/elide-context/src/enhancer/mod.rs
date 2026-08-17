@@ -87,13 +87,18 @@ impl Enhancer {
         let mut buckets: HashMap<LabelRef, Vec<BoostRule>> = HashMap::new();
         for rule in rules {
             let bucket = buckets.entry(rule.label.clone()).or_default();
-            // Merge only rules that share both language scope and match mode;
-            // a word-boundary rule and a substring rule for the same label stay
-            // distinct so each keyword set keeps its intended matching.
-            if let Some(existing) = bucket
-                .iter_mut()
-                .find(|r| r.language == rule.language && r.word_boundary == rule.word_boundary)
-            {
+            // Merge only rules that agree on every knob `merge` does not itself
+            // reconcile — language scope, match mode, window radii, and boost.
+            // `merge` keeps the existing rule's window/boost, so two rules with
+            // different lifts for the same label must stay distinct or one
+            // would silently adopt the other's confidence boost.
+            if let Some(existing) = bucket.iter_mut().find(|r| {
+                r.language == rule.language
+                    && r.word_boundary == rule.word_boundary
+                    && r.prefix_words == rule.prefix_words
+                    && r.suffix_words == rule.suffix_words
+                    && r.boost == rule.boost
+            }) {
                 existing.merge(rule);
             } else {
                 bucket.push(rule);

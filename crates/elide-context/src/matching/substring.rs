@@ -31,7 +31,7 @@ impl KeywordMatcher for SubstringMatcher {
         // length, so an offset into `lowered` is the same offset into
         // `window` — each match position is reusable as-is.
         let lowered = window.to_ascii_lowercase();
-        keywords
+        let mut matches: Vec<Range<usize>> = keywords
             .iter()
             .flat_map(|kw| {
                 let needle = kw.as_str().to_ascii_lowercase();
@@ -42,7 +42,11 @@ impl KeywordMatcher for SubstringMatcher {
                     .map(|(start, _)| start..start + needle.len())
                     .collect::<Vec<_>>()
             })
-            .collect()
+            .collect();
+        // Report in text-scan order (by position), not grouped by keyword, so
+        // the enhancer resolves the earliest matching keyword's location.
+        matches.sort_by_key(|range| range.start);
+        matches
     }
 }
 
@@ -99,7 +103,8 @@ mod tests {
         // surface; the enhancer's boundary filter later keeps only the latter.
         assert_eq!(
             m.matches("die Kreditkarte hier", &[], &kws(&["karte", "kreditkarte"])),
-            vec![10..15, 4..15]
+            // Sorted by position: "kreditkarte" (4..15) precedes "karte" (10..15).
+            vec![4..15, 10..15]
         );
     }
 }
