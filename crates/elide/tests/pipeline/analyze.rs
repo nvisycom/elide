@@ -12,8 +12,7 @@ use elide_core::entity::{Entity, LabelRef};
 use elide_core::primitive::{Confidence, ConfidenceThreshold};
 use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId, Scope};
 
-mod fixtures;
-use fixtures::{SourceRef, Text, TextData, TextLocation};
+use crate::support::{SourceRef, Text, TextData, TextLocation};
 
 /// Builds an entity carrying one recognition event, the way a recognizer
 /// would.

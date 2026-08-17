@@ -940,6 +940,7 @@ dependencies = [
  "elide-llm",
  "elide-ner",
  "elide-ocr",
+ "elide-office",
  "elide-operator",
  "elide-pattern",
  "elide-redaction",
@@ -947,7 +948,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "uuid",
- "zip",
 ]
 
 [[package]]

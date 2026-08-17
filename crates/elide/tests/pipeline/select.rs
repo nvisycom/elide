@@ -14,8 +14,6 @@
 //! [`DocumentSelections`]: elide::DocumentSelections
 //! [`SelectionGroup`]: elide::SelectionGroup
 
-mod fixtures;
-
 use elide::codec::{FormatRegistry, PartId};
 use elide::detection::Analyzer;
 use elide::entity::builtins;
@@ -28,7 +26,7 @@ use elide::redaction::operators::{Erase, Replace};
 use elide::redaction::{Anonymizer, Rule, Selection};
 use elide::{Directives, Orchestrator, Report, Result};
 
-const SAMPLE: &[u8] = include_bytes!("testdata/sample.docx");
+const SAMPLE: &[u8] = include_bytes!("../testdata/sample.docx");
 const IMAGE_PART: &str = "word/media/image1.png";
 
 /// Build an orchestrator whose body rule set is deterministic enough to read

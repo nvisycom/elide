@@ -13,6 +13,8 @@ mod block;
 mod offset;
 mod part;
 mod store;
+#[cfg(feature = "test-util")]
+pub mod test_util;
 mod xml_span;
 
 use std::collections::HashMap;
@@ -100,6 +102,24 @@ impl<C: PartClassifier> Package<C> {
     /// `word/document.xml`).
     pub fn contains_part(&self, path: &str) -> bool {
         self.parts.iter().any(|p| p.path().as_str() == path)
+    }
+
+    /// The raw bytes of the part at `path`, or `None` when the package has no
+    /// such part. A cheap ref-counted share of the retained buffer, so a facade
+    /// can parse a part's own structure (e.g. XLSX reading its shared-string
+    /// table and sheet cells) before deciding what to redact.
+    pub fn part_bytes(&self, path: &str) -> Option<Bytes> {
+        self.parts
+            .iter()
+            .find(|p| p.path().as_str() == path)
+            .map(StoredPart::bytes)
+    }
+
+    /// The paths of every part, in archive order, so a facade can discover its
+    /// parts (e.g. XLSX enumerating `xl/worksheets/sheet*.xml`) without assuming
+    /// fixed names.
+    pub fn part_paths(&self) -> impl Iterator<Item = &PartPath> {
+        self.parts.iter().map(StoredPart::path)
     }
 
     /// Extract the redactable text and embedded media of the package.

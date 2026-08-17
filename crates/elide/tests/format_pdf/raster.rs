@@ -15,19 +15,18 @@
 //! The proof is that the redacted output has **no extractable text at all** —
 //! it is images — and none of the original PII survives.
 
-mod fixtures;
-
 use elide::Result;
 use elide::codec::FormatRegistry;
 use elide::codec::handler::pdf_format_with;
 use elide::modality::StreamDataReader;
 use elide::modality::text::Text;
 use elide::primitive::RasterMode;
-use fixtures::pipeline::Fixture;
+
+use crate::support::pipeline::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/sample.pdf"),
-    source: include_bytes!("testdata/sample.pdf"),
+    source: include_bytes!("../testdata/sample.pdf"),
     extension: "pdf",
 };
 

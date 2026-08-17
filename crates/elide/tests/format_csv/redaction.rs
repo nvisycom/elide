@@ -3,18 +3,17 @@
 //! The handler redacts PII per cell while the table structure (header row,
 //! delimiters, non-sensitive cells) passes through unchanged.
 
-mod fixtures;
-
 use elide::Result;
 use elide::entity::builtins;
-use fixtures::asserts::{
+
+use crate::support::asserts::{
     assert_label_present, assert_pii_removed, assert_preserved, assert_tokens_present,
 };
-use fixtures::pipeline::Fixture;
+use crate::support::pipeline::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/sample.csv"),
-    source: include_bytes!("testdata/sample.csv"),
+    source: include_bytes!("../testdata/sample.csv"),
     extension: "csv",
 };
 
