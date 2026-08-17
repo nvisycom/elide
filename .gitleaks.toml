@@ -1,0 +1,25 @@
+# Gitleaks configuration for the elide repository.
+#
+# elide is a PII/PHI detection and redaction toolkit. Its test corpus
+# deliberately contains synthetic secret-shaped values — payment cards
+# (Luhn-valid test vectors), API-key / token shapes, and a fake PEM private
+# key — because the tests assert that the detectors *find and redact* them.
+# These are canaries, not real credentials: every value is synthetic
+# (RFC-5737 IPs, `@example.com` addresses, published test cards, obviously
+# fake key bodies). We keep global secret scanning enabled and allowlist
+# only the test-fixture paths where such values are expected by design.
+
+title = "elide gitleaks config"
+
+[extend]
+# Start from gitleaks' built-in rule set, then narrow with the allowlist below.
+useDefault = true
+
+[allowlist]
+description = "Synthetic secret-shaped values in the detection test corpus"
+# Any `testdata` tree, plus the per-format test drivers that inline the same
+# fixture values in their assertions. These hold only synthetic canaries.
+paths = [
+  '''(^|/)testdata/''',
+  '''crates/elide/tests/format_.*\.rs''',
+]
