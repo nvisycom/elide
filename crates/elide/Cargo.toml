@@ -105,7 +105,7 @@ codec-json = ["codec", "elide-codec/json"]
 codec-html = ["codec", "elide-codec/html"]
 codec-xml = ["codec", "elide-codec/xml"]
 codec-csv = ["codec", "tabular", "elide-codec/csv"]
-codec-xlsx = ["codec", "tabular", "elide-codec/xlsx"]
+codec-xlsx = ["codec", "tabular", "codec-xml", "elide-codec/xlsx"]
 codec-png = ["codec", "image", "elide-codec/png"]
 codec-jpeg = ["codec", "image", "elide-codec/jpeg"]
 codec-tiff = ["codec", "image", "elide-codec/tiff"]
@@ -152,11 +152,12 @@ elide-operator = { workspace = true, features = [] }
 elide-redaction = { workspace = true, features = [] }
 
 # Async runtime & parallelism
-# Re-exported so consumers implementing the async traits (Recognizer,
-# Operator, …) need no direct dep.
 async-trait = { workspace = true, features = [] }
 
 [dev-dependencies]
+# Internal crates (test utils)
+elide-office = { workspace = true, features = ["test-util"] }
+
 # (De)serialization
 serde_json = { workspace = true, features = [] }
 
@@ -167,63 +168,44 @@ uuid = { workspace = true, features = ["v4"] }
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
-# Compression
-zip = { workspace = true }
-
-# The orchestrator's reviewable `select` seam over a container.
+# Format families: one test binary per format (or format family), each a
+# folder of scenario files under a same-named driver. The OOXML formats
+# (docx, xlsx, …) share the OPC package engine, so they share one `office`
+# binary; PDF's born-digital and raster paths share `format_pdf`.
 [[test]]
-name = "select_operators"
-required-features = ["codec-docx", "codec-png", "llm", "mock", "serde"]
-
-# Codec round-trip e2e tests
-[[test]]
-name = "e2e_txt"
-required-features = ["codec-txt", "mock", "serde"]
+name = "format_ooxml"
+required-features = ["codec-docx", "codec-xlsx", "codec-pptx", "codec-xml", "mock", "serde"]
 
 [[test]]
-name = "e2e_json"
-required-features = ["codec-json", "mock", "serde"]
-
-[[test]]
-name = "e2e_html"
-required-features = ["codec-html", "mock", "serde"]
-
-[[test]]
-name = "e2e_csv"
-required-features = ["codec-csv", "mock", "serde"]
-
-[[test]]
-name = "e2e_xlsx"
-required-features = ["codec-xlsx", "codec-xml", "mock", "serde"]
-
-[[test]]
-name = "e2e_docx"
-required-features = ["codec-docx", "codec-png", "llm", "mock", "serde"]
-
-[[test]]
-name = "e2e_pptx"
-required-features = ["codec-pptx", "codec-xml", "mock", "serde"]
-
-[[test]]
-name = "e2e_wav"
-required-features = ["codec-wav", "stt", "mock", "serde"]
-
-[[test]]
-name = "e2e_mp3"
-required-features = ["codec-mp3", "stt", "mock", "serde"]
-
-[[test]]
-name = "e2e_png"
-required-features = ["codec-png", "ocr", "mock", "serde"]
-
-[[test]]
-name = "e2e_pdf"
-required-features = ["codec-pdf", "mock", "serde"]
-
-[[test]]
-name = "e2e_pdf_raster"
+name = "format_pdf"
 required-features = ["codec-pdf-render", "mock", "serde"]
 
 [[test]]
-name = "audit"
-required-features = ["serde"]
+name = "format_txt"
+required-features = ["codec-txt", "mock", "serde"]
+
+[[test]]
+name = "format_json"
+required-features = ["codec-json", "mock", "serde"]
+
+[[test]]
+name = "format_html"
+required-features = ["codec-html", "mock", "serde"]
+
+[[test]]
+name = "format_csv"
+required-features = ["codec-csv", "mock", "serde"]
+
+[[test]]
+name = "format_image"
+required-features = ["codec-png", "codec-jpeg", "codec-tiff", "ocr", "mock", "serde"]
+
+[[test]]
+name = "format_audio"
+required-features = ["codec-wav", "codec-mp3", "stt", "mock", "serde"]
+
+# Format-independent facade integration: detection pipeline, audit trail,
+# cross-modal context enhancement, and the reviewable `select` seam.
+[[test]]
+name = "pipeline"
+required-features = ["codec-docx", "codec-png", "llm", "ocr", "stt", "mock", "serde"]

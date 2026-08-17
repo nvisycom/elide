@@ -9,7 +9,7 @@
 //! byte-faithfully by [`elide_office`], de-sharing any shared-string cell that
 //! was redacted so other cells keep the pooled value.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use bytes::Bytes;
 use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
@@ -72,6 +72,9 @@ pub(crate) struct XlsxHandler {
     /// Redacted bytes for text parts, keyed by part path, filled through
     /// [`Container::replace_part`] and folded in on encode.
     replacements: HashMap<String, Bytes>,
+    /// Indices into `cells` of the cells a redaction actually changed, so encode
+    /// rewrites only those — leaving unedited shared-string cells shared.
+    changed: BTreeSet<usize>,
 }
 
 impl XlsxHandler {
@@ -88,39 +91,83 @@ impl XlsxHandler {
             cursor: 0,
             text_parts,
             replacements: HashMap::new(),
+            changed: BTreeSet::new(),
         }
     }
 
-    /// The index of the cell at `(sheet, row, column)`, if one exists.
-    fn cell_index(&self, sheet: Option<&str>, row: u32, column: u32) -> Option<usize> {
-        self.cells.iter().position(|c| {
+    /// The index of the unique cell at `(sheet, row, column)`.
+    ///
+    /// A location with no sheet name must still identify exactly one cell: if the
+    /// same coordinates exist on more than one sheet, the match is ambiguous and
+    /// this errs rather than silently editing the wrong sheet. `Ok(None)` means no
+    /// cell matched.
+    fn cell_index(&self, sheet: Option<&str>, row: u32, column: u32) -> Result<Option<usize>> {
+        let mut matches = self.cells.iter().enumerate().filter(|(_, c)| {
             c.row == row && c.column == column && sheet.is_none_or(|name| c.sheet == name)
-        })
+        });
+        let first = matches.next().map(|(i, _)| i);
+        if first.is_some() && matches.next().is_some() {
+            return Err(Error::new(
+                ErrorKind::MalformedInput,
+                format!(
+                    "xlsx redaction at (row {row}, column {column}) is ambiguous \
+                     across sheets; a sheet name is required"
+                ),
+            ));
+        }
+        Ok(first)
     }
 
-    /// The cell text at `location`, if the cell exists.
-    fn cell_at(&self, location: &TabularLocation) -> Option<&str> {
+    /// The header text for `column` on `sheet`: the text of the cell at row 0 of
+    /// that column, if any. Provides column context to the recognizer.
+    fn column_header(&self, sheet: &str, column: u32) -> Option<&str> {
+        self.cells
+            .iter()
+            .find(|c| c.sheet == sheet && c.row == 0 && c.column == column)
+            .map(|c| c.text.as_str())
+    }
+
+    /// The cell text at `location`, if a unique cell exists.
+    fn cell_at(&self, location: &TabularLocation) -> Result<Option<&str>> {
         let sheet = location.sheet_name.as_deref();
-        let index = self.cell_index(sheet, location.row_index, location.column_index)?;
-        Some(self.cells[index].text.as_str())
+        let Some(index) = self.cell_index(sheet, location.row_index, location.column_index)? else {
+            return Ok(None);
+        };
+        Ok(Some(self.cells[index].text.as_str()))
     }
 
     /// Apply one cell edit at `location`, replacing its intra-cell range (or the
     /// whole cell when no range is set) with the replacement text.
+    ///
+    /// Fail-closed: a redaction that matches no cell is an error, not a silent
+    /// no-op, so a request can never appear to succeed without changing the
+    /// intended cell.
     fn redact_one(
         &mut self,
         location: &TabularLocation,
         replacement: &TextReplacement,
     ) -> Result<()> {
         let sheet = location.sheet_name.as_deref();
-        let Some(index) = self.cell_index(sheet, location.row_index, location.column_index) else {
-            return Ok(());
-        };
+        let index = self
+            .cell_index(sheet, location.row_index, location.column_index)?
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::MalformedInput,
+                    format!(
+                        "xlsx redaction targets no cell at sheet {:?} (row {}, column {})",
+                        sheet, location.row_index, location.column_index
+                    ),
+                )
+            })?;
         let cell = &mut self.cells[index];
         let start = location.start_offset.unwrap_or(0);
         let end = location.end_offset.unwrap_or(cell.text.len());
         let value = replacement.value().unwrap_or_default();
-        redact::replace_range(&mut cell.text, value, start..end)
+        redact::replace_range(&mut cell.text, value, start..end)?;
+        // Only a cell that was actually edited is sent for rewrite, so unchanged
+        // shared-string cells are not needlessly de-shared.
+        self.changed.insert(index);
+        Ok(())
     }
 }
 
@@ -131,18 +178,21 @@ impl Handler<Tabular> for XlsxHandler {
     }
 
     fn encode(&self) -> Result<ContentData> {
-        // Re-open the retained package and rewrite every cell as an edit; the
-        // engine splices in-place inline cells and de-shares shared ones,
-        // re-packing the rest byte-faithfully. Feeding an unchanged cell back is
-        // harmless (it splices its own text), so all cells are sent.
+        // Rewrite only the cells a redaction actually changed. Sending every cell
+        // would de-share the whole workbook (each shared cell becomes an inline
+        // string); sending just the edited ones de-shares only what was redacted
+        // and leaves the shared-string table otherwise intact.
         let edits: Vec<CellEdit> = self
-            .cells
+            .changed
             .iter()
-            .map(|cell| CellEdit {
-                sheet: cell.sheet.clone(),
-                row: cell.row,
-                column: cell.column,
-                text: cell.text.clone(),
+            .map(|&index| {
+                let cell = &self.cells[index];
+                CellEdit {
+                    sheet: cell.sheet.clone(),
+                    row: cell.row,
+                    column: cell.column,
+                    text: cell.text.clone(),
+                }
             })
             .collect();
         // The redacted non-cell text parts (comments, drawings, charts) fold in
@@ -164,19 +214,36 @@ impl Handler<Tabular> for XlsxHandler {
         }
         let cell = &self.cells[self.cursor];
         self.cursor += 1;
-        let location =
+        let mut location =
             TabularLocation::new(cell.row, cell.column).with_sheet_name(cell.sheet.clone());
+        // Attach the column's header text as context, so a context-gated pattern
+        // (a payment card wants a nearby `card`/`payment` word) can reach its
+        // threshold on a value that carries no such cue on its own. A data cell
+        // takes its header from row 0 of the same sheet and column; a header cell
+        // is its own context and is not re-hinted with itself.
+        let mut hints = Vec::new();
+        if cell.row > 0
+            && let Some(header) = self.column_header(&cell.sheet, cell.column)
+        {
+            location = location.clone().with_column_name(header.to_owned());
+            let header_location = TabularLocation::new(0, cell.column)
+                .with_sheet_name(cell.sheet.clone())
+                .with_column_name(header.to_owned());
+            hints.push(Hint::new(header_location, TextData::new(header.to_owned())));
+        }
         Ok(Some(Chunk {
             location,
             data: TextData::new(cell.text.clone()),
-            hints: Vec::<Hint<Tabular>>::new(),
+            hints,
         }))
     }
 
     fn lift(&self, chunk: &Chunk<Tabular>, local: TabularLocation) -> Option<TabularLocation> {
         // `local` carries the chunk-local intra-cell range in its offsets; its
-        // row/column/sheet are placeholders. Re-anchor onto the chunk's cell.
-        let cell = self.cell_at(&chunk.location)?;
+        // row/column/sheet are placeholders. Re-anchor onto the chunk's cell. A
+        // chunk always names its own sheet, so the lookup is unambiguous; treat
+        // an ambiguous or missing match as no source pre-image.
+        let cell = self.cell_at(&chunk.location).ok().flatten()?;
         let start = local.start_offset.unwrap_or(0);
         let end = local.end_offset.unwrap_or(cell.len());
         if start > end || end > cell.len() {
@@ -187,6 +254,9 @@ impl Handler<Tabular> for XlsxHandler {
                 .with_range(start, end);
         if let Some(sheet) = &chunk.location.sheet_name {
             location = location.with_sheet_name(sheet.clone());
+        }
+        if let Some(name) = &chunk.location.column_name {
+            location = location.with_column_name(name.clone());
         }
         Some(location)
     }
@@ -227,12 +297,18 @@ impl Container for XlsxHandler {
 #[async_trait::async_trait]
 impl DataReader<Tabular> for XlsxHandler {
     async fn read_at(&self, location: &TabularLocation) -> Result<Option<TextData>> {
-        let Some(cell) = self.cell_at(location) else {
+        let Some(cell) = self.cell_at(location)? else {
             return Ok(None);
         };
         match (location.start_offset, location.end_offset) {
-            (Some(start), Some(end)) => Ok(cell.get(start..end).map(TextData::new)),
-            _ => Ok(Some(TextData::new(cell.to_owned()))),
+            // A sub-cell range: an unset end means the rest of the cell, matching
+            // how a write treats a missing end, so read and write agree.
+            (Some(start), end) => {
+                let end = end.unwrap_or(cell.len());
+                Ok(cell.get(start..end).map(TextData::new))
+            }
+            // No start: the whole cell.
+            (None, _) => Ok(Some(TextData::new(cell.to_owned()))),
         }
     }
 }
@@ -279,7 +355,14 @@ mod tests {
     use super::*;
     use crate::Loader;
 
-    const SAMPLE: &[u8] = include_bytes!("../../../../elide-office/tests/testdata/sample.xlsx");
+    /// The two-sheet workbook whose shared string is reused across sheets, for
+    /// the de-share / cell-addressing mechanics tests.
+    const SAMPLE: &[u8] =
+        include_bytes!("../../../../elide-office/tests/testdata/shared_across_sheets.xlsx");
+
+    /// A real Excel-authored workbook with a header row, for the column-context
+    /// test.
+    const REAL: &[u8] = include_bytes!("../../../../elide-office/tests/testdata/sample.xlsx");
 
     async fn load() -> XlsxHandler {
         XlsxLoader
@@ -316,6 +399,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn data_cells_carry_their_column_header_as_context() {
+        // A data cell must stream with its header column's text, so a
+        // context-gated pattern can match a value that carries no cue itself.
+        let mut h = XlsxLoader
+            .decode(ContentData::new(Bytes::from_static(REAL)))
+            .await
+            .unwrap();
+        let mut card = None;
+        while let Some(chunk) = h.read_next().await.unwrap() {
+            if chunk.data.as_str() == "4111 1111 1111 1111" {
+                card = Some(chunk);
+                break;
+            }
+        }
+        let card = card.expect("the card cell is streamed");
+        // The header of the card's column is `card`, attached as the column name
+        // and surfaced as a hint the recognizer can boost on.
+        assert_eq!(card.location.column_name.as_deref(), Some("card"));
+        assert!(
+            card.hints.iter().any(|h| h.data.as_str() == "card"),
+            "the header is surfaced as a context hint",
+        );
+        // A header cell is not re-hinted with itself.
+        let mut header = XlsxLoader
+            .decode(ContentData::new(Bytes::from_static(REAL)))
+            .await
+            .unwrap();
+        while let Some(chunk) = header.read_next().await.unwrap() {
+            if chunk.location.row_index == 0 {
+                assert!(chunk.hints.is_empty(), "header cell has no self-hint");
+                assert!(chunk.location.column_name.is_none());
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn read_at_slices_intra_cell_range() {
         let h = load().await;
         // Customers!A2 = "alice@example.com"; bytes 0..5 = "alice".
@@ -345,10 +464,12 @@ mod tests {
             .unwrap();
         let a2 = reopened
             .cell_at(&TabularLocation::new(1, 0).with_sheet_name("Customers"))
+            .unwrap()
             .unwrap();
         assert_eq!(a2, "[EMAIL]");
         let notes = reopened
             .cell_at(&TabularLocation::new(0, 0).with_sheet_name("Notes"))
+            .unwrap()
             .unwrap();
         assert_eq!(notes, "alice@example.com");
     }
@@ -360,6 +481,49 @@ mod tests {
         batch.push(
             TabularLocation::new(1, 0).with_sheet_name("Customers"),
             TabularReplacement::DropRow,
+        );
+        assert!(h.write_at(batch).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn encode_only_de_shares_redacted_cells() {
+        let mut h = load().await;
+        let mut batch: Redactions<Tabular> = Redactions::new();
+        // Redact only Customers!A2 (alice). The `Email` header at A1 is a
+        // different, unredacted shared string.
+        batch.push(
+            TabularLocation::new(1, 0).with_sheet_name("Customers"),
+            TabularReplacement::Cell(TextReplacement::substituted("[EMAIL]")),
+        );
+        h.write_at(batch).await.unwrap();
+        let out = h.encode().unwrap();
+
+        let sheet1 = read_part(out.as_bytes(), "xl/worksheets/sheet1.xml");
+        let sheet1 = String::from_utf8_lossy(&sheet1);
+        // The redacted cell is de-shared to an inline string.
+        assert!(
+            sheet1.contains(r#"t="inlineStr"><is><t>[EMAIL]</t>"#),
+            "{sheet1}"
+        );
+        // The untouched `Email` header cell stays a shared string — the workbook
+        // is not wholesale de-shared.
+        assert!(
+            sheet1.contains(r#"<c r="A1" t="s"><v>0</v></c>"#),
+            "unredacted shared cell was needlessly de-shared: {sheet1}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_sheetless_ambiguous_redaction_fails_closed() {
+        // alice's coordinates (row 1, col 0) exist on Customers; a request with no
+        // sheet name that matched two sheets would be ambiguous. Here the same
+        // (0,0) exists on both Customers (Email) and Notes (alice), so a sheetless
+        // request at (0,0) must fail rather than edit an arbitrary sheet.
+        let mut h = load().await;
+        let mut batch: Redactions<Tabular> = Redactions::new();
+        batch.push(
+            TabularLocation::new(0, 0), // no sheet name
+            TabularReplacement::Cell(TextReplacement::substituted("[X]")),
         );
         assert!(h.write_at(batch).await.is_err());
     }

@@ -171,7 +171,7 @@ jobs:
       - name: Run render tests (ignored, need PDFium)
         run: >
           cargo test -p elide --features codec-pdf-render,mock,serde
-          --test e2e_pdf_raster -- --ignored
+          --test format_pdf raster:: -- --ignored
 
   build:
     name: Build

@@ -13,6 +13,8 @@ mod block;
 mod offset;
 mod part;
 mod store;
+#[cfg(feature = "test-util")]
+pub mod test_util;
 mod xml_span;
 
 use std::collections::HashMap;

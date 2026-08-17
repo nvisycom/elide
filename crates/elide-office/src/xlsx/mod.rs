@@ -161,36 +161,46 @@ impl Xlsx {
     /// and zero-based cell coordinates.
     ///
     /// A shared-string cell resolves its text through the shared-string table; an
-    /// inline-string cell reads it from the sheet. Numeric, boolean, and formula
-    /// cells hold no free text and are skipped.
+    /// inline-string or cached-formula-string cell carries its text directly.
+    /// Numeric, boolean, and other typed cells hold no free text and are skipped.
+    ///
+    /// **Fail-closed:** a sheet the workbook references but does not contain is an
+    /// error, not a silently-skipped part, so a workbook can never report a
+    /// successful extraction while an unread worksheet's text survives.
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::InvalidXml`](crate::ErrorKind::InvalidXml) if a sheet or the
-    /// shared-string table is not UTF-8 or is malformed.
+    /// - [`ErrorKind::InvalidPackage`](crate::ErrorKind::InvalidPackage) if a
+    ///   referenced worksheet part is missing;
+    /// - [`ErrorKind::InvalidXml`](crate::ErrorKind::InvalidXml) if a sheet or the
+    ///   shared-string table is not UTF-8 or is malformed.
     pub fn extract(&self) -> Result<Vec<Cell>> {
         let shared = self.shared_strings()?;
         let mut cells = Vec::new();
         for sheet in &self.sheets {
-            let Some(bytes) = self.package.part_bytes(&sheet.part) else {
-                continue;
-            };
+            let bytes = self.package.part_bytes(&sheet.part).ok_or_else(|| {
+                Error::invalid_package(format!(
+                    "worksheet `{}` referenced by sheet `{}` is missing",
+                    sheet.part, sheet.name
+                ))
+            })?;
             let raw = decode_part(&sheet.part, &bytes)?;
             for cell in parse_cells(&raw)? {
-                let text = match (cell.shared_index, &cell.inline_text) {
+                let text = match (cell.shared_index, cell.inline_text) {
                     (Some(index), _) => match shared.get(index) {
                         Some(text) => text.clone(),
                         // A dangling index names no string; nothing to redact.
                         None => continue,
                     },
-                    (None, Some(range)) => raw[range.clone()].to_owned(),
+                    // Inline and formula cells carry their already-decoded text.
+                    (None, Some(text)) => text,
                     (None, None) => continue,
                 };
                 cells.push(Cell {
                     sheet: sheet.name.clone(),
                     row: cell.row,
                     column: cell.column,
-                    text: unescape_text(&text),
+                    text,
                 });
             }
         }
@@ -402,25 +412,38 @@ impl Xlsx {
         // then apply from the highest offset down.
         let cells = parse_cells(raw)?;
         let mut splices: Vec<(Range<usize>, String)> = Vec::new();
+        let mut matched = 0usize;
         for cell in &cells {
             let Some(edit) = edits.get(&(cell.row, cell.column)) else {
                 continue;
             };
-            let splice = match &cell.source {
-                CellSource::Inline { text } => {
-                    (text.clone(), escape(edit.text.as_str()).into_owned())
-                }
+            matched += 1;
+            let safe = escape(edit.text.as_str());
+            // Every text-bearing cell becomes a single-run inline string carrying
+            // the redacted text, rewriting the whole `<c>` element rather than one
+            // `<t>` so that no run of a multi-run value is left behind. A shared
+            // cell is thereby de-shared; a cached string-formula cell drops its
+            // `<f>` too, so the formula cannot recompute the redacted value.
+            let (range, attributes) = match &cell.source {
                 CellSource::Shared {
                     cell, attributes, ..
-                } => (
-                    cell.clone(),
-                    format!(
-                        r#"<c{attributes} t="inlineStr"><is><t>{}</t></is></c>"#,
-                        escape(edit.text.as_str())
-                    ),
-                ),
+                }
+                | CellSource::Inline {
+                    cell, attributes, ..
+                } => (cell.clone(), attributes),
             };
-            splices.push(splice);
+            let replacement = format!(r#"<c{attributes} t="inlineStr"><is><t>{safe}</t></is></c>"#);
+            splices.push((range, replacement));
+        }
+
+        // Fail closed if any edit did not land on a text-bearing cell: a redaction
+        // that produced no splice would otherwise leave its target untouched.
+        if matched != edits.len() {
+            return Err(Error::unsafe_rewrite(format!(
+                "in `{part}`, {} of {} cell edits matched no text-bearing cell",
+                edits.len() - matched,
+                edits.len()
+            )));
         }
 
         // Reject overlapping splices (two edits landing on the same/nested span)
@@ -475,23 +498,20 @@ fn decode_part(path: &str, bytes: &[u8]) -> Result<String> {
         .map_err(|_| Error::invalid_xml(format!("part `{path}` is not UTF-8")))
 }
 
-/// Decode XML entities in already-extracted cell text (an inline `<t>` body is
-/// captured raw, so it may still carry `&amp;`).
-fn unescape_text(text: &str) -> String {
-    match quick_xml::escape::unescape(text) {
-        Ok(decoded) => decoded.into_owned(),
-        Err(_) => text.to_owned(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// The hand-built sample workbook: two sheets, a shared-string table where
-    /// index 1 (`alice@example.com`) is referenced by both sheet1!A2 and
-    /// sheet2!A1, and an inline SSN at sheet1!B2.
+    /// A real Excel-authored workbook (Microsoft): one sheet `in`, a header row
+    /// and two data rows of PII (names, emails, phones, cards, IBANs, SSNs, IPs)
+    /// stored as shared strings, with a full styles/theme package.
     const SAMPLE: &[u8] = include_bytes!("../../tests/testdata/sample.xlsx");
+
+    /// A hand-built workbook whose shared string `alice@example.com` (index 1) is
+    /// referenced by both `Customers!A2` and `Notes!A1`, plus an inline SSN at
+    /// `Customers!B2`. Its two sheets sharing a pooled value drive the de-share
+    /// and orphan-prune tests, which a single-sheet workbook cannot exercise.
+    const SHARED: &[u8] = include_bytes!("../../tests/testdata/shared_across_sheets.xlsx");
 
     fn cell<'a>(cells: &'a [Cell], sheet: &str, row: u32, col: u32) -> Option<&'a Cell> {
         cells
@@ -500,11 +520,10 @@ mod tests {
     }
 
     #[test]
-    fn opens_and_resolves_sheets() {
+    fn opens_and_resolves_a_real_workbook() {
         let xlsx = Xlsx::open(SAMPLE).expect("opens");
-        assert_eq!(xlsx.sheets.len(), 2);
-        assert_eq!(xlsx.sheets[0].name, "Customers");
-        assert_eq!(xlsx.sheets[1].name, "Notes");
+        assert_eq!(xlsx.sheets.len(), 1);
+        assert_eq!(xlsx.sheets[0].name, "in");
     }
 
     #[test]
@@ -524,8 +543,24 @@ mod tests {
     }
 
     #[test]
-    fn extracts_shared_and_inline_cells() {
+    fn extracts_shared_string_cells_from_a_real_workbook() {
         let cells = Xlsx::open(SAMPLE).unwrap().extract().unwrap();
+        // The header labels and the first data row's PII, on sheet `in`.
+        assert_eq!(cell(&cells, "in", 0, 1).unwrap().text, "email");
+        assert_eq!(
+            cell(&cells, "in", 1, 1).unwrap().text,
+            "alice.johnson@example.com"
+        );
+        assert_eq!(cell(&cells, "in", 1, 5).unwrap().text, "123-45-6789");
+        assert_eq!(
+            cell(&cells, "in", 2, 1).unwrap().text,
+            "bob.smith@example.com"
+        );
+    }
+
+    #[test]
+    fn extracts_shared_and_inline_cells() {
+        let cells = Xlsx::open(SHARED).unwrap().extract().unwrap();
         assert_eq!(cell(&cells, "Customers", 0, 0).unwrap().text, "Email");
         assert_eq!(
             cell(&cells, "Customers", 1, 0).unwrap().text,
@@ -546,7 +581,7 @@ mod tests {
 
     #[test]
     fn de_share_inlines_one_cell_and_leaves_the_pool_and_other_sheet() {
-        let xlsx = Xlsx::open(SAMPLE).unwrap();
+        let xlsx = Xlsx::open(SHARED).unwrap();
         // Redact only sheet1!A2 (alice). sheet2!A1 shares the same pool entry.
         let edit = CellEdit {
             sheet: String::from("Customers"),
@@ -577,7 +612,7 @@ mod tests {
 
     #[test]
     fn redacting_every_reference_prunes_the_orphaned_pool_entry() {
-        let xlsx = Xlsx::open(SAMPLE).unwrap();
+        let xlsx = Xlsx::open(SHARED).unwrap();
         // Redact BOTH cells that reference alice's pool entry (sheet1!A2 and
         // sheet2!A1). With no reference left, the pooled value must not survive.
         let edits = [
@@ -623,7 +658,7 @@ mod tests {
 
     #[test]
     fn inline_edit_splices_in_place() {
-        let xlsx = Xlsx::open(SAMPLE).unwrap();
+        let xlsx = Xlsx::open(SHARED).unwrap();
         let edit = CellEdit {
             sheet: String::from("Customers"),
             row: 1,
@@ -638,7 +673,7 @@ mod tests {
 
     #[test]
     fn edit_text_is_xml_escaped() {
-        let xlsx = Xlsx::open(SAMPLE).unwrap();
+        let xlsx = Xlsx::open(SHARED).unwrap();
         let edit = CellEdit {
             sheet: String::from("Customers"),
             row: 1,
@@ -653,7 +688,7 @@ mod tests {
 
     #[test]
     fn rewrite_rejects_an_unknown_sheet() {
-        let xlsx = Xlsx::open(SAMPLE).unwrap();
+        let xlsx = Xlsx::open(SHARED).unwrap();
         let edit = CellEdit {
             sheet: String::from("Ghost"),
             row: 0,
@@ -665,7 +700,7 @@ mod tests {
 
     #[test]
     fn unedited_parts_are_byte_identical() {
-        let xlsx = Xlsx::open(SAMPLE).unwrap();
+        let xlsx = Xlsx::open(SHARED).unwrap();
         let edit = CellEdit {
             sheet: String::from("Customers"),
             row: 1,
@@ -676,7 +711,7 @@ mod tests {
         // sheet2 was not edited, so its bytes are unchanged.
         assert_eq!(
             read_part(&out, "xl/worksheets/sheet2.xml"),
-            read_part(SAMPLE, "xl/worksheets/sheet2.xml"),
+            read_part(SHARED, "xl/worksheets/sheet2.xml"),
         );
     }
 

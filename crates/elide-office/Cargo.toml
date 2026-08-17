@@ -31,6 +31,11 @@ default = []
 ## so a caller can ship an extraction result across a boundary.
 serde = ["dep:serde"]
 
+## Expose `opc::test_util`, readers that decompress a package's parts so a
+## dependent crate's tests can assert on individual parts. Test scaffolding,
+## not part of the shipped surface.
+test-util = []
+
 [dependencies]
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }

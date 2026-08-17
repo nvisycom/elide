@@ -59,15 +59,41 @@ impl<M: Modality> PipelineOutcome<M> {
         String::from_utf8(self.redacted.clone()).expect("redacted output is UTF-8 text")
     }
 
-    /// Read one entry out of the redacted output, treating it as a zip
-    /// container (DOCX). Returns the entry bytes, or `None` if absent.
+    /// Read one entry out of the redacted output, treating it as an OPC
+    /// package (DOCX/XLSX). Returns the entry bytes decompressed, or `None`
+    /// if absent. The OOXML packaging lives in `elide-office`, so the read
+    /// goes through its part reader rather than reconstructing the zip here.
     pub fn part(&self, name: &str) -> Option<Vec<u8>> {
-        use std::io::Read;
-        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(self.redacted.clone())).ok()?;
-        let mut entry = zip.by_name(name).ok()?;
-        let mut buf = Vec::new();
-        entry.read_to_end(&mut buf).ok()?;
-        Some(buf)
+        elide_office::opc::test_util::read_part(&self.redacted, name)
+    }
+
+    /// Every text-bearing part of the redacted package (OOXML container
+    /// formats), each *decompressed* to `(name, text)`.
+    ///
+    /// Decompressing is what makes a leak scan sound: the archive stores
+    /// each part deflated, so a plaintext value can straddle the deflate
+    /// stream and a substring check over the *raw* container bytes would
+    /// give a false pass. `elide-office` owns this — read the parts back
+    /// out, then scan.
+    pub fn text_parts(&self) -> Vec<(String, String)> {
+        elide_office::opc::test_util::text_parts(&self.redacted)
+    }
+
+    /// Assert that no value in `pii` survives in any text-bearing part of
+    /// the redacted package — the end-to-end leak guarantee. Scans the
+    /// decompressed [`text_parts`], so it holds against the real part bytes,
+    /// not the deflated container.
+    ///
+    /// [`text_parts`]: Self::text_parts
+    pub fn assert_no_pii(&self, pii: &[&str]) {
+        for (name, text) in self.text_parts() {
+            for value in pii {
+                assert!(
+                    !text.contains(value),
+                    "PII `{value}` survived in part `{name}`",
+                );
+            }
+        }
     }
 }
 
@@ -144,7 +170,7 @@ fn build_image_analyzer() -> Result<Analyzer<Image>> {
 /// [`run_tabular`]: Self::run_tabular
 pub struct Fixture {
     /// Absolute path to the fixture on disk; the artifact writer derives
-    /// `{stem}.out.{ext}` next to it.
+    /// its `testdata/audits` and `testdata/results` output dirs from this.
     pub path: &'static str,
     /// Fixture body the codec decodes (compile-time inlined bytes).
     pub source: &'static [u8],
@@ -374,32 +400,49 @@ impl Fixture {
         })
     }
 
-    /// Write the serialized detection [`Report`] next to the fixture as
+    /// Write the serialized detection [`Report`] to `testdata/audits/` as
     /// `{filename}.json` (e.g. `sample.docx.json`): the body and any
     /// container parts' findings, grouped by part id. Only with the `serde`
-    /// feature; gitignored under `testdata/`.
+    /// feature; the whole `audits/` directory is gitignored.
     #[cfg(feature = "serde")]
     fn write_entities(&self, report: &Report) {
-        let out = format!("{}.json", self.path);
+        let dir = self.output_dir("audits");
+        let file = std::path::Path::new(self.path)
+            .file_name()
+            .expect("fixture has a file name");
+        let out = dir.join(format!("{}.json", file.to_string_lossy()));
         let json = serde_json::to_string_pretty(report).expect("report serializes");
-        std::fs::write(&out, json).unwrap_or_else(|e| panic!("write entities {out}: {e}"));
+        std::fs::write(&out, json).unwrap_or_else(|e| panic!("write audit {}: {e}", out.display()));
     }
 
     /// No-op when `serde` is off.
     #[cfg(not(feature = "serde"))]
     fn write_entities(&self, _report: &Report) {}
 
-    /// Write the redacted document next to the fixture as
-    /// `{stem}.out.{ext}`. Gitignored via `**/testdata/**/*.out.*`.
+    /// Write the redacted document to `testdata/results/` as
+    /// `{stem}.out.{ext}`. The whole `results/` directory is gitignored.
     fn write_redacted(&self, redacted: &[u8]) {
-        let path = std::path::Path::new(self.path);
-        let stem = path
+        let dir = self.output_dir("results");
+        let stem = std::path::Path::new(self.path)
             .file_stem()
             .and_then(|s| s.to_str())
             .expect("fixture has a UTF-8 stem");
-        let parent = path.parent().expect("fixture has a parent");
-        let out = parent.join(format!("{stem}.out.{}", self.extension));
+        let out = dir.join(format!("{stem}.out.{}", self.extension));
         std::fs::write(&out, redacted)
-            .unwrap_or_else(|e| panic!("write redacted artifact {}: {e}", out.display()));
+            .unwrap_or_else(|e| panic!("write result {}: {e}", out.display()));
+    }
+
+    /// The `testdata/<kind>/` directory for generated artifacts, created if
+    /// absent. `kind` is `audits` (serialized reports) or `results`
+    /// (redacted documents); both sit beside the input fixtures and are
+    /// gitignored so a test run never dirties the tree.
+    fn output_dir(&self, kind: &str) -> std::path::PathBuf {
+        let dir = std::path::Path::new(self.path)
+            .parent()
+            .expect("fixture has a parent testdata dir")
+            .join(kind);
+        std::fs::create_dir_all(&dir)
+            .unwrap_or_else(|e| panic!("create {} dir {}: {e}", kind, dir.display()));
+        dir
     }
 }

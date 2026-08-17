@@ -101,7 +101,7 @@ tabular = ["csv", "xlsx"]
 csv = ["internal_tabular", "dep:csv"]
 ## XLSX: an OOXML spreadsheet; cells redact like text via the shared
 ## tabular surface, backed by the `elide-office` package engine.
-xlsx = ["internal_tabular", "dep:elide-office"]
+xlsx = ["internal_tabular", "xml", "dep:elide-office"]
 
 # Internal markers: set automatically by any format feature above. Code
 # uses `#[cfg(feature = "internal_image")]` to mean "any image format is
