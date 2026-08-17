@@ -4,7 +4,7 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::opc::{EmbeddingKind, PartRole};
+use crate::opc::{EmbeddingKind, PartRole, media_kind};
 
 /// What a package part is in a WordprocessingML document, which determines how
 /// it is handled.
@@ -190,7 +190,7 @@ impl PartKind {
 /// Classify the binary embedding at `path`, or `None` if it is not one.
 fn embedding_of(path: &str) -> Option<EmbeddingKind> {
     if path.starts_with("word/media/") {
-        Some(EmbeddingKind::Image)
+        Some(media_kind(path))
     } else if path.starts_with("word/embeddings/") {
         Some(EmbeddingKind::Object)
     } else if path.starts_with("word/fonts/") {

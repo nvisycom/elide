@@ -47,13 +47,14 @@ xml = ["internal_extract", "dep:quick-xml"]
 html = ["xml"]
 
 ## The rich-document formats.
-document = ["docx", "pdf", "rtf"]
+document = ["docx", "pptx", "pdf", "rtf"]
 
 ## DOCX: OOXML text extraction and byte-faithful redaction come from the
 ## standalone `elide-office` crate; this codec adapts it to the `Handler`
 ## contract (via the shared `ExtractHandler`, hence `internal_extract`).
 ## Embedded media surfaces through `elide-office`'s typed extraction.
 docx = ["internal_document", "internal_extract", "dep:elide-office"]
+pptx = ["internal_document", "internal_extract", "dep:elide-office"]
 
 ## PDF: born-digital text extraction and redaction come from the standalone
 ## `elide-pdf` crate; this codec adapts it to the `Handler` contract.

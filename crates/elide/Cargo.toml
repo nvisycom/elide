@@ -97,7 +97,7 @@ codec-text = ["codec-txt", "codec-json", "codec-html", "codec-xml"]
 codec-tabular = ["codec-csv", "codec-xlsx"]
 codec-image = ["codec-png", "codec-jpeg", "codec-tiff"]
 codec-audio = ["codec-wav", "codec-mp3"]
-codec-document = ["codec-docx", "codec-pdf", "codec-rtf"]
+codec-document = ["codec-docx", "codec-pptx", "codec-pdf", "codec-rtf"]
 
 ## Per-format handlers.
 codec-txt = ["codec", "elide-codec/txt"]
@@ -112,6 +112,7 @@ codec-tiff = ["codec", "image", "elide-codec/tiff"]
 codec-wav = ["codec", "audio", "elide-codec/wav"]
 codec-mp3 = ["codec", "audio", "elide-codec/mp3"]
 codec-docx = ["codec", "elide-codec/docx"]
+codec-pptx = ["codec", "elide-codec/pptx"]
 codec-pdf = ["codec", "elide-codec/pdf"]
 ## PDF page rendering for OCR of scanned/image-only PDFs. Requires the native
 ## PDFium library present at runtime (see `scripts/install-pdfium.sh`); pulls
@@ -173,7 +174,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 # binary; PDF's born-digital and raster paths share `format_pdf`.
 [[test]]
 name = "format_ooxml"
-required-features = ["codec-docx", "codec-xlsx", "codec-xml", "mock", "serde"]
+required-features = ["codec-docx", "codec-xlsx", "codec-pptx", "codec-xml", "mock", "serde"]
 
 [[test]]
 name = "format_pdf"
