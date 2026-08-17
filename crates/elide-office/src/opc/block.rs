@@ -69,12 +69,20 @@ impl Block {
 )]
 #[non_exhaustive]
 pub enum EmbeddingKind {
-    /// An embedded image (e.g. `word/media/*`).
+    /// An embedded image (e.g. an image in `word/media/*`).
     Image,
+    /// An embedded audio clip (e.g. an `.mp3`/`.wav` in `ppt/media/*`).
+    Audio,
+    /// An embedded video clip (e.g. an `.mp4`/`.mov` in `ppt/media/*`).
+    Video,
     /// An embedded object / OLE package (e.g. `word/embeddings/*`).
     Object,
     /// An embedded font (e.g. `word/fonts/*`).
     Font,
+    /// Embedded media whose type could not be determined from its path — a
+    /// `media/` part with an unrecognized (or absent) extension. It still
+    /// redacts as opaque bytes; the kind just makes no claim it can't back up.
+    Other,
 }
 
 /// One binary embedding surfaced for redaction (an image, embedded object, or
@@ -160,4 +168,48 @@ pub struct PartReplacement {
     pub part: PartPath,
     /// The new bytes for the part.
     pub bytes: Vec<u8>,
+}
+
+/// The [`EmbeddingKind`] of a `*/media/*` part, chosen by its file extension.
+///
+/// An OOXML `media/` directory mixes images, audio, and video, so the
+/// directory alone can't say which — a caller redacting embedded media wants
+/// an mp3 surfaced as [`Audio`], not misreported as an image. An unrecognized
+/// or extension-less part is [`Other`] rather than a guessed type: it still
+/// redacts as opaque bytes, but the kind claims nothing it can't back up.
+///
+/// [`Audio`]: EmbeddingKind::Audio
+/// [`Other`]: EmbeddingKind::Other
+pub fn media_kind(path: &str) -> EmbeddingKind {
+    let ext = path
+        .rsplit_once('.')
+        .map(|(_, e)| e)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tif" | "tiff" | "svg" | "webp" | "emf"
+        | "wmf" | "ico" => EmbeddingKind::Image,
+        "mp3" | "wav" | "m4a" | "aac" | "wma" | "flac" | "oga" | "ogg" => EmbeddingKind::Audio,
+        "mp4" | "mov" | "avi" | "wmv" | "m4v" | "mkv" | "webm" | "mpg" | "mpeg" => {
+            EmbeddingKind::Video
+        }
+        _ => EmbeddingKind::Other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EmbeddingKind, media_kind};
+
+    #[test]
+    fn media_kind_classifies_by_extension() {
+        assert_eq!(media_kind("ppt/media/image1.png"), EmbeddingKind::Image);
+        assert_eq!(media_kind("ppt/media/image2.JPEG"), EmbeddingKind::Image);
+        assert_eq!(media_kind("ppt/media/media1.mp3"), EmbeddingKind::Audio);
+        assert_eq!(media_kind("ppt/media/media2.wav"), EmbeddingKind::Audio);
+        assert_eq!(media_kind("ppt/media/media3.mp4"), EmbeddingKind::Video);
+        // An unrecognized or extension-less part claims no type it can't back up.
+        assert_eq!(media_kind("ppt/media/blob"), EmbeddingKind::Other);
+        assert_eq!(media_kind("ppt/media/data.xyz"), EmbeddingKind::Other);
+    }
 }

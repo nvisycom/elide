@@ -1,4 +1,4 @@
-//! Shared test fixtures: re-exports the core [`Text`] modality and a
+//! Shared test support: re-exports the core [`Text`] modality and a
 //! trivial in-memory [`DataReader`] over a single string, the way a
 //! real text codec would slice values at byte ranges.
 // A shared fixture exposes more than any one test uses.

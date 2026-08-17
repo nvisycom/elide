@@ -26,8 +26,9 @@ pub(crate) struct Sheet {
 /// The workbook's sheets in tab order, resolved from the workbook part `raw` and
 /// its relationships `rels`.
 ///
-/// A `<sheet>` whose `r:id` has no matching relationship, or whose relationship
-/// is not a worksheet target, is skipped — it names no readable cells.
+/// **Fail-closed:** a `<sheet>` that names a worksheet the relationships cannot
+/// resolve is an error, not a skipped sheet — a workbook must never report a
+/// successful redaction while an unresolved worksheet's text ships unread.
 pub(crate) fn resolve_sheets(raw: &str, rels: &str) -> Result<Vec<Sheet>> {
     let targets = relationship_targets(rels)?;
     let malformed =
@@ -56,14 +57,23 @@ pub(crate) fn resolve_sheets(raw: &str, rels: &str) -> Result<Vec<Sheet>> {
                 _ => {}
             }
         }
-        if let (Some(name), Some(rid)) = (name, rid)
-            && let Some(target) = targets.get(&rid)
-        {
-            sheets.push(Sheet {
-                name,
-                part: normalize_target(target),
-            });
-        }
+        // A `<sheet>` must carry a name and an `r:id`, and that id must resolve to
+        // a worksheet target; anything else leaves a worksheet unprocessed, so it
+        // fails closed rather than being dropped.
+        let (Some(name), Some(rid)) = (name, rid) else {
+            return Err(Error::invalid_xml(
+                "workbook `<sheet>` missing a name or relationship id".to_owned(),
+            ));
+        };
+        let Some(target) = targets.get(&rid) else {
+            return Err(Error::invalid_package(format!(
+                "sheet `{name}` references relationship `{rid}` with no worksheet target"
+            )));
+        };
+        sheets.push(Sheet {
+            name,
+            part: normalize_target(target),
+        });
     }
     Ok(sheets)
 }
@@ -108,18 +118,34 @@ fn relationship_targets(rels: &str) -> Result<HashMap<String, String>> {
     Ok(targets)
 }
 
-/// Resolve a workbook-relationship `Target` (relative to `xl/`) to a
-/// package-absolute part path.
+/// Resolve a workbook-relationship `Target` to a package-absolute part path.
 ///
-/// Targets are normally relative (`worksheets/sheet1.xml` → `xl/worksheets/…`);
-/// an absolute target (`/xl/worksheets/sheet1.xml`) is taken as-is with its
-/// leading slash stripped.
+/// The target is relative to the workbook part's directory (`xl/`), except an
+/// absolute target (`/xl/…`) is package-rooted. Backslash separators are
+/// normalized to `/`, and `.` / `..` segments are collapsed, so a target like
+/// `../xl/worksheets/./sheet1.xml` resolves to `xl/worksheets/sheet1.xml` and
+/// cannot be used to smuggle a mismatched path past the extractor.
 fn normalize_target(target: &str) -> String {
-    if let Some(absolute) = target.strip_prefix('/') {
-        absolute.to_owned()
-    } else {
-        format!("xl/{target}")
+    let target = target.replace('\\', "/");
+    // An absolute target is rooted at the package; a relative one is joined onto
+    // the workbook part's `xl/` directory.
+    let joined = match target.strip_prefix('/') {
+        Some(absolute) => absolute.to_owned(),
+        None => format!("xl/{target}"),
+    };
+
+    // Collapse `.` and `..` segments against the accumulated path.
+    let mut segments: Vec<&str> = Vec::new();
+    for segment in joined.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                segments.pop();
+            }
+            other => segments.push(other),
+        }
     }
+    segments.join("/")
 }
 
 /// Decode an attribute value's bytes to an unescaped owned `String`.
@@ -167,23 +193,34 @@ mod tests {
     }
 
     #[test]
-    fn skips_a_sheet_with_no_worksheet_relationship() {
+    fn an_unresolved_sheet_fails_closed() {
+        // A sheet whose `r:id` resolves to no worksheet relationship must be an
+        // error, not silently dropped — otherwise its cells would ship unread.
         let workbook = concat!(
             r#"<?xml version="1.0"?>"#,
             r#"<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
             r#"<sheets><sheet name="Ghost" sheetId="1" r:id="rIdMissing"/></sheets></workbook>"#,
         );
-        assert!(resolve_sheets(workbook, RELS).unwrap().is_empty());
+        assert!(resolve_sheets(workbook, RELS).is_err());
     }
 
     #[test]
-    fn normalizes_absolute_targets() {
+    fn normalizes_relative_absolute_and_dotted_targets() {
         assert_eq!(
             normalize_target("worksheets/sheet1.xml"),
             "xl/worksheets/sheet1.xml"
         );
         assert_eq!(
             normalize_target("/xl/worksheets/sheet1.xml"),
+            "xl/worksheets/sheet1.xml"
+        );
+        // `.` and `..` segments and backslashes are collapsed.
+        assert_eq!(
+            normalize_target("./worksheets/sheet1.xml"),
+            "xl/worksheets/sheet1.xml"
+        );
+        assert_eq!(
+            normalize_target("..\\xl\\worksheets\\sheet1.xml"),
             "xl/worksheets/sheet1.xml"
         );
     }

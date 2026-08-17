@@ -4,7 +4,7 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::opc::{EmbeddingKind, PartPath, PartRole};
+use crate::opc::{EmbeddingKind, PartPath, PartRole, media_kind};
 
 /// What a PresentationML package part is, which determines how it is handled.
 ///
@@ -34,7 +34,8 @@ pub enum PartKind {
     Notes,
     /// A handout master (`ppt/handoutMasters/handoutMaster{n}.xml`).
     HandoutMaster,
-    /// Comment text (`ppt/comments/*.xml`, modern or legacy).
+    /// Comment text (`ppt/comments/*.xml` classic, or
+    /// `ppt/threadedComments/*.xml` threaded).
     Comments,
     /// Chart text (`ppt/charts/chart{n}.xml`) or a diagram's data
     /// (`ppt/diagrams/data{n}.xml`).
@@ -75,10 +76,13 @@ impl PartKind {
         if Self::is_numbered(path, "ppt/handoutMasters/handoutMaster", ".xml") {
             return Self::HandoutMaster;
         }
-        // Comments come in a modern (`ppt/comments/`) and a legacy
-        // (`ppt/commentAuthors.xml` is authors-only, so only the comment parts)
-        // layout; both hold the comment text.
-        if path.starts_with("ppt/comments/") && path.ends_with(".xml") {
+        // Comments come in three layouts, all holding the comment text: the
+        // classic per-slide `ppt/comments/`, and the modern threaded
+        // `ppt/threadedComments/` (PowerPoint 2021+). `ppt/commentAuthors.xml`
+        // is authors-only, so only the comment parts themselves are matched.
+        if (path.starts_with("ppt/comments/") || path.starts_with("ppt/threadedComments/"))
+            && path.ends_with(".xml")
+        {
             return Self::Comments;
         }
         if Self::is_numbered(path, "ppt/charts/chart", ".xml")
@@ -136,12 +140,15 @@ impl PartKind {
     }
 }
 
-/// The [`EmbeddingKind`] of a binary media part, if `part` names one. PowerPoint
-/// keeps images and media under `ppt/media/` and embedded objects under
-/// `ppt/embeddings/`.
+/// The [`EmbeddingKind`] of a binary media part, if `part` names one.
+///
+/// `ppt/media/` mixes images, audio, and video, so the kind is taken from the
+/// file extension (a slide's embedded `.mp3` is [`Audio`], not an image).
+///
+/// [`Audio`]: EmbeddingKind::Audio
 fn embedding_kind(part: &PartPath) -> Option<EmbeddingKind> {
     if part.in_dir("ppt/media") {
-        Some(EmbeddingKind::Image)
+        Some(media_kind(part.as_str()))
     } else if part.in_dir("ppt/embeddings") {
         Some(EmbeddingKind::Object)
     } else {
@@ -168,6 +175,12 @@ mod tests {
         );
         assert_eq!(kind("ppt/notesSlides/notesSlide1.xml"), PartKind::Notes);
         assert_eq!(kind("ppt/comments/comment1.xml"), PartKind::Comments);
+        // Threaded comments (PowerPoint 2021+) carry comment text too, so they
+        // must classify as text-bearing — not fall through to `Other` and leak.
+        assert_eq!(
+            kind("ppt/threadedComments/threadedComment1.xml"),
+            PartKind::Comments
+        );
         assert_eq!(
             kind("ppt/slides/_rels/slide1.xml.rels"),
             PartKind::Relationships
@@ -175,6 +188,16 @@ mod tests {
         assert_eq!(
             kind("ppt/media/image1.png"),
             PartKind::Embedding(EmbeddingKind::Image)
+        );
+        // A slide's `ppt/media/` dir also holds audio and video, classified by
+        // extension so an embedded clip surfaces as media, not as an image.
+        assert_eq!(
+            kind("ppt/media/media1.mp3"),
+            PartKind::Embedding(EmbeddingKind::Audio)
+        );
+        assert_eq!(
+            kind("ppt/media/media2.mp4"),
+            PartKind::Embedding(EmbeddingKind::Video)
         );
         assert_eq!(kind("ppt/theme/theme1.xml"), PartKind::Other);
     }

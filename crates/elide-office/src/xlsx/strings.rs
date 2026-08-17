@@ -50,6 +50,9 @@ pub(crate) fn shared_string_items(raw: &str) -> Result<Vec<SharedItem>> {
     let mut item_open: Option<usize> = None;
     let mut text_open: Option<usize> = None;
     let mut current = String::new();
+    // Nesting depth inside `<rPh>` phonetic-run subtrees, whose `<t>` holds the
+    // furigana reading, not the value a reader sees, and so must be ignored.
+    let mut phonetic_depth = 0u32;
 
     loop {
         let event = reader.read_event().map_err(malformed)?;
@@ -69,10 +72,21 @@ pub(crate) fn shared_string_items(raw: &str) -> Result<Vec<SharedItem>> {
                     inner,
                 });
             }
+            Event::Start(e) if e.local_name().as_ref() == b"rPh" => {
+                phonetic_depth += 1;
+            }
+            Event::End(e) if e.local_name().as_ref() == b"rPh" => {
+                phonetic_depth = phonetic_depth.saturating_sub(1);
+            }
             // The `<t>` under an `<si>` (directly, or inside an `<r>` run) holds
             // the text; its inner byte range runs from just past the open tag to
-            // the start of the close tag.
-            Event::Start(e) if item_open.is_some() && e.local_name().as_ref() == b"t" => {
+            // the start of the close tag. A `<t>` inside an `<rPh>` phonetic run
+            // is skipped.
+            Event::Start(e)
+                if item_open.is_some()
+                    && phonetic_depth == 0
+                    && e.local_name().as_ref() == b"t" =>
+            {
                 text_open = Some(span.end);
             }
             Event::End(e) if e.local_name().as_ref() == b"t" => {
@@ -133,6 +147,20 @@ mod tests {
         assert_eq!(
             parse_shared_strings(&raw).unwrap(),
             vec![String::new(), "y".to_owned()]
+        );
+    }
+
+    #[test]
+    fn phonetic_runs_are_ignored() {
+        // A CJK `<si>` carries the reading in `<rPh><t>` alongside the base text
+        // in `<r><t>`. Only the base text a reader sees is the string value; the
+        // furigana must not be appended, or recognizer matching breaks.
+        let raw = format!(
+            "{HEAD}<si><r><t>\u{6771}\u{4eac}</t></r><rPh sb=\"0\" eb=\"2\"><t>\u{3068}\u{3046}\u{304d}\u{3087}\u{3046}</t></rPh></si></sst>"
+        );
+        assert_eq!(
+            parse_shared_strings(&raw).unwrap(),
+            vec!["\u{6771}\u{4eac}"]
         );
     }
 }

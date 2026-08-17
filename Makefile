@@ -48,6 +48,14 @@ ci: lint ## Runs all CI checks locally.
 	@cargo build --workspace --release
 	@$(call log,All CI checks passed!)
 
+.PHONY: clean-testdata
+clean-testdata: ## Removes generated e2e artifacts (testdata/audits, testdata/results).
+	@$(call log,Cleaning generated e2e test artifacts...)
+	@find . -type d -path '*/testdata/audits' -o -type d -path '*/testdata/results' | while read -r dir; do \
+		find "$$dir" -type f ! -name .gitkeep -delete; \
+	done
+	@$(call log,Test artifacts cleaned.)
+
 # `help` parses the `## …` doc comment after each target name and
 # prints `target — description`. Keeping help auto-generated from
 # the targets themselves means new targets don't need a manual

@@ -13,6 +13,8 @@ mod block;
 mod offset;
 mod part;
 mod store;
+#[cfg(feature = "test-util")]
+pub mod test_util;
 mod xml_span;
 
 use std::collections::HashMap;
@@ -24,6 +26,7 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 pub use self::block::{
     Block, Embedding, EmbeddingKind, Extraction, Issue, IssueKind, PartReplacement, Replacement,
+    media_kind,
 };
 pub use self::offset::{OffsetMap, OffsetRun, RunKind};
 pub use self::part::{PartClassifier, PartPath, PartRole};
