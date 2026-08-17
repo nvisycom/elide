@@ -11,7 +11,7 @@ use elide_core::entity::builtins;
 use elide_core::modality::text::{Text, TextData};
 use elide_core::primitive::Confidence;
 use elide_core::recognition::{Recognizer, RecognizerContext, Scope};
-use elide_pattern::{PatternRecognizer, Regex, Variant};
+use elide_pattern::{Context, PatternRecognizer, Regex, Sourced, Variant};
 
 #[tokio::test]
 async fn enhancer_boosts_matches_near_keyword_only() {
@@ -113,5 +113,47 @@ async fn bare_recognizer_works_without_enhancement() {
             .iter()
             .any(|e| matches!(e.kind, AuditKind::Refinement { .. })),
         "bare recognizer must not record any Refinement",
+    );
+}
+
+/// A `[context]` table may override the default `+0.35` boost. A pattern that
+/// sets `boost = 0.1` lifts a near-keyword match by exactly that amount, not
+/// the enhancer default.
+#[tokio::test]
+async fn context_boost_override_applies_the_custom_lift() {
+    let variant = Variant::new(r"\b\d{3}-\d{2}-\d{4}\b")
+        .expect("ssn variant builds")
+        .with_score(Confidence::clamped(0.6));
+    // `boost = 0.1` on the context table — weaker than the default 0.35.
+    let context = Context::Global(Sourced {
+        keywords: vec!["ssn".to_owned()],
+        boost: Some(0.1),
+        ..Sourced::default()
+    });
+    let regex = Regex::builder()
+        .with_name("ssn")
+        .with_labels(vec![builtins::GOVERNMENT_ID.to_ref()])
+        .with_context(context)
+        .with_variants(vec![variant])
+        .build()
+        .expect("ssn regex builds");
+
+    let recognizer = PatternRecognizer::builder()
+        .with_pattern(regex)
+        .build_context_enhanced()
+        .expect("recognizer builds");
+
+    let text = "SSN: 123-45-6789.";
+    let data = TextData::new(text.to_owned());
+    let scope = Scope::new();
+    let ctx = RecognizerContext::<Text>::new(&scope);
+    let entities = recognizer.recognize(&data, &ctx).await.expect("recognize");
+
+    assert_eq!(entities.len(), 1, "one SSN match expected");
+    // 0.6 base + 0.1 override = 0.7 (not 0.6 + 0.35 = 0.95).
+    assert!(
+        (entities[0].confidence.get() - 0.7).abs() < f32::EPSILON,
+        "custom boost 0.1 should lift 0.6 to 0.7, got {}",
+        entities[0].confidence.get(),
     );
 }

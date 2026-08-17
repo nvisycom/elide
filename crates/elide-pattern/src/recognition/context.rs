@@ -31,7 +31,7 @@ use serde::Deserialize;
 ///
 /// [`Global`]: Self::Global
 /// [`PerLanguage`]: Self::PerLanguage
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, From)]
+#[derive(Debug, Clone, PartialEq, Deserialize, From)]
 #[serde(untagged)]
 pub enum Context {
     /// Keywords applied regardless of the per-call language hint: inline
@@ -57,7 +57,7 @@ pub enum Context {
 /// keywords = ["total", "balance"]       # optional inline keywords
 /// dictionaries = ["currencies"]         # plus dictionary-sourced terms
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Sourced {
     /// Inline keywords applied regardless of language, merged with the
@@ -74,6 +74,13 @@ pub struct Sourced {
     /// let a keyword fire inside a longer word (`ssn` in `yourSSN`).
     #[serde(default, rename = "match")]
     pub matching: Matching,
+    /// Additive confidence lift applied when one of these keywords fires,
+    /// overriding the enhancer's default (`0.35`). Set `boost = 0.5` in TOML
+    /// for a pattern whose keywords are strong evidence, or a lower value for
+    /// generic ones. `None` (the default) uses the enhancer default, so an
+    /// author only sets this when the default is wrong for that pattern.
+    #[serde(default)]
+    pub boost: Option<f32>,
 }
 
 /// How a context keyword matches the surrounding text.
@@ -140,6 +147,21 @@ impl Context {
         match self {
             Self::Global(s) => s.matching,
             Self::PerLanguage(_) => Matching::Word,
+        }
+    }
+
+    /// The additive boost override this context declares, if any. `Some` only
+    /// for a [`Global`] context with an explicit `boost`; `None` (a
+    /// [`PerLanguage`] context, or a `Global` one without the field) leaves
+    /// the enhancer's default boost in place.
+    ///
+    /// [`Global`]: Self::Global
+    /// [`PerLanguage`]: Self::PerLanguage
+    #[must_use]
+    pub fn boost(&self) -> Option<f32> {
+        match self {
+            Self::Global(s) => s.boost,
+            Self::PerLanguage(_) => None,
         }
     }
 }

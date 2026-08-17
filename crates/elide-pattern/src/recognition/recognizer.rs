@@ -8,7 +8,7 @@ use elide_context::{BoostRule, Enhanced, Enhancer};
 use elide_core::entity::audit::AuditEvent;
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
-use elide_core::primitive::LanguageTag;
+use elide_core::primitive::{Confidence, LanguageTag};
 use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
 use elide_core::{Error, ErrorKind, Result};
 // The external `regex` crate is aliased throughout because `Regex` is already
@@ -108,6 +108,9 @@ struct ContextKeywords<'a> {
     keywords: &'a [String],
     /// Whole-word vs substring matching for these keywords.
     matching: Matching,
+    /// Additive boost override from the `[context]` table, or `None` to use
+    /// the enhancer default.
+    boost: Option<f32>,
 }
 
 /// Accumulator of rules + validator registry for [`PatternRecognizer`].
@@ -548,8 +551,11 @@ impl PatternRecognizerBuilder {
         let mut boost_rules: Vec<BoostRule> = self
             .context_keywords()
             .map(|ck| {
-                let rule = BoostRule::new(ck.label.clone(), ck.keywords.iter().cloned())
+                let mut rule = BoostRule::new(ck.label.clone(), ck.keywords.iter().cloned())
                     .with_word_boundary(ck.matching == Matching::Word);
+                if let Some(boost) = ck.boost {
+                    rule = rule.with_boost(Confidence::clamped(boost));
+                }
                 match ck.language {
                     Some(lang) => rule.with_language(lang.clone()),
                     None => rule,
@@ -576,11 +582,14 @@ impl PatternRecognizerBuilder {
                 continue;
             }
             let word_boundary = pattern.context.matching() == Matching::Word;
+            let boost = pattern.context.boost();
             for label in &pattern.labels {
-                boost_rules.push(
-                    BoostRule::new(label.clone(), terms.iter().cloned())
-                        .with_word_boundary(word_boundary),
-                );
+                let mut rule = BoostRule::new(label.clone(), terms.iter().cloned())
+                    .with_word_boundary(word_boundary);
+                if let Some(boost) = boost {
+                    rule = rule.with_boost(Confidence::clamped(boost));
+                }
+                boost_rules.push(rule);
             }
         }
 
@@ -600,12 +609,14 @@ impl PatternRecognizerBuilder {
             .filter(|p| !p.context.is_empty())
             .flat_map(|p| {
                 let matching = p.context.matching();
+                let boost = p.context.boost();
                 p.context.iter().flat_map(move |(language, keywords)| {
                     p.labels.iter().map(move |label| ContextKeywords {
                         label,
                         language,
                         keywords,
                         matching,
+                        boost,
                     })
                 })
             });
@@ -615,12 +626,14 @@ impl PatternRecognizerBuilder {
             .filter(|d| !d.context.is_empty())
             .flat_map(|d| {
                 let matching = d.context.matching();
+                let boost = d.context.boost();
                 d.context.iter().flat_map(move |(language, keywords)| {
                     d.labels.iter().map(move |label| ContextKeywords {
                         label,
                         language,
                         keywords,
                         matching,
+                        boost,
                     })
                 })
             });
