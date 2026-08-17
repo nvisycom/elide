@@ -15,4 +15,4 @@ context = [
 
 [[variants]]
 regex = '\b(0[1-9]|[1-7]\d|8[0-2])\d{4}\b'
-score = 0.4
+score = 0.2

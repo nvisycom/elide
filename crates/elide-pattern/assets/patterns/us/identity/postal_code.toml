@@ -16,5 +16,5 @@ context = [
 
 [[variants]]
 regex = "\\b\\d{5}(?:-\\d{4})?\\b"
-score = 0.1
+score = 0.2
 validator = "us.postal_code"
