@@ -3,13 +3,14 @@
 //! The shipped patterns detect the PII spread and the anonymizer rewrites
 //! it, while the surrounding prose passes through unchanged.
 
+use elide::Result;
+use elide::entity::audit::AuditKind;
+use elide::entity::builtins;
+
 use crate::support::asserts::{
     assert_label_present, assert_pii_removed, assert_preserved, assert_tokens_present,
 };
 use crate::support::pipeline::Fixture;
-use elide::Result;
-use elide::entity::audit::AuditKind;
-use elide::entity::builtins;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/sample.txt"),

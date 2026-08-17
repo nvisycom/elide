@@ -5,7 +5,6 @@
 //! container.
 #![cfg(feature = "serde")]
 
-use elide::Result;
 use elide::codec::FormatRegistry;
 use elide::detection::Analyzer;
 use elide::entity::audit::AuditKind;
@@ -14,7 +13,7 @@ use elide::modality::text::Text;
 use elide::recognition::pattern::PatternRecognizer;
 use elide::redaction::operators::{Erase, Replace};
 use elide::redaction::{Anonymizer, Rule};
-use elide::{Directives, Orchestrator, Report};
+use elide::{Directives, Orchestrator, Report, Result};
 
 use super::{BODY_PART, FIXTURE};
 

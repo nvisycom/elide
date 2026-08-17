@@ -5,14 +5,15 @@
 //! directly; the shipped patterns find the PII and the anonymizer rewrites it
 //! in the re-encoded document.
 
-use crate::support::asserts::{assert_label_present, assert_pii_removed};
-use crate::support::pipeline::Fixture;
 use elide::Result;
 use elide::codec::FormatRegistry;
 use elide::entity::audit::AuditKind;
 use elide::entity::builtins;
 use elide::modality::StreamDataReader;
 use elide::modality::text::Text;
+
+use crate::support::asserts::{assert_label_present, assert_pii_removed};
+use crate::support::pipeline::Fixture;
 
 /// Re-decode a redacted PDF through the public registry and reassemble its
 /// born-digital text. The re-encoded content stream is FlateDecode-compressed,
