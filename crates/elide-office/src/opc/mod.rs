@@ -40,6 +40,13 @@ use crate::error::{Error, Result};
 /// decompressed bomb would demand.
 const MAX_PART_BYTES: u64 = 512 * 1024 * 1024;
 
+/// The largest total uncompressed size a package may inflate to across all its
+/// parts. The per-part cap alone lets an archive of many large entries exhaust
+/// memory, since [`open`](Package::open) retains every part; this bounds the sum
+/// so a bomb of many parts is refused before it can. 1 GiB comfortably exceeds
+/// any legitimate OOXML document while staying well within process memory.
+const MAX_PACKAGE_BYTES: u64 = 1024 * 1024 * 1024;
+
 /// An opened OOXML package: every part read once and classified by the
 /// format's `C`, ready to [`extract`](Package::extract) the text of every
 /// text-bearing part or [`rewrite`](Package::rewrite) them back to bytes.
@@ -69,29 +76,50 @@ impl<C: PartClassifier> Package<C> {
     /// bytes are not a readable zip, a part is unreadable, or a part exceeds the
     /// size cap.
     pub fn open(document: &[u8], classifier: C) -> Result<Self> {
+        Self::open_with_limits(document, classifier, MAX_PART_BYTES, MAX_PACKAGE_BYTES)
+    }
+
+    /// [`open`](Package::open) with explicit `part_cap` (per-part) and
+    /// `package_cap` (aggregate) byte limits, so tests can exercise the caps with
+    /// a small archive.
+    fn open_with_limits(
+        document: &[u8],
+        classifier: C,
+        part_cap: u64,
+        package_cap: u64,
+    ) -> Result<Self> {
         let mut zip = ZipArchive::new(Cursor::new(document))
             .map_err(|e| Error::invalid_archive(format!("not a zip: {e}")))?;
 
         let mut parts = Vec::with_capacity(zip.len());
+        // Bytes still allowed across the whole package; each part's read and
+        // allocation are bounded by this, so a bomb of many parts is refused
+        // before it can inflate past the package cap.
+        let mut budget = package_cap;
         for i in 0..zip.len() {
             let entry = zip
                 .by_index(i)
                 .map_err(|e| Error::invalid_archive(format!("bad zip entry: {e}")))?;
             let path = PartPath::from(entry.name());
             let role = classifier.role(&path);
-            // Reserve only up to the cap (the entry's claimed size may lie), and
-            // bound the read so a zip bomb cannot inflate past it.
-            let claimed = entry.size().min(MAX_PART_BYTES);
+            // Cap this part at the smaller of the per-part limit and what remains
+            // of the package budget. Reserve only up to that cap (the entry's
+            // claimed size may lie), and bound the read one byte past it so an
+            // over-large part is detected rather than inflated.
+            let cap = part_cap.min(budget);
+            let claimed = entry.size().min(cap);
             let mut buf = Vec::with_capacity(claimed as usize);
             let read = entry
-                .take(MAX_PART_BYTES + 1)
+                .take(cap + 1)
                 .read_to_end(&mut buf)
                 .map_err(|e| Error::invalid_archive(format!("part `{path}` unreadable: {e}")))?;
-            if read as u64 > MAX_PART_BYTES {
+            if read as u64 > cap {
                 return Err(Error::invalid_archive(format!(
-                    "part `{path}` exceeds {MAX_PART_BYTES}-byte limit"
+                    "package exceeds size limits at part `{path}` \
+                     (part cap {part_cap}, package cap {package_cap} bytes)"
                 )));
             }
+            budget -= read as u64;
             parts.push(StoredPart::new(path, role, Bytes::from(buf)));
         }
 
@@ -220,13 +248,24 @@ impl<C: PartClassifier> Package<C> {
             by_part.entry(&r.part).or_default().push(r);
         }
 
-        // Index binary part replacements, validating each names an existing part
-        // that is neither structural nor already targeted by a text splice.
+        // Index whole-part replacements, validating each names an existing part
+        // that is redactable (never a structure/metadata part), not protected,
+        // and not already targeted by a text splice.
         let mut part_bytes: HashMap<&PartPath, &[u8]> = HashMap::new();
         for pr in parts {
-            if !index.contains_key(&pr.part) {
+            let Some(part) = index.get(&pr.part) else {
                 return Err(Error::unsafe_rewrite(format!(
                     "part replacement names unknown part `{}`",
+                    pr.part
+                )));
+            };
+            // A whole-part replacement may only overwrite a redactable part — a
+            // binary embedding, or a text part redacted out of band. Refusing a
+            // `Structure` part closes the hole where redacted bytes could
+            // overwrite styles, the theme, or the content-types manifest.
+            if part.role() == PartRole::Structure {
+                return Err(Error::unsafe_rewrite(format!(
+                    "part replacement targets non-redactable part `{}`",
                     pr.part
                 )));
             }
@@ -266,5 +305,102 @@ impl<C: PartClassifier> Package<C> {
             .finish()
             .map_err(|e| Error::invalid_package(format!("repack failed: {e}")))?;
         Ok(cursor.into_inner())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use zip::write::SimpleFileOptions;
+    use zip::{CompressionMethod, ZipWriter};
+
+    use super::*;
+
+    /// A classifier that routes one text part and one media part, marking the
+    /// text part protected, so every role and guard can be exercised.
+    struct TestClassifier;
+
+    impl PartClassifier for TestClassifier {
+        fn role(&self, path: &PartPath) -> PartRole {
+            match path.as_str() {
+                "doc/text.xml" => PartRole::ElementText,
+                "media/image1.png" => PartRole::Binary(EmbeddingKind::Image),
+                _ => PartRole::Structure,
+            }
+        }
+
+        fn is_protected(&self, path: &PartPath) -> bool {
+            path.as_str() == "doc/text.xml"
+        }
+    }
+
+    /// A zip of `(name, bytes)` entries.
+    fn zip_of(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
+        let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        for (name, bytes) in entries {
+            zip.start_file(*name, opts).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+        zip.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn a_part_replacement_targeting_a_structure_part_is_refused() {
+        let bytes = zip_of(&[("styles.xml", b"<styles/>"), ("doc/text.xml", b"<t>hi</t>")]);
+        let package = Package::open(&bytes, TestClassifier).unwrap();
+        // `styles.xml` is a Structure part: replacing its bytes wholesale must be
+        // refused, so redacted bytes can't overwrite the package's structure.
+        let replacement = PartReplacement {
+            part: PartPath::from("styles.xml"),
+            bytes: b"<evil/>".to_vec(),
+        };
+        assert!(package.rewrite_with_parts(&[], &[replacement]).is_err());
+    }
+
+    #[test]
+    fn a_part_replacement_on_a_binary_part_is_accepted() {
+        let bytes = zip_of(&[
+            ("media/image1.png", b"\x89PNG original"),
+            ("doc/text.xml", b"<t>hi</t>"),
+        ]);
+        let package = Package::open(&bytes, TestClassifier).unwrap();
+        let replacement = PartReplacement {
+            part: PartPath::from("media/image1.png"),
+            bytes: b"\x89PNG redacted".to_vec(),
+        };
+        let out = package.rewrite_with_parts(&[], &[replacement]).unwrap();
+        let repacked = Package::open(&out, TestClassifier).unwrap();
+        assert_eq!(
+            repacked.part_bytes("media/image1.png").unwrap().as_ref(),
+            b"\x89PNG redacted"
+        );
+    }
+
+    #[test]
+    fn a_package_exceeding_the_aggregate_size_limit_is_refused() {
+        // Two parts each within the per-part cap but together over the package
+        // cap: the second crosses the aggregate budget and is refused, even
+        // though neither part alone is too large. Tiny caps keep the archive
+        // small.
+        let bytes = zip_of(&[("a.xml", &[b'x'; 40]), ("b.xml", &[b'y'; 40])]);
+        // Per-part cap 100 (each 40-byte part is fine); package cap 64 (the two
+        // parts sum to 80, so the second overflows).
+        let err = Package::open_with_limits(&bytes, TestClassifier, 100, 64);
+        assert!(
+            err.is_err(),
+            "aggregate over-budget package must be refused"
+        );
+
+        // The same archive opens when the package cap admits both parts.
+        assert!(Package::open_with_limits(&bytes, TestClassifier, 100, 100).is_ok());
+    }
+
+    #[test]
+    fn a_single_part_over_the_per_part_cap_is_refused() {
+        let bytes = zip_of(&[("a.xml", &[b'x'; 200])]);
+        // Per-part cap 100 rejects the 200-byte part; package cap is generous.
+        assert!(Package::open_with_limits(&bytes, TestClassifier, 100, 10_000).is_err());
     }
 }

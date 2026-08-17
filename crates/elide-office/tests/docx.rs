@@ -119,27 +119,19 @@ fn a_corrupt_text_part_becomes_an_issue_not_a_failure() {
 
 #[test]
 fn part_kind_classifies_from_path() {
-    assert_eq!(PartKind::of(BODY_PART), PartKind::Body);
-    assert_eq!(PartKind::of("word/header2.xml"), PartKind::Header);
-    assert_eq!(PartKind::of("word/footer1.xml"), PartKind::Footer);
-    assert_eq!(PartKind::of("word/footnotes.xml"), PartKind::Footnotes);
-    assert_eq!(PartKind::of("word/comments.xml"), PartKind::Comments);
-    assert_eq!(
-        PartKind::of(MEDIA_PART),
-        PartKind::Embedding(EmbeddingKind::Image)
-    );
-    assert_eq!(PartKind::of("docProps/core.xml"), PartKind::Metadata);
-    assert_eq!(PartKind::of("word/settings.xml"), PartKind::Other);
-    assert_eq!(PartKind::of("word/charts/chart1.xml"), PartKind::Chart);
-    assert_eq!(PartKind::of("word/diagrams/data1.xml"), PartKind::Diagram);
-    assert_eq!(
-        PartKind::of("word/glossary/document.xml"),
-        PartKind::Glossary
-    );
-    assert_eq!(
-        PartKind::of("word/glossary/header1.xml"),
-        PartKind::Glossary
-    );
+    let kind = |path: &str| PartKind::of(&PartPath::from(path));
+    assert_eq!(kind(BODY_PART), PartKind::Body);
+    assert_eq!(kind("word/header2.xml"), PartKind::Header);
+    assert_eq!(kind("word/footer1.xml"), PartKind::Footer);
+    assert_eq!(kind("word/footnotes.xml"), PartKind::Footnotes);
+    assert_eq!(kind("word/comments.xml"), PartKind::Comments);
+    assert_eq!(kind(MEDIA_PART), PartKind::Embedding(EmbeddingKind::Image));
+    assert_eq!(kind("docProps/core.xml"), PartKind::Metadata);
+    assert_eq!(kind("word/settings.xml"), PartKind::Other);
+    assert_eq!(kind("word/charts/chart1.xml"), PartKind::Chart);
+    assert_eq!(kind("word/diagrams/data1.xml"), PartKind::Diagram);
+    assert_eq!(kind("word/glossary/document.xml"), PartKind::Glossary);
+    assert_eq!(kind("word/glossary/header1.xml"), PartKind::Glossary);
     assert!(PartKind::Chart.is_text());
     assert!(PartKind::Diagram.is_text());
 }

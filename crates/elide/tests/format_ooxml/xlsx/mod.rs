@@ -24,7 +24,8 @@ pub const FIXTURE: Fixture = Fixture {
 };
 
 /// A workbook whose PII lives outside the cell grid: an email in a cell
-/// comment, a phone in a drawing's text.
+/// comment, a phone in a drawing's text, and an email in an external hyperlink
+/// `Target` in the workbook's relationships.
 pub const FIXTURE_NON_CELL: Fixture = Fixture {
     path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/sample2.xlsx"),
     source: include_bytes!("../../testdata/sample2.xlsx"),
@@ -32,4 +33,4 @@ pub const FIXTURE_NON_CELL: Fixture = Fixture {
 };
 
 /// The non-cell PII carried by [`FIXTURE_NON_CELL`].
-pub const NON_CELL_PII: &[&str] = &["carol@example.com", "+1 (510) 555-0199"];
+pub const NON_CELL_PII: &[&str] = &["carol@example.com", "+1 (510) 555-0199", "dave@example.com"];

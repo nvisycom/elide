@@ -149,7 +149,10 @@ impl Container for PptxEncoder {
     fn replace_part(&mut self, id: &PartId, bytes: Bytes) -> Result<()> {
         // Reject anything that isn't a binary embedding so a caller can't smuggle
         // bytes into a text/structure part through this surface.
-        if PartKind::of(id.as_str()).embedding().is_none() {
+        if PartKind::of(&PartPath::from(id.as_str()))
+            .embedding()
+            .is_none()
+        {
             return Err(Error::new(
                 ErrorKind::MalformedInput,
                 format!("pptx replace_part: `{id}` is not an embedded media part"),
