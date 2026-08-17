@@ -112,7 +112,19 @@ pub fn build_analyzer<M: TextRecognizable>() -> Result<Analyzer<M>> {
         .with_builtin_dictionaries()
         .build_context_enhanced()?;
 
-    let analyzer = Analyzer::new().with_recognizer(patterns);
+    let analyzer = Analyzer::new();
+
+    // Detect the document's languages first (when `lingua` is on), so a
+    // per-language context rule — a credit card beside `tarjeta` / `carte` /
+    // `Kreditkarte` — fires under whatever language that sentence is in. With no
+    // caller-asserted language, the enricher's detections are authoritative.
+    #[cfg(feature = "lingua")]
+    let analyzer = {
+        use elide::enrichment::lingua::LinguaEnricher;
+        analyzer.with_enricher(LinguaEnricher::unrestricted())
+    };
+
+    let analyzer = analyzer.with_recognizer(patterns);
 
     #[cfg(feature = "ner")]
     let analyzer = {
@@ -365,13 +377,11 @@ impl Fixture {
     {
         let mut document = UntypedDocumentHandle::new(self.decode_as::<M>(&registry).await?);
 
-        let en_tag = LanguageTag::parse("en").map_err(|e| {
-            Error::new(
-                ErrorKind::MalformedInput,
-                format!("invalid language tag: {e}"),
-            )
-        })?;
-        let scope = Scope::new().with_language(Language::asserted(en_tag));
+        // No asserted language: the analyzer's `LinguaEnricher` detects each
+        // document's languages, so a multilingual fixture activates every one
+        // of its languages' per-language context (asserting a single language
+        // would suppress detection — see `LinguaEnricher::enrich`).
+        let scope = Scope::new();
 
         // One scope, shared across every modality pipeline.
         let orchestrator = Orchestrator::new(&registry)

@@ -22,9 +22,10 @@ pub struct Context<'a> {
     /// stream; when absent, words are derived from `text` via
     /// Unicode word segmentation.
     pub tokens: Option<&'a [Token]>,
-    /// Per-call language hint. `None` means "unknown", so every
-    /// per-language rule applies as a permissive fallback.
-    pub language: Option<&'a LanguageTag>,
+    /// Per-call language hints (asserted and/or detected), most likely first.
+    /// A per-language rule fires when *any* of these matches it. Empty means
+    /// "unknown", so every per-language rule applies as a permissive fallback.
+    pub languages: &'a [&'a LanguageTag],
     /// Out-of-band context hint *texts* (CSV column headers, JSON object
     /// keys, log field names) the caller wants treated as in-context. Each
     /// hint is fed to the matcher as its own one-string window; a hit
@@ -44,7 +45,7 @@ impl<'a> Context<'a> {
         Self {
             text,
             tokens: None,
-            language: None,
+            languages: &[],
             hints: &[],
         }
     }
@@ -56,10 +57,10 @@ impl<'a> Context<'a> {
         self
     }
 
-    /// Attach a language hint.
+    /// Attach the per-call language hints (asserted and/or detected).
     #[must_use]
-    pub fn with_language(mut self, language: &'a LanguageTag) -> Self {
-        self.language = Some(language);
+    pub fn with_languages(mut self, languages: &'a [&'a LanguageTag]) -> Self {
+        self.languages = languages;
         self
     }
 

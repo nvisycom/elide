@@ -18,6 +18,7 @@ use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::entity::audit::AuditEvent;
 use elide_core::modality::TextRecognizable;
+use elide_core::primitive::LanguageTag;
 use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
 
 use crate::io::Tokens;
@@ -83,12 +84,16 @@ where
             .iter()
             .map(|h| M::as_text(&h.data, &ctx.artifacts))
             .collect();
-        let mut context = Context::new(text).with_hints(&hint_texts);
+        // Every asserted/detected language, most likely first, so a per-language
+        // context rule fires when any of them matches — a document covering
+        // several languages activates each one's context, not just the primary.
+        let languages: Vec<&LanguageTag> =
+            ctx.ranked_languages().iter().map(|l| &l.language).collect();
+        let mut context = Context::new(text)
+            .with_hints(&hint_texts)
+            .with_languages(&languages);
         if let Some(tokens) = ctx.artifacts.get::<Tokens>() {
             context = context.with_tokens(tokens.as_slice());
-        }
-        if let Some(language) = ctx.primary_language() {
-            context = context.with_language(language);
         }
 
         let boosts = self.enhancer.enhance(&mut entities, &context);

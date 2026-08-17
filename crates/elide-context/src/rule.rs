@@ -151,11 +151,15 @@ impl BoostRule {
     ///   when no hint is set (permissive fallback so callers
     ///   who don't pass a language still get boosts).
     #[must_use]
-    pub fn applies_to_language(&self, hint: Option<&LanguageTag>) -> bool {
-        match (&self.language, hint) {
-            (None, _) => true,
-            (Some(_), None) => true,
-            (Some(scope), Some(hint)) => scope.matches(hint),
+    pub fn applies_to_language(&self, hints: &[&LanguageTag]) -> bool {
+        match &self.language {
+            // A language-agnostic rule always applies.
+            None => true,
+            // A scoped rule applies when the call asserts no language (the
+            // permissive fallback), or when *any* asserted/detected language
+            // matches the rule's scope — so a multilingual call activates every
+            // one of its languages' per-language context.
+            Some(scope) => hints.is_empty() || hints.iter().any(|hint| scope.matches(hint)),
         }
     }
 

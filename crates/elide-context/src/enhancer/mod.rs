@@ -10,7 +10,7 @@ use elide_core::primitive::Confidence;
 use hipstr::HipStr;
 
 use crate::io::Token;
-use crate::matching::KeywordMatcher;
+use crate::matching::{KeywordMatcher, on_word_boundaries};
 use crate::rule::BoostRule;
 
 mod context;
@@ -166,7 +166,7 @@ impl Enhancer {
             return;
         };
         for rule in bucket {
-            if !rule.applies_to_language(ctx.language) {
+            if !rule.applies_to_language(ctx.languages) {
                 continue;
             }
             if rule.keywords.is_empty() {
@@ -202,8 +202,9 @@ impl Enhancer {
             (EVENT_SOURCE_WINDOW, None, Some(keyword_range))
         } else if let Some(i) = ctx.hints.iter().position(|h| {
             self.matcher
-                .any_match(h, &[], &rule.keywords)
-                .is_some_and(|m| !rule.word_boundary || on_word_boundaries(h, &m))
+                .matches(h, &[], &rule.keywords)
+                .iter()
+                .any(|m| !rule.word_boundary || on_word_boundaries(h, m))
         }) {
             (EVENT_SOURCE_HINT, Some(i), None)
         } else {
@@ -268,26 +269,11 @@ impl Enhancer {
             };
         let m = self
             .matcher
-            .any_match(snippet, tokens_in_window, &rule.keywords)?;
-        if rule.word_boundary && !on_word_boundaries(snippet, &m) {
-            return None;
-        }
+            .matches(snippet, tokens_in_window, &rule.keywords)
+            .into_iter()
+            .find(|m| !rule.word_boundary || on_word_boundaries(snippet, m))?;
         Some(window_offset + m.start..window_offset + m.end)
     }
-}
-
-/// Whether the byte range `m` of `text` sits on word boundaries — the
-/// characters immediately before and after are not word characters
-/// (Unicode alphanumerics or `_`). Mirrors a regex `\b…\b` around a keyword,
-/// so `"AUD"` matches the token `AUD` but not the `aud` inside `audit`.
-fn on_word_boundaries(text: &str, m: &Range<usize>) -> bool {
-    let is_word = |c: char| c.is_alphanumeric() || c == '_';
-    let before_ok = text[..m.start]
-        .chars()
-        .next_back()
-        .is_none_or(|c| !is_word(c));
-    let after_ok = text[m.end..].chars().next().is_none_or(|c| !is_word(c));
-    before_ok && after_ok
 }
 
 /// One confidence lift the enhancer applied, for the caller to record in
