@@ -12,11 +12,25 @@
 
 use std::ops::Range;
 
-use quick_xml::Reader;
 use quick_xml::events::Event;
+use quick_xml::events::attributes::Attribute;
+use quick_xml::{Reader, XmlVersion};
 
 use crate::error::{Error, Result};
 use crate::xlsx::cellref::parse_cell_ref;
+
+/// The entity-decoded value of an attribute, for comparison or parsing.
+///
+/// `Attribute::value` is the raw on-the-wire bytes, so an attribute written with
+/// character references — e.g. `t="inline&#83;tr"` — would not compare equal to
+/// `inlineStr`. Normalizing resolves those references so a cell's type and
+/// reference are read correctly regardless of how they were escaped. The raw
+/// value is still used where an attribute is re-emitted verbatim.
+fn normalized(attr: &Attribute<'_>) -> Result<String> {
+    attr.normalized_value(XmlVersion::Implicit1_0)
+        .map(|value| value.into_owned())
+        .map_err(|e| Error::invalid_xml(format!("attribute value: {e}")))
+}
 
 /// Where a cell's text lives, and the byte spans to rewrite it.
 ///
@@ -156,7 +170,7 @@ fn row_index(e: &quick_xml::events::BytesStart<'_>) -> Result<Option<u32>> {
     for attr in e.attributes() {
         let attr = attr.map_err(|err| Error::invalid_xml(format!("row attribute: {err}")))?;
         if attr.key.local_name().as_ref() == b"r" {
-            let text = String::from_utf8_lossy(&attr.value);
+            let text = normalized(&attr)?;
             let one_based: u32 = text.trim().parse().map_err(|_| {
                 Error::invalid_xml(format!("row reference `{text}` is not a number"))
             })?;
@@ -216,17 +230,19 @@ impl OpenCell {
             let attr = attr.map_err(|err| Error::invalid_xml(format!("cell attribute: {err}")))?;
             let local = attr.key.local_name();
             if local.as_ref() == b"t" {
-                cell_type = match attr.value.as_ref() {
-                    b"s" => CellType::Shared,
-                    b"inlineStr" => CellType::Inline,
-                    b"str" => CellType::Formula,
+                // Compare the decoded value: `t` may be written with character
+                // references and must still classify the cell correctly.
+                cell_type = match normalized(&attr)?.as_str() {
+                    "s" => CellType::Shared,
+                    "inlineStr" => CellType::Inline,
+                    "str" => CellType::Formula,
                     _ => CellType::Other,
                 };
                 // The type attribute is not carried: the rewrite sets its own.
                 continue;
             }
             if local.as_ref() == b"r" {
-                reference = Some(String::from_utf8_lossy(&attr.value).into_owned());
+                reference = Some(normalized(&attr)?);
             }
             // Every non-`t` attribute (including `r` and any style `s`) is carried
             // verbatim, using the full qualified name so a namespaced attribute
@@ -465,6 +481,36 @@ mod tests {
         let cells = parse_cells(sheet).unwrap();
         assert_eq!((cells[0].row, cells[0].column), (1, 0));
         assert_eq!((cells[1].row, cells[1].column), (1, 1));
+    }
+
+    #[test]
+    fn an_entity_encoded_type_attribute_is_still_classified() {
+        // `t="inline&#83;tr"` decodes to `inlineStr`; comparing the raw value
+        // would misclassify the cell as non-text and leak its content.
+        let sheet = concat!(
+            r#"<?xml version="1.0"?><worksheet><sheetData><row r="1">"#,
+            r#"<c r="A1" t="inline&#83;tr"><is><t>alice@example.com</t></is></c>"#,
+            r#"</row></sheetData></worksheet>"#,
+        );
+        let cells = parse_cells(sheet).unwrap();
+        assert_eq!(
+            cells.len(),
+            1,
+            "the cell must be recognized as text-bearing"
+        );
+        assert_eq!(cells[0].inline_text.as_deref(), Some("alice@example.com"));
+    }
+
+    #[test]
+    fn an_entity_encoded_cell_reference_is_parsed() {
+        // A `&#65;` in the reference decodes to `A`, so `&#65;1` is `A1`.
+        let sheet = concat!(
+            r#"<?xml version="1.0"?><worksheet><sheetData><row r="1">"#,
+            r#"<c r="&#65;1" t="inlineStr"><is><t>x</t></is></c>"#,
+            r#"</row></sheetData></worksheet>"#,
+        );
+        let cells = parse_cells(sheet).unwrap();
+        assert_eq!((cells[0].row, cells[0].column), (0, 0));
     }
 
     #[test]
