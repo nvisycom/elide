@@ -118,6 +118,15 @@ impl XlsxHandler {
         Ok(first)
     }
 
+    /// The header text for `column` on `sheet`: the text of the cell at row 0 of
+    /// that column, if any. Provides column context to the recognizer.
+    fn column_header(&self, sheet: &str, column: u32) -> Option<&str> {
+        self.cells
+            .iter()
+            .find(|c| c.sheet == sheet && c.row == 0 && c.column == column)
+            .map(|c| c.text.as_str())
+    }
+
     /// The cell text at `location`, if a unique cell exists.
     fn cell_at(&self, location: &TabularLocation) -> Result<Option<&str>> {
         let sheet = location.sheet_name.as_deref();
@@ -205,12 +214,27 @@ impl Handler<Tabular> for XlsxHandler {
         }
         let cell = &self.cells[self.cursor];
         self.cursor += 1;
-        let location =
+        let mut location =
             TabularLocation::new(cell.row, cell.column).with_sheet_name(cell.sheet.clone());
+        // Attach the column's header text as context, so a context-gated pattern
+        // (a payment card wants a nearby `card`/`payment` word) can reach its
+        // threshold on a value that carries no such cue on its own. A data cell
+        // takes its header from row 0 of the same sheet and column; a header cell
+        // is its own context and is not re-hinted with itself.
+        let mut hints = Vec::new();
+        if cell.row > 0
+            && let Some(header) = self.column_header(&cell.sheet, cell.column)
+        {
+            location = location.clone().with_column_name(header.to_owned());
+            let header_location = TabularLocation::new(0, cell.column)
+                .with_sheet_name(cell.sheet.clone())
+                .with_column_name(header.to_owned());
+            hints.push(Hint::new(header_location, TextData::new(header.to_owned())));
+        }
         Ok(Some(Chunk {
             location,
             data: TextData::new(cell.text.clone()),
-            hints: Vec::<Hint<Tabular>>::new(),
+            hints,
         }))
     }
 
@@ -230,6 +254,9 @@ impl Handler<Tabular> for XlsxHandler {
                 .with_range(start, end);
         if let Some(sheet) = &chunk.location.sheet_name {
             location = location.with_sheet_name(sheet.clone());
+        }
+        if let Some(name) = &chunk.location.column_name {
+            location = location.with_column_name(name.clone());
         }
         Some(location)
     }
@@ -328,7 +355,14 @@ mod tests {
     use super::*;
     use crate::Loader;
 
-    const SAMPLE: &[u8] = include_bytes!("../../../../elide-office/tests/testdata/sample.xlsx");
+    /// The two-sheet workbook whose shared string is reused across sheets, for
+    /// the de-share / cell-addressing mechanics tests.
+    const SAMPLE: &[u8] =
+        include_bytes!("../../../../elide-office/tests/testdata/shared_across_sheets.xlsx");
+
+    /// A real Excel-authored workbook with a header row, for the column-context
+    /// test.
+    const REAL: &[u8] = include_bytes!("../../../../elide-office/tests/testdata/sample.xlsx");
 
     async fn load() -> XlsxHandler {
         XlsxLoader
@@ -362,6 +396,42 @@ mod tests {
             0,
             "alice@example.com".to_owned()
         )));
+    }
+
+    #[tokio::test]
+    async fn data_cells_carry_their_column_header_as_context() {
+        // A data cell must stream with its header column's text, so a
+        // context-gated pattern can match a value that carries no cue itself.
+        let mut h = XlsxLoader
+            .decode(ContentData::new(Bytes::from_static(REAL)))
+            .await
+            .unwrap();
+        let mut card = None;
+        while let Some(chunk) = h.read_next().await.unwrap() {
+            if chunk.data.as_str() == "4111 1111 1111 1111" {
+                card = Some(chunk);
+                break;
+            }
+        }
+        let card = card.expect("the card cell is streamed");
+        // The header of the card's column is `card`, attached as the column name
+        // and surfaced as a hint the recognizer can boost on.
+        assert_eq!(card.location.column_name.as_deref(), Some("card"));
+        assert!(
+            card.hints.iter().any(|h| h.data.as_str() == "card"),
+            "the header is surfaced as a context hint",
+        );
+        // A header cell is not re-hinted with itself.
+        let mut header = XlsxLoader
+            .decode(ContentData::new(Bytes::from_static(REAL)))
+            .await
+            .unwrap();
+        while let Some(chunk) = header.read_next().await.unwrap() {
+            if chunk.location.row_index == 0 {
+                assert!(chunk.hints.is_empty(), "header cell has no self-hint");
+                assert!(chunk.location.column_name.is_none());
+            }
+        }
     }
 
     #[tokio::test]

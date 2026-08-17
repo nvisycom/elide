@@ -1,12 +1,12 @@
 //! End-to-end XLSX codec round-trip: decode → analyze → anonymize → encode.
 //!
-//! A workbook is an OPC container whose cell text lives in shared strings
-//! (`xl/sharedStrings.xml`) and inline strings (in the sheets). The handler
-//! redacts each cell as text while the workbook structure re-packs
-//! byte-faithfully. Redacting a shared-string cell de-shares it (the cell
-//! becomes an inline string), and a pooled value left with no reference is
-//! blanked — so no PII survives anywhere in the output package, not even as an
-//! orphaned shared string.
+//! The primary fixture is a real Excel-authored workbook whose cell text lives
+//! in the shared-string table. The handler redacts each cell as text while the
+//! workbook structure (styles, theme, content-types) re-packs byte-faithfully.
+//! Redacting a shared-string cell de-shares it (the cell becomes an inline
+//! string), and a pooled value left with no reference is blanked — so no PII
+//! survives anywhere in the output package, not even as an orphaned shared
+//! string.
 
 mod fixtures;
 
@@ -21,18 +21,31 @@ const FIXTURE: Fixture = Fixture {
     extension: "xlsx",
 };
 
-/// Every PII value present in the fixture, in shared strings and inline cells.
-const PII: &[&str] = &["alice@example.com", "bob@example.com", "123-45-6789"];
+/// Every PII value present in the fixture's shared-string cells.
+const PII: &[&str] = &[
+    "alice.johnson@example.com",
+    "bob.smith@example.com",
+    "+1 (415) 555-0142",
+    "+1 (510) 555-0199",
+    "4111 1111 1111 1111",
+    "GB29 NWBK 6016 1331 9268 19",
+    "123-45-6789",
+    "192.168.1.42",
+];
 
 #[tokio::test]
 async fn xlsx_detects_and_redacts_every_part() -> Result<()> {
     let outcome = FIXTURE.run_tabular().await?;
-
-    // The shipped patterns find the workbook's PII across shared and inline
-    // cells: two emails and one government id (the SSN).
+    // The shipped patterns find every sensitive label across the workbook's
+    // cells — including the payment card, which needs its column header (`card`)
+    // as context to reach the detection threshold.
     for label in [
         builtins::EMAIL_ADDRESS.to_ref(),
+        builtins::PHONE_NUMBER.to_ref(),
+        builtins::PAYMENT_CARD.to_ref(),
+        builtins::IBAN.to_ref(),
         builtins::GOVERNMENT_ID.to_ref(),
+        builtins::IP_ADDRESS.to_ref(),
     ] {
         assert_label_present(&outcome.entities, &label);
     }

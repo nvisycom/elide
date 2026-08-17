@@ -502,10 +502,16 @@ fn decode_part(path: &str, bytes: &[u8]) -> Result<String> {
 mod tests {
     use super::*;
 
-    /// The hand-built sample workbook: two sheets, a shared-string table where
-    /// index 1 (`alice@example.com`) is referenced by both sheet1!A2 and
-    /// sheet2!A1, and an inline SSN at sheet1!B2.
+    /// A real Excel-authored workbook (Microsoft): one sheet `in`, a header row
+    /// and two data rows of PII (names, emails, phones, cards, IBANs, SSNs, IPs)
+    /// stored as shared strings, with a full styles/theme package.
     const SAMPLE: &[u8] = include_bytes!("../../tests/testdata/sample.xlsx");
+
+    /// A hand-built workbook whose shared string `alice@example.com` (index 1) is
+    /// referenced by both `Customers!A2` and `Notes!A1`, plus an inline SSN at
+    /// `Customers!B2`. Its two sheets sharing a pooled value drive the de-share
+    /// and orphan-prune tests, which a single-sheet workbook cannot exercise.
+    const SHARED: &[u8] = include_bytes!("../../tests/testdata/shared_across_sheets.xlsx");
 
     fn cell<'a>(cells: &'a [Cell], sheet: &str, row: u32, col: u32) -> Option<&'a Cell> {
         cells
@@ -514,11 +520,10 @@ mod tests {
     }
 
     #[test]
-    fn opens_and_resolves_sheets() {
+    fn opens_and_resolves_a_real_workbook() {
         let xlsx = Xlsx::open(SAMPLE).expect("opens");
-        assert_eq!(xlsx.sheets.len(), 2);
-        assert_eq!(xlsx.sheets[0].name, "Customers");
-        assert_eq!(xlsx.sheets[1].name, "Notes");
+        assert_eq!(xlsx.sheets.len(), 1);
+        assert_eq!(xlsx.sheets[0].name, "in");
     }
 
     #[test]
@@ -538,8 +543,24 @@ mod tests {
     }
 
     #[test]
-    fn extracts_shared_and_inline_cells() {
+    fn extracts_shared_string_cells_from_a_real_workbook() {
         let cells = Xlsx::open(SAMPLE).unwrap().extract().unwrap();
+        // The header labels and the first data row's PII, on sheet `in`.
+        assert_eq!(cell(&cells, "in", 0, 1).unwrap().text, "email");
+        assert_eq!(
+            cell(&cells, "in", 1, 1).unwrap().text,
+            "alice.johnson@example.com"
+        );
+        assert_eq!(cell(&cells, "in", 1, 5).unwrap().text, "123-45-6789");
+        assert_eq!(
+            cell(&cells, "in", 2, 1).unwrap().text,
+            "bob.smith@example.com"
+        );
+    }
+
+    #[test]
+    fn extracts_shared_and_inline_cells() {
+        let cells = Xlsx::open(SHARED).unwrap().extract().unwrap();
         assert_eq!(cell(&cells, "Customers", 0, 0).unwrap().text, "Email");
         assert_eq!(
             cell(&cells, "Customers", 1, 0).unwrap().text,
@@ -560,7 +581,7 @@ mod tests {
 
     #[test]
     fn de_share_inlines_one_cell_and_leaves_the_pool_and_other_sheet() {
-        let xlsx = Xlsx::open(SAMPLE).unwrap();
+        let xlsx = Xlsx::open(SHARED).unwrap();
         // Redact only sheet1!A2 (alice). sheet2!A1 shares the same pool entry.
         let edit = CellEdit {
             sheet: String::from("Customers"),
@@ -591,7 +612,7 @@ mod tests {
 
     #[test]
     fn redacting_every_reference_prunes_the_orphaned_pool_entry() {
-        let xlsx = Xlsx::open(SAMPLE).unwrap();
+        let xlsx = Xlsx::open(SHARED).unwrap();
         // Redact BOTH cells that reference alice's pool entry (sheet1!A2 and
         // sheet2!A1). With no reference left, the pooled value must not survive.
         let edits = [
@@ -637,7 +658,7 @@ mod tests {
 
     #[test]
     fn inline_edit_splices_in_place() {
-        let xlsx = Xlsx::open(SAMPLE).unwrap();
+        let xlsx = Xlsx::open(SHARED).unwrap();
         let edit = CellEdit {
             sheet: String::from("Customers"),
             row: 1,
@@ -652,7 +673,7 @@ mod tests {
 
     #[test]
     fn edit_text_is_xml_escaped() {
-        let xlsx = Xlsx::open(SAMPLE).unwrap();
+        let xlsx = Xlsx::open(SHARED).unwrap();
         let edit = CellEdit {
             sheet: String::from("Customers"),
             row: 1,
@@ -667,7 +688,7 @@ mod tests {
 
     #[test]
     fn rewrite_rejects_an_unknown_sheet() {
-        let xlsx = Xlsx::open(SAMPLE).unwrap();
+        let xlsx = Xlsx::open(SHARED).unwrap();
         let edit = CellEdit {
             sheet: String::from("Ghost"),
             row: 0,
@@ -679,7 +700,7 @@ mod tests {
 
     #[test]
     fn unedited_parts_are_byte_identical() {
-        let xlsx = Xlsx::open(SAMPLE).unwrap();
+        let xlsx = Xlsx::open(SHARED).unwrap();
         let edit = CellEdit {
             sheet: String::from("Customers"),
             row: 1,
@@ -690,7 +711,7 @@ mod tests {
         // sheet2 was not edited, so its bytes are unchanged.
         assert_eq!(
             read_part(&out, "xl/worksheets/sheet2.xml"),
-            read_part(SAMPLE, "xl/worksheets/sheet2.xml"),
+            read_part(SHARED, "xl/worksheets/sheet2.xml"),
         );
     }
 

@@ -1,17 +1,15 @@
 //! End-to-end DOCX codec round-trip: decode → analyze → anonymize → encode.
 //!
-//! A container format: the body XML is redacted as text and the embedded
-//! image is driven by the orchestrator's image pipeline (mock LLM, detects
-//! nothing), while the content-types manifest passes through unchanged.
-//!
-//! The fixture is shaped like a real generator (docx.js) output: its XML parts
-//! carry a leading UTF-8 BOM, so detection must find the body PII against the
-//! true byte offsets rather than shift off them; and its two emails live both
-//! in the body and as external hyperlink `mailto:` targets in
-//! `word/_rels/document.xml.rels`, so redaction must reach the targets in the
-//! relationships part, not just the body.
+//! The fixture is a real Word-authored document: its PII spans the body
+//! (`word/document.xml`), a page header (`word/header3.xml`), and an external
+//! hyperlink `mailto:` target in `word/_rels/document.xml.rels`, so redaction
+//! must reach every text-bearing part and the relationship targets — not just
+//! the body — while the styles, theme, and content-types parts pass through
+//! unchanged.
 
 mod fixtures;
+
+use std::io::Read;
 
 use elide::Result;
 use elide::entity::builtins;
@@ -25,15 +23,26 @@ const FIXTURE: Fixture = Fixture {
 };
 
 const BODY_PART: &str = "word/document.xml";
-const IMAGE_PART: &str = "word/media/image1.png";
+const HEADER_PART: &str = "word/header3.xml";
 const RELS_PART: &str = "word/_rels/document.xml.rels";
+
+/// Every PII value in the document, across its body, header, and relationships.
+const PII: &[&str] = &[
+    "alice.johnson@example.com",
+    "bob.smith@example.com",
+    "+1 (415) 555-0142",
+    "+1 (510) 555-0199",
+    "4111 1111 1111 1111",
+    "GB29 NWBK 6016 1331 9268 19",
+    "123-45-6789",
+    "192.168.1.42",
+];
 
 #[tokio::test]
 async fn docx_detects_and_redacts() -> Result<()> {
     let outcome = FIXTURE.run().await?;
 
-    // The shipped patterns find the same labels they do in the other
-    // `sample.*` fixtures.
+    // The shipped patterns find every sensitive label across the document.
     for label in [
         builtins::EMAIL_ADDRESS.to_ref(),
         builtins::PHONE_NUMBER.to_ref(),
@@ -45,22 +54,9 @@ async fn docx_detects_and_redacts() -> Result<()> {
         assert_label_present(&outcome.entities, &label);
     }
 
-    // The body XML part: originals gone, replacement tokens in.
+    // The body part: originals gone, replacement tokens in.
     let body = outcome.part(BODY_PART).expect("body part present");
     let body = String::from_utf8(body).expect("body XML is UTF-8");
-    assert_pii_removed(
-        &body,
-        &[
-            "alice.johnson@example.com",
-            "bob.smith@example.com",
-            "+1 (415) 555-0142",
-            "+1 (510) 555-0199",
-            "4111 1111 1111 1111",
-            "GB29 NWBK 6016 1331 9268 19",
-            "123-45-6789",
-            "192.168.1.42",
-        ],
-    );
     assert_tokens_present(
         &body,
         &[
@@ -72,29 +68,56 @@ async fn docx_detects_and_redacts() -> Result<()> {
         ],
     );
 
-    // The two emails are also external hyperlink `mailto:` targets in the
-    // relationships part. Redaction must reach them there — the part survives,
-    // but the plaintext addresses are gone and the redaction token is in their
-    // place.
+    // The header carries an email too, and it is redacted in its own part.
+    let header = outcome.part(HEADER_PART).expect("header part present");
+    let header = String::from_utf8(header).expect("header XML is UTF-8");
+    assert_pii_removed(&header, &["alice.johnson@example.com"]);
+    assert_tokens_present(&header, &["[email_address]"]);
+
+    // The body email is also an external hyperlink `mailto:` target in the
+    // relationships part; redaction reaches it there too.
     let rels = outcome
         .part(RELS_PART)
         .expect("relationships part must survive");
     let rels = String::from_utf8(rels).expect("relationships XML is UTF-8");
-    assert_pii_removed(
-        &rels,
-        &["alice.johnson@example.com", "bob.smith@example.com"],
-    );
+    assert_pii_removed(&rels, &["bob.smith@example.com"]);
     assert_tokens_present(&rels, &["[email_address]"]);
 
-    // The embedded image survives as a valid PNG, and the content-types
-    // manifest is still present.
-    let image = outcome.part(IMAGE_PART).expect("image part present");
-    assert_eq!(&image[..8], b"\x89PNG\r\n\x1a\n", "image part is not a PNG");
+    // The real guarantee: no PII value survives in ANY part of the output.
+    for part in part_names(&outcome.redacted) {
+        let bytes = outcome.part(&part).expect("listed part is readable");
+        let text = String::from_utf8_lossy(&bytes);
+        for pii in PII {
+            assert!(!text.contains(pii), "PII `{pii}` survived in part `{part}`");
+        }
+    }
+
+    // The content-types manifest still round-trips.
     assert!(
         outcome.part("[Content_Types].xml").is_some(),
         "content-types part must survive",
     );
     Ok(())
+}
+
+/// Every entry name in the redacted zip, so the leak scan covers all parts.
+fn part_names(zip_bytes: &[u8]) -> Vec<String> {
+    let mut archive =
+        zip::ZipArchive::new(std::io::Cursor::new(zip_bytes)).expect("output is a zip");
+    (0..archive.len())
+        .filter_map(|i| {
+            let mut entry = archive.by_index(i).ok()?;
+            // Skip binary parts (fonts, images) — the PII scan is over text.
+            let name = entry.name().to_owned();
+            if name.ends_with(".xml") || name.ends_with(".rels") {
+                let mut buf = String::new();
+                let _ = entry.read_to_string(&mut buf);
+                Some(name)
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 /// A [`Report`] rebuilt from scratch — as a consumer would after serializing
@@ -105,12 +128,10 @@ async fn docx_detects_and_redacts() -> Result<()> {
 #[cfg(feature = "serde")]
 #[tokio::test]
 async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
-    use elide::codec::{FormatRegistry, PartId};
+    use elide::codec::FormatRegistry;
     use elide::detection::Analyzer;
     use elide::entity::audit::AuditKind;
-    use elide::modality::image::Image;
     use elide::modality::text::Text;
-    use elide::recognition::llm::LlmRecognizer;
     use elide::recognition::pattern::PatternRecognizer;
     use elide::redaction::operators::{Erase, Replace};
     use elide::redaction::{Anonymizer, Rule};
@@ -128,29 +149,14 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
         ))
         .with(Rule::fallback(Erase));
     let orchestrator = Orchestrator::new(&registry)
-        .with_modality::<Text>(Analyzer::new().with_recognizer(patterns), anonymizer)
-        .with_modality::<Image>(
-            Analyzer::new().with_recognizer(
-                LlmRecognizer::<Image>::builder()
-                    .with_name("mock-image")
-                    .with_mock_backend()
-                    .with_default_prompt()
-                    .build()?,
-            ),
-            Anonymizer::new(),
-        );
+        .with_modality::<Text>(Analyzer::new().with_recognizer(patterns), anonymizer);
 
-    // Phase 1: analyze, then copy the entities out by modality — exactly what
-    // a caller can serialize and ship to another process.
+    // Phase 1: analyze, then copy the body entities out — exactly what a caller
+    // can serialize and ship to another process.
     let mut doc = registry.decode(FIXTURE.source, "docx").await?;
     let mut report = orchestrator.analyze(&mut doc, &Directives::new()).await?;
     let body = report
         .entities::<Text>()
-        .map(|v| v.to_vec())
-        .unwrap_or_default();
-    let image_part = PartId::new(IMAGE_PART);
-    let part = report
-        .part_entities::<Image>(&image_part)
         .map(|v| v.to_vec())
         .unwrap_or_default();
     assert!(!body.is_empty(), "the body should detect entities");
@@ -158,16 +164,14 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
     // Phase 2: rebuild a FRESH report from the copied entities (no cached
     // handles), on a FRESH document handle, and apply. This forces the
     // re-decode path — the proof a deserialized report still redacts.
-    let rebuilt = Report::new()
-        .insert_body::<Text>(body)
-        .insert_part::<Image>(image_part, part);
+    let rebuilt = Report::new().insert_body::<Text>(body);
     let mut doc2 = registry.decode(FIXTURE.source, "docx").await?;
     let mut applied = orchestrator.anonymize_with(&mut doc2, rebuilt).await?;
 
     let encoded = doc2.encode()?;
     let redacted = String::from_utf8_lossy(encoded.as_bytes()).into_owned();
     assert!(
-        !redacted.contains("alice.johnson@example.com"),
+        !redacted.contains("bob.smith@example.com"),
         "a rebuilt report must still redact the body",
     );
 
