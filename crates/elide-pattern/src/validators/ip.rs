@@ -31,8 +31,13 @@ pub fn ipv6(value: &str) -> bool {
         return false;
     }
     // Drop a `%zone` scope id before parsing: it is valid in text but not
-    // accepted by `Ipv6Addr::from_str`.
-    let addr = addr.split_once('%').map_or(addr, |(head, _)| head);
+    // accepted by `Ipv6Addr::from_str`. The zone must be a single non-empty
+    // segment — reject an empty (`fe80::1%`) or repeated (`fe80::1%a%b`) zone.
+    let addr = match addr.split_once('%') {
+        Some((head, zone)) if !zone.is_empty() && !zone.contains('%') => head,
+        Some(_) => return false,
+        None => addr,
+    };
     addr.parse::<Ipv6Addr>().is_ok()
 }
 
@@ -73,6 +78,8 @@ mod tests {
             "gggg::1",           // non-hex
             "1:2:3:4:5:6:7:8:9", // too many groups
             "2001:db8::/129",    // prefix out of range
+            "fe80::1%",          // empty zone id
+            "fe80::1%eth0%x",    // repeated zone separator
             "not an address",
         ] {
             assert!(!ipv6(addr), "{addr} should be rejected");
