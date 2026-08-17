@@ -18,10 +18,7 @@ impl Loader<Text> for TxtLoader {
     type Handler = TxtHandler;
 
     async fn decode(&self, content: ContentData) -> Result<TxtHandler> {
-        let text = content.decode()?;
-        let trailing_newline = text.ends_with('\n');
-        let lines: Vec<String> = text.lines().map(String::from).collect();
-        Ok(TxtHandler::new(lines, trailing_newline))
+        Ok(TxtHandler::new(content.decode()?))
     }
 }
 
@@ -38,8 +35,8 @@ mod tests {
             .decode(ContentData::from_text("hello\nworld\n"))
             .await?;
         assert_eq!(doc.format().as_str(), "elide.text.txt");
-        assert_eq!(doc.lines(), &["hello", "world"]);
-        assert!(doc.trailing_newline());
+        // The source is held verbatim, blank lines and trailing newline included.
+        assert_eq!(doc.text(), "hello\nworld\n");
         Ok(())
     }
 
@@ -48,9 +45,7 @@ mod tests {
         let doc = TxtLoader
             .decode(ContentData::from_text("single line"))
             .await?;
-        assert_eq!(doc.len(), 1);
-        assert_eq!(doc.line(0), Some("single line"));
-        assert!(!doc.trailing_newline());
+        assert_eq!(doc.text(), "single line");
         Ok(())
     }
 

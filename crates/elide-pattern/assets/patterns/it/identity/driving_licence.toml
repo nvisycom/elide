@@ -6,7 +6,9 @@ name = "it-driving-licence"
 labels = ["drivers_license"]
 countries = ["IT"]
 languages = ["it"]
-context = [
+
+[context]
+keywords = [
   "patente di guida",
   "patente",
   "motorizzazione civile",

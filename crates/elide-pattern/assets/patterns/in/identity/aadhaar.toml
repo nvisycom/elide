@@ -6,7 +6,9 @@ name = "in-aadhaar"
 labels = ["government_id"]
 countries = ["IN"]
 languages = ["en", "hi"]
-context = [
+
+[context]
+keywords = [
   "aadhaar",
   "uidai",
   "unique identification authority",

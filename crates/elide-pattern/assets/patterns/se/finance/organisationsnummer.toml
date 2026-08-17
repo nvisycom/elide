@@ -6,7 +6,9 @@ name = "se-organisationsnummer"
 labels = ["company_id"]
 countries = ["SE"]
 languages = ["sv"]
-context = [
+
+[context]
+keywords = [
   "organisationsnummer",
   "orgnr",
   "org nr",

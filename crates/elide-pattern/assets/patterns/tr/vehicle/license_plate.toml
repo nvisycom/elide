@@ -6,7 +6,9 @@ name = "tr-license-plate"
 labels = ["license_plate"]
 countries = ["TR"]
 languages = ["tr"]
-context = [
+
+[context]
+keywords = [
   "plaka",
   "araç plakası",
   "plaka numarası",

@@ -1,0 +1,40 @@
+# Monetary amount: a number that reads as a money value — grouped thousands
+# and/or a decimal fraction (`5,000`, `1000.50`, `1,234,567.89`), or a bare
+# integer beside a currency (`5000 USD`).
+#
+# Weak on its own: a bare number is rarely a monetary amount without evidence.
+# Its `[context]` sources keywords from the currency dictionaries — every
+# currency name/code (`USD`, `Euro`, `Bitcoin`, …) becomes a boost keyword — so
+# a number next to a currency is lifted over the threshold. The amount is the
+# number only; a currency term is its own `currency` entity, so a policy can
+# redact the value while keeping (or also redacting) the currency independently.
+
+name = "monetary-amount"
+labels = ["monetary_amount"]
+
+[context]
+dictionaries = ["currencies", "cryptocurrencies"]
+
+[[variants]]
+# Grouped thousands with an optional decimal (`1,234`, `1,234.56`).
+regex = '\b\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?\b'
+score = 0.3
+
+[[variants]]
+# A dot-decimal number (`1000.50`, `0.99`) — the fraction hints at money.
+regex = '\b\d+\.\d{2}\b'
+score = 0.2
+
+[[variants]]
+# A comma-decimal number (`1000,50`, `0,99`) — the comma-as-decimal
+# rendering used across much of Europe and Latin America. The two-digit
+# fraction distinguishes it from grouped thousands (`1,234`, three digits).
+regex = '\b\d+,\d{2}\b'
+score = 0.2
+
+[[variants]]
+# A bare integer (`5000`). Ambiguous on its own, so its base score sits well
+# below threshold: it only becomes a monetary amount when a currency term
+# nearby boosts it (a lone `5000` in prose is never flagged).
+regex = '\b\d+\b'
+score = 0.1

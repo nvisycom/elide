@@ -6,7 +6,9 @@ name = "ca-sin"
 labels = ["government_id"]
 countries = ["CA"]
 languages = ["en", "fr"]
-context = [
+
+[context]
+keywords = [
   "sin",
   "social insurance number",
   "social insurance",

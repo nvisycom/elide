@@ -12,7 +12,9 @@ name = "us-medical-license"
 labels = ["medical_id"]
 countries = ["US"]
 languages = ["en"]
-context = [
+
+[context]
+keywords = [
   "medical",
   "license",
   "licence",

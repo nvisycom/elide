@@ -7,7 +7,9 @@ name = "de-tax-number"
 labels = ["tax_id"]
 countries = ["DE"]
 languages = ["de"]
-context = [
+
+[context]
+keywords = [
   "steuernummer",
   "st-nr",
   "stnr",

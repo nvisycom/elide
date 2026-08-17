@@ -233,14 +233,53 @@ fn recognizer_context_scopes_by_language_and_country() {
     // The asserted language is the primary one.
     assert_eq!(ctx.primary_language(), Some(&en_us));
 
-    // Empty scope always applies.
-    assert!(ctx.applies_to_language(&[]));
+    // Country scope: empty always applies; matching applies, non-matching not.
     assert!(ctx.applies_to_country(&[]));
-    // Matching scope applies; non-matching does not.
-    assert!(ctx.applies_to_language(&[en]));
-    assert!(!ctx.applies_to_language(&[fr]));
     assert!(ctx.applies_to_country(&[CountryCode::from_alpha2("US").unwrap()]));
     assert!(!ctx.applies_to_country(&[CountryCode::from_alpha2("GB").unwrap()]));
+
+    // Language scope: a matching or empty scope applies, a mismatch does not.
+    // The only language is the asserted en-US, so the asserted-OR-detected
+    // `applies_to_language` and the asserted-only `applies_to_asserted_language`
+    // agree here — each rule scope is checked through both.
+    let en_scope = [en];
+    let fr_scope = [fr];
+    assert!(ctx.applies_to_language(&[]));
+    assert!(ctx.applies_to_language(&en_scope));
+    assert!(!ctx.applies_to_language(&fr_scope));
+    assert!(ctx.applies_to_asserted_language(&[]));
+    assert!(ctx.applies_to_asserted_language(&en_scope));
+    assert!(!ctx.applies_to_asserted_language(&fr_scope));
+}
+
+#[test]
+fn a_detected_language_never_filters() {
+    use elide_core::recognition::{RecognizerContext, Scope};
+
+    let de = LanguageTag::parse("de").unwrap();
+    let es = LanguageTag::parse("es").unwrap();
+
+    // No asserted language; a detector reports Spanish with high confidence.
+    let scope = Scope::new();
+    let mut ctx: RecognizerContext<'_, Text> = RecognizerContext::new(&scope);
+    ctx.detect_language(Language::detected(es).with_confidence(Confidence::clamped(0.9)));
+
+    // A German-scoped rule still runs: detection is unreliable and must never
+    // suppress a match — only a caller assertion filters by language.
+    let de_scope = [de];
+    assert!(ctx.applies_to_asserted_language(&de_scope));
+    // The old asserted-OR-detected filter WOULD suppress it (detected es ≠ de).
+    assert!(!ctx.applies_to_language(&de_scope));
+
+    // `asserted_languages` excludes the detected one — the caller asserted
+    // nothing — so per-language context selection stays permissive rather than
+    // keying on the (unreliable) detected `es`.
+    assert!(ctx.asserted_languages().is_empty());
+    assert_eq!(
+        ctx.ranked_languages().len(),
+        1,
+        "detection is still recorded"
+    );
 }
 
 #[test]

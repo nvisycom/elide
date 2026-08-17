@@ -1,0 +1,19 @@
+Every sensitive value below is a weak, ambiguous shape on its own — a bare
+number a regex would not dare flag. Each earns detection only from a keyword
+sitting a few words away, inside the context window, that lifts its score
+over the threshold. Read each line as the positive half of a paired test:
+the same value with no keyword nearby lives in weak_without_context.txt and
+must stay undetected.
+
+Please debit the payment card 4111 1111 1111 1111 on file for the renewal.
+The checking account 000123456789 is where the direct deposit should land.
+His US social security number is 123-45-6789 for the tax filing.
+Her passport number is C31195855 and expires next spring.
+The driver license D1234563 was issued by the state last year.
+Mail it to postal code 90210 for the west-coast branch.
+The API key ctx_9f8e7d6c5b4a2b1c0d9e is scoped to the sandbox only.
+Wire it via IBAN GB29 NWBK 6016 1331 9268 19 to settle the invoice.
+
+None of these keywords ("payment card", "account", "social security",
+"passport", "driver license", "postal code", "API key", "IBAN") should
+themselves be redacted — only the value each one vouches for.

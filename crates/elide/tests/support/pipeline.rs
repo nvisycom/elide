@@ -14,7 +14,7 @@ use elide::codec::{DocumentHandle, FormatRegistry, UntypedDocumentHandle};
 use elide::detection::Analyzer;
 use elide::detection::filter::FilterLayer;
 use elide::detection::reconcile::{Merging, ReconcileLayer, Structural};
-use elide::entity::{Entity, builtins};
+use elide::entity::{Entity, Label, builtins};
 #[cfg(feature = "stt")]
 use elide::modality::audio::Audio;
 #[cfg(any(feature = "llm", feature = "ocr"))]
@@ -98,19 +98,69 @@ impl<M: Modality> PipelineOutcome<M> {
 }
 
 /// Build the detection side: the real built-in pattern recognizer (with
-/// context boosting), behind the standard dedup pipeline. Generic over any
-/// text-payload modality the patterns serve.
+/// context boosting) plus — when the `ner` feature is on — the NER
+/// recognizer, behind the standard dedup pipeline. Generic over any
+/// text-payload modality the recognizers serve.
+///
+/// The NER recognizer rides a mock backend that finds nothing today, so
+/// name/organization/address fixtures round-trip un-redacted for now; the
+/// pipeline shape is already the intended one, so those fixtures light up
+/// unchanged once a real backend is configured.
 pub fn build_analyzer<M: TextRecognizable>() -> Result<Analyzer<M>> {
     let patterns = PatternRecognizer::builder()
         .with_builtin_patterns()
         .with_builtin_dictionaries()
         .build_context_enhanced()?;
 
-    Ok(Analyzer::new()
-        .with_recognizer(patterns)
+    let analyzer = Analyzer::new();
+
+    // Detect the document's languages first (when `lingua` is on), so a
+    // per-language context rule — a credit card beside `tarjeta` / `carte` /
+    // `Kreditkarte` — fires under whatever language that sentence is in. With no
+    // caller-asserted language, the enricher's detections are authoritative.
+    #[cfg(feature = "lingua")]
+    let analyzer = {
+        use elide::enrichment::lingua::LinguaEnricher;
+        analyzer.with_enricher(LinguaEnricher::unrestricted())
+    };
+
+    let analyzer = analyzer.with_recognizer(patterns);
+
+    #[cfg(feature = "ner")]
+    let analyzer = {
+        use elide::recognition::ner::NerRecognizer;
+        let ner = NerRecognizer::builder()
+            .with_name("mock-ner")
+            .with_mock_backend()
+            .build()?;
+        analyzer.with_recognizer(ner)
+    };
+
+    Ok(analyzer
         .with_layer(ReconcileLayer::same_label(Merging::max()))
         .with_layer(ReconcileLayer::cross_label(Structural::default()))
         .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE)))
+}
+
+/// The [`Text`] analyzer with the mock LLM recognizer added on top of
+/// [`build_analyzer`]'s pattern + NER. The LLM recognizer is bound to
+/// [`LlmModality`], which `Text` satisfies but `Tabular` does not (see
+/// `testdata/BUGS.md` B9), so only `Text` pipelines can carry it today; a
+/// container's tabular body still drives its text sub-parts through this
+/// `Text` pipeline.
+///
+/// Like the mock NER, the mock LLM finds nothing today — it makes the
+/// pipeline shape the intended one, so LLM-tier fixtures light up unchanged
+/// once a real backend is configured.
+#[cfg(feature = "llm")]
+pub fn build_text_analyzer() -> Result<Analyzer<Text>> {
+    use elide::recognition::llm::LlmRecognizer;
+    let llm = LlmRecognizer::builder()
+        .with_name("mock-llm")
+        .with_mock_backend()
+        .with_default_prompt()
+        .build()?;
+    Ok(build_analyzer::<Text>()?.with_recognizer(llm))
 }
 
 /// Build the redaction side: one operator per label the shipped patterns
@@ -192,6 +242,30 @@ impl Fixture {
     /// [`pdf_format_with`]: elide::codec::handler::pdf_format_with
     pub async fn run_with(&self, registry: FormatRegistry) -> Result<PipelineOutcome<Text>> {
         self.run_typed::<Text>(registry).await
+    }
+
+    /// Run the [`Text`] pipeline with the request [`LabelCatalog`] scoped to
+    /// `labels`, so a test can assert that only the requested entity types are
+    /// emitted (and everything else is left in place). An empty `labels`
+    /// iterator would request nothing; pass the labels under test.
+    pub async fn run_with_labels(
+        &self,
+        labels: impl IntoIterator<Item = Label>,
+    ) -> Result<PipelineOutcome<Text>> {
+        let scope = Scope::new().with_catalog(labels.into_iter().collect());
+        self.run_typed_with::<Text>(FormatRegistry::with_builtin(), scope)
+            .await
+    }
+
+    /// Run the [`Text`] pipeline with a caller-**asserted** language, so a
+    /// test can exercise the soft language signal: a match from a pattern
+    /// whose locale the asserted language contradicts is confidence-demoted
+    /// (and typically pruned by the threshold). An assertion also suppresses
+    /// language *detection* (the assertion is authoritative).
+    pub async fn run_with_language(&self, language: LanguageTag) -> Result<PipelineOutcome<Text>> {
+        let scope = Scope::new().with_language(Language::asserted(language));
+        self.run_typed_with::<Text>(FormatRegistry::with_builtin(), scope)
+            .await
     }
 
     /// Run the pipeline as the [`Tabular`] modality (`csv`).
@@ -325,15 +399,34 @@ impl Fixture {
         Mask: Operator<M>,
         Erase: Operator<M>,
     {
-        let mut document = UntypedDocumentHandle::new(self.decode_as::<M>(&registry).await?);
+        // No asserted language: the analyzer's `LinguaEnricher` detects each
+        // document's languages, so a multilingual fixture activates every one
+        // of its languages' per-language context (asserting a single language
+        // would suppress detection — see `LinguaEnricher::enrich`). An empty
+        // catalog requests every label, so recognizers emit all they find.
+        self.run_typed_with::<M>(registry, Scope::new()).await
+    }
 
-        let en_tag = LanguageTag::parse("en").map_err(|e| {
-            Error::new(
-                ErrorKind::MalformedInput,
-                format!("invalid language tag: {e}"),
-            )
-        })?;
-        let scope = Scope::new().with_language(Language::asserted(en_tag));
+    /// [`run_typed`] with a caller-supplied [`Scope`], so a test can scope the
+    /// [`LabelCatalog`] (which entity types to emit), assert a language, or set
+    /// other request-level state.
+    ///
+    /// [`run_typed`]: Self::run_typed
+    async fn run_typed_with<M>(
+        &self,
+        registry: FormatRegistry,
+        scope: Scope,
+    ) -> Result<PipelineOutcome<M>>
+    where
+        M: TextRecognizable,
+        Entity<M>: Clone,
+        Vec<Entity<M>>: EntityGroup,
+        DocumentHandle<M>: StreamDataReader<M>,
+        Replace: Operator<M>,
+        Mask: Operator<M>,
+        Erase: Operator<M>,
+    {
+        let mut document = UntypedDocumentHandle::new(self.decode_as::<M>(&registry).await?);
 
         // One scope, shared across every modality pipeline.
         let orchestrator = Orchestrator::new(&registry)
@@ -348,8 +441,12 @@ impl Fixture {
         // drive them. When the body modality already is Text this re-registers
         // the same pipeline, which is a no-op; when it is Tabular it adds the
         // pipeline the container parts need.
-        let orchestrator = orchestrator
-            .with_modality::<Text>(build_analyzer::<Text>()?, build_anonymizer::<Text>());
+        #[cfg(feature = "llm")]
+        let text_analyzer = build_text_analyzer()?;
+        #[cfg(not(feature = "llm"))]
+        let text_analyzer = build_analyzer::<Text>()?;
+        let orchestrator =
+            orchestrator.with_modality::<Text>(text_analyzer, build_anonymizer::<Text>());
 
         // Two phases so the entities surface for assertions: detect, copy
         // the body entities out, then apply with no editing.

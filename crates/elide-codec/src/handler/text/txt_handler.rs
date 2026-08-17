@@ -1,10 +1,20 @@
-//! Plain-text handler: holds loaded text content and streams it
-//! line-by-line via [`Handler<Text>`], with random-access reads /
-//! redactions.
+//! Plain-text handler: holds the loaded text as a single source buffer
+//! and streams it as one [`Chunk<Text>`] per paragraph block, with
+//! random-access reads / redactions addressed by absolute byte offset.
 //!
-//! The handler stores the text as a vector of lines together with a
-//! trailing-newline flag so the original file can be reconstructed
-//! byte-for-byte after edits.
+//! A block is a maximal run of non-blank lines; blank lines delimit
+//! blocks and are not themselves emitted. Chunking by block rather than
+//! by line is what lets a multi-line pattern match: a PEM
+//! `-----BEGIN…END-----` private-key block or a PGP block spans several
+//! lines, so a per-line chunk could never contain it, while the block it
+//! lives in is a single chunk. This mirrors the other codecs, which each
+//! chunk by a semantic unit (CSV by cell, XML by text node, HTML by
+//! block element) rather than by an arbitrary physical span.
+//!
+//! The buffer holds the source bytes verbatim — blank-line gaps included
+//! — so a redaction splices it in place and encoding is byte-exact.
+
+use std::ops::Range;
 
 use elide_core::Result;
 use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
@@ -28,19 +38,15 @@ pub fn format() -> Format {
         .with_content_types(["text/plain"])
 }
 
-/// Handler for loaded plain-text content. Each line is independently
-/// addressable via [`TextLocation`].
-///
-/// `line_starts` is a cumulative-offset index maintained alongside
-/// `lines`: `line_starts[i]` is the byte position of line `i` in the
-/// serialized output, and `line_starts[lines.len()]` is the total-length
-/// sentinel. Random-access `read_at` / `write_at` (from [`DataReader`] /
-/// [`DataWriter`]) resolve a byte offset to a line in `O(log N)`.
+/// Handler for loaded plain-text content. The whole document is held in a
+/// single buffer whose bytes are the source verbatim; `blocks` indexes the
+/// paragraph spans a recognizer sees. A redaction splices the buffer in
+/// place, so encoding is byte-exact and block offsets stay valid because
+/// edits are applied right-to-left.
 #[derive(Debug)]
 pub(crate) struct TxtHandler {
-    lines: Vec<String>,
-    line_starts: Vec<usize>,
-    trailing_newline: bool,
+    text: String,
+    blocks: Vec<Range<usize>>,
     cursor: usize,
 }
 
@@ -51,31 +57,23 @@ impl Handler<Text> for TxtHandler {
     }
 
     fn encode(&self) -> Result<ContentData> {
-        let mut out = self.lines.join("\n");
-        if self.trailing_newline && !self.lines.is_empty() {
-            out.push('\n');
-        }
-        Ok(ContentData::from_text(out))
+        Ok(ContentData::from_text(self.text.clone()))
     }
 
     async fn read_next(&mut self) -> Result<Option<Chunk<Text>>> {
-        if self.cursor >= self.lines.len() {
+        let Some(range) = self.blocks.get(self.cursor).cloned() else {
             return Ok(None);
-        }
-        let i = self.cursor;
-        let start = self.line_starts[i];
-        let end = self.line_starts[i + 1] - 1; // strip the implicit '\n' separator
-        let line = &self.lines[i];
+        };
         self.cursor += 1;
         Ok(Some(Chunk {
-            location: TextLocation::new(start, end),
-            data: TextData::new(line.clone()),
+            location: TextLocation::new(range.start, range.end),
+            data: TextData::new(self.text[range].to_string()),
             hints: Vec::new(),
         }))
     }
 
     fn lift(&self, chunk: &Chunk<Text>, local: TextLocation) -> Option<TextLocation> {
-        // TXT chunks are byte-for-byte slices of source, so lifting is an
+        // A block chunk's bytes are a verbatim source slice, so lifting is an
         // identity offset add of the chunk-local range against the chunk's
         // start, bounded by its end.
         let base = chunk.location.range.start;
@@ -84,8 +82,6 @@ impl Handler<Text> for TxtHandler {
         if start > end || end > chunk.location.range.end {
             return None;
         }
-        // Plain text: the decoded stream *is* the source, so `start`/`end`
-        // already address the source; no separate source range is carried.
         Some(TextLocation::new(start, end).with_page(chunk.location.page))
     }
 }
@@ -93,26 +89,18 @@ impl Handler<Text> for TxtHandler {
 #[async_trait::async_trait]
 impl DataReader<Text> for TxtHandler {
     async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
-        let Some(i) = self.line_for(location.range.start) else {
-            return Ok(None);
-        };
-        let line_start = self.line_starts[i];
-        let line_end = self.line_starts[i + 1] - 1;
-        if location.range.end > line_end {
-            return Ok(None); // crosses a line boundary
-        }
-        let local_start = location.range.start - line_start;
-        let local_end = location.range.end - line_start;
-        Ok(self.lines[i].get(local_start..local_end).map(TextData::new))
+        Ok(self
+            .text
+            .get(location.range.start..location.range.end)
+            .map(TextData::new))
     }
 }
 
 #[async_trait::async_trait]
 impl DataWriter<Text> for TxtHandler {
     async fn write_at(&mut self, mut redactions: Redactions<Text>) -> Result<()> {
-        // Apply right-to-left so each edit's length delta doesn't
-        // invalidate earlier locations: sort ascending by position, then
-        // walk in reverse.
+        // Apply right-to-left so each edit's length delta doesn't invalidate
+        // earlier locations: sort ascending by position, then walk in reverse.
         redactions.sort_by_position();
         for (location, replacement) in redactions.into_iter().rev() {
             self.redact_one(&location, &replacement)?;
@@ -122,92 +110,77 @@ impl DataWriter<Text> for TxtHandler {
 }
 
 impl TxtHandler {
-    /// Create a new handler from lines and a trailing-newline flag.
-    pub fn new(lines: Vec<String>, trailing_newline: bool) -> Self {
-        let line_starts = compute_line_starts(&lines);
+    /// Create a new handler over the document's raw text.
+    pub fn new(text: String) -> Self {
+        let blocks = paragraph_blocks(&text);
         Self {
-            lines,
-            line_starts,
-            trailing_newline,
+            text,
+            blocks,
             cursor: 0,
         }
     }
 
-    /// All lines in the document. Test-only inspection helper.
+    /// The document text. Test-only inspection helper.
     #[cfg(test)]
-    pub fn lines(&self) -> &[String] {
-        &self.lines
-    }
-
-    /// A specific line by 0-based index. Test-only inspection helper.
-    #[cfg(test)]
-    pub fn line(&self, index: usize) -> Option<&str> {
-        self.lines.get(index).map(String::as_str)
-    }
-
-    /// Whether the original source had a trailing newline. Test-only
-    /// inspection helper.
-    #[cfg(test)]
-    pub fn trailing_newline(&self) -> bool {
-        self.trailing_newline
-    }
-
-    /// Total number of lines. Test-only inspection helper.
-    #[cfg(test)]
-    pub fn len(&self) -> usize {
-        self.lines.len()
-    }
-
-    /// Line index containing `byte_offset`, or `None` if past the end.
-    fn line_for(&self, byte_offset: usize) -> Option<usize> {
-        match self.line_starts.binary_search(&byte_offset) {
-            Ok(i) if i < self.lines.len() => Some(i),
-            Ok(_) => None, // landed on the trailing sentinel
-            Err(i) if i > 0 && i <= self.lines.len() => Some(i - 1),
-            _ => None,
-        }
-    }
-
-    /// Shift every `line_starts[j]` for `j > i` by `delta`. Called after
-    /// a redaction changes the length of line `i`.
-    fn shift_starts_after(&mut self, i: usize, delta: isize) {
-        if delta == 0 {
-            return;
-        }
-        for s in &mut self.line_starts[i + 1..] {
-            *s = s.saturating_add_signed(delta);
-        }
+    pub fn text(&self) -> &str {
+        &self.text
     }
 
     fn redact_one(&mut self, location: &TextLocation, replacement: &TextReplacement) -> Result<()> {
-        let Some(i) = self.line_for(location.range.start) else {
-            return Ok(());
-        };
-        let line_start = self.line_starts[i];
-        let line_end = self.line_starts[i + 1] - 1;
-        if location.range.end > line_end {
+        let range = location.range.start..location.range.end;
+        // An inverted, out-of-bounds, or non-UTF-8-boundary range is skipped
+        // rather than panicking: a detector may report a range that no longer
+        // aligns after an earlier splice, and a redaction must never corrupt
+        // bytes. `replace_range` panics on an inverted range, so guard it here.
+        if range.start > range.end
+            || range.end > self.text.len()
+            || !self.text.is_char_boundary(range.start)
+            || !self.text.is_char_boundary(range.end)
+        {
             return Ok(());
         }
-        let local_start = location.range.start - line_start;
-        let local_end = location.range.end - line_start;
         let value = replacement.value().unwrap_or_default();
-        let before_len = self.lines[i].len();
-        redact::replace_range(&mut self.lines[i], value, local_start..local_end)?;
-        let after_len = self.lines[i].len();
-        self.shift_starts_after(i, after_len as isize - before_len as isize);
+        redact::replace_range(&mut self.text, value, range)?;
         Ok(())
     }
 }
 
-fn compute_line_starts(lines: &[String]) -> Vec<usize> {
-    let mut starts = Vec::with_capacity(lines.len() + 1);
+/// Byte ranges of the paragraph blocks in `text`: each is a maximal run of
+/// consecutive non-blank lines. Blank (empty or whitespace-only) lines
+/// delimit blocks and are excluded, as is the trailing `\n` of a block's
+/// last line. A block therefore never spans a blank-line gap, so an entity
+/// found inside one is contiguous in the source.
+fn paragraph_blocks(text: &str) -> Vec<Range<usize>> {
+    let mut blocks = Vec::new();
     let mut offset = 0usize;
-    for line in lines {
-        starts.push(offset);
-        offset += line.len() + 1; // +1 for the implicit '\n' separator
+    let mut current: Option<Range<usize>> = None;
+    for line in text.split_inclusive('\n') {
+        // Drop a trailing `\r\n` or `\n` as one line ending, so a CRLF file
+        // does not carry a stray `\r` at each block's end (internal CRLF bytes
+        // in a multi-line block are kept — only the terminator is trimmed).
+        let ending = if line.ends_with("\r\n") {
+            2
+        } else {
+            usize::from(line.ends_with('\n'))
+        };
+        let content_end = offset + line.len() - ending;
+        let is_blank = text[offset..content_end].trim().is_empty();
+        if is_blank {
+            if let Some(block) = current.take() {
+                blocks.push(block);
+            }
+        } else {
+            match &mut current {
+                Some(block) => block.end = content_end,
+                None => current = Some(offset..content_end),
+            }
+        }
+        offset += line.len();
     }
-    starts.push(offset);
-    starts
+    if let Some(block) = current.take() {
+        blocks.push(block);
+    }
+    blocks
 }
 
 #[cfg(test)]
@@ -215,77 +188,113 @@ mod tests {
     use super::*;
 
     fn handler(text: &str) -> TxtHandler {
-        let trailing_newline = text.ends_with('\n');
-        let lines = text.lines().map(String::from).collect();
-        TxtHandler::new(lines, trailing_newline)
+        TxtHandler::new(text.to_string())
+    }
+
+    async fn chunks(text: &str) -> Vec<(usize, usize, String)> {
+        let mut h = handler(text);
+        let mut out = Vec::new();
+        while let Some(c) = h.read_next().await.unwrap() {
+            out.push((
+                c.location.range.start,
+                c.location.range.end,
+                c.data.as_str().to_string(),
+            ));
+        }
+        out
     }
 
     #[tokio::test]
-    async fn stream_yields_each_line() -> Result<()> {
+    async fn one_chunk_per_paragraph_block() {
+        let cs = chunks("para1 line1\npara1 line2\n\npara2\n").await;
+        assert_eq!(
+            cs,
+            vec![
+                (0, 23, "para1 line1\npara1 line2".to_string()),
+                (25, 30, "para2".to_string()),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_multi_line_block_is_a_single_chunk() {
+        // The PEM block spans three lines but is one chunk, so the multi-line
+        // private-key pattern can match it.
+        let src = "-----BEGIN KEY-----\nbody\n-----END KEY-----\n";
+        let cs = chunks(src).await;
+        assert_eq!(cs.len(), 1);
+        assert_eq!(cs[0].2, "-----BEGIN KEY-----\nbody\n-----END KEY-----");
+    }
+
+    #[tokio::test]
+    async fn blank_and_whitespace_only_lines_are_skipped() {
+        let cs = chunks("\n\nleading blanks\nsecond\n   \n").await;
+        assert_eq!(cs, vec![(2, 23, "leading blanks\nsecond".to_string())]);
+    }
+
+    #[tokio::test]
+    async fn crlf_line_endings_are_not_carried_into_a_block() {
+        // A CRLF terminator is trimmed whole — no stray `\r` at the block end —
+        // while an internal CRLF between the block's lines is kept.
+        let cs = chunks("first\r\nsecond\r\n\r\nthird\r\n").await;
+        assert_eq!(
+            cs,
+            vec![
+                (0, 13, "first\r\nsecond".to_string()),
+                (17, 22, "third".to_string()),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn no_trailing_newline() {
+        let cs = chunks("no newline").await;
+        assert_eq!(cs, vec![(0, 10, "no newline".to_string())]);
+    }
+
+    #[tokio::test]
+    async fn lift_is_identity_across_a_line_break() {
         let mut h = handler("hello\nworld\n");
-        let first = h.read_next().await?.unwrap();
-        assert_eq!(first.location.range.start, 0);
-        assert_eq!(first.location.range.end, 5);
-        assert_eq!(first.data.as_str(), "hello");
-        let second = h.read_next().await?.unwrap();
-        assert_eq!(second.location.range.start, 6);
-        assert_eq!(second.location.range.end, 11);
-        assert_eq!(second.data.as_str(), "world");
-        assert!(h.read_next().await?.is_none());
-        Ok(())
+        let chunk = h.read_next().await.unwrap().unwrap();
+        // A span crossing the internal line break lifts unchanged — this is
+        // what makes a multi-line pattern redactable.
+        let lifted = h.lift(&chunk, TextLocation::new(3, 8)).expect("in bounds");
+        assert_eq!(lifted.range.start, 3);
+        assert_eq!(lifted.range.end, 8);
     }
 
     #[tokio::test]
-    async fn lift_is_identity_on_second_line() -> Result<()> {
-        let mut h = handler("hello\nworld\n");
-        let _first = h.read_next().await?.unwrap();
-        let second = h.read_next().await?.unwrap();
-        let lifted = h.lift(&second, TextLocation::new(1, 4)).expect("in bounds");
-        assert_eq!(lifted.range.start, 7);
-        assert_eq!(lifted.range.end, 10);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn read_returns_line() -> Result<()> {
-        let h = handler("hello\nworld\n");
-        let loc = TextLocation {
-            range: 6..11,
-            ..Default::default()
-        };
-        assert_eq!(h.read_at(&loc).await?.unwrap().as_str(), "world");
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn read_cross_line_returns_none() -> Result<()> {
+    async fn read_returns_a_cross_line_span() -> Result<()> {
         let h = handler("hello\nworld\n");
         let loc = TextLocation {
             range: 3..8,
             ..Default::default()
         };
-        assert!(h.read_at(&loc).await?.is_none());
+        assert_eq!(h.read_at(&loc).await?.unwrap().as_str(), "lo\nwo");
         Ok(())
     }
 
     #[tokio::test]
-    async fn redact_replaces_whole_line() -> Result<()> {
-        let mut h = handler("hello\nworld\n");
+    async fn redact_a_multi_line_span() -> Result<()> {
+        let src = "before\n-----BEGIN KEY-----\nbody\n-----END KEY-----\nafter\n";
+        let mut h = handler(src);
+        let begin = src.find("-----BEGIN").unwrap();
+        let end = src.find("-----END KEY-----").unwrap() + "-----END KEY-----".len();
         let mut rs = Redactions::new();
         rs.push(
             TextLocation {
-                range: 6..11,
+                range: begin..end,
                 ..Default::default()
             },
-            TextReplacement::substituted("[REDACTED]"),
+            TextReplacement::substituted("[KEY]"),
         );
         h.write_at(rs).await?;
-        assert_eq!(h.lines(), &["hello", "[REDACTED]"]);
+        assert_eq!(h.text(), "before\n[KEY]\nafter\n");
         Ok(())
     }
 
     #[tokio::test]
-    async fn redact_multiple_lines_any_input_order() -> Result<()> {
+    async fn redact_multiple_spans_any_input_order() -> Result<()> {
         let mut h = handler("alpha\nbravo\ncharlie\n");
         let mut rs = Redactions::new();
         rs.push(
@@ -303,7 +312,7 @@ mod tests {
             TextReplacement::substituted("[A]"),
         );
         h.write_at(rs).await?;
-        assert_eq!(h.lines(), &["[A]", "bravo", "[C]"]);
+        assert_eq!(h.text(), "[A]\nbravo\n[C]\n");
         Ok(())
     }
 
@@ -319,38 +328,29 @@ mod tests {
             TextReplacement::substituted("nope"),
         );
         h.write_at(rs).await?;
-        assert_eq!(h.lines(), &["one line"]);
+        assert_eq!(h.text(), "one line");
         Ok(())
     }
 
     #[test]
-    fn encode_with_trailing_newline() -> Result<()> {
+    fn encode_round_trips_with_trailing_newline() -> Result<()> {
         let h = handler("hello\nworld\n");
         assert_eq!(h.encode()?.as_bytes(), b"hello\nworld\n");
         Ok(())
     }
 
     #[test]
-    fn encode_without_trailing_newline() -> Result<()> {
+    fn encode_round_trips_without_trailing_newline() -> Result<()> {
         let h = handler("no newline");
         assert_eq!(h.encode()?.as_bytes(), b"no newline");
         Ok(())
     }
 
-    #[tokio::test]
-    async fn line_starts_shift_after_shrink() -> Result<()> {
-        let mut h = handler("hello\nworld\n");
-        let mut rs = Redactions::new();
-        rs.push(
-            TextLocation {
-                range: 0..5,
-                ..Default::default()
-            },
-            TextReplacement::substituted("[X]"),
-        );
-        h.write_at(rs).await?;
-        assert_eq!(h.line_starts, vec![0, 4, 10]);
-        assert_eq!(h.lines(), &["[X]", "world"]);
+    #[test]
+    fn encode_preserves_blank_line_gaps() -> Result<()> {
+        // Blank lines are not chunks but must survive in the output verbatim.
+        let h = handler("a\n\n\n\nb\n");
+        assert_eq!(h.encode()?.as_bytes(), b"a\n\n\n\nb\n");
         Ok(())
     }
 }

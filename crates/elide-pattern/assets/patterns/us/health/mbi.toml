@@ -8,7 +8,9 @@ name = "us-mbi"
 labels = ["medical_id"]
 countries = ["US"]
 languages = ["en"]
-context = [
+
+[context]
+keywords = [
   "mbi",
   "medicare beneficiary",
   "medicare",

@@ -53,8 +53,14 @@ schema = [
 pattern = ["dep:elide-pattern"]
 ## Re-export the NER recognizer crate.
 ner = ["dep:elide-ner"]
-## Re-export the lingua language-detection crate.
+
+## Re-export the lingua language-detection crate. On its own no language
+## models are compiled in — add `lingua-common` or `lingua-all` for coverage.
 lingua = ["dep:elide-lingua"]
+## Lingua with the most widely-used language models.
+lingua-common = ["lingua", "elide-lingua/common"]
+## Lingua with every language model it ships (~75).
+lingua-all = ["lingua", "elide-lingua/all"]
 
 ## Re-export the LLM recognizer crate. Lean by default (the trait, recognizer,
 ## prompts, and — with `mock` — the stub backend); add `llm-rig` or a provider
@@ -182,7 +188,7 @@ required-features = ["codec-pdf-render", "mock", "serde"]
 
 [[test]]
 name = "format_txt"
-required-features = ["codec-txt", "mock", "serde"]
+required-features = ["codec-txt", "ner", "llm", "lingua-common", "mock", "serde"]
 
 [[test]]
 name = "format_json"
@@ -194,7 +200,7 @@ required-features = ["codec-html", "mock", "serde"]
 
 [[test]]
 name = "format_csv"
-required-features = ["codec-csv", "mock", "serde"]
+required-features = ["codec-csv", "ner", "llm", "lingua-common", "mock", "serde"]
 
 [[test]]
 name = "format_image"

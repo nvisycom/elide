@@ -1,0 +1,16 @@
+Context boosting reaches only so far: a keyword lifts a weak value's score
+only when it sits inside the window of a few words on either side. These
+lines probe that boundary with the same weak value (a bare payment-card
+number) and a "card" keyword placed at different distances.
+
+In window (keyword within the few-word span, value should be boosted and
+detected):
+  The card on file is 4111 1111 1111 1111 for you.
+
+Out of window (keyword pushed well past the span by filler words, so the
+value stays weak and undetected):
+  The card, according to the note we filed away last quarter, was 5555 5555 5555 4444.
+
+The first value is close enough to "card" to cross the threshold; the second
+is too far, so it must survive un-redacted even though the word "card" does
+appear earlier in the sentence.

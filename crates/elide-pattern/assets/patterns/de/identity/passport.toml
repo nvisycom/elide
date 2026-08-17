@@ -6,7 +6,9 @@ name = "de-passport"
 labels = ["passport_number"]
 countries = ["DE"]
 languages = ["de"]
-context = [
+
+[context]
+keywords = [
   "passnummer",
   "reisepassnummer",
   "passport number",

@@ -6,7 +6,9 @@ name = "uk-postcode"
 labels = ["postal_code"]
 countries = ["GB"]
 languages = ["en"]
-context = [
+
+[context]
+keywords = [
   "postcode",
   "post code",
   "postal code",

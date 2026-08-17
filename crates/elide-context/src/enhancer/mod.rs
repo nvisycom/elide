@@ -10,7 +10,7 @@ use elide_core::primitive::Confidence;
 use hipstr::HipStr;
 
 use crate::io::Token;
-use crate::matching::KeywordMatcher;
+use crate::matching::{KeywordMatcher, on_word_boundaries};
 use crate::rule::BoostRule;
 
 mod context;
@@ -87,7 +87,18 @@ impl Enhancer {
         let mut buckets: HashMap<LabelRef, Vec<BoostRule>> = HashMap::new();
         for rule in rules {
             let bucket = buckets.entry(rule.label.clone()).or_default();
-            if let Some(existing) = bucket.iter_mut().find(|r| r.language == rule.language) {
+            // Merge only rules that agree on every knob `merge` does not itself
+            // reconcile — language scope, match mode, window radii, and boost.
+            // `merge` keeps the existing rule's window/boost, so two rules with
+            // different lifts for the same label must stay distinct or one
+            // would silently adopt the other's confidence boost.
+            if let Some(existing) = bucket.iter_mut().find(|r| {
+                r.language == rule.language
+                    && r.word_boundary == rule.word_boundary
+                    && r.prefix_words == rule.prefix_words
+                    && r.suffix_words == rule.suffix_words
+                    && r.boost == rule.boost
+            }) {
                 existing.merge(rule);
             } else {
                 bucket.push(rule);
@@ -160,7 +171,7 @@ impl Enhancer {
             return;
         };
         for rule in bucket {
-            if !rule.applies_to_language(ctx.language) {
+            if !rule.applies_to_language(ctx.languages) {
                 continue;
             }
             if rule.keywords.is_empty() {
@@ -194,11 +205,12 @@ impl Enhancer {
         // native location for it, symmetric with the hint's own location.
         let (source, hint_index, keyword_range) = if let Some(keyword_range) = window {
             (EVENT_SOURCE_WINDOW, None, Some(keyword_range))
-        } else if let Some(i) = ctx
-            .hints
-            .iter()
-            .position(|h| self.matcher.any_match(h, &[], &rule.keywords).is_some())
-        {
+        } else if let Some(i) = ctx.hints.iter().position(|h| {
+            self.matcher
+                .matches(h, &[], &rule.keywords)
+                .iter()
+                .any(|m| !rule.word_boundary || on_word_boundaries(h, m))
+        }) {
             (EVENT_SOURCE_HINT, Some(i), None)
         } else {
             return None;
@@ -262,7 +274,9 @@ impl Enhancer {
             };
         let m = self
             .matcher
-            .any_match(snippet, tokens_in_window, &rule.keywords)?;
+            .matches(snippet, tokens_in_window, &rule.keywords)
+            .into_iter()
+            .find(|m| !rule.word_boundary || on_word_boundaries(snippet, m))?;
         Some(window_offset + m.start..window_offset + m.end)
     }
 }

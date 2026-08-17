@@ -26,8 +26,8 @@ pub enum OnConflict {
 /// treating every overlap as a contest:
 /// - **Nesting** — one location inside the other (a postal code within an
 ///   address): a legitimate hierarchy → keep both, *unless* the contained
-///   entity is much weaker than its container (`inner + margin < outer`), a
-///   subsumed junk match that loses.
+///   entity is weaker than its container by at least `margin`
+///   (`inner + margin <= outer`), a subsumed junk match that loses.
 /// - **Incidental overlap** — they overlap but their [intersection-over-union]
 ///   is below `threshold`: two distinct findings that merely touch → keep both.
 /// - **Near-coincident** — IoU at or above `threshold`: two recognizers
@@ -43,8 +43,8 @@ pub struct Structural<T = HighestConfidence> {
     /// rather than two distinct findings.
     pub threshold: f32,
     /// The confidence margin within which a *contained* entity is kept as a
-    /// real nesting; a contained entity weaker than `container − margin` is
-    /// subsumed and dropped.
+    /// real nesting; a contained entity weaker than its container by at least
+    /// this margin (`inner + margin <= container`) is subsumed and dropped.
     pub margin: f32,
     /// How a true conflict is settled.
     pub tiebreaker: T,
@@ -87,8 +87,8 @@ impl<T> Structural<T> {
         self
     }
 
-    /// Set the nesting margin: a contained entity weaker than
-    /// `container − margin` is subsumed and dropped.
+    /// Set the nesting margin: a contained entity weaker than its container by
+    /// at least this margin (`inner + margin <= container`) is subsumed.
     #[must_use]
     pub fn with_margin(mut self, margin: f32) -> Self {
         self.margin = margin;
@@ -129,11 +129,14 @@ where
     T: Tiebreaker<M>,
 {
     fn decide(&self, a: &Entity<M>, b: &Entity<M>) -> Disposition {
-        // A contained span weaker than its container by more than `margin` is
-        // subsumed noise; the container wins. An otherwise-confident nesting is
-        // a legitimate hierarchy — keep both.
+        // A contained span weaker than its container by at least `margin` is
+        // subsumed noise — a junk sub-match inside a larger entity (a digit run
+        // inside a payment card, say); the container wins. A contained span
+        // within `margin` of its container is a legitimate hierarchy (a postal
+        // code inside an address) — keep both. The comparison is inclusive so a
+        // difference of exactly `margin` subsumes rather than slipping through.
         let subsumed = |inner: &Entity<M>, outer: &Entity<M>| {
-            inner.confidence.get() + self.margin < outer.confidence.get()
+            inner.confidence.get() + self.margin <= outer.confidence.get()
         };
         match a.location.overlap(&b.location) {
             // `b` is inside `a`.

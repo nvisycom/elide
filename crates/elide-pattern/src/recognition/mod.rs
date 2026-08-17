@@ -15,7 +15,7 @@ mod recognizer;
 mod regex;
 mod term;
 
-pub use self::context::Context;
+pub use self::context::{Context, Matching, Sourced};
 pub use self::dictionary::{Dictionary, DictionaryBuilder, Scoring};
 pub use self::recognizer::{PatternRecognizer, PatternRecognizerBuilder};
 pub use self::regex::{Regex, RegexBuilder, Variant};

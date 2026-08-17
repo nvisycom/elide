@@ -7,7 +7,9 @@ name = "sg-nric"
 labels = ["government_id"]
 countries = ["SG"]
 languages = ["en"]
-context = [
+
+[context]
+keywords = [
   "nric",
   "nric#",
   "fin",

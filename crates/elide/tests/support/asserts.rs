@@ -15,6 +15,19 @@ pub fn assert_label_present<M: Modality>(entities: &[Entity<M>], label: &LabelRe
     );
 }
 
+/// Assert that no detected entity carries `label` — the negative of
+/// [`assert_label_present`], for precision cases where a weak or
+/// context-free value must not be flagged at all.
+pub fn assert_label_absent<M: Modality>(entities: &[Entity<M>], label: &LabelRef) {
+    let found: Vec<_> = entities.iter().filter(|e| &e.label == label).collect();
+    assert!(
+        found.is_empty(),
+        "expected no entity labeled {label:?}, but found {} ({:?})",
+        found.len(),
+        found.iter().map(|e| e.label.clone()).collect::<Vec<_>>(),
+    );
+}
+
 /// Assert that none of `originals` survives in the redacted output.
 pub fn assert_pii_removed(redacted: &str, originals: &[&str]) {
     for original in originals {

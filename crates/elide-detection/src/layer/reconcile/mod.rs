@@ -206,6 +206,21 @@ mod tests {
         assert_eq!(out.dropped.len(), 1);
     }
 
+    /// A contained match exactly `margin` (0.25) weaker than its container is
+    /// subsumed, not kept: the boundary is inclusive, so a junk sub-match (a
+    /// digit run inside a payment card) does not slip through by a hair.
+    #[test]
+    fn structural_drops_contained_at_margin_boundary() {
+        let entities = vec![
+            entity("payment_card", 0, 17, 0.65),
+            entity("postal_code", 5, 11, 0.40), // 0.40 + 0.25 == 0.65
+        ];
+        let out = structural().apply(entities);
+        assert_eq!(out.kept.len(), 1);
+        assert_eq!(out.kept[0].label, LabelRef::new("payment_card"));
+        assert_eq!(out.dropped.len(), 1);
+    }
+
     /// A near-coincident cross-label overlap is a true conflict: the winner
     /// survives and records the loser; the loser is dropped.
     #[test]

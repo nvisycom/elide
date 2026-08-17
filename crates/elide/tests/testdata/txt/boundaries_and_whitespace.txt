@@ -1,0 +1,6 @@
+first.line@example.com opens the file with a value on byte zero.
+
+Ordinary prose sits in the middle so the edge cases are isolated. Call the
+desk at +1 (415) 555-0142 if anything looks off.
+
+The file ends on a value with no trailing newline: last.line@example.com

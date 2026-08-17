@@ -111,7 +111,7 @@ unicode-normalization = { version = "0.1", features = [] }
 unicode-segmentation = { version = "1.13", features = [] }
 
 # Natural language processing
-lingua = { version = "1.8", default-features = false, features = ["english"] }
+lingua = { version = "1.8", default-features = false }
 
 # Checksums & validators
 bs58 = { version = "0.5", features = ["check"] }

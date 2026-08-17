@@ -6,7 +6,9 @@ name = "es-nie"
 labels = ["government_id"]
 countries = ["ES"]
 languages = ["es"]
-context = [
+
+[context]
+keywords = [
   "número de identidad de extranjero",
   "número de identificación de extranjero",
   "nie",

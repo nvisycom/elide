@@ -7,7 +7,9 @@ name = "kr-passport"
 labels = ["passport_number"]
 countries = ["KR"]
 languages = ["ko"]
-context = [
+
+[context]
+keywords = [
   "passport",
   "passport number",
   "korean passport",

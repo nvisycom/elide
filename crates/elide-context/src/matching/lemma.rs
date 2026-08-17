@@ -25,14 +25,14 @@ use crate::io::Token;
 pub struct LemmaMatcher;
 
 impl KeywordMatcher for LemmaMatcher {
-    fn any_match(
+    fn matches(
         &self,
         window: &str,
         tokens: &[Token],
         keywords: &[HipStr<'static>],
-    ) -> Option<Range<usize>> {
+    ) -> Vec<Range<usize>> {
         if tokens.is_empty() {
-            return SubstringMatcher.any_match(window, tokens, keywords);
+            return SubstringMatcher.matches(window, tokens, keywords);
         }
         let lowered_keywords: Vec<String> = keywords
             .iter()
@@ -42,12 +42,15 @@ impl KeywordMatcher for LemmaMatcher {
         // *window*-relative range. The window spans from the first token
         // (see `token_span`), so subtracting its start rebases each match.
         let base = tokens[0].offset.start;
-        tokens.iter().find_map(|tok| {
-            let lemma = tok.lemma.as_str().to_ascii_lowercase();
-            lowered_keywords
-                .contains(&lemma)
-                .then(|| tok.offset.start - base..tok.offset.end - base)
-        })
+        tokens
+            .iter()
+            .filter_map(|tok| {
+                let lemma = tok.lemma.as_str().to_ascii_lowercase();
+                lowered_keywords
+                    .contains(&lemma)
+                    .then(|| tok.offset.start - base..tok.offset.end - base)
+            })
+            .collect()
     }
 }
 
@@ -69,9 +72,9 @@ mod tests {
         let m = LemmaMatcher;
         // Ranges are window-relative; here the first token starts at 0, so
         // they coincide with the stream offsets.
-        assert_eq!(m.any_match("", &tokens, &kws(&["run"])), Some(4..11));
-        assert_eq!(m.any_match("", &tokens, &kws(&["dog"])), Some(12..16));
-        assert_eq!(m.any_match("", &tokens, &kws(&["cat"])), None);
+        assert_eq!(m.matches("", &tokens, &kws(&["run"])), vec![4..11]);
+        assert_eq!(m.matches("", &tokens, &kws(&["dog"])), vec![12..16]);
+        assert!(m.matches("", &tokens, &kws(&["cat"])).is_empty());
     }
 
     #[test]
@@ -83,15 +86,12 @@ mod tests {
             Token::from_text("dogs", 108..112).with_lemma("dog"),
         ];
         let m = LemmaMatcher;
-        assert_eq!(m.any_match("", &tokens, &kws(&["dog"])), Some(8..12));
+        assert_eq!(m.matches("", &tokens, &kws(&["dog"])), vec![8..12]);
     }
 
     #[test]
     fn falls_back_to_substring_without_tokens() {
         let m = LemmaMatcher;
-        assert_eq!(
-            m.any_match("Your SSN: 123", &[], &kws(&["ssn"])),
-            Some(5..8)
-        );
+        assert_eq!(m.matches("Your SSN: 123", &[], &kws(&["ssn"])), vec![5..8]);
     }
 }

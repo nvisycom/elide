@@ -6,7 +6,9 @@ name = "ca-postal-code"
 labels = ["postal_code"]
 countries = ["CA"]
 languages = ["en", "fr"]
-context = [
+
+[context]
+keywords = [
   "postal code",
   "code postal",
   "canada post",

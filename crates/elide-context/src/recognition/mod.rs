@@ -18,6 +18,7 @@ use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::entity::audit::AuditEvent;
 use elide_core::modality::TextRecognizable;
+use elide_core::primitive::LanguageTag;
 use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
 
 use crate::io::Tokens;
@@ -83,12 +84,22 @@ where
             .iter()
             .map(|h| M::as_text(&h.data, &ctx.artifacts))
             .collect();
-        let mut context = Context::new(text).with_hints(&hint_texts);
+        // Only *asserted* languages select which per-language context fires; a
+        // *detected* language does not. Detection is unreliable on the short,
+        // word-poor chunks a codec emits (a lone `Card: 4111…` cell resolves to
+        // an arbitrary language), and a misdetected chunk language would
+        // deactivate the very context whose keyword sits in the text. With no
+        // asserted language the list is empty, which the enhancer reads as
+        // permissive — every per-language context is active, so the keyword
+        // that actually appears (`card`, `tarjeta`, `Kreditkarte`, …) fires
+        // regardless of the surrounding language. Activating a language's
+        // context is harmless when its keyword is absent.
+        let languages: Vec<&LanguageTag> = ctx.asserted_languages();
+        let mut context = Context::new(text)
+            .with_hints(&hint_texts)
+            .with_languages(&languages);
         if let Some(tokens) = ctx.artifacts.get::<Tokens>() {
             context = context.with_tokens(tokens.as_slice());
-        }
-        if let Some(language) = ctx.primary_language() {
-            context = context.with_language(language);
         }
 
         let boosts = self.enhancer.enhance(&mut entities, &context);

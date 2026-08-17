@@ -7,7 +7,9 @@ name = "es-cif"
 labels = ["company_id"]
 countries = ["ES"]
 languages = ["es"]
-context = [
+
+[context]
+keywords = [
   "código de identificación fiscal",
   "cif",
   "identificación fiscal",

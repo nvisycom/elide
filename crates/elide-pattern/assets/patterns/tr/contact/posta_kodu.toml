@@ -6,7 +6,9 @@ name = "tr-posta-kodu"
 labels = ["postal_code"]
 countries = ["TR"]
 languages = ["tr"]
-context = [
+
+[context]
+keywords = [
   "posta kodu",
   "ptt",
   "adres",
@@ -15,4 +17,4 @@ context = [
 
 [[variants]]
 regex = '\b(0[1-9]|[1-7]\d|8[01])\d{3}\b'
-score = 0.4
+score = 0.2

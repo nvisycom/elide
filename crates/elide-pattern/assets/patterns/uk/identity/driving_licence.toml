@@ -8,7 +8,9 @@ name = "uk-driving-licence"
 labels = ["drivers_license"]
 countries = ["GB"]
 languages = ["en"]
-context = [
+
+[context]
+keywords = [
   "driving licence",
   "driving license",
   "driver's licence",

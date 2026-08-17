@@ -1,0 +1,13 @@
+The payment-card detector ships a per-language context table: the keyword
+that vouches for a bare card number differs by language. Each line below
+places a Luhn-valid card next to its language's card keyword, so the boost
+should fire regardless of the surrounding language.
+
+English: please charge the card 4111 1111 1111 1111 today.
+Spanish: cargue la tarjeta 5555 5555 5555 4444 por favor.
+German: bitte die Kreditkarte 4012 8888 8888 1881 belasten.
+French: veuillez débiter la carte 6011 1111 1111 1117 maintenant.
+
+Each card is valid under Luhn and each sits beside its language's keyword
+("card", "tarjeta", "Kreditkarte", "carte"), so all four should be detected
+as payment cards and redacted.

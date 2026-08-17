@@ -17,7 +17,7 @@ pub(super) fn currency_code<R: RngExt + ?Sized>(locale: Locale, rng: &mut R) -> 
 
 /// Locale-aware monetary amount. SI/UK locales use `1234.56`;
 /// continental EU locales use `1234,56`.
-pub(super) fn amount<R: RngExt + ?Sized>(locale: Locale, rng: &mut R) -> String {
+pub(super) fn monetary_amount<R: RngExt + ?Sized>(locale: Locale, rng: &mut R) -> String {
     let cents: u32 = (0..10_000_000u32).fake_with_rng(rng);
     let whole = cents / 100;
     let frac = cents % 100;
@@ -42,10 +42,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn amount_uses_locale_decimal_separator() {
+    fn monetary_amount_uses_locale_decimal_separator() {
         let mut rng = SmallRng::seed_from_u64(1);
-        assert!(amount(Locale::DeDe, &mut rng).contains(','));
+        assert!(monetary_amount(Locale::DeDe, &mut rng).contains(','));
         let mut rng = SmallRng::seed_from_u64(1);
-        assert!(amount(Locale::En, &mut rng).contains('.'));
+        assert!(monetary_amount(Locale::En, &mut rng).contains('.'));
     }
 }

@@ -1,0 +1,14 @@
+The bare numbers below are genuinely weak, context-gated shapes — the kind
+whose base score sits well under the threshold, so without a nearby keyword
+to vouch for them they must stay undetected and survive un-redacted. This is
+the precision floor: an ambiguous number with no supporting evidence is left
+alone rather than guessed at. Each value here is paired with a
+keyword-bearing positive in heavy_contextual.txt.
+
+The inventory line read 000123456789 in the third column.
+Row 000987654321 was archived to cold storage overnight.
+The lot was tagged 000555000555 during the warehouse audit.
+
+These are ordinary bare numbers in ordinary sentences. No "account",
+"checking", "bank", or other supporting keyword appears anywhere near them,
+so the weak bank-account shape must not be flagged on a single one.

@@ -219,6 +219,25 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
         all
     }
 
+    /// The caller-*asserted* language tags for this call — the scope's
+    /// languages only, *excluding* anything a detector added.
+    ///
+    /// Use this where a *detected* language must not participate because
+    /// detection is unreliable on the input (short, word-poor chunks resolve
+    /// to arbitrary languages): selecting which per-language context to
+    /// activate keys on this, so a misdetected chunk language can't deactivate
+    /// the context whose keyword actually sits in the text. Empty when the
+    /// caller asserted no language, which callers read as "any".
+    #[must_use]
+    pub fn asserted_languages(&self) -> Vec<&LanguageTag> {
+        self.scope
+            .languages
+            .as_slice()
+            .iter()
+            .map(|l| &l.language)
+            .collect()
+    }
+
     /// Single most likely language tag for this call, or `None` when no
     /// language is known.
     #[must_use]
@@ -301,5 +320,36 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
             return true;
         }
         langs.any(|d| allowed.iter().any(|a| a.matches(&d.language)))
+    }
+
+    /// Whether a recognizer rule scoped to `allowed` languages should run,
+    /// filtering **only** on caller-*asserted* languages.
+    ///
+    /// The locale hard filter: a language-scoped pattern is suppressed when
+    /// the caller asserted a language and none of the asserted languages
+    /// match the rule's scope (so declaring a document Spanish stops the
+    /// German/Italian/… locale patterns from firing on same-shaped values).
+    ///
+    /// Unlike [`applies_to_language`], a *detected* language never
+    /// participates: detection is unreliable on short, word-poor input (a
+    /// bare identifier cell resolves to an arbitrary language) and its
+    /// confidence scale shifts with the compiled model set, so a detected
+    /// language must not suppress a valid match. When the caller asserts no
+    /// language the rule always runs.
+    ///
+    /// Returns `true` for a language-agnostic rule (empty `allowed`) and when
+    /// no language is asserted.
+    ///
+    /// [`applies_to_language`]: Self::applies_to_language
+    #[must_use]
+    pub fn applies_to_asserted_language(&self, allowed: &[LanguageTag]) -> bool {
+        if allowed.is_empty() {
+            return true;
+        }
+        let mut asserted = self.scope.languages.as_slice().iter().peekable();
+        if asserted.peek().is_none() {
+            return true;
+        }
+        asserted.any(|d| allowed.iter().any(|a| a.matches(&d.language)))
     }
 }

@@ -10,7 +10,9 @@ name = "sg-uen"
 labels = ["company_id"]
 countries = ["SG"]
 languages = ["en"]
-context = [
+
+[context]
+keywords = [
   "uen",
   "unique entity number",
   "acra",

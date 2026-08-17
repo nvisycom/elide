@@ -5,7 +5,9 @@ name = "de-plz"
 labels = ["postal_code"]
 countries = ["DE"]
 languages = ["de"]
-context = [
+
+[context]
+keywords = [
   "postleitzahl",
   "plz",
   "postanschrift",
@@ -17,5 +19,5 @@ context = [
 
 [[variants]]
 regex = '\b(0[1-9]\d{3}|[1-9]\d{4})\b'
-score = 0.3
+score = 0.2
 validator = "de.plz"

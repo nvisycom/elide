@@ -1,0 +1,16 @@
+Sensitive values that sit next to each other, or nest one inside another,
+stress the reconciliation layer: it must resolve overlaps into a coherent set
+of non-conflicting spans rather than double-redacting or leaving a fragment.
+
+An email inside a URL: visit https://mail.example.com/u/leah.kim@example.com
+to confirm — the address and the link share bytes.
+
+Back-to-back values with no separator between them:
+alex.tan@example.com+1 (628) 555-0175 were pasted together by mistake.
+
+A run of same-label entities crowded into one line: contact
+noor.h@example.com, then omar.s@example.com, then wei.l@example.com — three
+emails, three spans, adjacent but distinct.
+
+The reconciler should surface each real entity once, with clean boundaries,
+even where the raw matches touch or overlap.

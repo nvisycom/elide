@@ -6,7 +6,9 @@ name = "in-pan"
 labels = ["tax_id"]
 countries = ["IN"]
 languages = ["en", "hi"]
-context = [
+
+[context]
+keywords = [
   "pan",
   "permanent account number",
   "income tax",

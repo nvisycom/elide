@@ -9,7 +9,9 @@ name = "us-bank-account"
 labels = ["bank_account"]
 countries = ["US"]
 languages = ["en"]
-context = [
+
+[context]
+keywords = [
   "check",
   "checking account",
   "account",

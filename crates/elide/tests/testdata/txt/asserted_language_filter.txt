@@ -1,0 +1,8 @@
+The value below is a German VAT identification number, valid under its
+checksum and detected on its own shape without any nearby keyword.
+
+Reference: DE123456788
+
+When the caller asserts that the document is in a different language, this
+locale-scoped match is demoted and pruned; when no language is asserted, it
+is detected normally.

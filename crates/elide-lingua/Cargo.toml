@@ -22,6 +22,39 @@ documentation = { workspace = true }
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[features]
+## English only by default. `lingua` compiles one model per language and the
+## full set is large, so the default stays minimal; a caller opts into wider
+## coverage with `common` (the major world languages) or `all` (every language
+## `lingua` ships). English is the floor rather than an empty set because
+## `lingua` itself does not compile with zero language models.
+default = ["lingua/english"]
+
+## The most widely-used languages — a practical default for documents whose
+## language is one of the major world/business languages. Keeps the model
+## footprint modest compared to `all`.
+common = [
+    "lingua/english",
+    "lingua/spanish",
+    "lingua/portuguese",
+    "lingua/french",
+    "lingua/german",
+    "lingua/italian",
+    "lingua/dutch",
+    "lingua/russian",
+    "lingua/polish",
+    "lingua/turkish",
+    "lingua/arabic",
+    "lingua/chinese",
+    "lingua/japanese",
+    "lingua/korean",
+    "lingua/hindi",
+]
+
+## Every language model `lingua` ships (~75). Largest footprint; use when a
+## document may be in any language.
+all = ["lingua/default"]
+
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = ["serde"] }

@@ -6,7 +6,9 @@ name = "de-handelsregister"
 labels = ["company_id"]
 countries = ["DE"]
 languages = ["de"]
-context = [
+
+[context]
+keywords = [
   "handelsregister",
   "handelsregisternummer",
   "registernummer",

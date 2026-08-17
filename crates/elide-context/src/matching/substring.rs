@@ -21,22 +21,32 @@ use crate::io::Token;
 pub struct SubstringMatcher;
 
 impl KeywordMatcher for SubstringMatcher {
-    fn any_match(
+    fn matches(
         &self,
         window: &str,
         _tokens: &[Token],
         keywords: &[HipStr<'static>],
-    ) -> Option<Range<usize>> {
+    ) -> Vec<Range<usize>> {
         // `to_ascii_lowercase` rewrites bytes in place without changing
         // length, so an offset into `lowered` is the same offset into
-        // `window` — the match position is reusable as-is.
+        // `window` — each match position is reusable as-is.
         let lowered = window.to_ascii_lowercase();
-        keywords.iter().find_map(|kw| {
-            let needle = kw.as_str().to_ascii_lowercase();
-            lowered
-                .find(&needle)
-                .map(|start| start..start + needle.len())
-        })
+        let mut matches: Vec<Range<usize>> = keywords
+            .iter()
+            .flat_map(|kw| {
+                let needle = kw.as_str().to_ascii_lowercase();
+                // Every occurrence, so the enhancer's boundary filter can skip
+                // a substring hit and still reach a later boundary-valid one.
+                lowered
+                    .match_indices(&needle)
+                    .map(|(start, _)| start..start + needle.len())
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        // Report in text-scan order (by position), not grouped by keyword, so
+        // the enhancer resolves the earliest matching keyword's location.
+        matches.sort_by_key(|range| range.start);
+        matches
     }
 }
 
@@ -49,31 +59,52 @@ mod tests {
     }
 
     #[test]
-    fn substring_matches_case_insensitively() {
+    fn matches_case_insensitively() {
         let m = SubstringMatcher;
         // "SSN" sits at bytes 5..8 of the window.
+        assert_eq!(m.matches("Your SSN: 123", &[], &kws(&["ssn"])), vec![5..8]);
         assert_eq!(
-            m.any_match("Your SSN: 123", &[], &kws(&["ssn"])),
-            Some(5..8)
-        );
-        assert_eq!(
-            m.any_match(
+            m.matches(
                 "the SOCIAL SECURITY number",
                 &[],
                 &kws(&["social security"])
             ),
-            Some(4..19)
+            vec![4..19]
         );
-        assert_eq!(m.any_match("nothing here", &[], &kws(&["ssn"])), None);
+        assert!(m.matches("nothing here", &[], &kws(&["ssn"])).is_empty());
     }
 
     #[test]
-    fn substring_is_permissive() {
+    fn is_permissive() {
         let m = SubstringMatcher;
-        // "Email" inside "MyEmailAddress" is bytes 2..7.
+        // "Email" inside "MyEmailAddress" is bytes 2..7 — the raw matcher
+        // reports it; the enhancer's boundary policy decides whether it counts.
         assert_eq!(
-            m.any_match("MyEmailAddress", &[], &kws(&["email"])),
-            Some(2..7)
+            m.matches("MyEmailAddress", &[], &kws(&["email"])),
+            vec![2..7]
+        );
+    }
+
+    #[test]
+    fn reports_every_occurrence_of_a_keyword() {
+        let m = SubstringMatcher;
+        // "card" inside "cardholder" (0..4) and standalone (11..15): both are
+        // reported so the enhancer can skip the first and keep the second.
+        assert_eq!(
+            m.matches("cardholder card", &[], &kws(&["card"])),
+            vec![0..4, 11..15]
+        );
+    }
+
+    #[test]
+    fn reports_hits_across_all_keywords() {
+        let m = SubstringMatcher;
+        // "karte" (inside "Kreditkarte") and the whole "kreditkarte" both
+        // surface; the enhancer's boundary filter later keeps only the latter.
+        assert_eq!(
+            m.matches("die Kreditkarte hier", &[], &kws(&["karte", "kreditkarte"])),
+            // Sorted by position: "kreditkarte" (4..15) precedes "karte" (10..15).
+            vec![4..15, 10..15]
         );
     }
 }

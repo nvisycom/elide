@@ -7,7 +7,9 @@ name = "pl-regon"
 labels = ["company_id"]
 countries = ["PL"]
 languages = ["pl"]
-context = [
+
+[context]
+keywords = [
   "regon",
   "numer regon",
   "rejestr gospodarki narodowej",

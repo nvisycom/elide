@@ -8,7 +8,9 @@ name = "fi-hetu"
 labels = ["government_id"]
 countries = ["FI"]
 languages = ["fi", "sv"]
-context = [
+
+[context]
+keywords = [
   "henkilötunnus",
   "hetu",
   "personbeteckning",

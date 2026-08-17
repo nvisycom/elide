@@ -9,7 +9,9 @@ name = "uk-passport"
 labels = ["passport_number"]
 countries = ["GB"]
 languages = ["en"]
-context = [
+
+[context]
+keywords = [
   "passport",
   "passport number",
   "travel document",

@@ -6,7 +6,9 @@ name = "pl-kod-pocztowy"
 labels = ["postal_code"]
 countries = ["PL"]
 languages = ["pl"]
-context = [
+
+[context]
+keywords = [
   "kod pocztowy",
   "kod",
   "poczta polska",

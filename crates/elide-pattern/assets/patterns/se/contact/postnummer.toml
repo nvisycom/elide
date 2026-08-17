@@ -6,7 +6,9 @@ name = "se-postnummer"
 labels = ["postal_code"]
 countries = ["SE"]
 languages = ["sv"]
-context = [
+
+[context]
+keywords = [
   "postnummer",
   "post",
   "postnord",
@@ -14,9 +16,13 @@ context = [
   "postal code",
 ]
 
+# Both renderings are just five digits (spaced `XXX XX` or bare
+# `XXXXX`) with no checksum, so a bare match is ambiguous with any
+# 5-digit number — "room 123 45", "SEK 250 00" — and the score stays
+# weak, relying on a postal context keyword to lift a real code.
 [[variants]]
 regex = '\b[1-9]\d{2}\s\d{2}\b'
-score = 0.5
+score = 0.2
 
 [[variants]]
 regex = '\b[1-9]\d{4}\b'

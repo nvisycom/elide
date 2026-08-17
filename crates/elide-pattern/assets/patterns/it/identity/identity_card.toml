@@ -7,7 +7,9 @@ name = "it-identity-card"
 labels = ["government_id"]
 countries = ["IT"]
 languages = ["it"]
-context = [
+
+[context]
+keywords = [
   "carta d'identità",
   "carta di identità",
   "carta identità",

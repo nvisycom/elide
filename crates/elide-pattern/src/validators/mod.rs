@@ -34,6 +34,7 @@
 mod btc;
 mod date;
 mod iban;
+mod ip;
 mod luhn;
 mod phone;
 mod verhoeff;
@@ -65,6 +66,7 @@ use elide_core::primitive::{CountryCode, LanguageTag};
 pub use self::btc::btc;
 pub use self::date::date;
 pub use self::iban::iban;
+pub use self::ip::{ipv4, ipv6};
 pub use self::luhn::luhn;
 pub use self::phone::phone;
 
@@ -184,6 +186,8 @@ impl ValidatorRegistry {
             .with_simple("iban", iban)
             .with("phone", phone)
             .with_simple("date", date)
+            .with_simple("ipv4", ipv4)
+            .with_simple("ipv6", ipv6)
             .with_simple("crypto.btc", btc)
             .with_simple("us.ssn", us::ssn)
             .with_simple("us.aba_routing", us::aba_routing)
