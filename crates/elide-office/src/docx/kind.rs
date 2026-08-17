@@ -1,18 +1,21 @@
-//! [`PartKind`] and [`EmbeddingKind`]: the classification of a package part.
+//! [`PartKind`]: the Word-specific classification of a package part, and its
+//! mapping onto the neutral [`PartRole`] the OPC engine acts on.
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// What a package part is, which determines how it is handled.
+use crate::opc::{EmbeddingKind, PartRole};
+
+/// What a package part is in a WordprocessingML document, which determines how
+/// it is handled.
 ///
-/// The text-bearing parts ([`Body`](PartKind::Body),
-/// [`Header`](PartKind::Header), …) are extracted and redacted the same way: the
-/// WordprocessingML stories via the `w:t` run text model, and
-/// [`Chart`](PartKind::Chart) / [`Diagram`](PartKind::Diagram) via the
-/// user-visible text of their own schemas. [`Embedding`](PartKind::Embedding)
-/// parts are binary (images, embedded objects) and are surfaced for redaction
-/// as bytes. Everything else is structure or metadata carried through
-/// unchanged.
+/// The text-bearing parts ([`Body`](PartKind::Body), [`Header`](PartKind::Header),
+/// …) are extracted and redacted the same way: the WordprocessingML stories via
+/// the `w:t` run text model, and [`Chart`](PartKind::Chart) /
+/// [`Diagram`](PartKind::Diagram) via the user-visible text of their own schemas.
+/// [`Embedding`](PartKind::Embedding) parts are binary (images, embedded objects)
+/// and are surfaced for redaction as bytes. Everything else is structure or
+/// metadata carried through unchanged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(
     feature = "serde",
@@ -56,7 +59,7 @@ pub enum PartKind {
 
 impl PartKind {
     /// Classify the part at `path` from its package path.
-    pub(crate) fn of(path: &str) -> Self {
+    pub fn of(path: &str) -> Self {
         // Text-bearing WordprocessingML parts.
         if path == "word/document.xml" {
             return Self::Body;
@@ -97,7 +100,7 @@ impl PartKind {
             return Self::Relationships;
         }
         // Binary embeddings.
-        if let Some(kind) = EmbeddingKind::of(path) {
+        if let Some(kind) = embedding_of(path) {
             return Self::Embedding(kind);
         }
         // Metadata.
@@ -105,6 +108,26 @@ impl PartKind {
             return Self::Metadata;
         }
         Self::Other
+    }
+
+    /// The neutral [`PartRole`] the OPC engine applies to this kind: text-bearing
+    /// stories map to element text, a relationships part to relationship targets,
+    /// an embedding to binary, and everything else to structure.
+    pub(crate) fn role(self) -> PartRole {
+        match self {
+            Self::Body
+            | Self::Header
+            | Self::Footer
+            | Self::Footnotes
+            | Self::Endnotes
+            | Self::Comments
+            | Self::Glossary
+            | Self::Chart
+            | Self::Diagram => PartRole::ElementText,
+            Self::Relationships => PartRole::RelationshipTargets,
+            Self::Embedding(kind) => PartRole::Binary(kind),
+            Self::Metadata | Self::Other => PartRole::Structure,
+        }
     }
 
     /// Whether this part carries redactable *element* text (body, header,
@@ -131,8 +154,7 @@ impl PartKind {
 
     /// Whether this part yields redactable text of any kind: the element text of
     /// an [`is_text`](PartKind::is_text) part, or the external hyperlink targets
-    /// of a [`Relationships`](PartKind::Relationships) part. This is the gate
-    /// extraction and rewrite use to decide a part is text-splice territory.
+    /// of a [`Relationships`](PartKind::Relationships) part.
     pub fn is_redactable(self) -> bool {
         self.is_text() || matches!(self, Self::Relationships)
     }
@@ -165,35 +187,16 @@ impl PartKind {
     }
 }
 
-/// The kind of binary embedding a part holds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(
-    feature = "serde",
-    derive(Serialize, Deserialize),
-    serde(rename_all = "snake_case")
-)]
-#[non_exhaustive]
-pub enum EmbeddingKind {
-    /// An embedded image (`word/media/*`).
-    Image,
-    /// An embedded object / OLE package (`word/embeddings/*`).
-    Object,
-    /// An embedded font (`word/fonts/*`).
-    Font,
-}
-
-impl EmbeddingKind {
-    /// Classify the binary embedding at `path`, or `None` if it is not one.
-    fn of(path: &str) -> Option<Self> {
-        if path.starts_with("word/media/") {
-            Some(Self::Image)
-        } else if path.starts_with("word/embeddings/") {
-            Some(Self::Object)
-        } else if path.starts_with("word/fonts/") {
-            Some(Self::Font)
-        } else {
-            None
-        }
+/// Classify the binary embedding at `path`, or `None` if it is not one.
+fn embedding_of(path: &str) -> Option<EmbeddingKind> {
+    if path.starts_with("word/media/") {
+        Some(EmbeddingKind::Image)
+    } else if path.starts_with("word/embeddings/") {
+        Some(EmbeddingKind::Object)
+    } else if path.starts_with("word/fonts/") {
+        Some(EmbeddingKind::Font)
+    } else {
+        None
     }
 }
 
@@ -229,5 +232,21 @@ mod tests {
         assert!(!PartKind::Other.is_redactable());
         assert!(!PartKind::Metadata.is_redactable());
         assert!(!PartKind::Embedding(EmbeddingKind::Image).is_redactable());
+    }
+
+    #[test]
+    fn role_maps_each_kind_to_its_neutral_role() {
+        assert_eq!(PartKind::Body.role(), PartRole::ElementText);
+        assert_eq!(PartKind::Comments.role(), PartRole::ElementText);
+        assert_eq!(
+            PartKind::Relationships.role(),
+            PartRole::RelationshipTargets
+        );
+        assert_eq!(
+            PartKind::Embedding(EmbeddingKind::Image).role(),
+            PartRole::Binary(EmbeddingKind::Image)
+        );
+        assert_eq!(PartKind::Metadata.role(), PartRole::Structure);
+        assert_eq!(PartKind::Other.role(), PartRole::Structure);
     }
 }

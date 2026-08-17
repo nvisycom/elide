@@ -1,6 +1,18 @@
-//! [`Docx`]: an opened DOCX package, extracted and rewritten in place.
+//! The Office Open XML packaging (OPC) engine: a zip of parts, opened once,
+//! extracted, and rewritten in place — format-neutral.
+//!
+//! [`Package`] is the shared core every OOXML format (DOCX, and — ahead — XLSX,
+//! PPTX) builds on. A format supplies a [`PartClassifier`] that assigns each
+//! part a [`PartRole`]; the engine acts on the role alone, so it never needs to
+//! know one format's part schema from another's. The engine extracts the
+//! redactable text of every text-bearing part (each block addressed by its part
+//! and an exact byte span) and rewrites those spans back into a byte-faithful
+//! package.
 
-mod part_store;
+mod block;
+mod offset;
+mod part;
+mod store;
 mod xml_span;
 
 use std::collections::HashMap;
@@ -10,51 +22,60 @@ use bytes::Bytes;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
-use self::part_store::StoredPart;
-use crate::block::{Embedding, Extraction, Issue, PartReplacement, Replacement};
+pub use self::block::{
+    Block, Embedding, EmbeddingKind, Extraction, Issue, IssueKind, PartReplacement, Replacement,
+};
+pub use self::offset::{OffsetMap, OffsetRun, RunKind};
+pub use self::part::{PartClassifier, PartPath, PartRole};
+use self::store::StoredPart;
 use crate::error::{Error, Result};
-use crate::part::{PartKind, PartPath};
 
 /// The largest a single package part may be. A zip entry may claim any
 /// uncompressed size, so extraction is capped and the read is bounded to this
 /// many bytes to refuse allocation-DoS and zip-bomb parts. 512 MiB comfortably
-/// exceeds any legitimate WordprocessingML part while staying far below memory
-/// a decompressed bomb would demand.
+/// exceeds any legitimate OOXML part while staying far below memory a
+/// decompressed bomb would demand.
 const MAX_PART_BYTES: u64 = 512 * 1024 * 1024;
 
-/// An opened DOCX package: every part read once and classified, ready to
-/// [`extract`](Docx::extract) the text of every text-bearing part or
-/// [`rewrite`](Docx::rewrite) them back to bytes.
+/// An opened OOXML package: every part read once and classified by the
+/// format's `C`, ready to [`extract`](Package::extract) the text of every
+/// text-bearing part or [`rewrite`](Package::rewrite) them back to bytes.
 ///
 /// Open a document once and reuse it for both operations; the package is parsed
 /// a single time.
 #[derive(Debug, Clone)]
-pub struct Docx {
+pub struct Package<C: PartClassifier> {
     /// Every package part, in archive order.
     parts: Vec<StoredPart>,
+    /// The format's part classifier, retained for rewrite-time protection
+    /// checks.
+    classifier: C,
 }
 
-impl Docx {
-    /// Open a DOCX from its bytes, reading and classifying every part.
+impl<C: PartClassifier> Package<C> {
+    /// Open a package from its bytes, reading every part and tagging it with the
+    /// role `classifier` assigns.
+    ///
+    /// This is the neutral open: it validates the zip and reads every part, but
+    /// applies no format-specific structural requirement (e.g. "a body part must
+    /// exist") — a format facade layers that on top.
     ///
     /// # Errors
     ///
-    /// - [`ErrorKind::InvalidArchive`](crate::ErrorKind::InvalidArchive) if the
-    ///   bytes are not a zip;
-    /// - [`ErrorKind::InvalidPackage`](crate::ErrorKind::InvalidPackage) if the
-    ///   body part is missing.
-    pub fn open(document: &[u8]) -> Result<Self> {
+    /// [`ErrorKind::InvalidArchive`](crate::ErrorKind::InvalidArchive) if the
+    /// bytes are not a readable zip, a part is unreadable, or a part exceeds the
+    /// size cap.
+    pub fn open(document: &[u8], classifier: C) -> Result<Self> {
         let mut zip = ZipArchive::new(Cursor::new(document))
             .map_err(|e| Error::invalid_archive(format!("not a zip: {e}")))?;
 
         let mut parts = Vec::with_capacity(zip.len());
-        let mut has_body = false;
         for i in 0..zip.len() {
             let entry = zip
                 .by_index(i)
                 .map_err(|e| Error::invalid_archive(format!("bad zip entry: {e}")))?;
             let path = PartPath::from(entry.name());
-            has_body |= path.kind() == PartKind::Body;
+            let role = classifier.role(&path);
             // Reserve only up to the cap (the entry's claimed size may lie), and
             // bound the read so a zip bomb cannot inflate past it.
             let claimed = entry.size().min(MAX_PART_BYTES);
@@ -68,32 +89,34 @@ impl Docx {
                     "part `{path}` exceeds {MAX_PART_BYTES}-byte limit"
                 )));
             }
-            parts.push(StoredPart::new(path, Bytes::from(buf)));
+            parts.push(StoredPart::new(path, role, Bytes::from(buf)));
         }
 
-        if !has_body {
-            return Err(Error::invalid_package(
-                "missing body part `word/document.xml`",
-            ));
-        }
-        Ok(Self { parts })
+        Ok(Self { parts, classifier })
     }
 
-    /// Extract the redactable text and embedded images of the document.
+    /// Whether the package contains a part at `path`, so a facade can enforce a
+    /// format's required part (e.g. a Word document must have
+    /// `word/document.xml`).
+    pub fn contains_part(&self, path: &str) -> bool {
+        self.parts.iter().any(|p| p.path().as_str() == path)
+    }
+
+    /// Extract the redactable text and embedded media of the package.
     ///
-    /// Each [`Block`](crate::block::Block) is addressed by its part and an exact byte
-    /// span into that part's XML; each [`Embedding`](crate::block::Embedding) by its
-    /// part. Metadata and structure parts are carried through untouched.
-    /// Extraction is partial-success: a text part that cannot be parsed is
-    /// recorded in [`issues`](Extraction::issues) rather than failing the whole
-    /// document.
+    /// Each [`Block`] is addressed by its part and an exact byte span into that
+    /// part's XML; each [`Embedding`] by its part. Structure and metadata parts
+    /// are carried through untouched. Extraction is partial-success: a text part
+    /// that cannot be parsed is recorded in [`issues`](Extraction::issues)
+    /// rather than failing the whole document.
     pub fn extract(&self) -> Extraction {
         let mut blocks = Vec::new();
         let mut embeddings = Vec::new();
         let mut issues = Vec::new();
 
         for part in &self.parts {
-            if part.kind().is_redactable() {
+            let role = part.role();
+            if role.is_redactable() {
                 // Partial-success: a part that fails to parse yields no blocks
                 // and is recorded as an issue rather than failing the whole
                 // extraction.
@@ -104,7 +127,7 @@ impl Docx {
                         kind,
                     }),
                 }
-            } else if let Some(kind) = part.kind().embedding() {
+            } else if let PartRole::Binary(kind) = role {
                 embeddings.push(Embedding {
                     part: part.path().clone(),
                     kind,
@@ -123,7 +146,7 @@ impl Docx {
     /// Rewrite text `replacements` across their parts and re-pack every other
     /// part byte-for-byte.
     ///
-    /// See [`rewrite_with_parts`](Docx::rewrite_with_parts) to also replace
+    /// See [`rewrite_with_parts`](Package::rewrite_with_parts) to also replace
     /// binary parts (e.g. redact an embedded image).
     ///
     /// **Fail-closed:** an out-of-bounds, overlapping, or mid-character
@@ -142,12 +165,12 @@ impl Docx {
     /// Rewrite text `replacements` *and* replace binary `parts` (each a part
     /// path mapped to its new bytes).
     ///
-    /// A [`PartReplacement`](crate::block::PartReplacement) naming a part not in the package refuses the
-    /// rewrite; the text rules match [`rewrite`](Docx::rewrite).
+    /// A [`PartReplacement`] naming a part not in the package refuses the
+    /// rewrite; the text rules match [`rewrite`](Package::rewrite).
     ///
     /// # Errors
     ///
-    /// As [`rewrite`](Docx::rewrite).
+    /// As [`rewrite`](Package::rewrite).
     pub fn rewrite_with_parts(
         &self,
         replacements: &[Replacement],
@@ -167,7 +190,7 @@ impl Docx {
                     r.part
                 )));
             };
-            if !part.kind().is_redactable() {
+            if !part.role().is_redactable() {
                 return Err(Error::unsafe_rewrite(format!(
                     "replacement names non-text part `{}`",
                     r.part
@@ -186,7 +209,7 @@ impl Docx {
                     pr.part
                 )));
             }
-            if pr.part.is_protected() {
+            if self.classifier.is_protected(&pr.part) {
                 return Err(Error::unsafe_rewrite(format!(
                     "part replacement targets protected structural part `{}`",
                     pr.part

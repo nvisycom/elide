@@ -1,4 +1,4 @@
-//! DOCX loader: extract the body's text blocks via [`elide_docx`] and hand
+//! DOCX loader: extract the body's text blocks via [`elide_office`] and hand
 //! them to the shared [`ExtractHandler`], retaining the archive for re-pack.
 
 use std::collections::HashMap;
@@ -22,7 +22,7 @@ impl Loader<Text> for DocxLoader {
 
     async fn decode(&self, content: ContentData) -> Result<DocxHandler> {
         let archive = content.to_bytes();
-        let extraction = elide_docx::Docx::open(&archive)
+        let extraction = elide_office::docx::Docx::open(&archive)
             .map_err(docx_error)?
             .extract();
 

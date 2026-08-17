@@ -1,19 +1,25 @@
-# elide-docx
+# elide-office
 
 [![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/elide/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/elide/actions/workflows/build.yml)
 
-Standalone DOCX text extraction and byte-faithful redaction: bytes in, bytes out.
+Office Open XML text extraction and byte-faithful redaction: bytes in, bytes out.
 
 ## Overview
 
-A DOCX is a zip of OOXML parts, and its text lives across several of them: the
-body, page headers and footers, footnotes and endnotes, comments, and the
-glossary. This crate opens a document once and does two things over it: extract
-the redactable text of every text-bearing part, each block addressed by its part
-and an exact byte span, and rewrite those spans back into a new document that is
-byte-for-byte identical outside the redacted text. It performs no filesystem or
-network I/O and carries no detection logic; a caller supplies document bytes and
-receives extracted text or a rewritten document.
+An Office Open XML document (DOCX, and — ahead — XLSX and PPTX) is a zip of OOXML
+parts, and its text lives across several of them. This crate opens a document
+once and does two things over it: extract the redactable text of every
+text-bearing part, each block addressed by its part and an exact byte span, and
+rewrite those spans back into a new document that is byte-for-byte identical
+outside the redacted text. It performs no filesystem or network I/O and carries
+no detection logic; a caller supplies document bytes and receives extracted text
+or a rewritten document.
+
+The [`opc`](crate::opc) module is the format-neutral core: the package
+container, the typed part path, the decoded-to-raw offset map, and the
+escape-aware span engine. A format module supplies only its part-classification
+rules and drives the shared engine — [`docx`](crate::docx) is the Word facade
+today.
 
 Every part is typed, so a block, a replacement, and an embedding each name their
 part explicitly rather than a bare path. Redaction is fail-closed: an

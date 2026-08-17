@@ -1,14 +1,14 @@
 //! The XML span engine: locating the redactable byte ranges of a part's XML and
 //! rewriting text back into them.
 //!
-//! A [`StoredPart`](super::part_store::StoredPart) delegates here to turn raw XML
+//! A [`StoredPart`](crate::opc::store::StoredPart) delegates here to turn raw XML
 //! into [`Span`]s — a byte [`Range`] into the part's original bytes plus the
 //! [`BlockKind`] that says how the range is framed. A [`Span`] then knows how to
 //! [`decode`](Span::decode) its slice into logical text and how to
 //! [`escape`](Span::escape) a replacement for the context it lands in. Everything
 //! operates on a bare `&str`; nothing here knows about packages or parts.
 //!
-//! Two producers cover the two kinds of PII-bearing text a DOCX holds:
+//! Two producers cover the two kinds of PII-bearing text an OOXML part holds:
 //! [`text_spans`] for the element text of story parts (body, headers, notes, …)
 //! and [`relationship_spans`] for the external hyperlink `Target` values of a
 //! relationships part.
@@ -20,13 +20,14 @@ use quick_xml::Reader;
 use quick_xml::escape::{escape, partial_escape, unescape};
 use quick_xml::events::Event;
 
-use crate::block::{OffsetMap, OffsetRun, Replacement};
 use crate::error::{Error, Result};
+use crate::opc::block::Replacement;
+use crate::opc::offset::{OffsetMap, OffsetRun};
 
 /// The XML construct a redactable span lives inside, which determines how a
 /// replacement spliced into it must be escaped or framed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum BlockKind {
+pub(crate) enum BlockKind {
     /// Character data of a `Text` event: escape `<`, `>`, `&`.
     Text,
     /// Body of a `<!-- ... -->` comment: reject `--` and a trailing `-`.
@@ -41,11 +42,11 @@ pub(super) enum BlockKind {
 /// One redactable region of a part's XML: its byte [`range`](Span::range) into
 /// the original bytes and the [`kind`](Span::kind) of construct framing it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Span {
+pub(crate) struct Span {
     /// The byte range into the part's original (BOM-inclusive) bytes.
-    pub(super) range: Range<usize>,
+    pub(crate) range: Range<usize>,
     /// How the range is framed, which decides how a replacement is escaped.
-    pub(super) kind: BlockKind,
+    pub(crate) kind: BlockKind,
 }
 
 impl Span {
@@ -56,7 +57,7 @@ impl Span {
 
     /// The span in `spans` that wholly covers `start..end`, if any. Used to
     /// recover a replacement's framing before splicing.
-    pub(super) fn covering(spans: &[Span], start: usize, end: usize) -> Option<&Span> {
+    pub(crate) fn covering(spans: &[Span], start: usize, end: usize) -> Option<&Span> {
         spans
             .iter()
             .find(|s| s.range.start <= start && end <= s.range.end)
@@ -69,7 +70,7 @@ impl Span {
     /// Text and attribute values carry entities, so they unescape and get an
     /// entity-aware map; a comment or CDATA body is byte-identical to its source,
     /// so its text is borrowed as-is over a single identity run.
-    pub(super) fn decode<'a>(
+    pub(crate) fn decode<'a>(
         &self,
         raw: &'a str,
     ) -> std::result::Result<(Cow<'a, str>, OffsetMap), ()> {
@@ -91,7 +92,7 @@ impl Span {
     /// [`BlockKind`]. Text content is XML-escaped and an attribute value is fully
     /// escaped; a comment or CDATA replacement that would break its framing is a
     /// fail-closed [`Error::unsafe_rewrite`] naming `r`'s part.
-    pub(super) fn escape<'a>(&self, text: &'a str, r: &Replacement) -> Result<Cow<'a, str>> {
+    pub(crate) fn escape<'a>(&self, text: &'a str, r: &Replacement) -> Result<Cow<'a, str>> {
         match self.kind {
             BlockKind::Text => Ok(partial_escape(text)),
             // A double-quoted attribute value: fully escape so `"`, `<`, and `&`
@@ -188,7 +189,7 @@ fn offset_map(slice: &str, base: usize) -> std::result::Result<OffsetMap, ()> {
 /// logical text run splits into `Text`/`GeneralRef` events; a contiguous run of
 /// them is coalesced into one `Text` span (covering the entity bytes) so
 /// unescaping the whole span yields the decoded logical text.
-pub(super) fn text_spans(raw: &str) -> std::result::Result<Vec<Span>, ()> {
+pub(crate) fn text_spans(raw: &str) -> std::result::Result<Vec<Span>, ()> {
     let mut reader = Reader::from_str(raw);
     let mut spans = Vec::new();
     // quick-xml reports positions relative to the text *after* a leading BOM, but
@@ -238,7 +239,7 @@ pub(super) fn text_spans(raw: &str) -> std::result::Result<Vec<Span>, ()> {
 /// (`mailto:`, `https://…`) that carry the same PII as the body. Internal
 /// relationships (styles, headers, fonts, …) target other package parts and
 /// hold no user data, so they are left untouched.
-pub(super) fn relationship_spans(raw: &str) -> std::result::Result<Vec<Span>, ()> {
+pub(crate) fn relationship_spans(raw: &str) -> std::result::Result<Vec<Span>, ()> {
     /// The OPC relationship type of an external hyperlink.
     const HYPERLINK_TYPE: &str =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";

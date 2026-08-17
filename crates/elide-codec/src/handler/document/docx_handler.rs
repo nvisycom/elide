@@ -1,14 +1,14 @@
-//! DOCX handler side: adapts the standalone [`elide_docx`] engine to the
+//! DOCX handler side: adapts the standalone [`elide_office`] engine to the
 //! codec's [`Handler`] contract.
 //!
 //! The handler *is* an [`ExtractHandler`] over the text blocks
-//! [`Docx::extract`](elide_docx::Docx::extract) recovers from every
+//! [`Docx::extract`](elide_office::docx::Docx::extract) recovers from every
 //! text-bearing part (body, headers, footers, notes, comments). Each block's
 //! [`Address`] is its part plus its byte span, so redaction edits the block
 //! value in place; on encode, [`DocxEncoder`] turns the edits into
-//! [`elide_docx::block::Replacement`]s (plus any redacted media parts) and calls
-//! [`Docx::rewrite_with_parts`](elide_docx::Docx::rewrite_with_parts), which
-//! owns the package round-trip.
+//! [`elide_office::opc::Replacement`]s (plus any redacted media parts) and calls
+//! [`Docx::rewrite_with_parts`](elide_office::docx::Docx::rewrite_with_parts),
+//! which owns the package round-trip.
 //!
 //! [`ExtractHandler`]: crate::handler::extract::ExtractHandler
 //! [`Address`]: crate::handler::extract::Encoder::Address
@@ -19,8 +19,8 @@ use std::ops::Range;
 use bytes::Bytes;
 use elide_core::modality::text::{SourceRef, Text};
 use elide_core::{Error, ErrorKind, Result};
-use elide_docx::block::{Embedding, OffsetMap};
-use elide_docx::part::PartPath;
+use elide_office::docx::PartKind;
+use elide_office::opc::{Embedding, OffsetMap, PartPath};
 
 use super::DocxLoader;
 use crate::codec::{Container, Part, PartId};
@@ -36,7 +36,7 @@ pub(crate) type DocxHandler = ExtractHandler<DocxEncoder>;
 
 /// The address of a DOCX text block: which package part it is in, and its byte
 /// span within that part's XML, as reported by
-/// [`Docx::extract`](elide_docx::Docx::extract).
+/// [`Docx::extract`](elide_office::docx::Docx::extract).
 #[derive(Debug, Clone)]
 pub(crate) struct DocxAddress {
     /// The part the block belongs to.
@@ -59,12 +59,12 @@ pub fn format() -> Format {
         ])
 }
 
-/// Re-packs a DOCX by delegating to [`Docx::rewrite_with_parts`](elide_docx::Docx::rewrite_with_parts): the
-/// redacted body blocks become text replacements and any redacted media parts
-/// travel alongside.
+/// Re-packs a DOCX by delegating to [`Docx::rewrite_with_parts`](elide_office::docx::Docx::rewrite_with_parts):
+/// the redacted body blocks become text replacements and any redacted media
+/// parts travel alongside.
 #[derive(Debug)]
 pub(crate) struct DocxEncoder {
-    /// The original package bytes, retained so [`elide_docx`] can re-pack every
+    /// The original package bytes, retained so [`elide_office`] can re-pack every
     /// unredacted part unchanged.
     pub(super) archive: Bytes,
     /// The binary embeddings surfaced for redaction, cached at decode so the
@@ -85,26 +85,26 @@ impl Encoder for DocxEncoder {
 
     fn encode(&self, items: &[ExtractedItem<DocxAddress>]) -> Result<ContentData> {
         // Each item's (current) value overwrites its source byte span in its
-        // part's XML. `elide_docx` validates and applies these fail-closed.
-        let text_replacements: Vec<elide_docx::block::Replacement> = items
+        // part's XML. `elide_office` validates and applies these fail-closed.
+        let text_replacements: Vec<elide_office::opc::Replacement> = items
             .iter()
-            .map(|item| elide_docx::block::Replacement {
+            .map(|item| elide_office::opc::Replacement {
                 part: item.address.part.clone(),
                 start: item.address.span.start,
                 end: item.address.span.end,
                 text: item.value.clone().into(),
             })
             .collect();
-        let media: Vec<elide_docx::block::PartReplacement> = self
+        let media: Vec<elide_office::opc::PartReplacement> = self
             .replacements
             .iter()
-            .map(|(name, bytes)| elide_docx::block::PartReplacement {
+            .map(|(name, bytes)| elide_office::opc::PartReplacement {
                 part: PartPath::new(name.clone()),
                 bytes: bytes.to_vec(),
             })
             .collect();
 
-        let out = elide_docx::Docx::open(&self.archive)
+        let out = elide_office::docx::Docx::open(&self.archive)
             .and_then(|docx| docx.rewrite_with_parts(&text_replacements, &media))
             .map_err(docx_error)?;
         Ok(ContentData::new(Bytes::from(out)))
@@ -157,10 +157,7 @@ impl Container for DocxEncoder {
     fn replace_part(&mut self, id: &PartId, bytes: Bytes) -> Result<()> {
         // Reject anything that isn't a binary embedding so a caller can't
         // smuggle bytes into a text/structure part through this surface.
-        let is_embedding = PartPath::new(id.as_str().to_owned())
-            .kind()
-            .embedding()
-            .is_some();
+        let is_embedding = PartKind::of(id.as_str()).embedding().is_some();
         if !is_embedding {
             return Err(Error::new(
                 ErrorKind::MalformedInput,
@@ -185,9 +182,9 @@ impl Container for DocxEncoder {
     }
 }
 
-/// Map an [`elide_docx`] error into the codec's error type.
-pub(super) fn docx_error(err: elide_docx::Error) -> Error {
-    use elide_docx::ErrorKind as DocxKind;
+/// Map an [`elide_office`] error into the codec's error type.
+pub(super) fn docx_error(err: elide_office::Error) -> Error {
+    use elide_office::ErrorKind as DocxKind;
     let kind = match err.kind() {
         DocxKind::InvalidArchive | DocxKind::InvalidPackage | DocxKind::InvalidXml => {
             ErrorKind::MalformedInput

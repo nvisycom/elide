@@ -1,42 +1,41 @@
-//! [`StoredPart`]: one package part, read once and classified, with the XML
-//! text extraction and splicing it supports.
+//! [`StoredPart`]: one package part, read once and tagged with its
+//! [`PartRole`], with the XML text extraction and splicing it supports.
 
 use bytes::Bytes;
 use hipstr::HipStr;
 
-use super::xml_span::{Span, relationship_spans, text_spans};
-use crate::block::{Block, IssueKind, Replacement};
 use crate::error::{Error, Result};
-use crate::part::{PartKind, PartPath};
+use crate::opc::block::{Block, IssueKind, Replacement};
+use crate::opc::part::{PartPath, PartRole};
+use crate::opc::xml_span::{Span, relationship_spans, text_spans};
 
-/// One package part: its path, its kind, and its bytes, retained for extraction
+/// One package part: its path, its role, and its bytes, retained for extraction
 /// and a byte-faithful re-pack.
 #[derive(Debug, Clone)]
-pub(super) struct StoredPart {
+pub(crate) struct StoredPart {
     path: PartPath,
-    kind: PartKind,
+    role: PartRole,
     bytes: Bytes,
 }
 
 impl StoredPart {
-    /// The part at `path` holding `bytes`, classified from its path.
-    pub(super) fn new(path: PartPath, bytes: Bytes) -> Self {
-        let kind = path.kind();
-        Self { path, kind, bytes }
+    /// The part at `path`, tagged with `role`, holding `bytes`.
+    pub(crate) fn new(path: PartPath, role: PartRole, bytes: Bytes) -> Self {
+        Self { path, role, bytes }
     }
 
     /// The part's path.
-    pub(super) fn path(&self) -> &PartPath {
+    pub(crate) fn path(&self) -> &PartPath {
         &self.path
     }
 
-    /// The part's kind.
-    pub(super) fn kind(&self) -> PartKind {
-        self.kind
+    /// The part's role.
+    pub(crate) fn role(&self) -> PartRole {
+        self.role
     }
 
     /// The part's raw bytes (a cheap ref-counted share).
-    pub(super) fn bytes(&self) -> Bytes {
+    pub(crate) fn bytes(&self) -> Bytes {
         self.bytes.clone()
     }
 
@@ -49,14 +48,14 @@ impl StoredPart {
     /// The redactable text [`Block`]s of this (redactable) part, or the
     /// [`IssueKind`] that prevented extraction.
     ///
-    /// For an [`is_text`](PartKind::is_text) part, each text/comment/CDATA
+    /// For an [`ElementText`](PartRole::ElementText) part, each text/comment/CDATA
     /// event's inner bytes (delimiters stripped) become a block addressed by
     /// this part and its byte span; whitespace-only runs are dropped. For a
-    /// [`Relationships`](PartKind::Relationships) part, each external hyperlink
-    /// `Target` attribute value becomes a block. A block's `text` is the decoded
-    /// logical text (entities like `&amp;` resolved) while its span stays raw, so
-    /// splicing lands on the original bytes.
-    pub(super) fn text_blocks(&self) -> std::result::Result<Vec<Block>, IssueKind> {
+    /// [`RelationshipTargets`](PartRole::RelationshipTargets) part, each external
+    /// hyperlink `Target` attribute value becomes a block. A block's `text` is
+    /// the decoded logical text (entities like `&amp;` resolved) while its span
+    /// stays raw, so splicing lands on the original bytes.
+    pub(crate) fn text_blocks(&self) -> std::result::Result<Vec<Block>, IssueKind> {
         let raw = self.as_text()?;
         let mut blocks = Vec::new();
         for span in self.spans(raw).map_err(|_| IssueKind::MalformedXml)? {
@@ -72,21 +71,21 @@ impl StoredPart {
         Ok(blocks)
     }
 
-    /// The redactable spans of `raw`, chosen by this part's kind: the
-    /// text/comment/CDATA spans of an [`is_text`](PartKind::is_text) part, or the
-    /// external hyperlink `Target` values of a
-    /// [`Relationships`](PartKind::Relationships) part. Errs on malformed XML.
+    /// The redactable spans of `raw`, chosen by this part's role: the
+    /// text/comment/CDATA spans of an [`ElementText`](PartRole::ElementText)
+    /// part, or the external hyperlink `Target` values of a
+    /// [`RelationshipTargets`](PartRole::RelationshipTargets) part. Errs on
+    /// malformed XML.
     fn spans(&self, raw: &str) -> std::result::Result<Vec<Span>, ()> {
-        if self.kind == PartKind::Relationships {
-            relationship_spans(raw)
-        } else {
-            text_spans(raw)
+        match self.role {
+            PartRole::RelationshipTargets => relationship_spans(raw),
+            _ => text_spans(raw),
         }
     }
 
     /// Splice `replacements` into this part's XML, leaving every byte outside a
     /// replaced span identical. Fail-closed: validates the whole set first.
-    pub(super) fn splice(&self, replacements: &[&Replacement]) -> Result<String> {
+    pub(crate) fn splice(&self, replacements: &[&Replacement]) -> Result<String> {
         let raw = self
             .as_text()
             .map_err(|_| Error::invalid_xml(format!("part `{}` not UTF-8", self.path)))?;
@@ -149,13 +148,31 @@ impl StoredPart {
 mod tests {
     use super::*;
 
+    /// A stored element-text part over `xml`, the role most parts carry.
+    fn element(xml: &'static str) -> StoredPart {
+        StoredPart::new(
+            PartPath::from("word/document.xml"),
+            PartRole::ElementText,
+            Bytes::from(xml),
+        )
+    }
+
+    /// A stored relationships part over `xml`.
+    fn rels(xml: impl Into<Bytes>) -> StoredPart {
+        StoredPart::new(
+            PartPath::from("word/_rels/document.xml.rels"),
+            PartRole::RelationshipTargets,
+            xml.into(),
+        )
+    }
+
     #[test]
     fn text_blocks_decodes_an_entity_and_maps_it_back_to_raw() {
-        // Whole path: a body part whose text run carries `&amp;`. `text_blocks`
-        // must decode it to `a & b` and attach an offset map whose `raw_ranges`
-        // over the whole decoded text covers the raw `&amp;`.
+        // Whole path: an element-text part whose text run carries `&amp;`.
+        // `text_blocks` must decode it to `a & b` and attach an offset map whose
+        // `raw_ranges` over the whole decoded text covers the raw `&amp;`.
         let xml = "<w:document><w:t>a &amp; b</w:t></w:document>";
-        let part = StoredPart::new(PartPath::from("word/document.xml"), Bytes::from(xml));
+        let part = element(xml);
         let blocks = part.text_blocks().expect("decodes");
 
         let block = blocks
@@ -181,7 +198,7 @@ mod tests {
         // raw bytes, so a redaction lands on — and a recognizer matches — the
         // right text.
         let xml = "\u{feff}<w:document><w:t>alice@example.com</w:t></w:document>";
-        let part = StoredPart::new(PartPath::from("word/document.xml"), Bytes::from(xml));
+        let part = element(xml);
         let blocks = part.text_blocks().expect("decodes");
 
         let block = blocks
@@ -204,10 +221,7 @@ mod tests {
 
     #[test]
     fn relationship_blocks_extracts_only_the_external_hyperlink_target() {
-        let part = StoredPart::new(
-            PartPath::from("word/_rels/document.xml.rels"),
-            Bytes::from(RELS),
-        );
+        let part = rels(RELS);
         let blocks = part.text_blocks().expect("decodes");
 
         // The internal `styles.xml` relationship is not a hyperlink target, so
@@ -224,24 +238,17 @@ mod tests {
         // A hyperlink relationship without `TargetMode="External"` points inside
         // the package (an internal anchor / bookmark target), not a user URL, so
         // it is not surfaced for redaction.
-        let rels = concat!(
+        let xml = concat!(
             r#"<?xml version="1.0"?><Relationships>"#,
             r#"<Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="bookmark_anchor" Id="rIdX"/>"#,
             r#"</Relationships>"#,
         );
-        let part = StoredPart::new(
-            PartPath::from("word/_rels/document.xml.rels"),
-            Bytes::from(rels),
-        );
-        assert!(part.text_blocks().expect("decodes").is_empty());
+        assert!(rels(xml).text_blocks().expect("decodes").is_empty());
     }
 
     #[test]
     fn relationship_target_round_trips_through_a_splice() {
-        let part = StoredPart::new(
-            PartPath::from("word/_rels/document.xml.rels"),
-            Bytes::from(RELS),
-        );
+        let part = rels(RELS);
         let block = &part.text_blocks().expect("decodes")[0];
         let replacement = Replacement::for_block(block, "mailto:[EMAIL]");
         let out = part.splice(&[&replacement]).expect("splices");
@@ -263,13 +270,10 @@ mod tests {
     fn relationship_blocks_handle_a_leading_bom() {
         // The real docx.js `.rels` carries a BOM; the extracted span must still
         // index the true bytes so the splice lands on the target value.
-        let rels = format!("\u{feff}{RELS}");
-        let part = StoredPart::new(
-            PartPath::from("word/_rels/document.xml.rels"),
-            Bytes::from(rels.clone()),
-        );
+        let xml = format!("\u{feff}{RELS}");
+        let part = rels(Bytes::from(xml.clone()));
         let block = &part.text_blocks().expect("decodes")[0];
-        assert_eq!(&rels[block.start..block.end], "mailto:alice@example.com");
+        assert_eq!(&xml[block.start..block.end], "mailto:alice@example.com");
     }
 
     #[test]
@@ -278,20 +282,17 @@ mod tests {
         // space around its `=` (all valid XML). The extracted span must be the
         // `Target` value, not a mis-match on the `TargetMode` prefix or the wrong
         // quote character.
-        let rels = concat!(
+        let xml = concat!(
             r#"<?xml version="1.0"?><Relationships>"#,
             r#"<Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" TargetMode="External" Target = 'mailto:carol@example.com' Id="rIdC"/>"#,
             r#"</Relationships>"#,
         );
-        let part = StoredPart::new(
-            PartPath::from("word/_rels/document.xml.rels"),
-            Bytes::from(rels),
-        );
+        let part = rels(xml);
         let blocks = part.text_blocks().expect("decodes");
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].text, "mailto:carol@example.com");
         assert_eq!(
-            &rels[blocks[0].start..blocks[0].end],
+            &xml[blocks[0].start..blocks[0].end],
             "mailto:carol@example.com"
         );
     }
@@ -301,21 +302,18 @@ mod tests {
         // A `Target` carrying an XML entity (`&amp;` inside a query string) must
         // decode for the recognizer, while its span still covers the raw bytes so
         // a splice replaces the whole escaped value.
-        let rels = concat!(
+        let xml = concat!(
             r#"<?xml version="1.0"?><Relationships>"#,
             r#"<Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://x.example/?a=1&amp;b=2" TargetMode="External" Id="rIdE"/>"#,
             r#"</Relationships>"#,
         );
-        let part = StoredPart::new(
-            PartPath::from("word/_rels/document.xml.rels"),
-            Bytes::from(rels),
-        );
+        let part = rels(xml);
         let block = &part.text_blocks().expect("decodes")[0];
         // Decoded logical text has the literal `&`.
         assert_eq!(block.text, "https://x.example/?a=1&b=2");
         // The raw span covers the still-escaped bytes, entity and all.
         assert_eq!(
-            &rels[block.start..block.end],
+            &xml[block.start..block.end],
             "https://x.example/?a=1&amp;b=2"
         );
     }
