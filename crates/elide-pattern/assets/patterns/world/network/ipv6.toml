@@ -1,25 +1,24 @@
-# IPv6 address (comprehensive form set).
+# IPv6 address.
 #
-# Rust's `regex` crate doesn't support look-around, so the
-# variants use `\b` boundaries to limit match overlap inside
-# larger IPv6-shaped strings. Over-matching at sub-token
-# boundaries is rare in practice and gets collapsed by the entity
-# dedup pipeline downstream.
+# IPv6 has many compression forms (`::`, embedded IPv4, mixed splits) that a
+# single strict regex either truncates or over-matches — Rust's `regex` crate
+# has no look-around to disambiguate them. Instead a permissive regex captures
+# a maximal address-shaped token and the `ipv6` validator confirms it with the
+# standard library's parser (the reference implementation), the same
+# permissive-match-then-validate approach the checksum patterns use.
 
 name = "ipv6"
 labels = ["ip_address"]
 
-# IPv4-mapped IPv6 (::ffff:0:0:1.2.3.4 et al).
 [[variants]]
-regex = '\b::(?:ffff(?::0{1,4})?:)?(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?:/(?:12[0-8]|1[01]\d|[1-9]?\d))?\b'
+# Addresses with leading hex groups: `(hex:){2,7}` then an optional trailing
+# hextet or embedded IPv4 quad, with optional `%zone` and `/prefix`.
+regex = '\b(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f.]{0,4}(?:%[0-9A-Za-z]+)?(?:/\d{1,3})?'
 score = 0.6
+validator = "ipv6"
 
-# IPv4-embedded IPv6 (X:X:…:1.2.3.4).
 [[variants]]
-regex = '\b(?:(?:[0-9A-Fa-f]{1,4}:){1,5}:(?:[0-9A-Fa-f]{1,4}:){0,4}|(?:[0-9A-Fa-f]{1,4}:){6})(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?:/(?:12[0-8]|1[01]\d|[1-9]?\d))?\b'
+# Addresses that start with `::` (`::1`, `::ffff:192.0.2.1`, `::`).
+regex = '::(?:[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4})*(?:\.\d{1,3}){0,3})?(?:%[0-9A-Za-z]+)?(?:/\d{1,3})?'
 score = 0.6
-
-# Standard IPv6 with all compressed forms.
-[[variants]]
-regex = '\b(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}:|:(?::[0-9A-Fa-f]{1,4}){1,7}|(?:[0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,5}(?::[0-9A-Fa-f]{1,4}){1,2}|(?:[0-9A-Fa-f]{1,4}:){1,4}(?::[0-9A-Fa-f]{1,4}){1,3}|(?:[0-9A-Fa-f]{1,4}:){1,3}(?::[0-9A-Fa-f]{1,4}){1,4}|(?:[0-9A-Fa-f]{1,4}:){1,2}(?::[0-9A-Fa-f]{1,4}){1,5}|[0-9A-Fa-f]{1,4}:(?::[0-9A-Fa-f]{1,4}){1,6}|:(?::[0-9A-Fa-f]{1,4}){1,6})(?:%[0-9a-zA-Z]+)?(?:/(?:12[0-8]|1[01]\d|[1-9]?\d))?\b'
-score = 0.6
+validator = "ipv6"
