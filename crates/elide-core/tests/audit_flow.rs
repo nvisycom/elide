@@ -233,21 +233,23 @@ fn recognizer_context_scopes_by_language_and_country() {
     // The asserted language is the primary one.
     assert_eq!(ctx.primary_language(), Some(&en_us));
 
-    // Empty scope always applies.
-    assert!(ctx.applies_to_language(&[]));
+    // Country scope: empty always applies; matching applies, non-matching not.
     assert!(ctx.applies_to_country(&[]));
-    // Matching scope applies; non-matching does not.
-    assert!(ctx.applies_to_language(&[en.clone()]));
-    assert!(!ctx.applies_to_language(&[fr.clone()]));
     assert!(ctx.applies_to_country(&[CountryCode::from_alpha2("US").unwrap()]));
     assert!(!ctx.applies_to_country(&[CountryCode::from_alpha2("GB").unwrap()]));
 
-    // Asserted-language locale filter: an asserted language that matches a
-    // rule's scope lets it run; a mismatch suppresses it; an agnostic rule
-    // always runs.
-    assert!(ctx.applies_to_asserted_language(&[en])); // asserted en-US matches en rule
-    assert!(!ctx.applies_to_asserted_language(&[fr])); // asserted en-US vs fr rule
-    assert!(ctx.applies_to_asserted_language(&[])); // language-agnostic rule
+    // Language scope: a matching or empty scope applies, a mismatch does not.
+    // The only language is the asserted en-US, so the asserted-OR-detected
+    // `applies_to_language` and the asserted-only `applies_to_asserted_language`
+    // agree here — each rule scope is checked through both.
+    let en_scope = [en];
+    let fr_scope = [fr];
+    assert!(ctx.applies_to_language(&[]));
+    assert!(ctx.applies_to_language(&en_scope));
+    assert!(!ctx.applies_to_language(&fr_scope));
+    assert!(ctx.applies_to_asserted_language(&[]));
+    assert!(ctx.applies_to_asserted_language(&en_scope));
+    assert!(!ctx.applies_to_asserted_language(&fr_scope));
 }
 
 #[test]
@@ -264,9 +266,10 @@ fn a_detected_language_never_filters() {
 
     // A German-scoped rule still runs: detection is unreliable and must never
     // suppress a match — only a caller assertion filters by language.
-    assert!(ctx.applies_to_asserted_language(&[de.clone()]));
+    let de_scope = [de];
+    assert!(ctx.applies_to_asserted_language(&de_scope));
     // The old asserted-OR-detected filter WOULD suppress it (detected es ≠ de).
-    assert!(!ctx.applies_to_language(&[de]));
+    assert!(!ctx.applies_to_language(&de_scope));
 }
 
 #[test]
