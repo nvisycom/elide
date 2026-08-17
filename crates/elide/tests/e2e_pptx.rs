@@ -17,8 +17,9 @@ const FIXTURE: Fixture = Fixture {
     extension: "pptx",
 };
 
-/// The PII in the slide's text runs: an email and a phone.
-const PII: &[&str] = &["alice@example.com", "+1 (510) 555-0199"];
+/// The PII in the presentation: an email and a phone in the slide's text runs,
+/// and an email in an external hyperlink `Target` in the slide's relationships.
+const PII: &[&str] = &["alice@example.com", "+1 (510) 555-0199", "bob@example.com"];
 
 #[tokio::test]
 async fn pptx_detects_and_redacts_slide_text() -> Result<()> {

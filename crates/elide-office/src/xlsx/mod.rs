@@ -79,6 +79,16 @@ fn is_extra_text_part(path: &str) -> bool {
         || path.starts_with("xl/charts/") && path.ends_with(".xml")
 }
 
+/// Whether `path` is a part the handler surfaces for out-of-band markup
+/// redaction: the non-cell text parts, plus relationships parts (whose external
+/// hyperlink `Target` values carry the same PII as the cells and are redacted as
+/// XML attribute values). This is the gate for both what
+/// [`text_parts`](Xlsx::text_parts) exposes and what
+/// [`rewrite_with_parts`](Xlsx::rewrite_with_parts) accepts.
+fn is_surfaced_text_part(path: &str) -> bool {
+    is_extra_text_part(path) || is_relationships(path)
+}
+
 /// The [`EmbeddingKind`] of a binary media part, if `path` names one.
 fn embedding_kind(path: &str) -> Option<EmbeddingKind> {
     if path.starts_with("xl/media/") {
@@ -276,7 +286,7 @@ impl Xlsx {
         // Fold in the externally-redacted non-cell text parts. Each must name a
         // text part the workbook carries and must not collide with a cell part.
         for (part, bytes) in part_bytes {
-            if !is_extra_text_part(part) {
+            if !is_surfaced_text_part(part) {
                 return Err(Error::unsafe_rewrite(format!(
                     "part replacement targets non-text part `{part}`"
                 )));
@@ -295,17 +305,20 @@ impl Xlsx {
         self.package.rewrite_with_parts(&[], &replacements)
     }
 
-    /// The non-cell text-bearing parts of the workbook — cell comments, and the
-    /// text of drawings and charts — each as its part path and raw bytes.
+    /// The parts the workbook surfaces for out-of-band markup redaction: the
+    /// non-cell text parts (cell comments, drawing and chart text) and the
+    /// relationships parts (whose external hyperlink `Target` values hold the
+    /// same PII as the cells), each as its part path and raw bytes.
     ///
-    /// These hold user-visible text (`<t>` / `a:t`) that is redacted through the
-    /// shared markup pipeline rather than the cell model, so a container surface
-    /// exposes them for the orchestrator to drive and hands their redacted bytes
-    /// back to [`rewrite_with_parts`](Xlsx::rewrite_with_parts).
+    /// All are redacted through the shared markup pipeline rather than the cell
+    /// model — comments and drawings by their `<t>` / `a:t` element text, a
+    /// relationships part by its `Target` attribute values — so a container
+    /// surface exposes them for the orchestrator to drive and hands their
+    /// redacted bytes back to [`rewrite_with_parts`](Xlsx::rewrite_with_parts).
     pub fn text_parts(&self) -> Vec<(String, Bytes)> {
         self.package
             .part_paths()
-            .filter(|path| is_extra_text_part(path.as_str()))
+            .filter(|path| is_surfaced_text_part(path.as_str()))
             .filter_map(|path| {
                 self.package
                     .part_bytes(path.as_str())
@@ -686,7 +699,7 @@ mod tests {
     const SAMPLE2: &[u8] = include_bytes!("../../tests/testdata/sample2.xlsx");
 
     #[test]
-    fn text_parts_lists_comments_and_drawings() {
+    fn text_parts_lists_comments_drawings_and_relationships() {
         let xlsx = Xlsx::open(SAMPLE2).unwrap();
         let parts: Vec<String> = xlsx.text_parts().into_iter().map(|(p, _)| p).collect();
         assert!(
@@ -697,8 +710,15 @@ mod tests {
             parts.contains(&"xl/drawings/drawing1.xml".to_owned()),
             "drawing part missing: {parts:?}"
         );
-        // The sheet and structural parts are not text parts.
-        assert!(!parts.iter().any(|p| p.starts_with("xl/worksheets/")));
+        // Relationships parts are surfaced too — their external hyperlink targets
+        // carry PII redacted as XML attribute values.
+        assert!(
+            parts.contains(&"xl/worksheets/_rels/sheet1.xml.rels".to_owned()),
+            "sheet relationships part missing: {parts:?}"
+        );
+        // The worksheet itself (its cells) is redacted through the cell model,
+        // not surfaced here.
+        assert!(!parts.contains(&"xl/worksheets/sheet1.xml".to_owned()));
     }
 
     #[test]
