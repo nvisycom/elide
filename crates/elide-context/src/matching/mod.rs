@@ -22,12 +22,15 @@ pub use self::substring::SubstringMatcher;
 use crate::io::Token;
 
 /// Whether the byte range `m` of `text` sits on word boundaries — the
-/// characters immediately before and after are not word characters
-/// (Unicode alphanumerics or `_`). Mirrors a regex `\b…\b` around a
-/// keyword, so `"AUD"` matches the token `AUD` but not the `aud` inside
-/// `audit`, and `"karte"` does not match inside `"Kreditkarte"`.
+/// characters immediately before and after are not word characters. A
+/// word character is a Unicode alphanumeric; `_` and `-` are treated as
+/// separators, so a `snake_case` / `kebab-case` identifier tokenizes into
+/// its words: the keyword `"postal"` matches inside the column header
+/// `"postal_code"`, and `"tax"` inside `"tax-id"`. Otherwise this mirrors
+/// a regex `\b…\b`, so `"AUD"` matches the token `AUD` but not the `aud`
+/// inside `audit`, and `"karte"` does not match inside `"Kreditkarte"`.
 pub(crate) fn on_word_boundaries(text: &str, m: &Range<usize>) -> bool {
-    let is_word = |c: char| c.is_alphanumeric() || c == '_';
+    let is_word = |c: char| c.is_alphanumeric();
     let before_ok = text[..m.start]
         .chars()
         .next_back()

@@ -302,4 +302,35 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
         }
         langs.any(|d| allowed.iter().any(|a| a.matches(&d.language)))
     }
+
+    /// Whether a recognizer rule scoped to `allowed` languages should run,
+    /// filtering **only** on caller-*asserted* languages.
+    ///
+    /// The locale hard filter: a language-scoped pattern is suppressed when
+    /// the caller asserted a language and none of the asserted languages
+    /// match the rule's scope (so declaring a document Spanish stops the
+    /// German/Italian/… locale patterns from firing on same-shaped values).
+    ///
+    /// Unlike [`applies_to_language`], a *detected* language never
+    /// participates: detection is unreliable on short, word-poor input (a
+    /// bare identifier cell resolves to an arbitrary language) and its
+    /// confidence scale shifts with the compiled model set, so a detected
+    /// language must not suppress a valid match. When the caller asserts no
+    /// language the rule always runs.
+    ///
+    /// Returns `true` for a language-agnostic rule (empty `allowed`) and when
+    /// no language is asserted.
+    ///
+    /// [`applies_to_language`]: Self::applies_to_language
+    #[must_use]
+    pub fn applies_to_asserted_language(&self, allowed: &[LanguageTag]) -> bool {
+        if allowed.is_empty() {
+            return true;
+        }
+        let mut asserted = self.scope.languages.as_slice().iter().peekable();
+        if asserted.peek().is_none() {
+            return true;
+        }
+        asserted.any(|d| allowed.iter().any(|a| a.matches(&d.language)))
+    }
 }

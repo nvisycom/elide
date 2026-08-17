@@ -14,7 +14,7 @@ use elide::codec::{DocumentHandle, FormatRegistry, UntypedDocumentHandle};
 use elide::detection::Analyzer;
 use elide::detection::filter::FilterLayer;
 use elide::detection::reconcile::{Merging, ReconcileLayer, Structural};
-use elide::entity::{Entity, builtins};
+use elide::entity::{Entity, Label, builtins};
 #[cfg(feature = "stt")]
 use elide::modality::audio::Audio;
 #[cfg(any(feature = "llm", feature = "ocr"))]
@@ -244,6 +244,30 @@ impl Fixture {
         self.run_typed::<Text>(registry).await
     }
 
+    /// Run the [`Text`] pipeline with the request [`LabelCatalog`] scoped to
+    /// `labels`, so a test can assert that only the requested entity types are
+    /// emitted (and everything else is left in place). An empty `labels`
+    /// iterator would request nothing; pass the labels under test.
+    pub async fn run_with_labels(
+        &self,
+        labels: impl IntoIterator<Item = Label>,
+    ) -> Result<PipelineOutcome<Text>> {
+        let scope = Scope::new().with_catalog(labels.into_iter().collect());
+        self.run_typed_with::<Text>(FormatRegistry::with_builtin(), scope)
+            .await
+    }
+
+    /// Run the [`Text`] pipeline with a caller-**asserted** language, so a
+    /// test can exercise the soft language signal: a match from a pattern
+    /// whose locale the asserted language contradicts is confidence-demoted
+    /// (and typically pruned by the threshold). An assertion also suppresses
+    /// language *detection* (the assertion is authoritative).
+    pub async fn run_with_language(&self, language: LanguageTag) -> Result<PipelineOutcome<Text>> {
+        let scope = Scope::new().with_language(Language::asserted(language));
+        self.run_typed_with::<Text>(FormatRegistry::with_builtin(), scope)
+            .await
+    }
+
     /// Run the pipeline as the [`Tabular`] modality (`csv`).
     ///
     /// [`Tabular`]: elide::modality::tabular::Tabular
@@ -375,13 +399,34 @@ impl Fixture {
         Mask: Operator<M>,
         Erase: Operator<M>,
     {
-        let mut document = UntypedDocumentHandle::new(self.decode_as::<M>(&registry).await?);
-
         // No asserted language: the analyzer's `LinguaEnricher` detects each
         // document's languages, so a multilingual fixture activates every one
         // of its languages' per-language context (asserting a single language
-        // would suppress detection — see `LinguaEnricher::enrich`).
-        let scope = Scope::new();
+        // would suppress detection — see `LinguaEnricher::enrich`). An empty
+        // catalog requests every label, so recognizers emit all they find.
+        self.run_typed_with::<M>(registry, Scope::new()).await
+    }
+
+    /// [`run_typed`] with a caller-supplied [`Scope`], so a test can scope the
+    /// [`LabelCatalog`] (which entity types to emit), assert a language, or set
+    /// other request-level state.
+    ///
+    /// [`run_typed`]: Self::run_typed
+    async fn run_typed_with<M>(
+        &self,
+        registry: FormatRegistry,
+        scope: Scope,
+    ) -> Result<PipelineOutcome<M>>
+    where
+        M: TextRecognizable,
+        Entity<M>: Clone,
+        Vec<Entity<M>>: EntityGroup,
+        DocumentHandle<M>: StreamDataReader<M>,
+        Replace: Operator<M>,
+        Mask: Operator<M>,
+        Erase: Operator<M>,
+    {
+        let mut document = UntypedDocumentHandle::new(self.decode_as::<M>(&registry).await?);
 
         // One scope, shared across every modality pipeline.
         let orchestrator = Orchestrator::new(&registry)

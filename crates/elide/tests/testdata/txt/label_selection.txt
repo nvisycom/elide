@@ -1,0 +1,10 @@
+This document carries several kinds of sensitive value so that a catalog
+request for one label can be shown to redact that label and leave the rest
+untouched.
+
+The mailing ZIP code is 90210 for the west-coast office.
+Reach the desk at contact@example.com during business hours.
+The applicant's preferred language is Spanish.
+
+A caller that asks only for postal codes should see the ZIP redacted while
+the email address and the language both survive.

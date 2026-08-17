@@ -35,10 +35,11 @@ async fn locale_identifiers_are_detected() -> Result<()> {
         &outcome.redacted_text(),
         &[
             "123-45-6789",
+            "912-85-1234",
             "AB123456C",
             "12345678Z",
-            "DE123456789",
-            "ABCDE1234F",
+            "DE123456788",
+            "ABCPE1234F",
         ],
     );
 

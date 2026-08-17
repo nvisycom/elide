@@ -671,7 +671,14 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
         if let Some(set) = self.regex_set.as_ref() {
             for pattern_id in set.matches(text).into_iter() {
                 let pat = &self.patterns[pattern_id];
-                if !ctx.applies_to_language(&pat.languages) {
+                // Locale filtering keys on *asserted* languages and countries
+                // only. A detected language never filters: detection is
+                // unreliable on short, word-poor input (a single data cell like
+                // `12345678Z` has no language, yet resolves to an arbitrary one)
+                // and would wrongly suppress a valid locale-scoped match. When
+                // the caller asserts a language or country, that assertion is
+                // authoritative and gates the locale patterns.
+                if !ctx.applies_to_asserted_language(&pat.languages) {
                     continue;
                 }
                 if !ctx.applies_to_country(&pat.countries) {
@@ -708,7 +715,9 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
                 let Some(dict) = self.dictionary_owning_term(term_id) else {
                     continue;
                 };
-                if !ctx.applies_to_language(&dict.languages) {
+                // Asserted-language + country locale filter (see the pattern
+                // loop above); a detected language never suppresses a match.
+                if !ctx.applies_to_asserted_language(&dict.languages) {
                     continue;
                 }
                 if !ctx.applies_to_country(&dict.countries) {

@@ -1,0 +1,10 @@
+This paragraph is ordinary prose in one language, but the value below
+belongs to a different locale and is vouched for by that locale's own
+keyword. The point is that a locale-scoped pattern still fires in an
+otherwise foreign document: language is a soft boost signal, not a gate.
+
+The Munich branch confirmed the shipment. Its Postleitzahl 10115
+identifies the delivery district for the courier.
+
+The remaining sentences are plain prose with no other sensitive values,
+so nothing else here should be detected or redacted.

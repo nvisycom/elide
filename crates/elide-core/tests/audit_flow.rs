@@ -237,10 +237,36 @@ fn recognizer_context_scopes_by_language_and_country() {
     assert!(ctx.applies_to_language(&[]));
     assert!(ctx.applies_to_country(&[]));
     // Matching scope applies; non-matching does not.
-    assert!(ctx.applies_to_language(&[en]));
-    assert!(!ctx.applies_to_language(&[fr]));
+    assert!(ctx.applies_to_language(&[en.clone()]));
+    assert!(!ctx.applies_to_language(&[fr.clone()]));
     assert!(ctx.applies_to_country(&[CountryCode::from_alpha2("US").unwrap()]));
     assert!(!ctx.applies_to_country(&[CountryCode::from_alpha2("GB").unwrap()]));
+
+    // Asserted-language locale filter: an asserted language that matches a
+    // rule's scope lets it run; a mismatch suppresses it; an agnostic rule
+    // always runs.
+    assert!(ctx.applies_to_asserted_language(&[en])); // asserted en-US matches en rule
+    assert!(!ctx.applies_to_asserted_language(&[fr])); // asserted en-US vs fr rule
+    assert!(ctx.applies_to_asserted_language(&[])); // language-agnostic rule
+}
+
+#[test]
+fn a_detected_language_never_filters() {
+    use elide_core::recognition::{RecognizerContext, Scope};
+
+    let de = LanguageTag::parse("de").unwrap();
+    let es = LanguageTag::parse("es").unwrap();
+
+    // No asserted language; a detector reports Spanish with high confidence.
+    let scope = Scope::new();
+    let mut ctx: RecognizerContext<'_, Text> = RecognizerContext::new(&scope);
+    ctx.detect_language(Language::detected(es).with_confidence(Confidence::clamped(0.9)));
+
+    // A German-scoped rule still runs: detection is unreliable and must never
+    // suppress a match — only a caller assertion filters by language.
+    assert!(ctx.applies_to_asserted_language(&[de.clone()]));
+    // The old asserted-OR-detected filter WOULD suppress it (detected es ≠ de).
+    assert!(!ctx.applies_to_language(&[de]));
 }
 
 #[test]
