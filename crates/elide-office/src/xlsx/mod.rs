@@ -161,36 +161,46 @@ impl Xlsx {
     /// and zero-based cell coordinates.
     ///
     /// A shared-string cell resolves its text through the shared-string table; an
-    /// inline-string cell reads it from the sheet. Numeric, boolean, and formula
-    /// cells hold no free text and are skipped.
+    /// inline-string or cached-formula-string cell carries its text directly.
+    /// Numeric, boolean, and other typed cells hold no free text and are skipped.
+    ///
+    /// **Fail-closed:** a sheet the workbook references but does not contain is an
+    /// error, not a silently-skipped part, so a workbook can never report a
+    /// successful extraction while an unread worksheet's text survives.
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::InvalidXml`](crate::ErrorKind::InvalidXml) if a sheet or the
-    /// shared-string table is not UTF-8 or is malformed.
+    /// - [`ErrorKind::InvalidPackage`](crate::ErrorKind::InvalidPackage) if a
+    ///   referenced worksheet part is missing;
+    /// - [`ErrorKind::InvalidXml`](crate::ErrorKind::InvalidXml) if a sheet or the
+    ///   shared-string table is not UTF-8 or is malformed.
     pub fn extract(&self) -> Result<Vec<Cell>> {
         let shared = self.shared_strings()?;
         let mut cells = Vec::new();
         for sheet in &self.sheets {
-            let Some(bytes) = self.package.part_bytes(&sheet.part) else {
-                continue;
-            };
+            let bytes = self.package.part_bytes(&sheet.part).ok_or_else(|| {
+                Error::invalid_package(format!(
+                    "worksheet `{}` referenced by sheet `{}` is missing",
+                    sheet.part, sheet.name
+                ))
+            })?;
             let raw = decode_part(&sheet.part, &bytes)?;
             for cell in parse_cells(&raw)? {
-                let text = match (cell.shared_index, &cell.inline_text) {
+                let text = match (cell.shared_index, cell.inline_text) {
                     (Some(index), _) => match shared.get(index) {
                         Some(text) => text.clone(),
                         // A dangling index names no string; nothing to redact.
                         None => continue,
                     },
-                    (None, Some(range)) => raw[range.clone()].to_owned(),
+                    // Inline and formula cells carry their already-decoded text.
+                    (None, Some(text)) => text,
                     (None, None) => continue,
                 };
                 cells.push(Cell {
                     sheet: sheet.name.clone(),
                     row: cell.row,
                     column: cell.column,
-                    text: unescape_text(&text),
+                    text,
                 });
             }
         }
@@ -402,25 +412,38 @@ impl Xlsx {
         // then apply from the highest offset down.
         let cells = parse_cells(raw)?;
         let mut splices: Vec<(Range<usize>, String)> = Vec::new();
+        let mut matched = 0usize;
         for cell in &cells {
             let Some(edit) = edits.get(&(cell.row, cell.column)) else {
                 continue;
             };
-            let splice = match &cell.source {
-                CellSource::Inline { text } => {
-                    (text.clone(), escape(edit.text.as_str()).into_owned())
-                }
+            matched += 1;
+            let safe = escape(edit.text.as_str());
+            // Every text-bearing cell becomes a single-run inline string carrying
+            // the redacted text, rewriting the whole `<c>` element rather than one
+            // `<t>` so that no run of a multi-run value is left behind. A shared
+            // cell is thereby de-shared; a cached string-formula cell drops its
+            // `<f>` too, so the formula cannot recompute the redacted value.
+            let (range, attributes) = match &cell.source {
                 CellSource::Shared {
                     cell, attributes, ..
-                } => (
-                    cell.clone(),
-                    format!(
-                        r#"<c{attributes} t="inlineStr"><is><t>{}</t></is></c>"#,
-                        escape(edit.text.as_str())
-                    ),
-                ),
+                }
+                | CellSource::Inline {
+                    cell, attributes, ..
+                } => (cell.clone(), attributes),
             };
-            splices.push(splice);
+            let replacement = format!(r#"<c{attributes} t="inlineStr"><is><t>{safe}</t></is></c>"#);
+            splices.push((range, replacement));
+        }
+
+        // Fail closed if any edit did not land on a text-bearing cell: a redaction
+        // that produced no splice would otherwise leave its target untouched.
+        if matched != edits.len() {
+            return Err(Error::unsafe_rewrite(format!(
+                "in `{part}`, {} of {} cell edits matched no text-bearing cell",
+                edits.len() - matched,
+                edits.len()
+            )));
         }
 
         // Reject overlapping splices (two edits landing on the same/nested span)
@@ -473,15 +496,6 @@ fn decode_part(path: &str, bytes: &[u8]) -> Result<String> {
     std::str::from_utf8(bytes)
         .map(str::to_owned)
         .map_err(|_| Error::invalid_xml(format!("part `{path}` is not UTF-8")))
-}
-
-/// Decode XML entities in already-extracted cell text (an inline `<t>` body is
-/// captured raw, so it may still carry `&amp;`).
-fn unescape_text(text: &str) -> String {
-    match quick_xml::escape::unescape(text) {
-        Ok(decoded) => decoded.into_owned(),
-        Err(_) => text.to_owned(),
-    }
 }
 
 #[cfg(test)]
