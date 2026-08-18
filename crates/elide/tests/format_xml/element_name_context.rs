@@ -36,7 +36,12 @@ async fn the_element_name_boosts_its_weak_value() -> Result<()> {
 
     assert_pii_removed(
         &outcome.redacted_text(),
-        &["4111 1111 1111 1111", "90210", "912-85-1234", "000123456789"],
+        &[
+            "4111 1111 1111 1111",
+            "90210",
+            "912-85-1234",
+            "000123456789",
+        ],
     );
     Ok(())
 }

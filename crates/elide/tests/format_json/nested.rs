@@ -9,7 +9,10 @@ use crate::support::asserts::{assert_label_present, assert_pii_removed, assert_p
 use crate::support::pipeline::Fixture;
 
 const FIXTURE: Fixture = Fixture {
-    path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/json/nested.json"),
+    path: concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/testdata/json/nested.json"
+    ),
     source: include_bytes!("../testdata/json/nested.json"),
     extension: "json",
 };
@@ -36,7 +39,12 @@ async fn nested_objects_and_arrays_redact_at_any_depth() -> Result<()> {
     // Container keys and a non-PII array item survive.
     assert_preserved(
         &outcome.redacted_text(),
-        &["\"organization\"", "\"departments\"", "\"members\"", "not-an-email"],
+        &[
+            "\"organization\"",
+            "\"departments\"",
+            "\"members\"",
+            "not-an-email",
+        ],
     );
     Ok(())
 }

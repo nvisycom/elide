@@ -30,7 +30,12 @@ async fn string_pii_redacts_while_non_string_scalars_survive() -> Result<()> {
     // Number, float, boolean, and null scalars are untouched and round-trip.
     assert_preserved(
         &out,
-        &["\"retries\": 3", "\"ratio\": 0.75", "\"active\": true", "\"deleted\": null"],
+        &[
+            "\"retries\": 3",
+            "\"ratio\": 0.75",
+            "\"active\": true",
+            "\"deleted\": null",
+        ],
     );
     Ok(())
 }

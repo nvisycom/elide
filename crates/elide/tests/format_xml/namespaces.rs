@@ -9,7 +9,10 @@ use crate::support::asserts::{assert_label_present, assert_pii_removed, assert_p
 use crate::support::pipeline::Fixture;
 
 const FIXTURE: Fixture = Fixture {
-    path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/xml/namespaces.xml"),
+    path: concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/testdata/xml/namespaces.xml"
+    ),
     source: include_bytes!("../testdata/xml/namespaces.xml"),
     extension: "xml",
 };

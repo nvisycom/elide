@@ -28,17 +28,23 @@ async fn comment_and_cdata_pii_is_redacted() -> Result<()> {
     assert_pii_removed(
         &outcome.redacted_text(),
         &[
-            "bob.smith@example.com",       // comment
-            "+1 (510) 555-0199",           // comment
-            "alice.johnson@example.com",   // CDATA
-            "4111 1111 1111 1111",         // CDATA
+            "bob.smith@example.com",     // comment
+            "+1 (510) 555-0199",         // comment
+            "alice.johnson@example.com", // CDATA
+            "4111 1111 1111 1111",       // CDATA
         ],
     );
 
     // The comment and CDATA delimiters and the non-sensitive summary survive.
     assert_preserved(
         &outcome.redacted_text(),
-        &["<!--", "-->", "<![CDATA[", "]]>", "<summary>Onboarding follow-up</summary>"],
+        &[
+            "<!--",
+            "-->",
+            "<![CDATA[",
+            "]]>",
+            "<summary>Onboarding follow-up</summary>",
+        ],
     );
     Ok(())
 }
