@@ -121,6 +121,8 @@ pub(crate) fn build_items(raw: &str, config: MarkupConfig<'_>) -> Result<Vec<Xml
                 } else {
                     stack.push(Frame {
                         name,
+                        hint: hint_words(e),
+                        tag_span: span.clone(),
                         text_start: text_items.len(),
                     });
                 }
@@ -145,11 +147,23 @@ pub(crate) fn build_items(raw: &str, config: MarkupConfig<'_>) -> Result<Vec<Xml
                     let value = source.slice(inner.clone()).to_owned();
                     let engine = items.offset()..items.offset() + value.len();
                     let item_index = items.push(value, inner);
+                    // The enclosing element's name vouches for its text, the
+                    // way a JSON object key vouches for its value or a CSV
+                    // header for its cell: `<paymentCard>4111…</paymentCard>`
+                    // lets `paymentCard` boost the number. A generic tag name
+                    // simply carries no matching context keyword, so it costs
+                    // nothing.
+                    let name_hint = stack.last().map(|frame| {
+                        Hint::new(
+                            TextLocation::new(frame.tag_span.start, frame.tag_span.end),
+                            TextData::new(frame.hint.clone()),
+                        )
+                    });
                     text_items.push(TextRecord {
                         item_index,
                         engine,
                         text: source.slice(span).trim().to_owned(),
-                        pending_hints: Vec::new(),
+                        pending_hints: name_hint.into_iter().collect(),
                     });
                 }
             }
@@ -196,6 +210,12 @@ struct TextRecord {
 /// An open element on the parse stack.
 struct Frame {
     name: String,
+    /// The element name as space-separated words (`paymentCard` → `payment
+    /// card`), the text of the context hint attached to the element's content.
+    hint: String,
+    /// Source span of this element's start tag (`<name …>`), used as the
+    /// location of the element-name hint attached to the element's text.
+    tag_span: Range<usize>,
     text_start: usize,
 }
 
@@ -222,6 +242,38 @@ fn bom_len(raw: &str) -> usize {
 /// makes `<SCRIPT>` and `<P>` match too).
 fn local_name(e: &BytesStart<'_>) -> String {
     String::from_utf8_lossy(e.local_name().as_ref()).to_ascii_lowercase()
+}
+
+/// The start tag's local name split into space-separated words, so it reads as
+/// context for the element's text. A `camelCase` / `PascalCase` name breaks on
+/// each case transition and a `snake_case` / `kebab-case` name on its
+/// separators, so `paymentCard`, `PaymentCard`, `payment_card`, and
+/// `payment-card` all become `"payment card"` — where a context keyword like
+/// `card` then matches on a word boundary.
+fn hint_words(e: &BytesStart<'_>) -> String {
+    let local = e.local_name();
+    let raw = String::from_utf8_lossy(local.as_ref());
+    let mut out = String::with_capacity(raw.len() + 4);
+    let mut prev: Option<char> = None;
+    for c in raw.chars() {
+        if c == '_' || c == '-' {
+            if !out.ends_with(' ') && !out.is_empty() {
+                out.push(' ');
+            }
+        } else {
+            // Insert a break before an uppercase letter that follows a
+            // lowercase/digit — the camelCase word boundary.
+            if c.is_uppercase()
+                && prev.is_some_and(|p| p.is_lowercase() || p.is_ascii_digit())
+                && !out.ends_with(' ')
+            {
+                out.push(' ');
+            }
+            out.push(c);
+        }
+        prev = Some(c);
+    }
+    out
 }
 
 /// The end tag's lowercased local name, matched against an open skip element.
@@ -264,11 +316,10 @@ fn attach_sibling_hints(group: &mut [TextRecord]) {
                     TextLocation::new(engine.start, engine.end),
                     TextData::new(text.clone()),
                 )
-            })
-            .collect::<Vec<_>>();
-        if !hints.is_empty() {
-            record.pending_hints = hints;
-        }
+            });
+        // Append, don't replace: a text node already carries its enclosing
+        // element-name hint, and the sibling prose hints add to it.
+        record.pending_hints.extend(hints);
     }
 }
 
@@ -333,6 +384,45 @@ mod tests {
             let h = load(raw).await;
             assert_eq!(encoded(&h), raw, "round-trip changed: {raw:?}");
         }
+    }
+
+    #[test]
+    fn hint_words_splits_case_and_separators() {
+        use quick_xml::events::BytesStart;
+        for (name, expected) in [
+            ("paymentCard", "payment Card"),
+            ("PaymentCard", "Payment Card"), // splits on the internal lower→upper
+            ("payment_card", "payment card"),
+            ("payment-card", "payment card"),
+            ("ssn", "ssn"),
+            ("taxId", "tax Id"),
+        ] {
+            let e = BytesStart::new(name);
+            assert_eq!(hint_words(&e), expected, "name = {name:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_element_name_hints_its_text() {
+        // `<paymentCard>` should reach its text as a `payment card` hint, so a
+        // context keyword (`card`) can boost the value inside — the markup
+        // counterpart of a JSON key or CSV header vouching for its value.
+        let raw = "<paymentCard>4111 1111 1111 1111</paymentCard>";
+        let mut h = load(raw).await;
+        let chunk = h.read_next().await.unwrap().expect("one text chunk");
+        assert_eq!(chunk.data.as_str(), "4111 1111 1111 1111");
+        assert!(
+            chunk
+                .hints
+                .iter()
+                .any(|hint| hint.data.as_str() == "payment Card"),
+            "expected a `payment Card` element-name hint, got {:?}",
+            chunk
+                .hints
+                .iter()
+                .map(|h| h.data.as_str())
+                .collect::<Vec<_>>(),
+        );
     }
 
     #[tokio::test]
