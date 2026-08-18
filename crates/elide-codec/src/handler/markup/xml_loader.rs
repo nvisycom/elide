@@ -31,6 +31,7 @@ use super::stream::{MarkupSink, MarkupSource};
 use super::xml_handler::{FORMAT_ID, XmlEncoder, XmlHandler, XmlItem};
 use crate::Loader;
 use crate::content::ContentData;
+use crate::handler::context::context_words;
 use crate::handler::extract::ExtractHandler;
 
 /// Loader for XML files. Produces one [`XmlHandler`] per input.
@@ -244,36 +245,14 @@ fn local_name(e: &BytesStart<'_>) -> String {
     String::from_utf8_lossy(e.local_name().as_ref()).to_ascii_lowercase()
 }
 
-/// The start tag's local name split into space-separated words, so it reads as
-/// context for the element's text. A `camelCase` / `PascalCase` name breaks on
-/// each case transition and a `snake_case` / `kebab-case` name on its
-/// separators, so `paymentCard`, `PaymentCard`, `payment_card`, and
-/// `payment-card` all become `"payment card"` — where a context keyword like
-/// `card` then matches on a word boundary.
+/// The start tag's local name as context words for the element's text — see
+/// [`context_words`]: `paymentCard` becomes `"payment card"` so a keyword like
+/// `card` matches on a word boundary.
+///
+/// [`context_words`]: crate::handler::context::context_words
 fn hint_words(e: &BytesStart<'_>) -> String {
     let local = e.local_name();
-    let raw = String::from_utf8_lossy(local.as_ref());
-    let mut out = String::with_capacity(raw.len() + 4);
-    let mut prev: Option<char> = None;
-    for c in raw.chars() {
-        if c == '_' || c == '-' {
-            if !out.ends_with(' ') && !out.is_empty() {
-                out.push(' ');
-            }
-        } else {
-            // Insert a break before an uppercase letter that follows a
-            // lowercase/digit — the camelCase word boundary.
-            if c.is_uppercase()
-                && prev.is_some_and(|p| p.is_lowercase() || p.is_ascii_digit())
-                && !out.ends_with(' ')
-            {
-                out.push(' ');
-            }
-            out.push(c);
-        }
-        prev = Some(c);
-    }
-    out
+    context_words(&String::from_utf8_lossy(local.as_ref()))
 }
 
 /// The end tag's lowercased local name, matched against an open skip element.
@@ -387,19 +366,15 @@ mod tests {
     }
 
     #[test]
-    fn hint_words_splits_case_and_separators() {
+    fn hint_words_reads_the_local_name_through_context_words() {
+        // The splitting rules are exercised in `handler::context`; here we only
+        // confirm the element's *local* name (namespace prefix stripped) is what
+        // gets tokenized.
         use quick_xml::events::BytesStart;
-        for (name, expected) in [
-            ("paymentCard", "payment Card"),
-            ("PaymentCard", "Payment Card"), // splits on the internal lower→upper
-            ("payment_card", "payment card"),
-            ("payment-card", "payment card"),
-            ("ssn", "ssn"),
-            ("taxId", "tax Id"),
-        ] {
-            let e = BytesStart::new(name);
-            assert_eq!(hint_words(&e), expected, "name = {name:?}");
-        }
+        assert_eq!(
+            hint_words(&BytesStart::new("c:paymentCard")),
+            "payment Card"
+        );
     }
 
     #[tokio::test]

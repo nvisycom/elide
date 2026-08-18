@@ -7,9 +7,13 @@
 //! [`TextReplacement`]: elide_core::modality::text::TextReplacement
 
 #[cfg(feature = "json")]
+mod json_escape;
+#[cfg(feature = "json")]
 mod json_handler;
 #[cfg(feature = "json")]
 mod json_loader;
+#[cfg(feature = "json")]
+mod json_parser;
 #[cfg(feature = "txt")]
 mod txt_handler;
 #[cfg(feature = "txt")]

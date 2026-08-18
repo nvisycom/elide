@@ -5,16 +5,16 @@
 //! verbatim) or [`Slot::Leaf`] (a key, string value, or scalar). Leaves
 //! carry both the original source bytes (`serialized`) and the unescaped
 //! UTF-8 value the recognizer sees (`value`). [`Handler::read_next`]
-//! yields leaves in document order; `write_at` mutates the leaf's value
-//! and re-renders its serialized form; [`Handler::encode`] concatenates
-//! every slot.
+//! yields leaves in document order; `write_at` splices each redaction into
+//! the leaf's `serialized` bytes at the mapped source span (keeping `value`
+//! in sync); [`Handler::encode`] concatenates every slot.
 //!
-//! This keeps formatting (indentation, key order, whitespace)
-//! byte-identical to the source for any slot the caller didn't touch, and
-//! reduces the partial-leaf offset translation to a single per-leaf walk
-//! of its escape table.
+//! Because a redaction is spliced rather than re-rendered from the decoded
+//! value, formatting (indentation, key order, whitespace) *and* every byte
+//! outside a redacted span — including `\uXXXX` / `\"` escapes within a
+//! redacted string — stay byte-identical to the source. The partial-leaf
+//! offset translation is a single per-leaf walk of its escape table.
 
-use std::mem;
 use std::ops::Range;
 
 use elide_core::modality::text::{Text, TextData, TextLocation};
@@ -23,6 +23,8 @@ use elide_core::operator::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 
 use super::JsonLoader;
+use super::json_escape::{decode_escape, json_escape};
+use super::json_parser::parse_slots;
 use crate::content::ContentData;
 use crate::handler::redact;
 use crate::{Format, FormatId, Handler};
@@ -81,11 +83,33 @@ impl Leaf {
         matches!(self.kind, LeafKind::Key | LeafKind::StringValue)
     }
 
-    fn render(&mut self) {
-        self.serialized = match self.kind {
-            LeafKind::Key | LeafKind::StringValue => format!("\"{}\"", json_escape(&self.value)),
-            LeafKind::Scalar => self.value.clone(),
-        };
+    /// Replace the decoded-value byte range `value_range` with `replacement`,
+    /// editing `serialized` **in place** so every byte outside the edited span
+    /// — quote, indentation, and any `\uXXXX` / `\"` escapes — survives
+    /// verbatim, rather than re-rendering the whole value (which would flatten
+    /// escapes to their literal chars). `value` is kept in sync so later reads
+    /// and edits of the same leaf see the new content.
+    fn splice(&mut self, value_range: Range<usize>, replacement: &str) -> Result<()> {
+        if !self.is_quoted() {
+            // A scalar has no escapes and no quotes; value and serialized are
+            // the same bytes, so a direct splice of both is exact.
+            redact::replace_range(&mut self.value, replacement, value_range.clone())?;
+            redact::replace_range(&mut self.serialized, replacement, value_range)?;
+            return Ok(());
+        }
+        // Map the value range to source offsets within `serialized` (offset 0 =
+        // the leaf's own bytes), then splice the escaped replacement there.
+        let source_start = value_to_source_offset(self, 0, value_range.start)
+            .ok_or_else(|| Error::new(ErrorKind::MalformedInput, "value offset out of range"))?;
+        let source_end = value_to_source_offset(self, 0, value_range.end)
+            .ok_or_else(|| Error::new(ErrorKind::MalformedInput, "value offset out of range"))?;
+        redact::replace_range(
+            &mut self.serialized,
+            &json_escape(replacement),
+            source_start..source_end,
+        )?;
+        redact::replace_range(&mut self.value, replacement, value_range)?;
+        Ok(())
     }
 }
 
@@ -197,8 +221,7 @@ impl DataWriter<Text> for JsonHandler {
             let Slot::Leaf(leaf) = &mut self.slots[idx] else {
                 continue;
             };
-            redact::replace_range(&mut leaf.value, &value, value_start..value_end)?;
-            leaf.render();
+            leaf.splice(value_start..value_end, &value)?;
         }
         self.cursor = 0;
         Ok(())
@@ -247,13 +270,6 @@ impl JsonHandler {
     }
 }
 
-/// Escape a string for JSON matching (backslash and quote only; other
-/// control characters in keys/values are unsupported in this codec's
-/// redaction path and round-trip as-is).
-fn json_escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
 /// Translate a `(source_start, source_end)` range expressed in the
 /// current encoded output into the corresponding `(value_start,
 /// value_end)` range inside `leaf.value`.
@@ -300,14 +316,21 @@ fn translate_to_value(
             end = Some(val);
             break;
         }
-        // Index into leaf.serialized: `src - slot_start`.
+        // Index into leaf.serialized: `src - slot_start`. An escape advances the
+        // source cursor by its byte span and the value cursor by the decoded
+        // char's UTF-8 length — the two differ for `\uXXXX`.
         let local = src - slot_start;
-        let is_escape = bytes.get(local) == Some(&b'\\');
-        if is_escape && src + 1 > escaped_end {
-            return None;
-        }
-        src += if is_escape { 2 } else { 1 };
-        val += 1;
+        let (source_len, value_len) = if bytes.get(local) == Some(&b'\\') {
+            let (source_len, decoded) = decode_escape(&bytes[local..])?;
+            if src + source_len > escaped_end + 1 {
+                return None;
+            }
+            (source_len, decoded.len_utf8())
+        } else {
+            (1, 1)
+        };
+        src += source_len;
+        val += value_len;
     }
     Some((start?, end?))
 }
@@ -339,305 +362,16 @@ fn value_to_source_offset(leaf: &Leaf, slot_start: usize, value_offset: usize) -
             return None;
         }
         let local = src - slot_start;
-        let is_escape = bytes.get(local) == Some(&b'\\');
-        src += if is_escape { 2 } else { 1 };
-        val += 1;
+        let (source_len, value_len) = if bytes.get(local) == Some(&b'\\') {
+            let (source_len, decoded) = decode_escape(&bytes[local..])?;
+            (source_len, decoded.len_utf8())
+        } else {
+            (1, 1)
+        };
+        src += source_len;
+        val += value_len;
     }
     Some(src)
-}
-
-/// Lex JSON source into a flat ordered slot list.
-///
-/// Whitespace and structural punctuation collapse into
-/// [`Slot::Passthrough`]; keys, string values and scalars become
-/// [`Slot::Leaf`]. Returns an error if the source is not well-formed
-/// JSON.
-pub(super) fn parse_slots(src: &str) -> Result<Vec<Slot>> {
-    let mut p = SlotParser::new(src);
-    p.parse_value(None)?;
-    p.flush_passthrough();
-    p.consume_whitespace();
-    p.flush_passthrough();
-    if p.pos != src.len() {
-        return Err(Error::new(
-            ErrorKind::MalformedInput,
-            format!("trailing bytes after JSON value at offset {}", p.pos),
-        ));
-    }
-    Ok(p.slots)
-}
-
-struct SlotParser<'a> {
-    src: &'a str,
-    bytes: &'a [u8],
-    pos: usize,
-    /// Pending whitespace + structural bytes we haven't flushed into a
-    /// [`Slot::Passthrough`] yet.
-    pending: String,
-    slots: Vec<Slot>,
-}
-
-impl<'a> SlotParser<'a> {
-    fn new(src: &'a str) -> Self {
-        Self {
-            src,
-            bytes: src.as_bytes(),
-            pos: 0,
-            pending: String::new(),
-            slots: Vec::new(),
-        }
-    }
-
-    fn flush_passthrough(&mut self) {
-        if !self.pending.is_empty() {
-            self.slots
-                .push(Slot::Passthrough(mem::take(&mut self.pending)));
-        }
-    }
-
-    fn push_leaf(&mut self, leaf: Leaf) {
-        self.flush_passthrough();
-        self.slots.push(Slot::Leaf(leaf));
-    }
-
-    fn peek(&self) -> Option<u8> {
-        self.bytes.get(self.pos).copied()
-    }
-
-    fn consume_whitespace(&mut self) {
-        while let Some(b) = self.peek() {
-            if b == b' ' || b == b'\t' || b == b'\n' || b == b'\r' {
-                self.pending.push(b as char);
-                self.pos += 1;
-            } else {
-                break;
-            }
-        }
-    }
-
-    fn consume_punct(&mut self, c: u8) -> Result<()> {
-        if self.peek() != Some(c) {
-            return Err(Error::new(
-                ErrorKind::MalformedInput,
-                format!("expected {:?} at offset {}", c as char, self.pos),
-            ));
-        }
-        self.pending.push(c as char);
-        self.pos += 1;
-        Ok(())
-    }
-
-    fn parse_value(&mut self, key_context: Option<&Hint<Text>>) -> Result<()> {
-        self.consume_whitespace();
-        match self.peek() {
-            Some(b'{') => self.parse_object(),
-            Some(b'[') => self.parse_array(key_context),
-            Some(b'"') => {
-                let mut leaf = self.parse_string_leaf(LeafKind::StringValue)?;
-                if let Some(k) = key_context {
-                    leaf.hints.push(k.clone());
-                }
-                self.push_leaf(leaf);
-                Ok(())
-            }
-            Some(b't') | Some(b'f') | Some(b'n') | Some(b'-') | Some(b'0'..=b'9') => {
-                let mut leaf = self.parse_scalar()?;
-                if let Some(k) = key_context {
-                    leaf.hints.push(k.clone());
-                }
-                self.push_leaf(leaf);
-                Ok(())
-            }
-            Some(b) => Err(Error::new(
-                ErrorKind::MalformedInput,
-                format!("unexpected byte {b:#x} at offset {}", self.pos),
-            )),
-            None => Err(Error::new(
-                ErrorKind::MalformedInput,
-                "unexpected end of input".to_string(),
-            )),
-        }
-    }
-
-    fn parse_object(&mut self) -> Result<()> {
-        self.consume_punct(b'{')?;
-        self.consume_whitespace();
-        if self.peek() == Some(b'}') {
-            self.consume_punct(b'}')?;
-            return Ok(());
-        }
-        loop {
-            self.consume_whitespace();
-            // The key's source span is the quoted form `"…"` between here
-            // and where `parse_string_leaf` leaves the cursor; that span is
-            // the located hint we hand every value under this key.
-            let key_start = self.pos;
-            let key = self.parse_string_leaf(LeafKind::Key)?;
-            let key_hint = Hint::new(
-                TextLocation::new(key_start, self.pos),
-                TextData::new(key.value.clone()),
-            );
-            self.push_leaf(key);
-            self.consume_whitespace();
-            self.consume_punct(b':')?;
-            self.parse_value(Some(&key_hint))?;
-            self.consume_whitespace();
-            match self.peek() {
-                Some(b',') => {
-                    self.consume_punct(b',')?;
-                }
-                Some(b'}') => {
-                    self.consume_punct(b'}')?;
-                    return Ok(());
-                }
-                _ => {
-                    return Err(Error::new(
-                        ErrorKind::MalformedInput,
-                        format!("expected ',' or '}}' at offset {}", self.pos),
-                    ));
-                }
-            }
-        }
-    }
-
-    fn parse_array(&mut self, key_context: Option<&Hint<Text>>) -> Result<()> {
-        self.consume_punct(b'[')?;
-        self.consume_whitespace();
-        if self.peek() == Some(b']') {
-            self.consume_punct(b']')?;
-            return Ok(());
-        }
-        loop {
-            // Array elements inherit the containing object key as their
-            // hint: `{"cards": ["4111…", "5555…"]}` should treat both
-            // PANs as living under `cards`.
-            self.parse_value(key_context)?;
-            self.consume_whitespace();
-            match self.peek() {
-                Some(b',') => {
-                    self.consume_punct(b',')?;
-                }
-                Some(b']') => {
-                    self.consume_punct(b']')?;
-                    return Ok(());
-                }
-                _ => {
-                    return Err(Error::new(
-                        ErrorKind::MalformedInput,
-                        format!("expected ',' or ']' at offset {}", self.pos),
-                    ));
-                }
-            }
-        }
-    }
-
-    fn parse_string_leaf(&mut self, kind: LeafKind) -> Result<Leaf> {
-        if self.peek() != Some(b'"') {
-            return Err(Error::new(
-                ErrorKind::MalformedInput,
-                format!("expected '\"' at offset {}", self.pos),
-            ));
-        }
-        let start = self.pos;
-        self.pos += 1;
-        let mut value = String::new();
-        loop {
-            match self.peek() {
-                Some(b'"') => {
-                    self.pos += 1;
-                    let serialized = self.src[start..self.pos].to_string();
-                    return Ok(Leaf {
-                        kind,
-                        value,
-                        serialized,
-                        hints: Vec::new(),
-                    });
-                }
-                Some(b'\\') => {
-                    let next = self.bytes.get(self.pos + 1).copied();
-                    match next {
-                        Some(b'"') => value.push('"'),
-                        Some(b'\\') => value.push('\\'),
-                        Some(b'/') => value.push('/'),
-                        Some(b'n') => value.push('\n'),
-                        Some(b'r') => value.push('\r'),
-                        Some(b't') => value.push('\t'),
-                        Some(b'b') => value.push('\u{0008}'),
-                        Some(b'f') => value.push('\u{000c}'),
-                        Some(b'u') => {
-                            return Err(Error::new(
-                                ErrorKind::MalformedInput,
-                                format!(
-                                    "JSON \\u escapes are not supported in redaction codec \
-                                     (offset {})",
-                                    self.pos
-                                ),
-                            ));
-                        }
-                        Some(other) => {
-                            return Err(Error::new(
-                                ErrorKind::MalformedInput,
-                                format!(
-                                    "invalid escape \\{} at offset {}",
-                                    other as char, self.pos
-                                ),
-                            ));
-                        }
-                        None => {
-                            return Err(Error::new(
-                                ErrorKind::MalformedInput,
-                                "unterminated escape at end of input".to_string(),
-                            ));
-                        }
-                    }
-                    self.pos += 2;
-                }
-                Some(_) => {
-                    let ch_start = self.pos;
-                    // Advance one UTF-8 codepoint without reading the
-                    // escape table.
-                    let rest = &self.src[ch_start..];
-                    let ch = rest.chars().next().ok_or_else(|| {
-                        Error::new(ErrorKind::MalformedInput, "unterminated string".to_string())
-                    })?;
-                    value.push(ch);
-                    self.pos += ch.len_utf8();
-                }
-                None => {
-                    return Err(Error::new(
-                        ErrorKind::MalformedInput,
-                        "unterminated string".to_string(),
-                    ));
-                }
-            }
-        }
-    }
-
-    fn parse_scalar(&mut self) -> Result<Leaf> {
-        let start = self.pos;
-        while let Some(b) = self.peek() {
-            let is_scalar_byte =
-                b.is_ascii_alphanumeric() || matches!(b, b'-' | b'+' | b'.' | b'_');
-            if is_scalar_byte {
-                self.pos += 1;
-            } else {
-                break;
-            }
-        }
-        if start == self.pos {
-            return Err(Error::new(
-                ErrorKind::MalformedInput,
-                format!("expected scalar at offset {start}"),
-            ));
-        }
-        let literal = self.src[start..self.pos].to_string();
-        Ok(Leaf {
-            kind: LeafKind::Scalar,
-            value: literal.clone(),
-            serialized: literal,
-            hints: Vec::new(),
-        })
-    }
 }
 
 #[cfg(test)]
@@ -768,6 +502,56 @@ mod tests {
         );
         h.write_at(rs).await?;
         assert_eq!(encoded(&h), r#"{"msg":"foo\"XXX"}"#);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn u_escape_decodes_in_the_value_and_round_trips() -> Result<()> {
+        // `é` is one `é` in the value but six source bytes; a
+        // `😀` surrogate pair is one `😀` from twelve source bytes.
+        // (Sources built at runtime so the literal backslash-u is unambiguous.)
+        let e_acute = "\\u00e9";
+        let grin = "\\uD83D\\uDE00";
+        let src = format!("{{\"a\":\"caf{e_acute}\",\"b\":\"{grin}\"}}");
+        let mut h = handler(&src);
+        let mut values = Vec::new();
+        while let Some(c) = h.read_next().await? {
+            values.push(c.data.as_str().to_owned());
+        }
+        assert!(values.contains(&"caf\u{e9}".to_owned()), "got {values:?}");
+        assert!(values.contains(&"\u{1F600}".to_owned()), "got {values:?}");
+        // No redaction: the escapes are spliced back verbatim, never decoded.
+        assert_eq!(encoded(&h), src);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn redact_a_span_after_a_u_escape() -> Result<()> {
+        // The `é` before `bar` is 6 source bytes for 1 value char, so the
+        // value offset of `bar` maps back across it correctly.
+        let src = format!("{{\"msg\":\"caf{} bar\"}}", "\\u00e9");
+        let mut h = handler(&src);
+        let _ = loop {
+            let c = h.read_next().await?.expect("chunk");
+            if c.data.as_str() == "caf\u{e9} bar" {
+                break c;
+            }
+        };
+        // The redaction location is in *source* coordinates (as the lift step
+        // produces), so `bar` sits after the 6-byte `é` escape — the
+        // source→value mapping must cross it correctly.
+        let local_start = src.find("bar").unwrap();
+        let local_end = local_start + "bar".len();
+        let mut rs = Redactions::new();
+        rs.push(
+            TextLocation::new(local_start, local_end),
+            TextReplacement::substituted("XXX"),
+        );
+        h.write_at(rs).await?;
+        // Only `bar` is replaced; the `é` escape before it is spliced
+        // through verbatim (the redaction edits `serialized` in place, not a
+        // re-render of the decoded value).
+        assert_eq!(encoded(&h), format!("{{\"msg\":\"caf{} XXX\"}}", "\\u00e9"));
         Ok(())
     }
 
