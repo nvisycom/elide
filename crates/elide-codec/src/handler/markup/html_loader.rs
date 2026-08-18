@@ -13,8 +13,8 @@ use elide_core::modality::text::Text;
 
 use super::config::MarkupConfig;
 use super::html_handler::{FORMAT_ID, HtmlHandler, ScriptPolicy};
+use super::markup_parser::build_items;
 use super::xml_handler::XmlEncoder;
-use super::xml_loader::build_items;
 use crate::Loader;
 use crate::content::ContentData;
 use crate::handler::extract::ExtractHandler;

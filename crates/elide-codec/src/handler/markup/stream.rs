@@ -27,6 +27,11 @@ impl<'a> MarkupSource<'a> {
         Self { raw }
     }
 
+    /// The whole retained source document.
+    pub(super) fn raw(&self) -> &'a str {
+        self.raw
+    }
+
     /// The source text over `range`.
     pub(super) fn slice(&self, range: Range<usize>) -> &'a str {
         &self.raw[range]
@@ -38,9 +43,11 @@ impl<'a> MarkupSource<'a> {
         (!self.raw[span.clone()].trim().is_empty()).then_some(span)
     }
 
-    /// The source byte spans of an element's redactable attribute values — the
-    /// inner bytes between the quotes. Values pass through verbatim, so a
-    /// `mailto:` URL has its email matched in place.
+    /// Each redactable attribute of an element: its local name (for context)
+    /// and the source byte span of its value — the inner bytes between the
+    /// quotes. Values pass through verbatim, so a `mailto:` URL has its email
+    /// matched in place; the name lets a context-gated value (`ssn="…"`) be
+    /// boosted by its attribute name.
     ///
     /// Strict XML validates attributes (rejecting e.g. a duplicate key) and
     /// reports an [`AttrError`] as [`ErrorKind::MalformedInput`]; lenient HTML
@@ -48,12 +55,12 @@ impl<'a> MarkupSource<'a> {
     /// failing.
     ///
     /// [`AttrError`]: quick_xml::events::attributes::AttrError
-    pub(super) fn attribute_spans(
+    pub(super) fn attributes(
         &self,
         e: &BytesStart<'_>,
         lenient: bool,
-    ) -> Result<Vec<Range<usize>>> {
-        let mut spans = Vec::new();
+    ) -> Result<Vec<(String, Range<usize>)>> {
+        let mut out = Vec::new();
         for attr in e.attributes().with_checks(!lenient) {
             let attr = match attr {
                 Ok(attr) => attr,
@@ -84,9 +91,10 @@ impl<'a> MarkupSource<'a> {
             if self.raw[inner.clone()].trim().is_empty() {
                 continue;
             }
-            spans.push(inner);
+            let key = String::from_utf8_lossy(attr.key.local_name().as_ref()).into_owned();
+            out.push((key, inner));
         }
-        Ok(spans)
+        Ok(out)
     }
 
     /// The byte range a `slice` borrowed out of this source occupies in it, or

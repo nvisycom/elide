@@ -33,3 +33,24 @@ async fn unicode_escapes_survive_and_ascii_pii_redacts() -> Result<()> {
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn pii_after_escapes_redacts_while_the_escaped_prefix_survives() -> Result<()> {
+    // The `greeting` value decodes to `😀 café corner: bob.smith@example.com`:
+    // a leading surrogate pair (`😀`) and a BMP escape (`é`)
+    // precede the email. Detection sees the *decoded* value, so the email is
+    // found; redaction must then map the value-space span back through those
+    // escapes to the right *source* bytes — replacing only the email and
+    // leaving every escape in the prefix byte-for-byte intact.
+    let outcome = FIXTURE.run().await?;
+    let out = outcome.redacted_text();
+
+    assert_label_present(&outcome.entities, &builtins::EMAIL_ADDRESS.to_ref());
+    // The email (past the escapes) is gone…
+    assert_pii_removed(&out, &["bob.smith@example.com"]);
+    // …while the surrogate pair and BMP escape before it survive verbatim,
+    // proving the source-offset mapping counted escape bytes correctly rather
+    // than shifting into or past the prefix.
+    assert_preserved(&out, &["\\uD83D\\uDE00 caf\\u00e9 corner: "]);
+    Ok(())
+}

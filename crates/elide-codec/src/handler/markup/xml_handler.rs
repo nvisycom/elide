@@ -124,3 +124,191 @@ pub(crate) fn splice(raw: &str, items: &[XmlItem]) -> Result<String> {
     }
     Ok(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use elide_core::modality::DataWriter;
+    use elide_core::modality::text::{TextLocation, TextReplacement};
+    use elide_core::operator::Redactions;
+
+    use super::*;
+    #[cfg(feature = "html")]
+    use crate::handler::markup::config::MarkupConfig;
+    #[cfg(feature = "html")]
+    use crate::handler::markup::markup_parser::build_items;
+    use crate::{Handler, Loader};
+
+    async fn load(raw: &str) -> XmlHandler {
+        XmlLoader
+            .decode(ContentData::from_text(raw))
+            .await
+            .expect("xml decode succeeds")
+    }
+
+    /// Build a handler over `raw` with an explicit (lenient HTML) config, for
+    /// the round-trips that need the skip/void tolerance the strict loader
+    /// won't grant.
+    #[cfg(feature = "html")]
+    fn handler_with(raw: &str, config: MarkupConfig<'_>) -> XmlHandler {
+        let items = build_items(raw, config).expect("markup decode succeeds");
+        ExtractHandler::new(
+            FORMAT_ID.clone(),
+            XmlEncoder {
+                raw: raw.to_owned(),
+            },
+            items,
+        )
+    }
+
+    fn encoded(h: &XmlHandler) -> String {
+        h.encode().unwrap().decode().unwrap()
+    }
+
+    #[tokio::test]
+    async fn encode_unchanged_round_trips_verbatim() {
+        let raw = "<?xml version=\"1.0\"?>\n<root attr=\"x\">\n  <name>Alice</name>\n  <!-- note -->\n</root>\n";
+        let h = load(raw).await;
+        assert_eq!(encoded(&h), raw);
+    }
+
+    #[tokio::test]
+    async fn round_trips_verbatim_across_tricky_inputs() {
+        for raw in [
+            "\u{FEFF}<?xml version=\"1.0\"?><r>x</r>",
+            "  <r>x</r>",
+            "<r>café résumé</r>",
+            "<r>a&amp;b</r>",
+            "<r><![CDATA[üñ]]></r>",
+        ] {
+            let h = load(raw).await;
+            assert_eq!(encoded(&h), raw, "round-trip changed: {raw:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn lift_carries_the_exact_source_span() {
+        // Text preceded by tags: the chunk's stream offset differs from the raw
+        // byte offset, so `source` must point at the raw bytes, not the stream.
+        let raw = "<root><name>Alice Carter</name></root>";
+        let mut h = load(raw).await;
+        let chunk = loop {
+            let c = h.read_next().await.unwrap().unwrap();
+            if c.data.as_str() == "Alice Carter" {
+                break c;
+            }
+        };
+        // Redact "Carter" — value-local [6, 12).
+        let lifted = h.lift(&chunk, TextLocation::new(6, 12)).expect("in bounds");
+        // "Carter" sits at raw bytes 18..24 in the document.
+        let want = "<root><name>Alice Carter".find("Carter").unwrap();
+        assert_eq!(
+            lifted.source,
+            vec![SourceRef::new(want..want + "Carter".len())]
+        );
+        assert_eq!(&raw[want..want + 6], "Carter");
+    }
+
+    #[tokio::test]
+    async fn redact_text_node() {
+        let raw = "<root><name>Alice</name></root>";
+        let mut h = load(raw).await;
+        let chunk = loop {
+            let c = h.read_next().await.unwrap().unwrap();
+            if c.data.as_str() == "Alice" {
+                break c;
+            }
+        };
+        let mut rs = Redactions::new();
+        rs.push(chunk.location, TextReplacement::substituted("[NAME]"));
+        h.write_at(rs).await.unwrap();
+        assert_eq!(encoded(&h), "<root><name>[NAME]</name></root>");
+    }
+
+    #[tokio::test]
+    async fn redact_attribute_value() {
+        let raw = r#"<user email="alice@example.com">Bob</user>"#;
+        let mut h = load(raw).await;
+        let chunk = loop {
+            let c = h.read_next().await.unwrap().unwrap();
+            if c.data.as_str() == "alice@example.com" {
+                break c;
+            }
+        };
+        let mut rs = Redactions::new();
+        rs.push(chunk.location, TextReplacement::substituted("[EMAIL]"));
+        h.write_at(rs).await.unwrap();
+        assert_eq!(encoded(&h), r#"<user email="[EMAIL]">Bob</user>"#);
+    }
+
+    #[tokio::test]
+    async fn redact_cdata_body() {
+        let raw = "<doc><![CDATA[alice@example.com]]></doc>";
+        let mut h = load(raw).await;
+        let chunk = loop {
+            let c = h.read_next().await.unwrap().unwrap();
+            if c.data.as_str() == "alice@example.com" {
+                break c;
+            }
+        };
+        let mut rs = Redactions::new();
+        rs.push(chunk.location, TextReplacement::substituted("[EMAIL]"));
+        h.write_at(rs).await.unwrap();
+        assert_eq!(encoded(&h), "<doc><![CDATA[[EMAIL]]]></doc>");
+    }
+
+    #[tokio::test]
+    async fn redact_partial_text() {
+        let raw = "<p>contact alice@example.com today</p>";
+        let mut h = load(raw).await;
+        let chunk = loop {
+            let c = h.read_next().await.unwrap().unwrap();
+            if c.data.as_str().contains("alice@example.com") {
+                break c;
+            }
+        };
+        let at = chunk.data.as_str().find("alice@example.com").unwrap();
+        let loc = TextLocation::new(
+            chunk.location.range.start + at,
+            chunk.location.range.start + at + "alice@example.com".len(),
+        );
+        let mut rs = Redactions::new();
+        rs.push(loc, TextReplacement::substituted("[EMAIL]"));
+        h.write_at(rs).await.unwrap();
+        assert_eq!(encoded(&h), "<p>contact [EMAIL] today</p>");
+    }
+
+    // A lenient round-trip over the same encoder, exercising our splice
+    // bookkeeping across a skipped region. Gated on `html`: the lenient config
+    // only exists when HTML is compiled. A small synthetic vocabulary stands in
+    // for the real HTML element lists, which the HTML loader tests directly.
+    #[cfg(feature = "html")]
+    const TEST_BLOCKS: &[&str] = &["p", "div"];
+
+    #[cfg(feature = "html")]
+    #[tokio::test]
+    async fn redaction_after_a_skipped_script_is_byte_faithful() {
+        // Redacting text that follows a skipped script leaves the script and all
+        // other markup byte-identical, changing only the targeted span — the
+        // splice offsets stay correct across the skipped region.
+        let raw = r#"<p><script>var a="keep@x.com";</script>mail alice@example.com</p>"#;
+        let mut h = handler_with(raw, MarkupConfig::lenient(TEST_BLOCKS, &["script"]));
+        let chunk = loop {
+            let c = h.read_next().await.unwrap().unwrap();
+            if c.data.as_str().contains("alice@example.com") {
+                break c;
+            }
+        };
+        let at = chunk.data.as_str().find("alice@example.com").unwrap();
+        let loc = TextLocation::new(
+            chunk.location.range.start + at,
+            chunk.location.range.start + at + "alice@example.com".len(),
+        );
+        let mut rs = Redactions::new();
+        rs.push(loc, TextReplacement::substituted("[EMAIL]"));
+        h.write_at(rs).await.unwrap();
+        assert_eq!(
+            encoded(&h),
+            r#"<p><script>var a="keep@x.com";</script>mail [EMAIL]</p>"#
+        );
+    }
+}

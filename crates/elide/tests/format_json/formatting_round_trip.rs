@@ -16,6 +16,11 @@ const FIXTURE: Fixture = Fixture {
     extension: "json",
 };
 
+/// The whole document as it must come out: the two PII values replaced by
+/// their tokens, and every other byte — key order, colon/comma spacing, the
+/// tab indent, trailing spaces, newlines — identical to the input.
+const EXPECTED: &str = include_str!("../testdata/json/formatting_round_trip.expected.json");
+
 #[tokio::test]
 async fn irregular_formatting_and_key_order_are_preserved() -> Result<()> {
     let outcome = FIXTURE.run().await?;
@@ -33,5 +38,10 @@ async fn irregular_formatting_and_key_order_are_preserved() -> Result<()> {
             "\t\"alpha\":",
         ],
     );
+
+    // The fragment checks above document intent; this pins the *entire* output,
+    // so any drift in unredacted whitespace, punctuation, or line endings — not
+    // just the sampled fragments — fails the test.
+    assert_eq!(out, EXPECTED);
     Ok(())
 }

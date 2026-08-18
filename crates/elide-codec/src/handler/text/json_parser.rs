@@ -14,7 +14,7 @@ use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::{Error, ErrorKind, Result};
 
 use super::json_escape::decode_escape;
-use super::json_handler::{Leaf, LeafKind, Slot};
+use super::json_handler::{Leaf, LeafKind, Slot, is_json_literal};
 use crate::handler::context::context_words;
 
 /// Lex JSON source into a flat ordered slot list.
@@ -38,10 +38,19 @@ pub(super) fn parse_slots(src: &str) -> Result<Vec<Slot>> {
     Ok(p.slots)
 }
 
+/// Maximum object/array nesting depth accepted before the input is rejected.
+/// `parse_object`/`parse_array` recurse once per level and the source is
+/// caller-controlled, so an adversarial `[[[[…` would otherwise overflow the
+/// stack — an abort a `Result` cannot catch. 128 is far beyond any real
+/// document's structural depth.
+const MAX_DEPTH: usize = 128;
+
 struct SlotParser<'a> {
     src: &'a str,
     bytes: &'a [u8],
     pos: usize,
+    /// Current object/array nesting depth, bounded by [`MAX_DEPTH`].
+    depth: usize,
     /// Pending whitespace + structural bytes we haven't flushed into a
     /// [`Slot::Passthrough`] yet.
     pending: String,
@@ -54,6 +63,7 @@ impl<'a> SlotParser<'a> {
             src,
             bytes: src.as_bytes(),
             pos: 0,
+            depth: 0,
             pending: String::new(),
             slots: Vec::new(),
         }
@@ -98,11 +108,24 @@ impl<'a> SlotParser<'a> {
         Ok(())
     }
 
+    /// Run `parse` (an object/array body) one level deeper, restoring the
+    /// depth afterwards. The caller has already checked `depth < MAX_DEPTH`.
+    fn nested(&mut self, parse: impl FnOnce(&mut Self) -> Result<()>) -> Result<()> {
+        self.depth += 1;
+        let result = parse(self);
+        self.depth -= 1;
+        result
+    }
+
     fn parse_value(&mut self, key_context: Option<&Hint<Text>>) -> Result<()> {
         self.consume_whitespace();
         match self.peek() {
-            Some(b'{') => self.parse_object(),
-            Some(b'[') => self.parse_array(key_context),
+            Some(b'{') | Some(b'[') if self.depth >= MAX_DEPTH => Err(Error::new(
+                ErrorKind::MalformedInput,
+                format!("JSON nested deeper than {MAX_DEPTH} at offset {}", self.pos),
+            )),
+            Some(b'{') => self.nested(Self::parse_object),
+            Some(b'[') => self.nested(|p| p.parse_array(key_context)),
             Some(b'"') => {
                 let mut leaf = self.parse_string_leaf(LeafKind::StringValue)?;
                 if let Some(k) = key_context {
@@ -278,11 +301,56 @@ impl<'a> SlotParser<'a> {
             ));
         }
         let literal = self.src[start..self.pos].to_string();
+        // The scalar byte class (`alnum | - | + | . | _`) is permissive and
+        // would accept non-JSON runs like `tru`, `1.2.3`, `+5`, or `_`. Reject
+        // anything that is not a well-formed JSON literal so the lexer honors
+        // its contract of erroring on malformed input.
+        if !is_json_literal(&literal) {
+            return Err(Error::new(
+                ErrorKind::MalformedInput,
+                format!("invalid JSON literal {literal:?} at offset {start}"),
+            ));
+        }
         Ok(Leaf {
             kind: LeafKind::Scalar,
             value: literal.clone(),
             serialized: literal,
             hints: Vec::new(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_input_nested_past_the_depth_limit() {
+        // Deeply nested arrays must error, not overflow the stack.
+        let deep = format!("{}{}", "[".repeat(MAX_DEPTH + 5), "]".repeat(MAX_DEPTH + 5));
+        let err = parse_slots(&deep).expect_err("over-deep nesting should be rejected");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+    }
+
+    #[test]
+    fn accepts_input_at_the_depth_limit() {
+        // Exactly MAX_DEPTH levels is fine and round-trips.
+        let ok = format!("{}{}", "[".repeat(MAX_DEPTH), "]".repeat(MAX_DEPTH));
+        assert!(parse_slots(&ok).is_ok(), "MAX_DEPTH nesting should parse");
+    }
+
+    #[test]
+    fn rejects_scalars_that_are_not_valid_json_literals() {
+        // The permissive scalar byte class must not let malformed literals
+        // through: partial keywords, malformed numbers, and bare `_` are not
+        // JSON values.
+        for bad in ["[tru]", "[1.2.3]", "[+5]", "[0x1f]", "[_]", "[nul]"] {
+            let err = parse_slots(bad).expect_err("{bad} must be rejected");
+            assert_eq!(err.kind(), ErrorKind::MalformedInput, "for {bad}");
+        }
+        // Valid literals still parse: keywords, ints, floats, exponents, signs.
+        for ok in ["[true]", "[false]", "[null]", "[42]", "[-3.14]", "[1e10]"] {
+            assert!(parse_slots(ok).is_ok(), "{ok} should parse");
+        }
     }
 }

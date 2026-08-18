@@ -92,9 +92,16 @@ impl Leaf {
     fn splice(&mut self, value_range: Range<usize>, replacement: &str) -> Result<()> {
         if !self.is_quoted() {
             // A scalar has no escapes and no quotes; value and serialized are
-            // the same bytes, so a direct splice of both is exact.
+            // the same bytes, so a direct splice of both keeps them in step.
             redact::replace_range(&mut self.value, replacement, value_range.clone())?;
             redact::replace_range(&mut self.serialized, replacement, value_range)?;
+            // A spliced scalar may no longer be a valid JSON literal (masking
+            // `42` with `XXX` yields bare `XXX`). Promote such a value to a
+            // quoted string so the document stays valid JSON.
+            if !is_json_literal(&self.serialized) {
+                self.serialized = format!("\"{}\"", json_escape(&self.value));
+                self.kind = LeafKind::StringValue;
+            }
             return Ok(());
         }
         // Map the value range to source offsets within `serialized` (offset 0 =
@@ -111,6 +118,14 @@ impl Leaf {
         redact::replace_range(&mut self.value, replacement, value_range)?;
         Ok(())
     }
+}
+
+/// Whether `s` is a bare JSON literal — a number, or one of `true` / `false`
+/// / `null`. The lexer uses it to reject a malformed scalar, and the redactor
+/// to decide whether a redacted scalar can stay unquoted or must be promoted
+/// to a JSON string to keep the document valid.
+pub(super) fn is_json_literal(s: &str) -> bool {
+    matches!(s, "true" | "false" | "null") || s.parse::<f64>().is_ok()
 }
 
 /// Handler for loaded JSON content.
@@ -587,6 +602,24 @@ mod tests {
         rs.push(chunk.location.clone(), TextReplacement::substituted("0"));
         h.write_at(rs).await?;
         assert_eq!(encoded(&h), r#"{"n":0}"#);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn redact_scalar_with_non_literal_replacement_quotes_it() -> Result<()> {
+        // Masking a number with a non-literal string would make bare `XXX`
+        // invalid JSON, so the leaf is promoted to a quoted string value.
+        let mut h = handler(r#"{"n":42}"#);
+        let chunk = loop {
+            let c = h.read_next().await?.expect("chunk");
+            if c.data.as_str() == "42" {
+                break c;
+            }
+        };
+        let mut rs = Redactions::new();
+        rs.push(chunk.location.clone(), TextReplacement::substituted("XXX"));
+        h.write_at(rs).await?;
+        assert_eq!(encoded(&h), r#"{"n":"XXX"}"#);
         Ok(())
     }
 

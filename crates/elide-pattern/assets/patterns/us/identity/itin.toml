@@ -19,12 +19,17 @@ keywords = [
   "tin",
 ]
 
-# Medium: dashes / spaces around the IRS-published middle range.
+# Dashes / spaces around the IRS-published middle range. The shape is
+# indistinguishable from an SSN and carries no checksum, so — unlike the SSN
+# pattern, which earns a self-firing 0.5 through its `us.ssn` validator — this
+# unvalidated form must not fire on shape alone. It scores below the detection
+# baseline; a context keyword (`itin`, `taxpayer`, `tin`, …) lifts a genuine
+# match over the threshold.
 [[variants]]
 regex = '\b9\d{2}[- ](?:5\d|6[0-5]|7\d|8[0-8]|9(?:[0-2]|[4-9]))[- ]\d{4}\b'
-score = 0.5
+score = 0.3
 
-# Weak: unbroken 9-digit form.
+# Unbroken 9-digit form: weaker still, likewise keyword-gated.
 [[variants]]
 regex = '\b9\d{2}(?:5\d|6[0-5]|7\d|8[0-8]|9(?:[0-2]|[4-9]))\d{4}\b'
 score = 0.3

@@ -5,11 +5,27 @@
 //! lexer both walk escapes through it. [`json_escape`] is the inverse used
 //! when splicing a redaction back into a quoted value.
 
-/// Escape a string for JSON matching (backslash and quote only; other
-/// control characters in keys/values are unsupported in this codec's
-/// redaction path and round-trip as-is).
+/// Escape a string so it is safe to splice inside a JSON string value:
+/// `\` and `"` take their two-char escapes, and every C0 control character
+/// (`U+0000..=U+001F`) — which is illegal raw inside a JSON string — takes
+/// its short escape (`\n`, `\t`, …) or `\uXXXX`. Used when a redaction
+/// replacement is spliced back into a quoted value.
 pub(super) fn json_escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\u{08}' => out.push_str("\\b"),
+            '\u{0c}' => out.push_str("\\f"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// Decode the JSON string escape beginning at `bytes[0]` (which must be `\`),
@@ -81,5 +97,17 @@ mod tests {
         assert_eq!(decode_escape(b"\\u00zz"), None);
         assert_eq!(decode_escape(b"\\uD83D"), None);
         assert_eq!(decode_escape(b"\\uDE00"), None);
+    }
+
+    #[test]
+    fn json_escape_covers_quotes_backslash_and_control_chars() {
+        assert_eq!(json_escape("a\\b\"c"), "a\\\\b\\\"c");
+        // Short escapes for the common controls…
+        assert_eq!(json_escape("x\ny\tz"), "x\\ny\\tz");
+        // …and `\uXXXX` for other C0 controls, which are illegal raw in a
+        // JSON string (a NUL or a bell must not be spliced in unescaped).
+        assert_eq!(json_escape("\u{0}\u{7}"), "\\u0000\\u0007");
+        // A plain string is unchanged.
+        assert_eq!(json_escape("hello"), "hello");
     }
 }

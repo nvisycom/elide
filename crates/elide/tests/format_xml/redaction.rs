@@ -13,7 +13,10 @@ use crate::support::asserts::{
 use crate::support::pipeline::Fixture;
 
 const FIXTURE: Fixture = Fixture {
-    path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/xml/redaction.xml"),
+    path: concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/testdata/xml/redaction.xml"
+    ),
     source: include_bytes!("../testdata/xml/redaction.xml"),
     extension: "xml",
 };
@@ -59,6 +62,11 @@ async fn xml_detects_and_redacts() -> Result<()> {
             "[ip_address]",
         ],
     );
+
+    // The payment card is masked in place (the test anonymizer stars it, rather
+    // than tokening it), so the element keeps a star-mask — a regression that
+    // *deleted* the card instead of masking it would leave `<paymentCard></…>`.
+    assert_preserved(&outcome.redacted_text(), &["<paymentCard>*"]);
 
     // Markup structure survives: the declaration, namespaced root, tags, and
     // non-sensitive text stay verbatim.
