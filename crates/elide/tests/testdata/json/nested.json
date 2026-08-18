@@ -1,0 +1,14 @@
+{
+  "organization": {
+    "departments": [
+      {
+        "name": "Finance",
+        "members": [
+          { "email": "alice.johnson@example.com", "iban": "GB29 NWBK 6016 1331 9268 19" },
+          { "email": "bob.smith@example.com" }
+        ]
+      }
+    ],
+    "aliases": ["carol.lee@example.com", "not-an-email"]
+  }
+}

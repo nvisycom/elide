@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Reviewer: Alice Johnson handles bob.smith@example.com inbox -->
+<onboarding xmlns="urn:example:onboarding" host="192.168.1.42">
+  <customer id="cust-01" contact="alice.johnson@example.com">
+    <name>Alice Johnson</name>
+    <email>alice.johnson@example.com</email>
+    <phone>+1 (415) 555-0142</phone>
+    <paymentCard>4111 1111 1111 1111</paymentCard>
+    <iban>GB29 NWBK 6016 1331 9268 19</iban>
+    <taxId>123-45-6789</taxId>
+  </customer>
+  <notes><![CDATA[Escalate to bob.smith@example.com or call +1 (510) 555-0199.]]></notes>
+  <status>active</status>
+</onboarding>

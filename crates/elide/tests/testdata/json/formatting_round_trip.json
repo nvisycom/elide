@@ -1,0 +1,6 @@
+{
+    "zeta":    "keep this key order",
+        "email":"alice.johnson@example.com"  ,
+  "nested":{"phone":  "+1 (415) 555-0142"},
+	"alpha": "tabs and trailing spaces preserved"
+}
