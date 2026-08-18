@@ -26,6 +26,8 @@ mod html_handler;
 #[cfg(feature = "html")]
 mod html_loader;
 #[cfg(feature = "xml")]
+mod markup_parser;
+#[cfg(feature = "xml")]
 mod stream;
 #[cfg(feature = "xml")]
 mod xml_handler;

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<data>
+  <!-- An email whose local part carries an XML entity, plus surrounding
+       entities that must round-trip untouched. -->
+  <note>Ampersand &amp; company: reach a&amp;b.support@example.com for help.</note>
+  <plain>Contact carol.lee@example.com &lt;preferred&gt; before Friday.</plain>
+</data>

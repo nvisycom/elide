@@ -199,6 +199,10 @@ name = "format_html"
 required-features = ["codec-html", "mock", "serde"]
 
 [[test]]
+name = "format_xml"
+required-features = ["codec-xml", "mock", "serde"]
+
+[[test]]
 name = "format_csv"
 required-features = ["codec-csv", "ner", "llm", "lingua-common", "mock", "serde"]
 

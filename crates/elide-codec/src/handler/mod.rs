@@ -15,6 +15,9 @@
 #[cfg(feature = "internal_text")]
 pub(crate) mod redact;
 
+#[cfg(any(feature = "json", feature = "xml", feature = "html"))]
+pub(crate) mod context;
+
 #[cfg(feature = "internal_audio")]
 pub(crate) mod audio;
 #[cfg(feature = "internal_document")]

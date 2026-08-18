@@ -1,0 +1,9 @@
+{
+  "email": "alice.johnson@example.com",
+  "host": "192.168.1.42",
+  "retries": 3,
+  "ratio": 0.75,
+  "active": true,
+  "deleted": null,
+  "zip": "90210"
+}

@@ -13,8 +13,11 @@ use crate::support::asserts::{
 use crate::support::pipeline::Fixture;
 
 const FIXTURE: Fixture = Fixture {
-    path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/sample.txt"),
-    source: include_bytes!("../testdata/sample.txt"),
+    path: concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/testdata/txt/redaction.txt"
+    ),
+    source: include_bytes!("../testdata/txt/redaction.txt"),
     extension: "txt",
 };
 

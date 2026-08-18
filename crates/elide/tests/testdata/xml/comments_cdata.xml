@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ticket>
+  <!-- Reviewer note: escalate to bob.smith@example.com, phone +1 (510) 555-0199 -->
+  <summary>Onboarding follow-up</summary>
+  <details><![CDATA[Customer email alice.johnson@example.com; card 4111 1111 1111 1111 on file.]]></details>
+</ticket>

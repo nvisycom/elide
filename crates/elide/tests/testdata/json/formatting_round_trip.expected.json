@@ -1,0 +1,6 @@
+{
+    "zeta":    "keep this key order",
+        "email":"[email_address]"  ,
+  "nested":{"phone":  "[phone_number]"},
+	"alpha": "tabs and trailing spaces preserved"
+}

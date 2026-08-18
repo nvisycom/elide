@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<organization>
+  <department name="Finance">
+    <team>
+      <member>
+        <email>alice.johnson@example.com</email>
+        <records>
+          <iban>GB29 NWBK 6016 1331 9268 19</iban>
+        </records>
+      </member>
+      <member>
+        <email>bob.smith@example.com</email>
+      </member>
+    </team>
+  </department>
+</organization>

@@ -1,7 +1,8 @@
-//! End-to-end CSV codec round-trip: decode → analyze → anonymize → encode.
+//! End-to-end XML codec round-trip: decode → analyze → anonymize → encode.
 //!
-//! The handler redacts PII per cell while the table structure (header row,
-//! delimiters, non-sensitive cells) passes through unchanged.
+//! The markup handler surfaces element text, attribute values, comment
+//! bodies, and CDATA payloads; PII in each is redacted while the XML
+//! declaration, tags, namespaces, and structure pass through unchanged.
 
 use elide::Result;
 use elide::entity::builtins;
@@ -14,17 +15,16 @@ use crate::support::pipeline::Fixture;
 const FIXTURE: Fixture = Fixture {
     path: concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/tests/testdata/csv/redaction.csv"
+        "/tests/testdata/xml/redaction.xml"
     ),
-    source: include_bytes!("../testdata/csv/redaction.csv"),
-    extension: "csv",
+    source: include_bytes!("../testdata/xml/redaction.xml"),
+    extension: "xml",
 };
 
 #[tokio::test]
-async fn csv_detects_and_redacts() -> Result<()> {
-    let outcome = FIXTURE.run_tabular().await?;
+async fn xml_detects_and_redacts() -> Result<()> {
+    let outcome = FIXTURE.run().await?;
 
-    // Every sensitive column is detected across both data rows.
     for label in [
         builtins::EMAIL_ADDRESS.to_ref(),
         builtins::PHONE_NUMBER.to_ref(),
@@ -36,7 +36,8 @@ async fn csv_detects_and_redacts() -> Result<()> {
         assert_label_present(&outcome.entities, &label);
     }
 
-    // Both rows' sensitive values are gone from the re-encoded CSV.
+    // PII is gone from every construct the handler surfaces: element text,
+    // the `host`/`contact` attribute values, the comment body, and CDATA.
     assert_pii_removed(
         &outcome.redacted_text(),
         &[
@@ -45,7 +46,6 @@ async fn csv_detects_and_redacts() -> Result<()> {
             "+1 (415) 555-0142",
             "+1 (510) 555-0199",
             "4111 1111 1111 1111",
-            "5555 5555 5555 4444",
             "GB29 NWBK 6016 1331 9268 19",
             "123-45-6789",
             "192.168.1.42",
@@ -63,13 +63,20 @@ async fn csv_detects_and_redacts() -> Result<()> {
         ],
     );
 
-    // CSV structure survives: header row and non-sensitive name cells stay.
+    // The payment card is masked in place (the test anonymizer stars it, rather
+    // than tokening it), so the element keeps a star-mask — a regression that
+    // *deleted* the card instead of masking it would leave `<paymentCard></…>`.
+    assert_preserved(&outcome.redacted_text(), &["<paymentCard>*"]);
+
+    // Markup structure survives: the declaration, namespaced root, tags, and
+    // non-sensitive text stay verbatim.
     assert_preserved(
         &outcome.redacted_text(),
         &[
-            "name,email,phone,card,iban,ssn,host",
-            "Alice Johnson,",
-            "Bob Smith,",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+            "<onboarding xmlns=\"urn:example:onboarding\"",
+            "<name>Alice Johnson</name>",
+            "<status>active</status>",
         ],
     );
     Ok(())

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ns:directory xmlns:ns="urn:example:directory" xmlns:c="urn:example:contact">
+  <ns:entry>
+    <c:email>alice.johnson@example.com</c:email>
+    <c:phone>+1 (415) 555-0142</c:phone>
+  </ns:entry>
+</ns:directory>
