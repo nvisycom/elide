@@ -113,7 +113,7 @@ impl<'a> MarkupParser<'a> {
                     self.open_element(e, span);
                 }
                 Event::Empty(ref e) => self.attributes(e)?,
-                Event::End(_) => self.close_element(),
+                Event::End(ref e) => self.close_element(&end_name(e)),
                 Event::Text(_) => self.text(span),
                 Event::Comment(_) => {
                     if let Some(inner) = strip(span, "<!--", "-->") {
@@ -195,13 +195,25 @@ impl<'a> MarkupParser<'a> {
         }
     }
 
-    /// Close an element: when a block element closes, its gathered text nodes
-    /// share its context, so hint them against each other.
-    fn close_element(&mut self) {
-        if let Some(frame) = self.stack.pop()
-            && self.config.is_block(&frame.name)
-        {
-            attach_sibling_hints(&mut self.text_items[frame.text_start..]);
+    /// Close the element named by an end tag. Well-formed XML always closes the
+    /// top of the stack, but lenient HTML permits a stray `</div>` with no open
+    /// `<div>`: popping unconditionally would then discard the *wrong* frame and
+    /// strip the enclosing element-name hint from the following text (which can
+    /// change context-gated detection). So match the name against the stack:
+    /// ignore an end tag with no open counterpart, and otherwise unwind through
+    /// the nearest matching frame, finalizing each block group closed on the way.
+    fn close_element(&mut self, name: &str) {
+        let Some(depth) = self.stack.iter().rposition(|frame| frame.name == name) else {
+            // No matching open element: a stray end tag. Ignore it.
+            return;
+        };
+        // Unwind every frame from the top down to (and including) the match —
+        // an intervening unclosed inline element is closed implicitly here.
+        while self.stack.len() > depth {
+            let frame = self.stack.pop().expect("frame above the matched depth");
+            if self.config.is_block(&frame.name) {
+                attach_sibling_hints(&mut self.text_items[frame.text_start..]);
+            }
         }
     }
 
@@ -490,5 +502,34 @@ mod tests {
                 "post-text missing: {raw:?}"
             );
         }
+    }
+
+    #[cfg(feature = "html")]
+    #[tokio::test]
+    async fn a_stray_end_tag_does_not_pop_the_wrong_frame() {
+        // Lenient parsing emits an `End(div)` for a `</div>` with no open
+        // `<div>`. Popping unconditionally would discard the still-open
+        // `<paymentCard>` frame, stripping the element-name hint from the text
+        // that follows — which can change context-gated detection. The stray
+        // end tag must be ignored so the following number keeps its hint.
+        let raw = "<paymentCard>4111 <b>1111</b></div> 1111 1111</paymentCard>";
+        let mut h = handler_with(raw, MarkupConfig::lenient(TEST_BLOCKS, &[]));
+        let mut hinted = false;
+        while let Some(chunk) = h.read_next().await.unwrap() {
+            // The text after the stray `</div>` must still carry the
+            // `payment Card` element-name hint.
+            if chunk.data.as_str().contains("1111 1111")
+                && chunk
+                    .hints
+                    .iter()
+                    .any(|hint| hint.data.as_str() == "payment Card")
+            {
+                hinted = true;
+            }
+        }
+        assert!(
+            hinted,
+            "text after a stray </div> lost its enclosing paymentCard hint"
+        );
     }
 }

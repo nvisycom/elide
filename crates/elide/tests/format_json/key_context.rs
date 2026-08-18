@@ -1,11 +1,11 @@
 //! An object key is context for its value — the JSON counterpart of a CSV
-//! header or an XML element name vouching for its content. The card, postal
-//! code, and bank account here are weak, context-gated shapes with no keyword
-//! of their own; only the key lifts them over the threshold (the companion
-//! `neutral_keys_…` test proves they vanish without it). The SSN-shaped value
-//! is self-detecting and rides along to show the key does not *suppress* a
-//! strong shape. The key is tokenized so `paymentCard`, `postal_code`,
-//! `TaxId`, and `bank-account` all read as their words.
+//! header or an XML element name vouching for its content. Every value here is
+//! a weak, context-gated shape with no keyword of its own — the card, the
+//! postal code, the ITIN, and the bank account all sit below the detection
+//! threshold on their own; only the key lifts them over it (the companion
+//! `neutral_keys_…` test proves they vanish without it). The key is tokenized
+//! so `paymentCard`, `postal_code`, `TaxId`, and `bank-account` all read as
+//! their words.
 
 use elide::Result;
 use elide::entity::builtins;

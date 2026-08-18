@@ -344,7 +344,11 @@ mod tests {
         // The permissive scalar byte class must not let malformed literals
         // through: partial keywords, malformed numbers, and bare `_` are not
         // JSON values.
-        for bad in ["[tru]", "[1.2.3]", "[+5]", "[0x1f]", "[_]", "[nul]"] {
+        // Includes forms Rust's f64 parser accepts but JSON rejects: a
+        // trailing dot, a leading zero, and the infinities.
+        for bad in [
+            "[tru]", "[1.2.3]", "[+5]", "[0x1f]", "[_]", "[nul]", "[5.]", "[007]", "[-inf]",
+        ] {
             let err = parse_slots(bad).expect_err("{bad} must be rejected");
             assert_eq!(err.kind(), ErrorKind::MalformedInput, "for {bad}");
         }

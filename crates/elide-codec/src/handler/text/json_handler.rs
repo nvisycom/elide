@@ -124,8 +124,70 @@ impl Leaf {
 /// / `null`. The lexer uses it to reject a malformed scalar, and the redactor
 /// to decide whether a redacted scalar can stay unquoted or must be promoted
 /// to a JSON string to keep the document valid.
+///
+/// The number test follows the JSON grammar (RFC 8259), *not* Rust's
+/// `f64::from_str`, which is looser: it would accept `5.`, `007`, `-inf`, and
+/// `NaN`, none of which are valid JSON. Accepting them here would let the lexer
+/// pass malformed input and let a redaction emit a bare token that breaks the
+/// document.
 pub(super) fn is_json_literal(s: &str) -> bool {
-    matches!(s, "true" | "false" | "null") || s.parse::<f64>().is_ok()
+    matches!(s, "true" | "false" | "null") || is_json_number(s)
+}
+
+/// Whether `s` matches the JSON number grammar:
+/// `-?(0 | [1-9][0-9]*) (\.[0-9]+)? ([eE][+-]?[0-9]+)?` — an optional minus, an
+/// integer part with no leading zeros, an optional fraction with at least one
+/// digit, and an optional exponent.
+fn is_json_number(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    let len = bytes.len();
+
+    // Optional leading minus.
+    if bytes.first() == Some(&b'-') {
+        i = 1;
+    }
+    // Integer part: a lone `0`, or a non-zero digit followed by more digits.
+    let int_start = i;
+    match bytes.get(i) {
+        Some(b'0') => i += 1,
+        Some(b'1'..=b'9') => {
+            while matches!(bytes.get(i), Some(b'0'..=b'9')) {
+                i += 1;
+            }
+        }
+        _ => return false,
+    }
+    // A leading zero may not be followed by another digit (`007` is invalid).
+    if bytes[int_start] == b'0' && matches!(bytes.get(i), Some(b'0'..=b'9')) {
+        return false;
+    }
+    // Optional fraction: a dot followed by at least one digit.
+    if bytes.get(i) == Some(&b'.') {
+        i += 1;
+        let frac_start = i;
+        while matches!(bytes.get(i), Some(b'0'..=b'9')) {
+            i += 1;
+        }
+        if i == frac_start {
+            return false;
+        }
+    }
+    // Optional exponent: e/E, optional sign, at least one digit.
+    if matches!(bytes.get(i), Some(b'e' | b'E')) {
+        i += 1;
+        if matches!(bytes.get(i), Some(b'+' | b'-')) {
+            i += 1;
+        }
+        let exp_start = i;
+        while matches!(bytes.get(i), Some(b'0'..=b'9')) {
+            i += 1;
+        }
+        if i == exp_start {
+            return false;
+        }
+    }
+    i == len
 }
 
 /// Handler for loaded JSON content.
@@ -397,6 +459,23 @@ mod tests {
 
     fn handler(src: &str) -> JsonHandler {
         JsonHandler::from_source_string(src.to_string())
+    }
+
+    #[test]
+    fn is_json_literal_follows_the_json_number_grammar() {
+        // Valid: keywords, integers, a lone zero, signed, fraction, exponent.
+        for ok in [
+            "true", "false", "null", "0", "-0", "42", "-3.14", "1e10", "1E+10", "2.5e-3", "0.5",
+        ] {
+            assert!(is_json_literal(ok), "{ok:?} should be a valid literal");
+        }
+        // Invalid: Rust's f64 parser accepts these, JSON does not.
+        for bad in [
+            "5.", "007", "-inf", "inf", "NaN", "Infinity", "+5", ".5", "1.", "0x1f", "1.2.3", "",
+            "01",
+        ] {
+            assert!(!is_json_literal(bad), "{bad:?} must be rejected");
+        }
     }
 
     fn encoded(h: &JsonHandler) -> String {
