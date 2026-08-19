@@ -107,7 +107,8 @@ macro_rules! assert_preserved {
 
 // Re-export so `use crate::support::asserts::assert_label_present;` resolves
 // the macro by its module path, keeping every existing import line working.
-pub(crate) use {
-    assert_label_absent, assert_label_present, assert_pii_removed, assert_preserved,
-    assert_tokens_present,
-};
+pub(crate) use assert_label_absent;
+pub(crate) use assert_label_present;
+pub(crate) use assert_pii_removed;
+pub(crate) use assert_preserved;
+pub(crate) use assert_tokens_present;
