@@ -26,14 +26,11 @@ async fn a_scoped_catalog_redacts_only_the_requested_label() -> Result<()> {
         .await?;
 
     // The requested label is redacted.
-    assert_pii_removed(&outcome.redacted_text(), &["90210"]);
+    assert_pii_removed!(outcome.redacted_text(), "90210");
 
     // Everything else the pipeline could detect (an email address, a language
     // name) survives, because it is not in the requested catalog.
-    assert_preserved(
-        &outcome.redacted_text(),
-        &["contact@example.com", "Spanish"],
-    );
+    assert_preserved!(outcome.redacted_text(), "contact@example.com", "Spanish",);
     Ok(())
 }
 
@@ -43,9 +40,11 @@ async fn an_empty_catalog_redacts_every_detected_label() -> Result<()> {
     let outcome = FIXTURE.run().await?;
 
     // All three detectable values are redacted — nothing narrows the output.
-    assert_pii_removed(
-        &outcome.redacted_text(),
-        &["90210", "contact@example.com", "Spanish"],
+    assert_pii_removed!(
+        outcome.redacted_text(),
+        "90210",
+        "contact@example.com",
+        "Spanish",
     );
     Ok(())
 }

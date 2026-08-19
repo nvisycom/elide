@@ -26,13 +26,14 @@ async fn german_keyword_boosts_a_postal_code_in_english_text() -> Result<()> {
 
     // The German postal code is detected even though the document is English:
     // its German keyword `Postleitzahl` boosts the weak match over threshold.
-    assert_label_present(&outcome.entities, &builtins::POSTAL_CODE.to_ref());
-    assert_pii_removed(&outcome.redacted_text(), &["10115"]);
+    assert_label_present!(outcome.entities, builtins::POSTAL_CODE.to_ref());
+    assert_pii_removed!(outcome.redacted_text(), "10115");
 
     // The surrounding prose carries no other sensitive values.
-    assert_preserved(
-        &outcome.redacted_text(),
-        &["Munich branch", "delivery district"],
+    assert_preserved!(
+        outcome.redacted_text(),
+        "Munich branch",
+        "delivery district",
     );
     Ok(())
 }

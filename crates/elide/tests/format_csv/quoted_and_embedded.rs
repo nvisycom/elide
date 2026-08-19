@@ -21,20 +21,22 @@ const FIXTURE: Fixture = Fixture {
 async fn redacts_pii_in_quoted_cells() -> Result<()> {
     let outcome = FIXTURE.run_tabular().await?;
 
-    assert_label_present(&outcome.entities, &builtins::EMAIL_ADDRESS.to_ref());
+    assert_label_present!(outcome.entities, builtins::EMAIL_ADDRESS.to_ref());
 
     // The email appears in a plain cell and again inside a quoted cell with an
     // embedded comma / newline / doubled-quote escape — every occurrence gone.
-    assert_pii_removed(
-        &outcome.redacted_text(),
-        &["alice.rivera@example.com", "bob.nguyen@example.com"],
+    assert_pii_removed!(
+        outcome.redacted_text(),
+        "alice.rivera@example.com",
+        "bob.nguyen@example.com",
     );
 
     // The non-sensitive quoted content around the PII survives, including the
     // embedded-comma address and the doubled-quote phrasing.
-    assert_preserved(
-        &outcome.redacted_text(),
-        &["100 Market St, Suite 400, Springfield", "she said"],
+    assert_preserved!(
+        outcome.redacted_text(),
+        "100 Market St, Suite 400, Springfield",
+        "she said",
     );
     Ok(())
 }

@@ -21,16 +21,14 @@ async fn overlapping_and_adjacent_entities_all_redacted() -> Result<()> {
 
     // The email nested in a URL, the two run-together values, and the three
     // crowded emails are each removed — nothing leaks through a seam.
-    assert_pii_removed(
-        &outcome.redacted_text(),
-        &[
-            "leah.kim@example.com",
-            "alex.tan@example.com",
-            "+1 (628) 555-0175",
-            "noor.h@example.com",
-            "omar.s@example.com",
-            "wei.l@example.com",
-        ],
+    assert_pii_removed!(
+        outcome.redacted_text(),
+        "leah.kim@example.com",
+        "alex.tan@example.com",
+        "+1 (628) 555-0175",
+        "noor.h@example.com",
+        "omar.s@example.com",
+        "wei.l@example.com",
     );
     Ok(())
 }

@@ -23,14 +23,11 @@ async fn unicode_escapes_survive_and_ascii_pii_redacts() -> Result<()> {
     let outcome = FIXTURE.run().await?;
     let out = outcome.redacted_text();
 
-    assert_label_present(&outcome.entities, &builtins::EMAIL_ADDRESS.to_ref());
-    assert_pii_removed(&out, &["alice.johnson@example.com"]);
+    assert_label_present!(outcome.entities, builtins::EMAIL_ADDRESS.to_ref());
+    assert_pii_removed!(out, "alice.johnson@example.com");
 
     // The `\uXXXX` escapes are preserved literally, not decoded to `é`/`—`/`€`.
-    assert_preserved(
-        &out,
-        &["Caf\\u00e9 r\\u00e9sum\\u00e9", "\\u2014", "5\\u20ac"],
-    );
+    assert_preserved!(out, "Caf\\u00e9 r\\u00e9sum\\u00e9", "\\u2014", "5\\u20ac",);
     Ok(())
 }
 
@@ -45,12 +42,12 @@ async fn pii_after_escapes_redacts_while_the_escaped_prefix_survives() -> Result
     let outcome = FIXTURE.run().await?;
     let out = outcome.redacted_text();
 
-    assert_label_present(&outcome.entities, &builtins::EMAIL_ADDRESS.to_ref());
+    assert_label_present!(outcome.entities, builtins::EMAIL_ADDRESS.to_ref());
     // The email (past the escapes) is gone…
-    assert_pii_removed(&out, &["bob.smith@example.com"]);
+    assert_pii_removed!(out, "bob.smith@example.com");
     // …while the surrogate pair and BMP escape before it survive verbatim,
     // proving the source-offset mapping counted escape bytes correctly rather
     // than shifting into or past the prefix.
-    assert_preserved(&out, &["\\uD83D\\uDE00 caf\\u00e9 corner: "]);
+    assert_preserved!(out, "\\uD83D\\uDE00 caf\\u00e9 corner: ");
     Ok(())
 }

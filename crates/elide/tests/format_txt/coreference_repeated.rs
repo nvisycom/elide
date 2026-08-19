@@ -21,13 +21,11 @@ async fn repeated_values_are_all_redacted() -> Result<()> {
     let redacted = outcome.redacted_text();
 
     // Every occurrence of each repeated value is gone — no stray copy survives.
-    assert_pii_removed(
-        &redacted,
-        &[
-            "priya.rao@example.com",
-            "+1 (415) 555-0142",
-            "sam.diaz@example.com",
-        ],
+    assert_pii_removed!(
+        redacted,
+        "priya.rao@example.com",
+        "+1 (415) 555-0142",
+        "sam.diaz@example.com",
     );
 
     // The repeated email appears four times and the phone three times in the

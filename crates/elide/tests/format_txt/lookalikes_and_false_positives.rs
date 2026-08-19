@@ -21,13 +21,16 @@ async fn mundane_lookalikes_are_not_flagged() -> Result<()> {
     let outcome = FIXTURE.run().await?;
 
     // No weak-shape identifier here has supporting context, so none is flagged.
-    assert_label_absent(&outcome.entities, &builtins::BANK_ACCOUNT.to_ref());
-    assert_label_absent(&outcome.entities, &builtins::GOVERNMENT_ID.to_ref());
-    assert_label_absent(&outcome.entities, &builtins::PAYMENT_CARD.to_ref());
+    assert_label_absent!(outcome.entities, builtins::BANK_ACCOUNT.to_ref());
+    assert_label_absent!(outcome.entities, builtins::GOVERNMENT_ID.to_ref());
+    assert_label_absent!(outcome.entities, builtins::PAYMENT_CARD.to_ref());
 
-    assert_preserved(
-        &outcome.redacted_text(),
-        &["000123456789", "000987654321", "000555", "000456000456"],
+    assert_preserved!(
+        outcome.redacted_text(),
+        "000123456789",
+        "000987654321",
+        "000555",
+        "000456000456",
     );
     Ok(())
 }

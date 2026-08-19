@@ -21,23 +21,22 @@ const FIXTURE: Fixture = Fixture {
 async fn namespaced_elements_redact_and_declarations_survive() -> Result<()> {
     let outcome = FIXTURE.run().await?;
 
-    assert_label_present(&outcome.entities, &builtins::EMAIL_ADDRESS.to_ref());
-    assert_label_present(&outcome.entities, &builtins::PHONE_NUMBER.to_ref());
+    assert_label_present!(outcome.entities, builtins::EMAIL_ADDRESS.to_ref());
+    assert_label_present!(outcome.entities, builtins::PHONE_NUMBER.to_ref());
 
-    assert_pii_removed(
-        &outcome.redacted_text(),
-        &["alice.johnson@example.com", "+1 (415) 555-0142"],
+    assert_pii_removed!(
+        outcome.redacted_text(),
+        "alice.johnson@example.com",
+        "+1 (415) 555-0142",
     );
 
     // Namespace declarations and prefixed tags round-trip unchanged.
-    assert_preserved(
-        &outcome.redacted_text(),
-        &[
-            "xmlns:ns=\"urn:example:directory\"",
-            "xmlns:c=\"urn:example:contact\"",
-            "<ns:entry>",
-            "<c:email>",
-        ],
+    assert_preserved!(
+        outcome.redacted_text(),
+        "xmlns:ns=\"urn:example:directory\"",
+        "xmlns:c=\"urn:example:contact\"",
+        "<ns:entry>",
+        "<c:email>",
     );
     Ok(())
 }

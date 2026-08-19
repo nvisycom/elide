@@ -22,12 +22,14 @@ async fn weak_values_without_context_stay_undetected() -> Result<()> {
 
     // No keyword vouches for these bare numbers, so the weak bank-account
     // shape must never be flagged.
-    assert_label_absent(&outcome.entities, &builtins::BANK_ACCOUNT.to_ref());
+    assert_label_absent!(outcome.entities, builtins::BANK_ACCOUNT.to_ref());
 
     // The values survive verbatim — proof they were neither detected nor redacted.
-    assert_preserved(
-        &outcome.redacted_text(),
-        &["000123456789", "000987654321", "000555000555"],
+    assert_preserved!(
+        outcome.redacted_text(),
+        "000123456789",
+        "000987654321",
+        "000555000555",
     );
     Ok(())
 }

@@ -40,23 +40,20 @@ const NEUTRAL_FIXTURE: Fixture = Fixture {
 async fn the_key_boosts_its_weak_value() -> Result<()> {
     let outcome = FIXTURE.run().await?;
 
-    for label in [
+    assert_label_present!(
+        outcome.entities,
         builtins::PAYMENT_CARD.to_ref(),
         builtins::POSTAL_CODE.to_ref(),
         builtins::TAX_ID.to_ref(),
         builtins::BANK_ACCOUNT.to_ref(),
-    ] {
-        assert_label_present(&outcome.entities, &label);
-    }
+    );
 
-    assert_pii_removed(
-        &outcome.redacted_text(),
-        &[
-            "4111 1111 1111 1111",
-            "90210",
-            "912-85-1234",
-            "000123456789",
-        ],
+    assert_pii_removed!(
+        outcome.redacted_text(),
+        "4111 1111 1111 1111",
+        "90210",
+        "912-85-1234",
+        "000123456789",
     );
     Ok(())
 }
@@ -70,23 +67,20 @@ async fn neutral_keys_leave_the_weak_values_untouched() -> Result<()> {
     // the value.
     let outcome = NEUTRAL_FIXTURE.run().await?;
 
-    for label in [
+    assert_label_absent!(
+        outcome.entities,
         builtins::PAYMENT_CARD.to_ref(),
         builtins::POSTAL_CODE.to_ref(),
         builtins::TAX_ID.to_ref(),
         builtins::BANK_ACCOUNT.to_ref(),
-    ] {
-        assert_label_absent(&outcome.entities, &label);
-    }
+    );
 
-    assert_preserved(
-        &outcome.redacted_text(),
-        &[
-            "4111 1111 1111 1111",
-            "90210",
-            "912-85-1234",
-            "000123456789",
-        ],
+    assert_preserved!(
+        outcome.redacted_text(),
+        "4111 1111 1111 1111",
+        "90210",
+        "912-85-1234",
+        "000123456789",
     );
     Ok(())
 }
