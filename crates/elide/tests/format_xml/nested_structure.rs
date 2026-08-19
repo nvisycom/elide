@@ -21,29 +21,25 @@ const FIXTURE: Fixture = Fixture {
 async fn deeply_nested_values_are_redacted_and_structure_survives() -> Result<()> {
     let outcome = FIXTURE.run().await?;
 
-    assert_label_present(&outcome.entities, &builtins::EMAIL_ADDRESS.to_ref());
-    assert_label_present(&outcome.entities, &builtins::IBAN.to_ref());
+    assert_label_present!(outcome.entities, builtins::EMAIL_ADDRESS.to_ref());
+    assert_label_present!(outcome.entities, builtins::IBAN.to_ref());
 
     // Both emails (at different depths) and the deeply-nested IBAN are gone.
-    assert_pii_removed(
-        &outcome.redacted_text(),
-        &[
-            "alice.johnson@example.com",
-            "bob.smith@example.com",
-            "GB29 NWBK 6016 1331 9268 19",
-        ],
+    assert_pii_removed!(
+        outcome.redacted_text(),
+        "alice.johnson@example.com",
+        "bob.smith@example.com",
+        "GB29 NWBK 6016 1331 9268 19",
     );
 
     // The container structure — every level of nesting — is preserved.
-    assert_preserved(
-        &outcome.redacted_text(),
-        &[
-            "<organization>",
-            "<department name=\"Finance\">",
-            "<team>",
-            "<member>",
-            "<records>",
-        ],
+    assert_preserved!(
+        outcome.redacted_text(),
+        "<organization>",
+        "<department name=\"Finance\">",
+        "<team>",
+        "<member>",
+        "<records>",
     );
     Ok(())
 }

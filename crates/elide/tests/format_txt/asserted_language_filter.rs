@@ -27,7 +27,7 @@ async fn a_contradicting_asserted_language_suppresses_a_locale_match() -> Result
     let outcome = FIXTURE
         .run_with_language(LanguageTag::parse("es").unwrap())
         .await?;
-    assert_preserved(&outcome.redacted_text(), &["DE123456788"]);
+    assert_preserved!(outcome.redacted_text(), "DE123456788");
     Ok(())
 }
 
@@ -36,7 +36,7 @@ async fn no_asserted_language_leaves_the_locale_match_intact() -> Result<()> {
     // With no asserted language (unreliable per-cell detection is never a
     // filter trigger), the German VAT id is detected on its own merit.
     let outcome = FIXTURE.run().await?;
-    assert_label_present(&outcome.entities, &builtins::TAX_ID.to_ref());
-    assert_pii_removed(&outcome.redacted_text(), &["DE123456788"]);
+    assert_label_present!(outcome.entities, builtins::TAX_ID.to_ref());
+    assert_pii_removed!(outcome.redacted_text(), "DE123456788");
     Ok(())
 }

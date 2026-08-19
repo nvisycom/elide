@@ -21,30 +21,26 @@ const FIXTURE: Fixture = Fixture {
 async fn nested_objects_and_arrays_redact_at_any_depth() -> Result<()> {
     let outcome = FIXTURE.run().await?;
 
-    assert_label_present(&outcome.entities, &builtins::EMAIL_ADDRESS.to_ref());
-    assert_label_present(&outcome.entities, &builtins::IBAN.to_ref());
+    assert_label_present!(outcome.entities, builtins::EMAIL_ADDRESS.to_ref());
+    assert_label_present!(outcome.entities, builtins::IBAN.to_ref());
 
     // Emails in object values (nested), a bare string in an array, and the
     // deeply-nested IBAN are all removed.
-    assert_pii_removed(
-        &outcome.redacted_text(),
-        &[
-            "alice.johnson@example.com",
-            "bob.smith@example.com",
-            "carol.lee@example.com",
-            "GB29 NWBK 6016 1331 9268 19",
-        ],
+    assert_pii_removed!(
+        outcome.redacted_text(),
+        "alice.johnson@example.com",
+        "bob.smith@example.com",
+        "carol.lee@example.com",
+        "GB29 NWBK 6016 1331 9268 19",
     );
 
     // Container keys and a non-PII array item survive.
-    assert_preserved(
-        &outcome.redacted_text(),
-        &[
-            "\"organization\"",
-            "\"departments\"",
-            "\"members\"",
-            "not-an-email",
-        ],
+    assert_preserved!(
+        outcome.redacted_text(),
+        "\"organization\"",
+        "\"departments\"",
+        "\"members\"",
+        "not-an-email",
     );
     Ok(())
 }

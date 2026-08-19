@@ -38,24 +38,22 @@ const TAB: Fixture = Fixture {
 async fn assert_detected_and_redacted(fixture: Fixture, sep: char) -> Result<()> {
     let outcome = fixture.run_tabular().await?;
 
-    assert_label_present(&outcome.entities, &builtins::EMAIL_ADDRESS.to_ref());
-    assert_label_present(&outcome.entities, &builtins::PHONE_NUMBER.to_ref());
+    assert_label_present!(outcome.entities, builtins::EMAIL_ADDRESS.to_ref());
+    assert_label_present!(outcome.entities, builtins::PHONE_NUMBER.to_ref());
 
-    assert_pii_removed(
-        &outcome.redacted_text(),
-        &[
-            "alice.rivera@example.com",
-            "bob.nguyen@example.com",
-            "+1 (415) 555-0142",
-            "+1 (510) 555-0199",
-        ],
+    assert_pii_removed!(
+        outcome.redacted_text(),
+        "alice.rivera@example.com",
+        "bob.nguyen@example.com",
+        "+1 (415) 555-0142",
+        "+1 (510) 555-0199",
     );
 
     // The delimiter is preserved on re-serialize: the header row round-trips
     // with the same separator the file used.
-    assert_preserved(
-        &outcome.redacted_text(),
-        &[format!("name{sep}email{sep}phone").as_str()],
+    assert_preserved!(
+        outcome.redacted_text(),
+        format!("name{sep}email{sep}phone").as_str(),
     );
     Ok(())
 }

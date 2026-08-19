@@ -11,12 +11,11 @@ use crate::support::asserts::assert_label_present;
 async fn pptx_detects_and_redacts_slide_text() -> Result<()> {
     let outcome = FIXTURE.run().await?;
 
-    for label in [
+    assert_label_present!(
+        outcome.entities,
         builtins::EMAIL_ADDRESS.to_ref(),
         builtins::PHONE_NUMBER.to_ref(),
-    ] {
-        assert_label_present(&outcome.entities, &label);
-    }
+    );
 
     // The redaction token replaced the slide text.
     let slide = outcome

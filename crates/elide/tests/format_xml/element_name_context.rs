@@ -25,23 +25,20 @@ async fn the_element_name_boosts_its_weak_value() -> Result<()> {
 
     // camelCase, snake_case, PascalCase, and kebab-case names all tokenize so
     // their keyword (`card`, `postal`, `tax`, `account`) matches on a boundary.
-    for label in [
+    assert_label_present!(
+        outcome.entities,
         builtins::PAYMENT_CARD.to_ref(),
         builtins::POSTAL_CODE.to_ref(),
         builtins::TAX_ID.to_ref(),
         builtins::BANK_ACCOUNT.to_ref(),
-    ] {
-        assert_label_present(&outcome.entities, &label);
-    }
+    );
 
-    assert_pii_removed(
-        &outcome.redacted_text(),
-        &[
-            "4111 1111 1111 1111",
-            "90210",
-            "912-85-1234",
-            "000123456789",
-        ],
+    assert_pii_removed!(
+        outcome.redacted_text(),
+        "4111 1111 1111 1111",
+        "90210",
+        "912-85-1234",
+        "000123456789",
     );
     Ok(())
 }

@@ -23,14 +23,14 @@ async fn entities_round_trip_and_neighbouring_pii_redacts() -> Result<()> {
     let outcome = FIXTURE.run().await?;
     let out = outcome.redacted_text();
 
-    assert_label_present(&outcome.entities, &builtins::EMAIL_ADDRESS.to_ref());
+    assert_label_present!(outcome.entities, builtins::EMAIL_ADDRESS.to_ref());
 
     // The plain email beside `&lt;`/`&gt;` is removed.
-    assert_pii_removed(&out, &["carol.lee@example.com"]);
+    assert_pii_removed!(out, "carol.lee@example.com");
 
     // Entity references not inside a redacted span survive verbatim — the
     // standalone `&amp;` in the note text and the `&lt;`/`&gt;` around the plain
     // contact are untouched.
-    assert_preserved(&out, &["Ampersand &amp; company", "&lt;preferred&gt;"]);
+    assert_preserved!(out, "Ampersand &amp; company", "&lt;preferred&gt;");
     Ok(())
 }

@@ -26,17 +26,15 @@ async fn irregular_formatting_and_key_order_are_preserved() -> Result<()> {
     let outcome = FIXTURE.run().await?;
     let out = outcome.redacted_text();
 
-    assert_pii_removed(&out, &["alice.johnson@example.com", "+1 (415) 555-0142"]);
+    assert_pii_removed!(out, "alice.johnson@example.com", "+1 (415) 555-0142");
 
     // Original key order (zeta before alpha), odd spacing around colons and
     // commas, and the tab indentation all survive verbatim.
-    assert_preserved(
-        &out,
-        &[
-            "\"zeta\":    \"keep this key order\"",
-            "\"nested\":{\"phone\":  ",
-            "\t\"alpha\":",
-        ],
+    assert_preserved!(
+        out,
+        "\"zeta\":    \"keep this key order\"",
+        "\"nested\":{\"phone\":  ",
+        "\t\"alpha\":",
     );
 
     // The fragment checks above document intent; this pins the *entire* output,

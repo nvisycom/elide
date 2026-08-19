@@ -55,16 +55,15 @@ async fn born_digital_pdf_detects_and_redacts() -> Result<()> {
 
     // The born-digital text layer was extracted (not OCR'd), so the shipped
     // patterns find the PII spread the fixture carries.
-    for label in [
+    assert_label_present!(
+        outcome.entities,
         builtins::EMAIL_ADDRESS.to_ref(),
         builtins::PHONE_NUMBER.to_ref(),
         builtins::PAYMENT_CARD.to_ref(),
         builtins::IBAN.to_ref(),
         builtins::GOVERNMENT_ID.to_ref(),
         builtins::IP_ADDRESS.to_ref(),
-    ] {
-        assert_label_present(&outcome.entities, &label);
-    }
+    );
 
     // Re-decode the redacted PDF: whichever path ran, none of the original PII
     // survives. PDF redaction removes the text (glyph deletion keeps a
@@ -72,7 +71,15 @@ async fn born_digital_pdf_detects_and_redacts() -> Result<()> {
     // the guarantee asserted here is that the originals are gone — not that a
     // replacement token was inserted.
     let redacted = extracted_text(&outcome.redacted).await?;
-    assert_pii_removed(&redacted, &PII);
+    assert_pii_removed!(
+        redacted,
+        "alice.johnson@example.com",
+        "555-0142",
+        "4111 1111 1111 1111",
+        "GB29 NWBK 6016 1331 9268 19",
+        "123-45-6789",
+        "192.168.1.42",
+    );
 
     // Also assert the PII is absent from the raw output bytes. On the glyph
     // path the content stream is FlateDecode-compressed, so this is a weaker

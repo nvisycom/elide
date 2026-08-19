@@ -22,20 +22,18 @@ async fn string_pii_redacts_while_non_string_scalars_survive() -> Result<()> {
     let outcome = FIXTURE.run().await?;
     let out = outcome.redacted_text();
 
-    assert_label_present(&outcome.entities, &builtins::EMAIL_ADDRESS.to_ref());
-    assert_label_present(&outcome.entities, &builtins::IP_ADDRESS.to_ref());
+    assert_label_present!(outcome.entities, builtins::EMAIL_ADDRESS.to_ref());
+    assert_label_present!(outcome.entities, builtins::IP_ADDRESS.to_ref());
 
-    assert_pii_removed(&out, &["alice.johnson@example.com", "192.168.1.42"]);
+    assert_pii_removed!(out, "alice.johnson@example.com", "192.168.1.42");
 
     // Number, float, boolean, and null scalars are untouched and round-trip.
-    assert_preserved(
-        &out,
-        &[
-            "\"retries\": 3",
-            "\"ratio\": 0.75",
-            "\"active\": true",
-            "\"deleted\": null",
-        ],
+    assert_preserved!(
+        out,
+        "\"retries\": 3",
+        "\"ratio\": 0.75",
+        "\"active\": true",
+        "\"deleted\": null",
     );
     Ok(())
 }

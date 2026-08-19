@@ -21,7 +21,8 @@ async fn detects_every_strong_pattern() -> Result<()> {
     let outcome = FIXTURE.run().await?;
 
     // Each strong detector fires without any context keyword.
-    for label in [
+    assert_label_present!(
+        outcome.entities,
         builtins::EMAIL_ADDRESS.to_ref(),
         builtins::URL.to_ref(),
         builtins::IP_ADDRESS.to_ref(),
@@ -32,30 +33,26 @@ async fn detects_every_strong_pattern() -> Result<()> {
         builtins::SWIFT_CODE.to_ref(),
         builtins::CRYPTO_ADDRESS.to_ref(),
         builtins::PRIVATE_KEY.to_ref(),
-    ] {
-        assert_label_present(&outcome.entities, &label);
-    }
+    );
 
     // Every sensitive value is gone from the output (some are tokened, some
     // erased — the anonymizer config decides which, but none survives).
-    assert_pii_removed(
-        &outcome.redacted_text(),
-        &[
-            "dana.well@example.com",
-            "ops-team@example.org",
-            "https://portal.example.com/account/settings?ref=welcome",
-            "192.0.2.44",
-            "2001:db8::8a2e:370:7334",
-            "3c:22:fb:8a:1e:9d",
-            "AKIAIOSFODNN7EXAMPLE",
-            "ghp_16C7e42F292c6912E7710c838347Ae178B4a",
-            "sk_test_00000000000000000000000000",
-            "GB29 NWBK 6016 1331 9268 19",
-            "NWBKGB2L",
-            "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2",
-            "0x52908400098527886E0F7030069857D2E4169EE7",
-            "THISISNOTAREALKEYitisatestfixtureblobAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-        ],
+    assert_pii_removed!(
+        outcome.redacted_text(),
+        "dana.well@example.com",
+        "ops-team@example.org",
+        "https://portal.example.com/account/settings?ref=welcome",
+        "192.0.2.44",
+        "2001:db8::8a2e:370:7334",
+        "3c:22:fb:8a:1e:9d",
+        "AKIAIOSFODNN7EXAMPLE",
+        "ghp_16C7e42F292c6912E7710c838347Ae178B4a",
+        "sk_test_00000000000000000000000000",
+        "GB29 NWBK 6016 1331 9268 19",
+        "NWBKGB2L",
+        "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2",
+        "0x52908400098527886E0F7030069857D2E4169EE7",
+        "THISISNOTAREALKEYitisatestfixtureblobAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     );
     Ok(())
 }

@@ -20,9 +20,9 @@ async fn keyword_boosts_only_within_the_window() -> Result<()> {
     let outcome = FIXTURE.run().await?;
 
     // The card close to "card" is boosted over the threshold and redacted.
-    assert_pii_removed(&outcome.redacted_text(), &["4111 1111 1111 1111"]);
+    assert_pii_removed!(outcome.redacted_text(), "4111 1111 1111 1111");
 
     // The card too far from "card" stays weak and survives verbatim.
-    assert_preserved(&outcome.redacted_text(), &["5555 5555 5555 4444"]);
+    assert_preserved!(outcome.redacted_text(), "5555 5555 5555 4444");
     Ok(())
 }
