@@ -108,10 +108,8 @@ where
 }
 
 /// What a [`Recognizer`] returns from one call: the entities it found. Under
-/// the `usage` feature it also carries the [`ModelUsage`] the call cost, which
-/// a model-backed recognizer attaches with [`with_model_usage`].
-///
-/// [`with_model_usage`]: Self::with_model_usage
+/// the `usage` feature it also carries the `ModelUsage` the call cost, which a
+/// model-backed recognizer attaches with `with_model_usage`.
 #[derive(Debug, Clone)]
 pub struct Recognition<M: Modality> {
     /// The recognized entities, in modality-local coordinates.
@@ -123,9 +121,7 @@ pub struct Recognition<M: Modality> {
 
 impl<M: Modality> Recognition<M> {
     /// A recognition carrying `entities` (and, under the `usage` feature, no
-    /// model usage yet — attach it with [`with_model_usage`]).
-    ///
-    /// [`with_model_usage`]: Self::with_model_usage
+    /// model usage yet — attach it with `with_model_usage`).
     pub fn new(entities: Vec<Entity<M>>) -> Self {
         Self {
             entities,

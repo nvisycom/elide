@@ -42,11 +42,9 @@ where
 }
 
 /// What an [`Enricher`] returns from one call. It produces no entities; under
-/// the `usage` feature it carries the [`ModelUsage`] the enrichment cost, which
-/// a model-backed enricher (OCR/STT) attaches with [`with_model`]. A pure-CPU
+/// the `usage` feature it carries the `ModelUsage` the enrichment cost, which a
+/// model-backed enricher (OCR/STT) attaches with `with_model`. A pure-CPU
 /// enricher (language detection) returns [`Enrichment::none`].
-///
-/// [`with_model`]: Self::with_model
 #[derive(Debug, Clone, Default)]
 pub struct Enrichment {
     /// Model / token detail for a model-backed enricher; `None` otherwise.

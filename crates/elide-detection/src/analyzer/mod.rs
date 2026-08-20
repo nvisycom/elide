@@ -25,7 +25,7 @@ use futures::future;
 use crate::layer::Layer;
 
 /// The output of one analysis: the reconciled entities and, under the `usage`
-/// feature, the per-component [`Usage`] the run recorded (one entry per
+/// feature, the per-component `Usage` the run recorded (one entry per
 /// recognizer and enricher, in run order).
 #[derive(Debug, Clone)]
 pub struct Analysis<M: Modality> {
@@ -38,9 +38,7 @@ pub struct Analysis<M: Modality> {
 
 impl<M: Modality> Analysis<M> {
     /// An analysis carrying `entities` (and, under the `usage` feature, no
-    /// usage yet — attach it with [`with_usage`]).
-    ///
-    /// [`with_usage`]: Self::with_usage
+    /// usage yet — attach it with `with_usage`).
     pub fn new(entities: Vec<Entity<M>>) -> Self {
         Self {
             entities,
