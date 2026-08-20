@@ -227,15 +227,49 @@ impl UsageReport {
         self.entries.is_empty()
     }
 
+    /// Every entry recorded for the component named `name` (a recognizer's or
+    /// enricher's [`RecognizerId::name`]), in run order.
+    ///
+    /// The pure-CPU singletons report a fixed name — `"elide-pattern"`,
+    /// `"elide-lingua"` — but each model-backed component (NER, LLM, OCR, STT)
+    /// reports the name its *caller* configured, so match those against the
+    /// name you built the component with. Token cost is left on each entry
+    /// deliberately: tokens are not comparable across models (their prices
+    /// differ), so this returns the raw entries rather than any summed figure.
+    ///
+    /// [`RecognizerId::name`]: crate::recognition::RecognizerId::name
+    pub fn by_name<'a>(&'a self, name: &str) -> impl Iterator<Item = &'a Usage> {
+        let name = name.to_owned();
+        self.entries.iter().filter(move |u| u.id.name == name)
+    }
+
     /// Append more usage entries.
     pub fn extend(&mut self, more: impl IntoIterator<Item = Usage>) {
         self.entries.extend(more);
     }
 }
 
+#[cfg(test)]
+mod report_tests {
+    use super::*;
+
+    #[test]
+    fn by_name_filters_to_one_component() {
+        let mut report = UsageReport::new();
+        report.extend([
+            Usage::new(RecognizerId::new("elide-pattern", "1"), Duration::ZERO, 2),
+            Usage::new(RecognizerId::new("acme-ner", "1"), Duration::ZERO, 1),
+            Usage::new(RecognizerId::new("elide-pattern", "1"), Duration::ZERO, 3),
+        ]);
+        let counts: Vec<_> = report.by_name("elide-pattern").map(|u| u.count).collect();
+        assert_eq!(counts, [Some(2), Some(3)]);
+        assert_eq!(report.by_name("acme-ner").count(), 1);
+        assert_eq!(report.by_name("absent").count(), 0);
+    }
+}
+
 // Only the custom serde behavior is worth testing here: the hand-rolled
-// millisecond `Duration` codec and the `skip_serializing_if` omissions. The
-// constructors and the `Vec`-delegating `UsageReport` carry no logic of ours.
+// millisecond `Duration` codec and the `skip_serializing_if` omissions.
 #[cfg(all(test, feature = "serde"))]
 mod tests {
     use super::*;
