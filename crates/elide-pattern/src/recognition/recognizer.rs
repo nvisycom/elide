@@ -9,7 +9,7 @@ use elide_core::entity::audit::AuditEvent;
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::{Confidence, LanguageTag};
-use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
+use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId};
 use elide_core::{Error, ErrorKind, Result};
 // The external `regex` crate is aliased throughout because `Regex` is already
 // this crate's rule type (`super::regex::Regex`, imported below).
@@ -677,7 +677,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
         &self,
         data: &M::Data,
         ctx: &RecognizerContext<'_, M>,
-    ) -> Result<Vec<Entity<M>>> {
+    ) -> Result<Recognition<M>> {
         let text = M::as_text(data, &ctx.artifacts);
         let mut entities: Vec<Entity<M>> = Vec::new();
 
@@ -752,6 +752,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
             }
         }
 
-        Ok(entities)
+        // Pattern matching is pure-CPU: no model usage to report.
+        Ok(entities.into())
     }
 }

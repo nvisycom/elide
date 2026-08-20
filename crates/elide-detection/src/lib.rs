@@ -5,5 +5,5 @@
 mod analyzer;
 mod layer;
 
-pub use self::analyzer::Analyzer;
+pub use self::analyzer::{Analysis, Analyzer};
 pub use self::layer::{Layer, LayerOutput, calibrate, filter, reconcile};

@@ -26,6 +26,10 @@ default = []
 ## Ship the no-op `MockBackend` for tests, examples, and offline wiring.
 mock = []
 
+## Resource-usage accounting: surface the `ModelUsage` the STT enricher
+## attaches to its `Enrichment`. Off by default.
+usage = ["elide-core/usage"]
+
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
@@ -35,10 +39,14 @@ rustdoc-args = ["--cfg", "docsrs"]
 elide-core = { workspace = true, features = ["audio"] }
 
 # Primitive datatypes
+hipstr = { workspace = true, features = [] }
 uuid = { workspace = true, features = ["v7"] }
 
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
+
+# Derive macros & error handling
+derive_builder = { workspace = true, features = [] }
 
 [dev-dependencies]
 # Async runtime & parallelism

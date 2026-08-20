@@ -41,6 +41,10 @@ mock = []
 ## Load prompt wording from a Jinja2 template file (`Jinja2Prompt`).
 jinja2 = ["dep:minijinja"]
 
+## Resource-usage accounting: surface the token counts a call spent on the
+## `LlmResponse` and the `ModelUsage` the recognizer attaches. Off by default.
+usage = ["elide-core/usage"]
+
 ## Enable the OpenAI GPT completion provider (implies `rig`).
 openai-gpt = ["rig"]
 ## Enable the Anthropic Claude completion provider (implies `rig`).

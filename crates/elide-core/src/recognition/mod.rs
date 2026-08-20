@@ -14,6 +14,8 @@ mod context;
 mod enricher;
 mod label;
 mod scope;
+#[cfg(feature = "usage")]
+mod usage;
 
 use std::fmt;
 
@@ -23,9 +25,11 @@ use serde::{Deserialize, Serialize};
 
 pub use self::artifacts::Artifacts;
 pub use self::context::RecognizerContext;
-pub use self::enricher::Enricher;
+pub use self::enricher::{Enricher, Enrichment};
 pub use self::label::LabelMap;
 pub use self::scope::{Scope, ScopeMetadata};
+#[cfg(feature = "usage")]
+pub use self::usage::{ModelUsage, TokenCounts, Usage, UsageReport};
 use crate::entity::Entity;
 use crate::error::Result;
 use crate::modality::Modality;
@@ -94,10 +98,56 @@ where
     fn id(&self) -> RecognizerId;
 
     /// Inspect `data` in the given context and return the recognized
-    /// entities, in modality-local coordinates.
+    /// entities, in modality-local coordinates, together with any
+    /// model-usage detail the call incurred (see [`Recognition`]).
     async fn recognize(
         &self,
         data: &M::Data,
         ctx: &RecognizerContext<'_, M>,
-    ) -> Result<Vec<Entity<M>>>;
+    ) -> Result<Recognition<M>>;
+}
+
+/// What a [`Recognizer`] returns from one call: the entities it found. Under
+/// the `usage` feature it also carries the `ModelUsage` the call cost, which a
+/// model-backed recognizer attaches with `with_model_usage`.
+#[derive(Debug, Clone)]
+pub struct Recognition<M: Modality> {
+    /// The recognized entities, in modality-local coordinates.
+    pub entities: Vec<Entity<M>>,
+    /// Model / token detail for a model-backed recognizer; `None` otherwise.
+    #[cfg(feature = "usage")]
+    pub model_usage: Option<ModelUsage>,
+}
+
+impl<M: Modality> Recognition<M> {
+    /// A recognition carrying `entities` (and, under the `usage` feature, no
+    /// model usage yet — attach it with `with_model_usage`).
+    pub fn new(entities: Vec<Entity<M>>) -> Self {
+        Self {
+            entities,
+            #[cfg(feature = "usage")]
+            model_usage: None,
+        }
+    }
+
+    /// Attach the [`ModelUsage`] this recognition cost (the model-backed path).
+    #[cfg(feature = "usage")]
+    #[must_use]
+    pub fn with_model_usage(mut self, model_usage: ModelUsage) -> Self {
+        self.model_usage = Some(model_usage);
+        self
+    }
+}
+
+impl<M: Modality> From<Vec<Entity<M>>> for Recognition<M> {
+    /// Entities with no model usage — the pure-CPU recognizer case.
+    fn from(entities: Vec<Entity<M>>) -> Self {
+        Self::new(entities)
+    }
+}
+
+impl<M: Modality> Default for Recognition<M> {
+    fn default() -> Self {
+        Self::new(Vec::new())
+    }
 }

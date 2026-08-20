@@ -46,6 +46,10 @@ schema = [
     "elide-codec/schema",
 ]
 
+## Resource-usage accounting: carry the per-recognizer / per-enricher usage a
+## document's analysis incurred on the [`Report`]. Off by default.
+usage = ["elide-core/usage", "elide-detection/usage"]
+
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }

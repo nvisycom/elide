@@ -52,6 +52,11 @@ serde = ["dep:serde", "hipstr/serde", "jiff/serde", "uuid/serde", "bytes?/serde"
 ## the serde representation, and the derive reads serde attributes.
 schema = ["serde", "dep:schemars"]
 
+## Resource-usage accounting for a detection run: the [`Usage`] vocabulary
+## and the per-recognizer/enricher model-usage a [`Recognition`]/[`Enrichment`]
+## carries. Off by default; a consumer that does not read usage pays nothing.
+usage = []
+
 ## Test utilities (fixture helpers, builders, …).
 test-utils = []
 

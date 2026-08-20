@@ -130,6 +130,21 @@ codec-rtf = ["codec", "elide-codec/rtf"]
 ## Ship the no-op mock backends in the re-exported recognizer crates.
 mock = ["elide-ner?/mock", "elide-llm?/mock", "elide-stt?/mock", "elide-ocr?/mock"]
 
+## Resource-usage accounting across the toolkit: the [`Usage`] vocabulary, the
+## per-recognizer / per-enricher model-usage recognitions and enrichments
+## carry, and the usage a [`Report`] records. Off by default; forwards to every
+## engine crate that populates usage (the optional ones only when enabled).
+usage = [
+    "elide-core/usage",
+    "elide-context/usage",
+    "elide-detection/usage",
+    "elide-engine?/usage",
+    "elide-llm?/usage",
+    "elide-ner?/usage",
+    "elide-ocr?/usage",
+    "elide-stt?/usage",
+]
+
 ## The one-way `Sha2Hash` operator (SHA-256 / SHA-512).
 sha2 = ["elide-operator/sha2"]
 ## The keyed `HmacHash` operator (HMAC-SHA-256 / HMAC-SHA-512).

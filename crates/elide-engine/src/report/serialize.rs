@@ -27,12 +27,20 @@ impl serde::Serialize for Report {
             .map(|(id, p)| (id.as_str(), Group(p.entities.as_ref())))
             .collect();
 
-        let mut state = serializer.serialize_struct("Report", 2)?;
+        // `usage` is the third field only under the `usage` feature.
+        #[cfg(feature = "usage")]
+        let field_count = 3;
+        #[cfg(not(feature = "usage"))]
+        let field_count = 2;
+
+        let mut state = serializer.serialize_struct("Report", field_count)?;
         state.serialize_field(
             "body",
             &self.body.as_ref().map(|b| Group(b.entities.as_ref())),
         )?;
         state.serialize_field("parts", &parts)?;
+        #[cfg(feature = "usage")]
+        state.serialize_field("usage", &self.usage)?;
         state.end()
     }
 }
@@ -73,5 +81,30 @@ mod tests {
         // No body pipeline ran → body is null.
         let empty = serde_json::to_value(Report::new()).unwrap();
         assert!(empty["body"].is_null());
+    }
+
+    #[cfg(feature = "usage")]
+    #[test]
+    fn serializes_usage_entries() {
+        use std::time::Duration;
+
+        use elide_core::recognition::{RecognizerId, Usage};
+
+        let mut report = Report::new();
+        report.usage.extend([Usage::new(
+            RecognizerId::new("elide-pattern", "1"),
+            Duration::from_millis(5),
+            3,
+        )]);
+
+        let value = serde_json::to_value(&report).unwrap();
+        let entries = value["usage"]["entries"].as_array().expect("usage array");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["id"]["name"], "elide-pattern");
+        assert_eq!(entries[0]["duration"], 5);
+        assert_eq!(entries[0]["count"], 3);
+        // An empty report still carries an (empty) usage array.
+        let empty = serde_json::to_value(Report::new()).unwrap();
+        assert!(empty["usage"]["entries"].as_array().unwrap().is_empty());
     }
 }

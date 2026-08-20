@@ -36,7 +36,11 @@ async fn enhancer_boosts_matches_near_keyword_only() {
     let data = TextData::new(text.to_owned());
     let scope = Scope::new();
     let ctx = RecognizerContext::<Text>::new(&scope);
-    let entities = recognizer.recognize(&data, &ctx).await.expect("recognize");
+    let entities = recognizer
+        .recognize(&data, &ctx)
+        .await
+        .expect("recognize")
+        .entities;
     assert_eq!(entities.len(), 2, "two SSN matches expected");
 
     // First match has `SSN:` within the default 5-word prefix/suffix
@@ -100,7 +104,11 @@ async fn bare_recognizer_works_without_enhancement() {
     let data = TextData::new(text.to_owned());
     let scope = Scope::new();
     let ctx = RecognizerContext::<Text>::new(&scope);
-    let entities = recognizer.recognize(&data, &ctx).await.expect("recognize");
+    let entities = recognizer
+        .recognize(&data, &ctx)
+        .await
+        .expect("recognize")
+        .entities;
 
     assert_eq!(entities.len(), 1, "one SSN match expected");
     let entity = &entities[0];
@@ -147,7 +155,11 @@ async fn context_boost_override_applies_the_custom_lift() {
     let data = TextData::new(text.to_owned());
     let scope = Scope::new();
     let ctx = RecognizerContext::<Text>::new(&scope);
-    let entities = recognizer.recognize(&data, &ctx).await.expect("recognize");
+    let entities = recognizer
+        .recognize(&data, &ctx)
+        .await
+        .expect("recognize")
+        .entities;
 
     assert_eq!(entities.len(), 1, "one SSN match expected");
     // 0.6 base + 0.1 override = 0.7 (not 0.6 + 0.35 = 0.95).

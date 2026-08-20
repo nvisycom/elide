@@ -9,4 +9,4 @@ mod enricher;
 #[cfg_attr(docsrs, doc(cfg(feature = "mock")))]
 pub use self::backend::MockBackend;
 pub use self::backend::{SttBackend, SttRequest, SttResponse};
-pub use self::enricher::SttEnricher;
+pub use self::enricher::{SttEnricher, SttEnricherBuilder};

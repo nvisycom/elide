@@ -24,7 +24,8 @@ pub async fn scan(text: &str) -> (String, Vec<Entity<Text>>) {
     let entities = recognizer
         .recognize(&data, &ctx)
         .await
-        .expect("shipped recognize");
+        .expect("shipped recognize")
+        .entities;
     (text.to_owned(), entities)
 }
 

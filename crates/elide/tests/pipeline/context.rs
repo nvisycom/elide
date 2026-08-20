@@ -52,7 +52,11 @@ async fn image_context_boosts_and_keeps_the_native_region() {
     ctx.artifacts.insert(Layout::new(vec![block]));
 
     let data = ImageData::new(bytes::Bytes::new(), Dimensions::new(200, 20));
-    let entities = ssn_recognizer().recognize(&data, &ctx).await.unwrap();
+    let entities = ssn_recognizer()
+        .recognize(&data, &ctx)
+        .await
+        .unwrap()
+        .entities;
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
@@ -91,7 +95,11 @@ async fn audio_context_boosts_and_keeps_the_native_timespan() {
     ctx.artifacts.insert(Transcription::new(vec![segment]));
 
     let data = AudioData::new(bytes::Bytes::new());
-    let entities = ssn_recognizer().recognize(&data, &ctx).await.unwrap();
+    let entities = ssn_recognizer()
+        .recognize(&data, &ctx)
+        .await
+        .unwrap()
+        .entities;
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];

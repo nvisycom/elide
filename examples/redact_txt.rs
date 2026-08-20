@@ -55,7 +55,8 @@ async fn main() -> Result<()> {
     //    carries per-call assertions (here, that the document is English).
     let en = Language::asserted(LanguageTag::parse("en").unwrap());
     let scope = Scope::new().with_language(en);
-    let mut entities = analyzer.analyze_stream(&mut document, &scope).await?;
+    let analysis = analyzer.analyze_stream(&mut document, &scope).await?;
+    let mut entities = analysis.entities;
 
     // 5. Redact: apply each entity's operator back into the document,
     //    then re-encode.
@@ -68,6 +69,16 @@ async fn main() -> Result<()> {
     let count = entities.len();
     println!("\n--- original ---\n{SAMPLE}");
     println!("--- redacted ({count} entities) ---\n{redacted}");
+    // Resource usage recorded per recognizer/enricher during detection.
+    #[cfg(feature = "usage")]
+    for usage in &analysis.usage {
+        println!(
+            "usage: {} — {} ms, {} found",
+            usage.id,
+            usage.duration.as_millis(),
+            usage.count.unwrap_or(0)
+        );
+    }
 
     Ok(())
 }

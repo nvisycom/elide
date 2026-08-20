@@ -10,15 +10,57 @@
 //! [`analyze`]: Analyzer::analyze
 
 use std::sync::Arc;
+#[cfg(feature = "usage")]
+use std::time::{Duration, Instant};
 
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::{Modality, ModalityLocation, StreamDataReader};
 use elide_core::recognition::annotation::{Annotations, Exclusion};
-use elide_core::recognition::{Enricher, Recognizer, RecognizerContext, Scope};
+use elide_core::recognition::{Enricher, Recognition, Recognizer, RecognizerContext, Scope};
+#[cfg(feature = "usage")]
+use elide_core::recognition::{RecognizerId, Usage};
 use futures::future;
 
 use crate::layer::Layer;
+
+/// The output of one analysis: the reconciled entities and, under the `usage`
+/// feature, the per-component `Usage` the run recorded (one entry per
+/// recognizer and enricher, in run order).
+#[derive(Debug, Clone)]
+pub struct Analysis<M: Modality> {
+    /// The reconciled entities, in the caller's coordinate system.
+    pub entities: Vec<Entity<M>>,
+    /// Per-recognizer / per-enricher resource usage for this analysis.
+    #[cfg(feature = "usage")]
+    pub usage: Vec<Usage>,
+}
+
+impl<M: Modality> Analysis<M> {
+    /// An analysis carrying `entities` (and, under the `usage` feature, no
+    /// usage yet — attach it with `with_usage`).
+    pub fn new(entities: Vec<Entity<M>>) -> Self {
+        Self {
+            entities,
+            #[cfg(feature = "usage")]
+            usage: Vec::new(),
+        }
+    }
+
+    /// Attach the per-component [`Usage`] this analysis recorded.
+    #[cfg(feature = "usage")]
+    #[must_use]
+    pub fn with_usage(mut self, usage: Vec<Usage>) -> Self {
+        self.usage = usage;
+        self
+    }
+}
+
+impl<M: Modality> Default for Analysis<M> {
+    fn default() -> Self {
+        Self::new(Vec::new())
+    }
+}
 
 /// The find engine: enrichers, recognizers, and deduplication, in one
 /// call.
@@ -101,18 +143,45 @@ impl<M: Modality> Analyzer<M> {
         &self,
         data: M::Data,
         ctx: &mut RecognizerContext<'_, M>,
-    ) -> Result<Vec<Entity<M>>> {
+    ) -> Result<Analysis<M>> {
+        // Usage accumulates in run order: enrichers (sequential) first, then
+        // recognizers.
+        #[cfg(feature = "usage")]
+        let mut usage = Vec::with_capacity(self.enrichers.len() + self.recognizers.len());
         for enricher in &self.enrichers {
-            enricher.enrich(&data, ctx).await?;
+            #[cfg(feature = "usage")]
+            let start = Instant::now();
+            let enrichment = enricher.enrich(&data, ctx).await?;
+            // An enricher yields context, not counted entities, so its usage
+            // carries a duration but no count.
+            #[cfg(feature = "usage")]
+            {
+                let mut record = Usage::timed(enricher.id(), start.elapsed());
+                if let Some(model) = enrichment.model_usage {
+                    record = record.with_model(model);
+                }
+                usage.push(record);
+            }
+            #[cfg(not(feature = "usage"))]
+            let _ = enrichment;
         }
+        #[cfg(feature = "usage")]
+        let (mut entities, recognizer_usage) = self.recognize(&data, ctx).await?;
+        #[cfg(not(feature = "usage"))]
         let mut entities = self.recognize(&data, ctx).await?;
+        #[cfg(feature = "usage")]
+        usage.extend(recognizer_usage);
         ctx.stamp_languages(&mut entities);
         let reduced = self.reduce(entities);
         // Restrict the *output* to the requested catalog only after
         // reconciliation, so a strong out-of-catalog detection can subsume a
         // weak in-catalog one nested inside it before being culled itself.
         let in_catalog = ctx.catalog().retain_declared(reduced);
-        Ok(Self::apply_exclusions(in_catalog, ctx.exclusions()))
+        let entities = Self::apply_exclusions(in_catalog, ctx.exclusions());
+        let analysis = Analysis::new(entities);
+        #[cfg(feature = "usage")]
+        let analysis = analysis.with_usage(usage);
+        Ok(analysis)
     }
 
     /// Run every deduplication layer in order over `entities`, threading
@@ -166,7 +235,7 @@ impl<M: Modality> Analyzer<M> {
     /// [`analyze_with`]: Self::analyze_with
     /// [`analyze_stream`]: Self::analyze_stream
     /// [`Annotations`]: elide_core::recognition::annotation::Annotations
-    pub async fn analyze(&self, data: M::Data, scope: &Scope) -> Result<Vec<Entity<M>>> {
+    pub async fn analyze(&self, data: M::Data, scope: &Scope) -> Result<Analysis<M>> {
         self.analyze_with(data, scope, &Annotations::new()).await
     }
 
@@ -184,7 +253,7 @@ impl<M: Modality> Analyzer<M> {
         data: M::Data,
         scope: &Scope,
         annotations: &Annotations<M>,
-    ) -> Result<Vec<Entity<M>>> {
+    ) -> Result<Analysis<M>> {
         let mut ctx = RecognizerContext::new(scope).with_annotations(annotations);
         self.analyze_core(data, &mut ctx).await
     }
@@ -212,7 +281,7 @@ impl<M: Modality> Analyzer<M> {
     /// [`analyze_stream_with`]: Self::analyze_stream_with
     /// [`Annotations`]: elide_core::recognition::annotation::Annotations
     /// [`lift`]: elide_core::modality::StreamDataReader::lift
-    pub async fn analyze_stream<S>(&self, source: &mut S, scope: &Scope) -> Result<Vec<Entity<M>>>
+    pub async fn analyze_stream<S>(&self, source: &mut S, scope: &Scope) -> Result<Analysis<M>>
     where
         S: StreamDataReader<M>,
     {
@@ -231,23 +300,80 @@ impl<M: Modality> Analyzer<M> {
         source: &mut S,
         scope: &Scope,
         annotations: &Annotations<M>,
-    ) -> Result<Vec<Entity<M>>>
+    ) -> Result<Analysis<M>>
     where
         S: StreamDataReader<M>,
     {
         let mut out = Vec::new();
+        #[cfg(feature = "usage")]
+        let mut usage = Vec::new();
         while let Some(chunk) = source.read_next().await? {
             let mut ctx = RecognizerContext::new(scope)
                 .with_annotations(annotations)
                 .with_context_hints(chunk.hints.clone());
-            let entities = self.analyze_core(chunk.data.clone(), &mut ctx).await?;
+            let analysis = self.analyze_core(chunk.data.clone(), &mut ctx).await?;
+            // Usage accrues across chunks: each chunk re-runs every recognizer
+            // and enricher, so the stream's total is the sum of its chunks'.
+            #[cfg(feature = "usage")]
+            usage.extend(analysis.usage);
             out.extend(
-                entities
+                analysis
+                    .entities
                     .into_iter()
                     .filter_map(|entity| source.lift(&chunk, entity)),
             );
         }
-        Ok(out)
+        let analysis = Analysis::new(out);
+        #[cfg(feature = "usage")]
+        let analysis = analysis.with_usage(usage);
+        Ok(analysis)
+    }
+
+    /// Run every recognizer over `data` concurrently and collect their
+    /// entities. Under the `usage` feature it also returns a [`Usage`] per
+    /// recognizer (its id, wall-clock time, entity count, and any model/token
+    /// detail it returned). The first error is returned (fail-fast).
+    ///
+    /// Recognizers borrow `data` and `ctx`, so they are joined in place
+    /// rather than spawned onto the runtime.
+    #[cfg(feature = "usage")]
+    async fn recognize(
+        &self,
+        data: &M::Data,
+        ctx: &RecognizerContext<'_, M>,
+    ) -> Result<(Vec<Entity<M>>, Vec<Usage>)> {
+        if self.recognizers.is_empty() {
+            return Ok((Vec::new(), Vec::new()));
+        }
+
+        // Time each recognizer inside its own future so the measure reflects
+        // that recognizer alone; `join_all` polls them on one task (no spawn),
+        // so the timings are concurrent-but-in-place, matching how they run.
+        // Each future returns this recognizer's id, its elapsed millis, and
+        // its `Recognition`; `join_all` yields one per recognizer in order.
+        let futures = self.recognizers.iter().map(|recognizer| {
+            let id = recognizer.id();
+            async move {
+                let start = Instant::now();
+                let recognition: Recognition<M> = recognizer.recognize(data, ctx).await?;
+                let elapsed = start.elapsed();
+                Result::<_>::Ok((id, elapsed, recognition))
+            }
+        });
+
+        let mut entities = Vec::new();
+        let mut usage = Vec::with_capacity(self.recognizers.len());
+        for found in future::join_all(futures).await {
+            let (id, elapsed, recognition): (RecognizerId, Duration, Recognition<M>) = found?;
+            let count = recognition.entities.len() as u64;
+            let mut record = Usage::new(id, elapsed, count);
+            if let Some(model) = recognition.model_usage {
+                record = record.with_model(model);
+            }
+            usage.push(record);
+            entities.extend(recognition.entities);
+        }
+        Ok((entities, usage))
     }
 
     /// Run every recognizer over `data` concurrently and collect their
@@ -255,22 +381,21 @@ impl<M: Modality> Analyzer<M> {
     ///
     /// Recognizers borrow `data` and `ctx`, so they are joined in place
     /// rather than spawned onto the runtime.
+    #[cfg(not(feature = "usage"))]
     async fn recognize(
         &self,
         data: &M::Data,
         ctx: &RecognizerContext<'_, M>,
     ) -> Result<Vec<Entity<M>>> {
-        if self.recognizers.is_empty() {
-            return Ok(Vec::new());
-        }
-
         let futures = self
             .recognizers
             .iter()
             .map(|recognizer| recognizer.recognize(data, ctx));
+
         let mut entities = Vec::new();
         for found in future::join_all(futures).await {
-            entities.extend(found?);
+            let recognition: Recognition<M> = found?;
+            entities.extend(recognition.entities);
         }
         Ok(entities)
     }

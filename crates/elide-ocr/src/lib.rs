@@ -9,4 +9,4 @@ mod enricher;
 #[cfg_attr(docsrs, doc(cfg(feature = "mock")))]
 pub use self::backend::MockBackend;
 pub use self::backend::{OcrBackend, OcrRequest, OcrResponse};
-pub use self::enricher::OcrEnricher;
+pub use self::enricher::{OcrEnricher, OcrEnricherBuilder};

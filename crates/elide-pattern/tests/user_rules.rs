@@ -44,7 +44,11 @@ async fn user_toml_rules_load_and_detect() {
     let data = TextData::new(text.to_owned());
     let scope = Scope::new();
     let ctx = RecognizerContext::<Text>::new(&scope);
-    let entities = recognizer.recognize(&data, &ctx).await.expect("recognize");
+    let entities = recognizer
+        .recognize(&data, &ctx)
+        .await
+        .expect("recognize")
+        .entities;
 
     // The custom regex finds both employee numbers.
     let emp_hits: Vec<&str> = entities
