@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use elide_core::Result;
 use elide_core::modality::image::{Image, ImageData, Layout};
-use elide_core::recognition::{Enricher, RecognizerContext};
+use elide_core::recognition::{Enricher, Enrichment, RecognizerContext, RecognizerId};
 
 use crate::{OcrBackend, OcrRequest};
 
@@ -44,10 +44,18 @@ impl OcrEnricher {
 
 #[async_trait::async_trait]
 impl Enricher<Image> for OcrEnricher {
-    async fn enrich(&self, data: &ImageData, ctx: &mut RecognizerContext<'_, Image>) -> Result<()> {
+    fn id(&self) -> RecognizerId {
+        RecognizerId::new("elide-ocr", env!("CARGO_PKG_VERSION"))
+    }
+
+    async fn enrich(
+        &self,
+        data: &ImageData,
+        ctx: &mut RecognizerContext<'_, Image>,
+    ) -> Result<Enrichment> {
         // Already OCR'd (e.g. a second enricher pass): leave it.
         if ctx.artifacts.contains::<Layout>() {
-            return Ok(());
+            return Ok(Enrichment::none());
         }
         let mut request = OcrRequest::new(&data.bytes);
         if let Some(name) = data.filename.as_deref() {
@@ -58,7 +66,12 @@ impl Enricher<Image> for OcrEnricher {
         }
         let response = self.backend.recognize(request).await?;
         ctx.artifacts.insert(Layout::new(response.blocks));
-        Ok(())
+        // The OCR model vouches for its own identity; OCR reports no token
+        // counts today.
+        #[cfg(feature = "usage")]
+        return Ok(Enrichment::with_model(self.backend.provenance().into()));
+        #[cfg(not(feature = "usage"))]
+        Ok(Enrichment::none())
     }
 }
 

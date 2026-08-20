@@ -41,6 +41,8 @@ use std::ops::ControlFlow;
 use elide_codec::PartId;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
+#[cfg(feature = "usage")]
+use elide_core::recognition::UsageReport;
 use uuid::Uuid;
 
 pub(crate) use self::entry::{BodyReport, PartReport};
@@ -88,6 +90,10 @@ pub struct Report {
     pub(crate) body: Option<BodyReport>,
     /// Each container part's entry, keyed by its [`PartId`].
     pub(crate) parts: HashMap<PartId, PartReport>,
+    /// Per-recognizer / per-enricher resource usage across the whole
+    /// analysis (the body and every part), in run order.
+    #[cfg(feature = "usage")]
+    pub(crate) usage: UsageReport,
 }
 
 impl Report {
@@ -101,7 +107,17 @@ impl Report {
         Self {
             body: None,
             parts: HashMap::new(),
+            #[cfg(feature = "usage")]
+            usage: UsageReport::new(),
         }
+    }
+
+    /// The resource usage recorded across this analysis — one entry per
+    /// recognizer and enricher that ran, each self-identifying via its id.
+    #[cfg(feature = "usage")]
+    #[must_use]
+    pub fn usage(&self) -> &UsageReport {
+        &self.usage
     }
 
     /// Set the body entities of modality `M`, replacing any already set.

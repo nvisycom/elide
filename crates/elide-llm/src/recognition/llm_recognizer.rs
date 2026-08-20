@@ -10,8 +10,9 @@
 use std::sync::Arc;
 
 use derive_builder::Builder;
-use elide_core::entity::Entity;
-use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
+#[cfg(feature = "usage")]
+use elide_core::recognition::ModelUsage;
+use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId};
 use elide_core::{Error, Result};
 
 #[cfg(any(test, feature = "mock"))]
@@ -147,9 +148,18 @@ impl<M: LlmModality> Recognizer<M> for LlmRecognizer<M> {
         &self,
         data: &M::Data,
         ctx: &RecognizerContext<'_, M>,
-    ) -> Result<Vec<Entity<M>>> {
+    ) -> Result<Recognition<M>> {
         let prompt = self.prompt.build(data, ctx);
         let response = self.backend.extract(LlmRequest::new(&prompt, data)).await?;
-        Ok(M::lift(response.candidates, data))
+        // The backend names the model it called; token counts are whatever the
+        // response carries (empty when the backend cannot surface them).
+        #[cfg(feature = "usage")]
+        let model_usage =
+            ModelUsage::new(self.backend.model().to_owned()).with_tokens(response.tokens);
+        let entities = M::lift(response.candidates, data);
+        let recognition = Recognition::new(entities);
+        #[cfg(feature = "usage")]
+        let recognition = recognition.with_model_usage(model_usage);
+        Ok(recognition)
     }
 }

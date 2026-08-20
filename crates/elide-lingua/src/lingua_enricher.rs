@@ -15,7 +15,7 @@
 use elide_core::Result;
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::LanguageTag;
-use elide_core::recognition::{Enricher, RecognizerContext};
+use elide_core::recognition::{Enricher, Enrichment, RecognizerContext, RecognizerId};
 
 use crate::lingua_detector::LinguaDetector;
 
@@ -75,10 +75,18 @@ impl Default for LinguaEnricher {
 /// tabular (CSV/XLSX), or transcript pipeline to its detected language.
 #[async_trait::async_trait]
 impl<M: TextRecognizable> Enricher<M> for LinguaEnricher {
-    async fn enrich(&self, data: &M::Data, ctx: &mut RecognizerContext<'_, M>) -> Result<()> {
+    fn id(&self) -> RecognizerId {
+        RecognizerId::new("elide-lingua", env!("CARGO_PKG_VERSION"))
+    }
+
+    async fn enrich(
+        &self,
+        data: &M::Data,
+        ctx: &mut RecognizerContext<'_, M>,
+    ) -> Result<Enrichment> {
         // A caller-asserted language is authoritative; skip detection.
         if ctx.has_asserted_language() {
-            return Ok(());
+            return Ok(Enrichment::none());
         }
         // Detect into an owned list first so the immutable borrow of the payload
         // text ends before `detect_language` takes `&mut ctx`.
@@ -86,7 +94,8 @@ impl<M: TextRecognizable> Enricher<M> for LinguaEnricher {
         for detection in detections {
             ctx.detect_language(detection);
         }
-        Ok(())
+        // Language detection is pure-CPU: no model tokens to report.
+        Ok(Enrichment::none())
     }
 }
 

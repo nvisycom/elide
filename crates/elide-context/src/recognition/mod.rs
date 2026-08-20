@@ -15,11 +15,10 @@
 //! [`Enhancer`]: crate::Enhancer
 
 use elide_core::Result;
-use elide_core::entity::Entity;
 use elide_core::entity::audit::AuditEvent;
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::LanguageTag;
-use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
+use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId};
 
 use crate::io::Tokens;
 use crate::{Context, Enhancer};
@@ -69,10 +68,19 @@ where
         &self,
         data: &M::Data,
         ctx: &RecognizerContext<'_, M>,
-    ) -> Result<Vec<Entity<M>>> {
-        let mut entities = self.inner.recognize(data, ctx).await?;
+    ) -> Result<Recognition<M>> {
+        let recognition = self.inner.recognize(data, ctx).await?;
+        #[cfg(feature = "usage")]
+        let model_usage = recognition.model_usage;
+        let mut entities = recognition.entities;
         if self.enhancer.is_empty() {
-            return Ok(entities);
+            let recognition = Recognition::new(entities);
+            #[cfg(feature = "usage")]
+            let recognition = match model_usage {
+                Some(model_usage) => recognition.with_model_usage(model_usage),
+                None => recognition,
+            };
+            return Ok(recognition);
         }
 
         let text = M::as_text(data, &ctx.artifacts);
@@ -123,6 +131,12 @@ where
                 location,
             ));
         }
-        Ok(entities)
+        let recognition = Recognition::new(entities);
+        #[cfg(feature = "usage")]
+        let recognition = match model_usage {
+            Some(model_usage) => recognition.with_model_usage(model_usage),
+            None => recognition,
+        };
+        Ok(recognition)
     }
 }

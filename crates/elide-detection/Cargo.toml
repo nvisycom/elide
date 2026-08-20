@@ -33,6 +33,10 @@ serde = ["dep:serde", "elide-core/serde"]
 ## crate's serializable config.
 schema = ["serde", "dep:schemars", "elide-core/schema"]
 
+## Resource-usage accounting: record the per-recognizer / per-enricher
+## [`Usage`] an analysis incurs on the [`Analysis`]. Off by default.
+usage = ["elide-core/usage"]
+
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }

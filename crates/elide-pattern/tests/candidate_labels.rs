@@ -30,7 +30,11 @@ fn address_recognizer() -> PatternRecognizer {
 async fn emitted_label(recognizer: &PatternRecognizer, scope: &Scope) -> LabelRef {
     let data = TextData::new("12 Main St".to_owned());
     let ctx = RecognizerContext::<Text>::new(scope);
-    let entities = recognizer.recognize(&data, &ctx).await.expect("recognize");
+    let entities = recognizer
+        .recognize(&data, &ctx)
+        .await
+        .expect("recognize")
+        .entities;
     assert_eq!(entities.len(), 1, "one match, one entity");
     entities[0].label.clone()
 }

@@ -131,6 +131,10 @@ impl LlmBackend<Text> for RigBackend {
     #[tracing::instrument(target = TARGET, skip_all, fields(model = %self.model_name))]
     async fn extract(&self, request: LlmRequest<'_, Text>) -> Result<LlmResponse<Text>> {
         let candidates = self.extract_batch(Message::user(request.prompt)).await?;
+        // No token counts: rig's `Extractor::extract` returns only the parsed
+        // `T` and drops the provider's usage. Surfacing tokens would require
+        // extracting over the raw completion path to read
+        // `CompletionResponse::usage`.
         Ok(LlmResponse::new(candidates))
     }
 

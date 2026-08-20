@@ -137,10 +137,16 @@ impl<'r> Orchestrator<'r> {
         // matches analyzes it in place. The pipeline's key is the body's
         // modality `TypeId`.
         for (modality, pipeline) in &self.pipelines {
-            if let Some(entities) = pipeline
+            if let Some(analyzed) = pipeline
                 .analyze_in_place(document, scope, annotations)
                 .await?
             {
+                #[cfg(feature = "usage")]
+                let (entities, usage) = analyzed;
+                #[cfg(not(feature = "usage"))]
+                let entities = analyzed;
+                #[cfg(feature = "usage")]
+                report.usage.extend(usage);
                 report.body = Some(BodyReport {
                     modality: *modality,
                     entities,
@@ -164,7 +170,11 @@ impl<'r> Orchestrator<'r> {
                         modality,
                         handle: retained,
                         entities,
+                        #[cfg(feature = "usage")]
+                        usage,
                     } => {
+                        #[cfg(feature = "usage")]
+                        report.usage.extend(usage);
                         report.parts.insert(
                             part.id.clone(),
                             PartReport {

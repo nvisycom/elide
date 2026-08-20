@@ -27,6 +27,13 @@ path = "redact_txt.rs"
 name = "redact_docx"
 path = "redact_docx.rs"
 
+[features]
+default = []
+
+## Print the per-recognizer / per-enricher resource usage a detection run
+## records. Off by default; forwards to `elide/usage`.
+usage = ["elide/usage"]
+
 [dependencies]
 # Internal crates
 elide = { workspace = true, features = [

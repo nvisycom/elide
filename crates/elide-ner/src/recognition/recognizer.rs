@@ -24,7 +24,9 @@ use derive_builder::Builder;
 use elide_core::entity::audit::{AuditEvent, ModelEvent};
 use elide_core::entity::{Entity, Label, LabelRef};
 use elide_core::modality::TextRecognizable;
-use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId};
+#[cfg(feature = "usage")]
+use elide_core::recognition::ModelUsage;
+use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId};
 use elide_core::{Error, Result};
 use hipstr::HipStr;
 
@@ -182,7 +184,7 @@ impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
         &self,
         data: &M::Data,
         ctx: &RecognizerContext<'_, M>,
-    ) -> Result<Vec<Entity<M>>> {
+    ) -> Result<Recognition<M>> {
         // The effective target labels, as full `Label`s (localized name +
         // optional description) so a zero-shot backend like GLiNER gets the
         // localized text in the analysis language: the recognizer's own
@@ -213,12 +215,17 @@ impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
         };
         let response = self.backend.recognize(request).await?;
 
+        // The model that produced these spans vouches for its own identity
+        // (name + version) via `provenance()`, plus any tokens it reported.
+        #[cfg(feature = "usage")]
+        let model_usage = ModelUsage::from(self.backend.provenance()).with_tokens(response.tokens);
+
         // Spans already carry canonical labels (the backend did any
         // raw-to-canonical mapping; ignored labels are dropped by an
         // `IgnoreLabels` decorator). When a target set was requested, we
         // restrict to it. Each surviving span is placed in the medium; one
         // whose range can't be located is dropped.
-        Ok(response
+        let entities = response
             .spans
             .iter()
             .filter(|s| {
@@ -226,7 +233,11 @@ impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
                     || effective_labels.iter().any(|l| l.to_ref() == s.label)
             })
             .filter_map(|s| self.build_entity::<M>(s, s.label.clone(), data, ctx))
-            .collect())
+            .collect();
+        let recognition = Recognition::new(entities);
+        #[cfg(feature = "usage")]
+        let recognition = recognition.with_model_usage(model_usage);
+        Ok(recognition)
     }
 }
 
@@ -256,7 +267,7 @@ mod tests {
         let data = TextData::new("Alice Smith".to_owned());
         let scope = Scope::new();
         let ctx = RecognizerContext::<Text>::new(&scope);
-        let out = rec.recognize(&data, &ctx).await.unwrap();
+        let out = rec.recognize(&data, &ctx).await.unwrap().entities;
         assert!(out.is_empty());
     }
 
@@ -270,7 +281,7 @@ mod tests {
         let data = TextData::new("Alice Smith".to_owned());
         let scope = Scope::new();
         let ctx = RecognizerContext::<Text>::new(&scope);
-        let out = rec.recognize(&data, &ctx).await.unwrap();
+        let out = rec.recognize(&data, &ctx).await.unwrap().entities;
         assert!(out.is_empty());
     }
 

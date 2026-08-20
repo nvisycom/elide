@@ -19,6 +19,8 @@ use std::ops::Range;
 
 use elide_core::entity::LabelRef;
 use elide_core::primitive::Confidence;
+#[cfg(feature = "usage")]
+use elide_core::recognition::TokenCounts;
 
 /// One per-call NER response from a [`NerBackend`].
 ///
@@ -31,13 +33,29 @@ use elide_core::primitive::Confidence;
 pub struct NerResponse {
     /// Spans predicted for the request's text, in backend order.
     pub spans: Vec<NerSpan>,
+    /// Tokens the call spent, when the backend reports them. Most NER
+    /// backends do not, so this is [`TokenCounts::default`] (all `None`).
+    #[cfg(feature = "usage")]
+    pub tokens: TokenCounts,
 }
 
 impl NerResponse {
-    /// Construct a response from spans.
+    /// Construct a response from spans, with no token counts.
     #[must_use]
     pub fn new(spans: Vec<NerSpan>) -> Self {
-        Self { spans }
+        Self {
+            spans,
+            #[cfg(feature = "usage")]
+            tokens: TokenCounts::default(),
+        }
+    }
+
+    /// Attach token counts the backend reported.
+    #[cfg(feature = "usage")]
+    #[must_use]
+    pub fn with_tokens(mut self, tokens: TokenCounts) -> Self {
+        self.tokens = tokens;
+        self
     }
 }
 

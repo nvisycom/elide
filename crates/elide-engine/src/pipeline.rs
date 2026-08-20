@@ -14,8 +14,10 @@ use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::recognition::Scope;
+#[cfg(feature = "usage")]
+use elide_core::recognition::Usage;
 use elide_core::recognition::annotation::Annotations;
-use elide_detection::Analyzer;
+use elide_detection::{Analysis, Analyzer};
 use elide_redaction::{Anonymizer, Selection};
 
 use super::directives::AnnotationSet;
@@ -46,7 +48,7 @@ where
         handle: &mut DocumentHandle<M>,
         scope: &Scope,
         annotations: &Annotations<M>,
-    ) -> Result<Vec<Entity<M>>> {
+    ) -> Result<Analysis<M>> {
         self.analyzer
             .analyze_stream_with(handle, scope, annotations)
             .await
@@ -77,18 +79,32 @@ where
 /// A boxed, pinned, `Send` future — the erased async return shape.
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+/// The boxed entities a matched in-place analysis produced; `None` when the
+/// pipeline's modality did not match the handle. Under the `usage` feature it
+/// also carries the per-component [`Usage`] the analysis recorded. The result
+/// of [`ErasedPipeline::analyze_in_place`].
+#[cfg(feature = "usage")]
+type InPlaceAnalysis = Option<(Box<dyn EntityGroup>, Vec<Usage>)>;
+/// The boxed entities a matched in-place analysis produced; `None` when the
+/// pipeline's modality did not match the handle. The result of
+/// [`ErasedPipeline::analyze_in_place`].
+#[cfg(not(feature = "usage"))]
+type InPlaceAnalysis = Option<Box<dyn EntityGroup>>;
+
 /// The result of offering a decoded handle to a pipeline for analysis: the
 /// pipeline either accepts it (its modality matched) and returns the
 /// detected entities boxed by modality, or rejects it (a different
 /// modality) and hands the handle back for another pipeline to try.
 pub(super) enum AnalyzeOutcome {
     /// Modality matched: the matched modality's `TypeId`, the retained
-    /// handle, and its boxed `Vec<Entity<M>>` (recoverable as that
-    /// modality).
+    /// handle, its boxed `Vec<Entity<M>>` (recoverable as that modality), and
+    /// the per-component [`Usage`] the analysis recorded.
     Accepted {
         modality: TypeId,
         handle: UntypedDocumentHandle,
         entities: Box<dyn EntityGroup>,
+        #[cfg(feature = "usage")]
+        usage: Vec<Usage>,
     },
     /// Not this pipeline's modality; the undecoded handle is returned.
     Rejected(UntypedDocumentHandle),
@@ -129,7 +145,7 @@ pub(super) trait ErasedPipeline: Send + Sync {
         handle: &'a mut UntypedDocumentHandle,
         scope: &'a Scope,
         annotations: &'a AnnotationSet,
-    ) -> BoxFuture<'a, Result<Option<Box<dyn EntityGroup>>>>;
+    ) -> BoxFuture<'a, Result<InPlaceAnalysis>>;
 
     fn apply_in_place<'a>(
         &'a self,
@@ -170,11 +186,13 @@ where
                 Err(returned) => return Ok(AnalyzeOutcome::Rejected(returned)),
             };
             let regions = annotations.get::<M>();
-            let entities = ModalityPipeline::analyze(self, &mut handle, scope, &regions).await?;
+            let analysis = ModalityPipeline::analyze(self, &mut handle, scope, &regions).await?;
             Ok(AnalyzeOutcome::Accepted {
                 modality: TypeId::of::<M>(),
                 handle: UntypedDocumentHandle::new(handle),
-                entities: Box::new(entities),
+                entities: Box::new(analysis.entities),
+                #[cfg(feature = "usage")]
+                usage: analysis.usage,
             })
         })
     }
@@ -184,14 +202,18 @@ where
         handle: &'a mut UntypedDocumentHandle,
         scope: &'a Scope,
         annotations: &'a AnnotationSet,
-    ) -> BoxFuture<'a, Result<Option<Box<dyn EntityGroup>>>> {
+    ) -> BoxFuture<'a, Result<InPlaceAnalysis>> {
         Box::pin(async move {
             let Some(typed) = handle.downcast_mut::<M>() else {
                 return Ok(None); // not this pipeline's modality
             };
             let regions = annotations.get::<M>();
-            let entities = ModalityPipeline::analyze(self, typed, scope, &regions).await?;
-            Ok(Some(Box::new(entities) as Box<dyn EntityGroup>))
+            let analysis = ModalityPipeline::analyze(self, typed, scope, &regions).await?;
+            let entities = Box::new(analysis.entities) as Box<dyn EntityGroup>;
+            #[cfg(feature = "usage")]
+            return Ok(Some((entities, analysis.usage)));
+            #[cfg(not(feature = "usage"))]
+            Ok(Some(entities))
         })
     }
 

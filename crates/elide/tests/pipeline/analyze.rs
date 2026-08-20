@@ -10,7 +10,7 @@ use elide_core::Result;
 use elide_core::entity::audit::{AuditEvent, AuditKind, AuditLog, PatternEvent};
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::primitive::{Confidence, ConfidenceThreshold};
-use elide_core::recognition::{Recognizer, RecognizerContext, RecognizerId, Scope};
+use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId, Scope};
 
 use crate::support::{SourceRef, Text, TextData, TextLocation};
 
@@ -59,8 +59,8 @@ impl Recognizer<Text> for Fixed {
         &self,
         _data: &TextData,
         _ctx: &RecognizerContext<'_, Text>,
-    ) -> Result<Vec<Entity<Text>>> {
-        Ok(self.0.clone())
+    ) -> Result<Recognition<Text>> {
+        Ok(self.0.clone().into())
     }
 }
 
@@ -85,7 +85,8 @@ async fn analyze_fuses_resolves_filters() {
     let mut entities = analyzer
         .analyze(TextData::new(""), &Scope::new())
         .await
-        .unwrap();
+        .unwrap()
+        .entities;
 
     // The two PHONE_NUMBER detections fused into one; the weak stray was
     // filtered out below the 0.35 baseline.
@@ -105,6 +106,39 @@ async fn analyze_fuses_resolves_filters() {
         AuditKind::Deduplication { ref strategy } if strategy == "max"
     ));
     assert_eq!(phone.audit.final_confidence(), Some(phone.confidence));
+}
+
+#[cfg(feature = "usage")]
+#[tokio::test]
+async fn analyze_records_per_recognizer_usage() {
+    // Two recognizers: A finds 2, B finds 1. Each should get one Usage entry
+    // carrying its id, its own found-count (measured before reduction), a
+    // duration, and — being pure-CPU doubles — no model detail.
+    let a = Fixed(vec![
+        detected("pattern", "PHONE_NUMBER", (10, 22), 0.8),
+        detected("pattern", "WEAK", (40, 44), 0.1),
+    ]);
+    let b = Fixed(vec![detected("ner", "PHONE_NUMBER", (10, 23), 0.95)]);
+
+    let analyzer = Analyzer::<Text>::new()
+        .with_recognizer(a)
+        .with_recognizer(b)
+        .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE));
+
+    let analysis = analyzer
+        .analyze(TextData::new(""), &Scope::new())
+        .await
+        .unwrap();
+
+    // One usage entry per recognizer, in registration order.
+    assert_eq!(analysis.usage.len(), 2);
+    for usage in &analysis.usage {
+        assert_eq!(usage.id.name, "fixed");
+        assert!(usage.model.is_none(), "a pure-CPU double reports no model");
+    }
+    // Counts reflect what each recognizer returned (pre-reduction): 2 and 1.
+    assert_eq!(analysis.usage[0].count, Some(2));
+    assert_eq!(analysis.usage[1].count, Some(1));
 }
 
 #[tokio::test]
@@ -136,7 +170,8 @@ async fn fusion_keeps_both_operands_source_refs() {
     let mut entities = analyzer
         .analyze(TextData::new(""), &Scope::new())
         .await
-        .unwrap();
+        .unwrap()
+        .entities;
 
     assert_eq!(entities.len(), 1);
     let phone = entities.pop().unwrap();
@@ -168,7 +203,8 @@ async fn analyze_stamps_language_from_recognized_range() {
     let entities = analyzer
         .analyze(TextData::new("hello"), &scope)
         .await
-        .unwrap();
+        .unwrap()
+        .entities;
     assert_eq!(entities.len(), 1);
     assert_eq!(
         entities[0].language.as_ref().map(|l| l.primary_language()),
@@ -231,7 +267,11 @@ async fn out_of_catalog_container_subsumes_then_is_culled() {
         .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE));
 
     let scope = Scope::new().with_catalog(catalog);
-    let entities = analyzer.analyze(TextData::new(""), &scope).await.unwrap();
+    let entities = analyzer
+        .analyze(TextData::new(""), &scope)
+        .await
+        .unwrap()
+        .entities;
 
     let labels: Vec<&str> = entities.iter().map(|e| e.label.as_str()).collect();
     // The nested driver's-license prefix was subsumed by the IBAN.

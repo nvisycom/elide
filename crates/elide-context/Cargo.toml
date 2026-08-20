@@ -22,6 +22,13 @@ documentation = { workspace = true }
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[features]
+default = []
+
+## Resource-usage accounting: thread the [`ModelUsage`] a wrapped recognizer
+## reports through the [`Enhanced`] decorator. Off by default.
+usage = ["elide-core/usage"]
+
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }

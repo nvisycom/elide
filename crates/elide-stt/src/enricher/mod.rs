@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use elide_core::Result;
 use elide_core::modality::audio::{Audio, AudioData, Transcription};
-use elide_core::recognition::{Enricher, RecognizerContext};
+use elide_core::recognition::{Enricher, Enrichment, RecognizerContext, RecognizerId};
 
 use crate::{SttBackend, SttRequest};
 
@@ -46,10 +46,18 @@ impl SttEnricher {
 
 #[async_trait::async_trait]
 impl Enricher<Audio> for SttEnricher {
-    async fn enrich(&self, data: &AudioData, ctx: &mut RecognizerContext<'_, Audio>) -> Result<()> {
+    fn id(&self) -> RecognizerId {
+        RecognizerId::new("elide-stt", env!("CARGO_PKG_VERSION"))
+    }
+
+    async fn enrich(
+        &self,
+        data: &AudioData,
+        ctx: &mut RecognizerContext<'_, Audio>,
+    ) -> Result<Enrichment> {
         // Already transcribed (e.g. a second enricher pass): leave it.
         if ctx.artifacts.contains::<Transcription>() {
-            return Ok(());
+            return Ok(Enrichment::none());
         }
         let mut request = SttRequest::new(&data.bytes);
         if let Some(name) = data.filename.as_deref() {
@@ -60,7 +68,12 @@ impl Enricher<Audio> for SttEnricher {
         }
         let response = self.backend.transcribe(request).await?;
         ctx.artifacts.insert(Transcription::new(response.segments));
-        Ok(())
+        // The transcription model vouches for its own identity; STT reports no
+        // token counts today.
+        #[cfg(feature = "usage")]
+        return Ok(Enrichment::with_model(self.backend.provenance().into()));
+        #[cfg(not(feature = "usage"))]
+        Ok(Enrichment::none())
     }
 }
 
@@ -105,7 +118,15 @@ mod tests {
         let scope = Scope::new();
         let mut ctx = RecognizerContext::new(&scope);
 
-        enricher.enrich(&data, &mut ctx).await.unwrap();
+        let _enrichment = enricher.enrich(&data, &mut ctx).await.unwrap();
+
+        // The enrichment reports the transcription model that ran, taken from
+        // the backend's `provenance()`.
+        #[cfg(feature = "usage")]
+        {
+            let model = _enrichment.model_usage.expect("STT reports its model");
+            assert_eq!(model.model, "canned");
+        }
 
         // Recognizers read the transcript from the call's artifacts.
         assert_eq!(Audio::as_text(&data, &ctx.artifacts), "hi Alice");
