@@ -17,9 +17,16 @@
 // pre-recognition concern and live in the `enrichment` module.
 #[doc(inline)]
 pub use elide_core::recognition::{
-    Artifacts, LabelMap, Recognizer, RecognizerContext, RecognizerId, Scope, ScopeMetadata,
-    annotation,
+    Artifacts, LabelMap, Recognition, Recognizer, RecognizerContext, RecognizerId, Scope,
+    ScopeMetadata, annotation,
 };
+/// Resource-usage accounting for a detection run: the per-recognizer /
+/// per-enricher [`Usage`] and the model / token detail it carries. A
+/// document's aggregate is a [`UsageReport`], reachable via
+/// [`Report::usage`](crate::Report::usage).
+#[cfg(feature = "usage")]
+#[cfg_attr(docsrs, doc(cfg(feature = "usage")))]
+pub use elide_core::recognition::{ModelUsage, TokenCounts, Usage, UsageReport};
 
 /// Context-enhanced recognition: keyword-boosted confidence over another
 /// recognizer.

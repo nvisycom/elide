@@ -10,7 +10,7 @@
 //! [`Enricher`]: elide_core::recognition::Enricher
 
 #[doc(inline)]
-pub use elide_core::recognition::Enricher;
+pub use elide_core::recognition::{Enricher, Enrichment};
 /// Language detection for language-aware recognizers and policies.
 #[cfg(feature = "lingua")]
 #[cfg_attr(docsrs, doc(cfg(feature = "lingua")))]
