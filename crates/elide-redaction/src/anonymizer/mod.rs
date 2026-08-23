@@ -574,7 +574,7 @@ mod tests {
         let live_id = live.id;
         // The reviewer marks the second detection as a false positive.
         suppressed.suppress(
-            AuditEvent::manual(suppressed.location.clone(), suppressed.confidence)
+            AuditEvent::manual_suppress(suppressed.location.clone(), suppressed.confidence)
                 .with_reason("false positive"),
         );
         let mut entities = vec![live, suppressed];
@@ -645,7 +645,7 @@ mod tests {
         let mut suppressed = entity("NAME", 0, 5); // overlaps the live span
         let live_id = live.id;
         let suppressed_id = suppressed.id;
-        suppressed.suppress(AuditEvent::manual(
+        suppressed.suppress(AuditEvent::manual_suppress(
             suppressed.location.clone(),
             suppressed.confidence,
         ));
@@ -687,7 +687,7 @@ mod tests {
         let live_b = entity("B", 10, 15);
         let mut bridge = entity("BRIDGE", 4, 11);
         let (a_id, b_id, bridge_id) = (live_a.id, live_b.id, bridge.id);
-        bridge.suppress(AuditEvent::manual(
+        bridge.suppress(AuditEvent::manual_suppress(
             bridge.location.clone(),
             bridge.confidence,
         ));

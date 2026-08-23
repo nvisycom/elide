@@ -149,7 +149,6 @@ impl<M: Modality> EntityBuilder<M> {
             language: self.language,
             recognized_range: self.recognized_range,
             audit,
-            suppressed: false,
         })
     }
 }

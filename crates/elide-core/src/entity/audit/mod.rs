@@ -15,8 +15,8 @@ pub use self::attribution::{Attribution, AttributionKind};
 pub use self::event::{AuditEvent, AuditKind};
 pub use self::hash::AuditHash;
 pub use self::payload::{
-    Calibration, Conflict, Contested, Deduplication, Manual, Model, ModelEvent, Pattern,
-    PatternEvent, Redaction, Refinement, Selection,
+    Calibration, Conflict, Contested, Deduplication, Manual, ManualIntent, Model, ModelEvent,
+    Pattern, PatternEvent, Redaction, Refinement, Selection,
 };
 pub use self::rule_match::RuleMatch;
 use crate::modality::Modality;
@@ -162,6 +162,26 @@ impl<M: Modality> AuditLog<M> {
         self.events
             .iter()
             .any(|e| matches!(e.kind, AuditKind::Redaction(_)))
+    }
+
+    /// Whether a reviewer has suppressed this entity — i.e. its most recent
+    /// [`Manual`] event carries [`ManualIntent::Suppress`]. The audit trail is
+    /// the single source of truth: there is no separate flag to keep in sync.
+    /// A manually *included* entity (a `Manual` with [`ManualIntent::Include`])
+    /// is not suppressed, and is redacted like any detection.
+    ///
+    /// [`Manual`]: crate::entity::audit::Manual
+    /// [`ManualIntent::Suppress`]: crate::entity::audit::ManualIntent::Suppress
+    /// [`ManualIntent::Include`]: crate::entity::audit::ManualIntent::Include
+    pub fn is_suppressed(&self) -> bool {
+        self.events
+            .iter()
+            .rev()
+            .find_map(|e| match &e.kind {
+                AuditKind::Manual(m) => Some(m.intent == ManualIntent::Suppress),
+                _ => None,
+            })
+            .unwrap_or(false)
     }
 
     /// The index of the first event whose [`kind`] satisfies `predicate`, or

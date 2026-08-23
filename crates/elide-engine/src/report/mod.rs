@@ -399,7 +399,7 @@ fn ensure_manual<M: Modality>(entity: &mut Entity<M>) {
         .iter()
         .any(|e| matches!(e.kind, AuditKind::Manual(_)));
     if !has_manual {
-        let event = AuditEvent::manual(entity.location.clone(), entity.confidence);
+        let event = AuditEvent::manual_include(entity.location.clone(), entity.confidence);
         entity.audit.record(event);
     }
 }
@@ -414,7 +414,7 @@ fn suppress_entity<M: Modality>(
     reason: Option<String>,
     actor: Option<String>,
 ) {
-    let mut event = AuditEvent::manual(entity.location.clone(), entity.confidence);
+    let mut event = AuditEvent::manual_suppress(entity.location.clone(), entity.confidence);
     if let Some(reason) = reason {
         event = event.with_reason(reason);
     }

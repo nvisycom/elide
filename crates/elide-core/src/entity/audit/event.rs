@@ -7,8 +7,8 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use super::payload::{
-    Calibration, Conflict, Contested, Deduplication, KindPayload, Manual, Model, ModelEvent,
-    Pattern, PatternEvent, Redaction, Refinement, Selection,
+    Calibration, Conflict, Contested, Deduplication, KindPayload, Manual, ManualIntent, Model,
+    ModelEvent, Pattern, PatternEvent, Redaction, Refinement, Selection,
 };
 use super::{Attribution, AuditHash, RuleMatch};
 use crate::entity::LabelRef;
@@ -280,24 +280,46 @@ impl<M: Modality> AuditEvent<M> {
         )
     }
 
-    /// A human override at `location` with the entity's asserted `confidence`
-    /// — the birth event of a manually-added entity, or the marker recorded
-    /// when a reviewer suppresses a detected one. Attach the rationale and the
-    /// actor with [`with_reason`] / [`with_actor`]; the `source` mirrors the
-    /// actor, or is `"manual"` when none is given.
+    /// A human override at `location` with the entity's asserted `confidence`,
+    /// carrying `intent` — [`Include`] for a manually-added entity's birth
+    /// event, [`Suppress`] to mark a detected one to leave alone. Prefer the
+    /// [`manual_include`] / [`manual_suppress`] shorthands. Attach the rationale
+    /// and the actor with [`with_reason`] / [`with_actor`]; the `source` mirrors
+    /// the actor, or is `"manual"` when none is given.
     ///
+    /// [`Include`]: crate::entity::audit::ManualIntent::Include
+    /// [`Suppress`]: crate::entity::audit::ManualIntent::Suppress
+    /// [`manual_include`]: Self::manual_include
+    /// [`manual_suppress`]: Self::manual_suppress
     /// [`with_reason`]: Self::with_reason
     /// [`with_actor`]: Self::with_actor
-    pub fn manual(location: M::Location, confidence: Confidence) -> Self {
+    pub fn manual(location: M::Location, confidence: Confidence, intent: ManualIntent) -> Self {
         Self::unlinked(
             HipStr::borrowed("manual"),
             confidence,
             AuditKind::Manual(Manual {
+                intent,
                 location,
                 reason: None,
                 actor: None,
             }),
         )
+    }
+
+    /// A [`manual`](Self::manual) event including a manually-added entity
+    /// ([`ManualIntent::Include`]).
+    ///
+    /// [`ManualIntent::Include`]: crate::entity::audit::ManualIntent::Include
+    pub fn manual_include(location: M::Location, confidence: Confidence) -> Self {
+        Self::manual(location, confidence, ManualIntent::Include)
+    }
+
+    /// A [`manual`](Self::manual) event suppressing a detected entity
+    /// ([`ManualIntent::Suppress`]).
+    ///
+    /// [`ManualIntent::Suppress`]: crate::entity::audit::ManualIntent::Suppress
+    pub fn manual_suppress(location: M::Location, confidence: Confidence) -> Self {
+        Self::manual(location, confidence, ManualIntent::Suppress)
     }
 
     /// Set the rationale on a [`manual`](Self::manual) event (a no-op on any

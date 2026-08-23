@@ -349,6 +349,13 @@ kind_payload!(plain Redaction, 7);
     )
 )]
 pub struct Manual<M: Modality> {
+    /// Which human decision this records: including a missed entity, or
+    /// suppressing a detected one. This is the authority on whether the entity
+    /// is redacted — [`AuditLog::is_suppressed`] reads it, so there is no
+    /// separate flag to keep in sync.
+    ///
+    /// [`AuditLog::is_suppressed`]: crate::entity::audit::AuditLog::is_suppressed
+    pub intent: ManualIntent,
     /// Where the override applies, in modality-native coordinates.
     pub location: M::Location,
     /// The reviewer's rationale, when supplied (e.g. `"false positive"`,
@@ -371,12 +378,29 @@ pub struct Manual<M: Modality> {
 
 impl<M: Modality> Manual<M> {
     fn hash_fields(&self, out: &mut Vec<u8>) {
+        out.push(self.intent as u8);
         put_bytes(out, &self.location.hash());
         put_opt(out, self.reason.as_ref().map(|s| s.as_bytes()));
         put_opt(out, self.actor.as_ref().map(|s| s.as_bytes()));
     }
 }
 kind_payload!(Manual<M>, 8);
+
+/// Which human decision a [`Manual`] event records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum ManualIntent {
+    /// A reviewer added an entity detection missed. The entity is redacted like
+    /// any detected one.
+    Include,
+    /// A reviewer marked a detected entity to leave alone (a false positive).
+    /// The redaction pass skips it — see [`AuditLog::is_suppressed`].
+    ///
+    /// [`AuditLog::is_suppressed`]: crate::entity::audit::AuditLog::is_suppressed
+    Suppress,
+}
 
 /// An operator was *picked* to hide the entity — the redaction decision,
 /// recorded before it is applied so it can be reviewed (and the entity edited)

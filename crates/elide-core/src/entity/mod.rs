@@ -97,32 +97,13 @@ pub struct Entity<M: Modality> {
     )]
     pub recognized_range: Option<Range<usize>>,
     /// Tamper-evident audit trail: every contributing detection, the fusion
-    /// event if any, and the redaction that hid it, as a hash-linked DAG.
-    pub audit: AuditLog<M>,
-    /// Whether a reviewer has suppressed this entity: it stays in the report
-    /// (and keeps its audit trail, including the [`Manual`] event that
-    /// suppressed it) but the redaction pass skips it, so it is never hidden.
-    /// `false` for a normally-detected entity. A suppressed entity records
-    /// *why* it was left alone, rather than vanishing silently.
-    ///
-    /// Not publicly writable: set it through [`suppress`], which also records
-    /// the required [`Manual`] audit event, and read it through
-    /// [`is_suppressed`]. A bare public field would let a caller flip redaction
-    /// behavior with no trace on the trail. serde still deserializes it.
+    /// event if any, and the redaction that hid it, as a hash-linked DAG. It is
+    /// also the single source of truth for whether a reviewer
+    /// [suppressed](Self::is_suppressed) the entity — a suppression is a
+    /// [`Manual`] event on this trail, not a separate flag.
     ///
     /// [`Manual`]: crate::entity::audit::AuditKind::Manual
-    /// [`suppress`]: Entity::suppress
-    /// [`is_suppressed`]: Entity::is_suppressed
-    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "is_false"))]
-    pub(crate) suppressed: bool,
-}
-
-/// serde `skip_serializing_if` helper: omit `suppressed` when it is the default
-/// (`false`), so a normally-detected entity's wire form is unchanged.
-#[cfg(feature = "serde")]
-#[allow(clippy::trivially_copy_pass_by_ref)]
-fn is_false(b: &bool) -> bool {
-    !*b
+    pub audit: AuditLog<M>,
 }
 
 impl<M: Modality> Entity<M> {
@@ -149,7 +130,6 @@ impl<M: Modality> Entity<M> {
             language: None,
             recognized_range: None,
             audit,
-            suppressed: false,
         }
     }
 
@@ -174,34 +154,40 @@ impl<M: Modality> Entity<M> {
 
     /// Mark this entity suppressed by a reviewer: it stays in the report and
     /// keeps its trail, but the redaction pass skips it, so it is never hidden.
-    /// `event` **must** be a [`Manual`] event built with [`AuditEvent::manual`]
-    /// (plus [`with_reason`]/[`with_actor`]) — it is recorded onto the audit so
-    /// *why* the entity was left alone is auditable, rather than the entity
-    /// vanishing silently. Suppressing changes redaction behaviour, so the trail
-    /// must carry the human override that explains it, not a recognition or
-    /// redaction event.
+    /// `event` **must** be a [`Manual`] event with [`ManualIntent::Suppress`],
+    /// built with [`AuditEvent::manual_suppress`] (plus
+    /// [`with_reason`]/[`with_actor`]). Recording it onto the trail *is* the
+    /// suppression — [`is_suppressed`](Self::is_suppressed) reads the trail — so
+    /// there is no separate flag, and *why* the entity was left alone is
+    /// auditable rather than the entity vanishing silently.
     ///
     /// # Panics
     ///
-    /// In debug builds, panics if `event` is not a [`Manual`] event.
+    /// In debug builds, panics if `event` is not a `Manual` event with
+    /// `Suppress` intent.
     ///
     /// [`Manual`]: crate::entity::audit::AuditKind::Manual
-    /// [`AuditEvent::manual`]: crate::entity::audit::AuditEvent::manual
+    /// [`ManualIntent::Suppress`]: crate::entity::audit::ManualIntent::Suppress
+    /// [`AuditEvent::manual_suppress`]: crate::entity::audit::AuditEvent::manual_suppress
     /// [`with_reason`]: crate::entity::audit::AuditEvent::with_reason
     /// [`with_actor`]: crate::entity::audit::AuditEvent::with_actor
     pub fn suppress(&mut self, event: AuditEvent<M>) {
         debug_assert!(
-            matches!(event.kind, audit::AuditKind::Manual(_)),
-            "suppress requires a Manual audit event",
+            matches!(
+                event.kind,
+                audit::AuditKind::Manual(ref m) if m.intent == audit::ManualIntent::Suppress
+            ),
+            "suppress requires a Manual audit event with Suppress intent",
         );
-        self.suppressed = true;
         self.audit.record(event);
     }
 
-    /// Whether a reviewer has [`suppress`](Self::suppress)ed this entity.
+    /// Whether a reviewer has [`suppress`](Self::suppress)ed this entity — the
+    /// audit trail is the single source of truth. Delegates to
+    /// [`AuditLog::is_suppressed`](crate::entity::audit::AuditLog::is_suppressed).
     #[must_use]
     pub fn is_suppressed(&self) -> bool {
-        self.suppressed
+        self.audit.is_suppressed()
     }
 
     /// Whether an operator has hidden this entity — a [`Redaction`] event is on
@@ -264,7 +250,9 @@ mod tests {
     fn suppress_records_the_manual_event() {
         let mut entity = text_entity();
         let loc = entity.location.clone();
-        entity.suppress(AuditEvent::manual(loc, entity.confidence).with_reason("false positive"));
+        entity.suppress(
+            AuditEvent::manual_suppress(loc, entity.confidence).with_reason("false positive"),
+        );
         assert!(entity.is_suppressed());
     }
 
