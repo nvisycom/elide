@@ -36,7 +36,7 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
     // Phase 1: analyze, then copy the body entities out — exactly what a caller
     // can serialize and ship to another process.
     let mut doc = registry.decode(FIXTURE.source, "docx").await?;
-    let mut report = orchestrator.analyze(&mut doc, &Directives::new()).await?;
+    let report = orchestrator.analyze(&mut doc, &Directives::new()).await?;
     let body = report
         .entities::<Text>()
         .map(|v| v.to_vec())
@@ -48,7 +48,7 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
     // re-decode path — the proof a deserialized report still redacts.
     let rebuilt = Report::new().insert_body::<Text>(body);
     let mut doc2 = registry.decode(FIXTURE.source, "docx").await?;
-    let mut applied = orchestrator.anonymize_with(&mut doc2, rebuilt).await?;
+    let applied = orchestrator.anonymize_with(&mut doc2, rebuilt).await?;
 
     // Scan the *decompressed* body part, not the deflated archive bytes: a
     // substring check on the container could pass while the email survives.

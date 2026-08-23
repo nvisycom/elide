@@ -312,7 +312,7 @@ impl Fixture {
         let orchestrator =
             Orchestrator::new(&registry).with_modality::<Audio>(analyzer, anonymizer);
 
-        let mut report = orchestrator
+        let report = orchestrator
             .analyze(&mut document, &Directives::new())
             .await?;
         let entities: Vec<Entity<Audio>> = report
@@ -320,7 +320,7 @@ impl Fixture {
             .map(|e| e.to_vec())
             .unwrap_or_default();
         self.write_entities(&report);
-        let mut applied = orchestrator.anonymize_with(&mut document, report).await?;
+        let applied = orchestrator.anonymize_with(&mut document, report).await?;
         let audited: Vec<Entity<Audio>> = applied
             .entities::<Audio>()
             .map(|e| e.to_vec())
@@ -368,7 +368,7 @@ impl Fixture {
         let orchestrator =
             Orchestrator::new(&registry).with_modality::<Image>(analyzer, anonymizer);
 
-        let mut report = orchestrator
+        let report = orchestrator
             .analyze(&mut document, &Directives::new())
             .await?;
         let entities: Vec<Entity<Image>> = report
@@ -376,7 +376,7 @@ impl Fixture {
             .map(|e| e.to_vec())
             .unwrap_or_default();
         self.write_entities(&report);
-        let mut applied = orchestrator.anonymize_with(&mut document, report).await?;
+        let applied = orchestrator.anonymize_with(&mut document, report).await?;
         let audited: Vec<Entity<Image>> = applied
             .entities::<Image>()
             .map(|e| e.to_vec())
@@ -462,7 +462,7 @@ impl Fixture {
 
         // Two phases so the entities surface for assertions: detect, copy
         // the body entities out, then apply with no editing.
-        let mut report = orchestrator
+        let report = orchestrator
             .analyze(&mut document, &Directives::new())
             .await?;
         let entities: Vec<Entity<M>> = report
@@ -472,7 +472,7 @@ impl Fixture {
         // Write the detected entities as JSON for inspection before the
         // report is consumed by `anonymize_with`.
         self.write_entities(&report);
-        let mut applied = orchestrator.anonymize_with(&mut document, report).await?;
+        let applied = orchestrator.anonymize_with(&mut document, report).await?;
         // The returned report's entities now carry the redaction event —
         // the post-redaction audit trail.
         let audited: Vec<Entity<M>> = applied

@@ -4,7 +4,7 @@
 //! The wire form drops the concrete modality type — a group is just tagged with
 //! its [`Modality::NAME`]. Deserialization is not object-safe, so the report
 //! cannot recover the type on its own. Instead the [`Orchestrator`] holds a
-//! [`GroupRegistry`]: [`with_modality`] registers, per modality name, a parser
+//! [`ModalityRegistry`]: [`with_modality`] registers, per modality name, a parser
 //! that deserializes that group as the concrete `Vec<Entity<M>>`. A group naming
 //! an unregistered modality is skipped when empty (nothing to lose, matching how
 //! `analyze` ignores an unmatched part) but a hard error when non-empty — its
@@ -52,11 +52,11 @@ struct ModalityEntry {
 /// [`Modality::NAME`]: elide_core::modality::Modality::NAME
 /// [`with_modality`]: crate::Orchestrator::with_modality
 #[derive(Default)]
-pub(crate) struct GroupRegistry {
+pub(crate) struct ModalityRegistry {
     entries: HashMap<&'static str, ModalityEntry>,
 }
 
-impl GroupRegistry {
+impl ModalityRegistry {
     /// Register modality `M`, keyed by its name. Called by
     /// [`with_modality`](crate::Orchestrator::with_modality) alongside the
     /// pipeline registration.
@@ -84,8 +84,12 @@ impl GroupRegistry {
     }
 }
 
-/// A parsed group with the routing [`TypeId`] its modality registered.
-type ParsedGroup = (TypeId, Box<dyn EntityGroup>);
+/// One reconstructed group: the entities and the routing [`TypeId`] the report
+/// entry keys on (matching [`BodyReport::modality`] / [`PartReport::modality`]).
+struct ParsedGroup {
+    modality: TypeId,
+    entities: Box<dyn EntityGroup>,
+}
 
 /// A serialized group envelope: `{ modality, entities }`. Deserializes by
 /// buffering both fields (in any order — a review layer may reorder keys),
@@ -100,7 +104,7 @@ type ParsedGroup = (TypeId, Box<dyn EntityGroup>);
 /// hard error: it may carry entities a reviewer edited, and silently dropping
 /// those would lose their work.
 struct GroupSeed<'a> {
-    registry: &'a GroupRegistry,
+    registry: &'a ModalityRegistry,
 }
 
 impl<'de> DeserializeSeed<'de> for GroupSeed<'_> {
@@ -166,7 +170,10 @@ impl<'de> Visitor<'de> for GroupSeed<'_> {
         // Replay the buffered entities through the modality's parser.
         let mut erased = <dyn erased_serde::Deserializer<'_>>::erase(entities.into_deserializer());
         let group = (entry.parse)(&mut erased).map_err(DeError::custom)?;
-        Ok(Some((entry.type_id, group)))
+        Ok(Some(ParsedGroup {
+            modality: entry.type_id,
+            entities: group,
+        }))
     }
 }
 
@@ -191,7 +198,7 @@ fn entity_count(entities: &Value) -> usize {
 ///
 /// [`Orchestrator::deserialize_report`]: crate::Orchestrator::deserialize_report
 pub(crate) struct ReportSeed<'a> {
-    pub(crate) registry: &'a GroupRegistry,
+    pub(crate) registry: &'a ModalityRegistry,
 }
 
 impl<'de> serde::de::DeserializeSeed<'de> for ReportSeed<'_> {
@@ -220,12 +227,12 @@ impl<'de> Visitor<'de> for ReportSeed<'_> {
                         return Err(DeError::duplicate_field("body"));
                     }
                     seen_body = true;
-                    if let Some((type_id, entities)) = map.next_value_seed(OptionGroupSeed {
+                    if let Some(group) = map.next_value_seed(OptionGroupSeed {
                         registry: self.registry,
                     })? {
                         report.body = Some(BodyReport {
-                            modality: type_id,
-                            entities,
+                            modality: group.modality,
+                            entities: group.entities,
                         });
                     }
                 }
@@ -241,15 +248,15 @@ impl<'de> Visitor<'de> for ReportSeed<'_> {
                     // A `None` value is a part that was skipped (unregistered and
                     // empty); its id was reserved only to catch duplicates.
                     for (id, group) in parts {
-                        let Some((type_id, entities)) = group else {
+                        let Some(group) = group else {
                             continue;
                         };
                         report.parts.insert(
                             PartId::from(id),
                             PartReport {
-                                modality: type_id,
+                                modality: group.modality,
                                 handle: None,
-                                entities,
+                                entities: group.entities,
                             },
                         );
                     }
@@ -269,7 +276,7 @@ impl<'de> Visitor<'de> for ReportSeed<'_> {
 
 /// `body` is `Option<Group>`: null when no body pipeline ran.
 struct OptionGroupSeed<'a> {
-    registry: &'a GroupRegistry,
+    registry: &'a ModalityRegistry,
 }
 
 impl<'de> DeserializeSeed<'de> for OptionGroupSeed<'_> {
@@ -307,7 +314,7 @@ impl<'de> Visitor<'de> for OptionGroupSeed<'_> {
 
 /// `parts` is a map of `PartId` -> group.
 struct PartsSeed<'a> {
-    registry: &'a GroupRegistry,
+    registry: &'a ModalityRegistry,
 }
 
 impl<'de> DeserializeSeed<'de> for PartsSeed<'_> {
@@ -371,13 +378,13 @@ mod tests {
 
     /// A registry with `Text` registered — the unit under test needs only the
     /// group parsers, not a full orchestrator.
-    fn text_registry() -> GroupRegistry {
-        let mut r = GroupRegistry::default();
+    fn text_registry() -> ModalityRegistry {
+        let mut r = ModalityRegistry::default();
         r.register::<Text>();
         r
     }
 
-    fn round_trip(report: &Report, registry: &GroupRegistry) -> Report {
+    fn round_trip(report: &Report, registry: &ModalityRegistry) -> Report {
         let json = serde_json::to_string(report).expect("serialize");
         let mut de = serde_json::Deserializer::from_str(&json);
         match (ReportSeed { registry }).deserialize(&mut de) {
@@ -389,7 +396,7 @@ mod tests {
     #[test]
     fn round_trips_a_body_report() {
         let report = Report::new().insert_body::<Text>(vec![text_entity("EMAIL_ADDRESS")]);
-        let mut back = round_trip(&report, &text_registry());
+        let back = round_trip(&report, &text_registry());
 
         let body = back.entities::<Text>().expect("body reconstructed as Text");
         assert_eq!(body.len(), 1);
@@ -403,7 +410,7 @@ mod tests {
         let report = Report::new()
             .insert_body::<Text>(vec![text_entity("A")])
             .insert_part::<Text>(part.clone(), vec![text_entity("B")]);
-        let mut back = round_trip(&report, &text_registry());
+        let back = round_trip(&report, &text_registry());
 
         assert!(back.entities::<Text>().is_some(), "body present");
         let p = back
@@ -477,7 +484,7 @@ mod tests {
         let json =
             format!(r#"{{"parts":{{}},"body":{{"entities":{entities},"modality":"text"}}}}"#);
         let mut de = serde_json::Deserializer::from_str(&json);
-        let mut report = match (ReportSeed {
+        let report = match (ReportSeed {
             registry: &text_registry(),
         })
         .deserialize(&mut de)

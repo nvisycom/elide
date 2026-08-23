@@ -52,14 +52,14 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
 
     // Analyze, then serialize the report — the artifact a review layer ships.
     let mut doc = registry.decode(SAMPLE, "docx").await?;
-    let mut report = orchestrator.analyze(&mut doc, &Directives::new()).await?;
+    let report = orchestrator.analyze(&mut doc, &Directives::new()).await?;
     let detected = report.entities::<Text>().expect("text body").len();
     assert!(detected > 0, "the fixture detected body entities");
     let json = serde_json::to_string(&report).expect("report serializes");
 
     // Rebuild it from the wire through the same orchestrator.
     let mut de = serde_json::Deserializer::from_str(&json);
-    let mut rebuilt = orchestrator.deserialize_report(&mut de)?;
+    let rebuilt = orchestrator.deserialize_report(&mut de)?;
 
     // Same entities, same modality, audit trail intact.
     let body = rebuilt
@@ -74,7 +74,7 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
     // The rebuilt report (no cached handles) redacts against a fresh decode of
     // the same document, stamping pick + redaction on every entity.
     let mut doc2 = registry.decode(SAMPLE, "docx").await?;
-    let mut applied = orchestrator.anonymize_with(&mut doc2, rebuilt).await?;
+    let applied = orchestrator.anonymize_with(&mut doc2, rebuilt).await?;
     for entity in applied.entities::<Text>().expect("applied body").iter() {
         assert!(entity.audit.selection().is_some(), "records the pick");
         assert!(entity.is_redacted(), "records the redaction");

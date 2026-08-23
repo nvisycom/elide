@@ -58,7 +58,7 @@ async fn anonymize_records_reviewable_body_picks() -> Result<()> {
 
     let mut doc = registry.decode(SAMPLE, "docx").await?;
     let report = orchestrator.analyze(&mut doc, &Directives::new()).await?;
-    let mut report = orchestrator.anonymize_with(&mut doc, report).await?;
+    let report = orchestrator.anonymize_with(&mut doc, report).await?;
 
     let body = report
         .entities::<Text>()
@@ -120,7 +120,7 @@ async fn anonymize_over_an_empty_part_records_nothing() -> Result<()> {
     let image = PartId::new("word/media/image1.png");
     let report = Report::new().insert_part::<Image>(image.clone(), Vec::new());
 
-    let mut report = orchestrator.anonymize_with(&mut doc, report).await?;
+    let report = orchestrator.anonymize_with(&mut doc, report).await?;
     assert!(
         report.entities::<Text>().is_none(),
         "the report has no body"
