@@ -234,10 +234,16 @@ impl<'de> Visitor<'de> for ReportSeed<'_> {
                         return Err(DeError::duplicate_field("parts"));
                     }
                     seen_parts = true;
-                    let parts: HashMap<String, ParsedGroup> = map.next_value_seed(PartsSeed {
-                        registry: self.registry,
-                    })?;
-                    for (id, (type_id, entities)) in parts {
+                    let parts: HashMap<String, Option<ParsedGroup>> =
+                        map.next_value_seed(PartsSeed {
+                            registry: self.registry,
+                        })?;
+                    // A `None` value is a part that was skipped (unregistered and
+                    // empty); its id was reserved only to catch duplicates.
+                    for (id, group) in parts {
+                        let Some((type_id, entities)) = group else {
+                            continue;
+                        };
                         report.parts.insert(
                             PartId::from(id),
                             PartReport {
@@ -305,7 +311,7 @@ struct PartsSeed<'a> {
 }
 
 impl<'de> DeserializeSeed<'de> for PartsSeed<'_> {
-    type Value = HashMap<String, ParsedGroup>;
+    type Value = HashMap<String, Option<ParsedGroup>>;
 
     fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
         deserializer.deserialize_map(self)
@@ -313,7 +319,7 @@ impl<'de> DeserializeSeed<'de> for PartsSeed<'_> {
 }
 
 impl<'de> Visitor<'de> for PartsSeed<'_> {
-    type Value = HashMap<String, ParsedGroup>;
+    type Value = HashMap<String, Option<ParsedGroup>>;
 
     fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("a map of part id to group")
@@ -322,14 +328,20 @@ impl<'de> Visitor<'de> for PartsSeed<'_> {
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
         let mut out = HashMap::new();
         while let Some(id) = map.next_key::<String>()? {
+            // A repeated part id would silently overwrite the earlier group — and
+            // its entity edits — so reject it. Checked on the id (before the
+            // value) so a duplicate is caught even when one side is skipped.
+            if out.contains_key(&id) {
+                return Err(DeError::custom(format!("duplicate part id `{id}`")));
+            }
             // A part whose modality is unregistered and empty is skipped (`None`),
             // matching how `analyze` ignores an unmatched part; a non-empty one
-            // has already errored inside `GroupSeed`.
-            if let Some(group) = map.next_value_seed(GroupSeed {
+            // has already errored inside `GroupSeed`. A skipped part still
+            // reserves its id (an empty entry) so a later duplicate is caught.
+            let group = map.next_value_seed(GroupSeed {
                 registry: self.registry,
-            })? {
-                out.insert(id, group);
-            }
+            })?;
+            out.insert(id, group);
         }
         Ok(out)
     }
@@ -503,5 +515,30 @@ mod tests {
             Err(e) => e,
         };
         assert!(err.to_string().contains("duplicate field"), "got: {err}");
+    }
+
+    /// A repeated part id is rejected: silently overwriting the earlier group
+    /// would drop its (possibly reviewer-edited) entities, and `anonymize_with`
+    /// would apply only the later group.
+    #[test]
+    fn duplicate_part_id_is_rejected() {
+        let json = concat!(
+            r#"{"body":null,"parts":{"#,
+            r#""a/b.txt":{"modality":"text","entities":[]},"#,
+            r#""a/b.txt":{"modality":"text","entities":[]}}}"#,
+        );
+        let mut de = serde_json::Deserializer::from_str(json);
+        let err = match (ReportSeed {
+            registry: &text_registry(),
+        })
+        .deserialize(&mut de)
+        {
+            Ok(_) => panic!("a duplicate part id must be rejected"),
+            Err(e) => e,
+        };
+        assert!(
+            err.to_string().contains("duplicate part id `a/b.txt`"),
+            "got: {err}",
+        );
     }
 }
