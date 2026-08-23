@@ -18,7 +18,7 @@ use fixtures::{TextDoc, anonymize_one, entity, entity_conf};
 async fn anonymize_resolves_label_to_operator_with_fallback() {
     //                          0         1         2
     //                          0123456789012345678901234567
-    let mut doc = TextDoc("call 555-867-5309 or a@b.com".to_owned());
+    let mut doc = TextDoc::new("call 555-867-5309 or a@b.com");
     let mut entities = vec![
         entity("PHONE_NUMBER", (5, 17)),   // "555-867-5309" -> Mask
         entity("EMAIL_ADDRESS", (21, 28)), // "a@b.com" -> fallback Erase
@@ -35,7 +35,7 @@ async fn anonymize_resolves_label_to_operator_with_fallback() {
         .unwrap();
 
     // PHONE_NUMBER masked (last 4 kept); EMAIL_ADDRESS fell back to Erase.
-    assert_eq!(doc.0, "call ********5309 or ");
+    assert_eq!(doc.text(), "call ********5309 or ");
 }
 
 #[tokio::test]
@@ -55,7 +55,7 @@ async fn anonymize_replace_renders_label_and_value() {
 #[tokio::test]
 async fn anonymize_replace_threads_coref_through_template() {
     //                          012345678901234567890
-    let mut doc = TextDoc("Alice told Bob she left".to_owned());
+    let mut doc = TextDoc::new("Alice told Bob she left");
     // Alice and "she" share a cluster; Bob is his own.
     let alice = EntityCoRef::new("alice");
     let mut entities = vec![
@@ -75,7 +75,7 @@ async fn anonymize_replace_threads_coref_through_template() {
 
     // Coreferent mentions render to the same token; Bob's is distinct.
     assert_eq!(
-        doc.0,
+        doc.text(),
         "[PERSON:alice] told [PERSON:bob] [PERSON:alice] left"
     );
 }
@@ -109,7 +109,7 @@ async fn anonymize_skips_unmapped_without_fallback() {
 
 #[tokio::test]
 async fn anonymize_predicate_gates_on_confidence() {
-    let mut doc = TextDoc("call 555-867-5309 or a@b.com".to_owned());
+    let mut doc = TextDoc::new("call 555-867-5309 or a@b.com");
     let mut entities = vec![
         entity_conf("PHONE_NUMBER", (5, 17), Confidence::clamped(0.2)), // weak -> Keep
         entity_conf("EMAIL_ADDRESS", (21, 28), Confidence::MAX),        // strong -> Erase
@@ -129,12 +129,12 @@ async fn anonymize_predicate_gates_on_confidence() {
         .unwrap();
 
     // Weak phone kept verbatim; strong email erased.
-    assert_eq!(doc.0, "call 555-867-5309 or ");
+    assert_eq!(doc.text(), "call 555-867-5309 or ");
 }
 
 #[tokio::test]
 async fn anonymize_selects_by_tag() {
-    let mut doc = TextDoc("4111111111111111 and bob".to_owned());
+    let mut doc = TextDoc::new("4111111111111111 and bob");
     let mut entities = vec![
         entity("payment_card", (0, 16)), // tagged "financial" -> Mask
         entity("person_name", (21, 24)), // no financial tag -> fallback Erase
@@ -155,12 +155,12 @@ async fn anonymize_selects_by_tag() {
         .unwrap();
 
     // Financial-tagged card masked; untagged person erased by the fallback.
-    assert_eq!(doc.0, "**************** and ");
+    assert_eq!(doc.text(), "**************** and ");
 }
 
 #[tokio::test]
 async fn catalog_predicate_resolves_tags_through_the_catalog() {
-    let mut doc = TextDoc("4111111111111111 and bob".to_owned());
+    let mut doc = TextDoc::new("4111111111111111 and bob");
     let mut entities = vec![
         entity("payment_card", (0, 16)), // financial -> Mask
         entity("person_name", (21, 24)), // not financial -> fallback Erase
@@ -187,7 +187,7 @@ async fn catalog_predicate_resolves_tags_through_the_catalog() {
         .await
         .unwrap();
 
-    assert_eq!(doc.0, "**************** and ");
+    assert_eq!(doc.text(), "**************** and ");
 }
 
 #[tokio::test]
@@ -212,7 +212,7 @@ async fn anonymize_first_matching_rule_wins() {
 
 #[tokio::test]
 async fn anonymize_records_redaction_provenance_with_rule_and_attribution() {
-    let mut doc = TextDoc("a@b.com here".to_owned());
+    let mut doc = TextDoc::new("a@b.com here");
     let mut entities = vec![entity("EMAIL_ADDRESS", (0, 7))];
 
     Anonymizer::<Text>::new()
@@ -254,7 +254,7 @@ async fn anonymize_records_redaction_provenance_with_rule_and_attribution() {
 
 #[tokio::test]
 async fn anonymize_records_fallback_rule_with_no_attribution() {
-    let mut doc = TextDoc("a@b.com".to_owned());
+    let mut doc = TextDoc::new("a@b.com");
     let mut entities = vec![entity("EMAIL_ADDRESS", (0, 7))];
 
     // A bare operator via the fallback rule: matched_by is Fallback, no attribution.
@@ -280,7 +280,7 @@ async fn anonymize_records_fallback_rule_with_no_attribution() {
 
 #[tokio::test]
 async fn because_accepts_a_bare_name() {
-    let mut doc = TextDoc("a@b.com".to_owned());
+    let mut doc = TextDoc::new("a@b.com");
     let mut entities = vec![entity("EMAIL_ADDRESS", (0, 7))];
 
     // `.because` takes `Into<Attribution>`: a bare &str is the name, no description.
@@ -313,7 +313,7 @@ async fn because_accepts_a_bare_name() {
 async fn because_records_a_cited_attribution_with_a_source_id() {
     use uuid::Uuid;
 
-    let mut doc = TextDoc("a@b.com".to_owned());
+    let mut doc = TextDoc::new("a@b.com");
     let mut entities = vec![entity("EMAIL_ADDRESS", (0, 7))];
 
     let source = Uuid::now_v7();

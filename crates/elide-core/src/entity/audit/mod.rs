@@ -129,6 +129,56 @@ impl<M: Modality> AuditLog<M> {
         self.events.iter().filter(|e| e.is_recognition())
     }
 
+    /// The entity's operator *pick*, if one was recorded: the [`Selection`]
+    /// payload from its most recent selection event. `None` when no operator was
+    /// picked (e.g. a suppressed entity, or before [`pick`] ran).
+    ///
+    /// [`Selection`]: crate::entity::audit::Selection
+    /// [`pick`]: crate::entity::audit::AuditKind::Selection
+    pub fn selection(&self) -> Option<&Selection> {
+        self.events.iter().rev().find_map(|e| match &e.kind {
+            AuditKind::Selection(s) => Some(s),
+            _ => None,
+        })
+    }
+
+    /// The entity's redaction, if one was recorded: the [`Redaction`] payload
+    /// from its most recent redaction event. `None` when the entity was not
+    /// redacted (e.g. suppressed, or not yet applied).
+    ///
+    /// [`Redaction`]: crate::entity::audit::Redaction
+    pub fn redaction(&self) -> Option<&Redaction> {
+        self.events.iter().rev().find_map(|e| match &e.kind {
+            AuditKind::Redaction(r) => Some(r),
+            _ => None,
+        })
+    }
+
+    /// Whether an operator hid this entity — i.e. a [`Redaction`] event is on
+    /// the trail.
+    ///
+    /// [`Redaction`]: crate::entity::audit::Redaction
+    pub fn is_redacted(&self) -> bool {
+        self.events
+            .iter()
+            .any(|e| matches!(e.kind, AuditKind::Redaction(_)))
+    }
+
+    /// The index of the first event whose [`kind`] satisfies `predicate`, or
+    /// `None` if none do — the audit-trail counterpart to
+    /// [`slice::position`](https://doc.rust-lang.org/std/primitive.slice.html).
+    ///
+    /// Events are in the order they were recorded, so comparing two positions
+    /// tells you which happened first (e.g. that a [`Selection`] pick was
+    /// recorded before the [`Redaction`] that applied it).
+    ///
+    /// [`kind`]: AuditEvent::kind
+    /// [`Selection`]: crate::entity::audit::Selection
+    /// [`Redaction`]: crate::entity::audit::Redaction
+    pub fn position(&self, mut predicate: impl FnMut(&AuditKind<M>) -> bool) -> Option<usize> {
+        self.events.iter().position(|e| predicate(&e.kind))
+    }
+
     /// Confidence at the very first event, before any adjustment.
     pub fn original_confidence(&self) -> Option<Confidence> {
         self.events.first().map(|e| e.confidence)

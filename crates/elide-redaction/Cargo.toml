@@ -51,11 +51,9 @@ hipstr = { workspace = true, features = [] }
 # Observability
 tracing = { workspace = true, features = [] }
 
-# Async runtime & parallelism
-async-trait = { workspace = true, features = [] }
-
 [dev-dependencies]
 # Internal crates
+elide-core = { workspace = true, features = ["test-utils"] }
 elide-operator = { workspace = true, features = ["aes", "hmac", "datetime"] }
 
 # Async runtime & parallelism

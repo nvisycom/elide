@@ -14,7 +14,7 @@
 use elide::codec::{FormatRegistry, PartId};
 use elide::detection::Analyzer;
 use elide::entity::audit::AuditKind;
-use elide::entity::{Entity, builtins};
+use elide::entity::builtins;
 use elide::modality::image::Image;
 use elide::modality::text::Text;
 use elide::recognition::llm::LlmRecognizer;
@@ -48,23 +48,6 @@ fn orchestrator(registry: &FormatRegistry) -> Result<Orchestrator<'_>> {
         .with_modality::<Image>(Analyzer::new().with_recognizer(image), Anonymizer::new()))
 }
 
-/// The pick for `entity`: the operator named by its recorded [`Selection`]
-/// event, or `None` if it carries no pick.
-fn picked_operator(entity: &Entity<Text>) -> Option<String> {
-    entity.audit.events().iter().find_map(|e| match &e.kind {
-        AuditKind::Selection(s) => Some(s.operator.name.to_string()),
-        _ => None,
-    })
-}
-
-fn is_redacted(entity: &Entity<Text>) -> bool {
-    entity
-        .audit
-        .events()
-        .iter()
-        .any(|e| matches!(&e.kind, AuditKind::Redaction(_)))
-}
-
 /// `anonymize` records a reviewable pick on every body entity: each names one of
 /// the configured operators, is followed by its redaction, and the whole trail
 /// still verifies. The fixture's email addresses route to the replace rule.
@@ -83,18 +66,41 @@ async fn anonymize_records_reviewable_body_picks() -> Result<()> {
     assert!(!body.is_empty(), "the body detected entities to redact");
 
     for entity in body.iter() {
-        let name = picked_operator(entity).expect("every redacted entity records its pick");
+        let picked = entity
+            .audit
+            .selection()
+            .expect("every redacted entity records its pick");
+        let applied = entity
+            .audit
+            .redaction()
+            .expect("the pick is followed by a redaction");
+        let picked = picked.operator.name.as_str();
         assert!(
-            name == "replace" || name == "erase",
-            "each pick is one of the configured operators, got {name}",
+            picked == "replace" || picked == "erase",
+            "each pick is one of the configured operators, got {picked}",
         );
-        assert!(is_redacted(entity), "the pick is followed by its redaction");
+        // The pick is recorded before it is applied, and the operator actually
+        // run is the one that was picked.
+        let selection_at = entity
+            .audit
+            .position(|k| matches!(k, AuditKind::Selection(_)));
+        let redaction_at = entity
+            .audit
+            .position(|k| matches!(k, AuditKind::Redaction(_)));
+        assert!(
+            selection_at < redaction_at,
+            "the Selection precedes the Redaction",
+        );
+        assert_eq!(
+            picked, applied.operator.name,
+            "the redaction ran the picked operator"
+        );
         assert!(entity.audit.verify().is_ok(), "the trail still verifies");
     }
     // The fixture's email addresses route to the replace rule.
     assert!(
         body.iter()
-            .any(|e| picked_operator(e).as_deref() == Some("replace")),
+            .any(|e| e.audit.selection().map(|s| s.operator.name.as_str()) == Some("replace")),
         "the email rule fires on the fixture's addresses",
     );
     Ok(())

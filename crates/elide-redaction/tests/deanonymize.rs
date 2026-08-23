@@ -16,7 +16,7 @@ async fn encrypt_then_decrypt_recovers_the_original_document() {
 
     //                    0         1         2
     //                    0123456789012345678901234
-    let mut doc = TextDoc("email a@b.com now".to_string());
+    let mut doc = TextDoc::new("email a@b.com now");
     // "a@b.com" occupies bytes 6..13.
     let mut email = entity("EMAIL_ADDRESS", (6, 13));
 
@@ -35,8 +35,8 @@ async fn encrypt_then_decrypt_recovers_the_original_document() {
         .unwrap();
 
     // The original is gone; a ciphertext now sits in its place.
-    assert!(!doc.0.contains("a@b.com"));
-    let ciphertext_len = doc.0.len() - "email  now".len();
+    assert!(!doc.text().contains("a@b.com"));
+    let ciphertext_len = doc.text().len() - "email  now".len();
     assert!(ciphertext_len > 0);
 
     // The entity's location now spans the ciphertext that replaced it.
@@ -53,12 +53,12 @@ async fn encrypt_then_decrypt_recovers_the_original_document() {
         .await
         .unwrap();
 
-    assert_eq!(doc.0, "email a@b.com now");
+    assert_eq!(doc.text(), "email a@b.com now");
 }
 
 #[tokio::test]
 async fn wrong_key_leaves_the_ciphertext_in_place() {
-    let mut doc = TextDoc("x secret y".to_string());
+    let mut doc = TextDoc::new("x secret y");
     let mut secret = entity("TOKEN", (2, 8));
 
     Anonymizer::<Text>::new()
@@ -73,8 +73,8 @@ async fn wrong_key_leaves_the_ciphertext_in_place() {
         )
         .await
         .unwrap();
-    let encrypted_doc = doc.0.clone();
-    let ct_len = doc.0.len() - "x  y".len();
+    let encrypted_doc = doc.text().to_owned();
+    let ct_len = doc.text().len() - "x  y".len();
     let encrypted = entity("TOKEN", (2, 2 + ct_len));
 
     // A deanonymizer with the wrong key cannot recover, so it skips the entity
@@ -88,5 +88,5 @@ async fn wrong_key_leaves_the_ciphertext_in_place() {
         .await
         .unwrap();
 
-    assert_eq!(doc.0, encrypted_doc);
+    assert_eq!(doc.text(), encrypted_doc);
 }

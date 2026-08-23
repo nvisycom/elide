@@ -105,9 +105,16 @@ pub struct Entity<M: Modality> {
     /// `false` for a normally-detected entity. A suppressed entity records
     /// *why* it was left alone, rather than vanishing silently.
     ///
+    /// Not publicly writable: set it through [`suppress`], which also records
+    /// the required [`Manual`] audit event, and read it through
+    /// [`is_suppressed`]. A bare public field would let a caller flip redaction
+    /// behavior with no trace on the trail. serde still deserializes it.
+    ///
     /// [`Manual`]: crate::entity::audit::AuditKind::Manual
+    /// [`suppress`]: Entity::suppress
+    /// [`is_suppressed`]: Entity::is_suppressed
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "is_false"))]
-    pub suppressed: bool,
+    pub(crate) suppressed: bool,
 }
 
 /// serde `skip_serializing_if` helper: omit `suppressed` when it is the default
@@ -184,5 +191,15 @@ impl<M: Modality> Entity<M> {
     #[must_use]
     pub fn is_suppressed(&self) -> bool {
         self.suppressed
+    }
+
+    /// Whether an operator has hidden this entity — a [`Redaction`] event is on
+    /// its [`audit`](Self::audit) trail. A convenience for
+    /// [`audit().is_redacted()`](crate::entity::audit::AuditLog::is_redacted).
+    ///
+    /// [`Redaction`]: crate::entity::audit::AuditKind::Redaction
+    #[must_use]
+    pub fn is_redacted(&self) -> bool {
+        self.audit.is_redacted()
     }
 }

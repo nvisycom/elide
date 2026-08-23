@@ -9,4 +9,8 @@ pub mod operator;
 pub mod primitive;
 pub mod recognition;
 
+#[cfg(feature = "test-utils")]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
+pub mod test_util;
+
 pub use self::error::{Error, ErrorKind, Result};
