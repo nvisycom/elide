@@ -50,9 +50,11 @@ async fn overlap_merges_under_safest_operator() {
 
     // Both entities record a redaction by the winning operator.
     for entity in &entities {
-        let redacted = entity.audit.events().iter().any(|e| {
-            matches!(&e.kind, AuditKind::Redaction { operator, .. } if operator.name == "erase")
-        });
+        let redacted = entity
+            .audit
+            .events()
+            .iter()
+            .any(|e| matches!(&e.kind, AuditKind::Redaction(r) if r.operator.name == "erase"));
         assert!(redacted, "every member records the erase redaction");
     }
 }
@@ -103,7 +105,7 @@ async fn non_coalescible_overlap_stays_separate() {
                 .audit
                 .events()
                 .iter()
-                .any(|e| matches!(&e.kind, AuditKind::Redaction { .. })),
+                .any(|e| matches!(&e.kind, AuditKind::Redaction(_))),
             "every entity records its own redaction",
         );
     }

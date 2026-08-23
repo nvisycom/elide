@@ -52,7 +52,7 @@ fn orchestrator(registry: &FormatRegistry) -> Result<Orchestrator<'_>> {
 /// event, or `None` if it carries no pick.
 fn picked_operator(entity: &Entity<Text>) -> Option<String> {
     entity.audit.events().iter().find_map(|e| match &e.kind {
-        AuditKind::Selection { operator, .. } => Some(operator.name.to_string()),
+        AuditKind::Selection(s) => Some(s.operator.name.to_string()),
         _ => None,
     })
 }
@@ -62,7 +62,7 @@ fn is_redacted(entity: &Entity<Text>) -> bool {
         .audit
         .events()
         .iter()
-        .any(|e| matches!(&e.kind, AuditKind::Redaction { .. }))
+        .any(|e| matches!(&e.kind, AuditKind::Redaction(_)))
 }
 
 /// `anonymize` records a reviewable pick on every body entity: each names one of

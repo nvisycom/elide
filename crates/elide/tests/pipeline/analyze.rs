@@ -103,7 +103,7 @@ async fn analyze_fuses_resolves_filters() {
     let last = phone.audit.events().last().unwrap();
     assert!(matches!(
         last.kind,
-        AuditKind::Deduplication { ref strategy } if strategy == "max"
+        AuditKind::Deduplication(ref d) if d.strategy == "max"
     ));
     assert_eq!(phone.audit.final_confidence(), Some(phone.confidence));
 }

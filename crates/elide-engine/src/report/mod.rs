@@ -422,8 +422,8 @@ mod tests {
             .events()
             .iter()
             .find_map(|ev| match &ev.kind {
-                elide_core::entity::audit::AuditKind::Manual { reason, actor, .. } => {
-                    Some((reason.clone(), actor.clone()))
+                elide_core::entity::audit::AuditKind::Manual(m) => {
+                    Some((m.reason.clone(), m.actor.clone()))
                 }
                 _ => None,
             })

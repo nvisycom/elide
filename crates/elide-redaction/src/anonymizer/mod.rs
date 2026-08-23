@@ -434,7 +434,7 @@ mod tests {
             .events()
             .iter()
             .map(|e| &e.kind)
-            .find(|k| matches!(k, AuditKind::Selection { .. }))
+            .find(|k| matches!(k, AuditKind::Selection(_)))
     }
 
     fn is_redacted(entity: &Entity<Text>) -> bool {
@@ -442,7 +442,7 @@ mod tests {
             .audit
             .events()
             .iter()
-            .any(|e| matches!(&e.kind, AuditKind::Redaction { .. }))
+            .any(|e| matches!(&e.kind, AuditKind::Redaction(_)))
     }
 
     /// `pick` records one [`Selection`] event per entity, naming the winning
@@ -460,7 +460,7 @@ mod tests {
         let names: Vec<_> = entities
             .iter()
             .map(|e| match pick_of(e) {
-                Some(AuditKind::Selection { operator, .. }) => operator.name.to_string(),
+                Some(AuditKind::Selection(s)) => s.operator.name.to_string(),
                 _ => panic!("every entity records a Selection pick"),
             })
             .collect();
@@ -496,20 +496,14 @@ mod tests {
         assert!(
             matches!(
                 pick_of(&for_auditor[0]),
-                Some(AuditKind::Selection {
-                    matched_by: RuleMatch::Predicate,
-                    ..
-                })
+                Some(AuditKind::Selection(s)) if matches!(s.matched_by, RuleMatch::Predicate)
             ),
             "auditor matches the scope predicate",
         );
         assert!(
             matches!(
                 pick_of(&for_support[0]),
-                Some(AuditKind::Selection {
-                    matched_by: RuleMatch::Fallback,
-                    ..
-                })
+                Some(AuditKind::Selection(s)) if matches!(s.matched_by, RuleMatch::Fallback)
             ),
             "support falls through to the fallback",
         );
@@ -532,8 +526,8 @@ mod tests {
         // operator, `erase`.
         for entity in &entities {
             match pick_of(entity) {
-                Some(AuditKind::Selection { operator, .. }) => {
-                    assert_eq!(operator.name, "erase", "safest operator wins");
+                Some(AuditKind::Selection(s)) => {
+                    assert_eq!(s.operator.name, "erase", "safest operator wins");
                 }
                 _ => panic!("every cluster member records the pick"),
             }
@@ -619,7 +613,7 @@ mod tests {
         );
         // The suppression itself is on the trail, with its reason.
         let has_manual = of(suppressed_id).audit.events().iter().any(|e| {
-            matches!(&e.kind, AuditKind::Manual { reason: Some(r), .. } if r == "false positive")
+            matches!(&e.kind, AuditKind::Manual(m) if m.reason.as_deref() == Some("false positive"))
         });
         assert!(has_manual, "the suppression is audited with its reason");
     }

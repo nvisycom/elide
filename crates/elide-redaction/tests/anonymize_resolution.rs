@@ -230,12 +230,11 @@ async fn anonymize_records_redaction_provenance_with_rule_and_attribution() {
         .events()
         .iter()
         .find_map(|e| match &e.kind {
-            AuditKind::Redaction {
-                operator,
-                matched_by,
-                attribution,
-                ..
-            } => Some((operator.clone(), matched_by.clone(), attribution.clone())),
+            AuditKind::Redaction(r) => Some((
+                r.operator.clone(),
+                r.matched_by.clone(),
+                r.attribution.clone(),
+            )),
             _ => None,
         })
         .expect("a Redaction event was recorded");
@@ -270,11 +269,7 @@ async fn anonymize_records_fallback_rule_with_no_attribution() {
         .events()
         .iter()
         .find_map(|e| match &e.kind {
-            AuditKind::Redaction {
-                matched_by,
-                attribution,
-                ..
-            } => Some((matched_by.clone(), attribution.clone())),
+            AuditKind::Redaction(r) => Some((r.matched_by.clone(), r.attribution.clone())),
             _ => None,
         })
         .expect("a Redaction event was recorded");
@@ -302,7 +297,7 @@ async fn because_accepts_a_bare_name() {
         .events()
         .iter()
         .find_map(|e| match &e.kind {
-            AuditKind::Redaction { attribution, .. } => attribution.clone(),
+            AuditKind::Redaction(r) => r.attribution.clone(),
             _ => None,
         })
         .expect("attribution recorded");
@@ -338,7 +333,7 @@ async fn because_records_a_cited_attribution_with_a_source_id() {
         .events()
         .iter()
         .find_map(|e| match &e.kind {
-            AuditKind::Redaction { attribution, .. } => attribution.clone(),
+            AuditKind::Redaction(r) => r.attribution.clone(),
             _ => None,
         })
         .expect("attribution recorded");

@@ -57,7 +57,7 @@ async fn enhancer_boosts_matches_near_keyword_only() {
         near.audit
             .events()
             .iter()
-            .any(|e| matches!(e.kind, AuditKind::Refinement { .. })),
+            .any(|e| matches!(e.kind, AuditKind::Refinement(_))),
         "near-keyword match should have a Refinement step",
     );
 
@@ -74,7 +74,7 @@ async fn enhancer_boosts_matches_near_keyword_only() {
         !far.audit
             .events()
             .iter()
-            .any(|e| matches!(e.kind, AuditKind::Refinement { .. })),
+            .any(|e| matches!(e.kind, AuditKind::Refinement(_))),
         "far-from-keyword match should have no Refinement step",
     );
 }
@@ -119,7 +119,7 @@ async fn bare_recognizer_works_without_enhancement() {
             .audit
             .events()
             .iter()
-            .any(|e| matches!(e.kind, AuditKind::Refinement { .. })),
+            .any(|e| matches!(e.kind, AuditKind::Refinement(_))),
         "bare recognizer must not record any Refinement",
     );
 }

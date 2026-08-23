@@ -5,14 +5,19 @@
 mod attribution;
 mod event;
 mod hash;
+mod payload;
 mod rule_match;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 pub use self::attribution::{Attribution, AttributionKind};
-pub use self::event::{AuditEvent, AuditKind, ModelEvent, PatternEvent};
+pub use self::event::{AuditEvent, AuditKind};
 pub use self::hash::AuditHash;
+pub use self::payload::{
+    Calibration, Conflict, Contested, Deduplication, Manual, Model, ModelEvent, Pattern,
+    PatternEvent, Redaction, Refinement, Selection,
+};
 pub use self::rule_match::RuleMatch;
 use crate::modality::Modality;
 use crate::primitive::Confidence;

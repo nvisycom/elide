@@ -235,7 +235,7 @@ mod tests {
         assert_eq!(out.kept[0].label, LabelRef::new("PERSON_NAME"));
         assert!(has_kind(&out.kept[0], |k| matches!(
             k,
-            AuditKind::Conflict { competing_label, .. } if *competing_label == LabelRef::new("ORGANIZATION")
+            AuditKind::Conflict(c) if c.competing_label == LabelRef::new("ORGANIZATION")
         )));
     }
 
@@ -252,7 +252,7 @@ mod tests {
         assert_eq!(out.kept.len(), 2, "contest keeps both");
         assert!(out.dropped.is_empty());
         for e in &out.kept {
-            assert!(has_kind(e, |k| matches!(k, AuditKind::Contested { .. })));
+            assert!(has_kind(e, |k| matches!(k, AuditKind::Contested(_))));
         }
     }
 
