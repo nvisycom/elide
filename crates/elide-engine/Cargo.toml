@@ -53,6 +53,9 @@ elide-codec = { workspace = true, features = ["serde"] }
 # (De)serialization — required, not optional.
 serde = { workspace = true, features = [] }
 erased-serde = { workspace = true, features = [] }
+# Buffers a group's `entities` value so `deserialize_report` is independent of
+# the wire's key order (a review layer's JSON tooling may reorder keys).
+serde-value = { workspace = true, features = [] }
 
 # Primitive datatypes
 bytes = { workspace = true, features = [] }

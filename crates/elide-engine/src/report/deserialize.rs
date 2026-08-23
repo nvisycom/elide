@@ -19,7 +19,10 @@ use std::collections::HashMap;
 
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
-use serde::de::{DeserializeSeed, Deserializer, Error as DeError, MapAccess, Visitor};
+use serde::de::{
+    DeserializeSeed, Deserializer, Error as DeError, IntoDeserializer, MapAccess, Visitor,
+};
+use serde_value::Value;
 
 use super::group::EntityGroup;
 use super::{BodyReport, PartReport, Report};
@@ -88,8 +91,9 @@ impl GroupRegistry {
 type ParsedGroup = (TypeId, Box<dyn EntityGroup>);
 
 /// A serialized group envelope: `{ modality, entities }`. Deserializes by
-/// reading the `modality` tag first, resolving its registered entry, then
-/// running that entry's parser over `entities`.
+/// buffering both fields (in any order — a review layer may reorder keys),
+/// resolving the `modality`'s registered entry, then running that entry's parser
+/// over the buffered `entities`.
 struct GroupSeed<'a> {
     registry: &'a GroupRegistry,
 }
@@ -110,44 +114,42 @@ impl<'de> Visitor<'de> for GroupSeed<'_> {
     }
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-        let mut entry: Option<ModalityEntry> = None;
-        let mut group: Option<Box<dyn EntityGroup>> = None;
+        // Order-independent: a review layer's JSON tooling may reorder keys, so
+        // `entities` can arrive before `modality`. Buffer both, then resolve the
+        // parser and parse the entities after the map is fully read. Unknown
+        // fields are ignored (as at the report level) so the format can grow.
+        let mut modality: Option<String> = None;
+        let mut entities: Option<Value> = None;
         while let Some(key) = map.next_key::<String>()? {
             match key.as_str() {
                 "modality" => {
-                    if entry.is_some() {
+                    if modality.is_some() {
                         return Err(DeError::duplicate_field("modality"));
                     }
-                    let name: String = map.next_value()?;
-                    entry = Some(self.registry.entry(&name)?);
+                    modality = Some(map.next_value()?);
                 }
                 "entities" => {
-                    // `modality` precedes `entities` on the wire (our serializer
-                    // emits them in that order), so the parser is resolved by
-                    // the time the entities are read.
-                    let resolved = entry
-                        .ok_or_else(|| DeError::custom("`modality` must precede `entities`"))?;
-                    group = Some(map.next_value_seed(ParseWith(resolved.parse))?);
+                    if entities.is_some() {
+                        return Err(DeError::duplicate_field("entities"));
+                    }
+                    // Buffered, not parsed yet: the modality (hence the parser)
+                    // may not have been seen. A `Value` round-trips into a
+                    // deserializer below.
+                    entities = Some(map.next_value()?);
                 }
-                other => return Err(DeError::unknown_field(other, &["modality", "entities"])),
+                _ => {
+                    map.next_value::<serde::de::IgnoredAny>()?;
+                }
             }
         }
-        let entry = entry.ok_or_else(|| DeError::missing_field("modality"))?;
-        let group = group.ok_or_else(|| DeError::missing_field("entities"))?;
+        let name = modality.ok_or_else(|| DeError::missing_field("modality"))?;
+        let entities = entities.ok_or_else(|| DeError::missing_field("entities"))?;
+        let entry = self.registry.entry(&name)?;
+
+        // Replay the buffered entities through the modality's parser.
+        let mut erased = <dyn erased_serde::Deserializer<'_>>::erase(entities.into_deserializer());
+        let group = (entry.parse)(&mut erased).map_err(DeError::custom)?;
         Ok((entry.type_id, group))
-    }
-}
-
-/// A `DeserializeSeed` that runs a registered [`GroupParser`] over the entities
-/// value, bridging serde's `Deserializer` to `erased_serde`.
-struct ParseWith(GroupParser);
-
-impl<'de> serde::de::DeserializeSeed<'de> for ParseWith {
-    type Value = Box<dyn EntityGroup>;
-
-    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
-        let mut erased = <dyn erased_serde::Deserializer<'_>>::erase(deserializer);
-        (self.0)(&mut erased).map_err(DeError::custom)
     }
 }
 
@@ -176,9 +178,15 @@ impl<'de> Visitor<'de> for ReportSeed<'_> {
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Report, A::Error> {
         let mut report = Report::new();
+        let mut seen_body = false;
+        let mut seen_parts = false;
         while let Some(key) = map.next_key::<String>()? {
             match key.as_str() {
                 "body" => {
+                    if seen_body {
+                        return Err(DeError::duplicate_field("body"));
+                    }
+                    seen_body = true;
                     if let Some((type_id, entities)) = map.next_value_seed(OptionGroupSeed {
                         registry: self.registry,
                     })? {
@@ -189,6 +197,10 @@ impl<'de> Visitor<'de> for ReportSeed<'_> {
                     }
                 }
                 "parts" => {
+                    if seen_parts {
+                        return Err(DeError::duplicate_field("parts"));
+                    }
+                    seen_parts = true;
                     let parts: HashMap<String, ParsedGroup> = map.next_value_seed(PartsSeed {
                         registry: self.registry,
                     })?;
@@ -204,7 +216,9 @@ impl<'de> Visitor<'de> for ReportSeed<'_> {
                     }
                 }
                 // `usage` (and any future field) is ignored: it is derived
-                // analysis output, not editable review state.
+                // analysis output, not editable review state. Both `body` and
+                // `parts` are optional — a body-less document, or one with no
+                // container parts, is a valid report.
                 _ => {
                     map.next_value::<serde::de::IgnoredAny>()?;
                 }
@@ -376,5 +390,56 @@ mod tests {
                 .contains("no registered modality for `audio`"),
             "got: {err}",
         );
+    }
+
+    /// A review layer's JSON tooling may reorder object keys, so a group with
+    /// `entities` before `modality` must still parse — the reconstruction is
+    /// independent of wire key order.
+    #[test]
+    fn group_fields_may_arrive_in_any_order() {
+        // `entities` first, then `modality` — the reverse of what we emit.
+        let json = r#"{"parts":{},"body":{"entities":[],"modality":"text"}}"#;
+        let mut de = serde_json::Deserializer::from_str(json);
+        let mut report = match (ReportSeed {
+            registry: &text_registry(),
+        })
+        .deserialize(&mut de)
+        {
+            Ok(report) => report,
+            Err(e) => panic!("key order must not matter: {e}"),
+        };
+        assert!(report.entities::<Text>().is_some(), "body reconstructed");
+    }
+
+    /// An unknown group field (a later format version) is ignored, matching the
+    /// report-level policy — the wire format can grow additively.
+    #[test]
+    fn unknown_group_fields_are_ignored() {
+        let json = r#"{"body":{"modality":"text","entities":[],"future":42},"parts":{}}"#;
+        let mut de = serde_json::Deserializer::from_str(json);
+        assert!(
+            (ReportSeed {
+                registry: &text_registry(),
+            })
+            .deserialize(&mut de)
+            .is_ok(),
+            "unknown group fields must be ignored",
+        );
+    }
+
+    /// A duplicate top-level field is rejected.
+    #[test]
+    fn duplicate_report_field_is_rejected() {
+        let json = r#"{"body":null,"body":null,"parts":{}}"#;
+        let mut de = serde_json::Deserializer::from_str(json);
+        let err = match (ReportSeed {
+            registry: &text_registry(),
+        })
+        .deserialize(&mut de)
+        {
+            Ok(_) => panic!("duplicate `body` must be rejected"),
+            Err(e) => e,
+        };
+        assert!(err.to_string().contains("duplicate field"), "got: {err}");
     }
 }
