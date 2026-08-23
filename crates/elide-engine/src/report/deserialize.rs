@@ -467,13 +467,16 @@ mod tests {
     }
 
     /// A review layer's JSON tooling may reorder object keys, so a group with
-    /// `entities` before `modality` must still parse — the reconstruction is
-    /// independent of wire key order.
+    /// `entities` before `modality` must still parse — with *real* buffered
+    /// entities, not just an empty array — and the entity data must survive.
     #[test]
     fn group_fields_may_arrive_in_any_order() {
-        // `entities` first, then `modality` — the reverse of what we emit.
-        let json = r#"{"parts":{},"body":{"entities":[],"modality":"text"}}"#;
-        let mut de = serde_json::Deserializer::from_str(json);
+        // A real entity array, then `entities` placed before `modality` — the
+        // reverse of what we emit.
+        let entities = serde_json::to_string(&vec![text_entity("EMAIL_ADDRESS")]).unwrap();
+        let json =
+            format!(r#"{{"parts":{{}},"body":{{"entities":{entities},"modality":"text"}}}}"#);
+        let mut de = serde_json::Deserializer::from_str(&json);
         let mut report = match (ReportSeed {
             registry: &text_registry(),
         })
@@ -482,7 +485,10 @@ mod tests {
             Ok(report) => report,
             Err(e) => panic!("key order must not matter: {e}"),
         };
-        assert!(report.entities::<Text>().is_some(), "body reconstructed");
+        let body = report.entities::<Text>().expect("body reconstructed");
+        assert_eq!(body.len(), 1, "the buffered entity survived reordering");
+        assert_eq!(body[0].label, LabelRef::new("EMAIL_ADDRESS"));
+        assert!(body[0].audit.verify().is_ok(), "audit data survived");
     }
 
     /// An unknown group field (a later format version) is ignored, matching the
@@ -519,12 +525,14 @@ mod tests {
 
     /// A repeated part id is rejected: silently overwriting the earlier group
     /// would drop its (possibly reviewer-edited) entities, and `anonymize_with`
-    /// would apply only the later group.
+    /// would apply only the later group. The first entry here is a *skipped*
+    /// (unregistered-and-empty `audio`) group, so this also verifies a skipped
+    /// `None` still reserves its id and cannot be overwritten.
     #[test]
     fn duplicate_part_id_is_rejected() {
         let json = concat!(
             r#"{"body":null,"parts":{"#,
-            r#""a/b.txt":{"modality":"text","entities":[]},"#,
+            r#""a/b.txt":{"modality":"audio","entities":[]},"#,
             r#""a/b.txt":{"modality":"text","entities":[]}}}"#,
         );
         let mut de = serde_json::Deserializer::from_str(json);
