@@ -63,7 +63,7 @@ pub use elide_detection::{
         scoring::MaxConfidence,
     },
 };
-#[cfg(feature = "codec")]
+#[cfg(feature = "engine")]
 #[doc(no_inline)]
 pub use elide_engine::{Directives, Orchestrator, Report};
 #[doc(no_inline)]

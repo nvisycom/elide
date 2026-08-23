@@ -405,7 +405,7 @@ impl Fixture {
     where
         M: TextRecognizable,
         Entity<M>: Clone,
-        Vec<Entity<M>>: EntityGroup,
+        Vec<Entity<M>>: EntityGroup + serde::de::DeserializeOwned,
         DocumentHandle<M>: StreamDataReader<M>,
         Replace: Operator<M>,
         Mask: Operator<M>,
@@ -432,7 +432,7 @@ impl Fixture {
     where
         M: TextRecognizable,
         Entity<M>: Clone,
-        Vec<Entity<M>>: EntityGroup,
+        Vec<Entity<M>>: EntityGroup + serde::de::DeserializeOwned,
         DocumentHandle<M>: StreamDataReader<M>,
         Replace: Operator<M>,
         Mask: Operator<M>,

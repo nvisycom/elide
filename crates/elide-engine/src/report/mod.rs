@@ -27,9 +27,9 @@
 //! [`PartReport`]: entry::PartReport
 //! [`anonymize_with`]: super::Orchestrator::anonymize_with
 
+mod deserialize;
 mod entry;
 mod group;
-#[cfg(feature = "serde")]
 mod serialize;
 
 use std::any::TypeId;
@@ -44,6 +44,7 @@ use elide_core::modality::Modality;
 use elide_core::recognition::UsageReport;
 use uuid::Uuid;
 
+pub(crate) use self::deserialize::{GroupRegistry, ReportSeed};
 pub(crate) use self::entry::{BodyReport, PartReport};
 pub use self::group::EntityGroup;
 
