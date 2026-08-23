@@ -192,22 +192,20 @@ impl<M: Modality> Anonymizer<M> {
     /// Operators are cloned out of the rule registry (config intact) so the
     /// borrow on `self` ends and the caller can mutate `entities` freely.
     fn resolve_clusters(&self, entities: &[Entity<M>], scope: &Scope) -> Vec<ResolvedCluster<M>> {
+        // A reviewer-suppressed entity is left alone: it contributes no operator
+        // and does not extend the redacted span. (Where it overlaps a live
+        // entity, the shared bytes still fall inside the live member's own span —
+        // span-level redaction cannot spare those.) Exclude suppressed entities
+        // from clustering entirely, so a suppressed span can never bridge two
+        // live ones into a cluster that fails to coalesce once it is dropped.
+        let live: Vec<usize> = (0..entities.len())
+            .filter(|&i| !entities[i].is_suppressed())
+            .collect();
         let mut resolved = Vec::new();
-        for cluster in cluster_overlaps(entities) {
-            // A reviewer-suppressed entity is left alone: it contributes no
-            // operator and does not extend the redacted span. (Where it overlaps
-            // a live entity, the shared bytes still fall inside the live member's
-            // own span — span-level redaction cannot spare those.) Filter it out
-            // of the cluster first.
-            let members: Vec<usize> = cluster
-                .iter()
-                .copied()
-                .filter(|&i| !entities[i].is_suppressed())
-                .collect();
-            // Pick the safest operator among the live members — the one that
-            // leaks least; ties go to the wider span, then the earlier
-            // position. `None` means no live member had an operator (or every
-            // member was suppressed).
+        for members in cluster_overlaps(entities, &live) {
+            // Pick the safest operator among the members — the one that leaks
+            // least; ties go to the wider span, then the earlier position.
+            // `None` means no member had an operator.
             let Some((winner, operator, matched_by, attribution)) = members
                 .iter()
                 .copied()
@@ -372,9 +370,9 @@ impl<M: Modality> Default for Anonymizer<M> {
     }
 }
 
-/// Group entity indices that redact as one span, by single-linkage
-/// clustering: two entities join when they overlap *and* their locations
-/// [coalesce] into one span.
+/// Group `candidates` (indices into `entities`) that redact as one span, by
+/// single-linkage clustering: two entities join when they overlap *and* their
+/// locations [coalesce] into one span.
 ///
 /// Each group is a `Vec` of indices into `entities`. Disjoint entities each
 /// form a singleton; a chain of pairwise links (A–B, B–C) lands in one
@@ -384,13 +382,17 @@ impl<M: Modality> Default for Anonymizer<M> {
 /// every group's [`union`][coalesce] is well-defined — no member is ever
 /// dropped when the span is computed.
 ///
+/// Only the `candidates` participate: the caller passes the *live* entities, so
+/// a suppressed entity never bridges two live ones into a cluster that then
+/// fails to coalesce once it is dropped.
+///
 /// [coalesce]: ModalityLocation::union
-fn cluster_overlaps<M: Modality>(entities: &[Entity<M>]) -> Vec<Vec<usize>> {
+fn cluster_overlaps<M: Modality>(entities: &[Entity<M>], candidates: &[usize]) -> Vec<Vec<usize>> {
     // Two entities link only if they overlap and coalesce into one span, so
     // every group folds to a single union with no member lost.
     let links = |a: &M::Location, b: &M::Location| a.overlaps(b) && a.union(b).is_some();
     let mut groups: Vec<Vec<usize>> = Vec::new();
-    for i in 0..entities.len() {
+    for &i in candidates {
         let location = &entities[i].location;
         // Every existing group holding an entity this one links to. With more
         // than one, this entity bridges them, so they all merge.
@@ -675,6 +677,43 @@ mod tests {
             "[EMAIL]",
             "suppressed entity contributed no operator or span",
         );
+    }
+
+    /// A suppressed entity that *bridges* two non-coalescible live spans must not
+    /// merge them: it is excluded from clustering, so the two live spans stay in
+    /// separate clusters and each redacts on its own — no panic at the union.
+    #[tokio::test]
+    async fn a_suppressed_bridge_does_not_merge_live_clusters() {
+        // Live [0,5) and [10,15); suppressed [4,11) overlaps both but bridges
+        // spans that do not coalesce with each other.
+        let mut target = TextDoc::new("0123456789abcdef");
+        let live_a = entity("A", 0, 5);
+        let live_b = entity("B", 10, 15);
+        let mut bridge = entity("BRIDGE", 4, 11);
+        let (a_id, b_id, bridge_id) = (live_a.id, live_b.id, bridge.id);
+        bridge.suppress(AuditEvent::manual(
+            bridge.location.clone(),
+            bridge.confidence,
+        ));
+        let mut entities = vec![live_a, bridge, live_b];
+
+        let anonymizer = Anonymizer::new().with(Rule::fallback(Erase));
+        anonymizer
+            .redact(&mut target, &mut entities, &Scope::default())
+            .await
+            .unwrap();
+
+        let of = |id| entities.iter().find(|e| e.id == id).unwrap();
+        // Two separate redactions ([0,5) and [10,15)); the bridge is untouched.
+        assert!(of(a_id).is_redacted(), "live A redacts on its own");
+        assert!(of(b_id).is_redacted(), "live B redacts on its own");
+        assert!(
+            !of(bridge_id).is_redacted(),
+            "the suppressed bridge is left alone"
+        );
+        // Each live span erased separately: [0,5) and [10,15) removed, leaving
+        // the middle gap [5,10) and the tail [15,16).
+        assert_eq!(target.text(), "56789f");
     }
 
     /// A failed write records no redaction events: the audit trail is the

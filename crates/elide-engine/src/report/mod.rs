@@ -38,7 +38,7 @@ use std::ops::ControlFlow;
 
 use elide_codec::PartId;
 use elide_core::entity::Entity;
-use elide_core::entity::audit::AuditEvent;
+use elide_core::entity::audit::{AuditEvent, AuditKind};
 use elide_core::modality::Modality;
 #[cfg(feature = "usage")]
 use elide_core::recognition::UsageReport;
@@ -188,14 +188,17 @@ impl Report {
     }
 
     /// Manually add `entity` to the body group — a reviewer including a
-    /// detection the engine missed. `entity` should carry a
-    /// [`Manual`](elide_core::entity::audit::AuditEvent::manual) birth event so
-    /// its human origin is auditable (build it with
-    /// [`Entity::builder`](elide_core::entity::Entity::builder)). Returns
+    /// detection the engine missed. Its human origin is made auditable: if
+    /// `entity` does not already carry a [`Manual`] event, one is recorded onto
+    /// its trail (from its own location and confidence) as it is included, so an
+    /// included entity is never mistaken for an automatic detection. Returns
     /// `false` (adding nothing) when no body pipeline ran or the body is a
     /// different modality than `M` — use [`insert_body`](Self::insert_body) to
     /// seed an empty report first.
-    pub fn include<M: Modality>(&mut self, entity: Entity<M>) -> bool {
+    ///
+    /// [`Manual`]: elide_core::entity::audit::AuditKind::Manual
+    pub fn include<M: Modality>(&mut self, mut entity: Entity<M>) -> bool {
+        ensure_manual(&mut entity);
         match self.entities::<M>() {
             Some(entities) => {
                 entities.push(entity);
@@ -229,12 +232,14 @@ impl Report {
     }
 
     /// Manually add `entity` to the container part `part_id` — the part
-    /// counterpart to [`include`]. `entity` should carry a
-    /// [`Manual`](elide_core::entity::audit::AuditEvent::manual) birth event.
-    /// Returns `false` for an unknown part or a modality mismatch.
+    /// counterpart to [`include`], recording a [`Manual`] event onto `entity`
+    /// (unless it already carries one) so its human origin is auditable. Returns
+    /// `false` for an unknown part or a modality mismatch.
     ///
     /// [`include`]: Self::include
-    pub fn include_part<P: Modality>(&mut self, part_id: &PartId, entity: Entity<P>) -> bool {
+    /// [`Manual`]: elide_core::entity::audit::AuditKind::Manual
+    pub fn include_part<P: Modality>(&mut self, part_id: &PartId, mut entity: Entity<P>) -> bool {
+        ensure_manual(&mut entity);
         match self.part_entities::<P>(part_id) {
             Some(entities) => {
                 entities.push(entity);
@@ -381,6 +386,24 @@ impl Report {
     }
 }
 
+/// Ensure `entity` carries a [`Manual`] event, recording one (from its own
+/// location and confidence) if it does not already have one. Shared by
+/// [`Report::include`] and [`Report::include_part`] so a manually-added entity
+/// is always auditable as a human decision, however the caller built it.
+///
+/// [`Manual`]: elide_core::entity::audit::AuditKind::Manual
+fn ensure_manual<M: Modality>(entity: &mut Entity<M>) {
+    let has_manual = entity
+        .audit
+        .events()
+        .iter()
+        .any(|e| matches!(e.kind, AuditKind::Manual(_)));
+    if !has_manual {
+        let event = AuditEvent::manual(entity.location.clone(), entity.confidence);
+        entity.audit.record(event);
+    }
+}
+
 /// Suppress `entity`, recording a [`Manual`] event built from its own location
 /// and confidence and carrying `reason`/`actor`. Shared by [`Report::suppress`]
 /// and [`Report::suppress_part`].
@@ -451,7 +474,19 @@ mod tests {
 
         assert!(report.include::<Text>(manual), "included into the body");
         assert_eq!(report.entities::<Text>().unwrap().len(), 2);
-        assert!(report.entity_mut::<Text>(manual_id).is_some());
+        // The included entity — built here with only a Pattern event — now
+        // carries a Manual event stamped by `include`, so it is auditable as a
+        // human decision.
+        let included = report.entity_mut::<Text>(manual_id).unwrap();
+        assert!(
+            included
+                .audit
+                .events()
+                .iter()
+                .any(|e| matches!(e.kind, AuditKind::Manual(_))),
+            "include stamps a Manual event",
+        );
+        assert!(included.audit.verify().is_ok());
 
         // Including on an empty report (no body) adds nothing and says so.
         assert!(!Report::new().include::<Text>(text_entity("X")));
@@ -535,11 +570,24 @@ mod tests {
         let part = PartId::new("word/media/image1.png");
         let mut report = Report::new().insert_part::<Text>(part.clone(), Vec::new());
 
+        let included = text_entity("EMAIL_ADDRESS");
+        let included_id = included.id;
         assert!(
-            report.include_part::<Text>(&part, text_entity("EMAIL_ADDRESS")),
+            report.include_part::<Text>(&part, included),
             "included into the part",
         );
-        assert_eq!(report.part_entities::<Text>(&part).unwrap().len(), 1);
+        let part_entities = report.part_entities::<Text>(&part).unwrap();
+        assert_eq!(part_entities.len(), 1);
+        // The included part entity is stamped with a Manual event.
+        assert!(
+            part_entities[0]
+                .audit
+                .events()
+                .iter()
+                .any(|e| matches!(e.kind, AuditKind::Manual(_))),
+            "include_part stamps a Manual event",
+        );
+        assert_eq!(part_entities[0].id, included_id);
 
         // An unknown part includes nothing.
         assert!(!report.include_part::<Text>(&PartId::new("missing"), text_entity("X")));

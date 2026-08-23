@@ -24,7 +24,13 @@ use crate::{Error, ErrorKind, Result};
 /// [`text`](Self::text). Set [`fail_writes`](Self::failing) to make `write_at`
 /// error instead, for exercising the apply-failure path.
 ///
+/// **Single flat page.** It keys on the byte range only and ignores
+/// [`TextLocation::page`], so it cannot model page-local reads/writes. A test
+/// exercising multi-page behaviour should assert on the audit trail (which is
+/// page-aware) rather than this document's text.
+///
 /// [`write_at`]: DataWriter::write_at
+/// [`TextLocation::page`]: crate::modality::text::TextLocation::page
 pub struct TextDoc {
     text: String,
     fail_writes: bool,

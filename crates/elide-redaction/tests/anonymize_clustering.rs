@@ -98,7 +98,9 @@ async fn non_coalescible_overlap_stays_separate() {
         .await
         .unwrap();
 
-    // Neither entity is silently dropped — both record a redaction.
+    // Neither entity is silently dropped — both record a redaction. Asserted on
+    // the (page-aware) audit trail rather than `doc.text()`, since the flat
+    // `TextDoc` ignores `page` and cannot model two same-range page-local writes.
     for entity in &entities {
         assert!(
             entity.is_redacted(),

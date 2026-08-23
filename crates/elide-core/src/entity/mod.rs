@@ -174,15 +174,26 @@ impl<M: Modality> Entity<M> {
 
     /// Mark this entity suppressed by a reviewer: it stays in the report and
     /// keeps its trail, but the redaction pass skips it, so it is never hidden.
-    /// `event` — a [`Manual`] event built with [`AuditEvent::manual`] (plus
-    /// [`with_reason`]/[`with_actor`]) — is recorded onto the audit so *why* it
-    /// was left alone is auditable, rather than the entity vanishing silently.
+    /// `event` **must** be a [`Manual`] event built with [`AuditEvent::manual`]
+    /// (plus [`with_reason`]/[`with_actor`]) — it is recorded onto the audit so
+    /// *why* the entity was left alone is auditable, rather than the entity
+    /// vanishing silently. Suppressing changes redaction behaviour, so the trail
+    /// must carry the human override that explains it, not a recognition or
+    /// redaction event.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, panics if `event` is not a [`Manual`] event.
     ///
     /// [`Manual`]: crate::entity::audit::AuditKind::Manual
     /// [`AuditEvent::manual`]: crate::entity::audit::AuditEvent::manual
     /// [`with_reason`]: crate::entity::audit::AuditEvent::with_reason
     /// [`with_actor`]: crate::entity::audit::AuditEvent::with_actor
     pub fn suppress(&mut self, event: AuditEvent<M>) {
+        debug_assert!(
+            matches!(event.kind, audit::AuditKind::Manual(_)),
+            "suppress requires a Manual audit event",
+        );
         self.suppressed = true;
         self.audit.record(event);
     }
@@ -201,5 +212,44 @@ impl<M: Modality> Entity<M> {
     #[must_use]
     pub fn is_redacted(&self) -> bool {
         self.audit.is_redacted()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::audit::PatternEvent;
+    use super::*;
+    use crate::modality::text::{Text, TextLocation};
+
+    fn text_entity() -> Entity<Text> {
+        let loc = TextLocation::new(0, 5);
+        let conf = Confidence::MAX;
+        let birth = AuditEvent::pattern("t", conf, loc.clone(), PatternEvent::default());
+        Entity::new(LabelRef::new("NAME"), loc, conf, AuditLog::new(birth))
+    }
+
+    #[test]
+    fn suppress_records_the_manual_event() {
+        let mut entity = text_entity();
+        let loc = entity.location.clone();
+        entity.suppress(AuditEvent::manual(loc, entity.confidence).with_reason("false positive"));
+        assert!(entity.is_suppressed());
+    }
+
+    /// `suppress` requires a `Manual` event; a recognition event is rejected in
+    /// debug builds so suppression cannot change redaction behaviour without the
+    /// human-override event that explains it.
+    #[test]
+    #[should_panic(expected = "suppress requires a Manual audit event")]
+    fn suppress_rejects_a_non_manual_event() {
+        let mut entity = text_entity();
+        let loc = entity.location.clone();
+        // A recognition event, not a Manual override.
+        entity.suppress(AuditEvent::pattern(
+            "t",
+            entity.confidence,
+            loc,
+            PatternEvent::default(),
+        ));
     }
 }
