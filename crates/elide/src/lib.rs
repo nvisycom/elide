@@ -33,8 +33,6 @@ pub use elide_core::{entity, primitive};
 #[cfg(feature = "codec")]
 #[cfg_attr(docsrs, doc(cfg(feature = "codec")))]
 #[doc(inline)]
-pub use elide_engine::{
-    Directives, DocumentSelections, EntityGroup, Orchestrator, Report, SelectionGroup,
-};
+pub use elide_engine::{Directives, EntityGroup, Orchestrator, Report};
 
 pub mod prelude;

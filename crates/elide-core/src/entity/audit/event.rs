@@ -254,6 +254,28 @@ impl<M: Modality> AuditEvent<M> {
         )
     }
 
+    /// The redaction *decision*: `operator` was picked to hide the entity (at
+    /// the entity's `confidence`), recorded before it is applied so the pick
+    /// can be reviewed. The [`redaction`](Self::redaction) event that follows
+    /// records the operator actually run.
+    pub fn selection(
+        operator: OperatorId,
+        confidence: Confidence,
+        matched_by: RuleMatch,
+        attribution: Option<Attribution>,
+    ) -> Self {
+        let source = operator.name.clone();
+        Self::unlinked(
+            source,
+            confidence,
+            AuditKind::Selection {
+                operator,
+                matched_by,
+                attribution,
+            },
+        )
+    }
+
     /// A human override at `location` with the entity's asserted `confidence`
     /// — the birth event of a manually-added entity, or the marker recorded
     /// when a reviewer suppresses a detected one. Attach the rationale and the
@@ -440,6 +462,23 @@ impl<M: Modality> AuditKind<M> {
                 put_opt(out, reason.as_ref().map(|s| s.as_bytes()));
                 put_opt(out, actor.as_ref().map(|s| s.as_bytes()));
             }
+            Self::Selection {
+                operator,
+                matched_by,
+                attribution,
+            } => {
+                out.push(9);
+                put_bytes(out, operator.name.as_bytes());
+                put_bytes(out, operator.version.as_bytes());
+                matched_by.hash(out);
+                match attribution {
+                    Some(attribution) => {
+                        out.push(1);
+                        attribution.hash(out);
+                    }
+                    None => out.push(0),
+                }
+            }
         }
     }
 }
@@ -575,6 +614,26 @@ pub enum AuditKind<M: Modality> {
             serde(default, skip_serializing_if = "Option::is_none")
         )]
         span_length: Option<u32>,
+    },
+    /// An operator was *picked* to hide the entity — the redaction decision,
+    /// recorded before it is applied so it can be reviewed (and the entity
+    /// edited) first. The [`Redaction`](Self::Redaction) event that follows,
+    /// when the pick is applied, records the operator actually run.
+    Selection {
+        /// Identity (name + version) of the operator picked. Its *config* is
+        /// not recorded — it lives in the policy that will run it, so apply
+        /// re-resolves the configured operator rather than reading it here.
+        operator: OperatorId,
+        /// Which selection rule chose this operator: the automatic "why"
+        /// (matched a label, a tag, a predicate, or the fallback).
+        matched_by: RuleMatch,
+        /// The author-supplied policy rationale, when the matched rule carried
+        /// an [`Attribution`]; `None` otherwise.
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        attribution: Option<Attribution>,
     },
     /// A human override, outside automatic detection: an entity a reviewer
     /// added by hand, or a detected one they marked to ignore. Its provenance

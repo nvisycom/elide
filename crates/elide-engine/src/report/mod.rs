@@ -15,11 +15,10 @@
 //! belongs to. The part id is the map key; each entity carries its own id,
 //! label, location, and confidence.
 //!
-//! The type-erased storage ([`EntityGroup`] / [`SelectionGroup`]) lives in
-//! [`group`], the per-group report entries ([`BodyReport`] / [`PartReport`])
-//! in [`entry`], the whole-document selection aggregate
-//! ([`DocumentSelections`]) in `selections`, and the serde wire view in
-//! `serialize`. Each entity carries its own tamper-evident audit trail
+//! The type-erased storage ([`EntityGroup`]) lives in [`group`], the per-group
+//! report entries ([`BodyReport`] / [`PartReport`]) in [`entry`], and the serde
+//! wire view in `serialize`. Each entity carries its own tamper-evident audit
+//! trail
 //! ([`AuditLog`]) natively, so there is no separate document-level audit type.
 //!
 //! [`AuditLog`]: elide_core::entity::audit::AuditLog
@@ -30,7 +29,6 @@
 
 mod entry;
 mod group;
-mod selections;
 #[cfg(feature = "serde")]
 mod serialize;
 
@@ -47,8 +45,7 @@ use elide_core::recognition::UsageReport;
 use uuid::Uuid;
 
 pub(crate) use self::entry::{BodyReport, PartReport};
-pub use self::group::{EntityGroup, SelectionGroup};
-pub use self::selections::DocumentSelections;
+pub use self::group::EntityGroup;
 
 /// The detected entities of a whole document, editable before apply.
 ///

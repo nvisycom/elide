@@ -18,10 +18,10 @@ use elide_core::recognition::Scope;
 use elide_core::recognition::Usage;
 use elide_core::recognition::annotation::Annotations;
 use elide_detection::{Analysis, Analyzer};
-use elide_redaction::{Anonymizer, Selection};
+use elide_redaction::Anonymizer;
 
 use super::directives::AnnotationSet;
-use super::report::{EntityGroup, SelectionGroup};
+use super::report::EntityGroup;
 
 /// The concrete analyze + redact pipeline for one modality `M`.
 ///
@@ -64,15 +64,6 @@ where
         scope: &Scope,
     ) -> Result<()> {
         self.anonymizer.anonymize(handle, entities, scope).await
-    }
-
-    /// Resolve the reviewable operator selections for `entities` under `scope`,
-    /// without reading any document data — the [`Anonymizer::select`] pass
-    /// surfaced through the pipeline.
-    ///
-    /// [`Anonymizer::select`]: elide_redaction::Anonymizer::select
-    pub(super) fn select(&self, entities: &[Entity<M>], scope: &Scope) -> Vec<Selection<M>> {
-        self.anonymizer.select(entities, scope)
     }
 }
 
@@ -160,12 +151,6 @@ pub(super) trait ErasedPipeline: Send + Sync {
         entities: &'a mut dyn EntityGroup,
         scope: &'a Scope,
     ) -> BoxFuture<'a, Result<Bytes>>;
-
-    /// Resolve the operator selections for a group of this pipeline's
-    /// entities under `scope`, boxed erased. Reads no data — it is the
-    /// `select` pass, not apply. `entities` was matched to this pipeline's
-    /// modality by the orchestrator, so the downcast holds.
-    fn select(&self, entities: &dyn EntityGroup, scope: &Scope) -> Box<dyn SelectionGroup>;
 }
 
 impl<M> ErasedPipeline for ModalityPipeline<M>
@@ -259,15 +244,5 @@ where
             self.apply(&mut handle, entities, scope).await?;
             Ok(handle.encode()?.to_bytes())
         })
-    }
-
-    fn select(&self, entities: &dyn EntityGroup, scope: &Scope) -> Box<dyn SelectionGroup> {
-        // Matched to this pipeline's `M` by the orchestrator, so the downcast
-        // holds.
-        let entities = entities
-            .as_any()
-            .downcast_ref::<Vec<Entity<M>>>()
-            .expect("select entities modality mismatch");
-        Box::new(ModalityPipeline::select(self, entities, scope))
     }
 }
