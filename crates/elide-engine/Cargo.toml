@@ -43,18 +43,15 @@ schema = [
 usage = ["elide-core/usage", "elide-detection/usage"]
 
 [dependencies]
-# Internal crates. serde support is required — a `Report` exists to be
-# serialized for external review and reconstructed with `deserialize_report`.
+# Internal crates
 elide-core = { workspace = true, features = ["serde"] }
 elide-detection = { workspace = true, features = ["serde"] }
 elide-redaction = { workspace = true, features = ["serde"] }
 elide-codec = { workspace = true, features = ["serde"] }
 
-# (De)serialization — required, not optional.
+# (De)serialization
 serde = { workspace = true, features = [] }
 erased-serde = { workspace = true, features = [] }
-# Buffers a group's `entities` value so `deserialize_report` is independent of
-# the wire's key order (a review layer's JSON tooling may reorder keys).
 serde-value = { workspace = true, features = [] }
 
 # Primitive datatypes
