@@ -1,8 +1,10 @@
-//! Shared fixtures for the `anonymize` integration tests. The in-memory
-//! read/write [`TextDoc`] and the [`entity`] builders come from `elide_core`
-//! (behind its `test-util` feature, colocated with the types they stand in
-//! for); this module re-exports them and adds a one-shot [`anonymize_one`]
-//! runner. Compiled into each sibling test binary via `mod fixtures;`.
+//! Shared fixtures for the `anonymize` integration tests. Re-exports the
+//! in-memory read/write [`TextDoc`] (and [`Text`]) from `elide_core` — behind
+//! its `test-util` feature — and adds a one-shot [`anonymize_one`] runner.
+//! Entity fixtures come straight from [`Entity::fixture`], which callers use
+//! directly. Compiled into each sibling test binary via `mod fixtures;`.
+//!
+//! [`Entity::fixture`]: elide_core::entity::Entity::fixture
 
 #![allow(dead_code, unused_imports)]
 

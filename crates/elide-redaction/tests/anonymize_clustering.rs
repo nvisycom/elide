@@ -104,9 +104,12 @@ async fn non_coalescible_overlap_stays_separate() {
         .await
         .unwrap();
 
-    // Neither entity is silently dropped — both record a redaction. Asserted on
-    // the (page-aware) audit trail rather than `doc.text()`, since the flat
-    // `TextDoc` ignores `page` and cannot model two same-range page-local writes.
+    // The invariant under test is a *clustering* one: non-coalescible entities
+    // must not merge into a cluster that then drops a member (see the union
+    // `expect` in `redact`). It is asserted on the (page-aware) audit trail —
+    // each entity records its own redaction — not on `doc.text()`: the flat
+    // `TextDoc` ignores `page`, so page-local write *placement* is out of scope
+    // here and would need a page-partitioned double to check.
     for entity in &entities {
         assert!(
             entity.is_redacted(),
