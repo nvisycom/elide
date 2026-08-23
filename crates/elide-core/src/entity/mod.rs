@@ -17,7 +17,7 @@ use std::ops::Range;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use self::audit::AuditLog;
+use self::audit::{AuditEvent, AuditLog};
 pub use self::builder::EntityBuilder;
 pub use self::label::{Category, Label, LabelCatalog, LabelLocale, LabelRef, builtins};
 pub use self::reference::{EntityCoRef, EntityRef};
@@ -97,7 +97,12 @@ pub struct Entity<M: Modality> {
     )]
     pub recognized_range: Option<Range<usize>>,
     /// Tamper-evident audit trail: every contributing detection, the fusion
-    /// event if any, and the redaction that hid it, as a hash-linked DAG.
+    /// event if any, and the redaction that hid it, as a hash-linked DAG. It is
+    /// also the single source of truth for whether a reviewer
+    /// [suppressed](Self::is_suppressed) the entity — a suppression is a
+    /// [`Manual`] event on this trail, not a separate flag.
+    ///
+    /// [`Manual`]: crate::entity::audit::AuditKind::Manual
     pub audit: AuditLog<M>,
 }
 
@@ -145,5 +150,126 @@ impl<M: Modality> Entity<M> {
     pub fn with_coref(mut self, coref: EntityCoRef) -> Self {
         self.coref = Some(coref);
         self
+    }
+
+    /// Mark this entity suppressed by a reviewer: it stays in the report and
+    /// keeps its trail, but the redaction pass skips it, so it is never hidden.
+    /// `event` **must** be a [`Manual`] event with [`ManualIntent::Suppress`],
+    /// built with [`AuditEvent::manual_suppress`] (plus
+    /// [`with_reason`]/[`with_actor`]). Recording it onto the trail *is* the
+    /// suppression — [`is_suppressed`](Self::is_suppressed) reads the trail — so
+    /// there is no separate flag, and *why* the entity was left alone is
+    /// auditable rather than the entity vanishing silently.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, panics if `event` is not a `Manual` event with
+    /// `Suppress` intent.
+    ///
+    /// [`Manual`]: crate::entity::audit::AuditKind::Manual
+    /// [`ManualIntent::Suppress`]: crate::entity::audit::ManualIntent::Suppress
+    /// [`AuditEvent::manual_suppress`]: crate::entity::audit::AuditEvent::manual_suppress
+    /// [`with_reason`]: crate::entity::audit::AuditEvent::with_reason
+    /// [`with_actor`]: crate::entity::audit::AuditEvent::with_actor
+    pub fn suppress(&mut self, event: AuditEvent<M>) {
+        debug_assert!(
+            matches!(
+                event.kind,
+                audit::AuditKind::Manual(ref m) if m.intent == audit::ManualIntent::Suppress
+            ),
+            "suppress requires a Manual audit event with Suppress intent",
+        );
+        self.audit.record(event);
+    }
+
+    /// Whether a reviewer has [`suppress`](Self::suppress)ed this entity — the
+    /// audit trail is the single source of truth. Delegates to
+    /// [`AuditLog::is_suppressed`](crate::entity::audit::AuditLog::is_suppressed).
+    #[must_use]
+    pub fn is_suppressed(&self) -> bool {
+        self.audit.is_suppressed()
+    }
+
+    /// Whether an operator has hidden this entity — a [`Redaction`] event is on
+    /// its [`audit`](Self::audit) trail. A convenience for
+    /// [`audit().is_redacted()`](crate::entity::audit::AuditLog::is_redacted).
+    ///
+    /// [`Redaction`]: crate::entity::audit::AuditKind::Redaction
+    #[must_use]
+    pub fn is_redacted(&self) -> bool {
+        self.audit.is_redacted()
+    }
+}
+
+/// Test fixtures, behind the `test-util` feature.
+#[cfg(feature = "test-util")]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
+impl Entity<crate::modality::text::Text> {
+    /// A text entity for `label` over the byte range `loc`, born from a pattern
+    /// recognition at `Confidence::MAX` — the standard test fixture.
+    pub fn fixture(label: &str, loc: (usize, usize)) -> Self {
+        Self::fixture_conf(label, loc, Confidence::MAX)
+    }
+
+    /// Like [`fixture`](Self::fixture), but at an explicit `confidence` — for
+    /// confidence-gated selection tests.
+    pub fn fixture_conf(label: &str, loc: (usize, usize), confidence: Confidence) -> Self {
+        use crate::entity::audit::PatternEvent;
+        use crate::modality::text::TextLocation;
+
+        let location = TextLocation::new(loc.0, loc.1);
+        let event = AuditEvent::pattern(
+            "test",
+            confidence,
+            location.clone(),
+            PatternEvent::default(),
+        );
+        Entity::new(
+            LabelRef::new(label.to_owned()),
+            location,
+            confidence,
+            AuditLog::new(event),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::audit::PatternEvent;
+    use super::*;
+    use crate::modality::text::{Text, TextLocation};
+
+    fn text_entity() -> Entity<Text> {
+        let loc = TextLocation::new(0, 5);
+        let conf = Confidence::MAX;
+        let birth = AuditEvent::pattern("t", conf, loc.clone(), PatternEvent::default());
+        Entity::new(LabelRef::new("NAME"), loc, conf, AuditLog::new(birth))
+    }
+
+    #[test]
+    fn suppress_records_the_manual_event() {
+        let mut entity = text_entity();
+        let loc = entity.location.clone();
+        entity.suppress(
+            AuditEvent::manual_suppress(loc, entity.confidence).with_reason("false positive"),
+        );
+        assert!(entity.is_suppressed());
+    }
+
+    /// `suppress` requires a `Manual` event; a recognition event is rejected in
+    /// debug builds so suppression cannot change redaction behaviour without the
+    /// human-override event that explains it.
+    #[test]
+    #[should_panic(expected = "suppress requires a Manual audit event")]
+    fn suppress_rejects_a_non_manual_event() {
+        let mut entity = text_entity();
+        let loc = entity.location.clone();
+        // A recognition event, not a Manual override.
+        entity.suppress(AuditEvent::pattern(
+            "t",
+            entity.confidence,
+            loc,
+            PatternEvent::default(),
+        ));
     }
 }

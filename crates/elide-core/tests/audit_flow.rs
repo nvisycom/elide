@@ -104,7 +104,7 @@ fn two_recognizers_fuse_into_one() {
     assert_eq!(entity.audit.events().len(), 3);
     assert!(matches!(
         entity.audit.events().last().unwrap().kind,
-        AuditKind::Deduplication { ref strategy } if strategy == "max"
+        AuditKind::Deduplication(ref dedup) if dedup.strategy == "max"
     ));
     assert_eq!(
         entity.audit.final_confidence(),

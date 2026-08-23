@@ -1183,12 +1183,9 @@ dependencies = [
 name = "elide-redaction"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "elide-core",
  "elide-operator",
  "hipstr",
- "schemars",
- "serde",
  "tokio",
  "tracing",
  "uuid",

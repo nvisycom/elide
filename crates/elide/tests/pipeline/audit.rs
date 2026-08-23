@@ -38,11 +38,11 @@ fn entity_audit_trail_is_reachable_and_verifies() {
     assert_eq!(entity.audit.events().len(), 2);
     assert!(matches!(
         entity.audit.events()[0].kind,
-        AuditKind::Pattern { .. }
+        AuditKind::Pattern(_)
     ));
     assert!(matches!(
         entity.audit.events()[1].kind,
-        AuditKind::Redaction { .. }
+        AuditKind::Redaction(_)
     ));
     // The redaction links to the detection (its single parent).
     assert_eq!(entity.audit.events()[1].parents().len(), 1);

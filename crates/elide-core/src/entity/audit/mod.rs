@@ -5,14 +5,19 @@
 mod attribution;
 mod event;
 mod hash;
+mod payload;
 mod rule_match;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 pub use self::attribution::{Attribution, AttributionKind};
-pub use self::event::{AuditEvent, AuditKind, ModelEvent, PatternEvent};
+pub use self::event::{AuditEvent, AuditKind};
 pub use self::hash::AuditHash;
+pub use self::payload::{
+    Calibration, Conflict, Contested, Deduplication, Manual, ManualIntent, Model, ModelEvent,
+    Pattern, PatternEvent, Redaction, Refinement, Selection,
+};
 pub use self::rule_match::RuleMatch;
 use crate::modality::Modality;
 use crate::primitive::Confidence;
@@ -122,6 +127,76 @@ impl<M: Modality> AuditLog<M> {
     /// Recognition events (pattern / model) that found this entity.
     pub fn recognizers(&self) -> impl Iterator<Item = &AuditEvent<M>> {
         self.events.iter().filter(|e| e.is_recognition())
+    }
+
+    /// The entity's operator *pick*, if one was recorded: the [`Selection`]
+    /// payload from its most recent selection event. `None` when no operator was
+    /// picked (e.g. a suppressed entity, or before [`pick`] ran).
+    ///
+    /// [`Selection`]: crate::entity::audit::Selection
+    /// [`pick`]: crate::entity::audit::AuditKind::Selection
+    pub fn selection(&self) -> Option<&Selection> {
+        self.events.iter().rev().find_map(|e| match &e.kind {
+            AuditKind::Selection(s) => Some(s),
+            _ => None,
+        })
+    }
+
+    /// The entity's redaction, if one was recorded: the [`Redaction`] payload
+    /// from its most recent redaction event. `None` when the entity was not
+    /// redacted (e.g. suppressed, or not yet applied).
+    ///
+    /// [`Redaction`]: crate::entity::audit::Redaction
+    pub fn redaction(&self) -> Option<&Redaction> {
+        self.events.iter().rev().find_map(|e| match &e.kind {
+            AuditKind::Redaction(r) => Some(r),
+            _ => None,
+        })
+    }
+
+    /// Whether an operator hid this entity — i.e. a [`Redaction`] event is on
+    /// the trail.
+    ///
+    /// [`Redaction`]: crate::entity::audit::Redaction
+    pub fn is_redacted(&self) -> bool {
+        self.events
+            .iter()
+            .any(|e| matches!(e.kind, AuditKind::Redaction(_)))
+    }
+
+    /// Whether a reviewer has suppressed this entity — i.e. its most recent
+    /// [`Manual`] event carries [`ManualIntent::Suppress`]. The audit trail is
+    /// the single source of truth: there is no separate flag to keep in sync.
+    /// A manually *included* entity (a `Manual` with [`ManualIntent::Include`])
+    /// is not suppressed, and is redacted like any detection.
+    ///
+    /// [`Manual`]: crate::entity::audit::Manual
+    /// [`ManualIntent::Suppress`]: crate::entity::audit::ManualIntent::Suppress
+    /// [`ManualIntent::Include`]: crate::entity::audit::ManualIntent::Include
+    pub fn is_suppressed(&self) -> bool {
+        self.events
+            .iter()
+            .rev()
+            .find_map(|e| match &e.kind {
+                AuditKind::Manual(m) => Some(m.intent == ManualIntent::Suppress),
+                _ => None,
+            })
+            .unwrap_or(false)
+    }
+
+    /// The index of the first event whose [`kind`] satisfies `predicate`, or
+    /// `None` if none do — the audit-trail counterpart to
+    /// [`slice::position`](https://doc.rust-lang.org/std/primitive.slice.html).
+    ///
+    /// Events are in the order they were recorded, so comparing two positions
+    /// tells you which happened first (e.g. that a [`Selection`] pick was
+    /// recorded before the [`Redaction`] that applied it).
+    ///
+    /// [`kind`]: AuditEvent::kind
+    /// [`Selection`]: crate::entity::audit::Selection
+    /// [`Redaction`]: crate::entity::audit::Redaction
+    pub fn position(&self, mut predicate: impl FnMut(&AuditKind<M>) -> bool) -> Option<usize> {
+        self.events.iter().position(|e| predicate(&e.kind))
     }
 
     /// Confidence at the very first event, before any adjustment.

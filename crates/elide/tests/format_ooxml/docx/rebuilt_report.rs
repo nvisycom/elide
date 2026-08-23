@@ -76,7 +76,7 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
         assert!(
             matches!(
                 entity.audit.events().last().map(|e| &e.kind),
-                Some(AuditKind::Redaction { .. })
+                Some(AuditKind::Redaction(_))
             ),
             "each applied entity's final provenance event is its redaction",
         );

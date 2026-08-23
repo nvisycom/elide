@@ -4,6 +4,8 @@ mod data;
 mod location;
 mod replacement;
 mod source_ref;
+#[cfg(feature = "test-util")]
+mod test_doc;
 
 use std::ops::Range;
 
@@ -11,6 +13,9 @@ pub use self::data::TextData;
 pub use self::location::TextLocation;
 pub use self::replacement::TextReplacement;
 pub use self::source_ref::SourceRef;
+#[cfg(feature = "test-util")]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
+pub use self::test_doc::TextDoc;
 use super::Modality;
 use super::text_recognizable::TextRecognizable;
 use crate::recognition::Artifacts;

@@ -15,11 +15,10 @@
 //! belongs to. The part id is the map key; each entity carries its own id,
 //! label, location, and confidence.
 //!
-//! The type-erased storage ([`EntityGroup`] / [`SelectionGroup`]) lives in
-//! [`group`], the per-group report entries ([`BodyReport`] / [`PartReport`])
-//! in [`entry`], the whole-document selection aggregate
-//! ([`DocumentSelections`]) in `selections`, and the serde wire view in
-//! `serialize`. Each entity carries its own tamper-evident audit trail
+//! The type-erased storage ([`EntityGroup`]) lives in [`group`], the per-group
+//! report entries ([`BodyReport`] / [`PartReport`]) in [`entry`], and the serde
+//! wire view in `serialize`. Each entity carries its own tamper-evident audit
+//! trail
 //! ([`AuditLog`]) natively, so there is no separate document-level audit type.
 //!
 //! [`AuditLog`]: elide_core::entity::audit::AuditLog
@@ -30,7 +29,6 @@
 
 mod entry;
 mod group;
-mod selections;
 #[cfg(feature = "serde")]
 mod serialize;
 
@@ -40,14 +38,14 @@ use std::ops::ControlFlow;
 
 use elide_codec::PartId;
 use elide_core::entity::Entity;
+use elide_core::entity::audit::{AuditEvent, AuditKind};
 use elide_core::modality::Modality;
 #[cfg(feature = "usage")]
 use elide_core::recognition::UsageReport;
 use uuid::Uuid;
 
 pub(crate) use self::entry::{BodyReport, PartReport};
-pub use self::group::{EntityGroup, SelectionGroup};
-pub use self::selections::DocumentSelections;
+pub use self::group::EntityGroup;
 
 /// The detected entities of a whole document, editable before apply.
 ///
@@ -189,6 +187,92 @@ impl Report {
         self.entities::<M>()?.iter_mut().find(|e| e.id == id)
     }
 
+    /// Manually add `entity` to the body group — a reviewer including a
+    /// detection the engine missed. Its human origin is made auditable: if
+    /// `entity` does not already carry a [`Manual`] event, one is recorded onto
+    /// its trail (from its own location and confidence) as it is included, so an
+    /// included entity is never mistaken for an automatic detection. Returns
+    /// `false` (adding nothing) when no body pipeline ran or the body is a
+    /// different modality than `M` — use [`insert_body`](Self::insert_body) to
+    /// seed an empty report first.
+    ///
+    /// [`Manual`]: elide_core::entity::audit::AuditKind::Manual
+    pub fn include<M: Modality>(&mut self, mut entity: Entity<M>) -> bool {
+        ensure_manual(&mut entity);
+        match self.entities::<M>() {
+            Some(entities) => {
+                entities.push(entity);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Manually suppress the body entity `id` — a reviewer marking a detection
+    /// to leave alone (a false positive). It stays in the report but the
+    /// redaction pass skips it; a [`Manual`] event built from the entity's own
+    /// location and confidence, carrying `reason` and `actor`, is recorded so
+    /// *why* it was left alone is auditable. Returns `false` when the body is a
+    /// different modality than `M` or no entity has that `id`.
+    ///
+    /// [`Manual`]: elide_core::entity::audit::AuditKind::Manual
+    pub fn suppress<M: Modality>(
+        &mut self,
+        id: Uuid,
+        reason: Option<String>,
+        actor: Option<String>,
+    ) -> bool {
+        match self.entity_mut::<M>(id) {
+            Some(entity) => {
+                suppress_entity(entity, reason, actor);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Manually add `entity` to the container part `part_id` — the part
+    /// counterpart to [`include`], recording a [`Manual`] event onto `entity`
+    /// (unless it already carries one) so its human origin is auditable. Returns
+    /// `false` for an unknown part or a modality mismatch.
+    ///
+    /// [`include`]: Self::include
+    /// [`Manual`]: elide_core::entity::audit::AuditKind::Manual
+    pub fn include_part<P: Modality>(&mut self, part_id: &PartId, mut entity: Entity<P>) -> bool {
+        ensure_manual(&mut entity);
+        match self.part_entities::<P>(part_id) {
+            Some(entities) => {
+                entities.push(entity);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Manually suppress the entity `id` in the container part `part_id` — the
+    /// part counterpart to [`suppress`], so a reviewer can leave alone a false
+    /// positive detected inside a part. Records the same auditable [`Manual`]
+    /// event. Returns `false` for an unknown part, a modality mismatch, or no
+    /// entity with that `id`.
+    ///
+    /// [`suppress`]: Self::suppress
+    /// [`Manual`]: elide_core::entity::audit::AuditKind::Manual
+    pub fn suppress_part<P: Modality>(
+        &mut self,
+        part_id: &PartId,
+        id: Uuid,
+        reason: Option<String>,
+        actor: Option<String>,
+    ) -> bool {
+        match self.part_entity_mut::<P>(part_id, id) {
+            Some(entity) => {
+                suppress_entity(entity, reason, actor);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Run `f` over every body entity of modality `M`, in one pass. A no-op
     /// when the body is a different modality or no body pipeline ran.
     ///
@@ -302,6 +386,44 @@ impl Report {
     }
 }
 
+/// Ensure `entity` carries a [`Manual`] event, recording one (from its own
+/// location and confidence) if it does not already have one. Shared by
+/// [`Report::include`] and [`Report::include_part`] so a manually-added entity
+/// is always auditable as a human decision, however the caller built it.
+///
+/// [`Manual`]: elide_core::entity::audit::AuditKind::Manual
+fn ensure_manual<M: Modality>(entity: &mut Entity<M>) {
+    let has_manual = entity
+        .audit
+        .events()
+        .iter()
+        .any(|e| matches!(e.kind, AuditKind::Manual(_)));
+    if !has_manual {
+        let event = AuditEvent::manual_include(entity.location.clone(), entity.confidence);
+        entity.audit.record(event);
+    }
+}
+
+/// Suppress `entity`, recording a [`Manual`] event built from its own location
+/// and confidence and carrying `reason`/`actor`. Shared by [`Report::suppress`]
+/// and [`Report::suppress_part`].
+///
+/// [`Manual`]: elide_core::entity::audit::AuditKind::Manual
+fn suppress_entity<M: Modality>(
+    entity: &mut Entity<M>,
+    reason: Option<String>,
+    actor: Option<String>,
+) {
+    let mut event = AuditEvent::manual_suppress(entity.location.clone(), entity.confidence);
+    if let Some(reason) = reason {
+        event = event.with_reason(reason);
+    }
+    if let Some(actor) = actor {
+        event = event.with_actor(actor);
+    }
+    entity.suppress(event);
+}
+
 #[cfg(test)]
 mod tests {
     use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
@@ -342,6 +464,133 @@ mod tests {
         // An unknown id misses. (Modality-mismatch and no-body-pipeline both
         // route through `entities`, which is covered by its own tests.)
         assert!(report.entity_mut::<Text>(Uuid::now_v7()).is_none());
+    }
+
+    #[test]
+    fn include_adds_a_manual_entity_to_the_body() {
+        let mut report = Report::new().insert_body::<Text>(vec![text_entity("EMAIL_ADDRESS")]);
+        let manual = text_entity("PHONE_NUMBER");
+        let manual_id = manual.id;
+
+        assert!(report.include::<Text>(manual), "included into the body");
+        assert_eq!(report.entities::<Text>().unwrap().len(), 2);
+        // The included entity — built here with only a Pattern event — now
+        // carries a Manual event stamped by `include`, so it is auditable as a
+        // human decision.
+        let included = report.entity_mut::<Text>(manual_id).unwrap();
+        assert!(
+            included
+                .audit
+                .events()
+                .iter()
+                .any(|e| matches!(e.kind, AuditKind::Manual(_))),
+            "include stamps a Manual event",
+        );
+        assert!(included.audit.verify().is_ok());
+
+        // Including on an empty report (no body) adds nothing and says so.
+        assert!(!Report::new().include::<Text>(text_entity("X")));
+    }
+
+    #[test]
+    fn suppress_marks_the_entity_and_audits_it() {
+        let entity = text_entity("EMAIL_ADDRESS");
+        let id = entity.id;
+        let mut report = Report::new().insert_body::<Text>(vec![entity]);
+
+        assert!(report.suppress::<Text>(
+            id,
+            Some("false positive".into()),
+            Some("reviewer-7".into())
+        ));
+
+        let e = report.entity_mut::<Text>(id).unwrap();
+        assert!(e.is_suppressed(), "the entity is marked suppressed");
+        // The suppression is on the audit trail, carrying its reason and actor.
+        let manual = e
+            .audit
+            .events()
+            .iter()
+            .find_map(|ev| match &ev.kind {
+                elide_core::entity::audit::AuditKind::Manual(m) => {
+                    Some((m.reason.clone(), m.actor.clone()))
+                }
+                _ => None,
+            })
+            .expect("a Manual event was recorded");
+        assert_eq!(manual.0.as_deref(), Some("false positive"));
+        assert_eq!(manual.1.as_deref(), Some("reviewer-7"));
+        // The audit chain still verifies with the appended Manual event.
+        assert!(e.audit.verify().is_ok());
+
+        // Suppressing an unknown id does nothing.
+        assert!(!report.suppress::<Text>(Uuid::now_v7(), None::<String>, None::<String>));
+    }
+
+    #[test]
+    fn suppress_part_marks_a_part_entity_and_audits_it() {
+        let entity = text_entity("EMAIL_ADDRESS");
+        let id = entity.id;
+        let part = PartId::new("word/media/image1.png");
+        let mut report = Report::new().insert_part::<Text>(part.clone(), vec![entity]);
+
+        assert!(report.suppress_part::<Text>(
+            &part,
+            id,
+            Some("false positive".into()),
+            Some("reviewer-7".into()),
+        ));
+
+        let e = report.part_entity_mut::<Text>(&part, id).unwrap();
+        assert!(e.is_suppressed(), "the part entity is marked suppressed");
+        let has_manual = e.audit.events().iter().any(|ev| {
+            matches!(&ev.kind, elide_core::entity::audit::AuditKind::Manual(m)
+                if m.reason.as_deref() == Some("false positive"))
+        });
+        assert!(has_manual, "the suppression is audited");
+        assert!(e.audit.verify().is_ok());
+
+        // An unknown part, and an unknown id in a known part, both do nothing.
+        assert!(!report.suppress_part::<Text>(
+            &PartId::new("missing"),
+            id,
+            None::<String>,
+            None::<String>,
+        ));
+        assert!(!report.suppress_part::<Text>(
+            &part,
+            Uuid::now_v7(),
+            None::<String>,
+            None::<String>
+        ));
+    }
+
+    #[test]
+    fn include_part_adds_a_manual_entity_to_a_part() {
+        let part = PartId::new("word/media/image1.png");
+        let mut report = Report::new().insert_part::<Text>(part.clone(), Vec::new());
+
+        let included = text_entity("EMAIL_ADDRESS");
+        let included_id = included.id;
+        assert!(
+            report.include_part::<Text>(&part, included),
+            "included into the part",
+        );
+        let part_entities = report.part_entities::<Text>(&part).unwrap();
+        assert_eq!(part_entities.len(), 1);
+        // The included part entity is stamped with a Manual event.
+        assert!(
+            part_entities[0]
+                .audit
+                .events()
+                .iter()
+                .any(|e| matches!(e.kind, AuditKind::Manual(_))),
+            "include_part stamps a Manual event",
+        );
+        assert_eq!(part_entities[0].id, included_id);
+
+        // An unknown part includes nothing.
+        assert!(!report.include_part::<Text>(&PartId::new("missing"), text_entity("X")));
     }
 
     #[test]

@@ -1,18 +1,13 @@
-//! Type-erased, downcastable groups the [`Report`] stores: [`EntityGroup`]
-//! (a `Vec<Entity<M>>`) and its selection counterpart [`SelectionGroup`] (a
-//! `Vec<Selection<M>>`). `EntityGroup` carries the serde-conditional
-//! [`MaybeErased`] capability so the whole report serializes; `SelectionGroup`
-//! serializes instead through [`views`](SelectionGroup::views), since a
-//! [`Selection`] holds a live operator.
+//! The type-erased, downcastable [`EntityGroup`] (a `Vec<Entity<M>>`) the
+//! [`Report`] stores. It carries the serde-conditional [`MaybeErased`]
+//! capability so the whole report serializes.
 //!
 //! [`Report`]: super::Report
-//! [`Selection`]: elide_redaction::Selection
 
 use std::any::Any;
 
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
-use elide_redaction::{Selection, SelectionView};
 
 /// A type-erased, downcastable group of entities.
 ///
@@ -59,46 +54,3 @@ pub use erased_serde::Serialize as MaybeErased;
 pub trait MaybeErased {}
 #[cfg(not(feature = "serde"))]
 impl<T> MaybeErased for T {}
-
-/// A type-erased, downcastable group of selections.
-///
-/// The selection counterpart to [`EntityGroup`]: the operator picks for the
-/// body and each container part span several modalities, so [`select`] hands
-/// them back erased in a [`DocumentSelections`]. A `Selection` carries a live
-/// operator and does not serialize, so the group is not serde-erased; instead
-/// [`views`](Self::views) projects the whole group to `Vec<`[`SelectionView`]`>`
-/// — the serializable, modality-free form a review layer displays or ships,
-/// no downcast required. For the in-process apply path, recover the concrete
-/// group with [`as_any`] / [`as_any_mut`] and `downcast_ref`/`downcast_mut` to
-/// `Vec<Selection<M>>`.
-///
-/// [`select`]: crate::Orchestrator::select
-/// [`DocumentSelections`]: super::DocumentSelections
-/// [`as_any`]: Self::as_any
-/// [`as_any_mut`]: Self::as_any_mut
-pub trait SelectionGroup: Send + Sync {
-    /// The group as `&dyn Any`, to `downcast_ref` to a `Vec<Selection<M>>`.
-    fn as_any(&self) -> &dyn Any;
-    /// The group as `&mut dyn Any`, to `downcast_mut` to a `Vec<Selection<M>>`.
-    fn as_any_mut(&mut self) -> &mut dyn Any;
-    /// The serializable, modality-free projection of every pick in the group.
-    ///
-    /// Works through erasure: each [`Selection`]'s [`view`](Selection::view)
-    /// drops the live operator, so a review layer serializes the picks for a
-    /// whole document without knowing any modality.
-    fn views(&self) -> Vec<SelectionView>;
-}
-
-impl<M: Modality> SelectionGroup for Vec<Selection<M>> {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
-    fn views(&self) -> Vec<SelectionView> {
-        self.iter().map(Selection::view).collect()
-    }
-}

@@ -24,9 +24,10 @@ use futures::future;
 
 use crate::layer::Layer;
 
-/// The output of one analysis: the reconciled entities and, under the `usage`
-/// feature, the per-component `Usage` the run recorded (one entry per
-/// recognizer and enricher, in run order).
+/// The output of one analysis: the reconciled entities.
+///
+/// Under the `usage` feature, the per-component `Usage` the run recorded
+/// (one entry per recognizer and enricher, in run order).
 #[derive(Debug, Clone)]
 pub struct Analysis<M: Modality> {
     /// The reconciled entities, in the caller's coordinate system.

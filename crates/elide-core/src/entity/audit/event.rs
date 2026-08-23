@@ -6,9 +6,13 @@ use jiff::Timestamp;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use super::payload::{
+    Calibration, Conflict, Contested, Deduplication, KindPayload, Manual, ManualIntent, Model,
+    ModelEvent, Pattern, PatternEvent, Redaction, Refinement, Selection,
+};
 use super::{Attribution, AuditHash, RuleMatch};
 use crate::entity::LabelRef;
-use crate::modality::{Hint, Modality, ModalityLocation};
+use crate::modality::{Hint, Modality};
 use crate::operator::{LeakProfile, OperatorId};
 use crate::primitive::Confidence;
 
@@ -121,7 +125,7 @@ impl<M: Modality> AuditEvent<M> {
         Self::unlinked(
             source.into(),
             confidence,
-            AuditKind::Pattern { location, pattern },
+            AuditKind::Pattern(Pattern { location, pattern }),
         )
     }
 
@@ -135,7 +139,7 @@ impl<M: Modality> AuditEvent<M> {
         Self::unlinked(
             source.into(),
             confidence,
-            AuditKind::Model { location, model },
+            AuditKind::Model(Model { location, model }),
         )
     }
 
@@ -146,7 +150,7 @@ impl<M: Modality> AuditEvent<M> {
         Self::unlinked(
             strategy.clone(),
             confidence,
-            AuditKind::Deduplication { strategy },
+            AuditKind::Deduplication(Deduplication { strategy }),
         )
     }
 
@@ -165,11 +169,11 @@ impl<M: Modality> AuditEvent<M> {
         Self::unlinked(
             resolved_by.clone(),
             confidence,
-            AuditKind::Conflict {
+            AuditKind::Conflict(Conflict {
                 competing_label,
                 competing_confidence,
                 resolved_by,
-            },
+            }),
         )
     }
 
@@ -186,11 +190,11 @@ impl<M: Modality> AuditEvent<M> {
         Self::unlinked(
             flagged_by.clone(),
             confidence,
-            AuditKind::Contested {
+            AuditKind::Contested(Contested {
                 competing_label,
                 competing_confidence,
                 flagged_by,
-            },
+            }),
         )
     }
 
@@ -200,7 +204,7 @@ impl<M: Modality> AuditEvent<M> {
         Self::unlinked(
             HipStr::borrowed("calibration"),
             confidence,
-            AuditKind::Calibration { factor },
+            AuditKind::Calibration(Calibration { factor }),
         )
     }
 
@@ -221,11 +225,11 @@ impl<M: Modality> AuditEvent<M> {
         Self::unlinked(
             source.into(),
             confidence,
-            AuditKind::Refinement {
+            AuditKind::Refinement(Refinement {
                 keyword: keyword.into(),
                 hint,
                 location,
-            },
+            }),
         )
     }
 
@@ -242,7 +246,7 @@ impl<M: Modality> AuditEvent<M> {
         Self::unlinked(
             source,
             confidence,
-            AuditKind::Redaction {
+            AuditKind::Redaction(Redaction {
                 operator,
                 leak_profile,
                 key_id: None,
@@ -250,16 +254,99 @@ impl<M: Modality> AuditEvent<M> {
                 attribution,
                 span_hash: None,
                 span_length: None,
-            },
+            }),
         )
+    }
+
+    /// The redaction *decision*: `operator` was picked to hide the entity (at
+    /// the entity's `confidence`), recorded before it is applied so the pick
+    /// can be reviewed. The [`redaction`](Self::redaction) event that follows
+    /// records the operator actually run.
+    pub fn selection(
+        operator: OperatorId,
+        confidence: Confidence,
+        matched_by: RuleMatch,
+        attribution: Option<Attribution>,
+    ) -> Self {
+        let source = operator.name.clone();
+        Self::unlinked(
+            source,
+            confidence,
+            AuditKind::Selection(Selection {
+                operator,
+                matched_by,
+                attribution,
+            }),
+        )
+    }
+
+    /// A human override at `location` with the entity's asserted `confidence`,
+    /// carrying `intent` — [`Include`] for a manually-added entity's birth
+    /// event, [`Suppress`] to mark a detected one to leave alone. Prefer the
+    /// [`manual_include`] / [`manual_suppress`] shorthands. Attach the rationale
+    /// and the actor with [`with_reason`] / [`with_actor`]; the `source` mirrors
+    /// the actor, or is `"manual"` when none is given.
+    ///
+    /// [`Include`]: crate::entity::audit::ManualIntent::Include
+    /// [`Suppress`]: crate::entity::audit::ManualIntent::Suppress
+    /// [`manual_include`]: Self::manual_include
+    /// [`manual_suppress`]: Self::manual_suppress
+    /// [`with_reason`]: Self::with_reason
+    /// [`with_actor`]: Self::with_actor
+    pub fn manual(location: M::Location, confidence: Confidence, intent: ManualIntent) -> Self {
+        Self::unlinked(
+            HipStr::borrowed("manual"),
+            confidence,
+            AuditKind::Manual(Manual {
+                intent,
+                location,
+                reason: None,
+                actor: None,
+            }),
+        )
+    }
+
+    /// A [`manual`](Self::manual) event including a manually-added entity
+    /// ([`ManualIntent::Include`]).
+    ///
+    /// [`ManualIntent::Include`]: crate::entity::audit::ManualIntent::Include
+    pub fn manual_include(location: M::Location, confidence: Confidence) -> Self {
+        Self::manual(location, confidence, ManualIntent::Include)
+    }
+
+    /// A [`manual`](Self::manual) event suppressing a detected entity
+    /// ([`ManualIntent::Suppress`]).
+    ///
+    /// [`ManualIntent::Suppress`]: crate::entity::audit::ManualIntent::Suppress
+    pub fn manual_suppress(location: M::Location, confidence: Confidence) -> Self {
+        Self::manual(location, confidence, ManualIntent::Suppress)
+    }
+
+    /// Set the rationale on a [`manual`](Self::manual) event (a no-op on any
+    /// other kind).
+    #[must_use]
+    pub fn with_reason(mut self, reason: impl Into<HipStr<'static>>) -> Self {
+        if let AuditKind::Manual(manual) = &mut self.kind {
+            manual.reason = Some(reason.into());
+        }
+        self
+    }
+
+    /// Set the actor on a [`manual`](Self::manual) event (a no-op on any other
+    /// kind); the actor also becomes the event's `source`.
+    #[must_use]
+    pub fn with_actor(mut self, actor: impl Into<HipStr<'static>>) -> Self {
+        let actor = actor.into();
+        if let AuditKind::Manual(manual) = &mut self.kind {
+            self.source = actor.clone();
+            manual.actor = Some(actor);
+        }
+        self
     }
 
     /// Whether this event is a recognition (pattern or model).
     pub fn is_recognition(&self) -> bool {
-        matches!(
-            self.kind,
-            AuditKind::Pattern { .. } | AuditKind::Model { .. }
-        )
+        matches!(self.kind, AuditKind::Pattern(_) | AuditKind::Model(_))
     }
 
     /// The events this one follows, by their [`hash`](Self::hash): none for a
@@ -301,104 +388,52 @@ impl<M: Modality> AuditKind<M> {
     ///
     /// [`ModalityLocation::hash`]: crate::modality::ModalityLocation::hash
     pub(crate) fn hash(&self, out: &mut Vec<u8>) {
+        // Each arm writes its payload's central discriminant [`TAG`], then folds
+        // the payload's own fields in. The per-kind logic lives with the kind's
+        // struct (in [`payload`](super::payload)); here it is uniform dispatch.
         match self {
-            Self::Pattern { location, pattern } => {
-                out.push(0);
-                put_bytes(out, &location.hash());
-                put_bytes(out, pattern.name.as_bytes());
-                put_opt(out, pattern.regex.as_ref().map(|s| s.as_bytes()));
-                put_opt(out, pattern.validator.as_ref().map(|s| s.as_bytes()));
-                out.push(pattern.contextual.into());
-            }
-            Self::Model { location, model } => {
-                out.push(1);
-                put_bytes(out, &location.hash());
-                put_bytes(out, model.name.as_bytes());
-                put_opt(out, model.version.as_ref().map(|s| s.as_bytes()));
-                out.push(model.contextual.into());
-            }
-            Self::Deduplication { strategy } => {
-                out.push(2);
-                put_bytes(out, strategy.as_bytes());
-            }
-            Self::Conflict {
-                competing_label,
-                competing_confidence,
-                resolved_by,
-            } => {
-                out.push(3);
-                put_bytes(out, competing_label.as_str().as_bytes());
-                out.extend_from_slice(&competing_confidence.get().to_le_bytes());
-                put_bytes(out, resolved_by.as_bytes());
-            }
-            Self::Contested {
-                competing_label,
-                competing_confidence,
-                flagged_by,
-            } => {
-                out.push(4);
-                put_bytes(out, competing_label.as_str().as_bytes());
-                out.extend_from_slice(&competing_confidence.get().to_le_bytes());
-                put_bytes(out, flagged_by.as_bytes());
-            }
-            Self::Calibration { factor } => {
-                out.push(5);
-                out.extend_from_slice(&factor.to_bits().to_le_bytes());
-            }
-            Self::Refinement {
-                keyword,
-                hint,
-                location,
-            } => {
-                out.push(6);
-                put_bytes(out, keyword.as_bytes());
-                // The hint's location identifies where the keyword sits; its
-                // data payload is auxiliary context and stays out of the hash.
-                put_opt(out, hint.as_ref().map(|h| h.location.hash()).as_deref());
-                put_opt(out, location.as_ref().map(|l| l.hash()).as_deref());
-            }
-            Self::Redaction {
-                operator,
-                leak_profile,
-                key_id,
-                matched_by,
-                attribution,
-                span_hash,
-                span_length,
-            } => {
-                out.push(7);
-                put_bytes(out, operator.name.as_bytes());
-                put_bytes(out, operator.version.as_bytes());
-                out.push(*leak_profile as u8);
-                put_opt(out, key_id.as_ref().map(|s| s.as_bytes()));
-                matched_by.hash(out);
-                match attribution {
-                    Some(attribution) => {
-                        out.push(1);
-                        attribution.hash(out);
-                    }
-                    None => out.push(0),
-                }
-                put_opt(out, span_hash.as_ref().map(|h| h.as_bytes().as_slice()));
-                match span_length {
-                    Some(length) => {
-                        out.push(1);
-                        out.extend_from_slice(&length.to_le_bytes());
-                    }
-                    None => out.push(0),
-                }
-            }
+            Self::Pattern(p) => tagged(out, p),
+            Self::Model(m) => tagged(out, m),
+            Self::Deduplication(d) => tagged(out, d),
+            Self::Conflict(c) => tagged(out, c),
+            Self::Contested(c) => tagged(out, c),
+            Self::Calibration(c) => tagged(out, c),
+            Self::Refinement(r) => tagged(out, r),
+            Self::Redaction(r) => tagged(out, r),
+            Self::Selection(s) => tagged(out, s),
+            Self::Manual(m) => tagged(out, m),
         }
     }
+}
+
+/// Write a payload's discriminant [`TAG`](KindPayload::TAG) then its fields —
+/// the uniform "tag, then body" every [`AuditKind`] arm folds into the hash.
+fn tagged<P: KindPayload>(out: &mut Vec<u8>, payload: &P) {
+    out.push(P::TAG);
+    payload.hash_into(out);
 }
 
 /// Kind of an [`AuditEvent`], carrying its event-specific detail and the
 /// rationale for why it happened.
 ///
-/// `#[non_exhaustive]`: new event kinds (verification, annotation, …)
-/// can be added compatibly. The recognition kinds ([`Pattern`],
-/// [`Model`]) carry the matched [`Location`]; the rest carry their own
-/// data.
+/// A thin tagged union: each variant wraps one payload struct (e.g.
+/// [`Redaction`], [`Selection`], [`Manual`]) that owns that kind's fields, its
+/// docs, and how it folds into the audit hash. Match on a variant to reach its
+/// payload:
+///
+/// ```
+/// # use elide_core::entity::audit::AuditKind;
+/// # use elide_core::modality::text::Text;
+/// # fn show(kind: &AuditKind<Text>) {
+/// if let AuditKind::Redaction(redaction) = kind {
+///     let _ = &redaction.operator;
+/// }
+/// # }
+/// ```
+///
+/// `#[non_exhaustive]`: new event kinds (verification, annotation, …) can be
+/// added compatibly. The recognition kinds ([`Pattern`], [`Model`]) carry the
+/// matched [`Location`]; the rest carry their own data.
 ///
 /// [`Pattern`]: AuditKind::Pattern
 /// [`Model`]: AuditKind::Model
@@ -409,6 +444,7 @@ impl<M: Modality> AuditKind<M> {
     feature = "serde",
     serde(
         tag = "kind",
+        content = "detail",
         rename_all = "snake_case",
         bound = "M::Location: Serialize + for<'a> Deserialize<'a>, \
                  M::Data: Serialize + for<'a> Deserialize<'a>"
@@ -425,137 +461,27 @@ impl<M: Modality> AuditKind<M> {
 #[non_exhaustive]
 pub enum AuditKind<M: Modality> {
     /// A pattern or dictionary recognizer matched here.
-    Pattern {
-        /// Where the recognizer matched.
-        location: M::Location,
-        /// Pattern detail.
-        pattern: PatternEvent,
-    },
+    Pattern(Pattern<M>),
     /// A model / NER recognizer matched here.
-    Model {
-        /// Where the recognizer matched.
-        location: M::Location,
-        /// Model detail.
-        model: ModelEvent,
-    },
+    Model(Model<M>),
     /// Several detections were fused into one entity.
-    Deduplication {
-        /// Name of the fusion strategy that combined them.
-        #[cfg_attr(feature = "schema", schemars(with = "String"))]
-        strategy: HipStr<'static>,
-    },
+    Deduplication(Deduplication),
     /// A competing detection of a different label over the same span was
     /// resolved against this (winning) entity.
-    Conflict {
-        /// The label of the detection that lost arbitration.
-        competing_label: LabelRef,
-        /// The loser's confidence at resolution time.
-        competing_confidence: Confidence,
-        /// Name of the conflict policy that chose the winner.
-        #[cfg_attr(feature = "schema", schemars(with = "String"))]
-        resolved_by: HipStr<'static>,
-    },
+    Conflict(Conflict),
     /// A competing detection of a different label over the same span was left
     /// *unresolved*: both entities survive, flagged for a human to settle.
-    /// Recorded on each entity of the contested pair, naming the other.
-    Contested {
-        /// The label of the competing detection.
-        competing_label: LabelRef,
-        /// The competing detection's confidence.
-        competing_confidence: Confidence,
-        /// Name of the policy that flagged the contest.
-        #[cfg_attr(feature = "schema", schemars(with = "String"))]
-        flagged_by: HipStr<'static>,
-    },
+    Contested(Contested),
     /// The entity's confidence was rescaled by a per-recognizer factor.
-    Calibration {
-        /// Multiplier applied.
-        factor: f64,
-    },
+    Calibration(Calibration),
     /// A context keyword near the entity lifted its confidence.
-    Refinement {
-        /// Keyword that fired the boost.
-        #[cfg_attr(feature = "schema", schemars(with = "String"))]
-        keyword: HipStr<'static>,
-        /// The located [`Hint`] the keyword fired from, when the match came
-        /// from an out-of-band hint (a column header, a key) rather than
-        /// the in-text word window. `None` for an in-text-window match.
-        ///
-        /// [`Hint`]: crate::modality::Hint
-        hint: Option<Hint<M>>,
-        /// Where the boosting keyword sits in the medium. For a hint match
-        /// this mirrors the hint's own location; for an in-text-window match
-        /// it is the keyword resolved through the modality's [`locate`] (a
-        /// pixel box for image, a time span for audio, the byte range for
-        /// text/tabular). `None` when the keyword's stream range could not be
-        /// placed, symmetric with a match the recognizer itself drops.
-        ///
-        /// [`locate`]: crate::modality::TextRecognizable::locate
-        location: Option<M::Location>,
-    },
+    Refinement(Refinement<M>),
     /// An operator hid the entity.
-    Redaction {
-        /// Which operator (name + version) ran.
-        operator: OperatorId,
-        /// How much the output leaks about the original.
-        leak_profile: LeakProfile,
-        /// Identifier of the key needed to reverse it, if reversible.
-        #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
-        key_id: Option<HipStr<'static>>,
-        /// Which selection rule chose this operator: the automatic "why"
-        /// (matched a label, a tag, a predicate, or the fallback).
-        matched_by: RuleMatch,
-        /// The author-supplied policy rationale, when the operator carried an
-        /// [`Attribution`]; `None` otherwise.
-        attribution: Option<Attribution>,
-        /// BLAKE3 digest of the original text the operator hid, when the
-        /// redaction layer recorded it. Proves *what* was redacted without
-        /// storing the plaintext; `None` when the operator did not capture it.
-        #[cfg_attr(
-            feature = "serde",
-            serde(default, skip_serializing_if = "Option::is_none")
-        )]
-        span_hash: Option<AuditHash>,
-        /// Byte length of the original text the operator hid, paired with
-        /// [`span_hash`](Self::Redaction::span_hash). `None` when not captured.
-        #[cfg_attr(
-            feature = "serde",
-            serde(default, skip_serializing_if = "Option::is_none")
-        )]
-        span_length: Option<u32>,
-    },
-}
-
-/// Detail of a pattern/dictionary recognition.
-#[derive(Debug, Clone, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct PatternEvent {
-    /// Name of the pattern that matched (e.g. `"ssn"`, `"email"`).
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
-    pub name: HipStr<'static>,
-    /// Literal regex source that matched, when exposed.
-    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
-    pub regex: Option<HipStr<'static>>,
-    /// Name of the validator that confirmed the match (e.g. `"luhn"`).
-    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
-    pub validator: Option<HipStr<'static>>,
-    /// Whether contextual analysis (keyword co-occurrence) adjusted the
-    /// score for this match.
-    pub contextual: bool,
-}
-
-/// Detail of a model/NER recognition.
-#[derive(Debug, Clone, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct ModelEvent {
-    /// Model name (e.g. `"spacy-en-core-web-lg"`, `"gpt-4"`).
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
-    pub name: HipStr<'static>,
-    /// Model version string, when known.
-    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
-    pub version: Option<HipStr<'static>>,
-    /// Whether contextual analysis adjusted the score for this match.
-    pub contextual: bool,
+    Redaction(Redaction),
+    /// An operator was *picked* to hide the entity — the redaction decision,
+    /// recorded before it is applied so it can be reviewed first.
+    Selection(Selection),
+    /// A human override, outside automatic detection: an entity a reviewer
+    /// added by hand, or a detected one they marked to ignore.
+    Manual(Manual<M>),
 }

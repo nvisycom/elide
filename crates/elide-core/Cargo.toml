@@ -57,8 +57,9 @@ schema = ["serde", "dep:schemars"]
 ## carries. Off by default; a consumer that does not read usage pays nothing.
 usage = []
 
-## Test utilities (fixture helpers, builders, …).
-test-utils = []
+## Test doubles and fixtures (the in-memory `TextDoc`, entity builders),
+## colocated with the types they stand in for. For downstream `[dev-dependencies]`.
+test-util = []
 
 [dependencies]
 # (De)serialization

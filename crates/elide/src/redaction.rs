@@ -22,4 +22,4 @@ pub use elide_core::operator::{LeakProfile, Operator, OperatorId, Redactions, Re
 #[doc(inline)]
 pub use elide_operator::{generator, operators, vault};
 #[doc(inline)]
-pub use elide_redaction::{Anonymizer, Deanonymizer, MatchContext, Rule, Selection, SelectionView};
+pub use elide_redaction::{Anonymizer, Deanonymizer, MatchContext, Rule};

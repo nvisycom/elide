@@ -25,11 +25,14 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 default = []
 
-## Derive `serde::{Serialize, Deserialize}` on the re-exported types.
-serde = ["dep:serde", "elide-core/serde"]
+## Forward `serde` support to `elide-core`, so the audit/entity types this
+## crate operates on serialize. This crate defines no types of its own that
+## derive serde, so it pulls no serde dependency directly.
+serde = ["elide-core/serde"]
 
-## Derive `schemars::JsonSchema` on the re-exported types.
-schema = ["dep:schemars", "serde", "elide-core/schema"]
+## Forward `schemars` support to `elide-core`. As with `serde`, this crate
+## derives no schema of its own, so it only propagates the feature.
+schema = ["serde", "elide-core/schema"]
 
 ## The `Deanonymizer` supports the `tabular` modality unconditionally (its impl
 ## is generic over text-backed modalities); this only pulls `elide-core`'s
@@ -41,10 +44,6 @@ tabular = ["elide-core/tabular"]
 # Internal crates
 elide-core = { workspace = true, features = [] }
 
-# (De)serialization
-serde = { workspace = true, features = ["derive"], optional = true }
-schemars = { workspace = true, features = [], optional = true }
-
 # Primitive datatypes
 uuid = { workspace = true, features = ["v4"] }
 hipstr = { workspace = true, features = [] }
@@ -52,11 +51,9 @@ hipstr = { workspace = true, features = [] }
 # Observability
 tracing = { workspace = true, features = [] }
 
-# Async runtime & parallelism
-async-trait = { workspace = true, features = [] }
-
 [dev-dependencies]
 # Internal crates
+elide-core = { workspace = true, features = ["test-util"] }
 elide-operator = { workspace = true, features = ["aes", "hmac", "datetime"] }
 
 # Async runtime & parallelism

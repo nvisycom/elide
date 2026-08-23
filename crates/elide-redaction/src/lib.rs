@@ -11,5 +11,5 @@ mod deanonymizer;
 #[doc(inline)]
 pub use elide_core::operator::{LeakProfile, Operator, OperatorId, Redactions, ReversibleOperator};
 
-pub use self::anonymizer::{Anonymizer, MatchContext, Rule, Selection, SelectionView};
+pub use self::anonymizer::{Anonymizer, MatchContext, Rule};
 pub use self::deanonymizer::Deanonymizer;
