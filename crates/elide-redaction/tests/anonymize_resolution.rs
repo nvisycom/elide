@@ -6,13 +6,13 @@
 mod fixtures;
 
 use elide_core::entity::audit::{Attribution, AttributionKind, AuditKind, RuleMatch};
-use elide_core::entity::{EntityCoRef, Label, LabelCatalog, LabelRef};
+use elide_core::entity::{Entity, EntityCoRef, Label, LabelCatalog, LabelRef};
 use elide_core::modality::text::Text;
 use elide_core::primitive::{Confidence, ConfidenceThreshold};
 use elide_core::recognition::Scope;
 use elide_operator::operators::{Erase, Keep, Mask, Replace};
 use elide_redaction::{Anonymizer, Rule};
-use fixtures::{TextDoc, anonymize_one, entity, entity_conf};
+use fixtures::{TextDoc, anonymize_one};
 
 #[tokio::test]
 async fn anonymize_resolves_label_to_operator_with_fallback() {
@@ -20,8 +20,8 @@ async fn anonymize_resolves_label_to_operator_with_fallback() {
     //                          0123456789012345678901234567
     let mut doc = TextDoc::new("call 555-867-5309 or a@b.com");
     let mut entities = vec![
-        entity("PHONE_NUMBER", (5, 17)),   // "555-867-5309" -> Mask
-        entity("EMAIL_ADDRESS", (21, 28)), // "a@b.com" -> fallback Erase
+        Entity::fixture("PHONE_NUMBER", (5, 17)), // "555-867-5309" -> Mask
+        Entity::fixture("EMAIL_ADDRESS", (21, 28)), // "a@b.com" -> fallback Erase
     ];
 
     Anonymizer::<Text>::new()
@@ -46,7 +46,7 @@ async fn anonymize_replace_renders_label_and_value() {
             Replace::new("<{label}:{value}>"),
         )),
         "name: Alice",
-        entity("PERSON", (6, 11)), // "Alice"
+        Entity::fixture("PERSON", (6, 11)), // "Alice"
     )
     .await;
     assert_eq!(out, "name: <PERSON:Alice>");
@@ -59,9 +59,9 @@ async fn anonymize_replace_threads_coref_through_template() {
     // Alice and "she" share a cluster; Bob is his own.
     let alice = EntityCoRef::new("alice");
     let mut entities = vec![
-        entity("PERSON", (0, 5)).with_coref(alice.clone()), // "Alice"
-        entity("PERSON", (11, 14)).with_coref(EntityCoRef::new("bob")), // "Bob"
-        entity("PERSON", (15, 18)).with_coref(alice),       // "she"
+        Entity::fixture("PERSON", (0, 5)).with_coref(alice.clone()), // "Alice"
+        Entity::fixture("PERSON", (11, 14)).with_coref(EntityCoRef::new("bob")), // "Bob"
+        Entity::fixture("PERSON", (15, 18)).with_coref(alice),       // "she"
     ];
 
     Anonymizer::<Text>::new()
@@ -88,7 +88,7 @@ async fn anonymize_replace_coref_empty_when_unset() {
             Replace::new("[{label}:{coref}]"),
         )),
         "name: Alice",
-        entity("PERSON", (6, 11)), // "Alice", no coref
+        Entity::fixture("PERSON", (6, 11)), // "Alice", no coref
     )
     .await;
     // Unset coref expands to empty.
@@ -101,7 +101,7 @@ async fn anonymize_skips_unmapped_without_fallback() {
     let out = anonymize_one(
         Anonymizer::<Text>::new(),
         "123-45-6789",
-        entity("SSN", (0, 11)),
+        Entity::fixture("SSN", (0, 11)),
     )
     .await;
     assert_eq!(out, "123-45-6789");
@@ -111,8 +111,8 @@ async fn anonymize_skips_unmapped_without_fallback() {
 async fn anonymize_predicate_gates_on_confidence() {
     let mut doc = TextDoc::new("call 555-867-5309 or a@b.com");
     let mut entities = vec![
-        entity_conf("PHONE_NUMBER", (5, 17), Confidence::clamped(0.2)), // weak -> Keep
-        entity_conf("EMAIL_ADDRESS", (21, 28), Confidence::MAX),        // strong -> Erase
+        Entity::fixture_conf("PHONE_NUMBER", (5, 17), Confidence::clamped(0.2)), // weak -> Keep
+        Entity::fixture_conf("EMAIL_ADDRESS", (21, 28), Confidence::MAX),        // strong -> Erase
     ];
 
     // A weak detection is kept verbatim; everything else falls through to the
@@ -136,8 +136,8 @@ async fn anonymize_predicate_gates_on_confidence() {
 async fn anonymize_selects_by_tag() {
     let mut doc = TextDoc::new("4111111111111111 and bob");
     let mut entities = vec![
-        entity("payment_card", (0, 16)), // tagged "financial" -> Mask
-        entity("person_name", (21, 24)), // no financial tag -> fallback Erase
+        Entity::fixture("payment_card", (0, 16)), // tagged "financial" -> Mask
+        Entity::fixture("person_name", (21, 24)), // no financial tag -> fallback Erase
     ];
 
     // A catalog gives labels their tags; the tag rule then matches any entity
@@ -162,8 +162,8 @@ async fn anonymize_selects_by_tag() {
 async fn catalog_predicate_resolves_tags_through_the_catalog() {
     let mut doc = TextDoc::new("4111111111111111 and bob");
     let mut entities = vec![
-        entity("payment_card", (0, 16)), // financial -> Mask
-        entity("person_name", (21, 24)), // not financial -> fallback Erase
+        Entity::fixture("payment_card", (0, 16)), // financial -> Mask
+        Entity::fixture("person_name", (21, 24)), // not financial -> fallback Erase
     ];
 
     let mut catalog = LabelCatalog::new();
@@ -204,7 +204,7 @@ async fn anonymize_first_matching_rule_wins() {
                 Replace::new("[SECOND]"),
             )),
         "a@b.com",
-        entity("EMAIL_ADDRESS", (0, 7)),
+        Entity::fixture("EMAIL_ADDRESS", (0, 7)),
     )
     .await;
     assert_eq!(out, "[FIRST]");
@@ -213,7 +213,7 @@ async fn anonymize_first_matching_rule_wins() {
 #[tokio::test]
 async fn anonymize_records_redaction_provenance_with_rule_and_attribution() {
     let mut doc = TextDoc::new("a@b.com here");
-    let mut entities = vec![entity("EMAIL_ADDRESS", (0, 7))];
+    let mut entities = vec![Entity::fixture("EMAIL_ADDRESS", (0, 7))];
 
     Anonymizer::<Text>::new()
         .with(
@@ -255,7 +255,7 @@ async fn anonymize_records_redaction_provenance_with_rule_and_attribution() {
 #[tokio::test]
 async fn anonymize_records_fallback_rule_with_no_attribution() {
     let mut doc = TextDoc::new("a@b.com");
-    let mut entities = vec![entity("EMAIL_ADDRESS", (0, 7))];
+    let mut entities = vec![Entity::fixture("EMAIL_ADDRESS", (0, 7))];
 
     // A bare operator via the fallback rule: matched_by is Fallback, no attribution.
     Anonymizer::<Text>::new()
@@ -281,7 +281,7 @@ async fn anonymize_records_fallback_rule_with_no_attribution() {
 #[tokio::test]
 async fn because_accepts_a_bare_name() {
     let mut doc = TextDoc::new("a@b.com");
-    let mut entities = vec![entity("EMAIL_ADDRESS", (0, 7))];
+    let mut entities = vec![Entity::fixture("EMAIL_ADDRESS", (0, 7))];
 
     // `.because` takes `Into<Attribution>`: a bare &str is the name, no description.
     Anonymizer::<Text>::new()
@@ -314,7 +314,7 @@ async fn because_records_a_cited_attribution_with_a_source_id() {
     use uuid::Uuid;
 
     let mut doc = TextDoc::new("a@b.com");
-    let mut entities = vec![entity("EMAIL_ADDRESS", (0, 7))];
+    let mut entities = vec![Entity::fixture("EMAIL_ADDRESS", (0, 7))];
 
     let source = Uuid::now_v7();
     Anonymizer::<Text>::new()

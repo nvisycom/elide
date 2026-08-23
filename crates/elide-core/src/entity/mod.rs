@@ -215,6 +215,38 @@ impl<M: Modality> Entity<M> {
     }
 }
 
+/// Test fixtures, behind the `test-util` feature.
+#[cfg(feature = "test-util")]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
+impl Entity<crate::modality::text::Text> {
+    /// A text entity for `label` over the byte range `loc`, born from a pattern
+    /// recognition at `Confidence::MAX` — the standard test fixture.
+    pub fn fixture(label: &str, loc: (usize, usize)) -> Self {
+        Self::fixture_conf(label, loc, Confidence::MAX)
+    }
+
+    /// Like [`fixture`](Self::fixture), but at an explicit `confidence` — for
+    /// confidence-gated selection tests.
+    pub fn fixture_conf(label: &str, loc: (usize, usize), confidence: Confidence) -> Self {
+        use crate::entity::audit::PatternEvent;
+        use crate::modality::text::TextLocation;
+
+        let location = TextLocation::new(loc.0, loc.1);
+        let event = AuditEvent::pattern(
+            "test",
+            confidence,
+            location.clone(),
+            PatternEvent::default(),
+        );
+        Entity::new(
+            LabelRef::new(label.to_owned()),
+            location,
+            confidence,
+            AuditLog::new(event),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::audit::PatternEvent;

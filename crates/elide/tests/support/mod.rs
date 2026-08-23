@@ -1,6 +1,6 @@
 //! Shared test support: re-exports the core [`Text`] modality types and the
 //! codec round-trip driver. An in-memory [`Text`] reader/writer lives in
-//! `elide_core::test_util::TextDoc` (the `test-utils` feature).
+//! `elide_core::modality::text::TextDoc` (the `test-util` feature).
 // A shared fixture exposes more than any one test uses.
 #![allow(dead_code, unused_imports)]
 

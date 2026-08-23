@@ -107,9 +107,11 @@ where
     ) -> Result<Recognition<M>>;
 }
 
-/// What a [`Recognizer`] returns from one call: the entities it found. Under
-/// the `usage` feature it also carries the `ModelUsage` the call cost, which a
-/// model-backed recognizer attaches with `with_model_usage`.
+/// What a [`Recognizer`] returns from one call.
+///
+/// The entities it found. Under the `usage` feature it also carries the
+/// `ModelUsage` the call cost, which a model-backed recognizer attaches with
+/// `with_model_usage`.
 #[derive(Debug, Clone)]
 pub struct Recognition<M: Modality> {
     /// The recognized entities, in modality-local coordinates.

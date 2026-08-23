@@ -8,7 +8,8 @@ use elide_operator::operators::AesEncrypt;
 use elide_redaction::{Anonymizer, Deanonymizer, Rule};
 
 mod fixtures;
-use fixtures::{TextDoc, entity};
+use elide_core::entity::Entity;
+use fixtures::TextDoc;
 
 #[tokio::test]
 async fn encrypt_then_decrypt_recovers_the_original_document() {
@@ -18,7 +19,7 @@ async fn encrypt_then_decrypt_recovers_the_original_document() {
     //                    0123456789012345678901234
     let mut doc = TextDoc::new("email a@b.com now");
     // "a@b.com" occupies bytes 6..13.
-    let mut email = entity("EMAIL_ADDRESS", (6, 13));
+    let mut email = Entity::fixture("EMAIL_ADDRESS", (6, 13));
 
     // AesEncrypt under the label.
     Anonymizer::<Text>::new()
@@ -41,7 +42,7 @@ async fn encrypt_then_decrypt_recovers_the_original_document() {
 
     // The entity's location now spans the ciphertext that replaced it.
     let start = "email ".len();
-    let encrypted = entity("EMAIL_ADDRESS", (start, start + ciphertext_len));
+    let encrypted = Entity::fixture("EMAIL_ADDRESS", (start, start + ciphertext_len));
 
     // Decrypt under the same label.
     Deanonymizer::<Text>::new()
@@ -59,7 +60,7 @@ async fn encrypt_then_decrypt_recovers_the_original_document() {
 #[tokio::test]
 async fn wrong_key_leaves_the_ciphertext_in_place() {
     let mut doc = TextDoc::new("x secret y");
-    let mut secret = entity("TOKEN", (2, 8));
+    let mut secret = Entity::fixture("TOKEN", (2, 8));
 
     Anonymizer::<Text>::new()
         .with(Rule::label(
@@ -75,7 +76,7 @@ async fn wrong_key_leaves_the_ciphertext_in_place() {
         .unwrap();
     let encrypted_doc = doc.text().to_owned();
     let ct_len = doc.text().len() - "x  y".len();
-    let encrypted = entity("TOKEN", (2, 2 + ct_len));
+    let encrypted = Entity::fixture("TOKEN", (2, 2 + ct_len));
 
     // A deanonymizer with the wrong key cannot recover, so it skips the entity
     // and leaves the ciphertext untouched.

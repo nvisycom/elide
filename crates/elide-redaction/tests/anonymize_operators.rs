@@ -6,11 +6,11 @@
 
 mod fixtures;
 
-use elide_core::entity::LabelRef;
+use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::Text;
 use elide_operator::operators::{Clamp, Keep};
 use elide_redaction::{Anonymizer, Rule};
-use fixtures::{anonymize_one, entity};
+use fixtures::anonymize_one;
 
 #[tokio::test]
 async fn generalize_reduces_a_birthdate_to_the_year() {
@@ -24,7 +24,7 @@ async fn generalize_reduces_a_birthdate_to_the_year() {
             GeneralizeDate::new(DateGranularity::Year),
         )),
         "DOB: 1987-03-14",
-        entity("date_of_birth", (5, 15)),
+        Entity::fixture("date_of_birth", (5, 15)),
     )
     .await;
     assert_eq!(out, "DOB: 1987");
@@ -40,7 +40,7 @@ async fn generalize_erases_an_unparseable_value_by_default() {
             GeneralizeDate::new(DateGranularity::Year),
         )),
         "DOB: sometime",
-        entity("date_of_birth", (5, 13)),
+        Entity::fixture("date_of_birth", (5, 13)),
     )
     .await;
     assert_eq!(out, "DOB: ", "unparseable date erases");
@@ -54,7 +54,7 @@ async fn clamp_caps_an_age_at_the_hipaa_ceiling() {
             Clamp::new().with_ceiling(90.0, "90 or older"),
         )),
         "age 94",
-        entity("age", (4, 6)),
+        Entity::fixture("age", (4, 6)),
     )
     .await;
     assert_eq!(out, "age 90 or older");
@@ -68,7 +68,7 @@ async fn clamp_passes_an_in_range_age_through() {
             Clamp::new().with_ceiling(90.0, "90 or older"),
         )),
         "age 73",
-        entity("age", (4, 6)),
+        Entity::fixture("age", (4, 6)),
     )
     .await;
     assert_eq!(out, "age 73");
@@ -86,7 +86,7 @@ async fn truncate_shortens_a_pan_to_bin_plus_last_four() {
             Truncate::new(6, 4),
         )),
         "4111111111111234",
-        entity("payment_card", (0, 16)),
+        Entity::fixture("payment_card", (0, 16)),
     )
     .await;
     // 16 chars in, 10 out: the middle six are physically gone, not masked.
@@ -104,7 +104,7 @@ async fn hmac_tokenizes_a_pan_deterministically() {
             HmacHash::sha256(key.clone()),
         )),
         "4111111111111234",
-        entity("payment_card", (0, 16)),
+        Entity::fixture("payment_card", (0, 16)),
     )
     .await;
     let b = anonymize_one(
@@ -113,7 +113,7 @@ async fn hmac_tokenizes_a_pan_deterministically() {
             HmacHash::sha256(key),
         )),
         "4111111111111234",
-        entity("payment_card", (0, 16)),
+        Entity::fixture("payment_card", (0, 16)),
     )
     .await;
 
@@ -134,7 +134,7 @@ async fn hmac_digest_changes_with_the_key() {
             HmacHash::sha256(b"key-a".to_vec()),
         )),
         "4111111111111234",
-        entity("payment_card", (0, 16)),
+        Entity::fixture("payment_card", (0, 16)),
     )
     .await;
     let b = anonymize_one(
@@ -143,7 +143,7 @@ async fn hmac_digest_changes_with_the_key() {
             HmacHash::sha256(b"key-b".to_vec()),
         )),
         "4111111111111234",
-        entity("payment_card", (0, 16)),
+        Entity::fixture("payment_card", (0, 16)),
     )
     .await;
     assert_ne!(a, b, "a different key yields a different token");
@@ -159,7 +159,7 @@ async fn clamp_renders_the_bucket_in_the_entity_language() {
         .with(LanguageTag::parse("fr").unwrap(), "90 ou plus".to_owned());
 
     // "âge 94": 'â' is two bytes, so "94" sits at bytes 5..7.
-    let mut fr_entity = entity("age", (5, 7));
+    let mut fr_entity = Entity::fixture("age", (5, 7));
     fr_entity.language = Some(LanguageTag::parse("fr").unwrap());
 
     let out = anonymize_one(
@@ -186,7 +186,7 @@ async fn generalize_with_fallback_keeps_unparseable_intact() {
             WithFallback::new(GeneralizeDate::new(DateGranularity::Year), Keep),
         )),
         "DOB: n/a",
-        entity("date_of_birth", (5, 8)),
+        Entity::fixture("date_of_birth", (5, 8)),
     )
     .await;
     assert_eq!(out, "DOB: n/a");

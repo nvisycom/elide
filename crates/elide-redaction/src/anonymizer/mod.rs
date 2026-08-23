@@ -422,19 +422,15 @@ fn cluster_overlaps<M: Modality>(entities: &[Entity<M>], candidates: &[usize]) -
 #[cfg(test)]
 mod tests {
     use elide_core::entity::LabelRef;
-    use elide_core::entity::audit::{AuditEvent, AuditKind, AuditLog, PatternEvent, RuleMatch};
-    use elide_core::modality::text::{Text, TextLocation};
+    use elide_core::entity::audit::{AuditEvent, AuditKind, RuleMatch};
+    use elide_core::modality::text::{Text, TextDoc};
     use elide_core::primitive::Confidence;
-    use elide_core::test_util::TextDoc;
     use elide_operator::operators::{Erase, Mask, Replace};
 
     use super::*;
 
     fn entity(label: &str, start: usize, end: usize) -> Entity<Text> {
-        let loc = TextLocation::new(start, end);
-        let confidence = Confidence::new(0.9).unwrap();
-        let event = AuditEvent::pattern("t", confidence, loc.clone(), PatternEvent::default());
-        Entity::new(LabelRef::new(label), loc, confidence, AuditLog::new(event))
+        Entity::fixture_conf(label, (start, end), Confidence::new(0.9).unwrap())
     }
 
     /// `pick` records one [`Selection`] event per entity, naming the winning

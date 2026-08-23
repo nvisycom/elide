@@ -6,20 +6,23 @@
 
 mod fixtures;
 
-use elide_core::entity::LabelRef;
 use elide_core::entity::audit::AuditKind;
+use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::Text;
 use elide_core::operator::Operator;
 use elide_core::recognition::Scope;
 use elide_operator::operators::{Erase, Replace};
 use elide_redaction::{Anonymizer, Rule};
-use fixtures::{TextDoc, entity};
+use fixtures::TextDoc;
 
 /// Disjoint entities each redact separately — the baseline behaviour.
 #[tokio::test]
 async fn disjoint_entities_redact_separately() {
     let mut doc = TextDoc::new("alice and bob");
-    let mut entities = vec![entity("NAME", (0, 5)), entity("NAME", (10, 13))];
+    let mut entities = vec![
+        Entity::fixture("NAME", (0, 5)),
+        Entity::fixture("NAME", (10, 13)),
+    ];
     Anonymizer::new()
         .with(Rule::fallback(Replace::default()))
         .anonymize(&mut doc, &mut entities, &Scope::default())
@@ -36,7 +39,10 @@ async fn disjoint_entities_redact_separately() {
 async fn overlap_merges_under_safest_operator() {
     let mut doc = TextDoc::new("0123456789abc");
     // NAME [0,5) → Replace (Partial); SSN [3,12) → Erase (Irrecoverable).
-    let mut entities = vec![entity("NAME", (0, 5)), entity("SSN", (3, 12))];
+    let mut entities = vec![
+        Entity::fixture("NAME", (0, 5)),
+        Entity::fixture("SSN", (3, 12)),
+    ];
     Anonymizer::new()
         .with(Rule::label(LabelRef::new("NAME"), Replace::default()))
         .with(Rule::label(LabelRef::new("SSN"), Erase))
@@ -65,9 +71,9 @@ async fn overlap_merges_under_safest_operator() {
 async fn transitive_overlap_chain_merges() {
     let mut doc = TextDoc::new("0123456789abcdef");
     let mut entities = vec![
-        entity("A", (0, 5)),
-        entity("B", (4, 9)),
-        entity("C", (8, 13)),
+        Entity::fixture("A", (0, 5)),
+        Entity::fixture("B", (4, 9)),
+        Entity::fixture("C", (8, 13)),
     ];
     Anonymizer::new()
         .with(Rule::fallback(Erase))
@@ -86,9 +92,9 @@ async fn non_coalescible_overlap_stays_separate() {
     let mut doc = TextDoc::new("0123456789");
     // Same range, different page: overlaps() is true (page is ignored) but
     // union() is None, so clustering must keep them apart.
-    let mut a = entity("A", (0, 5));
+    let mut a = Entity::fixture("A", (0, 5));
     a.location.page = Some(1);
-    let mut b = entity("B", (0, 5));
+    let mut b = Entity::fixture("B", (0, 5));
     b.location.page = Some(2);
     let mut entities = vec![a, b];
 
@@ -121,7 +127,10 @@ async fn boxed_and_arced_trait_objects_are_operators() {
     let boxed: Box<dyn Operator<Text>> = Box::new(Replace::default());
     let arced: Arc<dyn Operator<Text>> = Arc::new(Erase);
 
-    let mut entities = vec![entity("NAME", (0, 5)), entity("SECRET", (6, 9))];
+    let mut entities = vec![
+        Entity::fixture("NAME", (0, 5)),
+        Entity::fixture("SECRET", (6, 9)),
+    ];
     Anonymizer::new()
         .with(Rule::label(LabelRef::new("NAME"), boxed))
         .with(Rule::label(LabelRef::new("SECRET"), arced))
