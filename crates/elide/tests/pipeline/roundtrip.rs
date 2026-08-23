@@ -84,15 +84,18 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
     Ok(())
 }
 
-/// A report referencing a modality the orchestrator does not handle is rejected,
-/// rather than silently losing those entities.
+/// A report whose group carries entities under a modality the orchestrator does
+/// not handle is rejected, rather than silently losing those (possibly
+/// reviewer-edited) entities. An *empty* unregistered group would instead be
+/// skipped — see the engine unit tests.
 #[tokio::test]
-async fn deserialize_rejects_an_unregistered_modality() -> Result<()> {
+async fn deserialize_rejects_an_unregistered_modality_with_entities() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
     // An orchestrator with *no* modalities registered.
     let orchestrator = Orchestrator::new(&registry);
 
-    let json = r#"{"body":{"modality":"text","entities":[]},"parts":{}}"#;
+    // A non-empty text group against a registry with no text pipeline.
+    let json = r#"{"body":{"modality":"text","entities":[{}]},"parts":{}}"#;
     let mut de = serde_json::Deserializer::from_str(json);
     let err = match orchestrator.deserialize_report(&mut de) {
         Ok(_) => panic!("no text pipeline registered — should have failed"),

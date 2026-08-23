@@ -325,12 +325,20 @@ impl<'r> Orchestrator<'r> {
     /// it out for editing, then `deserialize_report` it back here and
     /// [`anonymize_with`]. Both ends configure the same modalities.
     ///
+    /// A group naming a modality this orchestrator has no pipeline for is handled
+    /// by what it would cost to drop it, deliberately splitting the difference
+    /// with [`analyze`] (which silently ignores a part whose modality has no
+    /// pipeline): an *empty* such group is skipped — the part could not have been
+    /// redacted anyway, so nothing is lost, and the round trip succeeds just as a
+    /// fresh analysis of the same document would; a *non-empty* one is a hard
+    /// error, since its entities may carry a reviewer's edits that silently
+    /// dropping the group would lose.
+    ///
     /// # Errors
     ///
     /// Returns a [`MalformedInput`] error if the payload is not a valid report,
-    /// or if a group names a modality this orchestrator has no pipeline for —
-    /// rebuilding it would silently drop those entities (and any reviewer edits),
-    /// so the whole report is rejected instead.
+    /// or if a group carries entities under a modality this orchestrator has no
+    /// pipeline for (see above).
     ///
     /// [`with_modality`]: Self::with_modality
     /// [`analyze`]: Self::analyze

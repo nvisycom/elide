@@ -5,9 +5,10 @@
 //! its [`Modality::NAME`]. Deserialization is not object-safe, so the report
 //! cannot recover the type on its own. Instead the [`Orchestrator`] holds a
 //! [`GroupRegistry`]: [`with_modality`] registers, per modality name, a parser
-//! that deserializes that group as the concrete `Vec<Entity<M>>`. A group whose
-//! tag names no registered modality is a hard error — the report would silently
-//! lose those entities (and any reviewer edits on them) otherwise.
+//! that deserializes that group as the concrete `Vec<Entity<M>>`. A group naming
+//! an unregistered modality is skipped when empty (nothing to lose, matching how
+//! `analyze` ignores an unmatched part) but a hard error when non-empty — its
+//! entities may carry reviewer edits that silently dropping the group would lose.
 //!
 //! [`Report`]: super::Report
 //! [`Orchestrator`]: crate::Orchestrator
@@ -76,14 +77,10 @@ impl GroupRegistry {
         );
     }
 
-    /// The entry registered for `modality`, or a [`DeError`] naming the missing
-    /// modality — a report referencing an unregistered modality is rejected
-    /// rather than silently dropping its entities.
-    fn entry<E: DeError>(&self, modality: &str) -> Result<ModalityEntry, E> {
-        self.entries
-            .get(modality)
-            .copied()
-            .ok_or_else(|| DeError::custom(format!("no registered modality for `{modality}`")))
+    /// The entry registered for `modality`, or `None` if this orchestrator has
+    /// no pipeline for it.
+    fn entry(&self, modality: &str) -> Option<ModalityEntry> {
+        self.entries.get(modality).copied()
     }
 }
 
@@ -94,12 +91,20 @@ type ParsedGroup = (TypeId, Box<dyn EntityGroup>);
 /// buffering both fields (in any order — a review layer may reorder keys),
 /// resolving the `modality`'s registered entry, then running that entry's parser
 /// over the buffered `entities`.
+///
+/// Yields `None` — the group is skipped — only when the modality is
+/// *unregistered and its `entities` are empty*: an orchestrator without that
+/// pipeline could not have redacted the part anyway, and skipping an empty group
+/// loses nothing, matching how [`analyze`](crate::Orchestrator::analyze) ignores
+/// a part whose modality has no pipeline. A *non-empty* unregistered group is a
+/// hard error: it may carry entities a reviewer edited, and silently dropping
+/// those would lose their work.
 struct GroupSeed<'a> {
     registry: &'a GroupRegistry,
 }
 
 impl<'de> DeserializeSeed<'de> for GroupSeed<'_> {
-    type Value = ParsedGroup;
+    type Value = Option<ParsedGroup>;
 
     fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
         deserializer.deserialize_struct("Group", &["modality", "entities"], self)
@@ -107,7 +112,7 @@ impl<'de> DeserializeSeed<'de> for GroupSeed<'_> {
 }
 
 impl<'de> Visitor<'de> for GroupSeed<'_> {
-    type Value = ParsedGroup;
+    type Value = Option<ParsedGroup>;
 
     fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("a { modality, entities } group")
@@ -144,12 +149,40 @@ impl<'de> Visitor<'de> for GroupSeed<'_> {
         }
         let name = modality.ok_or_else(|| DeError::missing_field("modality"))?;
         let entities = entities.ok_or_else(|| DeError::missing_field("entities"))?;
-        let entry = self.registry.entry(&name)?;
+
+        let Some(entry) = self.registry.entry(&name) else {
+            // Unregistered modality: skip only an empty group (nothing to lose,
+            // as in `analyze`); reject a non-empty one, whose entities a reviewer
+            // may have edited.
+            if is_empty_entities(&entities) {
+                return Ok(None);
+            }
+            return Err(DeError::custom(format!(
+                "no registered modality for `{name}` (its {} entities would be dropped)",
+                entity_count(&entities),
+            )));
+        };
 
         // Replay the buffered entities through the modality's parser.
         let mut erased = <dyn erased_serde::Deserializer<'_>>::erase(entities.into_deserializer());
         let group = (entry.parse)(&mut erased).map_err(DeError::custom)?;
-        Ok((entry.type_id, group))
+        Ok(Some((entry.type_id, group)))
+    }
+}
+
+/// Whether a buffered `entities` value is an empty list — the group carries no
+/// entities, so skipping it (for an unregistered modality) loses nothing.
+fn is_empty_entities(entities: &Value) -> bool {
+    entity_count(entities) == 0
+}
+
+/// The number of entities a buffered `entities` value carries. The serializer
+/// emits an array; anything else counts as non-empty so it is never silently
+/// dropped.
+fn entity_count(entities: &Value) -> usize {
+    match entities {
+        Value::Seq(items) => items.len(),
+        _ => usize::MAX,
     }
 }
 
@@ -257,11 +290,12 @@ impl<'de> Visitor<'de> for OptionGroupSeed<'_> {
     }
 
     fn visit_some<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
+        // `GroupSeed` already yields `Option`: a skipped unregistered-and-empty
+        // body flattens to `None`, exactly like a null body.
         GroupSeed {
             registry: self.registry,
         }
         .deserialize(d)
-        .map(Some)
     }
 }
 
@@ -288,10 +322,14 @@ impl<'de> Visitor<'de> for PartsSeed<'_> {
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
         let mut out = HashMap::new();
         while let Some(id) = map.next_key::<String>()? {
-            let group = map.next_value_seed(GroupSeed {
+            // A part whose modality is unregistered and empty is skipped (`None`),
+            // matching how `analyze` ignores an unmatched part; a non-empty one
+            // has already errored inside `GroupSeed`.
+            if let Some(group) = map.next_value_seed(GroupSeed {
                 registry: self.registry,
-            })?;
-            out.insert(id, group);
+            })? {
+                out.insert(id, group);
+            }
         }
         Ok(out)
     }
@@ -370,19 +408,20 @@ mod tests {
         assert!(back.parts.is_empty());
     }
 
-    /// A group naming a modality the registry does not know is rejected, rather
-    /// than silently dropping its entities.
+    /// A *non-empty* group naming a modality the registry does not know is
+    /// rejected — those entities may carry reviewer edits, and silently dropping
+    /// them would lose that work. (The array element need not be a real entity:
+    /// the emptiness check fires before any parse.)
     #[test]
-    fn unregistered_modality_is_rejected() {
-        // A body group tagged with a modality the registry has no parser for.
-        let json = r#"{"body":{"modality":"audio","entities":[]},"parts":{}}"#;
+    fn unregistered_modality_with_entities_is_rejected() {
+        let json = r#"{"body":{"modality":"audio","entities":[{}]},"parts":{}}"#;
         let mut de = serde_json::Deserializer::from_str(json);
         let err = match (ReportSeed {
             registry: &text_registry(),
         })
         .deserialize(&mut de)
         {
-            Ok(_) => panic!("unregistered modality must be rejected"),
+            Ok(_) => panic!("a non-empty unregistered group must be rejected"),
             Err(e) => e,
         };
         assert!(
@@ -390,6 +429,29 @@ mod tests {
                 .contains("no registered modality for `audio`"),
             "got: {err}",
         );
+    }
+
+    /// An *empty* group naming an unregistered modality is skipped, not an error:
+    /// an orchestrator without that pipeline could not have redacted the part
+    /// anyway, and skipping an empty group loses nothing — matching how `analyze`
+    /// ignores a part whose modality has no pipeline. A body skips to `None`; a
+    /// part is dropped from the map.
+    #[test]
+    fn unregistered_empty_group_is_skipped() {
+        // An audio body and an audio part, both empty, against a text-only
+        // registry: the report reconstructs with no body and no parts.
+        let json = r#"{"body":{"modality":"audio","entities":[]},"parts":{"a/b.wav":{"modality":"audio","entities":[]}}}"#;
+        let mut de = serde_json::Deserializer::from_str(json);
+        let back = match (ReportSeed {
+            registry: &text_registry(),
+        })
+        .deserialize(&mut de)
+        {
+            Ok(report) => report,
+            Err(e) => panic!("empty unregistered groups must be skipped: {e}"),
+        };
+        assert!(back.body.is_none(), "empty unregistered body skipped");
+        assert!(back.parts.is_empty(), "empty unregistered part skipped");
     }
 
     /// A review layer's JSON tooling may reorder object keys, so a group with
