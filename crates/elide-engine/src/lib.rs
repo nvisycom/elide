@@ -20,7 +20,7 @@ use elide_redaction::Anonymizer;
 
 pub use self::directives::Directives;
 use self::pipeline::{AnalyzeOutcome, ErasedPipeline, ModalityPipeline};
-use self::report::{BodyReport, PartReport};
+use self::report::{BodyReport, GroupRegistry, PartReport, ReportSeed};
 // `EntityGroup` is the bound on the construction methods — named in public
 // signatures, so callers must be able to reach it.
 pub use self::report::{EntityGroup, Report};
@@ -45,6 +45,12 @@ pub use self::report::{EntityGroup, Report};
 pub struct Orchestrator<'r> {
     registry: &'r FormatRegistry,
     pipelines: HashMap<TypeId, Box<dyn ErasedPipeline>>,
+    /// Per-modality parsers for reconstructing a serialized [`Report`], keyed by
+    /// modality name. Populated alongside `pipelines` in [`with_modality`], so a
+    /// deserialized report is rebuilt against exactly the registered modalities.
+    ///
+    /// [`with_modality`]: Self::with_modality
+    groups: GroupRegistry,
     scope: Scope,
 }
 
@@ -55,6 +61,7 @@ impl<'r> Orchestrator<'r> {
         Self {
             registry,
             pipelines: HashMap::new(),
+            groups: GroupRegistry::default(),
             scope: Scope::new(),
         }
     }
@@ -85,7 +92,7 @@ impl<'r> Orchestrator<'r> {
     pub fn with_modality<M>(mut self, analyzer: Analyzer<M>, anonymizer: Anonymizer<M>) -> Self
     where
         M: Modality,
-        Vec<Entity<M>>: EntityGroup,
+        Vec<Entity<M>>: EntityGroup + serde::de::DeserializeOwned,
         DocumentHandle<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
     {
         self.pipelines.insert(
@@ -95,6 +102,9 @@ impl<'r> Orchestrator<'r> {
                 anonymizer,
             }),
         );
+        // Register the parser that reconstructs this modality's group from the
+        // wire, so `deserialize_report` can route it back by name.
+        self.groups.register::<M>();
         self
     }
 
@@ -298,5 +308,44 @@ impl<'r> Orchestrator<'r> {
     ) -> Result<Report> {
         let report = self.analyze(document, directives).await?;
         self.anonymize_with(document, report).await
+    }
+
+    /// Reconstruct a [`Report`] from its serialized wire form, routing each
+    /// group back to the modality that produced it.
+    ///
+    /// The serialized report tags each group with its modality name but not the
+    /// concrete type, and deserialization is not object-safe — so the report
+    /// cannot rebuild itself. This orchestrator can: [`with_modality`] registered
+    /// a parser per modality, so each group is parsed as the right
+    /// `Vec<Entity<M>>`. Reconstructed parts carry no cached handle;
+    /// [`anonymize_with`] re-decodes them from the container, exactly as for any
+    /// report built by hand.
+    ///
+    /// The round trip for a review layer: [`analyze`], serialize the report, ship
+    /// it out for editing, then `deserialize_report` it back here and
+    /// [`anonymize_with`]. Both ends configure the same modalities.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`MalformedInput`] error if the payload is not a valid report,
+    /// or if a group names a modality this orchestrator has no pipeline for —
+    /// rebuilding it would silently drop those entities (and any reviewer edits),
+    /// so the whole report is rejected instead.
+    ///
+    /// [`with_modality`]: Self::with_modality
+    /// [`analyze`]: Self::analyze
+    /// [`anonymize_with`]: Self::anonymize_with
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    pub fn deserialize_report<'de, D>(&self, deserializer: D) -> Result<Report>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::DeserializeSeed;
+
+        ReportSeed {
+            registry: &self.groups,
+        }
+        .deserialize(deserializer)
+        .map_err(|e| elide_core::Error::new(elide_core::ErrorKind::MalformedInput, e.to_string()))
     }
 }

@@ -1,23 +1,39 @@
 //! The `serde::Serialize` impl for [`Report`]: the part-grouped
-//! `{ body, parts }` wire view a review layer consumes.
+//! `{ body, parts }` wire view a review layer consumes. Each group is tagged
+//! with its [`modality`](elide_core::modality::Modality::NAME) so the
+//! orchestrator can route it back on [`deserialize_report`].
 //!
 //! [`Report`]: super::Report
+//! [`deserialize_report`]: crate::Orchestrator::deserialize_report
 
 use std::collections::HashMap;
 
 use super::{EntityGroup, Report};
 
 impl serde::Serialize for Report {
-    /// Serialize to `{ body: [entities], parts: { id: [entities] } }`.
-    /// `body` is null when no body pipeline ran.
+    /// Serialize to `{ body: {modality, entities}, parts: { id: {modality,
+    /// entities} } }`. `body` is null when no body pipeline ran. Each group
+    /// carries its modality name so it can be parsed back into the right
+    /// `Vec<Entity<M>>`.
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
 
-        // Adapt an erased group to a Serialize value.
+        // Adapt an erased group to a Serialize value: `{ modality, entities }`.
         struct Group<'a>(&'a dyn EntityGroup);
         impl serde::Serialize for Group<'_> {
             fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-                erased_serde::serialize(self.0, s)
+                // The entities serialize through erasure; `modality` tags which
+                // `M` to parse them back as.
+                struct Entities<'a>(&'a dyn EntityGroup);
+                impl serde::Serialize for Entities<'_> {
+                    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+                        erased_serde::serialize(self.0, s)
+                    }
+                }
+                let mut state = s.serialize_struct("Group", 2)?;
+                state.serialize_field("modality", self.0.modality_name())?;
+                state.serialize_field("entities", &Entities(self.0))?;
+                state.end()
             }
         }
 
@@ -73,8 +89,9 @@ mod tests {
         let report = Report::new().insert_body::<Text>(vec![text_entity("EMAIL_ADDRESS")]);
 
         let value = serde_json::to_value(&report).unwrap();
-        // body is an array carrying the entity's label; parts is an object.
-        assert_eq!(value["body"][0]["label"], "EMAIL_ADDRESS");
+        // body is a `{ modality, entities }` group; parts is an object.
+        assert_eq!(value["body"]["modality"], "text");
+        assert_eq!(value["body"]["entities"][0]["label"], "EMAIL_ADDRESS");
         assert!(value["parts"].is_object());
         assert_eq!(value["parts"].as_object().unwrap().len(), 0);
 

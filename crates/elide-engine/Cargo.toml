@@ -25,20 +25,12 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 default = []
 
-## Serialize a [`Report`] to a part-grouped JSON view for external review.
-serde = [
-    "dep:serde",
-    "dep:erased-serde",
-    "elide-core/serde",
-    "elide-detection/serde",
-    "elide-redaction/serde",
-    "elide-codec/serde",
-]
-
 ## Derive `schemars::JsonSchema` on the re-exported core types. `Report`
 ## itself serializes through `erased-serde` (a type-erased entity view) and
-## has no derivable schema; this forwards schema support to the engine
-## crates so a consumer can describe the entities a report carries.
+## has no derivable schema; this forwards schema support to the engine crates
+## so a consumer can describe the entities a report carries. serde is always
+## on for this crate (the `Report` exists to serialize), so schema only adds
+## the schemars derives on top.
 schema = [
     "elide-core/schema",
     "elide-detection/schema",
@@ -51,15 +43,16 @@ schema = [
 usage = ["elide-core/usage", "elide-detection/usage"]
 
 [dependencies]
-# Internal crates
-elide-core = { workspace = true, features = [] }
-elide-detection = { workspace = true, features = [] }
-elide-redaction = { workspace = true, features = [] }
-elide-codec = { workspace = true, features = [] }
+# Internal crates. serde support is required — a `Report` exists to be
+# serialized for external review and reconstructed with `deserialize_report`.
+elide-core = { workspace = true, features = ["serde"] }
+elide-detection = { workspace = true, features = ["serde"] }
+elide-redaction = { workspace = true, features = ["serde"] }
+elide-codec = { workspace = true, features = ["serde"] }
 
-# (De)serialization
-serde = { workspace = true, features = [], optional = true }
-erased-serde = { workspace = true, features = [], optional = true }
+# (De)serialization — required, not optional.
+serde = { workspace = true, features = [] }
+erased-serde = { workspace = true, features = [] }
 
 # Primitive datatypes
 bytes = { workspace = true, features = [] }

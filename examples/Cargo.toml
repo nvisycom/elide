@@ -37,7 +37,7 @@ usage = ["elide/usage"]
 [dependencies]
 # Internal crates
 elide = { workspace = true, features = [
-    "codec",
+    "engine",
     "codec-docx",
     "codec-png",
     "mock",

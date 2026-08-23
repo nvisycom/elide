@@ -30,8 +30,12 @@ pub use async_trait::async_trait;
 pub use elide_core::{Error, ErrorKind, Result};
 #[doc(inline)]
 pub use elide_core::{entity, primitive};
-#[cfg(feature = "codec")]
-#[cfg_attr(docsrs, doc(cfg(feature = "codec")))]
+// The orchestration engine (`Orchestrator`, `Report`, `Directives`,
+// `EntityGroup`) — a small curated set, re-exported flat at the root under the
+// `engine` feature. `engine` implies `codec` (the orchestrator decodes through
+// it) and serde.
+#[cfg(feature = "engine")]
+#[cfg_attr(docsrs, doc(cfg(feature = "engine")))]
 #[doc(inline)]
 pub use elide_engine::{Directives, EntityGroup, Orchestrator, Report};
 

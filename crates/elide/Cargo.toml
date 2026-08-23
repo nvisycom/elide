@@ -32,7 +32,9 @@ default = ["pattern", "ner", "llm"]
 ## domain types. Recognizer crates (`pattern`/`ner`/`llm`) need serde
 ## structurally and pull it in regardless; `codec` forwards it when both
 ## are enabled.
-serde = ["elide-core/serde", "elide-detection/serde", "elide-operator/serde", "elide-redaction/serde", "elide-codec?/serde", "elide-engine?/serde"]
+## (`elide-engine` requires serde unconditionally, so the `engine` feature
+## pulls it in on its own — no forward needed here.)
+serde = ["elide-core/serde", "elide-detection/serde", "elide-operator/serde", "elide-redaction/serde", "elide-codec?/serde"]
 
 ## Derive `schemars::JsonSchema` on the re-exported domain types, for
 ## emitting JSON Schemas of the serialized model. Implies serde. Forwards to
@@ -92,11 +94,18 @@ image = ["elide-core/image", "elide-operator/image"]
 ## The `tabular` modality. Implied by the tabular codec formats.
 tabular = ["elide-core/tabular", "elide-operator/tabular", "elide-redaction/tabular"]
 
-## Re-export the codec crate and the orchestration engine (`Orchestrator`,
-## `Report`). On its own this enables only the codec's default formats; use the
-## per-modality or per-format `codec-*` features below to pull in the shipped
-## format handlers.
-codec = ["dep:elide-codec", "dep:elide-engine"]
+## Re-export the codec crate: the `codec` module (`FormatRegistry`, decode /
+## encode). On its own this enables no formats; use the per-modality or
+## per-format `codec-*` features below to pull in the shipped handlers. For the
+## `Orchestrator` / `Report` that drive analyze + redact across a decoded
+## document, enable `engine`.
+codec = ["dep:elide-codec"]
+
+## Re-export the orchestration engine: the `engine` module (`Orchestrator`,
+## `Report`, `Directives`). Implies `codec` (the orchestrator decodes documents
+## through it) and `serde` (`elide-engine` requires it — a `Report` exists to be
+## serialized for review and reconstructed with `deserialize_report`).
+engine = ["dep:elide-engine", "codec", "serde"]
 
 ## Per-modality format groups (each aggregates its per-format features).
 codec-text = ["codec-txt", "codec-json", "codec-html", "codec-xml"]
@@ -180,6 +189,7 @@ async-trait = { workspace = true, features = [] }
 elide-office = { workspace = true, features = ["test-util"] }
 
 # (De)serialization
+serde = { workspace = true, features = [] }
 serde_json = { workspace = true, features = [] }
 
 # Primitive datatypes
@@ -195,42 +205,42 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 # binary; PDF's born-digital and raster paths share `format_pdf`.
 [[test]]
 name = "format_ooxml"
-required-features = ["codec-docx", "codec-xlsx", "codec-pptx", "codec-xml", "mock", "serde"]
+required-features = ["codec-docx", "codec-xlsx", "codec-pptx", "codec-xml", "mock", "engine", "serde"]
 
 [[test]]
 name = "format_pdf"
-required-features = ["codec-pdf-render", "mock", "serde"]
+required-features = ["codec-pdf-render", "mock", "engine", "serde"]
 
 [[test]]
 name = "format_txt"
-required-features = ["codec-txt", "ner", "llm", "lingua-common", "mock", "serde"]
+required-features = ["codec-txt", "ner", "llm", "lingua-common", "mock", "engine", "serde"]
 
 [[test]]
 name = "format_json"
-required-features = ["codec-json", "mock", "serde"]
+required-features = ["codec-json", "mock", "engine", "serde"]
 
 [[test]]
 name = "format_html"
-required-features = ["codec-html", "mock", "serde"]
+required-features = ["codec-html", "mock", "engine", "serde"]
 
 [[test]]
 name = "format_xml"
-required-features = ["codec-xml", "mock", "serde"]
+required-features = ["codec-xml", "mock", "engine", "serde"]
 
 [[test]]
 name = "format_csv"
-required-features = ["codec-csv", "ner", "llm", "lingua-common", "mock", "serde"]
+required-features = ["codec-csv", "ner", "llm", "lingua-common", "mock", "engine", "serde"]
 
 [[test]]
 name = "format_image"
-required-features = ["codec-png", "codec-jpeg", "codec-tiff", "ocr", "mock", "serde"]
+required-features = ["codec-png", "codec-jpeg", "codec-tiff", "ocr", "mock", "engine", "serde"]
 
 [[test]]
 name = "format_audio"
-required-features = ["codec-wav", "codec-mp3", "stt", "mock", "serde"]
+required-features = ["codec-wav", "codec-mp3", "stt", "mock", "engine", "serde"]
 
 # Format-independent facade integration: detection pipeline, audit trail,
 # cross-modal context enhancement, and the reviewable `select` seam.
 [[test]]
 name = "pipeline"
-required-features = ["codec-docx", "codec-png", "llm", "ocr", "stt", "mock", "serde"]
+required-features = ["codec-docx", "codec-png", "llm", "ocr", "stt", "mock", "engine", "serde"]

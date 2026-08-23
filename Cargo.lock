@@ -945,6 +945,7 @@ dependencies = [
  "elide-pattern",
  "elide-redaction",
  "elide-stt",
+ "serde",
  "serde_json",
  "tokio",
  "uuid",
