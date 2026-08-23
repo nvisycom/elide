@@ -20,7 +20,7 @@ use elide_redaction::Anonymizer;
 
 pub use self::directives::Directives;
 use self::pipeline::{AnalyzeOutcome, ErasedPipeline, ModalityPipeline};
-use self::report::{BodyReport, GroupRegistry, PartReport, ReportSeed};
+use self::report::{BodyReport, ModalityRegistry, PartReport, ReportSeed};
 // `EntityGroup` is the bound on the construction methods — named in public
 // signatures, so callers must be able to reach it.
 pub use self::report::{EntityGroup, Report};
@@ -50,7 +50,7 @@ pub struct Orchestrator<'r> {
     /// deserialized report is rebuilt against exactly the registered modalities.
     ///
     /// [`with_modality`]: Self::with_modality
-    groups: GroupRegistry,
+    groups: ModalityRegistry,
     scope: Scope,
 }
 
@@ -61,7 +61,7 @@ impl<'r> Orchestrator<'r> {
         Self {
             registry,
             pipelines: HashMap::new(),
-            groups: GroupRegistry::default(),
+            groups: ModalityRegistry::default(),
             scope: Scope::new(),
         }
     }

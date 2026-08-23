@@ -44,20 +44,21 @@ use elide_core::modality::Modality;
 use elide_core::recognition::UsageReport;
 use uuid::Uuid;
 
-pub(crate) use self::deserialize::{GroupRegistry, ReportSeed};
+pub(crate) use self::deserialize::{ModalityRegistry, ReportSeed};
 pub(crate) use self::entry::{BodyReport, PartReport};
 pub use self::group::EntityGroup;
 
 /// The detected entities of a whole document, editable before apply.
 ///
-/// Returned by [`analyze`] and consumed by [`anonymize_with`]. Edit the
-/// body entities of modality `M` with [`entities`], and a part's with
-/// [`part_entities`]; both hand back a `&mut Vec<Entity<_>>` you can
-/// filter, retag, or extend before applying. To reach one entity by
-/// [`id`] use [`entity_mut`] / [`part_entity_mut`]; to walk a whole group
-/// in a single mutable pass (e.g. merging the applied report's provenance
-/// back onto a caller's records) use [`for_each_body_mut`] /
-/// [`for_each_part_mut`], or their `try_` variants to stop the walk early.
+/// Returned by [`analyze`] and consumed by [`anonymize_with`]. Read the body
+/// entities of modality `M` with [`entities`] (a part's with [`part_entities`]),
+/// returning a `&[Entity<_>]`; edit them with [`entities_mut`] /
+/// [`part_entities_mut`], returning a `&mut Vec<Entity<_>>` you can filter,
+/// retag, or extend before applying. To reach one entity by [`id`] use
+/// [`entity_mut`] / [`part_entity_mut`]; to walk a whole group in a single
+/// mutable pass (e.g. merging the applied report's provenance back onto a
+/// caller's records) use [`for_each_body_mut`] / [`for_each_part_mut`], or their
+/// `try_` variants to stop the walk early.
 ///
 /// [`id`]: elide_core::entity::Entity::id
 /// [`entity_mut`]: Report::entity_mut
@@ -78,7 +79,9 @@ pub use self::group::EntityGroup;
 /// [`analyze`]: super::Orchestrator::analyze
 /// [`anonymize_with`]: super::Orchestrator::anonymize_with
 /// [`entities`]: Report::entities
+/// [`entities_mut`]: Report::entities_mut
 /// [`part_entities`]: Report::part_entities
+/// [`part_entities_mut`]: Report::part_entities_mut
 /// [`new`]: Report::new
 /// [`insert_body`]: Report::insert_body
 /// [`insert_part`]: Report::insert_part
@@ -162,10 +165,28 @@ impl Report {
         self
     }
 
-    /// The body entities of modality `M`, for inspection or editing.
-    /// Returns `None` if the document's body is a different modality (or
-    /// no body pipeline ran).
-    pub fn entities<M: Modality>(&mut self) -> Option<&mut Vec<Entity<M>>> {
+    /// The body entities of modality `M`, read-only. Returns `None` if the
+    /// document's body is a different modality (or no body pipeline ran). Use
+    /// [`entities_mut`] to edit them.
+    ///
+    /// [`entities_mut`]: Self::entities_mut
+    pub fn entities<M: Modality>(&self) -> Option<&[Entity<M>]> {
+        let body = self.body.as_ref()?;
+        if body.modality != TypeId::of::<M>() {
+            return None;
+        }
+        body.entities
+            .as_any()
+            .downcast_ref::<Vec<Entity<M>>>()
+            .map(Vec::as_slice)
+    }
+
+    /// The body entities of modality `M`, for editing — the `&mut` counterpart
+    /// to [`entities`]. Returns `None` if the body is a different modality, or
+    /// no body pipeline ran.
+    ///
+    /// [`entities`]: Self::entities
+    pub fn entities_mut<M: Modality>(&mut self) -> Option<&mut Vec<Entity<M>>> {
         let body = self.body.as_mut()?;
         if body.modality != TypeId::of::<M>() {
             return None;
@@ -185,7 +206,7 @@ impl Report {
     /// [`id`]: elide_core::entity::Entity::id
     /// [`entities`]: Self::entities
     pub fn entity_mut<M: Modality>(&mut self, id: Uuid) -> Option<&mut Entity<M>> {
-        self.entities::<M>()?.iter_mut().find(|e| e.id == id)
+        self.entities_mut::<M>()?.iter_mut().find(|e| e.id == id)
     }
 
     /// Manually add `entity` to the body group — a reviewer including a
@@ -200,7 +221,7 @@ impl Report {
     /// [`Manual`]: elide_core::entity::audit::AuditKind::Manual
     pub fn include<M: Modality>(&mut self, mut entity: Entity<M>) -> bool {
         ensure_manual(&mut entity);
-        match self.entities::<M>() {
+        match self.entities_mut::<M>() {
             Some(entities) => {
                 entities.push(entity);
                 true
@@ -241,7 +262,7 @@ impl Report {
     /// [`Manual`]: elide_core::entity::audit::AuditKind::Manual
     pub fn include_part<P: Modality>(&mut self, part_id: &PartId, mut entity: Entity<P>) -> bool {
         ensure_manual(&mut entity);
-        match self.part_entities::<P>(part_id) {
+        match self.part_entities_mut::<P>(part_id) {
             Some(entities) => {
                 entities.push(entity);
                 true
@@ -285,7 +306,7 @@ impl Report {
     /// [`entity_mut`]: Self::entity_mut
     /// [`id`]: elide_core::entity::Entity::id
     pub fn for_each_body_mut<M: Modality>(&mut self, f: impl FnMut(&mut Entity<M>)) {
-        if let Some(entities) = self.entities::<M>() {
+        if let Some(entities) = self.entities_mut::<M>() {
             entities.iter_mut().for_each(f);
         }
     }
@@ -308,16 +329,34 @@ impl Report {
         &mut self,
         f: impl FnMut(&mut Entity<M>) -> ControlFlow<B>,
     ) -> ControlFlow<B> {
-        match self.entities::<M>() {
+        match self.entities_mut::<M>() {
             Some(entities) => entities.iter_mut().try_for_each(f),
             None => ControlFlow::Continue(()),
         }
     }
 
-    /// The entities of the container part identified by `id`, as modality
-    /// `P`, for inspection or editing. Returns `None` for an unknown part or
-    /// a modality mismatch.
-    pub fn part_entities<P: Modality>(&mut self, id: &PartId) -> Option<&mut Vec<Entity<P>>> {
+    /// The entities of the container part identified by `id`, as modality `P`,
+    /// read-only. Returns `None` for an unknown part or a modality mismatch. Use
+    /// [`part_entities_mut`] to edit them.
+    ///
+    /// [`part_entities_mut`]: Self::part_entities_mut
+    pub fn part_entities<P: Modality>(&self, id: &PartId) -> Option<&[Entity<P>]> {
+        let part = self.parts.get(id)?;
+        if part.modality != TypeId::of::<P>() {
+            return None;
+        }
+        part.entities
+            .as_any()
+            .downcast_ref::<Vec<Entity<P>>>()
+            .map(Vec::as_slice)
+    }
+
+    /// The entities of the container part `id`, as modality `P`, for editing —
+    /// the `&mut` counterpart to [`part_entities`]. Returns `None` for an
+    /// unknown part or a modality mismatch.
+    ///
+    /// [`part_entities`]: Self::part_entities
+    pub fn part_entities_mut<P: Modality>(&mut self, id: &PartId) -> Option<&mut Vec<Entity<P>>> {
         let part = self.parts.get_mut(id)?;
         if part.modality != TypeId::of::<P>() {
             return None;
@@ -338,7 +377,7 @@ impl Report {
         part_id: &PartId,
         id: Uuid,
     ) -> Option<&mut Entity<P>> {
-        self.part_entities::<P>(part_id)?
+        self.part_entities_mut::<P>(part_id)?
             .iter_mut()
             .find(|e| e.id == id)
     }
@@ -356,7 +395,7 @@ impl Report {
         part_id: &PartId,
         f: impl FnMut(&mut Entity<P>),
     ) {
-        if let Some(entities) = self.part_entities::<P>(part_id) {
+        if let Some(entities) = self.part_entities_mut::<P>(part_id) {
             entities.iter_mut().for_each(f);
         }
     }
@@ -373,7 +412,7 @@ impl Report {
         part_id: &PartId,
         f: impl FnMut(&mut Entity<P>) -> ControlFlow<B>,
     ) -> ControlFlow<B> {
-        match self.part_entities::<P>(part_id) {
+        match self.part_entities_mut::<P>(part_id) {
             Some(entities) => entities.iter_mut().try_for_each(f),
             None => ControlFlow::Continue(()),
         }

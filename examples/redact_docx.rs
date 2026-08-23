@@ -58,10 +58,10 @@ async fn main() -> Result<()> {
     // 3. Detect across the body and every container part. The report keeps
     //    each part's findings separate so you can inspect (and edit) them
     //    before anything is redacted.
-    let mut report = orchestrator
+    let report = orchestrator
         .analyze(&mut document, &Directives::new())
         .await?;
-    print_report(&mut report);
+    print_report(&report);
 
     // 4. Apply the (here unedited) report: redact the body, redact each
     //    part, write the parts back, and re-encode the package.
@@ -83,23 +83,24 @@ async fn main() -> Result<()> {
 /// Print the detected entities grouped by where they live: the body, then
 /// each container part by its id. This is the detect → *inspect* → apply
 /// seam the orchestrator exposes via the [`Report`].
-fn print_report(report: &mut Report) {
-    let body = report.entities::<Text>().map(|v| v.len()).unwrap_or(0);
+fn print_report(report: &Report) {
+    let body = report.entities::<Text>().map(<[_]>::len).unwrap_or(0);
     println!("--- detected ---");
     println!("body: {body} entities");
 
-    // `part_ids` hands back each part's id and modality; the typed
-    // accessor reads its entities back.
-    let part_ids: Vec<_> = report.part_ids().map(|(id, _)| id.clone()).collect();
-    if part_ids.is_empty() {
-        println!("parts: none with a matching pipeline");
-    }
-    for id in part_ids {
+    // Each part's id and modality, then its entities read back by the typed
+    // accessor.
+    let mut any_part = false;
+    for (id, _) in report.part_ids() {
+        any_part = true;
         let n = report
-            .part_entities::<Image>(&id)
-            .map(|v| v.len())
+            .part_entities::<Image>(id)
+            .map(<[_]>::len)
             .unwrap_or(0);
         println!("part {id}: {n} entities");
+    }
+    if !any_part {
+        println!("parts: none with a matching pipeline");
     }
 }
 
