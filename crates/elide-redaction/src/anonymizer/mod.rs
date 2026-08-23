@@ -181,11 +181,20 @@ impl<M: Modality> Anonymizer<M> {
     pub fn select(&self, entities: &[Entity<M>], scope: &Scope) -> Vec<Selection<M>> {
         let mut selections = Vec::new();
         for cluster in cluster_overlaps(entities) {
-            // Pick the safest operator in the cluster — the one that leaks
-            // least — to redact the whole overlapping span; ties go to the
-            // wider span, then the earlier position. A singleton cluster just
-            // resolves its one entity. `None` means no member had an operator.
-            let Some((operator, matched_by, attribution)) = cluster
+            // A reviewer-suppressed entity is left alone: it contributes no
+            // operator and is not covered, so it is never hidden even when it
+            // overlaps a live entity. Filter it out of the cluster first.
+            let live: Vec<usize> = cluster
+                .iter()
+                .copied()
+                .filter(|&i| !entities[i].is_suppressed())
+                .collect();
+            // Pick the safest operator among the live members — the one that
+            // leaks least — to redact the whole overlapping span; ties go to
+            // the wider span, then the earlier position. A singleton cluster
+            // just resolves its one entity. `None` means no live member had an
+            // operator (or every member was suppressed).
+            let Some((operator, matched_by, attribution)) = live
                 .iter()
                 .copied()
                 .filter_map(|i| self.operators.resolve(&entities[i], scope).map(|r| (i, r)))
@@ -201,7 +210,7 @@ impl<M: Modality> Anonymizer<M> {
                 continue;
             };
 
-            let covered = cluster.iter().map(|&i| entities[i].id).collect();
+            let covered = live.iter().map(|&i| entities[i].id).collect();
             selections.push(Selection::new(operator, covered, matched_by, attribution));
         }
         selections
@@ -295,11 +304,15 @@ impl<M: Modality> Anonymizer<M> {
 
         let mut redactions = Redactions::new();
         for selection in selections {
-            // The entity indices this selection covers, in slice order.
+            // The entity indices this selection covers, in slice order. A
+            // reviewer-suppressed entity is dropped here too, so even a
+            // caller-supplied selection (the `anonymize_selections` path, which
+            // bypasses `select`) never hides it.
             let members: Vec<usize> = selection
                 .entities()
                 .iter()
                 .filter_map(|id| index.get(id).copied())
+                .filter(|&i| !entities[i].is_suppressed())
                 .collect();
             let Some(&winner) = members.first() else {
                 continue;
@@ -534,6 +547,66 @@ mod tests {
                 "each covered entity records its redaction",
             );
         }
+    }
+
+    /// A reviewer-suppressed entity is left alone: `select` emits no selection
+    /// for it, and `anonymize` records no redaction on it, while a co-located
+    /// live entity is still redacted.
+    #[tokio::test]
+    async fn a_suppressed_entity_is_not_redacted() {
+        let mut target = StrReader("alice and bob".to_owned());
+        let live = entity("NAME", 0, 5);
+        let mut suppressed = entity("NAME", 10, 13);
+        let suppressed_id = suppressed.id;
+        let live_id = live.id;
+        // The reviewer marks the second detection as a false positive.
+        suppressed.suppress(
+            AuditEvent::manual(suppressed.location.clone(), suppressed.confidence)
+                .with_reason("false positive"),
+        );
+        let mut entities = vec![live, suppressed];
+
+        let anonymizer = Anonymizer::new().with(Rule::fallback(Erase));
+
+        // `select` produces a selection only for the live entity.
+        let selections = anonymizer.select(&entities, &Scope::default());
+        assert_eq!(
+            selections.len(),
+            1,
+            "no selection for the suppressed entity"
+        );
+        assert_eq!(selections[0].entities(), [live_id]);
+
+        anonymizer
+            .anonymize(&mut target, &mut entities, &Scope::default())
+            .await
+            .unwrap();
+
+        let redacted = |id| {
+            entities
+                .iter()
+                .find(|e| e.id == id)
+                .unwrap()
+                .audit
+                .events()
+                .iter()
+                .any(|e| matches!(&e.kind, AuditKind::Redaction { .. }))
+        };
+        assert!(redacted(live_id), "the live entity is redacted");
+        assert!(
+            !redacted(suppressed_id),
+            "the suppressed entity is left alone"
+        );
+        // The suppression itself is on the trail, with its reason.
+        let has_manual = entities
+            .iter()
+            .find(|e| e.id == suppressed_id)
+            .unwrap()
+            .audit
+            .events()
+            .iter()
+            .any(|e| matches!(&e.kind, AuditKind::Manual { reason: Some(r), .. } if r == "false positive"));
+        assert!(has_manual, "the suppression is audited with its reason");
     }
 
     /// Swapping a selection's operator before apply overrides the pick — the

@@ -40,6 +40,7 @@ use std::ops::ControlFlow;
 
 use elide_codec::PartId;
 use elide_core::entity::Entity;
+use elide_core::entity::audit::AuditEvent;
 use elide_core::modality::Modality;
 #[cfg(feature = "usage")]
 use elide_core::recognition::UsageReport;
@@ -187,6 +188,52 @@ impl Report {
     /// [`entities`]: Self::entities
     pub fn entity_mut<M: Modality>(&mut self, id: Uuid) -> Option<&mut Entity<M>> {
         self.entities::<M>()?.iter_mut().find(|e| e.id == id)
+    }
+
+    /// Manually add `entity` to the body group — a reviewer including a
+    /// detection the engine missed. `entity` should carry a
+    /// [`Manual`](elide_core::entity::audit::AuditEvent::manual) birth event so
+    /// its human origin is auditable (build it with
+    /// [`Entity::builder`](elide_core::entity::Entity::builder)). Returns
+    /// `false` (adding nothing) when no body pipeline ran or the body is a
+    /// different modality than `M` — use [`insert_body`](Self::insert_body) to
+    /// seed an empty report first.
+    pub fn include<M: Modality>(&mut self, entity: Entity<M>) -> bool {
+        match self.entities::<M>() {
+            Some(entities) => {
+                entities.push(entity);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Manually suppress the body entity `id` — a reviewer marking a detection
+    /// to leave alone (a false positive). It stays in the report but the
+    /// redaction pass skips it; a [`Manual`] event built from the entity's own
+    /// location and confidence, carrying `reason` and `actor`, is recorded so
+    /// *why* it was left alone is auditable. Returns `false` when the body is a
+    /// different modality than `M` or no entity has that `id`.
+    ///
+    /// [`Manual`]: elide_core::entity::audit::AuditKind::Manual
+    pub fn suppress<M: Modality>(
+        &mut self,
+        id: Uuid,
+        reason: Option<String>,
+        actor: Option<String>,
+    ) -> bool {
+        let Some(entity) = self.entity_mut::<M>(id) else {
+            return false;
+        };
+        let mut event = AuditEvent::manual(entity.location.clone(), entity.confidence);
+        if let Some(reason) = reason {
+            event = event.with_reason(reason);
+        }
+        if let Some(actor) = actor {
+            event = event.with_actor(actor);
+        }
+        entity.suppress(event);
+        true
     }
 
     /// Run `f` over every body entity of modality `M`, in one pass. A no-op
@@ -342,6 +389,55 @@ mod tests {
         // An unknown id misses. (Modality-mismatch and no-body-pipeline both
         // route through `entities`, which is covered by its own tests.)
         assert!(report.entity_mut::<Text>(Uuid::now_v7()).is_none());
+    }
+
+    #[test]
+    fn include_adds_a_manual_entity_to_the_body() {
+        let mut report = Report::new().insert_body::<Text>(vec![text_entity("EMAIL_ADDRESS")]);
+        let manual = text_entity("PHONE_NUMBER");
+        let manual_id = manual.id;
+
+        assert!(report.include::<Text>(manual), "included into the body");
+        assert_eq!(report.entities::<Text>().unwrap().len(), 2);
+        assert!(report.entity_mut::<Text>(manual_id).is_some());
+
+        // Including on an empty report (no body) adds nothing and says so.
+        assert!(!Report::new().include::<Text>(text_entity("X")));
+    }
+
+    #[test]
+    fn suppress_marks_the_entity_and_audits_it() {
+        let entity = text_entity("EMAIL_ADDRESS");
+        let id = entity.id;
+        let mut report = Report::new().insert_body::<Text>(vec![entity]);
+
+        assert!(report.suppress::<Text>(
+            id,
+            Some("false positive".into()),
+            Some("reviewer-7".into())
+        ));
+
+        let e = report.entity_mut::<Text>(id).unwrap();
+        assert!(e.is_suppressed(), "the entity is marked suppressed");
+        // The suppression is on the audit trail, carrying its reason and actor.
+        let manual = e
+            .audit
+            .events()
+            .iter()
+            .find_map(|ev| match &ev.kind {
+                elide_core::entity::audit::AuditKind::Manual { reason, actor, .. } => {
+                    Some((reason.clone(), actor.clone()))
+                }
+                _ => None,
+            })
+            .expect("a Manual event was recorded");
+        assert_eq!(manual.0.as_deref(), Some("false positive"));
+        assert_eq!(manual.1.as_deref(), Some("reviewer-7"));
+        // The audit chain still verifies with the appended Manual event.
+        assert!(e.audit.verify().is_ok());
+
+        // Suppressing an unknown id does nothing.
+        assert!(!report.suppress::<Text>(Uuid::now_v7(), None::<String>, None::<String>));
     }
 
     #[test]

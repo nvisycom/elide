@@ -17,7 +17,7 @@ use std::ops::Range;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use self::audit::AuditLog;
+use self::audit::{AuditEvent, AuditLog};
 pub use self::builder::EntityBuilder;
 pub use self::label::{Category, Label, LabelCatalog, LabelLocale, LabelRef, builtins};
 pub use self::reference::{EntityCoRef, EntityRef};
@@ -99,6 +99,23 @@ pub struct Entity<M: Modality> {
     /// Tamper-evident audit trail: every contributing detection, the fusion
     /// event if any, and the redaction that hid it, as a hash-linked DAG.
     pub audit: AuditLog<M>,
+    /// Whether a reviewer has suppressed this entity: it stays in the report
+    /// (and keeps its audit trail, including the [`Manual`] event that
+    /// suppressed it) but the redaction pass skips it, so it is never hidden.
+    /// `false` for a normally-detected entity. A suppressed entity records
+    /// *why* it was left alone, rather than vanishing silently.
+    ///
+    /// [`Manual`]: crate::entity::audit::AuditKind::Manual
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "is_false"))]
+    pub suppressed: bool,
+}
+
+/// serde `skip_serializing_if` helper: omit `suppressed` when it is the default
+/// (`false`), so a normally-detected entity's wire form is unchanged.
+#[cfg(feature = "serde")]
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 impl<M: Modality> Entity<M> {
@@ -125,6 +142,7 @@ impl<M: Modality> Entity<M> {
             language: None,
             recognized_range: None,
             audit,
+            suppressed: false,
         }
     }
 
@@ -145,5 +163,26 @@ impl<M: Modality> Entity<M> {
     pub fn with_coref(mut self, coref: EntityCoRef) -> Self {
         self.coref = Some(coref);
         self
+    }
+
+    /// Mark this entity suppressed by a reviewer: it stays in the report and
+    /// keeps its trail, but the redaction pass skips it, so it is never hidden.
+    /// `event` — a [`Manual`] event built with [`AuditEvent::manual`] (plus
+    /// [`with_reason`]/[`with_actor`]) — is recorded onto the audit so *why* it
+    /// was left alone is auditable, rather than the entity vanishing silently.
+    ///
+    /// [`Manual`]: crate::entity::audit::AuditKind::Manual
+    /// [`AuditEvent::manual`]: crate::entity::audit::AuditEvent::manual
+    /// [`with_reason`]: crate::entity::audit::AuditEvent::with_reason
+    /// [`with_actor`]: crate::entity::audit::AuditEvent::with_actor
+    pub fn suppress(&mut self, event: AuditEvent<M>) {
+        self.suppressed = true;
+        self.audit.record(event);
+    }
+
+    /// Whether a reviewer has [`suppress`](Self::suppress)ed this entity.
+    #[must_use]
+    pub fn is_suppressed(&self) -> bool {
+        self.suppressed
     }
 }

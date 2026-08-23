@@ -254,6 +254,48 @@ impl<M: Modality> AuditEvent<M> {
         )
     }
 
+    /// A human override at `location` with the entity's asserted `confidence`
+    /// — the birth event of a manually-added entity, or the marker recorded
+    /// when a reviewer suppresses a detected one. Attach the rationale and the
+    /// actor with [`with_reason`] / [`with_actor`]; the `source` mirrors the
+    /// actor, or is `"manual"` when none is given.
+    ///
+    /// [`with_reason`]: Self::with_reason
+    /// [`with_actor`]: Self::with_actor
+    pub fn manual(location: M::Location, confidence: Confidence) -> Self {
+        Self::unlinked(
+            HipStr::borrowed("manual"),
+            confidence,
+            AuditKind::Manual {
+                location,
+                reason: None,
+                actor: None,
+            },
+        )
+    }
+
+    /// Set the rationale on a [`manual`](Self::manual) event (a no-op on any
+    /// other kind).
+    #[must_use]
+    pub fn with_reason(mut self, reason: impl Into<HipStr<'static>>) -> Self {
+        if let AuditKind::Manual { reason: r, .. } = &mut self.kind {
+            *r = Some(reason.into());
+        }
+        self
+    }
+
+    /// Set the actor on a [`manual`](Self::manual) event (a no-op on any other
+    /// kind); the actor also becomes the event's `source`.
+    #[must_use]
+    pub fn with_actor(mut self, actor: impl Into<HipStr<'static>>) -> Self {
+        let actor = actor.into();
+        if let AuditKind::Manual { actor: a, .. } = &mut self.kind {
+            self.source = actor.clone();
+            *a = Some(actor);
+        }
+        self
+    }
+
     /// Whether this event is a recognition (pattern or model).
     pub fn is_recognition(&self) -> bool {
         matches!(
@@ -387,6 +429,16 @@ impl<M: Modality> AuditKind<M> {
                     }
                     None => out.push(0),
                 }
+            }
+            Self::Manual {
+                location,
+                reason,
+                actor,
+            } => {
+                out.push(8);
+                put_bytes(out, &location.hash());
+                put_opt(out, reason.as_ref().map(|s| s.as_bytes()));
+                put_opt(out, actor.as_ref().map(|s| s.as_bytes()));
             }
         }
     }
@@ -523,6 +575,30 @@ pub enum AuditKind<M: Modality> {
             serde(default, skip_serializing_if = "Option::is_none")
         )]
         span_length: Option<u32>,
+    },
+    /// A human override, outside automatic detection: an entity a reviewer
+    /// added by hand, or a detected one they marked to ignore. Its provenance
+    /// is a person's decision, not a recognizer's — so the trail records who
+    /// (when supplied) and why, rather than a pattern or model.
+    Manual {
+        /// Where the override applies, in modality-native coordinates.
+        location: M::Location,
+        /// The reviewer's rationale, when supplied (e.g. `"false positive"`,
+        /// `"missed by detection"`). `None` for an unexplained override.
+        #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        reason: Option<HipStr<'static>>,
+        /// Who made the override (a reviewer id or name), when supplied. `None`
+        /// when the caller did not attribute it to an actor.
+        #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        actor: Option<HipStr<'static>>,
     },
 }
 
