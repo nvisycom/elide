@@ -13,11 +13,11 @@ use elide_core::modality::image::{Image, ImageData};
 use elide_core::modality::text::Text;
 #[cfg(feature = "usage")]
 use elide_core::recognition::TokenCounts;
+use rig::ExtractionResponse;
 use rig::client::CompletionClient;
 use rig::completion::{Message, Usage};
 use rig::extractor::ExtractorBuilder;
 use rig::message::{ImageMediaType, UserContent};
-use rig::{ExtractionResponse, OneOrMany};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -119,7 +119,7 @@ impl RigBackend {
         // `additional_params` — rig merges these into the provider request.
         let params = serde_json::json!({ "temperature": self.config.temperature });
         dispatch!(&self.model, |model| {
-            let mut builder = ExtractorBuilder::<_, T>::new(model.clone())
+            let mut builder = ExtractorBuilder::<T>::new(model.clone())
                 .max_tokens(max_tokens)
                 .additional_params(params);
             if let Some(p) = preamble.as_deref() {
@@ -193,10 +193,9 @@ fn image_message(prompt: &str, data: &ImageData) -> Message {
         "webp" => Some(ImageMediaType::WEBP),
         _ => None,
     };
-    let content = OneOrMany::many([
+    let content = vec![
         UserContent::text(prompt),
         UserContent::image_raw(data.bytes.to_vec(), media_type, None),
-    ])
-    .expect("two content items");
+    ];
     Message::User { content }
 }
