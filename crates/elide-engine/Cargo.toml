@@ -25,18 +25,26 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 default = []
 
-## Derive `schemars::JsonSchema` on the re-exported core types. `Report`
-## itself serializes through `erased-serde` (a type-erased entity view) and
-## has no derivable schema; this forwards schema support to the engine crates
-## so a consumer can describe the entities a report carries. serde is always
-## on for this crate (the `Report` exists to serialize), so schema only adds
-## the schemars derives on top.
+## Derive `schemars::JsonSchema` across the engine crates and hand-author it for
+## [`Report`], whose wire form is a hand-written `Serialize` (a type-erased
+## entity view). The report schema's per-modality group arms are gated on the
+## modality features below, so it describes exactly the modalities compiled in.
+## serde is always on for this crate, so schema only adds the schemars derives.
 schema = [
+    "dep:schemars",
+    "dep:serde_json",
     "elide-core/schema",
     "elide-detection/schema",
     "elide-redaction/schema",
     "elide-codec/schema",
 ]
+
+## The non-text modalities, forwarded to `elide-core`. A report can carry a
+## group of any compiled-in modality, so these gate the matching arm of the
+## `Report` JSON schema; `text` is always available.
+image = ["elide-core/image"]
+audio = ["elide-core/audio"]
+tabular = ["elide-core/tabular"]
 
 ## Resource-usage accounting: carry the per-recognizer / per-enricher usage a
 ## document's analysis incurred on the [`Report`]. Off by default.
@@ -53,11 +61,15 @@ elide-codec = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = [] }
 erased-serde = { workspace = true, features = [] }
 serde-value = { workspace = true, features = [] }
+# The hand-written `Report` JSON schema; both gated on the `schema` feature.
+schemars = { workspace = true, features = [], optional = true }
+serde_json = { workspace = true, features = [], optional = true }
 
 # Primitive datatypes
 bytes = { workspace = true, features = [] }
 uuid = { workspace = true, features = [] }
 
 [dev-dependencies]
+jsonschema = { version = "0.51.0", default-features = false }
 # (De)serialization
 serde_json = { workspace = true, features = [] }
