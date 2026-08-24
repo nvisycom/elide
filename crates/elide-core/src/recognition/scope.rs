@@ -75,6 +75,19 @@ pub struct ScopeMetadata {
     pub audience: Vec<HipStr<'static>>,
 }
 
+impl ScopeMetadata {
+    /// Whether the caller asserted no request metadata: no [`tags`], no
+    /// [`purpose`], and no [`audience`]. Equal to [`ScopeMetadata::default`].
+    ///
+    /// [`tags`]: Self::tags
+    /// [`purpose`]: Self::purpose
+    /// [`audience`]: Self::audience
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.tags.is_empty() && self.purpose.is_none() && self.audience.is_empty()
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
@@ -197,5 +210,19 @@ impl Scope {
     pub fn with_correlation_id(mut self, id: Uuid) -> Self {
         self.correlation_id = Some(id);
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metadata_is_empty_by_default_and_when_any_field_is_set() {
+        assert!(ScopeMetadata::default().is_empty());
+
+        assert!(!Scope::new().with_tags(["medical"]).metadata.is_empty());
+        assert!(!Scope::new().with_purpose("fraud").metadata.is_empty());
+        assert!(!Scope::new().with_audience(["auditor"]).metadata.is_empty());
     }
 }
