@@ -82,6 +82,93 @@ impl ModalityRegistry {
     fn entry(&self, modality: &str) -> Option<ModalityEntry> {
         self.entries.get(modality).copied()
     }
+
+    /// Reconstruct a [`Report`] from `deserializer`, routing each group to its
+    /// registered modality — the shared core of [`Report::deserializer`] and
+    /// [`Orchestrator::deserialize_report`]. Maps any deserialization failure to
+    /// a [`MalformedInput`] error.
+    ///
+    /// [`Report::deserializer`]: Report::deserializer
+    /// [`Orchestrator::deserialize_report`]: crate::Orchestrator::deserialize_report
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    pub(crate) fn deserialize<'de, D>(&self, deserializer: D) -> elide_core::Result<Report>
+    where
+        D: Deserializer<'de>,
+    {
+        ReportSeed { registry: self }
+            .deserialize(deserializer)
+            .map_err(|e| {
+                elide_core::Error::new(elide_core::ErrorKind::MalformedInput, e.to_string())
+            })
+    }
+}
+
+/// Rebuilds a serialized [`Report`] — without the analyzers, anonymizers, or
+/// codec registry needed to *run* one.
+///
+/// A report's wire form tags each group with its modality name but not the
+/// concrete type, and deserialization is not object-safe, so a bare
+/// `Report: Deserialize` is impossible. Register the modalities the report may
+/// contain with [`with_modality`], then reconstruct with [`deserialize`]. The
+/// modalities registered here need only be *deserializable*; they need no
+/// pipeline.
+///
+/// This is the deserialize-only counterpart to the full [`Orchestrator`], for a
+/// review layer that reconstructs an edited report without re-building the
+/// engine that produced it. Build one with [`Report::deserializer`].
+///
+/// ```ignore
+/// let report = Report::deserializer()
+///     .with_modality::<Text>()
+///     .with_modality::<Image>()
+///     .deserialize(&mut serde_json::Deserializer::from_str(json))?;
+/// ```
+///
+/// [`with_modality`]: Self::with_modality
+/// [`deserialize`]: Self::deserialize
+/// [`Orchestrator`]: crate::Orchestrator
+/// [`Report::deserializer`]: Report::deserializer
+#[derive(Default)]
+pub struct ReportDeserializer {
+    registry: ModalityRegistry,
+}
+
+impl ReportDeserializer {
+    /// A deserializer with no modalities registered.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register modality `M` so a group tagged with its name reconstructs as
+    /// `Vec<Entity<M>>`. Returns `self` for chaining.
+    #[must_use]
+    pub fn with_modality<M>(mut self) -> Self
+    where
+        M: Modality,
+        Vec<Entity<M>>: EntityGroup + serde::de::DeserializeOwned,
+    {
+        self.registry.register::<M>();
+        self
+    }
+
+    /// Reconstruct a [`Report`] from `deserializer`, routing each group to a
+    /// registered modality.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`MalformedInput`] error if the payload is not a valid report,
+    /// or if a group carries entities under a modality that was not registered —
+    /// see [`Orchestrator::deserialize_report`] for the empty-vs-non-empty rule.
+    ///
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    /// [`Orchestrator::deserialize_report`]: crate::Orchestrator::deserialize_report
+    pub fn deserialize<'de, D>(&self, deserializer: D) -> elide_core::Result<Report>
+    where
+        D: Deserializer<'de>,
+    {
+        self.registry.deserialize(deserializer)
+    }
 }
 
 /// One reconstructed group: the entities and the routing [`TypeId`] the report
@@ -402,6 +489,22 @@ mod tests {
         assert_eq!(body.len(), 1);
         assert_eq!(body[0].label, LabelRef::new("EMAIL_ADDRESS"));
         assert!(body[0].audit.verify().is_ok(), "the audit trail survives");
+    }
+
+    /// The public [`Report::deserializer`] rebuilds a report with no orchestrator
+    /// — no analyzers, anonymizers, or codec registry.
+    #[test]
+    fn report_deserializer_rebuilds_without_an_orchestrator() {
+        let report = Report::new().insert_body::<Text>(vec![text_entity("EMAIL_ADDRESS")]);
+        let json = serde_json::to_string(&report).unwrap();
+
+        let mut de = serde_json::Deserializer::from_str(&json);
+        let back = Report::deserializer()
+            .with_modality::<Text>()
+            .deserialize(&mut de)
+            .expect("rebuilt");
+        let body = back.entities::<Text>().expect("body reconstructed as Text");
+        assert_eq!(body[0].label, LabelRef::new("EMAIL_ADDRESS"));
     }
 
     #[test]

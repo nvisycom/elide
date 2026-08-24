@@ -37,6 +37,6 @@ pub use elide_core::{entity, primitive};
 #[cfg(feature = "engine")]
 #[cfg_attr(docsrs, doc(cfg(feature = "engine")))]
 #[doc(inline)]
-pub use elide_engine::{Directives, EntityGroup, Orchestrator, Report};
+pub use elide_engine::{Directives, EntityGroup, Orchestrator, Report, ReportDeserializer};
 
 pub mod prelude;
