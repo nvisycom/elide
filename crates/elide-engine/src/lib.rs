@@ -20,10 +20,10 @@ use elide_redaction::Anonymizer;
 
 pub use self::directives::Directives;
 use self::pipeline::{AnalyzeOutcome, ErasedPipeline, ModalityPipeline};
-use self::report::{BodyReport, ModalityRegistry, PartReport, ReportSeed};
+use self::report::{BodyReport, ModalityRegistry, PartReport};
 // `EntityGroup` is the bound on the construction methods — named in public
 // signatures, so callers must be able to reach it.
-pub use self::report::{EntityGroup, Report};
+pub use self::report::{EntityGroup, Report, ReportDeserializer};
 
 /// Drives analyze + redact across a whole document.
 ///
@@ -87,7 +87,14 @@ impl<'r> Orchestrator<'r> {
     /// Register the analyze + redact pipeline for modality `M`. A part
     /// that decodes to `M` is driven by this pipeline; parts of a modality
     /// with no registered pipeline pass through untouched. Re-registering
-    /// a modality replaces it.
+    /// a modality replaces both halves.
+    ///
+    /// When a modality only ever detects *or* only ever redacts, register just
+    /// the half it needs with [`with_analyzer`] / [`with_anonymizer`] instead —
+    /// the other half defaults to a no-op.
+    ///
+    /// [`with_analyzer`]: Self::with_analyzer
+    /// [`with_anonymizer`]: Self::with_anonymizer
     #[must_use]
     pub fn with_modality<M>(mut self, analyzer: Analyzer<M>, anonymizer: Anonymizer<M>) -> Self
     where
@@ -106,6 +113,83 @@ impl<'r> Orchestrator<'r> {
         // wire, so `deserialize_report` can route it back by name.
         self.groups.register::<M>();
         self
+    }
+
+    /// Register (or update) only the *analyzer* for modality `M` — the detection
+    /// half. If a pipeline for `M` already exists, its analyzer is replaced and
+    /// its anonymizer kept; otherwise a new pipeline is created with a no-op
+    /// [`Anonymizer::new`] as the redaction half.
+    ///
+    /// For a modality a caller only ever [`analyze`]s (never redacts): there is
+    /// no need to fabricate an anonymizer to satisfy [`with_modality`].
+    ///
+    /// [`analyze`]: Self::analyze
+    /// [`with_modality`]: Self::with_modality
+    #[must_use]
+    pub fn with_analyzer<M>(mut self, analyzer: Analyzer<M>) -> Self
+    where
+        M: Modality,
+        Vec<Entity<M>>: EntityGroup + serde::de::DeserializeOwned,
+        DocumentHandle<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
+    {
+        match self.modality_pipeline_mut::<M>() {
+            Some(pipeline) => pipeline.analyzer = analyzer,
+            None => self.insert_pipeline::<M>(analyzer, Anonymizer::new()),
+        }
+        self
+    }
+
+    /// Register (or update) only the *anonymizer* for modality `M` — the
+    /// redaction half. If a pipeline for `M` already exists, its anonymizer is
+    /// replaced and its analyzer kept; otherwise a new pipeline is created with a
+    /// no-op [`Analyzer::new`] as the detection half.
+    ///
+    /// For a modality whose entities are supplied out-of-band (a rebuilt report)
+    /// and only redacted: there is no need to fabricate an analyzer.
+    ///
+    /// [`with_modality`]: Self::with_modality
+    #[must_use]
+    pub fn with_anonymizer<M>(mut self, anonymizer: Anonymizer<M>) -> Self
+    where
+        M: Modality,
+        Vec<Entity<M>>: EntityGroup + serde::de::DeserializeOwned,
+        DocumentHandle<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
+    {
+        match self.modality_pipeline_mut::<M>() {
+            Some(pipeline) => pipeline.anonymizer = anonymizer,
+            None => self.insert_pipeline::<M>(Analyzer::new(), anonymizer),
+        }
+        self
+    }
+
+    /// The registered pipeline for `M`, recovered to its concrete type, or
+    /// `None` if none is registered. The downcast holds because the pipeline is
+    /// keyed by `TypeId::of::<M>()`.
+    fn modality_pipeline_mut<M>(&mut self) -> Option<&mut ModalityPipeline<M>>
+    where
+        M: Modality,
+    {
+        self.pipelines
+            .get_mut(&TypeId::of::<M>())?
+            .as_any_mut()
+            .downcast_mut::<ModalityPipeline<M>>()
+    }
+
+    /// Insert a fresh pipeline for `M` and register its deserialize parser.
+    fn insert_pipeline<M>(&mut self, analyzer: Analyzer<M>, anonymizer: Anonymizer<M>)
+    where
+        M: Modality,
+        Vec<Entity<M>>: EntityGroup + serde::de::DeserializeOwned,
+        DocumentHandle<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
+    {
+        self.pipelines.insert(
+            TypeId::of::<M>(),
+            Box::new(ModalityPipeline {
+                analyzer,
+                anonymizer,
+            }),
+        );
+        self.groups.register::<M>();
     }
 
     /// Detect the entities of a whole document without redacting: its body
@@ -348,12 +432,6 @@ impl<'r> Orchestrator<'r> {
     where
         D: serde::Deserializer<'de>,
     {
-        use serde::de::DeserializeSeed;
-
-        ReportSeed {
-            registry: &self.groups,
-        }
-        .deserialize(deserializer)
-        .map_err(|e| elide_core::Error::new(elide_core::ErrorKind::MalformedInput, e.to_string()))
+        self.groups.deserialize(deserializer)
     }
 }

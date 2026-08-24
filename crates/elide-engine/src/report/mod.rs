@@ -44,7 +44,8 @@ use elide_core::modality::Modality;
 use elide_core::recognition::UsageReport;
 use uuid::Uuid;
 
-pub(crate) use self::deserialize::{ModalityRegistry, ReportSeed};
+pub(crate) use self::deserialize::ModalityRegistry;
+pub use self::deserialize::ReportDeserializer;
 pub(crate) use self::entry::{BodyReport, PartReport};
 pub use self::group::EntityGroup;
 
@@ -112,6 +113,24 @@ impl Report {
             #[cfg(feature = "usage")]
             usage: UsageReport::new(),
         }
+    }
+
+    /// A [`ReportDeserializer`] for reconstructing a serialized report — without
+    /// the analyzers, anonymizers, or codec registry an [`Orchestrator`] needs
+    /// to *run* one. Register the modalities the report may contain, then
+    /// [`deserialize`] it:
+    ///
+    /// ```ignore
+    /// let report = Report::deserializer()
+    ///     .with_modality::<Text>()
+    ///     .deserialize(&mut serde_json::Deserializer::from_str(json))?;
+    /// ```
+    ///
+    /// [`Orchestrator`]: super::Orchestrator
+    /// [`deserialize`]: ReportDeserializer::deserialize
+    #[must_use]
+    pub fn deserializer() -> ReportDeserializer {
+        ReportDeserializer::new()
     }
 
     /// The resource usage recorded across this analysis — one entry per

@@ -1,12 +1,10 @@
-//! Per-modality pipeline and its type-erased form, used by the
-//! [`Orchestrator`] to drive a document's body and
-//! its container parts across two phases (analyze, then apply).
+//! [`ErasedPipeline`]: the type-erased pipeline the [`Orchestrator`] stores per
+//! modality, so a document part can be offered to each pipeline until one
+//! matches without the orchestrator naming the modality statically.
 //!
-//! [`Orchestrator`]: super::Orchestrator
+//! [`Orchestrator`]: crate::Orchestrator
 
-use std::any::TypeId;
-use std::future::Future;
-use std::pin::Pin;
+use std::any::{Any, TypeId};
 
 use bytes::Bytes;
 use elide_codec::{DocumentHandle, UntypedDocumentHandle};
@@ -14,92 +12,11 @@ use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::recognition::Scope;
-#[cfg(feature = "usage")]
-use elide_core::recognition::Usage;
-use elide_core::recognition::annotation::Annotations;
-use elide_detection::{Analysis, Analyzer};
-use elide_redaction::Anonymizer;
 
-use super::directives::AnnotationSet;
-use super::report::EntityGroup;
-
-/// The concrete analyze + redact pipeline for one modality `M`.
-///
-/// The [`Scope`] and region [`Annotations`] are supplied per analysis (via
-/// [`Directives`]) as arguments to [`analyze`].
-///
-/// [`Annotations`]: elide_core::recognition::annotation::Annotations
-/// [`Directives`]: super::Directives
-/// [`analyze`]: Self::analyze
-pub(super) struct ModalityPipeline<M: Modality> {
-    pub(super) analyzer: Analyzer<M>,
-    pub(super) anonymizer: Anonymizer<M>,
-}
-
-impl<M> ModalityPipeline<M>
-where
-    M: Modality,
-    DocumentHandle<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
-{
-    /// Detect the entities in `handle` (in source coordinates), without
-    /// redacting. The caller may edit the returned set before applying.
-    pub(super) async fn analyze(
-        &self,
-        handle: &mut DocumentHandle<M>,
-        scope: &Scope,
-        annotations: &Annotations<M>,
-    ) -> Result<Analysis<M>> {
-        self.analyzer
-            .analyze_stream_with(handle, scope, annotations)
-            .await
-    }
-
-    /// Apply `entities` to `handle` in place: the redactions land in the
-    /// handle, ready for its eventual `encode`. `scope` is passed to selection
-    /// so scope-aware rules can branch on request context.
-    pub(super) async fn apply(
-        &self,
-        handle: &mut DocumentHandle<M>,
-        entities: &mut [Entity<M>],
-        scope: &Scope,
-    ) -> Result<()> {
-        self.anonymizer.anonymize(handle, entities, scope).await
-    }
-}
-
-/// A boxed, pinned, `Send` future — the erased async return shape.
-type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-
-/// The boxed entities a matched in-place analysis produced; `None` when the
-/// pipeline's modality did not match the handle. Under the `usage` feature it
-/// also carries the per-component [`Usage`] the analysis recorded. The result
-/// of [`ErasedPipeline::analyze_in_place`].
-#[cfg(feature = "usage")]
-type InPlaceAnalysis = Option<(Box<dyn EntityGroup>, Vec<Usage>)>;
-/// The boxed entities a matched in-place analysis produced; `None` when the
-/// pipeline's modality did not match the handle. The result of
-/// [`ErasedPipeline::analyze_in_place`].
-#[cfg(not(feature = "usage"))]
-type InPlaceAnalysis = Option<Box<dyn EntityGroup>>;
-
-/// The result of offering a decoded handle to a pipeline for analysis: the
-/// pipeline either accepts it (its modality matched) and returns the
-/// detected entities boxed by modality, or rejects it (a different
-/// modality) and hands the handle back for another pipeline to try.
-pub(super) enum AnalyzeOutcome {
-    /// Modality matched: the matched modality's `TypeId`, the retained
-    /// handle, its boxed `Vec<Entity<M>>` (recoverable as that modality), and
-    /// the per-component [`Usage`] the analysis recorded.
-    Accepted {
-        modality: TypeId,
-        handle: UntypedDocumentHandle,
-        entities: Box<dyn EntityGroup>,
-        #[cfg(feature = "usage")]
-        usage: Vec<Usage>,
-    },
-    /// Not this pipeline's modality; the undecoded handle is returned.
-    Rejected(UntypedDocumentHandle),
-}
+use super::ModalityPipeline;
+use super::outcome::{AnalyzeOutcome, BoxFuture, InPlaceAnalysis};
+use crate::directives::AnnotationSet;
+use crate::report::EntityGroup;
 
 /// A type-erased pipeline the orchestrator stores per modality.
 ///
@@ -123,7 +40,7 @@ pub(super) enum AnalyzeOutcome {
 /// [`analyze_in_place`]: ErasedPipeline::analyze_in_place
 /// [`apply_in_place`]: ErasedPipeline::apply_in_place
 /// [`apply_part`]: ErasedPipeline::apply_part
-pub(super) trait ErasedPipeline: Send + Sync {
+pub(crate) trait ErasedPipeline: Send + Sync {
     fn analyze<'a>(
         &'a self,
         handle: UntypedDocumentHandle,
@@ -151,6 +68,14 @@ pub(super) trait ErasedPipeline: Send + Sync {
         entities: &'a mut dyn EntityGroup,
         scope: &'a Scope,
     ) -> BoxFuture<'a, Result<Bytes>>;
+
+    /// The pipeline as `&mut dyn Any`, to `downcast_mut` to a concrete
+    /// `ModalityPipeline<M>` — how [`with_analyzer`] / [`with_anonymizer`] reach
+    /// into an already-registered pipeline to replace one half.
+    ///
+    /// [`with_analyzer`]: crate::Orchestrator::with_analyzer
+    /// [`with_anonymizer`]: crate::Orchestrator::with_anonymizer
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
 impl<M> ErasedPipeline for ModalityPipeline<M>
@@ -244,5 +169,9 @@ where
             self.apply(&mut handle, entities, scope).await?;
             Ok(handle.encode()?.to_bytes())
         })
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }

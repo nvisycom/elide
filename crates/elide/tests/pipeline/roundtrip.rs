@@ -104,3 +104,69 @@ async fn deserialize_rejects_an_unregistered_modality_with_entities() -> Result<
     assert_eq!(err.kind(), elide::ErrorKind::MalformedInput);
     Ok(())
 }
+
+/// The standalone `Report::deserializer()` rebuilds a serialized report with no
+/// orchestrator — the review-layer path that carries no analyzers, anonymizers,
+/// or codec registry. The rebuilt report is byte-for-byte the same shape as one
+/// deserialized through the orchestrator.
+#[tokio::test]
+async fn report_deserializer_rebuilds_a_report_standalone() -> Result<()> {
+    let registry = FormatRegistry::with_builtin();
+    let orchestrator = orchestrator(&registry)?;
+
+    let mut doc = registry.decode(SAMPLE, "docx").await?;
+    let report = orchestrator.analyze(&mut doc, &Directives::new()).await?;
+    let detected = report.entities::<Text>().expect("text body").len();
+    let json = serde_json::to_string(&report).expect("serializes");
+
+    // No orchestrator here — just the modalities the report may contain.
+    let mut de = serde_json::Deserializer::from_str(&json);
+    let rebuilt = elide::Report::deserializer()
+        .with_modality::<Text>()
+        .with_modality::<Image>()
+        .deserialize(&mut de)?;
+
+    assert_eq!(
+        rebuilt
+            .entities::<Text>()
+            .expect("body reconstructed")
+            .len(),
+        detected,
+    );
+    Ok(())
+}
+
+/// `with_analyzer` and `with_anonymizer` register each pipeline half separately,
+/// merging into one pipeline — equivalent to `with_modality(analyzer,
+/// anonymizer)`. Detection and redaction both run, so neither half was lost.
+#[tokio::test]
+async fn split_pipeline_halves_detect_and_redact() -> Result<()> {
+    let registry = FormatRegistry::with_builtin();
+
+    let patterns = PatternRecognizer::builder()
+        .with_builtin_patterns()
+        .with_builtin_dictionaries()
+        .build_context_enhanced()?;
+    let text_redact = Anonymizer::new()
+        .with(Rule::label(
+            builtins::EMAIL_ADDRESS.to_ref(),
+            Replace::new("[EMAIL]"),
+        ))
+        .with(Rule::fallback(Erase));
+
+    // Register the two halves in separate calls — no fabricated empty half.
+    let orchestrator = Orchestrator::new(&registry)
+        .with_analyzer::<Text>(Analyzer::new().with_recognizer(patterns))
+        .with_anonymizer::<Text>(text_redact);
+
+    let mut doc = registry.decode(SAMPLE, "docx").await?;
+    let applied = orchestrator.anonymize(&mut doc, &Directives::new()).await?;
+
+    let body = applied.entities::<Text>().expect("text body");
+    assert!(!body.is_empty(), "the analyzer half detected entities");
+    assert!(
+        body.iter().all(|e| e.is_redacted()),
+        "the anonymizer half redacted them — both halves survived the merge",
+    );
+    Ok(())
+}
