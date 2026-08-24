@@ -88,11 +88,11 @@ stt = ["dep:elide-stt", "audio"]
 ocr = ["dep:elide-ocr", "image"]
 
 ## The `audio` modality. Implied by the audio codec formats.
-audio = ["elide-core/audio", "elide-operator/audio"]
+audio = ["elide-core/audio", "elide-operator/audio", "elide-engine?/audio"]
 ## The `image` modality. Implied by the image codec formats.
-image = ["elide-core/image", "elide-operator/image"]
+image = ["elide-core/image", "elide-operator/image", "elide-engine?/image"]
 ## The `tabular` modality. Implied by the tabular codec formats.
-tabular = ["elide-core/tabular", "elide-operator/tabular", "elide-redaction/tabular"]
+tabular = ["elide-core/tabular", "elide-operator/tabular", "elide-redaction/tabular", "elide-engine?/tabular"]
 
 ## Re-export the codec crate: the `codec` module (`FormatRegistry`, decode /
 ## encode). On its own this enables no formats; use the per-modality or

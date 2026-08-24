@@ -30,6 +30,8 @@
 mod deserialize;
 mod entry;
 mod group;
+#[cfg(feature = "schema")]
+mod schema;
 mod serialize;
 
 use std::any::TypeId;

@@ -100,6 +100,37 @@ mod tests {
         assert!(empty["body"].is_null());
     }
 
+    /// The hand-written [`JsonSchema`](super::schema) must accept what
+    /// [`Serialize`] produces — the drift guard. A populated report (body plus a
+    /// container part), a body-less report, and an empty report all validate
+    /// against `schema_for!(Report)`; any divergence between the two hand-written
+    /// impls fails here rather than silently shipping a schema that lies.
+    #[cfg(feature = "schema")]
+    #[test]
+    fn serialized_reports_validate_against_the_schema() {
+        use elide_codec::PartId;
+
+        let schema = serde_json::to_value(schemars::schema_for!(Report)).unwrap();
+
+        let with_part = Report::new()
+            .insert_body::<Text>(vec![text_entity("EMAIL_ADDRESS")])
+            .insert_part::<Text>(
+                PartId::from("word/media/image1.png".to_owned()),
+                vec![text_entity("PHONE_NUMBER")],
+            );
+
+        for report in [
+            with_part,
+            Report::new().insert_body::<Text>(Vec::new()),
+            Report::new(),
+        ] {
+            let doc = serde_json::to_value(&report).unwrap();
+            if let Err(e) = jsonschema::validate(&schema, &doc) {
+                panic!("serialized report does not match its schema: {e}\n{doc:#}");
+            }
+        }
+    }
+
     #[cfg(feature = "usage")]
     #[test]
     fn serializes_usage_entries() {
