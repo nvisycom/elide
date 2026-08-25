@@ -274,6 +274,32 @@ mod tests {
         assert!(entity.audit.verify().is_ok());
     }
 
+    /// An `Amend` *after* a `Suppress` must not clear the suppression — `Amend`
+    /// is provenance-only, so the earlier `Suppress` decision still stands.
+    #[test]
+    fn amend_after_suppress_stays_suppressed() {
+        let mut entity = text_entity();
+        let loc = entity.location.clone();
+        entity.suppress(AuditEvent::manual(
+            "reviewer-7",
+            entity.confidence,
+            Manual::new(ManualIntent::Suppress, loc.clone()),
+        ));
+        assert!(entity.is_suppressed(), "suppressed by the reviewer");
+        // A later amendment (e.g. retag) is recorded but leaves the entity
+        // suppressed.
+        entity.audit.record(AuditEvent::manual(
+            "reviewer-7",
+            entity.confidence,
+            Manual::new(ManualIntent::Amend, loc),
+        ));
+        assert!(
+            entity.is_suppressed(),
+            "amend after suppress keeps the suppression",
+        );
+        assert!(entity.audit.verify().is_ok());
+    }
+
     /// `suppress` requires a `Manual` event; a recognition event is rejected in
     /// debug builds so suppression cannot change redaction behaviour without the
     /// human-override event that explains it.

@@ -30,12 +30,20 @@ pub struct Redaction {
     pub leak_profile: Option<LeakProfile>,
     /// Identifier of the key needed to reverse it, if reversible.
     #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub key_id: Option<HipStr<'static>>,
     /// Which selection rule chose this operator: the automatic "why" (matched a
     /// label, a tag, a predicate, or the fallback).
     pub matched_by: RuleMatch,
     /// The author-supplied policy rationale, when the operator carried an
     /// [`Attribution`]; `None` otherwise.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub attribution: Option<Attribution>,
     /// BLAKE3 digest of the original text the operator hid, when the redaction
     /// layer recorded it. Proves *what* was redacted without storing the
@@ -258,23 +266,28 @@ impl<M: Modality> Manual<M> {
 /// Which human decision a [`Manual`] event records — the reviewer actions on a
 /// finding: [`Flag`](ManualIntent::Flag) a miss, [`Suppress`](ManualIntent::Suppress)
 /// a false positive, or [`Amend`](ManualIntent::Amend) an existing finding.
+// Explicit discriminants: `Manual::hash_into` folds `intent as u8` into the
+// tamper-evident hash, so these values are part of the hash. Pinning them makes
+// that dependence visible and keeps a reorder or mid-enum insertion from
+// silently changing an event's hash. Append new variants with the next value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum ManualIntent {
     /// A reviewer flagged an entity detection missed (a false negative). The
     /// entity is redacted like any detected one.
-    Flag,
+    Flag = 0,
     /// A reviewer marked a detected entity to leave alone (a false positive).
     /// The redaction pass skips it — see [`AuditLog::is_suppressed`].
     ///
     /// [`AuditLog::is_suppressed`]: crate::entity::audit::AuditLog::is_suppressed
-    Suppress,
+    Suppress = 1,
     /// A reviewer amended an existing entity — retagged its label, adjusted its
     /// span, or changed another attribute. The entity stays and is redacted
     /// normally; this records that a human changed it.
-    Amend,
+    Amend = 2,
 }
 
 /// Fold an optional [`Attribution`] into `out`: a presence byte, then the

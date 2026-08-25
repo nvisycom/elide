@@ -164,7 +164,9 @@ impl<M: Modality> AuditEvent<M> {
             hasher.raw(parent.as_bytes());
         }
         hasher.raw(&(self.parents.len() as u64).to_le_bytes());
-        hasher.raw(self.source.as_bytes());
+        // `source` is variable-width, so length-prefix it (`bytes`) — the
+        // fixed-width spine fields around it use `raw`.
+        hasher.bytes(self.source.as_bytes());
         hasher.raw(&self.timestamp.as_nanosecond().to_le_bytes());
         hasher.raw(&self.confidence.get().to_le_bytes());
         self.kind.hash_into(&mut hasher);

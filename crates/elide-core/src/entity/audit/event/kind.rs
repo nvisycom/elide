@@ -98,8 +98,9 @@ impl<M: Modality> AuditKind<M> {
     pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
         // Each arm writes its payload's central discriminant `TAG`, then folds
         // the payload's own fields in. The per-kind logic (the `TAG` and the
-        // `hash_into`) lives with the kind's struct in [`payload`](super::payload);
-        // here it is uniform "tag, then body" dispatch.
+        // `hash_into`) lives with the kind's struct in the `recognition`,
+        // `reconcile`, and `apply` submodules; here it is uniform "tag, then
+        // body" dispatch.
         match self {
             Self::Pattern(p) => {
                 out.byte(Pattern::<M>::TAG);

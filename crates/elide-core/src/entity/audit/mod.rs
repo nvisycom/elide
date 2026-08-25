@@ -175,7 +175,12 @@ impl<M: Modality> AuditLog<M> {
             .iter()
             .rev()
             .find_map(|e| match &e.kind {
-                AuditKind::Manual(m) => Some(m.intent == ManualIntent::Suppress),
+                // `Amend` is provenance-only — it does not decide suppression, so
+                // an amendment after a `Suppress` must not clear it. Skip it and
+                // read the most recent `Flag`/`Suppress` decision.
+                AuditKind::Manual(m) if m.intent != ManualIntent::Amend => {
+                    Some(m.intent == ManualIntent::Suppress)
+                }
                 _ => None,
             })
             .unwrap_or(false)
