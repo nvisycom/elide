@@ -7,8 +7,8 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use super::payload::{
-    Calibration, Conflict, Contested, Deduplication, KindPayload, Manual, ManualIntent, Model,
-    ModelEvent, Pattern, PatternEvent, Redaction, Refinement, Selection,
+    Calibration, Conflict, Contested, Deduplication, Manual, ManualIntent, Model, ModelEvent,
+    Pattern, PatternEvent, Redaction, Refinement, Selection,
 };
 use super::{Attribution, AuditHash, RuleMatch};
 use crate::entity::LabelRef;
@@ -113,6 +113,31 @@ impl<M: Modality> AuditEvent<M> {
             parents: Vec::new(),
             hash: AuditHash::GENESIS,
         }
+    }
+
+    /// This event's hash: BLAKE3 over its parents' hashes, its spine (source,
+    /// timestamp, confidence), and its [`kind`](Self::kind) detail.
+    ///
+    /// The kind folds itself in through [`AuditKind::hash`], which hashes each
+    /// field directly (locations via [`ModalityLocation::hash`]), so no
+    /// serialization and no `serde` bound is involved. Parents are folded in
+    /// first, so an event's hash covers the exact sub-DAG it descends from.
+    /// [`AuditLog`] assigns the result to [`hash`](Self::hash) when recording,
+    /// and recomputes it here to verify the trail.
+    ///
+    /// [`ModalityLocation::hash`]: crate::modality::ModalityLocation::hash
+    /// [`AuditLog`]: crate::entity::audit::AuditLog
+    pub(super) fn digest(&self) -> AuditHash {
+        let mut bytes = Vec::new();
+        for parent in &self.parents {
+            bytes.extend_from_slice(parent.as_bytes());
+        }
+        bytes.extend_from_slice(&(self.parents.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(self.source.as_bytes());
+        bytes.extend_from_slice(&self.timestamp.as_nanosecond().to_le_bytes());
+        bytes.extend_from_slice(&self.confidence.get().to_le_bytes());
+        self.kind.hash(&mut bytes);
+        AuditHash::of(&bytes)
     }
 
     /// Recognition event from a pattern/dictionary recognizer.
@@ -284,14 +309,14 @@ impl<M: Modality> AuditEvent<M> {
     /// carrying `intent` — [`Include`] for a manually-added entity's birth
     /// event, [`Suppress`] to mark a detected one to leave alone. Prefer the
     /// [`manual_include`] / [`manual_suppress`] shorthands. Attach the rationale
-    /// and the actor with [`with_reason`] / [`with_actor`]; the `source` mirrors
-    /// the actor, or is `"manual"` when none is given.
+    /// with [`with_attribution`], and name the reviewer with [`with_actor`]; the
+    /// `source` mirrors the actor, or is `"manual"` when none is given.
     ///
     /// [`Include`]: crate::entity::audit::ManualIntent::Include
     /// [`Suppress`]: crate::entity::audit::ManualIntent::Suppress
     /// [`manual_include`]: Self::manual_include
     /// [`manual_suppress`]: Self::manual_suppress
-    /// [`with_reason`]: Self::with_reason
+    /// [`with_attribution`]: Self::with_attribution
     /// [`with_actor`]: Self::with_actor
     pub fn manual(location: M::Location, confidence: Confidence, intent: ManualIntent) -> Self {
         Self::unlinked(
@@ -300,8 +325,7 @@ impl<M: Modality> AuditEvent<M> {
             AuditKind::Manual(Manual {
                 intent,
                 location,
-                reason: None,
-                actor: None,
+                attribution: None,
             }),
         )
     }
@@ -322,24 +346,24 @@ impl<M: Modality> AuditEvent<M> {
         Self::manual(location, confidence, ManualIntent::Suppress)
     }
 
-    /// Set the rationale on a [`manual`](Self::manual) event (a no-op on any
-    /// other kind).
+    /// Set the rationale [`Attribution`] on a [`manual`](Self::manual) event (a
+    /// no-op on any other kind).
+    ///
+    /// [`Attribution`]: crate::entity::audit::Attribution
     #[must_use]
-    pub fn with_reason(mut self, reason: impl Into<HipStr<'static>>) -> Self {
+    pub fn with_attribution(mut self, attribution: impl Into<Attribution>) -> Self {
         if let AuditKind::Manual(manual) = &mut self.kind {
-            manual.reason = Some(reason.into());
+            manual.attribution = Some(attribution.into());
         }
         self
     }
 
-    /// Set the actor on a [`manual`](Self::manual) event (a no-op on any other
-    /// kind); the actor also becomes the event's `source`.
+    /// Name the reviewer behind a [`manual`](Self::manual) event: the actor
+    /// becomes the event's `source` (who produced it). A no-op on any other kind.
     #[must_use]
     pub fn with_actor(mut self, actor: impl Into<HipStr<'static>>) -> Self {
-        let actor = actor.into();
-        if let AuditKind::Manual(manual) = &mut self.kind {
-            self.source = actor.clone();
-            manual.actor = Some(actor);
+        if matches!(self.kind, AuditKind::Manual(_)) {
+            self.source = actor.into();
         }
         self
     }
@@ -388,29 +412,53 @@ impl<M: Modality> AuditKind<M> {
     ///
     /// [`ModalityLocation::hash`]: crate::modality::ModalityLocation::hash
     pub(crate) fn hash(&self, out: &mut Vec<u8>) {
-        // Each arm writes its payload's central discriminant [`TAG`], then folds
-        // the payload's own fields in. The per-kind logic lives with the kind's
-        // struct (in [`payload`](super::payload)); here it is uniform dispatch.
+        // Each arm writes its payload's central discriminant `TAG`, then folds
+        // the payload's own fields in. The per-kind logic (the `TAG` and the
+        // `hash`) lives with the kind's struct in [`payload`](super::payload);
+        // here it is uniform "tag, then body" dispatch.
         match self {
-            Self::Pattern(p) => tagged(out, p),
-            Self::Model(m) => tagged(out, m),
-            Self::Deduplication(d) => tagged(out, d),
-            Self::Conflict(c) => tagged(out, c),
-            Self::Contested(c) => tagged(out, c),
-            Self::Calibration(c) => tagged(out, c),
-            Self::Refinement(r) => tagged(out, r),
-            Self::Redaction(r) => tagged(out, r),
-            Self::Selection(s) => tagged(out, s),
-            Self::Manual(m) => tagged(out, m),
+            Self::Pattern(p) => {
+                out.push(Pattern::<M>::TAG);
+                p.hash(out);
+            }
+            Self::Model(m) => {
+                out.push(Model::<M>::TAG);
+                m.hash(out);
+            }
+            Self::Deduplication(d) => {
+                out.push(Deduplication::TAG);
+                d.hash(out);
+            }
+            Self::Conflict(c) => {
+                out.push(Conflict::TAG);
+                c.hash(out);
+            }
+            Self::Contested(c) => {
+                out.push(Contested::TAG);
+                c.hash(out);
+            }
+            Self::Calibration(c) => {
+                out.push(Calibration::TAG);
+                c.hash(out);
+            }
+            Self::Refinement(r) => {
+                out.push(Refinement::<M>::TAG);
+                r.hash(out);
+            }
+            Self::Redaction(r) => {
+                out.push(Redaction::TAG);
+                r.hash(out);
+            }
+            Self::Selection(s) => {
+                out.push(Selection::TAG);
+                s.hash(out);
+            }
+            Self::Manual(m) => {
+                out.push(Manual::<M>::TAG);
+                m.hash(out);
+            }
         }
     }
-}
-
-/// Write a payload's discriminant [`TAG`](KindPayload::TAG) then its fields —
-/// the uniform "tag, then body" every [`AuditKind`] arm folds into the hash.
-fn tagged<P: KindPayload>(out: &mut Vec<u8>, payload: &P) {
-    out.push(P::TAG);
-    payload.hash_into(out);
 }
 
 /// Kind of an [`AuditEvent`], carrying its event-specific detail and the

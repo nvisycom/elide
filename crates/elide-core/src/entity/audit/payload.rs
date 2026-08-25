@@ -2,17 +2,19 @@
 //! fields, its documentation, and how it folds into the tamper-evident hash.
 //!
 //! [`AuditKind`] is a thin tagged union over these payloads. Keeping a kind's
-//! data next to its [`hash_into`](KindPayload::hash_into) — instead of smearing
-//! the two across a variant list and a monolithic match — is what makes a kind
-//! readable as a unit: the fields and exactly how they are hashed sit together.
+//! data next to its `hash` — instead of smearing the two across a variant list
+//! and a monolithic match — is what makes a kind readable as a unit: the fields
+//! and exactly how they are hashed sit together.
 //!
-//! Every payload implements the sealed [`KindPayload`] trait, which carries its
-//! central [`TAG`](KindPayload::TAG) discriminant and its hashing. The trait is
-//! sealed: audit kinds are core-owned, so the discriminant space stays centrally
-//! assigned and collision-free — the property the audit chain's tamper-evidence
-//! relies on.
+//! Each payload declares a central [`TAG`] discriminant byte, written before its
+//! own bytes so two kinds can never hash alike. The audit chain's
+//! tamper-evidence depends on those bytes being unique: every `TAG` is an
+//! inherent `const` declared once here, so a collision is a duplicated `const`
+//! visible at a glance, rather than a stray `push`. Kinds are core-owned, so the
+//! discriminant space stays centrally assigned.
 //!
 //! [`AuditKind`]: super::AuditKind
+//! [`TAG`]: Pattern::TAG
 
 use hipstr::HipStr;
 #[cfg(feature = "serde")]
@@ -24,55 +26,6 @@ use crate::entity::LabelRef;
 use crate::modality::{Hint, Modality, ModalityLocation};
 use crate::operator::{LeakProfile, OperatorId};
 use crate::primitive::Confidence;
-
-/// A single [`AuditKind`](super::AuditKind) payload: its central discriminant
-/// and how it folds into the audit hash.
-///
-/// Sealed (see [`sealed`]): the audit chain's tamper-evidence depends on every
-/// kind having a unique, centrally-assigned discriminant byte, so kinds cannot
-/// be defined outside this crate. Each `TAG` is declared once here; a collision
-/// is a duplicated `const`, visible at a glance, rather than a stray `push`.
-pub(crate) trait KindPayload: sealed::Sealed {
-    /// This kind's discriminant byte, unique across all kinds and never reused.
-    /// Written before the payload's own bytes so two kinds can never hash alike.
-    const TAG: u8;
-
-    /// Fold this payload's fields into `out`, after its [`TAG`](Self::TAG). Uses
-    /// the same length-prefixed encoding as the rest of the chain so no two
-    /// field layouts collide.
-    fn hash_into(&self, out: &mut Vec<u8>);
-}
-
-mod sealed {
-    /// Seals [`KindPayload`](super::KindPayload) to this crate's payload types.
-    pub trait Sealed {}
-}
-
-/// Declare a payload's `TAG` and seal it in one place, so the discriminant and
-/// the sealing that guards it are declared together.
-macro_rules! kind_payload {
-    ($ty:ty, $tag:literal) => {
-        impl<M: Modality> sealed::Sealed for $ty {}
-        impl<M: Modality> KindPayload for $ty {
-            const TAG: u8 = $tag;
-
-            fn hash_into(&self, out: &mut Vec<u8>) {
-                self.hash_fields(out);
-            }
-        }
-    };
-    // Non-generic payloads (no `M`).
-    (plain $ty:ty, $tag:literal) => {
-        impl sealed::Sealed for $ty {}
-        impl KindPayload for $ty {
-            const TAG: u8 = $tag;
-
-            fn hash_into(&self, out: &mut Vec<u8>) {
-                self.hash_fields(out);
-            }
-        }
-    };
-}
 
 /// Detail of a pattern/dictionary recognition: a recognizer matched at
 /// `location`, with the pattern metadata in `pattern`.
@@ -98,7 +51,11 @@ pub struct Pattern<M: Modality> {
 }
 
 impl<M: Modality> Pattern<M> {
-    fn hash_fields(&self, out: &mut Vec<u8>) {
+    /// This kind's discriminant byte. See the [module docs](self) — unique
+    /// across all kinds, written before the payload's own bytes.
+    pub(crate) const TAG: u8 = 0;
+
+    pub(crate) fn hash(&self, out: &mut Vec<u8>) {
         put_bytes(out, &self.location.hash());
         put_bytes(out, self.pattern.name.as_bytes());
         put_opt(out, self.pattern.regex.as_ref().map(|s| s.as_bytes()));
@@ -106,7 +63,6 @@ impl<M: Modality> Pattern<M> {
         out.push(self.pattern.contextual.into());
     }
 }
-kind_payload!(Pattern<M>, 0);
 
 /// Detail of a model/NER recognition: a model matched at `location`, with its
 /// metadata in `model`.
@@ -132,14 +88,16 @@ pub struct Model<M: Modality> {
 }
 
 impl<M: Modality> Model<M> {
-    fn hash_fields(&self, out: &mut Vec<u8>) {
+    /// This kind's discriminant byte (see the [module docs](self)).
+    pub(crate) const TAG: u8 = 1;
+
+    pub(crate) fn hash(&self, out: &mut Vec<u8>) {
         put_bytes(out, &self.location.hash());
         put_bytes(out, self.model.name.as_bytes());
         put_opt(out, self.model.version.as_ref().map(|s| s.as_bytes()));
         out.push(self.model.contextual.into());
     }
 }
-kind_payload!(Model<M>, 1);
 
 /// Several detections were fused into one entity.
 #[derive(Debug, Clone)]
@@ -152,11 +110,13 @@ pub struct Deduplication {
 }
 
 impl Deduplication {
-    fn hash_fields(&self, out: &mut Vec<u8>) {
+    /// This kind's discriminant byte (see the [module docs](self)).
+    pub(crate) const TAG: u8 = 2;
+
+    pub(crate) fn hash(&self, out: &mut Vec<u8>) {
         put_bytes(out, self.strategy.as_bytes());
     }
 }
-kind_payload!(plain Deduplication, 2);
 
 /// A competing detection of a *different* label over the same span was resolved
 /// against this (winning) entity — the loser is recorded, not dropped.
@@ -174,13 +134,15 @@ pub struct Conflict {
 }
 
 impl Conflict {
-    fn hash_fields(&self, out: &mut Vec<u8>) {
+    /// This kind's discriminant byte (see the [module docs](self)).
+    pub(crate) const TAG: u8 = 3;
+
+    pub(crate) fn hash(&self, out: &mut Vec<u8>) {
         put_bytes(out, self.competing_label.as_str().as_bytes());
         out.extend_from_slice(&self.competing_confidence.get().to_le_bytes());
         put_bytes(out, self.resolved_by.as_bytes());
     }
 }
-kind_payload!(plain Conflict, 3);
 
 /// A competing detection of a different label over the same span was left
 /// *unresolved*: both entities survive, flagged for a human. Recorded on each
@@ -199,13 +161,15 @@ pub struct Contested {
 }
 
 impl Contested {
-    fn hash_fields(&self, out: &mut Vec<u8>) {
+    /// This kind's discriminant byte (see the [module docs](self)).
+    pub(crate) const TAG: u8 = 4;
+
+    pub(crate) fn hash(&self, out: &mut Vec<u8>) {
         put_bytes(out, self.competing_label.as_str().as_bytes());
         out.extend_from_slice(&self.competing_confidence.get().to_le_bytes());
         put_bytes(out, self.flagged_by.as_bytes());
     }
 }
-kind_payload!(plain Contested, 4);
 
 /// The entity's confidence was rescaled by a per-recognizer factor.
 #[derive(Debug, Clone)]
@@ -217,11 +181,13 @@ pub struct Calibration {
 }
 
 impl Calibration {
-    fn hash_fields(&self, out: &mut Vec<u8>) {
+    /// This kind's discriminant byte (see the [module docs](self)).
+    pub(crate) const TAG: u8 = 5;
+
+    pub(crate) fn hash(&self, out: &mut Vec<u8>) {
         out.extend_from_slice(&self.factor.to_bits().to_le_bytes());
     }
 }
-kind_payload!(plain Calibration, 5);
 
 /// A context keyword near the entity lifted its confidence.
 #[derive(Debug, Clone)]
@@ -259,7 +225,10 @@ pub struct Refinement<M: Modality> {
 }
 
 impl<M: Modality> Refinement<M> {
-    fn hash_fields(&self, out: &mut Vec<u8>) {
+    /// This kind's discriminant byte (see the [module docs](self)).
+    pub(crate) const TAG: u8 = 6;
+
+    pub(crate) fn hash(&self, out: &mut Vec<u8>) {
         put_bytes(out, self.keyword.as_bytes());
         // The hint's location identifies where the keyword sits; its data
         // payload is auxiliary context and stays out of the hash.
@@ -270,7 +239,6 @@ impl<M: Modality> Refinement<M> {
         put_opt(out, self.location.as_ref().map(|l| l.hash()).as_deref());
     }
 }
-kind_payload!(Refinement<M>, 6);
 
 /// An operator hid the entity.
 #[derive(Debug, Clone)]
@@ -308,7 +276,10 @@ pub struct Redaction {
 }
 
 impl Redaction {
-    fn hash_fields(&self, out: &mut Vec<u8>) {
+    /// This kind's discriminant byte (see the [module docs](self)).
+    pub(crate) const TAG: u8 = 7;
+
+    pub(crate) fn hash(&self, out: &mut Vec<u8>) {
         put_bytes(out, self.operator.name.as_bytes());
         put_bytes(out, self.operator.version.as_bytes());
         out.push(self.leak_profile as u8);
@@ -328,12 +299,14 @@ impl Redaction {
         }
     }
 }
-kind_payload!(plain Redaction, 7);
 
 /// A human override, outside automatic detection: an entity a reviewer added by
 /// hand, or a detected one they marked to ignore. Its provenance is a person's
-/// decision, not a recognizer's — so the trail records who (when supplied) and
-/// why, rather than a pattern or model.
+/// decision, not a recognizer's — so the trail records *why* (an
+/// [`Attribution`], when supplied). *Who* made the override is the event's
+/// [`source`], not a payload field.
+///
+/// [`source`]: super::AuditEvent::source
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
@@ -358,33 +331,26 @@ pub struct Manual<M: Modality> {
     pub intent: ManualIntent,
     /// Where the override applies, in modality-native coordinates.
     pub location: M::Location,
-    /// The reviewer's rationale, when supplied (e.g. `"false positive"`,
-    /// `"missed by detection"`). `None` for an unexplained override.
-    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
+    /// The reviewer's rationale, when supplied (e.g. a freeform
+    /// `"false positive"`, or a cited authority). `None` for an unexplained
+    /// override.
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "Option::is_none")
     )]
-    pub reason: Option<HipStr<'static>>,
-    /// Who made the override (a reviewer id or name), when supplied. `None` when
-    /// the caller did not attribute it to an actor.
-    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
-    #[cfg_attr(
-        feature = "serde",
-        serde(default, skip_serializing_if = "Option::is_none")
-    )]
-    pub actor: Option<HipStr<'static>>,
+    pub attribution: Option<Attribution>,
 }
 
 impl<M: Modality> Manual<M> {
-    fn hash_fields(&self, out: &mut Vec<u8>) {
+    /// This kind's discriminant byte (see the [module docs](self)).
+    pub(crate) const TAG: u8 = 8;
+
+    pub(crate) fn hash(&self, out: &mut Vec<u8>) {
         out.push(self.intent as u8);
         put_bytes(out, &self.location.hash());
-        put_opt(out, self.reason.as_ref().map(|s| s.as_bytes()));
-        put_opt(out, self.actor.as_ref().map(|s| s.as_bytes()));
+        hash_opt_attribution(out, self.attribution.as_ref());
     }
 }
-kind_payload!(Manual<M>, 8);
 
 /// Which human decision a [`Manual`] event records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -427,14 +393,16 @@ pub struct Selection {
 }
 
 impl Selection {
-    fn hash_fields(&self, out: &mut Vec<u8>) {
+    /// This kind's discriminant byte (see the [module docs](self)).
+    pub(crate) const TAG: u8 = 9;
+
+    pub(crate) fn hash(&self, out: &mut Vec<u8>) {
         put_bytes(out, self.operator.name.as_bytes());
         put_bytes(out, self.operator.version.as_bytes());
         self.matched_by.hash(out);
         hash_opt_attribution(out, self.attribution.as_ref());
     }
 }
-kind_payload!(plain Selection, 9);
 
 /// Fold an optional [`Attribution`] into `out`: a presence byte, then the
 /// attribution's own bytes if present. Shared by [`Redaction`] and [`Selection`].

@@ -98,7 +98,7 @@ impl<M: Modality> Matcher<M> {
 /// accepts an entity wins.
 ///
 /// ```ignore
-/// Rule::label(EMAIL_ADDRESS, Replace::default()).because("gdpr-art-17")
+/// Rule::label(EMAIL_ADDRESS, Replace::default()).because(Attribution::freeform("gdpr-art-17"))
 /// Rule::tag("financial", Mask::stars())
 /// Rule::fallback(Erase)
 /// ```
@@ -171,10 +171,11 @@ impl<M: Modality> Rule<M> {
         Self::new(Matcher::Always, operator)
     }
 
-    /// Attribute this rule to a policy: the [`Attribution`] (a bare policy
-    /// id, or one built with a reason) is recorded on the redaction
-    /// provenance of every entity this rule redacts — the *why* alongside
-    /// the matched rule.
+    /// Attribute this rule to a policy: the [`Attribution`] is recorded on the
+    /// redaction provenance of every entity this rule redacts — the *why*
+    /// alongside the matched rule. Accepts anything that converts into an
+    /// `Attribution`, so a builder chain flows in directly:
+    /// `.because(Attribution::freeform("gdpr-art-17").with_description("…"))`.
     ///
     /// [`Attribution`]: elide_core::entity::audit::Attribution
     pub fn because(mut self, attribution: impl Into<Attribution>) -> Self {

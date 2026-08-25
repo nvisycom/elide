@@ -5,7 +5,9 @@
 
 mod fixtures;
 
-use elide_core::entity::audit::{Attribution, AttributionKind, AuditKind, RuleMatch};
+use elide_core::entity::audit::{
+    Attribution, AuditKind, CitedAttribution, FreeformAttribution, RuleMatch,
+};
 use elide_core::entity::{Entity, EntityCoRef, Label, LabelCatalog, LabelRef};
 use elide_core::modality::text::Text;
 use elide_core::primitive::{Confidence, ConfidenceThreshold};
@@ -245,7 +247,7 @@ async fn anonymize_records_redaction_provenance_with_rule_and_attribution() {
     assert_eq!(matched_by, RuleMatch::Label(LabelRef::new("EMAIL_ADDRESS")));
     // Author why: the attribution the rule carried.
     let attribution = attribution.expect("attribution recorded");
-    let AttributionKind::Freeform { name, description } = attribution.kind else {
+    let Attribution::Freeform(FreeformAttribution { name, description }) = attribution else {
         panic!("expected a freeform attribution");
     };
     assert_eq!(name, "gdpr-art-17");
@@ -279,14 +281,15 @@ async fn anonymize_records_fallback_rule_with_no_attribution() {
 }
 
 #[tokio::test]
-async fn because_accepts_a_bare_name() {
+async fn because_records_a_freeform_attribution() {
     let mut doc = TextDoc::new("a@b.com");
     let mut entities = vec![Entity::fixture("EMAIL_ADDRESS", (0, 7))];
 
-    // `.because` takes `Into<Attribution>`: a bare &str is the name, no description.
+    // A freeform attribution built from a bare name, no description.
     Anonymizer::<Text>::new()
         .with(
-            Rule::label(LabelRef::new("EMAIL_ADDRESS"), Replace::new("[X]")).because("pci-dss-3.4"),
+            Rule::label(LabelRef::new("EMAIL_ADDRESS"), Replace::new("[X]"))
+                .because(Attribution::freeform("pci-dss-3.4")),
         )
         .anonymize(&mut doc, &mut entities, &Scope::default())
         .await
@@ -302,7 +305,7 @@ async fn because_accepts_a_bare_name() {
         })
         .expect("attribution recorded");
     // A bare name builds a freeform attribution with no description.
-    let AttributionKind::Freeform { name, description } = attribution.kind else {
+    let Attribution::Freeform(FreeformAttribution { name, description }) = attribution else {
         panic!("a bare name builds a freeform attribution");
     };
     assert_eq!(name, "pci-dss-3.4");
@@ -310,18 +313,15 @@ async fn because_accepts_a_bare_name() {
 }
 
 #[tokio::test]
-async fn because_records_a_cited_attribution_with_a_source_id() {
-    use uuid::Uuid;
-
+async fn because_records_a_cited_attribution() {
     let mut doc = TextDoc::new("a@b.com");
     let mut entities = vec![Entity::fixture("EMAIL_ADDRESS", (0, 7))];
 
-    let source = Uuid::now_v7();
     Anonymizer::<Text>::new()
         .with(
             Rule::label(LabelRef::new("EMAIL_ADDRESS"), Replace::new("[X]")).because(
-                Attribution::cited("GDPR", "Art. 17(1)", "data subject requested erasure")
-                    .with_source_id(source),
+                Attribution::cited("GDPR", "Art. 17(1)")
+                    .with_rationale("data subject requested erasure"),
             ),
         )
         .anonymize(&mut doc, &mut entities, &Scope::default())
@@ -338,16 +338,15 @@ async fn because_records_a_cited_attribution_with_a_source_id() {
         })
         .expect("attribution recorded");
 
-    assert_eq!(attribution.source_id, Some(source));
-    let AttributionKind::Cited {
+    let Attribution::Cited(CitedAttribution {
         authority,
         citation,
         rationale,
-    } = attribution.kind
+    }) = attribution
     else {
         panic!("expected a cited attribution");
     };
     assert_eq!(authority, "GDPR");
     assert_eq!(citation, "Art. 17(1)");
-    assert_eq!(rationale, "data subject requested erasure");
+    assert_eq!(rationale.as_deref(), Some("data subject requested erasure"));
 }

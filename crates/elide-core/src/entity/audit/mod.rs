@@ -11,7 +11,7 @@ mod rule_match;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-pub use self::attribution::{Attribution, AttributionKind};
+pub use self::attribution::{Attribution, CitedAttribution, FreeformAttribution};
 pub use self::event::{AuditEvent, AuditKind};
 pub use self::hash::AuditHash;
 pub use self::payload::{
@@ -233,7 +233,7 @@ impl<M: Modality> AuditLog<M> {
             Some(head) => vec![head.hash],
             None => Vec::new(),
         };
-        event.hash = digest(&event);
+        event.hash = event.digest();
         self.events.push(event);
     }
 
@@ -246,7 +246,7 @@ impl<M: Modality> AuditLog<M> {
     /// without imposing a false linear order between them.
     pub fn record_fusion(&mut self, mut event: AuditEvent<M>, parents: impl Into<Vec<AuditHash>>) {
         event.parents = parents.into();
-        event.hash = digest(&event);
+        event.hash = event.digest();
         self.events.push(event);
     }
 
@@ -290,7 +290,7 @@ impl<M: Modality> AuditLog<M> {
                     referenced.push(*parent);
                 }
             }
-            if digest(event) != event.hash {
+            if event.digest() != event.hash {
                 return Err(Error::new(
                     ErrorKind::Integrity,
                     format!("audit event at index {index} was altered: hash mismatch"),
@@ -337,26 +337,4 @@ impl<M: Modality> Default for AuditLog<M> {
     fn default() -> Self {
         Self { events: Vec::new() }
     }
-}
-
-/// The hash of an event: BLAKE3 over its parents' hashes, its spine (source,
-/// timestamp, confidence), and its [`kind`](AuditEvent::kind) detail.
-///
-/// The kind folds itself in through [`AuditKind::hash`], which hashes each
-/// field directly (locations via [`ModalityLocation::hash`]), so no
-/// serialization and no `serde` bound is involved. Parents are folded in first,
-/// so an event's hash covers the exact sub-DAG it descends from.
-///
-/// [`ModalityLocation::hash`]: crate::modality::ModalityLocation::hash
-fn digest<M: Modality>(event: &AuditEvent<M>) -> AuditHash {
-    let mut bytes = Vec::new();
-    for parent in &event.parents {
-        bytes.extend_from_slice(parent.as_bytes());
-    }
-    bytes.extend_from_slice(&(event.parents.len() as u64).to_le_bytes());
-    bytes.extend_from_slice(event.source.as_bytes());
-    bytes.extend_from_slice(&event.timestamp.as_nanosecond().to_le_bytes());
-    bytes.extend_from_slice(&event.confidence.get().to_le_bytes());
-    event.kind.hash(&mut bytes);
-    AuditHash::of(&bytes)
 }

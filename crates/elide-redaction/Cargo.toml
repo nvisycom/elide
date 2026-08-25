@@ -45,7 +45,6 @@ tabular = ["elide-core/tabular"]
 elide-core = { workspace = true, features = [] }
 
 # Primitive datatypes
-uuid = { workspace = true, features = ["v4"] }
 hipstr = { workspace = true, features = [] }
 
 # Observability

@@ -99,7 +99,7 @@ impl<M: Modality> Anonymizer<M> {
     ///
     /// ```ignore
     /// Anonymizer::new()
-    ///     .with(Rule::label(EMAIL, Replace::default()).because("gdpr-art-17"))
+    ///     .with(Rule::label(EMAIL, Replace::default()).because(Attribution::freeform("gdpr-art-17")))
     ///     .with(Rule::tag("financial", Mask::stars()))
     ///     .with(Rule::fallback(Erase));
     /// ```
@@ -120,7 +120,7 @@ impl<M: Modality> Anonymizer<M> {
     /// reviewer traces back to "which rule fired".
     ///
     /// ```ignore
-    /// let attr = Attribution::freeform("hipaa-safe-harbor");
+    /// let attr: Attribution = Attribution::freeform("hipaa-safe-harbor").into();
     /// Anonymizer::new().with_multiple([
     ///     Rule::label(DATE_OF_BIRTH, GeneralizeDate::new(Year)).because(attr.clone()),
     ///     Rule::label(AGE, Clamp::new().with_ceiling(90.0, "90 or older")).because(attr.clone()),
@@ -575,7 +575,7 @@ mod tests {
         // The reviewer marks the second detection as a false positive.
         suppressed.suppress(
             AuditEvent::manual_suppress(suppressed.location.clone(), suppressed.confidence)
-                .with_reason("false positive"),
+                .with_attribution(Attribution::freeform("false positive")),
         );
         let mut entities = vec![live, suppressed];
 
@@ -600,11 +600,15 @@ mod tests {
             !of(suppressed_id).is_redacted(),
             "the suppressed entity is left alone",
         );
-        // The suppression itself is on the trail, with its reason.
+        // The suppression itself is on the trail, with its attribution.
         let has_manual = of(suppressed_id).audit.events().iter().any(|e| {
-            matches!(&e.kind, AuditKind::Manual(m) if m.reason.as_deref() == Some("false positive"))
+            matches!(&e.kind, AuditKind::Manual(m)
+                if m.attribution == Some(Attribution::freeform("false positive").into()))
         });
-        assert!(has_manual, "the suppression is audited with its reason");
+        assert!(
+            has_manual,
+            "the suppression is audited with its attribution"
+        );
     }
 
     /// In an overlap cluster the operator runs against the *winning* entity —
