@@ -181,6 +181,46 @@ impl<M: Modality> Entity<M> {
         self.audit.record(event);
     }
 
+    /// Record a reviewer's [`Manual`] override on this entity's trail — the
+    /// total, confidence-safe way to stamp any [`ManualIntent`].
+    ///
+    /// The [`Manual`] payload is built from this entity's own `location`, and
+    /// the event's `confidence` is this entity's `confidence`, so a caller can
+    /// neither target the wrong span nor record a stale score. `attribution`
+    /// carries the reviewer's rationale (the *why*); `actor` names who made the
+    /// override and becomes the event's source (defaulting to `"manual"` when
+    /// `None`).
+    ///
+    /// A [`Suppress`] override is idempotent: if the entity is already
+    /// [suppressed](Self::is_suppressed), nothing is recorded — re-applying an
+    /// override must not grow the trail. `Flag` and `Amend` always record.
+    /// Returns whether an event was recorded.
+    ///
+    /// [`Manual`]: crate::entity::audit::AuditKind::Manual
+    /// [`ManualIntent`]: crate::entity::audit::ManualIntent
+    /// [`Suppress`]: crate::entity::audit::ManualIntent::Suppress
+    pub fn record_manual(
+        &mut self,
+        intent: audit::ManualIntent,
+        attribution: Option<audit::Attribution>,
+        actor: Option<&str>,
+    ) -> bool {
+        // Idempotent suppression: re-applying it must not stack duplicate
+        // events. Flag/Amend are not decisions about suppression state, so they
+        // always record.
+        if intent == audit::ManualIntent::Suppress && self.is_suppressed() {
+            return false;
+        }
+        let mut manual = audit::Manual::new(intent, self.location.clone());
+        if let Some(attribution) = attribution {
+            manual = manual.with_attribution(attribution);
+        }
+        let source = actor.unwrap_or("manual").to_owned();
+        self.audit
+            .record(AuditEvent::manual(source, self.confidence, manual));
+        true
+    }
+
     /// Whether a reviewer has [`suppress`](Self::suppress)ed this entity — the
     /// audit trail is the single source of truth. Delegates to
     /// [`AuditLog::is_suppressed`](crate::entity::audit::AuditLog::is_suppressed).
@@ -271,6 +311,29 @@ mod tests {
                     .with_attribution(Attribution::freeform("retagged"))
             }));
         assert!(!entity.is_suppressed(), "amend does not suppress");
+        assert!(entity.audit.verify().is_ok());
+    }
+
+    /// `record_manual(Suppress)` is idempotent: a second call records nothing
+    /// and returns false, so re-applying a suppression does not grow the trail.
+    #[test]
+    fn record_manual_suppress_is_idempotent() {
+        let mut entity = text_entity();
+        assert!(
+            entity.record_manual(ManualIntent::Suppress, None, Some("reviewer-7")),
+            "first suppress records",
+        );
+        let after_first = entity.audit.events().len();
+        assert!(entity.is_suppressed());
+        assert!(
+            !entity.record_manual(ManualIntent::Suppress, None, None),
+            "second suppress records nothing",
+        );
+        assert_eq!(
+            entity.audit.events().len(),
+            after_first,
+            "re-suppressing does not grow the trail",
+        );
         assert!(entity.audit.verify().is_ok());
     }
 

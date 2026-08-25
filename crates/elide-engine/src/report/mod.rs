@@ -40,7 +40,7 @@ use std::ops::ControlFlow;
 
 use elide_codec::PartId;
 use elide_core::entity::Entity;
-use elide_core::entity::audit::{Attribution, AuditEvent, AuditKind, Manual, ManualIntent};
+use elide_core::entity::audit::{Attribution, AuditEvent, AuditKind, ManualIntent};
 use elide_core::modality::Modality;
 #[cfg(feature = "usage")]
 use elide_core::recognition::UsageReport;
@@ -58,14 +58,21 @@ pub use self::group::EntityGroup;
 /// returning a `&[Entity<_>]`; edit them with [`entities_mut`] /
 /// [`part_entities_mut`], returning a `&mut Vec<Entity<_>>` you can filter,
 /// retag, or extend before applying. To reach one entity by [`id`] use
-/// [`entity_mut`] / [`part_entity_mut`]; to walk a whole group in a single
-/// mutable pass (e.g. merging the applied report's provenance back onto a
-/// caller's records) use [`for_each_body_mut`] / [`for_each_part_mut`], or their
-/// `try_` variants to stop the walk early.
+/// [`entity`] / [`entity_mut`] (body) or [`part_entity`] / [`part_entity_mut`]
+/// (a named part); a review layer that holds an id without knowing where it
+/// lives uses [`entity_anywhere`] / [`entity_anywhere_mut`], which sweep the
+/// body and every part. To walk a whole group in a single mutable pass (e.g.
+/// merging the applied report's provenance back onto a caller's records) use
+/// [`for_each_body_mut`] / [`for_each_part_mut`], or their `try_` variants to
+/// stop the walk early.
 ///
 /// [`id`]: elide_core::entity::Entity::id
+/// [`entity`]: Report::entity
 /// [`entity_mut`]: Report::entity_mut
+/// [`part_entity`]: Report::part_entity
 /// [`part_entity_mut`]: Report::part_entity_mut
+/// [`entity_anywhere`]: Report::entity_anywhere
+/// [`entity_anywhere_mut`]: Report::entity_anywhere_mut
 /// [`for_each_body_mut`]: Report::for_each_body_mut
 /// [`for_each_part_mut`]: Report::for_each_part_mut
 ///
@@ -230,6 +237,71 @@ impl Report {
         self.entities_mut::<M>()?.iter_mut().find(|e| e.id == id)
     }
 
+    /// One body entity of modality `M` by its [`id`], read-only — the `&`
+    /// counterpart to [`entity_mut`]. Returns `None` when the body is a
+    /// different modality than `M` or no entity has that `id`.
+    ///
+    /// [`id`]: elide_core::entity::Entity::id
+    /// [`entity_mut`]: Self::entity_mut
+    pub fn entity<M: Modality>(&self, id: Uuid) -> Option<&Entity<M>> {
+        self.entities::<M>()?.iter().find(|e| e.id == id)
+    }
+
+    /// Find an entity of modality `M` by its [`id`] **anywhere** in the report —
+    /// the body, then every container part — read-only. For a review layer that
+    /// holds an entity id with no indication of where it lives.
+    ///
+    /// Parts of a different modality than `M` are skipped. Returns `None` when
+    /// no entity of modality `M` with that `id` exists in the body or any part.
+    /// Use [`entity_anywhere_mut`] to edit the match.
+    ///
+    /// [`id`]: elide_core::entity::Entity::id
+    /// [`entity_anywhere_mut`]: Self::entity_anywhere_mut
+    pub fn entity_anywhere<M: Modality>(&self, id: Uuid) -> Option<&Entity<M>> {
+        if let Some(entity) = self.entity::<M>(id) {
+            return Some(entity);
+        }
+        self.parts
+            .values()
+            .filter(|part| part.modality == TypeId::of::<M>())
+            .find_map(|part| {
+                part.entities
+                    .as_any()
+                    .downcast_ref::<Vec<Entity<M>>>()?
+                    .iter()
+                    .find(|e| e.id == id)
+            })
+    }
+
+    /// Find an entity of modality `M` by its [`id`] **anywhere** in the report —
+    /// the body, then every container part — for editing. The `&mut`
+    /// counterpart to [`entity_anywhere`], for a review layer acting on an id
+    /// whose location it does not track.
+    ///
+    /// Parts of a different modality than `M` are skipped. Returns `None` when
+    /// no entity of modality `M` with that `id` exists in the body or any part.
+    ///
+    /// [`id`]: elide_core::entity::Entity::id
+    /// [`entity_anywhere`]: Self::entity_anywhere
+    pub fn entity_anywhere_mut<M: Modality>(&mut self, id: Uuid) -> Option<&mut Entity<M>> {
+        // Split the borrow: check the body first, then fall through to the
+        // parts. `entity_mut` would hold `&mut self` across the parts search, so
+        // the two lookups are inlined here to keep the borrows disjoint.
+        if self.entity::<M>(id).is_some() {
+            return self.entity_mut::<M>(id);
+        }
+        self.parts
+            .values_mut()
+            .filter(|part| part.modality == TypeId::of::<M>())
+            .find_map(|part| {
+                part.entities
+                    .as_any_mut()
+                    .downcast_mut::<Vec<Entity<M>>>()?
+                    .iter_mut()
+                    .find(|e| e.id == id)
+            })
+    }
+
     /// Manually add `entity` to the body group — a reviewer including a
     /// detection the engine missed. Its human origin is made auditable: if
     /// `entity` does not already carry a [`Manual`] event, one is recorded onto
@@ -256,10 +328,12 @@ impl Report {
     /// redaction pass skips it; a [`Manual`] event built from the entity's own
     /// location and confidence, carrying the `attribution` (*why*) and `actor`
     /// (*who*, recorded as the event's source), is recorded so it is auditable.
-    /// Returns `false` when the body is a different modality than `M` or no
-    /// entity has that `id`.
+    /// Idempotent: suppressing an already-suppressed entity records nothing (see
+    /// [`Entity::record_manual`]). Returns `false` only when the body is a
+    /// different modality than `M` or no entity has that `id`.
     ///
     /// [`Manual`]: elide_core::entity::audit::AuditKind::Manual
+    /// [`Entity::record_manual`]: elide_core::entity::Entity::record_manual
     pub fn suppress<M: Modality>(
         &mut self,
         id: Uuid,
@@ -268,7 +342,7 @@ impl Report {
     ) -> bool {
         match self.entity_mut::<M>(id) {
             Some(entity) => {
-                suppress_entity(entity, attribution, actor);
+                entity.record_manual(ManualIntent::Suppress, attribution, actor.as_deref());
                 true
             }
             None => false,
@@ -310,7 +384,7 @@ impl Report {
     ) -> bool {
         match self.part_entity_mut::<P>(part_id, id) {
             Some(entity) => {
-                suppress_entity(entity, attribution, actor);
+                entity.record_manual(ManualIntent::Suppress, attribution, actor.as_deref());
                 true
             }
             None => false,
@@ -404,6 +478,19 @@ impl Report {
             .find(|e| e.id == id)
     }
 
+    /// One entity of the container part `part_id`, as modality `P`, by its
+    /// [`id`], read-only — the `&` counterpart to [`part_entity_mut`]. Returns
+    /// `None` for an unknown part, a modality mismatch, or no entity with that
+    /// id.
+    ///
+    /// [`id`]: elide_core::entity::Entity::id
+    /// [`part_entity_mut`]: Self::part_entity_mut
+    pub fn part_entity<P: Modality>(&self, part_id: &PartId, id: Uuid) -> Option<&Entity<P>> {
+        self.part_entities::<P>(part_id)?
+            .iter()
+            .find(|e| e.id == id)
+    }
+
     /// Run `f` over every entity of the container part `part_id`, as modality
     /// `P`, in one pass. A no-op for an unknown part or a modality mismatch.
     ///
@@ -466,32 +553,9 @@ fn ensure_manual<M: Modality>(entity: &mut Entity<M>) {
     }
 }
 
-/// Suppress `entity`, recording a [`Manual`] event built from its own location
-/// and confidence and carrying the `attribution` (*why*) and `actor` (*who*, as
-/// the event's source). Shared by [`Report::suppress`] and
-/// [`Report::suppress_part`].
-///
-/// [`Manual`]: elide_core::entity::audit::AuditKind::Manual
-fn suppress_entity<M: Modality>(
-    entity: &mut Entity<M>,
-    attribution: Option<Attribution>,
-    actor: Option<String>,
-) {
-    let mut manual = Manual::new(ManualIntent::Suppress, entity.location.clone());
-    if let Some(attribution) = attribution {
-        manual = manual.with_attribution(attribution);
-    }
-    // The reviewer is the event's source; unattributed overrides read "manual".
-    let event = match actor {
-        Some(actor) => AuditEvent::manual(actor, entity.confidence, manual),
-        None => AuditEvent::manual("manual", entity.confidence, manual),
-    };
-    entity.suppress(event);
-}
-
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
+    use elide_core::entity::audit::{AuditEvent, AuditLog, ManualIntent, PatternEvent};
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::modality::text::{Text, TextLocation};
     use elide_core::primitive::Confidence;
@@ -592,8 +656,53 @@ mod tests {
         // The audit chain still verifies with the appended Manual event.
         assert!(e.audit.verify().is_ok());
 
+        // Idempotent: suppressing again returns true (it is suppressed) but
+        // records no duplicate Manual event.
+        let before = report.entity::<Text>(id).unwrap().audit.events().len();
+        assert!(report.suppress::<Text>(id, None, None::<String>));
+        let after = report.entity::<Text>(id).unwrap().audit.events().len();
+        assert_eq!(before, after, "re-suppressing does not grow the trail");
+
         // Suppressing an unknown id does nothing.
         assert!(!report.suppress::<Text>(Uuid::now_v7(), None, None::<String>));
+    }
+
+    #[test]
+    fn entity_anywhere_finds_body_and_part_entities() {
+        let body = text_entity("EMAIL_ADDRESS");
+        let body_id = body.id;
+        let part_entity = text_entity("PHONE_NUMBER");
+        let part_id = part_entity.id;
+        let part = PartId::new("word/document2.xml");
+        let mut report = Report::new()
+            .insert_body::<Text>(vec![body])
+            .insert_part::<Text>(part, vec![part_entity]);
+
+        // Both are found by id alone, without the caller knowing where each lives.
+        assert_eq!(
+            report.entity_anywhere::<Text>(body_id).map(|e| e.id),
+            Some(body_id)
+        );
+        assert_eq!(
+            report.entity_anywhere::<Text>(part_id).map(|e| e.id),
+            Some(part_id)
+        );
+        // The mut sweep reaches a part entity for editing.
+        assert!(report.entity_anywhere_mut::<Text>(part_id).is_some());
+        // An unknown id resolves nowhere.
+        assert!(report.entity_anywhere::<Text>(Uuid::now_v7()).is_none());
+    }
+
+    #[test]
+    fn record_manual_amend_is_recorded_and_does_not_suppress() {
+        let entity = text_entity("EMAIL_ADDRESS");
+        let id = entity.id;
+        let mut report = Report::new().insert_body::<Text>(vec![entity]);
+
+        let e = report.entity_mut::<Text>(id).unwrap();
+        assert!(e.record_manual(ManualIntent::Amend, None, Some("reviewer-7")));
+        assert!(!e.is_suppressed(), "amend does not suppress");
+        assert!(e.audit.verify().is_ok());
     }
 
     #[test]
