@@ -21,7 +21,7 @@ mod rule;
 use std::sync::Arc;
 
 use elide_core::Result;
-use elide_core::entity::audit::{Attribution, AuditEvent, RuleMatch};
+use elide_core::entity::audit::{Attribution, AuditEvent, Redaction, RuleMatch, Selection};
 use elide_core::entity::{Entity, LabelCatalog};
 use elide_core::modality::{DataReader, DataWriter, Modality, ModalityLocation};
 use elide_core::operator::{Operator, Redactions};
@@ -99,7 +99,7 @@ impl<M: Modality> Anonymizer<M> {
     ///
     /// ```ignore
     /// Anonymizer::new()
-    ///     .with(Rule::label(EMAIL, Replace::default()).because("gdpr-art-17"))
+    ///     .with(Rule::label(EMAIL, Replace::default()).because(Attribution::freeform("gdpr-art-17")))
     ///     .with(Rule::tag("financial", Mask::stars()))
     ///     .with(Rule::fallback(Erase));
     /// ```
@@ -120,7 +120,7 @@ impl<M: Modality> Anonymizer<M> {
     /// reviewer traces back to "which rule fired".
     ///
     /// ```ignore
-    /// let attr = Attribution::freeform("hipaa-safe-harbor");
+    /// let attr: Attribution = Attribution::freeform("hipaa-safe-harbor").into();
     /// Anonymizer::new().with_multiple([
     ///     Rule::label(DATE_OF_BIRTH, GeneralizeDate::new(Year)).because(attr.clone()),
     ///     Rule::label(AGE, Clamp::new().with_ceiling(90.0, "90 or older")).because(attr.clone()),
@@ -174,12 +174,12 @@ impl<M: Modality> Anonymizer<M> {
             // (rather than cloned) because `AuditEvent<M>: Clone` would demand
             // `M: Clone`, which a modality marker need not be.
             for &i in &cluster.members {
-                let event = AuditEvent::selection(
-                    cluster.operator.id(),
-                    entities[i].confidence,
-                    cluster.matched_by.clone(),
-                    cluster.attribution.clone(),
-                );
+                let mut selection =
+                    Selection::new(cluster.operator.id(), cluster.matched_by.clone());
+                if let Some(attribution) = cluster.attribution.clone() {
+                    selection = selection.with_attribution(attribution);
+                }
+                let event = AuditEvent::selection(selection, entities[i].confidence);
                 entities[i].audit.record(event);
             }
         }
@@ -326,13 +326,13 @@ impl<M: Modality> Anonymizer<M> {
             // Stage a redaction event for every member, so each entity's
             // provenance reflects that this operator hid it.
             for &i in &cluster.members {
-                let event = AuditEvent::redaction(
-                    cluster.operator.id(),
-                    cluster.operator.leak_profile(),
-                    entities[i].confidence,
-                    cluster.matched_by.clone(),
-                    cluster.attribution.clone(),
-                );
+                let mut redaction =
+                    Redaction::new(cluster.operator.id(), cluster.matched_by.clone())
+                        .with_leak_profile(cluster.operator.leak_profile());
+                if let Some(attribution) = cluster.attribution.clone() {
+                    redaction = redaction.with_attribution(attribution);
+                }
+                let event = AuditEvent::redaction(redaction, entities[i].confidence);
                 pending.push((i, event));
             }
             redactions.push(location, replacement);
@@ -422,7 +422,7 @@ fn cluster_overlaps<M: Modality>(entities: &[Entity<M>], candidates: &[usize]) -
 #[cfg(test)]
 mod tests {
     use elide_core::entity::LabelRef;
-    use elide_core::entity::audit::{AuditEvent, AuditKind, RuleMatch};
+    use elide_core::entity::audit::{AuditEvent, AuditKind, Manual, ManualIntent, RuleMatch};
     use elide_core::modality::text::{Text, TextDoc};
     use elide_core::primitive::Confidence;
     use elide_operator::operators::{Erase, Mask, Replace};
@@ -573,10 +573,12 @@ mod tests {
         let suppressed_id = suppressed.id;
         let live_id = live.id;
         // The reviewer marks the second detection as a false positive.
-        suppressed.suppress(
-            AuditEvent::manual_suppress(suppressed.location.clone(), suppressed.confidence)
-                .with_reason("false positive"),
-        );
+        suppressed.suppress(AuditEvent::manual(
+            "manual",
+            suppressed.confidence,
+            Manual::new(ManualIntent::Suppress, suppressed.location.clone())
+                .with_attribution(Attribution::freeform("false positive")),
+        ));
         let mut entities = vec![live, suppressed];
 
         let anonymizer = Anonymizer::new().with(Rule::fallback(Erase));
@@ -600,11 +602,15 @@ mod tests {
             !of(suppressed_id).is_redacted(),
             "the suppressed entity is left alone",
         );
-        // The suppression itself is on the trail, with its reason.
+        // The suppression itself is on the trail, with its attribution.
         let has_manual = of(suppressed_id).audit.events().iter().any(|e| {
-            matches!(&e.kind, AuditKind::Manual(m) if m.reason.as_deref() == Some("false positive"))
+            matches!(&e.kind, AuditKind::Manual(m)
+                if m.attribution == Some(Attribution::freeform("false positive").into()))
         });
-        assert!(has_manual, "the suppression is audited with its reason");
+        assert!(
+            has_manual,
+            "the suppression is audited with its attribution"
+        );
     }
 
     /// In an overlap cluster the operator runs against the *winning* entity —

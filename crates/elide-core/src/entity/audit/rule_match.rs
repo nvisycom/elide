@@ -4,6 +4,7 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use super::hash::AuditHasher;
 use crate::entity::LabelRef;
 
 /// A serializable summary of *which selection rule* bound an operator to an
@@ -37,22 +38,22 @@ pub enum RuleMatch {
 
 impl RuleMatch {
     /// Fold this rule match's identifying bytes into `out`, for the audit hash.
-    pub(crate) fn hash(&self, out: &mut Vec<u8>) {
+    pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
         match self {
             Self::Label(label) => {
-                out.push(0);
-                let bytes = label.as_str().as_bytes();
-                out.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
-                out.extend_from_slice(bytes);
+                out.byte(0);
+                out.bytes(label.as_str().as_bytes());
             }
             Self::Tag(tag) => {
-                out.push(1);
-                let bytes = tag.as_bytes();
-                out.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
-                out.extend_from_slice(bytes);
+                out.byte(1);
+                out.bytes(tag.as_bytes());
             }
-            Self::Predicate => out.push(2),
-            Self::Fallback => out.push(3),
+            Self::Predicate => {
+                out.byte(2);
+            }
+            Self::Fallback => {
+                out.byte(3);
+            }
         }
     }
 }

@@ -40,7 +40,7 @@ use std::ops::ControlFlow;
 
 use elide_codec::PartId;
 use elide_core::entity::Entity;
-use elide_core::entity::audit::{AuditEvent, AuditKind};
+use elide_core::entity::audit::{Attribution, AuditEvent, AuditKind, Manual, ManualIntent};
 use elide_core::modality::Modality;
 #[cfg(feature = "usage")]
 use elide_core::recognition::UsageReport;
@@ -254,20 +254,21 @@ impl Report {
     /// Manually suppress the body entity `id` — a reviewer marking a detection
     /// to leave alone (a false positive). It stays in the report but the
     /// redaction pass skips it; a [`Manual`] event built from the entity's own
-    /// location and confidence, carrying `reason` and `actor`, is recorded so
-    /// *why* it was left alone is auditable. Returns `false` when the body is a
-    /// different modality than `M` or no entity has that `id`.
+    /// location and confidence, carrying the `attribution` (*why*) and `actor`
+    /// (*who*, recorded as the event's source), is recorded so it is auditable.
+    /// Returns `false` when the body is a different modality than `M` or no
+    /// entity has that `id`.
     ///
     /// [`Manual`]: elide_core::entity::audit::AuditKind::Manual
     pub fn suppress<M: Modality>(
         &mut self,
         id: Uuid,
-        reason: Option<String>,
+        attribution: Option<Attribution>,
         actor: Option<String>,
     ) -> bool {
         match self.entity_mut::<M>(id) {
             Some(entity) => {
-                suppress_entity(entity, reason, actor);
+                suppress_entity(entity, attribution, actor);
                 true
             }
             None => false,
@@ -304,12 +305,12 @@ impl Report {
         &mut self,
         part_id: &PartId,
         id: Uuid,
-        reason: Option<String>,
+        attribution: Option<Attribution>,
         actor: Option<String>,
     ) -> bool {
         match self.part_entity_mut::<P>(part_id, id) {
             Some(entity) => {
-                suppress_entity(entity, reason, actor);
+                suppress_entity(entity, attribution, actor);
                 true
             }
             None => false,
@@ -460,28 +461,31 @@ fn ensure_manual<M: Modality>(entity: &mut Entity<M>) {
         .iter()
         .any(|e| matches!(e.kind, AuditKind::Manual(_)));
     if !has_manual {
-        let event = AuditEvent::manual_include(entity.location.clone(), entity.confidence);
+        let event = AuditEvent::manual_flag(entity.location.clone(), entity.confidence);
         entity.audit.record(event);
     }
 }
 
 /// Suppress `entity`, recording a [`Manual`] event built from its own location
-/// and confidence and carrying `reason`/`actor`. Shared by [`Report::suppress`]
-/// and [`Report::suppress_part`].
+/// and confidence and carrying the `attribution` (*why*) and `actor` (*who*, as
+/// the event's source). Shared by [`Report::suppress`] and
+/// [`Report::suppress_part`].
 ///
 /// [`Manual`]: elide_core::entity::audit::AuditKind::Manual
 fn suppress_entity<M: Modality>(
     entity: &mut Entity<M>,
-    reason: Option<String>,
+    attribution: Option<Attribution>,
     actor: Option<String>,
 ) {
-    let mut event = AuditEvent::manual_suppress(entity.location.clone(), entity.confidence);
-    if let Some(reason) = reason {
-        event = event.with_reason(reason);
+    let mut manual = Manual::new(ManualIntent::Suppress, entity.location.clone());
+    if let Some(attribution) = attribution {
+        manual = manual.with_attribution(attribution);
     }
-    if let Some(actor) = actor {
-        event = event.with_actor(actor);
-    }
+    // The reviewer is the event's source; unattributed overrides read "manual".
+    let event = match actor {
+        Some(actor) => AuditEvent::manual(actor, entity.confidence, manual),
+        None => AuditEvent::manual("manual", entity.confidence, manual),
+    };
     entity.suppress(event);
 }
 
@@ -561,31 +565,35 @@ mod tests {
 
         assert!(report.suppress::<Text>(
             id,
-            Some("false positive".into()),
+            Some(Attribution::freeform("false positive").into()),
             Some("reviewer-7".into())
         ));
 
         let e = report.entity_mut::<Text>(id).unwrap();
         assert!(e.is_suppressed(), "the entity is marked suppressed");
-        // The suppression is on the audit trail, carrying its reason and actor.
+        // The suppression is on the audit trail: the *why* is the Manual event's
+        // attribution, the *who* is its source.
         let manual = e
             .audit
             .events()
             .iter()
             .find_map(|ev| match &ev.kind {
                 elide_core::entity::audit::AuditKind::Manual(m) => {
-                    Some((m.reason.clone(), m.actor.clone()))
+                    Some((m.attribution.clone(), ev.source.clone()))
                 }
                 _ => None,
             })
             .expect("a Manual event was recorded");
-        assert_eq!(manual.0.as_deref(), Some("false positive"));
-        assert_eq!(manual.1.as_deref(), Some("reviewer-7"));
+        assert_eq!(
+            manual.0,
+            Some(Attribution::freeform("false positive").into())
+        );
+        assert_eq!(manual.1, "reviewer-7");
         // The audit chain still verifies with the appended Manual event.
         assert!(e.audit.verify().is_ok());
 
         // Suppressing an unknown id does nothing.
-        assert!(!report.suppress::<Text>(Uuid::now_v7(), None::<String>, None::<String>));
+        assert!(!report.suppress::<Text>(Uuid::now_v7(), None, None::<String>));
     }
 
     #[test]
@@ -598,7 +606,7 @@ mod tests {
         assert!(report.suppress_part::<Text>(
             &part,
             id,
-            Some("false positive".into()),
+            Some(Attribution::freeform("false positive").into()),
             Some("reviewer-7".into()),
         ));
 
@@ -606,24 +614,14 @@ mod tests {
         assert!(e.is_suppressed(), "the part entity is marked suppressed");
         let has_manual = e.audit.events().iter().any(|ev| {
             matches!(&ev.kind, elide_core::entity::audit::AuditKind::Manual(m)
-                if m.reason.as_deref() == Some("false positive"))
+                if m.attribution == Some(Attribution::freeform("false positive").into()))
         });
         assert!(has_manual, "the suppression is audited");
         assert!(e.audit.verify().is_ok());
 
         // An unknown part, and an unknown id in a known part, both do nothing.
-        assert!(!report.suppress_part::<Text>(
-            &PartId::new("missing"),
-            id,
-            None::<String>,
-            None::<String>,
-        ));
-        assert!(!report.suppress_part::<Text>(
-            &part,
-            Uuid::now_v7(),
-            None::<String>,
-            None::<String>
-        ));
+        assert!(!report.suppress_part::<Text>(&PartId::new("missing"), id, None, None::<String>,));
+        assert!(!report.suppress_part::<Text>(&part, Uuid::now_v7(), None, None::<String>));
     }
 
     #[test]

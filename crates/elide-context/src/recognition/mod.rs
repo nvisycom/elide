@@ -15,7 +15,7 @@
 //! [`Enhancer`]: crate::Enhancer
 
 use elide_core::Result;
-use elide_core::entity::audit::AuditEvent;
+use elide_core::entity::audit::{AuditEvent, Refinement};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::LanguageTag;
 use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId};
@@ -123,12 +123,17 @@ where
                 (None, None) => None,
             };
             let entity = &mut entities[boost.entity_index];
+            let mut refinement = Refinement::new(boost.keyword);
+            if let Some(hint) = hint {
+                refinement = refinement.with_hint(hint);
+            }
+            if let Some(location) = location {
+                refinement = refinement.with_location(location);
+            }
             entity.audit.record(AuditEvent::refinement(
                 boost.source,
                 boost.confidence,
-                boost.keyword,
-                hint,
-                location,
+                refinement,
             ));
         }
         let recognition = Recognition::new(entities);

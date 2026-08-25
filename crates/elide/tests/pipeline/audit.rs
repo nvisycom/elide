@@ -9,7 +9,7 @@ use elide::primitive::Confidence;
 /// A text entity found by a pattern, then redacted, so its trail has two
 /// linked events.
 fn redacted_entity(label: &str) -> Entity<Text> {
-    use elide::entity::audit::RuleMatch;
+    use elide::entity::audit::{Redaction, RuleMatch};
     use elide::redaction::{LeakProfile, OperatorId};
 
     let location = TextLocation::new(0, 5);
@@ -21,11 +21,9 @@ fn redacted_entity(label: &str) -> Entity<Text> {
         PatternEvent::default(),
     ));
     audit.record(AuditEvent::redaction(
-        OperatorId::new("erase", "1.0.0"),
-        LeakProfile::Irrecoverable,
+        Redaction::new(OperatorId::new("erase", "1.0.0"), RuleMatch::Fallback)
+            .with_leak_profile(LeakProfile::Irrecoverable),
         conf,
-        RuleMatch::Fallback,
-        None,
     ));
     Entity::new(LabelRef::new(label), location, conf, audit)
 }
