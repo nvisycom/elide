@@ -1,20 +1,36 @@
 //! A single [`AuditEvent`] in an entity's life: its spine (source, confidence,
 //! timestamp), its [`AuditKind`], and its tamper-evident links.
 //!
-//! [`AuditKind`]: super::AuditKind
+//! The per-kind detail lives in the [payload](self) submodules, grouped by
+//! role: [`recognition`] (a recognizer matched), [`reconcile`] (detections were
+//! combined and scored), and [`apply`] (the redaction decision and human
+//! overrides). Each payload owns its fields, its `new` / `with_*` builders, its
+//! central `TAG` discriminant, and how it folds into the hash.
+//!
+//! [`AuditKind`]: AuditKind
+
+mod kind;
+
+/// Application payloads: the redaction decision and its execution, and human
+/// overrides.
+pub mod apply;
+/// Recognition payloads: a pattern or model recognizer matched an entity.
+pub mod recognition;
+/// Reconciliation payloads: fusion, cross-label arbitration, calibration, and
+/// context boosting.
+pub mod reconcile;
 
 use hipstr::HipStr;
 use jiff::Timestamp;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+pub use self::apply::{Manual, ManualIntent, Redaction, Selection};
+pub use self::kind::AuditKind;
+pub use self::recognition::{Model, ModelEvent, Pattern, PatternEvent};
+pub use self::reconcile::{Calibration, Conflict, Contested, Deduplication, Refinement};
 use super::AuditHash;
 use super::hash::AuditHasher;
-use super::kind::AuditKind;
-use super::payload::{
-    Calibration, Conflict, Contested, Deduplication, Manual, ManualIntent, Model, ModelEvent,
-    Pattern, PatternEvent, Redaction, Refinement, Selection,
-};
 use crate::modality::Modality;
 use crate::primitive::Confidence;
 

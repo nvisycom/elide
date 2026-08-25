@@ -1,11 +1,13 @@
-//! [`AuditKind`]: the tagged union over the per-kind [`payload`](super::payload)
-//! structs, plus how a kind folds into the tamper-evident hash.
+//! [`AuditKind`]: the tagged union over the per-kind payload structs (in the
+//! [`recognition`](super::recognition) / [`reconcile`](super::reconcile) /
+//! [`apply`](super::apply) submodules), plus how a kind folds into the
+//! tamper-evident hash.
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::hash::AuditHasher;
-use super::payload::{
+use super::super::hash::AuditHasher;
+use super::{
     Calibration, Conflict, Contested, Deduplication, Manual, Model, Pattern, Redaction, Refinement,
     Selection,
 };
