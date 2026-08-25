@@ -289,10 +289,20 @@ impl FormatRegistryInner {
     /// registered (so the `usize` indices the lookup maps hold stay valid —
     /// removing the old entry would shift every later index), and re-point
     /// its extensions / content types to that slot.
+    ///
+    /// When replacing, the outgoing format's extension / content-type keys are
+    /// first dropped, so a key the replacement no longer declares stops
+    /// resolving to this slot rather than lingering as a stale mapping.
     fn insert_format(&mut self, format: Format) {
         let id = format.id.clone();
         let index = match self.by_id.get(&id) {
             Some(&existing) => {
+                // Drop the outgoing format's keys that point here; the
+                // replacement re-inserts whatever it still declares below.
+                // Guard on the value so a key another format later claimed
+                // (last-registration-wins) is left alone.
+                self.by_extension.retain(|_, &mut i| i != existing);
+                self.by_content_type.retain(|_, &mut i| i != existing);
                 self.formats[existing] = format;
                 existing
             }
@@ -361,6 +371,31 @@ mod tests {
         );
         // The original still resolves by id to the same single entry.
         assert!(reg.by_id(&id).is_some());
+    }
+
+    /// Replacing a format drops the outgoing format's extension /
+    /// content-type keys that the replacement no longer declares, rather than
+    /// leaving them mapped to the reused slot. `txt` declares `txt`/`log` +
+    /// `text/plain`; the variant declares neither, so none of them may resolve
+    /// after the swap.
+    #[test]
+    fn replace_format_drops_stale_keys() {
+        let mut reg = FormatRegistry::new();
+        reg.add_format(txt_format());
+        // Present before the swap.
+        assert!(reg.by_extension("txt").is_some());
+        assert!(reg.by_extension("log").is_some());
+        assert!(reg.by_content_type("text/plain").is_some());
+
+        reg.replace_format(txt_variant());
+
+        // The keys the replacement no longer declares stop resolving...
+        assert!(reg.by_extension("txt").is_none());
+        assert!(reg.by_extension("log").is_none());
+        assert!(reg.by_content_type("text/plain").is_none());
+        // ...and only the replacement's own keys resolve.
+        assert!(reg.by_extension("variant").is_some());
+        assert!(reg.by_content_type("text/variant").is_some());
     }
 
     #[test]
