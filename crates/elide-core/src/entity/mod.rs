@@ -155,11 +155,11 @@ impl<M: Modality> Entity<M> {
     /// Mark this entity suppressed by a reviewer: it stays in the report and
     /// keeps its trail, but the redaction pass skips it, so it is never hidden.
     /// `event` **must** be a [`Manual`] event with [`ManualIntent::Suppress`],
-    /// built with [`AuditEvent::manual_suppress`] (plus
-    /// [`with_attribution`]/[`with_actor`]). Recording it onto the trail *is* the
-    /// suppression — [`is_suppressed`](Self::is_suppressed) reads the trail — so
-    /// there is no separate flag, and *why* the entity was left alone is
-    /// auditable rather than the entity vanishing silently.
+    /// built with [`AuditEvent::manual_suppress`], or [`AuditEvent::manual`] with
+    /// a [`Manual`] payload carrying the reviewer's rationale. Recording it onto
+    /// the trail *is* the suppression — [`is_suppressed`](Self::is_suppressed)
+    /// reads the trail — so there is no separate flag, and *why* the entity was
+    /// left alone is auditable rather than the entity vanishing silently.
     ///
     /// # Panics
     ///
@@ -169,8 +169,7 @@ impl<M: Modality> Entity<M> {
     /// [`Manual`]: crate::entity::audit::AuditKind::Manual
     /// [`ManualIntent::Suppress`]: crate::entity::audit::ManualIntent::Suppress
     /// [`AuditEvent::manual_suppress`]: crate::entity::audit::AuditEvent::manual_suppress
-    /// [`with_attribution`]: crate::entity::audit::AuditEvent::with_attribution
-    /// [`with_actor`]: crate::entity::audit::AuditEvent::with_actor
+    /// [`AuditEvent::manual`]: crate::entity::audit::AuditEvent::manual
     pub fn suppress(&mut self, event: AuditEvent<M>) {
         debug_assert!(
             matches!(
@@ -235,7 +234,7 @@ impl Entity<crate::modality::text::Text> {
 
 #[cfg(test)]
 mod tests {
-    use super::audit::{Attribution, PatternEvent};
+    use super::audit::{Attribution, Manual, ManualIntent, PatternEvent};
     use super::*;
     use crate::modality::text::{Text, TextLocation};
 
@@ -250,10 +249,12 @@ mod tests {
     fn suppress_records_the_manual_event() {
         let mut entity = text_entity();
         let loc = entity.location.clone();
-        entity.suppress(
-            AuditEvent::manual_suppress(loc, entity.confidence)
+        entity.suppress(AuditEvent::manual(
+            "manual",
+            entity.confidence,
+            Manual::new(ManualIntent::Suppress, loc)
                 .with_attribution(Attribution::freeform("false positive")),
-        );
+        ));
         assert!(entity.is_suppressed());
     }
 

@@ -40,7 +40,7 @@ use std::ops::ControlFlow;
 
 use elide_codec::PartId;
 use elide_core::entity::Entity;
-use elide_core::entity::audit::{Attribution, AuditEvent, AuditKind};
+use elide_core::entity::audit::{Attribution, AuditEvent, AuditKind, Manual, ManualIntent};
 use elide_core::modality::Modality;
 #[cfg(feature = "usage")]
 use elide_core::recognition::UsageReport;
@@ -477,13 +477,15 @@ fn suppress_entity<M: Modality>(
     attribution: Option<Attribution>,
     actor: Option<String>,
 ) {
-    let mut event = AuditEvent::manual_suppress(entity.location.clone(), entity.confidence);
+    let mut manual = Manual::new(ManualIntent::Suppress, entity.location.clone());
     if let Some(attribution) = attribution {
-        event = event.with_attribution(attribution);
+        manual = manual.with_attribution(attribution);
     }
-    if let Some(actor) = actor {
-        event = event.with_actor(actor);
-    }
+    // The reviewer is the event's source; unattributed overrides read "manual".
+    let event = match actor {
+        Some(actor) => AuditEvent::manual(actor, entity.confidence, manual),
+        None => AuditEvent::manual("manual", entity.confidence, manual),
+    };
     entity.suppress(event);
 }
 

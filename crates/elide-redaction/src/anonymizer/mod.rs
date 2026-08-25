@@ -21,7 +21,7 @@ mod rule;
 use std::sync::Arc;
 
 use elide_core::Result;
-use elide_core::entity::audit::{Attribution, AuditEvent, RuleMatch};
+use elide_core::entity::audit::{Attribution, AuditEvent, Redaction, RuleMatch, Selection};
 use elide_core::entity::{Entity, LabelCatalog};
 use elide_core::modality::{DataReader, DataWriter, Modality, ModalityLocation};
 use elide_core::operator::{Operator, Redactions};
@@ -174,12 +174,12 @@ impl<M: Modality> Anonymizer<M> {
             // (rather than cloned) because `AuditEvent<M>: Clone` would demand
             // `M: Clone`, which a modality marker need not be.
             for &i in &cluster.members {
-                let event = AuditEvent::selection(
-                    cluster.operator.id(),
-                    entities[i].confidence,
-                    cluster.matched_by.clone(),
-                    cluster.attribution.clone(),
-                );
+                let mut selection =
+                    Selection::new(cluster.operator.id(), cluster.matched_by.clone());
+                if let Some(attribution) = cluster.attribution.clone() {
+                    selection = selection.with_attribution(attribution);
+                }
+                let event = AuditEvent::selection(selection, entities[i].confidence);
                 entities[i].audit.record(event);
             }
         }
@@ -326,13 +326,13 @@ impl<M: Modality> Anonymizer<M> {
             // Stage a redaction event for every member, so each entity's
             // provenance reflects that this operator hid it.
             for &i in &cluster.members {
-                let event = AuditEvent::redaction(
-                    cluster.operator.id(),
-                    cluster.operator.leak_profile(),
-                    entities[i].confidence,
-                    cluster.matched_by.clone(),
-                    cluster.attribution.clone(),
-                );
+                let mut redaction =
+                    Redaction::new(cluster.operator.id(), cluster.matched_by.clone())
+                        .with_leak_profile(cluster.operator.leak_profile());
+                if let Some(attribution) = cluster.attribution.clone() {
+                    redaction = redaction.with_attribution(attribution);
+                }
+                let event = AuditEvent::redaction(redaction, entities[i].confidence);
                 pending.push((i, event));
             }
             redactions.push(location, replacement);
@@ -422,7 +422,7 @@ fn cluster_overlaps<M: Modality>(entities: &[Entity<M>], candidates: &[usize]) -
 #[cfg(test)]
 mod tests {
     use elide_core::entity::LabelRef;
-    use elide_core::entity::audit::{AuditEvent, AuditKind, RuleMatch};
+    use elide_core::entity::audit::{AuditEvent, AuditKind, Manual, ManualIntent, RuleMatch};
     use elide_core::modality::text::{Text, TextDoc};
     use elide_core::primitive::Confidence;
     use elide_operator::operators::{Erase, Mask, Replace};
@@ -573,10 +573,12 @@ mod tests {
         let suppressed_id = suppressed.id;
         let live_id = live.id;
         // The reviewer marks the second detection as a false positive.
-        suppressed.suppress(
-            AuditEvent::manual_suppress(suppressed.location.clone(), suppressed.confidence)
+        suppressed.suppress(AuditEvent::manual(
+            "manual",
+            suppressed.confidence,
+            Manual::new(ManualIntent::Suppress, suppressed.location.clone())
                 .with_attribution(Attribution::freeform("false positive")),
-        );
+        ));
         let mut entities = vec![live, suppressed];
 
         let anonymizer = Anonymizer::new().with(Rule::fallback(Erase));

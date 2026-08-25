@@ -4,7 +4,7 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::event::{put_bytes, put_opt};
+use super::hash::AuditHasher;
 
 /// Author-supplied rationale for a redaction: *under what authority* it was made.
 ///
@@ -73,11 +73,11 @@ impl FreeformAttribution {
     }
 
     /// Fold this shape's identifying bytes into the audit hash: its
-    /// discriminant byte, then each field. See [`Attribution::hash`].
-    fn hash(&self, out: &mut Vec<u8>) {
-        out.push(0);
-        put_bytes(out, self.name.as_bytes());
-        put_opt(out, self.description.as_ref().map(|s| s.as_bytes()));
+    /// discriminant byte, then each field. See [`Attribution::hash_into`].
+    fn hash_into(&self, out: &mut AuditHasher) {
+        out.byte(0);
+        out.bytes(self.name.as_bytes());
+        out.opt(self.description.as_ref().map(|s| s.as_bytes()));
     }
 }
 
@@ -122,12 +122,12 @@ impl CitedAttribution {
     }
 
     /// Fold this shape's identifying bytes into the audit hash: its
-    /// discriminant byte, then each field. See [`Attribution::hash`].
-    fn hash(&self, out: &mut Vec<u8>) {
-        out.push(1);
-        put_bytes(out, self.authority.as_bytes());
-        put_bytes(out, self.citation.as_bytes());
-        put_opt(out, self.rationale.as_ref().map(|s| s.as_bytes()));
+    /// discriminant byte, then each field. See [`Attribution::hash_into`].
+    fn hash_into(&self, out: &mut AuditHasher) {
+        out.byte(1);
+        out.bytes(self.authority.as_bytes());
+        out.bytes(self.citation.as_bytes());
+        out.opt(self.rationale.as_ref().map(|s| s.as_bytes()));
     }
 }
 
@@ -153,14 +153,14 @@ impl Attribution {
         CitedAttribution::new(authority, citation)
     }
 
-    /// Fold this attribution's identifying bytes into the audit hash, dispatching
-    /// to the shape's own [`hash`](FreeformAttribution::hash): a discriminant
-    /// byte tags the kind, then each field, so any edit to the recorded rationale
-    /// breaks the tamper-evident chain.
-    pub(crate) fn hash(&self, out: &mut Vec<u8>) {
+    /// Fold this attribution's identifying bytes into the audit hash,
+    /// dispatching to the shape's own `hash_into`: a discriminant byte tags the
+    /// kind, then each field, so any edit to the recorded rationale breaks the
+    /// tamper-evident chain.
+    pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
         match self {
-            Attribution::Freeform(freeform) => freeform.hash(out),
-            Attribution::Cited(cited) => cited.hash(out),
+            Attribution::Freeform(freeform) => freeform.hash_into(out),
+            Attribution::Cited(cited) => cited.hash_into(out),
         }
     }
 }
@@ -179,12 +179,13 @@ impl From<CitedAttribution> for Attribution {
 
 #[cfg(test)]
 mod tests {
+    use super::super::hash::AuditHash;
     use super::*;
 
-    fn hashed(a: &Attribution) -> Vec<u8> {
-        let mut out = Vec::new();
-        a.hash(&mut out);
-        out
+    fn hashed(a: &Attribution) -> AuditHash {
+        let mut hasher = AuditHasher::new();
+        a.hash_into(&mut hasher);
+        hasher.finish()
     }
 
     #[test]

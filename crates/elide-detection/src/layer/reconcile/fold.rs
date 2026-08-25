@@ -4,7 +4,7 @@
 use std::mem;
 
 use elide_core::entity::Entity;
-use elide_core::entity::audit::AuditEvent;
+use elide_core::entity::audit::{AuditEvent, Conflict, Contested};
 use elide_core::modality::{Modality, ModalityLocation};
 use elide_core::primitive::Confidence;
 
@@ -89,12 +89,12 @@ fn record_conflicts<M: Modality>(
         if dropped[winner] {
             continue; // winner later lost elsewhere; its claim travels nowhere
         }
-        let event = AuditEvent::conflict(
-            name.to_owned(),
-            entities[winner].confidence,
+        let conflict = Conflict::new(
             entities[loser].label.clone(),
             entities[loser].confidence,
+            name.to_owned(),
         );
+        let event = AuditEvent::conflict(conflict, entities[winner].confidence);
         entities[winner].audit.record(event);
     }
 }
@@ -111,16 +111,20 @@ fn record_contests<M: Modality>(
             continue;
         }
         let on_a = AuditEvent::contested(
-            name.to_owned(),
+            Contested::new(
+                entities[b].label.clone(),
+                entities[b].confidence,
+                name.to_owned(),
+            ),
             entities[a].confidence,
-            entities[b].label.clone(),
-            entities[b].confidence,
         );
         let on_b = AuditEvent::contested(
-            name.to_owned(),
+            Contested::new(
+                entities[a].label.clone(),
+                entities[a].confidence,
+                name.to_owned(),
+            ),
             entities[b].confidence,
-            entities[a].label.clone(),
-            entities[a].confidence,
         );
         entities[a].audit.record(on_a);
         entities[b].audit.record(on_b);

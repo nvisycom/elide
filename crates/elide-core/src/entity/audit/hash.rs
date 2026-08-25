@@ -31,14 +31,66 @@ impl AuditHash {
     /// The genesis link: the all-zero hash a birth event chains from.
     pub const GENESIS: Self = Self(HexBytes([0u8; 32]));
 
-    /// The BLAKE3 hash of `bytes`.
-    pub fn of(bytes: &[u8]) -> Self {
-        Self(HexBytes(*blake3::hash(bytes).as_bytes()))
-    }
-
     /// The raw 32 digest bytes.
     pub const fn as_bytes(&self) -> &[u8; 32] {
         &self.0.0
+    }
+}
+
+/// Streaming builder for an [`AuditHash`]: audit payloads fold their fields in
+/// through its methods, and [`finish`](AuditHasher::finish) yields the digest.
+///
+/// Feeds a BLAKE3 hasher directly — no intermediate buffer is allocated.
+/// [`bytes`](Self::bytes) / [`opt`](Self::opt) length-prefix each field so
+/// concatenated fields cannot be confused across a boundary (`"ab" + "c"`
+/// differs from `"a" + "bc"`); [`raw`](Self::raw) / [`byte`](Self::byte) write
+/// fixed-width spine values that need no delimiter.
+///
+/// [`finish`]: AuditHasher::finish
+pub(crate) struct AuditHasher(blake3::Hasher);
+
+impl AuditHasher {
+    /// A fresh hasher with nothing folded in yet.
+    pub(crate) fn new() -> Self {
+        Self(blake3::Hasher::new())
+    }
+
+    /// Fold in raw bytes with no length prefix — for fixed-width spine values
+    /// (a hash, a little-endian integer) whose width is known, so no delimiter
+    /// is needed.
+    pub(crate) fn raw(&mut self, bytes: &[u8]) -> &mut Self {
+        self.0.update(bytes);
+        self
+    }
+
+    /// Fold in a single byte (a discriminant, a presence flag, a bool).
+    pub(crate) fn byte(&mut self, byte: u8) -> &mut Self {
+        self.0.update(&[byte]);
+        self
+    }
+
+    /// Fold in a length-prefixed byte string, so a field boundary is
+    /// unambiguous.
+    pub(crate) fn bytes(&mut self, bytes: &[u8]) -> &mut Self {
+        self.raw(&(bytes.len() as u64).to_le_bytes());
+        self.raw(bytes)
+    }
+
+    /// Fold in an optional byte string: a presence byte, then the value if
+    /// present.
+    pub(crate) fn opt(&mut self, value: Option<&[u8]>) -> &mut Self {
+        match value {
+            Some(bytes) => {
+                self.byte(1);
+                self.bytes(bytes)
+            }
+            None => self.byte(0),
+        }
+    }
+
+    /// Finish hashing and return the digest.
+    pub(crate) fn finish(&self) -> AuditHash {
+        AuditHash(HexBytes(*self.0.finalize().as_bytes()))
     }
 }
 

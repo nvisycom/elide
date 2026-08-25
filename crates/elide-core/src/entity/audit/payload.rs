@@ -20,7 +20,7 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::event::{put_bytes, put_opt};
+use super::hash::AuditHasher;
 use super::{Attribution, AuditHash, RuleMatch};
 use crate::entity::LabelRef;
 use crate::modality::{Hint, Modality, ModalityLocation};
@@ -55,12 +55,12 @@ impl<M: Modality> Pattern<M> {
     /// across all kinds, written before the payload's own bytes.
     pub(crate) const TAG: u8 = 0;
 
-    pub(crate) fn hash(&self, out: &mut Vec<u8>) {
-        put_bytes(out, &self.location.hash());
-        put_bytes(out, self.pattern.name.as_bytes());
-        put_opt(out, self.pattern.regex.as_ref().map(|s| s.as_bytes()));
-        put_opt(out, self.pattern.validator.as_ref().map(|s| s.as_bytes()));
-        out.push(self.pattern.contextual.into());
+    pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.bytes(&self.location.hash());
+        out.bytes(self.pattern.name.as_bytes());
+        out.opt(self.pattern.regex.as_ref().map(|s| s.as_bytes()));
+        out.opt(self.pattern.validator.as_ref().map(|s| s.as_bytes()));
+        out.byte(self.pattern.contextual.into());
     }
 }
 
@@ -91,11 +91,11 @@ impl<M: Modality> Model<M> {
     /// This kind's discriminant byte (see the [module docs](self)).
     pub(crate) const TAG: u8 = 1;
 
-    pub(crate) fn hash(&self, out: &mut Vec<u8>) {
-        put_bytes(out, &self.location.hash());
-        put_bytes(out, self.model.name.as_bytes());
-        put_opt(out, self.model.version.as_ref().map(|s| s.as_bytes()));
-        out.push(self.model.contextual.into());
+    pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.bytes(&self.location.hash());
+        out.bytes(self.model.name.as_bytes());
+        out.opt(self.model.version.as_ref().map(|s| s.as_bytes()));
+        out.byte(self.model.contextual.into());
     }
 }
 
@@ -113,8 +113,8 @@ impl Deduplication {
     /// This kind's discriminant byte (see the [module docs](self)).
     pub(crate) const TAG: u8 = 2;
 
-    pub(crate) fn hash(&self, out: &mut Vec<u8>) {
-        put_bytes(out, self.strategy.as_bytes());
+    pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.bytes(self.strategy.as_bytes());
     }
 }
 
@@ -137,10 +137,25 @@ impl Conflict {
     /// This kind's discriminant byte (see the [module docs](self)).
     pub(crate) const TAG: u8 = 3;
 
-    pub(crate) fn hash(&self, out: &mut Vec<u8>) {
-        put_bytes(out, self.competing_label.as_str().as_bytes());
-        out.extend_from_slice(&self.competing_confidence.get().to_le_bytes());
-        put_bytes(out, self.resolved_by.as_bytes());
+    /// The loser of a cross-label arbitration: its `competing_label` and
+    /// `competing_confidence`, and the policy (`resolved_by`) that chose the
+    /// winner.
+    pub fn new(
+        competing_label: LabelRef,
+        competing_confidence: Confidence,
+        resolved_by: impl Into<HipStr<'static>>,
+    ) -> Self {
+        Self {
+            competing_label,
+            competing_confidence,
+            resolved_by: resolved_by.into(),
+        }
+    }
+
+    pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.bytes(self.competing_label.as_str().as_bytes());
+        out.raw(&self.competing_confidence.get().to_le_bytes());
+        out.bytes(self.resolved_by.as_bytes());
     }
 }
 
@@ -164,10 +179,25 @@ impl Contested {
     /// This kind's discriminant byte (see the [module docs](self)).
     pub(crate) const TAG: u8 = 4;
 
-    pub(crate) fn hash(&self, out: &mut Vec<u8>) {
-        put_bytes(out, self.competing_label.as_str().as_bytes());
-        out.extend_from_slice(&self.competing_confidence.get().to_le_bytes());
-        put_bytes(out, self.flagged_by.as_bytes());
+    /// The other side of an unresolved cross-label overlap: its
+    /// `competing_label` and `competing_confidence`, and the policy
+    /// (`flagged_by`) that flagged the contest.
+    pub fn new(
+        competing_label: LabelRef,
+        competing_confidence: Confidence,
+        flagged_by: impl Into<HipStr<'static>>,
+    ) -> Self {
+        Self {
+            competing_label,
+            competing_confidence,
+            flagged_by: flagged_by.into(),
+        }
+    }
+
+    pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.bytes(self.competing_label.as_str().as_bytes());
+        out.raw(&self.competing_confidence.get().to_le_bytes());
+        out.bytes(self.flagged_by.as_bytes());
     }
 }
 
@@ -184,8 +214,8 @@ impl Calibration {
     /// This kind's discriminant byte (see the [module docs](self)).
     pub(crate) const TAG: u8 = 5;
 
-    pub(crate) fn hash(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.factor.to_bits().to_le_bytes());
+    pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.raw(&self.factor.to_bits().to_le_bytes());
     }
 }
 
@@ -228,15 +258,39 @@ impl<M: Modality> Refinement<M> {
     /// This kind's discriminant byte (see the [module docs](self)).
     pub(crate) const TAG: u8 = 6;
 
-    pub(crate) fn hash(&self, out: &mut Vec<u8>) {
-        put_bytes(out, self.keyword.as_bytes());
+    /// A refinement fired by `keyword`, with no located hint or resolved
+    /// location. Attach them with [`with_hint`](Self::with_hint) /
+    /// [`with_location`](Self::with_location).
+    pub fn new(keyword: impl Into<HipStr<'static>>) -> Self {
+        Self {
+            keyword: keyword.into(),
+            hint: None,
+            location: None,
+        }
+    }
+
+    /// Attach the located [`Hint`] the keyword fired from (an out-of-band match).
+    ///
+    /// [`Hint`]: crate::modality::Hint
+    #[must_use]
+    pub fn with_hint(mut self, hint: Hint<M>) -> Self {
+        self.hint = Some(hint);
+        self
+    }
+
+    /// Attach where the boosting keyword sits in the medium.
+    #[must_use]
+    pub fn with_location(mut self, location: M::Location) -> Self {
+        self.location = Some(location);
+        self
+    }
+
+    pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.bytes(self.keyword.as_bytes());
         // The hint's location identifies where the keyword sits; its data
         // payload is auxiliary context and stays out of the hash.
-        put_opt(
-            out,
-            self.hint.as_ref().map(|h| h.location.hash()).as_deref(),
-        );
-        put_opt(out, self.location.as_ref().map(|l| l.hash()).as_deref());
+        out.opt(self.hint.as_ref().map(|h| h.location.hash()).as_deref());
+        out.opt(self.location.as_ref().map(|l| l.hash()).as_deref());
     }
 }
 
@@ -247,8 +301,13 @@ impl<M: Modality> Refinement<M> {
 pub struct Redaction {
     /// Which operator (name + version) ran.
     pub operator: OperatorId,
-    /// How much the output leaks about the original.
-    pub leak_profile: LeakProfile,
+    /// How much the output leaks about the original, when the operator claimed a
+    /// profile; `None` when it made no claim.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub leak_profile: Option<LeakProfile>,
     /// Identifier of the key needed to reverse it, if reversible.
     #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub key_id: Option<HipStr<'static>>,
@@ -279,23 +338,76 @@ impl Redaction {
     /// This kind's discriminant byte (see the [module docs](self)).
     pub(crate) const TAG: u8 = 7;
 
-    pub(crate) fn hash(&self, out: &mut Vec<u8>) {
-        put_bytes(out, self.operator.name.as_bytes());
-        put_bytes(out, self.operator.version.as_bytes());
-        out.push(self.leak_profile as u8);
-        put_opt(out, self.key_id.as_ref().map(|s| s.as_bytes()));
-        self.matched_by.hash(out);
+    /// A redaction by `operator`, chosen by the rule `matched_by`. The leak
+    /// profile, reversal key, policy attribution, and captured span are attached
+    /// with the `with_*` builders.
+    pub fn new(operator: OperatorId, matched_by: RuleMatch) -> Self {
+        Self {
+            operator,
+            leak_profile: None,
+            key_id: None,
+            matched_by,
+            attribution: None,
+            span_hash: None,
+            span_length: None,
+        }
+    }
+
+    /// Attach how much the operator's output leaks about the original.
+    #[must_use]
+    pub fn with_leak_profile(mut self, leak_profile: LeakProfile) -> Self {
+        self.leak_profile = Some(leak_profile);
+        self
+    }
+
+    /// Attach the identifier of the key needed to reverse a reversible operator.
+    #[must_use]
+    pub fn with_key_id(mut self, key_id: impl Into<HipStr<'static>>) -> Self {
+        self.key_id = Some(key_id.into());
+        self
+    }
+
+    /// Attach the author-supplied policy [`Attribution`] the operator carried.
+    #[must_use]
+    pub fn with_attribution(mut self, attribution: impl Into<Attribution>) -> Self {
+        self.attribution = Some(attribution.into());
+        self
+    }
+
+    /// Record what was hidden without the plaintext: the BLAKE3 `hash` of the
+    /// original span and its byte `length`. The two are set together — they are
+    /// meaningless apart.
+    #[must_use]
+    pub fn with_span(mut self, hash: AuditHash, length: u32) -> Self {
+        self.span_hash = Some(hash);
+        self.span_length = Some(length);
+        self
+    }
+
+    pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.bytes(self.operator.name.as_bytes());
+        out.bytes(self.operator.version.as_bytes());
+        match self.leak_profile {
+            Some(profile) => {
+                out.byte(1);
+                out.byte(profile as u8);
+            }
+            None => {
+                out.byte(0);
+            }
+        }
+        out.opt(self.key_id.as_ref().map(|s| s.as_bytes()));
+        self.matched_by.hash_into(out);
         hash_opt_attribution(out, self.attribution.as_ref());
-        put_opt(
-            out,
-            self.span_hash.as_ref().map(|h| h.as_bytes().as_slice()),
-        );
+        out.opt(self.span_hash.as_ref().map(|h| h.as_bytes().as_slice()));
         match self.span_length {
             Some(length) => {
-                out.push(1);
-                out.extend_from_slice(&length.to_le_bytes());
+                out.byte(1);
+                out.raw(&length.to_le_bytes());
             }
-            None => out.push(0),
+            None => {
+                out.byte(0);
+            }
         }
     }
 }
@@ -345,9 +457,27 @@ impl<M: Modality> Manual<M> {
     /// This kind's discriminant byte (see the [module docs](self)).
     pub(crate) const TAG: u8 = 8;
 
-    pub(crate) fn hash(&self, out: &mut Vec<u8>) {
-        out.push(self.intent as u8);
-        put_bytes(out, &self.location.hash());
+    /// A human override recording `intent` at `location`, with no rationale.
+    /// Attach one with [`with_attribution`](Self::with_attribution). *Who* made
+    /// the override is the event's source, not set here.
+    pub fn new(intent: ManualIntent, location: M::Location) -> Self {
+        Self {
+            intent,
+            location,
+            attribution: None,
+        }
+    }
+
+    /// Attach the reviewer's rationale [`Attribution`] for the override.
+    #[must_use]
+    pub fn with_attribution(mut self, attribution: impl Into<Attribution>) -> Self {
+        self.attribution = Some(attribution.into());
+        self
+    }
+
+    pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.byte(self.intent as u8);
+        out.bytes(&self.location.hash());
         hash_opt_attribution(out, self.attribution.as_ref());
     }
 }
@@ -396,23 +526,42 @@ impl Selection {
     /// This kind's discriminant byte (see the [module docs](self)).
     pub(crate) const TAG: u8 = 9;
 
-    pub(crate) fn hash(&self, out: &mut Vec<u8>) {
-        put_bytes(out, self.operator.name.as_bytes());
-        put_bytes(out, self.operator.version.as_bytes());
-        self.matched_by.hash(out);
+    /// A pick of `operator`, chosen by the rule `matched_by`, with no policy
+    /// attribution. Attach one with [`with_attribution`](Self::with_attribution).
+    pub fn new(operator: OperatorId, matched_by: RuleMatch) -> Self {
+        Self {
+            operator,
+            matched_by,
+            attribution: None,
+        }
+    }
+
+    /// Attach the author-supplied policy [`Attribution`] the matched rule carried.
+    #[must_use]
+    pub fn with_attribution(mut self, attribution: impl Into<Attribution>) -> Self {
+        self.attribution = Some(attribution.into());
+        self
+    }
+
+    pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.bytes(self.operator.name.as_bytes());
+        out.bytes(self.operator.version.as_bytes());
+        self.matched_by.hash_into(out);
         hash_opt_attribution(out, self.attribution.as_ref());
     }
 }
 
 /// Fold an optional [`Attribution`] into `out`: a presence byte, then the
 /// attribution's own bytes if present. Shared by [`Redaction`] and [`Selection`].
-fn hash_opt_attribution(out: &mut Vec<u8>, attribution: Option<&Attribution>) {
+fn hash_opt_attribution(out: &mut AuditHasher, attribution: Option<&Attribution>) {
     match attribution {
         Some(attribution) => {
-            out.push(1);
-            attribution.hash(out);
+            out.byte(1);
+            attribution.hash_into(out);
         }
-        None => out.push(0),
+        None => {
+            out.byte(0);
+        }
     }
 }
 

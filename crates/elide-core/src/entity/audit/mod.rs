@@ -5,6 +5,7 @@
 mod attribution;
 mod event;
 mod hash;
+mod kind;
 mod payload;
 mod rule_match;
 
@@ -12,8 +13,9 @@ mod rule_match;
 use serde::{Deserialize, Serialize};
 
 pub use self::attribution::{Attribution, CitedAttribution, FreeformAttribution};
-pub use self::event::{AuditEvent, AuditKind};
+pub use self::event::AuditEvent;
 pub use self::hash::AuditHash;
+pub use self::kind::AuditKind;
 pub use self::payload::{
     Calibration, Conflict, Contested, Deduplication, Manual, ManualIntent, Model, ModelEvent,
     Pattern, PatternEvent, Redaction, Refinement, Selection,
