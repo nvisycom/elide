@@ -255,20 +255,26 @@ impl<M: Modality> Manual<M> {
     }
 }
 
-/// Which human decision a [`Manual`] event records.
+/// Which human decision a [`Manual`] event records — the reviewer actions on a
+/// finding: [`Flag`](ManualIntent::Flag) a miss, [`Suppress`](ManualIntent::Suppress)
+/// a false positive, or [`Amend`](ManualIntent::Amend) an existing finding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum ManualIntent {
-    /// A reviewer added an entity detection missed. The entity is redacted like
-    /// any detected one.
-    Include,
+    /// A reviewer flagged an entity detection missed (a false negative). The
+    /// entity is redacted like any detected one.
+    Flag,
     /// A reviewer marked a detected entity to leave alone (a false positive).
     /// The redaction pass skips it — see [`AuditLog::is_suppressed`].
     ///
     /// [`AuditLog::is_suppressed`]: crate::entity::audit::AuditLog::is_suppressed
     Suppress,
+    /// A reviewer amended an existing entity — retagged its label, adjusted its
+    /// span, or changed another attribute. The entity stays and is redacted
+    /// normally; this records that a human changed it.
+    Amend,
 }
 
 /// Fold an optional [`Attribution`] into `out`: a presence byte, then the

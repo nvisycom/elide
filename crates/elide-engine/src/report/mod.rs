@@ -461,7 +461,7 @@ fn ensure_manual<M: Modality>(entity: &mut Entity<M>) {
         .iter()
         .any(|e| matches!(e.kind, AuditKind::Manual(_)));
     if !has_manual {
-        let event = AuditEvent::manual_include(entity.location.clone(), entity.confidence);
+        let event = AuditEvent::manual_flag(entity.location.clone(), entity.confidence);
         entity.audit.record(event);
     }
 }

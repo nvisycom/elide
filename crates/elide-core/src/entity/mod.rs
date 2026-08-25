@@ -258,6 +258,22 @@ mod tests {
         assert!(entity.is_suppressed());
     }
 
+    /// An amended entity is a human override (a `Manual` event) but *not*
+    /// suppressed — only `Suppress` skips redaction; `Amend` is provenance-only.
+    #[test]
+    fn an_amended_entity_is_not_suppressed() {
+        let mut entity = text_entity();
+        let loc = entity.location.clone();
+        entity
+            .audit
+            .record(AuditEvent::manual("reviewer-7", entity.confidence, {
+                Manual::new(ManualIntent::Amend, loc)
+                    .with_attribution(Attribution::freeform("retagged"))
+            }));
+        assert!(!entity.is_suppressed(), "amend does not suppress");
+        assert!(entity.audit.verify().is_ok());
+    }
+
     /// `suppress` requires a `Manual` event; a recognition event is rejected in
     /// debug builds so suppression cannot change redaction behaviour without the
     /// human-override event that explains it.

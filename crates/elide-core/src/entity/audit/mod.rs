@@ -165,12 +165,11 @@ impl<M: Modality> AuditLog<M> {
     /// Whether a reviewer has suppressed this entity — i.e. its most recent
     /// [`Manual`] event carries [`ManualIntent::Suppress`]. The audit trail is
     /// the single source of truth: there is no separate flag to keep in sync.
-    /// A manually *included* entity (a `Manual` with [`ManualIntent::Include`])
+    /// A [flagged](ManualIntent::Flag) or [amended](ManualIntent::Amend) entity
     /// is not suppressed, and is redacted like any detection.
     ///
     /// [`Manual`]: crate::entity::audit::Manual
     /// [`ManualIntent::Suppress`]: crate::entity::audit::ManualIntent::Suppress
-    /// [`ManualIntent::Include`]: crate::entity::audit::ManualIntent::Include
     pub fn is_suppressed(&self) -> bool {
         self.events
             .iter()

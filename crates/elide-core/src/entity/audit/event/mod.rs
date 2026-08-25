@@ -256,11 +256,13 @@ impl<M: Modality> AuditEvent<M> {
     /// A human override recording `manual` (built with its intent, location, and
     /// optional [`Attribution`]) at the entity's asserted `confidence`. The
     /// `source` names the reviewer who made the override — pass their id, or
-    /// `"manual"` when unattributed. Prefer the [`manual_include`] /
-    /// [`manual_suppress`] shorthands for an unattributed override.
+    /// `"manual"` when unattributed. Prefer the [`manual_flag`] /
+    /// [`manual_suppress`] shorthands for an unattributed override; build a
+    /// [`Manual`] directly (e.g. `Manual::new(ManualIntent::Amend, loc)`) for the
+    /// other intents.
     ///
     /// [`Attribution`]: crate::entity::audit::Attribution
-    /// [`manual_include`]: Self::manual_include
+    /// [`manual_flag`]: Self::manual_flag
     /// [`manual_suppress`]: Self::manual_suppress
     pub fn manual(
         source: impl Into<HipStr<'static>>,
@@ -270,15 +272,15 @@ impl<M: Modality> AuditEvent<M> {
         Self::new(source, confidence, manual)
     }
 
-    /// An unattributed [`manual`](Self::manual) event including a manually-added
-    /// entity ([`ManualIntent::Include`]), sourced to `"manual"`.
+    /// An unattributed [`manual`](Self::manual) event flagging a manually-added
+    /// entity ([`ManualIntent::Flag`]), sourced to `"manual"`.
     ///
-    /// [`ManualIntent::Include`]: crate::entity::audit::ManualIntent::Include
-    pub fn manual_include(location: M::Location, confidence: Confidence) -> Self {
+    /// [`ManualIntent::Flag`]: crate::entity::audit::ManualIntent::Flag
+    pub fn manual_flag(location: M::Location, confidence: Confidence) -> Self {
         Self::manual(
             HipStr::borrowed("manual"),
             confidence,
-            Manual::new(ManualIntent::Include, location),
+            Manual::new(ManualIntent::Flag, location),
         )
     }
 
