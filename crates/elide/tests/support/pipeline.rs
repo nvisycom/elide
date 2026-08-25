@@ -309,8 +309,9 @@ impl Fixture {
             .with(Rule::label(builtins::PHONE_NUMBER.to_ref(), Silence))
             .with(Rule::fallback(Erase));
 
-        let orchestrator =
-            Orchestrator::new(&registry).with_modality::<Audio>(analyzer, anonymizer);
+        let orchestrator = Orchestrator::new()
+            .with_registry(registry)
+            .with_modality::<Audio>(analyzer, anonymizer);
 
         let report = orchestrator
             .analyze(&mut document, &Directives::new())
@@ -365,8 +366,9 @@ impl Fixture {
         );
         let anonymizer = Anonymizer::new().with(Rule::fallback(Erase));
 
-        let orchestrator =
-            Orchestrator::new(&registry).with_modality::<Image>(analyzer, anonymizer);
+        let orchestrator = Orchestrator::new()
+            .with_registry(registry)
+            .with_modality::<Image>(analyzer, anonymizer);
 
         let report = orchestrator
             .analyze(&mut document, &Directives::new())
@@ -441,7 +443,8 @@ impl Fixture {
         let mut document = UntypedDocumentHandle::new(self.decode_as::<M>(&registry).await?);
 
         // One scope, shared across every modality pipeline.
-        let orchestrator = Orchestrator::new(&registry)
+        let orchestrator = Orchestrator::new()
+            .with_registry(registry)
             .with_scope(scope)
             .with_modality::<M>(build_analyzer::<M>()?, build_anonymizer::<M>());
         // Drive embedded images too when the image recognizer is available.

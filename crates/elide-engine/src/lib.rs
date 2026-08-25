@@ -28,22 +28,25 @@ pub use self::report::{EntityGroup, Report, ReportDeserializer};
 /// Drives analyze + redact across a whole document.
 ///
 /// Covers the body and its cross-modality container parts. Built with one
-/// [`with_modality`] call per modality the caller wants
-/// redacted, then run over an [`UntypedDocumentHandle`] with [`analyze`] +
-/// [`anonymize_with`] (or the [`anonymize`] shorthand). The document's
-/// modality is never named at the call site: the body and every container
-/// part are offered to each registered pipeline until one matches, so the
-/// orchestrator works the same whatever the document turns out to be.
+/// [`with_modality`] call per modality the caller wants redacted, plus a
+/// [`with_registry`] for the codec that decodes container parts (a body-only
+/// document needs none). Then run over an [`UntypedDocumentHandle`] with
+/// [`analyze`] + [`anonymize_with`] (or the [`anonymize`] shorthand). The
+/// document's modality is never named at the call site: the body and every
+/// container part are offered to each registered pipeline until one matches, so
+/// the orchestrator works the same whatever the document turns out to be.
 ///
-/// Holds the [`FormatRegistry`] used to decode each part and an erased
-/// pipeline per modality, keyed by the modality's [`TypeId`].
+/// Holds the [`FormatRegistry`] used to decode each container part and an
+/// erased pipeline per modality, keyed by the modality's [`TypeId`].
 ///
 /// [`with_modality`]: Orchestrator::with_modality
+/// [`with_registry`]: Orchestrator::with_registry
 /// [`analyze`]: Orchestrator::analyze
 /// [`anonymize_with`]: Orchestrator::anonymize_with
 /// [`anonymize`]: Orchestrator::anonymize
-pub struct Orchestrator<'r> {
-    registry: &'r FormatRegistry,
+#[derive(Default)]
+pub struct Orchestrator {
+    registry: FormatRegistry,
     pipelines: HashMap<TypeId, Box<dyn ErasedPipeline>>,
     /// Per-modality parsers for reconstructing a serialized [`Report`], keyed by
     /// modality name. Populated alongside `pipelines` in [`with_modality`], so a
@@ -54,16 +57,26 @@ pub struct Orchestrator<'r> {
     scope: Scope,
 }
 
-impl<'r> Orchestrator<'r> {
-    /// A new orchestrator that decodes parts through `registry`, with no
-    /// modality pipelines and an empty [`Scope`].
-    pub fn new(registry: &'r FormatRegistry) -> Self {
-        Self {
-            registry,
-            pipelines: HashMap::new(),
-            groups: ModalityRegistry::default(),
-            scope: Scope::new(),
-        }
+impl Orchestrator {
+    /// A new orchestrator: no modality pipelines, an empty [`Scope`], and an
+    /// empty [`FormatRegistry`] (so container parts do not decode until one is
+    /// supplied via [`with_registry`]).
+    ///
+    /// [`with_registry`]: Self::with_registry
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the [`FormatRegistry`] used to decode a document's container parts,
+    /// taking ownership. A body-only document needs no registry; a container
+    /// (DOCX, …) needs one that covers its part formats — typically
+    /// [`FormatRegistry::with_builtin`].
+    ///
+    /// [`FormatRegistry::with_builtin`]: elide_codec::FormatRegistry::with_builtin
+    #[must_use]
+    pub fn with_registry(mut self, registry: FormatRegistry) -> Self {
+        self.registry = registry;
+        self
     }
 
     /// Set the run-wide default [`Scope`] shared across every modality

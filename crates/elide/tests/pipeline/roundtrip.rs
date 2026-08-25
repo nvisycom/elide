@@ -20,7 +20,7 @@ use elide::{Directives, Orchestrator, Result};
 
 const SAMPLE: &[u8] = include_bytes!("../testdata/sample.docx");
 
-fn orchestrator(registry: &FormatRegistry) -> Result<Orchestrator<'_>> {
+fn orchestrator(registry: FormatRegistry) -> Result<Orchestrator> {
     let patterns = PatternRecognizer::builder()
         .with_builtin_patterns()
         .with_builtin_dictionaries()
@@ -36,7 +36,8 @@ fn orchestrator(registry: &FormatRegistry) -> Result<Orchestrator<'_>> {
         .with_mock_backend()
         .with_default_prompt()
         .build()?;
-    Ok(Orchestrator::new(registry)
+    Ok(Orchestrator::new()
+        .with_registry(registry)
         .with_modality::<Text>(Analyzer::new().with_recognizer(patterns), text)
         .with_modality::<Image>(Analyzer::new().with_recognizer(image), Anonymizer::new()))
 }
@@ -48,7 +49,7 @@ fn orchestrator(registry: &FormatRegistry) -> Result<Orchestrator<'_>> {
 #[tokio::test]
 async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
-    let orchestrator = orchestrator(&registry)?;
+    let orchestrator = orchestrator(registry.clone())?;
 
     // Analyze, then serialize the report — the artifact a review layer ships.
     let mut doc = registry.decode(SAMPLE, "docx").await?;
@@ -92,7 +93,7 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
 async fn deserialize_rejects_an_unregistered_modality_with_entities() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
     // An orchestrator with *no* modalities registered.
-    let orchestrator = Orchestrator::new(&registry);
+    let orchestrator = Orchestrator::new().with_registry(registry);
 
     // A non-empty text group against a registry with no text pipeline.
     let json = r#"{"body":{"modality":"text","entities":[{}]},"parts":{}}"#;
@@ -112,7 +113,7 @@ async fn deserialize_rejects_an_unregistered_modality_with_entities() -> Result<
 #[tokio::test]
 async fn report_deserializer_rebuilds_a_report_standalone() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
-    let orchestrator = orchestrator(&registry)?;
+    let orchestrator = orchestrator(registry.clone())?;
 
     let mut doc = registry.decode(SAMPLE, "docx").await?;
     let report = orchestrator.analyze(&mut doc, &Directives::new()).await?;
@@ -155,7 +156,8 @@ async fn split_pipeline_halves_detect_and_redact() -> Result<()> {
         .with(Rule::fallback(Erase));
 
     // Register the two halves in separate calls — no fabricated empty half.
-    let orchestrator = Orchestrator::new(&registry)
+    let orchestrator = Orchestrator::new()
+        .with_registry(registry.clone())
         .with_analyzer::<Text>(Analyzer::new().with_recognizer(patterns))
         .with_anonymizer::<Text>(text_redact);
 

@@ -30,7 +30,8 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
             Replace::new("[EMAIL]"),
         ))
         .with(Rule::fallback(Erase));
-    let orchestrator = Orchestrator::new(&registry)
+    let orchestrator = Orchestrator::new()
+        .with_registry(registry.clone())
         .with_modality::<Text>(Analyzer::new().with_recognizer(patterns), anonymizer);
 
     // Phase 1: analyze, then copy the body entities out — exactly what a caller

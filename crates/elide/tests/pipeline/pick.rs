@@ -27,7 +27,7 @@ const SAMPLE: &[u8] = include_bytes!("../testdata/sample.docx");
 
 /// Build an orchestrator whose body rule set is deterministic enough to read
 /// back from the picks: email is replaced, everything else erased.
-fn orchestrator(registry: &FormatRegistry) -> Result<Orchestrator<'_>> {
+fn orchestrator(registry: FormatRegistry) -> Result<Orchestrator> {
     let patterns = PatternRecognizer::builder()
         .with_builtin_patterns()
         .with_builtin_dictionaries()
@@ -43,7 +43,8 @@ fn orchestrator(registry: &FormatRegistry) -> Result<Orchestrator<'_>> {
         .with_mock_backend()
         .with_default_prompt()
         .build()?;
-    Ok(Orchestrator::new(registry)
+    Ok(Orchestrator::new()
+        .with_registry(registry)
         .with_modality::<Text>(Analyzer::new().with_recognizer(patterns), text)
         .with_modality::<Image>(Analyzer::new().with_recognizer(image), Anonymizer::new()))
 }
@@ -54,7 +55,7 @@ fn orchestrator(registry: &FormatRegistry) -> Result<Orchestrator<'_>> {
 #[tokio::test]
 async fn anonymize_records_reviewable_body_picks() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
-    let orchestrator = orchestrator(&registry)?;
+    let orchestrator = orchestrator(registry.clone())?;
 
     let mut doc = registry.decode(SAMPLE, "docx").await?;
     let report = orchestrator.analyze(&mut doc, &Directives::new()).await?;
@@ -112,7 +113,7 @@ async fn anonymize_records_reviewable_body_picks() -> Result<()> {
 #[tokio::test]
 async fn anonymize_over_an_empty_part_records_nothing() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
-    let orchestrator = orchestrator(&registry)?;
+    let orchestrator = orchestrator(registry.clone())?;
 
     let mut doc = registry.decode(SAMPLE, "docx").await?;
     // A report carrying one image part with no detected entities — apply routes
