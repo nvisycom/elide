@@ -4,7 +4,9 @@
 //! Downstream crates register their own formats with
 //! [`FormatRegistry::add_format`]; there is no central enum to extend.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use elide_core::{Error, ErrorKind, Result};
 
@@ -12,16 +14,63 @@ use super::document::UntypedDocumentHandle;
 use super::{Format, FormatId};
 use crate::content::ContentData;
 
+/// Lowercase `s` for ASCII case-insensitive extension / content-type keys,
+/// **borrowing** when it is already lowercase (the conventional case) so no
+/// allocation happens. Only a key that actually carries an uppercase ASCII
+/// letter is allocated. Used for both map keys and lookup queries, so a
+/// case-insensitive hit never allocates on either side unless the input is
+/// mixed-case.
+fn ascii_lower_cow(s: &str) -> Cow<'_, str> {
+    if s.bytes().any(|b| b.is_ascii_uppercase()) {
+        Cow::Owned(s.to_ascii_lowercase())
+    } else {
+        Cow::Borrowed(s)
+    }
+}
+
+/// Lowercase a `Format`'s extension / content-type into a lookup key while
+/// **preserving its `'static` borrow** when it is already lowercase: a builtin
+/// format's `Cow::Borrowed(&'static str)` becomes a borrowed key with no
+/// allocation, and only a mixed-case (or already-owned mixed-case) value
+/// allocates. This is the store-side counterpart to [`ascii_lower_cow`].
+fn ascii_lower_key(s: Cow<'static, str>) -> Cow<'static, str> {
+    if s.bytes().any(|b| b.is_ascii_uppercase()) {
+        Cow::Owned(s.to_ascii_lowercase())
+    } else {
+        s
+    }
+}
+
 /// Owns the registered [`Format`]s and resolves content to one of them.
 ///
 /// Resolves by file extension, MIME content type, or [`FormatId`], then
 /// decodes through the matched format's loader.
-#[derive(Debug, Default)]
-pub struct FormatRegistry {
+///
+/// A registry is a cheap-to-`Clone` handle over immutable shared state: the
+/// registered formats and their lookup maps live behind an [`Arc`], so cloning
+/// is a single atomic bump rather than re-allocating the (dozens of) map keys.
+/// A registry is built up once — [`with_builtin`] / [`with_format`] — then
+/// shared; the mutating builders use copy-on-write, so they only ever pay for a
+/// deep clone if the registry is mutated *after* it has been shared, which the
+/// build-then-share flow never does.
+///
+/// [`with_builtin`]: Self::with_builtin
+/// [`with_format`]: Self::with_format
+#[derive(Debug, Default, Clone)]
+pub struct FormatRegistry(Arc<FormatRegistryInner>);
+
+/// The shared, immutable body of a [`FormatRegistry`]. Held behind an [`Arc`]
+/// so the public handle clones cheaply; all resolution logic lives here.
+///
+/// `Clone` exists only for [`Arc::make_mut`]'s copy-on-write in the mutating
+/// builders — a live registry is never actually deep-cloned in the
+/// build-then-share flow.
+#[derive(Debug, Default, Clone)]
+struct FormatRegistryInner {
     formats: Vec<Format>,
     by_id: HashMap<FormatId, usize>,
-    by_extension: HashMap<String, usize>,
-    by_content_type: HashMap<String, usize>,
+    by_extension: HashMap<Cow<'static, str>, usize>,
+    by_content_type: HashMap<Cow<'static, str>, usize>,
 }
 
 impl FormatRegistry {
@@ -108,12 +157,13 @@ impl FormatRegistry {
     ///
     /// [`with_format`]: Self::with_format
     pub fn add_format(&mut self, format: Format) -> &mut Self {
+        let inner = Arc::make_mut(&mut self.0);
         assert!(
-            !self.by_id.contains_key(&format.id),
+            !inner.by_id.contains_key(&format.id),
             "format id already registered: {} (use replace_format to override)",
             format.id
         );
-        self.insert_format(format);
+        inner.insert_format(format);
         self
     }
 
@@ -144,62 +194,36 @@ impl FormatRegistry {
     ///
     /// [`with_replaced_format`]: Self::with_replaced_format
     pub fn replace_format(&mut self, format: Format) -> &mut Self {
-        self.insert_format(format);
+        Arc::make_mut(&mut self.0).insert_format(format);
         self
-    }
-
-    /// Insert `format`, reusing the existing slot when its id is already
-    /// registered (so the `usize` indices the lookup maps hold stay valid —
-    /// removing the old entry would shift every later index), and re-point
-    /// its extensions / content types to that slot.
-    fn insert_format(&mut self, format: Format) {
-        let id = format.id.clone();
-        let index = match self.by_id.get(&id) {
-            Some(&existing) => {
-                self.formats[existing] = format;
-                existing
-            }
-            None => {
-                let index = self.formats.len();
-                self.formats.push(format);
-                index
-            }
-        };
-        let extensions = self.formats[index].extensions.clone();
-        let content_types = self.formats[index].content_types.clone();
-        for ext in &extensions {
-            self.by_extension.insert(ext.to_ascii_lowercase(), index);
-        }
-        for ct in &content_types {
-            self.by_content_type.insert(ct.to_ascii_lowercase(), index);
-        }
-        self.by_id.insert(id, index);
     }
 
     /// Look up a registered format by id.
     pub fn by_id(&self, id: &FormatId) -> Option<&Format> {
-        self.by_id.get(id).map(|&i| &self.formats[i])
+        self.0.by_id.get(id).map(|&i| &self.0.formats[i])
     }
 
     /// Look up a registered format by file extension (case-insensitive,
     /// no leading dot).
     pub fn by_extension(&self, ext: &str) -> Option<&Format> {
-        self.by_extension
-            .get(&ext.to_ascii_lowercase())
-            .map(|&i| &self.formats[i])
+        self.0
+            .by_extension
+            .get(ascii_lower_cow(ext).as_ref())
+            .map(|&i| &self.0.formats[i])
     }
 
     /// Look up a registered format by MIME content type
     /// (case-insensitive).
     pub fn by_content_type(&self, mime: &str) -> Option<&Format> {
-        self.by_content_type
-            .get(&mime.to_ascii_lowercase())
-            .map(|&i| &self.formats[i])
+        self.0
+            .by_content_type
+            .get(ascii_lower_cow(mime).as_ref())
+            .map(|&i| &self.0.formats[i])
     }
 
     /// Iterate over every registered format in registration order.
     pub fn iter(&self) -> impl Iterator<Item = &Format> {
-        self.formats.iter()
+        self.0.formats.iter()
     }
 
     /// Decode raw content using the format resolved from the extension
@@ -260,6 +284,46 @@ impl FormatRegistry {
     }
 }
 
+impl FormatRegistryInner {
+    /// Insert `format`, reusing the existing slot when its id is already
+    /// registered (so the `usize` indices the lookup maps hold stay valid —
+    /// removing the old entry would shift every later index), and re-point
+    /// its extensions / content types to that slot.
+    ///
+    /// When replacing, the outgoing format's extension / content-type keys are
+    /// first dropped, so a key the replacement no longer declares stops
+    /// resolving to this slot rather than lingering as a stale mapping.
+    fn insert_format(&mut self, format: Format) {
+        let id = format.id.clone();
+        let index = match self.by_id.get(&id) {
+            Some(&existing) => {
+                // Drop the outgoing format's keys that point here; the
+                // replacement re-inserts whatever it still declares below.
+                // Guard on the value so a key another format later claimed
+                // (last-registration-wins) is left alone.
+                self.by_extension.retain(|_, &mut i| i != existing);
+                self.by_content_type.retain(|_, &mut i| i != existing);
+                self.formats[existing] = format;
+                existing
+            }
+            None => {
+                let index = self.formats.len();
+                self.formats.push(format);
+                index
+            }
+        };
+        let extensions = self.formats[index].extensions.clone();
+        let content_types = self.formats[index].content_types.clone();
+        for ext in extensions {
+            self.by_extension.insert(ascii_lower_key(ext), index);
+        }
+        for ct in content_types {
+            self.by_content_type.insert(ascii_lower_key(ct), index);
+        }
+        self.by_id.insert(id, index);
+    }
+}
+
 #[cfg(all(test, feature = "txt"))]
 mod tests {
     use elide_core::modality::text::Text;
@@ -307,6 +371,31 @@ mod tests {
         );
         // The original still resolves by id to the same single entry.
         assert!(reg.by_id(&id).is_some());
+    }
+
+    /// Replacing a format drops the outgoing format's extension /
+    /// content-type keys that the replacement no longer declares, rather than
+    /// leaving them mapped to the reused slot. `txt` declares `txt`/`log` +
+    /// `text/plain`; the variant declares neither, so none of them may resolve
+    /// after the swap.
+    #[test]
+    fn replace_format_drops_stale_keys() {
+        let mut reg = FormatRegistry::new();
+        reg.add_format(txt_format());
+        // Present before the swap.
+        assert!(reg.by_extension("txt").is_some());
+        assert!(reg.by_extension("log").is_some());
+        assert!(reg.by_content_type("text/plain").is_some());
+
+        reg.replace_format(txt_variant());
+
+        // The keys the replacement no longer declares stop resolving...
+        assert!(reg.by_extension("txt").is_none());
+        assert!(reg.by_extension("log").is_none());
+        assert!(reg.by_content_type("text/plain").is_none());
+        // ...and only the replacement's own keys resolve.
+        assert!(reg.by_extension("variant").is_some());
+        assert!(reg.by_content_type("text/variant").is_some());
     }
 
     #[test]

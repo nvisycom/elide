@@ -50,7 +50,8 @@ async fn main() -> Result<()> {
     //    for the body and an image pipeline for the embedded media. The
     //    scope is modality-free, so it is set once for every pipeline.
     let en = Language::asserted(LanguageTag::parse("en").unwrap());
-    let orchestrator = Orchestrator::new(&registry)
+    let orchestrator = Orchestrator::new()
+        .with_registry(registry)
         .with_scope(Scope::new().with_language(en))
         .with_modality::<Text>(build_text_analyzer()?, build_text_anonymizer())
         .with_modality::<Image>(build_image_analyzer()?, build_image_anonymizer());
