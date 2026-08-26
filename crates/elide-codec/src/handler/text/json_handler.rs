@@ -335,6 +335,21 @@ impl DataWriter<Text> for JsonHandler {
                             ),
                         ));
                     }
+                    // Both endpoints must fall on char boundaries of the decoded
+                    // value — splitting a multi-byte char (a `\uXXXX` escape) would
+                    // corrupt it. Reject here, before `Leaf::splice` mutates
+                    // `serialized`, so a rejected batch leaves the document intact.
+                    if !leaf.value.is_char_boundary(value_start)
+                        || !leaf.value.is_char_boundary(value_end)
+                    {
+                        return Err(Error::new(
+                            ErrorKind::MalformedInput,
+                            format!(
+                                "redaction range {}..{} splits a UTF-8 character",
+                                loc.range.start, loc.range.end
+                            ),
+                        ));
+                    }
                     let value = replacement.value().unwrap_or_default().to_owned();
                     plan.push((idx, value_start, value_end, value));
                     resolved = true;
@@ -716,6 +731,32 @@ mod tests {
         );
         let err = h.write_at(rs).await.expect_err("must reject");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn write_at_rejects_a_range_splitting_a_utf8_char() -> Result<()> {
+        // In the value `café`, `é` is bytes 3..5; a range ending at 4 splits it.
+        // The rejection must happen before any mutation, so the document is
+        // left byte-identical.
+        let src = format!("{{\"a\":\"caf{}\"}}", "\\u00e9");
+        let mut h = handler(&src);
+        let chunk = loop {
+            let c = h.read_next().await?.expect("chunk");
+            if c.data.as_str() == "caf\u{e9}" {
+                break c;
+            }
+        };
+        let start = chunk.location.range.start;
+        let mut rs = Redactions::new();
+        rs.push(
+            TextLocation::new(start + 3, start + 4),
+            TextReplacement::substituted("X"),
+        );
+        let err = h.write_at(rs).await.expect_err("must reject");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        // No partial mutation: the source is untouched after the rejected batch.
+        assert_eq!(encoded(&h), src);
         Ok(())
     }
 
