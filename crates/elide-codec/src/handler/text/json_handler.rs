@@ -17,7 +17,7 @@
 
 use std::ops::Range;
 
-use elide_core::modality::text::{Text, TextData, TextLocation};
+use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter, Hint};
 use elide_core::operator::Redactions;
 use elide_core::{Error, ErrorKind, Result};
@@ -59,10 +59,13 @@ pub(super) struct Leaf {
     /// Current unescaped UTF-8 value: what the recognizer sees in
     /// [`Chunk::data`] and what redactions edit.
     pub value: String,
-    /// Current source bytes: what `encode` emits and what
-    /// [`TextLocation`] offsets address. For [`LeafKind::Key`] and
+    /// Current source bytes: what `encode` emits and what a raw
+    /// [`SourceRef`] addresses. For [`LeafKind::Key`] and
     /// [`LeafKind::StringValue`] this is the quoted form `"…"` with `\\` /
     /// `\"` escapes; for [`LeafKind::Scalar`] it is the bare literal.
+    ///
+    /// [`TextLocation`] offsets address the *decoded* stream ([`value`](Self::value)),
+    /// not these bytes — the two differ wherever an escape collapses.
     pub serialized: String,
     /// Out-of-band located context (currently the enclosing object key)
     /// surfaced to recognizers as hints; empty for keys and for value
@@ -216,12 +219,16 @@ impl Handler<Text> for JsonHandler {
 
     async fn read_next(&mut self) -> Result<Option<Chunk<Text>>> {
         while self.cursor < self.slots.len() {
-            let start = self.offset_of(self.cursor);
+            // The chunk's location addresses the decoded stream — its span
+            // matches `data` (the decoded value), so a recognizer's offsets into
+            // `data` map straight through. `lift` carries the raw span in
+            // `.source` for a source-relative consumer.
+            let start = self.decoded_offset_of(self.cursor);
             let slot = &self.slots[self.cursor];
             self.cursor += 1;
             if let Slot::Leaf(leaf) = slot {
                 return Ok(Some(Chunk {
-                    location: TextLocation::new(start, start + leaf.serialized.len()),
+                    location: TextLocation::new(start, start + leaf.value.len()),
                     data: TextData::new(leaf.value.clone()),
                     hints: leaf.hints.clone(),
                 }));
@@ -231,16 +238,26 @@ impl Handler<Text> for JsonHandler {
     }
 
     fn lift(&self, chunk: &Chunk<Text>, local: TextLocation) -> Option<TextLocation> {
-        // `local` is a byte range into this leaf's *decoded* value. Walk
-        // the leaf's escape table to map each endpoint to its source byte
-        // offset (a `\"` / `\\` pair is 2 source bytes for 1 value byte).
+        // `local` is a byte range into this leaf's *decoded* value. The lifted
+        // location's `start..end` addresses the decoded stream (so it stays in
+        // step with the recognizer's own coordinates); `.source` carries the raw
+        // span, since a JSON value differs from its source wherever an escape
+        // (`\"`, `\uXXXX`) collapses.
         let (idx, leaf) = self.find_leaf(&chunk.location)?;
-        let slot_start = self.offset_of(idx);
-        let source_start = value_to_source_offset(leaf, slot_start, local.range.start)?;
-        let source_end = value_to_source_offset(leaf, slot_start, local.range.end)?;
-        // `start`/`end` are already source offsets (mapped through the escape
-        // table above), so no separate source range is carried.
-        Some(TextLocation::new(source_start, source_end).with_page(chunk.location.page))
+        let decoded_start = self.decoded_offset_of(idx) + local.range.start;
+        let decoded_end = self.decoded_offset_of(idx) + local.range.end;
+
+        // Raw span: map the value-local endpoints through the leaf's escape
+        // table, offset by the leaf's serialized start in the document.
+        let source_slot_start = self.source_offset_of(idx);
+        let source_start = value_to_source_offset(leaf, source_slot_start, local.range.start)?;
+        let source_end = value_to_source_offset(leaf, source_slot_start, local.range.end)?;
+
+        Some(
+            TextLocation::new(decoded_start, decoded_end)
+                .with_page(chunk.location.page)
+                .with_source([SourceRef::new(source_start..source_end)]),
+        )
     }
 }
 
@@ -268,20 +285,20 @@ impl DataWriter<Text> for JsonHandler {
         let mut items: Vec<_> = redactions.into_iter().collect();
         items.sort_by_key(|(loc, _)| loc.range.start);
         for (loc, replacement) in items {
-            // Advance the slot cursor to the slot containing `loc`. Slot
-            // offsets are monotonic, so a single forward sweep resolves
-            // every redaction in O(slots + redactions).
+            // `loc` addresses the decoded stream (values interleaved with
+            // passthrough). Advance the slot cursor to the slot containing it.
+            // Decoded-stream offsets are monotonic, so a single forward sweep
+            // resolves every redaction in O(slots + redactions).
             while let Some(&(idx, slot)) = slot_iter.peek() {
-                let len = match slot {
-                    Slot::Passthrough(t) => t.len(),
-                    Slot::Leaf(l) => l.serialized.len(),
-                };
-                let slot_end = slot_offset + len;
+                let slot_end = slot_offset + slot.decoded_len();
                 if loc.range.start < slot_end {
-                    if let Slot::Leaf(leaf) = slot
-                        && let Some((value_start, value_end)) =
-                            translate_to_value(leaf, slot_offset, loc.range.start..loc.range.end)
-                    {
+                    if let Slot::Leaf(_) = slot {
+                        // Within a leaf the decoded stream *is* the leaf's value,
+                        // so the decoded-local offsets are value offsets directly
+                        // — no escape-walk on the read side (`Leaf::splice` maps
+                        // the value range through the escapes on write).
+                        let value_start = loc.range.start - slot_offset;
+                        let value_end = loc.range.end - slot_offset;
                         let value = replacement.value().unwrap_or_default().to_owned();
                         plan.push((idx, value_start, value_end, value));
                     }
@@ -313,28 +330,28 @@ impl JsonHandler {
         Self { slots, cursor: 0 }
     }
 
-    /// Byte offset where the slot at `idx` starts in the current encoded
-    /// output.
-    fn offset_of(&self, idx: usize) -> usize {
-        self.slots[..idx]
-            .iter()
-            .map(|s| match s {
-                Slot::Passthrough(t) => t.len(),
-                Slot::Leaf(l) => l.serialized.len(),
-            })
-            .sum()
+    /// The decoded-stream byte offset where the slot at `idx` starts.
+    ///
+    /// The decoded stream is what [`TextLocation`] offsets address: passthrough
+    /// bytes verbatim (structural JSON carries no escapes) interleaved with each
+    /// leaf's *decoded* [`value`](Leaf::value). It diverges from the serialized
+    /// stream only across leaves whose value differs from its source (escapes).
+    fn decoded_offset_of(&self, idx: usize) -> usize {
+        self.slots[..idx].iter().map(Slot::decoded_len).sum()
     }
 
-    /// Locate the leaf slot whose source range contains `location`.
-    /// Returns its index and a borrow.
+    /// The serialized byte offset where the slot at `idx` starts — what
+    /// [`encode`](Handler::encode) emits and what a raw [`SourceRef`] addresses.
+    fn source_offset_of(&self, idx: usize) -> usize {
+        self.slots[..idx].iter().map(Slot::source_len).sum()
+    }
+
+    /// Locate the leaf slot whose *decoded* range contains `location`, returning
+    /// its index and a borrow. `location` is a decoded-stream range.
     fn find_leaf(&self, location: &TextLocation) -> Option<(usize, &Leaf)> {
         let mut offset = 0usize;
         for (idx, slot) in self.slots.iter().enumerate() {
-            let len = match slot {
-                Slot::Passthrough(t) => t.len(),
-                Slot::Leaf(l) => l.serialized.len(),
-            };
-            let slot_end = offset + len;
+            let slot_end = offset + slot.decoded_len();
             if let Slot::Leaf(leaf) = slot
                 && location.range.start >= offset
                 && location.range.end <= slot_end
@@ -347,74 +364,30 @@ impl JsonHandler {
     }
 }
 
-/// Translate a `(source_start, source_end)` range expressed in the
-/// current encoded output into the corresponding `(value_start,
-/// value_end)` range inside `leaf.value`.
-///
-/// `slot_start` is the leaf's byte offset in the current output. For
-/// scalars the mapping is identity. For quoted leaves the boundary
-/// positions (opening/closing quote) map to the full value range;
-/// interior positions are translated by walking the `\\`/`\"` escape
-/// pairs.
-///
-/// Returns `None` when the requested boundary lands on a quote byte
-/// (outside the whole-leaf case) or in the middle of an escape pair.
-fn translate_to_value(
-    leaf: &Leaf,
-    slot_start: usize,
-    source: Range<usize>,
-) -> Option<(usize, usize)> {
-    let Range {
-        start: source_start,
-        end: source_end,
-    } = source;
-    let slot_end = slot_start + leaf.serialized.len();
-    if !leaf.is_quoted() {
-        return Some((source_start - slot_start, source_end - slot_start));
-    }
-    if source_start == slot_start && source_end == slot_end {
-        return Some((0, leaf.value.len()));
-    }
-    let escaped_start = slot_start + 1;
-    let escaped_end = slot_end - 1;
-    if source_start < escaped_start || source_end > escaped_end || source_start > source_end {
-        return None;
-    }
-    let bytes = leaf.serialized.as_bytes();
-    let mut src = escaped_start;
-    let mut val = 0usize;
-    let mut start = None;
-    let mut end = None;
-    while src <= escaped_end {
-        if src == source_start {
-            start = Some(val);
+impl Slot {
+    /// This slot's length in the decoded stream — the decoded value for a leaf,
+    /// the verbatim bytes for passthrough.
+    fn decoded_len(&self) -> usize {
+        match self {
+            Slot::Passthrough(t) => t.len(),
+            Slot::Leaf(l) => l.value.len(),
         }
-        if src == source_end {
-            end = Some(val);
-            break;
-        }
-        // Index into leaf.serialized: `src - slot_start`. An escape advances the
-        // source cursor by its byte span and the value cursor by the decoded
-        // char's UTF-8 length — the two differ for `\uXXXX`.
-        let local = src - slot_start;
-        let (source_len, value_len) = if bytes.get(local) == Some(&b'\\') {
-            let (source_len, decoded) = decode_escape(&bytes[local..])?;
-            if src + source_len > escaped_end + 1 {
-                return None;
-            }
-            (source_len, decoded.len_utf8())
-        } else {
-            (1, 1)
-        };
-        src += source_len;
-        val += value_len;
     }
-    Some((start?, end?))
+
+    /// This slot's length in the serialized stream — the escaped source bytes
+    /// for a leaf, the verbatim bytes for passthrough.
+    fn source_len(&self) -> usize {
+        match self {
+            Slot::Passthrough(t) => t.len(),
+            Slot::Leaf(l) => l.serialized.len(),
+        }
+    }
 }
 
-/// Inverse of [`translate_to_value`]: map a value-byte offset inside
-/// `leaf.value` to the source byte offset inside the current encoded
-/// output.
+/// Map a value-byte offset inside `leaf.value` to the source byte offset
+/// inside the current encoded output — the escape-aware translation from a
+/// decoded position to its raw span, used by `lift` (for `.source`) and by
+/// [`Leaf::splice`] (to place a redaction in the serialized bytes).
 ///
 /// `slot_start` is the leaf's source byte offset. For scalars the mapping
 /// is identity. For quoted leaves the value-byte cursor advances one for
@@ -558,17 +531,22 @@ mod tests {
     async fn redact_partial_leaf_in_compact_source() -> Result<()> {
         let src = r#"{"email":"alice@example.com"}"#;
         let mut h = handler(src);
-        let _ = loop {
+        let chunk = loop {
             let c = h.read_next().await?.expect("chunk");
             if c.data.as_str() == "alice@example.com" {
                 break c;
             }
         };
-        let local_start = src.find("alice").unwrap();
-        let local_end = local_start + "alice".len();
+        // Decoded-stream offsets: the chunk's decoded start plus the value-local
+        // range of "alice" (offset 0 in the value here).
+        let value = chunk.data.as_str();
+        let at = value.find("alice").unwrap();
         let mut rs = Redactions::new();
         rs.push(
-            TextLocation::new(local_start, local_end),
+            TextLocation::new(
+                chunk.location.range.start + at,
+                chunk.location.range.start + at + "alice".len(),
+            ),
             TextReplacement::substituted("[USER]"),
         );
         h.write_at(rs).await?;
@@ -578,20 +556,24 @@ mod tests {
 
     #[tokio::test]
     async fn redact_partial_leaf_with_escapes() -> Result<()> {
-        // unescaped value: foo"bar; source: "foo\"bar"
+        // decoded value: foo"bar; source: "foo\"bar" — redacting "bar" in the
+        // decoded stream splices back over the source bytes past the `\"` escape.
         let src = r#"{"msg":"foo\"bar"}"#;
         let mut h = handler(src);
-        let _ = loop {
+        let chunk = loop {
             let c = h.read_next().await?.expect("chunk");
             if c.data.as_str() == r#"foo"bar"# {
                 break c;
             }
         };
-        let local_start = src.find("bar").unwrap();
-        let local_end = local_start + "bar".len();
+        let value = chunk.data.as_str();
+        let at = value.find("bar").unwrap();
         let mut rs = Redactions::new();
         rs.push(
-            TextLocation::new(local_start, local_end),
+            TextLocation::new(
+                chunk.location.range.start + at,
+                chunk.location.range.start + at + "bar".len(),
+            ),
             TextReplacement::substituted("XXX"),
         );
         h.write_at(rs).await?;
@@ -621,30 +603,32 @@ mod tests {
 
     #[tokio::test]
     async fn redact_a_span_after_a_u_escape() -> Result<()> {
-        // The `é` before `bar` is 6 source bytes for 1 value char, so the
-        // value offset of `bar` maps back across it correctly.
         let src = format!("{{\"msg\":\"caf{} bar\"}}", "\\u00e9");
         let mut h = handler(&src);
-        let _ = loop {
+        let chunk = loop {
             let c = h.read_next().await?.expect("chunk");
             if c.data.as_str() == "caf\u{e9} bar" {
                 break c;
             }
         };
-        // The redaction location is in *source* coordinates (as the lift step
-        // produces), so `bar` sits after the 6-byte `é` escape — the
-        // source→value mapping must cross it correctly.
-        let local_start = src.find("bar").unwrap();
-        let local_end = local_start + "bar".len();
+        // Decoded-stream offsets: in the value `café bar`, the `é` is one char,
+        // so `bar` sits at value byte 5 (`caf` = 3, `é` = 2 UTF-8 bytes). The
+        // decoded location addresses it directly; write_at maps back across the
+        // 6-byte `é` source escape when it splices.
+        let value = chunk.data.as_str();
+        let at = value.find("bar").unwrap();
         let mut rs = Redactions::new();
         rs.push(
-            TextLocation::new(local_start, local_end),
+            TextLocation::new(
+                chunk.location.range.start + at,
+                chunk.location.range.start + at + "bar".len(),
+            ),
             TextReplacement::substituted("XXX"),
         );
         h.write_at(rs).await?;
-        // Only `bar` is replaced; the `é` escape before it is spliced
-        // through verbatim (the redaction edits `serialized` in place, not a
-        // re-render of the decoded value).
+        // Only `bar` is replaced; the `é` escape before it is spliced through
+        // verbatim (the redaction edits `serialized` in place, not a re-render of
+        // the decoded value).
         assert_eq!(encoded(&h), format!("{{\"msg\":\"caf{} XXX\"}}", "\\u00e9"));
         Ok(())
     }
@@ -728,6 +712,8 @@ mod tests {
 
     #[tokio::test]
     async fn lift_simple_string() -> Result<()> {
+        // No escapes: decoded and source coincide, so `range` and `.source`
+        // agree — but `.source` is still populated with the raw span.
         let src = r#"{"email":"alice@example.com"}"#;
         let mut h = handler(src);
         let chunk = loop {
@@ -738,18 +724,27 @@ mod tests {
         };
         let value_start = "alice@example.com".find("alice").unwrap();
         let value_end = value_start + "alice".len();
-        let source_loc = h
+        let lifted = h
             .lift(&chunk, TextLocation::new(value_start, value_end))
             .expect("range is in bounds");
-        let expected_start = src.find("alice").unwrap();
-        assert_eq!(source_loc.range.start, expected_start);
-        assert_eq!(source_loc.range.end, expected_start + "alice".len());
+        // Primary range: decoded-stream offset (chunk start + value-local).
+        assert_eq!(lifted.range.start, chunk.location.range.start + value_start);
+        assert_eq!(lifted.range.end, chunk.location.range.start + value_end);
+        // Source: the raw byte span of "alice" in the document.
+        let raw = src.find("alice").unwrap();
+        assert_eq!(
+            lifted.source,
+            vec![SourceRef::new(raw..raw + "alice".len())]
+        );
         Ok(())
     }
 
     #[tokio::test]
     async fn lift_walks_escapes() -> Result<()> {
-        // unescaped value: foo"bar; source: "foo\"bar"
+        // decoded value: foo"bar; source: "foo\"bar". The `\"` escape makes the
+        // decoded stream one byte shorter than the source before "bar", so the
+        // decoded `range` and the raw `.source` diverge — this is the case the
+        // whole fix exists for.
         let src = r#"{"msg":"foo\"bar"}"#;
         let mut h = handler(src);
         let chunk = loop {
@@ -761,12 +756,15 @@ mod tests {
         let value = chunk.data.as_str();
         let value_start = value.find("bar").unwrap();
         let value_end = value_start + "bar".len();
-        let source_loc = h
+        let lifted = h
             .lift(&chunk, TextLocation::new(value_start, value_end))
             .expect("range is in bounds");
-        let expected_start = src.find("bar").unwrap();
-        assert_eq!(source_loc.range.start, expected_start);
-        assert_eq!(source_loc.range.end, expected_start + "bar".len());
+        // Decoded range: `bar` at value offset 4 (`foo"` = 4 decoded bytes).
+        assert_eq!(lifted.range.start, chunk.location.range.start + value_start);
+        assert_eq!(lifted.range.end, chunk.location.range.start + value_end);
+        // Raw source span: `bar` sits after the 2-byte `\"` escape.
+        let raw = src.find("bar").unwrap();
+        assert_eq!(lifted.source, vec![SourceRef::new(raw..raw + "bar".len())]);
         Ok(())
     }
 
