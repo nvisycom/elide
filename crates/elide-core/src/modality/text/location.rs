@@ -28,8 +28,9 @@ pub struct TextLocation {
     pub page: Option<u32>,
     /// The exact raw source ranges this decoded span came from, for codecs whose
     /// decoded text differs from the source (XML/HTML/DOCX, where entities are
-    /// decoded). Empty when the source equals the decoded text (plain text,
-    /// JSON, CSV) or has no byte-source coordinate (rendered/scanned formats).
+    /// decoded; JSON, where `\"` / `\uXXXX` escapes collapse). Empty when the
+    /// source equals the decoded text (plain text, CSV) or the format has no
+    /// byte-source coordinate (rendered/scanned formats).
     ///
     /// Usually one range; a reconciled span that fused several source runs (or a
     /// span crossing an escape) carries several, kept distinct rather than merged
