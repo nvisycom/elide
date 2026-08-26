@@ -285,6 +285,18 @@ impl DataWriter<Text> for JsonHandler {
         let mut items: Vec<_> = redactions.into_iter().collect();
         items.sort_by_key(|(loc, _)| loc.range.start);
         for (loc, replacement) in items {
+            // A reversed range would make the value-local `end - slot_offset`
+            // underflow below, so reject it up front (nothing constrains a
+            // caller-built `TextLocation` to `start <= end`).
+            if loc.range.start > loc.range.end {
+                return Err(Error::new(
+                    ErrorKind::MalformedInput,
+                    format!(
+                        "redaction range {}..{} is reversed",
+                        loc.range.start, loc.range.end
+                    ),
+                ));
+            }
             // `loc` addresses the decoded stream (values interleaved with
             // passthrough). Advance the slot cursor to the slot containing it.
             // Decoded-stream offsets are monotonic, so a single forward sweep
@@ -700,6 +712,28 @@ mod tests {
         let mut rs = Redactions::new();
         rs.push(
             TextLocation::new(start, start + 5),
+            TextReplacement::substituted("X"),
+        );
+        let err = h.write_at(rs).await.expect_err("must reject");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn write_at_rejects_a_reversed_range() -> Result<()> {
+        // A reversed range (start > end) must be rejected before the value-local
+        // `end - slot_offset` can underflow-panic in a checked build.
+        let mut h = handler(r#"{"a":"bcd"}"#);
+        let chunk = loop {
+            let c = h.read_next().await?.expect("chunk");
+            if c.data.as_str() == "bcd" {
+                break c;
+            }
+        };
+        let start = chunk.location.range.start;
+        let mut rs = Redactions::new();
+        rs.push(
+            TextLocation::new(start + 2, start),
             TextReplacement::substituted("X"),
         );
         let err = h.write_at(rs).await.expect_err("must reject");
