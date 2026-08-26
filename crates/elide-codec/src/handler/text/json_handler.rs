@@ -243,9 +243,9 @@ impl Handler<Text> for JsonHandler {
         // step with the recognizer's own coordinates); `.source` carries the raw
         // span, since a JSON value differs from its source wherever an escape
         // (`\"`, `\uXXXX`) collapses.
-        let (idx, leaf) = self.find_leaf(&chunk.location)?;
-        let decoded_start = self.decoded_offset_of(idx) + local.range.start;
-        let decoded_end = self.decoded_offset_of(idx) + local.range.end;
+        let (idx, leaf, decoded_slot_start) = self.find_leaf(&chunk.location)?;
+        let decoded_start = decoded_slot_start + local.range.start;
+        let decoded_end = decoded_slot_start + local.range.end;
 
         // Raw span: map the value-local endpoints through the leaf's escape
         // table, offset by the leaf's serialized start in the document.
@@ -266,7 +266,7 @@ impl DataReader<Text> for JsonHandler {
     async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
         Ok(self
             .find_leaf(location)
-            .map(|(_, leaf)| TextData::new(leaf.value.clone())))
+            .map(|(_, leaf, _)| TextData::new(leaf.value.clone())))
     }
 }
 
@@ -292,16 +292,38 @@ impl DataWriter<Text> for JsonHandler {
             while let Some(&(idx, slot)) = slot_iter.peek() {
                 let slot_end = slot_offset + slot.decoded_len();
                 if loc.range.start < slot_end {
-                    if let Slot::Leaf(_) = slot {
-                        // Within a leaf the decoded stream *is* the leaf's value,
-                        // so the decoded-local offsets are value offsets directly
-                        // — no escape-walk on the read side (`Leaf::splice` maps
-                        // the value range through the escapes on write).
-                        let value_start = loc.range.start - slot_offset;
-                        let value_end = loc.range.end - slot_offset;
-                        let value = replacement.value().unwrap_or_default().to_owned();
-                        plan.push((idx, value_start, value_end, value));
+                    let Slot::Leaf(leaf) = slot else {
+                        // The span starts in structural JSON (a `{`, `,`, quote,
+                        // or whitespace), not an addressable leaf value. Reject
+                        // it rather than silently redact nothing.
+                        return Err(Error::new(
+                            ErrorKind::MalformedInput,
+                            format!(
+                                "redaction range {}..{} does not start in a JSON value",
+                                loc.range.start, loc.range.end
+                            ),
+                        ));
+                    };
+                    // Within a leaf the decoded stream *is* the leaf's value, so
+                    // the decoded-local offsets are value offsets directly — no
+                    // escape-walk on the read side (`Leaf::splice` maps the value
+                    // range through the escapes on write).
+                    let value_start = loc.range.start - slot_offset;
+                    let value_end = loc.range.end - slot_offset;
+                    // A span must lie wholly within the leaf it starts in — a
+                    // redaction never straddles a value boundary into structural
+                    // bytes.
+                    if value_end > leaf.value.len() {
+                        return Err(Error::new(
+                            ErrorKind::MalformedInput,
+                            format!(
+                                "redaction range {}..{} extends past its JSON value",
+                                loc.range.start, loc.range.end
+                            ),
+                        ));
                     }
+                    let value = replacement.value().unwrap_or_default().to_owned();
+                    plan.push((idx, value_start, value_end, value));
                     break;
                 }
                 slot_offset = slot_end;
@@ -347,8 +369,12 @@ impl JsonHandler {
     }
 
     /// Locate the leaf slot whose *decoded* range contains `location`, returning
-    /// its index and a borrow. `location` is a decoded-stream range.
-    fn find_leaf(&self, location: &TextLocation) -> Option<(usize, &Leaf)> {
+    /// its index, a borrow, and the leaf's decoded-stream start offset (so a
+    /// caller need not re-sweep with [`decoded_offset_of`]). `location` is a
+    /// decoded-stream range.
+    ///
+    /// [`decoded_offset_of`]: Self::decoded_offset_of
+    fn find_leaf(&self, location: &TextLocation) -> Option<(usize, &Leaf, usize)> {
         let mut offset = 0usize;
         for (idx, slot) in self.slots.iter().enumerate() {
             let slot_end = offset + slot.decoded_len();
@@ -356,7 +382,7 @@ impl JsonHandler {
                 && location.range.start >= offset
                 && location.range.end <= slot_end
             {
-                return Some((idx, leaf));
+                return Some((idx, leaf, offset));
             }
             offset = slot_end;
         }
@@ -611,10 +637,10 @@ mod tests {
                 break c;
             }
         };
-        // Decoded-stream offsets: in the value `café bar`, the `é` is one char,
-        // so `bar` sits at value byte 5 (`caf` = 3, `é` = 2 UTF-8 bytes). The
-        // decoded location addresses it directly; write_at maps back across the
-        // 6-byte `é` source escape when it splices.
+        // Decoded-stream offsets: in the value `café bar`, `caf` is bytes 0..3,
+        // `é` is 3..5 (2 UTF-8 bytes), the space is 5, so `bar` starts at value
+        // byte 6. The decoded location addresses it directly; write_at maps back
+        // across the 6-byte `é` source escape when it splices.
         let value = chunk.data.as_str();
         let at = value.find("bar").unwrap();
         let mut rs = Redactions::new();
@@ -630,6 +656,40 @@ mod tests {
         // verbatim (the redaction edits `serialized` in place, not a re-render of
         // the decoded value).
         assert_eq!(encoded(&h), format!("{{\"msg\":\"caf{} XXX\"}}", "\\u00e9"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn write_at_rejects_a_range_starting_in_structural_json() -> Result<()> {
+        // Offset 0 is the opening `{` — structural, not an addressable value.
+        let mut h = handler(r#"{"a":"b"}"#);
+        let mut rs = Redactions::new();
+        rs.push(TextLocation::new(0, 1), TextReplacement::substituted("X"));
+        let err = h.write_at(rs).await.expect_err("must reject");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn write_at_rejects_a_range_past_its_value() -> Result<()> {
+        // A span that starts in the "b" value but runs past its end into the
+        // closing quote / brace is rejected with a named error, not a late
+        // generic splice failure.
+        let mut h = handler(r#"{"a":"b"}"#);
+        let chunk = loop {
+            let c = h.read_next().await?.expect("chunk");
+            if c.data.as_str() == "b" {
+                break c;
+            }
+        };
+        let start = chunk.location.range.start;
+        let mut rs = Redactions::new();
+        rs.push(
+            TextLocation::new(start, start + 5),
+            TextReplacement::substituted("X"),
+        );
+        let err = h.write_at(rs).await.expect_err("must reject");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
         Ok(())
     }
 
