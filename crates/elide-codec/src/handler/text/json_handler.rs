@@ -289,6 +289,7 @@ impl DataWriter<Text> for JsonHandler {
             // passthrough). Advance the slot cursor to the slot containing it.
             // Decoded-stream offsets are monotonic, so a single forward sweep
             // resolves every redaction in O(slots + redactions).
+            let mut resolved = false;
             while let Some(&(idx, slot)) = slot_iter.peek() {
                 let slot_end = slot_offset + slot.decoded_len();
                 if loc.range.start < slot_end {
@@ -324,10 +325,23 @@ impl DataWriter<Text> for JsonHandler {
                     }
                     let value = replacement.value().unwrap_or_default().to_owned();
                     plan.push((idx, value_start, value_end, value));
+                    resolved = true;
                     break;
                 }
                 slot_offset = slot_end;
                 slot_iter.next();
+            }
+            // The sweep exhausted without containing `loc.range.start` — it is at
+            // or past the decoded-stream end. Reject rather than silently
+            // redacting nothing.
+            if !resolved {
+                return Err(Error::new(
+                    ErrorKind::MalformedInput,
+                    format!(
+                        "redaction range {}..{} is past the end of the document",
+                        loc.range.start, loc.range.end
+                    ),
+                ));
             }
         }
         // Apply per-leaf edits right-to-left within each leaf so earlier
@@ -686,6 +700,22 @@ mod tests {
         let mut rs = Redactions::new();
         rs.push(
             TextLocation::new(start, start + 5),
+            TextReplacement::substituted("X"),
+        );
+        let err = h.write_at(rs).await.expect_err("must reject");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn write_at_rejects_a_range_at_the_document_end() -> Result<()> {
+        // A start at (or past) the decoded-stream end resolves to no leaf; the
+        // sweep must reject it rather than exhaust silently and return Ok.
+        let mut h = handler(r#"{"a":"b"}"#);
+        let decoded_len: usize = h.slots.iter().map(Slot::decoded_len).sum();
+        let mut rs = Redactions::new();
+        rs.push(
+            TextLocation::new(decoded_len, decoded_len + 1),
             TextReplacement::substituted("X"),
         );
         let err = h.write_at(rs).await.expect_err("must reject");
