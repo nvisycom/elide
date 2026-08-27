@@ -111,13 +111,24 @@ impl Encoder for PptxEncoder {
         // Translate the decoded-value range back to its raw source range(s) via
         // the block's offset map (already part-absolute), tagging each with the
         // part it lives in. A range crossing an entity yields several runs.
-        let part = item.address.part.as_str();
-        item.address
-            .offsets
-            .raw_ranges(local)
-            .into_iter()
-            .map(|range| SourceRef::in_part(range, part))
-            .collect()
+        super::opc_source::source_span(item.address.part.as_str(), &item.address.offsets, local)
+    }
+
+    fn locate_source(
+        &self,
+        items: &[ExtractedItem<PptxAddress>],
+        source: &[SourceRef],
+    ) -> Option<(usize, Range<usize>)> {
+        super::opc_source::locate_source(
+            items.iter().map(|item| {
+                (
+                    item.address.part.as_str(),
+                    item.address.span.clone(),
+                    &item.address.offsets,
+                )
+            }),
+            source,
+        )
     }
 
     fn as_container_mut(&mut self) -> Option<&mut dyn Container> {

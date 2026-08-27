@@ -98,6 +98,27 @@ pub(crate) trait Encoder: Send + Sync + 'static {
         Vec::new()
     }
 
+    /// Reverse of [`source_span`](Self::source_span): locate the item and the
+    /// decoded-local byte range that the raw `source` references address.
+    ///
+    /// This is what lets a redaction target a span the caller has only in raw
+    /// source coordinates — e.g. an entity a review layer added by selecting
+    /// text in a container part, which it can express as part byte spans but not
+    /// as a decoded-stream offset. `source` is the entity's whole
+    /// [`SourceRef`](TextLocation::source) list, which must resolve to one
+    /// contiguous decoded range within a single item (the runs of one selection
+    /// share an item). Returns that item's index and the decoded-local range to
+    /// edit, or `None` when the references do not resolve to a single item (or
+    /// the encoder does not address items by source span — the default). The
+    /// returned range feeds the same edit path a decoded-range redaction uses.
+    fn locate_source(
+        &self,
+        _items: &[ExtractedItem<Self::Address>],
+        _source: &[SourceRef],
+    ) -> Option<(usize, Range<usize>)> {
+        None
+    }
+
     /// This encoder as a [`Container`] of cross-modality sub-parts, if the
     /// format is a container (DOCX). The default is `None`; a plain
     /// single-part encoder (HTML, XML) is not a container. Lives on the
@@ -160,22 +181,44 @@ impl<E: Encoder> ExtractHandler<E> {
     }
 
     fn redact_one(&mut self, location: &TextLocation, replacement: &TextReplacement) -> Result<()> {
-        let Some(i) = self.item_for(location.range.start) else {
+        // Resolve the edit to (item index, decoded-local range). A location
+        // addressed by a raw `source` reference — e.g. an entity a review layer
+        // added by selecting text in a container part — is reverse-resolved
+        // through the encoder; otherwise the decoded `range` locates the item
+        // directly. Either way the edit path below is the same.
+        let Some((i, local_start, local_end)) = self.resolve(location) else {
             return Ok(());
         };
-        let item_start = self.item_starts[i];
-        let item_end = self.item_starts[i + 1];
-        if location.range.end > item_end {
-            return Ok(());
-        }
-        let local_start = location.range.start - item_start;
-        let local_end = location.range.end - item_start;
         let value = replacement.value().unwrap_or_default();
         let before_len = self.items[i].value.len();
         redact::replace_range(&mut self.items[i].value, value, local_start..local_end)?;
         let delta = self.items[i].value.len() as isize - before_len as isize;
         self.shift_starts_after(i, delta);
         Ok(())
+    }
+
+    /// Resolve `location` to `(item index, decoded-local start, end)`.
+    ///
+    /// Prefers a raw [`source`](TextLocation::source) reference when present
+    /// (reverse-resolved via [`Encoder::locate_source`]); falls back to the
+    /// decoded [`range`](TextLocation::range). `None` when the location resolves
+    /// to no item.
+    fn resolve(&self, location: &TextLocation) -> Option<(usize, usize, usize)> {
+        if !location.source.is_empty() {
+            let (i, local) = self.encoder.locate_source(&self.items, &location.source)?;
+            return Some((i, local.start, local.end));
+        }
+        let i = self.item_for(location.range.start)?;
+        let item_start = self.item_starts[i];
+        let item_end = self.item_starts[i + 1];
+        if location.range.end > item_end {
+            return None;
+        }
+        Some((
+            i,
+            location.range.start - item_start,
+            location.range.end - item_start,
+        ))
     }
 }
 
