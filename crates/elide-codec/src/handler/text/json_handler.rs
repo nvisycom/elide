@@ -41,6 +41,16 @@ pub fn format() -> Format {
         .with_content_types(["application/json"])
 }
 
+/// A resolved redaction: which leaf slot to edit, and the value-local byte
+/// range within it that [`Leaf::splice`] replaces.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LeafEdit {
+    /// Index of the target [`Slot::Leaf`] in `slots`.
+    slot: usize,
+    /// The byte range to replace within that leaf's decoded value.
+    value: Range<usize>,
+}
+
 /// One element of the parsed source.
 #[derive(Debug, Clone)]
 pub(super) enum Slot {
@@ -109,9 +119,11 @@ impl Leaf {
         }
         // Map the value range to source offsets within `serialized` (offset 0 =
         // the leaf's own bytes), then splice the escaped replacement there.
-        let source_start = value_to_source_offset(self, 0, value_range.start)
+        let source_start = self
+            .value_to_source(0, value_range.start)
             .ok_or_else(|| Error::new(ErrorKind::MalformedInput, "value offset out of range"))?;
-        let source_end = value_to_source_offset(self, 0, value_range.end)
+        let source_end = self
+            .value_to_source(0, value_range.end)
             .ok_or_else(|| Error::new(ErrorKind::MalformedInput, "value offset out of range"))?;
         redact::replace_range(
             &mut self.serialized,
@@ -120,6 +132,83 @@ impl Leaf {
         )?;
         redact::replace_range(&mut self.value, replacement, value_range)?;
         Ok(())
+    }
+
+    /// Map a byte offset in this leaf's decoded [`value`](Self::value) to the
+    /// source byte offset it sits at in [`serialized`](Self::serialized) — the
+    /// escape-aware forward mapping. `slot_start` is the leaf's source byte
+    /// offset in the document (0 when addressing the leaf's own bytes).
+    ///
+    /// For a scalar the mapping is identity. For a quoted leaf the value cursor
+    /// advances one per interior source byte (or by an escape's decoded width
+    /// across a `\` escape). `None` if `value_offset` is past the value.
+    fn value_to_source(&self, slot_start: usize, value_offset: usize) -> Option<usize> {
+        if !self.is_quoted() {
+            if value_offset > self.value.len() {
+                return None;
+            }
+            return Some(slot_start + value_offset);
+        }
+        let escaped_start = slot_start + 1;
+        let escaped_end = slot_start + self.serialized.len() - 1;
+        let bytes = self.serialized.as_bytes();
+        let mut src = escaped_start;
+        let mut val = 0usize;
+        while val < value_offset {
+            if src >= escaped_end {
+                return None;
+            }
+            let (source_len, value_len) = self.escape_widths(bytes, src - slot_start)?;
+            src += source_len;
+            val += value_len;
+        }
+        Some(src)
+    }
+
+    /// Inverse of [`value_to_source`](Self::value_to_source): map a source byte
+    /// offset in this leaf's [`serialized`](Self::serialized) bytes to the value
+    /// byte offset it decodes to.
+    ///
+    /// The offset must land on an escape boundary (never mid-`\uXXXX`); the
+    /// closing quote maps to the value's end. `None` if `source_offset` is
+    /// outside the leaf or splits an escape.
+    fn source_to_value(&self, slot_start: usize, source_offset: usize) -> Option<usize> {
+        if !self.is_quoted() {
+            let end = slot_start + self.serialized.len();
+            return (slot_start..=end)
+                .contains(&source_offset)
+                .then_some(source_offset - slot_start);
+        }
+        let escaped_start = slot_start + 1;
+        let escaped_end = slot_start + self.serialized.len() - 1;
+        if source_offset == escaped_end {
+            return Some(self.value.len()); // the closing quote is the value end
+        }
+        if source_offset < escaped_start || source_offset > escaped_end {
+            return None;
+        }
+        let bytes = self.serialized.as_bytes();
+        let mut src = escaped_start;
+        let mut val = 0usize;
+        while src < source_offset {
+            let (source_len, value_len) = self.escape_widths(bytes, src - slot_start)?;
+            src += source_len;
+            val += value_len;
+        }
+        // Landed inside an escape rather than on a boundary.
+        (src == source_offset).then_some(val)
+    }
+
+    /// The (source width, decoded value width) of the token at byte `local` in
+    /// `bytes` (the leaf's serialized bytes): an escape's spans for a `\`, else
+    /// `(1, 1)`. `None` for a malformed escape.
+    fn escape_widths(&self, bytes: &[u8], local: usize) -> Option<(usize, usize)> {
+        if bytes.get(local) == Some(&b'\\') {
+            let (source_len, decoded) = decode_escape(&bytes[local..])?;
+            Some((source_len, decoded.len_utf8()))
+        } else {
+            Some((1, 1))
+        }
     }
 }
 
@@ -250,8 +339,8 @@ impl Handler<Text> for JsonHandler {
         // Raw span: map the value-local endpoints through the leaf's escape
         // table, offset by the leaf's serialized start in the document.
         let source_slot_start = self.source_offset_of(idx);
-        let source_start = value_to_source_offset(leaf, source_slot_start, local.range.start)?;
-        let source_end = value_to_source_offset(leaf, source_slot_start, local.range.end)?;
+        let source_start = leaf.value_to_source(source_slot_start, local.range.start)?;
+        let source_end = leaf.value_to_source(source_slot_start, local.range.end)?;
 
         Some(
             TextLocation::new(decoded_start, decoded_end)
@@ -273,112 +362,26 @@ impl DataReader<Text> for JsonHandler {
 #[async_trait::async_trait]
 impl DataWriter<Text> for JsonHandler {
     async fn write_at(&mut self, redactions: Redactions<Text>) -> Result<()> {
-        // Resolve every redaction against the **pre-mutation** slot
-        // offsets first. Mutating a leaf shifts every later slot's
-        // source-byte offset, so resolving inline would mismatch later
-        // locations against the live (already-shifted) slot table. The
-        // plan stores per-leaf value-byte ranges, which stay valid
-        // regardless of how other slots change length.
-        let mut plan: Vec<(usize, usize, usize, String)> = Vec::new();
-        let mut slot_offset = 0usize;
-        let mut slot_iter = self.slots.iter().enumerate().peekable();
-        let mut items: Vec<_> = redactions.into_iter().collect();
-        items.sort_by_key(|(loc, _)| loc.range.start);
-        for (loc, replacement) in items {
-            // A reversed range would make the value-local `end - slot_offset`
-            // underflow below, so reject it up front (nothing constrains a
-            // caller-built `TextLocation` to `start <= end`).
-            if loc.range.start > loc.range.end {
-                return Err(Error::new(
-                    ErrorKind::MalformedInput,
-                    format!(
-                        "redaction range {}..{} is reversed",
-                        loc.range.start, loc.range.end
-                    ),
-                ));
-            }
-            // `loc` addresses the decoded stream (values interleaved with
-            // passthrough). Advance the slot cursor to the slot containing it.
-            // Decoded-stream offsets are monotonic, so a single forward sweep
-            // resolves every redaction in O(slots + redactions).
-            let mut resolved = false;
-            while let Some(&(idx, slot)) = slot_iter.peek() {
-                let slot_end = slot_offset + slot.decoded_len();
-                if loc.range.start < slot_end {
-                    let Slot::Leaf(leaf) = slot else {
-                        // The span starts in structural JSON (a `{`, `,`, quote,
-                        // or whitespace), not an addressable leaf value. Reject
-                        // it rather than silently redact nothing.
-                        return Err(Error::new(
-                            ErrorKind::MalformedInput,
-                            format!(
-                                "redaction range {}..{} does not start in a JSON value",
-                                loc.range.start, loc.range.end
-                            ),
-                        ));
-                    };
-                    // Within a leaf the decoded stream *is* the leaf's value, so
-                    // the decoded-local offsets are value offsets directly — no
-                    // escape-walk on the read side (`Leaf::splice` maps the value
-                    // range through the escapes on write).
-                    let value_start = loc.range.start - slot_offset;
-                    let value_end = loc.range.end - slot_offset;
-                    // A span must lie wholly within the leaf it starts in — a
-                    // redaction never straddles a value boundary into structural
-                    // bytes.
-                    if value_end > leaf.value.len() {
-                        return Err(Error::new(
-                            ErrorKind::MalformedInput,
-                            format!(
-                                "redaction range {}..{} extends past its JSON value",
-                                loc.range.start, loc.range.end
-                            ),
-                        ));
-                    }
-                    // Both endpoints must fall on char boundaries of the decoded
-                    // value — splitting a multi-byte char (a `\uXXXX` escape) would
-                    // corrupt it. Reject here, before `Leaf::splice` mutates
-                    // `serialized`, so a rejected batch leaves the document intact.
-                    if !leaf.value.is_char_boundary(value_start)
-                        || !leaf.value.is_char_boundary(value_end)
-                    {
-                        return Err(Error::new(
-                            ErrorKind::MalformedInput,
-                            format!(
-                                "redaction range {}..{} splits a UTF-8 character",
-                                loc.range.start, loc.range.end
-                            ),
-                        ));
-                    }
-                    let value = replacement.value().unwrap_or_default().to_owned();
-                    plan.push((idx, value_start, value_end, value));
-                    resolved = true;
-                    break;
-                }
-                slot_offset = slot_end;
-                slot_iter.next();
-            }
-            // The sweep exhausted without containing `loc.range.start` — it is at
-            // or past the decoded-stream end. Reject rather than silently
-            // redacting nothing.
-            if !resolved {
-                return Err(Error::new(
-                    ErrorKind::MalformedInput,
-                    format!(
-                        "redaction range {}..{} is past the end of the document",
-                        loc.range.start, loc.range.end
-                    ),
-                ));
+        // Resolve every redaction to a `(slot, value range)` plan against the
+        // **pre-mutation** slots first: mutating a leaf shifts later slots'
+        // offsets, but a per-leaf value range stays valid regardless. A location
+        // resolves through its raw `source` when present, else its decoded
+        // `range` — `resolve` handles both.
+        let mut plan: Vec<(LeafEdit, String)> = Vec::new();
+        for (loc, replacement) in redactions.into_iter() {
+            if let Some(edit) = self.resolve(&loc)? {
+                let value = replacement.value().unwrap_or_default().to_owned();
+                plan.push((edit, value));
             }
         }
         // Apply per-leaf edits right-to-left within each leaf so earlier
         // edits in the same leaf don't shift later ones.
-        plan.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
-        for (idx, value_start, value_end, value) in plan {
-            let Slot::Leaf(leaf) = &mut self.slots[idx] else {
+        plan.sort_by(|(a, _), (b, _)| a.slot.cmp(&b.slot).then(b.value.start.cmp(&a.value.start)));
+        for (edit, value) in plan {
+            let Slot::Leaf(leaf) = &mut self.slots[edit.slot] else {
                 continue;
             };
-            leaf.splice(value_start..value_end, &value)?;
+            leaf.splice(edit.value, &value)?;
         }
         self.cursor = 0;
         Ok(())
@@ -429,6 +432,124 @@ impl JsonHandler {
         }
         None
     }
+
+    /// Resolve a redaction `location` to the [`LeafEdit`] it targets.
+    ///
+    /// A location carrying a raw [`source`](TextLocation::source) reference is
+    /// resolved through the serialized bytes (JSON is single-file, so any
+    /// `part`-tagged ref is rejected); otherwise the decoded
+    /// [`range`](TextLocation::range) locates the leaf. Either way the returned
+    /// value range feeds the same splice. `Ok(None)` when the location resolves
+    /// to no leaf value; `Err` for a malformed range (reversed, structural,
+    /// past-value, escape-splitting).
+    fn resolve(&self, location: &TextLocation) -> Result<Option<LeafEdit>> {
+        if let Some(source) = location.source.first() {
+            return self.resolve_source(source);
+        }
+        self.resolve_range(location)
+    }
+
+    /// Resolve a raw [`SourceRef`] to a [`LeafEdit`]. JSON is single-file: a
+    /// `part`-tagged reference does not belong to it and is rejected. The raw
+    /// byte span is mapped to the leaf's value coordinate through the escape
+    /// table.
+    fn resolve_source(&self, source: &SourceRef) -> Result<Option<LeafEdit>> {
+        if source.part.is_some() {
+            return Ok(None); // JSON has no parts.
+        }
+        let raw = &source.range;
+        if raw.start > raw.end {
+            return Err(malformed(format_args!(
+                "source range {}..{} is reversed",
+                raw.start, raw.end
+            )));
+        }
+        let mut slot_start = 0usize;
+        for (idx, slot) in self.slots.iter().enumerate() {
+            let slot_end = slot_start + slot.source_len();
+            if let Slot::Leaf(leaf) = slot
+                && raw.start >= slot_start
+                && raw.end <= slot_end
+            {
+                let split = || {
+                    malformed(format_args!(
+                        "source range {}..{} splits a JSON escape",
+                        raw.start, raw.end
+                    ))
+                };
+                let value_start = leaf
+                    .source_to_value(slot_start, raw.start)
+                    .ok_or_else(split)?;
+                let value_end = leaf
+                    .source_to_value(slot_start, raw.end)
+                    .ok_or_else(split)?;
+                return Ok(Some(LeafEdit {
+                    slot: idx,
+                    value: value_start..value_end,
+                }));
+            }
+            slot_start = slot_end;
+        }
+        Ok(None) // Not inside any leaf (structural bytes, or out of range).
+    }
+
+    /// Resolve a decoded [`range`] to a [`LeafEdit`]. The decoded stream *is* the
+    /// leaf's value within a leaf, so the value offsets are the decoded-local
+    /// ones directly. Errors name every malformed shape: reversed, structural
+    /// start, past-value end, char-splitting, past-document.
+    ///
+    /// [`range`]: TextLocation::range
+    fn resolve_range(&self, location: &TextLocation) -> Result<Option<LeafEdit>> {
+        let range = &location.range;
+        if range.start > range.end {
+            return Err(malformed(format_args!(
+                "redaction range {}..{} is reversed",
+                range.start, range.end
+            )));
+        }
+        let mut slot_start = 0usize;
+        for (idx, slot) in self.slots.iter().enumerate() {
+            let slot_end = slot_start + slot.decoded_len();
+            if range.start < slot_end {
+                let Slot::Leaf(leaf) = slot else {
+                    return Err(malformed(format_args!(
+                        "redaction range {}..{} does not start in a JSON value",
+                        range.start, range.end
+                    )));
+                };
+                let value_start = range.start - slot_start;
+                let value_end = range.end - slot_start;
+                if value_end > leaf.value.len() {
+                    return Err(malformed(format_args!(
+                        "redaction range {}..{} extends past its JSON value",
+                        range.start, range.end
+                    )));
+                }
+                if !leaf.value.is_char_boundary(value_start)
+                    || !leaf.value.is_char_boundary(value_end)
+                {
+                    return Err(malformed(format_args!(
+                        "redaction range {}..{} splits a UTF-8 character",
+                        range.start, range.end
+                    )));
+                }
+                return Ok(Some(LeafEdit {
+                    slot: idx,
+                    value: value_start..value_end,
+                }));
+            }
+            slot_start = slot_end;
+        }
+        Err(malformed(format_args!(
+            "redaction range {}..{} is past the end of the document",
+            range.start, range.end
+        )))
+    }
+}
+
+/// A `MalformedInput` error with a formatted message.
+fn malformed(args: std::fmt::Arguments) -> Error {
+    Error::new(ErrorKind::MalformedInput, args.to_string())
 }
 
 impl Slot {
@@ -449,46 +570,6 @@ impl Slot {
             Slot::Leaf(l) => l.serialized.len(),
         }
     }
-}
-
-/// Map a value-byte offset inside `leaf.value` to the source byte offset
-/// inside the current encoded output — the escape-aware translation from a
-/// decoded position to its raw span, used by `lift` (for `.source`) and by
-/// [`Leaf::splice`] (to place a redaction in the serialized bytes).
-///
-/// `slot_start` is the leaf's source byte offset. For scalars the mapping
-/// is identity. For quoted leaves the value-byte cursor advances one for
-/// each interior source byte (or two source bytes when the next source
-/// byte is a `\` escape prefix).
-///
-/// Returns `None` if `value_offset` is past the end of the value.
-fn value_to_source_offset(leaf: &Leaf, slot_start: usize, value_offset: usize) -> Option<usize> {
-    if !leaf.is_quoted() {
-        if value_offset > leaf.value.len() {
-            return None;
-        }
-        return Some(slot_start + value_offset);
-    }
-    let escaped_start = slot_start + 1;
-    let escaped_end = slot_start + leaf.serialized.len() - 1;
-    let bytes = leaf.serialized.as_bytes();
-    let mut src = escaped_start;
-    let mut val = 0usize;
-    while val < value_offset {
-        if src >= escaped_end {
-            return None;
-        }
-        let local = src - slot_start;
-        let (source_len, value_len) = if bytes.get(local) == Some(&b'\\') {
-            let (source_len, decoded) = decode_escape(&bytes[local..])?;
-            (source_len, decoded.len_utf8())
-        } else {
-            (1, 1)
-        };
-        src += source_len;
-        val += value_len;
-    }
-    Some(src)
 }
 
 #[cfg(test)]
@@ -697,6 +778,43 @@ mod tests {
         // verbatim (the redaction edits `serialized` in place, not a re-render of
         // the decoded value).
         assert_eq!(encoded(&h), format!("{{\"msg\":\"caf{} XXX\"}}", "\\u00e9"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn redacts_a_leaf_located_only_by_source() -> Result<()> {
+        use elide_core::modality::text::SourceRef;
+
+        // A caller with only raw coordinates (no decoded range) locates the value
+        // by its raw byte span in the serialized JSON. `bar` sits after the 6-byte
+        // `é` escape, so its raw span differs from any decoded offset.
+        let src = format!("{{\"msg\":\"caf{} bar\"}}", "\\u00e9");
+        let mut h = handler(&src);
+        let raw_at = src.find("bar").unwrap();
+        let location =
+            TextLocation::new(0, 0).with_source([SourceRef::new(raw_at..raw_at + "bar".len())]);
+        let mut rs = Redactions::new();
+        rs.push(location, TextReplacement::substituted("XXX"));
+        h.write_at(rs).await?;
+        assert_eq!(encoded(&h), format!("{{\"msg\":\"caf{} XXX\"}}", "\\u00e9"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_part_tagged_source_ref_is_rejected_for_json() -> Result<()> {
+        use elide_core::modality::text::SourceRef;
+
+        // JSON is single-file; a part-tagged reference does not belong to it and
+        // must not resolve — the document is left unchanged.
+        let src = r#"{"a":"bcd"}"#;
+        let mut h = handler(src);
+        let at = src.find("bcd").unwrap();
+        let location =
+            TextLocation::new(0, 0).with_source([SourceRef::in_part(at..at + 3, "some/part.json")]);
+        let mut rs = Redactions::new();
+        rs.push(location, TextReplacement::substituted("X"));
+        h.write_at(rs).await?;
+        assert_eq!(encoded(&h), src, "part-tagged ref must not redact");
         Ok(())
     }
 
