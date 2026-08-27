@@ -141,7 +141,9 @@ impl Leaf {
     ///
     /// For a scalar the mapping is identity. For a quoted leaf the value cursor
     /// advances one per interior source byte (or by an escape's decoded width
-    /// across a `\` escape). `None` if `value_offset` is past the value.
+    /// across a `\` escape). `None` if `value_offset` is past the value or does
+    /// not land on a decoded-character boundary (splitting a multi-byte char an
+    /// escape produced would map to a source offset wider than the request).
     fn value_to_source(&self, slot_start: usize, value_offset: usize) -> Option<usize> {
         if !self.is_quoted() {
             if value_offset > self.value.len() {
@@ -162,16 +164,20 @@ impl Leaf {
             src += source_len;
             val += value_len;
         }
-        Some(src)
+        // `val` overshoots when `value_offset` fell inside a multi-byte decoded
+        // char; only an exact boundary has a well-defined source offset.
+        (val == value_offset).then_some(src)
     }
 
     /// Inverse of [`value_to_source`](Self::value_to_source): map a source byte
     /// offset in this leaf's [`serialized`](Self::serialized) bytes to the value
     /// byte offset it decodes to.
     ///
-    /// The offset must land on an escape boundary (never mid-`\uXXXX`); the
-    /// closing quote maps to the value's end. `None` if `source_offset` is
-    /// outside the leaf or splits an escape.
+    /// The offset must land on an escape boundary (never mid-`\uXXXX`). The
+    /// quotes bound the value: the opening quote maps to value offset 0, the
+    /// closing quote to the value's end — so a span covering the whole `"…"`
+    /// token resolves to the whole value. `None` if `source_offset` is outside
+    /// the leaf or splits an escape.
     fn source_to_value(&self, slot_start: usize, source_offset: usize) -> Option<usize> {
         if !self.is_quoted() {
             let end = slot_start + self.serialized.len();
@@ -181,8 +187,15 @@ impl Leaf {
         }
         let escaped_start = slot_start + 1;
         let escaped_end = slot_start + self.serialized.len() - 1;
-        if source_offset == escaped_end {
-            return Some(self.value.len()); // the closing quote is the value end
+        // The quotes bound the value: the opening quote (`slot_start`) maps to 0;
+        // the closing quote (`escaped_end`) and the token's exclusive end
+        // (one past it) both map to the value's end — so a span covering the
+        // whole `"…"` token resolves to the whole value.
+        if source_offset == slot_start {
+            return Some(0);
+        }
+        if source_offset == escaped_end || source_offset == escaped_end + 1 {
+            return Some(self.value.len());
         }
         if source_offset < escaped_start || source_offset > escaped_end {
             return None;
@@ -798,6 +811,45 @@ mod tests {
         h.write_at(rs).await?;
         assert_eq!(encoded(&h), format!("{{\"msg\":\"caf{} XXX\"}}", "\\u00e9"));
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn source_span_covering_the_whole_quoted_token_redacts_the_value() -> Result<()> {
+        use elide_core::modality::text::SourceRef;
+
+        // A caller pointing at the *entire* `"bcd"` token, quotes included, must
+        // resolve to the whole value (opening quote -> 0, closing -> value end),
+        // not fail with a misleading "splits an escape".
+        let src = r#"{"a":"bcd"}"#;
+        let mut h = handler(src);
+        let open = src.find(r#""bcd""#).unwrap();
+        let close = open + r#""bcd""#.len();
+        let location = TextLocation::new(0, 0).with_source([SourceRef::new(open..close)]);
+        let mut rs = Redactions::new();
+        rs.push(location, TextReplacement::substituted("X"));
+        h.write_at(rs).await?;
+        assert_eq!(encoded(&h), r#"{"a":"X"}"#);
+        Ok(())
+    }
+
+    #[test]
+    fn value_to_source_rejects_a_mid_character_offset() {
+        // In `café` (`é` decodes to the 2-byte `é` at value bytes 3..5),
+        // offset 4 splits the char — there is no well-defined source offset, so
+        // the mapping must reject it rather than overshoot past the escape.
+        let h = handler(&format!("{{\"a\":\"caf{}\"}}", "\\u00e9"));
+        let Slot::Leaf(leaf) = h
+            .slots
+            .iter()
+            .find(|s| matches!(s, Slot::Leaf(l) if l.value == "caf\u{e9}"))
+            .unwrap()
+        else {
+            unreachable!()
+        };
+        // Boundaries resolve; the mid-`é` offset (4) does not.
+        assert!(leaf.value_to_source(0, 3).is_some());
+        assert!(leaf.value_to_source(0, 5).is_some());
+        assert_eq!(leaf.value_to_source(0, 4), None);
     }
 
     #[tokio::test]
