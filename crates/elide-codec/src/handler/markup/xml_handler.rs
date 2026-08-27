@@ -81,6 +81,25 @@ impl Encoder for XmlEncoder {
             .map(|(start, end)| SourceRef::new(start..end));
         mapped.into_iter().collect()
     }
+
+    fn locate_source(
+        &self,
+        items: &[ExtractedItem<XmlSpan>],
+        source: &[SourceRef],
+    ) -> Option<(usize, Range<usize>)> {
+        // Inverse of `source_span`: the item value is the verbatim source slice,
+        // so a raw offset within the item's span is the same offset in the value
+        // (a subtract). Single file, so the reference carries no part. Cover the
+        // raw span from the first ref's start to the last ref's end.
+        let raw_start = source.iter().map(|s| s.range.start).min()?;
+        let raw_end = source.iter().map(|s| s.range.end).max()?;
+        let (i, base) = items
+            .iter()
+            .map(|item| &item.address.0)
+            .enumerate()
+            .find(|(_, base)| base.start <= raw_start && raw_end <= base.end)?;
+        Some((i, (raw_start - base.start)..(raw_end - base.start)))
+    }
 }
 
 /// Splice each item's current value back at its source span into `raw`,

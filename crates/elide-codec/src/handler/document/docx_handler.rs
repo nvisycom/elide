@@ -118,13 +118,24 @@ impl Encoder for DocxEncoder {
         // Translate the decoded-value range back to its raw source range(s) via
         // the block's offset map (already part-absolute), tagging each with the
         // part it lives in. A range crossing an entity yields several runs.
-        let part = item.address.part.as_str();
-        item.address
-            .offsets
-            .raw_ranges(local)
-            .into_iter()
-            .map(|range| SourceRef::in_part(range, part))
-            .collect()
+        super::opc_source::source_span(item.address.part.as_str(), &item.address.offsets, local)
+    }
+
+    fn locate_source(
+        &self,
+        items: &[ExtractedItem<DocxAddress>],
+        source: &[SourceRef],
+    ) -> Option<(usize, Range<usize>)> {
+        super::opc_source::locate_source(
+            items.iter().map(|item| {
+                (
+                    item.address.part.as_str(),
+                    item.address.span.clone(),
+                    &item.address.offsets,
+                )
+            }),
+            source,
+        )
     }
 
     fn as_container_mut(&mut self) -> Option<&mut dyn Container> {
@@ -308,5 +319,47 @@ mod tests {
             lifted.source,
             vec![SourceRef::in_part(head..head + 5, BODY_PART)]
         );
+    }
+
+    #[tokio::test]
+    async fn redacts_an_entity_located_only_by_source() {
+        // A review layer adds an entity by selecting text in the part — it can
+        // express the raw part byte span but not the decoded-stream `range`. The
+        // redaction is located purely by `.source` and must edit the right bytes.
+        use elide_core::modality::DataWriter;
+        use elide_core::modality::text::TextReplacement;
+        use elide_core::operator::Redactions;
+
+        let raw = r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Alice Bob</w:t></w:r></w:p></w:body></w:document>"#;
+        let mut handler = DocxLoader
+            .decode(docx_with_body("Alice Bob"))
+            .await
+            .unwrap();
+
+        // The raw span of "Bob" in the part — what a DOM selection yields.
+        let bob = raw.find("Bob").unwrap();
+        let location = TextLocation::new(0, 0) // no usable decoded range
+            .with_source([SourceRef::in_part(bob..bob + 3, BODY_PART)]);
+
+        let mut redactions = Redactions::new();
+        redactions.push(location, TextReplacement::substituted("[NAME]"));
+        handler.write_at(redactions).await.unwrap();
+
+        // The rebuilt part has "Bob" replaced, "Alice" untouched.
+        let out = handler.encode().unwrap();
+        let bytes = out.as_bytes();
+        // The output is a zip; the body part contains the replacement.
+        let mut archive = zip::ZipArchive::new(Cursor::new(bytes.to_vec())).unwrap();
+        let mut body = String::new();
+        {
+            use std::io::Read;
+            archive
+                .by_name(BODY_PART)
+                .unwrap()
+                .read_to_string(&mut body)
+                .unwrap();
+        }
+        assert!(body.contains("Alice [NAME]"), "body was: {body}");
+        assert!(!body.contains("Alice Bob"));
     }
 }

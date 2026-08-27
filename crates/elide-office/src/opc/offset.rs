@@ -145,6 +145,48 @@ impl OffsetMap {
         }
         ranges
     }
+
+    /// Translate a part-absolute `raw` byte range into the block-local
+    /// decoded byte range(s) it corresponds to — the inverse of
+    /// [`raw_ranges`](Self::raw_ranges).
+    ///
+    /// The entity atomicity is symmetric: as a decoded range touching an entity
+    /// pulls in that entity's whole raw bytes, a raw range touching an entity
+    /// run (even partway through the `&...;`) pulls in that entity's whole
+    /// decoded character. An entity is indivisible in both directions. A range
+    /// within an identity run maps one-for-one; one spanning several runs yields
+    /// several ranges; contiguous decoded ranges coalesce. Returns empty for an
+    /// empty range or one outside the mapped raw text.
+    pub fn decoded_ranges(&self, raw: Range<usize>) -> Vec<Range<usize>> {
+        if raw.start >= raw.end {
+            return Vec::new();
+        }
+        let mut ranges: Vec<Range<usize>> = Vec::new();
+        for run in &self.runs {
+            let start = raw.start.max(run.raw.start);
+            let end = raw.end.min(run.raw.end);
+            if start >= end {
+                continue;
+            }
+            let decoded = match run.kind {
+                // Offsets within an identity run advance one-for-one, so the
+                // decoded slice is the run's decoded start shifted by the overlap.
+                RunKind::Identity => {
+                    let shift = start - run.raw.start;
+                    let decoded_start = run.decoded.start + shift;
+                    decoded_start..decoded_start + (end - start)
+                }
+                // An entity is indivisible: any raw overlap yields its whole
+                // decoded character.
+                RunKind::Entity => run.decoded.clone(),
+            };
+            match ranges.last_mut() {
+                Some(prev) if prev.end == decoded.start => prev.end = decoded.end,
+                _ => ranges.push(decoded),
+            }
+        }
+        ranges
+    }
 }
 
 #[cfg(test)]
@@ -214,5 +256,51 @@ mod tests {
         let map = OffsetMap::identity(0, 5);
         assert!(map.raw_ranges(3..3).is_empty());
         assert!(map.raw_ranges(10..12).is_empty());
+    }
+
+    // `decoded_ranges` is the inverse of `raw_ranges`; the tests below mirror
+    // the forward ones.
+
+    #[test]
+    fn decoded_within_a_single_run_is_one_range() {
+        let map = alice_amp_bob();
+        // Raw "Alice" (100..105) is wholly in the leading identity run.
+        assert_eq!(map.decoded_ranges(100..105), vec![0..5]);
+        // Raw "Bob" (112..115) is wholly in the trailing run, clipped.
+        assert_eq!(map.decoded_ranges(112..115), vec![8..11]);
+    }
+
+    #[test]
+    fn any_raw_offset_inside_the_entity_maps_to_the_whole_decoded_char() {
+        let map = alice_amp_bob();
+        // The whole `&amp;` (106..111) is the decoded `&` at 6..7.
+        assert_eq!(map.decoded_ranges(106..111), vec![6..7]);
+        // A raw offset *partway through* the entity (108..109, mid-`amp`) still
+        // resolves to the whole decoded entity char — atomic in reverse too.
+        assert_eq!(map.decoded_ranges(108..109), vec![6..7]);
+    }
+
+    #[test]
+    fn a_whole_raw_run_with_an_embedded_entity_coalesces_to_one_decoded_range() {
+        let map = alice_amp_bob();
+        // Raw 100..115 crosses the entity; the three runs are contiguous in
+        // decoded, so they coalesce into 0..11.
+        assert_eq!(map.decoded_ranges(100..115), vec![0..11]);
+    }
+
+    #[test]
+    fn a_raw_range_reaching_into_the_entity_pulls_its_whole_decoded() {
+        let map = alice_amp_bob();
+        // Raw "Alice &amp;" (100..111) → identity 0..6 + entity 6..7, contiguous.
+        assert_eq!(map.decoded_ranges(100..111), vec![0..7]);
+        // Raw "&amp; Bob" (106..115) → entity 6..7 + identity 7..11, contiguous.
+        assert_eq!(map.decoded_ranges(106..115), vec![6..11]);
+    }
+
+    #[test]
+    fn an_empty_or_out_of_range_raw_range_maps_to_nothing() {
+        let map = OffsetMap::identity(100, 5);
+        assert!(map.decoded_ranges(102..102).is_empty());
+        assert!(map.decoded_ranges(200..212).is_empty());
     }
 }
