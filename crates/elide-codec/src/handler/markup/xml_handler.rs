@@ -89,8 +89,11 @@ impl Encoder for XmlEncoder {
     ) -> Option<(usize, Range<usize>)> {
         // Inverse of `source_span`: the item value is the verbatim source slice,
         // so a raw offset within the item's span is the same offset in the value
-        // (a subtract). Single file, so the reference carries no part. Cover the
-        // raw span from the first ref's start to the last ref's end.
+        // (a subtract). XML is a single file, so its source references carry no
+        // part — reject any part-tagged reference rather than misresolve it.
+        if source.iter().any(|s| s.part.is_some()) {
+            return None;
+        }
         let raw_start = source.iter().map(|s| s.range.start).min()?;
         let raw_end = source.iter().map(|s| s.range.end).max()?;
         let (i, base) = items
@@ -225,6 +228,36 @@ mod tests {
             vec![SourceRef::new(want..want + "Carter".len())]
         );
         assert_eq!(&raw[want..want + 6], "Carter");
+    }
+
+    #[tokio::test]
+    async fn redacts_a_node_located_only_by_source() {
+        // A caller with only raw coordinates (no decoded range) locates the node
+        // by a bare, part-less `SourceRef` — XML is a single file.
+        let raw = "<root><name>Alice</name></root>";
+        let mut h = load(raw).await;
+        let at = raw.find("Alice").unwrap();
+        let location =
+            TextLocation::new(0, 0).with_source([SourceRef::new(at..at + "Alice".len())]);
+        let mut rs = Redactions::new();
+        rs.push(location, TextReplacement::substituted("[NAME]"));
+        h.write_at(rs).await.unwrap();
+        assert_eq!(encoded(&h), "<root><name>[NAME]</name></root>");
+    }
+
+    #[tokio::test]
+    async fn a_part_tagged_source_ref_is_rejected_for_xml() {
+        // XML is single-file; a part-tagged reference does not belong to it and
+        // must not resolve — the document is left unchanged.
+        let raw = "<root><name>Alice</name></root>";
+        let mut h = load(raw).await;
+        let at = raw.find("Alice").unwrap();
+        let location = TextLocation::new(0, 0)
+            .with_source([SourceRef::in_part(at..at + "Alice".len(), "some/part.xml")]);
+        let mut rs = Redactions::new();
+        rs.push(location, TextReplacement::substituted("[NAME]"));
+        h.write_at(rs).await.unwrap();
+        assert_eq!(encoded(&h), raw, "part-tagged ref must not redact");
     }
 
     #[tokio::test]

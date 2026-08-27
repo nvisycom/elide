@@ -86,11 +86,20 @@ mod opc_source {
     /// and offset map in item order. The references of one selection share a
     /// part and a block; the covered raw span (first start .. last end) is
     /// reverse-mapped through that block's offset map.
+    ///
+    /// Fails closed (`None`) when the references do not all name the same part —
+    /// raw offsets are part-local, so aggregating a span across parts would be
+    /// meaningless (two parts can share the same numeric offsets).
     pub(super) fn locate_source<'a>(
         blocks: impl Iterator<Item = (&'a str, Range<usize>, &'a OffsetMap)>,
         source: &[SourceRef],
     ) -> Option<(usize, Range<usize>)> {
         let part = source.first()?.part.as_deref()?;
+        // Every reference must be in the same part before the bounds below are
+        // aggregated — offsets across parts are not comparable.
+        if source.iter().any(|s| s.part.as_deref() != Some(part)) {
+            return None;
+        }
         let raw_start = source.iter().map(|s| s.range.start).min()?;
         let raw_end = source.iter().map(|s| s.range.end).max()?;
 
@@ -103,5 +112,48 @@ mod opc_source {
 
         let decoded = offsets.decoded_ranges(raw_start..raw_end);
         Some((i, decoded.first()?.start..decoded.last()?.end))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        // Two parts whose blocks share the same numeric raw offsets. A selection
+        // must never aggregate references across them.
+        fn two_parts() -> Vec<(&'static str, Range<usize>, OffsetMap)> {
+            vec![
+                ("word/document.xml", 0..10, OffsetMap::identity(0, 10)),
+                ("word/header1.xml", 0..10, OffsetMap::identity(0, 10)),
+            ]
+        }
+
+        fn blocks<'a>(
+            v: &'a [(&'static str, Range<usize>, OffsetMap)],
+        ) -> impl Iterator<Item = (&'a str, Range<usize>, &'a OffsetMap)> + 'a {
+            v.iter().map(|(p, span, m)| (*p, span.clone(), m))
+        }
+
+        #[test]
+        fn single_part_selection_resolves() {
+            let parts = two_parts();
+            let source = [SourceRef::in_part(2..5, "word/header1.xml")];
+            let (i, range) = locate_source(blocks(&parts), &source).expect("resolves");
+            assert_eq!(i, 1, "the header block");
+            assert_eq!(range, 2..5);
+        }
+
+        #[test]
+        fn cross_part_selection_fails_closed() {
+            let parts = two_parts();
+            // Two references with overlapping numeric offsets but different parts.
+            let source = [
+                SourceRef::in_part(2..5, "word/document.xml"),
+                SourceRef::in_part(2..5, "word/header1.xml"),
+            ];
+            assert!(
+                locate_source(blocks(&parts), &source).is_none(),
+                "a cross-part selection must not resolve",
+            );
+        }
     }
 }
