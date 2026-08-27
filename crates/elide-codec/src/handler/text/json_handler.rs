@@ -213,14 +213,19 @@ impl Leaf {
     }
 
     /// The (source width, decoded value width) of the token at byte `local` in
-    /// `bytes` (the leaf's serialized bytes): an escape's spans for a `\`, else
-    /// `(1, 1)`. `None` for a malformed escape.
+    /// the leaf's serialized bytes: for a `\` escape its source span and decoded
+    /// width; for a literal character its UTF-8 width (equal in both dimensions,
+    /// so a multi-byte literal like `é` is stepped over whole and an offset can
+    /// never land inside it). `None` for a malformed escape or a non-boundary
+    /// `local`.
     fn escape_widths(&self, bytes: &[u8], local: usize) -> Option<(usize, usize)> {
         if bytes.get(local) == Some(&b'\\') {
             let (source_len, decoded) = decode_escape(&bytes[local..])?;
             Some((source_len, decoded.len_utf8()))
         } else {
-            Some((1, 1))
+            // A literal character occupies the same bytes in source and value.
+            let width = self.serialized.get(local..)?.chars().next()?.len_utf8();
+            Some((width, width))
         }
     }
 }
@@ -830,6 +835,28 @@ mod tests {
         h.write_at(rs).await?;
         assert_eq!(encoded(&h), r#"{"a":"X"}"#);
         Ok(())
+    }
+
+    #[test]
+    fn source_to_value_rejects_an_offset_inside_a_literal_multibyte_char() {
+        // A *literal* `é` (2 UTF-8 bytes, written directly — no `\u` escape).
+        // A source offset between its two bytes splits the char and must be
+        // rejected, not silently accepted as a value boundary.
+        let h = handler("{\"a\":\"caf\u{e9}\"}");
+        let Slot::Leaf(leaf) = h
+            .slots
+            .iter()
+            .find(|s| matches!(s, Slot::Leaf(l) if l.value == "caf\u{e9}"))
+            .unwrap()
+        else {
+            unreachable!()
+        };
+        // The leaf's serialized bytes are `"café"` at slot_start 0; `caf` is
+        // 1..4 (after the opening quote), `é` is 4..6. An offset of 5 is inside
+        // the literal `é`.
+        assert!(leaf.source_to_value(0, 4).is_some(), "before é resolves");
+        assert!(leaf.source_to_value(0, 6).is_some(), "after é resolves");
+        assert_eq!(leaf.source_to_value(0, 5), None, "mid-é must be rejected");
     }
 
     #[test]
