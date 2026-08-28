@@ -465,18 +465,45 @@ impl JsonHandler {
     /// bytes to redact, so silently dropping the edit would leave a green audit
     /// over an unredacted document. `Err` also covers a malformed range
     /// (reversed, structural, past-value, escape-splitting).
+    ///
+    /// A location's [`source`](TextLocation::source) may hold **several** refs —
+    /// one logical span fragmented across escapes or fused from several runs.
+    /// *Every* ref is resolved and *all* must land in the same leaf: the edit
+    /// covers their bounding value range. Resolving only the first would splice
+    /// it and report success while ignoring the rest, leaving the caller's later
+    /// coordinates unredacted under a green audit.
     fn resolve(&self, location: &TextLocation) -> Result<Option<LeafEdit>> {
-        if let Some(source) = location.source.first() {
-            return self.resolve_source(source);
+        match location.source.split_first() {
+            Some((first, rest)) => self.resolve_source(first, rest),
+            None => self.resolve_range(location),
         }
-        self.resolve_range(location)
     }
 
-    /// Resolve a raw [`SourceRef`] to a [`LeafEdit`]. JSON is single-file: a
-    /// `part`-tagged reference does not belong to it and is rejected. The raw
-    /// byte span is mapped to the leaf's value coordinate through the escape
-    /// table.
-    fn resolve_source(&self, source: &SourceRef) -> Result<Option<LeafEdit>> {
+    /// Resolve a location's raw [`SourceRef`] list to a single [`LeafEdit`]. JSON
+    /// is single-file: a `part`-tagged reference does not belong to it and is
+    /// rejected. Each raw byte span is mapped to the leaf's value coordinate
+    /// through the escape table; every ref must resolve to the *same* leaf, and
+    /// the resulting edit spans their combined value range.
+    fn resolve_source(&self, first: &SourceRef, rest: &[SourceRef]) -> Result<Option<LeafEdit>> {
+        let mut edit = self.resolve_one_source(first)?;
+        for source in rest {
+            let next = self.resolve_one_source(source)?;
+            if next.slot != edit.slot {
+                return Err(malformed(format_args!(
+                    "source references span more than one JSON value (slots {} and {})",
+                    edit.slot, next.slot
+                )));
+            }
+            edit.value = edit.value.start.min(next.value.start)..edit.value.end.max(next.value.end);
+        }
+        Ok(Some(edit))
+    }
+
+    /// Resolve one raw [`SourceRef`] to the [`LeafEdit`] for its leaf — `Ok` on
+    /// success, `Err` on an unresolvable or malformed ref. Never a silent no-op:
+    /// an unresolvable explicit coordinate is always an error, so it cannot be
+    /// dropped under a green audit.
+    fn resolve_one_source(&self, source: &SourceRef) -> Result<LeafEdit> {
         if let Some(part) = &source.part {
             // JSON is single-file: a part-tagged ref does not address it. The
             // caller supplied a raw coordinate to redact; silently dropping it
@@ -511,10 +538,10 @@ impl JsonHandler {
                 let value_end = leaf
                     .source_to_value(slot_start, raw.end)
                     .ok_or_else(split)?;
-                return Ok(Some(LeafEdit {
+                return Ok(LeafEdit {
                     slot: idx,
                     value: value_start..value_end,
-                }));
+                });
             }
             slot_start = slot_end;
         }
@@ -955,6 +982,77 @@ mod tests {
             .await
             .expect_err("out-of-range source must be rejected");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn every_source_ref_of_a_multi_ref_location_is_resolved() -> Result<()> {
+        use elide_core::modality::text::SourceRef;
+
+        // A location whose source was fused from several runs carries several
+        // refs. Both must resolve and the edit spans their union — resolving only
+        // the first would leave the rest of the caller's span unredacted.
+        let src = r#"{"a":"bcd"}"#;
+        let mut h = handler(src);
+        let b = src.find("bcd").unwrap();
+        // Two non-adjacent single-byte refs (`b` and `d`) within the one value;
+        // their bounding value range is the whole `bcd`.
+        let location = TextLocation::new(0, 0)
+            .with_source([SourceRef::new(b..b + 1), SourceRef::new(b + 2..b + 3)]);
+        let mut rs = Redactions::new();
+        rs.push(location, TextReplacement::substituted("X"));
+        h.write_at(rs).await?;
+        assert_eq!(encoded(&h), r#"{"a":"X"}"#);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_valid_first_ref_with_an_invalid_second_is_rejected() -> Result<()> {
+        use elide_core::modality::text::SourceRef;
+
+        // The first ref resolves cleanly; the second is out of range. The whole
+        // location must be rejected — never splice the first and report success
+        // while dropping the second, which would leave that coordinate unredacted
+        // under a green audit.
+        let src = r#"{"a":"bcd"}"#;
+        let mut h = handler(src);
+        let b = src.find("bcd").unwrap();
+        let past = src.len() + 4;
+        let location = TextLocation::new(0, 0)
+            .with_source([SourceRef::new(b..b + 1), SourceRef::new(past..past + 2)]);
+        let mut rs = Redactions::new();
+        rs.push(location, TextReplacement::substituted("X"));
+        let err = h
+            .write_at(rs)
+            .await
+            .expect_err("an invalid trailing ref must reject the whole location");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        // And nothing was spliced: the document is untouched.
+        assert_eq!(encoded(&h), src, "no partial redaction on rejection");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn source_refs_spanning_two_json_values_are_rejected() -> Result<()> {
+        use elide_core::modality::text::SourceRef;
+
+        // Two refs that each resolve, but to different leaves. Aggregating a span
+        // across two values is meaningless, so it errors rather than silently
+        // redacting just one.
+        let src = r#"{"a":"bcd","e":"fgh"}"#;
+        let mut h = handler(src);
+        let b = src.find("bcd").unwrap();
+        let f = src.find("fgh").unwrap();
+        let location = TextLocation::new(0, 0)
+            .with_source([SourceRef::new(b..b + 1), SourceRef::new(f..f + 1)]);
+        let mut rs = Redactions::new();
+        rs.push(location, TextReplacement::substituted("X"));
+        let err = h
+            .write_at(rs)
+            .await
+            .expect_err("refs across two values must be rejected");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        assert_eq!(encoded(&h), src, "no partial redaction on rejection");
         Ok(())
     }
 
