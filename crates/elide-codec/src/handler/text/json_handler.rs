@@ -457,9 +457,14 @@ impl JsonHandler {
     /// resolved through the serialized bytes (JSON is single-file, so any
     /// `part`-tagged ref is rejected); otherwise the decoded
     /// [`range`](TextLocation::range) locates the leaf. Either way the returned
-    /// value range feeds the same splice. `Ok(None)` when the location resolves
-    /// to no leaf value; `Err` for a malformed range (reversed, structural,
-    /// past-value, escape-splitting).
+    /// value range feeds the same splice.
+    ///
+    /// A **decoded `range`** that lands in no leaf is `Ok(None)` — the pipeline's
+    /// own coordinate, tolerated as a no-op. An explicit **`source`** that
+    /// resolves to nothing is `Err`, not `Ok(None)`: the caller supplied raw
+    /// bytes to redact, so silently dropping the edit would leave a green audit
+    /// over an unredacted document. `Err` also covers a malformed range
+    /// (reversed, structural, past-value, escape-splitting).
     fn resolve(&self, location: &TextLocation) -> Result<Option<LeafEdit>> {
         if let Some(source) = location.source.first() {
             return self.resolve_source(source);
@@ -472,8 +477,13 @@ impl JsonHandler {
     /// byte span is mapped to the leaf's value coordinate through the escape
     /// table.
     fn resolve_source(&self, source: &SourceRef) -> Result<Option<LeafEdit>> {
-        if source.part.is_some() {
-            return Ok(None); // JSON has no parts.
+        if let Some(part) = &source.part {
+            // JSON is single-file: a part-tagged ref does not address it. The
+            // caller supplied a raw coordinate to redact; silently dropping it
+            // would leave a green audit over an unredacted document.
+            return Err(malformed(format_args!(
+                "source reference names container part {part:?}, but JSON has no parts"
+            )));
         }
         let raw = &source.range;
         if raw.start > raw.end {
@@ -508,7 +518,14 @@ impl JsonHandler {
             }
             slot_start = slot_end;
         }
-        Ok(None) // Not inside any leaf (structural bytes, or out of range).
+        // The span fell in structural bytes (a `{`, `,`, whitespace) or past the
+        // document — no leaf value to redact. As with a part-tagged ref, an
+        // explicit-but-unresolvable source is a caller mistake, not a no-op:
+        // erroring keeps a green audit off an unredacted document.
+        Err(malformed(format_args!(
+            "source range {}..{} resolves to no JSON string value",
+            raw.start, raw.end
+        )))
     }
 
     /// Resolve a decoded [`range`] to a [`LeafEdit`]. The decoded stream *is* the
@@ -883,8 +900,10 @@ mod tests {
     async fn a_part_tagged_source_ref_is_rejected_for_json() -> Result<()> {
         use elide_core::modality::text::SourceRef;
 
-        // JSON is single-file; a part-tagged reference does not belong to it and
-        // must not resolve — the document is left unchanged.
+        // JSON is single-file; a part-tagged reference does not address it. The
+        // caller supplied an explicit source coordinate to redact, so an
+        // unresolvable one is an error — not a silent no-op that would leave a
+        // green audit over an unredacted document.
         let src = r#"{"a":"bcd"}"#;
         let mut h = handler(src);
         let at = src.find("bcd").unwrap();
@@ -892,8 +911,50 @@ mod tests {
             TextLocation::new(0, 0).with_source([SourceRef::in_part(at..at + 3, "some/part.json")]);
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("X"));
-        h.write_at(rs).await?;
-        assert_eq!(encoded(&h), src, "part-tagged ref must not redact");
+        let err = h
+            .write_at(rs)
+            .await
+            .expect_err("part-tagged ref must be rejected");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_source_ref_landing_in_structural_bytes_is_rejected() -> Result<()> {
+        use elide_core::modality::text::SourceRef;
+
+        // Offset 0 is the opening `{` — structural, no string value there. An
+        // explicit source that resolves to no leaf must error, not silently
+        // drop the edit.
+        let mut h = handler(r#"{"a":"b"}"#);
+        let location = TextLocation::new(0, 0).with_source([SourceRef::new(0..1)]);
+        let mut rs = Redactions::new();
+        rs.push(location, TextReplacement::substituted("X"));
+        let err = h
+            .write_at(rs)
+            .await
+            .expect_err("structural source must be rejected");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_source_ref_past_the_document_is_rejected() -> Result<()> {
+        use elide_core::modality::text::SourceRef;
+
+        // A source span past every slot resolves to nothing — a caller mistake
+        // (e.g. an off-by-one in a run→byte mapping), so it errors.
+        let src = r#"{"a":"b"}"#;
+        let mut h = handler(src);
+        let past = src.len() + 4;
+        let location = TextLocation::new(0, 0).with_source([SourceRef::new(past..past + 2)]);
+        let mut rs = Redactions::new();
+        rs.push(location, TextReplacement::substituted("X"));
+        let err = h
+            .write_at(rs)
+            .await
+            .expect_err("out-of-range source must be rejected");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
         Ok(())
     }
 

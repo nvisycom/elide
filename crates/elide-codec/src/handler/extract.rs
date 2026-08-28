@@ -25,10 +25,10 @@
 
 use std::ops::Range;
 
-use elide_core::Result;
 use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter, Hint};
 use elide_core::operator::Redactions;
+use elide_core::{Error, ErrorKind, Result};
 
 use crate::codec::Container;
 use crate::content::ContentData;
@@ -186,7 +186,7 @@ impl<E: Encoder> ExtractHandler<E> {
         // added by selecting text in a container part — is reverse-resolved
         // through the encoder; otherwise the decoded `range` locates the item
         // directly. Either way the edit path below is the same.
-        let Some((i, local_start, local_end)) = self.resolve(location) else {
+        let Some((i, local_start, local_end)) = self.resolve(location)? else {
             return Ok(());
         };
         let value = replacement.value().unwrap_or_default();
@@ -201,25 +201,54 @@ impl<E: Encoder> ExtractHandler<E> {
     ///
     /// Prefers a raw [`source`](TextLocation::source) reference when present
     /// (reverse-resolved via [`Encoder::locate_source`]); falls back to the
-    /// decoded [`range`](TextLocation::range). `None` when the location resolves
-    /// to no item.
-    fn resolve(&self, location: &TextLocation) -> Option<(usize, usize, usize)> {
+    /// decoded [`range`](TextLocation::range).
+    ///
+    /// An unresolvable **`source`** reference is a caller mistake, not a no-op:
+    /// the caller explicitly supplied raw byte coordinates to redact, and a bad
+    /// part name, an offset past the part, or a cross-part span means those
+    /// bytes were never redacted. Returning `Ok(None)` there would let a green
+    /// audit stand over an unredacted document, so it is an `Err` instead. A
+    /// missed decoded `range` stays `Ok(None)`: the pipeline's own coordinate,
+    /// tolerated as a no-op.
+    fn resolve(&self, location: &TextLocation) -> Result<Option<(usize, usize, usize)>> {
         if !location.source.is_empty() {
-            let (i, local) = self.encoder.locate_source(&self.items, &location.source)?;
-            return Some((i, local.start, local.end));
+            let (i, local) = self
+                .encoder
+                .locate_source(&self.items, &location.source)
+                .ok_or_else(|| unresolvable_source(&location.source))?;
+            return Ok(Some((i, local.start, local.end)));
         }
-        let i = self.item_for(location.range.start)?;
+        let Some(i) = self.item_for(location.range.start) else {
+            return Ok(None);
+        };
         let item_start = self.item_starts[i];
         let item_end = self.item_starts[i + 1];
         if location.range.end > item_end {
-            return None;
+            return Ok(None);
         }
-        Some((
+        Ok(Some((
             i,
             location.range.start - item_start,
             location.range.end - item_start,
-        ))
+        )))
     }
+}
+
+/// A location's raw [`source`](TextLocation::source) reference could not be
+/// reverse-resolved to any redactable item — a bad part name, an offset past
+/// the part, or a span crossing parts. `MalformedInput`: the caller-supplied
+/// coordinate is at fault.
+fn unresolvable_source(source: &[SourceRef]) -> Error {
+    let mut msg = String::from("source reference resolves to no redactable item:");
+    for src in source {
+        match &src.part {
+            Some(part) => {
+                msg.push_str(&format!(" {}#{}..{}", part, src.range.start, src.range.end))
+            }
+            None => msg.push_str(&format!(" {}..{}", src.range.start, src.range.end)),
+        }
+    }
+    Error::new(ErrorKind::MalformedInput, msg)
 }
 
 #[async_trait::async_trait]
