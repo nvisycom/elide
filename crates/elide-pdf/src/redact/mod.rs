@@ -20,7 +20,7 @@ mod sanitize;
 use std::collections::BTreeMap;
 
 use lopdf::content::Content;
-use lopdf::{Encoding, Object};
+use lopdf::{Encoding, Object, ObjectId};
 
 use self::glyphs::decode_glyphs;
 #[cfg(feature = "image")]
@@ -51,7 +51,10 @@ impl Detection {
 /// back to the glyphs that drew it.
 struct PageText {
     page: u32,
-    page_id: (u32, u16),
+    /// The page's indirect-object id (`lopdf`'s `(object number, generation)`),
+    /// distinct from the 1-based `page` number: it addresses the page object for
+    /// content get/set.
+    page_id: ObjectId,
     /// The page text, char for char aligned with `glyphs`.
     text: String,
     /// One entry per character of `text`, naming the glyph that produced it.

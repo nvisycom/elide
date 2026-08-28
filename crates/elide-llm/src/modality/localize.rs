@@ -11,6 +11,24 @@ use crate::candidates::TextCandidate;
 
 const TARGET: &str = "elide_llm::modality::localize";
 
+/// Parallel maps from a byte position in normalized text back to the original,
+/// un-normalized text: `start[i]` / `end[i]` are the original byte offsets that
+/// bound the character at normalized byte `i`. Built alongside the normalized
+/// string by [`normalize_with_index_map`].
+struct OriginIndex {
+    /// Original start offset for each normalized byte position.
+    start: Vec<usize>,
+    /// Original end offset for each normalized byte position.
+    end: Vec<usize>,
+}
+
+/// Normalized text paired with the [`OriginIndex`] that maps its byte positions
+/// back to the original text.
+struct NormalizedText {
+    text: String,
+    index: OriginIndex,
+}
+
 /// A candidate that's been resolved to a byte range in the source.
 #[derive(Debug, Clone)]
 pub(super) struct LocalizedCandidate {
@@ -38,11 +56,11 @@ pub(super) fn localize_all(
     candidates: Vec<TextCandidate>,
     policy: UnresolvedCandidatePolicy,
 ) -> Vec<LocalizedCandidate> {
-    let (normalized_text, index_maps) = normalize_with_index_map(text);
+    let normalized = normalize_with_index_map(text);
 
     let mut out = Vec::with_capacity(candidates.len());
     for c in candidates {
-        if let Some(localized) = localize_one(&normalized_text, &index_maps, &c, policy) {
+        if let Some(localized) = localize_one(&normalized, &c, policy) {
             out.push(localized);
         }
     }
@@ -50,8 +68,7 @@ pub(super) fn localize_all(
 }
 
 fn localize_one(
-    normalized_text: &str,
-    orig_index: &(Vec<usize>, Vec<usize>),
+    source: &NormalizedText,
     candidate: &TextCandidate,
     policy: UnresolvedCandidatePolicy,
 ) -> Option<LocalizedCandidate> {
@@ -62,10 +79,11 @@ fn localize_one(
             return None;
         }
     };
-    let (normalized_context, _) = normalize_with_index_map(context);
-    let (normalized_value, _) = normalize_with_index_map(&candidate.value);
+    let normalized_context = normalize_with_index_map(context).text;
+    let normalized_value = normalize_with_index_map(&candidate.value).text;
 
-    let context_matches: Vec<usize> = normalized_text
+    let context_matches: Vec<usize> = source
+        .text
         .match_indices(&normalized_context)
         .map(|(i, _)| i)
         .collect();
@@ -86,7 +104,7 @@ fn localize_one(
     };
 
     let context_end = context_start + normalized_context.len();
-    let window = &normalized_text[context_start..context_end];
+    let window = &source.text[context_start..context_end];
     let value_matches: Vec<usize> = window
         .match_indices(&normalized_value)
         .map(|(i, _)| i)
@@ -109,12 +127,12 @@ fn localize_one(
     let norm_start = context_start + value_offset;
     let norm_end = norm_start + normalized_value.len();
 
-    let (start_index, end_index) = orig_index;
-    let start_offset = *start_index.get(norm_start)?;
+    let index = &source.index;
+    let start_offset = *index.start.get(norm_start)?;
     let end_offset = if norm_end == 0 {
         start_offset
     } else {
-        *end_index.get(norm_end - 1)?
+        *index.end.get(norm_end - 1)?
     };
 
     Some(LocalizedCandidate {
@@ -134,9 +152,9 @@ fn warn_dropped(c: &TextCandidate, reason: &str) {
     );
 }
 
-/// Normalize text (NFC + whitespace collapse) and return parallel
-/// maps from normalized byte positions to original byte positions.
-fn normalize_with_index_map(text: &str) -> (String, (Vec<usize>, Vec<usize>)) {
+/// Normalize text (NFC + whitespace collapse) and return it with the
+/// [`OriginIndex`] mapping its byte positions back to the original text.
+fn normalize_with_index_map(text: &str) -> NormalizedText {
     let mut out = String::with_capacity(text.len());
     let mut start_index: Vec<usize> = Vec::with_capacity(text.len());
     let mut end_index: Vec<usize> = Vec::with_capacity(text.len());
@@ -168,5 +186,11 @@ fn normalize_with_index_map(text: &str) -> (String, (Vec<usize>, Vec<usize>)) {
     }
     start_index.push(orig_pos);
     end_index.push(orig_pos);
-    (out, (start_index, end_index))
+    NormalizedText {
+        text: out,
+        index: OriginIndex {
+            start: start_index,
+            end: end_index,
+        },
+    }
 }
