@@ -23,7 +23,7 @@ use elide_office::pptx::PartKind;
 use super::PptxLoader;
 use crate::codec::{Container, Part, PartId};
 use crate::content::ContentData;
-use crate::handler::extract::{Encoder, ExtractHandler, ExtractedItem};
+use crate::handler::extract::{Encoder, ExtractHandler, ExtractedItem, ItemEdit};
 use crate::{Format, FormatId};
 
 /// Stable [`FormatId`] for the PPTX codec.
@@ -118,7 +118,7 @@ impl Encoder for PptxEncoder {
         &self,
         items: &[ExtractedItem<PptxAddress>],
         source: &[SourceRef],
-    ) -> Option<(usize, Range<usize>)> {
+    ) -> Option<ItemEdit> {
         super::opc_source::locate_source(
             items.iter().map(|item| {
                 (

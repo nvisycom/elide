@@ -51,6 +51,18 @@ struct LeafEdit {
     value: Range<usize>,
 }
 
+/// A leaf located within the slot stream: its slot index, a borrow of the leaf,
+/// and where its value starts in the decoded stream — enough to lift a decoded
+/// offset into and out of it without re-sweeping the slots.
+struct LeafAt<'a> {
+    /// Index of the leaf's [`Slot`] in `slots`.
+    index: usize,
+    /// The located leaf.
+    leaf: &'a Leaf,
+    /// The leaf value's start offset in the decoded stream.
+    decoded_start: usize,
+}
+
 /// One element of the parsed source.
 #[derive(Debug, Clone)]
 pub(super) enum Slot {
@@ -160,9 +172,9 @@ impl Leaf {
             if src >= escaped_end {
                 return None;
             }
-            let (source_len, value_len) = self.escape_widths(bytes, src - slot_start)?;
-            src += source_len;
-            val += value_len;
+            let width = self.token_width(bytes, src - slot_start)?;
+            src += width.source;
+            val += width.value;
         }
         // `val` overshoots when `value_offset` fell inside a multi-byte decoded
         // char; only an exact boundary has a well-defined source offset.
@@ -204,30 +216,47 @@ impl Leaf {
         let mut src = escaped_start;
         let mut val = 0usize;
         while src < source_offset {
-            let (source_len, value_len) = self.escape_widths(bytes, src - slot_start)?;
-            src += source_len;
-            val += value_len;
+            let width = self.token_width(bytes, src - slot_start)?;
+            src += width.source;
+            val += width.value;
         }
         // Landed inside an escape rather than on a boundary.
         (src == source_offset).then_some(val)
     }
 
-    /// The (source width, decoded value width) of the token at byte `local` in
-    /// the leaf's serialized bytes: for a `\` escape its source span and decoded
-    /// width; for a literal character its UTF-8 width (equal in both dimensions,
-    /// so a multi-byte literal like `é` is stepped over whole and an offset can
-    /// never land inside it). `None` for a malformed escape or a non-boundary
-    /// `local`.
-    fn escape_widths(&self, bytes: &[u8], local: usize) -> Option<(usize, usize)> {
+    /// The [`TokenWidth`] of the token at byte `local` in the leaf's serialized
+    /// bytes: for a `\` escape its source span and decoded width; for a literal
+    /// character its UTF-8 width (equal in both dimensions, so a multi-byte
+    /// literal like `é` is stepped over whole and an offset can never land inside
+    /// it). `None` for a malformed escape or a non-boundary `local`.
+    fn token_width(&self, bytes: &[u8], local: usize) -> Option<TokenWidth> {
         if bytes.get(local) == Some(&b'\\') {
             let (source_len, decoded) = decode_escape(&bytes[local..])?;
-            Some((source_len, decoded.len_utf8()))
+            Some(TokenWidth {
+                source: source_len,
+                value: decoded.len_utf8(),
+            })
         } else {
             // A literal character occupies the same bytes in source and value.
             let width = self.serialized.get(local..)?.chars().next()?.len_utf8();
-            Some((width, width))
+            Some(TokenWidth {
+                source: width,
+                value: width,
+            })
         }
     }
+}
+
+/// How wide one serialized token is in each of the leaf's two coordinate spaces:
+/// its source bytes (`serialized`) and the decoded bytes it produces (`value`).
+/// Equal for a literal char; wider in `source` for a `\` escape (`é` is six
+/// source bytes, two value bytes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TokenWidth {
+    /// Bytes the token spans in the serialized source.
+    source: usize,
+    /// Bytes the token decodes to in the value.
+    value: usize,
 }
 
 /// Whether `s` is a bare JSON literal — a number, or one of `true` / `false`
@@ -350,13 +379,17 @@ impl Handler<Text> for JsonHandler {
         // step with the recognizer's own coordinates); `.source` carries the raw
         // span, since a JSON value differs from its source wherever an escape
         // (`\"`, `\uXXXX`) collapses.
-        let (idx, leaf, decoded_slot_start) = self.find_leaf(&chunk.location)?;
+        let LeafAt {
+            index,
+            leaf,
+            decoded_start: decoded_slot_start,
+        } = self.find_leaf(&chunk.location)?;
         let decoded_start = decoded_slot_start + local.range.start;
         let decoded_end = decoded_slot_start + local.range.end;
 
         // Raw span: map the value-local endpoints through the leaf's escape
         // table, offset by the leaf's serialized start in the document.
-        let source_slot_start = self.source_offset_of(idx);
+        let source_slot_start = self.source_offset_of(index);
         let source_start = leaf.value_to_source(source_slot_start, local.range.start)?;
         let source_end = leaf.value_to_source(source_slot_start, local.range.end)?;
 
@@ -373,7 +406,7 @@ impl DataReader<Text> for JsonHandler {
     async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
         Ok(self
             .find_leaf(location)
-            .map(|(_, leaf, _)| TextData::new(leaf.value.clone())))
+            .map(|found| TextData::new(found.leaf.value.clone())))
     }
 }
 
@@ -431,20 +464,24 @@ impl JsonHandler {
     }
 
     /// Locate the leaf slot whose *decoded* range contains `location`, returning
-    /// its index, a borrow, and the leaf's decoded-stream start offset (so a
-    /// caller need not re-sweep with [`decoded_offset_of`]). `location` is a
-    /// decoded-stream range.
+    /// the [`LeafAt`] it sits in — its index, a borrow, and the leaf's
+    /// decoded-stream start offset (so a caller need not re-sweep with
+    /// [`decoded_offset_of`]). `location` is a decoded-stream range.
     ///
     /// [`decoded_offset_of`]: Self::decoded_offset_of
-    fn find_leaf(&self, location: &TextLocation) -> Option<(usize, &Leaf, usize)> {
+    fn find_leaf(&self, location: &TextLocation) -> Option<LeafAt<'_>> {
         let mut offset = 0usize;
-        for (idx, slot) in self.slots.iter().enumerate() {
+        for (index, slot) in self.slots.iter().enumerate() {
             let slot_end = offset + slot.decoded_len();
             if let Slot::Leaf(leaf) = slot
                 && location.range.start >= offset
                 && location.range.end <= slot_end
             {
-                return Some((idx, leaf, offset));
+                return Some(LeafAt {
+                    index,
+                    leaf,
+                    decoded_start: offset,
+                });
             }
             offset = slot_end;
         }

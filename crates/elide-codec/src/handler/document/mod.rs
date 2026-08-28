@@ -66,6 +66,8 @@ mod opc_source {
     use elide_core::modality::text::SourceRef;
     use elide_office::opc::OffsetMap;
 
+    use crate::handler::extract::ItemEdit;
+
     /// The raw source range(s), part-tagged, that a decoded-value `local` range
     /// in a block at `part` came from — via the block's offset map. The forward
     /// half; the encoder's `source_span` is a thin wrapper.
@@ -93,7 +95,7 @@ mod opc_source {
     pub(super) fn locate_source<'a>(
         blocks: impl Iterator<Item = (&'a str, Range<usize>, &'a OffsetMap)>,
         source: &[SourceRef],
-    ) -> Option<(usize, Range<usize>)> {
+    ) -> Option<ItemEdit> {
         let part = source.first()?.part.as_deref()?;
         // Every reference must be in the same part before the bounds below are
         // aggregated — offsets across parts are not comparable.
@@ -103,15 +105,19 @@ mod opc_source {
         let raw_start = source.iter().map(|s| s.range.start).min()?;
         let raw_end = source.iter().map(|s| s.range.end).max()?;
 
-        let (i, offsets) = blocks
-            .enumerate()
-            .find_map(|(i, (block_part, span, offsets))| {
-                (block_part == part && span.start <= raw_start && raw_end <= span.end)
-                    .then_some((i, offsets))
-            })?;
+        let (item, offsets) =
+            blocks
+                .enumerate()
+                .find_map(|(item, (block_part, span, offsets))| {
+                    (block_part == part && span.start <= raw_start && raw_end <= span.end)
+                        .then_some((item, offsets))
+                })?;
 
         let decoded = offsets.decoded_ranges(raw_start..raw_end);
-        Some((i, decoded.first()?.start..decoded.last()?.end))
+        Some(ItemEdit {
+            item,
+            local: decoded.first()?.start..decoded.last()?.end,
+        })
     }
 
     #[cfg(test)]
@@ -137,9 +143,9 @@ mod opc_source {
         fn single_part_selection_resolves() {
             let parts = two_parts();
             let source = [SourceRef::in_part(2..5, "word/header1.xml")];
-            let (i, range) = locate_source(blocks(&parts), &source).expect("resolves");
-            assert_eq!(i, 1, "the header block");
-            assert_eq!(range, 2..5);
+            let edit = locate_source(blocks(&parts), &source).expect("resolves");
+            assert_eq!(edit.item, 1, "the header block");
+            assert_eq!(edit.local, 2..5);
         }
 
         #[test]

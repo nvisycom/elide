@@ -25,7 +25,7 @@ use elide_office::opc::{Embedding, OffsetMap, PartPath};
 use super::DocxLoader;
 use crate::codec::{Container, Part, PartId};
 use crate::content::ContentData;
-use crate::handler::extract::{Encoder, ExtractHandler, ExtractedItem};
+use crate::handler::extract::{Encoder, ExtractHandler, ExtractedItem, ItemEdit};
 use crate::{Format, FormatId};
 
 /// Stable [`FormatId`] for the DOCX codec.
@@ -125,7 +125,7 @@ impl Encoder for DocxEncoder {
         &self,
         items: &[ExtractedItem<DocxAddress>],
         source: &[SourceRef],
-    ) -> Option<(usize, Range<usize>)> {
+    ) -> Option<ItemEdit> {
         super::opc_source::locate_source(
             items.iter().map(|item| {
                 (

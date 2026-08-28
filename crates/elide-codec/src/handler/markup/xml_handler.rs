@@ -18,7 +18,7 @@ use elide_core::{Error, ErrorKind, Result};
 
 use super::XmlLoader;
 use crate::content::ContentData;
-use crate::handler::extract::{Encoder, ExtractHandler, ExtractedItem};
+use crate::handler::extract::{Encoder, ExtractHandler, ExtractedItem, ItemEdit};
 use crate::{Format, FormatId};
 
 /// Stable [`FormatId`] for the XML codec.
@@ -86,7 +86,7 @@ impl Encoder for XmlEncoder {
         &self,
         items: &[ExtractedItem<XmlSpan>],
         source: &[SourceRef],
-    ) -> Option<(usize, Range<usize>)> {
+    ) -> Option<ItemEdit> {
         // Inverse of `source_span`: the item value is the verbatim source slice,
         // so a raw offset within the item's span is the same offset in the value
         // (a subtract). XML is a single file, so its source references carry no
@@ -96,12 +96,15 @@ impl Encoder for XmlEncoder {
         }
         let raw_start = source.iter().map(|s| s.range.start).min()?;
         let raw_end = source.iter().map(|s| s.range.end).max()?;
-        let (i, base) = items
+        let (item, base) = items
             .iter()
             .map(|item| &item.address.0)
             .enumerate()
             .find(|(_, base)| base.start <= raw_start && raw_end <= base.end)?;
-        Some((i, (raw_start - base.start)..(raw_end - base.start)))
+        Some(ItemEdit {
+            item,
+            local: (raw_start - base.start)..(raw_end - base.start),
+        })
     }
 }
 
