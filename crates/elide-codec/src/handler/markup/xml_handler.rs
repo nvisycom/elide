@@ -18,7 +18,7 @@ use elide_core::{Error, ErrorKind, Result};
 
 use super::XmlLoader;
 use crate::content::ContentData;
-use crate::handler::extract::{Encoder, ExtractHandler, ExtractedItem};
+use crate::handler::extract::{Encoder, ExtractHandler, ExtractedItem, ItemEdit};
 use crate::{Format, FormatId};
 
 /// Stable [`FormatId`] for the XML codec.
@@ -86,7 +86,7 @@ impl Encoder for XmlEncoder {
         &self,
         items: &[ExtractedItem<XmlSpan>],
         source: &[SourceRef],
-    ) -> Option<(usize, Range<usize>)> {
+    ) -> Option<ItemEdit> {
         // Inverse of `source_span`: the item value is the verbatim source slice,
         // so a raw offset within the item's span is the same offset in the value
         // (a subtract). XML is a single file, so its source references carry no
@@ -96,12 +96,15 @@ impl Encoder for XmlEncoder {
         }
         let raw_start = source.iter().map(|s| s.range.start).min()?;
         let raw_end = source.iter().map(|s| s.range.end).max()?;
-        let (i, base) = items
+        let (item, base) = items
             .iter()
             .map(|item| &item.address.0)
             .enumerate()
             .find(|(_, base)| base.start <= raw_start && raw_end <= base.end)?;
-        Some((i, (raw_start - base.start)..(raw_end - base.start)))
+        Some(ItemEdit {
+            item,
+            local: (raw_start - base.start)..(raw_end - base.start),
+        })
     }
 }
 
@@ -247,8 +250,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_part_tagged_source_ref_is_rejected_for_xml() {
-        // XML is single-file; a part-tagged reference does not belong to it and
-        // must not resolve — the document is left unchanged.
+        // XML is single-file; a part-tagged reference does not address it. The
+        // caller supplied an explicit source coordinate to redact, so an
+        // unresolvable one is an error — not a silent no-op that would leave a
+        // green audit over an unredacted document.
         let raw = "<root><name>Alice</name></root>";
         let mut h = load(raw).await;
         let at = raw.find("Alice").unwrap();
@@ -256,8 +261,29 @@ mod tests {
             .with_source([SourceRef::in_part(at..at + "Alice".len(), "some/part.xml")]);
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("[NAME]"));
-        h.write_at(rs).await.unwrap();
-        assert_eq!(encoded(&h), raw, "part-tagged ref must not redact");
+        let err = h
+            .write_at(rs)
+            .await
+            .expect_err("part-tagged ref must be rejected");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+    }
+
+    #[tokio::test]
+    async fn an_out_of_range_source_ref_is_rejected_for_xml() {
+        // A source span past the document resolves to no item — a caller mistake
+        // (e.g. an off-by-one in a run→byte mapping), so it errors rather than
+        // leaving a green audit over an unredacted document.
+        let raw = "<root><name>Alice</name></root>";
+        let mut h = load(raw).await;
+        let past = raw.len() + 4;
+        let location = TextLocation::new(0, 0).with_source([SourceRef::new(past..past + 3)]);
+        let mut rs = Redactions::new();
+        rs.push(location, TextReplacement::substituted("[NAME]"));
+        let err = h
+            .write_at(rs)
+            .await
+            .expect_err("out-of-range source must be rejected");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
     }
 
     #[tokio::test]

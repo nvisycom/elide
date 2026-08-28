@@ -25,10 +25,10 @@
 
 use std::ops::Range;
 
-use elide_core::Result;
 use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter, Hint};
 use elide_core::operator::Redactions;
+use elide_core::{Error, ErrorKind, Result};
 
 use crate::codec::Container;
 use crate::content::ContentData;
@@ -55,6 +55,18 @@ pub(crate) struct ExtractedItem<A> {
     /// span where its text sits. Empty when there's no useful surrounding
     /// context.
     pub hints: Vec<Hint<Text>>,
+}
+
+/// A resolved redaction target: which item to edit, and the byte range within
+/// that item's decoded value to replace. The common currency of
+/// [`ExtractHandler::resolve`] and [`Encoder::locate_source`], which both answer
+/// "which item, and where in its value".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ItemEdit {
+    /// Index of the target item in the handler's item stream.
+    pub item: usize,
+    /// The byte range to replace within that item's decoded value.
+    pub local: Range<usize>,
 }
 
 /// Re-serialize a mutated [`ExtractedItem`] stream into a document's
@@ -107,15 +119,15 @@ pub(crate) trait Encoder: Send + Sync + 'static {
     /// as a decoded-stream offset. `source` is the entity's whole
     /// [`SourceRef`](TextLocation::source) list, which must resolve to one
     /// contiguous decoded range within a single item (the runs of one selection
-    /// share an item). Returns that item's index and the decoded-local range to
-    /// edit, or `None` when the references do not resolve to a single item (or
-    /// the encoder does not address items by source span — the default). The
-    /// returned range feeds the same edit path a decoded-range redaction uses.
+    /// share an item). Returns the [`ItemEdit`] to apply, or `None` when the
+    /// references do not resolve to a single item (or the encoder does not
+    /// address items by source span — the default). The returned edit feeds the
+    /// same path a decoded-range redaction uses.
     fn locate_source(
         &self,
         _items: &[ExtractedItem<Self::Address>],
         _source: &[SourceRef],
-    ) -> Option<(usize, Range<usize>)> {
+    ) -> Option<ItemEdit> {
         None
     }
 
@@ -181,45 +193,73 @@ impl<E: Encoder> ExtractHandler<E> {
     }
 
     fn redact_one(&mut self, location: &TextLocation, replacement: &TextReplacement) -> Result<()> {
-        // Resolve the edit to (item index, decoded-local range). A location
-        // addressed by a raw `source` reference — e.g. an entity a review layer
-        // added by selecting text in a container part — is reverse-resolved
-        // through the encoder; otherwise the decoded `range` locates the item
-        // directly. Either way the edit path below is the same.
-        let Some((i, local_start, local_end)) = self.resolve(location) else {
+        // Resolve to the item and its decoded-local range. A location addressed
+        // by a raw `source` reference — e.g. an entity a review layer added by
+        // selecting text in a container part — is reverse-resolved through the
+        // encoder; otherwise the decoded `range` locates the item directly.
+        // Either way the edit path below is the same.
+        let Some(ItemEdit { item, local }) = self.resolve(location)? else {
             return Ok(());
         };
         let value = replacement.value().unwrap_or_default();
-        let before_len = self.items[i].value.len();
-        redact::replace_range(&mut self.items[i].value, value, local_start..local_end)?;
-        let delta = self.items[i].value.len() as isize - before_len as isize;
-        self.shift_starts_after(i, delta);
+        let before_len = self.items[item].value.len();
+        redact::replace_range(&mut self.items[item].value, value, local)?;
+        let delta = self.items[item].value.len() as isize - before_len as isize;
+        self.shift_starts_after(item, delta);
         Ok(())
     }
 
-    /// Resolve `location` to `(item index, decoded-local start, end)`.
+    /// Resolve `location` to the [`ItemEdit`] it targets.
     ///
     /// Prefers a raw [`source`](TextLocation::source) reference when present
     /// (reverse-resolved via [`Encoder::locate_source`]); falls back to the
-    /// decoded [`range`](TextLocation::range). `None` when the location resolves
-    /// to no item.
-    fn resolve(&self, location: &TextLocation) -> Option<(usize, usize, usize)> {
+    /// decoded [`range`](TextLocation::range).
+    ///
+    /// An unresolvable **`source`** reference is a caller mistake, not a no-op:
+    /// the caller explicitly supplied raw byte coordinates to redact, and a bad
+    /// part name, an offset past the part, or a cross-part span means those
+    /// bytes were never redacted. Returning `Ok(None)` there would let a green
+    /// audit stand over an unredacted document, so it is an `Err` instead. A
+    /// missed decoded `range` stays `Ok(None)`: the pipeline's own coordinate,
+    /// tolerated as a no-op.
+    fn resolve(&self, location: &TextLocation) -> Result<Option<ItemEdit>> {
         if !location.source.is_empty() {
-            let (i, local) = self.encoder.locate_source(&self.items, &location.source)?;
-            return Some((i, local.start, local.end));
+            let edit = self
+                .encoder
+                .locate_source(&self.items, &location.source)
+                .ok_or_else(|| unresolvable_source(&location.source))?;
+            return Ok(Some(edit));
         }
-        let i = self.item_for(location.range.start)?;
-        let item_start = self.item_starts[i];
-        let item_end = self.item_starts[i + 1];
+        let Some(item) = self.item_for(location.range.start) else {
+            return Ok(None);
+        };
+        let item_start = self.item_starts[item];
+        let item_end = self.item_starts[item + 1];
         if location.range.end > item_end {
-            return None;
+            return Ok(None);
         }
-        Some((
-            i,
-            location.range.start - item_start,
-            location.range.end - item_start,
-        ))
+        Ok(Some(ItemEdit {
+            item,
+            local: (location.range.start - item_start)..(location.range.end - item_start),
+        }))
     }
+}
+
+/// A location's raw [`source`](TextLocation::source) reference could not be
+/// reverse-resolved to any redactable item — a bad part name, an offset past
+/// the part, or a span crossing parts. `MalformedInput`: the caller-supplied
+/// coordinate is at fault.
+fn unresolvable_source(source: &[SourceRef]) -> Error {
+    let mut msg = String::from("source reference resolves to no redactable item:");
+    for src in source {
+        match &src.part {
+            Some(part) => {
+                msg.push_str(&format!(" {}#{}..{}", part, src.range.start, src.range.end))
+            }
+            None => msg.push_str(&format!(" {}..{}", src.range.start, src.range.end)),
+        }
+    }
+    Error::new(ErrorKind::MalformedInput, msg)
 }
 
 #[async_trait::async_trait]
