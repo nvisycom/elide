@@ -51,6 +51,28 @@ struct LeafEdit {
     value: Range<usize>,
 }
 
+/// The interior of a quoted leaf: the source byte range between its two `"`
+/// delimiters, in document coordinates. The escape walk and the source↔value
+/// maps all bound their cursor to `start..end`, and the delimiter check asks
+/// whether a span misses the interior entirely.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EscapedBounds {
+    /// Source offset of the first interior byte (just past the opening `"`).
+    start: usize,
+    /// Source offset just past the last interior byte (the closing `"`).
+    end: usize,
+}
+
+impl EscapedBounds {
+    /// Whether a source `raw` span covers only a `"` delimiter and no interior
+    /// byte — the opening quote alone (`raw.end <= start`) or the closing quote
+    /// alone (`raw.start >= end`). Such a span maps to a zero-width edit at a
+    /// value boundary, which `splice` would *insert* rather than redact.
+    fn is_delimiter_only(&self, raw: &Range<usize>) -> bool {
+        raw.end <= self.start || raw.start >= self.end
+    }
+}
+
 /// A leaf located within the slot stream: its slot index, a borrow of the leaf,
 /// and where its value starts in the decoded stream — enough to lift a decoded
 /// offset into and out of it without re-sweeping the slots.
@@ -163,13 +185,12 @@ impl Leaf {
             }
             return Some(slot_start + value_offset);
         }
-        let escaped_start = slot_start + 1;
-        let escaped_end = slot_start + self.serialized.len() - 1;
+        let bounds = self.escaped_bounds(slot_start);
         let bytes = self.serialized.as_bytes();
-        let mut src = escaped_start;
+        let mut src = bounds.start;
         let mut val = 0usize;
         while val < value_offset {
-            if src >= escaped_end {
+            if src >= bounds.end {
                 return None;
             }
             let width = self.token_width(bytes, src - slot_start)?;
@@ -197,23 +218,22 @@ impl Leaf {
                 .contains(&source_offset)
                 .then_some(source_offset - slot_start);
         }
-        let escaped_start = slot_start + 1;
-        let escaped_end = slot_start + self.serialized.len() - 1;
+        let bounds = self.escaped_bounds(slot_start);
         // The quotes bound the value: the opening quote (`slot_start`) maps to 0;
-        // the closing quote (`escaped_end`) and the token's exclusive end
-        // (one past it) both map to the value's end — so a span covering the
-        // whole `"…"` token resolves to the whole value.
+        // the closing quote (`bounds.end`) and the token's exclusive end (one
+        // past it) both map to the value's end — so a span covering the whole
+        // `"…"` token resolves to the whole value.
         if source_offset == slot_start {
             return Some(0);
         }
-        if source_offset == escaped_end || source_offset == escaped_end + 1 {
+        if source_offset == bounds.end || source_offset == bounds.end + 1 {
             return Some(self.value.len());
         }
-        if source_offset < escaped_start || source_offset > escaped_end {
+        if source_offset < bounds.start || source_offset > bounds.end {
             return None;
         }
         let bytes = self.serialized.as_bytes();
-        let mut src = escaped_start;
+        let mut src = bounds.start;
         let mut val = 0usize;
         while src < source_offset {
             let width = self.token_width(bytes, src - slot_start)?;
@@ -222,6 +242,16 @@ impl Leaf {
         }
         // Landed inside an escape rather than on a boundary.
         (src == source_offset).then_some(val)
+    }
+
+    /// The [`EscapedBounds`] of this quoted leaf: the source byte range of its
+    /// interior — between the two `"` — in document coordinates. `slot_start` is
+    /// the leaf's own source offset in the document.
+    fn escaped_bounds(&self, slot_start: usize) -> EscapedBounds {
+        EscapedBounds {
+            start: slot_start + 1,
+            end: slot_start + self.serialized.len() - 1,
+        }
     }
 
     /// The [`TokenWidth`] of the token at byte `local` in the leaf's serialized
@@ -563,6 +593,19 @@ impl JsonHandler {
                 && raw.start >= slot_start
                 && raw.end <= slot_end
             {
+                // A quoted leaf's span may touch its `"` delimiters (the whole
+                // `"…"` token resolves to the whole value), but a span that
+                // covers *only* a quote and no interior byte addresses no
+                // redactable content — its endpoints would both collapse to the
+                // same value boundary, and `splice` would then *insert* the
+                // replacement into the adjacent value rather than redact. Reject
+                // it rather than silently corrupt the value.
+                if leaf.is_quoted() && leaf.escaped_bounds(slot_start).is_delimiter_only(raw) {
+                    return Err(malformed(format_args!(
+                        "source range {}..{} covers only a JSON string delimiter, no value",
+                        raw.start, raw.end
+                    )));
+                }
                 let split = || {
                     malformed(format_args!(
                         "source range {}..{} splits a JSON escape",
@@ -1090,6 +1133,49 @@ mod tests {
             .expect_err("refs across two values must be rejected");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
         assert_eq!(encoded(&h), src, "no partial redaction on rejection");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_source_ref_of_only_the_opening_quote_is_rejected() -> Result<()> {
+        use elide_core::modality::text::SourceRef;
+
+        // A span covering just the opening `"` of `"bcd"` addresses no value
+        // byte. Its endpoints would collapse to value offset 0 and `splice`
+        // would insert `X` at the value start rather than redact — reject it.
+        let src = r#"{"a":"bcd"}"#;
+        let mut h = handler(src);
+        let open = src.find(r#""bcd""#).unwrap();
+        let location = TextLocation::new(0, 0).with_source([SourceRef::new(open..open + 1)]);
+        let mut rs = Redactions::new();
+        rs.push(location, TextReplacement::substituted("X"));
+        let err = h
+            .write_at(rs)
+            .await
+            .expect_err("a delimiter-only span must be rejected");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        assert_eq!(encoded(&h), src, "document unchanged");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_source_ref_of_only_the_closing_quote_is_rejected() -> Result<()> {
+        use elide_core::modality::text::SourceRef;
+
+        // The closing `"` of `"bcd"`. Its endpoints collapse to the value end,
+        // where `splice` would append `X` — reject rather than corrupt.
+        let src = r#"{"a":"bcd"}"#;
+        let mut h = handler(src);
+        let close = src.find(r#""bcd""#).unwrap() + r#""bcd""#.len() - 1;
+        let location = TextLocation::new(0, 0).with_source([SourceRef::new(close..close + 1)]);
+        let mut rs = Redactions::new();
+        rs.push(location, TextReplacement::substituted("X"));
+        let err = h
+            .write_at(rs)
+            .await
+            .expect_err("a delimiter-only span must be rejected");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        assert_eq!(encoded(&h), src, "document unchanged");
         Ok(())
     }
 
