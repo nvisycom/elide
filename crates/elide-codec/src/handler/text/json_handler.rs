@@ -586,6 +586,17 @@ impl JsonHandler {
                 raw.start, raw.end
             )));
         }
+        // An empty span addresses no content to redact. Its endpoints map to a
+        // single value offset, so the edit would be zero-width and `Leaf::splice`
+        // would *insert* the replacement there rather than redact — for a quoted
+        // interior (`2..2` in `"bcd"`) and for a scalar alike, whose mapping is
+        // identity. Reject it before any mapping.
+        if raw.start == raw.end {
+            return Err(malformed(format_args!(
+                "source range {}..{} is empty",
+                raw.start, raw.end
+            )));
+        }
         let mut slot_start = 0usize;
         for (idx, slot) in self.slots.iter().enumerate() {
             let slot_end = slot_start + slot.source_len();
@@ -1174,6 +1185,49 @@ mod tests {
             .write_at(rs)
             .await
             .expect_err("a delimiter-only span must be rejected");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        assert_eq!(encoded(&h), src, "document unchanged");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn an_empty_source_ref_inside_a_value_is_rejected() -> Result<()> {
+        use elide_core::modality::text::SourceRef;
+
+        // A zero-width span in the interior of `"bcd"` (source `7..7`, at `c`).
+        // Both endpoints map to one value offset, so `splice` would insert `X`
+        // (yielding `bXcd`) rather than redact — reject it.
+        let src = r#"{"a":"bcd"}"#;
+        let mut h = handler(src);
+        let c = src.find("bcd").unwrap() + 1;
+        let location = TextLocation::new(0, 0).with_source([SourceRef::new(c..c)]);
+        let mut rs = Redactions::new();
+        rs.push(location, TextReplacement::substituted("X"));
+        let err = h
+            .write_at(rs)
+            .await
+            .expect_err("an empty interior span must be rejected");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
+        assert_eq!(encoded(&h), src, "document unchanged");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn an_empty_source_ref_inside_a_scalar_is_rejected() -> Result<()> {
+        use elide_core::modality::text::SourceRef;
+
+        // A scalar's source→value mapping is identity, so a zero-width span in it
+        // has the same insert-not-redact gap. Reject it too.
+        let src = r#"{"a":12345}"#;
+        let mut h = handler(src);
+        let mid = src.find("12345").unwrap() + 2;
+        let location = TextLocation::new(0, 0).with_source([SourceRef::new(mid..mid)]);
+        let mut rs = Redactions::new();
+        rs.push(location, TextReplacement::substituted("X"));
+        let err = h
+            .write_at(rs)
+            .await
+            .expect_err("an empty scalar span must be rejected");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
         assert_eq!(encoded(&h), src, "document unchanged");
         Ok(())
