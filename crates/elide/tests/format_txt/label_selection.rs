@@ -1,7 +1,7 @@
-//! Catalog label selection: a caller that scopes the request to a subset of
-//! entity types gets only those redacted, while every other detectable value
-//! is left in place. This pins the `catalog().retain_declared(..)` output
-//! filter — the seam that lets a caller opt into exactly the labels they want.
+//! Catalog label selection: the request catalog names the entity types to
+//! detect. A scoped subset redacts only those types; an empty catalog requests
+//! nothing, so nothing is detected or redacted. This pins the catalog as the
+//! caller's opt-in for exactly the labels they want.
 
 use elide::Result;
 use elide::entity::builtins;
@@ -35,12 +35,18 @@ async fn a_scoped_catalog_redacts_only_the_requested_label() -> Result<()> {
 }
 
 #[tokio::test]
-async fn an_empty_catalog_redacts_every_detected_label() -> Result<()> {
-    // The default `run` uses an empty catalog, which requests every label.
-    let outcome = FIXTURE.run().await?;
+async fn an_empty_catalog_detects_nothing() -> Result<()> {
+    // An empty catalog requests no entity types, so the analyzer detects
+    // nothing — every detectable value is left in place.
+    let outcome = FIXTURE.run_with_labels([]).await?;
 
-    // All three detectable values are redacted — nothing narrows the output.
-    assert_pii_removed!(
+    // Nothing is detected...
+    assert!(
+        outcome.entities.is_empty(),
+        "an empty catalog requests no types, so detection yields nothing",
+    );
+    // ...so nothing is redacted.
+    assert_preserved!(
         outcome.redacted_text(),
         "90210",
         "contact@example.com",

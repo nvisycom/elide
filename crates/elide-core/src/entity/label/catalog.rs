@@ -72,15 +72,13 @@ impl LabelCatalog {
     /// detection pipeline may emit entities the caller did not ask for (so a
     /// strong out-of-catalog match can still subsume a weak in-catalog one
     /// during reconciliation) and cull them here, after reconciliation, so only
-    /// the requested types reach the caller. An **empty** catalog declares no
-    /// restriction, so every entity is kept.
+    /// the requested types reach the caller. Called only with a non-empty
+    /// catalog — an empty request detects nothing and is gated before
+    /// recognition.
     pub fn retain_declared<M>(&self, entities: Vec<Entity<M>>) -> Vec<Entity<M>>
     where
         M: Modality,
     {
-        if self.is_empty() {
-            return entities;
-        }
         entities
             .into_iter()
             .filter(|entity| self.contains(&entity.label))
@@ -223,10 +221,10 @@ mod tests {
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[0].label, LabelRef::new("email_address"));
 
-        // An empty catalog restricts nothing.
-        let unrestricted =
+        // An empty catalog declares no type, so it keeps nothing.
+        let none =
             LabelCatalog::new().retain_declared(vec![entity("email_address"), entity("iban")]);
-        assert_eq!(unrestricted.len(), 2);
+        assert!(none.is_empty());
     }
 
     #[test]

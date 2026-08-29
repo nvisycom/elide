@@ -7,7 +7,7 @@
 //! and the [`Scope`] they run against, the reconciliation [`Layer`]s with
 //! their usual strategies, and the common vocabulary — the modality markers
 //! (`Text`, and the feature-gated `Image`/`Audio`/`Tabular`), `Entity`,
-//! `LabelRef`, `Category`, the [`builtins`] label set,
+//! `LabelRef`, `LabelCatalog`, `Category`, the [`builtins`] label set,
 //! `Confidence`/`ConfidenceThreshold`,
 //! and `Language`/`LanguageTag`. The [`operators`] module comes along too, so
 //! `prelude::operators::*` reaches the concrete operators without the longer
@@ -32,7 +32,7 @@ pub use async_trait::async_trait;
 #[doc(no_inline)]
 pub use elide_codec::FormatRegistry;
 #[doc(no_inline)]
-pub use elide_core::entity::{Category, Entity, LabelRef, builtins};
+pub use elide_core::entity::{Category, Entity, LabelCatalog, LabelRef, builtins};
 #[doc(no_inline)]
 pub use elide_core::modality::Modality;
 #[cfg(feature = "audio")]

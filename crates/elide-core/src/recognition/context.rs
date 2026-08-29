@@ -144,10 +144,12 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
         &self.scope.metadata.audience
     }
 
-    /// The [`LabelCatalog`] of entity types recognizers are asked to emit.
-    /// A zero-shot NER model requests exactly these labels; an LLM prompt
-    /// lists them as the types to find. Empty means "no run-wide target
-    /// set" — a recognizer falls back to its own configured labels.
+    /// The [`LabelCatalog`] of entity types to detect — the caller's request.
+    /// A zero-shot NER model requests exactly these labels; an LLM prompt lists
+    /// them as the types to find. On the `Analyzer::analyze*` path this is
+    /// non-empty: those entries gate an empty catalog (detect nothing) before
+    /// any recognizer runs. A recognizer driven directly still handles an empty
+    /// catalog as its own labels dictate.
     #[must_use]
     pub fn catalog(&self) -> &LabelCatalog {
         &self.scope.catalog
