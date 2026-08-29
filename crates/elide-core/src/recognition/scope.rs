@@ -106,11 +106,13 @@ pub struct Scope {
     /// Free-form request context — document tags, request purpose, and the
     /// output audience. See [`ScopeMetadata`].
     pub metadata: ScopeMetadata,
-    /// The entity types recognizers are asked to emit. A zero-shot NER
-    /// model requests exactly this set; an LLM prompt lists it as the
-    /// labels to find. Empty means "the recognizer's own default" — a
-    /// recognizer with its own configured label set keeps it; one without
-    /// emits whatever its backend natively produces.
+    /// The entity types to detect — the caller's request. A zero-shot NER
+    /// model requests exactly this set; an LLM prompt lists it as the labels
+    /// to find; every detection is culled to it. **Empty means detect
+    /// nothing**: an empty catalog requests no types, so the analyzer
+    /// short-circuits before any recognizer runs. Pass an explicit set, or
+    /// [`LabelCatalog::with_builtins`], to detect anything. (A recognizer's own
+    /// `supported_labels` still select a subset of a *non-empty* catalog.)
     pub catalog: LabelCatalog,
     /// Correlation UUID propagated through the tracing span for this
     /// analysis.
@@ -118,7 +120,9 @@ pub struct Scope {
 }
 
 impl Scope {
-    /// Empty scope: nothing asserted.
+    /// Empty scope: nothing asserted. Its [`catalog`](Self::catalog) is empty,
+    /// so a bare `Scope::new()` **detects nothing** — set a catalog (e.g.
+    /// `.with_catalog(`[`LabelCatalog::with_builtins`]`())`) to detect.
     pub fn new() -> Self {
         Self {
             languages: Languages::default(),
@@ -191,12 +195,15 @@ impl Scope {
         self
     }
 
-    /// Set the [`LabelCatalog`] of entity types recognizers should emit.
+    /// Set the [`LabelCatalog`] of entity types to detect — the request.
     ///
     /// Threaded onto every [`RecognizerContext`]; a zero-shot NER model
-    /// requests exactly these labels and an LLM prompt lists them as the
-    /// types to find. A recognizer with its own configured label set may
-    /// override.
+    /// requests exactly these labels, an LLM prompt lists them as the types to
+    /// find, and every detection is culled to this set. An empty catalog
+    /// requests nothing, so the analyzer detects nothing —
+    /// [`LabelCatalog::with_builtins`] is the ready-made "detect every built-in
+    /// type" set. (A recognizer with its own `supported_labels` still selects a
+    /// subset of a non-empty catalog.)
     ///
     /// [`RecognizerContext`]: super::RecognizerContext
     #[must_use]

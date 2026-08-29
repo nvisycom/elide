@@ -8,8 +8,9 @@
 use elide::codec::FormatRegistry;
 use elide::detection::Analyzer;
 use elide::entity::audit::AuditKind;
-use elide::entity::builtins;
+use elide::entity::{LabelCatalog, builtins};
 use elide::modality::text::Text;
+use elide::recognition::Scope;
 use elide::recognition::pattern::PatternRecognizer;
 use elide::redaction::operators::{Erase, Replace};
 use elide::redaction::{Anonymizer, Rule};
@@ -31,6 +32,7 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
         ))
         .with(Rule::fallback(Erase));
     let orchestrator = Orchestrator::new()
+        .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
         .with_registry(registry.clone())
         .with_modality::<Text>(Analyzer::new().with_recognizer(patterns), anonymizer);
 

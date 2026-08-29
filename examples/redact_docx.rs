@@ -52,7 +52,11 @@ async fn main() -> Result<()> {
     let en = Language::asserted(LanguageTag::parse("en").unwrap());
     let orchestrator = Orchestrator::new()
         .with_registry(registry)
-        .with_scope(Scope::new().with_language(en))
+        .with_scope(
+            Scope::new()
+                .with_language(en)
+                .with_catalog(LabelCatalog::with_builtins()),
+        )
         .with_modality::<Text>(build_text_analyzer()?, build_text_anonymizer())
         .with_modality::<Image>(build_image_analyzer()?, build_image_anonymizer());
 

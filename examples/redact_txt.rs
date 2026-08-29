@@ -54,7 +54,9 @@ async fn main() -> Result<()> {
     //    document's source coordinates (lift is folded in). The context
     //    carries per-call assertions (here, that the document is English).
     let en = Language::asserted(LanguageTag::parse("en").unwrap());
-    let scope = Scope::new().with_language(en);
+    let scope = Scope::new()
+        .with_language(en)
+        .with_catalog(LabelCatalog::with_builtins());
     let analysis = analyzer.analyze_stream(&mut document, &scope).await?;
     let mut entities = analysis.entities;
 

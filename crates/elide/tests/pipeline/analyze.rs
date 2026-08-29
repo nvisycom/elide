@@ -8,7 +8,7 @@ use elide::detection::filter::FilterLayer;
 use elide::detection::reconcile::{Merging, ReconcileLayer, Structural};
 use elide_core::Result;
 use elide_core::entity::audit::{AuditEvent, AuditKind, AuditLog, PatternEvent};
-use elide_core::entity::{Entity, LabelRef};
+use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
 use elide_core::primitive::{Confidence, ConfidenceThreshold};
 use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId, Scope};
 
@@ -44,6 +44,14 @@ fn detected_with_source(
     let mut entity = detected(recognizer, label, loc, conf);
     entity.location = entity.location.with_source([source]);
     entity
+}
+
+/// A request [`Scope`] whose catalog declares exactly `ids` — the labels a test
+/// wants to survive the analyzer's output cull. (The [`Fixed`] recognizer emits
+/// its list regardless of the catalog; the catalog gates what is kept.)
+fn scope_for(ids: &[&str]) -> Scope {
+    let catalog: LabelCatalog = ids.iter().map(|id| Label::new(*id, *id)).collect();
+    Scope::new().with_catalog(catalog)
 }
 
 /// A recognizer that just replays a fixed entity list.
@@ -83,7 +91,7 @@ async fn analyze_fuses_resolves_filters() {
         .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE));
 
     let mut entities = analyzer
-        .analyze(TextData::new(""), &Scope::new())
+        .analyze(TextData::new(""), &scope_for(&["PHONE_NUMBER", "WEAK"]))
         .await
         .unwrap()
         .entities;
@@ -126,7 +134,7 @@ async fn analyze_records_per_recognizer_usage() {
         .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE));
 
     let analysis = analyzer
-        .analyze(TextData::new(""), &Scope::new())
+        .analyze(TextData::new(""), &scope_for(&["PHONE_NUMBER", "WEAK"]))
         .await
         .unwrap();
 
@@ -168,7 +176,7 @@ async fn fusion_keeps_both_operands_source_refs() {
         .with_layer(ReconcileLayer::same_label(Merging::max()));
 
     let mut entities = analyzer
-        .analyze(TextData::new(""), &Scope::new())
+        .analyze(TextData::new(""), &scope_for(&["PHONE_NUMBER"]))
         .await
         .unwrap()
         .entities;
@@ -198,7 +206,7 @@ async fn analyze_stamps_language_from_recognized_range() {
     // The caller asserts the document language; it applies span-less (whole
     // payload), so every ranged entity is attributed to it.
     let de = Language::asserted(LanguageTag::parse("de").unwrap());
-    let scope = Scope::new().with_language(de);
+    let scope = scope_for(&["PERSON"]).with_language(de);
 
     let entities = analyzer
         .analyze(TextData::new("hello"), &scope)

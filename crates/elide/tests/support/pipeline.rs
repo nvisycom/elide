@@ -14,7 +14,7 @@ use elide::codec::{DocumentHandle, FormatRegistry, UntypedDocumentHandle};
 use elide::detection::Analyzer;
 use elide::detection::filter::FilterLayer;
 use elide::detection::reconcile::{Merging, ReconcileLayer, Structural};
-use elide::entity::{Entity, Label, builtins};
+use elide::entity::{Entity, Label, LabelCatalog, builtins};
 #[cfg(feature = "stt")]
 use elide::modality::audio::Audio;
 #[cfg(any(feature = "llm", feature = "ocr"))]
@@ -263,7 +263,9 @@ impl Fixture {
     /// (and typically pruned by the threshold). An assertion also suppresses
     /// language *detection* (the assertion is authoritative).
     pub async fn run_with_language(&self, language: LanguageTag) -> Result<PipelineOutcome<Text>> {
-        let scope = Scope::new().with_language(Language::asserted(language));
+        let scope = Scope::new()
+            .with_language(Language::asserted(language))
+            .with_catalog(LabelCatalog::with_builtins());
         self.run_typed_with::<Text>(FormatRegistry::with_builtin(), scope)
             .await
     }
@@ -416,9 +418,10 @@ impl Fixture {
         // No asserted language: the analyzer's `LinguaEnricher` detects each
         // document's languages, so a multilingual fixture activates every one
         // of its languages' per-language context (asserting a single language
-        // would suppress detection — see `LinguaEnricher::enrich`). An empty
-        // catalog requests every label, so recognizers emit all they find.
-        self.run_typed_with::<M>(registry, Scope::new()).await
+        // would suppress detection — see `LinguaEnricher::enrich`). The catalog
+        // requests every built-in label, so recognizers emit all they find.
+        let scope = Scope::new().with_catalog(LabelCatalog::with_builtins());
+        self.run_typed_with::<M>(registry, scope).await
     }
 
     /// [`run_typed`] with a caller-supplied [`Scope`], so a test can scope the

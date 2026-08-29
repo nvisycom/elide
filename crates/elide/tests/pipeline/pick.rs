@@ -14,9 +14,10 @@
 use elide::codec::{FormatRegistry, PartId};
 use elide::detection::Analyzer;
 use elide::entity::audit::AuditKind;
-use elide::entity::builtins;
+use elide::entity::{LabelCatalog, builtins};
 use elide::modality::image::Image;
 use elide::modality::text::Text;
+use elide::recognition::Scope;
 use elide::recognition::llm::LlmRecognizer;
 use elide::recognition::pattern::PatternRecognizer;
 use elide::redaction::operators::{Erase, Replace};
@@ -44,6 +45,7 @@ fn orchestrator(registry: FormatRegistry) -> Result<Orchestrator> {
         .with_default_prompt()
         .build()?;
     Ok(Orchestrator::new()
+        .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
         .with_registry(registry)
         .with_modality::<Text>(Analyzer::new().with_recognizer(patterns), text)
         .with_modality::<Image>(Analyzer::new().with_recognizer(image), Anonymizer::new()))

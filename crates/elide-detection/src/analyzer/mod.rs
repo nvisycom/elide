@@ -80,7 +80,7 @@ impl<M: Modality> Default for Analysis<M> {
 ///     .with_layer(ReconcileLayer::same_label(Merging::max()))
 ///     .with_layer(ReconcileLayer::cross_label(Structural::default()))
 ///     .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE))
-///     .analyze(data, &Scope::new())
+///     .analyze(data, &Scope::new().with_catalog(LabelCatalog::with_builtins()))
 ///     .await?;
 /// ```
 ///
@@ -145,6 +145,13 @@ impl<M: Modality> Analyzer<M> {
         data: M::Data,
         ctx: &mut RecognizerContext<'_, M>,
     ) -> Result<Analysis<M>> {
+        // An empty catalog requests no entity types: detect nothing. Gate here,
+        // the single choke point every `analyze`/`analyze_stream` entry funnels
+        // through, so no enricher or recognizer runs on a scope that asked for
+        // nothing — and no detected entity can then slip through unredacted.
+        if ctx.catalog().is_empty() {
+            return Ok(Analysis::new(Vec::new()));
+        }
         // Usage accumulates in run order: enrichers (sequential) first, then
         // recognizers.
         #[cfg(feature = "usage")]
