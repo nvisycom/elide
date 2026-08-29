@@ -146,9 +146,10 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
 
     /// The [`LabelCatalog`] of entity types to detect — the caller's request.
     /// A zero-shot NER model requests exactly these labels; an LLM prompt lists
-    /// them as the types to find. Never empty here: the analyzer gates an empty
-    /// catalog (detect nothing) before any recognizer runs, so a recognizer
-    /// only ever sees a non-empty request.
+    /// them as the types to find. On the `Analyzer::analyze*` path this is
+    /// non-empty: those entries gate an empty catalog (detect nothing) before
+    /// any recognizer runs. A recognizer driven directly still handles an empty
+    /// catalog as its own labels dictate.
     #[must_use]
     pub fn catalog(&self) -> &LabelCatalog {
         &self.scope.catalog

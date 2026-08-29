@@ -40,6 +40,12 @@ async fn an_empty_catalog_detects_nothing() -> Result<()> {
     // nothing — every detectable value is left in place.
     let outcome = FIXTURE.run_with_labels([]).await?;
 
+    // Nothing is detected...
+    assert!(
+        outcome.entities.is_empty(),
+        "an empty catalog requests no types, so detection yields nothing",
+    );
+    // ...so nothing is redacted.
     assert_preserved!(
         outcome.redacted_text(),
         "90210",

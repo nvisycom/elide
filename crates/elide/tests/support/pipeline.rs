@@ -311,7 +311,11 @@ impl Fixture {
             .with(Rule::label(builtins::PHONE_NUMBER.to_ref(), Silence))
             .with(Rule::fallback(Erase));
 
+        // A built-in catalog so the analyzer runs the enricher (the mock STT
+        // still transcribes nothing) — the point is to drive the whole codec +
+        // enricher path, not to detect.
         let orchestrator = Orchestrator::new()
+            .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
             .with_registry(registry)
             .with_modality::<Audio>(analyzer, anonymizer);
 
@@ -368,7 +372,11 @@ impl Fixture {
         );
         let anonymizer = Anonymizer::new().with(Rule::fallback(Erase));
 
+        // A built-in catalog so the analyzer runs the enricher (the mock OCR
+        // still recognizes nothing) — the point is to drive the whole codec +
+        // enricher path, not to detect.
         let orchestrator = Orchestrator::new()
+            .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
             .with_registry(registry)
             .with_modality::<Image>(analyzer, anonymizer);
 
