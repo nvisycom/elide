@@ -1,0 +1,41 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    Elide logo — "the ellipsis, dissolving": the elision mark itself, three dots
+    fading left to right (the sensitive run omitted). Sibling to the Nvisy Studio
+    mark (three dissolving bars) — same rhythm, one glyph. Cool-charcoal tile with
+    an ambient glow behind the first dot; light dots, each with a soft blurred
+    halo. The squircle is baked in for inline use. This SVG is the master; the
+    shipped README asset is a PNG rendered from it (the blur halo needs a raster).
+  -->
+  <defs>
+    <!-- Ambient ground: cool charcoal, lit from a pool behind the first dot. -->
+    <radialGradient id="ground" cx="0.32" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#3a3f47"/>
+      <stop offset="1" stop-color="#1a1c20"/>
+    </radialGradient>
+    <!-- Soft halo: a wide Gaussian blur over the whole tile (never clipped to the
+         dots' box). -->
+    <filter id="halo" filterUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <feGaussianBlur stdDeviation="34"/>
+    </filter>
+    <clipPath id="squircle"><rect width="1024" height="1024" rx="230" ry="230"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#squircle)">
+    <rect width="1024" height="1024" fill="#1a1c20"/>
+    <rect width="1024" height="1024" fill="url(#ground)"/>
+    <!-- Dots r=66, centres 322/512/702 (fills 256→768, the studio bars' width),
+         vertically centred, dissolving by opacity 1 / .6 / .22. Blurred halo
+         beneath, crisp dots above. -->
+    <g fill="#f4f5f7" filter="url(#halo)" opacity="0.9">
+      <circle cx="322" cy="512" r="66"/>
+      <circle cx="512" cy="512" r="66" opacity="0.6"/>
+      <circle cx="702" cy="512" r="66" opacity="0.22"/>
+    </g>
+    <g fill="#f4f5f7">
+      <circle cx="322" cy="512" r="66"/>
+      <circle cx="512" cy="512" r="66" opacity="0.6"/>
+      <circle cx="702" cy="512" r="66" opacity="0.22"/>
+    </g>
+  </g>
+</svg>

@@ -1,8 +1,21 @@
+<div align="center">
+
+<img src=".github/assets/logo.png" alt="Elide" width="104" height="104" />
+
 # Elide
 
-[![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/elide/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/elide/actions/workflows/build.yml)
+**Composable, multimodal toolkit for detecting and redacting sensitive data.**
 
-Composable, multimodal toolkit for detecting and redacting sensitive data.
+The building blocks — recognizers, deduplication, redaction operators, and
+format codecs — for finding and removing PII and PHI across your documents.
+
+[![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/elide/build.yml?branch=main&label=build&style=flat-square)](https://github.com/nvisycom/elide/actions/workflows/build.yml)
+[![Security](https://img.shields.io/github/actions/workflow/status/nvisycom/elide/security.yml?branch=main&label=security&style=flat-square)](https://github.com/nvisycom/elide/actions/workflows/security.yml)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](LICENSE.txt)
+
+[**nvisy.com**](https://nvisy.com) · [**docs.nvisy.com**](https://docs.nvisy.com)
+
+</div>
 
 Elide is a Rust toolkit for finding and removing PII and PHI from text, images,
 audio, and tabular data. It provides the building blocks (recognizers,
