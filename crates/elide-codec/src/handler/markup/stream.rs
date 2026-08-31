@@ -74,24 +74,24 @@ impl<'a> MarkupSource<'a> {
                     ));
                 }
             };
-            // `Attribute::value` is the *raw* on-the-wire bytes, entity spellings
-            // intact (decoding happens only through `unescape_value`, which we
+            // `Attribute::value` is the *raw* on-the-wire text, entity spellings
+            // intact (quick-xml unescapes only through `unescape_value`, which we
             // never call — the engine redacts raw slices). Over a
-            // `Reader::from_str`, the value borrows straight out of the source
-            // buffer, so its slice position *is* the source span — even for an
-            // entity-bearing value. `Cow::Owned` only arises for a non-borrowed
-            // value (no source position); it is a defensive guard, and such an
-            // attribute is left un-redactable rather than guessed at.
-            let Cow::Borrowed(bytes) = attr.value else {
+            // `Reader::from_str` it borrows straight out of the source buffer, so a
+            // borrowed value's slice position *is* the source span, even for an
+            // entity-bearing value. `Cow::Owned` arises only for a value with no
+            // source position; it is a defensive guard, and such an attribute is
+            // left un-redactable rather than guessed at.
+            let Cow::Borrowed(value) = attr.value else {
                 continue;
             };
-            let Some(inner) = self.slice_span(bytes) else {
+            let Some(inner) = self.slice_span(value) else {
                 continue;
             };
             if self.raw[inner.clone()].trim().is_empty() {
                 continue;
             }
-            let key = String::from_utf8_lossy(attr.key.local_name().as_ref()).into_owned();
+            let key = attr.key.local_name().as_ref().to_owned();
             out.push((key, inner));
         }
         Ok(out)
@@ -99,7 +99,7 @@ impl<'a> MarkupSource<'a> {
 
     /// The byte range a `slice` borrowed out of this source occupies in it, or
     /// `None` if it is not a valid in-bounds char-aligned subslice.
-    fn slice_span(&self, slice: &[u8]) -> Option<Range<usize>> {
+    fn slice_span(&self, slice: &str) -> Option<Range<usize>> {
         let base = self.raw.as_ptr() as usize;
         let start = (slice.as_ptr() as usize).checked_sub(base)?;
         let end = start.checked_add(slice.len())?;

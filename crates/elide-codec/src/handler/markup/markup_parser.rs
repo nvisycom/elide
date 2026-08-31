@@ -312,7 +312,7 @@ fn bom_len(raw: &str) -> usize {
 /// The start tag's lowercased local name (HTML is case-insensitive; lowercasing
 /// makes `<SCRIPT>` and `<P>` match too).
 fn local_name(e: &BytesStart<'_>) -> String {
-    String::from_utf8_lossy(e.local_name().as_ref()).to_ascii_lowercase()
+    e.local_name().as_ref().to_ascii_lowercase()
 }
 
 /// The start tag's local name as context words for the element's text — see
@@ -322,12 +322,12 @@ fn local_name(e: &BytesStart<'_>) -> String {
 /// [`context_words`]: crate::handler::context::context_words
 fn hint_words(e: &BytesStart<'_>) -> String {
     let local = e.local_name();
-    context_words(&String::from_utf8_lossy(local.as_ref()))
+    context_words(local.as_ref())
 }
 
 /// The end tag's lowercased local name, matched against an open skip element.
 fn end_name(e: &BytesEnd<'_>) -> String {
-    String::from_utf8_lossy(e.local_name().as_ref()).to_ascii_lowercase()
+    e.local_name().as_ref().to_ascii_lowercase()
 }
 
 /// Narrow `span` by its `open`/`close` delimiters, returning the inner range.

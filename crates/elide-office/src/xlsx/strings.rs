@@ -61,21 +61,21 @@ pub(crate) fn shared_string_items(raw: &str) -> Result<Vec<SharedItem>> {
 
         match event {
             Event::Eof => break,
-            Event::Start(e) if e.local_name().as_ref() == b"si" => {
+            Event::Start(e) if e.local_name().as_ref() == "si" => {
                 item_open = Some(span.end);
                 current.clear();
             }
-            Event::End(e) if e.local_name().as_ref() == b"si" => {
+            Event::End(e) if e.local_name().as_ref() == "si" => {
                 let inner = item_open.take().unwrap_or(span.start)..span.start;
                 items.push(SharedItem {
                     text: std::mem::take(&mut current),
                     inner,
                 });
             }
-            Event::Start(e) if e.local_name().as_ref() == b"rPh" => {
+            Event::Start(e) if e.local_name().as_ref() == "rPh" => {
                 phonetic_depth += 1;
             }
-            Event::End(e) if e.local_name().as_ref() == b"rPh" => {
+            Event::End(e) if e.local_name().as_ref() == "rPh" => {
                 phonetic_depth = phonetic_depth.saturating_sub(1);
             }
             // The `<t>` under an `<si>` (directly, or inside an `<r>` run) holds
@@ -83,13 +83,11 @@ pub(crate) fn shared_string_items(raw: &str) -> Result<Vec<SharedItem>> {
             // the start of the close tag. A `<t>` inside an `<rPh>` phonetic run
             // is skipped.
             Event::Start(e)
-                if item_open.is_some()
-                    && phonetic_depth == 0
-                    && e.local_name().as_ref() == b"t" =>
+                if item_open.is_some() && phonetic_depth == 0 && e.local_name().as_ref() == "t" =>
             {
                 text_open = Some(span.end);
             }
-            Event::End(e) if e.local_name().as_ref() == b"t" => {
+            Event::End(e) if e.local_name().as_ref() == "t" => {
                 if let Some(start) = text_open.take() {
                     let decoded = unescape(&raw[start..span.start]).map_err(|e| {
                         Error::invalid_xml(format!("sharedStrings.xml entity: {e}"))
