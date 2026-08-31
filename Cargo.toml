@@ -120,7 +120,7 @@ iban_validate = { version = "5.0" }
 phonenumber = { version = "0.3", default-features = false }
 
 # Markup parsing
-quick-xml = { version = "0.41", features = [] }
+quick-xml = { version = "0.42", features = [] }
 lopdf = { version = "0.44", default-features = false }
 
 # Compression

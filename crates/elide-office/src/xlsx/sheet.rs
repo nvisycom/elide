@@ -103,30 +103,30 @@ pub(crate) fn parse_cells(raw: &str) -> Result<Vec<SheetCell>> {
 
         match event {
             Event::Eof => break,
-            Event::Start(e) if e.local_name().as_ref() == b"row" => {
+            Event::Start(e) if e.local_name().as_ref() == "row" => {
                 row = row_index(&e)?.unwrap_or(row);
                 next_column = 0;
             }
-            Event::End(e) if e.local_name().as_ref() == b"row" => {
+            Event::End(e) if e.local_name().as_ref() == "row" => {
                 row = row.saturating_add(1);
             }
-            Event::Start(e) if e.local_name().as_ref() == b"c" => {
+            Event::Start(e) if e.local_name().as_ref() == "c" => {
                 let cell = OpenCell::parse(&e, span.start, row, next_column)?;
                 next_column = cell.column + 1;
                 open = Some(cell);
             }
             // A self-closing `<c r=".." />` holds no value; advance the column.
-            Event::Empty(e) if e.local_name().as_ref() == b"c" => {
+            Event::Empty(e) if e.local_name().as_ref() == "c" => {
                 let cell = OpenCell::parse(&e, span.start, row, next_column)?;
                 next_column = cell.column + 1;
                 open = None;
             }
-            Event::Start(e) if e.local_name().as_ref() == b"t" => {
+            Event::Start(e) if e.local_name().as_ref() == "t" => {
                 if let Some(cell) = open.as_mut() {
                     cell.text_open = Some(span.end);
                 }
             }
-            Event::End(e) if e.local_name().as_ref() == b"t" => {
+            Event::End(e) if e.local_name().as_ref() == "t" => {
                 if let Some(cell) = open.as_mut()
                     && let Some(text_start) = cell.text_open.take()
                 {
@@ -138,20 +138,20 @@ pub(crate) fn parse_cells(raw: &str) -> Result<Vec<SheetCell>> {
             Event::Text(t) if open.as_ref().and_then(|c| c.value_open).is_some() => {
                 // The `<v>` of a shared cell holds the shared-string index.
                 if let Some(cell) = open.as_mut() {
-                    cell.value_text = Some(String::from_utf8_lossy(t.as_ref()).into_owned());
+                    cell.value_text = Some(t.as_ref().to_owned());
                 }
             }
-            Event::Start(e) if e.local_name().as_ref() == b"v" => {
+            Event::Start(e) if e.local_name().as_ref() == "v" => {
                 if let Some(cell) = open.as_mut() {
                     cell.value_open = Some(span.end);
                 }
             }
-            Event::End(e) if e.local_name().as_ref() == b"v" => {
+            Event::End(e) if e.local_name().as_ref() == "v" => {
                 if let Some(cell) = open.as_mut() {
                     cell.value_open = None;
                 }
             }
-            Event::End(e) if e.local_name().as_ref() == b"c" => {
+            Event::End(e) if e.local_name().as_ref() == "c" => {
                 if let Some(cell) = open.take()
                     && let Some(finished) = cell.finish(raw, span.end)?
                 {
@@ -169,7 +169,7 @@ pub(crate) fn parse_cells(raw: &str) -> Result<Vec<SheetCell>> {
 fn row_index(e: &quick_xml::events::BytesStart<'_>) -> Result<Option<u32>> {
     for attr in e.attributes() {
         let attr = attr.map_err(|err| Error::invalid_xml(format!("row attribute: {err}")))?;
-        if attr.key.local_name().as_ref() == b"r" {
+        if attr.key.local_name().as_ref() == "r" {
             let text = normalized(&attr)?;
             let one_based: u32 = text.trim().parse().map_err(|_| {
                 Error::invalid_xml(format!("row reference `{text}` is not a number"))
@@ -229,7 +229,7 @@ impl OpenCell {
         for attr in e.attributes() {
             let attr = attr.map_err(|err| Error::invalid_xml(format!("cell attribute: {err}")))?;
             let local = attr.key.local_name();
-            if local.as_ref() == b"t" {
+            if local.as_ref() == "t" {
                 // Compare the decoded value: `t` may be written with character
                 // references and must still classify the cell correctly.
                 cell_type = match normalized(&attr)?.as_str() {
@@ -241,7 +241,7 @@ impl OpenCell {
                 // The type attribute is not carried: the rewrite sets its own.
                 continue;
             }
-            if local.as_ref() == b"r" {
+            if local.as_ref() == "r" {
                 reference = Some(normalized(&attr)?);
             }
             // Every non-`t` attribute (including `r` and any style `s`) is carried
@@ -249,8 +249,8 @@ impl OpenCell {
             // survives. The value keeps its existing entities but any literal `"`
             // is escaped, since the rewrite wraps values in double quotes and a
             // single-quoted source value may contain a bare `"`.
-            let name = String::from_utf8_lossy(attr.key.as_ref());
-            let value = escape_attr_value(&String::from_utf8_lossy(&attr.value));
+            let name = attr.key.as_ref();
+            let value = escape_attr_value(attr.value.as_ref());
             attributes.push_str(&format!(r#" {name}="{value}""#));
         }
         // A cell may omit `r`; when present it must be a valid reference.

@@ -42,7 +42,7 @@ pub(crate) fn resolve_sheets(raw: &str, rels: &str) -> Result<Vec<Sheet>> {
             Event::Empty(e) | Event::Start(e) => e,
             _ => continue,
         };
-        if elem.local_name().as_ref() != b"sheet" {
+        if elem.local_name().as_ref() != "sheet" {
             continue;
         }
         let mut name = None;
@@ -50,10 +50,10 @@ pub(crate) fn resolve_sheets(raw: &str, rels: &str) -> Result<Vec<Sheet>> {
         for attr in elem.attributes() {
             let attr = attr.map_err(|e| Error::invalid_xml(format!("workbook.xml attr: {e}")))?;
             match attr.key.local_name().as_ref() {
-                b"name" => name = Some(decode(&attr.value)?),
+                "name" => name = Some(decode(attr.value.as_ref())?),
                 // The relationship id is `r:id`; match on the local name so the
                 // namespace prefix does not matter.
-                b"id" => rid = Some(decode(&attr.value)?),
+                "id" => rid = Some(decode(attr.value.as_ref())?),
                 _ => {}
             }
         }
@@ -95,7 +95,7 @@ fn relationship_targets(rels: &str) -> Result<HashMap<String, String>> {
             Event::Empty(e) | Event::Start(e) => e,
             _ => continue,
         };
-        if elem.local_name().as_ref() != b"Relationship" {
+        if elem.local_name().as_ref() != "Relationship" {
             continue;
         }
         let mut id = None;
@@ -105,9 +105,9 @@ fn relationship_targets(rels: &str) -> Result<HashMap<String, String>> {
             let attr =
                 attr.map_err(|e| Error::invalid_xml(format!("workbook.xml.rels attr: {e}")))?;
             match attr.key.local_name().as_ref() {
-                b"Id" => id = Some(decode(&attr.value)?),
-                b"Target" => target = Some(decode(&attr.value)?),
-                b"Type" => is_worksheet = attr.value.as_ref() == WORKSHEET_TYPE.as_bytes(),
+                "Id" => id = Some(decode(attr.value.as_ref())?),
+                "Target" => target = Some(decode(attr.value.as_ref())?),
+                "Type" => is_worksheet = attr.value.as_ref() == WORKSHEET_TYPE,
                 _ => {}
             }
         }
@@ -148,10 +148,9 @@ fn normalize_target(target: &str) -> String {
     segments.join("/")
 }
 
-/// Decode an attribute value's bytes to an unescaped owned `String`.
-fn decode(value: &[u8]) -> Result<String> {
-    let text = String::from_utf8_lossy(value);
-    Ok(unescape(&text)
+/// Decode an attribute value to an unescaped owned `String`.
+fn decode(value: &str) -> Result<String> {
+    Ok(unescape(value)
         .map_err(|e| Error::invalid_xml(format!("workbook attribute entity: {e}")))?
         .into_owned())
 }

@@ -253,7 +253,7 @@ pub(crate) fn relationship_spans(raw: &str) -> std::result::Result<Vec<Span>, ()
             Event::Empty(e) | Event::Start(e) => e,
             _ => continue,
         };
-        if elem.local_name().as_ref() != b"Relationship" {
+        if elem.local_name().as_ref() != "Relationship" {
             continue;
         }
 
@@ -267,9 +267,9 @@ pub(crate) fn relationship_spans(raw: &str) -> std::result::Result<Vec<Span>, ()
         for attr in elem.attributes() {
             let attr = attr.map_err(|_| ())?;
             match attr.key.local_name().as_ref() {
-                b"Type" => is_hyperlink = attr.value.as_ref() == HYPERLINK_TYPE.as_bytes(),
-                b"TargetMode" => is_external = attr.value.as_ref() == b"External",
-                b"Target" => target = Some(sub_slice_range(raw, &attr.value)?),
+                "Type" => is_hyperlink = attr.value.as_ref() == HYPERLINK_TYPE,
+                "TargetMode" => is_external = attr.value.as_ref() == "External",
+                "Target" => target = Some(sub_slice_range(raw, attr.value.as_ref())?),
                 _ => {}
             }
         }
@@ -284,10 +284,11 @@ pub(crate) fn relationship_spans(raw: &str) -> std::result::Result<Vec<Span>, ()
 }
 
 /// The byte range of `value` within `raw`, where `value` is a slice quick-xml
-/// borrowed out of `raw` (its attribute values are un-unescaped borrows of the
-/// source). Errs — fail-closed — if `value` is not a sub-slice of `raw`, so a
-/// caller surfaces the part as an issue rather than dropping a redaction.
-fn sub_slice_range(raw: &str, value: &[u8]) -> std::result::Result<Range<usize>, ()> {
+/// borrowed out of `raw` (its attribute values are the raw source text, entity
+/// spellings intact, borrowed straight from the buffer). Errs — fail-closed — if
+/// `value` is not a sub-slice of `raw`, so a caller surfaces the part as an issue
+/// rather than dropping a redaction.
+fn sub_slice_range(raw: &str, value: &str) -> std::result::Result<Range<usize>, ()> {
     let base = raw.as_ptr() as usize;
     let start = (value.as_ptr() as usize).checked_sub(base).ok_or(())?;
     let end = start.checked_add(value.len()).ok_or(())?;
@@ -452,6 +453,21 @@ mod tests {
         let spans = relationship_spans(raw).unwrap();
         assert_eq!(spans.len(), 1);
         assert_eq!(&raw[spans[0].range.clone()], "mailto:c@example.com");
+    }
+
+    #[test]
+    fn relationship_target_with_an_entity_keeps_its_raw_span() {
+        // The `Target` value carries an entity (`&amp;`). quick-xml borrows the
+        // raw, still-escaped value out of the source, so the span covers the raw
+        // bytes (`a&amp;b@example.com`) and stays redactable.
+        let raw = concat!(
+            r#"<Relationships>"#,
+            r#"<Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="mailto:a&amp;b@example.com" TargetMode="External" Id="rIdE"/>"#,
+            r#"</Relationships>"#,
+        );
+        let spans = relationship_spans(raw).unwrap();
+        assert_eq!(spans.len(), 1);
+        assert_eq!(&raw[spans[0].range.clone()], "mailto:a&amp;b@example.com");
     }
 
     #[test]
