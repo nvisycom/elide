@@ -70,6 +70,6 @@ bytes = { workspace = true, features = [] }
 uuid = { workspace = true, features = [] }
 
 [dev-dependencies]
-jsonschema = { version = "0.51.0", default-features = false }
+jsonschema = { version = "0.52.0", default-features = false }
 # (De)serialization
 serde_json = { workspace = true, features = [] }
