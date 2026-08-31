@@ -6,8 +6,8 @@
 
 **Composable, multimodal toolkit for detecting and redacting sensitive data.**
 
-The building blocks — recognizers, deduplication, redaction operators, and
-format codecs — for finding and removing PII and PHI across your documents.
+The building blocks for finding and removing PII and PHI across your documents:
+recognizers, deduplication, redaction operators, and format codecs.
 
 [![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/elide/build.yml?branch=main&label=build&style=flat-square)](https://github.com/nvisycom/elide/actions/workflows/build.yml)
 [![Security](https://img.shields.io/github/actions/workflow/status/nvisycom/elide/security.yml?branch=main&label=security&style=flat-square)](https://github.com/nvisycom/elide/actions/workflows/security.yml)
@@ -32,12 +32,12 @@ projects.
 
 ## Features
 
-- **Multimodal:** Detect and redact across text, images, audio, and tabular data through one entity model
-- **Pattern & Model Detection:** Regex, dictionary, and checksum recognizers alongside NER and LLM/VLM recognition
-- **Context-Aware Scoring:** Nearby keywords lift ambiguous matches, and overlapping findings deduplicate into one entity set
-- **Redaction Operators:** Mask, replace, hash, encrypt, blur, silence, or drop — with reversible encrypt and pseudonymize
-- **Format Codecs:** Round-trip PDF, DOCX, HTML, JSON, CSV, images, and audio, changing only the redacted parts
-- **Provenance-First:** Every entity carries its full audit trail of how it was found, scored, and hidden
+- **Multimodal:** One entity model spanning text, images, audio, and tabular data, so a recognizer or operator written once serves every format.
+- **Detection:** Regex, dictionary, and checksum recognizers with validators, plus NER and LLM/VLM recognition. Language, OCR, and speech enrichers feed the text they produce back into the same pipeline.
+- **Context-aware scoring:** Nearby keywords lift ambiguous matches, and overlapping findings reconcile into one deduplicated entity set.
+- **Redaction operators:** Mask, replace, truncate, HMAC, hash, generalize, or clamp text; blur, pixelate, or black out image regions; silence or beep audio; drop rows and columns. Reversible encryption and pseudonymization round-trip.
+- **Format codecs:** Read and rewrite TXT, CSV, JSON, XML, HTML, RTF, PDF, DOCX, PPTX, XLSX, images (PNG, JPEG, TIFF), and audio (WAV, MP3), changing only the redacted spans and leaving every other byte intact.
+- **Provenance-first:** Every entity carries its full audit trail of how it was found, scored, and hidden, and the trail verifies.
 
 Everything is feature-gated: take only the modalities, recognizers, and codecs
 you need.
@@ -57,5 +57,4 @@ Apache 2.0 License, see [LICENSE.txt](LICENSE.txt)
 ## Support
 
 - **Documentation**: [docs.nvisy.com](https://docs.nvisy.com)
-- **Issues**: [GitHub Issues](https://github.com/nvisycom/elide/issues)
 - **Email**: [support@nvisy.com](mailto:support@nvisy.com)
