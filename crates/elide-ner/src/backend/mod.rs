@@ -4,15 +4,15 @@
 //! [`NerRequest::labels`] = `Some(...)`) and fixed-label backends
 //! (labels baked into the model, `labels = None`). Backends emit
 //! canonical [`NerSpan`]s. Wrap a backend with a [`decorator`] to scale or
-//! drop selected labels. The `mock`-gated [`MockBackend`] (returns no spans;
-//! test/example stub) ships here; concrete inference backends live
+//! drop selected labels. The `test-utils`-gated [`MockBackend`] (returns no
+//! spans; test/example stub) ships here; concrete inference backends live
 //! downstream.
 //!
 //! [`decorator`]: crate::decorator
 //! [`NerRecognizer::recognize`]: crate::NerRecognizer
 //! [`LabelMap`]: elide_core::recognition::LabelMap
 
-#[cfg(any(test, feature = "mock"))]
+#[cfg(any(test, feature = "test-utils"))]
 mod mock_backend;
 mod ner_request;
 mod ner_response;
@@ -20,8 +20,8 @@ mod ner_response;
 use elide_core::Result;
 use elide_core::entity::audit::ModelEvent;
 
-#[cfg(any(test, feature = "mock"))]
-#[cfg_attr(docsrs, doc(cfg(feature = "mock")))]
+#[cfg(any(test, feature = "test-utils"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
 pub use self::mock_backend::MockBackend;
 pub use self::ner_request::NerRequest;
 pub use self::ner_response::{NerResponse, NerSpan};
