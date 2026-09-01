@@ -28,7 +28,9 @@ use elide::recognition::pattern::PatternRecognizer;
 use elide::recognition::{Recognizer, Scope};
 use elide::redaction::operators::{Erase, Mask, Replace};
 use elide::redaction::{Anonymizer, Operator, Rule};
-use elide::{Directives, EntityGroup, Error, ErrorKind, Orchestrator, Report, Result};
+use elide::{
+    ArtifactGroup, Directives, EntityGroup, Error, ErrorKind, Orchestrator, Report, Result,
+};
 
 /// Outcome of one end-to-end run: the entities that survived dedup and
 /// the re-encoded redacted document.
@@ -321,7 +323,8 @@ impl Fixture {
 
         let report = orchestrator
             .analyze(&mut document, &Directives::new())
-            .await?;
+            .await?
+            .report;
         let entities: Vec<Entity<Audio>> = report
             .entities::<Audio>()
             .map(|e| e.to_vec())
@@ -382,7 +385,8 @@ impl Fixture {
 
         let report = orchestrator
             .analyze(&mut document, &Directives::new())
-            .await?;
+            .await?
+            .report;
         let entities: Vec<Entity<Image>> = report
             .entities::<Image>()
             .map(|e| e.to_vec())
@@ -418,6 +422,7 @@ impl Fixture {
         M: TextRecognizable,
         Entity<M>: Clone,
         Vec<Entity<M>>: EntityGroup + serde::de::DeserializeOwned,
+        M::Artifact: ArtifactGroup + serde::Serialize + serde::de::DeserializeOwned,
         DocumentHandle<M>: StreamDataReader<M>,
         Replace: Operator<M>,
         Mask: Operator<M>,
@@ -446,6 +451,7 @@ impl Fixture {
         M: TextRecognizable,
         Entity<M>: Clone,
         Vec<Entity<M>>: EntityGroup + serde::de::DeserializeOwned,
+        M::Artifact: ArtifactGroup + serde::Serialize + serde::de::DeserializeOwned,
         DocumentHandle<M>: StreamDataReader<M>,
         Replace: Operator<M>,
         Mask: Operator<M>,
@@ -478,7 +484,8 @@ impl Fixture {
         // the body entities out, then apply with no editing.
         let report = orchestrator
             .analyze(&mut document, &Directives::new())
-            .await?;
+            .await?
+            .report;
         let entities: Vec<Entity<M>> = report
             .entities::<M>()
             .map(|e| e.to_vec())

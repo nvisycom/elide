@@ -39,7 +39,10 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
     // Phase 1: analyze, then copy the body entities out — exactly what a caller
     // can serialize and ship to another process.
     let mut doc = registry.decode(FIXTURE.source, "docx").await?;
-    let report = orchestrator.analyze(&mut doc, &Directives::new()).await?;
+    let report = orchestrator
+        .analyze(&mut doc, &Directives::new())
+        .await?
+        .report;
     let body = report
         .entities::<Text>()
         .map(|v| v.to_vec())

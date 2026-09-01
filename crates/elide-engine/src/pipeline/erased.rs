@@ -15,8 +15,8 @@ use elide_core::recognition::Scope;
 
 use super::ModalityPipeline;
 use super::outcome::{AnalyzeOutcome, BoxFuture, InPlaceAnalysis};
+use crate::analysis::{ArtifactGroup, EntityGroup};
 use crate::directives::AnnotationSet;
-use crate::report::EntityGroup;
 
 /// A type-erased pipeline the orchestrator stores per modality.
 ///
@@ -55,6 +55,28 @@ pub(crate) trait ErasedPipeline: Send + Sync {
         annotations: &'a AnnotationSet,
     ) -> BoxFuture<'a, Result<InPlaceAnalysis>>;
 
+    /// [`analyze`](Self::analyze) seeded with the group's prior enrichment
+    /// `artifact` (from an earlier report), so a re-run re-recognizes an owned
+    /// handle (a container part) without re-enriching.
+    fn re_analyze<'a>(
+        &'a self,
+        handle: UntypedDocumentHandle,
+        scope: &'a Scope,
+        annotations: &'a AnnotationSet,
+        artifact: &'a dyn ArtifactGroup,
+    ) -> BoxFuture<'a, Result<AnalyzeOutcome>>;
+
+    /// [`analyze_in_place`](Self::analyze_in_place) seeded with the group's prior
+    /// enrichment `artifact`, so a re-run re-recognizes a borrowed handle (the
+    /// document body) without re-enriching.
+    fn re_analyze_in_place<'a>(
+        &'a self,
+        handle: &'a mut UntypedDocumentHandle,
+        scope: &'a Scope,
+        annotations: &'a AnnotationSet,
+        artifact: &'a dyn ArtifactGroup,
+    ) -> BoxFuture<'a, Result<InPlaceAnalysis>>;
+
     fn apply_in_place<'a>(
         &'a self,
         handle: &'a mut UntypedDocumentHandle,
@@ -82,6 +104,7 @@ impl<M> ErasedPipeline for ModalityPipeline<M>
 where
     M: Modality,
     Vec<Entity<M>>: EntityGroup,
+    M::Artifact: ArtifactGroup,
     DocumentHandle<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
 {
     fn analyze<'a>(
@@ -101,6 +124,7 @@ where
                 modality: TypeId::of::<M>(),
                 handle: UntypedDocumentHandle::new(handle),
                 entities: Box::new(analysis.entities),
+                artifact: Box::new(analysis.artifact),
                 #[cfg(feature = "usage")]
                 usage: analysis.usage,
             })
@@ -120,10 +144,69 @@ where
             let regions = annotations.get::<M>();
             let analysis = ModalityPipeline::analyze(self, typed, scope, &regions).await?;
             let entities = Box::new(analysis.entities) as Box<dyn EntityGroup>;
+            let artifact = Box::new(analysis.artifact) as Box<dyn ArtifactGroup>;
             #[cfg(feature = "usage")]
-            return Ok(Some((entities, analysis.usage)));
+            return Ok(Some((entities, artifact, analysis.usage)));
             #[cfg(not(feature = "usage"))]
-            Ok(Some(entities))
+            Ok(Some((entities, artifact)))
+        })
+    }
+
+    fn re_analyze<'a>(
+        &'a self,
+        handle: UntypedDocumentHandle,
+        scope: &'a Scope,
+        annotations: &'a AnnotationSet,
+        artifact: &'a dyn ArtifactGroup,
+    ) -> BoxFuture<'a, Result<AnalyzeOutcome>> {
+        Box::pin(async move {
+            let mut handle = match handle.into::<M>() {
+                Ok(handle) => handle,
+                Err(returned) => return Ok(AnalyzeOutcome::Rejected(returned)),
+            };
+            let regions = annotations.get::<M>();
+            let seed = artifact
+                .as_any()
+                .downcast_ref::<M::Artifact>()
+                .cloned()
+                .unwrap_or_default();
+            let analysis =
+                ModalityPipeline::re_analyze(self, &mut handle, scope, &regions, seed).await?;
+            Ok(AnalyzeOutcome::Accepted {
+                modality: TypeId::of::<M>(),
+                handle: UntypedDocumentHandle::new(handle),
+                entities: Box::new(analysis.entities),
+                artifact: Box::new(analysis.artifact),
+                #[cfg(feature = "usage")]
+                usage: analysis.usage,
+            })
+        })
+    }
+
+    fn re_analyze_in_place<'a>(
+        &'a self,
+        handle: &'a mut UntypedDocumentHandle,
+        scope: &'a Scope,
+        annotations: &'a AnnotationSet,
+        artifact: &'a dyn ArtifactGroup,
+    ) -> BoxFuture<'a, Result<InPlaceAnalysis>> {
+        Box::pin(async move {
+            let Some(typed) = handle.downcast_mut::<M>() else {
+                return Ok(None); // not this pipeline's modality
+            };
+            let regions = annotations.get::<M>();
+            let seed = artifact
+                .as_any()
+                .downcast_ref::<M::Artifact>()
+                .cloned()
+                .unwrap_or_default();
+            let analysis = ModalityPipeline::re_analyze(self, typed, scope, &regions, seed).await?;
+            let entities = Box::new(analysis.entities) as Box<dyn EntityGroup>;
+            let artifact = Box::new(analysis.artifact) as Box<dyn ArtifactGroup>;
+            #[cfg(feature = "usage")]
+            return Ok(Some((entities, artifact, analysis.usage)));
+            #[cfg(not(feature = "usage"))]
+            Ok(Some((entities, artifact)))
         })
     }
 

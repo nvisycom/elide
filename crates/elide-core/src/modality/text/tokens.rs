@@ -97,7 +97,11 @@ impl Token {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Tokens(Vec<Token>);
 
-impl ModalityArtifact for Tokens {}
+impl ModalityArtifact for Tokens {
+    fn is_empty(&self) -> bool {
+        Tokens::is_empty(self)
+    }
+}
 
 impl Tokens {
     /// Construct an empty token sequence. Use this when the producer has no

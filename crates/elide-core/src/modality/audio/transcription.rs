@@ -17,6 +17,7 @@ use hipstr::HipStr;
 use serde::{Deserialize, Serialize};
 
 use super::AudioLocation;
+use crate::modality::ModalityArtifact;
 use crate::primitive::{Confidence, LanguageTag, TimeSpan};
 
 /// Separator inserted between segments when building the flat transcript
@@ -276,6 +277,12 @@ impl Transcription {
             location = location.with_speaker_id(id.clone());
         }
         Some(location)
+    }
+}
+
+impl ModalityArtifact for Transcription {
+    fn is_empty(&self) -> bool {
+        Transcription::is_empty(self)
     }
 }
 

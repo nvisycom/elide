@@ -56,6 +56,21 @@ where
             .await
     }
 
+    /// Re-detect over `handle`, seeding the analysis with a prior enrichment
+    /// `artifact` so recognition runs against the same OCR/transcript without
+    /// re-invoking the model. The re-run counterpart to [`analyze`](Self::analyze).
+    pub(super) async fn re_analyze(
+        &self,
+        handle: &mut DocumentHandle<M>,
+        scope: &Scope,
+        annotations: &Annotations<M>,
+        artifact: M::Artifact,
+    ) -> Result<Analysis<M>> {
+        self.analyzer
+            .analyze_stream_in(handle, scope, annotations, artifact)
+            .await
+    }
+
     /// Apply `entities` to `handle` in place: the redactions land in the
     /// handle, ready for its eventual `encode`. `scope` is passed to selection
     /// so scope-aware rules can branch on request context.

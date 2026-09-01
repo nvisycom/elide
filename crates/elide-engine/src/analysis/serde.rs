@@ -1,173 +1,85 @@
-//! Reconstructing a [`Report`] from its serialized wire form, driven by the
-//! orchestrator's registered modalities.
+//! The serde wire form for the analysis views: the [`Report`]'s
+//! `serde::Serialize` and the seed visitors that reconstruct both a [`Report`]
+//! and an [`ArtifactSet`] from their `{ body, parts }` wire shape.
 //!
-//! The wire form drops the concrete modality type — a group is just tagged with
-//! its [`Modality::NAME`]. Deserialization is not object-safe, so the report
-//! cannot recover the type on its own. Instead the [`Orchestrator`] holds a
-//! [`ModalityRegistry`]: [`with_modality`] registers, per modality name, a parser
-//! that deserializes that group as the concrete `Vec<Entity<M>>`. A group naming
-//! an unregistered modality is skipped when empty (nothing to lose, matching how
-//! `analyze` ignores an unmatched part) but a hard error when non-empty — its
-//! entities may carry reviewer edits that silently dropping the group would lose.
+//! The serialized report is the part-grouped `{ body, parts }` view a review
+//! layer consumes; each group is tagged with its
+//! [`modality`](elide_core::modality::Modality::NAME) so the orchestrator can
+//! route it back on deserialization. Reconstruction is driven by the
+//! [`ModalityRegistry`](super::registry::ModalityRegistry): the wire form drops
+//! the concrete modality type, deserialization is not object-safe, so each group
+//! is buffered and replayed through the per-modality parser resolved from the
+//! registry. A group naming an unregistered modality is skipped when empty
+//! (nothing to lose, matching how `analyze` ignores an unmatched part) but a hard
+//! error when non-empty — its entities may carry reviewer edits that silently
+//! dropping the group would lose. An artifact carries no reviewer-editable state,
+//! so an unregistered or absent artifact simply yields nothing.
 //!
-//! [`Report`]: super::Report
-//! [`Orchestrator`]: crate::Orchestrator
-//! [`with_modality`]: crate::Orchestrator::with_modality
-//! [`Modality::NAME`]: elide_core::modality::Modality::NAME
+//! [`Report`]: super::report::Report
+//! [`ArtifactSet`]: super::artifacts::ArtifactSet
 
 use std::any::TypeId;
 use std::collections::HashMap;
 
-use elide_core::entity::Entity;
-use elide_core::modality::Modality;
 use serde::de::{
     DeserializeSeed, Deserializer, Error as DeError, IntoDeserializer, MapAccess, Visitor,
 };
 use serde_value::Value;
 
-use super::group::EntityGroup;
-use super::{BodyReport, PartReport, Report};
+use super::artifacts::ArtifactSet;
+use super::group::{ArtifactGroup, EntityGroup};
+use super::registry::ModalityRegistry;
+use super::report::{BodyReport, PartReport, Report};
 use crate::PartId;
 
-/// Parses one erased entity group as its concrete `Vec<Entity<M>>`. Registered
-/// per modality name by [`Orchestrator::with_modality`].
-///
-/// [`Orchestrator::with_modality`]: crate::Orchestrator::with_modality
-type GroupParser = fn(
-    &mut dyn erased_serde::Deserializer<'_>,
-) -> Result<Box<dyn EntityGroup>, erased_serde::Error>;
+impl serde::Serialize for Report {
+    /// Serialize to `{ body: {modality, entities}, parts: { id: {modality,
+    /// entities} } }`. `body` is null when no body pipeline ran. Each group
+    /// carries its modality name so it can be parsed back into the right
+    /// `Vec<Entity<M>>`.
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
 
-/// What a registered modality contributes to reconstruction: how to parse its
-/// group, and the routing [`TypeId`] the report entry stores for the apply path.
-#[derive(Clone, Copy)]
-struct ModalityEntry {
-    parse: GroupParser,
-    type_id: TypeId,
-}
+        // Adapt an erased group to a Serialize value: `{ modality, entities }`.
+        struct Group<'a>(&'a dyn EntityGroup);
+        impl serde::Serialize for Group<'_> {
+            fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+                // The entities serialize through erasure; `modality` tags which
+                // `M` to parse them back as.
+                struct Entities<'a>(&'a dyn EntityGroup);
+                impl serde::Serialize for Entities<'_> {
+                    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+                        erased_serde::serialize(self.0, s)
+                    }
+                }
+                let mut state = s.serialize_struct("Group", 2)?;
+                state.serialize_field("modality", self.0.modality_name())?;
+                state.serialize_field("entities", &Entities(self.0))?;
+                state.end()
+            }
+        }
 
-/// The orchestrator's per-modality reconstruction registry, keyed by
-/// [`Modality::NAME`]. Populated by [`with_modality`] so a deserialized report
-/// is reconstructed against exactly the modalities the orchestrator handles.
-///
-/// [`Modality::NAME`]: elide_core::modality::Modality::NAME
-/// [`with_modality`]: crate::Orchestrator::with_modality
-#[derive(Default)]
-pub(crate) struct ModalityRegistry {
-    entries: HashMap<&'static str, ModalityEntry>,
-}
+        let parts: HashMap<&str, Group<'_>> = self
+            .parts
+            .iter()
+            .map(|(id, p)| (id.as_str(), Group(p.entities.as_ref())))
+            .collect();
 
-impl ModalityRegistry {
-    /// Register modality `M`, keyed by its name. Called by
-    /// [`with_modality`](crate::Orchestrator::with_modality) alongside the
-    /// pipeline registration.
-    pub(crate) fn register<M>(&mut self)
-    where
-        M: Modality,
-        Vec<Entity<M>>: EntityGroup + serde::de::DeserializeOwned,
-    {
-        self.entries.insert(
-            M::NAME,
-            ModalityEntry {
-                parse: |de| {
-                    let entities: Vec<Entity<M>> = erased_serde::deserialize(de)?;
-                    Ok(Box::new(entities) as Box<dyn EntityGroup>)
-                },
-                type_id: TypeId::of::<M>(),
-            },
-        );
-    }
+        // `usage` is the third field only under the `usage` feature.
+        #[cfg(feature = "usage")]
+        let field_count = 3;
+        #[cfg(not(feature = "usage"))]
+        let field_count = 2;
 
-    /// The entry registered for `modality`, or `None` if this orchestrator has
-    /// no pipeline for it.
-    fn entry(&self, modality: &str) -> Option<ModalityEntry> {
-        self.entries.get(modality).copied()
-    }
-
-    /// Reconstruct a [`Report`] from `deserializer`, routing each group to its
-    /// registered modality — the shared core of [`Report::deserializer`] and
-    /// [`Orchestrator::deserialize_report`]. Maps any deserialization failure to
-    /// a [`MalformedInput`] error.
-    ///
-    /// [`Report::deserializer`]: Report::deserializer
-    /// [`Orchestrator::deserialize_report`]: crate::Orchestrator::deserialize_report
-    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
-    pub(crate) fn deserialize<'de, D>(&self, deserializer: D) -> elide_core::Result<Report>
-    where
-        D: Deserializer<'de>,
-    {
-        ReportSeed { registry: self }
-            .deserialize(deserializer)
-            .map_err(|e| {
-                elide_core::Error::new(elide_core::ErrorKind::MalformedInput, e.to_string())
-            })
-    }
-}
-
-/// Rebuilds a serialized [`Report`] — without the analyzers, anonymizers, or
-/// codec registry needed to *run* one.
-///
-/// A report's wire form tags each group with its modality name but not the
-/// concrete type, and deserialization is not object-safe, so a bare
-/// `Report: Deserialize` is impossible. Register the modalities the report may
-/// contain with [`with_modality`], then reconstruct with [`deserialize`]. The
-/// modalities registered here need only be *deserializable*; they need no
-/// pipeline.
-///
-/// This is the deserialize-only counterpart to the full [`Orchestrator`], for a
-/// review layer that reconstructs an edited report without re-building the
-/// engine that produced it. Build one with [`Report::deserializer`].
-///
-/// ```ignore
-/// let report = Report::deserializer()
-///     .with_modality::<Text>()
-///     .with_modality::<Image>()
-///     .deserialize(&mut serde_json::Deserializer::from_str(json))?;
-/// ```
-///
-/// [`with_modality`]: Self::with_modality
-/// [`deserialize`]: Self::deserialize
-/// [`Orchestrator`]: crate::Orchestrator
-/// [`Report::deserializer`]: Report::deserializer
-#[derive(Default)]
-pub struct ReportDeserializer {
-    registry: ModalityRegistry,
-}
-
-impl ReportDeserializer {
-    /// A deserializer with no modalities registered.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Register modality `M` so a group tagged with its name reconstructs as
-    /// `Vec<Entity<M>>`. Returns `self` for chaining.
-    #[must_use]
-    pub fn with_modality<M>(mut self) -> Self
-    where
-        M: Modality,
-        Vec<Entity<M>>: EntityGroup + serde::de::DeserializeOwned,
-    {
-        self.registry.register::<M>();
-        self
-    }
-
-    /// Reconstruct a [`Report`] from `deserializer`, routing each group to a
-    /// registered modality.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`MalformedInput`] error if the payload is not a valid report,
-    /// or if a group carries entities under a modality that was not registered —
-    /// see [`Orchestrator::deserialize_report`] for the empty-vs-non-empty rule.
-    ///
-    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
-    /// [`Orchestrator::deserialize_report`]: crate::Orchestrator::deserialize_report
-    pub fn deserialize<'de, D>(&self, deserializer: D) -> elide_core::Result<Report>
-    where
-        D: Deserializer<'de>,
-    {
-        self.registry.deserialize(deserializer)
+        let mut state = serializer.serialize_struct("Report", field_count)?;
+        state.serialize_field(
+            "body",
+            &self.body.as_ref().map(|b| Group(b.entities.as_ref())),
+        )?;
+        state.serialize_field("parts", &parts)?;
+        #[cfg(feature = "usage")]
+        state.serialize_field("usage", &self.usage)?;
+        state.end()
     }
 }
 
@@ -284,8 +196,8 @@ fn entity_count(entities: &Value) -> usize {
 /// registry. Drives [`Orchestrator::deserialize_report`].
 ///
 /// [`Orchestrator::deserialize_report`]: crate::Orchestrator::deserialize_report
-pub(crate) struct ReportSeed<'a> {
-    pub(crate) registry: &'a ModalityRegistry,
+pub(super) struct ReportSeed<'a> {
+    pub(super) registry: &'a ModalityRegistry,
 }
 
 impl<'de> serde::de::DeserializeSeed<'de> for ReportSeed<'_> {
@@ -441,11 +353,220 @@ impl<'de> Visitor<'de> for PartsSeed<'_> {
     }
 }
 
+// ---- ArtifactSet reconstruction: the artifact-side mirror of the report seeds.
+// The wire shape is identical (`{ body, parts }` of `{ modality, artifact }`),
+// but a group carries an artifact instead of entities, and an unregistered or
+// absent modality simply yields no artifact (there is no reviewer-editable state
+// to protect, so no hard error).
+
+/// One reconstructed artifact group: the erased artifact plus its routing
+/// [`TypeId`] and modality name.
+struct ParsedArtifact {
+    modality: TypeId,
+    modality_name: &'static str,
+    artifact: Box<dyn ArtifactGroup>,
+}
+
+/// A `{ modality, artifact }` group. Buffers both fields, resolves the
+/// modality's `parse_artifact`, and parses the buffered artifact. `None` when
+/// the modality is unregistered (nothing to reconstruct it as).
+struct ArtifactGroupSeed<'a> {
+    registry: &'a ModalityRegistry,
+}
+
+impl<'de> DeserializeSeed<'de> for ArtifactGroupSeed<'_> {
+    type Value = Option<ParsedArtifact>;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_struct("ArtifactGroup", &["modality", "artifact"], self)
+    }
+}
+
+impl<'de> Visitor<'de> for ArtifactGroupSeed<'_> {
+    type Value = Option<ParsedArtifact>;
+
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a { modality, artifact } group")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let mut modality: Option<String> = None;
+        let mut artifact: Option<Value> = None;
+        while let Some(key) = map.next_key::<String>()? {
+            match key.as_str() {
+                "modality" => {
+                    if modality.is_some() {
+                        return Err(DeError::duplicate_field("modality"));
+                    }
+                    modality = Some(map.next_value()?);
+                }
+                "artifact" => {
+                    if artifact.is_some() {
+                        return Err(DeError::duplicate_field("artifact"));
+                    }
+                    artifact = Some(map.next_value()?);
+                }
+                _ => {
+                    map.next_value::<serde::de::IgnoredAny>()?;
+                }
+            }
+        }
+        let name = modality.ok_or_else(|| DeError::missing_field("modality"))?;
+        let artifact = artifact.ok_or_else(|| DeError::missing_field("artifact"))?;
+
+        // An unregistered modality has no parser: drop the artifact (a re-run
+        // will re-enrich). Unlike entities, an artifact carries no reviewer
+        // edits, so dropping it loses no work.
+        let Some(entry) = self.registry.entry(&name) else {
+            return Ok(None);
+        };
+        let mut erased = <dyn erased_serde::Deserializer<'_>>::erase(artifact.into_deserializer());
+        let parsed = (entry.parse_artifact)(&mut erased).map_err(DeError::custom)?;
+        Ok(Some(ParsedArtifact {
+            modality: entry.type_id,
+            modality_name: entry.modality_name,
+            artifact: parsed,
+        }))
+    }
+}
+
+/// `body` is `Option<ArtifactGroup>`: null when there is no body artifact.
+struct OptionArtifactSeed<'a> {
+    registry: &'a ModalityRegistry,
+}
+
+impl<'de> DeserializeSeed<'de> for OptionArtifactSeed<'_> {
+    type Value = Option<ParsedArtifact>;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_option(self)
+    }
+}
+
+impl<'de> Visitor<'de> for OptionArtifactSeed<'_> {
+    type Value = Option<ParsedArtifact>;
+
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("null or an artifact group")
+    }
+
+    fn visit_none<E: DeError>(self) -> Result<Self::Value, E> {
+        Ok(None)
+    }
+
+    fn visit_unit<E: DeError>(self) -> Result<Self::Value, E> {
+        Ok(None)
+    }
+
+    fn visit_some<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
+        ArtifactGroupSeed {
+            registry: self.registry,
+        }
+        .deserialize(d)
+    }
+}
+
+/// `parts` is a map of `PartId` -> artifact group.
+struct ArtifactPartsSeed<'a> {
+    registry: &'a ModalityRegistry,
+}
+
+impl<'de> DeserializeSeed<'de> for ArtifactPartsSeed<'_> {
+    type Value = HashMap<String, Option<ParsedArtifact>>;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_map(self)
+    }
+}
+
+impl<'de> Visitor<'de> for ArtifactPartsSeed<'_> {
+    type Value = HashMap<String, Option<ParsedArtifact>>;
+
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a map of part id to artifact group")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let mut out = HashMap::new();
+        while let Some(id) = map.next_key::<String>()? {
+            if out.contains_key(&id) {
+                return Err(DeError::custom(format!("duplicate part id `{id}`")));
+            }
+            let group = map.next_value_seed(ArtifactGroupSeed {
+                registry: self.registry,
+            })?;
+            out.insert(id, group);
+        }
+        Ok(out)
+    }
+}
+
+/// The whole-set seed: `{ body, parts }`, each artifact parsed through the
+/// registry.
+pub(super) struct ArtifactSetSeed<'a> {
+    pub(super) registry: &'a ModalityRegistry,
+}
+
+impl<'de> DeserializeSeed<'de> for ArtifactSetSeed<'_> {
+    type Value = ArtifactSet;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_struct("ArtifactSet", &["body", "parts"], self)
+    }
+}
+
+impl<'de> Visitor<'de> for ArtifactSetSeed<'_> {
+    type Value = ArtifactSet;
+
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a { body, parts } artifact set")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let mut set = ArtifactSet::new();
+        let mut seen_body = false;
+        let mut seen_parts = false;
+        while let Some(key) = map.next_key::<String>()? {
+            match key.as_str() {
+                "body" => {
+                    if seen_body {
+                        return Err(DeError::duplicate_field("body"));
+                    }
+                    seen_body = true;
+                    if let Some(a) = map.next_value_seed(OptionArtifactSeed {
+                        registry: self.registry,
+                    })? {
+                        set.set_body(a.modality, a.modality_name, a.artifact);
+                    }
+                }
+                "parts" => {
+                    if seen_parts {
+                        return Err(DeError::duplicate_field("parts"));
+                    }
+                    seen_parts = true;
+                    let parts = map.next_value_seed(ArtifactPartsSeed {
+                        registry: self.registry,
+                    })?;
+                    for (id, a) in parts {
+                        if let Some(a) = a {
+                            set.set_part(PartId::from(id), a.modality, a.modality_name, a.artifact);
+                        }
+                    }
+                }
+                _ => {
+                    map.next_value::<serde::de::IgnoredAny>()?;
+                }
+            }
+        }
+        Ok(set)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
     use elide_core::entity::{Entity, LabelRef};
-    use elide_core::modality::text::{Text, TextLocation};
+    use elide_core::modality::text::{Text, TextLocation, Tokens};
     use elide_core::primitive::Confidence;
     use serde::de::DeserializeSeed;
 
@@ -478,6 +599,81 @@ mod tests {
             Ok(report) => report,
             Err(e) => panic!("deserialize: {e}"),
         }
+    }
+
+    #[test]
+    fn serializes_body_to_grouped_view() {
+        // The part-grouped `{ body, parts }` shape is exercised end to end
+        // (with a real container) in the docx integration test; here we
+        // check the body group and the empty-parts shape directly.
+        let report = Report::new().insert_body::<Text>(vec![text_entity("EMAIL_ADDRESS")]);
+
+        let value = serde_json::to_value(&report).unwrap();
+        // body is a `{ modality, entities }` group; parts is an object.
+        assert_eq!(value["body"]["modality"], "text");
+        assert_eq!(value["body"]["entities"][0]["label"], "EMAIL_ADDRESS");
+        assert!(value["parts"].is_object());
+        assert_eq!(value["parts"].as_object().unwrap().len(), 0);
+
+        // No body pipeline ran → body is null.
+        let empty = serde_json::to_value(Report::new()).unwrap();
+        assert!(empty["body"].is_null());
+    }
+
+    /// The hand-written [`JsonSchema`](super::super::schema) must accept what
+    /// [`Serialize`] produces — the drift guard. A populated report (body plus a
+    /// container part), a body-less report, and an empty report all validate
+    /// against `schema_for!(Report)`; any divergence between the two hand-written
+    /// impls fails here rather than silently shipping a schema that lies.
+    #[cfg(feature = "schema")]
+    #[test]
+    fn serialized_reports_validate_against_the_schema() {
+        use elide_codec::PartId;
+
+        let schema = serde_json::to_value(schemars::schema_for!(Report)).unwrap();
+
+        let with_part = Report::new()
+            .insert_body::<Text>(vec![text_entity("EMAIL_ADDRESS")])
+            .insert_part::<Text>(
+                PartId::from("word/media/image1.png".to_owned()),
+                vec![text_entity("PHONE_NUMBER")],
+            );
+
+        for report in [
+            with_part,
+            Report::new().insert_body::<Text>(Vec::new()),
+            Report::new(),
+        ] {
+            let doc = serde_json::to_value(&report).unwrap();
+            if let Err(e) = jsonschema::validate(&schema, &doc) {
+                panic!("serialized report does not match its schema: {e}\n{doc:#}");
+            }
+        }
+    }
+
+    #[cfg(feature = "usage")]
+    #[test]
+    fn serializes_usage_entries() {
+        use std::time::Duration;
+
+        use elide_core::recognition::{RecognizerId, Usage};
+
+        let mut report = Report::new();
+        report.usage.extend([Usage::new(
+            RecognizerId::new("elide-pattern", "1"),
+            Duration::from_millis(5),
+            3,
+        )]);
+
+        let value = serde_json::to_value(&report).unwrap();
+        let entries = value["usage"]["entries"].as_array().expect("usage array");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["id"]["name"], "elide-pattern");
+        assert_eq!(entries[0]["duration"], 5);
+        assert_eq!(entries[0]["count"], 3);
+        // An empty report still carries an (empty) usage array.
+        let empty = serde_json::to_value(Report::new()).unwrap();
+        assert!(empty["usage"]["entries"].as_array().unwrap().is_empty());
     }
 
     #[test]
@@ -658,5 +854,41 @@ mod tests {
             err.to_string().contains("duplicate part id `a/b.txt`"),
             "got: {err}",
         );
+    }
+
+    /// An image body's OCR [`Layout`] survives the [`ArtifactSet`] serialize
+    /// round trip — the whole point of persisting it beside the report is that a
+    /// re-run reads the same OCR without re-invoking the model. An empty
+    /// (text/tabular) artifact is omitted from the wire.
+    #[test]
+    fn round_trips_an_artifact_set() {
+        use elide_core::modality::image::{Image, ImageLocation, Layout, LayoutBlock};
+        use elide_core::primitive::{BoundingBox, Point};
+
+        let bbox = BoundingBox::from_origin_size(Point::new(0.0, 0.0), 100.0, 20.0);
+        let layout = Layout::new(vec![LayoutBlock::new(ImageLocation::new(bbox), "hi Alice")]);
+        let set = ArtifactSet::new()
+            .insert_body::<Image>(layout.clone())
+            .insert_part::<Text>(PartId::from("cell".to_owned()), Tokens::default());
+
+        // The body's non-empty Layout serializes; the empty text Tokens is
+        // omitted (its part carries no artifact on the wire).
+        let value = serde_json::to_value(&set).unwrap();
+        assert_eq!(value["body"]["modality"], "image");
+        assert!(value["body"]["artifact"].is_object());
+        assert!(
+            value["parts"].as_object().unwrap().is_empty(),
+            "an empty artifact must be omitted, got {value:#}",
+        );
+
+        // It reconstructs as the same Layout through the registry.
+        let mut registry = ModalityRegistry::default();
+        registry.register::<Image>();
+        let json = serde_json::to_string(&set).unwrap();
+        let mut de = serde_json::Deserializer::from_str(&json);
+        let back = registry.deserialize_artifacts(&mut de).expect("artifacts");
+        let restored = back.body::<Image>().expect("layout reconstructed");
+        assert_eq!(restored, &layout);
+        assert_eq!(restored.text(), "hi Alice");
     }
 }

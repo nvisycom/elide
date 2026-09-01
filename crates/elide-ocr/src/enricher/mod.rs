@@ -196,4 +196,59 @@ mod tests {
         assert_eq!(region.bounding_box.min.x, 40.0);
         assert_eq!(region.bounding_box.max.x, 100.0);
     }
+
+    /// A backend that counts how many times it is asked to OCR.
+    #[derive(Clone, Default)]
+    struct CountingBackend(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+    #[async_trait::async_trait]
+    impl OcrBackend for CountingBackend {
+        fn provenance(&self) -> ModelEvent {
+            ModelEvent {
+                name: "counting".into(),
+                ..ModelEvent::default()
+            }
+        }
+
+        async fn recognize(&self, _request: OcrRequest<'_>) -> Result<OcrResponse> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(OcrResponse::new(vec![LayoutBlock::new(
+                loc(0.0, 0.0, 100.0, 20.0),
+                "hi Alice",
+            )]))
+        }
+    }
+
+    /// The re-run reuse: an enrich over a context already carrying an artifact
+    /// (a restored `Layout` from a prior report) skips the backend entirely, so
+    /// re-recognition never re-invokes the OCR model.
+    #[tokio::test]
+    async fn a_present_artifact_skips_the_backend() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let enricher = OcrEnricher::builder()
+            .with_name("ocr")
+            .with_backend(CountingBackend(calls.clone()))
+            .build()
+            .expect("builder succeeds");
+        let data = ImageData::new(b"image".to_vec(), Dimensions::new(100, 20));
+        let scope = Scope::new();
+
+        // First pass: empty artifact → the backend runs once.
+        let mut ctx = RecognizerContext::new(&scope);
+        enricher.enrich(&data, &mut ctx).await.unwrap();
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        // Re-run: seed the context with the prior (restored) artifact. The
+        // enricher self-skips — the backend is not called again — and the
+        // seeded OCR text is still readable.
+        let restored = ctx.artifact.clone();
+        let mut ctx = RecognizerContext::new(&scope).with_artifact(restored);
+        enricher.enrich(&data, &mut ctx).await.unwrap();
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "a restored artifact must not re-invoke the OCR backend",
+        );
+        assert_eq!(Image::as_text(&data, &ctx.artifact), "hi Alice");
+    }
 }

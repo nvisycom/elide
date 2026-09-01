@@ -18,6 +18,7 @@ use std::ops::Range;
 use serde::{Deserialize, Serialize};
 
 use super::ImageLocation;
+use crate::modality::ModalityArtifact;
 use crate::primitive::{BoundingBox, Confidence, Point};
 
 /// Separator inserted between blocks when building the flat layout text, so
@@ -188,6 +189,12 @@ impl Layout {
         }
 
         acc.into_location()
+    }
+}
+
+impl ModalityArtifact for Layout {
+    fn is_empty(&self) -> bool {
+        Layout::is_empty(self)
     }
 }
 

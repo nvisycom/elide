@@ -211,7 +211,12 @@ pub trait ModalityReplacement: Clone + fmt::Debug + Send + Sync + 'static {}
 /// [`Enricher`]: crate::recognition::Enricher
 /// [`Layout`]: crate::modality::image::Layout
 /// [`Transcription`]: crate::modality::audio::Transcription
-pub trait ModalityArtifact: Clone + fmt::Debug + Default + Send + Sync + 'static {}
+pub trait ModalityArtifact: Clone + fmt::Debug + Default + Send + Sync + 'static {
+    /// Whether the artifact carries no enrichment — the same state as
+    /// [`Default`]. An enricher skips itself when its artifact is already
+    /// non-empty, and a serialized report omits an empty artifact.
+    fn is_empty(&self) -> bool;
+}
 
 /// The artifact of a medium with no enrichment (plain text, tabular): a
 /// zero-sized stand-in that carries nothing and is omitted from a serialized
@@ -221,7 +226,11 @@ pub trait ModalityArtifact: Clone + fmt::Debug + Default + Send + Sync + 'static
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct NoArtifact;
 
-impl ModalityArtifact for NoArtifact {}
+impl ModalityArtifact for NoArtifact {
+    fn is_empty(&self) -> bool {
+        true
+    }
+}
 
 /// Medium that entities can be located within.
 ///

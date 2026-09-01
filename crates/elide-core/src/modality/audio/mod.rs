@@ -11,7 +11,7 @@ pub use self::data::AudioData;
 pub use self::location::AudioLocation;
 pub use self::replacement::{AudioReplacement, Waveform};
 pub use self::transcription::{TranscriptSegment, TranscriptWord, Transcription};
-use super::{Modality, ModalityArtifact, TextRecognizable};
+use super::{Modality, TextRecognizable};
 
 /// Audio modality: data is [`AudioData`], locations are
 /// [`AudioLocation`] time ranges, replacements are [`AudioReplacement`].
@@ -27,8 +27,6 @@ impl Modality for Audio {
 
     const NAME: &'static str = "audio";
 }
-
-impl ModalityArtifact for Transcription {}
 
 impl TextRecognizable for Audio {
     /// The transcript text a recognizer inspects: the [`Transcription`] an

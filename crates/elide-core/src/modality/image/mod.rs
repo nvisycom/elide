@@ -11,7 +11,7 @@ pub use self::data::ImageData;
 pub use self::layout::{Layout, LayoutBlock, LayoutWord};
 pub use self::location::ImageLocation;
 pub use self::replacement::ImageReplacement;
-use super::{Modality, ModalityArtifact, TextRecognizable};
+use super::{Modality, TextRecognizable};
 
 /// Image modality: data is [`ImageData`], locations are
 /// [`ImageLocation`] regions, replacements are [`ImageReplacement`].
@@ -27,8 +27,6 @@ impl Modality for Image {
 
     const NAME: &'static str = "image";
 }
-
-impl ModalityArtifact for Layout {}
 
 impl TextRecognizable for Image {
     /// The OCR text a recognizer inspects: the [`Layout`] an enricher

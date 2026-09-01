@@ -15,30 +15,19 @@
 //! belongs to. The part id is the map key; each entity carries its own id,
 //! label, location, and confidence.
 //!
-//! The type-erased storage ([`EntityGroup`]) lives in [`group`], the per-group
-//! report entries ([`BodyReport`] / [`PartReport`]) in [`entry`], and the serde
-//! wire view in `serialize`. Each entity carries its own tamper-evident audit
-//! trail
-//! ([`AuditLog`]) natively, so there is no separate document-level audit type.
+//! The type-erased storage ([`EntityGroup`]) lives in [`group`](super::group),
+//! and the serde wire view in [`serde`](super::serde). Each entity carries its
+//! own tamper-evident audit trail ([`AuditLog`]) natively, so there is no
+//! separate document-level audit type.
 //!
 //! [`AuditLog`]: elide_core::entity::audit::AuditLog
-//!
-//! [`BodyReport`]: entry::BodyReport
-//! [`PartReport`]: entry::PartReport
-//! [`anonymize_with`]: super::Orchestrator::anonymize_with
-
-mod deserialize;
-mod entry;
-mod group;
-#[cfg(feature = "schema")]
-mod schema;
-mod serialize;
+//! [`anonymize_with`]: crate::Orchestrator::anonymize_with
 
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 
-use elide_codec::PartId;
+use elide_codec::{PartId, UntypedDocumentHandle};
 use elide_core::entity::Entity;
 use elide_core::entity::audit::{Attribution, AuditEvent, AuditKind, ManualIntent};
 use elide_core::modality::Modality;
@@ -46,10 +35,49 @@ use elide_core::modality::Modality;
 use elide_core::recognition::UsageReport;
 use uuid::Uuid;
 
-pub(crate) use self::deserialize::ModalityRegistry;
-pub use self::deserialize::ReportDeserializer;
-pub(crate) use self::entry::{BodyReport, PartReport};
-pub use self::group::EntityGroup;
+use super::group::EntityGroup;
+use super::registry::ReportDeserializer;
+
+/// The document body's entry: its detected entities and the modality they
+/// belong to.
+///
+/// A document has exactly one body, so a [`Report`] holds at most one of
+/// these. The `modality` is the routing key — the pipeline registered for it
+/// analyzes and applies the body.
+///
+/// The body's *enrichment* (OCR `Layout`, STT `Transcription`) is not held here:
+/// a [`Report`] is references only, like its entities. Enrichment content lives
+/// in the parallel [`ArtifactSet`](crate::ArtifactSet).
+pub(crate) struct BodyReport {
+    /// The body's modality, keying the pipeline that handles it.
+    pub(crate) modality: TypeId,
+    /// The body's detected entities (a `Vec<Entity<M>>`).
+    pub(crate) entities: Box<dyn EntityGroup>,
+}
+
+/// One container part captured during analysis: its detected entities, the
+/// modality they belong to, and — for the same-process fast path — the
+/// decoded part handle.
+pub(crate) struct PartReport {
+    /// The part's modality, the routing key for [`anonymize_with`]: it
+    /// re-fetches the part from the container and applies through the
+    /// pipeline registered for this modality.
+    ///
+    /// [`anonymize_with`]: crate::Orchestrator::anonymize_with
+    pub(crate) modality: TypeId,
+    /// The decoded part handle, retained from analysis as a same-process
+    /// cache. `Some` after [`analyze`] (so apply re-drives it directly with
+    /// no second decode); `None` for a [`Report`] built by hand or rebuilt
+    /// from serialized entities, where apply re-decodes the part from the
+    /// container instead.
+    ///
+    /// Never serialized — a live decoded document is not data.
+    ///
+    /// [`analyze`]: crate::Orchestrator::analyze
+    pub(crate) handle: Option<UntypedDocumentHandle>,
+    /// The part's detected entities (a `Vec<Entity<P>>`).
+    pub(crate) entities: Box<dyn EntityGroup>,
+}
 
 /// The detected entities of a whole document, editable before apply.
 ///
@@ -86,8 +114,8 @@ pub use self::group::EntityGroup;
 /// re-decodes each part from the container it is applied to, so a rebuilt
 /// report redacts just as a freshly-analyzed one does.
 ///
-/// [`analyze`]: super::Orchestrator::analyze
-/// [`anonymize_with`]: super::Orchestrator::anonymize_with
+/// [`analyze`]: crate::Orchestrator::analyze
+/// [`anonymize_with`]: crate::Orchestrator::anonymize_with
 /// [`entities`]: Report::entities
 /// [`entities_mut`]: Report::entities_mut
 /// [`part_entities`]: Report::part_entities
@@ -114,7 +142,7 @@ impl Report {
     ///
     /// [`insert_body`]: Self::insert_body
     /// [`insert_part`]: Self::insert_part
-    /// [`analyze`]: super::Orchestrator::analyze
+    /// [`analyze`]: crate::Orchestrator::analyze
     pub fn new() -> Self {
         Self {
             body: None,
@@ -135,7 +163,7 @@ impl Report {
     ///     .deserialize(&mut serde_json::Deserializer::from_str(json))?;
     /// ```
     ///
-    /// [`Orchestrator`]: super::Orchestrator
+    /// [`Orchestrator`]: crate::Orchestrator
     /// [`deserialize`]: ReportDeserializer::deserialize
     #[must_use]
     pub fn deserializer() -> ReportDeserializer {
@@ -156,7 +184,7 @@ impl Report {
     /// from a review tool). [`anonymize_with`] reads these back through the
     /// `M` pipeline.
     ///
-    /// [`anonymize_with`]: super::Orchestrator::anonymize_with
+    /// [`anonymize_with`]: crate::Orchestrator::anonymize_with
     #[must_use]
     pub fn insert_body<M: Modality>(mut self, entities: Vec<Entity<M>>) -> Self
     where
@@ -176,7 +204,7 @@ impl Report {
     /// re-decodes the part `id` from the container and applies these through
     /// the `P` pipeline.
     ///
-    /// [`anonymize_with`]: super::Orchestrator::anonymize_with
+    /// [`anonymize_with`]: crate::Orchestrator::anonymize_with
     #[must_use]
     pub fn insert_part<P: Modality>(mut self, id: PartId, entities: Vec<Entity<P>>) -> Self
     where

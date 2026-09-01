@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::modality::{Modality, ModalityLocation, StreamDataReader};
+use elide_core::modality::{Modality, ModalityArtifact, ModalityLocation, StreamDataReader};
 use elide_core::recognition::annotation::{Annotations, Exclusion};
 use elide_core::recognition::{Enricher, Recognition, Recognizer, RecognizerContext, Scope};
 #[cfg(feature = "usage")]
@@ -32,20 +32,36 @@ use crate::layer::Layer;
 pub struct Analysis<M: Modality> {
     /// The reconciled entities, in the caller's coordinate system.
     pub entities: Vec<Entity<M>>,
+    /// The enrichment artifact the analysis produced (or was seeded with): the
+    /// OCR [`Layout`] / STT [`Transcription`] the recognizers read. Carried out
+    /// so it can be persisted and restored for a re-run without re-enriching.
+    /// Empty for a modality with no enrichment.
+    ///
+    /// [`Layout`]: elide_core::modality::image::Layout
+    /// [`Transcription`]: elide_core::modality::audio::Transcription
+    pub artifact: M::Artifact,
     /// Per-recognizer / per-enricher resource usage for this analysis.
     #[cfg(feature = "usage")]
     pub usage: Vec<Usage>,
 }
 
 impl<M: Modality> Analysis<M> {
-    /// An analysis carrying `entities` (and, under the `usage` feature, no
-    /// usage yet — attach it with `with_usage`).
+    /// An analysis carrying `entities` and no artifact (and, under the `usage`
+    /// feature, no usage yet — attach it with `with_usage`).
     pub fn new(entities: Vec<Entity<M>>) -> Self {
         Self {
             entities,
+            artifact: M::Artifact::default(),
             #[cfg(feature = "usage")]
             usage: Vec::new(),
         }
+    }
+
+    /// Attach the enrichment [`artifact`](Self::artifact) the analysis produced.
+    #[must_use]
+    pub fn with_artifact(mut self, artifact: M::Artifact) -> Self {
+        self.artifact = artifact;
+        self
     }
 
     /// Attach the per-component [`Usage`] this analysis recorded.
@@ -186,7 +202,9 @@ impl<M: Modality> Analyzer<M> {
         // weak in-catalog one nested inside it before being culled itself.
         let in_catalog = ctx.catalog().retain_declared(reduced);
         let entities = Self::apply_exclusions(in_catalog, ctx.exclusions());
-        let analysis = Analysis::new(entities);
+        // Carry the enrichment artifact out with the entities so it can be
+        // persisted and restored for a re-run without re-enriching.
+        let analysis = Analysis::new(entities).with_artifact(ctx.artifact.clone());
         #[cfg(feature = "usage")]
         let analysis = analysis.with_usage(usage);
         Ok(analysis)
@@ -266,6 +284,20 @@ impl<M: Modality> Analyzer<M> {
         self.analyze_core(data, &mut ctx).await
     }
 
+    /// Analyze one payload against a caller-supplied context, so a re-run can
+    /// pre-seed the enrichment [`artifact`](RecognizerContext::artifact) and
+    /// re-recognize without re-enriching — the enrichers self-skip on a present
+    /// artifact. The single-payload counterpart to [`analyze_stream_in`].
+    ///
+    /// [`analyze_stream_in`]: Self::analyze_stream_in
+    pub async fn analyze_in(
+        &self,
+        data: M::Data,
+        ctx: &mut RecognizerContext<'_, M>,
+    ) -> Result<Analysis<M>> {
+        self.analyze_core(data, ctx).await
+    }
+
     /// Analyze a streamed source end to end, returning entities in the
     /// source's own coordinate system.
     ///
@@ -312,18 +344,66 @@ impl<M: Modality> Analyzer<M> {
     where
         S: StreamDataReader<M>,
     {
+        self.analyze_stream_seeded(source, scope, annotations, None)
+            .await
+    }
+
+    /// [`analyze_stream_with`] seeded with a prior enrichment `artifact`, so a
+    /// re-run re-recognizes without re-enriching: each chunk's context is
+    /// pre-seeded with `artifact`, and the enrichers self-skip because it is
+    /// already present. For the single-chunk media that produce an artifact
+    /// (image, audio) this seeds the one chunk.
+    ///
+    /// [`analyze_stream_with`]: Self::analyze_stream_with
+    pub async fn analyze_stream_in<S>(
+        &self,
+        source: &mut S,
+        scope: &Scope,
+        annotations: &Annotations<M>,
+        artifact: M::Artifact,
+    ) -> Result<Analysis<M>>
+    where
+        S: StreamDataReader<M>,
+    {
+        self.analyze_stream_seeded(source, scope, annotations, Some(artifact))
+            .await
+    }
+
+    /// The shared streaming core: drive `source` chunk by chunk, optionally
+    /// seeding each chunk's context with `seed`, and aggregate the lifted
+    /// entities plus the produced enrichment artifact.
+    async fn analyze_stream_seeded<S>(
+        &self,
+        source: &mut S,
+        scope: &Scope,
+        annotations: &Annotations<M>,
+        seed: Option<M::Artifact>,
+    ) -> Result<Analysis<M>>
+    where
+        S: StreamDataReader<M>,
+    {
         let mut out = Vec::new();
+        let mut artifact = M::Artifact::default();
         #[cfg(feature = "usage")]
         let mut usage = Vec::new();
         while let Some(chunk) = source.read_next().await? {
             let mut ctx = RecognizerContext::new(scope)
                 .with_annotations(annotations)
                 .with_context_hints(chunk.hints.clone());
+            if let Some(seed) = &seed {
+                ctx = ctx.with_artifact(seed.clone());
+            }
             let analysis = self.analyze_core(chunk.data.clone(), &mut ctx).await?;
             // Usage accrues across chunks: each chunk re-runs every recognizer
             // and enricher, so the stream's total is the sum of its chunks'.
             #[cfg(feature = "usage")]
             usage.extend(analysis.usage);
+            // Keep the last non-empty artifact. The media that produce one
+            // (image, audio) are single-chunk, so this captures that chunk's
+            // artifact; a multi-chunk text/tabular stream produces none.
+            if !ModalityArtifact::is_empty(&analysis.artifact) {
+                artifact = analysis.artifact;
+            }
             out.extend(
                 analysis
                     .entities
@@ -331,7 +411,7 @@ impl<M: Modality> Analyzer<M> {
                     .filter_map(|entity| source.lift(&chunk, entity)),
             );
         }
-        let analysis = Analysis::new(out);
+        let analysis = Analysis::new(out).with_artifact(artifact);
         #[cfg(feature = "usage")]
         let analysis = analysis.with_usage(usage);
         Ok(analysis)
