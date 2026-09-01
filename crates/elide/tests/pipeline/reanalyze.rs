@@ -119,3 +119,40 @@ async fn an_empty_backend_without_a_seed_finds_nothing() -> Result<()> {
     );
     Ok(())
 }
+
+/// The persist path: serialize `analyze`'s artifacts, ship them across a review
+/// gap, then `Orchestrator::deserialize_artifacts` them back and feed the
+/// rebuilt set to `re_analyze` — the OCR text survives the wire, so the re-run
+/// reuses it against an empty OCR backend rather than re-OCR'ing.
+#[tokio::test]
+async fn artifacts_round_trip_through_deserialize_for_a_re_run() -> Result<()> {
+    let block = LayoutBlock::new(loc(), "write to alice@example.com today");
+
+    // First pass produces the OCR Layout; serialize the artifacts out.
+    let first = orchestrator(
+        FormatRegistry::with_builtin(),
+        MockBackend::with(vec![block]),
+    )?;
+    let mut document = FormatRegistry::with_builtin().decode(SAMPLE, "png").await?;
+    let analyzed = first.analyze(&mut document, &Directives::new()).await?;
+    assert_eq!(image_entities(&analyzed).len(), 1);
+    let json = serde_json::to_string(&analyzed.artifacts).expect("artifacts serialize");
+
+    // Rebuild the ArtifactSet from the wire through the orchestrator, then re-run
+    // against an EMPTY OCR backend: detection survives only because the restored
+    // Layout carried the text through deserialize.
+    let second = orchestrator(FormatRegistry::with_builtin(), MockBackend::new())?;
+    let mut de = serde_json::Deserializer::from_str(&json);
+    let restored = second.deserialize_artifacts(&mut de)?;
+    let mut document = FormatRegistry::with_builtin().decode(SAMPLE, "png").await?;
+    let reanalyzed = second
+        .re_analyze(&mut document, &restored, &Directives::new())
+        .await?;
+
+    assert_eq!(
+        image_entities(&reanalyzed).len(),
+        1,
+        "the deserialized Layout was reused — the email survived the wire round trip",
+    );
+    Ok(())
+}

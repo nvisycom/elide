@@ -517,4 +517,34 @@ impl Orchestrator {
     {
         self.groups.deserialize(deserializer)
     }
+
+    /// Reconstruct an [`ArtifactSet`] from a serialized payload, rebuilding each
+    /// group's enrichment against the registered modalities (keyed by name).
+    ///
+    /// The counterpart to [`deserialize_report`](Self::deserialize_report) for
+    /// the enrichment [`analyze`](Self::analyze) returns beside the report:
+    /// serialize [`AnalyzedDocument::artifacts`], ship it across the review gap,
+    /// then deserialize it back here and pass it to
+    /// [`re_analyze`](Self::re_analyze) so the OCR/transcript is reused rather
+    /// than recomputed. Both ends configure the same modalities.
+    ///
+    /// A group naming a modality this orchestrator has no pipeline for is
+    /// skipped: without a parser its enrichment cannot be rebuilt, and a re-run
+    /// that lacks it simply re-enriches that group.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`MalformedInput`] error if the payload is not a valid artifact
+    /// set.
+    ///
+    /// [`analyze`]: Self::analyze
+    /// [`re_analyze`]: Self::re_analyze
+    /// [`AnalyzedDocument::artifacts`]: crate::AnalyzedDocument::artifacts
+    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
+    pub fn deserialize_artifacts<'de, D>(&self, deserializer: D) -> Result<ArtifactSet>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        self.groups.deserialize_artifacts(deserializer)
+    }
 }
