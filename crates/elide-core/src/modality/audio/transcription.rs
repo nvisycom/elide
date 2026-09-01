@@ -280,11 +280,7 @@ impl Transcription {
     }
 }
 
-impl ModalityArtifact for Transcription {
-    fn is_empty(&self) -> bool {
-        Transcription::is_empty(self)
-    }
-}
+impl ModalityArtifact for Transcription {}
 
 /// Span covering the words of `segment` that overlap the segment-local byte
 /// `range`, by walking each word's byte extent within the segment text.

@@ -102,9 +102,16 @@ where
         // regardless of the surrounding language. Activating a language's
         // context is harmless when its keyword is absent.
         let languages: Vec<&LanguageTag> = ctx.asserted_languages();
-        let context = Context::new(text)
+        let mut context = Context::new(text)
             .with_hints(&hint_texts)
             .with_languages(&languages);
+        // Forward the modality's producer-provided tokens (with lemmas) when it
+        // has them — Text/Tabular tokenize into their artifact — so lemma-aware
+        // keyword boosts fire even where a token's lemma differs from its
+        // surface text. Modalities that do not tokenize match on text alone.
+        if let Some(tokens) = M::as_tokens(&ctx.artifact) {
+            context = context.with_tokens(tokens);
+        }
 
         let boosts = self.enhancer.enhance(&mut entities, &context);
         for boost in boosts {

@@ -192,11 +192,7 @@ impl Layout {
     }
 }
 
-impl ModalityArtifact for Layout {
-    fn is_empty(&self) -> bool {
-        Layout::is_empty(self)
-    }
-}
+impl ModalityArtifact for Layout {}
 
 /// Accumulates the bounding boxes of covered regions into one location.
 #[derive(Default)]

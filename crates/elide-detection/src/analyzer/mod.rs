@@ -383,7 +383,15 @@ impl<M: Modality> Analyzer<M> {
         S: StreamDataReader<M>,
     {
         let mut out = Vec::new();
-        let mut artifact = M::Artifact::default();
+        // The stream's artifact: the seed when re-running (every chunk self-skips
+        // and hands it back unchanged), else the one artifact a producing chunk
+        // yields. Seeded from `seed` so a re-run whose chunks produce nothing new
+        // still carries the prior enrichment forward.
+        let mut artifact = seed.clone().unwrap_or_default();
+        // Whether `artifact` still holds the untouched seed. A produced artifact
+        // (distinct from the seed) may replace it exactly once; a second one is
+        // an unsupported multi-chunk enrichment (see the assert below).
+        let mut produced = false;
         #[cfg(feature = "usage")]
         let mut usage = Vec::new();
         while let Some(chunk) = source.read_next().await? {
@@ -398,11 +406,24 @@ impl<M: Modality> Analyzer<M> {
             // and enricher, so the stream's total is the sum of its chunks'.
             #[cfg(feature = "usage")]
             usage.extend(analysis.usage);
-            // Keep the last non-empty artifact. The media that produce one
-            // (image, audio) are single-chunk, so this captures that chunk's
-            // artifact; a multi-chunk text/tabular stream produces none.
-            if !ModalityArtifact::is_empty(&analysis.artifact) {
+            // A chunk that produced a *new* artifact (non-empty, and not just the
+            // seed handed straight back) owns the stream's artifact. The media
+            // that produce one (image, audio) are single-chunk, so exactly one
+            // chunk does this; a plain text/tabular stream produces none and
+            // keeps the seed. A multi-chunk *tokenizing* stream would produce a
+            // per-chunk artifact on more than one chunk — unsupported, because
+            // one stream-level artifact cannot represent per-chunk tokens; the
+            // assert catches that the day such an enricher is added.
+            let produced_here = !ModalityArtifact::is_empty(&analysis.artifact)
+                && seed.as_ref() != Some(&analysis.artifact);
+            if produced_here {
+                debug_assert!(
+                    !produced,
+                    "a multi-chunk stream produced more than one enrichment artifact; \
+                     per-chunk artifacts are not representable at the stream level",
+                );
                 artifact = analysis.artifact;
+                produced = true;
             }
             out.extend(
                 analysis

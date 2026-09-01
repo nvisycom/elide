@@ -3,6 +3,7 @@
 use std::ops::Range;
 
 use super::Modality;
+use super::text::Token;
 
 /// A modality whose per-chunk payload can be read as text for recognition,
 /// and that can place a chunk-local text match into its own location
@@ -52,4 +53,14 @@ pub trait TextRecognizable: Modality + Sized {
         data: &Self::Data,
         artifact: &Self::Artifact,
     ) -> Option<Self::Location>;
+
+    /// The producer-provided [`Token`]s over the recognizable text, when the
+    /// modality carries them — `Text` and `Tabular` tokenize into their
+    /// [`Artifact`](Modality::Artifact), so their tokens (with each token's
+    /// lemma) feed lemma-aware context matching. Modalities that do not
+    /// tokenize return `None`, the default, and context matches on the surface
+    /// text alone.
+    fn as_tokens(_artifact: &Self::Artifact) -> Option<&[Token]> {
+        None
+    }
 }

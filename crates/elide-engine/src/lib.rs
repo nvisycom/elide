@@ -239,75 +239,10 @@ impl Orchestrator {
         document: &mut UntypedDocumentHandle,
         directives: &Directives,
     ) -> Result<AnalyzedDocument> {
-        let mut report = Report::new();
-        let mut artifacts = ArtifactSet::new();
-        // Per-call scope override wins; else the run-wide default.
-        let scope = directives.scope.as_ref().unwrap_or(&self.scope);
-        let annotations = &directives.annotations;
-
-        // The body: offer it to each pipeline; the first whose modality
-        // matches analyzes it in place. The pipeline's key is the body's
-        // modality `TypeId`.
-        for (modality, pipeline) in &self.pipelines {
-            if let Some(analyzed) = pipeline
-                .analyze_in_place(document, scope, annotations)
-                .await?
-            {
-                #[cfg(feature = "usage")]
-                let (entities, artifact, usage) = analyzed;
-                #[cfg(not(feature = "usage"))]
-                let (entities, artifact) = analyzed;
-                #[cfg(feature = "usage")]
-                report.usage.extend(usage);
-                let name = entities.modality_name();
-                report.body = Some(BodyReport {
-                    modality: *modality,
-                    entities,
-                });
-                artifacts.set_body(*modality, name, artifact);
-                break;
-            }
-        }
-
-        // The parts: decode each, offer it to each pipeline; the matching
-        // one analyzes it and its handle is cached for the apply phase.
-        let parts = document.as_container_mut().map(|c| c.parts());
-        for part in parts.into_iter().flatten() {
-            let Ok(handle) = self.registry.decode(part.bytes.clone(), &part.hint).await else {
-                continue; // no codec for this part
-            };
-            let mut handle = Some(handle);
-            for pipeline in self.pipelines.values() {
-                let Some(taken) = handle.take() else { break };
-                match pipeline.analyze(taken, scope, annotations).await? {
-                    AnalyzeOutcome::Accepted {
-                        modality,
-                        handle: retained,
-                        entities,
-                        artifact,
-                        #[cfg(feature = "usage")]
-                        usage,
-                    } => {
-                        #[cfg(feature = "usage")]
-                        report.usage.extend(usage);
-                        let name = entities.modality_name();
-                        report.parts.insert(
-                            part.id.clone(),
-                            PartReport {
-                                modality,
-                                handle: Some(retained),
-                                entities,
-                            },
-                        );
-                        artifacts.set_part(part.id.clone(), modality, name, artifact);
-                        break;
-                    }
-                    AnalyzeOutcome::Rejected(returned) => handle = Some(returned),
-                }
-            }
-        }
-
-        Ok(AnalyzedDocument { report, artifacts })
+        // A first pass is a re-run seeded with nothing: every body and part
+        // starts from the empty (default) artifact, so it enriches from
+        // scratch. Sharing the driver keeps the two entry points from drifting.
+        self.drive(document, &ArtifactSet::new(), directives).await
     }
 
     /// Re-detect over `document`, seeding each group's recognition with the
@@ -326,21 +261,40 @@ impl Orchestrator {
         prior: &ArtifactSet,
         directives: &Directives,
     ) -> Result<AnalyzedDocument> {
+        self.drive(document, prior, directives).await
+    }
+
+    /// The shared analyze driver behind [`analyze`](Self::analyze) and
+    /// [`re_analyze`](Self::re_analyze): drive the body and every container part
+    /// through the matching pipeline, each seeded with its prior enrichment from
+    /// `prior` (an empty set on a first pass, so every group enriches from
+    /// scratch). The seeded artifact is downcast against the group's modality by
+    /// the erased pipeline, so a `prior` entry for a different modality resolves
+    /// to the default (empty) and that group re-enriches — the body and the
+    /// parts resolve their seed the same way.
+    async fn drive(
+        &self,
+        document: &mut UntypedDocumentHandle,
+        prior: &ArtifactSet,
+        directives: &Directives,
+    ) -> Result<AnalyzedDocument> {
         let mut report = Report::new();
         let mut artifacts = ArtifactSet::new();
+        // Per-call scope override wins; else the run-wide default.
         let scope = directives.scope.as_ref().unwrap_or(&self.scope);
         let annotations = &directives.annotations;
         let empty: Box<dyn ArtifactGroup> = Box::new(NoArtifact);
 
-        // The body, re-analyzed against its prior artifact.
+        // The body: offer it to each pipeline; the first whose modality matches
+        // analyzes it in place, seeded with the body's prior artifact. The
+        // pipeline's key is the body's modality `TypeId`.
         for (modality, pipeline) in &self.pipelines {
             let seed = prior
                 .body
                 .as_ref()
-                .filter(|b| b.modality == *modality)
                 .map_or(empty.as_ref(), |b| b.artifact.as_ref());
             if let Some(analyzed) = pipeline
-                .re_analyze_in_place(document, scope, annotations, seed)
+                .analyze_in_place(document, scope, annotations, seed)
                 .await?
             {
                 #[cfg(feature = "usage")]
@@ -359,7 +313,9 @@ impl Orchestrator {
             }
         }
 
-        // Each part, re-analyzed against its prior artifact.
+        // The parts: decode each, offer it to each pipeline; the matching one
+        // analyzes it (seeded with the part's prior artifact) and its handle is
+        // cached for the apply phase.
         let parts = document.as_container_mut().map(|c| c.parts());
         for part in parts.into_iter().flatten() {
             let Ok(handle) = self.registry.decode(part.bytes.clone(), &part.hint).await else {
@@ -369,11 +325,8 @@ impl Orchestrator {
             let mut handle = Some(handle);
             for pipeline in self.pipelines.values() {
                 let Some(taken) = handle.take() else { break };
-                // Seed with the prior part's artifact; the erased method
-                // downcasts against `M`, so a mismatched artifact resolves to the
-                // default (empty) and the part re-enriches.
                 let seed = prior_part.map_or(empty.as_ref(), |p| p.artifact.as_ref());
-                match pipeline.re_analyze(taken, scope, annotations, seed).await? {
+                match pipeline.analyze(taken, scope, annotations, seed).await? {
                     AnalyzeOutcome::Accepted {
                         modality,
                         handle: retained,

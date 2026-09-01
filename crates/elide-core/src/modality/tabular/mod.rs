@@ -15,7 +15,7 @@ use std::ops::Range;
 pub use self::location::TabularLocation;
 pub use self::replacement::TabularReplacement;
 use super::Modality;
-use super::text::{TextData, Tokens};
+use super::text::{TextData, Token, Tokens};
 use super::text_recognizable::TextRecognizable;
 
 /// Tabular modality: cells hold text, so data is [`TextData`] and
@@ -47,5 +47,9 @@ impl TextRecognizable for Tabular {
         // Chunk-local: only the intra-cell byte range is known here; the
         // codec's lift fills the row/column from the chunk.
         Some(TabularLocation::new(0, 0).with_range(range.start, range.end))
+    }
+
+    fn as_tokens(artifact: &Tokens) -> Option<&[Token]> {
+        (!artifact.is_empty()).then(|| artifact.as_slice())
     }
 }

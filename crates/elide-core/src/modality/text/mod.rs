@@ -44,6 +44,10 @@ impl TextRecognizable for Text {
     fn locate(range: Range<usize>, _data: &TextData, _artifact: &Tokens) -> Option<TextLocation> {
         Some(TextLocation::new(range.start, range.end))
     }
+
+    fn as_tokens(artifact: &Tokens) -> Option<&[Token]> {
+        (!artifact.is_empty()).then(|| artifact.as_slice())
+    }
 }
 
 #[cfg(test)]
@@ -63,5 +67,26 @@ mod tests {
 
         let starts: Vec<usize> = batch.iter().map(|(loc, _)| loc.range.start).collect();
         assert_eq!(starts, [0, 10, 20]);
+    }
+
+    #[test]
+    fn as_tokens_exposes_producer_lemmas() {
+        // A producer whose lemma differs from the surface form: the context
+        // enhancer reads `as_tokens` to boost on the lemma, so the differing
+        // lemma must survive the artifact -> tokens hop.
+        let tokens = Tokens::new(vec![
+            Token::from_text("running", 0..7).with_lemma("run"),
+            Token::from_text("dogs", 8..12).with_lemma("dog"),
+        ]);
+        let seen = Text::as_tokens(&tokens).expect("text carries its tokens");
+        let lemmas: Vec<&str> = seen.iter().map(|t| t.lemma.as_str()).collect();
+        assert_eq!(lemmas, ["run", "dog"]);
+    }
+
+    #[test]
+    fn as_tokens_is_none_without_an_artifact() {
+        // No tokenizing enricher ran: the empty artifact yields no tokens, so
+        // context matching falls back to the surface text.
+        assert!(Text::as_tokens(&Tokens::default()).is_none());
     }
 }
