@@ -114,7 +114,7 @@ impl Enricher<Image> for OcrEnricher {
     ) -> Result<Enrichment> {
         // Already OCR'd (a second enricher pass, or a restored artifact on a
         // re-run): leave it, so re-recognition never re-invokes the model.
-        if !ctx.artifact.is_empty() {
+        if ctx.is_enriched() {
             return Ok(Enrichment::none());
         }
         let mut request = OcrRequest::new(&data.bytes);
@@ -125,7 +125,7 @@ impl Enricher<Image> for OcrEnricher {
             request = request.with_correlation_id(id);
         }
         let response = self.backend.recognize(request).await?;
-        ctx.artifact = Layout::new(response.blocks);
+        ctx.set_artifact(Layout::new(response.blocks));
         // The OCR model vouches for its own identity; OCR reports no token
         // counts today.
         #[cfg(feature = "usage")]
@@ -176,9 +176,9 @@ mod tests {
         enricher.enrich(&data, &mut ctx).await.unwrap();
 
         // Recognizers read the OCR text from the call's artifact.
-        assert_eq!(Image::as_text(&data, &ctx.artifact), "hi Alice");
+        assert_eq!(Image::as_text(&data, ctx.artifact()), "hi Alice");
         // "Alice" is at bytes 3..8; locate resolves it to the word's box.
-        let region = Image::locate(3..8, &data, &ctx.artifact).expect("range resolves");
+        let region = Image::locate(3..8, &data, ctx.artifact()).expect("range resolves");
         assert_eq!(region.bounding_box.min.x, 40.0);
         assert_eq!(region.bounding_box.max.x, 100.0);
     }
@@ -228,9 +228,37 @@ mod tests {
         // Re-run: seed the context with the prior (restored) artifact. The
         // enricher self-skips — recognize is not called again, enforced by the
         // `.times(1)` above — and the seeded OCR text is still readable.
-        let restored = ctx.artifact.clone();
+        let restored = ctx.artifact().cloned().expect("the first pass enriched");
         let mut ctx = RecognizerContext::new(&scope).with_artifact(restored);
         enricher.enrich(&data, &mut ctx).await.unwrap();
-        assert_eq!(Image::as_text(&data, &ctx.artifact), "hi Alice");
+        assert_eq!(Image::as_text(&data, ctx.artifact()), "hi Alice");
+    }
+
+    /// A restored *empty* `Layout` — a payload a prior pass OCR'd to no text —
+    /// still counts as enriched, so the backend is not called again. Guarding on
+    /// artifact *presence* rather than emptiness is what makes this hold.
+    #[tokio::test]
+    async fn a_restored_empty_artifact_skips_the_backend() {
+        let mut backend = MockOcrSpy::new();
+        backend.expect_provenance().returning(|| ModelEvent {
+            name: "spy".into(),
+            ..ModelEvent::default()
+        });
+        // The backend must never run: the seeded (empty) artifact is enrichment.
+        backend.expect_recognize().times(0);
+
+        let enricher = OcrEnricher::builder()
+            .with_name("ocr")
+            .with_backend(backend)
+            .build()
+            .expect("builder succeeds");
+        let data = ImageData::new(b"image".to_vec(), Dimensions::new(100, 20));
+        let scope = Scope::new();
+
+        // Seed an empty Layout — the recorded result of a prior pass that found
+        // no text. The enricher must treat it as already-enriched and skip.
+        let mut ctx = RecognizerContext::new(&scope).with_artifact(Layout::default());
+        enricher.enrich(&data, &mut ctx).await.unwrap();
+        assert_eq!(Image::as_text(&data, ctx.artifact()), "");
     }
 }

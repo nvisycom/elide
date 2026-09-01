@@ -51,7 +51,12 @@ pub struct RecognizerContext<'a, M: Modality> {
     /// [`NoArtifact`]: crate::modality::NoArtifact
     /// [`as_text`]: crate::modality::TextRecognizable::as_text
     /// [`locate`]: crate::modality::TextRecognizable::locate
-    pub artifact: M::Artifact,
+    ///
+    /// [`None`] until an enricher runs (or a saved artifact is restored);
+    /// [`Some`] afterward — even when the enrichment is *empty* (no OCR text, a
+    /// silent clip), which is a valid result distinct from "not yet enriched",
+    /// so an enricher skips a restored empty artifact rather than re-running.
+    artifact: Option<M::Artifact>,
     /// Languages an enricher *detected* for this payload. The caller's
     /// asserted languages live on the [`Scope`]; query both together via
     /// [`primary_language`] / [`ranked_languages`].
@@ -79,7 +84,7 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
         Self {
             scope,
             annotations: None,
-            artifact: M::Artifact::default(),
+            artifact: None,
             detected_languages: Languages::default(),
             context_hints: Vec::new(),
         }
@@ -87,12 +92,37 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
 
     /// Seed the medium's enrichment [`artifact`](Self::artifact), consuming and
     /// returning `self`. Used to restore a saved artifact so recognition can
-    /// re-run without re-enriching; an enricher whose artifact is already
-    /// present skips itself.
+    /// re-run without re-enriching; an enricher then [skips](Self::is_enriched)
+    /// itself — including when the restored artifact is empty.
     #[must_use]
     pub fn with_artifact(mut self, artifact: M::Artifact) -> Self {
-        self.artifact = artifact;
+        self.artifact = Some(artifact);
         self
+    }
+
+    /// The medium's enrichment, or [`None`] when no enricher has run for this
+    /// payload. `Some(empty)` — a payload that *was* enriched to nothing — is
+    /// distinct from `None`, so callers that only need the content can
+    /// [`unwrap_or_default`](Option::unwrap_or_default) while an enricher tells
+    /// the two apart via [`is_enriched`](Self::is_enriched).
+    #[must_use]
+    pub fn artifact(&self) -> Option<&M::Artifact> {
+        self.artifact.as_ref()
+    }
+
+    /// Record `artifact` as this payload's enrichment — what an enricher calls
+    /// once it has run. Marks the context [enriched](Self::is_enriched) even
+    /// when `artifact` is empty, so a later enricher pass skips.
+    pub fn set_artifact(&mut self, artifact: M::Artifact) {
+        self.artifact = Some(artifact);
+    }
+
+    /// Whether an enricher has run (or a saved artifact was restored) for this
+    /// payload — `true` even when the enrichment is empty. An enricher checks
+    /// this to skip re-running.
+    #[must_use]
+    pub fn is_enriched(&self) -> bool {
+        self.artifact.is_some()
     }
 
     /// Attach the caller's per-modality [`Annotations`] (inclusion /

@@ -114,7 +114,7 @@ impl Enricher<Audio> for SttEnricher {
     ) -> Result<Enrichment> {
         // Already transcribed (a second enricher pass, or a restored artifact on
         // a re-run): leave it, so re-recognition never re-invokes the model.
-        if !ctx.artifact.is_empty() {
+        if ctx.is_enriched() {
             return Ok(Enrichment::none());
         }
         let mut request = SttRequest::new(&data.bytes);
@@ -125,7 +125,7 @@ impl Enricher<Audio> for SttEnricher {
             request = request.with_correlation_id(id);
         }
         let response = self.backend.transcribe(request).await?;
-        ctx.artifact = Transcription::new(response.segments);
+        ctx.set_artifact(Transcription::new(response.segments));
         // The transcription model vouches for its own identity; STT reports no
         // token counts today.
         #[cfg(feature = "usage")]
@@ -180,9 +180,9 @@ mod tests {
         }
 
         // Recognizers read the transcript from the call's artifact.
-        assert_eq!(Audio::as_text(&data, &ctx.artifact), "hi Alice");
+        assert_eq!(Audio::as_text(&data, ctx.artifact()), "hi Alice");
         // "Alice" is at bytes 3..8; locate resolves it to the word's time.
-        let loc = Audio::locate(3..8, &data, &ctx.artifact).expect("range resolves");
+        let loc = Audio::locate(3..8, &data, ctx.artifact()).expect("range resolves");
         assert_eq!(loc.span.start_millis(), 300);
         assert_eq!(loc.span.end_millis(), 900);
     }
@@ -232,9 +232,38 @@ mod tests {
         // Re-run: seed the context with the prior (restored) artifact. The
         // enricher self-skips — transcribe is not called again, enforced by the
         // `.times(1)` above — and the seeded transcript is still readable.
-        let restored = ctx.artifact.clone();
+        let restored = ctx.artifact().cloned().expect("the first pass enriched");
         let mut ctx = RecognizerContext::new(&scope).with_artifact(restored);
         enricher.enrich(&data, &mut ctx).await.unwrap();
-        assert_eq!(Audio::as_text(&data, &ctx.artifact), "hi Alice");
+        assert_eq!(Audio::as_text(&data, ctx.artifact()), "hi Alice");
+    }
+
+    /// A restored *empty* `Transcription` — a clip a prior pass transcribed to
+    /// silence — still counts as enriched, so the backend is not called again.
+    /// Guarding on artifact *presence* rather than emptiness is what makes this
+    /// hold.
+    #[tokio::test]
+    async fn a_restored_empty_artifact_skips_the_backend() {
+        let mut backend = MockSttSpy::new();
+        backend.expect_provenance().returning(|| ModelEvent {
+            name: "spy".into(),
+            ..ModelEvent::default()
+        });
+        // The backend must never run: the seeded (empty) artifact is enrichment.
+        backend.expect_transcribe().times(0);
+
+        let enricher = SttEnricher::builder()
+            .with_name("stt")
+            .with_backend(backend)
+            .build()
+            .expect("builder succeeds");
+        let data = AudioData::new(b"audio".to_vec());
+        let scope = Scope::new();
+
+        // Seed an empty Transcription — the recorded result of a prior pass that
+        // found silence. The enricher must treat it as enriched and skip.
+        let mut ctx = RecognizerContext::new(&scope).with_artifact(Transcription::default());
+        enricher.enrich(&data, &mut ctx).await.unwrap();
+        assert_eq!(Audio::as_text(&data, ctx.artifact()), "");
     }
 }

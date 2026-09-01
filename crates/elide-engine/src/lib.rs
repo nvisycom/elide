@@ -314,7 +314,11 @@ impl Orchestrator {
                     modality: *modality,
                     entities,
                 });
-                artifacts.set_body(*modality, name, artifact);
+                // Only an *enriched* body carries an artifact to persist; an
+                // un-enriched one (or a no-enrichment modality) stores nothing.
+                if let Some(artifact) = artifact {
+                    artifacts.set_body(*modality, name, artifact);
+                }
                 break;
             }
         }
@@ -352,7 +356,9 @@ impl Orchestrator {
                                 entities,
                             },
                         );
-                        artifacts.set_part(part.id.clone(), modality, name, artifact);
+                        if let Some(artifact) = artifact {
+                            artifacts.set_part(part.id.clone(), modality, name, artifact);
+                        }
                         break;
                     }
                     AnalyzeOutcome::Rejected(returned) => handle = Some(returned),

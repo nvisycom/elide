@@ -178,20 +178,22 @@ impl serde::Serialize for ArtifactSet {
             }
         }
 
-        // Only non-empty artifacts reach the wire (an empty one is a
-        // text/tabular `NoArtifact` or an un-enriched payload).
-        fn group(entry: &ArtifactEntry) -> Option<Group<'_>> {
-            (!entry.artifact.is_empty()).then_some(Group(entry, entry.modality_name))
+        // Every stored entry reaches the wire: the set only holds *enriched*
+        // artifacts (an un-enriched payload or a no-enrichment modality is never
+        // inserted), so even an empty one — an image OCR'd to no text — is
+        // persisted, and a restored re-run reuses it rather than re-enriching.
+        fn group(entry: &ArtifactEntry) -> Group<'_> {
+            Group(entry, entry.modality_name)
         }
 
         let parts: HashMap<&str, Group<'_>> = self
             .parts
             .iter()
-            .filter_map(|(id, e)| group(e).map(|g| (id.as_str(), g)))
+            .map(|(id, e)| (id.as_str(), group(e)))
             .collect();
 
         let mut state = serializer.serialize_struct("ArtifactSet", 2)?;
-        state.serialize_field("body", &self.body.as_ref().and_then(group))?;
+        state.serialize_field("body", &self.body.as_ref().map(group))?;
         state.serialize_field("parts", &parts)?;
         state.end()
     }

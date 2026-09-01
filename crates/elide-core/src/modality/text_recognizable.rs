@@ -31,11 +31,12 @@ use super::text::Token;
 pub trait TextRecognizable: Modality + Sized {
     /// View the recognizable text a recognizer inspects.
     ///
-    /// `Text` and `Tabular` return their payload string from `data`. A
-    /// medium whose text is enriched onto the call (audio's transcript)
-    /// returns it from `artifact`; when the artifact is empty it returns `""`,
-    /// so a recognizer simply finds nothing rather than erroring.
-    fn as_text<'a>(data: &'a Self::Data, artifact: &'a Self::Artifact) -> &'a str;
+    /// `Text` and `Tabular` return their payload string from `data`, ignoring
+    /// `artifact`. A medium whose text is enriched onto the call (audio's
+    /// transcript) returns it from `artifact`; when `artifact` is [`None`] (not
+    /// enriched) or empty it returns `""`, so a recognizer simply finds nothing
+    /// rather than erroring.
+    fn as_text<'a>(data: &'a Self::Data, artifact: Option<&'a Self::Artifact>) -> &'a str;
 
     /// Build the location of a match spanning `range` of the recognizable
     /// text, or `None` when the range cannot be placed in the medium.
@@ -51,7 +52,7 @@ pub trait TextRecognizable: Modality + Sized {
     fn locate(
         range: Range<usize>,
         data: &Self::Data,
-        artifact: &Self::Artifact,
+        artifact: Option<&Self::Artifact>,
     ) -> Option<Self::Location>;
 
     /// The producer-provided [`Token`]s over the recognizable text, when the
@@ -60,7 +61,7 @@ pub trait TextRecognizable: Modality + Sized {
     /// lemma) feed lemma-aware context matching. Modalities that do not
     /// tokenize return `None`, the default, and context matches on the surface
     /// text alone.
-    fn as_tokens(_artifact: &Self::Artifact) -> Option<&[Token]> {
+    fn as_tokens(_artifact: Option<&Self::Artifact>) -> Option<&[Token]> {
         None
     }
 }

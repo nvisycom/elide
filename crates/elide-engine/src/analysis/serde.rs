@@ -566,7 +566,7 @@ impl<'de> Visitor<'de> for ArtifactSetSeed<'_> {
 mod tests {
     use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
     use elide_core::entity::{Entity, LabelRef};
-    use elide_core::modality::text::{Text, TextLocation, Tokens};
+    use elide_core::modality::text::{Text, TextLocation};
     use elide_core::primitive::Confidence;
     use serde::de::DeserializeSeed;
 
@@ -858,8 +858,9 @@ mod tests {
 
     /// An image body's OCR [`Layout`] survives the [`ArtifactSet`] serialize
     /// round trip — the whole point of persisting it beside the report is that a
-    /// re-run reads the same OCR without re-invoking the model. An empty
-    /// (text/tabular) artifact is omitted from the wire.
+    /// re-run reads the same OCR without re-invoking the model. A stored *empty*
+    /// artifact (an image OCR'd to no text) survives too, distinct from an
+    /// un-enriched payload that was never inserted.
     #[test]
     fn round_trips_an_artifact_set() {
         use elide_core::modality::image::{Image, ImageLocation, Layout, LayoutBlock};
@@ -867,21 +868,25 @@ mod tests {
 
         let bbox = BoundingBox::from_origin_size(Point::new(0.0, 0.0), 100.0, 20.0);
         let layout = Layout::new(vec![LayoutBlock::new(ImageLocation::new(bbox), "hi Alice")]);
+        // The body carries a real Layout; a part was enriched to an *empty*
+        // Layout (an image with no text) — both are stored and both must survive.
         let set = ArtifactSet::new()
             .insert_body::<Image>(layout.clone())
-            .insert_part::<Text>(PartId::from("cell".to_owned()), Tokens::default());
+            .insert_part::<Image>(PartId::from("blank".to_owned()), Layout::default());
 
-        // The body's non-empty Layout serializes; the empty text Tokens is
-        // omitted (its part carries no artifact on the wire).
+        // Both reach the wire: the non-empty body Layout and the enriched-empty
+        // part Layout (omitting the latter would force a needless re-OCR).
         let value = serde_json::to_value(&set).unwrap();
         assert_eq!(value["body"]["modality"], "image");
         assert!(value["body"]["artifact"].is_object());
         assert!(
-            value["parts"].as_object().unwrap().is_empty(),
-            "an empty artifact must be omitted, got {value:#}",
+            value["parts"]["blank"]["artifact"].is_object(),
+            "an enriched-empty artifact must survive, got {value:#}",
         );
 
-        // It reconstructs as the same Layout through the registry.
+        // Both reconstruct through the registry: the body as the same Layout,
+        // and the part as an *empty* Layout that is present (Some) — so a re-run
+        // seeds it and the enricher skips, rather than re-OCR'ing a blank image.
         let mut registry = ModalityRegistry::default();
         registry.register::<Image>();
         let json = serde_json::to_string(&set).unwrap();
@@ -890,5 +895,9 @@ mod tests {
         let restored = back.body::<Image>().expect("layout reconstructed");
         assert_eq!(restored, &layout);
         assert_eq!(restored.text(), "hi Alice");
+        let part = back
+            .part::<Image>(&PartId::from("blank".to_owned()))
+            .expect("the enriched-empty part is present, not dropped");
+        assert!(part.is_empty(), "it round-trips as the empty Layout it was");
     }
 }

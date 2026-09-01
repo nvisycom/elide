@@ -33,8 +33,8 @@ impl TextRecognizable for Audio {
     /// enricher stamped onto the call, or `""` when it is empty (a clip that
     /// was never transcribed) — a recognizer then finds nothing, rather than
     /// erroring.
-    fn as_text<'a>(_data: &'a AudioData, artifact: &'a Transcription) -> &'a str {
-        artifact.text()
+    fn as_text<'a>(_data: &'a AudioData, artifact: Option<&'a Transcription>) -> &'a str {
+        artifact.map_or("", Transcription::text)
     }
 
     /// Resolve a transcript byte `range` to the audio time it was spoken in.
@@ -48,12 +48,12 @@ impl TextRecognizable for Audio {
     fn locate(
         range: Range<usize>,
         _data: &AudioData,
-        artifact: &Transcription,
+        artifact: Option<&Transcription>,
     ) -> Option<AudioLocation> {
-        // An empty transcript, or a range no segment covers: nothing to
+        // No transcript, an empty one, or a range no segment covers: nothing to
         // address. `resolve` yields the time span *and* the speaker (when
         // diarized).
-        artifact.resolve(range)
+        artifact?.resolve(range)
     }
 }
 
@@ -68,7 +68,7 @@ mod tests {
         let data = AudioData::new(bytes::Bytes::new());
         let scope = Scope::new();
         let ctx = RecognizerContext::<Audio>::new(&scope);
-        assert_eq!(Audio::as_text(&data, &ctx.artifact), "");
+        assert_eq!(Audio::as_text(&data, ctx.artifact()), "");
     }
 
     /// A context whose artifacts carry the phone-number transcript.
@@ -80,7 +80,7 @@ mod tests {
                     "555-1234",
                 )]);
         let mut ctx = RecognizerContext::new(scope);
-        ctx.artifact = Transcription::new(vec![segment]);
+        ctx.set_artifact(Transcription::new(vec![segment]));
         ctx
     }
 
@@ -90,7 +90,7 @@ mod tests {
         let scope = Scope::new();
         let ctx = phone_context(&scope);
         assert_eq!(
-            Audio::as_text(&data, &ctx.artifact),
+            Audio::as_text(&data, ctx.artifact()),
             "Call Alice at 555-1234"
         );
     }
@@ -101,7 +101,7 @@ mod tests {
         let scope = Scope::new();
         let ctx = phone_context(&scope);
         // "555-1234" is at bytes 14..22.
-        let loc = Audio::locate(14..22, &data, &ctx.artifact).expect("range resolves");
+        let loc = Audio::locate(14..22, &data, ctx.artifact()).expect("range resolves");
         assert_eq!(loc.span.start_millis(), 1_100);
         assert_eq!(loc.span.end_millis(), 1_800);
     }
@@ -112,6 +112,6 @@ mod tests {
         let scope = Scope::new();
         let ctx = RecognizerContext::<Audio>::new(&scope);
         // No transcript: the range can't be placed, so no location.
-        assert!(Audio::locate(0..5, &data, &ctx.artifact).is_none());
+        assert!(Audio::locate(0..5, &data, ctx.artifact()).is_none());
     }
 }

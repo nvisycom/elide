@@ -112,21 +112,20 @@ where
                 Err(returned) => return Ok(AnalyzeOutcome::Rejected(returned)),
             };
             let regions = annotations.get::<M>();
-            // The seed downcasts to this modality's artifact, or defaults to
-            // empty — a `NoArtifact` first-pass seed and a mismatched-modality
-            // seed both land here, so the group enriches from scratch.
-            let seed = artifact
-                .as_any()
-                .downcast_ref::<M::Artifact>()
-                .cloned()
-                .unwrap_or_default();
+            // A prior artifact for this modality restores as `Some` (even when
+            // empty — that is a valid enrichment result); a `NoArtifact`
+            // first-pass seed or a mismatched-modality seed downcasts to `None`,
+            // so the group enriches from scratch.
+            let seed = artifact.as_any().downcast_ref::<M::Artifact>().cloned();
             let analysis =
                 ModalityPipeline::analyze(self, &mut handle, scope, &regions, seed).await?;
             Ok(AnalyzeOutcome::Accepted {
                 modality: TypeId::of::<M>(),
                 handle: UntypedDocumentHandle::new(handle),
                 entities: Box::new(analysis.entities),
-                artifact: Box::new(analysis.artifact),
+                artifact: analysis
+                    .artifact
+                    .map(|a| Box::new(a) as Box<dyn ArtifactGroup>),
                 #[cfg(feature = "usage")]
                 usage: analysis.usage,
             })
@@ -145,14 +144,12 @@ where
                 return Ok(None); // not this pipeline's modality
             };
             let regions = annotations.get::<M>();
-            let seed = artifact
-                .as_any()
-                .downcast_ref::<M::Artifact>()
-                .cloned()
-                .unwrap_or_default();
+            let seed = artifact.as_any().downcast_ref::<M::Artifact>().cloned();
             let analysis = ModalityPipeline::analyze(self, typed, scope, &regions, seed).await?;
             let entities = Box::new(analysis.entities) as Box<dyn EntityGroup>;
-            let artifact = Box::new(analysis.artifact) as Box<dyn ArtifactGroup>;
+            let artifact = analysis
+                .artifact
+                .map(|a| Box::new(a) as Box<dyn ArtifactGroup>);
             #[cfg(feature = "usage")]
             return Ok(Some((entities, artifact, analysis.usage)));
             #[cfg(not(feature = "usage"))]

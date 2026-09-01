@@ -37,16 +37,20 @@ impl Modality for Text {
 }
 
 impl TextRecognizable for Text {
-    fn as_text<'a>(data: &'a TextData, _artifact: &'a Tokens) -> &'a str {
+    fn as_text<'a>(data: &'a TextData, _artifact: Option<&'a Tokens>) -> &'a str {
         data.text.as_str()
     }
 
-    fn locate(range: Range<usize>, _data: &TextData, _artifact: &Tokens) -> Option<TextLocation> {
+    fn locate(
+        range: Range<usize>,
+        _data: &TextData,
+        _artifact: Option<&Tokens>,
+    ) -> Option<TextLocation> {
         Some(TextLocation::new(range.start, range.end))
     }
 
-    fn as_tokens(artifact: &Tokens) -> Option<&[Token]> {
-        (!artifact.is_empty()).then(|| artifact.as_slice())
+    fn as_tokens(artifact: Option<&Tokens>) -> Option<&[Token]> {
+        artifact.filter(|t| !t.is_empty()).map(Tokens::as_slice)
     }
 }
 
@@ -78,15 +82,17 @@ mod tests {
             Token::from_text("running", 0..7).with_lemma("run"),
             Token::from_text("dogs", 8..12).with_lemma("dog"),
         ]);
-        let seen = Text::as_tokens(&tokens).expect("text carries its tokens");
+        let seen = Text::as_tokens(Some(&tokens)).expect("text carries its tokens");
         let lemmas: Vec<&str> = seen.iter().map(|t| t.lemma.as_str()).collect();
         assert_eq!(lemmas, ["run", "dog"]);
     }
 
     #[test]
     fn as_tokens_is_none_without_an_artifact() {
-        // No tokenizing enricher ran: the empty artifact yields no tokens, so
-        // context matching falls back to the surface text.
-        assert!(Text::as_tokens(&Tokens::default()).is_none());
+        // No tokenizing enricher ran (None), or one ran and produced nothing
+        // (an empty artifact): either way, no tokens — context matching falls
+        // back to the surface text.
+        assert!(Text::as_tokens(None).is_none());
+        assert!(Text::as_tokens(Some(&Tokens::default())).is_none());
     }
 }

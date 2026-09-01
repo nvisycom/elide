@@ -652,7 +652,7 @@ impl PatternRecognizer {
         data: &M::Data,
         ctx: &RecognizerContext<'_, M>,
     ) -> Option<Entity<M>> {
-        let location = M::locate(raw.range.clone(), data, &ctx.artifact)?;
+        let location = M::locate(raw.range.clone(), data, ctx.artifact())?;
         let event = AuditEvent::pattern("pattern", raw.confidence, location.clone(), raw.pattern);
         Some(
             Entity::builder()
@@ -678,7 +678,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
         data: &M::Data,
         ctx: &RecognizerContext<'_, M>,
     ) -> Result<Recognition<M>> {
-        let text = M::as_text(data, &ctx.artifact);
+        let text = M::as_text(data, ctx.artifact());
         let mut entities: Vec<Entity<M>> = Vec::new();
 
         if let Some(set) = self.regex_set.as_ref() {

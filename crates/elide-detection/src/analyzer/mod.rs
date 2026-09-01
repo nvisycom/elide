@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::modality::{Modality, ModalityArtifact, ModalityLocation, StreamDataReader};
+use elide_core::modality::{Modality, ModalityLocation, StreamDataReader};
 use elide_core::recognition::annotation::{Annotations, Exclusion};
 use elide_core::recognition::{Enricher, Recognition, Recognizer, RecognizerContext, Scope};
 #[cfg(feature = "usage")]
@@ -35,11 +35,15 @@ pub struct Analysis<M: Modality> {
     /// The enrichment artifact the analysis produced (or was seeded with): the
     /// OCR [`Layout`] / STT [`Transcription`] the recognizers read. Carried out
     /// so it can be persisted and restored for a re-run without re-enriching.
-    /// Empty for a modality with no enrichment.
+    ///
+    /// [`Some`] iff an enricher ran (or a saved artifact was restored) —
+    /// `Some(empty)` (an image OCR'd to no text, a silent clip) is a real
+    /// enrichment, distinct from [`None`] (a modality with no enrichment, or an
+    /// un-enriched payload), so it is persisted and a re-run does not re-enrich.
     ///
     /// [`Layout`]: elide_core::modality::image::Layout
     /// [`Transcription`]: elide_core::modality::audio::Transcription
-    pub artifact: M::Artifact,
+    pub artifact: Option<M::Artifact>,
     /// Per-recognizer / per-enricher resource usage for this analysis.
     #[cfg(feature = "usage")]
     pub usage: Vec<Usage>,
@@ -51,15 +55,16 @@ impl<M: Modality> Analysis<M> {
     pub fn new(entities: Vec<Entity<M>>) -> Self {
         Self {
             entities,
-            artifact: M::Artifact::default(),
+            artifact: None,
             #[cfg(feature = "usage")]
             usage: Vec::new(),
         }
     }
 
-    /// Attach the enrichment [`artifact`](Self::artifact) the analysis produced.
+    /// Attach the enrichment [`artifact`](Self::artifact) the analysis produced
+    /// — `Some` when it enriched (even to an empty artifact), `None` otherwise.
     #[must_use]
-    pub fn with_artifact(mut self, artifact: M::Artifact) -> Self {
+    pub fn with_artifact(mut self, artifact: Option<M::Artifact>) -> Self {
         self.artifact = artifact;
         self
     }
@@ -169,7 +174,7 @@ impl<M: Modality> Analyzer<M> {
             // Detect nothing, but carry the seeded artifact through: a re-run
             // seeded with a prior OCR/transcript must report it back unchanged
             // so `drive` persists it, or the next re-run would re-enrich.
-            return Ok(Analysis::new(Vec::new()).with_artifact(ctx.artifact.clone()));
+            return Ok(Analysis::new(Vec::new()).with_artifact(ctx.artifact().cloned()));
         }
         // Usage accumulates in run order: enrichers (sequential) first, then
         // recognizers.
@@ -207,7 +212,7 @@ impl<M: Modality> Analyzer<M> {
         let entities = Self::apply_exclusions(in_catalog, ctx.exclusions());
         // Carry the enrichment artifact out with the entities so it can be
         // persisted and restored for a re-run without re-enriching.
-        let analysis = Analysis::new(entities).with_artifact(ctx.artifact.clone());
+        let analysis = Analysis::new(entities).with_artifact(ctx.artifact().cloned());
         #[cfg(feature = "usage")]
         let analysis = analysis.with_usage(usage);
         Ok(analysis)
@@ -353,9 +358,10 @@ impl<M: Modality> Analyzer<M> {
 
     /// [`analyze_stream_with`] seeded with a prior enrichment `artifact`, so a
     /// re-run re-recognizes without re-enriching: each chunk's context is
-    /// pre-seeded with `artifact`, and the enrichers self-skip because it is
-    /// already present. For the single-chunk media that produce an artifact
-    /// (image, audio) this seeds the one chunk.
+    /// pre-seeded with `artifact`, and the enrichers self-skip because one is
+    /// already present. `Some` (even an empty artifact) restores; `None` is a
+    /// first pass that enriches from scratch. For the single-chunk media that
+    /// produce an artifact (image, audio) this seeds the one chunk.
     ///
     /// [`analyze_stream_with`]: Self::analyze_stream_with
     pub async fn analyze_stream_in<S>(
@@ -363,12 +369,12 @@ impl<M: Modality> Analyzer<M> {
         source: &mut S,
         scope: &Scope,
         annotations: &Annotations<M>,
-        artifact: M::Artifact,
+        artifact: Option<M::Artifact>,
     ) -> Result<Analysis<M>>
     where
         S: StreamDataReader<M>,
     {
-        self.analyze_stream_seeded(source, scope, annotations, Some(artifact))
+        self.analyze_stream_seeded(source, scope, annotations, artifact)
             .await
     }
 
@@ -387,14 +393,10 @@ impl<M: Modality> Analyzer<M> {
     {
         let mut out = Vec::new();
         // The stream's artifact: the seed when re-running (every chunk self-skips
-        // and hands it back unchanged), else the one artifact a producing chunk
-        // yields. Seeded from `seed` so a re-run whose chunks produce nothing new
-        // still carries the prior enrichment forward.
-        let mut artifact = seed.clone().unwrap_or_default();
-        // Whether `artifact` still holds the untouched seed. A produced artifact
-        // (distinct from the seed) may replace it exactly once; a second one is
-        // an unsupported multi-chunk enrichment (see the assert below).
-        let mut produced = false;
+        // and hands it back unchanged), else the one a producing chunk yields, or
+        // `None` when nothing enriched. Seeded from `seed` so a re-run whose
+        // chunks produce nothing new still carries the prior enrichment forward.
+        let mut artifact = seed.clone();
         #[cfg(feature = "usage")]
         let mut usage = Vec::new();
         while let Some(chunk) = source.read_next().await? {
@@ -409,7 +411,7 @@ impl<M: Modality> Analyzer<M> {
             // and enricher, so the stream's total is the sum of its chunks'.
             #[cfg(feature = "usage")]
             usage.extend(analysis.usage);
-            // A chunk that produced a *new* artifact (non-empty, and not just the
+            // A chunk that produced a *new* artifact (`Some`, and not just the
             // seed handed straight back) owns the stream's artifact. The media
             // that produce one (image, audio) are single-chunk, so exactly one
             // chunk does this; a plain text/tabular stream produces none and
@@ -417,16 +419,13 @@ impl<M: Modality> Analyzer<M> {
             // per-chunk artifact on more than one chunk — unsupported, because
             // one stream-level artifact cannot represent per-chunk tokens; the
             // assert catches that the day such an enricher is added.
-            let produced_here = !ModalityArtifact::is_empty(&analysis.artifact)
-                && seed.as_ref() != Some(&analysis.artifact);
-            if produced_here {
+            if analysis.artifact.is_some() && analysis.artifact != seed {
                 debug_assert!(
-                    !produced,
+                    artifact == seed,
                     "a multi-chunk stream produced more than one enrichment artifact; \
                      per-chunk artifacts are not representable at the stream level",
                 );
                 artifact = analysis.artifact;
-                produced = true;
             }
             out.extend(
                 analysis

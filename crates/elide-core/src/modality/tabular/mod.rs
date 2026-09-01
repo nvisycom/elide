@@ -35,21 +35,21 @@ impl Modality for Tabular {
 }
 
 impl TextRecognizable for Tabular {
-    fn as_text<'a>(data: &'a TextData, _artifact: &'a Tokens) -> &'a str {
+    fn as_text<'a>(data: &'a TextData, _artifact: Option<&'a Tokens>) -> &'a str {
         data.text.as_str()
     }
 
     fn locate(
         range: Range<usize>,
         _data: &TextData,
-        _artifact: &Tokens,
+        _artifact: Option<&Tokens>,
     ) -> Option<TabularLocation> {
         // Chunk-local: only the intra-cell byte range is known here; the
         // codec's lift fills the row/column from the chunk.
         Some(TabularLocation::new(0, 0).with_range(range.start, range.end))
     }
 
-    fn as_tokens(artifact: &Tokens) -> Option<&[Token]> {
-        (!artifact.is_empty()).then(|| artifact.as_slice())
+    fn as_tokens(artifact: Option<&Tokens>) -> Option<&[Token]> {
+        artifact.filter(|t| !t.is_empty()).map(Tokens::as_slice)
     }
 }

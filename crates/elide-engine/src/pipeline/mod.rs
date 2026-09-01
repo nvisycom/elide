@@ -44,17 +44,16 @@ where
     DocumentHandle<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
 {
     /// Detect the entities in `handle` (in source coordinates), without
-    /// redacting, seeding the analysis with the prior enrichment `artifact` so
-    /// recognition runs against a restored OCR/transcript instead of
-    /// re-invoking the model. A default (empty) `artifact` is a first pass: the
-    /// enricher runs and produces the artifact itself. The caller may edit the
-    /// returned set before applying.
+    /// redacting. `artifact` is the prior enrichment to restore — `Some` (even
+    /// when empty) has recognition run against it instead of re-invoking the
+    /// model; `None` is a first pass, so the enricher runs and produces the
+    /// artifact itself. The caller may edit the returned set before applying.
     pub(super) async fn analyze(
         &self,
         handle: &mut DocumentHandle<M>,
         scope: &Scope,
         annotations: &Annotations<M>,
-        artifact: M::Artifact,
+        artifact: Option<M::Artifact>,
     ) -> Result<Analysis<M>> {
         self.analyzer
             .analyze_stream_in(handle, scope, annotations, artifact)
