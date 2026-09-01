@@ -55,7 +55,10 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
 
     // Analyze, then serialize the report — the artifact a review layer ships.
     let mut doc = registry.decode(SAMPLE, "docx").await?;
-    let report = orchestrator.analyze(&mut doc, &Directives::new()).await?;
+    let report = orchestrator
+        .analyze(&mut doc, &Directives::new())
+        .await?
+        .report;
     let detected = report.entities::<Text>().expect("text body").len();
     assert!(detected > 0, "the fixture detected body entities");
     let json = serde_json::to_string(&report).expect("report serializes");
@@ -118,7 +121,10 @@ async fn report_deserializer_rebuilds_a_report_standalone() -> Result<()> {
     let orchestrator = orchestrator(registry.clone())?;
 
     let mut doc = registry.decode(SAMPLE, "docx").await?;
-    let report = orchestrator.analyze(&mut doc, &Directives::new()).await?;
+    let report = orchestrator
+        .analyze(&mut doc, &Directives::new())
+        .await?
+        .report;
     let detected = report.entities::<Text>().expect("text body").len();
     let json = serde_json::to_string(&report).expect("serializes");
 

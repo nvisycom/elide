@@ -3,13 +3,13 @@
 //!
 //! The OCR counterpart to language detection: it produces no entities, it
 //! *enriches*. On each call it OCRs the [`ImageData`] bytes through its
-//! [`OcrBackend`] and inserts the resulting [`Layout`] into the call's
-//! [`artifacts`]. Recognizers running afterward read the OCR text and
+//! [`OcrBackend`] and stamps the resulting [`Layout`] onto the call as
+//! `Image`'s [`artifact`]. Recognizers running afterward read the OCR text and
 //! resolve each match back to the image region it covers (see [`Image`]'s
 //! [`TextRecognizable`] impl).
 //!
 //! [`ImageData`]: elide_core::modality::image::ImageData
-//! [`artifacts`]: elide_core::recognition::RecognizerContext::artifacts
+//! [`artifact`]: elide_core::recognition::RecognizerContext::artifact
 //! [`OcrBackend`]: crate::OcrBackend
 //! [`Image`]: elide_core::modality::image::Image
 //! [`TextRecognizable`]: elide_core::modality::TextRecognizable
@@ -22,13 +22,13 @@ use elide_core::recognition::{Enricher, Enrichment, RecognizerContext, Recognize
 use elide_core::{Error, Result};
 use hipstr::HipStr;
 
-#[cfg(any(test, feature = "mock"))]
+#[cfg(any(test, feature = "test-utils"))]
 use crate::MockBackend;
 use crate::{OcrBackend, OcrRequest};
 
 /// An [`Enricher<Image>`] that OCRs the image.
 ///
-/// Stamps the resulting [`Layout`] onto the call's artifacts. Holds an
+/// Stamps the resulting [`Layout`] onto the call's artifact. Holds an
 /// `Arc<dyn OcrBackend>`; cloning shares the backend. Registered on
 /// an `Analyzer<Image>` ahead of its recognizers, the same way a language
 /// detector is registered on a text analyzer.
@@ -88,11 +88,11 @@ impl OcrEnricherBuilder {
     /// Wire the no-op [`MockBackend`] as this enricher's backend.
     ///
     /// [`MockBackend`]: crate::MockBackend
-    #[cfg(any(test, feature = "mock"))]
-    #[cfg_attr(docsrs, doc(cfg(feature = "mock")))]
+    #[cfg(any(test, feature = "test-utils"))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
     #[must_use]
     pub fn with_mock_backend(self) -> Self {
-        self.with_backend(MockBackend)
+        self.with_backend(MockBackend::new())
     }
 
     /// Finish the builder. Errors when `name` or `backend` is unset.
@@ -112,8 +112,9 @@ impl Enricher<Image> for OcrEnricher {
         data: &ImageData,
         ctx: &mut RecognizerContext<'_, Image>,
     ) -> Result<Enrichment> {
-        // Already OCR'd (e.g. a second enricher pass): leave it.
-        if ctx.artifacts.contains::<Layout>() {
+        // Already OCR'd (a second enricher pass, or a restored artifact on a
+        // re-run): leave it, so re-recognition never re-invokes the model.
+        if ctx.is_enriched() {
             return Ok(Enrichment::none());
         }
         let mut request = OcrRequest::new(&data.bytes);
@@ -124,7 +125,7 @@ impl Enricher<Image> for OcrEnricher {
             request = request.with_correlation_id(id);
         }
         let response = self.backend.recognize(request).await?;
-        ctx.artifacts.insert(Layout::new(response.blocks));
+        ctx.set_artifact(Layout::new(response.blocks));
         // The OCR model vouches for its own identity; OCR reports no token
         // counts today.
         #[cfg(feature = "usage")]
@@ -149,33 +150,19 @@ mod tests {
         ImageLocation::new(BoundingBox::from_origin_size(Point::new(x, y), w, h))
     }
 
-    /// Backend returning a fixed one-block, two-word OCR result.
-    #[derive(Clone)]
-    struct CannedBackend;
-
-    #[async_trait::async_trait]
-    impl OcrBackend for CannedBackend {
-        fn provenance(&self) -> ModelEvent {
-            ModelEvent {
-                name: "canned".into(),
-                ..ModelEvent::default()
-            }
-        }
-
-        async fn recognize(&self, _request: OcrRequest<'_>) -> Result<OcrResponse> {
-            let block = LayoutBlock::new(loc(0.0, 0.0, 100.0, 20.0), "hi Alice").with_words(vec![
-                LayoutWord::new(loc(0.0, 0.0, 30.0, 20.0), "hi"),
-                LayoutWord::new(loc(40.0, 0.0, 60.0, 20.0), "Alice"),
-            ]);
-            Ok(OcrResponse::new(vec![block]))
-        }
+    /// A fixed one-block, two-word OCR result the enricher stamps as a `Layout`.
+    fn canned_block() -> LayoutBlock {
+        LayoutBlock::new(loc(0.0, 0.0, 100.0, 20.0), "hi Alice").with_words(vec![
+            LayoutWord::new(loc(0.0, 0.0, 30.0, 20.0), "hi"),
+            LayoutWord::new(loc(40.0, 0.0, 60.0, 20.0), "Alice"),
+        ])
     }
 
     #[tokio::test]
     async fn enrich_stamps_readable_ocr_text() {
         let enricher = OcrEnricher::builder()
             .with_name("ocr")
-            .with_backend(CannedBackend)
+            .with_backend(MockBackend::with(vec![canned_block()]))
             .build()
             .expect("builder succeeds");
         // The usage id carries the caller's name, not a fixed crate string,
@@ -188,11 +175,90 @@ mod tests {
 
         enricher.enrich(&data, &mut ctx).await.unwrap();
 
-        // Recognizers read the OCR text from the call's artifacts.
-        assert_eq!(Image::as_text(&data, &ctx.artifacts), "hi Alice");
+        // Recognizers read the OCR text from the call's artifact.
+        assert_eq!(Image::as_text(&data, ctx.artifact()), "hi Alice");
         // "Alice" is at bytes 3..8; locate resolves it to the word's box.
-        let region = Image::locate(3..8, &data, &ctx.artifacts).expect("range resolves");
+        let region = Image::locate(3..8, &data, ctx.artifact()).expect("range resolves");
         assert_eq!(region.bounding_box.min.x, 40.0);
         assert_eq!(region.bounding_box.max.x, 100.0);
+    }
+
+    mockall::mock! {
+        /// A spy OCR backend whose `recognize` calls are counted and verifiable,
+        /// for asserting the enricher's self-skip on a re-run.
+        OcrSpy {}
+
+        #[async_trait::async_trait]
+        impl OcrBackend for OcrSpy {
+            fn provenance(&self) -> ModelEvent;
+            #[mockall::concretize]
+            async fn recognize(&self, request: OcrRequest<'_>) -> Result<OcrResponse>;
+        }
+    }
+
+    /// The re-run reuse: an enrich over a context already carrying an artifact
+    /// (a restored `Layout` from a prior report) skips the backend entirely, so
+    /// re-recognition never re-invokes the OCR model.
+    #[tokio::test]
+    async fn a_present_artifact_skips_the_backend() {
+        let mut backend = MockOcrSpy::new();
+        backend.expect_provenance().returning(|| ModelEvent {
+            name: "spy".into(),
+            ..ModelEvent::default()
+        });
+        // The self-skip, asserted as a call cardinality: recognize fires exactly
+        // once across both enrich calls. mockall fails the test on drop if not.
+        backend
+            .expect_recognize()
+            .times(1)
+            .returning(|_| Ok(OcrResponse::new(vec![canned_block()])));
+
+        let enricher = OcrEnricher::builder()
+            .with_name("ocr")
+            .with_backend(backend)
+            .build()
+            .expect("builder succeeds");
+        let data = ImageData::new(b"image".to_vec(), Dimensions::new(100, 20));
+        let scope = Scope::new();
+
+        // First pass: empty artifact → the backend runs once.
+        let mut ctx = RecognizerContext::new(&scope);
+        enricher.enrich(&data, &mut ctx).await.unwrap();
+
+        // Re-run: seed the context with the prior (restored) artifact. The
+        // enricher self-skips — recognize is not called again, enforced by the
+        // `.times(1)` above — and the seeded OCR text is still readable.
+        let restored = ctx.artifact().cloned().expect("the first pass enriched");
+        let mut ctx = RecognizerContext::new(&scope).with_artifact(restored);
+        enricher.enrich(&data, &mut ctx).await.unwrap();
+        assert_eq!(Image::as_text(&data, ctx.artifact()), "hi Alice");
+    }
+
+    /// A restored *empty* `Layout` — a payload a prior pass OCR'd to no text —
+    /// still counts as enriched, so the backend is not called again. Guarding on
+    /// artifact *presence* rather than emptiness is what makes this hold.
+    #[tokio::test]
+    async fn a_restored_empty_artifact_skips_the_backend() {
+        let mut backend = MockOcrSpy::new();
+        backend.expect_provenance().returning(|| ModelEvent {
+            name: "spy".into(),
+            ..ModelEvent::default()
+        });
+        // The backend must never run: the seeded (empty) artifact is enrichment.
+        backend.expect_recognize().times(0);
+
+        let enricher = OcrEnricher::builder()
+            .with_name("ocr")
+            .with_backend(backend)
+            .build()
+            .expect("builder succeeds");
+        let data = ImageData::new(b"image".to_vec(), Dimensions::new(100, 20));
+        let scope = Scope::new();
+
+        // Seed an empty Layout — the recorded result of a prior pass that found
+        // no text. The enricher must treat it as already-enriched and skip.
+        let mut ctx = RecognizerContext::new(&scope).with_artifact(Layout::default());
+        enricher.enrich(&data, &mut ctx).await.unwrap();
+        assert_eq!(Image::as_text(&data, ctx.artifact()), "");
     }
 }

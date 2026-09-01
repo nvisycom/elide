@@ -5,8 +5,8 @@
 mod backend;
 mod enricher;
 
-#[cfg(any(test, feature = "mock"))]
-#[cfg_attr(docsrs, doc(cfg(feature = "mock")))]
+#[cfg(any(test, feature = "test-utils"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
 pub use self::backend::MockBackend;
 pub use self::backend::{SttBackend, SttRequest, SttResponse};
 pub use self::enricher::{SttEnricher, SttEnricherBuilder};

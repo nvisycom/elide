@@ -17,6 +17,7 @@ use hipstr::HipStr;
 use serde::{Deserialize, Serialize};
 
 use super::AudioLocation;
+use crate::modality::ModalityArtifact;
 use crate::primitive::{Confidence, LanguageTag, TimeSpan};
 
 /// Separator inserted between segments when building the flat transcript
@@ -278,6 +279,8 @@ impl Transcription {
         Some(location)
     }
 }
+
+impl ModalityArtifact for Transcription {}
 
 /// Span covering the words of `segment` that overlap the segment-local byte
 /// `range`, by walking each word's byte extent within the segment text.

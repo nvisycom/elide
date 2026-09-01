@@ -15,7 +15,7 @@ use elide_core::recognition::ModelUsage;
 use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId};
 use elide_core::{Error, Result};
 
-#[cfg(any(test, feature = "mock"))]
+#[cfg(any(test, feature = "test-utils"))]
 use crate::backend::MockBackend;
 use crate::backend::{LlmBackend, LlmRequest};
 use crate::modality::LlmModality;
@@ -98,8 +98,8 @@ impl<M: LlmModality> LlmRecognizerBuilder<M> {
     /// `with_backend(MockBackend)`.
     ///
     /// [`MockBackend`]: crate::backend::MockBackend
-    #[cfg(any(test, feature = "mock"))]
-    #[cfg_attr(docsrs, doc(cfg(feature = "mock")))]
+    #[cfg(any(test, feature = "test-utils"))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
     #[must_use]
     pub fn with_mock_backend(self) -> Self
     where

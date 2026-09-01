@@ -7,12 +7,12 @@
 //! (audio bytes + optional hints) into a response of ordered
 //! [`TranscriptSegment`]s — the core transcription type, so a backend's
 //! output drops straight onto the call's artifacts with no remapping. The
-//! `mock`-gated [`MockBackend`] (returns no segments; test/example stub)
+//! `test-utils`-gated [`MockBackend`] (returns no segments; test/example stub)
 //! ships here; concrete provider backends live downstream.
 //!
 //! [`TranscriptSegment`]: elide_core::modality::audio::TranscriptSegment
 
-#[cfg(any(test, feature = "mock"))]
+#[cfg(any(test, feature = "test-utils"))]
 mod mock_backend;
 mod stt_request;
 mod stt_response;
@@ -20,8 +20,8 @@ mod stt_response;
 use elide_core::Result;
 use elide_core::entity::audit::ModelEvent;
 
-#[cfg(any(test, feature = "mock"))]
-#[cfg_attr(docsrs, doc(cfg(feature = "mock")))]
+#[cfg(any(test, feature = "test-utils"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
 pub use self::mock_backend::MockBackend;
 pub use self::stt_request::SttRequest;
 pub use self::stt_response::SttResponse;
@@ -64,7 +64,7 @@ mod tests {
 
     #[tokio::test]
     async fn mock_returns_empty() {
-        let backend = MockBackend;
+        let backend = MockBackend::new();
         let audio = vec![0u8; 8];
         let response = backend.transcribe(SttRequest::new(&audio)).await.unwrap();
         assert!(response.segments.is_empty());

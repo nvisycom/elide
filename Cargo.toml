@@ -83,7 +83,6 @@ hipstr = { version = "0.8", features = ["serde"] }
 jiff = { version = "0.2", features = ["serde"] }
 oxilangtag = { version = "0.1", features = ["serialize"] }
 celes = { version = "2.8", features = [] }
-type-map = { version = "0.5", features = [] }
 
 # Encoding & hashing
 base64 = { version = "0.23", features = [] }
@@ -101,6 +100,9 @@ tokio = { version = "1.50", features = [] }
 async-trait = { version = "0.1", features = [] }
 futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 rayon = { version = "1.10", features = [] }
+
+# Testing and benchmarking
+mockall = { version = "0.15", features = [] }
 
 # Observability
 tracing = { version = "0.1", features = ["attributes"] }

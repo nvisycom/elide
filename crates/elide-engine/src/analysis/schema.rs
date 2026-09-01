@@ -1,5 +1,5 @@
 //! Hand-written [`JsonSchema`] for [`Report`], kept in lockstep with its
-//! [`Serialize`](super::serialize) impl so a generated schema never drifts from
+//! [`Serialize`](super::serde) impl so a generated schema never drifts from
 //! the wire form.
 //!
 //! `Report` serializes through a hand-written `Serialize` (its groups are
@@ -9,11 +9,11 @@
 //! `discriminator` on `modality`. Each arm is gated on its modality feature, so
 //! the schema enumerates exactly the modalities compiled in (`text` always).
 //!
-//! A round-trip test (in [`serialize`](super::serialize)'s test module)
+//! A round-trip test (in [`serde`](super::serde)'s test module)
 //! validates a serialized report against this schema, turning any drift into a
 //! failing test rather than a lying client.
 //!
-//! [`Report`]: super::Report
+//! [`Report`]: super::report::Report
 
 use std::borrow::Cow;
 
@@ -22,7 +22,7 @@ use elide_core::modality::Modality;
 use elide_core::modality::text::Text;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 
-use super::Report;
+use super::report::Report;
 
 /// The `{ modality: "<name>", entities: [Entity<M>] }` arm for one modality,
 /// with `modality` pinned to a `const` so it discriminates the union.

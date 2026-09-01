@@ -60,7 +60,10 @@ async fn anonymize_records_reviewable_body_picks() -> Result<()> {
     let orchestrator = orchestrator(registry.clone())?;
 
     let mut doc = registry.decode(SAMPLE, "docx").await?;
-    let report = orchestrator.analyze(&mut doc, &Directives::new()).await?;
+    let report = orchestrator
+        .analyze(&mut doc, &Directives::new())
+        .await?
+        .report;
     let report = orchestrator.anonymize_with(&mut doc, report).await?;
 
     let body = report

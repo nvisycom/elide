@@ -8,17 +8,18 @@ use uuid::Uuid;
 use crate::entity::{Entity, Label, LabelCatalog, LabelRef};
 use crate::modality::{Hint, Modality};
 use crate::primitive::{CountryCode, Language, LanguageTag, Languages};
+use crate::recognition::Scope;
 use crate::recognition::annotation::{Annotations, Exclusion, Inclusion};
-use crate::recognition::{Artifacts, Scope};
 
 /// Per-payload context handed to a [`Recognizer`].
 ///
 /// Built up by enrichers for one payload of an analysis. Borrows the
-/// caller-asserted [`Scope`] (shared across every payload)
-/// and adds the *working* state produced per payload: NLP [`artifacts`],
-/// languages an enricher *detected*, and any payload-local context hints.
-/// Enrichers write into it; recognizers read it. The analyzer constructs
-/// a fresh one per payload, so working state never leaks between payloads.
+/// caller-asserted [`Scope`] (shared across every payload) and adds the
+/// *working* state produced per payload: the medium's enrichment
+/// [`artifact`](Modality::Artifact), languages an enricher *detected*, and any
+/// payload-local context hints. Enrichers write into it; recognizers read it.
+/// The analyzer constructs a fresh one per payload, so working state never leaks
+/// between payloads.
 ///
 /// Query the call's languages, jurisdictions, labels, inclusions, and
 /// exclusions through the methods here rather than reaching into the
@@ -27,7 +28,6 @@ use crate::recognition::{Artifacts, Scope};
 ///
 /// [`Recognizer`]: super::Recognizer
 /// [`Scope`]: super::Scope
-/// [`artifacts`]: Self::artifacts
 #[derive(Debug)]
 pub struct RecognizerContext<'a, M: Modality> {
     /// Caller-asserted, modality-free scope for the analysis (shared,
@@ -40,10 +40,23 @@ pub struct RecognizerContext<'a, M: Modality> {
     /// [`inclusions`]: Self::inclusions
     /// [`exclusions`]: Self::exclusions
     annotations: Option<&'a Annotations<M>>,
-    /// Shared per-payload NLP enrichment (tokens, lemmas, …), keyed by
-    /// type. An enricher computes it once; recognizers that want it read
-    /// it back by type. Those that don't leave it empty.
-    pub artifacts: Artifacts,
+    /// The medium's per-payload enrichment ([`Layout`] for an image, a
+    /// [`Transcription`] for audio, [`NoArtifact`] for plain text). An enricher
+    /// produces it once; the recognizers read the text and coordinates it
+    /// carries through [`as_text`] / [`locate`]. Empty ([`Default`]) until an
+    /// enricher fills it.
+    ///
+    /// [`Layout`]: crate::modality::image::Layout
+    /// [`Transcription`]: crate::modality::audio::Transcription
+    /// [`NoArtifact`]: crate::modality::NoArtifact
+    /// [`as_text`]: crate::modality::TextRecognizable::as_text
+    /// [`locate`]: crate::modality::TextRecognizable::locate
+    ///
+    /// [`None`] until an enricher runs (or a saved artifact is restored);
+    /// [`Some`] afterward — even when the enrichment is *empty* (no OCR text, a
+    /// silent clip), which is a valid result distinct from "not yet enriched",
+    /// so an enricher skips a restored empty artifact rather than re-running.
+    artifact: Option<M::Artifact>,
     /// Languages an enricher *detected* for this payload. The caller's
     /// asserted languages live on the [`Scope`]; query both together via
     /// [`primary_language`] / [`ranked_languages`].
@@ -71,10 +84,45 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
         Self {
             scope,
             annotations: None,
-            artifacts: Artifacts::new(),
+            artifact: None,
             detected_languages: Languages::default(),
             context_hints: Vec::new(),
         }
+    }
+
+    /// Seed the medium's enrichment [`artifact`](Self::artifact), consuming and
+    /// returning `self`. Used to restore a saved artifact so recognition can
+    /// re-run without re-enriching; an enricher then [skips](Self::is_enriched)
+    /// itself — including when the restored artifact is empty.
+    #[must_use]
+    pub fn with_artifact(mut self, artifact: M::Artifact) -> Self {
+        self.artifact = Some(artifact);
+        self
+    }
+
+    /// The medium's enrichment, or [`None`] when no enricher has run for this
+    /// payload. `Some(empty)` — a payload that *was* enriched to nothing — is
+    /// distinct from `None`, so callers that only need the content can
+    /// [`unwrap_or_default`](Option::unwrap_or_default) while an enricher tells
+    /// the two apart via [`is_enriched`](Self::is_enriched).
+    #[must_use]
+    pub fn artifact(&self) -> Option<&M::Artifact> {
+        self.artifact.as_ref()
+    }
+
+    /// Record `artifact` as this payload's enrichment — what an enricher calls
+    /// once it has run. Marks the context [enriched](Self::is_enriched) even
+    /// when `artifact` is empty, so a later enricher pass skips.
+    pub fn set_artifact(&mut self, artifact: M::Artifact) {
+        self.artifact = Some(artifact);
+    }
+
+    /// Whether an enricher has run (or a saved artifact was restored) for this
+    /// payload — `true` even when the enrichment is empty. An enricher checks
+    /// this to skip re-running.
+    #[must_use]
+    pub fn is_enriched(&self) -> bool {
+        self.artifact.is_some()
     }
 
     /// Attach the caller's per-modality [`Annotations`] (inclusion /

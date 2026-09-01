@@ -2,9 +2,8 @@
 //!
 //! [`Enhancer::enhance`]: super::Enhancer::enhance
 
+use elide_core::modality::text::Token;
 use elide_core::primitive::LanguageTag;
-
-use crate::io::Token;
 
 /// Per-call inputs to one enhancement pass, bundled together.
 ///

@@ -4,10 +4,10 @@
 
 use std::ops::Range;
 
+use elide_core::modality::text::Token;
 use hipstr::HipStr;
 
 use super::KeywordMatcher;
-use crate::io::Token;
 
 /// ASCII case-insensitive substring matcher.
 ///

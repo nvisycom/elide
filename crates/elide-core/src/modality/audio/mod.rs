@@ -12,7 +12,6 @@ pub use self::location::AudioLocation;
 pub use self::replacement::{AudioReplacement, Waveform};
 pub use self::transcription::{TranscriptSegment, TranscriptWord, Transcription};
 use super::{Modality, TextRecognizable};
-use crate::recognition::Artifacts;
 
 /// Audio modality: data is [`AudioData`], locations are
 /// [`AudioLocation`] time ranges, replacements are [`AudioReplacement`].
@@ -21,6 +20,7 @@ use crate::recognition::Artifacts;
 pub struct Audio;
 
 impl Modality for Audio {
+    type Artifact = Transcription;
     type Data = AudioData;
     type Location = AudioLocation;
     type Replacement = AudioReplacement;
@@ -30,33 +30,30 @@ impl Modality for Audio {
 
 impl TextRecognizable for Audio {
     /// The transcript text a recognizer inspects: the [`Transcription`] an
-    /// enricher stamped onto the call's artifacts, or `""` when none is
-    /// present (a clip that was never transcribed) — a recognizer then finds
-    /// nothing, rather than erroring.
-    fn as_text<'a>(_data: &'a AudioData, artifacts: &'a Artifacts) -> &'a str {
-        artifacts
-            .get::<Transcription>()
-            .map_or("", Transcription::text)
+    /// enricher stamped onto the call, or `""` when it is empty (a clip that
+    /// was never transcribed) — a recognizer then finds nothing, rather than
+    /// erroring.
+    fn as_text<'a>(_data: &'a AudioData, artifact: Option<&'a Transcription>) -> &'a str {
+        artifact.map_or("", Transcription::text)
     }
 
     /// Resolve a transcript byte `range` to the audio time it was spoken in.
     ///
     /// Unlike the byte-based text modalities, audio's location is a time
     /// span, so `locate` resolves `range` immediately against the
-    /// transcript's word timings (read from the call's artifacts) rather
-    /// than deferring to a lift. Returns `None` when the range resolves to
-    /// nothing (no transcript, or out of bounds) — there is no time span to
-    /// address, so the caller drops the match.
+    /// [`Transcription`]'s word timings rather than deferring to a lift.
+    /// Returns `None` when the range resolves to nothing (an empty transcript,
+    /// or out of bounds) — there is no time span to address, so the caller
+    /// drops the match.
     fn locate(
         range: Range<usize>,
         _data: &AudioData,
-        artifacts: &Artifacts,
+        artifact: Option<&Transcription>,
     ) -> Option<AudioLocation> {
-        // No transcript, or a range no segment covers: nothing to address.
-        // `resolve` yields the time span *and* the speaker (when diarized).
-        artifacts
-            .get::<Transcription>()
-            .and_then(|t| t.resolve(range))
+        // No transcript, an empty one, or a range no segment covers: nothing to
+        // address. `resolve` yields the time span *and* the speaker (when
+        // diarized).
+        artifact?.resolve(range)
     }
 }
 
@@ -71,7 +68,7 @@ mod tests {
         let data = AudioData::new(bytes::Bytes::new());
         let scope = Scope::new();
         let ctx = RecognizerContext::<Audio>::new(&scope);
-        assert_eq!(Audio::as_text(&data, &ctx.artifacts), "");
+        assert_eq!(Audio::as_text(&data, ctx.artifact()), "");
     }
 
     /// A context whose artifacts carry the phone-number transcript.
@@ -83,7 +80,7 @@ mod tests {
                     "555-1234",
                 )]);
         let mut ctx = RecognizerContext::new(scope);
-        ctx.artifacts.insert(Transcription::new(vec![segment]));
+        ctx.set_artifact(Transcription::new(vec![segment]));
         ctx
     }
 
@@ -93,7 +90,7 @@ mod tests {
         let scope = Scope::new();
         let ctx = phone_context(&scope);
         assert_eq!(
-            Audio::as_text(&data, &ctx.artifacts),
+            Audio::as_text(&data, ctx.artifact()),
             "Call Alice at 555-1234"
         );
     }
@@ -104,7 +101,7 @@ mod tests {
         let scope = Scope::new();
         let ctx = phone_context(&scope);
         // "555-1234" is at bytes 14..22.
-        let loc = Audio::locate(14..22, &data, &ctx.artifacts).expect("range resolves");
+        let loc = Audio::locate(14..22, &data, ctx.artifact()).expect("range resolves");
         assert_eq!(loc.span.start_millis(), 1_100);
         assert_eq!(loc.span.end_millis(), 1_800);
     }
@@ -115,6 +112,6 @@ mod tests {
         let scope = Scope::new();
         let ctx = RecognizerContext::<Audio>::new(&scope);
         // No transcript: the range can't be placed, so no location.
-        assert!(Audio::locate(0..5, &data, &ctx.artifacts).is_none());
+        assert!(Audio::locate(0..5, &data, ctx.artifact()).is_none());
     }
 }

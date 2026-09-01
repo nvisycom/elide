@@ -12,7 +12,6 @@ pub use self::layout::{Layout, LayoutBlock, LayoutWord};
 pub use self::location::ImageLocation;
 pub use self::replacement::ImageReplacement;
 use super::{Modality, TextRecognizable};
-use crate::recognition::Artifacts;
 
 /// Image modality: data is [`ImageData`], locations are
 /// [`ImageLocation`] regions, replacements are [`ImageReplacement`].
@@ -21,6 +20,7 @@ use crate::recognition::Artifacts;
 pub struct Image;
 
 impl Modality for Image {
+    type Artifact = Layout;
     type Data = ImageData;
     type Location = ImageLocation;
     type Replacement = ImageReplacement;
@@ -30,11 +30,10 @@ impl Modality for Image {
 
 impl TextRecognizable for Image {
     /// The OCR text a recognizer inspects: the [`Layout`] an enricher
-    /// stamped onto the call's artifacts, or `""` when none is present (an
-    /// image that was never OCR'd) — a recognizer then finds nothing,
-    /// rather than erroring.
-    fn as_text<'a>(_data: &'a ImageData, artifacts: &'a Artifacts) -> &'a str {
-        artifacts.get::<Layout>().map_or("", Layout::text)
+    /// stamped onto the call, or `""` when it is empty (an image that was
+    /// never OCR'd) — a recognizer then finds nothing, rather than erroring.
+    fn as_text<'a>(_data: &'a ImageData, artifact: Option<&'a Layout>) -> &'a str {
+        artifact.map_or("", Layout::text)
     }
 
     /// Resolve an OCR-text byte `range` to the region of the image it
@@ -42,16 +41,16 @@ impl TextRecognizable for Image {
     ///
     /// Unlike the byte-based text modalities, an image location is a 2-D
     /// region, so `locate` resolves `range` immediately against the OCR
-    /// word boxes (read from the call's artifacts) rather than deferring to
-    /// a lift. Returns `None` when the range resolves to nothing (no OCR
-    /// layout, or out of bounds) — there is no region to address, so the
-    /// caller drops the match rather than emit a placeless entity.
+    /// word boxes in the [`Layout`] rather than deferring to a lift. Returns
+    /// `None` when the range resolves to nothing (an empty layout, or out of
+    /// bounds) — there is no region to address, so the caller drops the match
+    /// rather than emit a placeless entity.
     fn locate(
         range: Range<usize>,
         _data: &ImageData,
-        artifacts: &Artifacts,
+        artifact: Option<&Layout>,
     ) -> Option<ImageLocation> {
-        artifacts.get::<Layout>().and_then(|t| t.resolve(range))
+        artifact?.resolve(range)
     }
 }
 
@@ -70,7 +69,7 @@ mod tests {
         let data = ImageData::new(bytes::Bytes::new(), Dimensions::new(10, 10));
         let scope = Scope::new();
         let ctx = RecognizerContext::<Image>::new(&scope);
-        assert_eq!(Image::as_text(&data, &ctx.artifacts), "");
+        assert_eq!(Image::as_text(&data, ctx.artifact()), "");
     }
 
     /// A context whose artifacts carry a one-block, one-word OCR result.
@@ -78,7 +77,7 @@ mod tests {
         let block = LayoutBlock::new(loc(0.0, 0.0, 100.0, 20.0), "Alice")
             .with_words(vec![LayoutWord::new(loc(0.0, 0.0, 100.0, 20.0), "Alice")]);
         let mut ctx = RecognizerContext::new(scope);
-        ctx.artifacts.insert(Layout::new(vec![block]));
+        ctx.set_artifact(Layout::new(vec![block]));
         ctx
     }
 
@@ -87,7 +86,7 @@ mod tests {
         let data = ImageData::new(bytes::Bytes::new(), Dimensions::new(10, 10));
         let scope = Scope::new();
         let ctx = ocr_context(&scope);
-        assert_eq!(Image::as_text(&data, &ctx.artifacts), "Alice");
+        assert_eq!(Image::as_text(&data, ctx.artifact()), "Alice");
     }
 
     #[test]
@@ -96,7 +95,7 @@ mod tests {
         let scope = Scope::new();
         let ctx = ocr_context(&scope);
         // "Alice" is bytes 0..5.
-        let region = Image::locate(0..5, &data, &ctx.artifacts).expect("range resolves");
+        let region = Image::locate(0..5, &data, ctx.artifact()).expect("range resolves");
         assert_eq!(region.bounding_box.min.x, 0.0);
         assert_eq!(region.bounding_box.max.x, 100.0);
     }
@@ -107,6 +106,6 @@ mod tests {
         let scope = Scope::new();
         let ctx = RecognizerContext::<Image>::new(&scope);
         // No OCR layout: the range can't be placed, so no location.
-        assert!(Image::locate(0..5, &data, &ctx.artifacts).is_none());
+        assert!(Image::locate(0..5, &data, ctx.artifact()).is_none());
     }
 }

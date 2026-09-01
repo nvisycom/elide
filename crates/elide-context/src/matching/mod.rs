@@ -15,11 +15,11 @@ mod substring;
 
 use std::ops::Range;
 
+use elide_core::modality::text::Token;
 use hipstr::HipStr;
 
 pub use self::lemma::LemmaMatcher;
 pub use self::substring::SubstringMatcher;
-use crate::io::Token;
 
 /// Whether the byte range `m` of `text` sits on word boundaries — the
 /// characters immediately before and after are not word characters. A

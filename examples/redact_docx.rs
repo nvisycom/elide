@@ -63,14 +63,18 @@ async fn main() -> Result<()> {
     // 3. Detect across the body and every container part. The report keeps
     //    each part's findings separate so you can inspect (and edit) them
     //    before anything is redacted.
-    let report = orchestrator
+    let analyzed = orchestrator
         .analyze(&mut document, &Directives::new())
         .await?;
-    print_report(&report);
+    print_report(&analyzed.report);
 
     // 4. Apply the (here unedited) report: redact the body, redact each
-    //    part, write the parts back, and re-encode the package.
-    orchestrator.anonymize_with(&mut document, report).await?;
+    //    part, write the parts back, and re-encode the package. The enrichment
+    //    (`analyzed.artifacts`) is not needed to redact; it is what a re-run
+    //    would reuse.
+    orchestrator
+        .anonymize_with(&mut document, analyzed.report)
+        .await?;
     let encoded = document.encode()?;
 
     // 5. Write the redacted `.docx` out. That is the whole deliverable: a

@@ -2,9 +2,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 
+mod analysis;
 mod directives;
 mod pipeline;
-mod report;
 
 use std::any::TypeId;
 use std::collections::HashMap;
@@ -13,17 +13,18 @@ use bytes::Bytes;
 use elide_codec::{DocumentHandle, FormatRegistry, Part, PartId, UntypedDocumentHandle};
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
+use elide_core::modality::{DataReader, DataWriter, Modality, NoArtifact, StreamDataReader};
 use elide_core::recognition::Scope;
 use elide_detection::Analyzer;
 use elide_redaction::Anonymizer;
 
+pub use self::analysis::{AnalyzedDocument, ArtifactSet, Report, ReportDeserializer};
+// `EntityGroup` / `ArtifactGroup` are bounds on the construction methods — named
+// in public signatures, so callers must be able to reach them.
+pub use self::analysis::{ArtifactGroup, EntityGroup};
+use self::analysis::{BodyReport, ModalityRegistry, PartReport};
 pub use self::directives::Directives;
 use self::pipeline::{AnalyzeOutcome, ErasedPipeline, ModalityPipeline};
-use self::report::{BodyReport, ModalityRegistry, PartReport};
-// `EntityGroup` is the bound on the construction methods — named in public
-// signatures, so callers must be able to reach it.
-pub use self::report::{EntityGroup, Report, ReportDeserializer};
 
 /// Drives analyze + redact across a whole document.
 ///
@@ -113,6 +114,7 @@ impl Orchestrator {
     where
         M: Modality,
         Vec<Entity<M>>: EntityGroup + serde::de::DeserializeOwned,
+        M::Artifact: crate::analysis::ArtifactGroup + serde::de::DeserializeOwned,
         DocumentHandle<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
     {
         self.pipelines.insert(
@@ -143,6 +145,7 @@ impl Orchestrator {
     where
         M: Modality,
         Vec<Entity<M>>: EntityGroup + serde::de::DeserializeOwned,
+        M::Artifact: crate::analysis::ArtifactGroup + serde::de::DeserializeOwned,
         DocumentHandle<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
     {
         match self.modality_pipeline_mut::<M>() {
@@ -166,6 +169,7 @@ impl Orchestrator {
     where
         M: Modality,
         Vec<Entity<M>>: EntityGroup + serde::de::DeserializeOwned,
+        M::Artifact: crate::analysis::ArtifactGroup + serde::de::DeserializeOwned,
         DocumentHandle<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
     {
         match self.modality_pipeline_mut::<M>() {
@@ -193,6 +197,7 @@ impl Orchestrator {
     where
         M: Modality,
         Vec<Entity<M>>: EntityGroup + serde::de::DeserializeOwned,
+        M::Artifact: crate::analysis::ArtifactGroup + serde::de::DeserializeOwned,
         DocumentHandle<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
     {
         self.pipelines.insert(
@@ -207,7 +212,10 @@ impl Orchestrator {
 
     /// Detect the entities of a whole document without redacting: its body
     /// *and* every container part whose modality has a registered pipeline.
-    /// Returns an editable [`Report`] to hand to [`anonymize_with`].
+    /// Returns an [`AnalyzedDocument`]: its editable [`report`] to hand to
+    /// [`anonymize_with`], and the [`artifacts`] (the OCR/transcript enrichment)
+    /// to persist across a review gap and pass to [`re_analyze`], which reuses
+    /// them instead of re-enriching.
     ///
     /// `directives` carries the caller's per-analysis inputs: the region
     /// [`Annotations`] for each modality present in the document, and an
@@ -227,60 +235,119 @@ impl Orchestrator {
     /// [`Annotations`]: elide_core::recognition::annotation::Annotations
     /// [`with_scope`]: Self::with_scope
     /// [`anonymize_with`]: Self::anonymize_with
+    /// [`re_analyze`]: Self::re_analyze
+    /// [`report`]: AnalyzedDocument::report
+    /// [`artifacts`]: AnalyzedDocument::artifacts
     /// [`entities`]: Report::entities
     /// [`part_entities`]: Report::part_entities
     pub async fn analyze(
         &self,
         document: &mut UntypedDocumentHandle,
         directives: &Directives,
-    ) -> Result<Report> {
+    ) -> Result<AnalyzedDocument> {
+        // A first pass is a re-run seeded with nothing: every body and part
+        // starts from the empty (default) artifact, so it enriches from
+        // scratch. Sharing the driver keeps the two entry points from drifting.
+        self.drive(document, &ArtifactSet::new(), directives).await
+    }
+
+    /// Re-detect over `document`, seeding each group's recognition with the
+    /// enrichment artifact from `prior` so the OCR/transcript is reused rather
+    /// than recomputed. The re-run counterpart to [`analyze`](Self::analyze),
+    /// for detection separated in time from a first pass: after the review gap,
+    /// re-run recognition (e.g. under a narrowed `scope` to add one recognizer)
+    /// without paying for OCR/STT again.
+    ///
+    /// A group `prior` has no artifact for — a body/part it never analyzed —
+    /// re-runs from an empty (default) artifact, i.e. it re-enriches. `document`
+    /// must be the same document the `prior` artifacts were produced from.
+    pub async fn re_analyze(
+        &self,
+        document: &mut UntypedDocumentHandle,
+        prior: &ArtifactSet,
+        directives: &Directives,
+    ) -> Result<AnalyzedDocument> {
+        self.drive(document, prior, directives).await
+    }
+
+    /// The shared analyze driver behind [`analyze`](Self::analyze) and
+    /// [`re_analyze`](Self::re_analyze): drive the body and every container part
+    /// through the matching pipeline, each seeded with its prior enrichment from
+    /// `prior` (an empty set on a first pass, so every group enriches from
+    /// scratch). The seeded artifact is downcast against the group's modality by
+    /// the erased pipeline, so a `prior` entry for a different modality resolves
+    /// to the default (empty) and that group re-enriches — the body and the
+    /// parts resolve their seed the same way.
+    async fn drive(
+        &self,
+        document: &mut UntypedDocumentHandle,
+        prior: &ArtifactSet,
+        directives: &Directives,
+    ) -> Result<AnalyzedDocument> {
         let mut report = Report::new();
+        let mut artifacts = ArtifactSet::new();
         // Per-call scope override wins; else the run-wide default.
         let scope = directives.scope.as_ref().unwrap_or(&self.scope);
         let annotations = &directives.annotations;
+        let empty: Box<dyn ArtifactGroup> = Box::new(NoArtifact);
 
-        // The body: offer it to each pipeline; the first whose modality
-        // matches analyzes it in place. The pipeline's key is the body's
-        // modality `TypeId`.
+        // The body: offer it to each pipeline; the first whose modality matches
+        // analyzes it in place, seeded with the body's prior artifact. The
+        // pipeline's key is the body's modality `TypeId`.
         for (modality, pipeline) in &self.pipelines {
+            let seed = prior
+                .body
+                .as_ref()
+                .map_or(empty.as_ref(), |b| b.artifact.as_ref());
             if let Some(analyzed) = pipeline
-                .analyze_in_place(document, scope, annotations)
+                .analyze_in_place(document, scope, annotations, seed)
                 .await?
             {
                 #[cfg(feature = "usage")]
-                let (entities, usage) = analyzed;
+                let (entities, artifact, usage) = analyzed;
                 #[cfg(not(feature = "usage"))]
-                let entities = analyzed;
+                let (entities, artifact) = analyzed;
                 #[cfg(feature = "usage")]
                 report.usage.extend(usage);
+                let name = entities.modality_name();
                 report.body = Some(BodyReport {
                     modality: *modality,
                     entities,
                 });
+                // Only an *enriched* body carries an artifact to persist; an
+                // un-enriched one (or a no-enrichment modality) stores nothing.
+                if let Some(artifact) = artifact {
+                    artifacts.set_body(*modality, name, artifact);
+                }
                 break;
             }
         }
 
-        // The parts: decode each, offer it to each pipeline; the matching
-        // one analyzes it and its handle is cached for the apply phase.
+        // The parts: decode each, offer it to each pipeline; the matching one
+        // analyzes it (seeded with the part's prior artifact) and its handle is
+        // cached for the apply phase.
         let parts = document.as_container_mut().map(|c| c.parts());
         for part in parts.into_iter().flatten() {
             let Ok(handle) = self.registry.decode(part.bytes.clone(), &part.hint).await else {
                 continue; // no codec for this part
             };
+            let prior_part = prior.parts.get(&part.id);
             let mut handle = Some(handle);
             for pipeline in self.pipelines.values() {
                 let Some(taken) = handle.take() else { break };
-                match pipeline.analyze(taken, scope, annotations).await? {
+                let seed = prior_part.map_or(empty.as_ref(), |p| p.artifact.as_ref());
+                match pipeline.analyze(taken, scope, annotations, seed).await? {
                     AnalyzeOutcome::Accepted {
                         modality,
                         handle: retained,
                         entities,
+                        artifact,
                         #[cfg(feature = "usage")]
                         usage,
                     } => {
                         #[cfg(feature = "usage")]
                         report.usage.extend(usage);
+                        let name = entities.modality_name();
                         report.parts.insert(
                             part.id.clone(),
                             PartReport {
@@ -289,6 +356,9 @@ impl Orchestrator {
                                 entities,
                             },
                         );
+                        if let Some(artifact) = artifact {
+                            artifacts.set_part(part.id.clone(), modality, name, artifact);
+                        }
                         break;
                     }
                     AnalyzeOutcome::Rejected(returned) => handle = Some(returned),
@@ -296,7 +366,7 @@ impl Orchestrator {
             }
         }
 
-        Ok(report)
+        Ok(AnalyzedDocument { report, artifacts })
     }
 
     /// Apply a (possibly edited) [`Report`] back onto `document`: redact the
@@ -403,8 +473,8 @@ impl Orchestrator {
         document: &mut UntypedDocumentHandle,
         directives: &Directives,
     ) -> Result<Report> {
-        let report = self.analyze(document, directives).await?;
-        self.anonymize_with(document, report).await
+        let analyzed = self.analyze(document, directives).await?;
+        self.anonymize_with(document, analyzed.report).await
     }
 
     /// Reconstruct a [`Report`] from its serialized wire form, routing each

@@ -15,12 +15,12 @@ use crate::modality::{ModalityData, extension_or};
 /// and encoding inference (the container format a decoder should expect).
 /// The recognizable text — a timestamped transcript — is *not* held here;
 /// a speech-to-text [`Enricher`] stamps it onto the call's
-/// [`artifacts`], keeping
+/// [`artifact`], keeping
 /// `AudioData` the codec's payload alone.
 ///
 /// [`Audio`]: super::Audio
 /// [`Enricher`]: crate::recognition::Enricher
-/// [`artifacts`]: crate::recognition::RecognizerContext::artifacts
+/// [`artifact`]: crate::recognition::RecognizerContext::artifact
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

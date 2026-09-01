@@ -198,15 +198,52 @@ pub trait ModalityLocation: Clone + fmt::Debug + Send + Sync + 'static {
 /// [`Operator`]: crate::operator::Operator
 pub trait ModalityReplacement: Clone + fmt::Debug + Send + Sync + 'static {}
 
+/// Enrichment an [`Enricher`] derives from a medium's payload for its
+/// recognizers to read: an image's OCR [`Layout`], an audio clip's STT
+/// [`Transcription`]. It is *context state*, produced once per payload and read
+/// by recognizers through the medium's text/location projection; it never enters
+/// an entity. A medium with no enrichment uses [`NoArtifact`].
+///
+/// [`Default`] stands in for "not yet enriched": an empty artifact reads as no
+/// text, so a recognizer over an un-enriched payload finds nothing rather than
+/// needing an `Option`.
+///
+/// [`Enricher`]: crate::recognition::Enricher
+/// [`Layout`]: crate::modality::image::Layout
+/// [`Transcription`]: crate::modality::audio::Transcription
+pub trait ModalityArtifact:
+    Clone + fmt::Debug + Default + PartialEq + Send + Sync + 'static
+{
+    /// Whether the artifact carries no enrichment — by definition the
+    /// [`Default`] value, since a partial artifact is never a valid state (each
+    /// artifact's cached text is derived from its entries by its constructor).
+    /// An enricher skips itself when its artifact is already non-empty, and a
+    /// serialized report omits an empty artifact.
+    fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// The artifact of a medium with no enrichment (plain text, tabular): a
+/// zero-sized stand-in that carries nothing and is omitted from a serialized
+/// report.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct NoArtifact;
+
+impl ModalityArtifact for NoArtifact {}
+
 /// Medium that entities can be located within.
 ///
 /// Implemented by a modality crate's marker type, binding the medium's
-/// [`Data`], [`Location`], and [`Replacement`] types together at compile
-/// time.
+/// [`Data`], [`Location`], [`Replacement`], and [`Artifact`] types together at
+/// compile time.
 ///
 /// [`Data`]: Modality::Data
 /// [`Location`]: Modality::Location
 /// [`Replacement`]: Modality::Replacement
+/// [`Artifact`]: Modality::Artifact
 pub trait Modality: Send + Sync + 'static {
     /// Payload a recognizer inspects for this medium.
     type Data: ModalityData;
@@ -216,6 +253,10 @@ pub trait Modality: Send + Sync + 'static {
 
     /// Instruction an anonymizer produces to hide an entity.
     type Replacement: ModalityReplacement;
+
+    /// Enrichment a recognizer reads for this medium ([`NoArtifact`] when the
+    /// medium has none).
+    type Artifact: ModalityArtifact;
 
     /// Stable, human-readable name for the medium (e.g. `"text"`).
     const NAME: &'static str;

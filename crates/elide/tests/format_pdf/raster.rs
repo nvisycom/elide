@@ -6,7 +6,7 @@
 //! by default; run it where PDFium is installed:
 //!
 //! ```sh
-//! cargo test -p elide --features codec-pdf-render,mock,serde \
+//! cargo test -p elide --features codec-pdf-render,test-utils,serde \
 //!     --test e2e_pdf_raster -- --ignored
 //! ```
 //!

@@ -18,6 +18,7 @@ use std::ops::Range;
 use serde::{Deserialize, Serialize};
 
 use super::ImageLocation;
+use crate::modality::ModalityArtifact;
 use crate::primitive::{BoundingBox, Confidence, Point};
 
 /// Separator inserted between blocks when building the flat layout text, so
@@ -190,6 +191,8 @@ impl Layout {
         acc.into_location()
     }
 }
+
+impl ModalityArtifact for Layout {}
 
 /// Accumulates the bounding boxes of covered regions into one location.
 #[derive(Default)]

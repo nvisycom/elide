@@ -19,12 +19,12 @@ homepage = { workspace = true }
 documentation = { workspace = true }
 
 [features]
-## No features on by default: the NER traits ship bare. Enable `mock`
+## No features on by default: the NER traits ship bare. Enable `test-utils`
 ## for the no-op backend.
 default = []
 
 ## Ship the no-op `MockBackend` for tests, examples, and offline wiring.
-mock = []
+test-utils = []
 
 ## Resource-usage accounting: surface the token counts a call spent on the
 ## `NerResponse` and the `ModelUsage` the recognizer attaches. Off by default.

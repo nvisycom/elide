@@ -6,6 +6,7 @@ mod replacement;
 mod source_ref;
 #[cfg(feature = "test-util")]
 mod test_doc;
+mod tokens;
 
 use std::ops::Range;
 
@@ -16,9 +17,9 @@ pub use self::source_ref::SourceRef;
 #[cfg(feature = "test-util")]
 #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
 pub use self::test_doc::TextDoc;
+pub use self::tokens::{Token, Tokens};
 use super::Modality;
 use super::text_recognizable::TextRecognizable;
-use crate::recognition::Artifacts;
 
 /// Text modality: data is [`TextData`], locations are
 /// [`TextLocation`] byte ranges, replacements are [`TextReplacement`].
@@ -27,6 +28,7 @@ use crate::recognition::Artifacts;
 pub struct Text;
 
 impl Modality for Text {
+    type Artifact = Tokens;
     type Data = TextData;
     type Location = TextLocation;
     type Replacement = TextReplacement;
@@ -35,16 +37,20 @@ impl Modality for Text {
 }
 
 impl TextRecognizable for Text {
-    fn as_text<'a>(data: &'a TextData, _artifacts: &'a Artifacts) -> &'a str {
+    fn as_text<'a>(data: &'a TextData, _artifact: Option<&'a Tokens>) -> &'a str {
         data.text.as_str()
     }
 
     fn locate(
         range: Range<usize>,
         _data: &TextData,
-        _artifacts: &Artifacts,
+        _artifact: Option<&Tokens>,
     ) -> Option<TextLocation> {
         Some(TextLocation::new(range.start, range.end))
+    }
+
+    fn as_tokens(artifact: Option<&Tokens>) -> Option<&[Token]> {
+        artifact.filter(|t| !t.is_empty()).map(Tokens::as_slice)
     }
 }
 
@@ -65,5 +71,28 @@ mod tests {
 
         let starts: Vec<usize> = batch.iter().map(|(loc, _)| loc.range.start).collect();
         assert_eq!(starts, [0, 10, 20]);
+    }
+
+    #[test]
+    fn as_tokens_exposes_producer_lemmas() {
+        // A producer whose lemma differs from the surface form: the context
+        // enhancer reads `as_tokens` to boost on the lemma, so the differing
+        // lemma must survive the artifact -> tokens hop.
+        let tokens = Tokens::new(vec![
+            Token::from_text("running", 0..7).with_lemma("run"),
+            Token::from_text("dogs", 8..12).with_lemma("dog"),
+        ]);
+        let seen = Text::as_tokens(Some(&tokens)).expect("text carries its tokens");
+        let lemmas: Vec<&str> = seen.iter().map(|t| t.lemma.as_str()).collect();
+        assert_eq!(lemmas, ["run", "dog"]);
+    }
+
+    #[test]
+    fn as_tokens_is_none_without_an_artifact() {
+        // No tokenizing enricher ran (None), or one ran and produced nothing
+        // (an empty artifact): either way, no tokens — context matching falls
+        // back to the surface text.
+        assert!(Text::as_tokens(None).is_none());
+        assert!(Text::as_tokens(Some(&Tokens::default())).is_none());
     }
 }

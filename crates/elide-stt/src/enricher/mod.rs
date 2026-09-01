@@ -3,15 +3,13 @@
 //!
 //! The speech-to-text counterpart to language detection: it produces no
 //! entities, it *enriches*. On each call it transcribes the [`AudioData`]
-//! bytes through its [`SttBackend`] and inserts the resulting
-//! [`Transcription`] into the call's
-//! [`artifacts`].
-//! Recognizers running afterward read the transcript text and resolve each
-//! match back to the audio time it was spoken in (see [`Audio`]'s
-//! [`TextRecognizable`] impl).
+//! bytes through its [`SttBackend`] and stamps the resulting [`Transcription`]
+//! onto the call as `Audio`'s [`artifact`]. Recognizers running afterward read
+//! the transcript text and resolve each match back to the audio time it was
+//! spoken in (see [`Audio`]'s [`TextRecognizable`] impl).
 //!
 //! [`AudioData`]: elide_core::modality::audio::AudioData
-//! [`artifacts`]: elide_core::recognition::RecognizerContext::artifacts
+//! [`artifact`]: elide_core::recognition::RecognizerContext::artifact
 //! [`SttBackend`]: crate::SttBackend
 //! [`Audio`]: elide_core::modality::audio::Audio
 //! [`TextRecognizable`]: elide_core::modality::TextRecognizable
@@ -24,13 +22,13 @@ use elide_core::recognition::{Enricher, Enrichment, RecognizerContext, Recognize
 use elide_core::{Error, Result};
 use hipstr::HipStr;
 
-#[cfg(any(test, feature = "mock"))]
+#[cfg(any(test, feature = "test-utils"))]
 use crate::MockBackend;
 use crate::{SttBackend, SttRequest};
 
 /// An [`Enricher<Audio>`] that transcribes the clip.
 ///
-/// Stamps the resulting [`Transcription`] onto the call's artifacts. Holds an
+/// Stamps the resulting [`Transcription`] onto the call's artifact. Holds an
 /// `Arc<dyn SttBackend>`; cloning shares the backend. Registered on
 /// an `Analyzer<Audio>` ahead of its recognizers, the same way a language
 /// detector is registered on a text analyzer.
@@ -90,11 +88,11 @@ impl SttEnricherBuilder {
     /// Wire the no-op [`MockBackend`] as this enricher's backend.
     ///
     /// [`MockBackend`]: crate::MockBackend
-    #[cfg(any(test, feature = "mock"))]
-    #[cfg_attr(docsrs, doc(cfg(feature = "mock")))]
+    #[cfg(any(test, feature = "test-utils"))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
     #[must_use]
     pub fn with_mock_backend(self) -> Self {
-        self.with_backend(MockBackend)
+        self.with_backend(MockBackend::new())
     }
 
     /// Finish the builder. Errors when `name` or `backend` is unset.
@@ -114,8 +112,9 @@ impl Enricher<Audio> for SttEnricher {
         data: &AudioData,
         ctx: &mut RecognizerContext<'_, Audio>,
     ) -> Result<Enrichment> {
-        // Already transcribed (e.g. a second enricher pass): leave it.
-        if ctx.artifacts.contains::<Transcription>() {
+        // Already transcribed (a second enricher pass, or a restored artifact on
+        // a re-run): leave it, so re-recognition never re-invokes the model.
+        if ctx.is_enriched() {
             return Ok(Enrichment::none());
         }
         let mut request = SttRequest::new(&data.bytes);
@@ -126,7 +125,7 @@ impl Enricher<Audio> for SttEnricher {
             request = request.with_correlation_id(id);
         }
         let response = self.backend.transcribe(request).await?;
-        ctx.artifacts.insert(Transcription::new(response.segments));
+        ctx.set_artifact(Transcription::new(response.segments));
         // The transcription model vouches for its own identity; STT reports no
         // token counts today.
         #[cfg(feature = "usage")]
@@ -147,34 +146,20 @@ mod tests {
     use super::*;
     use crate::SttResponse;
 
-    /// Backend returning a fixed two-word segment with timings.
-    #[derive(Clone)]
-    struct CannedBackend;
-
-    #[async_trait::async_trait]
-    impl SttBackend for CannedBackend {
-        fn provenance(&self) -> ModelEvent {
-            ModelEvent {
-                name: "canned".into(),
-                ..ModelEvent::default()
-            }
-        }
-
-        async fn transcribe(&self, _request: SttRequest<'_>) -> Result<SttResponse> {
-            let segment = TranscriptSegment::new(TimeSpan::from_millis(0, 900), "hi Alice")
-                .with_words(vec![
-                    TranscriptWord::new(TimeSpan::from_millis(0, 300), "hi"),
-                    TranscriptWord::new(TimeSpan::from_millis(300, 900), "Alice"),
-                ]);
-            Ok(SttResponse::new(vec![segment]))
-        }
+    /// A fixed two-word segment with timings the enricher stamps as a
+    /// `Transcription`.
+    fn canned_segment() -> TranscriptSegment {
+        TranscriptSegment::new(TimeSpan::from_millis(0, 900), "hi Alice").with_words(vec![
+            TranscriptWord::new(TimeSpan::from_millis(0, 300), "hi"),
+            TranscriptWord::new(TimeSpan::from_millis(300, 900), "Alice"),
+        ])
     }
 
     #[tokio::test]
     async fn enrich_stamps_a_readable_transcript() {
         let enricher = SttEnricher::builder()
             .with_name("stt")
-            .with_backend(CannedBackend)
+            .with_backend(MockBackend::with(vec![canned_segment()]))
             .build()
             .expect("builder succeeds");
         // The usage id carries the caller's name, not a fixed crate string.
@@ -191,14 +176,94 @@ mod tests {
         #[cfg(feature = "usage")]
         {
             let model = _enrichment.model_usage.expect("STT reports its model");
-            assert_eq!(model.model, "canned");
+            assert_eq!(model.model, "mock-stt");
         }
 
-        // Recognizers read the transcript from the call's artifacts.
-        assert_eq!(Audio::as_text(&data, &ctx.artifacts), "hi Alice");
+        // Recognizers read the transcript from the call's artifact.
+        assert_eq!(Audio::as_text(&data, ctx.artifact()), "hi Alice");
         // "Alice" is at bytes 3..8; locate resolves it to the word's time.
-        let loc = Audio::locate(3..8, &data, &ctx.artifacts).expect("range resolves");
+        let loc = Audio::locate(3..8, &data, ctx.artifact()).expect("range resolves");
         assert_eq!(loc.span.start_millis(), 300);
         assert_eq!(loc.span.end_millis(), 900);
+    }
+
+    mockall::mock! {
+        /// A spy STT backend whose `transcribe` calls are counted and verifiable,
+        /// for asserting the enricher's self-skip on a re-run.
+        SttSpy {}
+
+        #[async_trait::async_trait]
+        impl SttBackend for SttSpy {
+            fn provenance(&self) -> ModelEvent;
+            #[mockall::concretize]
+            async fn transcribe(&self, request: SttRequest<'_>) -> Result<SttResponse>;
+        }
+    }
+
+    /// The re-run reuse: an enrich over a context already carrying an artifact
+    /// (a restored `Transcription` from a prior report) skips the backend
+    /// entirely, so re-recognition never re-invokes the STT model.
+    #[tokio::test]
+    async fn a_present_artifact_skips_the_backend() {
+        let mut backend = MockSttSpy::new();
+        backend.expect_provenance().returning(|| ModelEvent {
+            name: "spy".into(),
+            ..ModelEvent::default()
+        });
+        // The self-skip, asserted as a call cardinality: transcribe fires exactly
+        // once across both enrich calls. mockall fails the test on drop if not.
+        backend
+            .expect_transcribe()
+            .times(1)
+            .returning(|_| Ok(SttResponse::new(vec![canned_segment()])));
+
+        let enricher = SttEnricher::builder()
+            .with_name("stt")
+            .with_backend(backend)
+            .build()
+            .expect("builder succeeds");
+        let data = AudioData::new(b"audio".to_vec());
+        let scope = Scope::new();
+
+        // First pass: empty artifact → the backend runs once.
+        let mut ctx = RecognizerContext::new(&scope);
+        enricher.enrich(&data, &mut ctx).await.unwrap();
+
+        // Re-run: seed the context with the prior (restored) artifact. The
+        // enricher self-skips — transcribe is not called again, enforced by the
+        // `.times(1)` above — and the seeded transcript is still readable.
+        let restored = ctx.artifact().cloned().expect("the first pass enriched");
+        let mut ctx = RecognizerContext::new(&scope).with_artifact(restored);
+        enricher.enrich(&data, &mut ctx).await.unwrap();
+        assert_eq!(Audio::as_text(&data, ctx.artifact()), "hi Alice");
+    }
+
+    /// A restored *empty* `Transcription` — a clip a prior pass transcribed to
+    /// silence — still counts as enriched, so the backend is not called again.
+    /// Guarding on artifact *presence* rather than emptiness is what makes this
+    /// hold.
+    #[tokio::test]
+    async fn a_restored_empty_artifact_skips_the_backend() {
+        let mut backend = MockSttSpy::new();
+        backend.expect_provenance().returning(|| ModelEvent {
+            name: "spy".into(),
+            ..ModelEvent::default()
+        });
+        // The backend must never run: the seeded (empty) artifact is enrichment.
+        backend.expect_transcribe().times(0);
+
+        let enricher = SttEnricher::builder()
+            .with_name("stt")
+            .with_backend(backend)
+            .build()
+            .expect("builder succeeds");
+        let data = AudioData::new(b"audio".to_vec());
+        let scope = Scope::new();
+
+        // Seed an empty Transcription — the recorded result of a prior pass that
+        // found silence. The enricher must treat it as enriched and skip.
+        let mut ctx = RecognizerContext::new(&scope).with_artifact(Transcription::default());
+        enricher.enrich(&data, &mut ctx).await.unwrap();
+        assert_eq!(Audio::as_text(&data, ctx.artifact()), "");
     }
 }

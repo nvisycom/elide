@@ -3,16 +3,39 @@
 
 use elide_core::Result;
 use elide_core::entity::audit::ModelEvent;
+use elide_core::modality::audio::TranscriptSegment;
 
 use super::{SttBackend, SttRequest, SttResponse};
 
-/// Mock STT backend: every call returns an empty response.
+/// Mock STT backend: returns a fixed set of segments on every call.
 ///
-/// Useful as a test stub, in examples that must run without a model, and
-/// as the default STT backend when the operator wants the extractor wired
-/// but isn't ready to configure a real backend.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct MockBackend;
+/// Empty by default ([`new`](Self::new) / [`default`](Default::default)) — the
+/// no-op stub examples and offline wiring rely on, transcribing nothing. Give it
+/// canned segments with [`with`](Self::with) to have every call enrich with the
+/// same [`Transcription`], for tests that need a real artifact to read back.
+///
+/// [`Transcription`]: elide_core::modality::audio::Transcription
+#[derive(Debug, Default, Clone)]
+pub struct MockBackend {
+    segments: Vec<TranscriptSegment>,
+}
+
+impl MockBackend {
+    /// An empty mock backend: every call transcribes nothing.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// A mock backend that returns `segments` on every call, so the enricher
+    /// stamps the same [`Transcription`] onto each request.
+    ///
+    /// [`Transcription`]: elide_core::modality::audio::Transcription
+    #[must_use]
+    pub fn with(segments: Vec<TranscriptSegment>) -> Self {
+        Self { segments }
+    }
+}
 
 #[async_trait::async_trait]
 impl SttBackend for MockBackend {
@@ -24,6 +47,6 @@ impl SttBackend for MockBackend {
     }
 
     async fn transcribe(&self, _request: SttRequest<'_>) -> Result<SttResponse> {
-        Ok(SttResponse::default())
+        Ok(SttResponse::new(self.segments.clone()))
     }
 }
