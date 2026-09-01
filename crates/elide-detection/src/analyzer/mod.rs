@@ -166,7 +166,10 @@ impl<M: Modality> Analyzer<M> {
         // through, so no enricher or recognizer runs on a scope that asked for
         // nothing — and no detected entity can then slip through unredacted.
         if ctx.catalog().is_empty() {
-            return Ok(Analysis::new(Vec::new()));
+            // Detect nothing, but carry the seeded artifact through: a re-run
+            // seeded with a prior OCR/transcript must report it back unchanged
+            // so `drive` persists it, or the next re-run would re-enrich.
+            return Ok(Analysis::new(Vec::new()).with_artifact(ctx.artifact.clone()));
         }
         // Usage accumulates in run order: enrichers (sequential) first, then
         // recognizers.

@@ -305,7 +305,7 @@ impl Fixture {
         let analyzer = Analyzer::new().with_enricher(
             SttEnricher::builder()
                 .with_name("mock-stt")
-                .with_backend(MockBackend)
+                .with_backend(MockBackend::new())
                 .build()
                 .expect("stt enricher builds"),
         );
@@ -369,7 +369,7 @@ impl Fixture {
         let analyzer = Analyzer::new().with_enricher(
             OcrEnricher::builder()
                 .with_name("mock-ocr")
-                .with_backend(MockBackend)
+                .with_backend(MockBackend::new())
                 .build()
                 .expect("ocr enricher builds"),
         );

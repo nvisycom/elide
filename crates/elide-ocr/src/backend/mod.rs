@@ -75,7 +75,7 @@ mod tests {
 
     #[tokio::test]
     async fn mock_returns_empty() {
-        let backend = MockBackend;
+        let backend = MockBackend::new();
         let image = vec![0u8; 8];
         let response = backend.recognize(OcrRequest::new(&image)).await.unwrap();
         assert!(response.blocks.is_empty());

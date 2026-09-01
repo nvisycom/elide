@@ -212,7 +212,10 @@ impl Orchestrator {
 
     /// Detect the entities of a whole document without redacting: its body
     /// *and* every container part whose modality has a registered pipeline.
-    /// Returns an editable [`Report`] to hand to [`anonymize_with`].
+    /// Returns an [`AnalyzedDocument`]: its editable [`report`] to hand to
+    /// [`anonymize_with`], and the [`artifacts`] (the OCR/transcript enrichment)
+    /// to persist across a review gap and pass to [`re_analyze`], which reuses
+    /// them instead of re-enriching.
     ///
     /// `directives` carries the caller's per-analysis inputs: the region
     /// [`Annotations`] for each modality present in the document, and an
@@ -232,6 +235,9 @@ impl Orchestrator {
     /// [`Annotations`]: elide_core::recognition::annotation::Annotations
     /// [`with_scope`]: Self::with_scope
     /// [`anonymize_with`]: Self::anonymize_with
+    /// [`re_analyze`]: Self::re_analyze
+    /// [`report`]: AnalyzedDocument::report
+    /// [`artifacts`]: AnalyzedDocument::artifacts
     /// [`entities`]: Report::entities
     /// [`part_entities`]: Report::part_entities
     pub async fn analyze(

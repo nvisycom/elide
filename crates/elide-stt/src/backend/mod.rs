@@ -64,7 +64,7 @@ mod tests {
 
     #[tokio::test]
     async fn mock_returns_empty() {
-        let backend = MockBackend;
+        let backend = MockBackend::new();
         let audio = vec![0u8; 8];
         let response = backend.transcribe(SttRequest::new(&audio)).await.unwrap();
         assert!(response.segments.is_empty());

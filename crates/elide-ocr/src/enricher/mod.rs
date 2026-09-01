@@ -92,7 +92,7 @@ impl OcrEnricherBuilder {
     #[cfg_attr(docsrs, doc(cfg(feature = "mock")))]
     #[must_use]
     pub fn with_mock_backend(self) -> Self {
-        self.with_backend(MockBackend)
+        self.with_backend(MockBackend::new())
     }
 
     /// Finish the builder. Errors when `name` or `backend` is unset.
