@@ -89,7 +89,7 @@ impl ArtifactSet {
     #[must_use]
     pub fn insert_body<M: Modality>(mut self, artifact: M::Artifact) -> Self
     where
-        M::Artifact: ArtifactGroup,
+        M::Artifact: serde::Serialize,
     {
         self.body = Some(ArtifactEntry {
             modality: TypeId::of::<M>(),
@@ -104,7 +104,7 @@ impl ArtifactSet {
     #[must_use]
     pub fn insert_part<P: Modality>(mut self, id: PartId, artifact: P::Artifact) -> Self
     where
-        P::Artifact: ArtifactGroup,
+        P::Artifact: serde::Serialize,
     {
         self.parts.insert(
             id,

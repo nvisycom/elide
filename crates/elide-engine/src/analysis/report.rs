@@ -188,7 +188,7 @@ impl Report {
     #[must_use]
     pub fn insert_body<M: Modality>(mut self, entities: Vec<Entity<M>>) -> Self
     where
-        Vec<Entity<M>>: EntityGroup,
+        Vec<Entity<M>>: serde::Serialize,
     {
         self.body = Some(BodyReport {
             modality: TypeId::of::<M>(),
@@ -208,7 +208,7 @@ impl Report {
     #[must_use]
     pub fn insert_part<P: Modality>(mut self, id: PartId, entities: Vec<Entity<P>>) -> Self
     where
-        Vec<Entity<P>>: EntityGroup,
+        Vec<Entity<P>>: serde::Serialize,
     {
         self.parts.insert(
             id,

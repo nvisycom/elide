@@ -28,9 +28,7 @@ use elide::recognition::pattern::PatternRecognizer;
 use elide::recognition::{Recognizer, Scope};
 use elide::redaction::operators::{Erase, Mask, Replace};
 use elide::redaction::{Anonymizer, Operator, Rule};
-use elide::{
-    ArtifactGroup, Directives, EntityGroup, Error, ErrorKind, Orchestrator, Report, Result,
-};
+use elide::{Directives, Error, ErrorKind, Orchestrator, Report, Result};
 
 /// Outcome of one end-to-end run: the entities that survived dedup and
 /// the re-encoded redacted document.
@@ -421,8 +419,8 @@ impl Fixture {
     where
         M: TextRecognizable,
         Entity<M>: Clone,
-        Vec<Entity<M>>: EntityGroup + serde::de::DeserializeOwned,
-        M::Artifact: ArtifactGroup + serde::Serialize + serde::de::DeserializeOwned,
+        Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
+        M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
         DocumentHandle<M>: StreamDataReader<M>,
         Replace: Operator<M>,
         Mask: Operator<M>,
@@ -450,8 +448,8 @@ impl Fixture {
     where
         M: TextRecognizable,
         Entity<M>: Clone,
-        Vec<Entity<M>>: EntityGroup + serde::de::DeserializeOwned,
-        M::Artifact: ArtifactGroup + serde::Serialize + serde::de::DeserializeOwned,
+        Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
+        M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
         DocumentHandle<M>: StreamDataReader<M>,
         Replace: Operator<M>,
         Mask: Operator<M>,

@@ -19,10 +19,11 @@ use elide_detection::Analyzer;
 use elide_redaction::Anonymizer;
 
 pub use self::analysis::{AnalyzedDocument, ArtifactSet, Report, ReportDeserializer};
-// `EntityGroup` / `ArtifactGroup` are bounds on the construction methods — named
-// in public signatures, so callers must be able to reach them.
-pub use self::analysis::{ArtifactGroup, EntityGroup};
-use self::analysis::{BodyReport, ModalityRegistry, PartReport};
+// `EntityGroup` / `ArtifactGroup` are the crate-internal erased storage the
+// report and artifact set hold; the public construction bounds are expressed in
+// terms of `serde::Serialize`, which the blanket impls satisfy, so neither trait
+// is named in any public signature and both stay `pub(crate)`.
+use self::analysis::{ArtifactGroup, BodyReport, ModalityRegistry, PartReport};
 pub use self::directives::Directives;
 use self::pipeline::{AnalyzeOutcome, ErasedPipeline, ModalityPipeline};
 
@@ -113,8 +114,8 @@ impl Orchestrator {
     pub fn with_modality<M>(mut self, analyzer: Analyzer<M>, anonymizer: Anonymizer<M>) -> Self
     where
         M: Modality,
-        Vec<Entity<M>>: EntityGroup + serde::de::DeserializeOwned,
-        M::Artifact: crate::analysis::ArtifactGroup + serde::de::DeserializeOwned,
+        Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
+        M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
         DocumentHandle<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
     {
         self.pipelines.insert(
@@ -144,8 +145,8 @@ impl Orchestrator {
     pub fn with_analyzer<M>(mut self, analyzer: Analyzer<M>) -> Self
     where
         M: Modality,
-        Vec<Entity<M>>: EntityGroup + serde::de::DeserializeOwned,
-        M::Artifact: crate::analysis::ArtifactGroup + serde::de::DeserializeOwned,
+        Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
+        M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
         DocumentHandle<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
     {
         match self.modality_pipeline_mut::<M>() {
@@ -168,8 +169,8 @@ impl Orchestrator {
     pub fn with_anonymizer<M>(mut self, anonymizer: Anonymizer<M>) -> Self
     where
         M: Modality,
-        Vec<Entity<M>>: EntityGroup + serde::de::DeserializeOwned,
-        M::Artifact: crate::analysis::ArtifactGroup + serde::de::DeserializeOwned,
+        Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
+        M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
         DocumentHandle<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
     {
         match self.modality_pipeline_mut::<M>() {
@@ -196,8 +197,8 @@ impl Orchestrator {
     fn insert_pipeline<M>(&mut self, analyzer: Analyzer<M>, anonymizer: Anonymizer<M>)
     where
         M: Modality,
-        Vec<Entity<M>>: EntityGroup + serde::de::DeserializeOwned,
-        M::Artifact: crate::analysis::ArtifactGroup + serde::de::DeserializeOwned,
+        Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
+        M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
         DocumentHandle<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
     {
         self.pipelines.insert(
