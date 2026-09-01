@@ -15,9 +15,8 @@ use std::ops::Range;
 pub use self::location::TabularLocation;
 pub use self::replacement::TabularReplacement;
 use super::Modality;
-use super::text::TextData;
+use super::text::{TextData, Tokens};
 use super::text_recognizable::TextRecognizable;
-use crate::recognition::Artifacts;
 
 /// Tabular modality: cells hold text, so data is [`TextData`] and
 /// replacements are [`TabularReplacement`]; only [`TabularLocation`] is
@@ -27,6 +26,7 @@ use crate::recognition::Artifacts;
 pub struct Tabular;
 
 impl Modality for Tabular {
+    type Artifact = Tokens;
     type Data = TextData;
     type Location = TabularLocation;
     type Replacement = TabularReplacement;
@@ -35,14 +35,14 @@ impl Modality for Tabular {
 }
 
 impl TextRecognizable for Tabular {
-    fn as_text<'a>(data: &'a TextData, _artifacts: &'a Artifacts) -> &'a str {
+    fn as_text<'a>(data: &'a TextData, _artifact: &'a Tokens) -> &'a str {
         data.text.as_str()
     }
 
     fn locate(
         range: Range<usize>,
         _data: &TextData,
-        _artifacts: &Artifacts,
+        _artifact: &Tokens,
     ) -> Option<TabularLocation> {
         // Chunk-local: only the intra-cell byte range is known here; the
         // codec's lift fills the row/column from the chunk.

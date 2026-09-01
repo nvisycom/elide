@@ -6,6 +6,7 @@ mod replacement;
 mod source_ref;
 #[cfg(feature = "test-util")]
 mod test_doc;
+mod tokens;
 
 use std::ops::Range;
 
@@ -16,9 +17,9 @@ pub use self::source_ref::SourceRef;
 #[cfg(feature = "test-util")]
 #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
 pub use self::test_doc::TextDoc;
+pub use self::tokens::{Token, Tokens};
 use super::Modality;
 use super::text_recognizable::TextRecognizable;
-use crate::recognition::Artifacts;
 
 /// Text modality: data is [`TextData`], locations are
 /// [`TextLocation`] byte ranges, replacements are [`TextReplacement`].
@@ -27,6 +28,7 @@ use crate::recognition::Artifacts;
 pub struct Text;
 
 impl Modality for Text {
+    type Artifact = Tokens;
     type Data = TextData;
     type Location = TextLocation;
     type Replacement = TextReplacement;
@@ -35,15 +37,11 @@ impl Modality for Text {
 }
 
 impl TextRecognizable for Text {
-    fn as_text<'a>(data: &'a TextData, _artifacts: &'a Artifacts) -> &'a str {
+    fn as_text<'a>(data: &'a TextData, _artifact: &'a Tokens) -> &'a str {
         data.text.as_str()
     }
 
-    fn locate(
-        range: Range<usize>,
-        _data: &TextData,
-        _artifacts: &Artifacts,
-    ) -> Option<TextLocation> {
+    fn locate(range: Range<usize>, _data: &TextData, _artifact: &Tokens) -> Option<TextLocation> {
         Some(TextLocation::new(range.start, range.end))
     }
 }

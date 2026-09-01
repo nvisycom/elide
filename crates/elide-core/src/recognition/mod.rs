@@ -9,7 +9,6 @@
 //! [`AuditEvent`]: crate::entity::audit::AuditEvent
 
 pub mod annotation;
-mod artifacts;
 mod context;
 mod enricher;
 mod label;
@@ -23,7 +22,6 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-pub use self::artifacts::Artifacts;
 pub use self::context::RecognizerContext;
 pub use self::enricher::{Enricher, Enrichment};
 pub use self::label::LabelMap;

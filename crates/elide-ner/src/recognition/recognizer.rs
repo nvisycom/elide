@@ -121,7 +121,7 @@ impl NerRecognizer {
         ctx: &RecognizerContext<'_, M>,
     ) -> Option<Entity<M>> {
         let range = span.offset.clone();
-        let location = M::locate(range.clone(), data, &ctx.artifacts)?;
+        let location = M::locate(range.clone(), data, &ctx.artifact)?;
         let event = AuditEvent::model(
             "ner",
             span.confidence,
@@ -208,7 +208,7 @@ impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
             Some(effective_labels.as_slice())
         };
         let request = NerRequest {
-            text: M::as_text(data, &ctx.artifacts),
+            text: M::as_text(data, &ctx.artifact),
             labels,
             language: ctx.primary_language(),
             correlation_id: ctx.correlation_id(),

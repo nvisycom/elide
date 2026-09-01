@@ -3,13 +3,13 @@
 //!
 //! The OCR counterpart to language detection: it produces no entities, it
 //! *enriches*. On each call it OCRs the [`ImageData`] bytes through its
-//! [`OcrBackend`] and inserts the resulting [`Layout`] into the call's
-//! [`artifacts`]. Recognizers running afterward read the OCR text and
+//! [`OcrBackend`] and stamps the resulting [`Layout`] onto the call as
+//! `Image`'s [`artifact`]. Recognizers running afterward read the OCR text and
 //! resolve each match back to the image region it covers (see [`Image`]'s
 //! [`TextRecognizable`] impl).
 //!
 //! [`ImageData`]: elide_core::modality::image::ImageData
-//! [`artifacts`]: elide_core::recognition::RecognizerContext::artifacts
+//! [`artifact`]: elide_core::recognition::RecognizerContext::artifact
 //! [`OcrBackend`]: crate::OcrBackend
 //! [`Image`]: elide_core::modality::image::Image
 //! [`TextRecognizable`]: elide_core::modality::TextRecognizable
@@ -28,7 +28,7 @@ use crate::{OcrBackend, OcrRequest};
 
 /// An [`Enricher<Image>`] that OCRs the image.
 ///
-/// Stamps the resulting [`Layout`] onto the call's artifacts. Holds an
+/// Stamps the resulting [`Layout`] onto the call's artifact. Holds an
 /// `Arc<dyn OcrBackend>`; cloning shares the backend. Registered on
 /// an `Analyzer<Image>` ahead of its recognizers, the same way a language
 /// detector is registered on a text analyzer.
@@ -112,8 +112,9 @@ impl Enricher<Image> for OcrEnricher {
         data: &ImageData,
         ctx: &mut RecognizerContext<'_, Image>,
     ) -> Result<Enrichment> {
-        // Already OCR'd (e.g. a second enricher pass): leave it.
-        if ctx.artifacts.contains::<Layout>() {
+        // Already OCR'd (a second enricher pass, or a restored artifact on a
+        // re-run): leave it, so re-recognition never re-invokes the model.
+        if !ctx.artifact.is_empty() {
             return Ok(Enrichment::none());
         }
         let mut request = OcrRequest::new(&data.bytes);
@@ -124,7 +125,7 @@ impl Enricher<Image> for OcrEnricher {
             request = request.with_correlation_id(id);
         }
         let response = self.backend.recognize(request).await?;
-        ctx.artifacts.insert(Layout::new(response.blocks));
+        ctx.artifact = Layout::new(response.blocks);
         // The OCR model vouches for its own identity; OCR reports no token
         // counts today.
         #[cfg(feature = "usage")]
@@ -188,10 +189,10 @@ mod tests {
 
         enricher.enrich(&data, &mut ctx).await.unwrap();
 
-        // Recognizers read the OCR text from the call's artifacts.
-        assert_eq!(Image::as_text(&data, &ctx.artifacts), "hi Alice");
+        // Recognizers read the OCR text from the call's artifact.
+        assert_eq!(Image::as_text(&data, &ctx.artifact), "hi Alice");
         // "Alice" is at bytes 3..8; locate resolves it to the word's box.
-        let region = Image::locate(3..8, &data, &ctx.artifacts).expect("range resolves");
+        let region = Image::locate(3..8, &data, &ctx.artifact).expect("range resolves");
         assert_eq!(region.bounding_box.min.x, 40.0);
         assert_eq!(region.bounding_box.max.x, 100.0);
     }

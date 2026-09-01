@@ -6,10 +6,10 @@ use std::ops::Range;
 
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::TextRecognizable;
+use elide_core::modality::text::Token;
 use elide_core::primitive::Confidence;
 use hipstr::HipStr;
 
-use crate::io::Token;
 use crate::matching::{KeywordMatcher, on_word_boundaries};
 use crate::rule::BoostRule;
 

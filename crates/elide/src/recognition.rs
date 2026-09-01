@@ -17,8 +17,8 @@
 // pre-recognition concern and live in the `enrichment` module.
 #[doc(inline)]
 pub use elide_core::recognition::{
-    Artifacts, LabelMap, Recognition, Recognizer, RecognizerContext, RecognizerId, Scope,
-    ScopeMetadata, annotation,
+    LabelMap, Recognition, Recognizer, RecognizerContext, RecognizerId, Scope, ScopeMetadata,
+    annotation,
 };
 /// Resource-usage accounting for a detection run: the per-recognizer /
 /// per-enricher [`Usage`] and the model / token detail it carries. A
@@ -61,7 +61,7 @@ pub mod context {
     #[doc(inline)]
     pub use elide_context::{
         Boost, BoostRule, Context, DEFAULT_BOOST, DEFAULT_PREFIX_WORDS, DEFAULT_SUFFIX_WORDS,
-        Enhanced, Enhancer, Token, Tokens,
+        Enhanced, Enhancer,
     };
 
     /// Keyword matching for the [`Enhancer`]: the [`KeywordMatcher`] contract
@@ -73,7 +73,7 @@ pub mod context {
     /// from [`elide_context::matching`].
     ///
     /// [`Enhancer`]: elide_context::Enhancer
-    /// [`Token`]: elide_context::Token
+    /// [`Token`]: elide_core::modality::text::Token
     /// [`KeywordMatcher`]: elide_context::matching::KeywordMatcher
     /// [`SubstringMatcher`]: elide_context::matching::SubstringMatcher
     /// [`LemmaMatcher`]: elide_context::matching::LemmaMatcher

@@ -2,10 +2,10 @@
 
 use std::ops::Range;
 
+use elide_core::modality::text::Token;
 use hipstr::HipStr;
 
 use super::{KeywordMatcher, SubstringMatcher};
-use crate::io::Token;
 
 /// Lemma-aware [`KeywordMatcher`].
 ///

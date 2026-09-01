@@ -19,9 +19,8 @@
 
 use std::ops::Range;
 
+use elide_core::modality::text::Token;
 use unicode_segmentation::UnicodeSegmentation;
-
-use crate::io::Token;
 
 /// Walk `prefix` words before `range` and `suffix` words after, via
 /// Unicode word segmentation, and return the spanning substring

@@ -3,15 +3,13 @@
 //!
 //! The speech-to-text counterpart to language detection: it produces no
 //! entities, it *enriches*. On each call it transcribes the [`AudioData`]
-//! bytes through its [`SttBackend`] and inserts the resulting
-//! [`Transcription`] into the call's
-//! [`artifacts`].
-//! Recognizers running afterward read the transcript text and resolve each
-//! match back to the audio time it was spoken in (see [`Audio`]'s
-//! [`TextRecognizable`] impl).
+//! bytes through its [`SttBackend`] and stamps the resulting [`Transcription`]
+//! onto the call as `Audio`'s [`artifact`]. Recognizers running afterward read
+//! the transcript text and resolve each match back to the audio time it was
+//! spoken in (see [`Audio`]'s [`TextRecognizable`] impl).
 //!
 //! [`AudioData`]: elide_core::modality::audio::AudioData
-//! [`artifacts`]: elide_core::recognition::RecognizerContext::artifacts
+//! [`artifact`]: elide_core::recognition::RecognizerContext::artifact
 //! [`SttBackend`]: crate::SttBackend
 //! [`Audio`]: elide_core::modality::audio::Audio
 //! [`TextRecognizable`]: elide_core::modality::TextRecognizable
@@ -30,7 +28,7 @@ use crate::{SttBackend, SttRequest};
 
 /// An [`Enricher<Audio>`] that transcribes the clip.
 ///
-/// Stamps the resulting [`Transcription`] onto the call's artifacts. Holds an
+/// Stamps the resulting [`Transcription`] onto the call's artifact. Holds an
 /// `Arc<dyn SttBackend>`; cloning shares the backend. Registered on
 /// an `Analyzer<Audio>` ahead of its recognizers, the same way a language
 /// detector is registered on a text analyzer.
@@ -114,8 +112,9 @@ impl Enricher<Audio> for SttEnricher {
         data: &AudioData,
         ctx: &mut RecognizerContext<'_, Audio>,
     ) -> Result<Enrichment> {
-        // Already transcribed (e.g. a second enricher pass): leave it.
-        if ctx.artifacts.contains::<Transcription>() {
+        // Already transcribed (a second enricher pass, or a restored artifact on
+        // a re-run): leave it, so re-recognition never re-invokes the model.
+        if !ctx.artifact.is_empty() {
             return Ok(Enrichment::none());
         }
         let mut request = SttRequest::new(&data.bytes);
@@ -126,7 +125,7 @@ impl Enricher<Audio> for SttEnricher {
             request = request.with_correlation_id(id);
         }
         let response = self.backend.transcribe(request).await?;
-        ctx.artifacts.insert(Transcription::new(response.segments));
+        ctx.artifact = Transcription::new(response.segments);
         // The transcription model vouches for its own identity; STT reports no
         // token counts today.
         #[cfg(feature = "usage")]
@@ -194,10 +193,10 @@ mod tests {
             assert_eq!(model.model, "canned");
         }
 
-        // Recognizers read the transcript from the call's artifacts.
-        assert_eq!(Audio::as_text(&data, &ctx.artifacts), "hi Alice");
+        // Recognizers read the transcript from the call's artifact.
+        assert_eq!(Audio::as_text(&data, &ctx.artifact), "hi Alice");
         // "Alice" is at bytes 3..8; locate resolves it to the word's time.
-        let loc = Audio::locate(3..8, &data, &ctx.artifacts).expect("range resolves");
+        let loc = Audio::locate(3..8, &data, &ctx.artifact).expect("range resolves");
         assert_eq!(loc.span.start_millis(), 300);
         assert_eq!(loc.span.end_millis(), 900);
     }

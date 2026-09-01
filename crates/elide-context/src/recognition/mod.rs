@@ -20,7 +20,6 @@ use elide_core::modality::TextRecognizable;
 use elide_core::primitive::LanguageTag;
 use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId};
 
-use crate::io::Tokens;
 use crate::{Context, Enhancer};
 
 /// Wraps a [`Recognizer`] with a keyword-boost [`Enhancer`] applied to its
@@ -83,14 +82,14 @@ where
             return Ok(recognition);
         }
 
-        let text = M::as_text(data, &ctx.artifacts);
+        let text = M::as_text(data, &ctx.artifact);
         // A hint is a text annotation (a header, a field name). Read each
         // through the modality's text view; for text/tabular that is the
         // hint's own payload.
         let hint_texts: Vec<&str> = ctx
             .context_hints
             .iter()
-            .map(|h| M::as_text(&h.data, &ctx.artifacts))
+            .map(|h| M::as_text(&h.data, &ctx.artifact))
             .collect();
         // Only *asserted* languages select which per-language context fires; a
         // *detected* language does not. Detection is unreliable on the short,
@@ -103,12 +102,9 @@ where
         // regardless of the surrounding language. Activating a language's
         // context is harmless when its keyword is absent.
         let languages: Vec<&LanguageTag> = ctx.asserted_languages();
-        let mut context = Context::new(text)
+        let context = Context::new(text)
             .with_hints(&hint_texts)
             .with_languages(&languages);
-        if let Some(tokens) = ctx.artifacts.get::<Tokens>() {
-            context = context.with_tokens(tokens.as_slice());
-        }
 
         let boosts = self.enhancer.enhance(&mut entities, &context);
         for boost in boosts {
@@ -119,7 +115,7 @@ where
             // itself was located. `None` when it can't be placed.
             let location = match (&hint, boost.keyword_range) {
                 (Some(h), _) => Some(h.location.clone()),
-                (None, Some(range)) => M::locate(range, data, &ctx.artifacts),
+                (None, Some(range)) => M::locate(range, data, &ctx.artifact),
                 (None, None) => None,
             };
             let entity = &mut entities[boost.entity_index];

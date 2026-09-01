@@ -90,7 +90,7 @@ impl<M: TextRecognizable> Enricher<M> for LinguaEnricher {
         }
         // Detect into an owned list first so the immutable borrow of the payload
         // text ends before `detect_language` takes `&mut ctx`.
-        let detections = self.detector().detect(M::as_text(data, &ctx.artifacts))?;
+        let detections = self.detector().detect(M::as_text(data, &ctx.artifact))?;
         for detection in detections {
             ctx.detect_language(detection);
         }

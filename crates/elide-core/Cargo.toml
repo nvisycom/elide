@@ -77,7 +77,6 @@ hex = { workspace = true, features = [] }
 jiff = { workspace = true, features = [] }
 oxilangtag = { workspace = true, features = [] }
 celes = { workspace = true, features = [] }
-type-map = { workspace = true, features = [] }
 bytes = { workspace = true, features = [], optional = true }
 
 # Async runtime & parallelism
