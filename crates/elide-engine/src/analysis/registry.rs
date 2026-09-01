@@ -69,8 +69,8 @@ impl ModalityRegistry {
     pub(crate) fn register<M>(&mut self)
     where
         M: Modality,
-        Vec<Entity<M>>: EntityGroup + serde::de::DeserializeOwned,
-        M::Artifact: ArtifactGroup + serde::de::DeserializeOwned,
+        Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
+        M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
     {
         self.entries.insert(
             M::NAME,
@@ -107,7 +107,7 @@ impl ModalityRegistry {
     where
         D: Deserializer<'de>,
     {
-        ReportSeed { registry: self }
+        ReportSeed::new(self)
             .deserialize(deserializer)
             .map_err(|e| {
                 elide_core::Error::new(elide_core::ErrorKind::MalformedInput, e.to_string())
@@ -126,7 +126,7 @@ impl ModalityRegistry {
     where
         D: Deserializer<'de>,
     {
-        ArtifactSetSeed { registry: self }
+        ArtifactSetSeed::new(self)
             .deserialize(deserializer)
             .map_err(|e| {
                 elide_core::Error::new(elide_core::ErrorKind::MalformedInput, e.to_string())
@@ -177,8 +177,8 @@ impl ReportDeserializer {
     pub fn with_modality<M>(mut self) -> Self
     where
         M: Modality,
-        Vec<Entity<M>>: EntityGroup + serde::de::DeserializeOwned,
-        M::Artifact: ArtifactGroup + serde::de::DeserializeOwned,
+        Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
+        M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
     {
         self.registry.register::<M>();
         self

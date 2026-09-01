@@ -11,10 +11,10 @@
 //! and hand them to [`re_analyze`](crate::Orchestrator::re_analyze) to
 //! re-recognize without re-enriching.
 //!
-//! The type-erased storage the two views share lives in [`group`]
-//! ([`EntityGroup`] / [`ArtifactGroup`]); the per-modality reconstruction
-//! [`registry`] and the public [`ReportDeserializer`] drive deserialization; and
-//! the serde wire form of both views lives in [`serde`]. With the `schema`
+//! The crate-internal type-erased storage the two views share lives in `group`
+//! (the sealed `EntityGroup` / `ArtifactGroup`); the per-modality reconstruction
+//! `registry` and the public [`ReportDeserializer`] drive deserialization; and
+//! the serde wire form of both views lives in `serde`. With the `schema`
 //! feature, the report's hand-written `JsonSchema` lives in `schema`.
 
 mod artifacts;
@@ -26,7 +26,7 @@ mod schema;
 mod serde;
 
 pub use self::artifacts::ArtifactSet;
-pub use self::group::{ArtifactGroup, EntityGroup};
+pub(crate) use self::group::{ArtifactGroup, EntityGroup};
 pub(crate) use self::registry::ModalityRegistry;
 pub use self::registry::ReportDeserializer;
 pub use self::report::Report;

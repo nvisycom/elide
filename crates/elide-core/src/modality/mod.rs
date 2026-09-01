@@ -204,9 +204,12 @@ pub trait ModalityReplacement: Clone + fmt::Debug + Send + Sync + 'static {}
 /// by recognizers through the medium's text/location projection; it never enters
 /// an entity. A medium with no enrichment uses [`NoArtifact`].
 ///
-/// [`Default`] stands in for "not yet enriched": an empty artifact reads as no
-/// text, so a recognizer over an un-enriched payload finds nothing rather than
-/// needing an `Option`.
+/// A marker over the bounds an artifact must satisfy to flow through analysis
+/// and persist beside a report. [`PartialEq`] lets a streaming analysis tell a
+/// freshly-produced artifact from the seed it was re-run with; whether a payload
+/// *was* enriched is tracked separately (as presence, not emptiness) by the
+/// recognizer context, so an empty artifact is a valid enrichment result, not a
+/// sentinel for "not enriched".
 ///
 /// [`Enricher`]: crate::recognition::Enricher
 /// [`Layout`]: crate::modality::image::Layout
@@ -214,14 +217,6 @@ pub trait ModalityReplacement: Clone + fmt::Debug + Send + Sync + 'static {}
 pub trait ModalityArtifact:
     Clone + fmt::Debug + Default + PartialEq + Send + Sync + 'static
 {
-    /// Whether the artifact carries no enrichment — by definition the
-    /// [`Default`] value, since a partial artifact is never a valid state (each
-    /// artifact's cached text is derived from its entries by its constructor).
-    /// An enricher skips itself when its artifact is already non-empty, and a
-    /// serialized report omits an empty artifact.
-    fn is_empty(&self) -> bool {
-        *self == Self::default()
-    }
 }
 
 /// The artifact of a medium with no enrichment (plain text, tabular): a
