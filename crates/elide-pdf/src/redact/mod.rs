@@ -5,8 +5,8 @@
 //! spans from the content streams (rather than re-encoding a replacement, which
 //! corrupts subset/CID fonts) and strips the structures that retain copies of
 //! the text (annotations, `/Info`, `/Metadata`), keeping a real selectable text
-//! layer with the detected spans gone. [`redact_images`](crate::Pdf::redact_images)
-//! (feature `image`) replaces an embedded image XObject with a redacted image.
+//! layer with the detected spans gone. `redact_images` (feature `image`)
+//! replaces an embedded image XObject with a redacted image.
 //!
 //! Pure-Rust: no renderer, no font subsetting. The glyph decode reuses lopdf's
 //! per-font [`Encoding`], walked one glyph at a time so a detected character
