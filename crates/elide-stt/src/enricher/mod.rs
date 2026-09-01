@@ -146,34 +146,20 @@ mod tests {
     use super::*;
     use crate::SttResponse;
 
-    /// Backend returning a fixed two-word segment with timings.
-    #[derive(Clone)]
-    struct CannedBackend;
-
-    #[async_trait::async_trait]
-    impl SttBackend for CannedBackend {
-        fn provenance(&self) -> ModelEvent {
-            ModelEvent {
-                name: "canned".into(),
-                ..ModelEvent::default()
-            }
-        }
-
-        async fn transcribe(&self, _request: SttRequest<'_>) -> Result<SttResponse> {
-            let segment = TranscriptSegment::new(TimeSpan::from_millis(0, 900), "hi Alice")
-                .with_words(vec![
-                    TranscriptWord::new(TimeSpan::from_millis(0, 300), "hi"),
-                    TranscriptWord::new(TimeSpan::from_millis(300, 900), "Alice"),
-                ]);
-            Ok(SttResponse::new(vec![segment]))
-        }
+    /// A fixed two-word segment with timings the enricher stamps as a
+    /// `Transcription`.
+    fn canned_segment() -> TranscriptSegment {
+        TranscriptSegment::new(TimeSpan::from_millis(0, 900), "hi Alice").with_words(vec![
+            TranscriptWord::new(TimeSpan::from_millis(0, 300), "hi"),
+            TranscriptWord::new(TimeSpan::from_millis(300, 900), "Alice"),
+        ])
     }
 
     #[tokio::test]
     async fn enrich_stamps_a_readable_transcript() {
         let enricher = SttEnricher::builder()
             .with_name("stt")
-            .with_backend(CannedBackend)
+            .with_backend(MockBackend::with(vec![canned_segment()]))
             .build()
             .expect("builder succeeds");
         // The usage id carries the caller's name, not a fixed crate string.
@@ -190,7 +176,7 @@ mod tests {
         #[cfg(feature = "usage")]
         {
             let model = _enrichment.model_usage.expect("STT reports its model");
-            assert_eq!(model.model, "canned");
+            assert_eq!(model.model, "mock-stt");
         }
 
         // Recognizers read the transcript from the call's artifact.
@@ -199,5 +185,60 @@ mod tests {
         let loc = Audio::locate(3..8, &data, &ctx.artifact).expect("range resolves");
         assert_eq!(loc.span.start_millis(), 300);
         assert_eq!(loc.span.end_millis(), 900);
+    }
+
+    /// A backend that counts how many times it is asked to transcribe.
+    #[derive(Clone, Default)]
+    struct CountingBackend(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+    #[async_trait::async_trait]
+    impl SttBackend for CountingBackend {
+        fn provenance(&self) -> ModelEvent {
+            ModelEvent {
+                name: "counting".into(),
+                ..ModelEvent::default()
+            }
+        }
+
+        async fn transcribe(&self, _request: SttRequest<'_>) -> Result<SttResponse> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(SttResponse::new(vec![TranscriptSegment::new(
+                TimeSpan::from_millis(0, 900),
+                "hi Alice",
+            )]))
+        }
+    }
+
+    /// The re-run reuse: an enrich over a context already carrying an artifact
+    /// (a restored `Transcription` from a prior report) skips the backend
+    /// entirely, so re-recognition never re-invokes the STT model.
+    #[tokio::test]
+    async fn a_present_artifact_skips_the_backend() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let enricher = SttEnricher::builder()
+            .with_name("stt")
+            .with_backend(CountingBackend(calls.clone()))
+            .build()
+            .expect("builder succeeds");
+        let data = AudioData::new(b"audio".to_vec());
+        let scope = Scope::new();
+
+        // First pass: empty artifact → the backend runs once.
+        let mut ctx = RecognizerContext::new(&scope);
+        enricher.enrich(&data, &mut ctx).await.unwrap();
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        // Re-run: seed the context with the prior (restored) artifact. The
+        // enricher self-skips — the backend is not called again — and the
+        // seeded transcript is still readable.
+        let restored = ctx.artifact.clone();
+        let mut ctx = RecognizerContext::new(&scope).with_artifact(restored);
+        enricher.enrich(&data, &mut ctx).await.unwrap();
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "a restored artifact must not re-invoke the STT backend",
+        );
+        assert_eq!(Audio::as_text(&data, &ctx.artifact), "hi Alice");
     }
 }

@@ -150,33 +150,19 @@ mod tests {
         ImageLocation::new(BoundingBox::from_origin_size(Point::new(x, y), w, h))
     }
 
-    /// Backend returning a fixed one-block, two-word OCR result.
-    #[derive(Clone)]
-    struct CannedBackend;
-
-    #[async_trait::async_trait]
-    impl OcrBackend for CannedBackend {
-        fn provenance(&self) -> ModelEvent {
-            ModelEvent {
-                name: "canned".into(),
-                ..ModelEvent::default()
-            }
-        }
-
-        async fn recognize(&self, _request: OcrRequest<'_>) -> Result<OcrResponse> {
-            let block = LayoutBlock::new(loc(0.0, 0.0, 100.0, 20.0), "hi Alice").with_words(vec![
-                LayoutWord::new(loc(0.0, 0.0, 30.0, 20.0), "hi"),
-                LayoutWord::new(loc(40.0, 0.0, 60.0, 20.0), "Alice"),
-            ]);
-            Ok(OcrResponse::new(vec![block]))
-        }
+    /// A fixed one-block, two-word OCR result the enricher stamps as a `Layout`.
+    fn canned_block() -> LayoutBlock {
+        LayoutBlock::new(loc(0.0, 0.0, 100.0, 20.0), "hi Alice").with_words(vec![
+            LayoutWord::new(loc(0.0, 0.0, 30.0, 20.0), "hi"),
+            LayoutWord::new(loc(40.0, 0.0, 60.0, 20.0), "Alice"),
+        ])
     }
 
     #[tokio::test]
     async fn enrich_stamps_readable_ocr_text() {
         let enricher = OcrEnricher::builder()
             .with_name("ocr")
-            .with_backend(CannedBackend)
+            .with_backend(MockBackend::with(vec![canned_block()]))
             .build()
             .expect("builder succeeds");
         // The usage id carries the caller's name, not a fixed crate string,
