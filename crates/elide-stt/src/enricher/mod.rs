@@ -22,7 +22,7 @@ use elide_core::recognition::{Enricher, Enrichment, RecognizerContext, Recognize
 use elide_core::{Error, Result};
 use hipstr::HipStr;
 
-#[cfg(any(test, feature = "mock"))]
+#[cfg(any(test, feature = "test-utils"))]
 use crate::MockBackend;
 use crate::{SttBackend, SttRequest};
 
@@ -88,8 +88,8 @@ impl SttEnricherBuilder {
     /// Wire the no-op [`MockBackend`] as this enricher's backend.
     ///
     /// [`MockBackend`]: crate::MockBackend
-    #[cfg(any(test, feature = "mock"))]
-    #[cfg_attr(docsrs, doc(cfg(feature = "mock")))]
+    #[cfg(any(test, feature = "test-utils"))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
     #[must_use]
     pub fn with_mock_backend(self) -> Self {
         self.with_backend(MockBackend::new())
@@ -187,25 +187,16 @@ mod tests {
         assert_eq!(loc.span.end_millis(), 900);
     }
 
-    /// A backend that counts how many times it is asked to transcribe.
-    #[derive(Clone, Default)]
-    struct CountingBackend(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+    mockall::mock! {
+        /// A spy STT backend whose `transcribe` calls are counted and verifiable,
+        /// for asserting the enricher's self-skip on a re-run.
+        SttSpy {}
 
-    #[async_trait::async_trait]
-    impl SttBackend for CountingBackend {
-        fn provenance(&self) -> ModelEvent {
-            ModelEvent {
-                name: "counting".into(),
-                ..ModelEvent::default()
-            }
-        }
-
-        async fn transcribe(&self, _request: SttRequest<'_>) -> Result<SttResponse> {
-            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Ok(SttResponse::new(vec![TranscriptSegment::new(
-                TimeSpan::from_millis(0, 900),
-                "hi Alice",
-            )]))
+        #[async_trait::async_trait]
+        impl SttBackend for SttSpy {
+            fn provenance(&self) -> ModelEvent;
+            #[mockall::concretize]
+            async fn transcribe(&self, request: SttRequest<'_>) -> Result<SttResponse>;
         }
     }
 
@@ -214,10 +205,21 @@ mod tests {
     /// entirely, so re-recognition never re-invokes the STT model.
     #[tokio::test]
     async fn a_present_artifact_skips_the_backend() {
-        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut backend = MockSttSpy::new();
+        backend.expect_provenance().returning(|| ModelEvent {
+            name: "spy".into(),
+            ..ModelEvent::default()
+        });
+        // The self-skip, asserted as a call cardinality: transcribe fires exactly
+        // once across both enrich calls. mockall fails the test on drop if not.
+        backend
+            .expect_transcribe()
+            .times(1)
+            .returning(|_| Ok(SttResponse::new(vec![canned_segment()])));
+
         let enricher = SttEnricher::builder()
             .with_name("stt")
-            .with_backend(CountingBackend(calls.clone()))
+            .with_backend(backend)
             .build()
             .expect("builder succeeds");
         let data = AudioData::new(b"audio".to_vec());
@@ -226,19 +228,13 @@ mod tests {
         // First pass: empty artifact → the backend runs once.
         let mut ctx = RecognizerContext::new(&scope);
         enricher.enrich(&data, &mut ctx).await.unwrap();
-        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
 
         // Re-run: seed the context with the prior (restored) artifact. The
-        // enricher self-skips — the backend is not called again — and the
-        // seeded transcript is still readable.
+        // enricher self-skips — transcribe is not called again, enforced by the
+        // `.times(1)` above — and the seeded transcript is still readable.
         let restored = ctx.artifact.clone();
         let mut ctx = RecognizerContext::new(&scope).with_artifact(restored);
         enricher.enrich(&data, &mut ctx).await.unwrap();
-        assert_eq!(
-            calls.load(std::sync::atomic::Ordering::SeqCst),
-            1,
-            "a restored artifact must not re-invoke the STT backend",
-        );
         assert_eq!(Audio::as_text(&data, &ctx.artifact), "hi Alice");
     }
 }

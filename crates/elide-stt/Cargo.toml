@@ -19,12 +19,12 @@ homepage = { workspace = true }
 documentation = { workspace = true }
 
 [features]
-## No features on by default: the STT traits ship bare. Enable `mock` for
+## No features on by default: the STT traits ship bare. Enable `test-utils` for
 ## the no-op backend used in tests, examples, and offline wiring.
 default = []
 
 ## Ship the no-op `MockBackend` for tests, examples, and offline wiring.
-mock = []
+test-utils = []
 
 ## Resource-usage accounting: surface the `ModelUsage` the STT enricher
 ## attaches to its `Enrichment`. Off by default.
@@ -51,3 +51,6 @@ derive_builder = { workspace = true, features = [] }
 [dev-dependencies]
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["macros", "rt"] }
+
+# Testing and benchmarking
+mockall = { workspace = true, features = [] }

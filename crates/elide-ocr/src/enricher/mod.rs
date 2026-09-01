@@ -22,7 +22,7 @@ use elide_core::recognition::{Enricher, Enrichment, RecognizerContext, Recognize
 use elide_core::{Error, Result};
 use hipstr::HipStr;
 
-#[cfg(any(test, feature = "mock"))]
+#[cfg(any(test, feature = "test-utils"))]
 use crate::MockBackend;
 use crate::{OcrBackend, OcrRequest};
 
@@ -88,8 +88,8 @@ impl OcrEnricherBuilder {
     /// Wire the no-op [`MockBackend`] as this enricher's backend.
     ///
     /// [`MockBackend`]: crate::MockBackend
-    #[cfg(any(test, feature = "mock"))]
-    #[cfg_attr(docsrs, doc(cfg(feature = "mock")))]
+    #[cfg(any(test, feature = "test-utils"))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
     #[must_use]
     pub fn with_mock_backend(self) -> Self {
         self.with_backend(MockBackend::new())
@@ -183,25 +183,16 @@ mod tests {
         assert_eq!(region.bounding_box.max.x, 100.0);
     }
 
-    /// A backend that counts how many times it is asked to OCR.
-    #[derive(Clone, Default)]
-    struct CountingBackend(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+    mockall::mock! {
+        /// A spy OCR backend whose `recognize` calls are counted and verifiable,
+        /// for asserting the enricher's self-skip on a re-run.
+        OcrSpy {}
 
-    #[async_trait::async_trait]
-    impl OcrBackend for CountingBackend {
-        fn provenance(&self) -> ModelEvent {
-            ModelEvent {
-                name: "counting".into(),
-                ..ModelEvent::default()
-            }
-        }
-
-        async fn recognize(&self, _request: OcrRequest<'_>) -> Result<OcrResponse> {
-            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Ok(OcrResponse::new(vec![LayoutBlock::new(
-                loc(0.0, 0.0, 100.0, 20.0),
-                "hi Alice",
-            )]))
+        #[async_trait::async_trait]
+        impl OcrBackend for OcrSpy {
+            fn provenance(&self) -> ModelEvent;
+            #[mockall::concretize]
+            async fn recognize(&self, request: OcrRequest<'_>) -> Result<OcrResponse>;
         }
     }
 
@@ -210,10 +201,21 @@ mod tests {
     /// re-recognition never re-invokes the OCR model.
     #[tokio::test]
     async fn a_present_artifact_skips_the_backend() {
-        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut backend = MockOcrSpy::new();
+        backend.expect_provenance().returning(|| ModelEvent {
+            name: "spy".into(),
+            ..ModelEvent::default()
+        });
+        // The self-skip, asserted as a call cardinality: recognize fires exactly
+        // once across both enrich calls. mockall fails the test on drop if not.
+        backend
+            .expect_recognize()
+            .times(1)
+            .returning(|_| Ok(OcrResponse::new(vec![canned_block()])));
+
         let enricher = OcrEnricher::builder()
             .with_name("ocr")
-            .with_backend(CountingBackend(calls.clone()))
+            .with_backend(backend)
             .build()
             .expect("builder succeeds");
         let data = ImageData::new(b"image".to_vec(), Dimensions::new(100, 20));
@@ -222,19 +224,13 @@ mod tests {
         // First pass: empty artifact → the backend runs once.
         let mut ctx = RecognizerContext::new(&scope);
         enricher.enrich(&data, &mut ctx).await.unwrap();
-        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
 
         // Re-run: seed the context with the prior (restored) artifact. The
-        // enricher self-skips — the backend is not called again — and the
-        // seeded OCR text is still readable.
+        // enricher self-skips — recognize is not called again, enforced by the
+        // `.times(1)` above — and the seeded OCR text is still readable.
         let restored = ctx.artifact.clone();
         let mut ctx = RecognizerContext::new(&scope).with_artifact(restored);
         enricher.enrich(&data, &mut ctx).await.unwrap();
-        assert_eq!(
-            calls.load(std::sync::atomic::Ordering::SeqCst),
-            1,
-            "a restored artifact must not re-invoke the OCR backend",
-        );
         assert_eq!(Image::as_text(&data, &ctx.artifact), "hi Alice");
     }
 }
