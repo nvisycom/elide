@@ -52,16 +52,15 @@ where
     }
 }
 
-/// A type-erased, downcastable enrichment artifact ([`M::Artifact`]) the
-/// [`ArtifactSet`] stores beside each group's entities, so an image's OCR
-/// `Layout` or an audio clip's `Transcription` survives the review gap and a
-/// recognizer can re-run against it without re-enriching.
+/// A type-erased, downcastable enrichment artifact ([`M::Artifact`]) — the
+/// artifact face of the erased storage, mirroring [`EntityGroup`].
 ///
-/// The artifact face of the erased storage, mirroring [`EntityGroup`] —
-/// implemented only for a [`ModalityArtifact`]. It carries **no** modality name
-/// of its own: an artifact type is not tied to one modality (`Text` and
-/// `Tabular` both use `Tokens`), so it is routed by the entry's modality, never
-/// by its own type.
+/// The [`ArtifactSet`] stores one beside each group's entities, so an image's
+/// OCR `Layout` or an audio clip's `Transcription` survives the review gap and a
+/// recognizer can re-run against it without re-enriching. Implemented only for a
+/// [`ModalityArtifact`]. It carries **no** modality name of its own: an artifact
+/// type is not tied to one modality (`Text` and `Tabular` both use `Tokens`), so
+/// it is routed by the entry's modality, never by its own type.
 ///
 /// [`M::Artifact`]: elide_core::modality::Modality::Artifact
 /// [`ArtifactSet`]: super::artifacts::ArtifactSet

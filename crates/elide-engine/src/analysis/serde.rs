@@ -19,8 +19,10 @@
 //! entities, an unregistered group is skipped when empty (nothing to lose,
 //! matching how `analyze` ignores an unmatched part) but a hard error when
 //! non-empty — its entities may carry reviewer edits that silently dropping the
-//! group would lose. An artifact carries no reviewer-editable state, so an
-//! unregistered or absent artifact simply yields nothing.
+//! group would lose, and an absent/null `entities` field is likewise rejected.
+//! An artifact carries no reviewer-editable state, so anything that reconstructs
+//! to nothing — an unregistered modality, or an absent/null `artifact` field —
+//! is simply dropped, and a re-run re-enriches.
 //!
 //! [`Report`]: super::report::Report
 //! [`ArtifactSet`]: super::artifacts::ArtifactSet
@@ -167,6 +169,12 @@ impl Leaf for EntityLeaf {
         name: &str,
         value: Value,
     ) -> Result<Option<ParsedGroup>, E> {
+        // Entities are required — an absent/null `entities` field (`Value::Unit`)
+        // is malformed, not "no entities": unlike an artifact, a missing entity
+        // group could be silently dropping a reviewer's edits.
+        if matches!(value, Value::Unit) {
+            return Err(E::missing_field("entities"));
+        }
         let Some(entry) = entry else {
             // Unregistered modality: skip only an empty group (nothing to lose,
             // as in `analyze`); reject a non-empty one, whose entities a reviewer
@@ -257,8 +265,13 @@ impl Leaf for ArtifactLeaf {
         _name: &str,
         value: Value,
     ) -> Result<Option<ParsedArtifact>, E> {
-        // An unregistered modality has no parser: drop the artifact (a re-run
-        // will re-enrich).
+        // A dropped artifact loses no work — a re-run re-enriches — so anything
+        // that leaves nothing to reconstruct is skipped rather than rejected: an
+        // unregistered modality (no parser), or an absent/null `artifact` field
+        // (`Value::Unit`, a payload that was never enriched).
+        if matches!(value, Value::Unit) {
+            return Ok(None);
+        }
         let Some(entry) = entry else {
             return Ok(None);
         };
@@ -344,7 +357,10 @@ impl<'de, L: Leaf> Visitor<'de> for GroupSeed<'_, L> {
             }
         }
         let name = modality.ok_or_else(|| DeError::missing_field("modality"))?;
-        let payload = payload.ok_or_else(|| DeError::missing_field(L::FIELD))?;
+        // An absent payload field is `Value::Unit` (the same value a JSON `null`
+        // yields), so `Leaf::parse` decides what a missing payload means for its
+        // side — entities require one, an artifact treats it as "not enriched".
+        let payload = payload.unwrap_or(Value::Unit);
         L::parse(self.registry.entry(&name), &name, payload)
     }
 }
@@ -830,5 +846,37 @@ mod tests {
             .part::<Image>(&PartId::from("blank".to_owned()))
             .expect("the enriched-empty part is present, not dropped");
         assert!(part.is_empty(), "it round-trips as the empty Layout it was");
+    }
+
+    /// A group whose `artifact` field is `null` — or absent entirely — is
+    /// dropped, not rejected. An artifact carries no reviewer edits, so a payload
+    /// that reconstructs to nothing is treated as "not enriched" (a re-run
+    /// re-enriches), matching the unregistered-modality drop. Our own serializer
+    /// never emits this; hand-authored input can.
+    #[test]
+    fn a_null_or_absent_artifact_is_dropped() {
+        use elide_core::modality::image::Image;
+
+        let mut registry = ModalityRegistry::default();
+        registry.register::<Image>();
+
+        for json in [
+            r#"{ "body": { "modality": "image", "artifact": null }, "parts": {} }"#,
+            r#"{ "body": { "modality": "image" }, "parts": {} }"#,
+            r#"{ "body": null, "parts": { "p": { "modality": "image", "artifact": null } } }"#,
+        ] {
+            let mut de = serde_json::Deserializer::from_str(json);
+            let set = registry
+                .deserialize_artifacts(&mut de)
+                .expect("a null/absent artifact deserializes without error");
+            assert!(
+                set.body::<Image>().is_none(),
+                "the body artifact was dropped: {json}",
+            );
+            assert!(
+                set.part::<Image>(&PartId::from("p".to_owned())).is_none(),
+                "the part artifact was dropped: {json}",
+            );
+        }
     }
 }
