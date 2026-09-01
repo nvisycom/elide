@@ -9,7 +9,7 @@ pub use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation, Te
 // The codec round-trip driver and its asserts need the codec + mock
 // features; gate them so the non-codec tests (`analyze`, `anonymize`)
 // still compile this shared module on default features.
-#[cfg(all(feature = "codec", feature = "mock"))]
+#[cfg(all(feature = "codec", feature = "test-utils"))]
 pub mod asserts;
-#[cfg(all(feature = "codec", feature = "mock"))]
+#[cfg(all(feature = "codec", feature = "test-utils"))]
 pub mod pipeline;

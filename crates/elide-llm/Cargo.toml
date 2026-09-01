@@ -20,7 +20,7 @@ documentation = { workspace = true }
 
 [features]
 ## No backend on by default: enable `rig` (or a provider feature, which
-## implies it) for the rig-backed network backend, or `mock` for the
+## implies it) for the rig-backed network backend, or `test-utils` for the
 ## in-process stub.
 default = []
 
@@ -37,7 +37,7 @@ rig = [
 ]
 
 ## Ship the no-op `MockBackend` for tests, examples, and offline wiring.
-mock = []
+test-utils = []
 ## Load prompt wording from a Jinja2 template file (`Jinja2Prompt`).
 jinja2 = ["dep:minijinja"]
 

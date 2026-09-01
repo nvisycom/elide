@@ -40,7 +40,7 @@ elide = { workspace = true, features = [
     "engine",
     "codec-docx",
     "codec-png",
-    "mock",
+    "test-utils",
 ] }
 
 # Async runtime & parallelism

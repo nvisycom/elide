@@ -15,7 +15,7 @@
 mod http;
 mod llm_request;
 mod llm_response;
-#[cfg(any(test, feature = "mock"))]
+#[cfg(any(test, feature = "test-utils"))]
 mod mock_backend;
 #[cfg(feature = "rig")]
 mod rig;
@@ -24,8 +24,8 @@ use elide_core::Result;
 
 pub use self::llm_request::LlmRequest;
 pub use self::llm_response::LlmResponse;
-#[cfg(any(test, feature = "mock"))]
-#[cfg_attr(docsrs, doc(cfg(feature = "mock")))]
+#[cfg(any(test, feature = "test-utils"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
 pub use self::mock_backend::MockBackend;
 #[cfg(feature = "rig")]
 #[cfg_attr(docsrs, doc(cfg(feature = "rig")))]

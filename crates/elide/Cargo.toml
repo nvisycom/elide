@@ -65,7 +65,7 @@ lingua-common = ["lingua", "elide-lingua/common"]
 lingua-all = ["lingua", "elide-lingua/all"]
 
 ## Re-export the LLM recognizer crate. Lean by default (the trait, recognizer,
-## prompts, and — with `mock` — the stub backend); add `llm-rig` or a provider
+## prompts, and — with `test-utils` — the stub backend); add `llm-rig` or a provider
 ## feature for the rig-backed network backend.
 llm = ["dep:elide-llm"]
 ## The rig-backed `RigBackend` and its HTTP stack in the re-exported LLM
@@ -137,7 +137,7 @@ codec-pdf-render = ["codec-pdf", "elide-codec/pdf-render"]
 codec-rtf = ["codec", "elide-codec/rtf"]
 
 ## Ship the no-op mock backends in the re-exported recognizer crates.
-mock = ["elide-ner?/mock", "elide-llm?/mock", "elide-stt?/mock", "elide-ocr?/mock"]
+test-utils = ["elide-ner?/test-utils", "elide-llm?/test-utils", "elide-stt?/test-utils", "elide-ocr?/test-utils"]
 
 ## Resource-usage accounting across the toolkit: the [`Usage`] vocabulary, the
 ## per-recognizer / per-enricher model-usage recognitions and enrichments
@@ -205,42 +205,42 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 # binary; PDF's born-digital and raster paths share `format_pdf`.
 [[test]]
 name = "format_ooxml"
-required-features = ["codec-docx", "codec-xlsx", "codec-pptx", "codec-xml", "mock", "engine", "serde"]
+required-features = ["codec-docx", "codec-xlsx", "codec-pptx", "codec-xml", "test-utils", "engine", "serde"]
 
 [[test]]
 name = "format_pdf"
-required-features = ["codec-pdf-render", "mock", "engine", "serde"]
+required-features = ["codec-pdf-render", "test-utils", "engine", "serde"]
 
 [[test]]
 name = "format_txt"
-required-features = ["codec-txt", "ner", "llm", "lingua-common", "mock", "engine", "serde"]
+required-features = ["codec-txt", "ner", "llm", "lingua-common", "test-utils", "engine", "serde"]
 
 [[test]]
 name = "format_json"
-required-features = ["codec-json", "mock", "engine", "serde"]
+required-features = ["codec-json", "test-utils", "engine", "serde"]
 
 [[test]]
 name = "format_html"
-required-features = ["codec-html", "mock", "engine", "serde"]
+required-features = ["codec-html", "test-utils", "engine", "serde"]
 
 [[test]]
 name = "format_xml"
-required-features = ["codec-xml", "mock", "engine", "serde"]
+required-features = ["codec-xml", "test-utils", "engine", "serde"]
 
 [[test]]
 name = "format_csv"
-required-features = ["codec-csv", "ner", "llm", "lingua-common", "mock", "engine", "serde"]
+required-features = ["codec-csv", "ner", "llm", "lingua-common", "test-utils", "engine", "serde"]
 
 [[test]]
 name = "format_image"
-required-features = ["codec-png", "codec-jpeg", "codec-tiff", "ocr", "mock", "engine", "serde"]
+required-features = ["codec-png", "codec-jpeg", "codec-tiff", "ocr", "test-utils", "engine", "serde"]
 
 [[test]]
 name = "format_audio"
-required-features = ["codec-wav", "codec-mp3", "stt", "mock", "engine", "serde"]
+required-features = ["codec-wav", "codec-mp3", "stt", "test-utils", "engine", "serde"]
 
 # Format-independent facade integration: detection pipeline, audit trail,
 # cross-modal context enhancement, and the reviewable `select` seam.
 [[test]]
 name = "pipeline"
-required-features = ["codec-docx", "codec-png", "llm", "ocr", "stt", "mock", "engine", "serde"]
+required-features = ["codec-docx", "codec-png", "llm", "ocr", "stt", "test-utils", "engine", "serde"]

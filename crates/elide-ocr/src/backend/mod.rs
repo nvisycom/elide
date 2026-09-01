@@ -6,12 +6,12 @@
 //! turns a request (image bytes + optional hints) into a response of
 //! recognized [`LayoutBlock`]s — the core OCR type, so a backend's output
 //! drops straight onto the call's artifacts with no remapping. The
-//! `mock`-gated [`MockBackend`] (returns no blocks; test/example stub) ships
+//! `test-utils`-gated [`MockBackend`] (returns no blocks; test/example stub) ships
 //! here; concrete engine backends live downstream.
 //!
 //! [`LayoutBlock`]: elide_core::modality::image::LayoutBlock
 
-#[cfg(any(test, feature = "mock"))]
+#[cfg(any(test, feature = "test-utils"))]
 mod mock_backend;
 mod ocr_request;
 mod ocr_response;
@@ -19,8 +19,8 @@ mod ocr_response;
 use elide_core::Result;
 use elide_core::entity::audit::ModelEvent;
 
-#[cfg(any(test, feature = "mock"))]
-#[cfg_attr(docsrs, doc(cfg(feature = "mock")))]
+#[cfg(any(test, feature = "test-utils"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
 pub use self::mock_backend::MockBackend;
 pub use self::ocr_request::OcrRequest;
 pub use self::ocr_response::OcrResponse;
