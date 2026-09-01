@@ -624,6 +624,10 @@ mod tests {
     /// [`ArtifactSet`] validates against its hand-written schema, so a change to
     /// one that is not made to the other fails here rather than handing a
     /// generated client a schema that lies about the wire.
+    ///
+    /// Uses an `Image` artifact for a richer payload than text's `NoArtifact`,
+    /// so it needs `image` as well as `schema`.
+    #[cfg(all(feature = "schema", feature = "image"))]
     #[test]
     fn serialized_artifact_sets_validate_against_the_schema() {
         use elide_codec::PartId;
@@ -838,6 +842,7 @@ mod tests {
     /// re-run reads the same OCR without re-invoking the model. A stored *empty*
     /// artifact (an image OCR'd to no text) survives too, distinct from an
     /// un-enriched payload that was never inserted.
+    #[cfg(feature = "image")]
     #[test]
     fn round_trips_an_artifact_set() {
         use elide_core::modality::image::{Image, ImageLocation, Layout, LayoutBlock};
@@ -883,6 +888,7 @@ mod tests {
     /// that reconstructs to nothing is treated as "not enriched" (a re-run
     /// re-enriches), matching the unregistered-modality drop. Our own serializer
     /// never emits this; hand-authored input can.
+    #[cfg(feature = "image")]
     #[test]
     fn a_null_or_absent_artifact_is_dropped() {
         use elide_core::modality::image::Image;
