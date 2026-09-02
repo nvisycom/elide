@@ -11,9 +11,29 @@
 //! Gated behind the `test-util` feature: it is scaffolding for tests in
 //! this crate and its dependents, not part of the shipped surface.
 
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Write};
 
-use zip::ZipArchive;
+use zip::write::SimpleFileOptions;
+use zip::{CompressionMethod, ZipArchive, ZipWriter};
+
+/// Pack `(part name, bytes)` pairs into an OPC package (a deflate zip) — the
+/// inverse of [`read_part`], for building a minimal fixture package inline.
+/// A dependent crate's test supplies exactly the parts it needs (e.g. the
+/// three parts of a one-body `.docx`) without reconstructing the packaging.
+///
+/// # Panics
+///
+/// Panics if writing the in-memory zip fails — a fixture-builder error, never
+/// a runtime condition.
+pub fn pack_parts(parts: &[(&str, &[u8])]) -> Vec<u8> {
+    let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
+    let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+    for (name, bytes) in parts {
+        zip.start_file(*name, opts).expect("start fixture part");
+        zip.write_all(bytes).expect("write fixture part");
+    }
+    zip.finish().expect("finish fixture package").into_inner()
+}
 
 /// Read one part out of an OPC package by its full part name (e.g.
 /// `word/document.xml`), decompressed. Returns `None` if the package
@@ -68,4 +88,27 @@ pub fn text_parts(package: &[u8]) -> Vec<(String, String)> {
             Some((name, text))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pack_parts_round_trips_through_read_part() {
+        // A packed part reads back byte-for-byte; an absent part is `None`.
+        let package = pack_parts(&[
+            ("[Content_Types].xml", b"<Types/>"),
+            ("word/document.xml", b"<w:document/>"),
+        ]);
+        assert_eq!(
+            read_part(&package, "word/document.xml").as_deref(),
+            Some(&b"<w:document/>"[..]),
+        );
+        assert!(read_part(&package, "word/missing.xml").is_none());
+        // Both packed parts are enumerated.
+        let names = part_names(&package);
+        assert!(names.contains(&"[Content_Types].xml".to_owned()));
+        assert!(names.contains(&"word/document.xml".to_owned()));
+    }
 }

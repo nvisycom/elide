@@ -11,7 +11,7 @@
 //! [`Redaction`]: elide::entity::audit::AuditKind::Redaction
 //! [`anonymize`]: elide::Orchestrator::anonymize
 
-use elide::codec::{FormatRegistry, PartId};
+use elide::codec::FormatRegistry;
 use elide::detection::Analyzer;
 use elide::entity::audit::AuditKind;
 use elide::entity::{LabelCatalog, builtins};
@@ -22,9 +22,12 @@ use elide::recognition::llm::LlmRecognizer;
 use elide::recognition::pattern::PatternRecognizer;
 use elide::redaction::operators::{Erase, Replace};
 use elide::redaction::{Anonymizer, Rule};
-use elide::{Directives, Orchestrator, Report, Result};
+use elide::{Directives, Orchestrator, PartId, RegistryDocumentExt, Report, Result};
 
 const SAMPLE: &[u8] = include_bytes!("../testdata/sample.docx");
+
+/// The fixture document's name — its depth-1 part key in the report.
+const DOC: &str = "sample.docx";
 
 /// Build an orchestrator whose body rule set is deterministic enough to read
 /// back from the picks: email is replaced, everything else erased.
@@ -59,7 +62,7 @@ async fn anonymize_records_reviewable_body_picks() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
     let orchestrator = orchestrator(registry.clone())?;
 
-    let mut doc = registry.decode(SAMPLE, "docx").await?;
+    let mut doc = registry.document(DOC, SAMPLE).await?;
     let report = orchestrator
         .analyze(&mut doc, &Directives::new())
         .await?
@@ -120,16 +123,18 @@ async fn anonymize_over_an_empty_part_records_nothing() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
     let orchestrator = orchestrator(registry.clone())?;
 
-    let mut doc = registry.decode(SAMPLE, "docx").await?;
+    let mut doc = registry.document(DOC, SAMPLE).await?;
     // A report carrying one image part with no detected entities — apply routes
     // through the image pipeline (Anonymizer::new(), no rules) and does nothing.
-    let image = PartId::new("word/media/image1.png");
+    // The part is keyed under the document's name (a nested path) so apply
+    // re-decodes it from that document.
+    let image = PartId::from(DOC).child("word/media/image1.png");
     let report = Report::new().insert_part::<Image>(image.clone(), Vec::new());
 
     let report = orchestrator.anonymize_with(&mut doc, report).await?;
     assert!(
-        report.entities::<Text>().is_none(),
-        "the report has no body"
+        report.part_ids().all(|(id, _)| id.depth() > 1),
+        "the report carries no document own-content, only the nested image part",
     );
     let part = report
         .part_entities::<Image>(&image)

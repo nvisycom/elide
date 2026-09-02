@@ -1,13 +1,14 @@
-//! [`ArtifactSet`]: the enrichment content a document's analysis produced,
+//! [`ArtifactSet`]: the enrichment content a document set's analysis produced,
 //! keyed the same way as its [`Report`] but carrying *content* rather than
 //! *references*.
 //!
-//! A [`Report`] is references only — each entity is a location into the body
-//! plus its audit trail, adding no content of its own. Enrichment (an image's
-//! OCR `Layout`, an audio clip's STT `Transcription`) is the opposite: it is
-//! content *extracted from* the body, the very thing an entity's location points
-//! into. Keeping it out of the report preserves that separation; it lives here,
-//! in a parallel structure with the same body-and-parts-by-id shape.
+//! A [`Report`] is references only — each entity is a location into a part plus
+//! its audit trail, adding no content of its own. Enrichment (an image's OCR
+//! `Layout`, an audio clip's STT `Transcription`) is the opposite: it is content
+//! *extracted from* a part, the very thing an entity's location points into.
+//! Keeping it out of the report preserves that separation; it lives here, in a
+//! parallel structure with the same parts-by-[`PartId`] shape — a named
+//! document's own artifact is its depth-1 part.
 //!
 //! Its purpose is re-recognition after a time gap: persist the [`ArtifactSet`]
 //! alongside the report, and [`re_analyze`](crate::Orchestrator::re_analyze)
@@ -37,9 +38,9 @@ pub(crate) struct ArtifactEntry {
     pub(crate) artifact: Box<dyn ArtifactGroup>,
 }
 
-/// The enrichment a document's analysis produced: the body's artifact and each
-/// container part's, keyed by [`PartId`] exactly as the [`Report`] keys its
-/// parts.
+/// The enrichment a document set's analysis produced: every part's artifact
+/// keyed by [`PartId`], exactly as the [`Report`] keys its parts — a named
+/// document's own artifact is its depth-1 part.
 ///
 /// Produced beside a [`Report`] by [`analyze`](crate::Orchestrator::analyze)
 /// (see [`AnalyzedDocument`](crate::AnalyzedDocument)) and consumed by
@@ -50,31 +51,33 @@ pub(crate) struct ArtifactEntry {
 /// [`Report`]: crate::Report
 #[derive(Default)]
 pub struct ArtifactSet {
-    pub(crate) body: Option<ArtifactEntry>,
     pub(crate) parts: HashMap<PartId, ArtifactEntry>,
 }
 
 impl ArtifactSet {
-    /// An empty set — no body artifact, no parts.
+    /// An empty set — no parts.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// The body's enrichment [`artifact`](Modality::Artifact) of modality `M`
-    /// (the OCR `Layout`, STT `Transcription`, …), read-only. `None` when the
-    /// body is a different modality, or the set has no body artifact.
+    /// The **sole document's** enrichment [`artifact`](Modality::Artifact) of
+    /// modality `M` (the OCR `Layout`, STT `Transcription`, …), read-only — a
+    /// shorthand for the single-document case. `None` when the set holds zero or
+    /// more than one top-level document, or the sole document is a different
+    /// modality than `M`. For a multi-document set use [`part`](Self::part) with
+    /// the document's name.
     pub fn body<M: Modality>(&self) -> Option<&M::Artifact> {
-        let entry = self.body.as_ref()?;
+        let entry = self.sole_document()?;
         if entry.modality != TypeId::of::<M>() {
             return None;
         }
         entry.artifact.as_any().downcast_ref::<M::Artifact>()
     }
 
-    /// The enrichment [`artifact`](Modality::Artifact) of the container part
-    /// `id`, as modality `P`, read-only. `None` for an unknown part or a
-    /// modality mismatch.
+    /// The enrichment [`artifact`](Modality::Artifact) of the part `id`, as
+    /// modality `P`, read-only. `None` for an unknown part or a modality
+    /// mismatch.
     pub fn part<P: Modality>(&self, id: &PartId) -> Option<&P::Artifact> {
         let entry = self.parts.get(id)?;
         if entry.modality != TypeId::of::<P>() {
@@ -83,24 +86,19 @@ impl ArtifactSet {
         entry.artifact.as_any().downcast_ref::<P::Artifact>()
     }
 
-    /// Set the body's artifact, as modality `M`, replacing any already set.
-    /// For rebuilding a set out of band (a review layer that persisted the
-    /// artifacts separately).
+    /// Set the **sole document's** artifact, as modality `M` — a shorthand for
+    /// rebuilding a single-document set out of band (a review layer that
+    /// persisted the artifacts separately). The document is keyed `name`.
     #[must_use]
-    pub fn insert_body<M: Modality>(mut self, artifact: M::Artifact) -> Self
+    pub fn insert_body<M: Modality>(self, name: impl Into<PartId>, artifact: M::Artifact) -> Self
     where
         M::Artifact: serde::Serialize,
     {
-        self.body = Some(ArtifactEntry {
-            modality: TypeId::of::<M>(),
-            modality_name: M::NAME,
-            artifact: Box::new(artifact),
-        });
-        self
+        self.insert_part::<M>(name.into(), artifact)
     }
 
-    /// Set the artifact of the container part `id`, as modality `P`, replacing
-    /// any already set for that part.
+    /// Set the artifact of the part `id`, as modality `P`, replacing any already
+    /// set for that part.
     #[must_use]
     pub fn insert_part<P: Modality>(mut self, id: PartId, artifact: P::Artifact) -> Self
     where
@@ -117,19 +115,14 @@ impl ArtifactSet {
         self
     }
 
-    /// Store an already-erased body artifact (the analyze path, which holds a
-    /// `Box<dyn ArtifactGroup>` from the pipeline).
-    pub(crate) fn set_body(
-        &mut self,
-        modality: TypeId,
-        modality_name: &'static str,
-        artifact: Box<dyn ArtifactGroup>,
-    ) {
-        self.body = Some(ArtifactEntry {
-            modality,
-            modality_name,
-            artifact,
-        });
+    /// The single top-level (depth-1) document's artifact entry, if the set
+    /// describes exactly one — the backing for the [`body`](Self::body)
+    /// single-document shorthand. `None` for zero or more than one top-level
+    /// document.
+    fn sole_document(&self) -> Option<&ArtifactEntry> {
+        let mut tops = self.parts.iter().filter(|(id, _)| id.depth() == 1);
+        let (_, only) = tops.next().filter(|_| tops.next().is_none())?;
+        Some(only)
     }
 
     /// Store an already-erased part artifact (the analyze path).
@@ -152,28 +145,36 @@ impl ArtifactSet {
 }
 
 impl serde::Serialize for ArtifactSet {
-    /// Serialize to `{ body: {modality, artifact}?, parts: { id: {modality,
-    /// artifact} } }`, mirroring the [`Report`](crate::Report)'s shape. `body`
-    /// is null when there is no body artifact; a group whose artifact is empty
-    /// (text/tabular, or un-enriched) is omitted entirely, so a document with no
-    /// enrichment serializes to `{ body: null, parts: {} }`.
+    /// Serialize to `{ parts: [ { id: [seg..], modality, artifact } ] }`,
+    /// mirroring the [`Report`](crate::Report)'s shape. A group whose artifact is
+    /// empty (text/tabular, or un-enriched) is never inserted, so a document with
+    /// no enrichment serializes to `{ parts: [] }`. Each entry is keyed by its
+    /// full [`PartId`] path.
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
 
-        // `{ modality, artifact }` for one entry. The artifact serializes through
-        // erasure; `modality` tags which `M::Artifact` to parse it back as.
-        struct Group<'a>(&'a ArtifactEntry, &'a str);
-        impl serde::Serialize for Group<'_> {
+        // One entry: `{ id: [seg..], modality, artifact }`. The artifact
+        // serializes through erasure; `modality` tags which `M::Artifact` to
+        // parse it back as. The id rides as a segment array, never string-joined.
+        struct Entry<'a>(&'a PartId, &'a ArtifactEntry);
+        impl serde::Serialize for Entry<'_> {
             fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+                struct Path<'a>(&'a PartId);
+                impl serde::Serialize for Path<'_> {
+                    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+                        s.collect_seq(self.0.segments())
+                    }
+                }
                 struct Erased<'a>(&'a dyn ArtifactGroup);
                 impl serde::Serialize for Erased<'_> {
                     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
                         erased_serde::serialize(self.0, s)
                     }
                 }
-                let mut state = s.serialize_struct("ArtifactGroup", 2)?;
-                state.serialize_field("modality", self.1)?;
-                state.serialize_field("artifact", &Erased(self.0.artifact.as_ref()))?;
+                let mut state = s.serialize_struct("ArtifactEntry", 3)?;
+                state.serialize_field("id", &Path(self.0))?;
+                state.serialize_field("modality", self.1.modality_name)?;
+                state.serialize_field("artifact", &Erased(self.1.artifact.as_ref()))?;
                 state.end()
             }
         }
@@ -182,18 +183,9 @@ impl serde::Serialize for ArtifactSet {
         // artifacts (an un-enriched payload or a no-enrichment modality is never
         // inserted), so even an empty one — an image OCR'd to no text — is
         // persisted, and a restored re-run reuses it rather than re-enriching.
-        fn group(entry: &ArtifactEntry) -> Group<'_> {
-            Group(entry, entry.modality_name)
-        }
+        let parts: Vec<Entry<'_>> = self.parts.iter().map(|(id, e)| Entry(id, e)).collect();
 
-        let parts: HashMap<&str, Group<'_>> = self
-            .parts
-            .iter()
-            .map(|(id, e)| (id.as_str(), group(e)))
-            .collect();
-
-        let mut state = serializer.serialize_struct("ArtifactSet", 2)?;
-        state.serialize_field("body", &self.body.as_ref().map(group))?;
+        let mut state = serializer.serialize_struct("ArtifactSet", 1)?;
         state.serialize_field("parts", &parts)?;
         state.end()
     }

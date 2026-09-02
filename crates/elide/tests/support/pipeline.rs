@@ -28,7 +28,10 @@ use elide::recognition::pattern::PatternRecognizer;
 use elide::recognition::{Recognizer, Scope};
 use elide::redaction::operators::{Erase, Mask, Replace};
 use elide::redaction::{Anonymizer, Operator, Rule};
-use elide::{Directives, Error, ErrorKind, Orchestrator, Report, Result};
+use elide::{Directives, Document, Error, ErrorKind, Orchestrator, PartId, Report, Result};
+
+/// The single fixture document's name in the report — its depth-1 part key.
+const DOC: &str = "document";
 
 /// Outcome of one end-to-end run: the entities that survived dedup and
 /// the re-encoded redacted document.
@@ -36,9 +39,9 @@ pub struct PipelineOutcome<M: Modality> {
     /// Entities detected and reconciled, in source coordinates. The
     /// pre-redaction snapshot, taken before `anonymize_with` runs.
     pub entities: Vec<Entity<M>>,
-    /// The body entities recovered from the report `anonymize_with`
+    /// The document's entities recovered from the report `anonymize_with`
     /// returns: the same entities, now each carrying a redaction event in
-    /// its provenance. Empty when no body pipeline ran.
+    /// its provenance. Empty when no pipeline ran for the document.
     pub audited: Vec<Entity<M>>,
     /// Re-encoded document after redaction, as raw bytes. For text
     /// formats this is UTF-8 — use [`redacted_text`];
@@ -296,7 +299,10 @@ impl Fixture {
         use elide::redaction::operators::{Erase, Silence};
 
         let registry = FormatRegistry::with_builtin();
-        let mut document = UntypedDocumentHandle::new(self.decode_as::<Audio>(&registry).await?);
+        let mut document = Document::new(
+            DOC,
+            UntypedDocumentHandle::new(self.decode_as::<Audio>(&registry).await?),
+        );
 
         // The mock STT backend transcribes nothing, so recognition finds
         // nothing; the anonymizer would silence/erase any time spans it did.
@@ -334,7 +340,7 @@ impl Fixture {
             .map(|e| e.to_vec())
             .unwrap_or_default();
 
-        let redacted = document.encode()?.as_bytes().to_vec();
+        let redacted = document.handle.encode()?.as_bytes().to_vec();
         self.write_redacted(&redacted);
         Ok(PipelineOutcome {
             entities,
@@ -360,7 +366,10 @@ impl Fixture {
         use elide::redaction::operators::Erase;
 
         let registry = FormatRegistry::with_builtin();
-        let mut document = UntypedDocumentHandle::new(self.decode_as::<Image>(&registry).await?);
+        let mut document = Document::new(
+            DOC,
+            UntypedDocumentHandle::new(self.decode_as::<Image>(&registry).await?),
+        );
 
         // The mock OCR backend recognizes nothing, so recognition finds
         // nothing; the anonymizer would clear any regions it did.
@@ -396,7 +405,7 @@ impl Fixture {
             .map(|e| e.to_vec())
             .unwrap_or_default();
 
-        let redacted = document.encode()?.as_bytes().to_vec();
+        let redacted = document.handle.encode()?.as_bytes().to_vec();
         self.write_redacted(&redacted);
         Ok(PipelineOutcome {
             entities,
@@ -455,7 +464,10 @@ impl Fixture {
         Mask: Operator<M>,
         Erase: Operator<M>,
     {
-        let mut document = UntypedDocumentHandle::new(self.decode_as::<M>(&registry).await?);
+        let mut document = Document::new(
+            DOC,
+            UntypedDocumentHandle::new(self.decode_as::<M>(&registry).await?),
+        );
 
         // One scope, shared across every modality pipeline.
         let orchestrator = Orchestrator::new()
@@ -479,7 +491,7 @@ impl Fixture {
             orchestrator.with_modality::<Text>(text_analyzer, build_anonymizer::<Text>());
 
         // Two phases so the entities surface for assertions: detect, copy
-        // the body entities out, then apply with no editing.
+        // the document's own entities out, then apply with no editing.
         let report = orchestrator
             .analyze(&mut document, &Directives::new())
             .await?
@@ -499,7 +511,7 @@ impl Fixture {
             .map(|e| e.to_vec())
             .unwrap_or_default();
 
-        let redacted = document.encode()?.as_bytes().to_vec();
+        let redacted = document.handle.encode()?.as_bytes().to_vec();
 
         self.write_redacted(&redacted);
         Ok(PipelineOutcome {

@@ -13,10 +13,12 @@
 //! validates a serialized report against this schema, turning any drift into a
 //! failing test rather than a lying client.
 //!
-//! Both types share the `{ body, parts }` shape and the same erasure problem,
+//! Both types share the `{ parts: [..] }` shape and the same erasure problem,
 //! so both are expressed the same way — a `oneOf` over per-modality arms. They
 //! differ only in what an arm carries: a `Report` arm holds `entities`, an
-//! `ArtifactSet` arm holds the single `artifact` for that modality.
+//! `ArtifactSet` arm holds the single `artifact` for that modality. Every arm
+//! also carries the part's `id` (a segment array), so a part is addressed by its
+//! full path.
 //!
 //! [`Report`]: super::report::Report
 //! [`ArtifactSet`]: super::artifacts::ArtifactSet
@@ -31,8 +33,10 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use super::artifacts::ArtifactSet;
 use super::report::Report;
 
-/// The `{ modality: "<name>", entities: [Entity<M>] }` arm for one modality,
-/// with `modality` pinned to a `const` so it discriminates the union.
+/// The `{ id: [string..], modality: "<name>", entities: [Entity<M>] }` arm for
+/// one modality, with `modality` pinned to a `const` so it discriminates the
+/// union. `id` is the part's full [`PartId`](crate::PartId) path as a segment
+/// array.
 fn group_arm<M: Modality>(generator: &mut SchemaGenerator) -> Schema
 where
     Entity<M>: JsonSchema,
@@ -41,10 +45,11 @@ where
     json_schema!({
         "type": "object",
         "properties": {
+            "id": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
             "modality": { "type": "string", "const": M::NAME },
             "entities": { "type": "array", "items": entity },
         },
-        "required": ["modality", "entities"],
+        "required": ["id", "modality", "entities"],
     })
 }
 
@@ -74,16 +79,15 @@ impl JsonSchema for Report {
             "discriminator": { "propertyName": "modality" },
         });
 
-        // `body` is a group or null; `parts` maps a part id to a group. `mut` is
-        // used only to splice in `usage` under that feature.
+        // `parts` is an array of part entries, each a discriminated group. `mut`
+        // is used only to splice in `usage` under that feature.
         #[cfg_attr(not(feature = "usage"), allow(unused_mut))]
         let mut schema = json_schema!({
             "type": "object",
             "properties": {
-                "body": { "oneOf": [group.clone(), { "type": "null" }] },
-                "parts": { "type": "object", "additionalProperties": group },
+                "parts": { "type": "array", "items": group },
             },
-            "required": ["body", "parts"],
+            "required": ["parts"],
         });
 
         // `usage` is present only under the `usage` feature — mirror the
@@ -104,8 +108,9 @@ impl JsonSchema for Report {
     }
 }
 
-/// The `{ modality: "<name>", artifact: <M::Artifact> }` arm for one modality,
-/// with `modality` pinned to a `const` so it discriminates the union.
+/// The `{ id: [string..], modality: "<name>", artifact: <M::Artifact> }` arm for
+/// one modality, with `modality` pinned to a `const` so it discriminates the
+/// union.
 ///
 /// The artifact-side counterpart to [`group_arm`]: same discriminated shape,
 /// carrying one modality's enrichment (an image's `Layout`, an audio clip's
@@ -118,10 +123,11 @@ where
     json_schema!({
         "type": "object",
         "properties": {
+            "id": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
             "modality": { "type": "string", "const": M::NAME },
             "artifact": artifact,
         },
-        "required": ["modality", "artifact"],
+        "required": ["id", "modality", "artifact"],
     })
 }
 
@@ -151,15 +157,14 @@ impl JsonSchema for ArtifactSet {
             "discriminator": { "propertyName": "modality" },
         });
 
-        // `body` is a group or null; `parts` maps a part id to a group. No
-        // `usage` here — that rides on the report, not the enrichment.
+        // `parts` is an array of part entries. No `usage` here — that rides on
+        // the report, not the enrichment.
         json_schema!({
             "type": "object",
             "properties": {
-                "body": { "oneOf": [group.clone(), { "type": "null" }] },
-                "parts": { "type": "object", "additionalProperties": group },
+                "parts": { "type": "array", "items": group },
             },
-            "required": ["body", "parts"],
+            "required": ["parts"],
         })
     }
 }

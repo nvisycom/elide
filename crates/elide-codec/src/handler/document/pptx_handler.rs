@@ -21,7 +21,7 @@ use elide_office::opc::{Embedding, OffsetMap, PartPath};
 use elide_office::pptx::PartKind;
 
 use super::PptxLoader;
-use crate::codec::{Container, Part, PartId};
+use crate::codec::{Container, Part};
 use crate::content::ContentData;
 use crate::handler::extract::{Encoder, ExtractHandler, ExtractedItem, ItemEdit};
 use crate::{Format, FormatId};
@@ -157,13 +157,10 @@ impl Container for PptxEncoder {
             .collect()
     }
 
-    fn replace_part(&mut self, id: &PartId, bytes: Bytes) -> Result<()> {
+    fn replace_part(&mut self, id: &str, bytes: Bytes) -> Result<()> {
         // Reject anything that isn't a binary embedding so a caller can't smuggle
         // bytes into a text/structure part through this surface.
-        if PartKind::of(&PartPath::from(id.as_str()))
-            .embedding()
-            .is_none()
-        {
+        if PartKind::of(&PartPath::from(id)).embedding().is_none() {
             return Err(Error::new(
                 ErrorKind::MalformedInput,
                 format!("pptx replace_part: `{id}` is not an embedded media part"),
@@ -174,14 +171,14 @@ impl Container for PptxEncoder {
         let is_known = self
             .embeddings
             .iter()
-            .any(|embedding| embedding.part.as_str() == id.as_str());
+            .any(|embedding| embedding.part.as_str() == id);
         if !is_known {
             return Err(Error::new(
                 ErrorKind::MalformedInput,
                 format!("pptx replace_part: `{id}` is not a known embedded media part"),
             ));
         }
-        self.replacements.insert(id.as_str().to_owned(), bytes);
+        self.replacements.insert(id.to_owned(), bytes);
         Ok(())
     }
 }

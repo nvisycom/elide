@@ -26,7 +26,7 @@ pub(crate) mod loader;
 mod registry;
 
 pub use self::capability::Handler;
-pub use self::container::{Container, Part, PartId};
+pub use self::container::{Container, Part};
 pub use self::document::{DocumentHandle, UntypedDocumentHandle};
 pub use self::format::{Format, FormatId};
 pub use self::loader::Loader;

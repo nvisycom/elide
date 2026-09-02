@@ -17,9 +17,12 @@ use elide::recognition::llm::LlmRecognizer;
 use elide::recognition::pattern::PatternRecognizer;
 use elide::redaction::operators::{Erase, Replace};
 use elide::redaction::{Anonymizer, Rule};
-use elide::{Directives, Orchestrator, Result};
+use elide::{Directives, Orchestrator, RegistryDocumentExt, Result};
 
 const SAMPLE: &[u8] = include_bytes!("../testdata/sample.docx");
+
+/// The fixture document's name — its depth-1 part key in the report.
+const DOC: &str = "sample.docx";
 
 fn orchestrator(registry: FormatRegistry) -> Result<Orchestrator> {
     let patterns = PatternRecognizer::builder()
@@ -54,13 +57,13 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
     let orchestrator = orchestrator(registry.clone())?;
 
     // Analyze, then serialize the report — the artifact a review layer ships.
-    let mut doc = registry.decode(SAMPLE, "docx").await?;
+    let mut doc = registry.document(DOC, SAMPLE).await?;
     let report = orchestrator
         .analyze(&mut doc, &Directives::new())
         .await?
         .report;
-    let detected = report.entities::<Text>().expect("text body").len();
-    assert!(detected > 0, "the fixture detected body entities");
+    let detected = report.entities::<Text>().expect("text content").len();
+    assert!(detected > 0, "the fixture detected entities");
     let json = serde_json::to_string(&report).expect("report serializes");
 
     // Rebuild it from the wire through the same orchestrator.
@@ -70,7 +73,7 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
     // Same entities, same modality, audit trail intact.
     let body = rebuilt
         .entities::<Text>()
-        .expect("body reconstructed as Text");
+        .expect("content reconstructed as Text");
     assert_eq!(body.len(), detected, "every detected entity survived");
     assert!(
         body.iter().all(|e| e.audit.verify().is_ok()),
@@ -79,14 +82,14 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
 
     // The rebuilt report (no cached handles) redacts against a fresh decode of
     // the same document, stamping pick + redaction on every entity.
-    let mut doc2 = registry.decode(SAMPLE, "docx").await?;
+    let mut doc2 = registry.document(DOC, SAMPLE).await?;
     let applied = orchestrator.anonymize_with(&mut doc2, rebuilt).await?;
-    for entity in applied.entities::<Text>().expect("applied body").iter() {
+    for entity in applied.entities::<Text>().expect("applied content").iter() {
         assert!(entity.audit.selection().is_some(), "records the pick");
         assert!(entity.is_redacted(), "records the redaction");
     }
     // The document re-encodes after redaction.
-    assert!(!doc2.encode()?.as_bytes().is_empty());
+    assert!(!doc2.handle.encode()?.as_bytes().is_empty());
     Ok(())
 }
 
@@ -101,7 +104,7 @@ async fn deserialize_rejects_an_unregistered_modality_with_entities() -> Result<
     let orchestrator = Orchestrator::new().with_registry(registry);
 
     // A non-empty text group against a registry with no text pipeline.
-    let json = r#"{"body":{"modality":"text","entities":[{}]},"parts":{}}"#;
+    let json = r#"{"parts":[{"id":["document"],"modality":"text","entities":[{}]}]}"#;
     let mut de = serde_json::Deserializer::from_str(json);
     let err = match orchestrator.deserialize_report(&mut de) {
         Ok(_) => panic!("no text pipeline registered — should have failed"),
@@ -120,12 +123,12 @@ async fn report_deserializer_rebuilds_a_report_standalone() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
     let orchestrator = orchestrator(registry.clone())?;
 
-    let mut doc = registry.decode(SAMPLE, "docx").await?;
+    let mut doc = registry.document(DOC, SAMPLE).await?;
     let report = orchestrator
         .analyze(&mut doc, &Directives::new())
         .await?
         .report;
-    let detected = report.entities::<Text>().expect("text body").len();
+    let detected = report.entities::<Text>().expect("text content").len();
     let json = serde_json::to_string(&report).expect("serializes");
 
     // No orchestrator here — just the modalities the report may contain.
@@ -138,7 +141,7 @@ async fn report_deserializer_rebuilds_a_report_standalone() -> Result<()> {
     assert_eq!(
         rebuilt
             .entities::<Text>()
-            .expect("body reconstructed")
+            .expect("content reconstructed")
             .len(),
         detected,
     );
@@ -170,10 +173,10 @@ async fn split_pipeline_halves_detect_and_redact() -> Result<()> {
         .with_analyzer::<Text>(Analyzer::new().with_recognizer(patterns))
         .with_anonymizer::<Text>(text_redact);
 
-    let mut doc = registry.decode(SAMPLE, "docx").await?;
+    let mut doc = registry.document(DOC, SAMPLE).await?;
     let applied = orchestrator.anonymize(&mut doc, &Directives::new()).await?;
 
-    let body = applied.entities::<Text>().expect("text body");
+    let body = applied.entities::<Text>().expect("text content");
     assert!(!body.is_empty(), "the analyzer half detected entities");
     assert!(
         body.iter().all(|e| e.is_redacted()),

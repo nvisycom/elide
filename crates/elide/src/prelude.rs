@@ -65,7 +65,9 @@ pub use elide_detection::{
 };
 #[cfg(feature = "engine")]
 #[doc(no_inline)]
-pub use elide_engine::{Directives, Orchestrator, Report};
+pub use elide_engine::{
+    AsDocuments, Directives, Document, Orchestrator, PartId, RegistryDocumentExt, Report,
+};
 #[doc(no_inline)]
 pub use elide_operator::operators;
 #[doc(no_inline)]

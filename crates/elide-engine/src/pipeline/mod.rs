@@ -23,7 +23,7 @@ use elide_detection::{Analysis, Analyzer};
 use elide_redaction::Anonymizer;
 
 pub(crate) use self::erased::ErasedPipeline;
-pub(crate) use self::outcome::AnalyzeOutcome;
+pub(crate) use self::outcome::{AnalyzeOutcome, BoxFuture};
 
 /// The concrete analyze + redact pipeline for one modality `M`.
 ///

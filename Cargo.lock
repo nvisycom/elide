@@ -1025,7 +1025,6 @@ dependencies = [
  "symphonia",
  "tokio",
  "tracing",
- "zip",
 ]
 
 [[package]]
@@ -1083,6 +1082,7 @@ dependencies = [
  "serde",
  "serde-value",
  "serde_json",
+ "smallvec",
  "uuid",
 ]
 

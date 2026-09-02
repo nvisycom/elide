@@ -14,9 +14,12 @@ use elide::recognition::Scope;
 use elide::recognition::pattern::PatternRecognizer;
 use elide::redaction::operators::{Erase, Replace};
 use elide::redaction::{Anonymizer, Rule};
-use elide::{Directives, Orchestrator, Report, Result};
+use elide::{Directives, Orchestrator, PartId, RegistryDocumentExt, Report, Result};
 
 use super::{BODY_PART, FIXTURE};
+
+/// The fixture document's name — its depth-1 part key in the report.
+const DOC: &str = "report.docx";
 
 #[tokio::test]
 async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
@@ -36,9 +39,9 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
         .with_registry(registry.clone())
         .with_modality::<Text>(Analyzer::new().with_recognizer(patterns), anonymizer);
 
-    // Phase 1: analyze, then copy the body entities out — exactly what a caller
-    // can serialize and ship to another process.
-    let mut doc = registry.decode(FIXTURE.source, "docx").await?;
+    // Phase 1: analyze, then copy the document's own entities out — exactly what
+    // a caller can serialize and ship to another process.
+    let mut doc = registry.document(DOC, FIXTURE.source).await?;
     let report = orchestrator
         .analyze(&mut doc, &Directives::new())
         .await?
@@ -47,18 +50,18 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
         .entities::<Text>()
         .map(|v| v.to_vec())
         .unwrap_or_default();
-    assert!(!body.is_empty(), "the body should detect entities");
+    assert!(!body.is_empty(), "the document should detect entities");
 
     // Phase 2: rebuild a FRESH report from the copied entities (no cached
     // handles), on a FRESH document handle, and apply. This forces the
     // re-decode path — the proof a deserialized report still redacts.
-    let rebuilt = Report::new().insert_body::<Text>(body);
-    let mut doc2 = registry.decode(FIXTURE.source, "docx").await?;
+    let rebuilt = Report::new().insert_part::<Text>(PartId::from(DOC), body);
+    let mut doc2 = registry.document(DOC, FIXTURE.source).await?;
     let applied = orchestrator.anonymize_with(&mut doc2, rebuilt).await?;
 
     // Scan the *decompressed* body part, not the deflated archive bytes: a
     // substring check on the container could pass while the email survives.
-    let encoded = doc2.encode()?;
+    let encoded = doc2.handle.encode()?;
     let body_part = elide_office::opc::test_util::read_part(encoded.as_bytes(), BODY_PART)
         .expect("body part present");
     let body_part = String::from_utf8(body_part).expect("body XML is UTF-8");
@@ -76,7 +79,7 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
         .unwrap_or_default();
     assert!(
         !audited.is_empty(),
-        "the applied body should surface entities"
+        "the applied document should surface entities"
     );
     for entity in &audited {
         assert!(

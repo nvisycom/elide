@@ -1,21 +1,21 @@
 //! End-to-end example: detect and redact PII in a DOCX *container*.
 //!
 //! Where the plain-text example ([`redact_txt`]) drives a single text
-//! body, a `.docx` is a *container of parts across modalities*: body text
-//! in `word/document.xml` plus embedded images in `word/media/*`. This
-//! example wires the [`Orchestrator`], which drives the body and every
+//! document, a `.docx` is a *container of parts across modalities*: body
+//! text in `word/document.xml` plus embedded images in `word/media/*`. This
+//! example wires the [`Orchestrator`], which drives each document and every
 //! container part through the right per-modality pipeline:
 //!
 //! 1. [`FormatRegistry`] decodes the `.docx` into an
-//!    [`UntypedDocumentHandle`].
+//!    [`UntypedDocumentHandle`], wrapped as a named [`Document`].
 //! 2. An [`Orchestrator`] is assembled with a text pipeline for the body
-//!    and an image pipeline for the embedded media (mock LLM backend, so
-//!    the example runs offline — swap in a real backend to detect in
+//!    text and an image pipeline for the embedded media (mock LLM backend,
+//!    so the example runs offline — swap in a real backend to detect in
 //!    images).
-//! 3. [`analyze`] detects across the body *and* each part, returning an
-//!    editable [`Report`] that keeps the body's entities and each part's
-//!    entities separated. We print what was found, grouped by part, then
-//!    [`anonymize_with`] redacts everything and re-zips the package.
+//! 3. [`analyze`] detects across the document *and* each part, returning an
+//!    editable [`Report`] that keeps every part's entities separated. We
+//!    print what was found, grouped by part, then [`anonymize_with`] redacts
+//!    everything and re-zips the package.
 //! 4. We write the redacted `.docx` back out — a complete, drop-in
 //!    replacement package, only the redacted parts changed.
 //!
@@ -44,7 +44,7 @@ async fn main() -> Result<()> {
     //    works on the untyped handle — it discovers the body's modality by
     //    trial, so no `.into::<Text>()` turbofish is needed here.
     let registry = FormatRegistry::with_builtin();
-    let mut document = registry.decode(SAMPLE, "docx").await?;
+    let mut document = registry.document("contact.docx", SAMPLE).await?;
 
     // 2. Assemble the orchestrator: one shared scope, plus a text pipeline
     //    for the body and an image pipeline for the embedded media. The
@@ -75,7 +75,7 @@ async fn main() -> Result<()> {
     orchestrator
         .anonymize_with(&mut document, analyzed.report)
         .await?;
-    let encoded = document.encode()?;
+    let encoded = document.handle.encode()?;
 
     // 5. Write the redacted `.docx` out. That is the whole deliverable: a
     //    drop-in replacement package the caller saves or forwards.
@@ -89,22 +89,23 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Print the detected entities grouped by where they live: the body, then
-/// each container part by its id. This is the detect → *inspect* → apply
-/// seam the orchestrator exposes via the [`Report`].
+/// Print the detected entities grouped by where they live: each part by its
+/// id, one per line. The document's own content (its body text) is the depth-1
+/// part keyed by the document's name; its embedded media are the deeper parts.
+/// This is the detect → *inspect* → apply seam the orchestrator exposes via the
+/// [`Report`].
 fn print_report(report: &Report) {
-    let body = report.entities::<Text>().map(<[_]>::len).unwrap_or(0);
     println!("--- detected ---");
-    println!("body: {body} entities");
 
-    // Each part's id and modality, then its entities read back by the typed
-    // accessor.
+    // Each part's id, then its entities read back by whichever typed accessor
+    // matches its modality (text content vs. an embedded image).
     let mut any_part = false;
     for (id, _) in report.part_ids() {
         any_part = true;
         let n = report
-            .part_entities::<Image>(id)
+            .part_entities::<Text>(id)
             .map(<[_]>::len)
+            .or_else(|| report.part_entities::<Image>(id).map(<[_]>::len))
             .unwrap_or(0);
         println!("part {id}: {n} entities");
     }

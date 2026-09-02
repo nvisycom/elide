@@ -67,6 +67,7 @@ serde_json = { workspace = true, features = [], optional = true }
 
 # Primitive datatypes
 bytes = { workspace = true, features = [] }
+smallvec = { workspace = true, features = [] }
 uuid = { workspace = true, features = [] }
 
 [dev-dependencies]

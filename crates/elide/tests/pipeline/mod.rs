@@ -4,6 +4,7 @@
 mod analyze;
 mod audit;
 mod context;
+mod nested;
 mod pick;
 mod reanalyze;
 mod roundtrip;

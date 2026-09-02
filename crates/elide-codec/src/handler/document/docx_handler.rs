@@ -23,7 +23,7 @@ use elide_office::docx::PartKind;
 use elide_office::opc::{Embedding, OffsetMap, PartPath};
 
 use super::DocxLoader;
-use crate::codec::{Container, Part, PartId};
+use crate::codec::{Container, Part};
 use crate::content::ContentData;
 use crate::handler::extract::{Encoder, ExtractHandler, ExtractedItem, ItemEdit};
 use crate::{Format, FormatId};
@@ -165,12 +165,10 @@ impl Container for DocxEncoder {
             .collect()
     }
 
-    fn replace_part(&mut self, id: &PartId, bytes: Bytes) -> Result<()> {
+    fn replace_part(&mut self, id: &str, bytes: Bytes) -> Result<()> {
         // Reject anything that isn't a binary embedding so a caller can't
         // smuggle bytes into a text/structure part through this surface.
-        let is_embedding = PartKind::of(&PartPath::from(id.as_str()))
-            .embedding()
-            .is_some();
+        let is_embedding = PartKind::of(&PartPath::from(id)).embedding().is_some();
         if !is_embedding {
             return Err(Error::new(
                 ErrorKind::MalformedInput,
@@ -183,14 +181,14 @@ impl Container for DocxEncoder {
         let is_known = self
             .embeddings
             .iter()
-            .any(|embedding| embedding.part.as_str() == id.as_str());
+            .any(|embedding| embedding.part.as_str() == id);
         if !is_known {
             return Err(Error::new(
                 ErrorKind::MalformedInput,
                 format!("docx replace_part: `{id}` is not a known embedded media part"),
             ));
         }
-        self.replacements.insert(id.as_str().to_owned(), bytes);
+        self.replacements.insert(id.to_owned(), bytes);
         Ok(())
     }
 }
@@ -210,11 +208,8 @@ pub(super) fn docx_error(err: elide_office::Error) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Cursor, Write};
-
     use elide_core::modality::text::{SourceRef, TextLocation};
-    use zip::write::SimpleFileOptions;
-    use zip::{CompressionMethod, ZipWriter};
+    use elide_office::opc::test_util;
 
     use super::*;
     use crate::content::ContentData;
@@ -228,16 +223,12 @@ mod tests {
         let body = format!(
             r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>{body_text}</w:t></w:r></w:p></w:body></w:document>"#
         );
-        let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
-        let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
-        let mut put = |name: &str, bytes: &[u8]| {
-            zip.start_file(name, opts).unwrap();
-            zip.write_all(bytes).unwrap();
-        };
-        put("[Content_Types].xml", br#"<?xml version="1.0"?><Types/>"#);
-        put("_rels/.rels", br#"<?xml version="1.0"?><Relationships/>"#);
-        put(BODY_PART, body.as_bytes());
-        ContentData::new(zip.finish().unwrap().into_inner().into())
+        let package = test_util::pack_parts(&[
+            ("[Content_Types].xml", br#"<?xml version="1.0"?><Types/>"#),
+            ("_rels/.rels", br#"<?xml version="1.0"?><Relationships/>"#),
+            (BODY_PART, body.as_bytes()),
+        ]);
+        ContentData::new(package.into())
     }
 
     /// Read chunks until the one whose decoded text equals `value`.
@@ -347,18 +338,10 @@ mod tests {
 
         // The rebuilt part has "Bob" replaced, "Alice" untouched.
         let out = handler.encode().unwrap();
-        let bytes = out.as_bytes();
-        // The output is a zip; the body part contains the replacement.
-        let mut archive = zip::ZipArchive::new(Cursor::new(bytes.to_vec())).unwrap();
-        let mut body = String::new();
-        {
-            use std::io::Read;
-            archive
-                .by_name(BODY_PART)
-                .unwrap()
-                .read_to_string(&mut body)
-                .unwrap();
-        }
+        // The output is an OPC package; the body part contains the replacement.
+        let body_bytes =
+            test_util::read_part(out.as_bytes(), BODY_PART).expect("body part present");
+        let body = String::from_utf8(body_bytes).expect("body part is UTF-8");
         assert!(body.contains("Alice [NAME]"), "body was: {body}");
         assert!(!body.contains("Alice Bob"));
     }
