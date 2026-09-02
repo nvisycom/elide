@@ -13,10 +13,10 @@
 //!
 //! [`FormatRegistry`]: crate::FormatRegistry
 
-use std::borrow::Cow;
-
 use bytes::Bytes;
 use elide_core::Result;
+
+use crate::LocalId;
 
 /// One addressable sub-part of a [`Container`].
 #[derive(Debug, Clone)]
@@ -28,7 +28,7 @@ pub struct Part {
     /// segments into a full tree path when a container nests another (two
     /// containers can share a local id — `word/media/image1.png` in each of two
     /// bundled DOCX — which the path disambiguates).
-    pub id: Cow<'static, str>,
+    pub id: LocalId,
     /// The part's raw, undecoded bytes — what the orchestrator decodes
     /// through the registry.
     pub bytes: Bytes,
@@ -70,5 +70,5 @@ pub trait Container: Send + Sync {
     /// redacted form), to be folded in when the container re-encodes. `id` is a
     /// [`Part::id`] — this container's own segment, never a full tree path.
     /// Unknown ids are an error so a caller can't silently lose a redaction.
-    fn replace_part(&mut self, id: &str, bytes: Bytes) -> Result<()>;
+    fn replace_part(&mut self, id: &LocalId, bytes: Bytes) -> Result<()>;
 }

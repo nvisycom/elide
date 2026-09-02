@@ -13,7 +13,7 @@ use elide::modality::StreamDataReader;
 use elide::modality::text::Text;
 
 use crate::support::asserts::{assert_label_present, assert_pii_removed};
-use crate::support::pipeline::Fixture;
+use crate::support::fixture::Fixture;
 
 /// Re-decode a redacted PDF through the public registry and reassemble its
 /// born-digital text. The re-encoded content stream is FlateDecode-compressed,

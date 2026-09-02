@@ -25,6 +25,8 @@
 
 use std::cmp::Ordering;
 use std::fmt;
+#[cfg(any(feature = "audio", feature = "image"))]
+use std::path::Path;
 
 #[cfg(feature = "audio")]
 pub mod audio;
@@ -62,8 +64,7 @@ pub trait ModalityData: Clone + fmt::Debug + Send + Sync + 'static {}
 #[cfg(any(feature = "audio", feature = "image"))]
 pub(crate) fn extension_or<'a>(filename: Option<&'a str>, fallback: &'a str) -> &'a str {
     filename
-        .and_then(|name| name.rsplit_once('.'))
-        .map(|(_, ext)| ext)
+        .and_then(|name| Path::new(name).extension().and_then(|e| e.to_str()))
         .unwrap_or(fallback)
 }
 

@@ -22,7 +22,7 @@ use elide::modality::StreamDataReader;
 use elide::modality::text::Text;
 use elide::primitive::RasterMode;
 
-use crate::support::pipeline::Fixture;
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/sample.pdf"),

@@ -7,7 +7,7 @@
 //! is the content the formats have in common: the synthetic PII set the
 //! shared `sample.*` fixtures carry.
 //!
-//! [`PipelineOutcome`]: crate::support::pipeline::PipelineOutcome
+//! [`PipelineOutcome`]: crate::support::fixture::PipelineOutcome
 
 // Each format's scenarios use a different subset of the shared items.
 #![allow(dead_code)]

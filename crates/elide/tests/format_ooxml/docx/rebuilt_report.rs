@@ -6,17 +6,12 @@
 #![cfg(feature = "serde")]
 
 use elide::codec::FormatRegistry;
-use elide::detection::Analyzer;
 use elide::entity::audit::AuditKind;
-use elide::entity::{LabelCatalog, builtins};
 use elide::modality::text::Text;
-use elide::recognition::Scope;
-use elide::recognition::pattern::PatternRecognizer;
-use elide::redaction::operators::{Erase, Replace};
-use elide::redaction::{Anonymizer, Rule};
-use elide::{Directives, Orchestrator, PartId, RegistryDocumentExt, Report, Result};
+use elide::{Directives, PartId, RegistryDocumentExt, Report, Result};
 
 use super::{BODY_PART, FIXTURE};
+use crate::support::orchestrator::{TestOrchestrator, build_anonymizer, default_text_analyzer};
 
 /// The fixture document's name — its depth-1 part key in the report.
 const DOC: &str = "report.docx";
@@ -24,20 +19,10 @@ const DOC: &str = "report.docx";
 #[tokio::test]
 async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
-    let patterns = PatternRecognizer::builder()
-        .with_builtin_patterns()
-        .with_builtin_dictionaries()
-        .build_context_enhanced()?;
-    let anonymizer = Anonymizer::new()
-        .with(Rule::label(
-            builtins::EMAIL_ADDRESS.to_ref(),
-            Replace::new("[EMAIL]"),
-        ))
-        .with(Rule::fallback(Erase));
-    let orchestrator = Orchestrator::new()
-        .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
+    let orchestrator = TestOrchestrator::bare()
         .with_registry(registry.clone())
-        .with_modality::<Text>(Analyzer::new().with_recognizer(patterns), anonymizer);
+        .with_text(default_text_analyzer()?, build_anonymizer::<Text>())
+        .build();
 
     // Phase 1: analyze, then copy the document's own entities out — exactly what
     // a caller can serialize and ship to another process.

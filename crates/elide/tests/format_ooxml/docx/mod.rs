@@ -14,7 +14,7 @@
 mod rebuilt_report;
 mod redaction;
 
-use crate::support::pipeline::Fixture;
+use crate::support::fixture::Fixture;
 
 /// The real Word-authored sample driving the docx scenarios.
 pub const FIXTURE: Fixture = Fixture {

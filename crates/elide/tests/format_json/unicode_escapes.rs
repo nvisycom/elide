@@ -6,8 +6,8 @@
 use elide::Result;
 use elide::entity::builtins;
 
-use crate::support::asserts::{assert_label_present, assert_pii_removed, assert_preserved};
-use crate::support::pipeline::Fixture;
+use crate::support::asserts::{assert_content_preserved, assert_label_present, assert_pii_removed};
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(
@@ -27,7 +27,7 @@ async fn unicode_escapes_survive_and_ascii_pii_redacts() -> Result<()> {
     assert_pii_removed!(out, "alice.johnson@example.com");
 
     // The `\uXXXX` escapes are preserved literally, not decoded to `é`/`—`/`€`.
-    assert_preserved!(out, "Caf\\u00e9 r\\u00e9sum\\u00e9", "\\u2014", "5\\u20ac",);
+    assert_content_preserved!(out, "Caf\\u00e9 r\\u00e9sum\\u00e9", "\\u2014", "5\\u20ac",);
     Ok(())
 }
 
@@ -48,6 +48,6 @@ async fn pii_after_escapes_redacts_while_the_escaped_prefix_survives() -> Result
     // …while the surrogate pair and BMP escape before it survive verbatim,
     // proving the source-offset mapping counted escape bytes correctly rather
     // than shifting into or past the prefix.
-    assert_preserved!(out, "\\uD83D\\uDE00 caf\\u00e9 corner: ");
+    assert_content_preserved!(out, "\\uD83D\\uDE00 caf\\u00e9 corner: ");
     Ok(())
 }

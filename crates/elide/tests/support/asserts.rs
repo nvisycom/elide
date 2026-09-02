@@ -92,7 +92,7 @@ macro_rules! assert_tokens_present {
 /// Assert that each given substring still appears verbatim (e.g. non-sensitive
 /// structure that redaction must not touch).
 #[macro_export]
-macro_rules! assert_preserved {
+macro_rules! assert_content_preserved {
     ($redacted:expr, $($keep:expr),+ $(,)?) => {{
         let redacted: &str = &$redacted;
         $(
@@ -107,8 +107,8 @@ macro_rules! assert_preserved {
 
 // Re-export so `use crate::support::asserts::assert_label_present;` resolves
 // the macro by its module path, keeping every existing import line working.
+pub(crate) use assert_content_preserved;
 pub(crate) use assert_label_absent;
 pub(crate) use assert_label_present;
 pub(crate) use assert_pii_removed;
-pub(crate) use assert_preserved;
 pub(crate) use assert_tokens_present;

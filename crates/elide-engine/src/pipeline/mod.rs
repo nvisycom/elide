@@ -38,6 +38,16 @@ pub(crate) struct ModalityPipeline<M: Modality> {
     pub(crate) anonymizer: Anonymizer<M>,
 }
 
+impl<M: Modality> ModalityPipeline<M> {
+    /// Pair an analyzer and anonymizer into a pipeline for modality `M`.
+    pub(crate) fn new(analyzer: Analyzer<M>, anonymizer: Anonymizer<M>) -> Self {
+        Self {
+            analyzer,
+            anonymizer,
+        }
+    }
+}
+
 impl<M> ModalityPipeline<M>
 where
     M: Modality,

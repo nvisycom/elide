@@ -82,11 +82,15 @@ impl serde::Serialize for Report {
             }
         }
 
-        let parts: Vec<Entry<'_>> = self
+        let mut parts: Vec<Entry<'_>> = self
             .parts
             .iter()
             .map(|(id, p)| Entry(id, p.entities.as_ref()))
             .collect();
+        // Deterministic wire output: `parts` is a `HashMap` (random iteration
+        // order), and the array position is observable. Sort by path so identical
+        // reports serialize identically and the order follows the `PartId` tree.
+        parts.sort_unstable_by(|a, b| a.0.segments().cmp(b.0.segments()));
 
         // `usage` is the second field only under the `usage` feature.
         #[cfg(feature = "usage")]
@@ -485,25 +489,13 @@ impl<'de, L: Leaf> Visitor<'de> for SetSeed<'_, L> {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
-    use elide_core::entity::{Entity, LabelRef};
-    use elide_core::modality::text::{Text, TextLocation};
-    use elide_core::primitive::Confidence;
+    use elide_core::entity::LabelRef;
+    use elide_core::modality::text::Text;
     use serde::de::DeserializeSeed;
 
+    use super::super::test_support::{doc, text_entity};
     use super::*;
     use crate::PartId;
-
-    fn text_entity(label: &str) -> Entity<Text> {
-        let loc = TextLocation::new(0, 4);
-        let event = AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
-        Entity::new(
-            LabelRef::new(label),
-            loc,
-            Confidence::MAX,
-            AuditLog::new(event),
-        )
-    }
 
     /// A registry with `Text` registered — the unit under test needs only the
     /// group parsers, not a full orchestrator.
@@ -520,11 +512,6 @@ mod tests {
             Ok(report) => report,
             Err(e) => panic!("deserialize: {e}"),
         }
-    }
-
-    /// A depth-1 [`PartId`] naming the sole document under test.
-    fn doc() -> PartId {
-        PartId::new("document")
     }
 
     #[test]

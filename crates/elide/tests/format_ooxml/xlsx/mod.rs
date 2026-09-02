@@ -14,7 +14,7 @@
 mod comments;
 mod redaction;
 
-use crate::support::pipeline::Fixture;
+use crate::support::fixture::Fixture;
 
 /// The primary Excel-authored workbook: PII in shared-string cells.
 pub const FIXTURE: Fixture = Fixture {

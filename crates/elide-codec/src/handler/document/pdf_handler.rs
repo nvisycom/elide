@@ -35,7 +35,7 @@ use super::PdfLoader;
 use super::RasterMode;
 use crate::codec::{Container, Part};
 use crate::content::ContentData;
-use crate::{Format, FormatId, Handler};
+use crate::{Format, FormatId, Handler, LocalId};
 
 /// Stable [`FormatId`] for the PDF codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.document.pdf");
@@ -365,7 +365,7 @@ impl Container for PdfHandler {
                 .filter_map(|embedding| {
                     let hint = embedding_hint(embedding.kind)?;
                     Some(Part {
-                        id: image_part_id(embedding.id).into(),
+                        id: LocalId::new(image_part_id(embedding.id)),
                         bytes: embedding.bytes,
                         hint: hint.to_string(),
                     })
@@ -376,7 +376,7 @@ impl Container for PdfHandler {
         Vec::new()
     }
 
-    fn replace_part(&mut self, id: &str, bytes: Bytes) -> Result<()> {
+    fn replace_part(&mut self, id: &LocalId, bytes: Bytes) -> Result<()> {
         // In raster mode the output is a flattened image-only PDF, so no
         // per-image replacement is surfaced or applied — reject fail-closed
         // before accepting any bytes.
@@ -390,8 +390,8 @@ impl Container for PdfHandler {
         {
             // Accept only ids naming an image the container surfaced, validated
             // against the cached id set (no re-extraction per call).
-            let image_id =
-                parse_image_part_id(id).filter(|id| self.redactable_image_ids.contains(id));
+            let image_id = parse_image_part_id(id.as_str())
+                .filter(|id| self.redactable_image_ids.contains(id));
             if let Some(image_id) = image_id {
                 self.image_replacements.insert(image_id, bytes);
                 return Ok(());
@@ -482,8 +482,8 @@ mod tests {
     use lopdf::{Dictionary, Document, Object, Stream, dictionary};
 
     use super::{FORMAT_ID, PdfHandler, PdfPage, image_part_id, parse_image_part_id};
-    use crate::Handler;
     use crate::codec::Container;
+    use crate::{Handler, LocalId};
 
     /// A JPEG-encoded image of a solid colour, as bytes (a self-contained
     /// `.jpg` file, so the container surfaces it — see `embedding_hint`).
@@ -557,7 +557,7 @@ mod tests {
         let parts = handler.parts();
         assert_eq!(parts.len(), 1);
         assert_eq!(
-            parts[0].id.as_ref(),
+            parts[0].id.as_str(),
             format!("img-{}-{}", image_id.0, image_id.1)
         );
 
@@ -585,7 +585,7 @@ mod tests {
         let (pdf, _) = image_pdf();
         let mut handler = PdfHandler::text(Bytes::from(pdf), Vec::<PdfPage>::new());
         let err = handler
-            .replace_part("img-9999-0", Bytes::from(black_png()))
+            .replace_part(&LocalId::new("img-9999-0"), Bytes::from(black_png()))
             .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
     }
@@ -597,6 +597,7 @@ mod raster_tests {
     use elide_core::ErrorKind;
 
     use super::{PdfHandler, PdfPage};
+    use crate::LocalId;
     use crate::codec::Container;
 
     /// A raster handler built from empty observations (no PDFium needed):
@@ -609,7 +610,7 @@ mod raster_tests {
         assert!(handler.parts().is_empty());
 
         let err = handler
-            .replace_part("img-1-0", Bytes::from_static(b"x"))
+            .replace_part(&LocalId::new("img-1-0"), Bytes::from_static(b"x"))
             .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
     }

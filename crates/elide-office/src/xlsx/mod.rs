@@ -23,9 +23,7 @@ use self::sheet::{CellSource, parse_cells};
 use self::strings::{parse_shared_strings, shared_string_items};
 use self::workbook::{Sheet, resolve_sheets};
 use crate::error::{Error, Result};
-use crate::opc::{
-    EmbeddingKind, Package, PartClassifier, PartPath, PartReplacement, PartRole, media_kind,
-};
+use crate::opc::{EmbeddingKind, Package, PartClassifier, PartPath, PartReplacement, PartRole};
 
 /// The well-known part path of the workbook and its shared-string table.
 const WORKBOOK_PART: &str = "xl/workbook.xml";
@@ -93,7 +91,7 @@ fn is_surfaced_text_part(part: &PartPath) -> bool {
 /// `xl/embeddings/`.
 fn embedding_kind(part: &PartPath) -> Option<EmbeddingKind> {
     if part.in_dir("xl/media") {
-        Some(media_kind(part.as_str()))
+        Some(EmbeddingKind::from_path(part.as_str()))
     } else if part.in_dir("xl/embeddings") {
         Some(EmbeddingKind::Object)
     } else {
@@ -126,6 +124,18 @@ pub struct CellEdit {
     pub column: u32,
     /// The replacement text.
     pub text: String,
+}
+
+impl CellEdit {
+    /// An edit setting the cell at `(sheet, row, column)` to `text`.
+    pub fn new(sheet: impl Into<String>, row: u32, column: u32, text: impl Into<String>) -> Self {
+        Self {
+            sheet: sheet.into(),
+            row,
+            column,
+            text: text.into(),
+        }
+    }
 }
 
 /// An opened XLSX workbook: its parts read once, ready to
@@ -281,10 +291,10 @@ impl Xlsx {
                 .ok_or_else(|| Error::unsafe_rewrite(format!("sheet part `{part}` not found")))?;
             let raw = decode_part(part, &bytes)?;
             let spliced = self.splice_sheet(part, &raw, cell_edits)?;
-            replacements.push(PartReplacement {
-                part: PartPath::from(part.clone()),
-                bytes: spliced.into_bytes(),
-            });
+            replacements.push(PartReplacement::new(
+                PartPath::from(part.clone()),
+                spliced.into_bytes(),
+            ));
         }
 
         // De-sharing a `t="s"` cell drops a reference to its pooled string; a
@@ -307,10 +317,10 @@ impl Xlsx {
                     "part replacement names unknown part `{part}`"
                 )));
             }
-            replacements.push(PartReplacement {
-                part: PartPath::from(part.clone()),
-                bytes: bytes.clone(),
-            });
+            replacements.push(PartReplacement::new(
+                PartPath::from(part.clone()),
+                bytes.clone(),
+            ));
         }
 
         self.package.rewrite_with_parts(&[], &replacements)
@@ -399,10 +409,10 @@ impl Xlsx {
             cursor = inner.end;
         }
         out.push_str(&raw[cursor..]);
-        Ok(Some(PartReplacement {
-            part: PartPath::from(SHARED_STRINGS_PART),
-            bytes: out.into_bytes(),
-        }))
+        Ok(Some(PartReplacement::new(
+            PartPath::from(SHARED_STRINGS_PART),
+            out.into_bytes(),
+        )))
     }
 
     /// The shared-string table, or an empty table if the workbook has none.

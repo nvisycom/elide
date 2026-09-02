@@ -7,9 +7,9 @@ use elide::Result;
 use elide::entity::builtins;
 
 use crate::support::asserts::{
-    assert_label_present, assert_pii_removed, assert_preserved, assert_tokens_present,
+    assert_content_preserved, assert_label_present, assert_pii_removed, assert_tokens_present,
 };
-use crate::support::pipeline::Fixture;
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(
@@ -59,7 +59,7 @@ async fn csv_detects_and_redacts() -> Result<()> {
     );
 
     // CSV structure survives: header row and non-sensitive name cells stay.
-    assert_preserved!(
+    assert_content_preserved!(
         outcome.redacted_text(),
         "name,email,phone,card,iban,ssn,host",
         "Alice Johnson,",

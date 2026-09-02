@@ -397,15 +397,22 @@ impl Report {
         self.parts.iter().map(|(id, p)| (id, p.modality))
     }
 
-    /// The single top-level (depth-1) document's part, if the report describes
-    /// **exactly one** — the backing for the [`entities`](Self::entities)
-    /// single-document shorthand. `None` for zero or more than one top-level
-    /// document (a multi-document set, addressed by name via
-    /// [`part_entities`](Self::part_entities)).
-    fn sole_document(&self) -> Option<&PartReport> {
+    /// The single top-level (depth-1) document's entry — its [`PartId`] and its
+    /// part — if the report describes **exactly one** such document. The one
+    /// place the "exactly one depth-1 part" rule lives, so the read
+    /// ([`sole_document`](Self::sole_document)) and write
+    /// ([`sole_document_id`](Self::sole_document_id)) shorthands cannot drift.
+    /// `None` for zero or more than one top-level document (a multi-document set,
+    /// addressed by name via [`part_entities`](Self::part_entities)).
+    fn sole_document_entry(&self) -> Option<(&PartId, &PartReport)> {
         let mut tops = self.parts.iter().filter(|(id, _)| id.depth() == 1);
-        let (_, only) = tops.next().filter(|_| tops.next().is_none())?;
-        Some(only)
+        tops.next().filter(|_| tops.next().is_none())
+    }
+
+    /// The single top-level document's part, if there is exactly one — the
+    /// backing for the [`entities`](Self::entities) single-document shorthand.
+    fn sole_document(&self) -> Option<&PartReport> {
+        self.sole_document_entry().map(|(_, part)| part)
     }
 
     /// The [`PartId`] of the single top-level document, if there is exactly one
@@ -413,9 +420,7 @@ impl Report {
     /// hands back an owned key so the borrow of `self.parts` is released before
     /// the caller re-borrows it mutably.
     fn sole_document_id(&self) -> Option<PartId> {
-        let mut tops = self.parts.keys().filter(|id| id.depth() == 1);
-        let only = tops.next().filter(|_| tops.next().is_none())?;
-        Some(only.clone())
+        self.sole_document_entry().map(|(id, _)| id.clone())
     }
 }
 
@@ -439,29 +444,12 @@ fn ensure_manual<M: Modality>(entity: &mut Entity<M>) {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::{AuditEvent, AuditLog, ManualIntent, PatternEvent};
-    use elide_core::entity::{Entity, LabelRef};
-    use elide_core::modality::text::{Text, TextLocation};
-    use elide_core::primitive::Confidence;
+    use elide_core::entity::LabelRef;
+    use elide_core::entity::audit::ManualIntent;
+    use elide_core::modality::text::Text;
 
+    use super::super::test_support::{doc, text_entity};
     use super::*;
-
-    /// A minimal text entity carrying `label`, for building reports under test.
-    fn text_entity(label: &str) -> Entity<Text> {
-        let loc = TextLocation::new(0, 4);
-        let event = AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
-        Entity::new(
-            LabelRef::new(label),
-            loc,
-            Confidence::MAX,
-            AuditLog::new(event),
-        )
-    }
-
-    /// A one-segment [`PartId`] naming the sole document under test.
-    fn doc() -> PartId {
-        PartId::new("document")
-    }
 
     #[test]
     fn entity_mut_addresses_the_sole_document_by_id() {

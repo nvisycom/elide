@@ -61,12 +61,14 @@ impl ArtifactSet {
         Self::default()
     }
 
-    /// The **sole document's** enrichment [`artifact`](Modality::Artifact) of
+    /// The **sole enriched document's** [`artifact`](Modality::Artifact) of
     /// modality `M` (the OCR `Layout`, STT `Transcription`, …), read-only — a
-    /// shorthand for the single-document case. `None` when the set holds zero or
-    /// more than one top-level document, or the sole document is a different
-    /// modality than `M`. For a multi-document set use [`part`](Self::part) with
-    /// the document's name.
+    /// shorthand for the single-document case. A set holds an entry only for a
+    /// document that *produced* enrichment, so this returns the artifact when
+    /// exactly one top-level document enriched; `None` when none did, when two or
+    /// more did, or when that sole entry is a different modality than `M`. In a
+    /// multi-document set, address a document's artifact by name with
+    /// [`part`](Self::part) rather than relying on this shorthand.
     pub fn body<M: Modality>(&self) -> Option<&M::Artifact> {
         let entry = self.sole_document()?;
         if entry.modality != TypeId::of::<M>() {
@@ -115,10 +117,11 @@ impl ArtifactSet {
         self
     }
 
-    /// The single top-level (depth-1) document's artifact entry, if the set
-    /// describes exactly one — the backing for the [`body`](Self::body)
-    /// single-document shorthand. `None` for zero or more than one top-level
-    /// document.
+    /// The single top-level (depth-1) *enriched* document's artifact entry, if
+    /// the set holds exactly one — the backing for the [`body`](Self::body)
+    /// single-document shorthand. `None` when no top-level document enriched or
+    /// more than one did. A document that produced no enrichment has no entry
+    /// here, so this counts enriched documents, not input documents.
     fn sole_document(&self) -> Option<&ArtifactEntry> {
         let mut tops = self.parts.iter().filter(|(id, _)| id.depth() == 1);
         let (_, only) = tops.next().filter(|_| tops.next().is_none())?;
@@ -183,7 +186,10 @@ impl serde::Serialize for ArtifactSet {
         // artifacts (an un-enriched payload or a no-enrichment modality is never
         // inserted), so even an empty one — an image OCR'd to no text — is
         // persisted, and a restored re-run reuses it rather than re-enriching.
-        let parts: Vec<Entry<'_>> = self.parts.iter().map(|(id, e)| Entry(id, e)).collect();
+        let mut parts: Vec<Entry<'_>> = self.parts.iter().map(|(id, e)| Entry(id, e)).collect();
+        // Deterministic wire output, matching the report serializer: sort by path
+        // so a `HashMap`'s random iteration order does not churn the array.
+        parts.sort_unstable_by(|a, b| a.0.segments().cmp(b.0.segments()));
 
         let mut state = serializer.serialize_struct("ArtifactSet", 1)?;
         state.serialize_field("parts", &parts)?;

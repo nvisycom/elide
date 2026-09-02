@@ -4,7 +4,7 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::opc::{EmbeddingKind, PartPath, PartRole, media_kind};
+use crate::opc::{EmbeddingKind, PartPath, PartRole};
 
 /// What a PresentationML package part is, which determines how it is handled.
 ///
@@ -148,7 +148,7 @@ impl PartKind {
 /// [`Audio`]: EmbeddingKind::Audio
 fn embedding_kind(part: &PartPath) -> Option<EmbeddingKind> {
     if part.in_dir("ppt/media") {
-        Some(media_kind(part.as_str()))
+        Some(EmbeddingKind::from_path(part.as_str()))
     } else if part.in_dir("ppt/embeddings") {
         Some(EmbeddingKind::Object)
     } else {

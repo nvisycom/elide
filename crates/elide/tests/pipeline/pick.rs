@@ -12,17 +12,12 @@
 //! [`anonymize`]: elide::Orchestrator::anonymize
 
 use elide::codec::FormatRegistry;
-use elide::detection::Analyzer;
 use elide::entity::audit::AuditKind;
-use elide::entity::{LabelCatalog, builtins};
 use elide::modality::image::Image;
 use elide::modality::text::Text;
-use elide::recognition::Scope;
-use elide::recognition::llm::LlmRecognizer;
-use elide::recognition::pattern::PatternRecognizer;
-use elide::redaction::operators::{Erase, Replace};
-use elide::redaction::{Anonymizer, Rule};
 use elide::{Directives, Orchestrator, PartId, RegistryDocumentExt, Report, Result};
+
+use crate::support::orchestrator::TestOrchestrator;
 
 const SAMPLE: &[u8] = include_bytes!("../testdata/sample.docx");
 
@@ -30,28 +25,9 @@ const SAMPLE: &[u8] = include_bytes!("../testdata/sample.docx");
 const DOC: &str = "sample.docx";
 
 /// Build an orchestrator whose body rule set is deterministic enough to read
-/// back from the picks: email is replaced, everything else erased.
+/// back from the picks: every detected label redacts through `Replace` (`[{label}]`).
 fn orchestrator(registry: FormatRegistry) -> Result<Orchestrator> {
-    let patterns = PatternRecognizer::builder()
-        .with_builtin_patterns()
-        .with_builtin_dictionaries()
-        .build_context_enhanced()?;
-    let text = Anonymizer::new()
-        .with(Rule::label(
-            builtins::EMAIL_ADDRESS.to_ref(),
-            Replace::new("[EMAIL]"),
-        ))
-        .with(Rule::fallback(Erase));
-    let image = LlmRecognizer::<Image>::builder()
-        .with_name("mock-image")
-        .with_mock_backend()
-        .with_default_prompt()
-        .build()?;
-    Ok(Orchestrator::new()
-        .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
-        .with_registry(registry)
-        .with_modality::<Text>(Analyzer::new().with_recognizer(patterns), text)
-        .with_modality::<Image>(Analyzer::new().with_recognizer(image), Anonymizer::new()))
+    Ok(TestOrchestrator::new()?.with_registry(registry).build())
 }
 
 /// `anonymize` records a reviewable pick on every body entity: each names one of
@@ -85,7 +61,7 @@ async fn anonymize_records_reviewable_body_picks() -> Result<()> {
             .expect("the pick is followed by a redaction");
         let picked = picked.operator.name.as_str();
         assert!(
-            picked == "replace" || picked == "erase",
+            picked == "replace" || picked == "erase" || picked == "mask",
             "each pick is one of the configured operators, got {picked}",
         );
         // The pick is recorded before it is applied, and the operator actually

@@ -8,9 +8,9 @@
 //! descends — one segment per container level crossed — so every leaf has a
 //! unique address regardless of depth.
 
-use std::borrow::Cow;
 use std::fmt;
 
+use elide_codec::LocalId;
 use smallvec::{SmallVec, smallvec};
 
 /// A path from the top-level document to one part, one segment per container
@@ -18,13 +18,13 @@ use smallvec::{SmallVec, smallvec};
 /// paths; nesting appends segments.
 ///
 /// Keyed on by [`Report`](crate::Report) / [`ArtifactSet`](crate::ArtifactSet),
-/// so it is `Hash + Eq`. Segments are the containers' own local ids, opaque to
-/// the orchestrator, joined only structurally (never string-concatenated — a
+/// so it is `Hash + Eq`. Each segment is a container's own [`LocalId`], opaque
+/// to the orchestrator, joined only structurally (never string-concatenated — a
 /// segment can itself contain any delimiter). Backed by a `SmallVec` sized for
 /// one inline segment: the depth-1 case (an un-nested container — every part
 /// today) allocates nothing, and only genuine nesting spills to the heap.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct PartId(SmallVec<[Cow<'static, str>; 1]>);
+pub struct PartId(SmallVec<[LocalId; 1]>);
 
 impl PartId {
     /// A one-segment path from a `&'static str` — the depth-1 case (a part in a
@@ -41,9 +41,9 @@ impl PartId {
         Self(SmallVec::new())
     }
 
-    /// A one-segment path from `segment` (this container's local id).
+    /// A one-segment path from `segment` (this container's [`LocalId`]).
     #[must_use]
-    pub fn leaf(segment: impl Into<Cow<'static, str>>) -> Self {
+    pub fn leaf(segment: impl Into<LocalId>) -> Self {
         Self(smallvec![segment.into()])
     }
 
@@ -53,28 +53,37 @@ impl PartId {
     /// string-joined, so any delimiter inside a segment survives the round trip.
     #[must_use]
     pub fn from_segments(segments: impl IntoIterator<Item = String>) -> Self {
-        Self(segments.into_iter().map(Cow::Owned).collect())
+        Self(segments.into_iter().map(LocalId::new).collect())
     }
 
     /// Extend `self` by one segment — the orchestrator's descent step, forming
-    /// the child part's path from its parent's path plus the child's local id.
+    /// the child part's path from its parent's path plus the child's [`LocalId`].
     #[must_use]
-    pub fn child(&self, segment: impl Into<Cow<'static, str>>) -> Self {
+    pub fn child(&self, segment: impl Into<LocalId>) -> Self {
         let mut segments = self.0.clone();
         segments.push(segment.into());
         Self(segments)
     }
 
-    /// The path's segments, top-level container first.
+    /// The path's segments as string slices, top-level container first.
     pub fn segments(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().map(Cow::as_ref)
+        self.0.iter().map(LocalId::as_str)
     }
 
-    /// This path's last segment — the part's local id in its *immediate*
-    /// container, the value passed to that container's `replace_part`.
+    /// This path's last segment as a string slice — the part's local id in its
+    /// *immediate* container. See [`last_segment_id`](Self::last_segment_id) for
+    /// the typed form.
     #[must_use]
     pub fn last_segment(&self) -> &str {
-        self.0.last().map_or("", Cow::as_ref)
+        self.0.last().map_or("", LocalId::as_str)
+    }
+
+    /// This path's last segment as a [`LocalId`] — the typed local id in its
+    /// *immediate* container, the value passed to that container's
+    /// `replace_part`. `None` for the empty (top-level) path.
+    #[must_use]
+    pub fn last_segment_id(&self) -> Option<&LocalId> {
+        self.0.last()
     }
 
     /// The number of container levels this path crosses (its depth).
@@ -91,9 +100,9 @@ impl PartId {
     }
 
     /// Split off the last segment: the *parent* path (this part's immediate
-    /// container) and this part's local id in it. `None` for an empty path.
+    /// container) and this part's [`LocalId`] in it. `None` for an empty path.
     #[must_use]
-    pub(crate) fn split_last(&self) -> Option<(PartId, Cow<'static, str>)> {
+    pub(crate) fn split_last(&self) -> Option<(PartId, LocalId)> {
         let (local, prefix) = self.0.split_last()?;
         Some((PartId(prefix.iter().cloned().collect()), local.clone()))
     }
@@ -107,7 +116,7 @@ impl fmt::Display for PartId {
             if i > 0 {
                 f.write_str(" › ")?;
             }
-            f.write_str(seg)?;
+            f.write_str(seg.as_str())?;
         }
         Ok(())
     }

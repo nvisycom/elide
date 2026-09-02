@@ -7,7 +7,7 @@ pub mod content;
 pub mod handler;
 
 pub use self::codec::{
-    Container, DocumentHandle, Format, FormatId, FormatRegistry, Handler, Loader, Part,
+    Container, DocumentHandle, Format, FormatId, FormatRegistry, Handler, Loader, LocalId, Part,
     UntypedDocumentHandle,
 };
 

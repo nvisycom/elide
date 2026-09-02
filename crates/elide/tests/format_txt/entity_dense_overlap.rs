@@ -4,7 +4,7 @@
 use elide::Result;
 
 use crate::support::asserts::assert_pii_removed;
-use crate::support::pipeline::Fixture;
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(

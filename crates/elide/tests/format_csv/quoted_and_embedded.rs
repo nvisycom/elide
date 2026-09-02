@@ -5,8 +5,8 @@
 use elide::Result;
 use elide::entity::builtins;
 
-use crate::support::asserts::{assert_label_present, assert_pii_removed, assert_preserved};
-use crate::support::pipeline::Fixture;
+use crate::support::asserts::{assert_content_preserved, assert_label_present, assert_pii_removed};
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(
@@ -33,7 +33,7 @@ async fn redacts_pii_in_quoted_cells() -> Result<()> {
 
     // The non-sensitive quoted content around the PII survives, including the
     // embedded-comma address and the doubled-quote phrasing.
-    assert_preserved!(
+    assert_content_preserved!(
         outcome.redacted_text(),
         "100 Market St, Suite 400, Springfield",
         "she said",

@@ -5,8 +5,8 @@
 use elide::Result;
 use elide::entity::builtins;
 
-use crate::support::asserts::{assert_label_present, assert_pii_removed, assert_preserved};
-use crate::support::pipeline::Fixture;
+use crate::support::asserts::{assert_content_preserved, assert_label_present, assert_pii_removed};
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(
@@ -41,7 +41,7 @@ async fn locale_identifiers_are_detected() -> Result<()> {
     );
 
     // The country column and header survive.
-    assert_preserved!(
+    assert_content_preserved!(
         outcome.redacted_text(),
         "country,national_id,tax_id,postal_code",
         "US,",

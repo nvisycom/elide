@@ -26,7 +26,7 @@ use super::DocxLoader;
 use crate::codec::{Container, Part};
 use crate::content::ContentData;
 use crate::handler::extract::{Encoder, ExtractHandler, ExtractedItem, ItemEdit};
-use crate::{Format, FormatId};
+use crate::{Format, FormatId, LocalId};
 
 /// Stable [`FormatId`] for the DOCX codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.document.docx");
@@ -98,9 +98,8 @@ impl Encoder for DocxEncoder {
         let media: Vec<elide_office::opc::PartReplacement> = self
             .replacements
             .iter()
-            .map(|(name, bytes)| elide_office::opc::PartReplacement {
-                part: PartPath::new(name.clone()),
-                bytes: bytes.to_vec(),
+            .map(|(name, bytes)| {
+                elide_office::opc::PartReplacement::new(PartPath::new(name.clone()), bytes.to_vec())
             })
             .collect();
 
@@ -151,13 +150,10 @@ impl Container for DocxEncoder {
         self.embeddings
             .iter()
             .map(|embedding| {
-                let name = embedding.part.as_str().to_owned();
-                let hint = name
-                    .rsplit_once('.')
-                    .map(|(_, e)| e.to_owned())
-                    .unwrap_or_default();
+                let id = LocalId::new(embedding.part.as_str().to_owned());
+                let hint = id.extension().unwrap_or_default().to_owned();
                 Part {
-                    id: name.into(),
+                    id,
                     bytes: embedding.bytes.clone(),
                     hint,
                 }
@@ -165,10 +161,11 @@ impl Container for DocxEncoder {
             .collect()
     }
 
-    fn replace_part(&mut self, id: &str, bytes: Bytes) -> Result<()> {
+    fn replace_part(&mut self, id: &LocalId, bytes: Bytes) -> Result<()> {
         // Reject anything that isn't a binary embedding so a caller can't
         // smuggle bytes into a text/structure part through this surface.
-        let is_embedding = PartKind::of(&PartPath::from(id)).embedding().is_some();
+        let part_path = PartPath::from(id.as_str());
+        let is_embedding = PartKind::of(&part_path).embedding().is_some();
         if !is_embedding {
             return Err(Error::new(
                 ErrorKind::MalformedInput,
@@ -181,14 +178,14 @@ impl Container for DocxEncoder {
         let is_known = self
             .embeddings
             .iter()
-            .any(|embedding| embedding.part.as_str() == id);
+            .any(|embedding| embedding.part.as_str() == id.as_str());
         if !is_known {
             return Err(Error::new(
                 ErrorKind::MalformedInput,
                 format!("docx replace_part: `{id}` is not a known embedded media part"),
             ));
         }
-        self.replacements.insert(id.to_owned(), bytes);
+        self.replacements.insert(id.as_str().to_owned(), bytes);
         Ok(())
     }
 }

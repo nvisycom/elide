@@ -25,6 +25,34 @@ mod report;
 mod schema;
 mod serde;
 
+/// Shared helpers for the analysis unit tests (`report`, `serde`).
+#[cfg(test)]
+mod test_support {
+    use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
+    use elide_core::entity::{Entity, LabelRef};
+    use elide_core::modality::text::{Text, TextLocation};
+    use elide_core::primitive::Confidence;
+
+    use crate::PartId;
+
+    /// A minimal [`Text`] entity carrying `label`, for building reports under test.
+    pub(crate) fn text_entity(label: &str) -> Entity<Text> {
+        let loc = TextLocation::new(0, 4);
+        let event = AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
+        Entity::new(
+            LabelRef::new(label),
+            loc,
+            Confidence::MAX,
+            AuditLog::new(event),
+        )
+    }
+
+    /// A one-segment [`PartId`] naming the sole document under test.
+    pub(crate) fn doc() -> PartId {
+        PartId::new("document")
+    }
+}
+
 pub use self::artifacts::ArtifactSet;
 pub(crate) use self::group::{ArtifactGroup, EntityGroup};
 pub(crate) use self::registry::ModalityRegistry;

@@ -5,8 +5,8 @@
 use elide::Result;
 use elide::entity::builtins;
 
-use crate::support::asserts::{assert_label_present, assert_pii_removed, assert_preserved};
-use crate::support::pipeline::Fixture;
+use crate::support::asserts::{assert_content_preserved, assert_label_present, assert_pii_removed};
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(
@@ -28,7 +28,7 @@ async fn string_pii_redacts_while_non_string_scalars_survive() -> Result<()> {
     assert_pii_removed!(out, "alice.johnson@example.com", "192.168.1.42");
 
     // Number, float, boolean, and null scalars are untouched and round-trip.
-    assert_preserved!(
+    assert_content_preserved!(
         out,
         "\"retries\": 3",
         "\"ratio\": 0.75",

@@ -3,8 +3,8 @@
 
 use elide::Result;
 
-use crate::support::asserts::{assert_pii_removed, assert_preserved};
-use crate::support::pipeline::Fixture;
+use crate::support::asserts::{assert_content_preserved, assert_pii_removed};
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(
@@ -23,6 +23,6 @@ async fn keyword_boosts_only_within_the_window() -> Result<()> {
     assert_pii_removed!(outcome.redacted_text(), "4111 1111 1111 1111");
 
     // The card too far from "card" stays weak and survives verbatim.
-    assert_preserved!(outcome.redacted_text(), "5555 5555 5555 4444");
+    assert_content_preserved!(outcome.redacted_text(), "5555 5555 5555 4444");
     Ok(())
 }

@@ -12,4 +12,6 @@ pub use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation, Te
 #[cfg(all(feature = "codec", feature = "test-utils"))]
 pub mod asserts;
 #[cfg(all(feature = "codec", feature = "test-utils"))]
-pub mod pipeline;
+pub mod fixture;
+#[cfg(all(feature = "codec", feature = "test-utils"))]
+pub mod orchestrator;

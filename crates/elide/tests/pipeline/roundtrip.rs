@@ -5,19 +5,20 @@
 //! [`deserialize_report`]: elide::Orchestrator::deserialize_report
 //! [`anonymize_with`]: elide::Orchestrator::anonymize_with
 
-#![cfg(feature = "engine")]
+#![cfg(all(feature = "engine", feature = "test-utils", feature = "llm"))]
 
 use elide::codec::FormatRegistry;
 use elide::detection::Analyzer;
-use elide::entity::{LabelCatalog, builtins};
+use elide::entity::LabelCatalog;
 use elide::modality::image::Image;
 use elide::modality::text::Text;
 use elide::recognition::Scope;
-use elide::recognition::llm::LlmRecognizer;
 use elide::recognition::pattern::PatternRecognizer;
-use elide::redaction::operators::{Erase, Replace};
+use elide::redaction::operators::Replace;
 use elide::redaction::{Anonymizer, Rule};
 use elide::{Directives, Orchestrator, RegistryDocumentExt, Result};
+
+use crate::support::orchestrator::TestOrchestrator;
 
 const SAMPLE: &[u8] = include_bytes!("../testdata/sample.docx");
 
@@ -25,26 +26,7 @@ const SAMPLE: &[u8] = include_bytes!("../testdata/sample.docx");
 const DOC: &str = "sample.docx";
 
 fn orchestrator(registry: FormatRegistry) -> Result<Orchestrator> {
-    let patterns = PatternRecognizer::builder()
-        .with_builtin_patterns()
-        .with_builtin_dictionaries()
-        .build_context_enhanced()?;
-    let text = Anonymizer::new()
-        .with(Rule::label(
-            builtins::EMAIL_ADDRESS.to_ref(),
-            Replace::new("[EMAIL]"),
-        ))
-        .with(Rule::fallback(Erase));
-    let image = LlmRecognizer::<Image>::builder()
-        .with_name("mock-image")
-        .with_mock_backend()
-        .with_default_prompt()
-        .build()?;
-    Ok(Orchestrator::new()
-        .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
-        .with_registry(registry)
-        .with_modality::<Text>(Analyzer::new().with_recognizer(patterns), text)
-        .with_modality::<Image>(Analyzer::new().with_recognizer(image), Anonymizer::new()))
+    Ok(TestOrchestrator::new()?.with_registry(registry).build())
 }
 
 /// A report survives a JSON round trip through the orchestrator: the same
@@ -159,12 +141,7 @@ async fn split_pipeline_halves_detect_and_redact() -> Result<()> {
         .with_builtin_patterns()
         .with_builtin_dictionaries()
         .build_context_enhanced()?;
-    let text_redact = Anonymizer::new()
-        .with(Rule::label(
-            builtins::EMAIL_ADDRESS.to_ref(),
-            Replace::new("[EMAIL]"),
-        ))
-        .with(Rule::fallback(Erase));
+    let text_redact = Anonymizer::new().with(Rule::fallback(Replace::default()));
 
     // Register the two halves in separate calls — no fabricated empty half.
     let orchestrator = Orchestrator::new()

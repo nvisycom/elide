@@ -5,8 +5,8 @@
 use elide::Result;
 use elide::entity::builtins;
 
-use crate::support::asserts::{assert_label_present, assert_pii_removed, assert_preserved};
-use crate::support::pipeline::Fixture;
+use crate::support::asserts::{assert_content_preserved, assert_label_present, assert_pii_removed};
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(
@@ -35,7 +35,7 @@ async fn nested_objects_and_arrays_redact_at_any_depth() -> Result<()> {
     );
 
     // Container keys and a non-PII array item survive.
-    assert_preserved!(
+    assert_content_preserved!(
         outcome.redacted_text(),
         "\"organization\"",
         "\"departments\"",

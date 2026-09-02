@@ -8,9 +8,9 @@ use elide::Result;
 use elide::entity::builtins;
 
 use crate::support::asserts::{
-    assert_label_present, assert_pii_removed, assert_preserved, assert_tokens_present,
+    assert_content_preserved, assert_label_present, assert_pii_removed, assert_tokens_present,
 };
-use crate::support::pipeline::Fixture;
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(
@@ -61,11 +61,11 @@ async fn xml_detects_and_redacts() -> Result<()> {
     // The payment card is masked in place (the test anonymizer stars it, rather
     // than tokening it), so the element keeps a star-mask — a regression that
     // *deleted* the card instead of masking it would leave `<paymentCard></…>`.
-    assert_preserved!(outcome.redacted_text(), "<paymentCard>*");
+    assert_content_preserved!(outcome.redacted_text(), "<paymentCard>*");
 
     // Markup structure survives: the declaration, namespaced root, tags, and
     // non-sensitive text stay verbatim.
-    assert_preserved!(
+    assert_content_preserved!(
         outcome.redacted_text(),
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
         "<onboarding xmlns=\"urn:example:onboarding\"",

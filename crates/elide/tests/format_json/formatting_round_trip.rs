@@ -4,8 +4,8 @@
 
 use elide::Result;
 
-use crate::support::asserts::{assert_pii_removed, assert_preserved};
-use crate::support::pipeline::Fixture;
+use crate::support::asserts::{assert_content_preserved, assert_pii_removed};
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(
@@ -30,7 +30,7 @@ async fn irregular_formatting_and_key_order_are_preserved() -> Result<()> {
 
     // Original key order (zeta before alpha), odd spacing around colons and
     // commas, and the tab indentation all survive verbatim.
-    assert_preserved!(
+    assert_content_preserved!(
         out,
         "\"zeta\":    \"keep this key order\"",
         "\"nested\":{\"phone\":  ",

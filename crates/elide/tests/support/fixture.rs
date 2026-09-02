@@ -1,34 +1,36 @@
-//! The shared codec round-trip driver for the e2e tests.
+//! The codec round-trip driver for the e2e tests: [`Fixture`] / [`PipelineOutcome`].
 //!
-//! Wires the same flow the `redact-txt` example does — decode (codec) →
-//! analyze (`Analyzer`) → anonymize (`Anonymizer`) → encode — into one
-//! helper the per-format tests call, plus a [`PipelineOutcome`] carrying
-//! the entities and re-encoded bytes for assertions.
+//! [`Fixture`] wires the same flow the `redact-txt` example does — decode (codec)
+//! → analyze (`Analyzer`) → anonymize (`Anonymizer`) → encode — into one helper
+//! the per-format tests call, generic over any [`TextRecognizable`]: the [`Text`]
+//! formats (`txt`, `json`, `html`), [`Tabular`] (`csv`), and container bodies. It
+//! builds its orchestrator through [`TestOrchestrator`], the single construction
+//! path the pipeline tests share.
 //!
-//! Generic over any [`TextRecognizable`]: the [`Text`] formats (`txt`,
-//! `json`, `html`) and [`Tabular`] (`csv`). The shipped pattern
-//! recognizer and the operators serve both — only the codec handle's
-//! modality differs.
+//! [`TestOrchestrator`]: super::orchestrator::TestOrchestrator
 
 use elide::codec::{DocumentHandle, FormatRegistry, UntypedDocumentHandle};
 use elide::detection::Analyzer;
-use elide::detection::filter::FilterLayer;
-use elide::detection::reconcile::{Merging, ReconcileLayer, Structural};
 use elide::entity::{Entity, Label, LabelCatalog, builtins};
 #[cfg(feature = "stt")]
 use elide::modality::audio::Audio;
-#[cfg(any(feature = "llm", feature = "ocr"))]
+#[cfg(feature = "image")]
 use elide::modality::image::Image;
 #[cfg(feature = "tabular")]
 use elide::modality::tabular::Tabular;
 use elide::modality::text::Text;
 use elide::modality::{Modality, StreamDataReader, TextRecognizable};
-use elide::primitive::{ConfidenceThreshold, Language, LanguageTag};
-use elide::recognition::pattern::PatternRecognizer;
-use elide::recognition::{Recognizer, Scope};
+use elide::primitive::{Language, LanguageTag};
+use elide::recognition::Scope;
 use elide::redaction::operators::{Erase, Mask, Replace};
 use elide::redaction::{Anonymizer, Operator, Rule};
-use elide::{Directives, Document, Error, ErrorKind, Orchestrator, PartId, Report, Result};
+use elide::{Directives, Document, Error, ErrorKind, Orchestrator, Report, Result};
+
+#[cfg(all(feature = "image", feature = "llm"))]
+use super::orchestrator::image_analyzer;
+use super::orchestrator::{
+    TestOrchestrator, build_analyzer, build_anonymizer, default_text_analyzer,
+};
 
 /// The single fixture document's name in the report — its depth-1 part key.
 const DOC: &str = "document";
@@ -98,117 +100,6 @@ impl<M: Modality> PipelineOutcome<M> {
             }
         }
     }
-}
-
-/// Build the detection side: the real built-in pattern recognizer (with
-/// context boosting) plus — when the `ner` feature is on — the NER
-/// recognizer, behind the standard dedup pipeline. Generic over any
-/// text-payload modality the recognizers serve.
-///
-/// The NER recognizer rides a mock backend that finds nothing today, so
-/// name/organization/address fixtures round-trip un-redacted for now; the
-/// pipeline shape is already the intended one, so those fixtures light up
-/// unchanged once a real backend is configured.
-pub fn build_analyzer<M: TextRecognizable>() -> Result<Analyzer<M>> {
-    let patterns = PatternRecognizer::builder()
-        .with_builtin_patterns()
-        .with_builtin_dictionaries()
-        .build_context_enhanced()?;
-
-    let analyzer = Analyzer::new();
-
-    // Detect the document's languages first (when `lingua` is on), so a
-    // per-language context rule — a credit card beside `tarjeta` / `carte` /
-    // `Kreditkarte` — fires under whatever language that sentence is in. With no
-    // caller-asserted language, the enricher's detections are authoritative.
-    #[cfg(feature = "lingua")]
-    let analyzer = {
-        use elide::enrichment::lingua::LinguaEnricher;
-        analyzer.with_enricher(LinguaEnricher::unrestricted())
-    };
-
-    let analyzer = analyzer.with_recognizer(patterns);
-
-    #[cfg(feature = "ner")]
-    let analyzer = {
-        use elide::recognition::ner::NerRecognizer;
-        let ner = NerRecognizer::builder()
-            .with_name("mock-ner")
-            .with_mock_backend()
-            .build()?;
-        analyzer.with_recognizer(ner)
-    };
-
-    Ok(analyzer
-        .with_layer(ReconcileLayer::same_label(Merging::max()))
-        .with_layer(ReconcileLayer::cross_label(Structural::default()))
-        .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE)))
-}
-
-/// The [`Text`] analyzer with the mock LLM recognizer added on top of
-/// [`build_analyzer`]'s pattern + NER. The LLM recognizer is bound to
-/// [`LlmModality`], which `Text` satisfies but `Tabular` does not (see
-/// `testdata/BUGS.md` B9), so only `Text` pipelines can carry it today; a
-/// container's tabular body still drives its text sub-parts through this
-/// `Text` pipeline.
-///
-/// Like the mock NER, the mock LLM finds nothing today — it makes the
-/// pipeline shape the intended one, so LLM-tier fixtures light up unchanged
-/// once a real backend is configured.
-#[cfg(feature = "llm")]
-pub fn build_text_analyzer() -> Result<Analyzer<Text>> {
-    use elide::recognition::llm::LlmRecognizer;
-    let llm = LlmRecognizer::builder()
-        .with_name("mock-llm")
-        .with_mock_backend()
-        .with_default_prompt()
-        .build()?;
-    Ok(build_analyzer::<Text>()?.with_recognizer(llm))
-}
-
-/// Build the redaction side: one operator per label the shipped patterns
-/// emit, so assertions can spot the replacement tokens, plus a fallback.
-pub fn build_anonymizer<M: TextRecognizable>() -> Anonymizer<M>
-where
-    Replace: Operator<M>,
-    Mask: Operator<M>,
-    Erase: Operator<M>,
-{
-    Anonymizer::new()
-        .with(Rule::label(
-            builtins::EMAIL_ADDRESS.to_ref(),
-            Replace::new("[email_address]"),
-        ))
-        .with(Rule::label(
-            builtins::PHONE_NUMBER.to_ref(),
-            Replace::new("[phone_number]"),
-        ))
-        .with(Rule::label(builtins::IBAN.to_ref(), Replace::new("[iban]")))
-        .with(Rule::label(
-            builtins::GOVERNMENT_ID.to_ref(),
-            Replace::new("[government_id]"),
-        ))
-        .with(Rule::label(
-            builtins::IP_ADDRESS.to_ref(),
-            Replace::new("[ip_address]"),
-        ))
-        .with(Rule::label(builtins::PAYMENT_CARD.to_ref(), Mask::stars()))
-        .with(Rule::fallback(Erase))
-}
-
-/// Build an image analyzer backed by the mock LLM (detects nothing) — the
-/// image pipeline the master orchestrator registers so a container's
-/// embedded media is driven. Real image detection is a separate concern;
-/// here it proves the multi-modal path runs.
-#[cfg(feature = "llm")]
-fn build_image_analyzer() -> Result<Analyzer<Image>> {
-    use elide::recognition::llm::LlmRecognizer;
-    let recognizer = LlmRecognizer::builder()
-        .with_name("mock-image")
-        .with_mock_backend()
-        .with_default_prompt()
-        .build()?;
-    Ok(Analyzer::new().with_recognizer(recognizer))
 }
 
 /// A codec fixture the e2e tests load: the inlined source bytes, the
@@ -469,26 +360,22 @@ impl Fixture {
             UntypedDocumentHandle::new(self.decode_as::<M>(&registry).await?),
         );
 
-        // One scope, shared across every modality pipeline.
-        let orchestrator = Orchestrator::new()
+        // One scope, shared across every modality pipeline. Built through
+        // `TestOrchestrator`, the shared construction path.
+        let builder = TestOrchestrator::bare()
             .with_registry(registry)
             .with_scope(scope)
-            .with_modality::<M>(build_analyzer::<M>()?, build_anonymizer::<M>());
+            .with_body::<M>(build_analyzer::<M>()?, build_anonymizer::<M>());
         // Drive embedded images too when the image recognizer is available.
-        #[cfg(feature = "llm")]
-        let orchestrator =
-            orchestrator.with_modality::<Image>(build_image_analyzer()?, Anonymizer::new());
+        #[cfg(all(feature = "image", feature = "llm"))]
+        let builder = builder.with_image(image_analyzer()?, Anonymizer::new());
         // A container's text sub-parts (an XLSX comment or drawing, surfaced as
         // an XML part) are the Text modality, so register a Text pipeline to
         // drive them. When the body modality already is Text this re-registers
         // the same pipeline, which is a no-op; when it is Tabular it adds the
         // pipeline the container parts need.
-        #[cfg(feature = "llm")]
-        let text_analyzer = build_text_analyzer()?;
-        #[cfg(not(feature = "llm"))]
-        let text_analyzer = build_analyzer::<Text>()?;
-        let orchestrator =
-            orchestrator.with_modality::<Text>(text_analyzer, build_anonymizer::<Text>());
+        let builder = builder.with_text(default_text_analyzer()?, build_anonymizer::<Text>());
+        let orchestrator = builder.build();
 
         // Two phases so the entities surface for assertions: detect, copy
         // the document's own entities out, then apply with no editing.

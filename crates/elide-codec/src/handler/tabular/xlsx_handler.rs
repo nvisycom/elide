@@ -23,7 +23,7 @@ use super::xlsx_loader::XlsxLoader;
 use crate::codec::{Container, Part};
 use crate::content::ContentData;
 use crate::handler::redact;
-use crate::{Format, FormatId, Handler};
+use crate::{Format, FormatId, Handler, LocalId};
 
 /// Stable [`FormatId`] for the XLSX codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.tabular.xlsx");
@@ -187,12 +187,7 @@ impl Handler<Tabular> for XlsxHandler {
             .iter()
             .map(|&index| {
                 let cell = &self.cells[index];
-                CellEdit {
-                    sheet: cell.sheet.clone(),
-                    row: cell.row,
-                    column: cell.column,
-                    text: cell.text.clone(),
-                }
+                CellEdit::new(cell.sheet.clone(), cell.row, cell.column, cell.text.clone())
             })
             .collect();
         // The redacted non-cell text parts (comments, drawings, charts) fold in
@@ -273,23 +268,23 @@ impl Container for XlsxHandler {
         self.text_parts
             .iter()
             .map(|(path, bytes)| Part {
-                id: path.clone().into(),
+                id: LocalId::new(path.clone()),
                 bytes: bytes.clone(),
                 hint: "xml".to_owned(),
             })
             .collect()
     }
 
-    fn replace_part(&mut self, id: &str, bytes: Bytes) -> Result<()> {
+    fn replace_part(&mut self, id: &LocalId, bytes: Bytes) -> Result<()> {
         // Only a part the workbook actually surfaced can be replaced, so a caller
         // can't smuggle bytes into a cell or structure part through this surface.
-        if !self.text_parts.iter().any(|(path, _)| path == id) {
+        if !self.text_parts.iter().any(|(path, _)| path == id.as_str()) {
             return Err(Error::new(
                 ErrorKind::MalformedInput,
                 format!("xlsx replace_part: `{id}` is not a text-bearing part"),
             ));
         }
-        self.replacements.insert(id.to_owned(), bytes);
+        self.replacements.insert(id.as_str().to_owned(), bytes);
         Ok(())
     }
 }
@@ -542,13 +537,13 @@ mod tests {
         assert!(
             parts
                 .iter()
-                .any(|p| p.id.as_ref() == "xl/comments1.xml" && p.hint == "xml"),
+                .any(|p| p.id.as_str() == "xl/comments1.xml" && p.hint == "xml"),
             "comment part not surfaced: {parts:?}"
         );
         assert!(
             parts
                 .iter()
-                .any(|p| p.id.as_ref() == "xl/drawings/drawing1.xml" && p.hint == "xml"),
+                .any(|p| p.id.as_str() == "xl/drawings/drawing1.xml" && p.hint == "xml"),
         );
     }
 
@@ -564,12 +559,12 @@ mod tests {
         {
             let container = h.as_container_mut().unwrap();
             container
-                .replace_part("xl/comments1.xml", redacted.clone())
+                .replace_part(&LocalId::new("xl/comments1.xml"), redacted.clone())
                 .unwrap();
             // An id the workbook does not surface is refused.
             assert!(
                 container
-                    .replace_part("xl/nope.xml", redacted.clone())
+                    .replace_part(&LocalId::new("xl/nope.xml"), redacted.clone())
                     .is_err()
             );
         }

@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use super::ImageLocation;
 use crate::modality::ModalityArtifact;
-use crate::primitive::{BoundingBox, Confidence, Point};
+use crate::primitive::{BoundingBox, Confidence};
 
 /// Separator inserted between blocks when building the flat layout text, so
 /// adjacent blocks don't run their words together.
@@ -208,7 +208,7 @@ struct RegionUnion {
 impl RegionUnion {
     fn add(&mut self, location: &ImageLocation) {
         self.bbox = Some(match self.bbox.take() {
-            Some(acc) => union(acc, location.bounding_box),
+            Some(acc) => acc.union(&location.bounding_box),
             None => location.bounding_box,
         });
         // First region sets the page; a later region on a different page is
@@ -267,17 +267,10 @@ impl RegionUnion {
     }
 }
 
-/// The smallest axis-aligned box enclosing both inputs.
-fn union(a: BoundingBox, b: BoundingBox) -> BoundingBox {
-    BoundingBox::new(
-        Point::new(a.min.x.min(b.min.x), a.min.y.min(b.min.y)),
-        Point::new(a.max.x.max(b.max.x), a.max.y.max(b.max.y)),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::primitive::Point;
 
     fn loc(x: f64, y: f64, w: f64, h: f64) -> ImageLocation {
         ImageLocation::new(BoundingBox::from_origin_size(Point::new(x, y), w, h))

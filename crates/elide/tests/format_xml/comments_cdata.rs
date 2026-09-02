@@ -5,8 +5,8 @@
 use elide::Result;
 use elide::entity::builtins;
 
-use crate::support::asserts::{assert_label_present, assert_pii_removed, assert_preserved};
-use crate::support::pipeline::Fixture;
+use crate::support::asserts::{assert_content_preserved, assert_label_present, assert_pii_removed};
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(
@@ -34,7 +34,7 @@ async fn comment_and_cdata_pii_is_redacted() -> Result<()> {
     );
 
     // The comment and CDATA delimiters and the non-sensitive summary survive.
-    assert_preserved!(
+    assert_content_preserved!(
         outcome.redacted_text(),
         "<!--",
         "-->",

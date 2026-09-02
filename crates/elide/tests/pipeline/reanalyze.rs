@@ -4,19 +4,16 @@
 //! re-running against an orchestrator whose OCR backend is empty: detection
 //! survives only because the seeded artifact carried the OCR text through.
 
-#![cfg(all(feature = "engine", feature = "ocr"))]
+#![cfg(all(feature = "engine", feature = "ocr", feature = "test-utils"))]
 
 use elide::codec::FormatRegistry;
-use elide::detection::Analyzer;
-use elide::enrichment::ocr::{MockBackend, OcrEnricher};
-use elide::entity::{Entity, LabelCatalog};
+use elide::enrichment::ocr::MockBackend;
+use elide::entity::Entity;
 use elide::modality::image::{Image, ImageLocation, LayoutBlock};
 use elide::primitive::{BoundingBox, Point};
-use elide::recognition::Scope;
-use elide::recognition::pattern::PatternRecognizer;
-use elide::redaction::operators::Erase;
-use elide::redaction::{Anonymizer, Rule};
 use elide::{Directives, Orchestrator, PartId, RegistryDocumentExt, Result};
+
+use crate::support::orchestrator::{TestOrchestrator, erase_anonymizer, ocr_analyzer};
 
 /// Any decodable PNG: the mock OCR backend ignores the pixels and returns its
 /// canned blocks, so the fixture only has to decode to an image.
@@ -36,21 +33,10 @@ fn loc() -> ImageLocation {
 /// An orchestrator whose image pipeline enriches with `backend` and detects
 /// email addresses in the OCR text. The anonymizer erases what it finds.
 fn orchestrator(registry: FormatRegistry, backend: MockBackend) -> Result<Orchestrator> {
-    let patterns = PatternRecognizer::builder()
-        .with_builtin_patterns()
-        .build()?;
-    let analyzer = Analyzer::new()
-        .with_enricher(
-            OcrEnricher::builder()
-                .with_name("mock-ocr")
-                .with_backend(backend)
-                .build()?,
-        )
-        .with_recognizer(patterns);
-    Ok(Orchestrator::new()
-        .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
+    Ok(TestOrchestrator::bare()
         .with_registry(registry)
-        .with_modality::<Image>(analyzer, Anonymizer::new().with(Rule::fallback(Erase))))
+        .with_image(ocr_analyzer(backend)?, erase_anonymizer())
+        .build())
 }
 
 fn image_entities(analyzed: &elide::AnalyzedDocument) -> Vec<Entity<Image>> {

@@ -2,7 +2,7 @@
 //!
 //! - `format`: *what kind of thing a codec is*. [`FormatId`],
 //!   [`Format`] descriptor.
-//! - `capability`: *what a handler exposes*. [`Handler<M>`]
+//! - `handler`: *what a handler exposes*. [`Handler<M>`]
 //!   (per-modality capability surface: identify, encode, stream, plus
 //!   the inherited read/write and lift). The streamed unit is
 //!   [`elide_core::modality::Chunk`].
@@ -18,16 +18,18 @@
 //!
 //! Concrete format implementations live in `crate::handler::*`.
 
-mod capability;
 mod container;
 mod document;
 mod format;
+mod handler;
 pub(crate) mod loader;
+mod local_id;
 mod registry;
 
-pub use self::capability::Handler;
 pub use self::container::{Container, Part};
 pub use self::document::{DocumentHandle, UntypedDocumentHandle};
 pub use self::format::{Format, FormatId};
+pub use self::handler::Handler;
 pub use self::loader::Loader;
+pub use self::local_id::LocalId;
 pub use self::registry::FormatRegistry;

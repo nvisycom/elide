@@ -8,12 +8,12 @@ mod part_id;
 mod pipeline;
 
 use std::any::TypeId;
-use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
+use std::path::Path;
 
 use bytes::Bytes;
 use elide_codec::content::ContentData;
-use elide_codec::{DocumentHandle, FormatRegistry, Part, UntypedDocumentHandle};
+use elide_codec::{DocumentHandle, FormatRegistry, LocalId, Part, UntypedDocumentHandle};
 use elide_core::entity::Entity;
 use elide_core::modality::{DataReader, DataWriter, Modality, NoArtifact, StreamDataReader};
 use elide_core::recognition::Scope;
@@ -136,10 +136,7 @@ impl Orchestrator {
     {
         self.pipelines.insert(
             TypeId::of::<M>(),
-            Box::new(ModalityPipeline {
-                analyzer,
-                anonymizer,
-            }),
+            Box::new(ModalityPipeline::new(analyzer, anonymizer)),
         );
         // Register the parser that reconstructs this modality's group from the
         // wire, so `deserialize_report` can route it back by name.
@@ -219,10 +216,7 @@ impl Orchestrator {
     {
         self.pipelines.insert(
             TypeId::of::<M>(),
-            Box::new(ModalityPipeline {
-                analyzer,
-                anonymizer,
-            }),
+            Box::new(ModalityPipeline::new(analyzer, anonymizer)),
         );
         self.groups.register::<M>();
     }
@@ -321,6 +315,21 @@ impl Orchestrator {
         let scope = directives.scope.as_ref().unwrap_or(&self.scope);
         let annotations = &directives.annotations;
         let empty: Box<dyn ArtifactGroup> = Box::new(NoArtifact);
+
+        // A document's name is its depth-1 `PartId` — the key its own content and
+        // every nested part hang under. Two documents sharing a name would key to
+        // the same path, so the second would overwrite the first in the report and
+        // never be reached at apply. Reject the collision up front rather than
+        // silently drop a document's redaction.
+        let mut names = std::collections::HashSet::new();
+        for document in documents.iter() {
+            if !names.insert(document.name.as_str()) {
+                return Err(Error::new(
+                    ErrorKind::MalformedInput,
+                    format!("duplicate document name `{}` in the set", document.name),
+                ));
+            }
+        }
 
         // Each document's own content: analyzed in place, stored as a depth-1
         // part keyed by the document's name. This is where a leaf document (a
@@ -493,7 +502,6 @@ impl Orchestrator {
                     .analyze_part(
                         &part_id,
                         child,
-                        is_container,
                         prior,
                         scope,
                         annotations,
@@ -521,17 +529,15 @@ impl Orchestrator {
     /// then walked for its parts. A part whose modality has no pipeline is left
     /// untouched (an intentional pass-through).
     ///
-    /// Returns the handle to walk further, or [`None`] when it was consumed: a
-    /// depth-1 leaf's handle is cached in the report for the same-process apply
-    /// fast path (nothing to return), while a container's handle is never cached
-    /// (it is re-decoded by path at apply, like any nested part) and comes back
-    /// live so its parts can be walked. `is_container` selects between the two.
+    /// Returns the live handle so the caller can walk further into it (a
+    /// container's parts), or [`None`] when no pipeline accepted the part. The
+    /// handle is never cached in the report — every part is re-decoded by path at
+    /// apply — so it always comes back live when a pipeline matched.
     #[allow(clippy::too_many_arguments)]
     async fn analyze_part(
         &self,
         part_id: &PartId,
         handle: UntypedDocumentHandle,
-        is_container: bool,
         prior: &ArtifactSet,
         scope: &Scope,
         annotations: &AnnotationSet,
@@ -556,28 +562,19 @@ impl Orchestrator {
                     #[cfg(feature = "usage")]
                     report.usage.extend(usage);
                     let name = entities.modality_name();
-                    // Cache a depth-1 leaf's handle for the apply fast path; a
-                    // container caches nothing so its handle is returned live to
-                    // walk. `analyze` yields one handle, so caching and returning
-                    // it are mutually exclusive.
-                    let cache_leaf = !is_container && part_id.depth() == 1;
-                    let (cached, to_return) = if cache_leaf {
-                        (Some(retained), None)
-                    } else {
-                        (None, Some(retained))
-                    };
                     report.parts.insert(
                         part_id.clone(),
                         PartReport {
                             modality,
-                            handle: cached,
+                            // Re-decoded by path at apply — never cached.
+                            handle: None,
                             entities,
                         },
                     );
                     if let Some(artifact) = artifact {
                         artifacts.set_part(part_id.clone(), modality, name, artifact);
                     }
-                    return Ok(to_return);
+                    return Ok(Some(retained));
                 }
                 AnalyzeOutcome::Rejected(returned) => handle = Some(returned),
             }
@@ -668,6 +665,12 @@ impl Orchestrator {
     /// a redaction one level shallower. Repeatedly resolving the deepest parent
     /// first cascades this to the top, where the depth-1 parents write into each
     /// document's own container, which re-encodes itself.
+    ///
+    /// A nested container that carries *its own* redaction (a DOCX whose body
+    /// text was redacted) as well as descendant parts is folded onto its own
+    /// redacted bytes: those bytes — staged as a replacement in its parent — are
+    /// the base its descendant replacements apply to, so the container's own
+    /// redaction is preserved rather than lost to a re-decode of the original.
     fn fold_redactions<'a>(
         &'a self,
         documents: &'a mut [Document],
@@ -678,7 +681,7 @@ impl Orchestrator {
             // parent that names a *top* container — a one-segment document path —
             // writes straight into that document's handle; a deeper parent
             // re-encodes and folds into its own parent.
-            let mut by_parent: HashMap<PartId, Vec<(Cow<'static, str>, Bytes)>> = HashMap::new();
+            let mut by_parent: HashMap<PartId, Vec<(LocalId, Bytes)>> = HashMap::new();
             for (id, bytes) in redactions {
                 if let Some((parent, local)) = id.split_last() {
                     by_parent.entry(parent).or_default().push((local, bytes));
@@ -701,9 +704,28 @@ impl Orchestrator {
                     continue;
                 }
 
-                // A nested container: re-decode it, apply its child
-                // replacements, re-encode, and enqueue its bytes for its parent.
-                let Some(mut handle) = self.decode_by_path(documents, &parent).await? else {
+                // A nested container. If its *own* redaction was staged (as a
+                // replacement of `parent.local` in its grandparent), fold onto
+                // those bytes — the container's own redaction — and consume that
+                // staged entry so it is not also applied verbatim (which would
+                // clobber the fold). Otherwise decode the container as-is from the
+                // original document.
+                let own_bytes = parent
+                    .split_last()
+                    .and_then(|(gp, local)| take_staged(&mut by_parent, &gp, &local));
+                let decoded = match &own_bytes {
+                    // Decode the container's own redacted bytes, resolving the
+                    // format from its local id's extension (as the flatten did).
+                    Some(bytes) => {
+                        let hint = parent
+                            .last_segment_id()
+                            .and_then(LocalId::extension)
+                            .unwrap_or("");
+                        self.registry.decode(bytes.clone(), hint).await.ok()
+                    }
+                    None => self.decode_by_path(documents, &parent).await?,
+                };
+                let Some(mut handle) = decoded else {
                     continue; // the container is gone or undecodable
                 };
                 if let Some(c) = handle.as_container_mut() {
@@ -886,6 +908,25 @@ fn deepest_parent<V>(by_parent: &HashMap<PartId, V>) -> Option<PartId> {
     by_parent.keys().max_by_key(|id| id.depth()).cloned()
 }
 
+/// Remove and return a container's *own* staged redacted bytes from the fold
+/// map: the replacement of `local` in `parent`, if one is pending. Used so a
+/// nested container is re-decoded from its own redaction rather than the
+/// original, and that staged entry is not also applied verbatim (which would
+/// clobber the fold). The other replacements under `parent` are left in place.
+fn take_staged(
+    by_parent: &mut HashMap<PartId, Vec<(LocalId, Bytes)>>,
+    parent: &PartId,
+    local: &LocalId,
+) -> Option<Bytes> {
+    let entries = by_parent.get_mut(parent)?;
+    let pos = entries.iter().position(|(l, _)| l == local)?;
+    let (_, bytes) = entries.remove(pos);
+    if entries.is_empty() {
+        by_parent.remove(parent);
+    }
+    Some(bytes)
+}
+
 /// One document the engine redacts: its name — the first segment of every
 /// [`PartId`] beneath it — and its decoded handle.
 ///
@@ -1041,11 +1082,12 @@ impl RegistryDocumentExt for FormatRegistry {
         bytes: impl Into<ContentData>,
     ) -> Result<Document> {
         let name = name.into();
-        // The format is the name's own extension — the same parse
-        // `ContentData::extension` uses (last `.`-segment, lowercased).
-        let extension = name
-            .rsplit_once('.')
-            .map(|(_, ext)| ext.to_ascii_lowercase());
+        // The format is the name's own extension, lowercased — resolved via
+        // `Path::extension` (which ignores a leading-dot dotfile like `.rels`).
+        let extension = Path::new(&name)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_ascii_lowercase);
         let Some(extension) = extension else {
             return Err(Error::new(
                 ErrorKind::MalformedInput,
