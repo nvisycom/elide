@@ -166,10 +166,10 @@ impl Handler<Text> for MockHandler {
 #[async_trait::async_trait]
 impl DataReader<Text> for MockHandler {
     async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
-        Ok(self
-            .body
-            .get(location.range.start..location.range.end)
-            .map(TextData::new))
+        let Some(range) = location.range() else {
+            return Ok(None);
+        };
+        Ok(self.body.get(range.start..range.end).map(TextData::new))
     }
 }
 
@@ -180,7 +180,10 @@ impl DataWriter<Text> for MockHandler {
         // locations valid.
         redactions.sort_by_position();
         for (location, replacement) in redactions.into_iter().rev() {
-            let range = location.range.start..location.range.end;
+            let Some(range) = location.range() else {
+                continue;
+            };
+            let range = range.start..range.end;
             if range.end <= self.body.len() {
                 let value = replacement.value().unwrap_or_default();
                 self.body.replace_range(range, value);

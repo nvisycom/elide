@@ -53,10 +53,10 @@ impl TextDoc {
 #[async_trait::async_trait]
 impl DataReader<Text> for TextDoc {
     async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
-        Ok(self
-            .text
-            .get(location.range.start..location.range.end)
-            .map(TextData::new))
+        let Some(range) = location.range() else {
+            return Ok(None); // a source-only location has no decoded range to read
+        };
+        Ok(self.text.get(range.clone()).map(TextData::new))
     }
 }
 
@@ -72,8 +72,9 @@ impl DataWriter<Text> for TextDoc {
                 TextReplacement::Substituted(s) => s.as_str(),
                 TextReplacement::Removed => "",
             };
-            self.text
-                .replace_range(location.range.start..location.range.end, value);
+            if let Some(range) = location.range() {
+                self.text.replace_range(range.clone(), value);
+            }
         }
         Ok(())
     }

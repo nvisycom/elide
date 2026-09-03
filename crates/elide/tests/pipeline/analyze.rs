@@ -185,11 +185,11 @@ async fn fusion_keeps_both_operands_source_refs() {
     let phone = entities.pop().unwrap();
     // Both source refs survive the fusion, in canonical (part-then-range) order.
     assert_eq!(
-        phone.location.source,
-        vec![
+        phone.location.source(),
+        &[
             SourceRef::in_part(200..212, "word/document.xml"),
             SourceRef::in_part(300..313, "word/header1.xml"),
-        ]
+        ][..]
     );
 }
 

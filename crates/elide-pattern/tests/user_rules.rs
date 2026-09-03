@@ -54,7 +54,10 @@ async fn user_toml_rules_load_and_detect() {
     let emp_hits: Vec<&str> = entities
         .iter()
         .filter(|e| e.label == builtins::INTERNAL_ID.to_ref())
-        .map(|e| &text[e.location.range.start..e.location.range.end])
+        .map(|e| {
+            let r = e.location.range().unwrap();
+            &text[r.start..r.end]
+        })
         .collect();
     assert!(
         emp_hits.contains(&"EMP-12345"),
@@ -87,7 +90,9 @@ async fn user_toml_rules_load_and_detect() {
         entities
             .iter()
             .any(|e| e.label == builtins::EMAIL_ADDRESS.to_ref()
-                && &text[e.location.range.start..e.location.range.end] == "counsel@example.com"),
+                && e.location
+                    .range()
+                    .is_some_and(|r| &text[r.start..r.end] == "counsel@example.com")),
         "expected shipped email regex to fire alongside user rules"
     );
 }
