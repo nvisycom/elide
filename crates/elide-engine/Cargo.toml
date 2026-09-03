@@ -74,3 +74,6 @@ uuid = { workspace = true, features = [] }
 jsonschema = { version = "0.52.0", default-features = false }
 # (De)serialization
 serde_json = { workspace = true, features = [] }
+# Async runtime + trait-method desugaring for the mock codec in the fold test.
+tokio = { workspace = true, features = ["macros", "rt"] }
+async-trait = { workspace = true }

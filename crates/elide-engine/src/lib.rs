@@ -4,15 +4,14 @@
 
 mod analysis;
 mod directives;
+mod document;
 mod part_id;
 mod pipeline;
 
 use std::any::TypeId;
 use std::collections::{HashMap, VecDeque};
-use std::path::Path;
 
 use bytes::Bytes;
-use elide_codec::content::ContentData;
 use elide_codec::{DocumentHandle, FormatRegistry, LocalId, Part, UntypedDocumentHandle};
 use elide_core::entity::Entity;
 use elide_core::modality::{DataReader, DataWriter, Modality, NoArtifact, StreamDataReader};
@@ -29,6 +28,8 @@ pub use self::analysis::{AnalyzedDocument, ArtifactSet, Report, ReportDeserializ
 use self::analysis::{ArtifactGroup, ModalityRegistry, PartReport};
 use self::directives::AnnotationSet;
 pub use self::directives::Directives;
+use self::document::DocumentsExt;
+pub use self::document::{AsDocuments, Document, RegistryDocumentExt};
 pub use self::part_id::PartId;
 use self::pipeline::{AnalyzeOutcome, BoxFuture, ErasedPipeline, ModalityPipeline};
 
@@ -693,7 +694,7 @@ impl Orchestrator {
             // nested container enqueues its own bytes for *its* parent.
             while let Some(parent) = deepest_parent(&by_parent) {
                 let children = by_parent.remove(&parent).unwrap_or_default();
-                if let Some(top) = top_container(documents, &parent) {
+                if let Some(top) = documents.top_container(&parent) {
                     // A top container (a document's own handle): write straight
                     // into it; it re-encodes itself at the end.
                     if let Some(c) = top.as_container_mut() {
@@ -714,19 +715,42 @@ impl Orchestrator {
                     .split_last()
                     .and_then(|(gp, local)| take_staged(&mut by_parent, &gp, &local));
                 let decoded = match &own_bytes {
-                    // Decode the container's own redacted bytes, resolving the
-                    // format from its local id's extension (as the flatten did).
+                    // Decode the container's own redacted bytes with the format
+                    // hint its parent reports for it (`Part.hint`), the same hint
+                    // the flatten decoded it with. Deriving the hint from the id's
+                    // extension would misfire for an extensionless id, or one whose
+                    // hint came from a content type, and a failed decode would drop
+                    // the container's own redaction (a leak); resolve the real hint
+                    // instead. If the container is gone from its parent, fall back
+                    // to the id's extension so a staged redaction is never silently
+                    // discarded.
                     Some(bytes) => {
-                        let hint = parent
-                            .last_segment_id()
-                            .and_then(LocalId::extension)
-                            .unwrap_or("");
-                        self.registry.decode(bytes.clone(), hint).await.ok()
+                        let hint = self.hint_of(documents, &parent).await.unwrap_or_else(|| {
+                            parent
+                                .last_segment_id()
+                                .and_then(LocalId::extension)
+                                .unwrap_or("")
+                                .to_owned()
+                        });
+                        self.registry.decode(bytes.clone(), &hint).await.ok()
                     }
                     None => self.decode_by_path(documents, &parent).await?,
                 };
                 let Some(mut handle) = decoded else {
-                    continue; // the container is gone or undecodable
+                    // The container did not re-decode. If it had its *own* staged
+                    // redaction, that redaction must not be lost: fold it into the
+                    // grandparent verbatim (its descendant replacements are dropped
+                    // here, but its own redaction survives). Without own bytes there
+                    // is nothing to preserve.
+                    if let (Some(bytes), Some((grandparent, local))) =
+                        (own_bytes, parent.split_last())
+                    {
+                        by_parent
+                            .entry(grandparent)
+                            .or_default()
+                            .push((local, bytes));
+                    }
+                    continue;
                 };
                 if let Some(c) = handle.as_container_mut() {
                     for (local, bytes) in children {
@@ -761,7 +785,7 @@ impl Orchestrator {
         // Resolve the document and the segments still to walk within it. The
         // leading segment selects the document; the document itself (no remaining
         // segments) has no part to decode here.
-        let Some((root, rest)) = root_container(documents, &segments) else {
+        let Some((root, rest)) = documents.root_container(&segments) else {
             return Ok(None);
         };
         let Some((last, prefix)) = rest.split_last() else {
@@ -804,6 +828,48 @@ impl Orchestrator {
             return Ok(None);
         };
         Ok(self.registry.decode(part.bytes, &part.hint).await.ok())
+    }
+
+    /// The format hint the container at path `id` reports for it (its
+    /// [`Part::hint`]), by walking its parent's container tree. This is the hint
+    /// the flatten decoded the part with, so re-decoding the part's own redacted
+    /// bytes with it resolves the same codec, rather than guessing from the id's
+    /// extension. `None` when the part is not found (gone, or an undecodable
+    /// step) so the caller can fall back.
+    ///
+    /// [`Part::hint`]: elide_codec::Part
+    async fn hint_of(&self, documents: &mut [Document], id: &PartId) -> Option<String> {
+        let segments: Vec<&str> = id.segments().collect();
+        let (root, rest) = documents.root_container(&segments)?;
+        let (last, prefix) = rest.split_last()?;
+
+        // Descend the prefix containers to the part's immediate container, the
+        // same walk `decode_by_path` does.
+        let mut current: Option<UntypedDocumentHandle> = None;
+        for seg in prefix {
+            let container = current.as_mut().map_or_else(
+                || root.as_container_mut(),
+                UntypedDocumentHandle::as_container_mut,
+            );
+            let part = container
+                .map(|c| c.parts())
+                .into_iter()
+                .flatten()
+                .find(|p: &Part| p.id == **seg)?;
+            current = Some(self.registry.decode(part.bytes, &part.hint).await.ok()?);
+        }
+
+        // Read the target part's hint from its immediate container.
+        let container = current.as_mut().map_or_else(
+            || root.as_container_mut(),
+            UntypedDocumentHandle::as_container_mut,
+        );
+        container
+            .map(|c| c.parts())
+            .into_iter()
+            .flatten()
+            .find(|p: &Part| p.id == *last)
+            .map(|p| p.hint)
     }
 
     /// Convenience: [`analyze`] then [`anonymize_with`] with no editing
@@ -925,226 +991,4 @@ fn take_staged(
         by_parent.remove(parent);
     }
     Some(bytes)
-}
-
-/// One document the engine redacts: its name, the first segment of every
-/// [`PartId`] beneath it, and its decoded handle.
-///
-/// A report describes a slice of these, analyzed and redacted as one logical
-/// unit ([`analyze`] / [`anonymize_with`]); a single document is a one-element
-/// slice. The name keys the document's own content (a depth-1 part) and prefixes
-/// its parts' paths, so two documents that share a local part id (two scans,
-/// each `page-1.png`) stay distinct, the collision a flat id would hit.
-///
-/// The name is the engine's, not the codec's: [`UntypedDocumentHandle`] is bytes
-/// and format, never a filename, so identity is attached here, one layer up.
-///
-/// [`analyze`]: Orchestrator::analyze
-/// [`anonymize_with`]: Orchestrator::anonymize_with
-pub struct Document {
-    /// The document's name, the first path segment of every part beneath it,
-    /// and the key of its own content in the report. Must be unique within the
-    /// slice.
-    pub name: String,
-    /// The document's decoded handle. Redacted in place, ready for its own
-    /// `encode`.
-    pub handle: UntypedDocumentHandle,
-}
-
-impl Document {
-    /// A document from a name and an already-decoded handle.
-    ///
-    /// For the common case of decoding raw bytes into a document in one step,
-    /// prefer [`FormatRegistry::document`] / [`FormatRegistry::document_with`]
-    /// (the [`RegistryDocumentExt`] methods), which decode and name together.
-    ///
-    /// [`FormatRegistry::document`]: RegistryDocumentExt::document
-    /// [`FormatRegistry::document_with`]: RegistryDocumentExt::document_with
-    pub fn new(name: impl Into<String>, handle: UntypedDocumentHandle) -> Self {
-        Self {
-            name: name.into(),
-            handle,
-        }
-    }
-}
-
-/// Seals [`AsDocuments`] and [`RegistryDocumentExt`] so neither is a public
-/// extension point, the engine owns their whole impl surface.
-mod sealed {
-    pub trait Sealed {}
-}
-
-/// One or many [`Document`]s, so [`analyze`], [`re_analyze`], [`anonymize_with`],
-/// and [`anonymize`] accept a single `&mut Document` or a `&mut [Document]`
-/// interchangeably: a single document is a one-element slice.
-///
-/// Sealed, implemented only for [`Document`] and `[Document]`.
-///
-/// [`analyze`]: Orchestrator::analyze
-/// [`re_analyze`]: Orchestrator::re_analyze
-/// [`anonymize_with`]: Orchestrator::anonymize_with
-/// [`anonymize`]: Orchestrator::anonymize
-pub trait AsDocuments: sealed::Sealed {
-    /// The documents as a mutable slice, one element for a single document,
-    /// the slice itself for many.
-    fn as_documents_mut(&mut self) -> &mut [Document];
-}
-
-impl sealed::Sealed for Document {}
-impl sealed::Sealed for [Document] {}
-impl<const N: usize> sealed::Sealed for [Document; N] {}
-impl<T: sealed::Sealed + ?Sized> sealed::Sealed for &mut T {}
-
-impl AsDocuments for Document {
-    fn as_documents_mut(&mut self) -> &mut [Document] {
-        std::slice::from_mut(self)
-    }
-}
-
-impl AsDocuments for [Document] {
-    fn as_documents_mut(&mut self) -> &mut [Document] {
-        self
-    }
-}
-
-impl<const N: usize> AsDocuments for [Document; N] {
-    fn as_documents_mut(&mut self) -> &mut [Document] {
-        self
-    }
-}
-
-/// A `&mut` to anything that is [`AsDocuments`] is too, so a caller holding a
-/// `&mut Document` or `&mut [Document]` (as the two-phase [`anonymize`] does
-/// internally) passes it straight through.
-///
-/// [`anonymize`]: Orchestrator::anonymize
-impl<T: AsDocuments + ?Sized> AsDocuments for &mut T {
-    fn as_documents_mut(&mut self) -> &mut [Document] {
-        (**self).as_documents_mut()
-    }
-}
-
-/// Decode raw bytes straight into a named [`Document`], an extension trait on
-/// [`FormatRegistry`], so the codec stays byte-and-format only (a handle carries
-/// no filename) while the engine attaches the name it owns.
-///
-/// [`document`] infers the format from the name's own extension (a real filename
-/// like `report.docx`); [`document_with`] takes the format explicitly, for a name
-/// that carries none or a misleading one.
-///
-/// Sealed, implemented only for [`FormatRegistry`].
-///
-/// [`document`]: Self::document
-/// [`document_with`]: Self::document_with
-pub trait RegistryDocumentExt: sealed::Sealed {
-    /// Decode `bytes` into a [`Document`] named `name`, resolving the format from
-    /// the extension of `name` itself (`report.docx` → `docx`).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`MalformedInput`] when `name` carries no extension to resolve a
-    /// format from, use [`document_with`] with an explicit one. Otherwise
-    /// propagates the decode error (e.g. [`CapabilityUnavailable`] for an
-    /// unregistered format).
-    ///
-    /// [`document_with`]: Self::document_with
-    /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput
-    /// [`CapabilityUnavailable`]: elide_core::ErrorKind::CapabilityUnavailable
-    fn document(
-        &self,
-        name: impl Into<String>,
-        bytes: impl Into<ContentData>,
-    ) -> impl std::future::Future<Output = Result<Document>>;
-
-    /// Decode `bytes` into a [`Document`] named `name`, resolving the format from
-    /// the explicit `extension` (which always wins, whatever `name` looks like).
-    ///
-    /// # Errors
-    ///
-    /// Propagates the decode error (e.g. [`CapabilityUnavailable`] when no format
-    /// is registered for `extension`).
-    ///
-    /// [`CapabilityUnavailable`]: elide_core::ErrorKind::CapabilityUnavailable
-    fn document_with(
-        &self,
-        name: impl Into<String>,
-        extension: &str,
-        bytes: impl Into<ContentData>,
-    ) -> impl std::future::Future<Output = Result<Document>>;
-}
-
-impl sealed::Sealed for FormatRegistry {}
-
-impl RegistryDocumentExt for FormatRegistry {
-    async fn document(
-        &self,
-        name: impl Into<String>,
-        bytes: impl Into<ContentData>,
-    ) -> Result<Document> {
-        let name = name.into();
-        // The format is the name's own extension, lowercased, resolved via
-        // `Path::extension` (which ignores a leading-dot dotfile like `.rels`).
-        let extension = Path::new(&name)
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(str::to_ascii_lowercase);
-        let Some(extension) = extension else {
-            return Err(Error::new(
-                ErrorKind::MalformedInput,
-                format!(
-                    "document name `{name}` has no extension to resolve a format from; \
-                     use `document_with` with an explicit extension"
-                ),
-            ));
-        };
-        let handle = self.decode(bytes, &extension).await?;
-        Ok(Document::new(name, handle))
-    }
-
-    async fn document_with(
-        &self,
-        name: impl Into<String>,
-        extension: &str,
-        bytes: impl Into<ContentData>,
-    ) -> Result<Document> {
-        let handle = self.decode(bytes, extension).await?;
-        Ok(Document::new(name, handle))
-    }
-}
-
-/// Resolve the document a path descent starts from, and the segments still to
-/// walk within it: the leading segment selects the document, the remaining
-/// segments walk it. `None` when no document matches the leading segment, or the
-/// path is empty.
-///
-/// Shared by [`decode_by_path`](Orchestrator::decode_by_path) so a path resolves
-/// its starting container the same way everywhere.
-fn root_container<'d, 'seg>(
-    documents: &'d mut [Document],
-    segments: &'seg [&str],
-) -> Option<(&'d mut UntypedDocumentHandle, &'seg [&'seg str])> {
-    let (name, rest) = segments.split_first()?;
-    let document = documents.iter_mut().find(|d| d.name == *name)?;
-    Some((&mut document.handle, rest))
-}
-
-/// The *top* container named by `parent`, if `parent` is a top-level path, a
-/// one-segment document path. `None` for a deeper parent (a nested container to
-/// re-decode). The fold writes straight into a top container, which re-encodes
-/// itself.
-fn top_container<'d>(
-    documents: &'d mut [Document],
-    parent: &PartId,
-) -> Option<&'d mut UntypedDocumentHandle> {
-    let mut segments = parent.segments();
-    let name = segments.next()?;
-    // A top document is exactly a one-segment path; anything deeper is a nested
-    // container, not a root.
-    if segments.next().is_some() {
-        return None;
-    }
-    documents
-        .iter_mut()
-        .find(|d| d.name == name)
-        .map(|d| &mut d.handle)
 }
