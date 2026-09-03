@@ -75,10 +75,10 @@ pub(crate) struct PartReport {
 /// retag, or extend before applying. When the report describes a **single**
 /// document, [`entities`] / [`entities_mut`] are a shorthand for its sole
 /// content (see below). To reach one entity by [`id`] use [`part_entity`] /
-/// [`part_entity_mut`]; a review layer that holds an id without knowing which
-/// part it lives in sweeps [`part_ids`] itself. To walk a whole group in a
-/// single mutable pass (e.g. merging the applied report's provenance back onto a
-/// caller's records) use
+/// [`part_entity_mut`] when the part is known, or [`entity_anywhere`] /
+/// [`entity_anywhere_mut`] when a review layer holds only the id and not the
+/// part it lives in. To walk a whole group in a single mutable pass (e.g. merging
+/// the applied report's provenance back onto a caller's records) use
 /// [`for_each_part_mut`], or its `try_` variant to stop the walk early.
 ///
 /// The single-document shorthand: [`entities`] / [`entities_mut`] /
@@ -94,7 +94,8 @@ pub(crate) struct PartReport {
 /// [`entity_mut`]: Report::entity_mut
 /// [`part_entity`]: Report::part_entity
 /// [`part_entity_mut`]: Report::part_entity_mut
-/// [`part_ids`]: Report::part_ids
+/// [`entity_anywhere`]: Report::entity_anywhere
+/// [`entity_anywhere_mut`]: Report::entity_anywhere_mut
 /// [`for_each_part_mut`]: Report::for_each_part_mut
 ///
 /// A report is **pure entity data**: it carries no live document state, so
@@ -242,6 +243,59 @@ impl Report {
     /// [`entity`]: Self::entity
     pub fn entity_mut<M: Modality>(&mut self, id: Uuid) -> Option<&mut Entity<M>> {
         self.entities_mut::<M>()?.iter_mut().find(|e| e.id == id)
+    }
+
+    /// Find an entity of modality `M` by its [`id`] across **every** part,
+    /// read-only. For a caller that holds an entity id but not the part it lives
+    /// in, a reviewer whose edit addresses an entity by id alone (a
+    /// retag/suppress carries the id, not the part it was found in).
+    ///
+    /// Unlike [`entity`], this does not assume a single document: it scans every
+    /// part, so it resolves an entity inside a nested document (a DOCX's embedded
+    /// image) just as well as one in a single-file report. Parts of a modality
+    /// other than `M` are skipped. Returns `None` when no part holds an entity of
+    /// modality `M` with that `id`.
+    ///
+    /// [`id`]: elide_core::entity::Entity::id
+    /// [`entity`]: Self::entity
+    pub fn entity_anywhere<M: Modality>(&self, id: Uuid) -> Option<&Entity<M>> {
+        self.parts
+            .values()
+            .filter(|part| part.modality == TypeId::of::<M>())
+            .find_map(|part| {
+                part.entities
+                    .as_any()
+                    .downcast_ref::<Vec<Entity<M>>>()?
+                    .iter()
+                    .find(|e| e.id == id)
+            })
+    }
+
+    /// Find an entity of modality `M` by its [`id`] across **every** part, for
+    /// editing, the `&mut` counterpart to [`entity_anywhere`]. For a reviewer
+    /// acting on an entity by id alone (retag, suppress) without tracking which
+    /// part it lives in.
+    ///
+    /// Unlike [`entity_mut`] (which addresses the sole document and returns
+    /// `None` for a multi-part report), this reaches an entity in any part, so a
+    /// reviewer edit applies to a nested document's entity too. Parts of a
+    /// modality other than `M` are skipped. Returns `None` when no part holds an
+    /// entity of modality `M` with that `id`.
+    ///
+    /// [`id`]: elide_core::entity::Entity::id
+    /// [`entity_anywhere`]: Self::entity_anywhere
+    /// [`entity_mut`]: Self::entity_mut
+    pub fn entity_anywhere_mut<M: Modality>(&mut self, id: Uuid) -> Option<&mut Entity<M>> {
+        self.parts
+            .values_mut()
+            .filter(|part| part.modality == TypeId::of::<M>())
+            .find_map(|part| {
+                part.entities
+                    .as_any_mut()
+                    .downcast_mut::<Vec<Entity<M>>>()?
+                    .iter_mut()
+                    .find(|e| e.id == id)
+            })
     }
 
     /// Manually add `entity` to the container part `part_id`, recording a
@@ -627,6 +681,43 @@ mod tests {
                 .part_entity_mut::<Text>(&part, Uuid::now_v7())
                 .is_none()
         );
+    }
+
+    #[test]
+    fn entity_anywhere_reaches_a_nested_part_by_id_alone() {
+        // A review layer holds only an entity id (a retag/suppress addresses the
+        // entity, not the part it lives in). The entity lives in a *nested*
+        // depth-2 part, so the report is not a single sole document.
+        let entity = text_entity("EMAIL_ADDRESS");
+        let id = entity.id;
+        let nested = PartId::new("report.docx").child("word/media/image1.png");
+        let mut report = Report::new().insert_part::<Text>(nested.clone(), vec![entity]);
+
+        // The sole-document sugar cannot see it (the report is not a single
+        // depth-1 document), so a caller relying on `entity_mut` would silently
+        // find nothing — exactly why `entity_anywhere` exists.
+        assert!(
+            report.entity_mut::<Text>(id).is_none(),
+            "entity_mut is sole-document sugar and must not resolve a nested part",
+        );
+
+        // `entity_anywhere` finds it by id alone, and `_mut` edits it in place.
+        assert_eq!(
+            report.entity_anywhere::<Text>(id).map(|e| e.label.as_str()),
+            Some("EMAIL_ADDRESS"),
+        );
+        report
+            .entity_anywhere_mut::<Text>(id)
+            .expect("nested entity is reachable by id alone")
+            .label = LabelRef::new("RETAGGED");
+        assert_eq!(
+            report.part_entity::<Text>(&nested, id).unwrap().label,
+            LabelRef::new("RETAGGED"),
+            "the edit applied to the nested part",
+        );
+
+        // An unknown id resolves nowhere.
+        assert!(report.entity_anywhere::<Text>(Uuid::now_v7()).is_none());
     }
 
     #[test]
