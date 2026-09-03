@@ -185,7 +185,7 @@ elide-redaction = { workspace = true, features = [] }
 async-trait = { workspace = true, features = [] }
 
 [dev-dependencies]
-# Internal crates (test utils)
+# Internal crates
 elide-office = { workspace = true, features = ["test-util"] }
 
 # (De)serialization

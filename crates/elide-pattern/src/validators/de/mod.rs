@@ -1,7 +1,7 @@
 //! Germany-specific post-match validators.
 //!
 //! Registered under the [`ValidatorRegistry::builtin`] set with
-//! dotted names — `"de.bsnr"`, `"de.lanr"`, `"de.passport"`,
+//! dotted names, `"de.bsnr"`, `"de.lanr"`, `"de.passport"`,
 //! `"de.id_card"`, `"de.health_insurance"`, `"de.social_security"`,
 //! `"de.tax_id"`, `"de.vat_id"`, `"de.plz"`.
 //!

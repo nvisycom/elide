@@ -97,7 +97,7 @@ impl From<String> for PartPath {
 /// taxonomy.
 ///
 /// A format's classifier maps its detailed part kinds down to one of these
-/// roles, and the engine acts on the role alone — so the neutral core never
+/// roles, and the engine acts on the role alone, so the neutral core never
 /// needs to know a `word/header2.xml` from a `word/comments.xml`, only that both
 /// hold element text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,8 +115,8 @@ pub enum PartRole {
 }
 
 impl PartRole {
-    /// Whether this role yields redactable text — element text or relationship
-    /// targets — so the engine reads it as a text-splice part.
+    /// Whether this role yields redactable text, element text or relationship
+    /// targets, so the engine reads it as a text-splice part.
     pub(crate) fn is_redactable(self) -> bool {
         matches!(self, Self::ElementText | Self::RelationshipTargets)
     }
@@ -184,7 +184,7 @@ mod tests {
         assert!(PartPath::from("_rels/.rels").is_relationships());
         assert!(PartPath::from("word/_rels/document.xml.rels").is_relationships());
         assert!(PartPath::from("xl/worksheets/_rels/sheet1.xml.rels").is_relationships());
-        // A file merely ending in `.rels` but not in a `_rels/` dir is not one —
+        // A file merely ending in `.rels` but not in a `_rels/` dir is not one ,
         // the loose `ends_with(".rels")` check would wrongly accept this.
         assert!(!PartPath::from("data/foo.rels").is_relationships());
         assert!(!PartPath::from("word/document.xml").is_relationships());

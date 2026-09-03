@@ -1,5 +1,5 @@
-//! Shared helper for turning a structural *name* — an XML element or
-//! attribute name, a JSON object key — into context words for the value it
+//! Shared helper for turning a structural *name*, an XML element or
+//! attribute name, a JSON object key, into context words for the value it
 //! labels, so a recognizer's context boost can fire on it (an `<ssn>` element
 //! or an `"ssn"` key vouches for its content the way a CSV header vouches for
 //! its cell).
@@ -7,7 +7,7 @@
 /// Split a `name` into space-separated words: a `camelCase` / `PascalCase`
 /// name breaks on each lower→upper transition, and `_` / `-` are separators,
 /// so `paymentCard`, `PaymentCard`, `payment_card`, and `payment-card` all
-/// become `"payment card"` — where a context keyword like `card` then matches
+/// become `"payment card"`, where a context keyword like `card` then matches
 /// on a word boundary. A name with no case transition or separator (`ssn`,
 /// `email`) is returned unchanged.
 #[must_use]

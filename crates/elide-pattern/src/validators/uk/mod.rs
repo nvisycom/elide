@@ -1,7 +1,7 @@
 //! UK-specific post-match validators.
 //!
 //! Registered under the [`ValidatorRegistry::builtin`] set with
-//! dotted names — `"uk.nhs"`, `"uk.nino"`,
+//! dotted names, `"uk.nhs"`, `"uk.nino"`,
 //! `"uk.driving_licence"`, `"uk.vehicle_registration"`.
 //!
 //! [`ValidatorRegistry::builtin`]: super::ValidatorRegistry::builtin

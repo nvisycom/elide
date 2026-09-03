@@ -1,10 +1,10 @@
 //! Reconciliation payloads: what happened to an entity as detections were
-//! combined and scored — fusion ([`Deduplication`]), cross-label arbitration
+//! combined and scored, fusion ([`Deduplication`]), cross-label arbitration
 //! ([`Conflict`] / [`Contested`]), confidence rescaling ([`Calibration`]), and
 //! context-keyword boosting ([`Refinement`]).
 //!
 //! Each payload declares a central `TAG` discriminant byte, written before its
-//! own bytes so two kinds can never hash alike — see the [payloads
+//! own bytes so two kinds can never hash alike, see the [payloads
 //! overview](super).
 
 use hipstr::HipStr;
@@ -36,7 +36,7 @@ impl Deduplication {
 }
 
 /// A competing detection of a *different* label over the same span was resolved
-/// against this (winning) entity — the loser is recorded, not dropped.
+/// against this (winning) entity, the loser is recorded, not dropped.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

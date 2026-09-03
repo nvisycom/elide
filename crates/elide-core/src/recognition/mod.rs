@@ -10,11 +10,8 @@
 
 pub mod annotation;
 mod context;
-mod enricher;
 mod label;
 mod scope;
-#[cfg(feature = "usage")]
-mod usage;
 
 use std::fmt;
 
@@ -23,14 +20,13 @@ use hipstr::HipStr;
 use serde::{Deserialize, Serialize};
 
 pub use self::context::RecognizerContext;
-pub use self::enricher::{Enricher, Enrichment};
 pub use self::label::LabelMap;
 pub use self::scope::{Scope, ScopeMetadata};
-#[cfg(feature = "usage")]
-pub use self::usage::{ModelUsage, TokenCounts, Usage, UsageReport};
 use crate::entity::Entity;
 use crate::error::Result;
 use crate::modality::Modality;
+#[cfg(feature = "usage")]
+use crate::primitive::ModelUsage;
 
 /// Identifies a recognizer (name + version).
 ///
@@ -121,7 +117,7 @@ pub struct Recognition<M: Modality> {
 
 impl<M: Modality> Recognition<M> {
     /// A recognition carrying `entities` (and, under the `usage` feature, no
-    /// model usage yet — attach it with `with_model_usage`).
+    /// model usage yet, attach it with `with_model_usage`).
     pub fn new(entities: Vec<Entity<M>>) -> Self {
         Self {
             entities,
@@ -140,7 +136,7 @@ impl<M: Modality> Recognition<M> {
 }
 
 impl<M: Modality> From<Vec<Entity<M>>> for Recognition<M> {
-    /// Entities with no model usage — the pure-CPU recognizer case.
+    /// Entities with no model usage, the pure-CPU recognizer case.
     fn from(entities: Vec<Entity<M>>) -> Self {
         Self::new(entities)
     }

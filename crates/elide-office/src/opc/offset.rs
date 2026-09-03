@@ -4,7 +4,7 @@
 //! A block's [`text`](crate::opc::Block::text) is the *decoded* logical text (XML
 //! entities like `&amp;` resolved to `&`), while its byte
 //! [`span`](crate::opc::Block::span) addresses the *raw* source. Entities
-//! compress — `&amp;` is 5 raw bytes but 1 decoded byte — so a decoded offset is
+//! compress, `&amp;` is 5 raw bytes but 1 decoded byte, so a decoded offset is
 //! not a raw offset once an entity has been passed. The map records the
 //! correspondence as a list of contiguous [`runs`](OffsetRun): identity
 //! stretches where decoded and raw advance one-for-one, and atomic entity runs
@@ -34,7 +34,7 @@ pub enum RunKind {
 /// One stretch of the decoded-to-raw correspondence.
 ///
 /// `decoded` is block-local (the block's decoded text starts at 0); `raw` is
-/// **part-absolute** — a byte range in the containing part's XML, ready to hand
+/// **part-absolute**, a byte range in the containing part's XML, ready to hand
 /// back as a source pointer without any further offset math. For an
 /// [`Identity`](RunKind::Identity) run the two ranges are equal length; for an
 /// [`Entity`](RunKind::Entity) run they need not be.
@@ -108,7 +108,7 @@ impl OffsetMap {
     ///
     /// A range within one identity run maps to a single range; one that crosses
     /// an entity reference picks up that entity's whole raw bytes (an entity is
-    /// atomic — a decoded range touching it at all pulls in the entire `&...;`),
+    /// atomic, a decoded range touching it at all pulls in the entire `&...;`),
     /// and one spanning several runs yields several ranges. Adjacent raw ranges
     /// that are contiguous coalesce, so redacting a whole run of text with an
     /// embedded entity gives one uninterrupted raw range. Returns empty for an
@@ -147,7 +147,7 @@ impl OffsetMap {
     }
 
     /// Translate a part-absolute `raw` byte range into the block-local
-    /// decoded byte range(s) it corresponds to — the inverse of
+    /// decoded byte range(s) it corresponds to, the inverse of
     /// [`raw_ranges`](Self::raw_ranges).
     ///
     /// The entity atomicity is symmetric: as a decoded range touching an entity
@@ -276,7 +276,7 @@ mod tests {
         // The whole `&amp;` (106..111) is the decoded `&` at 6..7.
         assert_eq!(map.decoded_ranges(106..111), vec![6..7]);
         // A raw offset *partway through* the entity (108..109, mid-`amp`) still
-        // resolves to the whole decoded entity char — atomic in reverse too.
+        // resolves to the whole decoded entity char, atomic in reverse too.
         assert_eq!(map.decoded_ranges(108..109), vec![6..7]);
     }
 

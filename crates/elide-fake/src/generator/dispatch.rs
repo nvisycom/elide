@@ -6,7 +6,7 @@
 //! [`fan_locale!`] macro fans a single faker constructor across all
 //! 14 [`Locale`] variants at the call site.
 //!
-//! The macro is self-contained — it imports `fake::Fake` and every
+//! The macro is self-contained, it imports `fake::Fake` and every
 //! locale constant it needs into the expansion's scope, so callers
 //! don't have to.
 //!

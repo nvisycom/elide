@@ -3,7 +3,7 @@
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::audio::{Audio, AudioData, AudioReplacement, Waveform};
-use elide_core::operator::{LeakProfile, Operator, OperatorId};
+use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +15,7 @@ const DEFAULT_AMPLITUDE: f32 = 0.5;
 
 /// Overlay a tone (the broadcast "bleep") over the matched audio range.
 ///
-/// More obvious to a listener than [`Silence`] that something was removed —
+/// More obvious to a listener than [`Silence`] that something was removed,
 /// the timeline does not shift, but the redacted span is audibly marked.
 /// Defaults to a 1 kHz sine at half amplitude, the broadcast convention.
 ///

@@ -1,6 +1,6 @@
 //! Build-time resource limits on `PatternRecognizerBuilder`:
 //! - `with_size_limit` bounds the compiled automaton size of both individual
-//!   variant regexes and the shared `RegexSet` union — the one DoS defense a
+//!   variant regexes and the shared `RegexSet` union, the one DoS defense a
 //!   caller cannot replicate by capping regex *sources*.
 //! - `with_term_count_limit` / `with_term_bytes_limit` bound the shared
 //!   Aho-Corasick dictionary automaton (aggregate across all dictionaries).
@@ -95,7 +95,7 @@ fn term_count_limit_rejects_over_budget() {
 
 #[test]
 fn term_count_limit_aggregates_across_dictionaries() {
-    // Two dictionaries of 30 each = 60 total, over a 50 limit — proving the
+    // Two dictionaries of 30 each = 60 total, over a 50 limit, proving the
     // cap is recognizer-wide, not per-dictionary.
     let result = PatternRecognizer::builder()
         .with_dictionary(dict_of(30))

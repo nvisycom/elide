@@ -4,7 +4,7 @@ use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::TextData;
-use elide_core::operator::{LeakProfile, Operator, OperatorId};
+use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// A structural treatment, coarser than [`DropRow`]: a single match drops
 /// the whole column across every row. Useful for "this column is
-/// identifying — remove it" (e.g. an `SSN` column). Bind it to the column's
+/// identifying, remove it" (e.g. an `SSN` column). Bind it to the column's
 /// label or to a predicate over the column name; any match in the column
 /// removes it for all records.
 ///

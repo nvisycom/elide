@@ -1,9 +1,10 @@
 //! The extraction and redaction units: the [`Extraction`] result and its
 //! [`Block`]s, [`Embedding`]s, and [`Issue`]s, plus the [`Replacement`] and
-//! [`PartReplacement`] applied on rewrite — each addressed by a typed
+//! [`PartReplacement`] applied on rewrite, each addressed by a typed
 //! [`PartPath`].
 
 use std::ops::Range;
+use std::path::Path;
 
 use bytes::Bytes;
 use hipstr::HipStr;
@@ -79,7 +80,7 @@ pub enum EmbeddingKind {
     Object,
     /// An embedded font (e.g. `word/fonts/*`).
     Font,
-    /// Embedded media whose type could not be determined from its path — a
+    /// Embedded media whose type could not be determined from its path, a
     /// `media/` part with an unrecognized (or absent) extension. It still
     /// redacts as opaque bytes; the kind just makes no claim it can't back up.
     Other,
@@ -103,7 +104,7 @@ pub struct Embedding {
 ///
 /// Extraction is partial-success: a corrupt or non-UTF-8 part does not fail the
 /// whole document, but it also yields no blocks. An `Issue` records that gap so
-/// a caller does not silently ship a document with an un-redacted part — the
+/// a caller does not silently ship a document with an un-redacted part, the
 /// dangerous failure mode for redaction. A clean extraction produces none.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -170,46 +171,37 @@ pub struct PartReplacement {
     pub bytes: Vec<u8>,
 }
 
-/// The [`EmbeddingKind`] of a `*/media/*` part, chosen by its file extension.
-///
-/// An OOXML `media/` directory mixes images, audio, and video, so the
-/// directory alone can't say which — a caller redacting embedded media wants
-/// an mp3 surfaced as [`Audio`], not misreported as an image. An unrecognized
-/// or extension-less part is [`Other`] rather than a guessed type: it still
-/// redacts as opaque bytes, but the kind claims nothing it can't back up.
-///
-/// [`Audio`]: EmbeddingKind::Audio
-/// [`Other`]: EmbeddingKind::Other
-pub fn media_kind(path: &str) -> EmbeddingKind {
-    let ext = path
-        .rsplit_once('.')
-        .map(|(_, e)| e)
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    match ext.as_str() {
-        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tif" | "tiff" | "svg" | "webp" | "emf"
-        | "wmf" | "ico" => EmbeddingKind::Image,
-        "mp3" | "wav" | "m4a" | "aac" | "wma" | "flac" | "oga" | "ogg" => EmbeddingKind::Audio,
-        "mp4" | "mov" | "avi" | "wmv" | "m4v" | "mkv" | "webm" | "mpg" | "mpeg" => {
-            EmbeddingKind::Video
-        }
-        _ => EmbeddingKind::Other,
+impl PartReplacement {
+    /// A replacement overwriting `part`'s bytes with `bytes`.
+    pub fn new(part: PartPath, bytes: Vec<u8>) -> Self {
+        Self { part, bytes }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{EmbeddingKind, media_kind};
-
-    #[test]
-    fn media_kind_classifies_by_extension() {
-        assert_eq!(media_kind("ppt/media/image1.png"), EmbeddingKind::Image);
-        assert_eq!(media_kind("ppt/media/image2.JPEG"), EmbeddingKind::Image);
-        assert_eq!(media_kind("ppt/media/media1.mp3"), EmbeddingKind::Audio);
-        assert_eq!(media_kind("ppt/media/media2.wav"), EmbeddingKind::Audio);
-        assert_eq!(media_kind("ppt/media/media3.mp4"), EmbeddingKind::Video);
-        // An unrecognized or extension-less part claims no type it can't back up.
-        assert_eq!(media_kind("ppt/media/blob"), EmbeddingKind::Other);
-        assert_eq!(media_kind("ppt/media/data.xyz"), EmbeddingKind::Other);
+impl EmbeddingKind {
+    /// The [`EmbeddingKind`] of a `*/media/*` part, chosen by its file extension.
+    ///
+    /// An OOXML `media/` directory mixes images, audio, and video, so the
+    /// directory alone can't say which, a caller redacting embedded media wants
+    /// an mp3 surfaced as [`Audio`](EmbeddingKind::Audio), not misreported as an
+    /// image. An unrecognized or extension-less part is
+    /// [`Other`](EmbeddingKind::Other) rather than a guessed type: it still
+    /// redacts as opaque bytes, but the kind claims nothing it can't back up.
+    #[must_use]
+    pub fn from_path(path: &str) -> Self {
+        let ext = Path::new(path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        match ext.as_str() {
+            "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tif" | "tiff" | "svg" | "webp" | "emf"
+            | "wmf" | "ico" => EmbeddingKind::Image,
+            "mp3" | "wav" | "m4a" | "aac" | "wma" | "flac" | "oga" | "ogg" => EmbeddingKind::Audio,
+            "mp4" | "mov" | "avi" | "wmv" | "m4v" | "mkv" | "webm" | "mpg" | "mpeg" => {
+                EmbeddingKind::Video
+            }
+            _ => EmbeddingKind::Other,
+        }
     }
 }

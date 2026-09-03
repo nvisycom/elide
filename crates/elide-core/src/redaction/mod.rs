@@ -9,9 +9,9 @@
 //! implement [`ReversibleOperator`].
 //!
 //! This module defines the operator contracts and the [`Redactions`]
-//! batch they feed into. The redaction engine — the concrete operators,
+//! batch they feed into. The redaction engine, the concrete operators,
 //! the token vault they resolve through, and the label→operator registry
-//! that selects them — lives in `elide-redaction`.
+//! that selects them, lives in `elide-redaction`.
 //!
 //! [`Entity`]: crate::entity::Entity
 //! [`Data`]: crate::modality::Modality::Data

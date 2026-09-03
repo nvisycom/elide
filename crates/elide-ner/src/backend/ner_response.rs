@@ -20,7 +20,7 @@ use std::ops::Range;
 use elide_core::entity::LabelRef;
 use elide_core::primitive::Confidence;
 #[cfg(feature = "usage")]
-use elide_core::recognition::TokenCounts;
+use elide_core::primitive::TokenCounts;
 
 /// One per-call NER response from a [`NerBackend`].
 ///

@@ -33,7 +33,7 @@ mod tests {
 
     #[test]
     fn accepts_canonical_orgnr() {
-        // 556677-1233 — public Bolagsverket example shape.
+        // 556677-1233, public Bolagsverket example shape.
         assert!(organisationsnummer("5566771233"));
         assert!(organisationsnummer("556677-1233"));
     }

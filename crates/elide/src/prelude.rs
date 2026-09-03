@@ -1,18 +1,18 @@
 //! The common imports for assembling a pipeline.
 //!
 //! A `use elide::prelude::*;` brings the engines ([`Analyzer`],
-//! [`Anonymizer`], [`Deanonymizer`], and — with `codec` — `Orchestrator`
+//! [`Anonymizer`], [`Deanonymizer`], and, with `codec`, `Orchestrator`
 //! and the `FormatRegistry` that decodes documents),
 //! the error types, the [`Recognizer`]/[`Operator`]/[`Modality`] contracts
 //! and the [`Scope`] they run against, the reconciliation [`Layer`]s with
-//! their usual strategies, and the common vocabulary — the modality markers
+//! their usual strategies, and the common vocabulary, the modality markers
 //! (`Text`, and the feature-gated `Image`/`Audio`/`Tabular`), `Entity`,
 //! `LabelRef`, `LabelCatalog`, `Category`, the [`builtins`] label set,
 //! `Confidence`/`ConfidenceThreshold`,
 //! and `Language`/`LanguageTag`. The [`operators`] module comes along too, so
 //! `prelude::operators::*` reaches the concrete operators without the longer
-//! path. The concrete recognizers and backends are left out — they vary per
-//! use case and a few names collide — so import those from [`recognition`].
+//! path. The concrete recognizers and backends are left out, they vary per
+//! use case and a few names collide, so import those from [`recognition`].
 //!
 //! [`Analyzer`]: crate::detection::Analyzer
 //! [`Anonymizer`]: crate::redaction::Anonymizer
@@ -65,7 +65,9 @@ pub use elide_detection::{
 };
 #[cfg(feature = "engine")]
 #[doc(no_inline)]
-pub use elide_engine::{Directives, Orchestrator, Report};
+pub use elide_engine::{
+    AsDocuments, Directives, Document, Orchestrator, PartId, RegistryDocumentExt, Report,
+};
 #[doc(no_inline)]
 pub use elide_operator::operators;
 #[doc(no_inline)]

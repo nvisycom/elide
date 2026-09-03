@@ -11,7 +11,7 @@
 //! - **Raster** (feature `pdf-render`, [`RasterMode::Always`]): the page text
 //!   comes from [`Pdf::observe`](elide_pdf::Pdf::observe) alongside its glyph
 //!   geometry, so a redaction's span maps to pixel boxes; encode fills them and
-//!   emits a fresh image-only PDF — the text layer is gone entirely.
+//!   emits a fresh image-only PDF, the text layer is gone entirely.
 //!
 //! [`encode`]: Handler::encode
 //! [`RasterMode::Always`]: super::RasterMode::Always
@@ -19,7 +19,7 @@
 use bytes::Bytes;
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
-use elide_core::operator::Redactions;
+use elide_core::redaction::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 use elide_pdf::Pdf;
 #[cfg(feature = "internal_image")]
@@ -33,9 +33,9 @@ use elide_pdf::render::{Detection as RasterDetection, PageObservation};
 use super::PdfLoader;
 #[cfg(feature = "pdf-render")]
 use super::RasterMode;
-use crate::codec::{Container, Part, PartId};
+use crate::codec::{Container, Part};
 use crate::content::ContentData;
-use crate::{Format, FormatId, Handler};
+use crate::{Format, FormatId, Handler, LocalId};
 
 /// Stable [`FormatId`] for the PDF codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.document.pdf");
@@ -234,7 +234,7 @@ impl Handler<Text> for PdfHandler {
                     return Ok(ContentData::new(self.document.clone()));
                 }
                 // Fill the detected glyph boxes and emit a fresh image-only PDF
-                // — the strong redaction guarantee. Black fill.
+                //, the strong redaction guarantee. Black fill.
                 let (out, _certificate) = Pdf::open(&self.document)
                     .and_then(|pdf| pdf.redact_raster(observations.clone(), detections, [0, 0, 0]))
                     .map_err(pdf_error)?;
@@ -343,7 +343,7 @@ impl Container for PdfHandler {
     /// image pipeline.
     ///
     /// Only with an image codec (`internal_image`) able to decode and redact the
-    /// images, and only on the glyph-deletion path — the raster path flattens
+    /// images, and only on the glyph-deletion path, the raster path flattens
     /// every page to an image, so surfacing images for separate redaction would
     /// be redundant. Only images whose bytes are a decodable file are surfaced
     /// (see [`embedding_hint`]).
@@ -351,7 +351,7 @@ impl Container for PdfHandler {
         #[cfg(feature = "internal_image")]
         {
             // In raster mode the whole page is flattened, so per-image redaction
-            // is redundant — surface nothing.
+            // is redundant, surface nothing.
             #[cfg(feature = "pdf-render")]
             if matches!(self.mode, RedactMode::Raster { .. }) {
                 return Vec::new();
@@ -365,7 +365,7 @@ impl Container for PdfHandler {
                 .filter_map(|embedding| {
                     let hint = embedding_hint(embedding.kind)?;
                     Some(Part {
-                        id: image_part_id(embedding.id).into(),
+                        id: LocalId::new(image_part_id(embedding.id)),
                         bytes: embedding.bytes,
                         hint: hint.to_string(),
                     })
@@ -376,9 +376,9 @@ impl Container for PdfHandler {
         Vec::new()
     }
 
-    fn replace_part(&mut self, id: &PartId, bytes: Bytes) -> Result<()> {
+    fn replace_part(&mut self, id: &LocalId, bytes: Bytes) -> Result<()> {
         // In raster mode the output is a flattened image-only PDF, so no
-        // per-image replacement is surfaced or applied — reject fail-closed
+        // per-image replacement is surfaced or applied, reject fail-closed
         // before accepting any bytes.
         if self.mode.is_raster() {
             return Err(Error::new(
@@ -407,7 +407,7 @@ impl Container for PdfHandler {
 }
 
 /// The ids of every embedded image whose bytes are a decodable file (see
-/// [`embedding_hint`]) — the set the container will surface and accept back.
+/// [`embedding_hint`]), the set the container will surface and accept back.
 #[cfg(feature = "internal_image")]
 fn redactable_image_ids(document: &[u8]) -> std::collections::BTreeSet<ImageId> {
     let Ok(pdf) = Pdf::open(document) else {
@@ -421,13 +421,13 @@ fn redactable_image_ids(document: &[u8]) -> std::collections::BTreeSet<ImageId> 
         .collect()
 }
 
-/// The [`PartId`] string for an image XObject: `"img-{number}-{generation}"`.
+/// The local part-id string for an image XObject: `"img-{number}-{generation}"`.
 #[cfg(feature = "internal_image")]
 fn image_part_id(id: ImageId) -> String {
     format!("img-{}-{}", id.number, id.generation)
 }
 
-/// Parse an image [`PartId`] string back into an [`ImageId`](elide_pdf::extract::ImageId).
+/// Parse an image part-id string back into an [`ImageId`](elide_pdf::extract::ImageId).
 #[cfg(feature = "internal_image")]
 fn parse_image_part_id(s: &str) -> Option<ImageId> {
     let rest = s.strip_prefix("img-")?;
@@ -442,7 +442,7 @@ fn parse_image_part_id(s: &str) -> Option<ImageId> {
 /// An [`Embedding`](elide_pdf::extract::Embedding)'s bytes are the raw XObject
 /// stream. For a JPEG (`DCTDecode`) or JPEG 2000 (`JPXDecode`) image those bytes
 /// *are* a standalone `.jpg`/`.jp2` file that decodes directly. For the other
-/// kinds — raw/`FlateDecode` samples, CCITT fax, JBIG2 — the bytes are filter-
+/// kinds, raw/`FlateDecode` samples, CCITT fax, JBIG2, the bytes are filter-
 /// specific pixel data that only means anything alongside the XObject's
 /// dictionary, so they are **not** a decodable file. Surfacing those with a
 /// bogus extension would have the pipeline fail to decode and silently skip
@@ -482,11 +482,11 @@ mod tests {
     use lopdf::{Dictionary, Document, Object, Stream, dictionary};
 
     use super::{FORMAT_ID, PdfHandler, PdfPage, image_part_id, parse_image_part_id};
-    use crate::Handler;
-    use crate::codec::{Container, PartId};
+    use crate::codec::Container;
+    use crate::{Handler, LocalId};
 
     /// A JPEG-encoded image of a solid colour, as bytes (a self-contained
-    /// `.jpg` file, so the container surfaces it — see `embedding_hint`).
+    /// `.jpg` file, so the container surfaces it, see `embedding_hint`).
     fn jpeg(rgb: [u8; 3]) -> Vec<u8> {
         let img = image::RgbImage::from_pixel(8, 8, image::Rgb(rgb));
         let mut out = std::io::Cursor::new(Vec::new());
@@ -496,7 +496,7 @@ mod tests {
         out.into_inner()
     }
 
-    /// A one-page PDF with a single embedded JPEG (`DCTDecode`) image XObject —
+    /// A one-page PDF with a single embedded JPEG (`DCTDecode`) image XObject,
     /// the kind whose raw stream bytes are a decodable file. Returns the
     /// document bytes and the image's `(number, generation)` id.
     fn image_pdf() -> (Vec<u8>, (u32, u16)) {
@@ -585,10 +585,7 @@ mod tests {
         let (pdf, _) = image_pdf();
         let mut handler = PdfHandler::text(Bytes::from(pdf), Vec::<PdfPage>::new());
         let err = handler
-            .replace_part(
-                &PartId::from("img-9999-0".to_string()),
-                Bytes::from(black_png()),
-            )
+            .replace_part(&LocalId::new("img-9999-0"), Bytes::from(black_png()))
             .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
     }
@@ -600,7 +597,8 @@ mod raster_tests {
     use elide_core::ErrorKind;
 
     use super::{PdfHandler, PdfPage};
-    use crate::codec::{Container, PartId};
+    use crate::LocalId;
+    use crate::codec::Container;
 
     /// A raster handler built from empty observations (no PDFium needed):
     /// `parts()` surfaces nothing and `replace_part` rejects any id, since the
@@ -612,10 +610,7 @@ mod raster_tests {
         assert!(handler.parts().is_empty());
 
         let err = handler
-            .replace_part(
-                &PartId::from("img-1-0".to_string()),
-                Bytes::from_static(b"x"),
-            )
+            .replace_part(&LocalId::new("img-1-0"), Bytes::from_static(b"x"))
             .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
     }

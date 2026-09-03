@@ -3,14 +3,14 @@
 
 use super::{Text, TextData, TextLocation, TextReplacement};
 use crate::modality::{DataReader, DataWriter};
-use crate::operator::Redactions;
+use crate::redaction::Redactions;
 use crate::{Error, ErrorKind, Result};
 
 /// An in-memory read/write text document: the standard [`Text`] test double.
 ///
 /// Reads byte ranges out of its backing string, and on [`write_at`] applies the
 /// batch of substitutions in place (right-to-left, so earlier offsets stay
-/// valid) — a real read-modify-write, so a test can assert on the resulting
+/// valid), a real read-modify-write, so a test can assert on the resulting
 /// [`text`](Self::text). Set [`failing`](Self::failing) to make `write_at` error
 /// instead, for exercising the apply-failure path.
 ///
@@ -44,7 +44,7 @@ impl TextDoc {
         }
     }
 
-    /// The current backing text — after any applied writes.
+    /// The current backing text, after any applied writes.
     pub fn text(&self) -> &str {
         &self.text
     }

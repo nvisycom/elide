@@ -16,7 +16,7 @@ use crate::entity::{LabelCatalog, LabelRef};
 /// speaks (`"person_name"`, `"location"`, `"organization"`). A [`LabelMap`]
 /// maps each raw string to its canonical [`LabelRef`].
 ///
-/// It is a utility for the *boundary* that adapts such a model — a NER
+/// It is a utility for the *boundary* that adapts such a model, a NER
 /// backend that wraps a fixed-label or BIO-tagged model applies it before
 /// returning its spans, so the spans it emits already carry canonical
 /// labels and downstream code never sees the raw vocabulary. Backends that

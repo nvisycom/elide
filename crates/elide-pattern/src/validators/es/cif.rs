@@ -2,7 +2,7 @@
 //!
 //! 9 chars: entity-class letter + 7 digits + control char. The
 //! control char's representation (digit vs. letter) depends on
-//! the entity class — orgs starting with `P`, `Q`, `R`, `S`,
+//! the entity class, orgs starting with `P`, `Q`, `R`, `S`,
 //! `N`, `W`, or `K` always carry a letter; `A`, `B`, `E`, `H`
 //! always carry a digit; the rest accept either.
 //!

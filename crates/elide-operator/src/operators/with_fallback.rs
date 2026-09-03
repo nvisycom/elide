@@ -1,7 +1,7 @@
 //! [`TryOperator`] and [`WithFallback`]: an operator that may decline a
 //! value, plus a wrapper that runs another operator when it does.
 //!
-//! Some operators only apply to values of a certain *shape* — [`Clamp`]
+//! Some operators only apply to values of a certain *shape*, [`Clamp`]
 //! reshapes numbers, [`GeneralizeDate`] reshapes dates. When the value isn't
 //! that shape (a non-numeric age, a free-text date), the operator hasn't
 //! *failed*; it simply doesn't apply, and something else should decide
@@ -9,14 +9,14 @@
 //!
 //! A raw "try the next operator when this one errors" chain can't express
 //! this: it can't tell "not applicable" (a routing decision) from a *hard*
-//! error — a key fetch timed out, encryption failed — that must abort the
+//! error, a key fetch timed out, encryption failed, that must abort the
 //! redaction rather than be silently swallowed into a weaker treatment.
 //! So the two are kept distinct:
 //!
 //! - [`TryOperator`] refines [`Operator`] with [`try_anonymize`], which
-//!   returns `Ok(None)` for "not applicable" — separate from `Err`.
-//! - [`WithFallback`] wraps a [`TryOperator`] and any [`Operator`] —
-//!   including a caller's own — running the fallback exactly when the
+//!   returns `Ok(None)` for "not applicable", separate from `Err`.
+//! - [`WithFallback`] wraps a [`TryOperator`] and any [`Operator`],
+//!   including a caller's own, running the fallback exactly when the
 //!   primary declines. A genuine `Err` from either side still propagates.
 //!
 //! [`try_anonymize`]: TryOperator::try_anonymize
@@ -26,14 +26,14 @@
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
-use elide_core::operator::{LeakProfile, Operator, OperatorId};
+use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 
 /// An [`Operator`] that may decline to apply to a given value.
 ///
 /// The refinement for operators like [`Clamp`] and [`GeneralizeDate`] that
 /// only reshape values of a particular shape. [`try_anonymize`] returns
 /// `Ok(Some(replacement))` when it applied, `Ok(None)` when the value
-/// wasn't its shape — a distinct, first-class outcome — and `Err` only for
+/// wasn't its shape, a distinct, first-class outcome, and `Err` only for
 /// a genuine failure.
 ///
 /// It is a supertrait of [`Operator`]: a `TryOperator` *is* an operator.
@@ -49,7 +49,7 @@ pub trait TryOperator<M: Modality>: Operator<M> {
     /// Compute the replacement for `entity`, or `Ok(None)` if this operator
     /// doesn't apply to `data`.
     ///
-    /// `Ok(None)` means "not my shape" — defer to a fallback. It is never
+    /// `Ok(None)` means "not my shape", defer to a fallback. It is never
     /// used for a real failure; that is an `Err`, which aborts the batch.
     async fn try_anonymize(
         &self,
@@ -62,7 +62,7 @@ pub trait TryOperator<M: Modality>: Operator<M> {
 /// declines the value.
 ///
 /// Runs `primary` first. When it produces a replacement, that is the
-/// result. When it *declines* (`try_anonymize` returns `Ok(None)` — the
+/// result. When it *declines* (`try_anonymize` returns `Ok(None)`, the
 /// value wasn't the primary's shape), `fallback` runs instead. The
 /// fallback is any [`Operator`], so a caller composes their own treatment
 /// for the leftover values:
@@ -74,7 +74,7 @@ pub trait TryOperator<M: Modality>: Operator<M> {
 /// # let _ = op;
 /// ```
 ///
-/// A hard error from either operator still propagates — only the primary's
+/// A hard error from either operator still propagates, only the primary's
 /// "not applicable" is caught here.
 #[derive(Debug, Clone)]
 pub struct WithFallback<P, F> {
@@ -189,7 +189,7 @@ mod tests {
     #[tokio::test]
     async fn leak_profile_is_the_leakier_of_the_two() {
         // Clamp is Partial, Keep is Recoverable (leakier). The pair reports
-        // Recoverable — the guarantee a caller can rely on.
+        // Recoverable, the guarantee a caller can rely on.
         let op = WithFallback::new(Clamp::new().with_ceiling(90.0, "x"), Keep);
         assert_eq!(
             Operator::<Text>::leak_profile(&op),

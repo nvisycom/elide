@@ -1,7 +1,7 @@
 //! US-specific post-match validators.
 //!
 //! Registered under the [`ValidatorRegistry::builtin`] set with
-//! dotted names — `"us.ssn"`, `"us.aba_routing"`, etc.
+//! dotted names, `"us.ssn"`, `"us.aba_routing"`, etc.
 //!
 //! [`ValidatorRegistry::builtin`]: super::ValidatorRegistry::builtin
 

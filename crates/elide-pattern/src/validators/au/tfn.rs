@@ -32,7 +32,7 @@ mod tests {
 
     #[test]
     fn accepts_canonical_tfn() {
-        // 123 456 782 — ATO documented test value.
+        // 123 456 782, ATO documented test value.
         assert!(tfn("123456782"));
     }
 

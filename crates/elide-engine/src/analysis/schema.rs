@@ -4,7 +4,7 @@
 //!
 //! `Report` serializes through a hand-written `Serialize` (its groups are
 //! type-erased), so schemars cannot derive this. The one open piece is a group's
-//! `entities`, whose element type depends on the sibling `modality` string — a
+//! `entities`, whose element type depends on the sibling `modality` string, a
 //! discriminated union, expressed as `oneOf` over per-modality group arms with a
 //! `discriminator` on `modality`. Each arm is gated on its modality feature, so
 //! the schema enumerates exactly the modalities compiled in (`text` always).
@@ -13,10 +13,12 @@
 //! validates a serialized report against this schema, turning any drift into a
 //! failing test rather than a lying client.
 //!
-//! Both types share the `{ body, parts }` shape and the same erasure problem,
-//! so both are expressed the same way — a `oneOf` over per-modality arms. They
+//! Both types share the `{ parts: [..] }` shape and the same erasure problem,
+//! so both are expressed the same way, a `oneOf` over per-modality arms. They
 //! differ only in what an arm carries: a `Report` arm holds `entities`, an
-//! `ArtifactSet` arm holds the single `artifact` for that modality.
+//! `ArtifactSet` arm holds the single `artifact` for that modality. Every arm
+//! also carries the part's `id` (a segment array), so a part is addressed by its
+//! full path.
 //!
 //! [`Report`]: super::report::Report
 //! [`ArtifactSet`]: super::artifacts::ArtifactSet
@@ -31,8 +33,10 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use super::artifacts::ArtifactSet;
 use super::report::Report;
 
-/// The `{ modality: "<name>", entities: [Entity<M>] }` arm for one modality,
-/// with `modality` pinned to a `const` so it discriminates the union.
+/// The `{ id: [string..], modality: "<name>", entities: [Entity<M>] }` arm for
+/// one modality, with `modality` pinned to a `const` so it discriminates the
+/// union. `id` is the part's full [`PartId`](crate::PartId) path as a segment
+/// array.
 fn group_arm<M: Modality>(generator: &mut SchemaGenerator) -> Schema
 where
     Entity<M>: JsonSchema,
@@ -41,10 +45,11 @@ where
     json_schema!({
         "type": "object",
         "properties": {
+            "id": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
             "modality": { "type": "string", "const": M::NAME },
             "entities": { "type": "array", "items": entity },
         },
-        "required": ["modality", "entities"],
+        "required": ["id", "modality", "entities"],
     })
 }
 
@@ -74,23 +79,22 @@ impl JsonSchema for Report {
             "discriminator": { "propertyName": "modality" },
         });
 
-        // `body` is a group or null; `parts` maps a part id to a group. `mut` is
-        // used only to splice in `usage` under that feature.
+        // `parts` is an array of part entries, each a discriminated group. `mut`
+        // is used only to splice in `usage` under that feature.
         #[cfg_attr(not(feature = "usage"), allow(unused_mut))]
         let mut schema = json_schema!({
             "type": "object",
             "properties": {
-                "body": { "oneOf": [group.clone(), { "type": "null" }] },
-                "parts": { "type": "object", "additionalProperties": group },
+                "parts": { "type": "array", "items": group },
             },
-            "required": ["body", "parts"],
+            "required": ["parts"],
         });
 
-        // `usage` is present only under the `usage` feature — mirror the
+        // `usage` is present only under the `usage` feature, mirror the
         // conditional field in `Serialize`.
         #[cfg(feature = "usage")]
         {
-            let usage = generator.subschema_for::<elide_core::recognition::UsageReport>();
+            let usage = generator.subschema_for::<elide_core::primitive::UsageReport>();
             let props = schema
                 .ensure_object()
                 .entry("properties")
@@ -104,8 +108,9 @@ impl JsonSchema for Report {
     }
 }
 
-/// The `{ modality: "<name>", artifact: <M::Artifact> }` arm for one modality,
-/// with `modality` pinned to a `const` so it discriminates the union.
+/// The `{ id: [string..], modality: "<name>", artifact: <M::Artifact> }` arm for
+/// one modality, with `modality` pinned to a `const` so it discriminates the
+/// union.
 ///
 /// The artifact-side counterpart to [`group_arm`]: same discriminated shape,
 /// carrying one modality's enrichment (an image's `Layout`, an audio clip's
@@ -118,10 +123,11 @@ where
     json_schema!({
         "type": "object",
         "properties": {
+            "id": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
             "modality": { "type": "string", "const": M::NAME },
             "artifact": artifact,
         },
-        "required": ["modality", "artifact"],
+        "required": ["id", "modality", "artifact"],
     })
 }
 
@@ -135,7 +141,7 @@ impl JsonSchema for ArtifactSet {
     }
 
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        // One arm per compiled-in modality, discriminated by `modality` —
+        // One arm per compiled-in modality, discriminated by `modality` ,
         // mirroring `Report`, so a client reads both halves the same way.
         let arms = vec![
             artifact_arm::<Text>(generator),
@@ -151,15 +157,14 @@ impl JsonSchema for ArtifactSet {
             "discriminator": { "propertyName": "modality" },
         });
 
-        // `body` is a group or null; `parts` maps a part id to a group. No
-        // `usage` here — that rides on the report, not the enrichment.
+        // `parts` is an array of part entries. No `usage` here, that rides on
+        // the report, not the enrichment.
         json_schema!({
             "type": "object",
             "properties": {
-                "body": { "oneOf": [group.clone(), { "type": "null" }] },
-                "parts": { "type": "object", "additionalProperties": group },
+                "parts": { "type": "array", "items": group },
             },
-            "required": ["body", "parts"],
+            "required": ["parts"],
         })
     }
 }

@@ -1,5 +1,5 @@
 //! The core round-trip: every sensitive label is detected, and every part
-//! that carries text — body, header, and relationship targets — is redacted.
+//! that carries text, body, header, and relationship targets, is redacted.
 
 use elide::Result;
 use elide::entity::builtins;

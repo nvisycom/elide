@@ -3,7 +3,7 @@
 use crate::error::Result;
 use crate::modality::Modality;
 #[cfg(feature = "usage")]
-use crate::recognition::ModelUsage;
+use crate::primitive::ModelUsage;
 use crate::recognition::{RecognizerContext, RecognizerId};
 
 /// Enriches a [`RecognizerContext`] before recognizers run over it.
@@ -55,7 +55,7 @@ pub struct Enrichment {
 }
 
 impl Enrichment {
-    /// An enrichment with no model usage — the pure-CPU enricher case.
+    /// An enrichment with no model usage, the pure-CPU enricher case.
     #[must_use]
     pub fn none() -> Self {
         Self::default()

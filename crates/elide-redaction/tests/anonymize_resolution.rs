@@ -1,6 +1,6 @@
 //! Integration tests for how the public [`Anonymizer::anonymize`] path resolves
-//! an entity to an operator — by label, tag, predicate, catalog-predicate, and
-//! fallback, first-matching-rule-wins — and the provenance/attribution the run
+//! an entity to an operator, by label, tag, predicate, catalog-predicate, and
+//! fallback, first-matching-rule-wins, and the provenance/attribution the run
 //! records for each redaction.
 
 mod fixtures;
@@ -172,7 +172,7 @@ async fn catalog_predicate_resolves_tags_through_the_catalog() {
     catalog.insert(Label::new("payment_card", "payment card").with_tags(["financial"]));
     catalog.insert(Label::new("person_name", "person name").with_tags(["pii"]));
 
-    // A catalog-aware predicate resolves the entity's label to its tags — the
+    // A catalog-aware predicate resolves the entity's label to its tags, the
     // same source `with_tag` consults, but expressed as a predicate.
     Anonymizer::<Text>::new()
         .with_catalog(catalog)

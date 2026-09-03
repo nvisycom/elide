@@ -1,4 +1,4 @@
-//! An element's *name* is context for its text — the markup counterpart of a
+//! An element's *name* is context for its text, the markup counterpart of a
 //! JSON key or a CSV header vouching for its value. Each value here is a weak,
 //! context-gated shape with no keyword in its own text; only the tag name
 //! lifts it over the threshold. The name is tokenized so `paymentCard`,
@@ -8,7 +8,7 @@ use elide::Result;
 use elide::entity::builtins;
 
 use crate::support::asserts::{assert_label_present, assert_pii_removed};
-use crate::support::pipeline::Fixture;
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(

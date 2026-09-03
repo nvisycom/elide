@@ -12,10 +12,10 @@ use zeroize::Zeroizing;
 
 /// Supplies secret key material, keyed by label.
 ///
-/// The shared key-supply abstraction for the keyed operators — [`HmacHash`]
+/// The shared key-supply abstraction for the keyed operators, [`HmacHash`]
 /// (keyed hash) and [`AesEncrypt`] (reversible encryption). The provider is
 /// wired at operator construction from a secret store, an env var read at
-/// startup, or a per-tenant KMS — never from serialized policy, so key
+/// startup, or a per-tenant KMS, never from serialized policy, so key
 /// material never lives in a rule file. Keying by [`LabelRef`] lets one
 /// operator draw a distinct key per label class (card numbers under one
 /// key, SSNs under another).

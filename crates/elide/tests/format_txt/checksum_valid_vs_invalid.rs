@@ -5,9 +5,9 @@ use elide::Result;
 use elide::entity::builtins;
 
 use crate::support::asserts::{
-    assert_label_absent, assert_label_present, assert_pii_removed, assert_preserved,
+    assert_content_preserved, assert_label_absent, assert_label_present, assert_pii_removed,
 };
-use crate::support::pipeline::Fixture;
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(
@@ -39,14 +39,14 @@ async fn checksum_gates_detection() -> Result<()> {
 
     // The checksum-failing values match the regex but are rejected, so they
     // survive verbatim in the output.
-    assert_preserved!(
+    assert_content_preserved!(
         outcome.redacted_text(),
         "4111 1111 1111 1112",
         "GB29 NWBK 6016 1331 9268 18",
     );
 
     // The Amex's 4-6-5 grouping must not spawn a spurious `postal_code` out of
-    // its middle digit group — a valid card is one entity, not a card plus a
+    // its middle digit group, a valid card is one entity, not a card plus a
     // postal code carved from its digits.
     assert_label_absent!(outcome.entities, builtins::POSTAL_CODE.to_ref());
     Ok(())

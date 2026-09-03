@@ -29,7 +29,7 @@ impl KeywordMatcher for SubstringMatcher {
     ) -> Vec<Range<usize>> {
         // `to_ascii_lowercase` rewrites bytes in place without changing
         // length, so an offset into `lowered` is the same offset into
-        // `window` — each match position is reusable as-is.
+        // `window`, each match position is reusable as-is.
         let lowered = window.to_ascii_lowercase();
         let mut matches: Vec<Range<usize>> = keywords
             .iter()
@@ -77,7 +77,7 @@ mod tests {
     #[test]
     fn is_permissive() {
         let m = SubstringMatcher;
-        // "Email" inside "MyEmailAddress" is bytes 2..7 — the raw matcher
+        // "Email" inside "MyEmailAddress" is bytes 2..7, the raw matcher
         // reports it; the enhancer's boundary policy decides whether it counts.
         assert_eq!(
             m.matches("MyEmailAddress", &[], &kws(&["email"])),

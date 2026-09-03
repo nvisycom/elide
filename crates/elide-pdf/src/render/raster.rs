@@ -6,7 +6,7 @@
 //! leaves metadata, annotations, and prior revisions untouched. Raster
 //! redaction instead works on the *rendered pixels*: it fills every detected
 //! glyph's box with an opaque colour and rebuilds a new document whose only
-//! content is the sanitised page images — **no object, stream, or byte from the
+//! content is the sanitised page images, **no object, stream, or byte from the
 //! source is copied forward**, so nothing can survive underneath.
 //!
 //! The output is not searchable or accessible: it is images. That is the
@@ -25,7 +25,7 @@ use crate::error::{Error, Result};
 /// that one's `start`/`end` are Unicode *character* offsets into a page's text
 /// for the text-layer rewrite, whereas these are UTF-16 code-unit offsets into a
 /// rendered [`PageObservation`]'s text. The two constructors look identical but
-/// carry different offset units — pass the offsets that belong to this raster
+/// carry different offset units, pass the offsets that belong to this raster
 /// path, not character offsets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Detection {
@@ -98,8 +98,8 @@ impl super::Pdf {
 /// Verify that every detection's glyph boxes are painted `fill_rgb` in `pages`.
 ///
 /// Returns `Ok(())` iff, for every detection, every pixel of every glyph box it
-/// selects — by the same span-overlap rule and page-bounds clipping
-/// [`redact_raster`](super::Pdf::redact_raster) fills with — is exactly
+/// selects, by the same span-overlap rule and page-bounds clipping
+/// [`redact_raster`](super::Pdf::redact_raster) fills with, is exactly
 /// `fill_rgb` in that page's [`pixels`](PageObservation::pixels).
 ///
 /// A raster redaction's output is an image-only PDF with no text layer, so
@@ -209,7 +209,7 @@ fn fill_rect(pixels: &mut [u8], width: u32, height: u32, rect: PixelRect, fill: 
 /// RGB8 `pixels` buffer, as `(x, y)`; `None` if every covered pixel matches.
 ///
 /// The page height is derived from the buffer length, so the same page-bounds
-/// clipping [`fill_rect`] applies holds — an out-of-bounds glyph box covers no
+/// clipping [`fill_rect`] applies holds, an out-of-bounds glyph box covers no
 /// pixels rather than reporting a false mismatch.
 #[cfg(feature = "test-utils")]
 fn unfilled_pixel(pixels: &[u8], width: u32, rect: PixelRect, fill: [u8; 3]) -> Option<(u32, u32)> {

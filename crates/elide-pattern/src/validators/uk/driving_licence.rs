@@ -1,6 +1,6 @@
 //! UK Driving Licence (DVLA) structural validator.
 //!
-//! The 16-char DVLA number opens with a 5-char surname slot —
+//! The 16-char DVLA number opens with a 5-char surname slot,
 //! letters padded on the right with `9`s when the surname is
 //! shorter than five characters. A licence whose surname slot
 //! is *all* `9`s, or that places a `9` before a letter (e.g.
@@ -12,7 +12,7 @@
 ///
 /// Rejects an all-`9` surname and any `9` that appears before a
 /// letter within the slot. Does not re-validate the rest of the
-/// regex-matched number — that is the regex's job.
+/// regex-matched number, that is the regex's job.
 pub fn driving_licence(value: &str) -> bool {
     let surname: Vec<char> = value
         .chars()

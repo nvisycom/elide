@@ -1,7 +1,7 @@
 //! Enhancer in isolation: a context keyword near an entity lifts its
 //! confidence and the enhancer reports the lift as a [`Boost`].
 //!
-//! The enhancer is modality-agnostic and report-only — it mutates the
+//! The enhancer is modality-agnostic and report-only, it mutates the
 //! entity's confidence and returns the boosts; recording the located
 //! refinement event is the `Enhanced` adapter's job, exercised separately.
 
@@ -50,8 +50,8 @@ fn keyword_in_window_boosts_and_records_refinement() {
     assert_eq!(boost.entity_index, 0);
     assert_eq!(boost.keyword, "social security");
     assert!(boost.hint_index.is_none());
-    // The in-text path captures the keyword's range — "social security" is
-    // bytes 0..15 — so the caller can resolve its location.
+    // The in-text path captures the keyword's range, "social security" is
+    // bytes 0..15, so the caller can resolve its location.
     assert_eq!(boost.keyword_range, Some(0..15));
 }
 

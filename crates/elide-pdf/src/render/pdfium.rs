@@ -21,7 +21,7 @@ const MAX_PAGES: usize = 10_000;
 
 /// Maximum rendered width or height, in pixels, of any single page. A page
 /// buffer is `width * height * 3` bytes, so this caps one page near 3 GiB at the
-/// extreme (100k x 100k) — well beyond any legitimate render, while refusing a
+/// extreme (100k x 100k), well beyond any legitimate render, while refusing a
 /// malicious page that demands unbounded memory.
 const MAX_PAGE_DIMENSION_PX: u32 = 100_000;
 

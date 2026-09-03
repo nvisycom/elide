@@ -31,7 +31,7 @@ impl Modality for Image {
 impl TextRecognizable for Image {
     /// The OCR text a recognizer inspects: the [`Layout`] an enricher
     /// stamped onto the call, or `""` when it is empty (an image that was
-    /// never OCR'd) — a recognizer then finds nothing, rather than erroring.
+    /// never OCR'd), a recognizer then finds nothing, rather than erroring.
     fn as_text<'a>(_data: &'a ImageData, artifact: Option<&'a Layout>) -> &'a str {
         artifact.map_or("", Layout::text)
     }
@@ -43,7 +43,7 @@ impl TextRecognizable for Image {
     /// region, so `locate` resolves `range` immediately against the OCR
     /// word boxes in the [`Layout`] rather than deferring to a lift. Returns
     /// `None` when the range resolves to nothing (an empty layout, or out of
-    /// bounds) — there is no region to address, so the caller drops the match
+    /// bounds), there is no region to address, so the caller drops the match
     /// rather than emit a placeless entity.
     fn locate(
         range: Range<usize>,

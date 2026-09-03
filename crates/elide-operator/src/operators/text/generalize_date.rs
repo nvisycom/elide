@@ -7,7 +7,7 @@ use elide_core::entity::Entity;
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::operator::{LeakProfile, Operator, OperatorId};
+use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 use jiff::civil::{Date, DateTime, Time};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -17,13 +17,13 @@ use crate::operators::TryOperator;
 /// The coarseness a [`GeneralizeDate`] reduces a date/timestamp to.
 ///
 /// Every rendering is an ISO-8601 form, so the output is locale-independent
-/// by construction — no localized month names or week markers to configure.
+/// by construction, no localized month names or week markers to configure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum DateGranularity {
-    /// Year only: `1987-03-14` → `1987`. The HIPAA Safe Harbor default —
+    /// Year only: `1987-03-14` → `1987`. The HIPAA Safe Harbor default,
     /// §164.514(b)(2)(i)(C) keeps year but drops finer date elements.
     #[default]
     Year,
@@ -60,10 +60,10 @@ pub enum DateStyle {
 /// Reduce a date or timestamp to a coarser granularity.
 ///
 /// Parses the entity value as an ISO-8601 date (`1987-03-14`) or datetime
-/// (`1987-03-14T09:32:15`) — or, in [`DateStyle::Us`], a `MM/DD/YYYY` slash
-/// date — and re-renders it at the configured [`DateGranularity`]. This is
-/// the shape HIPAA Safe Harbor §164.514(b)(2)(i)(C) requires — dates
-/// directly related to an individual reduced to the year — while preserving
+/// (`1987-03-14T09:32:15`), or, in [`DateStyle::Us`], a `MM/DD/YYYY` slash
+/// date, and re-renders it at the configured [`DateGranularity`]. This is
+/// the shape HIPAA Safe Harbor §164.514(b)(2)(i)(C) requires, dates
+/// directly related to an individual reduced to the year, while preserving
 /// the coarse value analytics still need (age band, cohort). The output
 /// keeps the input value's own convention (dashes for ISO, slashes for US),
 /// so the redacted value still reads naturally in its source document.
@@ -184,13 +184,13 @@ impl GeneralizeDate {
     }
 
     /// Parse `value` as a datetime, but only when it carried an explicit
-    /// time-of-day — `None` for a bare date.
+    /// time-of-day, `None` for a bare date.
     ///
     /// jiff parses a bare date as a `DateTime` too (defaulting to midnight),
     /// so the parse type can't reveal whether a time was present; we detect
     /// the `<date><sep><time>` shape by splitting on the separator and
     /// parsing each side. The date part goes through [`parse_date`] (so US
-    /// slashes work), and the time part through jiff's [`Time`] — which
+    /// slashes work), and the time part through jiff's [`Time`], which
     /// accepts `HH:MM`, `HH:MM:SS`, and fractional seconds alike, so a
     /// minute-precision US timestamp is not spuriously declined. Separators
     /// are `T`/`t` (ISO) or a space (both styles).
@@ -217,7 +217,7 @@ impl Operator<Text> for GeneralizeDate {
     }
 
     async fn anonymize(&self, entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
-        // Used on its own, a declined value erases — the safe default.
+        // Used on its own, a declined value erases, the safe default.
         Ok(self
             .try_anonymize(entity, data)
             .await?
@@ -354,7 +354,7 @@ mod tests {
 
     #[test]
     fn iso_mode_declines_us_slashes() {
-        // The default is strict: month-first slashes are not ISO, so declined —
+        // The default is strict: month-first slashes are not ISO, so declined ,
         // never silently reinterpreted.
         let g = GeneralizeDate::new(DateGranularity::YearMonth);
         assert_eq!(g.render("03/14/1987"), None);
@@ -368,7 +368,7 @@ mod tests {
             g.render("03/14/1987 09:32:15"),
             Some("03/14/1987 09".to_owned())
         );
-        // A minute-precision timestamp (no seconds) still reduces — the time
+        // A minute-precision timestamp (no seconds) still reduces, the time
         // part is parsed as a jiff Time, which accepts HH:MM.
         assert_eq!(
             g.render("03/14/1987 09:32"),
@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn us_month_first_is_not_day_first() {
-        // 04/03/1987 under US = April 3, not March 4 — the disambiguation the
+        // 04/03/1987 under US = April 3, not March 4, the disambiguation the
         // explicit style buys us. Output echoes slashes (month/year).
         let g = GeneralizeDate::new(DateGranularity::YearMonth).with_us_format();
         assert_eq!(g.render("04/03/1987"), Some("04/1987".to_owned()));

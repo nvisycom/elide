@@ -1,4 +1,4 @@
-//! The [`Deanonymizer`] — the "recover" engine.
+//! The [`Deanonymizer`], the "recover" engine.
 //!
 //! The reverse of [`Anonymizer`]: per entity it resolves a
 //! [`ReversibleOperator`] (e.g. `AesEncrypt`), reads the replacement text the
@@ -8,7 +8,7 @@
 //! [`TextReplacement`] for the operator to reverse.
 //!
 //! [`Anonymizer`]: crate::Anonymizer
-//! [`ReversibleOperator`]: elide_core::operator::ReversibleOperator
+//! [`ReversibleOperator`]: elide_core::redaction::ReversibleOperator
 //! [`Text`]: elide_core::modality::text::Text
 //! [`Tabular`]: elide_core::modality::tabular::Tabular
 //! [`TextReplacement`]: elide_core::modality::text::TextReplacement
@@ -19,7 +19,7 @@ use elide_core::Result;
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::{TextData, TextReplacement};
 use elide_core::modality::{DataReader, DataWriter, Modality, TextRecognizable};
-use elide_core::operator::{Redactions, ReversibleOperator};
+use elide_core::redaction::{Redactions, ReversibleOperator};
 
 use self::registry::ReversibleRegistry;
 
@@ -150,7 +150,7 @@ mod tests {
 
     use elide_core::entity::LabelRef;
     use elide_core::modality::text::Text;
-    use elide_core::operator::ReversibleOperator;
+    use elide_core::redaction::ReversibleOperator;
     use elide_operator::operators::AesEncrypt;
 
     use crate::Deanonymizer;

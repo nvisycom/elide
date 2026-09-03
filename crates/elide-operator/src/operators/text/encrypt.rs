@@ -11,7 +11,7 @@ use elide_core::entity::{Entity, LabelRef};
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::operator::{LeakProfile, Operator, OperatorId, ReversibleOperator};
+use elide_core::redaction::{LeakProfile, Operator, OperatorId, ReversibleOperator};
 use elide_core::{Error, ErrorKind, Result};
 #[cfg(feature = "serde")]
 use serde::Serialize;
@@ -26,8 +26,8 @@ const NONCE_LEN: usize = 12;
 
 /// Reversibly replace the matched value with an AES-256-GCM ciphertext.
 ///
-/// The replacement is self-contained — base64 of `nonce ++ ciphertext` (the
-/// authentication tag is part of the ciphertext) — so [`deanonymize`] needs
+/// The replacement is self-contained, base64 of `nonce ++ ciphertext` (the
+/// authentication tag is part of the ciphertext), so [`deanonymize`] needs
 /// only the key, no out-of-band state. A fresh random nonce per call keeps
 /// equal plaintexts from producing equal ciphertexts. The redaction is
 /// recoverable by whoever holds the key, the basis for "redact for storage,

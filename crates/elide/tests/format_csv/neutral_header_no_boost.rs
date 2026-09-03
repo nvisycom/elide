@@ -5,8 +5,8 @@
 use elide::Result;
 use elide::entity::builtins;
 
-use crate::support::asserts::{assert_label_absent, assert_preserved};
-use crate::support::pipeline::Fixture;
+use crate::support::asserts::{assert_content_preserved, assert_label_absent};
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(
@@ -25,8 +25,8 @@ async fn neutral_headers_do_not_boost_weak_values() -> Result<()> {
     // shape is never lifted over the threshold.
     assert_label_absent!(outcome.entities, builtins::BANK_ACCOUNT.to_ref());
 
-    // The bare numbers survive verbatim — neither detected nor redacted.
-    assert_preserved!(
+    // The bare numbers survive verbatim, neither detected nor redacted.
+    assert_content_preserved!(
         outcome.redacted_text(),
         "000123456789",
         "000987654321",

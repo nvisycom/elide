@@ -23,7 +23,7 @@ use elide_detection::{Analysis, Analyzer};
 use elide_redaction::Anonymizer;
 
 pub(crate) use self::erased::ErasedPipeline;
-pub(crate) use self::outcome::AnalyzeOutcome;
+pub(crate) use self::outcome::{AnalyzeOutcome, BoxFuture};
 
 /// The concrete analyze + redact pipeline for one modality `M`.
 ///
@@ -38,13 +38,23 @@ pub(crate) struct ModalityPipeline<M: Modality> {
     pub(crate) anonymizer: Anonymizer<M>,
 }
 
+impl<M: Modality> ModalityPipeline<M> {
+    /// Pair an analyzer and anonymizer into a pipeline for modality `M`.
+    pub(crate) fn new(analyzer: Analyzer<M>, anonymizer: Anonymizer<M>) -> Self {
+        Self {
+            analyzer,
+            anonymizer,
+        }
+    }
+}
+
 impl<M> ModalityPipeline<M>
 where
     M: Modality,
     DocumentHandle<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
 {
     /// Detect the entities in `handle` (in source coordinates), without
-    /// redacting. `artifact` is the prior enrichment to restore — `Some` (even
+    /// redacting. `artifact` is the prior enrichment to restore, `Some` (even
     /// when empty) has recognition run against it instead of re-invoking the
     /// model; `None` is a first pass, so the enricher runs and produces the
     /// artifact itself. The caller may edit the returned set before applying.

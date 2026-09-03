@@ -50,7 +50,7 @@ async fn builtin_finance() {
         builtins::BANK_ROUTING.to_ref(),
         "121000358",
     );
-    // bank_account is `\b\d{8,17}\b` with score 0.05 — it requires
+    // bank_account is `\b\d{8,17}\b` with score 0.05, it requires
     // a context-keyword boost (e.g. `account`) to clear the
     // confidence threshold. The fixture provides one.
     assert_label_present(&entities, builtins::BANK_ACCOUNT.to_ref());

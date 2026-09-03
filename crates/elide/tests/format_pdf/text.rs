@@ -13,11 +13,11 @@ use elide::modality::StreamDataReader;
 use elide::modality::text::Text;
 
 use crate::support::asserts::{assert_label_present, assert_pii_removed};
-use crate::support::pipeline::Fixture;
+use crate::support::fixture::Fixture;
 
 /// Re-decode a redacted PDF through the public registry and reassemble its
 /// born-digital text. The re-encoded content stream is FlateDecode-compressed,
-/// so the text is only legible through a real decode — not by grepping bytes.
+/// so the text is only legible through a real decode, not by grepping bytes.
 async fn extracted_text(pdf: &[u8]) -> Result<String> {
     let registry = FormatRegistry::with_builtin();
     let mut handle = registry
@@ -68,7 +68,7 @@ async fn born_digital_pdf_detects_and_redacts() -> Result<()> {
     // Re-decode the redacted PDF: whichever path ran, none of the original PII
     // survives. PDF redaction removes the text (glyph deletion keeps a
     // selectable layer minus the detected spans; raster flattens to images), so
-    // the guarantee asserted here is that the originals are gone — not that a
+    // the guarantee asserted here is that the originals are gone, not that a
     // replacement token was inserted.
     let redacted = extracted_text(&outcome.redacted).await?;
     assert_pii_removed!(
@@ -83,7 +83,7 @@ async fn born_digital_pdf_detects_and_redacts() -> Result<()> {
 
     // Also assert the PII is absent from the raw output bytes. On the glyph
     // path the content stream is FlateDecode-compressed, so this is a weaker
-    // check than the decoded one above — but it catches any PII that survives
+    // check than the decoded one above, but it catches any PII that survives
     // uncompressed (annotations, metadata, an unfiltered stream).
     let raw = String::from_utf8_lossy(&outcome.redacted);
     for pii in PII {

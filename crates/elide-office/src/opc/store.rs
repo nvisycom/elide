@@ -184,7 +184,7 @@ mod tests {
         assert_eq!(block.start, raw_start);
         assert_eq!(block.end, raw_start + "a &amp; b".len());
         // The whole decoded span maps back to the whole raw slice, entity and
-        // all — one contiguous range.
+        // all, one contiguous range.
         assert_eq!(
             block.offsets.raw_ranges(0..block.text.len()),
             vec![raw_start..raw_start + "a &amp; b".len()]
@@ -195,7 +195,7 @@ mod tests {
     fn text_blocks_handles_a_leading_bom() {
         // A leading UTF-8 BOM (as docx.js emits) must not shift the recorded
         // spans: the decoded text is exact and its span still indexes the true
-        // raw bytes, so a redaction lands on — and a recognizer matches — the
+        // raw bytes, so a redaction lands on, and a recognizer matches, the
         // right text.
         let xml = "\u{feff}<w:document><w:t>alice@example.com</w:t></w:document>";
         let part = element(xml);

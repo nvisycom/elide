@@ -6,8 +6,8 @@ use elide_core::entity::Entity;
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::operator::{LeakProfile, Operator, OperatorId};
 use elide_core::primitive::{LanguageTag, LocalizedText};
+use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,7 @@ use crate::operators::TryOperator;
 /// Either an [`Explicit`](Bucket::Explicit) label the caller wrote (a
 /// [`LocalizedText`], so it can carry per-language variants), or one
 /// [`Derived`](Bucket::Derived) from the threshold via a format template so
-/// the caller doesn't repeat the number — `"{n}+"` renders `"90+"` for a
+/// the caller doesn't repeat the number, `"{n}+"` renders `"90+"` for a
 /// ceiling of `90`.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -92,10 +92,10 @@ fn format_threshold(n: f64) -> String {
 /// misconfigured pair overlaps (`floor >= ceiling`) a matching value takes
 /// the ceiling bucket.
 ///
-/// A bucket label is either **explicit** — text the caller writes, which
+/// A bucket label is either **explicit**, text the caller writes, which
 /// can be a [`LocalizedText`] so the same policy emits `"90 or older"` for
 /// an English document and `"90 ou plus"` for a French one (a bare `&str`
-/// is English-only) — or **derived** from the threshold via a format
+/// is English-only), or **derived** from the threshold via a format
 /// template, so the caller doesn't repeat the number: `with_ceiling_auto(90.0)`
 /// renders `"90+"`, and `with_ceiling_fmt(90.0, "{n} or older")` renders
 /// `"90 or older"`. A derived label is the same in every language.
@@ -117,7 +117,7 @@ fn format_threshold(n: f64) -> String {
 /// assert_eq!(cap.render("73", None), Some("73".to_owned()));
 /// assert_eq!(cap.render("N/A", None), None); // declined: not a number
 ///
-/// // Or derive the label from the threshold — no repeated number:
+/// // Or derive the label from the threshold, no repeated number:
 /// let auto = Clamp::new().with_ceiling_auto(90.0);
 /// assert_eq!(auto.render("94", None), Some("90+".to_owned()));
 /// ```
@@ -135,7 +135,7 @@ impl Clamp {
         OperatorId::new("clamp", "1.0.0")
     }
 
-    /// A clamp with no bounds — every value passes through until a
+    /// A clamp with no bounds, every value passes through until a
     /// ceiling or floor is added.
     pub fn new() -> Self {
         Self::default()
@@ -161,7 +161,7 @@ impl Clamp {
     }
 
     /// Collapse values `>= ceiling` into a label derived from the threshold
-    /// with the default template `"{n}+"` — a ceiling of `90` renders
+    /// with the default template `"{n}+"`, a ceiling of `90` renders
     /// `"90+"`. Use [`with_ceiling_fmt`] for a different wording.
     ///
     /// [`with_ceiling_fmt`]: Self::with_ceiling_fmt
@@ -171,7 +171,7 @@ impl Clamp {
     }
 
     /// Collapse values `>= ceiling` into a label derived from `format`, where
-    /// `{n}` is replaced by the threshold — e.g. `"{n} or older"` renders
+    /// `{n}` is replaced by the threshold, e.g. `"{n} or older"` renders
     /// `"90 or older"` for a ceiling of `90`. A derived label is the same in
     /// every language; use [`with_ceiling`] for localized wording.
     ///
@@ -200,14 +200,14 @@ impl Clamp {
     }
 
     /// Collapse values `<= floor` into a label derived with the default
-    /// template `"<{n}"` — a floor of `18` renders `"<18"`.
+    /// template `"<{n}"`, a floor of `18` renders `"<18"`.
     #[must_use]
     pub fn with_floor_auto(self, floor: f64) -> Self {
         self.with_floor_fmt(floor, DEFAULT_FLOOR_FORMAT)
     }
 
     /// Collapse values `<= floor` into a label derived from `format`, where
-    /// `{n}` is replaced by the threshold — e.g. `"under {n}"` renders
+    /// `{n}` is replaced by the threshold, e.g. `"under {n}"` renders
     /// `"under 18"` for a floor of `18`.
     #[must_use]
     pub fn with_floor_fmt(mut self, floor: f64, format: impl Into<HipStr<'static>>) -> Self {
@@ -221,7 +221,7 @@ impl Clamp {
     pub fn render(&self, value: &str, language: Option<&LanguageTag>) -> Option<String> {
         // Only finite numbers are clamped. `NaN`/`inf` parse as `f64` but
         // compare false against every bound, so without this filter they
-        // would fall through and pass the raw input string back unredacted —
+        // would fall through and pass the raw input string back unredacted ,
         // a leak. Reject them so they decline (and erase by default) instead.
         let number = value.trim().parse::<f64>().ok().filter(|n| n.is_finite())?;
         if let Some((ceiling, bucket)) = &self.ceiling
@@ -251,7 +251,7 @@ impl Operator<Text> for Clamp {
     }
 
     async fn anonymize(&self, entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
-        // Used on its own, a declined value erases — the safe default.
+        // Used on its own, a declined value erases, the safe default.
         Ok(self
             .try_anonymize(entity, data)
             .await?
@@ -389,7 +389,7 @@ mod tests {
 
     #[test]
     fn derived_label_is_language_independent() {
-        // A derived label is the same regardless of entity language — it's
+        // A derived label is the same regardless of entity language, it's
         // built from the number, not written per-locale.
         let op = Clamp::new().with_ceiling_fmt(90.0, "{n}+");
         assert_eq!(op.render("94", Some(&fr())), Some("90+".to_owned()));

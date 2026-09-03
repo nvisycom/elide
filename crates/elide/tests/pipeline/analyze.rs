@@ -32,7 +32,7 @@ fn detected(recognizer: &str, label: &str, loc: (usize, usize), conf: f32) -> En
     Entity::new(label, location, confidence, AuditLog::new(event))
 }
 
-/// Like [`detected`], but the location also carries a raw source reference — the
+/// Like [`detected`], but the location also carries a raw source reference, the
 /// pointer a source-mapping codec (markup, DOCX) attaches on lift.
 fn detected_with_source(
     recognizer: &str,
@@ -46,7 +46,7 @@ fn detected_with_source(
     entity
 }
 
-/// A request [`Scope`] whose catalog declares exactly `ids` — the labels a test
+/// A request [`Scope`] whose catalog declares exactly `ids`, the labels a test
 /// wants to survive the analyzer's output cull. (The [`Fixed`] recognizer emits
 /// its list regardless of the catalog; the catalog gates what is kept.)
 fn scope_for(ids: &[&str]) -> Scope {
@@ -121,7 +121,7 @@ async fn analyze_fuses_resolves_filters() {
 async fn analyze_records_per_recognizer_usage() {
     // Two recognizers: A finds 2, B finds 1. Each should get one Usage entry
     // carrying its id, its own found-count (measured before reduction), a
-    // duration, and — being pure-CPU doubles — no model detail.
+    // duration, and, being pure-CPU doubles, no model detail.
     let a = Fixed(vec![
         detected("pattern", "PHONE_NUMBER", (10, 22), 0.8),
         detected("pattern", "WEAK", (40, 44), 0.1),
@@ -154,7 +154,7 @@ async fn fusion_keeps_both_operands_source_refs() {
     // Two overlapping detections of the same label, each carrying a distinct raw
     // source reference (as a markup/DOCX codec would attach). Reconciliation
     // fuses them; the surviving entity must keep *both* source refs, normalized
-    // — so a client can still point at every source run behind the fused span.
+    //, so a client can still point at every source run behind the fused span.
     let a = Fixed(vec![detected_with_source(
         "pattern",
         "PHONE_NUMBER",

@@ -1,9 +1,9 @@
-//! PDF page rendering via PDFium, and raster redaction built on it — behind the
+//! PDF page rendering via PDFium, and raster redaction built on it, behind the
 //! `render` feature.
 //!
 //! Rendering rasterises whole pages to images (for OCR of scanned or image-only
 //! PDFs, and for the raster redaction that flattens a page to a sanitised
-//! image). The glyph geometry here — in rendered-pixel space — is the bridge
+//! image). The glyph geometry here, in rendered-pixel space, is the bridge
 //! between a detected text span and the pixels the redaction overwrites. It all
 //! requires the PDFium shared library at runtime (see
 //! `scripts/install-pdfium.sh`); the module is behind the `render` feature so
@@ -57,9 +57,9 @@ impl Pdf {
     /// unavailable).
     #[cfg_attr(docsrs, doc(cfg(feature = "render")))]
     pub fn render(&self, scale: f32) -> Result<Vec<RenderedPage>> {
-        // Render the pristine bytes this document was opened from — not a lopdf
+        // Render the pristine bytes this document was opened from, not a lopdf
         // re-serialisation, which can degrade the scanned or malformed PDFs OCR
-        // most needs — on the dedicated PDFium thread.
+        // most needs, on the dedicated PDFium thread.
         pdfium::render(self.source_bytes().to_vec(), scale)
     }
 
@@ -69,7 +69,7 @@ impl Pdf {
     /// This is the input to raster redaction: each [`PageObservation`] carries
     /// the pixels to overwrite, the page text detection runs over, and the
     /// glyph boxes that map a detected UTF-16 span back to pixels. A page with
-    /// no text layer yields an observation with pixels but no glyphs — a caller
+    /// no text layer yields an observation with pixels but no glyphs, a caller
     /// supplies OCR glyphs for those.
     ///
     /// # Errors

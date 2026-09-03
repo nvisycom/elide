@@ -4,7 +4,7 @@
 //! Each impl renders the user prompt wording: shared system instructions,
 //! the target labels, and the caller's hints. The source payload (text,
 //! image bytes) is attached to the provider message by the backend, and
-//! the structured response shape is fixed per modality — so this is pure
+//! the structured response shape is fixed per modality, so this is pure
 //! wording.
 //!
 //! [`Text`]: elide_core::modality::text::Text

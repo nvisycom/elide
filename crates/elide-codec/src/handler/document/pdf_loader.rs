@@ -49,8 +49,8 @@ impl Loader<Text> for PdfLoader {
     async fn decode(&self, content: ContentData) -> Result<PdfHandler> {
         let document = content.to_bytes();
 
-        // `RasterMode::Always` (feature `pdf-render`): observe each page —
-        // its text comes from the renderer alongside its glyph geometry — so
+        // `RasterMode::Always` (feature `pdf-render`): observe each page ,
+        // its text comes from the renderer alongside its glyph geometry, so
         // redaction on encode fills the detected pixels and emits a fresh
         // image-only PDF (the flatten guarantee, no selectable text).
         #[cfg(feature = "pdf-render")]
@@ -61,8 +61,8 @@ impl Loader<Text> for PdfLoader {
         }
 
         // Default (`Auto`/`Never`, and the whole pure-Rust build): glyph
-        // deletion. The page text comes from `page_texts` — the same walk
-        // `redact_text` uses — so a detection's character span maps to the
+        // deletion. The page text comes from `page_texts`, the same walk
+        // `redact_text` uses, so a detection's character span maps to the
         // glyphs it drew. On encode the glyphs are deleted and
         // annotations/metadata stripped, keeping a selectable text layer.
         let pdf = elide_pdf::Pdf::open(&document).map_err(pdf_error)?;

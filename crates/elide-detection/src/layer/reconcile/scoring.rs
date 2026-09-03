@@ -1,4 +1,4 @@
-//! The [`Scoring`] trait — how merged confidence is scored — and its impls.
+//! The [`Scoring`] trait, how merged confidence is scored, and its impls.
 
 use elide_core::modality::Modality;
 use elide_core::primitive::Confidence;
@@ -9,8 +9,8 @@ use elide_core::primitive::Confidence;
 /// score ([`MaxConfidence`]), others *compute* a new one ([`NoisyOrConfidence`]);
 /// the trait abstracts over both. The crate ships [`MaxConfidence`] (the
 /// default) and [`NoisyOrConfidence`]; a consumer can implement their own.
-/// Scoring is pairwise — the [`Merging`] reconciler applies it to each merged
-/// pair — so a scoring must be associative for a cluster of three or more to
+/// Scoring is pairwise, the [`Merging`] reconciler applies it to each merged
+/// pair, so a scoring must be associative for a cluster of three or more to
 /// combine consistently (both shipped scorings are).
 ///
 /// [`Merging`]: super::Merging
@@ -22,7 +22,7 @@ pub trait Scoring<M: Modality>: Send + Sync {
     fn score(&self, a: Confidence, b: Confidence) -> Confidence;
 }
 
-/// `max(a, b)` — the more confident finding wins.
+/// `max(a, b)`, the more confident finding wins.
 ///
 /// The conservative default: corroboration never *lowers* the score, and a
 /// single strong witness carries the cluster. The merged confidence is one
@@ -43,12 +43,12 @@ impl<M: Modality> Scoring<M> for MaxConfidence {
 
 /// Noisy-OR of two scores: `1 − (1 − a)(1 − b)`.
 ///
-/// Treats recognizers as independent witnesses — each adds evidence, so the
+/// Treats recognizers as independent witnesses, each adds evidence, so the
 /// fused score is monotonic in the number of agreeing detectors and can exceed
 /// any single one. Sound *only* when the members really are independent and
 /// their scores are calibrated probabilities; correlated detectors (two regexes
 /// for the same pattern) inflate the score. Per-recognizer reliability is *not*
-/// a fusion concern — scale individual recognizers' scores beforehand with a
+/// a fusion concern, scale individual recognizers' scores beforehand with a
 /// [`CalibrateLayer`]. Associative, so it composes consistently across a cluster
 /// of three or more.
 ///

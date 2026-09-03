@@ -2,7 +2,7 @@
 //!
 //! [`Context::generate`] returns `Some(string)` for every label the
 //! catalogue covers, or `None` for labels the fake-data layer
-//! doesn't support — the caller delegates to its fallback
+//! doesn't support, the caller delegates to its fallback
 //! anonymizer in that case.
 //!
 //! Two paths:

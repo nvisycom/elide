@@ -8,7 +8,7 @@ use super::{Disposition, Reconciler, Winner};
 
 /// The aggressive reconciler: one finding per span.
 ///
-/// Every grouped pair is a conflict, resolved by `tiebreaker` — never keeps
+/// Every grouped pair is a conflict, resolved by `tiebreaker`, never keeps
 /// both. For callers who want a strict, mutually-exclusive output (no nesting,
 /// no co-existing overlaps).
 #[derive(Debug, Clone, Copy, Default)]

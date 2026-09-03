@@ -44,7 +44,7 @@ impl<'a> MarkupSource<'a> {
     }
 
     /// Each redactable attribute of an element: its local name (for context)
-    /// and the source byte span of its value — the inner bytes between the
+    /// and the source byte span of its value, the inner bytes between the
     /// quotes. Values pass through verbatim, so a `mailto:` URL has its email
     /// matched in place; the name lets a context-gated value (`ssn="…"`) be
     /// boosted by its attribute name.
@@ -65,7 +65,7 @@ impl<'a> MarkupSource<'a> {
             let attr = match attr {
                 Ok(attr) => attr,
                 // Lenient parsing tolerates a malformed attribute; strict XML
-                // does not — a duplicate key or unquoted value is malformed.
+                // does not, a duplicate key or unquoted value is malformed.
                 Err(_) if lenient => continue,
                 Err(e) => {
                     return Err(Error::new(
@@ -76,7 +76,7 @@ impl<'a> MarkupSource<'a> {
             };
             // `Attribute::value` is the *raw* on-the-wire text, entity spellings
             // intact (quick-xml unescapes only through `unescape_value`, which we
-            // never call — the engine redacts raw slices). Over a
+            // never call, the engine redacts raw slices). Over a
             // `Reader::from_str` it borrows straight out of the source buffer, so a
             // borrowed value's slice position *is* the source span, even for an
             // entity-bearing value. `Cow::Owned` arises only for a value with no
@@ -112,7 +112,7 @@ impl<'a> MarkupSource<'a> {
 
 /// The growing item stream: the extracted items and the running engine-space
 /// offset (the cumulative length of their values). [`push`](Self::push) keeps
-/// the two in step — every item advances the offset by its own length — so the
+/// the two in step, every item advances the offset by its own length, so the
 /// offset a chunk carries can never drift from the stream it indexes.
 pub(super) struct MarkupSink {
     items: Vec<XmlItem>,

@@ -106,8 +106,8 @@ impl ModalityLocation for TextLocation {
             return None;
         }
         // The fused decoded span covers both operands' source ranges. Keep them
-        // as distinct ranges — merged runs and escape-split spans are genuinely
-        // non-contiguous in the raw bytes — normalized so the result is
+        // as distinct ranges, merged runs and escape-split spans are genuinely
+        // non-contiguous in the raw bytes, normalized so the result is
         // order-independent.
         let mut source = self.source.clone();
         source.extend_from_slice(&other.source);

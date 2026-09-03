@@ -45,13 +45,13 @@ mod tests {
 
     #[test]
     fn accepts_canonical_9() {
-        // 123456785 — widely-quoted valid REGON.
+        // 123456785, widely-quoted valid REGON.
         assert!(regon("123456785"));
     }
 
     #[test]
     fn accepts_canonical_14() {
-        // 12345678512347 — extends the 9-digit base with a valid
+        // 12345678512347, extends the 9-digit base with a valid
         // 14-digit suffix check.
         assert!(regon("12345678512347"));
     }

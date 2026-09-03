@@ -3,11 +3,11 @@
 //! 9 characters: prefix letter + 7 digits + check letter.
 //!
 //! Prefix:
-//! - `S` — Singapore citizen / PR born before 2000
-//! - `T` — Singapore citizen / PR born 2000+
-//! - `F` — foreigner (Long-Term Pass) issued before 2000
-//! - `G` — foreigner issued 2000+
-//! - `M` — foreigner issued 2022+ (introduced after the original
+//! - `S`, Singapore citizen / PR born before 2000
+//! - `T`, Singapore citizen / PR born 2000+
+//! - `F`, foreigner (Long-Term Pass) issued before 2000
+//! - `G`, foreigner issued 2000+
+//! - `M`, foreigner issued 2022+ (introduced after the original
 //!   NRIC spec; check digit uses a different table and offset).
 //!
 //! Algorithm: weighted sum of the 7 digits with

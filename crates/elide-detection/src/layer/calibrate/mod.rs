@@ -14,7 +14,7 @@ use super::{Layer, LayerOutput};
 /// The calibration stage: scale confidence by its recognizer's multiplier.
 ///
 /// The originating recognizer is the first detection in the entity's
-/// provenance — the one that produced the entity. Calibration is a
+/// provenance, the one that produced the entity. Calibration is a
 /// per-detector statement about score shape, so it keys on whoever
 /// detected the entity, not on any later contributor. Results clamp to
 /// `[0, 1]`. Drops nothing.

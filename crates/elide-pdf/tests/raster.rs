@@ -1,5 +1,5 @@
 //! Raster redaction: pixel fill, fresh image-only PDF emission, and the
-//! certificate — all pure logic, exercised without a PDFium runtime by
+//! certificate, all pure logic, exercised without a PDFium runtime by
 //! supplying hand-built page observations.
 #![cfg(feature = "render")]
 
@@ -32,7 +32,7 @@ fn source_pdf() -> Vec<u8> {
 }
 
 /// A source PDF carrying an `/Info` dictionary and an XMP `/Metadata` stream,
-/// both holding a secret — to prove the raster output does not carry them.
+/// both holding a secret, to prove the raster output does not carry them.
 fn source_pdf_with_metadata() -> Vec<u8> {
     let mut doc = Document::with_version("1.5");
     let pages_id = doc.new_object_id();
@@ -123,7 +123,7 @@ fn output_image_pixels(out: &[u8]) -> Vec<u8> {
 #[test]
 fn fills_only_detected_glyph_pixels() {
     let pdf = Pdf::open(&source_pdf()).unwrap();
-    // Redact "BC" — UTF-16 [1, 3): the middle two pixels of the 4x1 page.
+    // Redact "BC", UTF-16 [1, 3): the middle two pixels of the 4x1 page.
     let (out, _cert) = pdf
         .redact_raster(vec![observation()], &[Detection::new(1, 1, 3)], [0, 0, 0])
         .unwrap();
@@ -232,7 +232,7 @@ fn rejects_a_detection_on_an_absent_page() {
 }
 
 /// Fill the detected glyph boxes on `pages` in place with `fill`, the same
-/// pixel edit `redact_raster` performs before emitting — so a caller can then
+/// pixel edit `redact_raster` performs before emitting, so a caller can then
 /// assert the fill actually covered every detected region.
 #[cfg(feature = "test-utils")]
 fn fill_detected(pages: &mut [PageObservation], detections: &[Detection], fill: [u8; 3]) {
@@ -275,7 +275,7 @@ fn verify_raster_coverage_catches_an_unpainted_region() {
     use elide_pdf::render::verify_raster_coverage;
 
     // The observation is never filled, so a detection's box still shows the
-    // original white pixels — verification must fail closed.
+    // original white pixels, verification must fail closed.
     let err = verify_raster_coverage(&[observation()], &[Detection::new(1, 1, 3)], [0, 0, 0])
         .unwrap_err();
     assert_eq!(err.kind(), elide_pdf::ErrorKind::UnsafeRewrite);

@@ -8,7 +8,7 @@
 
 pub(super) const LETTERS: &[u8; 23] = b"TRWAGMYFPDXBNJZSQVHLCKE";
 
-/// Return `true` when `value` is a valid NIF (DNI) — 7 or 8
+/// Return `true` when `value` is a valid NIF (DNI), 7 or 8
 /// digits + Mod 23 control letter, with optional `-` separator.
 pub fn nif(value: &str) -> bool {
     let normalized: String = value

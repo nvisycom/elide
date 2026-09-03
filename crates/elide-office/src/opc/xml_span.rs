@@ -2,7 +2,7 @@
 //! rewriting text back into them.
 //!
 //! A [`StoredPart`](crate::opc::store::StoredPart) delegates here to turn raw XML
-//! into [`Span`]s — a byte [`Range`] into the part's original bytes plus the
+//! into [`Span`]s, a byte [`Range`] into the part's original bytes plus the
 //! [`BlockKind`] that says how the range is framed. A [`Span`] then knows how to
 //! [`decode`](Span::decode) its slice into logical text and how to
 //! [`escape`](Span::escape) a replacement for the context it lands in. Everything
@@ -123,8 +123,8 @@ impl Span {
 /// Build the decoded-to-raw [`OffsetMap`] for a `Text` or attribute span whose
 /// raw bytes are `slice` and whose part-absolute start is `base`.
 ///
-/// The map interleaves identity stretches — where decoded and raw advance
-/// one-for-one — with an atomic entity run per `&...;`. Each entity is unescaped
+/// The map interleaves identity stretches, where decoded and raw advance
+/// one-for-one, with an atomic entity run per `&...;`. Each entity is unescaped
 /// on its own to learn its decoded length (numeric refs `&#38;`/`&#x26;` and
 /// named refs alike), which is how much of the decoded text the whole raw
 /// reference stands for. Errs on an entity `unescape` rejects, matching the
@@ -258,7 +258,7 @@ pub(crate) fn relationship_spans(raw: &str) -> std::result::Result<Vec<Span>, ()
         }
 
         // Scan the element's attributes once for the hyperlink type, the external
-        // mode, and the `Target` value's source range — the latter derived from
+        // mode, and the `Target` value's source range, the latter derived from
         // the value bytes quick-xml borrowed straight out of `raw`. A span is
         // emitted only when the relationship is an external hyperlink.
         let mut is_hyperlink = false;
@@ -285,7 +285,7 @@ pub(crate) fn relationship_spans(raw: &str) -> std::result::Result<Vec<Span>, ()
 
 /// The byte range of `value` within `raw`, where `value` is a slice quick-xml
 /// borrowed out of `raw` (its attribute values are the raw source text, entity
-/// spellings intact, borrowed straight from the buffer). Errs — fail-closed — if
+/// spellings intact, borrowed straight from the buffer). Errs, fail-closed, if
 /// `value` is not a sub-slice of `raw`, so a caller surfaces the part as an issue
 /// rather than dropping a redaction.
 fn sub_slice_range(raw: &str, value: &str) -> std::result::Result<Range<usize>, ()> {

@@ -1,4 +1,4 @@
-//! Universal patterns — apply regardless of jurisdiction.
+//! Universal patterns, apply regardless of jurisdiction.
 
 use crate::{__shipped_pattern as shipped_pattern, Regex};
 

@@ -96,7 +96,7 @@ impl ModalityRegistry {
     }
 
     /// Reconstruct a [`Report`] from `deserializer`, routing each group to its
-    /// registered modality — the shared core of [`Report::deserializer`] and
+    /// registered modality, the shared core of [`Report::deserializer`] and
     /// [`Orchestrator::deserialize_report`]. Maps any deserialization failure to
     /// a [`MalformedInput`] error.
     ///
@@ -134,7 +134,7 @@ impl ModalityRegistry {
     }
 }
 
-/// Rebuilds a serialized [`Report`] — without the analyzers, anonymizers, or
+/// Rebuilds a serialized [`Report`], without the analyzers, anonymizers, or
 /// codec registry needed to *run* one.
 ///
 /// A report's wire form tags each group with its modality name but not the
@@ -190,7 +190,7 @@ impl ReportDeserializer {
     /// # Errors
     ///
     /// Returns a [`MalformedInput`] error if the payload is not a valid report,
-    /// or if a group carries entities under a modality that was not registered —
+    /// or if a group carries entities under a modality that was not registered,
     /// see [`Orchestrator::deserialize_report`] for the empty-vs-non-empty rule.
     ///
     /// [`MalformedInput`]: elide_core::ErrorKind::MalformedInput

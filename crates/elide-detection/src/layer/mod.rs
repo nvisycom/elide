@@ -5,13 +5,13 @@
 //! them. They are composed onto an [`Analyzer`], which runs them in order after
 //! detection. The shipped stages, in their usual order:
 //!
-//! 1. [`calibrate`] — scale each entity's confidence by a per-recognizer
+//! 1. [`calibrate`], scale each entity's confidence by a per-recognizer
 //!    multiplier, so detectors with different score distributions are
 //!    comparable before reconciliation.
-//! 2. [`reconcile`] — decide what happens to overlapping entities: cluster
-//!    them ([`GroupPredicate`]) and dispose of each pair ([`Reconciler`]) —
+//! 2. [`reconcile`], decide what happens to overlapping entities: cluster
+//!    them ([`GroupPredicate`]) and dispose of each pair ([`Reconciler`]),
 //!    merge same-label findings, keep/contest/resolve cross-label overlaps.
-//! 3. [`filter`] — drop entities outside an allow-list of labels or below a
+//! 3. [`filter`], drop entities outside an allow-list of labels or below a
 //!    confidence threshold.
 //!
 //! Each stage implements [`Layer`], returning a [`LayerOutput`]. Stages are
@@ -47,7 +47,7 @@ pub struct LayerOutput<M: Modality> {
 }
 
 impl<M: Modality> LayerOutput<M> {
-    /// All entities kept, none dropped — for layers that only reshape rather
+    /// All entities kept, none dropped, for layers that only reshape rather
     /// than remove.
     pub fn kept(entities: Vec<Entity<M>>) -> Self {
         Self {
@@ -65,10 +65,10 @@ impl<M: Modality> LayerOutput<M> {
 /// One stage of the layer pipeline.
 ///
 /// A layer takes the working set of entities and returns the reshaped set plus
-/// anything it removed. Stages are **pure and synchronous** — they operate over
+/// anything it removed. Stages are **pure and synchronous**, they operate over
 /// a `Vec<Entity<M>>` in memory with no I/O, so unlike recognition there is no
 /// async here. Concrete layers: [`ReconcileLayer`] (cluster and dispose of
-/// overlapping entities — merge, keep, contest, or resolve), [`FilterLayer`]
+/// overlapping entities, merge, keep, contest, or resolve), [`FilterLayer`]
 /// (drop by label / confidence), [`CalibrateLayer`] (rescale confidence).
 ///
 /// [`ReconcileLayer`]: reconcile::ReconcileLayer

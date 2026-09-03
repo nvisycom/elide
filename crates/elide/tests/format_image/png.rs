@@ -2,12 +2,12 @@
 //!
 //! Recognition reads OCR text an `OcrEnricher` stamps onto the call; the
 //! mock OCR backend recognizes nothing, so nothing is detected and the
-//! image round-trips unchanged — exercising the whole image + OCR path on
+//! image round-trips unchanged, exercising the whole image + OCR path on
 //! real PNG bytes.
 
 use elide::Result;
 
-use crate::support::pipeline::Fixture;
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/sample.png"),

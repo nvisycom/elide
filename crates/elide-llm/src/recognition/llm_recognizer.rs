@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use derive_builder::Builder;
 #[cfg(feature = "usage")]
-use elide_core::recognition::ModelUsage;
+use elide_core::primitive::ModelUsage;
 use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId};
 use elide_core::{Error, Result};
 

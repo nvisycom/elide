@@ -17,8 +17,9 @@
 use std::sync::Arc;
 
 use derive_builder::Builder;
+use elide_core::enrichment::{Enricher, Enrichment};
 use elide_core::modality::audio::{Audio, AudioData, Transcription};
-use elide_core::recognition::{Enricher, Enrichment, RecognizerContext, RecognizerId};
+use elide_core::recognition::{RecognizerContext, RecognizerId};
 use elide_core::{Error, Result};
 use hipstr::HipStr;
 
@@ -33,8 +34,8 @@ use crate::{SttBackend, SttRequest};
 /// an `Analyzer<Audio>` ahead of its recognizers, the same way a language
 /// detector is registered on a text analyzer.
 ///
-/// Built the same way as a NER or LLM recognizer —
-/// `SttEnricher::builder().with_name(..).with_backend(..).build()` — so
+/// Built the same way as a NER or LLM recognizer,
+/// `SttEnricher::builder().with_name(..).with_backend(..).build()`, so
 /// `name` and `backend` are required and construction is uniform across the
 /// model-backed components.
 #[derive(Clone, Builder)]
@@ -230,16 +231,16 @@ mod tests {
         enricher.enrich(&data, &mut ctx).await.unwrap();
 
         // Re-run: seed the context with the prior (restored) artifact. The
-        // enricher self-skips — transcribe is not called again, enforced by the
-        // `.times(1)` above — and the seeded transcript is still readable.
+        // enricher self-skips, transcribe is not called again, enforced by the
+        // `.times(1)` above, and the seeded transcript is still readable.
         let restored = ctx.artifact().cloned().expect("the first pass enriched");
         let mut ctx = RecognizerContext::new(&scope).with_artifact(restored);
         enricher.enrich(&data, &mut ctx).await.unwrap();
         assert_eq!(Audio::as_text(&data, ctx.artifact()), "hi Alice");
     }
 
-    /// A restored *empty* `Transcription` — a clip a prior pass transcribed to
-    /// silence — still counts as enriched, so the backend is not called again.
+    /// A restored *empty* `Transcription`, a clip a prior pass transcribed to
+    /// silence, still counts as enriched, so the backend is not called again.
     /// Guarding on artifact *presence* rather than emptiness is what makes this
     /// hold.
     #[tokio::test]
@@ -260,7 +261,7 @@ mod tests {
         let data = AudioData::new(b"audio".to_vec());
         let scope = Scope::new();
 
-        // Seed an empty Transcription — the recorded result of a prior pass that
+        // Seed an empty Transcription, the recorded result of a prior pass that
         // found silence. The enricher must treat it as enriched and skip.
         let mut ctx = RecognizerContext::new(&scope).with_artifact(Transcription::default());
         enricher.enrich(&data, &mut ctx).await.unwrap();

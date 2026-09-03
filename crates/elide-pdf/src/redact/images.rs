@@ -5,7 +5,7 @@
 //! redacts the image (blanking the sensitive region), re-encodes it, and hands
 //! the result back as an [`ImageReplacement`]. The XObject is then rebuilt from
 //! those encoded bytes so its stream and dictionary (dimensions, colour space,
-//! filter) stay consistent — the redacted pixels genuinely replace the original.
+//! filter) stay consistent, the redacted pixels genuinely replace the original.
 //!
 //! Behind the `image` feature, which pulls the `image` crate (via lopdf's
 //! `embed_image`) to build the XObject; the default build carries no image
@@ -22,7 +22,7 @@ use crate::extract::ImageId;
 /// One image replacement: overwrite the image XObject [`id`](ImageReplacement::id)
 /// with a redacted image.
 ///
-/// The `image` bytes are a self-contained encoded image (PNG or JPEG) — the same
+/// The `image` bytes are a self-contained encoded image (PNG or JPEG), the same
 /// form a caller extracts, redacts, and re-encodes.
 #[cfg_attr(docsrs, doc(cfg(feature = "image")))]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,8 +53,8 @@ impl crate::Pdf {
     pub fn redact_images(&self, replacements: &[ImageReplacement]) -> Result<Vec<u8>> {
         let mut doc = self.doc.clone();
 
-        // The original images' sub-objects that encode pixel content — soft
-        // masks, stencil masks, alternate representations — become orphaned when
+        // The original images' sub-objects that encode pixel content, soft
+        // masks, stencil masks, alternate representations, become orphaned when
         // the rebuilt XObject drops these dict keys. They must be deleted (else
         // `save_to` still serialises them, leaving a mask that carries the
         // sensitive shape in the bytes), but only if no *surviving* object still
@@ -66,7 +66,7 @@ impl crate::Pdf {
         for replacement in replacements {
             let id = replacement.id.object();
 
-            // The target must already be an image XObject — not a content or
+            // The target must already be an image XObject, not a content or
             // font stream that happens to share the id.
             let old = doc.get_object(id).ok().and_then(|o| o.as_stream().ok());
             let is_image = old.and_then(|s| s.dict.get(b"Subtype").and_then(Object::as_name).ok())
@@ -87,7 +87,7 @@ impl crate::Pdf {
             }
 
             // Rebuild a valid image XObject from the encoded bytes (lopdf sets
-            // the dictionary — dimensions, colour space, filter — to match).
+            // the dictionary, dimensions, colour space, filter, to match).
             let stream = lopdf::xobject::image_from(replacement.image.clone()).map_err(|e| {
                 Error::unsafe_rewrite(format!(
                     "could not build image ({}, {}): {e}",

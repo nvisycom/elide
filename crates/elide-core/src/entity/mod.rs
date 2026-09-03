@@ -83,7 +83,7 @@ pub struct Entity<M: Modality> {
     #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub language: Option<LanguageTag>,
     /// Byte range of the match in the *recognized text* it was found in (the
-    /// OCR layout text, the audio transcript, or the text payload itself) —
+    /// OCR layout text, the audio transcript, or the text payload itself),
     /// the stable key back into that enrichment artifact, where the rich
     /// context lives (which OCR block, which speaker) that the geometric
     /// [`location`] cannot hold. `None` for entities not found via text
@@ -99,7 +99,7 @@ pub struct Entity<M: Modality> {
     /// Tamper-evident audit trail: every contributing detection, the fusion
     /// event if any, and the redaction that hid it, as a hash-linked DAG. It is
     /// also the single source of truth for whether a reviewer
-    /// [suppressed](Self::is_suppressed) the entity — a suppression is a
+    /// [suppressed](Self::is_suppressed) the entity, a suppression is a
     /// [`Manual`] event on this trail, not a separate flag.
     ///
     /// [`Manual`]: crate::entity::audit::AuditKind::Manual
@@ -157,8 +157,8 @@ impl<M: Modality> Entity<M> {
     /// `event` **must** be a [`Manual`] event with [`ManualIntent::Suppress`],
     /// built with [`AuditEvent::manual_suppress`], or [`AuditEvent::manual`] with
     /// a [`Manual`] payload carrying the reviewer's rationale. Recording it onto
-    /// the trail *is* the suppression — [`is_suppressed`](Self::is_suppressed)
-    /// reads the trail — so there is no separate flag, and *why* the entity was
+    /// the trail *is* the suppression, [`is_suppressed`](Self::is_suppressed)
+    /// reads the trail, so there is no separate flag, and *why* the entity was
     /// left alone is auditable rather than the entity vanishing silently.
     ///
     /// # Panics
@@ -181,7 +181,7 @@ impl<M: Modality> Entity<M> {
         self.audit.record(event);
     }
 
-    /// Record a reviewer's [`Manual`] override on this entity's trail — the
+    /// Record a reviewer's [`Manual`] override on this entity's trail, the
     /// total, confidence-safe way to stamp any [`ManualIntent`].
     ///
     /// The [`Manual`] payload is built from this entity's own `location`, and
@@ -192,7 +192,7 @@ impl<M: Modality> Entity<M> {
     /// `None`).
     ///
     /// A [`Suppress`] override is idempotent: if the entity is already
-    /// [suppressed](Self::is_suppressed), nothing is recorded — re-applying an
+    /// [suppressed](Self::is_suppressed), nothing is recorded, re-applying an
     /// override must not grow the trail. `Flag` and `Amend` always record.
     /// Returns whether an event was recorded.
     ///
@@ -221,7 +221,7 @@ impl<M: Modality> Entity<M> {
         true
     }
 
-    /// Whether a reviewer has [`suppress`](Self::suppress)ed this entity — the
+    /// Whether a reviewer has [`suppress`](Self::suppress)ed this entity, the
     /// audit trail is the single source of truth. Delegates to
     /// [`AuditLog::is_suppressed`](crate::entity::audit::AuditLog::is_suppressed).
     #[must_use]
@@ -229,7 +229,7 @@ impl<M: Modality> Entity<M> {
         self.audit.is_suppressed()
     }
 
-    /// Whether an operator has hidden this entity — a [`Redaction`] event is on
+    /// Whether an operator has hidden this entity, a [`Redaction`] event is on
     /// its [`audit`](Self::audit) trail. A convenience for
     /// [`audit().is_redacted()`](crate::entity::audit::AuditLog::is_redacted).
     ///
@@ -245,12 +245,12 @@ impl<M: Modality> Entity<M> {
 #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
 impl Entity<crate::modality::text::Text> {
     /// A text entity for `label` over the byte range `loc`, born from a pattern
-    /// recognition at `Confidence::MAX` — the standard test fixture.
+    /// recognition at `Confidence::MAX`, the standard test fixture.
     pub fn fixture(label: &str, loc: (usize, usize)) -> Self {
         Self::fixture_conf(label, loc, Confidence::MAX)
     }
 
-    /// Like [`fixture`](Self::fixture), but at an explicit `confidence` — for
+    /// Like [`fixture`](Self::fixture), but at an explicit `confidence`, for
     /// confidence-gated selection tests.
     pub fn fixture_conf(label: &str, loc: (usize, usize), confidence: Confidence) -> Self {
         use crate::entity::audit::PatternEvent;
@@ -299,7 +299,7 @@ mod tests {
     }
 
     /// An amended entity is a human override (a `Manual` event) but *not*
-    /// suppressed — only `Suppress` skips redaction; `Amend` is provenance-only.
+    /// suppressed, only `Suppress` skips redaction; `Amend` is provenance-only.
     #[test]
     fn an_amended_entity_is_not_suppressed() {
         let mut entity = text_entity();
@@ -337,7 +337,7 @@ mod tests {
         assert!(entity.audit.verify().is_ok());
     }
 
-    /// An `Amend` *after* a `Suppress` must not clear the suppression — `Amend`
+    /// An `Amend` *after* a `Suppress` must not clear the suppression, `Amend`
     /// is provenance-only, so the earlier `Suppress` decision still stands.
     #[test]
     fn amend_after_suppress_stays_suppressed() {

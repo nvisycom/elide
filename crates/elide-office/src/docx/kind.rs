@@ -4,7 +4,7 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::opc::{EmbeddingKind, PartPath, PartRole, media_kind};
+use crate::opc::{EmbeddingKind, PartPath, PartRole};
 
 /// What a package part is in a WordprocessingML document, which determines how
 /// it is handled.
@@ -129,7 +129,7 @@ impl PartKind {
     }
 
     /// Whether this part carries redactable *element* text (body, header,
-    /// footer, notes, comments, glossary, and the text of charts and diagrams) —
+    /// footer, notes, comments, glossary, and the text of charts and diagrams),
     /// the text/comment/CDATA event model.
     ///
     /// This is narrower than [`is_redactable`](PartKind::is_redactable):
@@ -183,7 +183,7 @@ impl PartKind {
 /// and fonts under `word/fonts/`.
 fn embedding_of(part: &PartPath) -> Option<EmbeddingKind> {
     if part.in_dir("word/media") {
-        Some(media_kind(part.as_str()))
+        Some(EmbeddingKind::from_path(part.as_str()))
     } else if part.in_dir("word/embeddings") {
         Some(EmbeddingKind::Object)
     } else if part.in_dir("word/fonts") {

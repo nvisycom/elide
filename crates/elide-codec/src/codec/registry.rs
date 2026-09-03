@@ -49,7 +49,7 @@ fn ascii_lower_key(s: Cow<'static, str>) -> Cow<'static, str> {
 /// A registry is a cheap-to-`Clone` handle over immutable shared state: the
 /// registered formats and their lookup maps live behind an [`Arc`], so cloning
 /// is a single atomic bump rather than re-allocating the (dozens of) map keys.
-/// A registry is built up once — [`with_builtin`] / [`with_format`] — then
+/// A registry is built up once, [`with_builtin`] / [`with_format`], then
 /// shared; the mutating builders use copy-on-write, so they only ever pay for a
 /// deep clone if the registry is mutated *after* it has been shared, which the
 /// build-then-share flow never does.
@@ -63,7 +63,7 @@ pub struct FormatRegistry(Arc<FormatRegistryInner>);
 /// so the public handle clones cheaply; all resolution logic lives here.
 ///
 /// `Clone` exists only for [`Arc::make_mut`]'s copy-on-write in the mutating
-/// builders — a live registry is never actually deep-cloned in the
+/// builders, a live registry is never actually deep-cloned in the
 /// build-then-share flow.
 #[derive(Debug, Default, Clone)]
 struct FormatRegistryInner {
@@ -134,7 +134,7 @@ impl FormatRegistry {
     ///
     /// # Panics
     ///
-    /// Panics if the format's id is already registered — registering a new
+    /// Panics if the format's id is already registered, registering a new
     /// format must not silently shadow an existing one. To deliberately
     /// override a built-in (e.g. swap in the OCR-enabled PDF format), use
     /// [`with_replaced_format`]. Extensions and content types that conflict
@@ -286,7 +286,7 @@ impl FormatRegistry {
 
 impl FormatRegistryInner {
     /// Insert `format`, reusing the existing slot when its id is already
-    /// registered (so the `usize` indices the lookup maps hold stay valid —
+    /// registered (so the `usize` indices the lookup maps hold stay valid,
     /// removing the old entry would shift every later index), and re-point
     /// its extensions / content types to that slot.
     ///

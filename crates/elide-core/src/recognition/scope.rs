@@ -14,8 +14,8 @@ use crate::primitive::{CountryCode, Language, Languages};
 /// Built once with the `with_*` chain and passed by reference to the
 /// analyzer, which borrows it into a fresh [`RecognizerContext`] per
 /// payload. It holds only what the *caller* asserts about the analysis as a
-/// whole — languages, jurisdictions, document labels, the target catalog, a
-/// correlation id — none of which depends on the medium, so one [`Scope`]
+/// whole, languages, jurisdictions, document labels, the target catalog, a
+/// correlation id, none of which depends on the medium, so one [`Scope`]
 /// drives a text, image, or audio analysis alike.
 ///
 /// Per-medium regions (caller-supplied inclusions and exclusions, which are
@@ -29,7 +29,7 @@ use crate::primitive::{CountryCode, Language, Languages};
 /// the *request* driving it.
 ///
 /// Three axes of opaque classification strings elide neither ships nor
-/// interprets — a downstream policy layer chooses what `"medical"` or
+/// interprets, a downstream policy layer chooses what `"medical"` or
 /// `"fraud_detection"` or `"auditor"` mean. They are read in two places: a
 /// recognizer may bias its detection on them (the LLM prompt lists them so the
 /// model attends to the right terms), and a scope-aware operator predicate may
@@ -39,7 +39,7 @@ use crate::primitive::{CountryCode, Language, Languages};
 /// - [`tags`] classify the *document* (`"medical"`, `"gdpr-request"`).
 /// - [`purpose`] is why the request exists (`"fraud_detection"`).
 /// - [`audience`] is who the redacted output is for (`"support_agent"`,
-///   `"auditor"`) — the axis PCI-style "same document, two masks" branches on.
+///   `"auditor"`), the axis PCI-style "same document, two masks" branches on.
 ///
 /// [`tags`]: Self::tags
 /// [`purpose`]: Self::purpose
@@ -88,6 +88,18 @@ impl ScopeMetadata {
     }
 }
 
+/// The caller's request for one analysis: what to detect and the context to
+/// detect it in.
+///
+/// Carries the [`catalog`] of entity types to find (empty means detect
+/// nothing), the asserted [`languages`] and [`countries`] that gate
+/// locale-specific rules, and free-form [`metadata`]. Passed to every
+/// recognizer so each can narrow itself to what the caller asked for.
+///
+/// [`catalog`]: Self::catalog
+/// [`languages`]: Self::languages
+/// [`countries`]: Self::countries
+/// [`metadata`]: Self::metadata
 #[derive(Debug, Default, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
@@ -103,10 +115,10 @@ pub struct Scope {
     /// don't lose detections. A document spanning several jurisdictions
     /// can assert all of them; a rule runs when any one matches.
     pub countries: Vec<CountryCode>,
-    /// Free-form request context — document tags, request purpose, and the
+    /// Free-form request context, document tags, request purpose, and the
     /// output audience. See [`ScopeMetadata`].
     pub metadata: ScopeMetadata,
-    /// The entity types to detect — the caller's request. A zero-shot NER
+    /// The entity types to detect, the caller's request. A zero-shot NER
     /// model requests exactly this set; an LLM prompt lists it as the labels
     /// to find; every detection is culled to it. **Empty means detect
     /// nothing**: an empty catalog requests no types, so the analyzer
@@ -121,7 +133,7 @@ pub struct Scope {
 
 impl Scope {
     /// Empty scope: nothing asserted. Its [`catalog`](Self::catalog) is empty,
-    /// so a bare `Scope::new()` **detects nothing** — set a catalog (e.g.
+    /// so a bare `Scope::new()` **detects nothing**, set a catalog (e.g.
     /// `.with_catalog(`[`LabelCatalog::with_builtins`]`())`) to detect.
     pub fn new() -> Self {
         Self {
@@ -178,7 +190,7 @@ impl Scope {
     }
 
     /// Set the [audience](ScopeMetadata::audience) the redacted output is for
-    /// (e.g. `"auditor"`) — the axis a per-audience redaction branches on.
+    /// (e.g. `"auditor"`), the axis a per-audience redaction branches on.
     #[must_use]
     pub fn with_audience(
         mut self,
@@ -195,12 +207,12 @@ impl Scope {
         self
     }
 
-    /// Set the [`LabelCatalog`] of entity types to detect — the request.
+    /// Set the [`LabelCatalog`] of entity types to detect, the request.
     ///
     /// Threaded onto every [`RecognizerContext`]; a zero-shot NER model
     /// requests exactly these labels, an LLM prompt lists them as the types to
     /// find, and every detection is culled to this set. An empty catalog
-    /// requests nothing, so the analyzer detects nothing —
+    /// requests nothing, so the analyzer detects nothing,
     /// [`LabelCatalog::with_builtins`] is the ready-made "detect every built-in
     /// type" set. (A recognizer with its own `supported_labels` still selects a
     /// subset of a non-empty catalog.)

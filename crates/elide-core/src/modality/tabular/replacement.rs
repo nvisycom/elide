@@ -10,7 +10,7 @@ use crate::modality::text::TextReplacement;
 ///
 /// A cell holds text, so most treatments are a [`TextReplacement`] applied
 /// to the cell, carried as [`Cell`]. Structural treatments that the text
-/// model can't express — dropping a whole [`row`] or [`column`] — are their
+/// model can't express, dropping a whole [`row`] or [`column`], are their
 /// own variants.
 ///
 /// [`Cell`]: TabularReplacement::Cell

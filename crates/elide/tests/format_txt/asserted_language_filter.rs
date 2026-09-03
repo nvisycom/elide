@@ -3,14 +3,14 @@
 //! When the caller *asserts* a contradicting document language, the
 //! German-scoped pattern is suppressed. With no asserted language (the
 //! unreliable-detection case), nothing is filtered and the value is detected
-//! normally — a detected language never suppresses a match.
+//! normally, a detected language never suppresses a match.
 
 use elide::Result;
 use elide::entity::builtins;
 use elide::primitive::LanguageTag;
 
-use crate::support::asserts::{assert_label_present, assert_pii_removed, assert_preserved};
-use crate::support::pipeline::Fixture;
+use crate::support::asserts::{assert_content_preserved, assert_label_present, assert_pii_removed};
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(
@@ -27,7 +27,7 @@ async fn a_contradicting_asserted_language_suppresses_a_locale_match() -> Result
     let outcome = FIXTURE
         .run_with_language(LanguageTag::parse("es").unwrap())
         .await?;
-    assert_preserved!(outcome.redacted_text(), "DE123456788");
+    assert_content_preserved!(outcome.redacted_text(), "DE123456788");
     Ok(())
 }
 

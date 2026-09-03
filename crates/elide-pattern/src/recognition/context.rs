@@ -3,9 +3,9 @@
 //!
 //! Two shapes:
 //!
-//! - [`Global`] — one flat keyword list applied regardless of the
+//! - [`Global`], one flat keyword list applied regardless of the
 //!   per-call language hint.
-//! - [`PerLanguage`] — keyword lists keyed by [`LanguageTag`]; the
+//! - [`PerLanguage`], keyword lists keyed by [`LanguageTag`]; the
 //!   enhancer picks the entry matching `RecognizerContext.language`.
 //!   When no language hint is set, the union of every per-language
 //!   keyword fires (matches the crate's "missing language = any"
@@ -48,7 +48,7 @@ pub enum Context {
 /// named dictionaries.
 ///
 /// The dictionaries' terms are resolved into the keyword set at
-/// recognizer-build time — so a `monetary_amount` pattern can borrow every
+/// recognizer-build time, so a `monetary_amount` pattern can borrow every
 /// currency name from the `currencies` dictionary without restating them
 /// inline:
 ///
@@ -87,16 +87,16 @@ pub struct Sourced {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Matching {
-    /// The keyword must match on word boundaries — `AUD` matches the token
+    /// The keyword must match on word boundaries, `AUD` matches the token
     /// `AUD` but not the `aud` inside `audit`. The safe default.
     #[default]
     Word,
-    /// The keyword may match inside a longer word — `ssn` fires in `yourSSN`.
+    /// The keyword may match inside a longer word, `ssn` fires in `yourSSN`.
     Substring,
 }
 
 impl Context {
-    /// Return `true` when this context contributes no keywords at all —
+    /// Return `true` when this context contributes no keywords at all,
     /// no inline keywords **and** no dictionary sources.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -109,7 +109,7 @@ impl Context {
     /// Iterate over the *inline* `(language, keywords)` pairs.
     ///
     /// [`Global`] yields its inline keywords with `language = None` (its
-    /// dictionary terms are resolved separately — see [`dictionaries`]);
+    /// dictionary terms are resolved separately, see [`dictionaries`]);
     /// [`PerLanguage`] yields one entry per language.
     ///
     /// [`Global`]: Self::Global
@@ -174,7 +174,7 @@ impl Default for Context {
 
 impl From<Vec<String>> for Context {
     /// A bare keyword list becomes a language-agnostic [`Global`] context with
-    /// no dictionary sources — the ergonomic path for building a context from
+    /// no dictionary sources, the ergonomic path for building a context from
     /// keywords in code.
     ///
     /// [`Global`]: Self::Global

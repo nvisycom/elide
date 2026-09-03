@@ -111,9 +111,9 @@ impl std::error::Error for Error {
 /// Coarse category of [`Error`], suitable for matching.
 ///
 /// Deliberately small and `#[non_exhaustive]`: it names the *kind* of
-/// failure a caller can branch on — is the input corrupt, the config
-/// wrong, a capability missing, an external service at fault — while the
-/// boxed cause carries the detail. Downstream crates convert their richer
+/// failure a caller can branch on (is the input corrupt, the config wrong,
+/// a capability missing, an external service at fault?), while the boxed
+/// cause carries the detail. Downstream crates convert their richer
 /// errors into an [`Error`] at the trait boundary, tagging it with the
 /// kind that fits.
 ///
@@ -123,10 +123,10 @@ impl std::error::Error for Error {
 ///   in (a corrupt file) versus a bad *rule* the caller wrote (an invalid
 ///   regex). One means "fix the document", the other "fix your setup".
 /// - [`CapabilityUnavailable`]: the request is well-formed but the
-///   component that would serve it is absent — match this to fall back or
+///   component that would serve it is absent, match this to fall back or
 ///   report "unsupported" rather than "malformed".
 /// - [`Provider`] vs [`Transport`]: an external service answered with an
-///   error versus was never reached — the first is not retryable, the
+///   error versus was never reached: the first is not retryable, the
 ///   second often is.
 ///
 /// [`MalformedInput`]: Self::MalformedInput

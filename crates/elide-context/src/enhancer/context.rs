@@ -30,7 +30,7 @@ pub struct Context<'a> {
     /// hint is fed to the matcher as its own one-string window; a hit
     /// boosts the entity exactly as an in-text keyword would.
     ///
-    /// Texts only — the located [`Hint`] each came from is the caller's,
+    /// Texts only, the located [`Hint`] each came from is the caller's,
     /// reattached by index when the boost is recorded.
     ///
     /// [`Hint`]: elide_core::modality::Hint

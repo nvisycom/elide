@@ -82,7 +82,7 @@ async fn user_toml_rules_load_and_detect() {
         "expected dictionary alias/full-name hit, got {emp_hits:?}"
     );
 
-    // Shipped email regex fires too — proves user + shipped coexist.
+    // Shipped email regex fires too, proves user + shipped coexist.
     assert!(
         entities
             .iter()

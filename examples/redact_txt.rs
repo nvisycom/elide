@@ -9,7 +9,7 @@
 //!    [`NerRecognizer`], and an [`LlmRecognizer`]. The NER and LLM
 //!    recognizers use mock backends so the example runs offline with no
 //!    API keys; swap in a real backend to see them contribute. The
-//!    returned entities are already in the document's coordinates —
+//!    returned entities are already in the document's coordinates,
 //!    chunking and coordinate lifting happen inside `analyze_stream`.
 //! 3. Deduplication layers fuse overlapping detections, resolve
 //!    conflicts, and drop low-confidence ones.

@@ -5,7 +5,7 @@
 //! even digit double it and subtract 9 when the result is ≥10,
 //! sum those. Total mod 10 should equal the complement of the
 //! 11th (check) digit. The all-zero string passes the math but
-//! is reserved — reject explicitly.
+//! is reserved, reject explicitly.
 
 /// Return `true` when `value` is a valid 11-digit P.IVA.
 pub fn vat_code(value: &str) -> bool {

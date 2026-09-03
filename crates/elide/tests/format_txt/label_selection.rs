@@ -6,8 +6,8 @@
 use elide::Result;
 use elide::entity::builtins;
 
-use crate::support::asserts::{assert_pii_removed, assert_preserved};
-use crate::support::pipeline::Fixture;
+use crate::support::asserts::{assert_content_preserved, assert_pii_removed};
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(
@@ -30,14 +30,14 @@ async fn a_scoped_catalog_redacts_only_the_requested_label() -> Result<()> {
 
     // Everything else the pipeline could detect (an email address, a language
     // name) survives, because it is not in the requested catalog.
-    assert_preserved!(outcome.redacted_text(), "contact@example.com", "Spanish",);
+    assert_content_preserved!(outcome.redacted_text(), "contact@example.com", "Spanish",);
     Ok(())
 }
 
 #[tokio::test]
 async fn an_empty_catalog_detects_nothing() -> Result<()> {
     // An empty catalog requests no entity types, so the analyzer detects
-    // nothing — every detectable value is left in place.
+    // nothing, every detectable value is left in place.
     let outcome = FIXTURE.run_with_labels([]).await?;
 
     // Nothing is detected...
@@ -46,7 +46,7 @@ async fn an_empty_catalog_detects_nothing() -> Result<()> {
         "an empty catalog requests no types, so detection yields nothing",
     );
     // ...so nothing is redacted.
-    assert_preserved!(
+    assert_content_preserved!(
         outcome.redacted_text(),
         "90210",
         "contact@example.com",

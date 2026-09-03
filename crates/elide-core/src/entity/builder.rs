@@ -107,7 +107,7 @@ impl<M: Modality> EntityBuilder<M> {
         self
     }
 
-    /// Set the byte range of the match in the recognized text — the key back
+    /// Set the byte range of the match in the recognized text, the key back
     /// into the enrichment artifact (OCR layout, transcript).
     #[must_use]
     pub fn with_recognized_range(mut self, range: Range<usize>) -> Self {

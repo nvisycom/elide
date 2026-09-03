@@ -2,10 +2,10 @@
 //!
 //! Three formats issued by ACRA:
 //!
-//! - Format A: 9 chars — 8 digits + check letter.
-//! - Format B: 10 chars — 4-digit year of registration + 4
+//! - Format A: 9 chars, 8 digits + check letter.
+//! - Format B: 10 chars, 4-digit year of registration + 4
 //!   digits + check letter. The year cannot be in the future.
-//! - Format C: 10 chars — `T`/`S`/`R` prefix + 2 digits + 2-letter
+//! - Format C: 10 chars, `T`/`S`/`R` prefix + 2 digits + 2-letter
 //!   entity-type code (from a fixed list) + 4 digits + check
 //!   letter.
 //!

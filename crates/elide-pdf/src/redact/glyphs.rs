@@ -25,12 +25,12 @@ pub(super) struct Glyph {
 /// Split `bytes` into glyphs under `encoding`.
 ///
 /// Fails closed: a code that does not decode under the font's encoding is an
-/// unmatchable glyph — it could not be located for deletion, so the whole
+/// unmatchable glyph, it could not be located for deletion, so the whole
 /// redaction is refused rather than leaving that text silently in place.
 pub(super) fn decode_glyphs(encoding: &Encoding, bytes: &[u8]) -> Result<Vec<Glyph>> {
     match encoding {
         // Composite font: consume variable-length codes through the CMap, one
-        // glyph per successful lookup — the same greedy consumption the CMap
+        // glyph per successful lookup, the same greedy consumption the CMap
         // decode uses.
         Encoding::UnicodeMapEncoding(cmap) => {
             let mut glyphs = Vec::new();

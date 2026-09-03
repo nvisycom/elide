@@ -44,16 +44,14 @@ serde = { workspace = true, features = ["derive"], optional = true }
 thiserror = { workspace = true, features = [] }
 
 # Primitive datatypes
-# Inline-or-shared strings, so a part path or text block clones cheaply.
 hipstr = { workspace = true, features = [] }
-# Ref-counted byte buffers, so a part's bytes clone and surface without copying.
 bytes = { workspace = true, features = [] }
 
 # Markup parsing
 quick-xml = { workspace = true, features = [] }
 
 # Compression
-zip = { workspace = true }
+zip = { workspace = true, features = [] }
 
 [dev-dependencies]
 # (De)serialization

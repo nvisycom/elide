@@ -1,6 +1,6 @@
-//! An object key is context for its value — the JSON counterpart of a CSV
+//! An object key is context for its value, the JSON counterpart of a CSV
 //! header or an XML element name vouching for its content. Every value here is
-//! a weak, context-gated shape with no keyword of its own — the card, the
+//! a weak, context-gated shape with no keyword of its own, the card, the
 //! postal code, the ITIN, and the bank account all sit below the detection
 //! threshold on their own; only the key lifts them over it (the companion
 //! `neutral_keys_…` test proves they vanish without it). The key is tokenized
@@ -11,9 +11,9 @@ use elide::Result;
 use elide::entity::builtins;
 
 use crate::support::asserts::{
-    assert_label_absent, assert_label_present, assert_pii_removed, assert_preserved,
+    assert_content_preserved, assert_label_absent, assert_label_present, assert_pii_removed,
 };
-use crate::support::pipeline::Fixture;
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(
@@ -62,7 +62,7 @@ async fn the_key_boosts_its_weak_value() -> Result<()> {
 async fn neutral_keys_leave_the_weak_values_untouched() -> Result<()> {
     // The control for `the_key_boosts_its_weak_value`: the identical values
     // under neutral keys (`field1`…) carry no context keyword, so each stays
-    // below the detection threshold — undetected and preserved verbatim. That
+    // below the detection threshold, undetected and preserved verbatim. That
     // is what proves the detection in the keyed test comes from the *key*, not
     // the value.
     let outcome = NEUTRAL_FIXTURE.run().await?;
@@ -75,7 +75,7 @@ async fn neutral_keys_leave_the_weak_values_untouched() -> Result<()> {
         builtins::BANK_ACCOUNT.to_ref(),
     );
 
-    assert_preserved!(
+    assert_content_preserved!(
         outcome.redacted_text(),
         "4111 1111 1111 1111",
         "90210",

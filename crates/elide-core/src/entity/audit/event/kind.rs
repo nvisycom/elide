@@ -79,7 +79,7 @@ pub enum AuditKind<M: Modality> {
     Refinement(Refinement<M>),
     /// An operator hid the entity.
     Redaction(Redaction),
-    /// An operator was *picked* to hide the entity — the redaction decision,
+    /// An operator was *picked* to hide the entity, the redaction decision,
     /// recorded before it is applied so it can be reviewed first.
     Selection(Selection),
     /// A human override, outside automatic detection: an entity a reviewer

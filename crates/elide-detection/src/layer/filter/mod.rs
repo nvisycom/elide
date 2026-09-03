@@ -10,7 +10,7 @@ use super::{Layer, LayerOutput};
 /// The filtering stage: drop entities by label allow-list or confidence
 /// threshold.
 ///
-/// Both checks are optional and compose with AND — an entity must clear
+/// Both checks are optional and compose with AND, an entity must clear
 /// every configured filter to be kept. Unlike reconciliation this is plain
 /// configuration, not a strategy, so it is a struct rather than a trait.
 #[derive(Debug, Clone, Default)]

@@ -7,7 +7,7 @@ use elide_core::entity::Entity;
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::operator::{LeakProfile, Operator, OperatorId};
+use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 use elide_core::{Error, ErrorKind, Result};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 /// keeps the original length, [`Truncate`] *shortens* the string: the
 /// dropped characters leave no placeholder. This is the shape PCI DSS
 /// v4.0.1 §3.5.1 requires for a stored PAN rendered unreadable by
-/// truncation — `"411111"` (BIN only), not `"4111********1234"`.
+/// truncation, `"411111"` (BIN only), not `"4111********1234"`.
 ///
 /// Counts are character-based, so multi-byte codepoints stay intact.
 /// A configuration whose kept regions already cover (or overlap) the

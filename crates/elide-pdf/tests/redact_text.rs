@@ -1,6 +1,6 @@
 //! Text redaction (glyph deletion): deleting the glyphs of detected spans from
-//! a composite (Type0/Identity-H, CID) subset font — the case a naive
-//! text-operator rewrite corrupts — and the recursive document-sanitise pass
+//! a composite (Type0/Identity-H, CID) subset font, the case a naive
+//! text-operator rewrite corrupts, and the recursive document-sanitise pass
 //! that deletes structures retaining copies of text, including objects nested
 //! below an annotation.
 
@@ -8,7 +8,7 @@ use elide_pdf::Pdf;
 use elide_pdf::redact::Detection;
 
 /// A one-page PDF whose text is drawn with an embedded TrueType **subset** in a
-/// Type0/Identity-H (CID) font — the encoding that defeats whole-operand text
+/// Type0/Identity-H (CID) font, the encoding that defeats whole-operand text
 /// rewriting. It reads `"Contact alice@example.com at the office."` then
 /// `"Keep this line intact."`.
 const CID_FONT: &[u8] = include_bytes!("testdata/cid_font.pdf");
@@ -51,7 +51,7 @@ fn deletes_a_detected_span_in_a_cid_subset_font() {
     let text = extracted(&out);
 
     // The target is gone; the surrounding text (same CID font) is intact and
-    // uncorrupted — deletion never re-encodes, so no glyph is mangled.
+    // uncorrupted, deletion never re-encodes, so no glyph is mangled.
     assert!(!text.contains("alice@example.com"), "target survived");
     assert!(text.contains("Contact"), "leading context lost");
     assert!(text.contains("office"), "trailing context lost");
@@ -64,7 +64,7 @@ fn sanitize_deletes_a_nested_annotation_subtree() {
     use lopdf::{Document, Object, Stream, dictionary};
 
     // A page with a link annotation whose appearance stream (/AP -> /N)
-    // references a further object holding secret text — a grandchild of the
+    // references a further object holding secret text, a grandchild of the
     // annotation. A one-level GC would leave that grandchild orphaned.
     let mut doc = Document::with_version("1.5");
     let pages_id = doc.new_object_id();
@@ -120,7 +120,7 @@ fn sanitize_deletes_a_nested_annotation_subtree() {
     // With no detections, sanitize still runs; isolate its behaviour.
     let out = Pdf::open(&pdf).unwrap().redact_text(&[]).unwrap();
 
-    // The whole annotation subtree — including the grandchild — is gone.
+    // The whole annotation subtree, including the grandchild, is gone.
     assert!(
         !String::from_utf8_lossy(&out).contains("GRANDCHILD-SECRET"),
         "nested annotation object survived sanitize"

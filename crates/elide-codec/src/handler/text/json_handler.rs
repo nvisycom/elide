@@ -11,15 +11,15 @@
 //!
 //! Because a redaction is spliced rather than re-rendered from the decoded
 //! value, formatting (indentation, key order, whitespace) *and* every byte
-//! outside a redacted span — including `\uXXXX` / `\"` escapes within a
-//! redacted string — stay byte-identical to the source. The partial-leaf
+//! outside a redacted span, including `\uXXXX` / `\"` escapes within a
+//! redacted string, stay byte-identical to the source. The partial-leaf
 //! offset translation is a single per-leaf walk of its escape table.
 
 use std::ops::Range;
 
 use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter, Hint};
-use elide_core::operator::Redactions;
+use elide_core::redaction::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 
 use super::JsonLoader;
@@ -65,7 +65,7 @@ struct EscapedBounds {
 
 impl EscapedBounds {
     /// Whether a source `raw` span covers only a `"` delimiter and no interior
-    /// byte — the opening quote alone (`raw.end <= start`) or the closing quote
+    /// byte, the opening quote alone (`raw.end <= start`) or the closing quote
     /// alone (`raw.start >= end`). Such a span maps to a zero-width edit at a
     /// value boundary, which `splice` would *insert* rather than redact.
     fn is_delimiter_only(&self, raw: &Range<usize>) -> bool {
@@ -74,7 +74,7 @@ impl EscapedBounds {
 }
 
 /// A leaf located within the slot stream: its slot index, a borrow of the leaf,
-/// and where its value starts in the decoded stream — enough to lift a decoded
+/// and where its value starts in the decoded stream, enough to lift a decoded
 /// offset into and out of it without re-sweeping the slots.
 struct LeafAt<'a> {
     /// Index of the leaf's [`Slot`] in `slots`.
@@ -109,7 +109,7 @@ pub(super) struct Leaf {
     /// `\"` escapes; for [`LeafKind::Scalar`] it is the bare literal.
     ///
     /// [`TextLocation`] offsets address the *decoded* stream ([`value`](Self::value)),
-    /// not these bytes — the two differ wherever an escape collapses.
+    /// not these bytes, the two differ wherever an escape collapses.
     pub serialized: String,
     /// Out-of-band located context (currently the enclosing object key)
     /// surfaced to recognizers as hints; empty for keys and for value
@@ -131,8 +131,8 @@ impl Leaf {
     }
 
     /// Replace the decoded-value byte range `value_range` with `replacement`,
-    /// editing `serialized` **in place** so every byte outside the edited span
-    /// — quote, indentation, and any `\uXXXX` / `\"` escapes — survives
+    /// editing `serialized` **in place** so every byte outside the edited span,
+    /// quote, indentation, and any `\uXXXX` / `\"` escapes, survives
     /// verbatim, rather than re-rendering the whole value (which would flatten
     /// escapes to their literal chars). `value` is kept in sync so later reads
     /// and edits of the same leaf see the new content.
@@ -169,7 +169,7 @@ impl Leaf {
     }
 
     /// Map a byte offset in this leaf's decoded [`value`](Self::value) to the
-    /// source byte offset it sits at in [`serialized`](Self::serialized) — the
+    /// source byte offset it sits at in [`serialized`](Self::serialized), the
     /// escape-aware forward mapping. `slot_start` is the leaf's source byte
     /// offset in the document (0 when addressing the leaf's own bytes).
     ///
@@ -208,7 +208,7 @@ impl Leaf {
     ///
     /// The offset must land on an escape boundary (never mid-`\uXXXX`). The
     /// quotes bound the value: the opening quote maps to value offset 0, the
-    /// closing quote to the value's end — so a span covering the whole `"…"`
+    /// closing quote to the value's end, so a span covering the whole `"…"`
     /// token resolves to the whole value. `None` if `source_offset` is outside
     /// the leaf or splits an escape.
     fn source_to_value(&self, slot_start: usize, source_offset: usize) -> Option<usize> {
@@ -221,7 +221,7 @@ impl Leaf {
         let bounds = self.escaped_bounds(slot_start);
         // The quotes bound the value: the opening quote (`slot_start`) maps to 0;
         // the closing quote (`bounds.end`) and the token's exclusive end (one
-        // past it) both map to the value's end — so a span covering the whole
+        // past it) both map to the value's end, so a span covering the whole
         // `"…"` token resolves to the whole value.
         if source_offset == slot_start {
             return Some(0);
@@ -245,7 +245,7 @@ impl Leaf {
     }
 
     /// The [`EscapedBounds`] of this quoted leaf: the source byte range of its
-    /// interior — between the two `"` — in document coordinates. `slot_start` is
+    /// interior, between the two `"`, in document coordinates. `slot_start` is
     /// the leaf's own source offset in the document.
     fn escaped_bounds(&self, slot_start: usize) -> EscapedBounds {
         EscapedBounds {
@@ -289,7 +289,7 @@ struct TokenWidth {
     value: usize,
 }
 
-/// Whether `s` is a bare JSON literal — a number, or one of `true` / `false`
+/// Whether `s` is a bare JSON literal, a number, or one of `true` / `false`
 /// / `null`. The lexer uses it to reject a malformed scalar, and the redactor
 /// to decide whether a redacted scalar can stay unquoted or must be promoted
 /// to a JSON string to keep the document valid.
@@ -304,7 +304,7 @@ pub(super) fn is_json_literal(s: &str) -> bool {
 }
 
 /// Whether `s` matches the JSON number grammar:
-/// `-?(0 | [1-9][0-9]*) (\.[0-9]+)? ([eE][+-]?[0-9]+)?` — an optional minus, an
+/// `-?(0 | [1-9][0-9]*) (\.[0-9]+)? ([eE][+-]?[0-9]+)?`, an optional minus, an
 /// integer part with no leading zeros, an optional fraction with at least one
 /// digit, and an optional exponent.
 fn is_json_number(s: &str) -> bool {
@@ -385,7 +385,7 @@ impl Handler<Text> for JsonHandler {
 
     async fn read_next(&mut self) -> Result<Option<Chunk<Text>>> {
         while self.cursor < self.slots.len() {
-            // The chunk's location addresses the decoded stream — its span
+            // The chunk's location addresses the decoded stream, its span
             // matches `data` (the decoded value), so a recognizer's offsets into
             // `data` map straight through. `lift` carries the raw span in
             // `.source` for a source-relative consumer.
@@ -447,7 +447,7 @@ impl DataWriter<Text> for JsonHandler {
         // **pre-mutation** slots first: mutating a leaf shifts later slots'
         // offsets, but a per-leaf value range stays valid regardless. A location
         // resolves through its raw `source` when present, else its decoded
-        // `range` — `resolve` handles both.
+        // `range`, `resolve` handles both.
         let mut plan: Vec<(LeafEdit, String)> = Vec::new();
         for (loc, replacement) in redactions.into_iter() {
             if let Some(edit) = self.resolve(&loc)? {
@@ -487,14 +487,14 @@ impl JsonHandler {
         self.slots[..idx].iter().map(Slot::decoded_len).sum()
     }
 
-    /// The serialized byte offset where the slot at `idx` starts — what
+    /// The serialized byte offset where the slot at `idx` starts, what
     /// [`encode`](Handler::encode) emits and what a raw [`SourceRef`] addresses.
     fn source_offset_of(&self, idx: usize) -> usize {
         self.slots[..idx].iter().map(Slot::source_len).sum()
     }
 
     /// Locate the leaf slot whose *decoded* range contains `location`, returning
-    /// the [`LeafAt`] it sits in — its index, a borrow, and the leaf's
+    /// the [`LeafAt`] it sits in, its index, a borrow, and the leaf's
     /// decoded-stream start offset (so a caller need not re-sweep with
     /// [`decoded_offset_of`]). `location` is a decoded-stream range.
     ///
@@ -526,14 +526,14 @@ impl JsonHandler {
     /// [`range`](TextLocation::range) locates the leaf. Either way the returned
     /// value range feeds the same splice.
     ///
-    /// A **decoded `range`** that lands in no leaf is `Ok(None)` — the pipeline's
+    /// A **decoded `range`** that lands in no leaf is `Ok(None)`, the pipeline's
     /// own coordinate, tolerated as a no-op. An explicit **`source`** that
     /// resolves to nothing is `Err`, not `Ok(None)`: the caller supplied raw
     /// bytes to redact, so silently dropping the edit would leave a green audit
     /// over an unredacted document. `Err` also covers a malformed range
     /// (reversed, structural, past-value, escape-splitting).
     ///
-    /// A location's [`source`](TextLocation::source) may hold **several** refs —
+    /// A location's [`source`](TextLocation::source) may hold **several** refs,
     /// one logical span fragmented across escapes or fused from several runs.
     /// *Every* ref is resolved and *all* must land in the same leaf: the edit
     /// covers their bounding value range. Resolving only the first would splice
@@ -566,7 +566,7 @@ impl JsonHandler {
         Ok(Some(edit))
     }
 
-    /// Resolve one raw [`SourceRef`] to the [`LeafEdit`] for its leaf — `Ok` on
+    /// Resolve one raw [`SourceRef`] to the [`LeafEdit`] for its leaf, `Ok` on
     /// success, `Err` on an unresolvable or malformed ref. Never a silent no-op:
     /// an unresolvable explicit coordinate is always an error, so it cannot be
     /// dropped under a green audit.
@@ -588,7 +588,7 @@ impl JsonHandler {
         }
         // An empty span addresses no content to redact. Its endpoints map to a
         // single value offset, so the edit would be zero-width and `Leaf::splice`
-        // would *insert* the replacement there rather than redact — for a quoted
+        // would *insert* the replacement there rather than redact, for a quoted
         // interior (`2..2` in `"bcd"`) and for a scalar alike, whose mapping is
         // identity. Reject it before any mapping.
         if raw.start == raw.end {
@@ -607,7 +607,7 @@ impl JsonHandler {
                 // A quoted leaf's span may touch its `"` delimiters (the whole
                 // `"…"` token resolves to the whole value), but a span that
                 // covers *only* a quote and no interior byte addresses no
-                // redactable content — its endpoints would both collapse to the
+                // redactable content, its endpoints would both collapse to the
                 // same value boundary, and `splice` would then *insert* the
                 // replacement into the adjacent value rather than redact. Reject
                 // it rather than silently corrupt the value.
@@ -637,7 +637,7 @@ impl JsonHandler {
             slot_start = slot_end;
         }
         // The span fell in structural bytes (a `{`, `,`, whitespace) or past the
-        // document — no leaf value to redact. As with a part-tagged ref, an
+        // document, no leaf value to redact. As with a part-tagged ref, an
         // explicit-but-unresolvable source is a caller mistake, not a no-op:
         // erroring keeps a green audit off an unredacted document.
         Err(malformed(format_args!(
@@ -706,7 +706,7 @@ fn malformed(args: std::fmt::Arguments) -> Error {
 }
 
 impl Slot {
-    /// This slot's length in the decoded stream — the decoded value for a leaf,
+    /// This slot's length in the decoded stream, the decoded value for a leaf,
     /// the verbatim bytes for passthrough.
     fn decoded_len(&self) -> usize {
         match self {
@@ -715,7 +715,7 @@ impl Slot {
         }
     }
 
-    /// This slot's length in the serialized stream — the escaped source bytes
+    /// This slot's length in the serialized stream, the escaped source bytes
     /// for a leaf, the verbatim bytes for passthrough.
     fn source_len(&self) -> usize {
         match self {
@@ -857,7 +857,7 @@ mod tests {
 
     #[tokio::test]
     async fn redact_partial_leaf_with_escapes() -> Result<()> {
-        // decoded value: foo"bar; source: "foo\"bar" — redacting "bar" in the
+        // decoded value: foo"bar; source: "foo\"bar", redacting "bar" in the
         // decoded stream splices back over the source bytes past the `\"` escape.
         let src = r#"{"msg":"foo\"bar"}"#;
         let mut h = handler(src);
@@ -974,7 +974,7 @@ mod tests {
 
     #[test]
     fn source_to_value_rejects_an_offset_inside_a_literal_multibyte_char() {
-        // A *literal* `é` (2 UTF-8 bytes, written directly — no `\u` escape).
+        // A *literal* `é` (2 UTF-8 bytes, written directly, no `\u` escape).
         // A source offset between its two bytes splits the char and must be
         // rejected, not silently accepted as a value boundary.
         let h = handler("{\"a\":\"caf\u{e9}\"}");
@@ -997,7 +997,7 @@ mod tests {
     #[test]
     fn value_to_source_rejects_a_mid_character_offset() {
         // In `café` (`é` decodes to the 2-byte `é` at value bytes 3..5),
-        // offset 4 splits the char — there is no well-defined source offset, so
+        // offset 4 splits the char, there is no well-defined source offset, so
         // the mapping must reject it rather than overshoot past the escape.
         let h = handler(&format!("{{\"a\":\"caf{}\"}}", "\\u00e9"));
         let Slot::Leaf(leaf) = h
@@ -1020,7 +1020,7 @@ mod tests {
 
         // JSON is single-file; a part-tagged reference does not address it. The
         // caller supplied an explicit source coordinate to redact, so an
-        // unresolvable one is an error — not a silent no-op that would leave a
+        // unresolvable one is an error, not a silent no-op that would leave a
         // green audit over an unredacted document.
         let src = r#"{"a":"bcd"}"#;
         let mut h = handler(src);
@@ -1041,7 +1041,7 @@ mod tests {
     async fn a_source_ref_landing_in_structural_bytes_is_rejected() -> Result<()> {
         use elide_core::modality::text::SourceRef;
 
-        // Offset 0 is the opening `{` — structural, no string value there. An
+        // Offset 0 is the opening `{`, structural, no string value there. An
         // explicit source that resolves to no leaf must error, not silently
         // drop the edit.
         let mut h = handler(r#"{"a":"b"}"#);
@@ -1060,7 +1060,7 @@ mod tests {
     async fn a_source_ref_past_the_document_is_rejected() -> Result<()> {
         use elide_core::modality::text::SourceRef;
 
-        // A source span past every slot resolves to nothing — a caller mistake
+        // A source span past every slot resolves to nothing, a caller mistake
         // (e.g. an off-by-one in a run→byte mapping), so it errors.
         let src = r#"{"a":"b"}"#;
         let mut h = handler(src);
@@ -1081,7 +1081,7 @@ mod tests {
         use elide_core::modality::text::SourceRef;
 
         // A location whose source was fused from several runs carries several
-        // refs. Both must resolve and the edit spans their union — resolving only
+        // refs. Both must resolve and the edit spans their union, resolving only
         // the first would leave the rest of the caller's span unredacted.
         let src = r#"{"a":"bcd"}"#;
         let mut h = handler(src);
@@ -1102,7 +1102,7 @@ mod tests {
         use elide_core::modality::text::SourceRef;
 
         // The first ref resolves cleanly; the second is out of range. The whole
-        // location must be rejected — never splice the first and report success
+        // location must be rejected, never splice the first and report success
         // while dropping the second, which would leave that coordinate unredacted
         // under a green audit.
         let src = r#"{"a":"bcd"}"#;
@@ -1153,7 +1153,7 @@ mod tests {
 
         // A span covering just the opening `"` of `"bcd"` addresses no value
         // byte. Its endpoints would collapse to value offset 0 and `splice`
-        // would insert `X` at the value start rather than redact — reject it.
+        // would insert `X` at the value start rather than redact, reject it.
         let src = r#"{"a":"bcd"}"#;
         let mut h = handler(src);
         let open = src.find(r#""bcd""#).unwrap();
@@ -1174,7 +1174,7 @@ mod tests {
         use elide_core::modality::text::SourceRef;
 
         // The closing `"` of `"bcd"`. Its endpoints collapse to the value end,
-        // where `splice` would append `X` — reject rather than corrupt.
+        // where `splice` would append `X`, reject rather than corrupt.
         let src = r#"{"a":"bcd"}"#;
         let mut h = handler(src);
         let close = src.find(r#""bcd""#).unwrap() + r#""bcd""#.len() - 1;
@@ -1196,7 +1196,7 @@ mod tests {
 
         // A zero-width span in the interior of `"bcd"` (source `7..7`, at `c`).
         // Both endpoints map to one value offset, so `splice` would insert `X`
-        // (yielding `bXcd`) rather than redact — reject it.
+        // (yielding `bXcd`) rather than redact, reject it.
         let src = r#"{"a":"bcd"}"#;
         let mut h = handler(src);
         let c = src.find("bcd").unwrap() + 1;
@@ -1235,7 +1235,7 @@ mod tests {
 
     #[tokio::test]
     async fn write_at_rejects_a_range_starting_in_structural_json() -> Result<()> {
-        // Offset 0 is the opening `{` — structural, not an addressable value.
+        // Offset 0 is the opening `{`, structural, not an addressable value.
         let mut h = handler(r#"{"a":"b"}"#);
         let mut rs = Redactions::new();
         rs.push(TextLocation::new(0, 1), TextReplacement::substituted("X"));
@@ -1411,7 +1411,7 @@ mod tests {
     #[tokio::test]
     async fn lift_simple_string() -> Result<()> {
         // No escapes: decoded and source coincide, so `range` and `.source`
-        // agree — but `.source` is still populated with the raw span.
+        // agree, but `.source` is still populated with the raw span.
         let src = r#"{"email":"alice@example.com"}"#;
         let mut h = handler(src);
         let chunk = loop {
@@ -1441,7 +1441,7 @@ mod tests {
     async fn lift_walks_escapes() -> Result<()> {
         // decoded value: foo"bar; source: "foo\"bar". The `\"` escape makes the
         // decoded stream one byte shorter than the source before "bar", so the
-        // decoded `range` and the raw `.source` diverge — this is the case the
+        // decoded `range` and the raw `.source` diverge, this is the case the
         // whole fix exists for.
         let src = r#"{"msg":"foo\"bar"}"#;
         let mut h = handler(src);

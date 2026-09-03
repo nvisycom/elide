@@ -1,7 +1,7 @@
 //! Poland-specific post-match validators.
 //!
 //! Registered under the [`ValidatorRegistry::builtin`] set with
-//! dotted names — `"pl.pesel"`, `"pl.nip"`, `"pl.regon"`.
+//! dotted names, `"pl.pesel"`, `"pl.nip"`, `"pl.regon"`.
 //!
 //! [`ValidatorRegistry::builtin`]: super::ValidatorRegistry::builtin
 

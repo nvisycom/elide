@@ -1,11 +1,11 @@
 //! Backend layer: the [`SttBackend`] trait and its shipped impls.
 //!
-//! One trait covers every flavour of provider — hosted APIs that emit a
+//! One trait covers every flavour of provider, hosted APIs that emit a
 //! single full-clip segment (OpenAI Whisper), hosted APIs that emit
 //! diarized multi-speaker segments (Deepgram, AssemblyAI), and
 //! local/self-hosted inference services. Each backend turns a request
 //! (audio bytes + optional hints) into a response of ordered
-//! [`TranscriptSegment`]s — the core transcription type, so a backend's
+//! [`TranscriptSegment`]s, the core transcription type, so a backend's
 //! output drops straight onto the call's artifacts with no remapping. The
 //! `test-utils`-gated [`MockBackend`] (returns no segments; test/example stub)
 //! ships here; concrete provider backends live downstream.
@@ -29,7 +29,7 @@ pub use self::stt_response::SttResponse;
 /// Per-call speech-to-text backend.
 ///
 /// Implemented by everything that turns `(audio, language?)` into
-/// transcribed segments — hosted provider clients (OpenAI Whisper,
+/// transcribed segments, hosted provider clients (OpenAI Whisper,
 /// Deepgram, AssemblyAI), local model wrappers, and the in-process no-op
 /// test stub. One trait covers every flavour: providers that emit a single
 /// full-clip segment, providers that emit diarized multi-speaker segments,

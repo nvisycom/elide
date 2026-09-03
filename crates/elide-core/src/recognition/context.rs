@@ -53,7 +53,7 @@ pub struct RecognizerContext<'a, M: Modality> {
     /// [`locate`]: crate::modality::TextRecognizable::locate
     ///
     /// [`None`] until an enricher runs (or a saved artifact is restored);
-    /// [`Some`] afterward — even when the enrichment is *empty* (no OCR text, a
+    /// [`Some`] afterward, even when the enrichment is *empty* (no OCR text, a
     /// silent clip), which is a valid result distinct from "not yet enriched",
     /// so an enricher skips a restored empty artifact rather than re-running.
     artifact: Option<M::Artifact>,
@@ -93,7 +93,7 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
     /// Seed the medium's enrichment [`artifact`](Self::artifact), consuming and
     /// returning `self`. Used to restore a saved artifact so recognition can
     /// re-run without re-enriching; an enricher then [skips](Self::is_enriched)
-    /// itself — including when the restored artifact is empty.
+    /// itself, including when the restored artifact is empty.
     #[must_use]
     pub fn with_artifact(mut self, artifact: M::Artifact) -> Self {
         self.artifact = Some(artifact);
@@ -101,7 +101,7 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
     }
 
     /// The medium's enrichment, or [`None`] when no enricher has run for this
-    /// payload. `Some(empty)` — a payload that *was* enriched to nothing — is
+    /// payload. `Some(empty)`, a payload that *was* enriched to nothing, is
     /// distinct from `None`, so callers that only need the content can
     /// [`unwrap_or_default`](Option::unwrap_or_default) while an enricher tells
     /// the two apart via [`is_enriched`](Self::is_enriched).
@@ -110,7 +110,7 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
         self.artifact.as_ref()
     }
 
-    /// Record `artifact` as this payload's enrichment — what an enricher calls
+    /// Record `artifact` as this payload's enrichment, what an enricher calls
     /// once it has run. Marks the context [enriched](Self::is_enriched) even
     /// when `artifact` is empty, so a later enricher pass skips.
     pub fn set_artifact(&mut self, artifact: M::Artifact) {
@@ -118,7 +118,7 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
     }
 
     /// Whether an enricher has run (or a saved artifact was restored) for this
-    /// payload — `true` even when the enrichment is empty. An enricher checks
+    /// payload, `true` even when the enrichment is empty. An enricher checks
     /// this to skip re-running.
     #[must_use]
     pub fn is_enriched(&self) -> bool {
@@ -168,8 +168,8 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
     }
 
     /// Caller-asserted document-level classification tags for this
-    /// analysis (e.g. `"medical"`). Distinct from the entity types to emit
-    /// — those are [`target_labels`].
+    /// analysis (e.g. `"medical"`). Distinct from the entity types to emit,
+    /// those are [`target_labels`].
     ///
     /// [`target_labels`]: Self::target_labels
     #[must_use]
@@ -192,7 +192,7 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
         &self.scope.metadata.audience
     }
 
-    /// The [`LabelCatalog`] of entity types to detect — the caller's request.
+    /// The [`LabelCatalog`] of entity types to detect, the caller's request.
     /// A zero-shot NER model requests exactly these labels; an LLM prompt lists
     /// them as the types to find. On the `Analyzer::analyze*` path this is
     /// non-empty: those entries gate an empty catalog (detect nothing) before
@@ -203,7 +203,7 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
         &self.scope.catalog
     }
 
-    /// The entity types to emit, as [`LabelRef`]s — the catalog's labels.
+    /// The entity types to emit, as [`LabelRef`]s, the catalog's labels.
     /// Convenience over [`catalog`] for recognizers that
     /// only need the ids.
     ///
@@ -269,7 +269,7 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
         all
     }
 
-    /// The caller-*asserted* language tags for this call — the scope's
+    /// The caller-*asserted* language tags for this call, the scope's
     /// languages only, *excluding* anything a detector added.
     ///
     /// Use this where a *detected* language must not participate because

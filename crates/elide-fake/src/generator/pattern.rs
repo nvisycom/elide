@@ -6,7 +6,7 @@
 //!
 //! Used by structured kinds (IBAN, payment cards, postal codes,
 //! phone numbers, dates) where the shape carries meaning. Free-form
-//! kinds (names, addresses) don't go through this — their output
+//! kinds (names, addresses) don't go through this, their output
 //! comes straight from the locale-aware generator.
 
 use fake::Fake;

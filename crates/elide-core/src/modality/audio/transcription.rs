@@ -3,7 +3,7 @@
 //! A transcription is what makes audio *recognizable*: a recognizer reads
 //! its [`text`] like any other string, finds a match
 //! at a byte range, and [`resolve`]s that range back
-//! to the [`TimeSpan`] of the audio it was spoken in — via the per-word
+//! to the [`TimeSpan`] of the audio it was spoken in, via the per-word
 //! timings the transcription carries. The same shape serves any medium that
 //! turns a stream into timestamped text.
 //!
@@ -27,7 +27,7 @@ const SEGMENT_SEPARATOR: &str = " ";
 /// Timestamped transcript of an audio stream.
 ///
 /// An ordered set of [`TranscriptSegment`]s. The flat
-/// [`text`] — the segments joined — is what a recognizer
+/// [`text`], the segments joined, is what a recognizer
 /// inspects; [`resolve`] maps a byte range of that text back
 /// to the [`TimeSpan`] it occupies, using the segments' (and their words')
 /// timings. Empty when the backend produced nothing (silence, or a no-op
@@ -134,6 +134,39 @@ impl TranscriptSegment {
         self.words = words;
         self
     }
+
+    /// Span covering this segment's words that overlap the segment-local byte
+    /// `range`, by walking each word's byte extent within the segment text.
+    ///
+    /// `None` when no word overlaps (the caller then falls back to the segment
+    /// span).
+    fn word_span(&self, range: Range<usize>) -> Option<TimeSpan> {
+        let mut start_us: Option<u64> = None;
+        let mut end_us: Option<u64> = None;
+        let mut search_from = 0;
+
+        for word in &self.words {
+            // Locate the word in the segment text from where the last word
+            // ended, so repeated words resolve to successive occurrences.
+            let Some(rel) = self.text[search_from..].find(word.text.as_str()) else {
+                continue;
+            };
+            let word_start = search_from + rel;
+            let word_end = word_start + word.text.len();
+            search_from = word_end;
+
+            // Half-open overlap with the requested range.
+            if range.start >= word_end || range.end <= word_start {
+                continue;
+            }
+            start_us = Some(start_us.map_or(word.span.start_micros(), |s| {
+                s.min(word.span.start_micros())
+            }));
+            end_us = Some(end_us.map_or(word.span.end_micros(), |e| e.max(word.span.end_micros())));
+        }
+
+        Some(TimeSpan::new(start_us?, end_us?))
+    }
 }
 
 /// One word within a [`TranscriptSegment`], with its own time span.
@@ -224,10 +257,10 @@ impl Transcription {
     /// The span runs from the start of the first overlapped word (or segment,
     /// when word timings are absent) to the end of the last, falling back to
     /// whole-segment spans without per-word timings. The speaker is carried
-    /// through only when every overlapped segment shares it — a range that
+    /// through only when every overlapped segment shares it, a range that
     /// crosses a speaker change is left speaker-less rather than mis-attributed.
     /// `None` when the range overlaps no segment (out of bounds, or an empty
-    /// transcription) — the caller drops such a match.
+    /// transcription), the caller drops such a match.
     ///
     /// [`text`]: Self::text
     #[must_use]
@@ -252,7 +285,9 @@ impl Transcription {
             let segment_span = if segment.words.is_empty() {
                 segment.span
             } else {
-                word_span(segment, local_start..local_end).unwrap_or(segment.span)
+                segment
+                    .word_span(local_start..local_end)
+                    .unwrap_or(segment.span)
             };
 
             start_us = Some(start_us.map_or(segment_span.start_micros(), |s| {
@@ -281,39 +316,6 @@ impl Transcription {
 }
 
 impl ModalityArtifact for Transcription {}
-
-/// Span covering the words of `segment` that overlap the segment-local byte
-/// `range`, by walking each word's byte extent within the segment text.
-///
-/// `None` when no word overlaps (the caller then falls back to the segment
-/// span).
-fn word_span(segment: &TranscriptSegment, range: Range<usize>) -> Option<TimeSpan> {
-    let mut start_us: Option<u64> = None;
-    let mut end_us: Option<u64> = None;
-    let mut search_from = 0;
-
-    for word in &segment.words {
-        // Locate the word in the segment text from where the last word
-        // ended, so repeated words resolve to successive occurrences.
-        let Some(rel) = segment.text[search_from..].find(word.text.as_str()) else {
-            continue;
-        };
-        let word_start = search_from + rel;
-        let word_end = word_start + word.text.len();
-        search_from = word_end;
-
-        // Half-open overlap with the requested range.
-        if range.start >= word_end || range.end <= word_start {
-            continue;
-        }
-        start_us = Some(start_us.map_or(word.span.start_micros(), |s| {
-            s.min(word.span.start_micros())
-        }));
-        end_us = Some(end_us.map_or(word.span.end_micros(), |e| e.max(word.span.end_micros())));
-    }
-
-    Some(TimeSpan::new(start_us?, end_us?))
-}
 
 #[cfg(test)]
 mod tests {

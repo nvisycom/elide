@@ -3,7 +3,7 @@
 //! Validates P2PKH (`1…`) and P2SH (`3…`) addresses by decoding
 //! the Base58 payload and verifying its trailing four-byte
 //! double-SHA256 checksum. Bech32 / Bech32m addresses (`bc1…`)
-//! are not handled here — those use a different polynomial check.
+//! are not handled here, those use a different polynomial check.
 
 /// Return `true` if `value` is a structurally valid Base58Check
 /// Bitcoin address.

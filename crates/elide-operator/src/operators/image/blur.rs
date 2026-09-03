@@ -3,7 +3,7 @@
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::image::{Image, ImageData, ImageReplacement};
-use elide_core::operator::{LeakProfile, Operator, OperatorId};
+use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -64,8 +64,8 @@ mod tests {
     use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::modality::image::{Image, ImageData, ImageLocation, ImageReplacement};
-    use elide_core::operator::Operator;
     use elide_core::primitive::{BoundingBox, Confidence, Dimensions, Point};
+    use elide_core::redaction::Operator;
 
     use crate::operators::{Blackbox, Blur, Pixelate};
 

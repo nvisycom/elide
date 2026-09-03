@@ -2,7 +2,7 @@
 
 use super::Modality;
 use crate::error::Result;
-use crate::operator::Redactions;
+use crate::redaction::Redactions;
 
 /// Applies a [`Redactions`] batch back into some target.
 ///

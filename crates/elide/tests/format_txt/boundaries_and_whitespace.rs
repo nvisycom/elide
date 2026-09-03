@@ -3,8 +3,8 @@
 
 use elide::Result;
 
-use crate::support::asserts::{assert_pii_removed, assert_preserved};
-use crate::support::pipeline::Fixture;
+use crate::support::asserts::{assert_content_preserved, assert_pii_removed};
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(
@@ -29,7 +29,7 @@ async fn edge_values_are_redacted() -> Result<()> {
     );
 
     // Surrounding prose survives, including the last line's non-PII text.
-    assert_preserved!(
+    assert_content_preserved!(
         outcome.redacted_text(),
         "opens the file",
         "ends on a value with no trailing newline",

@@ -1,4 +1,4 @@
-//! English-language dictionaries — terms written in English
+//! English-language dictionaries, terms written in English
 //! and meant to fire on English documents.
 //!
 //! Demonyms, religion names, and language names translate

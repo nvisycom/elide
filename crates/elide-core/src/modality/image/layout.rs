@@ -3,7 +3,7 @@
 //! What makes an image *recognizable*: a recognizer reads its
 //! [`text`] like any other string, finds a match at a byte
 //! range, and [`resolve`]s that range back to the
-//! [`ImageLocation`] of the words it covers — via the per-word bounding
+//! [`ImageLocation`] of the words it covers, via the per-word bounding
 //! boxes the layout carries. Populated by an OCR pass today; the structure
 //! can grow to carry richer layout (headings, tables, reading order). The
 //! image counterpart of the audio [`Transcription`].
@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use super::ImageLocation;
 use crate::modality::ModalityArtifact;
-use crate::primitive::{BoundingBox, Confidence, Point};
+use crate::primitive::{BoundingBox, Confidence};
 
 /// Separator inserted between blocks when building the flat layout text, so
 /// adjacent blocks don't run their words together.
@@ -28,7 +28,7 @@ const BLOCK_SEPARATOR: &str = "\n";
 /// An image's recognized text, laid out in space.
 ///
 /// An ordered set of [`LayoutBlock`]s (the recognized text regions). The flat
-/// [`text`] — the blocks joined — is what a recognizer
+/// [`text`], the blocks joined, is what a recognizer
 /// inspects; [`resolve`] maps a byte range of that text back
 /// to the [`ImageLocation`] it occupies, using the blocks' (and their
 /// words') bounding boxes. Empty when the backend recognized nothing.
@@ -208,11 +208,11 @@ struct RegionUnion {
 impl RegionUnion {
     fn add(&mut self, location: &ImageLocation) {
         self.bbox = Some(match self.bbox.take() {
-            Some(acc) => union(acc, location.bounding_box),
+            Some(acc) => acc.union(&location.bounding_box),
             None => location.bounding_box,
         });
         // First region sets the page; a later region on a different page is
-        // a degenerate cross-page match — we keep the first page.
+        // a degenerate cross-page match, we keep the first page.
         if self.page.is_none() {
             self.page = location.page;
         }
@@ -267,17 +267,10 @@ impl RegionUnion {
     }
 }
 
-/// The smallest axis-aligned box enclosing both inputs.
-fn union(a: BoundingBox, b: BoundingBox) -> BoundingBox {
-    BoundingBox::new(
-        Point::new(a.min.x.min(b.min.x), a.min.y.min(b.min.y)),
-        Point::new(a.max.x.max(b.max.x), a.max.y.max(b.max.y)),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::primitive::Point;
 
     fn loc(x: f64, y: f64, w: f64, h: f64) -> ImageLocation {
         ImageLocation::new(BoundingBox::from_origin_size(Point::new(x, y), w, h))

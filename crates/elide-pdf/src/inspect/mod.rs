@@ -1,7 +1,7 @@
 //! [`Inspection`]: a bounded, fail-closed inventory of a PDF's risk-bearing
 //! structures and how completely it could be inspected.
 //!
-//! Inspection walks the current object graph — never a superseded revision —
+//! Inspection walks the current object graph, never a superseded revision,
 //! and reports two things: a [`RiskInventory`] of the structures that can
 //! retain sensitive data (forms, annotations, attachments, metadata, scripts,
 //! signatures, …), and the [`Coverage`] it achieved. It reads the document; it
@@ -216,7 +216,7 @@ fn xfa_entry_count(xfa: Option<&Object>) -> u32 {
 /// Each `%%EOF` marker ends a cross-reference section. A single-revision file
 /// has one; each incremental update appends another. **Linearization** is the
 /// exception: a web-optimised file has a first-page cross-reference section with
-/// its own `%%EOF` plus the main one — two markers, but a single revision — so
+/// its own `%%EOF` plus the main one, two markers, but a single revision, so
 /// that extra marker is not counted as a superseded revision.
 fn retained_bytes(source: &[u8]) -> (u32, u64) {
     const EOF: &[u8] = b"%%EOF";
@@ -238,7 +238,7 @@ fn retained_bytes(source: &[u8]) -> (u32, u64) {
         return (0, 0);
     }
 
-    // `%%EOF` markers beyond the first mark appended revisions — but a
+    // `%%EOF` markers beyond the first mark appended revisions, but a
     // linearized file's first-page section adds one `%%EOF` that is part of the
     // same (single) revision, so discount it.
     let linearization_markers = usize::from(is_linearized(source));
@@ -281,7 +281,7 @@ mod tests {
     #[test]
     fn linearized_two_eof_markers_are_a_single_revision() {
         // A linearized file: `/Linearized` near the start, two `%%EOF` markers
-        // (first-page section + main) — but one revision.
+        // (first-page section + main), but one revision.
         let bytes = b"%PDF-1.5\n1 0 obj<</Linearized 1>>endobj\n... first page ...\n\
                       %%EOF\n... main body ...\n%%EOF\n";
         let (revisions, _) = retained_bytes(bytes);

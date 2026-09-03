@@ -4,8 +4,8 @@
 use elide::Result;
 use elide::entity::builtins;
 
-use crate::support::asserts::{assert_label_absent, assert_preserved};
-use crate::support::pipeline::Fixture;
+use crate::support::asserts::{assert_content_preserved, assert_label_absent};
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(
@@ -24,8 +24,8 @@ async fn weak_values_without_context_stay_undetected() -> Result<()> {
     // shape must never be flagged.
     assert_label_absent!(outcome.entities, builtins::BANK_ACCOUNT.to_ref());
 
-    // The values survive verbatim — proof they were neither detected nor redacted.
-    assert_preserved!(
+    // The values survive verbatim, proof they were neither detected nor redacted.
+    assert_content_preserved!(
         outcome.redacted_text(),
         "000123456789",
         "000987654321",

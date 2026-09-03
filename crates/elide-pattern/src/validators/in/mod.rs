@@ -1,7 +1,7 @@
 //! India-specific post-match validators.
 //!
 //! Registered under the [`ValidatorRegistry::builtin`] set with
-//! dotted names — `"in.aadhaar"`, `"in.pan"`, `"in.gstin"`.
+//! dotted names, `"in.aadhaar"`, `"in.pan"`, `"in.gstin"`.
 //!
 //! [`ValidatorRegistry::builtin`]: super::ValidatorRegistry::builtin
 

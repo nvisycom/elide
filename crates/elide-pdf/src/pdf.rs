@@ -1,4 +1,4 @@
-//! [`Pdf`]: an opened PDF document — extract its text and images, inspect its
+//! [`Pdf`]: an opened PDF document, extract its text and images, inspect its
 //! structure, and redact it.
 
 use std::collections::HashSet;
@@ -12,7 +12,7 @@ use crate::error::{Error, Result};
 use crate::extract::{Block, Embedding, EmbeddingKind, Extraction, ImageId, Issue, IssueKind};
 
 /// An opened PDF document: parsed once, ready to [`extract`](Pdf::extract) its
-/// text, [`inspect`](Pdf::inspect) its structure, or redact it — by
+/// text, [`inspect`](Pdf::inspect) its structure, or redact it, by
 /// [`redact_text`](Pdf::redact_text) (delete glyphs, keep a selectable layer) or,
 /// with the `render` feature, `redact_raster` (flatten to images).
 ///
@@ -85,7 +85,7 @@ impl Pdf {
     /// [`issues`](Extraction::issues) for pages that yielded no text.
     ///
     /// A [`Block`] is addressed by its 1-based [`page`](Block::page) and its
-    /// [`text`](Block::text) — not a byte span, because PDF text lives in
+    /// [`text`](Block::text), not a byte span, because PDF text lives in
     /// content-stream operators. An [`Embedding`] is addressed by its image
     /// object [`id`](Embedding::id).
     pub fn extract(&self) -> Extraction {

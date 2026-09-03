@@ -12,8 +12,8 @@
 //!
 //! Unlike the text-splice path (`e2e_pdf`), raster redaction is reliable
 //! regardless of font encoding: it never re-encodes text, it destroys pixels.
-//! The proof is that the redacted output has **no extractable text at all** —
-//! it is images — and none of the original PII survives.
+//! The proof is that the redacted output has **no extractable text at all**,
+//! it is images, and none of the original PII survives.
 
 use elide::Result;
 use elide::codec::FormatRegistry;
@@ -22,7 +22,7 @@ use elide::modality::StreamDataReader;
 use elide::modality::text::Text;
 use elide::primitive::RasterMode;
 
-use crate::support::pipeline::Fixture;
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/sample.pdf"),

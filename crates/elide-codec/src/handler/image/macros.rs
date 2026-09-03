@@ -12,7 +12,7 @@
 /// Encode a [`DynamicImage`] to bytes in `fmt`.
 ///
 /// Shared by every generated handler's `encode`/`read_next`/`read_at`, so it
-/// is gated on the same set of formats as [`impl_image_handler!`] — a build
+/// is gated on the same set of formats as [`impl_image_handler!`], a build
 /// that pulls `internal_image` without any concrete image format (e.g.
 /// `pdf-render`, which only decodes/redacts embedded images) never encodes.
 ///
@@ -156,7 +156,7 @@ macro_rules! impl_image_handler {
         impl ::elide_core::modality::DataWriter<::elide_core::modality::image::Image> for $handler {
             async fn write_at(
                 &mut self,
-                redactions: ::elide_core::operator::Redactions<::elide_core::modality::image::Image>,
+                redactions: ::elide_core::redaction::Redactions<::elide_core::modality::image::Image>,
             ) -> ::elide_core::Result<()> {
                 for (location, replacement) in redactions.into_iter() {
                     $crate::handler::image::redact::apply(

@@ -4,7 +4,7 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::opc::{EmbeddingKind, PartPath, PartRole, media_kind};
+use crate::opc::{EmbeddingKind, PartPath, PartRole};
 
 /// What a PresentationML package part is, which determines how it is handled.
 ///
@@ -148,7 +148,7 @@ impl PartKind {
 /// [`Audio`]: EmbeddingKind::Audio
 fn embedding_kind(part: &PartPath) -> Option<EmbeddingKind> {
     if part.in_dir("ppt/media") {
-        Some(media_kind(part.as_str()))
+        Some(EmbeddingKind::from_path(part.as_str()))
     } else if part.in_dir("ppt/embeddings") {
         Some(EmbeddingKind::Object)
     } else {
@@ -176,7 +176,7 @@ mod tests {
         assert_eq!(kind("ppt/notesSlides/notesSlide1.xml"), PartKind::Notes);
         assert_eq!(kind("ppt/comments/comment1.xml"), PartKind::Comments);
         // Threaded comments (PowerPoint 2021+) carry comment text too, so they
-        // must classify as text-bearing — not fall through to `Other` and leak.
+        // must classify as text-bearing, not fall through to `Other` and leak.
         assert_eq!(
             kind("ppt/threadedComments/threadedComment1.xml"),
             PartKind::Comments

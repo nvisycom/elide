@@ -5,7 +5,7 @@
 //! - **nPA** (neuer Personalausweis), issued since November 2010:
 //!   9 alphanumeric characters, ICAO Doc 9303 charset
 //!   (excludes A, B, D, E, I, O, Q, S, U) plus a trailing check
-//!   digit. The check digit uses 7-3-1 weights — same as
+//!   digit. The check digit uses 7-3-1 weights, same as
 //!   [`super::passport`].
 //! - **Legacy** `T`-prefix card, issued before 2010: letter `T`
 //!   followed by 8 digits. The trailing digit is part of the
@@ -17,7 +17,7 @@ use super::icao::mrz_check_digit;
 const FORBIDDEN_LETTERS: &str = "ABDEIOQSU";
 
 /// Return `true` when `value` is a structurally-plausible
-/// German Personalausweis number — either an nPA serial with a
+/// German Personalausweis number, either an nPA serial with a
 /// valid ICAO Doc 9303 check digit, or a legacy `T` + 8-digit
 /// number.
 pub fn id_card(value: &str) -> bool {
@@ -60,7 +60,7 @@ mod tests {
 
     #[test]
     fn accepts_npa_with_valid_check() {
-        // Serial `L01X00T44` — known nPA sample (legal text in
+        // Serial `L01X00T44`, known nPA sample (legal text in
         // PassG references).
         assert!(id_card("L01X00T44"));
     }

@@ -1,12 +1,12 @@
 //! Deeply nested elements: PII is found and redacted at any depth, and the
-//! whole element tree — indentation, container tags, and the nesting itself —
+//! whole element tree, indentation, container tags, and the nesting itself,
 //! survives.
 
 use elide::Result;
 use elide::entity::builtins;
 
-use crate::support::asserts::{assert_label_present, assert_pii_removed, assert_preserved};
-use crate::support::pipeline::Fixture;
+use crate::support::asserts::{assert_content_preserved, assert_label_present, assert_pii_removed};
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(
@@ -32,8 +32,8 @@ async fn deeply_nested_values_are_redacted_and_structure_survives() -> Result<()
         "GB29 NWBK 6016 1331 9268 19",
     );
 
-    // The container structure — every level of nesting — is preserved.
-    assert_preserved!(
+    // The container structure, every level of nesting, is preserved.
+    assert_content_preserved!(
         outcome.redacted_text(),
         "<organization>",
         "<department name=\"Finance\">",

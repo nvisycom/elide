@@ -6,8 +6,8 @@
 use elide::Result;
 use elide::entity::builtins;
 
-use crate::support::asserts::{assert_label_present, assert_pii_removed, assert_preserved};
-use crate::support::pipeline::Fixture;
+use crate::support::asserts::{assert_content_preserved, assert_label_present, assert_pii_removed};
+use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
     path: concat!(
@@ -28,9 +28,9 @@ async fn entities_round_trip_and_neighbouring_pii_redacts() -> Result<()> {
     // The plain email beside `&lt;`/`&gt;` is removed.
     assert_pii_removed!(out, "carol.lee@example.com");
 
-    // Entity references not inside a redacted span survive verbatim — the
+    // Entity references not inside a redacted span survive verbatim, the
     // standalone `&amp;` in the note text and the `&lt;`/`&gt;` around the plain
     // contact are untouched.
-    assert_preserved!(out, "Ampersand &amp; company", "&lt;preferred&gt;");
+    assert_content_preserved!(out, "Ampersand &amp; company", "&lt;preferred&gt;");
     Ok(())
 }

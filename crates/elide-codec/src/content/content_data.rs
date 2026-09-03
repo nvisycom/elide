@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 use std::fmt;
 use std::ops::Range;
+use std::path::Path;
 
 use bytes::Bytes;
 use elide_core::{Error, ErrorKind, Result};
@@ -121,10 +122,12 @@ impl ContentData {
     /// [`filename`]: Self::filename
     #[must_use]
     pub fn extension(&self) -> Option<String> {
-        self.filename
-            .as_deref()
-            .and_then(|name| name.rsplit_once('.'))
-            .map(|(_, ext)| ext.to_ascii_lowercase())
+        self.filename.as_deref().and_then(|name| {
+            Path::new(name)
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(str::to_ascii_lowercase)
+        })
     }
 
     /// The size of the content in bytes.

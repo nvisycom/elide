@@ -13,9 +13,10 @@
 //! [`lingua`]: https://crates.io/crates/lingua
 
 use elide_core::Result;
+use elide_core::enrichment::{Enricher, Enrichment};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::LanguageTag;
-use elide_core::recognition::{Enricher, Enrichment, RecognizerContext, RecognizerId};
+use elide_core::recognition::{RecognizerContext, RecognizerId};
 
 use crate::lingua_detector::LinguaDetector;
 
@@ -69,9 +70,9 @@ impl Default for LinguaEnricher {
     }
 }
 
-/// Detects language over any [`TextRecognizable`] modality — `Text` and
+/// Detects language over any [`TextRecognizable`] modality, `Text` and
 /// `Tabular` project their payload as text identically, and an audio transcript
-/// is read from the call's artifacts — so the same enricher scopes a text,
+/// is read from the call's artifacts, so the same enricher scopes a text,
 /// tabular (CSV/XLSX), or transcript pipeline to its detected language.
 #[async_trait::async_trait]
 impl<M: TextRecognizable> Enricher<M> for LinguaEnricher {

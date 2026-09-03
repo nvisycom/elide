@@ -10,14 +10,14 @@
 //!
 //! Unlike DOCX/PDF, RTF is *not* a container: it is a single flat stream
 //! of control words and groups (`{\rtf1 … \par …}`) with the text inline,
-//! so it is a leaf [`Text`] handler with no [`Container`] surface — the
+//! so it is a leaf [`Text`] handler with no [`Container`] surface, the
 //! same shape as the plain-text and markup formats.
 //!
 //! [`Container`]: crate::codec::Container
 
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
-use elide_core::operator::Redactions;
+use elide_core::redaction::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 
 use super::RtfLoader;

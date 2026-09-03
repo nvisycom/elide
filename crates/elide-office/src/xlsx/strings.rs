@@ -18,8 +18,8 @@ use crate::error::{Error, Result};
 ///
 /// Each `<si>` is one string: a single `<t>` or a run of `<r><t>` rich-text
 /// pieces whose text concatenates. The inner text of every `<t>` is captured as
-/// a byte span and unescaped as a whole, so an entity (`&amp;`) — which quick-xml
-/// reports as its own event — is decoded correctly. Positions are shifted past a
+/// a byte span and unescaped as a whole, so an entity (`&amp;`), which quick-xml
+/// reports as its own event, is decoded correctly. Positions are shifted past a
 /// leading BOM so the spans index the original bytes.
 pub(crate) fn parse_shared_strings(raw: &str) -> Result<Vec<String>> {
     Ok(shared_string_items(raw)?

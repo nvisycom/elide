@@ -23,10 +23,10 @@ use elide_office::docx::PartKind;
 use elide_office::opc::{Embedding, OffsetMap, PartPath};
 
 use super::DocxLoader;
-use crate::codec::{Container, Part, PartId};
+use crate::codec::{Container, Part};
 use crate::content::ContentData;
 use crate::handler::extract::{Encoder, ExtractHandler, ExtractedItem, ItemEdit};
-use crate::{Format, FormatId};
+use crate::{Format, FormatId, LocalId};
 
 /// Stable [`FormatId`] for the DOCX codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.document.docx");
@@ -98,9 +98,8 @@ impl Encoder for DocxEncoder {
         let media: Vec<elide_office::opc::PartReplacement> = self
             .replacements
             .iter()
-            .map(|(name, bytes)| elide_office::opc::PartReplacement {
-                part: PartPath::new(name.clone()),
-                bytes: bytes.to_vec(),
+            .map(|(name, bytes)| {
+                elide_office::opc::PartReplacement::new(PartPath::new(name.clone()), bytes.to_vec())
             })
             .collect();
 
@@ -145,19 +144,16 @@ impl Encoder for DocxEncoder {
 
 impl Container for DocxEncoder {
     fn parts(&self) -> Vec<Part> {
-        // Surface every binary embedding the engine classifies — images
+        // Surface every binary embedding the engine classifies, images
         // (`word/media/`), embedded objects (`word/embeddings/`), and fonts
-        // (`word/fonts/`) — from the set cached at decode.
+        // (`word/fonts/`), from the set cached at decode.
         self.embeddings
             .iter()
             .map(|embedding| {
-                let name = embedding.part.as_str().to_owned();
-                let hint = name
-                    .rsplit_once('.')
-                    .map(|(_, e)| e.to_owned())
-                    .unwrap_or_default();
+                let id = LocalId::new(embedding.part.as_str().to_owned());
+                let hint = id.extension().unwrap_or_default().to_owned();
                 Part {
-                    id: name.into(),
+                    id,
                     bytes: embedding.bytes.clone(),
                     hint,
                 }
@@ -165,12 +161,11 @@ impl Container for DocxEncoder {
             .collect()
     }
 
-    fn replace_part(&mut self, id: &PartId, bytes: Bytes) -> Result<()> {
+    fn replace_part(&mut self, id: &LocalId, bytes: Bytes) -> Result<()> {
         // Reject anything that isn't a binary embedding so a caller can't
         // smuggle bytes into a text/structure part through this surface.
-        let is_embedding = PartKind::of(&PartPath::from(id.as_str()))
-            .embedding()
-            .is_some();
+        let part_path = PartPath::from(id.as_str());
+        let is_embedding = PartKind::of(&part_path).embedding().is_some();
         if !is_embedding {
             return Err(Error::new(
                 ErrorKind::MalformedInput,
@@ -178,7 +173,7 @@ impl Container for DocxEncoder {
             ));
         }
         // And reject ids that name no embedding the document actually carries,
-        // validated against the set cached at decode — an unknown id must not
+        // validated against the set cached at decode, an unknown id must not
         // be silently stored and dropped on rewrite.
         let is_known = self
             .embeddings
@@ -210,11 +205,8 @@ pub(super) fn docx_error(err: elide_office::Error) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Cursor, Write};
-
     use elide_core::modality::text::{SourceRef, TextLocation};
-    use zip::write::SimpleFileOptions;
-    use zip::{CompressionMethod, ZipWriter};
+    use elide_office::opc::test_util;
 
     use super::*;
     use crate::content::ContentData;
@@ -228,16 +220,12 @@ mod tests {
         let body = format!(
             r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>{body_text}</w:t></w:r></w:p></w:body></w:document>"#
         );
-        let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
-        let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
-        let mut put = |name: &str, bytes: &[u8]| {
-            zip.start_file(name, opts).unwrap();
-            zip.write_all(bytes).unwrap();
-        };
-        put("[Content_Types].xml", br#"<?xml version="1.0"?><Types/>"#);
-        put("_rels/.rels", br#"<?xml version="1.0"?><Relationships/>"#);
-        put(BODY_PART, body.as_bytes());
-        ContentData::new(zip.finish().unwrap().into_inner().into())
+        let package = test_util::pack_parts(&[
+            ("[Content_Types].xml", br#"<?xml version="1.0"?><Types/>"#),
+            ("_rels/.rels", br#"<?xml version="1.0"?><Relationships/>"#),
+            (BODY_PART, body.as_bytes()),
+        ]);
+        ContentData::new(package.into())
     }
 
     /// Read chunks until the one whose decoded text equals `value`.
@@ -257,7 +245,7 @@ mod tests {
     async fn source_span_maps_a_finding_across_an_entity_including_its_raw_bytes() {
         // The body text is `Alice &amp; Bob`, decoded to `Alice & Bob`. A finding
         // over the whole decoded text must point back at the raw bytes including
-        // the `&amp;` — one contiguous raw range, entity bytes and all.
+        // the `&amp;`, one contiguous raw range, entity bytes and all.
         let raw = r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Alice &amp; Bob</w:t></w:r></w:p></w:body></w:document>"#;
         let mut handler = DocxLoader
             .decode(docx_with_body("Alice &amp; Bob"))
@@ -323,12 +311,12 @@ mod tests {
 
     #[tokio::test]
     async fn redacts_an_entity_located_only_by_source() {
-        // A review layer adds an entity by selecting text in the part — it can
+        // A review layer adds an entity by selecting text in the part, it can
         // express the raw part byte span but not the decoded-stream `range`. The
         // redaction is located purely by `.source` and must edit the right bytes.
         use elide_core::modality::DataWriter;
         use elide_core::modality::text::TextReplacement;
-        use elide_core::operator::Redactions;
+        use elide_core::redaction::Redactions;
 
         let raw = r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Alice Bob</w:t></w:r></w:p></w:body></w:document>"#;
         let mut handler = DocxLoader
@@ -336,7 +324,7 @@ mod tests {
             .await
             .unwrap();
 
-        // The raw span of "Bob" in the part — what a DOM selection yields.
+        // The raw span of "Bob" in the part, what a DOM selection yields.
         let bob = raw.find("Bob").unwrap();
         let location = TextLocation::new(0, 0) // no usable decoded range
             .with_source([SourceRef::in_part(bob..bob + 3, BODY_PART)]);
@@ -347,18 +335,10 @@ mod tests {
 
         // The rebuilt part has "Bob" replaced, "Alice" untouched.
         let out = handler.encode().unwrap();
-        let bytes = out.as_bytes();
-        // The output is a zip; the body part contains the replacement.
-        let mut archive = zip::ZipArchive::new(Cursor::new(bytes.to_vec())).unwrap();
-        let mut body = String::new();
-        {
-            use std::io::Read;
-            archive
-                .by_name(BODY_PART)
-                .unwrap()
-                .read_to_string(&mut body)
-                .unwrap();
-        }
+        // The output is an OPC package; the body part contains the replacement.
+        let body_bytes =
+            test_util::read_part(out.as_bytes(), BODY_PART).expect("body part present");
+        let body = String::from_utf8(body_bytes).expect("body part is UTF-8");
         assert!(body.contains("Alice [NAME]"), "body was: {body}");
         assert!(!body.contains("Alice Bob"));
     }

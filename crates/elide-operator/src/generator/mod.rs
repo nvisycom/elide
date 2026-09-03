@@ -12,7 +12,7 @@ pub use self::random::RandomToken;
 /// Owns *what* a synthetic value looks like, generic over the
 /// [`Modality`] `M` so the same seam serves a fake string for text and,
 /// later, a synthetic region for an image or a voice-converted clip for
-/// audio — each producing that modality's [`Replacement`].
+/// audio, each producing that modality's [`Replacement`].
 ///
 /// A generator need not be deterministic: a caller that needs the same
 /// entity to render consistently across mentions layers a vault over the

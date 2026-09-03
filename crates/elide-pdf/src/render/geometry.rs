@@ -2,7 +2,7 @@
 //! spans and the pixels a raster redaction overwrites.
 //!
 //! Every geometry here is in the coordinate space of the *rendered page image*:
-//! pixels, origin at the top-left, x rightward and y downward — the space the
+//! pixels, origin at the top-left, x rightward and y downward, the space the
 //! raster fill works in. Text-layer glyphs (from the PDF's own text operators)
 //! are converted into this space from PDF points; an OCR source (supplied by a
 //! caller) is already here. Keeping one canonical space lets the fill treat

@@ -2,7 +2,7 @@
 //!
 //! Redaction resolves which operator hides each entity (and why) and records
 //! that decision as a [`Selection`] event on the entity's own audit trail,
-//! alongside the [`Redaction`] that applies it — no parallel selection object.
+//! alongside the [`Redaction`] that applies it, no parallel selection object.
 //! A review layer reads the picks straight off the entities. This exercises
 //! that over a real multi-part container: run [`anonymize`] and read the picks
 //! back from the returned report's body entities.
@@ -11,44 +11,23 @@
 //! [`Redaction`]: elide::entity::audit::AuditKind::Redaction
 //! [`anonymize`]: elide::Orchestrator::anonymize
 
-use elide::codec::{FormatRegistry, PartId};
-use elide::detection::Analyzer;
+use elide::codec::FormatRegistry;
 use elide::entity::audit::AuditKind;
-use elide::entity::{LabelCatalog, builtins};
 use elide::modality::image::Image;
 use elide::modality::text::Text;
-use elide::recognition::Scope;
-use elide::recognition::llm::LlmRecognizer;
-use elide::recognition::pattern::PatternRecognizer;
-use elide::redaction::operators::{Erase, Replace};
-use elide::redaction::{Anonymizer, Rule};
-use elide::{Directives, Orchestrator, Report, Result};
+use elide::{Directives, Orchestrator, PartId, RegistryDocumentExt, Report, Result};
+
+use crate::support::orchestrator::TestOrchestrator;
 
 const SAMPLE: &[u8] = include_bytes!("../testdata/sample.docx");
 
+/// The fixture document's name, its depth-1 part key in the report.
+const DOC: &str = "sample.docx";
+
 /// Build an orchestrator whose body rule set is deterministic enough to read
-/// back from the picks: email is replaced, everything else erased.
+/// back from the picks: every detected label redacts through `Replace` (`[{label}]`).
 fn orchestrator(registry: FormatRegistry) -> Result<Orchestrator> {
-    let patterns = PatternRecognizer::builder()
-        .with_builtin_patterns()
-        .with_builtin_dictionaries()
-        .build_context_enhanced()?;
-    let text = Anonymizer::new()
-        .with(Rule::label(
-            builtins::EMAIL_ADDRESS.to_ref(),
-            Replace::new("[EMAIL]"),
-        ))
-        .with(Rule::fallback(Erase));
-    let image = LlmRecognizer::<Image>::builder()
-        .with_name("mock-image")
-        .with_mock_backend()
-        .with_default_prompt()
-        .build()?;
-    Ok(Orchestrator::new()
-        .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
-        .with_registry(registry)
-        .with_modality::<Text>(Analyzer::new().with_recognizer(patterns), text)
-        .with_modality::<Image>(Analyzer::new().with_recognizer(image), Anonymizer::new()))
+    Ok(TestOrchestrator::new()?.with_registry(registry).build())
 }
 
 /// `anonymize` records a reviewable pick on every body entity: each names one of
@@ -59,7 +38,7 @@ async fn anonymize_records_reviewable_body_picks() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
     let orchestrator = orchestrator(registry.clone())?;
 
-    let mut doc = registry.decode(SAMPLE, "docx").await?;
+    let mut doc = registry.document(DOC, SAMPLE).await?;
     let report = orchestrator
         .analyze(&mut doc, &Directives::new())
         .await?
@@ -82,7 +61,7 @@ async fn anonymize_records_reviewable_body_picks() -> Result<()> {
             .expect("the pick is followed by a redaction");
         let picked = picked.operator.name.as_str();
         assert!(
-            picked == "replace" || picked == "erase",
+            picked == "replace" || picked == "erase" || picked == "mask",
             "each pick is one of the configured operators, got {picked}",
         );
         // The pick is recorded before it is applied, and the operator actually
@@ -113,23 +92,25 @@ async fn anonymize_records_reviewable_body_picks() -> Result<()> {
 }
 
 /// A part with no detected entities routes through its pipeline and records no
-/// picks — nothing to redact, no error. Built from a rebuilt report so the part
+/// picks, nothing to redact, no error. Built from a rebuilt report so the part
 /// is present regardless of what the mock image backend detected.
 #[tokio::test]
 async fn anonymize_over_an_empty_part_records_nothing() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
     let orchestrator = orchestrator(registry.clone())?;
 
-    let mut doc = registry.decode(SAMPLE, "docx").await?;
-    // A report carrying one image part with no detected entities — apply routes
+    let mut doc = registry.document(DOC, SAMPLE).await?;
+    // A report carrying one image part with no detected entities, apply routes
     // through the image pipeline (Anonymizer::new(), no rules) and does nothing.
-    let image = PartId::new("word/media/image1.png");
+    // The part is keyed under the document's name (a nested path) so apply
+    // re-decodes it from that document.
+    let image = PartId::from(DOC).child("word/media/image1.png");
     let report = Report::new().insert_part::<Image>(image.clone(), Vec::new());
 
     let report = orchestrator.anonymize_with(&mut doc, report).await?;
     assert!(
-        report.entities::<Text>().is_none(),
-        "the report has no body"
+        report.part_ids().all(|(id, _)| id.depth() > 1),
+        "the report carries no document own-content, only the nested image part",
     );
     let part = report
         .part_entities::<Image>(&image)

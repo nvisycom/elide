@@ -12,7 +12,7 @@
 //! Value reduction: [`Clamp`] collapses out-of-range numbers into a
 //! (localized) bucket label; [`GeneralizeDate`] (feature `datetime`) reduces
 //! a date/timestamp to a coarser ISO-8601 granularity. Both only apply to
-//! values of their shape, so both are a [`TryOperator`] — a value they
+//! values of their shape, so both are a [`TryOperator`], a value they
 //! can't parse is *declined* rather than erased by fiat. [`WithFallback`]
 //! wraps such an operator with any other [`Operator`] to run when it
 //! declines, so a caller composes their own treatment for the leftover
@@ -23,7 +23,7 @@
 //! with a keyed HMAC-SHA-2 digest, whose key stays secret. Both pick a
 //! width from the shared [`Sha2Algorithm`].
 //!
-//! Tabular (feature `tabular`): [`DropRow`], [`DropColumn`] — structural drops
+//! Tabular (feature `tabular`): [`DropRow`], [`DropColumn`], structural drops
 //! that remove a whole record or field rather than editing a cell.
 //!
 //! Image (feature `image`): [`Blur`], [`Pixelate`], [`Blackbox`].
@@ -36,7 +36,7 @@
 //! Cross-modality: [`Erase`] removes the entity in any modality, and
 //! [`Keep`] passes it through unchanged.
 //!
-//! [`Operator`]: elide_core::operator::Operator
+//! [`Operator`]: elide_core::redaction::Operator
 //! [`Replacement`]: elide_core::modality::Modality::Replacement
 //! [`Vault`]: crate::vault::Vault
 //! [`Generator`]: crate::generator::Generator

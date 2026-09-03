@@ -43,10 +43,12 @@ elide-core = { workspace = true, features = [] }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }
-schemars = { workspace = true, features = [], optional = true }
 
 # Async runtime & parallelism
 futures = { workspace = true, features = [] }
 
 # Observability
 tracing = { workspace = true, features = [] }
+
+# Templating & schema
+schemars = { workspace = true, features = [], optional = true }

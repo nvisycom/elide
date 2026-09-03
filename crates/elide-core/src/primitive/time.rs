@@ -123,7 +123,7 @@ impl TimeSpan {
         self.start_us <= other.start_us && other.end_us <= self.end_us
     }
 
-    /// How this span sits against `other` — disjoint, one containing the
+    /// How this span sits against `other`, disjoint, one containing the
     /// other, or crossing with an intersection-over-union measure.
     #[must_use]
     pub fn overlap(&self, other: &Self) -> Overlap {

@@ -1,10 +1,10 @@
 //! Backend layer: the [`OcrBackend`] trait and its shipped impls.
 //!
-//! One trait covers every flavour of OCR engine — hosted document-AI APIs
+//! One trait covers every flavour of OCR engine, hosted document-AI APIs
 //! (Google Document AI, Azure, AWS Textract), local engines (Tesseract,
 //! PaddleOCR wrappers), and the in-process no-op test stub. Each backend
 //! turns a request (image bytes + optional hints) into a response of
-//! recognized [`LayoutBlock`]s — the core OCR type, so a backend's output
+//! recognized [`LayoutBlock`]s, the core OCR type, so a backend's output
 //! drops straight onto the call's artifacts with no remapping. The
 //! `test-utils`-gated [`MockBackend`] (returns no blocks; test/example stub) ships
 //! here; concrete engine backends live downstream.
@@ -28,7 +28,7 @@ pub use self::ocr_response::OcrResponse;
 /// Per-call OCR backend.
 ///
 /// Implemented by everything that turns image bytes into recognized text
-/// blocks — hosted document-AI clients, local OCR engine wrappers, and the
+/// blocks, hosted document-AI clients, local OCR engine wrappers, and the
 /// in-process no-op test stub. Each block carries its bounding region and,
 /// when the engine emits them, per-word boxes; the recognizer resolves a
 /// matched byte range back to the region it covers.

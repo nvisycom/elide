@@ -44,7 +44,6 @@ elide-core = { workspace = true, features = ["serde"] }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
-schemars = { workspace = true, features = [], optional = true }
 
 # Derive macros & error handling
 derive_builder = { workspace = true, features = [] }
@@ -55,6 +54,9 @@ hipstr = { workspace = true, features = [] }
 
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
+
+# Templating & schema
+schemars = { workspace = true, features = [], optional = true }
 
 [dev-dependencies]
 # Async runtime & parallelism

@@ -3,7 +3,7 @@
 //! A [`Token`] is one lexical unit: its surface text, its lemma (== `text` when
 //! the producer has no lemmatizer), the byte range it occupies in the source
 //! text, and two precomputed predicates a context enhancer reads (`is_stop`,
-//! `is_punct`). [`Tokens`] is the owning `Vec<Token>` newtype — the
+//! `is_punct`). [`Tokens`] is the owning `Vec<Token>` newtype, the
 //! [`Text`](super::Text) modality's [`Artifact`](crate::modality::Modality::Artifact),
 //! produced by a tokenizing enricher and read by the recognizers/enhancer that
 //! want lemma-aware keyword matching.
@@ -91,7 +91,7 @@ impl Token {
 /// consumer-side code assumes this). A context enhancer borrows the underlying
 /// slice via [`as_slice`](Tokens::as_slice) and walks it by count when scoring an
 /// entity's neighbourhood. Empty ([`Default`]) until a tokenizing enricher fills
-/// it — the enhancer then tokenizes on demand instead.
+/// it, the enhancer then tokenizes on demand instead.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

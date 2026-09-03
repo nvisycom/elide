@@ -7,7 +7,7 @@
 //! users wanting different wording implement [`Prompt<M>`] and pass it to
 //! [`LlmRecognizerBuilder::with_prompt`]. The response *shape* is fixed
 //! per modality (the candidate batch the backend extracts), not chosen by
-//! the prompt — so a prompt varies wording only.
+//! the prompt, so a prompt varies wording only.
 //!
 //! [`LlmRecognizer`]: crate::LlmRecognizer
 //! [`LlmRecognizerBuilder::with_prompt`]: crate::recognition::LlmRecognizerBuilder::with_prompt

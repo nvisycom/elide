@@ -21,10 +21,10 @@ use elide_office::opc::{Embedding, OffsetMap, PartPath};
 use elide_office::pptx::PartKind;
 
 use super::PptxLoader;
-use crate::codec::{Container, Part, PartId};
+use crate::codec::{Container, Part};
 use crate::content::ContentData;
 use crate::handler::extract::{Encoder, ExtractHandler, ExtractedItem, ItemEdit};
-use crate::{Format, FormatId};
+use crate::{Format, FormatId, LocalId};
 
 /// Stable [`FormatId`] for the PPTX codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.document.pptx");
@@ -91,9 +91,8 @@ impl Encoder for PptxEncoder {
         let media: Vec<elide_office::opc::PartReplacement> = self
             .replacements
             .iter()
-            .map(|(name, bytes)| elide_office::opc::PartReplacement {
-                part: PartPath::new(name.clone()),
-                bytes: bytes.to_vec(),
+            .map(|(name, bytes)| {
+                elide_office::opc::PartReplacement::new(PartPath::new(name.clone()), bytes.to_vec())
             })
             .collect();
 
@@ -138,18 +137,15 @@ impl Encoder for PptxEncoder {
 
 impl Container for PptxEncoder {
     fn parts(&self) -> Vec<Part> {
-        // Surface every binary embedding the engine classifies — images and
+        // Surface every binary embedding the engine classifies, images and
         // media under `ppt/media/`, embedded objects under `ppt/embeddings/`.
         self.embeddings
             .iter()
             .map(|embedding| {
-                let name = embedding.part.as_str().to_owned();
-                let hint = name
-                    .rsplit_once('.')
-                    .map(|(_, e)| e.to_owned())
-                    .unwrap_or_default();
+                let id = LocalId::new(embedding.part.as_str().to_owned());
+                let hint = id.extension().unwrap_or_default().to_owned();
                 Part {
-                    id: name.into(),
+                    id,
                     bytes: embedding.bytes.clone(),
                     hint,
                 }
@@ -157,7 +153,7 @@ impl Container for PptxEncoder {
             .collect()
     }
 
-    fn replace_part(&mut self, id: &PartId, bytes: Bytes) -> Result<()> {
+    fn replace_part(&mut self, id: &LocalId, bytes: Bytes) -> Result<()> {
         // Reject anything that isn't a binary embedding so a caller can't smuggle
         // bytes into a text/structure part through this surface.
         if PartKind::of(&PartPath::from(id.as_str()))
@@ -170,7 +166,7 @@ impl Container for PptxEncoder {
             ));
         }
         // And reject ids that name no embedding the presentation actually
-        // carries — an unknown id must not be silently stored and dropped.
+        // carries, an unknown id must not be silently stored and dropped.
         let is_known = self
             .embeddings
             .iter()

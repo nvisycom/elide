@@ -2,7 +2,7 @@
 //! the shared [`opc`](crate::opc) engine.
 //!
 //! A presentation's user text lives as DrawingML `a:t` runs in its slides,
-//! notes, and slide masters/layouts, and as `<t>` in its comments — all element
+//! notes, and slide masters/layouts, and as `<t>` in its comments, all element
 //! text, with no shared-string indirection. So unlike a workbook, a PPTX is
 //! extracted and redacted entirely through the neutral element-text path: the
 //! facade only classifies parts and defers the rest to the engine.

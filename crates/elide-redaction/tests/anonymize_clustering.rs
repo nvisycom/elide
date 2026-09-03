@@ -9,13 +9,13 @@ mod fixtures;
 use elide_core::entity::audit::AuditKind;
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::Text;
-use elide_core::operator::Operator;
 use elide_core::recognition::Scope;
+use elide_core::redaction::Operator;
 use elide_operator::operators::{Erase, Replace};
 use elide_redaction::{Anonymizer, Rule};
 use fixtures::TextDoc;
 
-/// Disjoint entities each redact separately — the baseline behaviour.
+/// Disjoint entities each redact separately, the baseline behaviour.
 #[tokio::test]
 async fn disjoint_entities_redact_separately() {
     let mut doc = TextDoc::new("alice and bob");
@@ -106,8 +106,8 @@ async fn non_coalescible_overlap_stays_separate() {
 
     // The invariant under test is a *clustering* one: non-coalescible entities
     // must not merge into a cluster that then drops a member (see the union
-    // `expect` in `redact`). It is asserted on the (page-aware) audit trail —
-    // each entity records its own redaction — not on `doc.text()`: the flat
+    // `expect` in `redact`). It is asserted on the (page-aware) audit trail ,
+    // each entity records its own redaction, not on `doc.text()`: the flat
     // `TextDoc` ignores `page`, so page-local write *placement* is out of scope
     // here and would need a page-partitioned double to check.
     for entity in &entities {

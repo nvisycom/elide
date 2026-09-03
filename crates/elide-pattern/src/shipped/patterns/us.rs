@@ -1,4 +1,4 @@
-//! United States — patterns scoped to US jurisdictional formats.
+//! United States, patterns scoped to US jurisdictional formats.
 
 use crate::{__shipped_pattern as shipped_pattern, Regex};
 

@@ -25,7 +25,7 @@ use elide_core::entity::audit::{AuditEvent, ModelEvent};
 use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
 #[cfg(feature = "usage")]
-use elide_core::recognition::ModelUsage;
+use elide_core::primitive::ModelUsage;
 use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId};
 use elide_core::{Error, Result};
 use hipstr::HipStr;
@@ -102,7 +102,7 @@ impl NerRecognizer {
     /// With no configured [`supported_labels`](Self::supported_labels) the whole
     /// catalog is the target. Otherwise the recognizer's own set overrides,
     /// each entry resolved against the catalog; a supported label *absent* from
-    /// the catalog is dropped — there is no localized definition to send, and
+    /// the catalog is dropped, there is no localized definition to send, and
     /// fabricating one from its id would mislead the backend. An empty result
     /// leaves the backend to emit whatever it natively produces.
     fn effective_labels(&self, catalog: &LabelCatalog) -> Vec<Label> {
@@ -300,7 +300,7 @@ mod tests {
 
     #[test]
     fn no_supported_labels_targets_the_whole_catalog() {
-        // With no configured set, every catalog label is a target — as a full
+        // With no configured set, every catalog label is a target, as a full
         // `Label`, so a zero-shot backend gets the localized name *and* the
         // description.
         let mut catalog = LabelCatalog::new();
@@ -335,7 +335,7 @@ mod tests {
     #[test]
     fn supported_label_absent_from_catalog_is_dropped() {
         // person_name is not in the catalog, so there is no localized
-        // definition to send — it is dropped, not fabricated from its id.
+        // definition to send, it is dropped, not fabricated from its id.
         let mut catalog = LabelCatalog::new();
         catalog.insert(Label::new("email", "email address"));
         let rec = recognizer_with(vec![builtins::PERSON_NAME.to_ref()]);

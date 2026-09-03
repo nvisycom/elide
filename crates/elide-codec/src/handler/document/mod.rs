@@ -6,12 +6,12 @@
 //! page text and image XObjects in its own object format. The container is
 //! parsed, each text part is redacted (DOCX reuses the shared XML
 //! [`extract`] engine), and the document is rebuilt with only those parts
-//! changed — every other byte round-trips. Others, like RTF, are flat text
+//! changed, every other byte round-trips. Others, like RTF, are flat text
 //! with no parts, handled as plain text handlers.
 //!
 //! Following Tika's recursive model, embedded media are not flattened
 //! into the text stream; they are exposed as their own decodable handles
-//! for the toolkit to drive through the image pipeline (lazy, opt-in —
+//! for the toolkit to drive through the image pipeline (lazy, opt-in,
 //! see the media accessor).
 //!
 //! [`extract`]: crate::handler::extract
@@ -69,7 +69,7 @@ mod opc_source {
     use crate::handler::extract::ItemEdit;
 
     /// The raw source range(s), part-tagged, that a decoded-value `local` range
-    /// in a block at `part` came from — via the block's offset map. The forward
+    /// in a block at `part` came from, via the block's offset map. The forward
     /// half; the encoder's `source_span` is a thin wrapper.
     pub(super) fn source_span(
         part: &str,
@@ -89,7 +89,7 @@ mod opc_source {
     /// part and a block; the covered raw span (first start .. last end) is
     /// reverse-mapped through that block's offset map.
     ///
-    /// Fails closed (`None`) when the references do not all name the same part —
+    /// Fails closed (`None`) when the references do not all name the same part,
     /// raw offsets are part-local, so aggregating a span across parts would be
     /// meaningless (two parts can share the same numeric offsets).
     pub(super) fn locate_source<'a>(
@@ -98,7 +98,7 @@ mod opc_source {
     ) -> Option<ItemEdit> {
         let part = source.first()?.part.as_deref()?;
         // Every reference must be in the same part before the bounds below are
-        // aggregated — offsets across parts are not comparable.
+        // aggregated, offsets across parts are not comparable.
         if source.iter().any(|s| s.part.as_deref() != Some(part)) {
             return None;
         }

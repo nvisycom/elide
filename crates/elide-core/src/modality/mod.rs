@@ -25,6 +25,8 @@
 
 use std::cmp::Ordering;
 use std::fmt;
+#[cfg(any(feature = "audio", feature = "image"))]
+use std::path::Path;
 
 #[cfg(feature = "audio")]
 pub mod audio;
@@ -62,20 +64,19 @@ pub trait ModalityData: Clone + fmt::Debug + Send + Sync + 'static {}
 #[cfg(any(feature = "audio", feature = "image"))]
 pub(crate) fn extension_or<'a>(filename: Option<&'a str>, fallback: &'a str) -> &'a str {
     filename
-        .and_then(|name| name.rsplit_once('.'))
-        .map(|(_, ext)| ext)
+        .and_then(|name| Path::new(name).extension().and_then(|e| e.to_str()))
         .unwrap_or(fallback)
 }
 
 /// The spatial relationship between two locations.
 ///
 /// The single answer a [`ModalityLocation`] computes about how it sits
-/// against another — every yes/no the deduplication pipeline branches on
+/// against another, every yes/no the deduplication pipeline branches on
 /// is read off this one value, so the intersection geometry is computed
 /// once rather than re-derived per question.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Overlap {
-    /// No shared extent — the two are separate findings.
+    /// No shared extent, the two are separate findings.
     Disjoint,
     /// `self` fully contains `other`: every point of `other` lies within
     /// `self` (a nesting, viewed from the container).
@@ -113,13 +114,13 @@ pub enum Overlap {
 /// [`compares`]: ModalityLocation::span_cmp
 /// [*positionally*]: ModalityLocation::position_cmp
 pub trait ModalityLocation: Clone + fmt::Debug + Send + Sync + 'static {
-    /// How this location sits against `other` — disjoint, one containing
+    /// How this location sits against `other`, disjoint, one containing
     /// the other, or crossing with an [`iou`] measure.
     ///
     /// The one geometry query: containment ([`Contains`]/[`ContainedBy`])
     /// models a *nesting* (a postal code inside an address) the pipeline
     /// keeps as a hierarchy, while a [`Crossing`] `iou` near `1.0` is two
-    /// recognizers claiming the same span — a true conflict — and near
+    /// recognizers claiming the same span, a true conflict, and near
     /// `0.0` an incidental touch. `a.overlap(a)` is `Contains`.
     ///
     /// [`iou`]: Overlap::Crossing::iou
@@ -144,8 +145,8 @@ pub trait ModalityLocation: Clone + fmt::Debug + Send + Sync + 'static {
     ///
     /// The bounding range/rectangle: `[min(start), max(end))` for
     /// text/audio, the union rectangle for images. Returns `None` when the
-    /// two sit in *different containers* a single span can't cross — a
-    /// different line, cell, sheet, or page — because no one location can
+    /// two sit in *different containers* a single span can't cross, a
+    /// different line, cell, sheet, or page, because no one location can
     /// cover both without spilling over unrelated content.
     ///
     /// The anonymizer uses this to collapse overlapping redactions: a set
@@ -195,23 +196,23 @@ pub trait ModalityLocation: Clone + fmt::Debug + Send + Sync + 'static {
 /// the entity and its data; the codec writes it back into the document.
 /// A near-empty marker, like the others.
 ///
-/// [`Operator`]: crate::operator::Operator
+/// [`Operator`]: crate::redaction::Operator
 pub trait ModalityReplacement: Clone + fmt::Debug + Send + Sync + 'static {}
 
-/// Enrichment an [`Enricher`] derives from a medium's payload for its
-/// recognizers to read: an image's OCR [`Layout`], an audio clip's STT
-/// [`Transcription`]. It is *context state*, produced once per payload and read
-/// by recognizers through the medium's text/location projection; it never enters
-/// an entity. A medium with no enrichment uses [`NoArtifact`].
+/// Enrichment an [`Enricher`] derives from a payload for recognizers to read.
 ///
-/// A marker over the bounds an artifact must satisfy to flow through analysis
-/// and persist beside a report. [`PartialEq`] lets a streaming analysis tell a
-/// freshly-produced artifact from the seed it was re-run with; whether a payload
-/// *was* enriched is tracked separately (as presence, not emptiness) by the
-/// recognizer context, so an empty artifact is a valid enrichment result, not a
-/// sentinel for "not enriched".
+/// An image's OCR [`Layout`], an audio clip's STT [`Transcription`]: context
+/// state produced once per payload and read through the medium's text/location
+/// projection, never entering an entity. A medium with no enrichment uses
+/// [`NoArtifact`].
 ///
-/// [`Enricher`]: crate::recognition::Enricher
+/// This trait is a marker over the bounds such an artifact must satisfy.
+/// [`PartialEq`] lets a streaming analysis tell a fresh artifact from the seed
+/// it was re-run with; whether a payload *was* enriched is tracked as presence,
+/// not emptiness, so an empty artifact is a valid result, not a "not enriched"
+/// sentinel.
+///
+/// [`Enricher`]: crate::enrichment::Enricher
 /// [`Layout`]: crate::modality::image::Layout
 /// [`Transcription`]: crate::modality::audio::Transcription
 pub trait ModalityArtifact:

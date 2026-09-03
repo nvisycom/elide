@@ -10,7 +10,7 @@
 
 mod redaction;
 
-use crate::support::pipeline::Fixture;
+use crate::support::fixture::Fixture;
 
 /// A real presentation whose slide carries PII in its `a:t` text runs.
 pub const FIXTURE: Fixture = Fixture {

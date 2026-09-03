@@ -4,23 +4,23 @@
 //! re-running against an orchestrator whose OCR backend is empty: detection
 //! survives only because the seeded artifact carried the OCR text through.
 
-#![cfg(all(feature = "engine", feature = "ocr"))]
+#![cfg(all(feature = "engine", feature = "ocr", feature = "test-utils"))]
 
 use elide::codec::FormatRegistry;
-use elide::detection::Analyzer;
-use elide::enrichment::ocr::{MockBackend, OcrEnricher};
-use elide::entity::{Entity, LabelCatalog};
+use elide::enrichment::ocr::MockBackend;
+use elide::entity::Entity;
 use elide::modality::image::{Image, ImageLocation, LayoutBlock};
 use elide::primitive::{BoundingBox, Point};
-use elide::recognition::Scope;
-use elide::recognition::pattern::PatternRecognizer;
-use elide::redaction::operators::Erase;
-use elide::redaction::{Anonymizer, Rule};
-use elide::{Directives, Orchestrator, Result};
+use elide::{Directives, Orchestrator, PartId, RegistryDocumentExt, Result};
+
+use crate::support::orchestrator::{TestOrchestrator, erase_anonymizer, ocr_analyzer};
 
 /// Any decodable PNG: the mock OCR backend ignores the pixels and returns its
 /// canned blocks, so the fixture only has to decode to an image.
 const SAMPLE: &[u8] = include_bytes!("../testdata/sample.png");
+
+/// The fixture document's name, its depth-1 part key in the report.
+const DOC: &str = "sample.png";
 
 fn loc() -> ImageLocation {
     ImageLocation::new(BoundingBox::from_origin_size(
@@ -33,21 +33,10 @@ fn loc() -> ImageLocation {
 /// An orchestrator whose image pipeline enriches with `backend` and detects
 /// email addresses in the OCR text. The anonymizer erases what it finds.
 fn orchestrator(registry: FormatRegistry, backend: MockBackend) -> Result<Orchestrator> {
-    let patterns = PatternRecognizer::builder()
-        .with_builtin_patterns()
-        .build()?;
-    let analyzer = Analyzer::new()
-        .with_enricher(
-            OcrEnricher::builder()
-                .with_name("mock-ocr")
-                .with_backend(backend)
-                .build()?,
-        )
-        .with_recognizer(patterns);
-    Ok(Orchestrator::new()
-        .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
+    Ok(TestOrchestrator::bare()
         .with_registry(registry)
-        .with_modality::<Image>(analyzer, Anonymizer::new().with(Rule::fallback(Erase))))
+        .with_image(ocr_analyzer(backend)?, erase_anonymizer())
+        .build())
 }
 
 fn image_entities(analyzed: &elide::AnalyzedDocument) -> Vec<Entity<Image>> {
@@ -60,7 +49,7 @@ fn image_entities(analyzed: &elide::AnalyzedDocument) -> Vec<Entity<Image>> {
 
 /// `re_analyze` reuses the prior OCR `Layout` instead of re-enriching: the
 /// re-run finds the same entity even though its orchestrator's OCR backend is
-/// empty, because the seeded artifact — not a fresh OCR call — supplies the text.
+/// empty, because the seeded artifact, not a fresh OCR call, supplies the text.
 #[tokio::test]
 async fn re_analyze_reuses_the_prior_ocr_artifact() -> Result<()> {
     // OCR text carrying a detectable email.
@@ -72,21 +61,24 @@ async fn re_analyze_reuses_the_prior_ocr_artifact() -> Result<()> {
         FormatRegistry::with_builtin(),
         MockBackend::with(vec![block]),
     )?;
-    let mut document = FormatRegistry::with_builtin().decode(SAMPLE, "png").await?;
+    let mut document = FormatRegistry::with_builtin().document(DOC, SAMPLE).await?;
     let analyzed = first.analyze(&mut document, &Directives::new()).await?;
 
     let found = image_entities(&analyzed);
     assert_eq!(found.len(), 1, "the email is detected in the OCR text");
     assert!(
-        analyzed.artifacts.body::<Image>().is_some(),
-        "analyze surfaces the OCR Layout as the body artifact",
+        analyzed
+            .artifacts
+            .part::<Image>(&PartId::from(DOC))
+            .is_some(),
+        "analyze surfaces the OCR Layout as the document's part artifact",
     );
 
     // Second pass: re-run against an orchestrator whose OCR backend is EMPTY.
     // If re_analyze re-enriched, it would OCR nothing and detect nothing; it
     // instead seeds the recognition with the persisted Layout.
     let second = orchestrator(FormatRegistry::with_builtin(), MockBackend::new())?;
-    let mut document = FormatRegistry::with_builtin().decode(SAMPLE, "png").await?;
+    let mut document = FormatRegistry::with_builtin().document(DOC, SAMPLE).await?;
     let reanalyzed = second
         .re_analyze(&mut document, &analyzed.artifacts, &Directives::new())
         .await?;
@@ -104,12 +96,12 @@ async fn re_analyze_reuses_the_prior_ocr_artifact() -> Result<()> {
     Ok(())
 }
 
-/// A control: without the seed, an empty OCR backend genuinely finds nothing —
+/// A control: without the seed, an empty OCR backend genuinely finds nothing,
 /// so the reuse in the test above is what carries detection, not a stray match.
 #[tokio::test]
 async fn an_empty_backend_without_a_seed_finds_nothing() -> Result<()> {
     let orchestrator = orchestrator(FormatRegistry::with_builtin(), MockBackend::new())?;
-    let mut document = FormatRegistry::with_builtin().decode(SAMPLE, "png").await?;
+    let mut document = FormatRegistry::with_builtin().document(DOC, SAMPLE).await?;
     let analyzed = orchestrator
         .analyze(&mut document, &Directives::new())
         .await?;
@@ -122,7 +114,7 @@ async fn an_empty_backend_without_a_seed_finds_nothing() -> Result<()> {
 
 /// The persist path: serialize `analyze`'s artifacts, ship them across a review
 /// gap, then `Orchestrator::deserialize_artifacts` them back and feed the
-/// rebuilt set to `re_analyze` — the OCR text survives the wire, so the re-run
+/// rebuilt set to `re_analyze`, the OCR text survives the wire, so the re-run
 /// reuses it against an empty OCR backend rather than re-OCR'ing.
 #[tokio::test]
 async fn artifacts_round_trip_through_deserialize_for_a_re_run() -> Result<()> {
@@ -133,7 +125,7 @@ async fn artifacts_round_trip_through_deserialize_for_a_re_run() -> Result<()> {
         FormatRegistry::with_builtin(),
         MockBackend::with(vec![block]),
     )?;
-    let mut document = FormatRegistry::with_builtin().decode(SAMPLE, "png").await?;
+    let mut document = FormatRegistry::with_builtin().document(DOC, SAMPLE).await?;
     let analyzed = first.analyze(&mut document, &Directives::new()).await?;
     assert_eq!(image_entities(&analyzed).len(), 1);
     let json = serde_json::to_string(&analyzed.artifacts).expect("artifacts serialize");
@@ -144,7 +136,7 @@ async fn artifacts_round_trip_through_deserialize_for_a_re_run() -> Result<()> {
     let second = orchestrator(FormatRegistry::with_builtin(), MockBackend::new())?;
     let mut de = serde_json::Deserializer::from_str(&json);
     let restored = second.deserialize_artifacts(&mut de)?;
-    let mut document = FormatRegistry::with_builtin().decode(SAMPLE, "png").await?;
+    let mut document = FormatRegistry::with_builtin().document(DOC, SAMPLE).await?;
     let reanalyzed = second
         .re_analyze(&mut document, &restored, &Directives::new())
         .await?;

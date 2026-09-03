@@ -1,5 +1,5 @@
 //! End-to-end shape test: two recognizers find the same entity, a
-//! fusion combines them into one audited entity — exercising the
+//! fusion combines them into one audited entity, exercising the
 //! modality-generic model and the audit DAG the way the toolkit
 //! fusion step would.
 
@@ -23,7 +23,7 @@ fn recognized(
 }
 
 /// A trivial "highest confidence wins" fusion: absorb every other entity's
-/// trail, then record a deduplication event joining both trails' heads — what
+/// trail, then record a deduplication event joining both trails' heads, what
 /// the toolkit fusion step does, assembled here by hand from core parts.
 fn fuse_max_confidence(mut entities: Vec<Entity<Text>>) -> Entity<Text> {
     entities.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
@@ -241,7 +241,7 @@ fn recognizer_context_scopes_by_language_and_country() {
     // Language scope: a matching or empty scope applies, a mismatch does not.
     // The only language is the asserted en-US, so the asserted-OR-detected
     // `applies_to_language` and the asserted-only `applies_to_asserted_language`
-    // agree here — each rule scope is checked through both.
+    // agree here, each rule scope is checked through both.
     let en_scope = [en];
     let fr_scope = [fr];
     assert!(ctx.applies_to_language(&[]));
@@ -265,14 +265,14 @@ fn a_detected_language_never_filters() {
     ctx.detect_language(Language::detected(es).with_confidence(Confidence::clamped(0.9)));
 
     // A German-scoped rule still runs: detection is unreliable and must never
-    // suppress a match — only a caller assertion filters by language.
+    // suppress a match, only a caller assertion filters by language.
     let de_scope = [de];
     assert!(ctx.applies_to_asserted_language(&de_scope));
     // The old asserted-OR-detected filter WOULD suppress it (detected es ≠ de).
     assert!(!ctx.applies_to_language(&de_scope));
 
-    // `asserted_languages` excludes the detected one — the caller asserted
-    // nothing — so per-language context selection stays permissive rather than
+    // `asserted_languages` excludes the detected one, the caller asserted
+    // nothing, so per-language context selection stays permissive rather than
     // keying on the (unreliable) detected `es`.
     assert!(ctx.asserted_languages().is_empty());
     assert_eq!(
@@ -319,7 +319,7 @@ fn recognizer_context_carries_annotations() {
 
 #[test]
 fn operator_trait_shape() {
-    use elide_core::operator::{LeakProfile, Operator, OperatorId};
+    use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 
     /// A trivial `[LABEL]`-style replace operator, to exercise the
     /// trait shape and the pure `Replacement` model.

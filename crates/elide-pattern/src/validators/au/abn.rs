@@ -35,7 +35,7 @@ mod tests {
 
     #[test]
     fn accepts_canonical_abn() {
-        // 51 824 753 556 — Australian Taxation Office sample.
+        // 51 824 753 556, Australian Taxation Office sample.
         assert!(abn("51824753556"));
     }
 
@@ -47,7 +47,7 @@ mod tests {
 
     #[test]
     fn accepts_second_vector() {
-        // 53 004 085 616 — Telstra Corporation, public ABN.
+        // 53 004 085 616, Telstra Corporation, public ABN.
         assert!(abn("53004085616"));
     }
 

@@ -11,11 +11,11 @@ use super::Modality;
 /// for a nearby value.
 ///
 /// Out-of-band by nature: a hint is *not* a sub-span of the value it
-/// informs — it lives elsewhere in the source (a table's column header, a
+/// informs; it lives elsewhere in the source (a table's column header, a
 /// JSON object key, a log field name). So `location` points at where the
 /// hint text actually sits, and `data` is the hint text itself. Carrying
 /// the location (rather than a bare string) lets a confidence boost record
-/// *which* hint lifted a score and *where* it came from — provenance a
+/// *which* hint lifted a score and *where* it came from, provenance a
 /// review consumer can resolve back to the document.
 ///
 /// Mirrors [`Entity`]'s `location` + `data` shape, so the same

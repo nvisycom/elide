@@ -45,7 +45,7 @@ async fn builtin_contact() {
     let (text, entities) = scan(include_str!("../testdata/inputs/es/contact.txt")).await;
     assert_match(&text, &entities, builtins::POSTAL_CODE.to_ref(), "28013");
     // English-language nationality dictionary stays silent on a
-    // Spanish document — assert it didn't fire.
+    // Spanish document, assert it didn't fire.
     assert!(
         !entities
             .iter()

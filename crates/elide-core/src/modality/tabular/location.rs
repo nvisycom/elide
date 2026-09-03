@@ -149,7 +149,7 @@ impl ModalityLocation for TabularLocation {
                 }
             }
             // `self` is the whole cell: it contains the other (a sub-range,
-            // or — reflexively — another whole cell).
+            // or, reflexively, another whole cell).
             (None, _, _, _) | (_, None, _, _) => Overlap::Contains,
             // `self` is a sub-range and `other` is the whole cell.
             _ => Overlap::ContainedBy,

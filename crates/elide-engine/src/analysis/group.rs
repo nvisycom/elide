@@ -15,7 +15,7 @@ use std::any::Any;
 use elide_core::entity::Entity;
 use elide_core::modality::{Modality, ModalityArtifact};
 
-/// A type-erased, downcastable group of entities — a `Vec<Entity<M>>` behind
+/// A type-erased, downcastable group of entities, a `Vec<Entity<M>>` behind
 /// one type.
 ///
 /// A document's body and its container parts span several modalities, so the
@@ -27,7 +27,7 @@ pub(crate) trait EntityGroup: Send + Sync + erased_serde::Serialize {
     fn as_any(&self) -> &dyn Any;
     /// The group as `&mut dyn Any`, to `downcast_mut` to a `Vec<Entity<M>>`.
     fn as_any_mut(&mut self) -> &mut dyn Any;
-    /// The stable name of this group's modality ([`Modality::NAME`]) — the tag
+    /// The stable name of this group's modality ([`Modality::NAME`]), the tag
     /// the serialized report carries so deserialization routes each group back
     /// to the right modality's parser.
     ///
@@ -52,7 +52,7 @@ where
     }
 }
 
-/// A type-erased, downcastable enrichment artifact ([`M::Artifact`]) — the
+/// A type-erased, downcastable enrichment artifact ([`M::Artifact`]), the
 /// artifact face of the erased storage, mirroring [`EntityGroup`].
 ///
 /// The [`ArtifactSet`] stores one beside each group's entities, so an image's

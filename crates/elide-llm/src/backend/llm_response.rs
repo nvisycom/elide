@@ -3,7 +3,7 @@
 //! [`LlmBackend`]: super::LlmBackend
 
 #[cfg(feature = "usage")]
-use elide_core::recognition::TokenCounts;
+use elide_core::primitive::TokenCounts;
 
 use crate::candidates::Candidates;
 use crate::modality::LlmModality;
@@ -21,7 +21,7 @@ pub struct LlmResponse<M: LlmModality> {
     /// The structured candidate batch the model produced.
     pub candidates: Candidates<M::Item>,
     /// Tokens the call spent, when the backend can surface them from the
-    /// provider. [`TokenCounts::default`] (all `None`) when it cannot — some
+    /// provider. [`TokenCounts::default`] (all `None`) when it cannot, some
     /// providers omit usage, and the rig extractor path may not expose it.
     #[cfg(feature = "usage")]
     pub tokens: TokenCounts,

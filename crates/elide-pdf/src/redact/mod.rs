@@ -129,8 +129,8 @@ impl TextRun<'_> {
                     // thousandths of an em, negated). A large-negative adjustment is
                     // a word gap and reads as a space. The exact threshold is not
                     // font-metric-precise, but it deliberately mirrors lopdf's own
-                    // text extraction so the page text `page_texts` returns — the
-                    // string a caller runs detection over — matches character for
+                    // text extraction so the page text `page_texts` returns, the
+                    // string a caller runs detection over, matches character for
                     // character; the `per_char` glyph map is built in the same pass
                     // with the same rule, so a detected span stays aligned with the
                     // glyphs that drew it. The array is then followed by a trailing
@@ -188,7 +188,7 @@ impl Pdf {
     /// - [`ErrorKind::InvalidDocument`](crate::ErrorKind::InvalidDocument) if a
     ///   page's content or fonts cannot be read;
     /// - [`ErrorKind::UnsafeRewrite`](crate::ErrorKind::UnsafeRewrite) if a page
-    ///   draws text with a font whose encoding cannot be decoded — that text
+    ///   draws text with a font whose encoding cannot be decoded, that text
     ///   cannot be mapped to glyphs for redaction, so it is surfaced as an error
     ///   rather than silently omitted.
     pub fn page_texts(&self) -> Result<Vec<(u32, String)>> {
@@ -213,7 +213,7 @@ impl Pdf {
     /// - [`ErrorKind::InvalidDocument`](crate::ErrorKind::InvalidDocument) if the
     ///   document cannot be read or re-saved;
     /// - [`ErrorKind::UnsafeRewrite`](crate::ErrorKind::UnsafeRewrite) if a page
-    ///   draws text with an undecodable font (see [`page_texts`](Pdf::page_texts)) —
+    ///   draws text with an undecodable font (see [`page_texts`](Pdf::page_texts)),
     ///   redaction is refused rather than silently leaving that text in place.
     pub fn redact_text(&self, detections: &[Detection]) -> Result<Vec<u8>> {
         let pages = self.page_texts_inner()?;
@@ -262,8 +262,8 @@ impl Pdf {
     }
 
     /// Build the per-page text and per-character glyph map by walking each
-    /// page's content in operator order — the same order lopdf's text
-    /// extraction uses — so a character offset maps to the glyph that drew it.
+    /// page's content in operator order, the same order lopdf's text
+    /// extraction uses, so a character offset maps to the glyph that drew it.
     fn page_texts_inner(&self) -> Result<Vec<PageText>> {
         let pages = self.doc.get_pages();
         let mut out = Vec::with_capacity(pages.len());
@@ -314,7 +314,7 @@ impl Pdf {
                             run.show_text(enc, &op.operands, op_idx)?;
                         }
                         // Text drawn under a font we could not decode or resolve:
-                        // fail closed — its glyphs cannot be located for
+                        // fail closed, its glyphs cannot be located for
                         // deletion, so redacting this document would silently
                         // leave them in.
                         Some(None) => {
@@ -361,7 +361,7 @@ fn apply_deletions(content: &mut Content, to_delete: &Deletions) {
             // The same glyph range can be collected more than once (a ligature
             // whose one code spans several detected characters, or overlapping
             // detections). Merge overlapping/adjacent ranges so each byte span
-            // is drained exactly once — draining a span twice would corrupt the
+            // is drained exactly once, draining a span twice would corrupt the
             // string by consuming later, still-valid bytes.
             let mut merged: Vec<(usize, usize)> = ranges.clone();
             merged.sort_unstable();

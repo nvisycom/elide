@@ -1,7 +1,7 @@
 //! [`IgnoreLabels`]: a [`NerBackend`] decorator that drops spans whose
 //! label is in a configured set.
 //!
-//! Wraps any inner backend and removes every span whose label is ignored —
+//! Wraps any inner backend and removes every span whose label is ignored,
 //! for filtering out labels a model emits but the caller doesn't care
 //! about (`O` from BIO tagging, `MISC` from generic schemas, …):
 //!

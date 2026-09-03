@@ -9,7 +9,7 @@ use super::hash::AuditHasher;
 /// Author-supplied rationale for a redaction: *under what authority* it was made.
 ///
 /// Where the matched selection rule answers *which rule fired*, an
-/// `Attribution` answers *why the policy demanded it* — a compliance clause, an
+/// `Attribution` answers *why the policy demanded it*, a compliance clause, an
 /// internal policy, a data-handling rule. A policy author attaches it to a
 /// selection rule (`Rule::because` in `elide-redaction`); the anonymizer records
 /// it on the entity's [`Redaction`] event so an audit can trace a change back to
@@ -264,7 +264,7 @@ mod tests {
     fn the_wire_shape_is_flat_and_internally_tagged() {
         // Newtype variants wrapping structs must still serialize flat (the
         // struct's fields hoisted alongside the `kind` tag), not nested under a
-        // variant key — the wire contract other layers deserialize.
+        // variant key, the wire contract other layers deserialize.
         let freeform: Attribution = Attribution::freeform("gdpr-art-17")
             .with_description("right to erasure")
             .into();
