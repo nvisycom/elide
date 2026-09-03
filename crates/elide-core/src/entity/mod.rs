@@ -8,6 +8,7 @@
 
 pub mod audit;
 mod builder;
+mod custom;
 mod label;
 mod reference;
 
@@ -19,6 +20,7 @@ use uuid::Uuid;
 
 use self::audit::{AuditEvent, AuditLog};
 pub use self::builder::EntityBuilder;
+pub use self::custom::CustomEntity;
 pub use self::label::{Category, Label, LabelCatalog, LabelLocale, LabelRef, builtins};
 pub use self::reference::{EntityCoRef, EntityRef};
 use crate::modality::Modality;
@@ -136,25 +138,35 @@ impl<M: Modality> Entity<M> {
         }
     }
 
-    /// A user-asserted ("custom") entity: one a reviewer marks between detection
-    /// and redaction, not produced by a recognizer.
+    /// Begin a user-asserted ("custom") entity: one a reviewer marks between
+    /// detection and redaction, not produced by a recognizer.
+    ///
+    /// Returns a [`CustomEntity`] builder, so the reviewer's actor
+    /// ([`by`](CustomEntity::by)) and rationale ([`because`](CustomEntity::because))
+    /// land on the entity's single [`Manual`] audit event, rather than being
+    /// dropped or forcing a second event to attach them.
+    /// [`build`](CustomEntity::build) it (or pass it where an [`Entity`] is
+    /// wanted, via the [`From`] impl) to finish: a fresh time-ordered [`id`],
+    /// [`confidence`] [`MAX`](Confidence::MAX) (a human assertion is certain), and
+    /// the audit event so its human origin is auditable and it is never mistaken
+    /// for an automatic detection.
     ///
     /// Modality-agnostic: `location` is `M::Location`, so this builds a custom
     /// text span, image box, audio span, or any custom modality's own coordinate
-    /// the same way. Mints a fresh time-ordered [`id`], sets [`confidence`] to
-    /// [`MAX`](Confidence::MAX) (a human assertion is certain), and stamps a
-    /// single [`Manual`] audit event ([`ManualIntent::Flag`]) so its human origin
-    /// is auditable and it is never mistaken for an automatic detection. No
-    /// recognizer ceremony, and nothing can be missing, so it returns an
-    /// [`Entity`] directly rather than a builder.
+    /// the same way.
+    ///
+    /// ```
+    /// # use elide_core::entity::{Entity, LabelRef};
+    /// # use elide_core::modality::text::{Text, TextLocation};
+    /// let custom: Entity<Text> =
+    ///     Entity::custom(LabelRef::new("US_SSN"), TextLocation::new(0, 9)).build();
+    /// ```
     ///
     /// [`id`]: Entity::id
     /// [`confidence`]: Entity::confidence
     /// [`Manual`]: crate::entity::audit::AuditKind::Manual
-    /// [`ManualIntent::Flag`]: crate::entity::audit::ManualIntent::Flag
-    pub fn custom(label: impl Into<LabelRef>, location: M::Location) -> Self {
-        let event = AuditEvent::manual_flag(location.clone(), Confidence::MAX);
-        Self::new(label.into(), location, AuditLog::new(event))
+    pub fn custom(label: impl Into<LabelRef>, location: M::Location) -> CustomEntity<M> {
+        CustomEntity::new(label, location)
     }
 
     /// Start a chainable [`EntityBuilder`].
@@ -311,7 +323,7 @@ mod tests {
     #[test]
     fn custom_builds_a_manual_entity_at_max_confidence() {
         let loc = TextLocation::new(3, 12);
-        let entity = Entity::<Text>::custom("US_SSN", loc.clone());
+        let entity = Entity::<Text>::custom("US_SSN", loc.clone()).build();
 
         assert_eq!(entity.label, LabelRef::new("US_SSN"));
         assert_eq!(entity.location, loc);
@@ -331,6 +343,30 @@ mod tests {
         assert!(entity.audit.verify().is_ok(), "the trail verifies");
         // Not a recognizer detection: no Pattern/model birth event.
         assert!(!entity.is_suppressed());
+    }
+
+    #[test]
+    fn custom_carries_actor_and_attribution_on_one_event() {
+        let loc = TextLocation::new(3, 12);
+        let entity = Entity::<Text>::custom("US_SSN", loc)
+            .by("reviewer-7")
+            .because(Attribution::freeform("gdpr-art-17"))
+            .build();
+
+        // Actor and rationale land on the single Manual(Flag) event, not a second
+        // one stacked to attach them after the fact.
+        let events = entity.audit.events();
+        assert_eq!(events.len(), 1, "one event carries both");
+        assert_eq!(events[0].source, "reviewer-7");
+        let super::audit::AuditKind::Manual(manual) = &events[0].kind else {
+            panic!("custom stamps a Manual event");
+        };
+        assert_eq!(manual.intent, ManualIntent::Flag);
+        assert_eq!(
+            manual.attribution,
+            Some(Attribution::freeform("gdpr-art-17").into()),
+        );
+        assert!(entity.audit.verify().is_ok(), "the trail verifies");
     }
 
     #[test]
