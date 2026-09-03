@@ -1,7 +1,4 @@
-//! Free-form device/credential generators: passwords, API tokens,
-//! device UUIDs. Structured kinds (IpAddress, MacAddress)
-//! pattern-preserve their original and don't go through this
-//! module.
+//! Credentials category: passwords and authentication tokens.
 
 use fake::Fake;
 use fake::faker::internet::raw as internet;
@@ -9,7 +6,6 @@ use fake::locales::{
     AR_SA, CY_GB, DE_DE, EN, FA_IR, FR_FR, IT_IT, JA_JP, NL_NL, PT_BR, PT_PT, TR_TR, ZH_CN, ZH_TW,
 };
 use fake::rand::RngExt;
-use uuid::Uuid;
 
 use crate::locale::Locale;
 
@@ -46,16 +42,6 @@ pub(super) fn api_key<R: RngExt + ?Sized>(rng: &mut R) -> String {
 /// so the two are visually distinguishable.
 pub(super) fn auth_token<R: RngExt + ?Sized>(rng: &mut R) -> String {
     hex_chars(48, rng)
-}
-
-/// UUIDv4 in canonical hex-with-hyphens form.
-pub(super) fn device_id<R: RngExt + ?Sized>(rng: &mut R) -> String {
-    let mut bytes = [0u8; 16];
-    for b in &mut bytes {
-        let n: u32 = (0..256u32).fake_with_rng(rng);
-        *b = n as u8;
-    }
-    Uuid::from_bytes(bytes).to_string()
 }
 
 fn hex_chars<R: RngExt + ?Sized>(len: usize, rng: &mut R) -> String {

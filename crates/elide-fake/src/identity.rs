@@ -16,7 +16,7 @@ use elide_core::modality::Modality;
 /// coreference id (shared across mentions of the same
 /// real-world entity) and falls back to the entity's UUID bytes
 /// when the recognizer did not resolve a cluster.
-pub(super) enum Identity<'a> {
+pub(crate) enum Identity<'a> {
     /// Coreference cluster id, every mention of the same
     /// real-world entity shares this.
     Coref(&'a str),

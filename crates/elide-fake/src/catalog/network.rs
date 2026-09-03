@@ -1,27 +1,17 @@
-//! Free-form contact generators: street address composition, URL
-//! synthesis. The structured kinds (EmailAddress, PhoneNumber,
-//! PostalCode, Coordinates, LicensePlate) pattern-preserve their
-//! original and don't go through this module.
+//! Network category: usernames, URLs, and device identifiers. The structured
+//! kinds (IP address, MAC address) pattern-preserve their original and don't go
+//! through this module.
 
-use fake::faker::address::raw as address;
+use fake::Fake;
 use fake::faker::internet::raw as internet;
 use fake::rand::RngExt;
+use uuid::Builder;
 
 use super::dispatch::fan_locale;
 use crate::locale::Locale;
 
-pub(super) fn street_address<R: RngExt + ?Sized>(locale: Locale, rng: &mut R) -> String {
-    let building: String = fan_locale!(locale, rng, address::BuildingNumber);
-    let street: String = fan_locale!(locale, rng, address::StreetName);
-    let city: String = fan_locale!(locale, rng, address::CityName);
-    match locale {
-        // CJK addresses go big-to-small (prefecture → ward → block →
-        // building) and don't concatenate street + building the way
-        // Latin-script ones do. This is "less wrong than English
-        // ordering," not a faithful rendering.
-        Locale::JaJp | Locale::ZhCn | Locale::ZhTw => format!("{city}{street}{building}"),
-        _ => format!("{building} {street}, {city}"),
-    }
+pub(super) fn username<R: RngExt + ?Sized>(locale: Locale, rng: &mut R) -> String {
+    fan_locale!(locale, rng, internet::Username)
 }
 
 pub(super) fn url<R: RngExt + ?Sized>(locale: Locale, rng: &mut R) -> String {
@@ -34,6 +24,19 @@ pub(super) fn url<R: RngExt + ?Sized>(locale: Locale, rng: &mut R) -> String {
         host.as_str()
     };
     format!("https://www.{host}.{domain}")
+}
+
+/// UUIDv4 in canonical hex-with-hyphens form.
+pub(super) fn device_id<R: RngExt + ?Sized>(rng: &mut R) -> String {
+    let mut bytes = [0u8; 16];
+    for b in &mut bytes {
+        let n: u32 = (0..256u32).fake_with_rng(rng);
+        *b = n as u8;
+    }
+    // from_random_bytes stamps the RFC 4122 version (v4) and variant bits, so the
+    // result is a valid UUIDv4; from_bytes would keep the raw bytes and could
+    // fail downstream validation.
+    Builder::from_random_bytes(bytes).into_uuid().to_string()
 }
 
 /// Strip characters that aren't valid in a DNS label
@@ -51,7 +54,21 @@ fn sanitise_hostname_label(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use fake::rand::SeedableRng;
+    use fake::rand::rngs::SmallRng;
+    use uuid::Uuid;
+
     use super::*;
+
+    #[test]
+    fn device_id_is_a_valid_uuid_v4() {
+        for seed in 0..50u64 {
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let id = device_id(&mut rng);
+            let uuid = Uuid::parse_str(&id).expect("parses as a UUID");
+            assert_eq!(uuid.get_version_num(), 4, "seed {seed}: not a v4 UUID");
+        }
+    }
 
     #[test]
     fn strips_non_dns_characters() {
