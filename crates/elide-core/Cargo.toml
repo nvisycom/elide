@@ -64,7 +64,6 @@ test-util = []
 [dependencies]
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }
-schemars = { workspace = true, features = [], optional = true }
 
 # Derive macros & error handling
 derive_builder = { workspace = true, features = [] }
@@ -81,6 +80,9 @@ bytes = { workspace = true, features = [], optional = true }
 
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
+
+# Templating & schema
+schemars = { workspace = true, features = [], optional = true }
 
 [dev-dependencies]
 # (De)serialization

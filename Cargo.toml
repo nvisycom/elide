@@ -147,6 +147,7 @@ rig = { version = "0.42", default-features = false, features = ["agent"] }
 # Templating & schema
 minijinja = { version = "2.5", features = [] }
 schemars = { version = "1.0", features = ["uuid1", "bytes1"] }
+jsonschema = { version = "0.52.0", default-features = false }
 
 # HTTP client & middlewares
 reqwest-middleware = { version = "0.5", features = ["json", "multipart"] }

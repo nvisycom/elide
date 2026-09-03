@@ -163,10 +163,11 @@ symphonia = { workspace = true, features = [], optional = true }
 mp3lame-encoder = { workspace = true, features = [], optional = true }
 
 [dev-dependencies]
+# Internal crates
+elide-office = { workspace = true, features = ["test-util"] }
+
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["macros", "rt"] }
-# Build minimal PDF fixtures for the PDF handler's container tests.
+
+# Markup parsing
 lopdf = { workspace = true, default-features = false }
-# Pack/read OPC package parts for the DOCX/XLSX handler tests' fixtures,
-# through the office package engine these handlers are built on.
-elide-office = { workspace = true, features = ["test-util"] }

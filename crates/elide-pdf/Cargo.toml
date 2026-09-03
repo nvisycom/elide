@@ -54,36 +54,27 @@ serde = { workspace = true, features = ["derive"], optional = true }
 thiserror = { workspace = true, features = [] }
 
 # Primitive datatypes
-# Inline-or-shared strings, so extracted page text and a replacement's find /
-# replace clone cheaply.
 hipstr = { workspace = true, features = [] }
-# Ref-counted byte buffers, so an extracted image's bytes clone without copying.
 bytes = { workspace = true, features = [] }
 
-# Async runtime & parallelism
-# The dedicated single-thread PDFium render pool (feature `render`).
-rayon = { workspace = true, features = [], optional = true }
-
-# Image processing
-# PNG-encode rendered pages (feature `render`).
-image = { workspace = true, features = [], optional = true }
-
-# Cryptography
-# SHA-256 binding of the source, page pixels, and raster output (feature
-# `render`), so a raster redaction's provenance is verifiable.
+# Encoding & hashing
 sha2 = { workspace = true, features = [], optional = true }
 
-# Document parsing
-# Pure-Rust PDF parsing; default-features off drops the chrono/jiff/rayon/time
-# extras this crate does not need.
+# Async runtime & parallelism
+rayon = { workspace = true, features = [], optional = true }
+
+# Markup parsing
 lopdf = { workspace = true, default-features = false }
 
+# Image processing
+image = { workspace = true, features = [], optional = true }
+
 # Rendering
-# The native PDFium binding (feature `render`).
 pdfium-render = { workspace = true, features = [], optional = true }
 
 [dev-dependencies]
-# Build minimal PDF fixtures in tests.
+# Markup parsing
 lopdf = { workspace = true, default-features = false }
-# Encode redacted image fixtures for the `image` feature's tests.
+
+# Image processing
 image = { workspace = true, features = ["png"] }

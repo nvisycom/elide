@@ -38,15 +38,15 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Internal crates
 elide-core = { workspace = true, features = ["audio"] }
 
+# Derive macros & error handling
+derive_builder = { workspace = true, features = [] }
+
 # Primitive datatypes
 hipstr = { workspace = true, features = [] }
 uuid = { workspace = true, features = ["v7"] }
 
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
-
-# Derive macros & error handling
-derive_builder = { workspace = true, features = [] }
 
 [dev-dependencies]
 # Async runtime & parallelism

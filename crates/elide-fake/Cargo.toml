@@ -34,8 +34,7 @@ fake = { workspace = true, features = [] }
 async-trait = { workspace = true, features = [] }
 
 [dev-dependencies]
-# Internal crates — the facade, for the shipped operators the tests use as
-# fallbacks. Default features off to avoid pulling the recognizer backends.
+# Internal crates
 elide = { path = "../elide", default-features = false, features = ["tabular"] }
 
 # Async runtime & parallelism

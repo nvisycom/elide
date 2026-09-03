@@ -61,8 +61,6 @@ elide-codec = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = [] }
 erased-serde = { workspace = true, features = [] }
 serde-value = { workspace = true, features = [] }
-# The hand-written `Report` JSON schema; both gated on the `schema` feature.
-schemars = { workspace = true, features = [], optional = true }
 serde_json = { workspace = true, features = [], optional = true }
 
 # Primitive datatypes
@@ -70,10 +68,16 @@ bytes = { workspace = true, features = [] }
 smallvec = { workspace = true, features = [] }
 uuid = { workspace = true, features = [] }
 
+# Templating & schema
+schemars = { workspace = true, features = [], optional = true }
+
 [dev-dependencies]
-jsonschema = { version = "0.52.0", default-features = false }
 # (De)serialization
 serde_json = { workspace = true, features = [] }
-# Async runtime + trait-method desugaring for the mock codec in the fold test.
+
+# Async runtime & parallelism
 tokio = { workspace = true, features = ["macros", "rt"] }
-async-trait = { workspace = true }
+async-trait = { workspace = true, features = [] }
+
+# Templating & schema
+jsonschema = { workspace = true, features = [] }
