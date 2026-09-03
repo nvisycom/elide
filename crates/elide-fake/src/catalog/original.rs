@@ -53,10 +53,21 @@ impl<'a> Original<'a> {
     /// so a magnitude-preserving generator can emit a zero whole part rather than
     /// inflating it to a nonzero digit.
     pub(crate) fn whole_is_zero(&self) -> bool {
-        let whole = strip_fraction(self.0);
-        let mut digits = whole.chars().filter(char::is_ascii_digit).peekable();
-        digits.peek().is_some() && digits.all(|c| c == '0')
+        all_zero(strip_fraction(self.0))
     }
+
+    /// Whether the *entire* numeric value is zero (`"0"`, `"0.00"`, `"$0.00"`),
+    /// both the whole part and any fraction, so a generator can keep it exactly
+    /// zero rather than a nonzero sub-unit value.
+    pub(crate) fn is_zero(&self) -> bool {
+        all_zero(self.0)
+    }
+}
+
+/// Whether `s` has at least one digit and all its digits are `0`.
+fn all_zero(s: &str) -> bool {
+    let mut digits = s.chars().filter(char::is_ascii_digit).peekable();
+    digits.peek().is_some() && digits.all(|c| c == '0')
 }
 
 /// Drop a trailing fractional group: the run of digits after the final `.` or
@@ -113,5 +124,17 @@ mod tests {
         assert!(!Original::new("100").whole_is_zero());
         // No digits: not a zero whole part.
         assert!(!Original::new("n/a").whole_is_zero());
+    }
+
+    #[test]
+    fn is_zero_requires_the_whole_value_to_be_zero() {
+        // Entirely zero.
+        assert!(Original::new("0").is_zero());
+        assert!(Original::new("0.00").is_zero());
+        assert!(Original::new("$0.00").is_zero());
+        // A nonzero fraction is not zero, even with a zero whole part.
+        assert!(!Original::new("0.50").is_zero());
+        assert!(!Original::new("100").is_zero());
+        assert!(!Original::new("n/a").is_zero());
     }
 }

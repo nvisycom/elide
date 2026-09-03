@@ -44,9 +44,12 @@ pub(super) fn monetary_amount<R: RngExt + ?Sized>(
         let high = low * 10;
         (low..high).fake_with_rng(rng)
     };
-    // A zero-whole amount keeps a nonzero fraction so it stays a plausible
-    // sub-unit value (0.50 -> 0.NN, never 0.00); otherwise any fraction is fine.
-    let frac: u8 = if whole == 0 {
+    // An all-zero amount ("$0.00") stays exactly 0.00; a nonzero sub-unit one
+    // ("0.50") keeps a nonzero fraction so it stays a plausible small amount
+    // (0.NN, never 0.00); any other amount takes any fraction.
+    let frac: u8 = if original.is_zero() {
+        0
+    } else if whole == 0 {
         (1..100u8).fake_with_rng(rng)
     } else {
         (0..100u8).fake_with_rng(rng)
@@ -102,6 +105,18 @@ mod tests {
             let out = monetary_amount(&Original::new("0.50"), Locale::En, &mut rng);
             assert_eq!(whole_part(&out), "0", "{out} inflated the whole part");
             assert_ne!(out, "0.00", "{out} zeroed a sub-unit amount");
+        }
+    }
+
+    #[test]
+    fn an_all_zero_amount_stays_zero() {
+        // "$0.00" is genuinely zero and must stay 0.00, not become 0.NN.
+        for original in ["0", "0.00", "$0.00"] {
+            for seed in 0..50u64 {
+                let mut rng = SmallRng::seed_from_u64(seed);
+                let out = monetary_amount(&Original::new(original), Locale::En, &mut rng);
+                assert_eq!(out, "0.00", "{original} -> {out} was not kept zero");
+            }
         }
     }
 
