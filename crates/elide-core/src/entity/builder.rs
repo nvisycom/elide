@@ -132,23 +132,32 @@ impl<M: Modality> EntityBuilder<M> {
     /// Assemble the entity.
     ///
     /// Returns [`None`] when `label` or `location` was not set, the two facts a
-    /// builder cannot default. `confidence` defaults to
-    /// [`MAX`](Confidence::MAX) when unset (the shape of a user-asserted entity),
-    /// so a manual add need not supply one; a recognizer sets it explicitly. The
-    /// id defaults to a fresh UUIDv7; the audit trail records the accumulated
-    /// events in order, each linked to the one before it, and is empty when none
-    /// were added (as for a manual entity the include path stamps a Manual event
-    /// onto).
+    /// builder cannot default. `confidence`, when not set explicitly, is taken
+    /// from the audit trail's last event, falling back to [`MAX`](Confidence::MAX)
+    /// when there are no events (the shape of a user-asserted entity); so a manual
+    /// add need not supply one, and an audited entity carries its true confidence
+    /// rather than a blanket MAX. The id defaults to a fresh UUIDv7; the audit
+    /// trail records the accumulated events in order, each linked to the one
+    /// before it, and is empty when none were added (as for a manual entity the
+    /// include path stamps a Manual event onto).
     pub fn build(self) -> Option<Entity<M>> {
         let mut audit = AuditLog::default();
         for event in self.events {
             audit.record(event);
         }
+        // An explicit builder confidence wins; else derive it from the audit
+        // trail (reconciliation compares `Entity::confidence`, so an audited
+        // entity must carry its last-event confidence, not a blanket MAX); a
+        // bare manual add with no events defaults to MAX.
+        let confidence = self
+            .confidence
+            .or_else(|| audit.final_confidence())
+            .unwrap_or(Confidence::MAX);
         Some(Entity {
             id: self.id.unwrap_or_else(Uuid::now_v7),
             label: self.label?,
             location: self.location?,
-            confidence: self.confidence.unwrap_or(Confidence::MAX),
+            confidence,
             coref: self.coref,
             language: self.language,
             recognized_range: self.recognized_range,
@@ -180,6 +189,38 @@ mod tests {
             .expect("label and location set");
         assert_eq!(entity.confidence, Confidence::MAX);
         assert!(entity.audit.events().is_empty());
+    }
+
+    #[test]
+    fn build_derives_confidence_from_the_audit_trail() {
+        // An audited entity with no explicit builder confidence: the confidence
+        // comes from the last event, not a blanket MAX, so reconciliation (which
+        // compares Entity::confidence) sees the true value.
+        let audited = Confidence::new(0.4).expect("valid confidence");
+        let loc = TextLocation::new(0, 9);
+        let entity: Entity<Text> = EntityBuilder::new()
+            .with_label(LabelRef::new("US_SSN"))
+            .with_location(loc.clone())
+            .with_event(AuditEvent::manual_flag(loc, audited))
+            .build()
+            .expect("label and location set");
+        assert_eq!(entity.confidence, audited);
+    }
+
+    #[test]
+    fn build_prefers_an_explicit_confidence_over_the_audit_trail() {
+        // with_confidence wins over the audit's last event.
+        let explicit = Confidence::new(0.9).expect("valid confidence");
+        let audited = Confidence::new(0.4).expect("valid confidence");
+        let loc = TextLocation::new(0, 9);
+        let entity: Entity<Text> = EntityBuilder::new()
+            .with_label(LabelRef::new("US_SSN"))
+            .with_location(loc.clone())
+            .with_confidence(explicit)
+            .with_event(AuditEvent::manual_flag(loc, audited))
+            .build()
+            .expect("label and location set");
+        assert_eq!(entity.confidence, explicit);
     }
 
     #[test]

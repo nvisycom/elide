@@ -53,7 +53,7 @@ pub enum TextCoord {
     Decoded(DecodedSpan),
     /// Source-only: no decoded range (a reviewer selecting rendered text), only
     /// where it sits in the raw bytes. Non-empty by construction.
-    Source(Vec<SourceRef>),
+    Source(SourceSpan),
 }
 
 /// A decoded byte range and the raw source it decodes from.
@@ -146,6 +146,31 @@ impl DecodedSpan {
     }
 }
 
+/// A source-only coordinate: raw byte range(s) with no decoded span.
+///
+/// The counterpart to [`DecodedSpan`] for content the pipeline never decoded (a
+/// reviewer selecting rendered text). A named struct rather than a bare `Vec`
+/// variant so the coordinate serializes as a map, which an internally tagged
+/// enum can inject its `kind` tag into.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SourceSpan {
+    /// The raw byte range(s) the selection sits in. Sorted, deduplicated,
+    /// non-empty by construction.
+    pub source: Vec<SourceRef>,
+}
+
+impl SourceSpan {
+    /// A source-only span over `source`, normalizing the refs (sorted,
+    /// deduplicated).
+    pub fn new(source: impl IntoIterator<Item = SourceRef>) -> Self {
+        let mut source: Vec<SourceRef> = source.into_iter().collect();
+        SourceRef::normalize(&mut source);
+        Self { source }
+    }
+}
+
 impl TextLocation {
     /// A decoded location covering `start..end`, page unset and no source refs.
     pub fn new(start: usize, end: usize) -> Self {
@@ -158,10 +183,8 @@ impl TextLocation {
     /// A source-only location, for content with no decoded range (a reviewer
     /// selecting rendered text). Normalizes the refs (sorted, deduplicated).
     pub fn from_source(source: impl IntoIterator<Item = SourceRef>) -> Self {
-        let mut source: Vec<SourceRef> = source.into_iter().collect();
-        SourceRef::normalize(&mut source);
         Self {
-            coord: TextCoord::Source(source),
+            coord: TextCoord::Source(SourceSpan::new(source)),
             page: None,
         }
     }
@@ -200,7 +223,7 @@ impl TextLocation {
     pub fn source(&self) -> &[SourceRef] {
         match &self.coord {
             TextCoord::Decoded(span) => &span.source,
-            TextCoord::Source(refs) => refs,
+            TextCoord::Source(span) => &span.source,
         }
     }
 
@@ -304,9 +327,9 @@ impl ModalityLocation for TextLocation {
                 bytes.extend_from_slice(&(span.range.end as u64).to_le_bytes());
                 hash_source(&mut bytes, &span.source);
             }
-            TextCoord::Source(refs) => {
+            TextCoord::Source(span) => {
                 bytes.push(1); // coordinate tag: source-only
-                hash_source(&mut bytes, refs);
+                hash_source(&mut bytes, &span.source);
             }
         }
         bytes
@@ -315,9 +338,10 @@ impl ModalityLocation for TextLocation {
 
 /// Reading order over coordinates: all [`Decoded`](TextCoord::Decoded) sort
 /// before all [`Source`](TextCoord::Source) (a source-only coordinate has no
-/// decoded position); decoded coordinates order by range start then end; two
-/// source-only coordinates order by their source refs ([`SourceRef`] is itself
-/// [`Ord`], so the lists compare element-wise).
+/// decoded position); decoded coordinates order by range start then end, then by
+/// source refs so the order agrees with `Eq`; two source-only coordinates order
+/// by their source refs ([`SourceRef`] is itself [`Ord`], so the lists compare
+/// element-wise).
 impl Ord for TextCoord {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
@@ -325,7 +349,11 @@ impl Ord for TextCoord {
                 .range
                 .start
                 .cmp(&y.range.start)
-                .then(x.range.end.cmp(&y.range.end)),
+                .then(x.range.end.cmp(&y.range.end))
+                // Tiebreak on source so a total order agrees with `Eq` (two
+                // decoded spans with the same range but different source refs are
+                // distinct); reading order is unaffected, ranges being equal.
+                .then_with(|| x.source.cmp(&y.source)),
             (TextCoord::Decoded(_), TextCoord::Source(_)) => Ordering::Less,
             (TextCoord::Source(_), TextCoord::Decoded(_)) => Ordering::Greater,
             (TextCoord::Source(x), TextCoord::Source(y)) => x.cmp(y),
@@ -488,5 +516,35 @@ mod tests {
         // A decoded and a source-only location with the "same" bytes hash
         // differently (distinct coordinate kinds).
         assert_ne!(TextLocation::new(0, 5).hash(), src.hash());
+    }
+
+    #[test]
+    fn coord_ord_agrees_with_eq() {
+        // Two decoded coordinates with the same range but different source refs
+        // are distinct under Eq, so Ord must not call them Equal, else a
+        // BTreeSet/binary_search would drop one.
+        let a = TextLocation::new(0, 5).with_source([span(1, 2)]);
+        let b = TextLocation::new(0, 5).with_source([span(9, 10)]);
+        assert_ne!(a, b);
+        assert_ne!(a.coord.cmp(&b.coord), Ordering::Equal);
+        // Reading order is unaffected: same range, so they still tie on position.
+        assert_eq!(a.position_cmp(&b), b.position_cmp(&a).reverse());
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn source_only_serializes_and_round_trips() {
+        // A source-only coordinate is a struct-shaped variant, so the internally
+        // tagged enum can carry it (a bare Vec newtype variant cannot).
+        let src = TextLocation::from_source([span(3, 12)]);
+        let json = serde_json::to_string(&src).expect("source-only serializes");
+        let back: TextLocation = serde_json::from_str(&json).expect("round-trips");
+        assert_eq!(back, src);
+        assert!(back.is_source_only());
+        // The decoded variant round-trips too.
+        let decoded = TextLocation::new(0, 5).with_source([span(2, 4)]);
+        let json = serde_json::to_string(&decoded).expect("decoded serializes");
+        let back: TextLocation = serde_json::from_str(&json).expect("round-trips");
+        assert_eq!(back, decoded);
     }
 }

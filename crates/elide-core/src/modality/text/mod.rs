@@ -11,7 +11,7 @@ mod tokens;
 use std::ops::Range;
 
 pub use self::data::TextData;
-pub use self::location::{DecodedSpan, TextCoord, TextLocation};
+pub use self::location::{DecodedSpan, SourceSpan, TextCoord, TextLocation};
 pub use self::replacement::TextReplacement;
 pub use self::source_ref::SourceRef;
 #[cfg(feature = "test-util")]
