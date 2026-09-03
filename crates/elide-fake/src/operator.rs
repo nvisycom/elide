@@ -3,23 +3,15 @@
 //!
 //! [`Operator`]: elide_core::redaction::Operator
 
-mod identity;
-
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::str::FromStr;
 
 use elide_core::Result;
 use elide_core::entity::Entity;
+use elide_core::modality::Modality;
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::primitive::LanguageTag;
 use elide_core::redaction::{LeakProfile, Operator, OperatorId};
-use fake::rand::SeedableRng;
-use fake::rand::rngs::SmallRng;
-
-use self::identity::Identity;
-use crate::generator;
-use crate::locale::Locale;
 
 /// Locale-aware fake-data operator.
 ///
@@ -89,28 +81,11 @@ impl<F> Fake<F> {
         self
     }
 
-    fn locale_for(&self, language: Option<&LanguageTag>) -> Locale {
-        Locale::from_tag(language.unwrap_or(&self.default_language))
-    }
-
-    fn rng_for(&self, identity: Identity<'_>) -> SmallRng {
-        let mut hasher = DefaultHasher::new();
-        self.seed.hash(&mut hasher);
-        identity.hash(&mut hasher);
-        SmallRng::seed_from_u64(hasher.finish())
-    }
-
-    /// Try the generator for `label`; return `None` if it has no
-    /// entry, so the caller can delegate to the fallback.
-    fn try_generate(
-        &self,
-        locale: Locale,
-        label: &str,
-        identity: Identity<'_>,
-        source: &str,
-    ) -> Option<String> {
-        let mut rng = self.rng_for(identity);
-        generator::Context::new(locale, label, source).generate(&mut rng)
+    /// Mint a fake value for `entity`, reading `source` to pattern-preserve
+    /// structured labels; `None` when the label is outside the catalogue, so the
+    /// caller delegates to its fallback.
+    fn try_generate(&self, entity: &Entity<impl Modality>, source: &str) -> Option<String> {
+        crate::synth::fake_value(entity, source, self.seed, &self.default_language)
     }
 }
 
@@ -131,13 +106,7 @@ where
     }
 
     async fn anonymize(&self, entity: &Entity<Text>, data: &TextData) -> Result<TextReplacement> {
-        let locale = self.locale_for(entity.language.as_ref());
-        match self.try_generate(
-            locale,
-            entity.label.as_str(),
-            Identity::from(entity),
-            data.as_str(),
-        ) {
+        match self.try_generate(entity, data.as_str()) {
             Some(value) => Ok(TextReplacement::substituted(value)),
             None => self.fallback.anonymize(entity, data).await,
         }
@@ -162,13 +131,7 @@ where
         entity: &Entity<Tabular>,
         data: &TextData,
     ) -> Result<TabularReplacement> {
-        let locale = self.locale_for(entity.language.as_ref());
-        if let Some(value) = self.try_generate(
-            locale,
-            entity.label.as_str(),
-            Identity::from(entity),
-            data.as_str(),
-        ) {
+        if let Some(value) = self.try_generate(entity, data.as_str()) {
             return Ok(TabularReplacement::Cell(TextReplacement::substituted(
                 value,
             )));
