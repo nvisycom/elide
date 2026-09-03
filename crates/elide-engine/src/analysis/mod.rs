@@ -52,6 +52,7 @@ mod test_support {
             LabelRef::new(label),
             TextLocation::from_source([SourceRef::new(0..4)]),
         )
+        .build()
     }
 
     /// A one-segment [`PartId`] naming the sole document under test.
