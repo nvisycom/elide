@@ -19,6 +19,24 @@ use fake::rand::RngExt;
 /// - other code-point (separators, multibyte, punctuation) `→`
 ///   copied unchanged
 pub(crate) fn pattern_preserve<R: RngExt + ?Sized>(original: &str, rng: &mut R) -> String {
+    // Redraw until the output differs somewhere the input could change (a digit
+    // or letter), so a short value like a 3-digit security code is never returned
+    // unchanged. A pure-separator input (nothing alterable) can only equal itself,
+    // so cap the retries and accept it.
+    let alterable = original
+        .chars()
+        .any(|c| c.is_ascii_digit() || c.is_ascii_alphabetic());
+    for _ in 0..8 {
+        let out = reshape(original, rng);
+        if !alterable || out != original {
+            return out;
+        }
+    }
+    reshape(original, rng)
+}
+
+/// One pass: digit -> random digit, letter -> random same-case letter, else copy.
+fn reshape<R: RngExt + ?Sized>(original: &str, rng: &mut R) -> String {
     const DIGITS: &[u8; 10] = b"0123456789";
     const UPPER: &[u8; 26] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     const LOWER: &[u8; 26] = b"abcdefghijklmnopqrstuvwxyz";
@@ -67,6 +85,24 @@ mod tests {
         for i in 8..22 {
             assert!(out.as_bytes()[i].is_ascii_digit(), "pos {i}");
         }
+    }
+
+    #[test]
+    fn never_returns_a_short_value_unchanged() {
+        // A 3-digit security code has a 1/1000 chance of redrawing identically;
+        // pattern_preserve retries so it always changes. Sweep many seeds.
+        for seed in 0..500u64 {
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let out = pattern_preserve("123", &mut rng);
+            assert_ne!(out, "123", "seed {seed} returned the original unchanged");
+            assert_eq!(out.len(), 3);
+        }
+    }
+
+    #[test]
+    fn a_separator_only_value_is_copied() {
+        // Nothing alterable: it can only equal itself, and that is fine.
+        assert_eq!(pattern_preserve("---", &mut rng()), "---");
     }
 
     #[test]

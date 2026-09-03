@@ -8,9 +8,8 @@ use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::primitive::LanguageTag;
 use elide_core::redaction::Generator;
-use uuid::Uuid;
 
-use crate::synth::fake_value;
+use crate::synth::{fake_value, fallback_token};
 
 /// A [`Generator`] that produces believable, locale-aware, label-aware
 /// surrogates, the readable alternative to an opaque UUID token.
@@ -68,11 +67,12 @@ impl FakeGenerator {
         self
     }
 
-    /// The believable value for `entity` reading `original`, or a random UUID
-    /// token when the label is outside the fake-data catalogue.
+    /// The believable value for `entity` reading `original`, or a deterministic
+    /// opaque token when the label is outside the fake-data catalogue (still
+    /// consistent per entity, so coreferent mentions match).
     fn value(&self, entity: &Entity<impl Modality>, original: &str) -> String {
         fake_value(entity, original, self.seed, &self.default_language)
-            .unwrap_or_else(|| Uuid::new_v4().to_string())
+            .unwrap_or_else(|| fallback_token(entity, self.seed))
     }
 }
 
@@ -100,6 +100,7 @@ impl Generator<Tabular> for FakeGenerator {
 mod tests {
     use elide_core::entity::{EntityCoRef, LabelRef};
     use elide_core::modality::text::TextLocation;
+    use uuid::Uuid;
 
     use super::*;
 
@@ -158,12 +159,27 @@ mod tests {
     #[test]
     fn an_unknown_label_falls_back_to_a_token() {
         let generator = FakeGenerator::new();
-        // Outside the fake-data catalogue: an opaque UUID token, never the
+        // Outside the fake-data catalogue: an opaque UUIDv4 token, never the
         // original.
         let value = surrogate(&generator, &entity("some_custom_label", None), "secret");
-        assert!(
-            Uuid::parse_str(&value).is_ok(),
-            "fallback is a UUID token: {value}"
+        let uuid = Uuid::parse_str(&value).expect("fallback is a UUID token");
+        assert_eq!(uuid.get_version_num(), 4, "a valid UUIDv4");
+    }
+
+    #[test]
+    fn the_fallback_token_is_consistent_per_entity() {
+        // The consistency guarantee holds for unsupported labels too: a
+        // coreferent mention gets the same opaque token, not a fresh UUID.
+        let generator = FakeGenerator::new();
+        let a = surrogate(&generator, &entity("some_custom_label", Some("c1")), "one");
+        let b = surrogate(&generator, &entity("some_custom_label", Some("c1")), "two");
+        assert_eq!(a, b, "coreferent fallback tokens match");
+        // A different cluster gets a different token.
+        let c = surrogate(
+            &generator,
+            &entity("some_custom_label", Some("c2")),
+            "three",
         );
+        assert_ne!(a, c, "distinct clusters get distinct tokens");
     }
 }

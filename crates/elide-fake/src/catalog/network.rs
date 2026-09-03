@@ -5,7 +5,7 @@
 use fake::Fake;
 use fake::faker::internet::raw as internet;
 use fake::rand::RngExt;
-use uuid::Uuid;
+use uuid::Builder;
 
 use super::dispatch::fan_locale;
 use crate::locale::Locale;
@@ -33,7 +33,10 @@ pub(super) fn device_id<R: RngExt + ?Sized>(rng: &mut R) -> String {
         let n: u32 = (0..256u32).fake_with_rng(rng);
         *b = n as u8;
     }
-    Uuid::from_bytes(bytes).to_string()
+    // from_random_bytes stamps the RFC 4122 version (v4) and variant bits, so the
+    // result is a valid UUIDv4; from_bytes would keep the raw bytes and could
+    // fail downstream validation.
+    Builder::from_random_bytes(bytes).into_uuid().to_string()
 }
 
 /// Strip characters that aren't valid in a DNS label
@@ -51,7 +54,21 @@ fn sanitise_hostname_label(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use fake::rand::SeedableRng;
+    use fake::rand::rngs::SmallRng;
+    use uuid::Uuid;
+
     use super::*;
+
+    #[test]
+    fn device_id_is_a_valid_uuid_v4() {
+        for seed in 0..50u64 {
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let id = device_id(&mut rng);
+            let uuid = Uuid::parse_str(&id).expect("parses as a UUID");
+            assert_eq!(uuid.get_version_num(), 4, "seed {seed}: not a v4 UUID");
+        }
+    }
 
     #[test]
     fn strips_non_dns_characters() {

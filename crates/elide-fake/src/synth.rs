@@ -16,8 +16,10 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 use elide_core::primitive::LanguageTag;
+use fake::Fake;
 use fake::rand::SeedableRng;
 use fake::rand::rngs::SmallRng;
+use uuid::Builder;
 
 use crate::catalog::Context;
 use crate::identity::Identity;
@@ -51,4 +53,18 @@ pub(crate) fn fake_value<M: Modality>(
     let locale = locale_for(entity.language.as_ref(), default_language);
     let mut rng = rng_for(seed, Identity::from(entity));
     Context::new(locale, entity.label.as_str(), original).generate(&mut rng)
+}
+
+/// A deterministic opaque UUIDv4 token for `entity`, the fallback when a label
+/// has no believable fake. Seeded from the same `(seed, identity)`, so repeated
+/// calls, and coreferent mentions, mint the *same* token, upholding the
+/// consistency guarantee for unsupported labels too.
+pub(crate) fn fallback_token<M: Modality>(entity: &Entity<M>, seed: u64) -> String {
+    let mut rng = rng_for(seed, Identity::from(entity));
+    let mut bytes = [0u8; 16];
+    for b in &mut bytes {
+        let n: u32 = (0..256u32).fake_with_rng(&mut rng);
+        *b = n as u8;
+    }
+    Builder::from_random_bytes(bytes).into_uuid().to_string()
 }

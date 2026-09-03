@@ -31,7 +31,11 @@ pub(super) fn monetary_amount<R: RngExt + ?Sized>(
     // Same digit count as the original's whole part, default 1..=6 digits.
     // Cap the width so 10^d stays within u64 (its max is ~1.8e19, 20 digits).
     let digits = original.digit_magnitude().unwrap_or(0).min(18);
-    let whole: u64 = if digits == 0 {
+    let whole: u64 = if original.whole_is_zero() {
+        // A sub-unit or zero amount ("0.50", "$0.00"): keep the zero whole part,
+        // inflating it to 1..9 would misstate the magnitude.
+        0
+    } else if digits == 0 {
         (0..1_000_000u64).fake_with_rng(rng)
     } else {
         // A `digits`-wide number: [10^(d-1), 10^d), so the leading digit is
@@ -40,16 +44,26 @@ pub(super) fn monetary_amount<R: RngExt + ?Sized>(
         let high = low * 10;
         (low..high).fake_with_rng(rng)
     };
-    let frac: u8 = (0..100u8).fake_with_rng(rng);
+    // A zero-whole amount keeps a nonzero fraction so it stays a plausible
+    // sub-unit value (0.50 -> 0.NN, never 0.00); otherwise any fraction is fine.
+    let frac: u8 = if whole == 0 {
+        (1..100u8).fake_with_rng(rng)
+    } else {
+        (0..100u8).fake_with_rng(rng)
+    };
     let sep = decimal_separator(locale);
     format!("{whole}{sep}{frac:02}")
 }
 
 fn decimal_separator(locale: Locale) -> char {
     match locale {
-        Locale::DeDe | Locale::NlNl | Locale::FrFr | Locale::ItIt | Locale::PtPt | Locale::PtBr => {
-            ','
-        }
+        Locale::DeDe
+        | Locale::NlNl
+        | Locale::FrFr
+        | Locale::ItIt
+        | Locale::PtPt
+        | Locale::PtBr
+        | Locale::TrTr => ',',
         _ => '.',
     }
 }
@@ -68,10 +82,27 @@ mod tests {
     #[test]
     fn monetary_amount_uses_locale_decimal_separator() {
         let orig = Original::new("100.00");
-        let mut rng = SmallRng::seed_from_u64(1);
-        assert!(monetary_amount(&orig, Locale::DeDe, &mut rng).contains(','));
+        for locale in [Locale::DeDe, Locale::TrTr] {
+            let mut rng = SmallRng::seed_from_u64(1);
+            assert!(
+                monetary_amount(&orig, locale, &mut rng).contains(','),
+                "{locale:?} should use a comma"
+            );
+        }
         let mut rng = SmallRng::seed_from_u64(1);
         assert!(monetary_amount(&orig, Locale::En, &mut rng).contains('.'));
+    }
+
+    #[test]
+    fn a_sub_unit_amount_keeps_a_zero_whole_part() {
+        // A "$0.50" must not inflate to "$3.50": the whole part stays 0, and the
+        // fraction stays nonzero so it is still a plausible small amount.
+        for seed in 0..50u64 {
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let out = monetary_amount(&Original::new("0.50"), Locale::En, &mut rng);
+            assert_eq!(whole_part(&out), "0", "{out} inflated the whole part");
+            assert_ne!(out, "0.00", "{out} zeroed a sub-unit amount");
+        }
     }
 
     #[test]

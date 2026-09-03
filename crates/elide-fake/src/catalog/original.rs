@@ -48,6 +48,15 @@ impl<'a> Original<'a> {
         let count = whole.chars().filter(char::is_ascii_digit).count() as u32;
         (count > 0).then_some(count)
     }
+
+    /// Whether the whole-number part is all zeros (`"0"`, `"0.50"`, `"$0.00"`),
+    /// so a magnitude-preserving generator can emit a zero whole part rather than
+    /// inflating it to a nonzero digit.
+    pub(crate) fn whole_is_zero(&self) -> bool {
+        let whole = strip_fraction(self.0);
+        let mut digits = whole.chars().filter(char::is_ascii_digit).peekable();
+        digits.peek().is_some() && digits.all(|c| c == '0')
+    }
 }
 
 /// Drop a trailing fractional group: the run of digits after the final `.` or
@@ -93,5 +102,16 @@ mod tests {
         assert_eq!(Original::new("1,000").digit_magnitude(), Some(4));
         // No digits at all.
         assert_eq!(Original::new("n/a").digit_magnitude(), None);
+    }
+
+    #[test]
+    fn whole_is_zero_detects_sub_unit_and_zero_amounts() {
+        assert!(Original::new("0").whole_is_zero());
+        assert!(Original::new("0.50").whole_is_zero());
+        assert!(Original::new("$0.00").whole_is_zero());
+        assert!(!Original::new("42.00").whole_is_zero());
+        assert!(!Original::new("100").whole_is_zero());
+        // No digits: not a zero whole part.
+        assert!(!Original::new("n/a").whole_is_zero());
     }
 }
