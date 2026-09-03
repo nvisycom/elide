@@ -50,3 +50,23 @@ impl LabelRef {
         self.0.as_str()
     }
 }
+
+impl From<&'static str> for LabelRef {
+    /// A label ref from a `&'static str` literal, no allocation.
+    fn from(name: &'static str) -> Self {
+        Self::from_static(name)
+    }
+}
+
+impl From<String> for LabelRef {
+    /// A label ref that owns its name.
+    fn from(name: String) -> Self {
+        Self(HipStr::from(name))
+    }
+}
+
+impl From<HipStr<'static>> for LabelRef {
+    fn from(name: HipStr<'static>) -> Self {
+        Self(name)
+    }
+}

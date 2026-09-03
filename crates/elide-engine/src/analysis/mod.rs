@@ -39,12 +39,7 @@ mod test_support {
     pub(crate) fn text_entity(label: &str) -> Entity<Text> {
         let loc = TextLocation::new(0, 4);
         let event = AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
-        Entity::new(
-            LabelRef::new(label),
-            loc,
-            Confidence::MAX,
-            AuditLog::new(event),
-        )
+        Entity::new(LabelRef::new(label), loc, AuditLog::new(event))
     }
 
     /// A one-segment [`PartId`] naming the sole document under test.

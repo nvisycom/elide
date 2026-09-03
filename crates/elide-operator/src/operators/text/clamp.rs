@@ -425,12 +425,7 @@ mod tests {
             location.clone(),
             PatternEvent::default(),
         );
-        let e: Entity<Text> = Entity::new(
-            LabelRef::new("age"),
-            location,
-            Confidence::MAX,
-            AuditLog::new(event),
-        );
+        let e: Entity<Text> = Entity::new(LabelRef::new("age"), location, AuditLog::new(event));
         let out = Operator::<Text>::anonymize(
             &Clamp::new().with_ceiling(90.0, "x"),
             &e,

@@ -107,20 +107,23 @@ pub struct Entity<M: Modality> {
 }
 
 impl<M: Modality> Entity<M> {
-    /// Assemble an entity from its location, confidence, and audit trail.
+    /// Assemble an entity from its location and audit trail.
     ///
-    /// Mints a fresh time-ordered [`id`] and leaves [`coref`] unset. Called
-    /// by a recognizer (with a single-detection trail) or by the fusion step
-    /// in `elide` (with a fused, multi-detection trail).
+    /// Mints a fresh time-ordered [`id`] and leaves [`coref`] unset. Called by a
+    /// recognizer (with a single-detection trail) or by the fusion step in
+    /// `elide` (with a fused, multi-detection trail).
+    ///
+    /// The [`confidence`] is the audit's [`final_confidence`], the confidence of
+    /// its most recent event, since `entity.confidence` always equals that by
+    /// construction (it is not stored twice). `audit` therefore must carry a
+    /// birth event; an empty trail yields [`MAX`](Confidence::MAX).
     ///
     /// [`id`]: Entity::id
     /// [`coref`]: Entity::coref
-    pub fn new(
-        label: LabelRef,
-        location: M::Location,
-        confidence: Confidence,
-        audit: AuditLog<M>,
-    ) -> Self {
+    /// [`confidence`]: Entity::confidence
+    /// [`final_confidence`]: crate::entity::audit::AuditLog::final_confidence
+    pub fn new(label: LabelRef, location: M::Location, audit: AuditLog<M>) -> Self {
+        let confidence = audit.final_confidence().unwrap_or(Confidence::MAX);
         Self {
             id: Uuid::now_v7(),
             label,
@@ -131,6 +134,27 @@ impl<M: Modality> Entity<M> {
             recognized_range: None,
             audit,
         }
+    }
+
+    /// A user-asserted ("custom") entity: one a reviewer marks between detection
+    /// and redaction, not produced by a recognizer.
+    ///
+    /// Modality-agnostic: `location` is `M::Location`, so this builds a custom
+    /// text span, image box, audio span, or any custom modality's own coordinate
+    /// the same way. Mints a fresh time-ordered [`id`], sets [`confidence`] to
+    /// [`MAX`](Confidence::MAX) (a human assertion is certain), and stamps a
+    /// single [`Manual`] audit event ([`ManualIntent::Flag`]) so its human origin
+    /// is auditable and it is never mistaken for an automatic detection. No
+    /// recognizer ceremony, and nothing can be missing, so it returns an
+    /// [`Entity`] directly rather than a builder.
+    ///
+    /// [`id`]: Entity::id
+    /// [`confidence`]: Entity::confidence
+    /// [`Manual`]: crate::entity::audit::AuditKind::Manual
+    /// [`ManualIntent::Flag`]: crate::entity::audit::ManualIntent::Flag
+    pub fn custom(label: impl Into<LabelRef>, location: M::Location) -> Self {
+        let event = AuditEvent::manual_flag(location.clone(), Confidence::MAX);
+        Self::new(label.into(), location, AuditLog::new(event))
     }
 
     /// Start a chainable [`EntityBuilder`].
@@ -266,7 +290,6 @@ impl Entity<crate::modality::text::Text> {
         Entity::new(
             LabelRef::new(label.to_owned()),
             location,
-            confidence,
             AuditLog::new(event),
         )
     }
@@ -282,7 +305,32 @@ mod tests {
         let loc = TextLocation::new(0, 5);
         let conf = Confidence::MAX;
         let birth = AuditEvent::pattern("t", conf, loc.clone(), PatternEvent::default());
-        Entity::new(LabelRef::new("NAME"), loc, conf, AuditLog::new(birth))
+        Entity::new(LabelRef::new("NAME"), loc, AuditLog::new(birth))
+    }
+
+    #[test]
+    fn custom_builds_a_manual_entity_at_max_confidence() {
+        let loc = TextLocation::new(3, 12);
+        let entity = Entity::<Text>::custom("US_SSN", loc.clone());
+
+        assert_eq!(entity.label, LabelRef::new("US_SSN"));
+        assert_eq!(entity.location, loc);
+        assert_eq!(
+            entity.confidence,
+            Confidence::MAX,
+            "a human assertion is certain"
+        );
+        // Its sole audit event is a Manual(Flag) — human origin, auditable.
+        let events = entity.audit.events();
+        assert_eq!(events.len(), 1);
+        assert!(
+            matches!(&events[0].kind, super::audit::AuditKind::Manual(m)
+                if m.intent == ManualIntent::Flag),
+            "custom stamps a Manual(Flag) event",
+        );
+        assert!(entity.audit.verify().is_ok(), "the trail verifies");
+        // Not a recognizer detection: no Pattern/model birth event.
+        assert!(!entity.is_suppressed());
     }
 
     #[test]

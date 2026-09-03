@@ -29,7 +29,7 @@ fn detected(recognizer: &str, label: &str, loc: (usize, usize), conf: f32) -> En
             ..PatternEvent::default()
         },
     );
-    Entity::new(label, location, confidence, AuditLog::new(event))
+    Entity::new(label, location, AuditLog::new(event))
 }
 
 /// Like [`detected`], but the location also carries a raw source reference, the

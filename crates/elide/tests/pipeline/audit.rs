@@ -25,7 +25,7 @@ fn redacted_entity(label: &str) -> Entity<Text> {
             .with_leak_profile(LeakProfile::Irrecoverable),
         conf,
     ));
-    Entity::new(LabelRef::new(label), location, conf, audit)
+    Entity::new(LabelRef::new(label), location, audit)
 }
 
 #[test]

@@ -139,7 +139,7 @@ mod tests {
         let loc = TextLocation::new(start, end);
         let confidence = Confidence::new(conf).unwrap();
         let event = AuditEvent::pattern("t", confidence, loc.clone(), PatternEvent::default());
-        Entity::new(LabelRef::new(label), loc, confidence, AuditLog::new(event))
+        Entity::new(LabelRef::new(label), loc, AuditLog::new(event))
     }
 
     fn has_kind(entity: &Entity<Text>, f: impl Fn(&AuditKind<Text>) -> bool) -> bool {

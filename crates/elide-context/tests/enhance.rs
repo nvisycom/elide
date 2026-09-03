@@ -24,7 +24,7 @@ fn entity(label: &LabelRef, range: Range<usize>, score: f32) -> Entity<Text> {
         location.clone(),
         PatternEvent::default(),
     );
-    let mut entity = Entity::new(label.clone(), location, confidence, AuditLog::new(event));
+    let mut entity = Entity::new(label.clone(), location, AuditLog::new(event));
     entity.recognized_range = Some(range);
     entity
 }

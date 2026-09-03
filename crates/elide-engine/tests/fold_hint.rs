@@ -255,7 +255,6 @@ impl Recognizer<Text> for PiiRecognizer {
             entities.push(Entity::new(
                 EMAIL_ADDRESS.to_ref(),
                 loc,
-                Confidence::MAX,
                 AuditLog::new(event),
             ));
             from = end;

@@ -131,10 +131,14 @@ impl<M: Modality> EntityBuilder<M> {
 
     /// Assemble the entity.
     ///
-    /// Returns [`None`] when `label`, `location`, or `confidence` was not set.
-    /// The id defaults to a fresh UUIDv7; the audit trail is built by recording
-    /// the accumulated events in order (empty if none were added), each linked
-    /// to the one before it.
+    /// Returns [`None`] when `label` or `location` was not set, the two facts a
+    /// builder cannot default. `confidence` defaults to
+    /// [`MAX`](Confidence::MAX) when unset (the shape of a user-asserted entity),
+    /// so a manual add need not supply one; a recognizer sets it explicitly. The
+    /// id defaults to a fresh UUIDv7; the audit trail records the accumulated
+    /// events in order, each linked to the one before it, and is empty when none
+    /// were added (as for a manual entity the include path stamps a Manual event
+    /// onto).
     pub fn build(self) -> Option<Entity<M>> {
         let mut audit = AuditLog::default();
         for event in self.events {
@@ -144,7 +148,7 @@ impl<M: Modality> EntityBuilder<M> {
             id: self.id.unwrap_or_else(Uuid::now_v7),
             label: self.label?,
             location: self.location?,
-            confidence: self.confidence?,
+            confidence: self.confidence.unwrap_or(Confidence::MAX),
             coref: self.coref,
             language: self.language,
             recognized_range: self.recognized_range,
@@ -156,5 +160,37 @@ impl<M: Modality> EntityBuilder<M> {
 impl<M: Modality> Default for EntityBuilder<M> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entity::LabelRef;
+    use crate::modality::text::{Text, TextLocation};
+
+    #[test]
+    fn build_defaults_confidence_to_max_and_needs_no_event() {
+        // A manual add: only label + location. Confidence defaults to MAX and no
+        // audit event is required (the include path stamps a Manual one).
+        let entity: Entity<Text> = EntityBuilder::new()
+            .with_label(LabelRef::new("US_SSN"))
+            .with_location(TextLocation::new(0, 9))
+            .build()
+            .expect("label and location set");
+        assert_eq!(entity.confidence, Confidence::MAX);
+        assert!(entity.audit.events().is_empty());
+    }
+
+    #[test]
+    fn build_returns_none_without_label_or_location() {
+        // Label and location are the two facts a builder cannot default.
+        assert!(EntityBuilder::<Text>::new().build().is_none());
+        assert!(
+            EntityBuilder::<Text>::new()
+                .with_label(LabelRef::new("X"))
+                .build()
+                .is_none(),
+        );
     }
 }

@@ -131,12 +131,7 @@ mod tests {
             location.clone(),
             PatternEvent::default(),
         );
-        Entity::new(
-            LabelRef::new("AMOUNT"),
-            location,
-            Confidence::MAX,
-            AuditLog::new(event),
-        )
+        Entity::new(LabelRef::new("AMOUNT"), location, AuditLog::new(event))
     }
 
     #[tokio::test]
@@ -162,12 +157,8 @@ mod tests {
             location.clone(),
             PatternEvent::default(),
         );
-        let entity: Entity<Image> = Entity::new(
-            LabelRef::new("FACE"),
-            location,
-            Confidence::MAX,
-            AuditLog::new(event),
-        );
+        let entity: Entity<Image> =
+            Entity::new(LabelRef::new("FACE"), location, AuditLog::new(event));
         let data = ImageData::new(vec![0u8; 4], Dimensions::new(4, 4));
 
         let out = Keep.anonymize(&entity, &data).await.unwrap();
