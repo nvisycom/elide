@@ -125,7 +125,7 @@ where
         };
 
         self.vault
-            .get_or_try_insert_with(key, || Ok(self.generator.generate(&entity.label, &seed)))
+            .get_or_try_insert_with(key, || Ok(self.generator.generate(entity, data)))
             .await
     }
 }
@@ -160,14 +160,12 @@ where
         // treatment to get it (a surrogate generator never drops structure).
         let cell = self
             .vault
-            .get_or_try_insert_with(key, || {
-                match self.generator.generate(&entity.label, &seed) {
-                    TabularReplacement::Cell(replacement) => Ok(replacement),
-                    _ => Err(Error::new(
-                        ErrorKind::Redaction,
-                        "pseudonymize generator must produce a cell surrogate",
-                    )),
-                }
+            .get_or_try_insert_with(key, || match self.generator.generate(entity, data) {
+                TabularReplacement::Cell(replacement) => Ok(replacement),
+                _ => Err(Error::new(
+                    ErrorKind::Redaction,
+                    "pseudonymize generator must produce a cell surrogate",
+                )),
             })
             .await?;
         Ok(TabularReplacement::Cell(cell))
