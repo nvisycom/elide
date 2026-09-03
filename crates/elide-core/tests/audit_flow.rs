@@ -13,13 +13,8 @@ mod fixtures;
 use fixtures::{Text, TextData, TextLocation, TextReplacement};
 
 /// Build a single-recognition entity, the way a recognizer would.
-fn recognized(
-    label: &LabelRef,
-    location: TextLocation,
-    confidence: Confidence,
-    event: AuditEvent<Text>,
-) -> Entity<Text> {
-    Entity::new(label.clone(), location, confidence, AuditLog::new(event))
+fn recognized(label: &LabelRef, location: TextLocation, event: AuditEvent<Text>) -> Entity<Text> {
+    Entity::new(label.clone(), location, AuditLog::new(event))
 }
 
 /// A trivial "highest confidence wins" fusion: absorb every other entity's
@@ -48,7 +43,6 @@ fn two_recognizers_fuse_into_one() {
     let pattern = recognized(
         &phone,
         TextLocation::new(10, 22),
-        pattern_conf,
         AuditEvent::pattern(
             "us-phone-pattern",
             pattern_conf,
@@ -67,7 +61,6 @@ fn two_recognizers_fuse_into_one() {
     let ner = recognized(
         &phone,
         TextLocation::new(10, 23),
-        ner_conf,
         AuditEvent::model(
             "ner-model",
             ner_conf,

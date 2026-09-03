@@ -76,10 +76,12 @@ impl Handler<Text> for TxtHandler {
         // A block chunk's bytes are a verbatim source slice, so lifting is an
         // identity offset add of the chunk-local range against the chunk's
         // start, bounded by its end.
-        let base = chunk.location.range.start;
-        let start = base + local.range.start;
-        let end = base + local.range.end;
-        if start > end || end > chunk.location.range.end {
+        let chunk_range = chunk.location.range()?;
+        let local_range = local.range()?;
+        let base = chunk_range.start;
+        let start = base + local_range.start;
+        let end = base + local_range.end;
+        if start > end || end > chunk_range.end {
             return None;
         }
         Some(TextLocation::new(start, end).with_page(chunk.location.page))
@@ -89,10 +91,10 @@ impl Handler<Text> for TxtHandler {
 #[async_trait::async_trait]
 impl DataReader<Text> for TxtHandler {
     async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
-        Ok(self
-            .text
-            .get(location.range.start..location.range.end)
-            .map(TextData::new))
+        let Some(range) = location.range() else {
+            return Ok(None); // source-only location has no decoded range to read
+        };
+        Ok(self.text.get(range.clone()).map(TextData::new))
     }
 }
 
@@ -127,7 +129,12 @@ impl TxtHandler {
     }
 
     fn redact_one(&mut self, location: &TextLocation, replacement: &TextReplacement) -> Result<()> {
-        let range = location.range.start..location.range.end;
+        // Redaction here writes by decoded byte range; a source-only location has
+        // none, so it is skipped (as an unaligned range is below).
+        let Some(range) = location.range() else {
+            return Ok(());
+        };
+        let range = range.clone();
         // An inverted, out-of-bounds, or non-UTF-8-boundary range is skipped
         // rather than panicking: a detector may report a range that no longer
         // aligns after an earlier splice, and a redaction must never corrupt
@@ -195,11 +202,8 @@ mod tests {
         let mut h = handler(text);
         let mut out = Vec::new();
         while let Some(c) = h.read_next().await.unwrap() {
-            out.push((
-                c.location.range.start,
-                c.location.range.end,
-                c.data.as_str().to_string(),
-            ));
+            let range = c.location.range().unwrap();
+            out.push((range.start, range.end, c.data.as_str().to_string()));
         }
         out
     }
@@ -259,17 +263,15 @@ mod tests {
         // A span crossing the internal line break lifts unchanged, this is
         // what makes a multi-line pattern redactable.
         let lifted = h.lift(&chunk, TextLocation::new(3, 8)).expect("in bounds");
-        assert_eq!(lifted.range.start, 3);
-        assert_eq!(lifted.range.end, 8);
+        let lifted_range = lifted.range().unwrap();
+        assert_eq!(lifted_range.start, 3);
+        assert_eq!(lifted_range.end, 8);
     }
 
     #[tokio::test]
     async fn read_returns_a_cross_line_span() -> Result<()> {
         let h = handler("hello\nworld\n");
-        let loc = TextLocation {
-            range: 3..8,
-            ..Default::default()
-        };
+        let loc = TextLocation::new(3, 8);
         assert_eq!(h.read_at(&loc).await?.unwrap().as_str(), "lo\nwo");
         Ok(())
     }
@@ -282,10 +284,7 @@ mod tests {
         let end = src.find("-----END KEY-----").unwrap() + "-----END KEY-----".len();
         let mut rs = Redactions::new();
         rs.push(
-            TextLocation {
-                range: begin..end,
-                ..Default::default()
-            },
+            TextLocation::new(begin, end),
             TextReplacement::substituted("[KEY]"),
         );
         h.write_at(rs).await?;
@@ -298,19 +297,10 @@ mod tests {
         let mut h = handler("alpha\nbravo\ncharlie\n");
         let mut rs = Redactions::new();
         rs.push(
-            TextLocation {
-                range: 12..19,
-                ..Default::default()
-            },
+            TextLocation::new(12, 19),
             TextReplacement::substituted("[C]"),
         );
-        rs.push(
-            TextLocation {
-                range: 0..5,
-                ..Default::default()
-            },
-            TextReplacement::substituted("[A]"),
-        );
+        rs.push(TextLocation::new(0, 5), TextReplacement::substituted("[A]"));
         h.write_at(rs).await?;
         assert_eq!(h.text(), "[A]\nbravo\n[C]\n");
         Ok(())
@@ -321,10 +311,7 @@ mod tests {
         let mut h = handler("one line");
         let mut rs = Redactions::new();
         rs.push(
-            TextLocation {
-                range: 999..1000,
-                ..Default::default()
-            },
+            TextLocation::new(999, 1000),
             TextReplacement::substituted("nope"),
         );
         h.write_at(rs).await?;

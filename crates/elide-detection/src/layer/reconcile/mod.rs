@@ -139,7 +139,7 @@ mod tests {
         let loc = TextLocation::new(start, end);
         let confidence = Confidence::new(conf).unwrap();
         let event = AuditEvent::pattern("t", confidence, loc.clone(), PatternEvent::default());
-        Entity::new(LabelRef::new(label), loc, confidence, AuditLog::new(event))
+        Entity::new(LabelRef::new(label), loc, AuditLog::new(event))
     }
 
     fn has_kind(entity: &Entity<Text>, f: impl Fn(&AuditKind<Text>) -> bool) -> bool {
@@ -154,7 +154,8 @@ mod tests {
         let out = ReconcileLayer::same_label(Merging::max()).apply(entities);
         assert_eq!(out.kept.len(), 1);
         let s = &out.kept[0];
-        assert_eq!((s.location.range.start, s.location.range.end), (0, 25));
+        let range = s.location.range().unwrap();
+        assert_eq!((range.start, range.end), (0, 25));
         assert_eq!(s.label, LabelRef::new("EMAIL"));
         assert_eq!(s.confidence, Confidence::new(0.9).unwrap()); // max
     }

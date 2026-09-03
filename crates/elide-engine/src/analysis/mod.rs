@@ -30,7 +30,7 @@ mod serde;
 mod test_support {
     use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
     use elide_core::entity::{Entity, LabelRef};
-    use elide_core::modality::text::{Text, TextLocation};
+    use elide_core::modality::text::{SourceRef, Text, TextLocation};
     use elide_core::primitive::Confidence;
 
     use crate::PartId;
@@ -39,11 +39,18 @@ mod test_support {
     pub(crate) fn text_entity(label: &str) -> Entity<Text> {
         let loc = TextLocation::new(0, 4);
         let event = AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
-        Entity::new(
+        Entity::new(LabelRef::new(label), loc, AuditLog::new(event))
+    }
+
+    /// A custom [`Text`] entity located only by source, the reviewer-add shape:
+    /// no decoded range, just where the selection sits in the raw bytes. Exercises
+    /// the [`Source`](elide_core::modality::text::TextCoord::Source) wire arm.
+    ///
+    /// [`Source`]: elide_core::modality::text::TextCoord::Source
+    pub(crate) fn source_only_entity(label: &str) -> Entity<Text> {
+        Entity::custom(
             LabelRef::new(label),
-            loc,
-            Confidence::MAX,
-            AuditLog::new(event),
+            TextLocation::from_source([SourceRef::new(0..4)]),
         )
     }
 

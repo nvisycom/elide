@@ -259,10 +259,12 @@ impl Handler<Text> for PdfHandler {
     }
 
     fn lift(&self, chunk: &Chunk<Text>, local: TextLocation) -> Option<TextLocation> {
-        let base = chunk.location.range.start;
-        let start = base + local.range.start;
-        let end = base + local.range.end;
-        if start > end || end > chunk.location.range.end {
+        let chunk_range = chunk.location.range()?;
+        let local_range = local.range()?;
+        let base = chunk_range.start;
+        let start = base + local_range.start;
+        let end = base + local_range.end;
+        if start > end || end > chunk_range.end {
             return None;
         }
         // PDF text has no flat source byte coordinate (glyph runs in content
@@ -278,10 +280,13 @@ impl Handler<Text> for PdfHandler {
 #[async_trait::async_trait]
 impl DataReader<Text> for PdfHandler {
     async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
-        let Some((page, local)) = self.page_at(location.range.start) else {
+        let Some(range) = location.range() else {
+            return Ok(None); // source-only location has no decoded range to read
+        };
+        let Some((page, local)) = self.page_at(range.start) else {
             return Ok(None);
         };
-        let Some(local_end) = location.range.end.checked_sub(page.start) else {
+        let Some(local_end) = range.end.checked_sub(page.start) else {
             return Ok(None);
         };
         Ok(page.text.get(local..local_end).map(TextData::new))
@@ -296,16 +301,18 @@ impl DataWriter<Text> for PdfHandler {
             // byte range within that page's text. Both modes address glyphs by
             // span, not replacement text; the span is measured per mode below
             // (char offsets for glyph deletion, UTF-16 for raster) so only the
-            // counts a mode needs are computed.
+            // counts a mode needs are computed. PDF text is addressed by decoded
+            // range only; a source-only location has none, so it is skipped.
+            let Some(range) = location.range() else {
+                continue;
+            };
             let Some((page_idx, local, local_end)) =
                 self.pages.iter().enumerate().find_map(|(idx, page)| {
-                    if location.range.start < page.start
-                        || location.range.start >= page.start + page.text.len()
-                    {
+                    if range.start < page.start || range.start >= page.start + page.text.len() {
                         return None;
                     }
-                    let local = location.range.start - page.start;
-                    let local_end = location.range.end.checked_sub(page.start)?;
+                    let local = range.start - page.start;
+                    let local_end = range.end.checked_sub(page.start)?;
                     Some((idx, local, local_end))
                 })
             else {

@@ -29,8 +29,8 @@ use std::collections::HashMap;
 use std::ops::ControlFlow;
 
 use elide_codec::UntypedDocumentHandle;
-use elide_core::entity::Entity;
 use elide_core::entity::audit::{Attribution, AuditEvent, AuditKind, ManualIntent};
+use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::Modality;
 #[cfg(feature = "usage")]
 use elide_core::primitive::UsageReport;
@@ -315,6 +315,45 @@ impl Report {
             }
             None => false,
         }
+    }
+
+    /// Add a **custom** entity of modality `M` — a `label` at a `location` a
+    /// reviewer marked between detection and redaction — to the **sole document**
+    /// this report describes. One call: it builds the entity ([`Entity::custom`],
+    /// confidence [`MAX`](elide_core::primitive::Confidence::MAX), a [`Manual`]
+    /// audit event stamped) and includes it.
+    ///
+    /// Modality-agnostic: `location` is `M::Location`, so a custom text span,
+    /// image box, audio span, or a custom modality's own coordinate all add the
+    /// same way. Returns `false` when the report holds zero or more than one
+    /// top-level document, or the sole document is a different modality than `M`,
+    /// address a specific part with [`include_custom_at`](Self::include_custom_at)
+    /// for a multi-document report.
+    ///
+    /// [`Manual`]: elide_core::entity::audit::AuditKind::Manual
+    pub fn include_custom<M: Modality>(
+        &mut self,
+        label: impl Into<LabelRef>,
+        location: M::Location,
+    ) -> bool {
+        match self.sole_document_id() {
+            Some(id) => self.include_part::<M>(&id, Entity::custom(label, location)),
+            None => false,
+        }
+    }
+
+    /// Add a **custom** entity of modality `M` — a `label` at a `location` a
+    /// reviewer marked — to the container part `part_id`. The part counterpart to
+    /// [`include_custom`](Self::include_custom): builds the entity
+    /// ([`Entity::custom`]) and includes it under `part_id`. Modality-agnostic in
+    /// `location`. Returns `false` for an unknown part or a modality mismatch.
+    pub fn include_custom_at<M: Modality>(
+        &mut self,
+        part_id: &PartId,
+        label: impl Into<LabelRef>,
+        location: M::Location,
+    ) -> bool {
+        self.include_part::<M>(part_id, Entity::custom(label, location))
     }
 
     /// Manually suppress the entity `id` in the container part `part_id`, so a
@@ -655,6 +694,62 @@ mod tests {
 
         // An unknown part includes nothing.
         assert!(!report.include_part::<Text>(&PartId::new("missing"), text_entity("X")));
+    }
+
+    #[test]
+    fn include_custom_adds_a_manual_entity_in_one_call() {
+        use elide_core::modality::text::{Text, TextLocation};
+
+        // include_custom targets the sole document: one depth-1 part.
+        let mut report = Report::new().insert_part::<Text>(doc(), Vec::new());
+        assert!(
+            report.include_custom::<Text>("US_SSN", TextLocation::new(0, 9)),
+            "custom entity added to the sole document",
+        );
+        let entities = report.entities::<Text>().expect("sole document entities");
+        assert_eq!(entities.len(), 1);
+        assert_eq!(entities[0].label.as_str(), "US_SSN");
+        // Built as a custom entity: MAX confidence + a Manual event.
+        assert_eq!(
+            entities[0].confidence,
+            elide_core::primitive::Confidence::MAX
+        );
+        assert!(
+            entities[0]
+                .audit
+                .events()
+                .iter()
+                .any(|e| matches!(e.kind, AuditKind::Manual(_))),
+        );
+
+        // A multi-document report has no *sole* document, so include_custom
+        // returns false rather than guessing which document to add to.
+        let mut multi = Report::new()
+            .insert_part::<Text>(PartId::new("a.txt"), Vec::new())
+            .insert_part::<Text>(PartId::new("b.txt"), Vec::new());
+        assert!(
+            !multi.include_custom::<Text>("US_SSN", TextLocation::new(0, 9)),
+            "no sole document to add to",
+        );
+        // But include_custom_at addresses a specific part.
+        assert!(multi.include_custom_at::<Text>(
+            &PartId::new("a.txt"),
+            "US_SSN",
+            TextLocation::new(0, 9),
+        ),);
+        assert_eq!(
+            multi
+                .part_entities::<Text>(&PartId::new("a.txt"))
+                .unwrap()
+                .len(),
+            1,
+        );
+        // An unknown part adds nothing.
+        assert!(!multi.include_custom_at::<Text>(
+            &PartId::new("missing"),
+            "US_SSN",
+            TextLocation::new(0, 9),
+        ));
     }
 
     #[test]

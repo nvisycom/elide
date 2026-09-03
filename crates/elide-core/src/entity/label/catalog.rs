@@ -213,7 +213,7 @@ mod tests {
             let loc = TextLocation::new(0, 1);
             let conf = Confidence::new(0.9).unwrap();
             let event = AuditEvent::pattern("t", conf, loc.clone(), PatternEvent::default());
-            Entity::new(LabelRef::new(label), loc, conf, AuditLog::new(event))
+            Entity::new(LabelRef::new(label), loc, AuditLog::new(event))
         }
 
         let catalog: LabelCatalog = [Label::new("email_address", "email")].into_iter().collect();
@@ -237,7 +237,7 @@ mod tests {
             let loc = TextLocation::new(0, 1);
             let conf = Confidence::new(0.9).unwrap();
             let event = AuditEvent::pattern("t", conf, loc.clone(), PatternEvent::default());
-            Entity::new(LabelRef::new(label), loc, conf, AuditLog::new(event))
+            Entity::new(LabelRef::new(label), loc, AuditLog::new(event))
         }
 
         let catalog: LabelCatalog = [

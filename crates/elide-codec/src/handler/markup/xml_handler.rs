@@ -227,8 +227,8 @@ mod tests {
         // "Carter" sits at raw bytes 18..24 in the document.
         let want = "<root><name>Alice Carter".find("Carter").unwrap();
         assert_eq!(
-            lifted.source,
-            vec![SourceRef::new(want..want + "Carter".len())]
+            lifted.source(),
+            &[SourceRef::new(want..want + "Carter".len())][..]
         );
         assert_eq!(&raw[want..want + 6], "Carter");
     }
@@ -240,8 +240,7 @@ mod tests {
         let raw = "<root><name>Alice</name></root>";
         let mut h = load(raw).await;
         let at = raw.find("Alice").unwrap();
-        let location =
-            TextLocation::new(0, 0).with_source([SourceRef::new(at..at + "Alice".len())]);
+        let location = TextLocation::from_source([SourceRef::new(at..at + "Alice".len())]);
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("[NAME]"));
         h.write_at(rs).await.unwrap();
@@ -257,8 +256,10 @@ mod tests {
         let raw = "<root><name>Alice</name></root>";
         let mut h = load(raw).await;
         let at = raw.find("Alice").unwrap();
-        let location = TextLocation::new(0, 0)
-            .with_source([SourceRef::in_part(at..at + "Alice".len(), "some/part.xml")]);
+        let location = TextLocation::from_source([SourceRef::in_part(
+            at..at + "Alice".len(),
+            "some/part.xml",
+        )]);
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("[NAME]"));
         let err = h
@@ -276,7 +277,7 @@ mod tests {
         let raw = "<root><name>Alice</name></root>";
         let mut h = load(raw).await;
         let past = raw.len() + 4;
-        let location = TextLocation::new(0, 0).with_source([SourceRef::new(past..past + 3)]);
+        let location = TextLocation::from_source([SourceRef::new(past..past + 3)]);
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("[NAME]"));
         let err = h
@@ -346,8 +347,8 @@ mod tests {
         };
         let at = chunk.data.as_str().find("alice@example.com").unwrap();
         let loc = TextLocation::new(
-            chunk.location.range.start + at,
-            chunk.location.range.start + at + "alice@example.com".len(),
+            chunk.location.range().unwrap().start + at,
+            chunk.location.range().unwrap().start + at + "alice@example.com".len(),
         );
         let mut rs = Redactions::new();
         rs.push(loc, TextReplacement::substituted("[EMAIL]"));
@@ -378,8 +379,8 @@ mod tests {
         };
         let at = chunk.data.as_str().find("alice@example.com").unwrap();
         let loc = TextLocation::new(
-            chunk.location.range.start + at,
-            chunk.location.range.start + at + "alice@example.com".len(),
+            chunk.location.range().unwrap().start + at,
+            chunk.location.range().unwrap().start + at + "alice@example.com".len(),
         );
         let mut rs = Redactions::new();
         rs.push(loc, TextReplacement::substituted("[EMAIL]"));

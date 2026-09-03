@@ -261,8 +261,8 @@ mod tests {
         let head = raw.find("Alice").unwrap();
         let tail_end = raw.find("</w:t>").unwrap();
         assert_eq!(
-            lifted.source,
-            vec![SourceRef::in_part(head..tail_end, BODY_PART)]
+            lifted.source(),
+            &[SourceRef::in_part(head..tail_end, BODY_PART)][..]
         );
         // The single range spans the entity: `&amp;` is inside it, not a hole.
         assert_eq!(&raw[head..tail_end], "Alice &amp; Bob");
@@ -284,8 +284,8 @@ mod tests {
             .expect("in bounds");
         let amp = raw.find("&amp;").unwrap();
         assert_eq!(
-            lifted.source,
-            vec![SourceRef::in_part(amp..amp + "&amp;".len(), BODY_PART)]
+            lifted.source(),
+            &[SourceRef::in_part(amp..amp + "&amp;".len(), BODY_PART)][..]
         );
     }
 
@@ -304,8 +304,8 @@ mod tests {
             .expect("in bounds");
         let head = raw.find("Alice").unwrap();
         assert_eq!(
-            lifted.source,
-            vec![SourceRef::in_part(head..head + 5, BODY_PART)]
+            lifted.source(),
+            &[SourceRef::in_part(head..head + 5, BODY_PART)][..]
         );
     }
 
@@ -324,10 +324,12 @@ mod tests {
             .await
             .unwrap();
 
-        // The raw span of "Bob" in the part, what a DOM selection yields.
+        // The raw span of "Bob" in the part, what a DOM selection yields. The
+        // reviewer has no decoded-stream range, only this raw span, so the
+        // location is genuinely source-only (no faked `range`).
         let bob = raw.find("Bob").unwrap();
-        let location = TextLocation::new(0, 0) // no usable decoded range
-            .with_source([SourceRef::in_part(bob..bob + 3, BODY_PART)]);
+        let location = TextLocation::from_source([SourceRef::in_part(bob..bob + 3, BODY_PART)]);
+        assert!(location.is_source_only());
 
         let mut redactions = Redactions::new();
         redactions.push(location, TextReplacement::substituted("[NAME]"));

@@ -223,24 +223,30 @@ impl<E: Encoder> ExtractHandler<E> {
     /// missed decoded `range` stays `Ok(None)`: the pipeline's own coordinate,
     /// tolerated as a no-op.
     fn resolve(&self, location: &TextLocation) -> Result<Option<ItemEdit>> {
-        if !location.source.is_empty() {
+        if !location.source().is_empty() {
             let edit = self
                 .encoder
-                .locate_source(&self.items, &location.source)
-                .ok_or_else(|| unresolvable_source(&location.source))?;
+                .locate_source(&self.items, location.source())
+                .ok_or_else(|| unresolvable_source(location.source()))?;
             return Ok(Some(edit));
         }
-        let Some(item) = self.item_for(location.range.start) else {
+        // No source refs and no decoded range: a source-only location with an
+        // empty ref set, nothing to resolve. A decoded range is the pipeline's
+        // own coordinate, a miss is a tolerated no-op.
+        let Some(range) = location.range() else {
+            return Ok(None);
+        };
+        let Some(item) = self.item_for(range.start) else {
             return Ok(None);
         };
         let item_start = self.item_starts[item];
         let item_end = self.item_starts[item + 1];
-        if location.range.end > item_end {
+        if range.end > item_end {
             return Ok(None);
         }
         Ok(Some(ItemEdit {
             item,
-            local: (location.range.start - item_start)..(location.range.end - item_start),
+            local: (range.start - item_start)..(range.end - item_start),
         }))
     }
 }
@@ -293,11 +299,14 @@ impl<E: Encoder> Handler<Text> for ExtractHandler<E> {
     fn lift(&self, chunk: &Chunk<Text>, local: TextLocation) -> Option<TextLocation> {
         // Items are byte-for-byte the recognizer's view, so lifting is an
         // identity offset add of the chunk-local range against the chunk's
-        // start, bounded by its end.
-        let base = chunk.location.range.start;
-        let start = base.checked_add(local.range.start)?;
-        let end = base.checked_add(local.range.end)?;
-        if start > end || end > chunk.location.range.end {
+        // start, bounded by its end. Both are decoded coordinates (a chunk yields
+        // a decoded range; a recognizer's local finding is a decoded offset).
+        let chunk_range = chunk.location.range()?;
+        let local_range = local.range()?;
+        let base = chunk_range.start;
+        let start = base.checked_add(local_range.start)?;
+        let end = base.checked_add(local_range.end)?;
+        if start > end || end > chunk_range.end {
             return None;
         }
         // The exact raw source range(s) this finding came from, when the encoder
@@ -307,7 +316,7 @@ impl<E: Encoder> Handler<Text> for ExtractHandler<E> {
             .item_for(base)
             .map(|i| {
                 self.encoder
-                    .source_span(&self.items[i], local.range.start..local.range.end)
+                    .source_span(&self.items[i], local_range.start..local_range.end)
             })
             .unwrap_or_default();
         Some(
@@ -325,16 +334,21 @@ impl<E: Encoder> Handler<Text> for ExtractHandler<E> {
 #[async_trait::async_trait]
 impl<E: Encoder> DataReader<Text> for ExtractHandler<E> {
     async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
-        let Some(i) = self.item_for(location.range.start) else {
+        // Reads address the decoded stream; a source-only location has no decoded
+        // range to read from.
+        let Some(range) = location.range() else {
+            return Ok(None);
+        };
+        let Some(i) = self.item_for(range.start) else {
             return Ok(None);
         };
         let item_start = self.item_starts[i];
         let item_end = self.item_starts[i + 1];
-        if location.range.end > item_end {
+        if range.end > item_end {
             return Ok(None);
         }
-        let local_start = location.range.start - item_start;
-        let local_end = location.range.end - item_start;
+        let local_start = range.start - item_start;
+        let local_end = range.end - item_start;
         Ok(self.items[i]
             .value
             .get(local_start..local_end)

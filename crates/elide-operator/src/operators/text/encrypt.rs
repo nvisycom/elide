@@ -237,7 +237,6 @@ mod tests {
         Entity::new(
             LabelRef::new("email_address"),
             location,
-            Confidence::MAX,
             AuditLog::new(event),
         )
     }
@@ -314,23 +313,13 @@ mod tests {
             let loc = TextLocation::new(0, 5);
             let event =
                 AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
-            Entity::<Text>::new(
-                LabelRef::new("payment_card"),
-                loc,
-                Confidence::MAX,
-                AuditLog::new(event),
-            )
+            Entity::<Text>::new(LabelRef::new("payment_card"), loc, AuditLog::new(event))
         };
         let ssn = {
             let loc = TextLocation::new(0, 5);
             let event =
                 AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
-            Entity::<Text>::new(
-                LabelRef::new("ssn"),
-                loc,
-                Confidence::MAX,
-                AuditLog::new(event),
-            )
+            Entity::<Text>::new(LabelRef::new("ssn"), loc, AuditLog::new(event))
         };
 
         let replacement = op.anonymize(&card, &TextData::new("secret")).await.unwrap();

@@ -414,14 +414,15 @@ impl Handler<Text> for JsonHandler {
             leaf,
             decoded_start: decoded_slot_start,
         } = self.find_leaf(&chunk.location)?;
-        let decoded_start = decoded_slot_start + local.range.start;
-        let decoded_end = decoded_slot_start + local.range.end;
+        let local_range = local.range()?;
+        let decoded_start = decoded_slot_start + local_range.start;
+        let decoded_end = decoded_slot_start + local_range.end;
 
         // Raw span: map the value-local endpoints through the leaf's escape
         // table, offset by the leaf's serialized start in the document.
         let source_slot_start = self.source_offset_of(index);
-        let source_start = leaf.value_to_source(source_slot_start, local.range.start)?;
-        let source_end = leaf.value_to_source(source_slot_start, local.range.end)?;
+        let source_start = leaf.value_to_source(source_slot_start, local_range.start)?;
+        let source_end = leaf.value_to_source(source_slot_start, local_range.end)?;
 
         Some(
             TextLocation::new(decoded_start, decoded_end)
@@ -500,12 +501,14 @@ impl JsonHandler {
     ///
     /// [`decoded_offset_of`]: Self::decoded_offset_of
     fn find_leaf(&self, location: &TextLocation) -> Option<LeafAt<'_>> {
+        // A source-only location carries no decoded range to sweep against.
+        let range = location.range()?;
         let mut offset = 0usize;
         for (index, slot) in self.slots.iter().enumerate() {
             let slot_end = offset + slot.decoded_len();
             if let Slot::Leaf(leaf) = slot
-                && location.range.start >= offset
-                && location.range.end <= slot_end
+                && range.start >= offset
+                && range.end <= slot_end
             {
                 return Some(LeafAt {
                     index,
@@ -540,7 +543,7 @@ impl JsonHandler {
     /// it and report success while ignoring the rest, leaving the caller's later
     /// coordinates unredacted under a green audit.
     fn resolve(&self, location: &TextLocation) -> Result<Option<LeafEdit>> {
-        match location.source.split_first() {
+        match location.source().split_first() {
             Some((first, rest)) => self.resolve_source(first, rest),
             None => self.resolve_range(location),
         }
@@ -653,7 +656,11 @@ impl JsonHandler {
     ///
     /// [`range`]: TextLocation::range
     fn resolve_range(&self, location: &TextLocation) -> Result<Option<LeafEdit>> {
-        let range = &location.range;
+        // No decoded range and (per `resolve`) no source refs either: nothing to
+        // locate, tolerated as a no-op like a decoded range that lands in no leaf.
+        let Some(range) = location.range() else {
+            return Ok(None);
+        };
         if range.start > range.end {
             return Err(malformed(format_args!(
                 "redaction range {}..{} is reversed",
@@ -773,7 +780,7 @@ mod tests {
         let mut offsets = Vec::new();
         while let Some(c) = h.read_next().await? {
             if c.data.as_str() == "same" {
-                offsets.push(c.location.range.start);
+                offsets.push(c.location.range().unwrap().start);
             }
         }
         assert_eq!(offsets.len(), 2);
@@ -845,8 +852,8 @@ mod tests {
         let mut rs = Redactions::new();
         rs.push(
             TextLocation::new(
-                chunk.location.range.start + at,
-                chunk.location.range.start + at + "alice".len(),
+                chunk.location.range().unwrap().start + at,
+                chunk.location.range().unwrap().start + at + "alice".len(),
             ),
             TextReplacement::substituted("[USER]"),
         );
@@ -872,8 +879,8 @@ mod tests {
         let mut rs = Redactions::new();
         rs.push(
             TextLocation::new(
-                chunk.location.range.start + at,
-                chunk.location.range.start + at + "bar".len(),
+                chunk.location.range().unwrap().start + at,
+                chunk.location.range().unwrap().start + at + "bar".len(),
             ),
             TextReplacement::substituted("XXX"),
         );
@@ -921,8 +928,8 @@ mod tests {
         let mut rs = Redactions::new();
         rs.push(
             TextLocation::new(
-                chunk.location.range.start + at,
-                chunk.location.range.start + at + "bar".len(),
+                chunk.location.range().unwrap().start + at,
+                chunk.location.range().unwrap().start + at + "bar".len(),
             ),
             TextReplacement::substituted("XXX"),
         );
@@ -944,8 +951,7 @@ mod tests {
         let src = format!("{{\"msg\":\"caf{} bar\"}}", "\\u00e9");
         let mut h = handler(&src);
         let raw_at = src.find("bar").unwrap();
-        let location =
-            TextLocation::new(0, 0).with_source([SourceRef::new(raw_at..raw_at + "bar".len())]);
+        let location = TextLocation::from_source([SourceRef::new(raw_at..raw_at + "bar".len())]);
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("XXX"));
         h.write_at(rs).await?;
@@ -964,7 +970,7 @@ mod tests {
         let mut h = handler(src);
         let open = src.find(r#""bcd""#).unwrap();
         let close = open + r#""bcd""#.len();
-        let location = TextLocation::new(0, 0).with_source([SourceRef::new(open..close)]);
+        let location = TextLocation::from_source([SourceRef::new(open..close)]);
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("X"));
         h.write_at(rs).await?;
@@ -1026,7 +1032,7 @@ mod tests {
         let mut h = handler(src);
         let at = src.find("bcd").unwrap();
         let location =
-            TextLocation::new(0, 0).with_source([SourceRef::in_part(at..at + 3, "some/part.json")]);
+            TextLocation::from_source([SourceRef::in_part(at..at + 3, "some/part.json")]);
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("X"));
         let err = h
@@ -1045,7 +1051,7 @@ mod tests {
         // explicit source that resolves to no leaf must error, not silently
         // drop the edit.
         let mut h = handler(r#"{"a":"b"}"#);
-        let location = TextLocation::new(0, 0).with_source([SourceRef::new(0..1)]);
+        let location = TextLocation::from_source([SourceRef::new(0..1)]);
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("X"));
         let err = h
@@ -1065,7 +1071,7 @@ mod tests {
         let src = r#"{"a":"b"}"#;
         let mut h = handler(src);
         let past = src.len() + 4;
-        let location = TextLocation::new(0, 0).with_source([SourceRef::new(past..past + 2)]);
+        let location = TextLocation::from_source([SourceRef::new(past..past + 2)]);
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("X"));
         let err = h
@@ -1088,8 +1094,8 @@ mod tests {
         let b = src.find("bcd").unwrap();
         // Two non-adjacent single-byte refs (`b` and `d`) within the one value;
         // their bounding value range is the whole `bcd`.
-        let location = TextLocation::new(0, 0)
-            .with_source([SourceRef::new(b..b + 1), SourceRef::new(b + 2..b + 3)]);
+        let location =
+            TextLocation::from_source([SourceRef::new(b..b + 1), SourceRef::new(b + 2..b + 3)]);
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("X"));
         h.write_at(rs).await?;
@@ -1109,8 +1115,8 @@ mod tests {
         let mut h = handler(src);
         let b = src.find("bcd").unwrap();
         let past = src.len() + 4;
-        let location = TextLocation::new(0, 0)
-            .with_source([SourceRef::new(b..b + 1), SourceRef::new(past..past + 2)]);
+        let location =
+            TextLocation::from_source([SourceRef::new(b..b + 1), SourceRef::new(past..past + 2)]);
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("X"));
         let err = h
@@ -1134,8 +1140,8 @@ mod tests {
         let mut h = handler(src);
         let b = src.find("bcd").unwrap();
         let f = src.find("fgh").unwrap();
-        let location = TextLocation::new(0, 0)
-            .with_source([SourceRef::new(b..b + 1), SourceRef::new(f..f + 1)]);
+        let location =
+            TextLocation::from_source([SourceRef::new(b..b + 1), SourceRef::new(f..f + 1)]);
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("X"));
         let err = h
@@ -1157,7 +1163,7 @@ mod tests {
         let src = r#"{"a":"bcd"}"#;
         let mut h = handler(src);
         let open = src.find(r#""bcd""#).unwrap();
-        let location = TextLocation::new(0, 0).with_source([SourceRef::new(open..open + 1)]);
+        let location = TextLocation::from_source([SourceRef::new(open..open + 1)]);
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("X"));
         let err = h
@@ -1178,7 +1184,7 @@ mod tests {
         let src = r#"{"a":"bcd"}"#;
         let mut h = handler(src);
         let close = src.find(r#""bcd""#).unwrap() + r#""bcd""#.len() - 1;
-        let location = TextLocation::new(0, 0).with_source([SourceRef::new(close..close + 1)]);
+        let location = TextLocation::from_source([SourceRef::new(close..close + 1)]);
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("X"));
         let err = h
@@ -1200,7 +1206,7 @@ mod tests {
         let src = r#"{"a":"bcd"}"#;
         let mut h = handler(src);
         let c = src.find("bcd").unwrap() + 1;
-        let location = TextLocation::new(0, 0).with_source([SourceRef::new(c..c)]);
+        let location = TextLocation::from_source([SourceRef::new(c..c)]);
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("X"));
         let err = h
@@ -1221,7 +1227,7 @@ mod tests {
         let src = r#"{"a":12345}"#;
         let mut h = handler(src);
         let mid = src.find("12345").unwrap() + 2;
-        let location = TextLocation::new(0, 0).with_source([SourceRef::new(mid..mid)]);
+        let location = TextLocation::from_source([SourceRef::new(mid..mid)]);
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("X"));
         let err = h
@@ -1256,7 +1262,7 @@ mod tests {
                 break c;
             }
         };
-        let start = chunk.location.range.start;
+        let start = chunk.location.range().unwrap().start;
         let mut rs = Redactions::new();
         rs.push(
             TextLocation::new(start, start + 5),
@@ -1280,7 +1286,7 @@ mod tests {
                 break c;
             }
         };
-        let start = chunk.location.range.start;
+        let start = chunk.location.range().unwrap().start;
         let mut rs = Redactions::new();
         rs.push(
             TextLocation::new(start + 3, start + 4),
@@ -1304,7 +1310,7 @@ mod tests {
                 break c;
             }
         };
-        let start = chunk.location.range.start;
+        let start = chunk.location.range().unwrap().start;
         let mut rs = Redactions::new();
         rs.push(
             TextLocation::new(start + 2, start),
@@ -1426,13 +1432,15 @@ mod tests {
             .lift(&chunk, TextLocation::new(value_start, value_end))
             .expect("range is in bounds");
         // Primary range: decoded-stream offset (chunk start + value-local).
-        assert_eq!(lifted.range.start, chunk.location.range.start + value_start);
-        assert_eq!(lifted.range.end, chunk.location.range.start + value_end);
+        let lifted_range = lifted.range().unwrap();
+        let chunk_start = chunk.location.range().unwrap().start;
+        assert_eq!(lifted_range.start, chunk_start + value_start);
+        assert_eq!(lifted_range.end, chunk_start + value_end);
         // Source: the raw byte span of "alice" in the document.
         let raw = src.find("alice").unwrap();
         assert_eq!(
-            lifted.source,
-            vec![SourceRef::new(raw..raw + "alice".len())]
+            lifted.source(),
+            &[SourceRef::new(raw..raw + "alice".len())][..]
         );
         Ok(())
     }
@@ -1458,11 +1466,16 @@ mod tests {
             .lift(&chunk, TextLocation::new(value_start, value_end))
             .expect("range is in bounds");
         // Decoded range: `bar` at value offset 4 (`foo"` = 4 decoded bytes).
-        assert_eq!(lifted.range.start, chunk.location.range.start + value_start);
-        assert_eq!(lifted.range.end, chunk.location.range.start + value_end);
+        let lifted_range = lifted.range().unwrap();
+        let chunk_start = chunk.location.range().unwrap().start;
+        assert_eq!(lifted_range.start, chunk_start + value_start);
+        assert_eq!(lifted_range.end, chunk_start + value_end);
         // Raw source span: `bar` sits after the 2-byte `\"` escape.
         let raw = src.find("bar").unwrap();
-        assert_eq!(lifted.source, vec![SourceRef::new(raw..raw + "bar".len())]);
+        assert_eq!(
+            lifted.source(),
+            &[SourceRef::new(raw..raw + "bar".len())][..]
+        );
         Ok(())
     }
 

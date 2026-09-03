@@ -493,7 +493,7 @@ mod tests {
     use elide_core::modality::text::Text;
     use serde::de::DeserializeSeed;
 
-    use super::super::test_support::{doc, text_entity};
+    use super::super::test_support::{doc, source_only_entity, text_entity};
     use super::*;
     use crate::PartId;
 
@@ -561,7 +561,12 @@ mod tests {
         let schema = serde_json::to_value(schemars::schema_for!(Report)).unwrap();
 
         let with_part = Report::new()
-            .insert_part::<Text>(doc(), vec![text_entity("EMAIL_ADDRESS")])
+            .insert_part::<Text>(
+                doc(),
+                // A decoded finding and a source-only reviewer add: both coordinate
+                // arms must validate against the schema on the wire.
+                vec![text_entity("EMAIL_ADDRESS"), source_only_entity("US_SSN")],
+            )
             .insert_part::<Text>(
                 doc().child("word/media/image1.png"),
                 vec![text_entity("PHONE_NUMBER")],

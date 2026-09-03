@@ -11,7 +11,7 @@ mod tokens;
 use std::ops::Range;
 
 pub use self::data::TextData;
-pub use self::location::TextLocation;
+pub use self::location::{DecodedSpan, SourceSpan, TextCoord, TextLocation};
 pub use self::replacement::TextReplacement;
 pub use self::source_ref::SourceRef;
 #[cfg(feature = "test-util")]
@@ -69,7 +69,10 @@ mod tests {
 
         batch.sort_by_position();
 
-        let starts: Vec<usize> = batch.iter().map(|(loc, _)| loc.range.start).collect();
+        let starts: Vec<usize> = batch
+            .iter()
+            .map(|(loc, _)| loc.range().unwrap().start)
+            .collect();
         assert_eq!(starts, [0, 10, 20]);
     }
 

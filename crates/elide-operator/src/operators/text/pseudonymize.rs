@@ -193,12 +193,7 @@ mod tests {
             location.clone(),
             PatternEvent::default(),
         );
-        let entity = Entity::new(
-            LabelRef::new(label),
-            location,
-            Confidence::MAX,
-            AuditLog::new(event),
-        );
+        let entity = Entity::new(LabelRef::new(label), location, AuditLog::new(event));
         match coref {
             Some(c) => entity.with_coref(EntityCoRef::new(c.to_owned())),
             None => entity,

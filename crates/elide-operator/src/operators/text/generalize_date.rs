@@ -405,7 +405,6 @@ mod tests {
         let e: Entity<Text> = Entity::new(
             LabelRef::new("date_of_birth"),
             location,
-            Confidence::MAX,
             AuditLog::new(event),
         );
         let out = Operator::<Text>::anonymize(

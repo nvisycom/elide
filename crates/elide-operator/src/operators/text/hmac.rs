@@ -158,12 +158,7 @@ mod tests {
             location.clone(),
             PatternEvent::default(),
         );
-        Entity::new(
-            LabelRef::new(label),
-            location,
-            Confidence::MAX,
-            AuditLog::new(event),
-        )
+        Entity::new(LabelRef::new(label), location, AuditLog::new(event))
     }
 
     #[tokio::test]

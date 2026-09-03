@@ -94,16 +94,19 @@ impl Prompt<Text> for Jinja2Prompt<Text> {
         let hints: Vec<_> = ctx
             .inclusions()
             .iter()
-            .map(|h| {
-                let range = h.location.range.start..h.location.range.end;
+            .filter_map(|h| {
+                // The template quotes a snippet of the decoded `text`; a
+                // source-only hint has no decoded range to locate, so skip it.
+                let range = h.location.range()?;
+                let range = range.start..range.end;
                 let value = value_at(text, range.clone());
                 let snippet = snippet_around(text, range);
-                context! {
+                Some(context! {
                     name => h.name.as_deref().unwrap_or(""),
                     kind => h.label.as_ref().map(|l| l.as_str().to_owned()).unwrap_or_else(|| "unknown".to_owned()),
                     value => value,
                     snippet => snippet,
-                }
+                })
             })
             .collect();
         self.render(context! {

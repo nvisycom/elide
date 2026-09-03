@@ -79,12 +79,7 @@ mod tests {
             location.clone(),
             PatternEvent::default(),
         );
-        let entity = Entity::new(
-            LabelRef::new("FACE"),
-            location,
-            Confidence::MAX,
-            AuditLog::new(event),
-        );
+        let entity = Entity::new(LabelRef::new("FACE"), location, AuditLog::new(event));
         let data = ImageData::new(vec![0u8; 4], Dimensions::new(4, 4));
         (entity, data)
     }
