@@ -14,7 +14,7 @@ pub enum Waveform {
     /// Pure sine. The broadcast censor-beep convention: audible but smooth,
     /// with no harmonics to alias on resampling.
     Sine,
-    /// Square wave. Harsher and richer in harmonics — the "retro" bleep.
+    /// Square wave. Harsher and richer in harmonics, the "retro" bleep.
     Square,
 }
 

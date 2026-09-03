@@ -1,7 +1,7 @@
 //! South Korea-specific post-match validators.
 //!
 //! Registered under the [`ValidatorRegistry::builtin`] set with
-//! dotted names — `"kr.rrn"`, `"kr.frn"`, `"kr.brn"`,
+//! dotted names, `"kr.rrn"`, `"kr.frn"`, `"kr.brn"`,
 //! `"kr.driver_license"`.
 //!
 //! [`ValidatorRegistry::builtin`]: super::ValidatorRegistry::builtin

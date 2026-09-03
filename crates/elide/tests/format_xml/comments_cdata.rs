@@ -1,5 +1,5 @@
 //! PII inside comment bodies and CDATA sections is detected and redacted, not
-//! skipped as inert markup — a comment or CDATA is as leak-prone as element
+//! skipped as inert markup, a comment or CDATA is as leak-prone as element
 //! text. Non-sensitive structure survives.
 
 use elide::Result;

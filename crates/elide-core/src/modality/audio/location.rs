@@ -71,7 +71,7 @@ impl ModalityLocation for AudioLocation {
 
     fn union(&self, other: &Self) -> Option<Self> {
         // The speaker is a diarization label over one shared timeline, not a
-        // coordinate space — overlapping spans always coalesce into one
+        // coordinate space, overlapping spans always coalesce into one
         // redactable time span, like [`TimeSpan::union`]. The speaker is
         // carried only when both agree; a merged span across speakers honestly
         // carries none.

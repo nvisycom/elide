@@ -20,11 +20,11 @@ use crate::directives::AnnotationSet;
 
 /// A type-erased pipeline the orchestrator stores per modality.
 ///
-/// Every document part — the body and each container part — is an
+/// Every document part, the body and each container part, is an
 /// [`UntypedDocumentHandle`] offered to each pipeline until one matches by
 /// modality, so the orchestrator never needs to name the modality
 /// statically. Each analyze phase is seeded with the group's prior enrichment
-/// artifact — `NoArtifact` on a first pass, a restored artifact on a re-run —
+/// artifact, `NoArtifact` on a first pass, a restored artifact on a re-run,
 /// so the same path serves both. The phases:
 /// - [`analyze`] takes an *owned* handle (a freshly-decoded container part);
 ///   on a modality match it detects and hands back the handle plus the boxed
@@ -34,10 +34,10 @@ use crate::directives::AnnotationSet;
 ///   owns); on a match it detects and returns the boxed entities and artifact,
 ///   else `None`.
 /// - [`apply_in_place`] re-drives a borrowed handle with its (possibly
-///   edited) boxed entities, redacting it in place — for the body, which the
+///   edited) boxed entities, redacting it in place, for the body, which the
 ///   caller re-encodes itself.
 /// - [`apply_part`] does the same on an owned handle but re-encodes to
-///   redacted bytes — for a container part, spliced back into the container.
+///   redacted bytes, for a container part, spliced back into the container.
 ///
 /// [`analyze`]: ErasedPipeline::analyze
 /// [`analyze_in_place`]: ErasedPipeline::analyze_in_place
@@ -45,7 +45,7 @@ use crate::directives::AnnotationSet;
 /// [`apply_part`]: ErasedPipeline::apply_part
 pub(crate) trait ErasedPipeline: Send + Sync {
     /// Analyze an *owned* handle (a freshly-decoded container part), seeded with
-    /// the group's prior enrichment `artifact` — `NoArtifact` on a first pass,
+    /// the group's prior enrichment `artifact`, `NoArtifact` on a first pass,
     /// so it enriches from scratch; a restored artifact on a re-run, so it
     /// re-recognizes without re-enriching. On a modality match it detects and
     /// hands back the handle plus the boxed entities and artifact; otherwise it
@@ -84,7 +84,7 @@ pub(crate) trait ErasedPipeline: Send + Sync {
     ) -> BoxFuture<'a, Result<Bytes>>;
 
     /// The pipeline as `&mut dyn Any`, to `downcast_mut` to a concrete
-    /// `ModalityPipeline<M>` — how [`with_analyzer`] / [`with_anonymizer`] reach
+    /// `ModalityPipeline<M>`, how [`with_analyzer`] / [`with_anonymizer`] reach
     /// into an already-registered pipeline to replace one half.
     ///
     /// [`with_analyzer`]: crate::Orchestrator::with_analyzer
@@ -113,7 +113,7 @@ where
             };
             let regions = annotations.get::<M>();
             // A prior artifact for this modality restores as `Some` (even when
-            // empty — that is a valid enrichment result); a `NoArtifact`
+            // empty, that is a valid enrichment result); a `NoArtifact`
             // first-pass seed or a mismatched-modality seed downcasts to `None`,
             // so the group enriches from scratch.
             let seed = artifact.as_any().downcast_ref::<M::Artifact>().cloned();

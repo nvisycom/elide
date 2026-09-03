@@ -5,7 +5,7 @@
 //! fields, annotations, embedded attachments, metadata, JavaScript, XFA, and
 //! more. Inspection walks the object graph and tallies each such structure, so
 //! a caller sees *what kinds of retained data exist* before deciding how to
-//! sanitise — a text-layer rewrite that ignores these leaves them intact.
+//! sanitise, a text-layer rewrite that ignores these leaves them intact.
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};

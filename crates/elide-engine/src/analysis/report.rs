@@ -2,16 +2,16 @@
 //! editable per part before [`anonymize_with`].
 //!
 //! Detection (`analyze`) and redaction (`anonymize_with`) are split so a
-//! caller can inspect and edit the entities in between — drop a
+//! caller can inspect and edit the entities in between, drop a
 //! false-positive, retag, retarget a span. A document set's entities span
 //! several coordinate systems (each named document's own modality, plus every
 //! container part's), so the report keeps them separated: every part's entities
 //! are keyed by its [`PartId`] path, each editable through a typed accessor.
-//! There is no distinct "body" — a document's own content is simply its
+//! There is no distinct "body", a document's own content is simply its
 //! depth-1 part, keyed by the document's name.
 //!
-//! With the `serde` feature the report serializes to a part-list view —
-//! `{ parts: [ { "id": ["scan-A.docx", "word/media/image1.png"], .. } ] }` —
+//! With the `serde` feature the report serializes to a part-list view,
+//! `{ parts: [ { "id": ["scan-A.docx", "word/media/image1.png"], .. } ] }`,
 //! so an external consumer (a review UI) can identify which part each entity
 //! belongs to. The path is a segment array (never string-joined); each entity
 //! carries its own id, label, location, and confidence.
@@ -33,16 +33,16 @@ use elide_core::entity::Entity;
 use elide_core::entity::audit::{Attribution, AuditEvent, AuditKind, ManualIntent};
 use elide_core::modality::Modality;
 #[cfg(feature = "usage")]
-use elide_core::recognition::UsageReport;
+use elide_core::primitive::UsageReport;
 use uuid::Uuid;
 
 use super::group::EntityGroup;
 use super::registry::ReportDeserializer;
 use crate::PartId;
 
-/// One part captured during analysis — a named document's own content (a
+/// One part captured during analysis, a named document's own content (a
 /// depth-1 part) or a container part nested within one: its detected entities,
-/// the modality they belong to, and — for the same-process fast path — the
+/// the modality they belong to, and, for the same-process fast path, the
 /// decoded part handle.
 pub(crate) struct PartReport {
     /// The part's modality, the routing key for [`anonymize_with`]: it
@@ -57,7 +57,7 @@ pub(crate) struct PartReport {
     /// from serialized entities, where apply re-decodes the part from the
     /// container instead.
     ///
-    /// Never serialized — a live decoded document is not data.
+    /// Never serialized, a live decoded document is not data.
     ///
     /// [`analyze`]: crate::Orchestrator::analyze
     pub(crate) handle: Option<UntypedDocumentHandle>,
@@ -67,8 +67,8 @@ pub(crate) struct PartReport {
 
 /// The detected entities of a document set, editable before apply.
 ///
-/// Returned by [`analyze`] and consumed by [`anonymize_with`]. Every part —
-/// each named document's own content, and every container part within one — is
+/// Returned by [`analyze`] and consumed by [`anonymize_with`]. Every part,
+/// each named document's own content, and every container part within one, is
 /// keyed by its [`PartId`] path. Read a part's entities of modality `P` with
 /// [`part_entities`], returning a `&[Entity<_>]`; edit them with
 /// [`part_entities_mut`], returning a `&mut Vec<Entity<_>>` you can filter,
@@ -82,8 +82,8 @@ pub(crate) struct PartReport {
 /// [`for_each_part_mut`], or its `try_` variant to stop the walk early.
 ///
 /// The single-document shorthand: [`entities`] / [`entities_mut`] /
-/// [`entity`] / [`entity_mut`] read the *sole* document's content — the one
-/// depth-1 part — and return `None` when the report holds zero or more than one
+/// [`entity`] / [`entity_mut`] read the *sole* document's content, the one
+/// depth-1 part, and return `None` when the report holds zero or more than one
 /// top-level document (a multi-document set: use [`part_entities`] with the
 /// document's name).
 ///
@@ -97,7 +97,7 @@ pub(crate) struct PartReport {
 /// [`part_ids`]: Report::part_ids
 /// [`for_each_part_mut`]: Report::for_each_part_mut
 ///
-/// A report is **pure entity data** — it carries no live document state, so
+/// A report is **pure entity data**: it carries no live document state, so
 /// it can be built from scratch ([`new`] + [`insert_part`]) and, with the
 /// `serde` feature, serialized to a part-list `{ parts: [..] }` view, shipped
 /// elsewhere, and reconstructed there. To round-trip: serialize a report, edit
@@ -114,7 +114,7 @@ pub(crate) struct PartReport {
 /// [`insert_part`]: Report::insert_part
 #[derive(Default)]
 pub struct Report {
-    /// Every part's entry, keyed by its [`PartId`] path — a named document's own
+    /// Every part's entry, keyed by its [`PartId`] path, a named document's own
     /// content is its depth-1 part, container parts nest below.
     pub(crate) parts: HashMap<PartId, PartReport>,
     /// Per-recognizer / per-enricher resource usage across the whole
@@ -124,7 +124,7 @@ pub struct Report {
 }
 
 impl Report {
-    /// An empty report — no parts. Fill it with [`insert_part`], or let
+    /// An empty report, no parts. Fill it with [`insert_part`], or let
     /// [`analyze`] produce one.
     ///
     /// [`insert_part`]: Self::insert_part
@@ -137,7 +137,7 @@ impl Report {
         }
     }
 
-    /// A [`ReportDeserializer`] for reconstructing a serialized report — without
+    /// A [`ReportDeserializer`] for reconstructing a serialized report, without
     /// the analyzers, anonymizers, or codec registry an [`Orchestrator`] needs
     /// to *run* one. Register the modalities the report may contain, then
     /// [`deserialize`] it:
@@ -155,7 +155,7 @@ impl Report {
         ReportDeserializer::new()
     }
 
-    /// The resource usage recorded across this analysis — one entry per
+    /// The resource usage recorded across this analysis, one entry per
     /// recognizer and enricher that ran, each self-identifying via its id.
     #[cfg(feature = "usage")]
     #[must_use]
@@ -187,7 +187,7 @@ impl Report {
         self
     }
 
-    /// The **sole document's** entities of modality `M`, read-only — a
+    /// The **sole document's** entities of modality `M`, read-only, a
     /// shorthand for the single-document case. Returns `None` when the report
     /// holds zero or more than one top-level document, or the sole document is a
     /// different modality than `M`. For a multi-document set use
@@ -206,7 +206,7 @@ impl Report {
             .map(Vec::as_slice)
     }
 
-    /// The **sole document's** entities of modality `M`, for editing — the
+    /// The **sole document's** entities of modality `M`, for editing, the
     /// `&mut` counterpart to [`entities`]. Returns `None` when the report holds
     /// zero or more than one top-level document, or the sole document is a
     /// different modality than `M`.
@@ -224,7 +224,7 @@ impl Report {
     ///
     /// The id-addressed counterpart to [`entities`], for a caller that holds an
     /// entity's id (from the analyzed report) and wants to reach the same entity
-    /// in the applied report — e.g. to merge its post-redaction provenance back
+    /// in the applied report, e.g. to merge its post-redaction provenance back
     /// onto its own record without scanning the whole group.
     ///
     /// [`id`]: elide_core::entity::Entity::id
@@ -234,7 +234,7 @@ impl Report {
     }
 
     /// One entity of the **sole document**, of modality `M`, by its [`id`], for
-    /// editing — the `&mut` counterpart to [`entity`]. Returns `None` when the
+    /// editing, the `&mut` counterpart to [`entity`]. Returns `None` when the
     /// report holds zero or more than one top-level document, the sole document
     /// is a different modality than `M`, or no entity has that `id`.
     ///
@@ -244,11 +244,11 @@ impl Report {
         self.entities_mut::<M>()?.iter_mut().find(|e| e.id == id)
     }
 
-    /// Manually add `entity` to the container part `part_id` — recording a
+    /// Manually add `entity` to the container part `part_id`, recording a
     /// [`Manual`] event onto `entity` (unless it already carries one) so its
     /// human origin is auditable: a reviewer including a detection the engine
     /// missed is never mistaken for an automatic one. Returns `false` for an
-    /// unknown part or a modality mismatch — [`insert_part`](Self::insert_part)
+    /// unknown part or a modality mismatch, [`insert_part`](Self::insert_part)
     /// seeds an empty part first.
     ///
     /// [`Manual`]: elide_core::entity::audit::AuditKind::Manual
@@ -263,7 +263,7 @@ impl Report {
         }
     }
 
-    /// Manually suppress the entity `id` in the container part `part_id` — so a
+    /// Manually suppress the entity `id` in the container part `part_id`, so a
     /// reviewer can leave alone a false positive detected inside a part. Records
     /// an auditable [`Manual`] event (the *why* is `attribution`, the *who* is
     /// `actor`, recorded as the event's source). Idempotent: suppressing an
@@ -305,7 +305,7 @@ impl Report {
             .map(Vec::as_slice)
     }
 
-    /// The entities of the container part `id`, as modality `P`, for editing —
+    /// The entities of the container part `id`, as modality `P`, for editing,
     /// the `&mut` counterpart to [`part_entities`]. Returns `None` for an
     /// unknown part or a modality mismatch.
     ///
@@ -337,7 +337,7 @@ impl Report {
     }
 
     /// One entity of the container part `part_id`, as modality `P`, by its
-    /// [`id`], read-only — the `&` counterpart to [`part_entity_mut`]. Returns
+    /// [`id`], read-only, the `&` counterpart to [`part_entity_mut`]. Returns
     /// `None` for an unknown part, a modality mismatch, or no entity with that
     /// id.
     ///
@@ -354,7 +354,7 @@ impl Report {
     ///
     /// The batch counterpart to [`part_entity_mut`]: a caller merging the
     /// applied report's per-entity provenance back onto its own records walks the
-    /// group once here — keyed by [`id`] inside `f` — instead of an id-lookup per
+    /// group once here, keyed by [`id`] inside `f`, instead of an id-lookup per
     /// record. One linear pass, no per-call dispatch.
     ///
     /// [`part_entity_mut`]: Self::part_entity_mut
@@ -370,14 +370,14 @@ impl Report {
     }
 
     /// Like [`for_each_part_mut`], but `f` returns a [`ControlFlow`] so the
-    /// walk can stop early — [`ControlFlow::Break`] halts and returns its value,
+    /// walk can stop early, [`ControlFlow::Break`] halts and returns its value,
     /// [`ControlFlow::Continue`] proceeds. Returns `ControlFlow::Continue(())` on
     /// a full walk, an unknown part, or a modality mismatch.
     ///
     /// [`for_each_part_mut`]: Self::for_each_part_mut
     // Returns a concrete `ControlFlow<B>` rather than being generic over
     // `Try`, which is nightly-only (`try_trait_v2`); revisit when it
-    // stabilizes — see issue #139.
+    // stabilizes, see issue #139.
     pub fn try_for_each_part_mut<P: Modality, B>(
         &mut self,
         part_id: &PartId,
@@ -390,15 +390,15 @@ impl Report {
     }
 
     /// The [`PartId`]s of the parts the report carries, paired with each part's
-    /// modality [`TypeId`] — for a caller enumerating what's editable. Includes
+    /// modality [`TypeId`], for a caller enumerating what's editable. Includes
     /// every named document's own depth-1 part as well as any nested container
     /// parts.
     pub fn part_ids(&self) -> impl Iterator<Item = (&PartId, TypeId)> {
         self.parts.iter().map(|(id, p)| (id, p.modality))
     }
 
-    /// The single top-level (depth-1) document's entry — its [`PartId`] and its
-    /// part — if the report describes **exactly one** such document. The one
+    /// The single top-level (depth-1) document's entry, its [`PartId`] and its
+    /// part, if the report describes **exactly one** such document. The one
     /// place the "exactly one depth-1 part" rule lives, so the read
     /// ([`sole_document`](Self::sole_document)) and write
     /// ([`sole_document_id`](Self::sole_document_id)) shorthands cannot drift.
@@ -409,14 +409,14 @@ impl Report {
         tops.next().filter(|_| tops.next().is_none())
     }
 
-    /// The single top-level document's part, if there is exactly one — the
+    /// The single top-level document's part, if there is exactly one, the
     /// backing for the [`entities`](Self::entities) single-document shorthand.
     fn sole_document(&self) -> Option<&PartReport> {
         self.sole_document_entry().map(|(_, part)| part)
     }
 
-    /// The [`PartId`] of the single top-level document, if there is exactly one
-    /// — the `&mut` companion to [`sole_document`](Self::sole_document), which
+    /// The [`PartId`] of the single top-level document, if there is exactly one,
+    /// the `&mut` companion to [`sole_document`](Self::sole_document), which
     /// hands back an owned key so the borrow of `self.parts` is released before
     /// the caller re-borrows it mutably.
     fn sole_document_id(&self) -> Option<PartId> {
@@ -456,7 +456,7 @@ mod tests {
         let a = text_entity("EMAIL_ADDRESS");
         let b = text_entity("PHONE_NUMBER");
         let (id_a, id_b) = (a.id, b.id);
-        // A single depth-1 part — the sole document `entity`/`entity_mut` read.
+        // A single depth-1 part, the sole document `entity`/`entity_mut` read.
         let mut report = Report::new().insert_part::<Text>(doc(), vec![a, b]);
 
         // A present id resolves to that exact entity.
@@ -518,7 +518,7 @@ mod tests {
 
         assert!(report.include_part::<Text>(&doc(), manual), "included");
         assert_eq!(report.entities::<Text>().unwrap().len(), 2);
-        // The included entity — built here with only a Pattern event — now
+        // The included entity, built here with only a Pattern event, now
         // carries a Manual event, so it is auditable as a human decision.
         let included = report.entity_mut::<Text>(manual_id).unwrap();
         assert!(

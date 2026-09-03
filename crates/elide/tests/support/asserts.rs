@@ -34,7 +34,7 @@ macro_rules! assert_label_present {
     }};
 }
 
-/// Assert that no detected entity carries any of the given labels — the
+/// Assert that no detected entity carries any of the given labels, the
 /// negative of [`assert_label_present!`], for precision cases where a weak or
 /// context-free value must not be flagged at all. Accepts one or more labels.
 #[macro_export]

@@ -35,7 +35,7 @@ mod tests {
 
     #[test]
     fn accepts_canonical_aadhaar() {
-        // 234123412346 — widely-quoted Verhoeff-valid test value.
+        // 234123412346, widely-quoted Verhoeff-valid test value.
         assert!(aadhaar("234123412346"));
     }
 

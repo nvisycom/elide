@@ -12,8 +12,8 @@
 //!
 //! Unlike the text-splice path (`e2e_pdf`), raster redaction is reliable
 //! regardless of font encoding: it never re-encodes text, it destroys pixels.
-//! The proof is that the redacted output has **no extractable text at all** —
-//! it is images — and none of the original PII survives.
+//! The proof is that the redacted output has **no extractable text at all**,
+//! it is images, and none of the original PII survives.
 
 use elide::Result;
 use elide::codec::FormatRegistry;

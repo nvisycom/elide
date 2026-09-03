@@ -115,7 +115,7 @@ pub struct AuditEvent<M: Modality> {
 
 impl<M: Modality> AuditEvent<M> {
     /// Assemble an event from its `source` (who produced it), the `confidence`
-    /// after it, and its `kind` — pass a payload with `.into()` (e.g.
+    /// after it, and its `kind`, pass a payload with `.into()` (e.g.
     /// `Redaction::new(..).into()`). [`parents`] is empty and [`hash`] is
     /// [`GENESIS`] until [`AuditLog`] records it and assigns the links.
     ///
@@ -164,7 +164,7 @@ impl<M: Modality> AuditEvent<M> {
             hasher.raw(parent.as_bytes());
         }
         hasher.raw(&(self.parents.len() as u64).to_le_bytes());
-        // `source` is variable-width, so length-prefix it (`bytes`) — the
+        // `source` is variable-width, so length-prefix it (`bytes`), the
         // fixed-width spine fields around it use `raw`.
         hasher.bytes(self.source.as_bytes());
         hasher.raw(&self.timestamp.as_nanosecond().to_le_bytes());
@@ -257,7 +257,7 @@ impl<M: Modality> AuditEvent<M> {
 
     /// A human override recording `manual` (built with its intent, location, and
     /// optional [`Attribution`]) at the entity's asserted `confidence`. The
-    /// `source` names the reviewer who made the override — pass their id, or
+    /// `source` names the reviewer who made the override, pass their id, or
     /// `"manual"` when unattributed. Prefer the [`manual_flag`] /
     /// [`manual_suppress`] shorthands for an unattributed override; build a
     /// [`Manual`] directly (e.g. `Manual::new(ManualIntent::Amend, loc)`) for the

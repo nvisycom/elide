@@ -8,16 +8,16 @@ use std::pin::Pin;
 
 use elide_codec::UntypedDocumentHandle;
 #[cfg(feature = "usage")]
-use elide_core::recognition::Usage;
+use elide_core::primitive::Usage;
 
 use crate::analysis::{ArtifactGroup, EntityGroup};
 
-/// A boxed, pinned, `Send` future — the erased async return shape.
+/// A boxed, pinned, `Send` future, the erased async return shape.
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// What a matched in-place analysis produced: the boxed entities and the boxed
-/// enrichment artifact (`Some` iff the payload was enriched — even to an empty
-/// artifact — so an un-enriched payload persists nothing); the whole result is
+/// enrichment artifact (`Some` iff the payload was enriched, even to an empty
+/// artifact, so an un-enriched payload persists nothing); the whole result is
 /// `None` when the pipeline's modality did not match the handle. Under the
 /// `usage` feature it also carries the per-component [`Usage`] the analysis
 /// recorded. The result of [`ErasedPipeline::analyze_in_place`].

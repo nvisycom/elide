@@ -17,7 +17,7 @@ pub mod codec;
 /// The public async traits (`Recognizer`, `Operator`, `Enricher`,
 /// `DataReader`, …) are `#[async_trait]`, so an `impl` block must carry the
 /// attribute. Use this re-export instead of depending on `async-trait`
-/// directly — the version is guaranteed to match:
+/// directly, the version is guaranteed to match:
 ///
 /// ```ignore
 /// #[elide::async_trait]
@@ -30,7 +30,7 @@ pub use async_trait::async_trait;
 pub use elide_core::{Error, ErrorKind, Result};
 #[doc(inline)]
 pub use elide_core::{entity, primitive};
-// The orchestration engine (`Orchestrator`, `Report`, `Directives`, …) — a
+// The orchestration engine (`Orchestrator`, `Report`, `Directives`, …), a
 // small curated set, re-exported flat at the root under the `engine` feature.
 // `engine` implies `codec` (the orchestrator decodes through it) and serde.
 #[cfg(feature = "engine")]

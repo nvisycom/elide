@@ -8,7 +8,7 @@ use super::hash::AuditHasher;
 use crate::entity::LabelRef;
 
 /// A serializable summary of *which selection rule* bound an operator to an
-/// entity — the automatic "why" behind a redaction.
+/// entity, the automatic "why" behind a redaction.
 ///
 /// The anonymizer selects an operator by walking an ordered rule list and
 /// taking the first match. That decision is recorded on the [`Redaction`]

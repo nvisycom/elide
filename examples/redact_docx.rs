@@ -10,13 +10,13 @@
 //!    [`UntypedDocumentHandle`], wrapped as a named [`Document`].
 //! 2. An [`Orchestrator`] is assembled with a text pipeline for the body
 //!    text and an image pipeline for the embedded media (mock LLM backend,
-//!    so the example runs offline — swap in a real backend to detect in
+//!    so the example runs offline; swap in a real backend to detect in
 //!    images).
 //! 3. [`analyze`] detects across the document *and* each part, returning an
 //!    editable [`Report`] that keeps every part's entities separated. We
 //!    print what was found, grouped by part, then [`anonymize_with`] redacts
 //!    everything and re-zips the package.
-//! 4. We write the redacted `.docx` back out — a complete, drop-in
+//! 4. We write the redacted `.docx` back out: a complete, drop-in
 //!    replacement package, only the redacted parts changed.
 //!
 //! Run with: `cargo run -p elide-examples --bin redact_docx`.
@@ -41,7 +41,7 @@ const SAMPLE: &[u8] = include_bytes!("data/contact.docx");
 #[tokio::main]
 async fn main() -> Result<()> {
     // 1. Decode the container through the codec layer. The orchestrator
-    //    works on the untyped handle — it discovers the body's modality by
+    //    works on the untyped handle, it discovers the body's modality by
     //    trial, so no `.into::<Text>()` turbofish is needed here.
     let registry = FormatRegistry::with_builtin();
     let mut document = registry.document("contact.docx", SAMPLE).await?;

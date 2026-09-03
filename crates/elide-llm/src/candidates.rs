@@ -1,6 +1,6 @@
 //! Structured-output candidate types the model is asked to produce.
 //!
-//! [`Candidates<C>`] is the `T` in rig's `Extractor::<T>` — the backend
+//! [`Candidates<C>`] is the `T` in rig's `Extractor::<T>`, the backend
 //! asks the model to fill it in, and the [`JsonSchema`] derive constrains
 //! the output. The item type `C` is the per-modality candidate
 //! ([`TextCandidate`] / [`ImageCandidate`]); the recognizer localizes each
@@ -20,7 +20,7 @@ pub struct Candidates<C> {
     pub entities: Vec<C>,
 }
 
-// Hand-written so the bound is none — an empty batch needs no `C: Default`,
+// Hand-written so the bound is none, an empty batch needs no `C: Default`,
 // which a derive would spuriously require.
 impl<C> Default for Candidates<C> {
     fn default() -> Self {

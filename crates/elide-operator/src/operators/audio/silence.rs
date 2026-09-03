@@ -3,14 +3,14 @@
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::audio::{Audio, AudioData, AudioReplacement};
-use elide_core::operator::{LeakProfile, Operator, OperatorId};
+use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 /// Silence the matched audio interval, preserving its duration.
 ///
 /// The audio-native in-place treatment: the span is zeroed, so the clip's
-/// length and the timing of everything after it are unchanged — only the
+/// length and the timing of everything after it are unchanged, only the
 /// sensitive audio is gone. Contrast [`Erase`], which cuts the interval out
 /// and shortens the clip.
 ///

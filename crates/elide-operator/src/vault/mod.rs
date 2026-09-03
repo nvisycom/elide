@@ -3,7 +3,7 @@
 //! A vault is the out-of-band map a recoverable operator leans on: a
 //! token replaces the original in the document, and the token resolves
 //! back to its payload through the vault. A pseudonymizer is the same
-//! shape — the same key resolves to the same generated replacement, so
+//! shape, the same key resolves to the same generated replacement, so
 //! every mention of one entity redacts consistently.
 //!
 //! The vault is generic over the key `K` as well as the value, so a
@@ -36,7 +36,7 @@ pub use self::memory::InMemoryVault;
 /// only ever stored as part of resolving a key, never blindly, so a
 /// stored entry always wins and consistency holds by construction.
 ///
-/// [`Operator`]: elide_core::operator::Operator
+/// [`Operator`]: elide_core::redaction::Operator
 /// [`get_or_try_insert_with`]: Vault::get_or_try_insert_with
 #[async_trait::async_trait]
 pub trait Vault<K, V: Clone + Send + Sync>: Send + Sync {
@@ -46,7 +46,7 @@ pub trait Vault<K, V: Clone + Send + Sync>: Send + Sync {
 
     /// Return the value under `key`, or compute one with `init`, store it,
     /// and return that. The value already present always wins, so repeated
-    /// first-sights of the same key resolve to a single value — the
+    /// first-sights of the same key resolve to a single value, the
     /// consistency guarantee a pseudonymizer relies on.
     ///
     /// `init` is synchronous and fallible: a [`Vault`] may run it under a

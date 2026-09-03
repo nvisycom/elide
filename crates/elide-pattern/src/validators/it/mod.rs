@@ -1,7 +1,7 @@
 //! Italy-specific post-match validators.
 //!
 //! Registered under the [`ValidatorRegistry::builtin`] set with
-//! dotted names — `"it.fiscal_code"`, `"it.vat_code"`.
+//! dotted names, `"it.fiscal_code"`, `"it.vat_code"`.
 //!
 //! [`ValidatorRegistry::builtin`]: super::ValidatorRegistry::builtin
 

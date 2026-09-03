@@ -1,4 +1,4 @@
-//! Universal dictionaries — apply regardless of jurisdiction or
+//! Universal dictionaries, apply regardless of jurisdiction or
 //! language.
 //!
 //! These are brand-name lists whose terms transcend locale.

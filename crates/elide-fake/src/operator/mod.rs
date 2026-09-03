@@ -1,7 +1,7 @@
 //! [`Fake`]: locale-aware [`Operator`] that swaps detected
 //! entities for plausible fake values.
 //!
-//! [`Operator`]: elide_core::operator::Operator
+//! [`Operator`]: elide_core::redaction::Operator
 
 mod identity;
 
@@ -12,8 +12,8 @@ use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::operator::{LeakProfile, Operator, OperatorId};
 use elide_core::primitive::LanguageTag;
+use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 use fake::rand::SeedableRng;
 use fake::rand::rngs::SmallRng;
 
@@ -32,21 +32,21 @@ use crate::locale::Locale;
 ///
 /// Entity labels outside the core PII catalogue delegate to the
 /// `fallback` operator passed at construction. The fallback's
-/// modality bound matches whichever `Operator<M>` impl is invoked
-/// — call `Fake` from a [`Text`] context and the fallback only
+/// modality bound matches whichever `Operator<M>` impl is invoked,
+/// call `Fake` from a [`Text`] context and the fallback only
 /// needs `Operator<Text>`; call it from a [`Tabular`] context and
 /// it only needs `Operator<Tabular>`. Every built-in elide
 /// operator (`Mask`, `Replace`, `Erase`, `Sha2Hash`) implements both.
 ///
 /// Structured labels (IBAN, payment card, postal code, phone,
-/// date-of-birth, etc.) always pattern-preserve the original — the
+/// date-of-birth, etc.) always pattern-preserve the original, the
 /// output's length and character-class layout matches the input,
 /// only the digits and letters are randomised. Free-form labels
 /// (names, addresses, organisations) emit a fresh locale-aware
 /// fake whose length doesn't need to match.
 ///
 /// Generic over the fallback operator type because
-/// [`elide_core::operator::Operator`] is not dyn-compatible (its
+/// [`elide_core::redaction::Operator`] is not dyn-compatible (its
 /// `anonymize` method returns `impl Future`), so a stored
 /// `Arc<dyn Operator<…>>` is not available. Each `Fake` instance
 /// binds one concrete fallback type at construction.
@@ -227,8 +227,8 @@ mod tests {
 
     #[tokio::test]
     async fn unsupported_kind_delegates_to_fallback() {
-        // Diagnosis isn't faked — sensitive clinical labels are
-        // intentionally excluded — so it falls through to the
+        // Diagnosis isn't faked, sensitive clinical labels are
+        // intentionally excluded, so it falls through to the
         // fallback operator.
         let op = Fake::new(Replace::new("[redacted]"));
         let source = TextData::new("hypertension");

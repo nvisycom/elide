@@ -13,13 +13,13 @@ use crate::modality::{ModalityData, extension_or};
 ///
 /// Carries the encoded audio bytes; an optional filename aids diagnostics
 /// and encoding inference (the container format a decoder should expect).
-/// The recognizable text — a timestamped transcript — is *not* held here;
+/// The recognizable text, a timestamped transcript, is *not* held here;
 /// a speech-to-text [`Enricher`] stamps it onto the call's
 /// [`artifact`], keeping
 /// `AudioData` the codec's payload alone.
 ///
 /// [`Audio`]: super::Audio
-/// [`Enricher`]: crate::recognition::Enricher
+/// [`Enricher`]: crate::enrichment::Enricher
 /// [`artifact`]: crate::recognition::RecognizerContext::artifact
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

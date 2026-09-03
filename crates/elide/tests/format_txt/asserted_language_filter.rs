@@ -3,7 +3,7 @@
 //! When the caller *asserts* a contradicting document language, the
 //! German-scoped pattern is suppressed. With no asserted language (the
 //! unreliable-detection case), nothing is filtered and the value is detected
-//! normally — a detected language never suppresses a match.
+//! normally, a detected language never suppresses a match.
 
 use elide::Result;
 use elide::entity::builtins;

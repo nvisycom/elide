@@ -1,7 +1,7 @@
 //! The codec round-trip driver for the e2e tests: [`Fixture`] / [`PipelineOutcome`].
 //!
-//! [`Fixture`] wires the same flow the `redact-txt` example does — decode (codec)
-//! → analyze (`Analyzer`) → anonymize (`Anonymizer`) → encode — into one helper
+//! [`Fixture`] wires the same flow the `redact-txt` example does, decode (codec)
+//! → analyze (`Analyzer`) → anonymize (`Anonymizer`) → encode, into one helper
 //! the per-format tests call, generic over any [`TextRecognizable`]: the [`Text`]
 //! formats (`txt`, `json`, `html`), [`Tabular`] (`csv`), and container bodies. It
 //! builds its orchestrator through [`TestOrchestrator`], the single construction
@@ -32,7 +32,7 @@ use super::orchestrator::{
     TestOrchestrator, build_analyzer, build_anonymizer, default_text_analyzer,
 };
 
-/// The single fixture document's name in the report — its depth-1 part key.
+/// The single fixture document's name in the report, its depth-1 part key.
 const DOC: &str = "document";
 
 /// Outcome of one end-to-end run: the entities that survived dedup and
@@ -46,8 +46,8 @@ pub struct PipelineOutcome<M: Modality> {
     /// its provenance. Empty when no pipeline ran for the document.
     pub audited: Vec<Entity<M>>,
     /// Re-encoded document after redaction, as raw bytes. For text
-    /// formats this is UTF-8 — use [`redacted_text`];
-    /// for container formats (DOCX) it is the rebuilt package — use
+    /// formats this is UTF-8, use [`redacted_text`];
+    /// for container formats (DOCX) it is the rebuilt package, use
     /// [`part`] to read one entry.
     ///
     /// [`redacted_text`]: Self::redacted_text
@@ -57,7 +57,7 @@ pub struct PipelineOutcome<M: Modality> {
 
 impl<M: Modality> PipelineOutcome<M> {
     /// The redacted output decoded as UTF-8 text. Panics if it is not
-    /// (i.e. for a binary container format — read a [`part`]).
+    /// (i.e. for a binary container format, read a [`part`]).
     ///
     /// [`part`]: Self::part
     pub fn redacted_text(&self) -> String {
@@ -78,14 +78,14 @@ impl<M: Modality> PipelineOutcome<M> {
     /// Decompressing is what makes a leak scan sound: the archive stores
     /// each part deflated, so a plaintext value can straddle the deflate
     /// stream and a substring check over the *raw* container bytes would
-    /// give a false pass. `elide-office` owns this — read the parts back
+    /// give a false pass. `elide-office` owns this, read the parts back
     /// out, then scan.
     pub fn text_parts(&self) -> Vec<(String, String)> {
         elide_office::opc::test_util::text_parts(&self.redacted)
     }
 
     /// Assert that no value in `pii` survives in any text-bearing part of
-    /// the redacted package — the end-to-end leak guarantee. Scans the
+    /// the redacted package, the end-to-end leak guarantee. Scans the
     /// decompressed [`text_parts`], so it holds against the real part bytes,
     /// not the deflated container.
     ///
@@ -178,7 +178,7 @@ impl Fixture {
     /// The audio path differs from the text formats: recognition reads a
     /// *transcript* an STT enricher stamps onto the call, not the codec's
     /// byte payload. Here the enricher is backed by the no-op mock STT
-    /// backend, so no transcript is produced and no entities are detected —
+    /// backend, so no transcript is produced and no entities are detected,
     /// the clip round-trips through decode → analyze → anonymize → encode
     /// unchanged. That still exercises the whole audio codec + pipeline
     /// wiring end to end.
@@ -209,7 +209,7 @@ impl Fixture {
             .with(Rule::fallback(Erase));
 
         // A built-in catalog so the analyzer runs the enricher (the mock STT
-        // still transcribes nothing) — the point is to drive the whole codec +
+        // still transcribes nothing), the point is to drive the whole codec +
         // enricher path, not to detect.
         let orchestrator = Orchestrator::new()
             .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
@@ -244,8 +244,8 @@ impl Fixture {
     ///
     /// Recognition reads OCR text an [`OcrEnricher`] stamps onto the call,
     /// not the codec's image bytes. Here the enricher is backed by the no-op
-    /// mock OCR backend, so no text is recognized and no entities are found
-    /// — the image round-trips through decode → analyze → anonymize → encode
+    /// mock OCR backend, so no text is recognized and no entities are found,
+    /// the image round-trips through decode → analyze → anonymize → encode
     /// unchanged. That still exercises the whole image codec + OCR pipeline
     /// wiring end to end.
     ///
@@ -274,7 +274,7 @@ impl Fixture {
         let anonymizer = Anonymizer::new().with(Rule::fallback(Erase));
 
         // A built-in catalog so the analyzer runs the enricher (the mock OCR
-        // still recognizes nothing) — the point is to drive the whole codec +
+        // still recognizes nothing), the point is to drive the whole codec +
         // enricher path, not to detect.
         let orchestrator = Orchestrator::new()
             .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
@@ -310,8 +310,8 @@ impl Fixture {
     /// `*.out.*` and entities artifacts, and return the outcome.
     /// Panics with a descriptive message on any stage failure.
     ///
-    /// The orchestrator registers a pipeline for the body modality `M` and
-    /// — when the `llm` feature is on — an image pipeline (mock backend) so
+    /// The orchestrator registers a pipeline for the body modality `M` and,
+    /// when the `llm` feature is on, an image pipeline (mock backend) so
     /// a container fixture's embedded media is driven too. Registering the
     /// image modality is format-neutral: it only fires for a document that
     /// actually has image parts (a DOCX), and is inert for the rest.
@@ -329,7 +329,7 @@ impl Fixture {
         // No asserted language: the analyzer's `LinguaEnricher` detects each
         // document's languages, so a multilingual fixture activates every one
         // of its languages' per-language context (asserting a single language
-        // would suppress detection — see `LinguaEnricher::enrich`). The catalog
+        // would suppress detection, see `LinguaEnricher::enrich`). The catalog
         // requests every built-in label, so recognizers emit all they find.
         let scope = Scope::new().with_catalog(LabelCatalog::with_builtins());
         self.run_typed_with::<M>(registry, scope).await
@@ -391,7 +391,7 @@ impl Fixture {
         // report is consumed by `anonymize_with`.
         self.write_entities(&report);
         let applied = orchestrator.anonymize_with(&mut document, report).await?;
-        // The returned report's entities now carry the redaction event —
+        // The returned report's entities now carry the redaction event ,
         // the post-redaction audit trail.
         let audited: Vec<Entity<M>> = applied
             .entities::<M>()

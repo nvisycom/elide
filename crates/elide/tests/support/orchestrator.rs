@@ -27,7 +27,7 @@ use elide::{Orchestrator, Result};
 // ---- Fixture builders --------------------------------------------------------
 
 /// Build the detection side: the real built-in pattern recognizer (with
-/// context boosting) plus — when the `ner` feature is on — the NER
+/// context boosting) plus, when the `ner` feature is on, the NER
 /// recognizer, behind the standard dedup pipeline. Generic over any
 /// text-payload modality the recognizers serve.
 ///
@@ -44,8 +44,8 @@ pub fn build_analyzer<M: TextRecognizable>() -> Result<Analyzer<M>> {
     let analyzer = Analyzer::new();
 
     // Detect the document's languages first (when `lingua` is on), so a
-    // per-language context rule — a credit card beside `tarjeta` / `carte` /
-    // `Kreditkarte` — fires under whatever language that sentence is in. With no
+    // per-language context rule, a credit card beside `tarjeta` / `carte` /
+    // `Kreditkarte`, fires under whatever language that sentence is in. With no
     // caller-asserted language, the enricher's detections are authoritative.
     #[cfg(feature = "lingua")]
     let analyzer = {
@@ -72,13 +72,13 @@ pub fn build_analyzer<M: TextRecognizable>() -> Result<Analyzer<M>> {
 }
 
 /// The default [`Text`] analyzer used by [`TestOrchestrator`] and [`Fixture`]:
-/// [`build_analyzer`] plus — when `llm` is on — the mock LLM recognizer. The LLM
+/// [`build_analyzer`] plus, when `llm` is on, the mock LLM recognizer. The LLM
 /// recognizer is bound to [`LlmModality`], which `Text` satisfies but `Tabular`
 /// does not (see `testdata/BUGS.md` B9), so only `Text` pipelines carry it today;
 /// a container's tabular body still drives its text sub-parts through this `Text`
 /// pipeline.
 ///
-/// Like the mock NER, the mock LLM finds nothing today — it makes the pipeline
+/// Like the mock NER, the mock LLM finds nothing today; it makes the pipeline
 /// shape the intended one, so LLM-tier fixtures light up unchanged once a real
 /// backend is configured.
 ///
@@ -104,7 +104,7 @@ pub fn default_text_analyzer() -> Result<Analyzer<Text>> {
 
 /// Build the redaction side: `Replace::default()` (`[{label}]`) as the fallback,
 /// so every detected label redacts to its own `[<label_id>]` token (e.g.
-/// `[email_address]`, `[phone_number]`) that assertions can spot — with payment
+/// `[email_address]`, `[phone_number]`) that assertions can spot, with payment
 /// cards masked instead, since a masked card is what those tests check.
 pub fn build_anonymizer<M: TextRecognizable>() -> Anonymizer<M>
 where
@@ -116,7 +116,7 @@ where
         .with(Rule::fallback(Replace::default()))
 }
 
-/// An erase-everything [`Anonymizer`] for a modality `M` — the image default, and
+/// An erase-everything [`Anonymizer`] for a modality `M`, the image default, and
 /// what OCR image tests use.
 pub fn erase_anonymizer<M: Modality>() -> Anonymizer<M>
 where
@@ -125,7 +125,7 @@ where
     Anonymizer::new().with(Rule::fallback(Erase))
 }
 
-/// The default image [`Analyzer`]: a mock LLM recognizer that detects nothing —
+/// The default image [`Analyzer`]: a mock LLM recognizer that detects nothing,
 /// enough to register the image pipeline so a container's embedded media is
 /// driven, without an OCR backend. Image tests that need real detection override
 /// with [`ocr_analyzer`] via [`TestOrchestrator::with_image`].
@@ -164,7 +164,7 @@ pub fn ocr_analyzer(backend: elide::enrichment::ocr::MockBackend) -> Result<Anal
 // ---- TestOrchestrator --------------------------------------------------------
 
 /// An orchestrator with strong test defaults: the built-in label catalog, the
-/// built-in format registry, and default Text (+ Image, with `llm`) pipelines —
+/// built-in format registry, and default Text (+ Image, with `llm`) pipelines,
 /// so a test wanting the standard setup writes `TestOrchestrator::new()?.build()`.
 /// Override any piece with the `with_*` methods, or start from
 /// [`bare`](Self::bare) (scope + registry, no pipelines) and add only the
@@ -172,7 +172,7 @@ pub fn ocr_analyzer(backend: elide::enrichment::ocr::MockBackend) -> Result<Anal
 ///
 /// Wraps a partially-built [`Orchestrator`] and applies each modality eagerly, so
 /// [`with_body`](Self::with_body) can register *any* modality (`Text`, `Tabular`,
-/// `Image`) — the generic arm [`Fixture`] uses for a `Tabular` body.
+/// `Image`), the generic arm [`Fixture`] uses for a `Tabular` body.
 ///
 /// Defaults ([`new`](Self::new)):
 /// - scope: [`LabelCatalog::with_builtins`] (detect every built-in).
@@ -201,7 +201,7 @@ impl TestOrchestrator {
     }
 
     /// The fully opinionated default (see the type docs): [`bare`](Self::bare)
-    /// plus the default Text pipeline and — with `image`+`llm` — the default
+    /// plus the default Text pipeline and, with `image`+`llm`, the default
     /// Image pipeline. Errors only if a default recognizer fails to build.
     pub fn new() -> Result<Self> {
         let this = Self::bare().with_text(default_text_analyzer()?, build_anonymizer::<Text>());
@@ -225,7 +225,7 @@ impl TestOrchestrator {
         self
     }
 
-    /// Register (or replace) the pipeline for **any** modality `M` — the generic
+    /// Register (or replace) the pipeline for **any** modality `M`, the generic
     /// arm. [`with_text`](Self::with_text) / [`with_image`](Self::with_image) are
     /// typed conveniences over this.
     #[must_use]

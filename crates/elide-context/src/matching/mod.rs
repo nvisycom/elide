@@ -21,7 +21,7 @@ use hipstr::HipStr;
 pub use self::lemma::LemmaMatcher;
 pub use self::substring::SubstringMatcher;
 
-/// Whether the byte range `m` of `text` sits on word boundaries — the
+/// Whether the byte range `m` of `text` sits on word boundaries, the
 /// characters immediately before and after are not word characters. A
 /// word character is a Unicode alphanumeric; `_` and `-` are treated as
 /// separators, so a `snake_case` / `kebab-case` identifier tokenizes into
@@ -55,7 +55,7 @@ pub(crate) fn on_word_boundaries(text: &str, m: &Range<usize>) -> bool {
 /// A matcher reports *every* candidate hit rather than just the first:
 /// the enhancer applies its own word-boundary policy over the
 /// candidates (see [`Enhancer`]), so a matcher that stopped at the
-/// first raw hit could mask a later boundary-valid one — e.g. `"karte"`
+/// first raw hit could mask a later boundary-valid one, e.g. `"karte"`
 /// inside `"Kreditkarte"` must not hide the whole-word `"kreditkarte"`.
 /// Keeping the boundary decision in one place (the enhancer) also means
 /// each matcher stays a pure "where does this keyword occur" strategy.

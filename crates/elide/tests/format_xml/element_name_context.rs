@@ -1,4 +1,4 @@
-//! An element's *name* is context for its text — the markup counterpart of a
+//! An element's *name* is context for its text, the markup counterpart of a
 //! JSON key or a CSV header vouching for its value. Each value here is a weak,
 //! context-gated shape with no keyword in its own text; only the tag name
 //! lifts it over the threshold. The name is tokenized so `paymentCard`,

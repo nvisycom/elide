@@ -1,6 +1,6 @@
 //! The extraction and redaction units: the [`Extraction`] result and its
 //! [`Block`]s, [`Embedding`]s, and [`Issue`]s, plus the [`Replacement`] and
-//! [`PartReplacement`] applied on rewrite — each addressed by a typed
+//! [`PartReplacement`] applied on rewrite, each addressed by a typed
 //! [`PartPath`].
 
 use std::ops::Range;
@@ -80,7 +80,7 @@ pub enum EmbeddingKind {
     Object,
     /// An embedded font (e.g. `word/fonts/*`).
     Font,
-    /// Embedded media whose type could not be determined from its path — a
+    /// Embedded media whose type could not be determined from its path, a
     /// `media/` part with an unrecognized (or absent) extension. It still
     /// redacts as opaque bytes; the kind just makes no claim it can't back up.
     Other,
@@ -104,7 +104,7 @@ pub struct Embedding {
 ///
 /// Extraction is partial-success: a corrupt or non-UTF-8 part does not fail the
 /// whole document, but it also yields no blocks. An `Issue` records that gap so
-/// a caller does not silently ship a document with an un-redacted part — the
+/// a caller does not silently ship a document with an un-redacted part, the
 /// dangerous failure mode for redaction. A clean extraction produces none.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -182,7 +182,7 @@ impl EmbeddingKind {
     /// The [`EmbeddingKind`] of a `*/media/*` part, chosen by its file extension.
     ///
     /// An OOXML `media/` directory mixes images, audio, and video, so the
-    /// directory alone can't say which — a caller redacting embedded media wants
+    /// directory alone can't say which, a caller redacting embedded media wants
     /// an mp3 surfaced as [`Audio`](EmbeddingKind::Audio), not misreported as an
     /// image. An unrecognized or extension-less part is
     /// [`Other`](EmbeddingKind::Other) rather than a guessed type: it still

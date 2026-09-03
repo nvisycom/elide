@@ -11,15 +11,15 @@
 //! chunk by a semantic unit (CSV by cell, XML by text node, HTML by
 //! block element) rather than by an arbitrary physical span.
 //!
-//! The buffer holds the source bytes verbatim — blank-line gaps included
-//! — so a redaction splices it in place and encoding is byte-exact.
+//! The buffer holds the source bytes verbatim, blank-line gaps included,
+//! so a redaction splices it in place and encoding is byte-exact.
 
 use std::ops::Range;
 
 use elide_core::Result;
 use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
-use elide_core::operator::Redactions;
+use elide_core::redaction::Redactions;
 
 use super::TxtLoader;
 use crate::content::ContentData;
@@ -157,7 +157,7 @@ fn paragraph_blocks(text: &str) -> Vec<Range<usize>> {
     for line in text.split_inclusive('\n') {
         // Drop a trailing `\r\n` or `\n` as one line ending, so a CRLF file
         // does not carry a stray `\r` at each block's end (internal CRLF bytes
-        // in a multi-line block are kept — only the terminator is trimmed).
+        // in a multi-line block are kept, only the terminator is trimmed).
         let ending = if line.ends_with("\r\n") {
             2
         } else {
@@ -234,7 +234,7 @@ mod tests {
 
     #[tokio::test]
     async fn crlf_line_endings_are_not_carried_into_a_block() {
-        // A CRLF terminator is trimmed whole — no stray `\r` at the block end —
+        // A CRLF terminator is trimmed whole, no stray `\r` at the block end ,
         // while an internal CRLF between the block's lines is kept.
         let cs = chunks("first\r\nsecond\r\n\r\nthird\r\n").await;
         assert_eq!(
@@ -256,7 +256,7 @@ mod tests {
     async fn lift_is_identity_across_a_line_break() {
         let mut h = handler("hello\nworld\n");
         let chunk = h.read_next().await.unwrap().unwrap();
-        // A span crossing the internal line break lifts unchanged — this is
+        // A span crossing the internal line break lifts unchanged, this is
         // what makes a multi-line pattern redactable.
         let lifted = h.lift(&chunk, TextLocation::new(3, 8)).expect("in bounds");
         assert_eq!(lifted.range.start, 3);

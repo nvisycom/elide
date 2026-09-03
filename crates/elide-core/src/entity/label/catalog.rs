@@ -73,7 +73,7 @@ impl LabelCatalog {
     /// strong out-of-catalog match can still subsume a weak in-catalog one
     /// during reconciliation) and cull them here, after reconciliation, so only
     /// the requested types reach the caller. Called only with a non-empty
-    /// catalog — an empty request detects nothing and is gated before
+    /// catalog, an empty request detects nothing and is gated before
     /// recognition.
     pub fn retain_declared<M>(&self, entities: Vec<Entity<M>>) -> Vec<Entity<M>>
     where
@@ -131,7 +131,7 @@ impl LabelCatalog {
         self.0.values()
     }
 
-    /// A [`LabelRef`] for every label in the catalog — the set of labels
+    /// A [`LabelRef`] for every label in the catalog, the set of labels
     /// recognizers are asked to emit (zero-shot NER, LLM prompt targets).
     pub fn refs(&self) -> impl Iterator<Item = LabelRef> + '_ {
         self.0.values().map(|label| label.to_ref())
@@ -147,7 +147,7 @@ impl LabelCatalog {
         self.0.values().filter(move |label| label.has_tag(tag))
     }
 
-    /// A [`LabelRef`] for every label carrying `tag` — the ref-only
+    /// A [`LabelRef`] for every label carrying `tag`, the ref-only
     /// counterpart to [`tagged`].
     ///
     /// [`tagged`]: Self::tagged
@@ -158,7 +158,7 @@ impl LabelCatalog {
     /// A new catalog holding only the labels carrying `tag`.
     ///
     /// The owned-subset form of [`tagged`], for a caller that wants to drive
-    /// a run with just one category — e.g. build the sub-catalog of `phi`
+    /// a run with just one category, e.g. build the sub-catalog of `phi`
     /// labels, then hand it to an analyzer or anonymizer.
     ///
     /// [`tagged`]: Self::tagged

@@ -24,13 +24,13 @@ pub enum OnConflict {
 ///
 /// Reads the geometric relationship between the two locations rather than
 /// treating every overlap as a contest:
-/// - **Nesting** — one location inside the other (a postal code within an
+/// - **Nesting**, one location inside the other (a postal code within an
 ///   address): a legitimate hierarchy → keep both, *unless* the contained
 ///   entity is weaker than its container by at least `margin`
 ///   (`inner + margin <= outer`), a subsumed junk match that loses.
-/// - **Incidental overlap** — they overlap but their [intersection-over-union]
+/// - **Incidental overlap**, they overlap but their [intersection-over-union]
 ///   is below `threshold`: two distinct findings that merely touch → keep both.
-/// - **Near-coincident** — IoU at or above `threshold`: two recognizers
+/// - **Near-coincident**, IoU at or above `threshold`: two recognizers
 ///   claiming substantially the same span with different labels, a true
 ///   conflict → disposed of per [`on_conflict`] (resolve with `tiebreaker`, or
 ///   contest for human review).
@@ -130,10 +130,10 @@ where
 {
     fn decide(&self, a: &Entity<M>, b: &Entity<M>) -> Disposition {
         // A contained span weaker than its container by at least `margin` is
-        // subsumed noise — a junk sub-match inside a larger entity (a digit run
+        // subsumed noise, a junk sub-match inside a larger entity (a digit run
         // inside a payment card, say); the container wins. A contained span
         // within `margin` of its container is a legitimate hierarchy (a postal
-        // code inside an address) — keep both. The comparison is inclusive so a
+        // code inside an address), keep both. The comparison is inclusive so a
         // difference of exactly `margin` subsumes rather than slipping through.
         let subsumed = |inner: &Entity<M>, outer: &Entity<M>| {
             inner.confidence.get() + self.margin <= outer.confidence.get()

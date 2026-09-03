@@ -160,7 +160,7 @@ pub struct Regex {
     #[serde(default)]
     pub languages: Vec<LanguageTag>,
     /// ISO 3166-1 alpha-2 country codes the rule applies to.
-    /// Empty means "any country" — the rule fires regardless of
+    /// Empty means "any country", the rule fires regardless of
     /// the per-call jurisdiction hint. Use this to scope a
     /// pattern to specific national formats (e.g. `["US"]` for
     /// the SSN regex).

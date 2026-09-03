@@ -8,7 +8,7 @@ use std::iter;
 
 use super::nif::LETTERS;
 
-/// Return `true` when `value` is a valid NIE — `X`, `Y`, or `Z`
+/// Return `true` when `value` is a valid NIE, `X`, `Y`, or `Z`
 /// prefix + 7 digits + Mod 23 control letter, with optional `-`.
 pub fn nie(value: &str) -> bool {
     let normalized: String = value

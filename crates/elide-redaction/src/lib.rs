@@ -9,7 +9,9 @@ mod deanonymizer;
 // operators themselves live in `elide-operator`; this crate only *selects and
 // applies* them, so it names the trait, not the concrete types.
 #[doc(inline)]
-pub use elide_core::operator::{LeakProfile, Operator, OperatorId, Redactions, ReversibleOperator};
+pub use elide_core::redaction::{
+    LeakProfile, Operator, OperatorId, Redactions, ReversibleOperator,
+};
 
 pub use self::anonymizer::{Anonymizer, MatchContext, Rule};
 pub use self::deanonymizer::Deanonymizer;

@@ -1,7 +1,7 @@
 //! Thailand-specific post-match validators.
 //!
 //! Registered under the [`ValidatorRegistry::builtin`] set with
-//! dotted names — `"th.national_id"`.
+//! dotted names, `"th.national_id"`.
 //!
 //! [`ValidatorRegistry::builtin`]: super::ValidatorRegistry::builtin
 

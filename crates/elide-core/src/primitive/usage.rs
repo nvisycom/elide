@@ -1,15 +1,15 @@
 //! Resource-usage accounting for one detection run.
 //!
 //! Every recognizer and enricher a payload passes through contributes a
-//! [`Usage`]: its identity, how long it ran, how much it found, and — for a
-//! model-backed component — the model it called and the tokens that cost.
+//! [`Usage`]: its identity, how long it ran, how much it found, and, for a
+//! model-backed component, the model it called and the tokens that cost.
 //! The analyzer measures the always-present facts (time, count) at the call
 //! boundary; the component itself supplies the model detail it alone can see
 //! (via [`Recognition`]/[`Enrichment`]). Per-document, the entries aggregate
 //! into a [`UsageReport`].
 //!
-//! [`Recognition`]: super::Recognition
-//! [`Enrichment`]: super::Enrichment
+//! [`Recognition`]: crate::recognition::Recognition
+//! [`Enrichment`]: crate::enrichment::Enrichment
 
 use std::time::Duration;
 
@@ -17,8 +17,8 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::RecognizerId;
 use crate::entity::audit::ModelEvent;
+use crate::recognition::RecognizerId;
 
 /// Serialize a [`Duration`] as a whole number of milliseconds (and read it
 /// back), keeping the wire form a plain integer rather than serde's default
@@ -38,8 +38,10 @@ mod duration_millis {
     }
 }
 
-/// Token counts a model reported, each optional because providers differ in
-/// what they return — some give only a total, some none at all.
+/// The token counts a model reported.
+///
+/// Each is optional because providers differ in what they return: some give
+/// only a total, some none at all.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -56,7 +58,7 @@ pub struct TokenCounts {
         serde(default, skip_serializing_if = "Option::is_none")
     )]
     pub output: Option<u64>,
-    /// Total tokens — may be reported even when the input/output split is not.
+    /// Total tokens, may be reported even when the input/output split is not.
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "Option::is_none")
@@ -72,9 +74,9 @@ impl TokenCounts {
     }
 }
 
-/// Model detail for a model-backed recognizer or enricher: which model it
-/// called and the tokens that cost. Absent from a pure-CPU component (a
-/// pattern recognizer, a language enricher).
+/// The model a model-backed recognizer or enricher called, and its token cost.
+///
+/// Absent from a pure-CPU component (a pattern recognizer, a language enricher).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -125,7 +127,7 @@ impl ModelUsage {
 impl From<ModelEvent> for ModelUsage {
     /// Take a model's identity (name + version) from the audit-trail
     /// [`ModelEvent`] a backend reports via its `provenance()`, dropping the
-    /// per-entity `contextual` flag and leaving tokens unset — a backend that
+    /// per-entity `contextual` flag and leaving tokens unset; a backend that
     /// reports tokens attaches them with [`with_tokens`](Self::with_tokens).
     fn from(event: ModelEvent) -> Self {
         Self {
@@ -167,7 +169,7 @@ pub struct Usage {
 }
 
 impl Usage {
-    /// A record with a duration and a count, and no model detail — the shape a
+    /// A record with a duration and a count, and no model detail, the shape a
     /// pure-CPU recognizer produces.
     pub fn new(id: RecognizerId, duration: Duration, count: u64) -> Self {
         Self {
@@ -178,7 +180,7 @@ impl Usage {
         }
     }
 
-    /// A record with a duration and no count — the shape an enricher produces
+    /// A record with a duration and no count, the shape an enricher produces
     /// (an enricher yields context, not counted entities).
     pub fn timed(id: RecognizerId, duration: Duration) -> Self {
         Self {
@@ -230,8 +232,8 @@ impl UsageReport {
     /// Every entry recorded for the component named `name` (a recognizer's or
     /// enricher's [`RecognizerId::name`]), in run order.
     ///
-    /// The pure-CPU singletons report a fixed name — `"elide-pattern"`,
-    /// `"elide-lingua"` — but each model-backed component (NER, LLM, OCR, STT)
+    /// The pure-CPU singletons report a fixed name, `"elide-pattern"`,
+    /// `"elide-lingua"`, but each model-backed component (NER, LLM, OCR, STT)
     /// reports the name its *caller* configured, so match those against the
     /// name you built the component with. Token cost is left on each entry
     /// deliberately: tokens are not comparable across models (their prices

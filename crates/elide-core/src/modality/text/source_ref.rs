@@ -7,8 +7,8 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// A reference back to the original source: a byte range, and — for a container
-/// whose body spans several files — which part that range indexes.
+/// A reference back to the original source: a byte range, and, for a container
+/// whose body spans several files, which part that range indexes.
 ///
 /// [`TextLocation`]'s `range` indexes the *decoded* text stream a codec hands
 /// the pipeline (entities resolved, container parts concatenated). A `SourceRef`
@@ -51,7 +51,7 @@ impl SourceRef {
     }
 
     /// Put a collection of source refs into canonical order and drop exact
-    /// duplicates, leaving non-contiguous ranges distinct — so equal source sets
+    /// duplicates, leaving non-contiguous ranges distinct, so equal source sets
     /// compare and hash identically regardless of how they were accumulated.
     pub(super) fn normalize(refs: &mut Vec<SourceRef>) {
         refs.sort_unstable();

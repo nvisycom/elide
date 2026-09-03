@@ -6,7 +6,7 @@
 //! directly in `<is>…<t>..</t></is>` (across one or more rich-text runs), and
 //! `t="str"` caches the string result of a formula in `<v>`. Every other cell
 //! (numbers, booleans, errors) holds no free text and is skipped. Row and column
-//! come from the `r` reference, or — when it is omitted — from the enclosing row
+//! come from the `r` reference, or, when it is omitted, from the enclosing row
 //! and the preceding cell, so a sparse or reference-less sheet is placed
 //! correctly.
 
@@ -22,7 +22,7 @@ use crate::xlsx::cellref::parse_cell_ref;
 /// The entity-decoded value of an attribute, for comparison or parsing.
 ///
 /// `Attribute::value` is the raw on-the-wire bytes, so an attribute written with
-/// character references — e.g. `t="inline&#83;tr"` — would not compare equal to
+/// character references, e.g. `t="inline&#83;tr"`, would not compare equal to
 /// `inlineStr`. Normalizing resolves those references so a cell's type and
 /// reference are read correctly regardless of how they were escaped. The raw
 /// value is still used where an attribute is re-emitted verbatim.
@@ -285,7 +285,7 @@ impl OpenCell {
                     .and_then(|v| v.trim().parse::<usize>().ok())
                 else {
                     // A shared cell with no parseable index is malformed but not
-                    // fatal — it simply names no string to redact.
+                    // fatal, it simply names no string to redact.
                     return Ok(None);
                 };
                 Ok(Some(SheetCell {
@@ -457,7 +457,7 @@ mod tests {
 
     #[test]
     fn a_cached_formula_string_is_text_bearing() {
-        // `t="str"` holds a formula's cached string result — user-visible text.
+        // `t="str"` holds a formula's cached string result, user-visible text.
         let sheet = concat!(
             r#"<?xml version="1.0"?><worksheet><sheetData><row r="1">"#,
             r#"<c r="A1" t="str"><f>B1</f><v>bob@example.com</v></c>"#,

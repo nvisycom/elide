@@ -41,14 +41,14 @@ mod tests {
 
     #[test]
     fn accepts_canonical_personnummer() {
-        // 900101-1239 — 6-digit date form with valid Luhn.
+        // 900101-1239, 6-digit date form with valid Luhn.
         assert!(personnummer("9001011239"));
         assert!(personnummer("900101-1239"));
     }
 
     #[test]
     fn accepts_8_digit_form() {
-        // 19900101-1239 — 12-digit form; Luhn applies to last 10.
+        // 19900101-1239, 12-digit form; Luhn applies to last 10.
         assert!(personnummer("199001011239"));
         assert!(personnummer("19900101-1239"));
     }

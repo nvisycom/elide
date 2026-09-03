@@ -2,7 +2,7 @@
 //!
 //! The pattern recognizer reads its text from the OCR `Layout` / STT
 //! `Transcription` artifact, finds a match, and the `Enhanced` adapter boosts
-//! its confidence from a context keyword in that same text — all before the
+//! its confidence from a context keyword in that same text, all before the
 //! match is lifted to a native location. Proves enhancement works for image
 //! and audio (whose location is a region / time span, not a byte range) and
 //! that the resulting entity carries the native location, not a stream offset.
@@ -67,7 +67,7 @@ async fn image_context_boosts_and_keeps_the_native_region() {
     assert_eq!(entity.location.bounding_box.min.x, 45.0);
     assert!(entity.location.bounding_box.area() > 0.0);
 
-    // The boost's provenance resolves the *keyword* to its own region — the
+    // The boost's provenance resolves the *keyword* to its own region, the
     // "ssn" word box at x=0..40, distinct from the match's box at x=45.
     let kw = entity
         .audit
@@ -108,7 +108,7 @@ async fn audio_context_boosts_and_keeps_the_native_timespan() {
     assert_eq!(entity.location.span.start_millis(), 400);
     assert!(!entity.location.span.is_empty());
 
-    // The boost's provenance resolves the *keyword* to its own time span —
+    // The boost's provenance resolves the *keyword* to its own time span ,
     // "ssn" at 0..300 ms, before the match's span at 400 ms.
     let kw = entity
         .audit

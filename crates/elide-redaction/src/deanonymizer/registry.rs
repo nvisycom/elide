@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::Modality;
-use elide_core::operator::ReversibleOperator;
+use elide_core::redaction::ReversibleOperator;
 
 /// How a rule decides whether it applies to an entity.
 enum Matcher {

@@ -1,7 +1,7 @@
 //! Australia-specific post-match validators.
 //!
 //! Registered under the [`ValidatorRegistry::builtin`] set with
-//! dotted names — `"au.abn"`, `"au.acn"`, `"au.medicare"`,
+//! dotted names, `"au.abn"`, `"au.acn"`, `"au.medicare"`,
 //! `"au.tfn"`.
 //!
 //! [`ValidatorRegistry::builtin`]: super::ValidatorRegistry::builtin

@@ -4,8 +4,8 @@
 //! A recognizer emits located [`Entity`]s, each carrying the
 //! [`recognized_range`] it was found at in the recognized text. [`Enhanced`]
 //! runs the inner recognizer, then runs the keyword-boost [`Enhancer`] over
-//! those entities — lifting confidence where a context keyword fires in the
-//! word window around each entity's range (or in an out-of-band hint) — and
+//! those entities, lifting confidence where a context keyword fires in the
+//! word window around each entity's range (or in an out-of-band hint), and
 //! records a refinement event per boost. Because it reads only the
 //! modality-free fields, the same `Enhanced<R>` serves every modality.
 //!
@@ -97,7 +97,7 @@ where
         // an arbitrary language), and a misdetected chunk language would
         // deactivate the very context whose keyword sits in the text. With no
         // asserted language the list is empty, which the enhancer reads as
-        // permissive — every per-language context is active, so the keyword
+        // permissive, every per-language context is active, so the keyword
         // that actually appears (`card`, `tarjeta`, `Kreditkarte`, …) fires
         // regardless of the surrounding language. Activating a language's
         // context is harmless when its keyword is absent.
@@ -106,7 +106,7 @@ where
             .with_hints(&hint_texts)
             .with_languages(&languages);
         // Forward the modality's producer-provided tokens (with lemmas) when it
-        // has them — Text/Tabular tokenize into their artifact — so lemma-aware
+        // has them, Text/Tabular tokenize into their artifact, so lemma-aware
         // keyword boosts fire even where a token's lemma differs from its
         // surface text. Modalities that do not tokenize match on text alone.
         if let Some(tokens) = M::as_tokens(ctx.artifact()) {

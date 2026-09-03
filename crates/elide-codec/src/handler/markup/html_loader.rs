@@ -4,9 +4,9 @@
 //! ([`build_items`]) leniently (tolerating void elements, stray end tags, and
 //! bare `&`) and supplies the two HTML vocabularies the engine takes as plain
 //! element-name lists: the block elements that group sibling text for context
-//! hints, and — translated from the loader's [`ScriptPolicy`] — the
-//! `<script>` / `<style>` bodies not to scan. Everything downstream —
-//! streaming, redaction, byte-faithful splice — is the XML handler.
+//! hints, and, translated from the loader's [`ScriptPolicy`], the
+//! `<script>` / `<style>` bodies not to scan. Everything downstream,
+//! streaming, redaction, byte-faithful splice, is the XML handler.
 
 use elide_core::Result;
 use elide_core::modality::text::Text;
@@ -105,7 +105,7 @@ impl Loader<Text> for HtmlLoader {
 mod tests {
     use elide_core::modality::DataWriter;
     use elide_core::modality::text::TextReplacement;
-    use elide_core::operator::Redactions;
+    use elide_core::redaction::Redactions;
 
     use super::*;
     use crate::Handler;

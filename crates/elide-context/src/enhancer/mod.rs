@@ -88,7 +88,7 @@ impl Enhancer {
         for rule in rules {
             let bucket = buckets.entry(rule.label.clone()).or_default();
             // Merge only rules that agree on every knob `merge` does not itself
-            // reconcile — language scope, match mode, window radii, and boost.
+            // reconcile, language scope, match mode, window radii, and boost.
             // `merge` keeps the existing rule's window/boost, so two rules with
             // different lifts for the same label must stay distinct or one
             // would silently adopt the other's confidence boost.
@@ -134,8 +134,8 @@ impl Enhancer {
     /// `prefix_words`/`suffix_words` around the entity's
     /// [`recognized_range`] (and the out-of-band hints), and on a hit lift
     /// confidence by the rule's `boost` (saturating at the [`Confidence`]
-    /// ceiling). The in-text and hint paths are independent — at most one
-    /// boost per rule fires per entity (window first, hint as fallback) — so
+    /// ceiling). The in-text and hint paths are independent, at most one
+    /// boost per rule fires per entity (window first, hint as fallback), so
     /// a long keyword list can't double-dip.
     ///
     /// Reads only the modality-free fields (`label`, `recognized_range`,
@@ -223,7 +223,7 @@ impl Enhancer {
         }
         entity.confidence = after;
 
-        // The rule's first keyword stands in for the match — the matcher
+        // The rule's first keyword stands in for the match, the matcher
         // reports "any keyword fired", not which one.
         let keyword = rule.keywords.first().cloned().unwrap_or_default();
         Some(Boost {
@@ -304,7 +304,7 @@ pub struct Boost {
     pub hint_index: Option<usize>,
     /// For an in-text-window match, the **stream** byte range of the keyword
     /// that fired (into the recognized-text stream), so the caller can
-    /// resolve it to a native location via [`locate`] — symmetric with the
+    /// resolve it to a native location via [`locate`], symmetric with the
     /// located hint a `hint_index` match carries. `None` for a hint match
     /// (the location lives on the hint).
     ///

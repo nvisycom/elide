@@ -129,7 +129,7 @@ impl PartKind {
     }
 
     /// Whether this part carries redactable *element* text (body, header,
-    /// footer, notes, comments, glossary, and the text of charts and diagrams) —
+    /// footer, notes, comments, glossary, and the text of charts and diagrams),
     /// the text/comment/CDATA event model.
     ///
     /// This is narrower than [`is_redactable`](PartKind::is_redactable):

@@ -8,8 +8,8 @@
 //! - fusion = `ReconcileLayer<`[`SameLabel`](group::SameLabel)`, `[`Merging`]`<…>>`
 //! - resolution = `ReconcileLayer<`[`CrossLabel`](group::CrossLabel)`, `[`Structural`]`<…>>`
 //!
-//! The [`Reconciler`]s — [`Merging`], [`Structural`], [`Exclusive`],
-//! [`Permissive`] — sit here at the root. The customization traits live in
+//! The [`Reconciler`]s, [`Merging`], [`Structural`], [`Exclusive`],
+//! [`Permissive`], sit here at the root. The customization traits live in
 //! topic modules: [`group`] (the `G` axis), [`scoring`] (how [`Merging`]
 //! combines confidences), and [`tiebreaker`] (how conflicts pick a winner).
 
@@ -33,7 +33,7 @@ pub use self::reconciler::{
 use super::{Layer, LayerOutput};
 
 /// One cluster: the indices (into the working `entities`) of entities that
-/// single-linkage-grouped together — e.g. three overlapping `EMAIL`s become
+/// single-linkage-grouped together, e.g. three overlapping `EMAIL`s become
 /// `[2, 5, 7]`. Clustering works on indices so entities aren't moved or cloned
 /// while groups are built and merged.
 pub(super) type Cluster = Vec<usize>;
@@ -61,7 +61,7 @@ impl<G, R> ReconcileLayer<G, R> {
 }
 
 impl<R> ReconcileLayer<SameLabel, R> {
-    /// A reconcile layer over *same-label* overlaps — the fusion pass.
+    /// A reconcile layer over *same-label* overlaps, the fusion pass.
     /// Clusters co-located findings of the same label and disposes of each
     /// pair with `reconciler` (typically a [`Merging`]).
     pub fn same_label(reconciler: R) -> Self {
@@ -70,7 +70,7 @@ impl<R> ReconcileLayer<SameLabel, R> {
 }
 
 impl<R> ReconcileLayer<CrossLabel, R> {
-    /// A reconcile layer over *cross-label* overlaps — the conflict pass.
+    /// A reconcile layer over *cross-label* overlaps, the conflict pass.
     /// Clusters overlapping findings of different labels and disposes of each
     /// pair with `reconciler` (typically a [`Structural`]).
     pub fn cross_label(reconciler: R) -> Self {
@@ -89,11 +89,11 @@ where
         // `is_grouped` within its bucket. The bucket bounds the search:
         // entities with different buckets can never group (the trait law), so a
         // clustered entity only scans groups sharing its bucket. Bucket
-        // iteration order doesn't affect the result — clusters are independent
+        // iteration order doesn't affect the result, clusters are independent
         // and the kept set is rebuilt in entity order.
         // `Vec<Cluster>`, not `Cluster`: a bucket coarsely groups by label, but
         // within it overlap clustering can yield *several* disjoint clusters
-        // (two overlapping emails here, two unrelated ones elsewhere) — each a
+        // (two overlapping emails here, two unrelated ones elsewhere), each a
         // separate `Cluster`. The bucket is the candidate set; overlap does the
         // fine grouping.
         let mut buckets: HashMap<G::Bucket, Vec<Cluster>> = HashMap::new();
@@ -182,7 +182,7 @@ mod tests {
         ReconcileLayer::cross_label(Structural::default())
     }
 
-    /// A nesting of different labels is a hierarchy — keep both.
+    /// A nesting of different labels is a hierarchy, keep both.
     #[test]
     fn structural_keeps_nested() {
         let entities = vec![
@@ -240,7 +240,7 @@ mod tests {
     }
 
     /// With `OnConflict::Contest`, a true conflict keeps BOTH, each flagged
-    /// contested against the other — nothing dropped.
+    /// contested against the other, nothing dropped.
     #[test]
     fn structural_contests_when_reviewing() {
         let entities = vec![

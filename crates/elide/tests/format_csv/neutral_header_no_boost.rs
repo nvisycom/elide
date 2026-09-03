@@ -25,7 +25,7 @@ async fn neutral_headers_do_not_boost_weak_values() -> Result<()> {
     // shape is never lifted over the threshold.
     assert_label_absent!(outcome.entities, builtins::BANK_ACCOUNT.to_ref());
 
-    // The bare numbers survive verbatim — neither detected nor redacted.
+    // The bare numbers survive verbatim, neither detected nor redacted.
     assert_content_preserved!(
         outcome.redacted_text(),
         "000123456789",

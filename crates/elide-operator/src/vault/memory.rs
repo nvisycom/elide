@@ -11,7 +11,7 @@ use super::Vault;
 /// Process-local [`Vault`] backed by a locked [`HashMap`].
 ///
 /// The default vault: holds everything in memory behind a [`Mutex`], so
-/// it is shareable and concurrency-safe but not durable — the contents
+/// it is shareable and concurrency-safe but not durable, the contents
 /// vanish when the last handle is dropped. Suited to a single
 /// anonymization run or to tests; swap in a durable [`Vault`] for
 /// cross-run consistency.
@@ -19,7 +19,7 @@ use super::Vault;
 /// The map sits behind an internal [`Arc`], so [`Clone`] is cheap and
 /// every clone shares *one* underlying map. That is what lets a single
 /// vault back several rules (or several cloned pseudonymizing operators)
-/// while keeping their surrogates consistent — cloning hands out another
+/// while keeping their surrogates consistent, cloning hands out another
 /// handle, never a separate copy.
 ///
 /// [`Vault`]: super::Vault

@@ -11,7 +11,7 @@ use elide_core::entity::{Entity, LabelRef};
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::operator::{LeakProfile, Operator, OperatorId};
+use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 use hmac::{Hmac, KeyInit, Mac};
 #[cfg(feature = "serde")]
 use serde::Serialize;
@@ -22,21 +22,21 @@ use crate::operators::{KeyProvider, Sha2Algorithm, StaticKey};
 /// Keyed one-way HMAC-SHA-2 hash operator.
 ///
 /// Replaces the value with the lowercase hex of `HMAC-SHA-N(key, value)`.
-/// Unlike [`Sha2Hash`]'s salt — which is public and only blocks precomputed
-/// rainbow tables — the HMAC key stays secret, so an attacker who obtains
+/// Unlike [`Sha2Hash`]'s salt, which is public and only blocks precomputed
+/// rainbow tables, the HMAC key stays secret, so an attacker who obtains
 /// the ciphertext database still cannot enumerate a small input space
 /// without it. This is the "keyed cryptographic hash" PCI DSS v4.0.1
 /// §3.5.1 lists as a permitted method for rendering a stored PAN
 /// unreadable.
 ///
 /// The digest is deterministic for a given key, so equal plaintexts
-/// tokenize to equal digests — the property that makes it a stable token.
+/// tokenize to equal digests, the property that makes it a stable token.
 /// Key material comes from a [`KeyProvider`] wired at construction, never
 /// from serialized policy.
 ///
 /// [`Sha2Hash`]: crate::operators::Sha2Hash
 /// Only the policy config (`algorithm`) serializes; the [`KeyProvider`] is
-/// skipped — key material is never part of serialized policy and is re-wired
+/// skipped, key material is never part of serialized policy and is re-wired
 /// at construction when a selection is rebuilt. `Serialize` only: the skipped
 /// provider has no default to deserialize back into.
 #[derive(Clone)]
@@ -198,7 +198,7 @@ mod tests {
 
     #[tokio::test]
     async fn sha256_and_sha512_select_distinct_algorithms() {
-        // Our dispatch must route each constructor to its own variant — a
+        // Our dispatch must route each constructor to its own variant, a
         // swap bug would make both digests identical. (The digest *widths*
         // are a property of the sha2 crate, so we don't assert them here.)
         let e = entity("payment_card");

@@ -7,7 +7,7 @@ use elide_core::entity::Entity;
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::operator::{LeakProfile, Operator, OperatorId};
+use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256, Sha512};
@@ -42,7 +42,7 @@ impl Sha2Hash {
         }
     }
 
-    /// SHA-256, no salt — the common default.
+    /// SHA-256, no salt, the common default.
     pub fn sha256() -> Self {
         Self::new(Sha2Algorithm::Sha256)
     }

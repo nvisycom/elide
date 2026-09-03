@@ -2,7 +2,7 @@
 //!
 //! Recognition reads a transcript an `SttEnricher` stamps onto the call;
 //! the mock STT backend transcribes nothing, so nothing is detected and the
-//! clip round-trips unchanged — exercising the whole audio path on real
+//! clip round-trips unchanged, exercising the whole audio path on real
 //! WAV bytes.
 
 use elide::Result;

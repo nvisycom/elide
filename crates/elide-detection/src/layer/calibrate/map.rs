@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// Per-recognizer confidence multipliers applied before fusion.
 ///
 /// Maps a recognizer name to a scaling factor, compensating for
-/// score-distribution differences between detectors — a regex that
+/// score-distribution differences between detectors, a regex that
 /// always returns `1.0` and an NER model that returns `0.3–0.9` can be
 /// brought into the same range (e.g. a `0.8` multiplier on the regex)
 /// before deduplication compares them. Recognizers absent from the map

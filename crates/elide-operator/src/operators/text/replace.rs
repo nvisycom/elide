@@ -6,7 +6,7 @@ use elide_core::modality::Modality;
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::operator::{LeakProfile, Operator, OperatorId};
+use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -14,9 +14,9 @@ use serde::{Deserialize, Serialize};
 ///
 /// Templates support three placeholders, expanded at apply time:
 ///
-/// - `{label}` — the entity's label name (e.g. `PHONE_NUMBER`).
-/// - `{value}` — the original matched substring.
-/// - `{coref}` — the entity's coreference identifier, or empty when the
+/// - `{label}`, the entity's label name (e.g. `PHONE_NUMBER`).
+/// - `{value}`, the original matched substring.
+/// - `{coref}`, the entity's coreference identifier, or empty when the
 ///   entity is not part of a resolved cluster.
 ///
 /// The `{coref}` placeholder threads coreference through redaction: every
@@ -53,7 +53,7 @@ impl Replace {
 }
 
 impl Default for Replace {
-    /// Default template `[{label}]` — a visible, label-tagged marker.
+    /// Default template `[{label}]`, a visible, label-tagged marker.
     fn default() -> Self {
         Self::new("[{label}]")
     }

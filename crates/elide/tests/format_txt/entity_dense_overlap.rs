@@ -20,7 +20,7 @@ async fn overlapping_and_adjacent_entities_all_redacted() -> Result<()> {
     let outcome = FIXTURE.run().await?;
 
     // The email nested in a URL, the two run-together values, and the three
-    // crowded emails are each removed — nothing leaks through a seam.
+    // crowded emails are each removed, nothing leaks through a seam.
     assert_pii_removed!(
         outcome.redacted_text(),
         "leah.kim@example.com",

@@ -1,7 +1,7 @@
 //! Internal error type bridging rig's provider errors to
 //! [`elide_core::Error`].
 //!
-//! The crate exposes no error type of its own — every public result is an
+//! The crate exposes no error type of its own, every public result is an
 //! [`elide_core::Error`]. This private [`Error`] exists only to host the
 //! `From<rig error>` conversions the orphan rule forbids writing directly
 //! onto `elide_core::Error`, and to keep call sites `?`-ergonomic. Its

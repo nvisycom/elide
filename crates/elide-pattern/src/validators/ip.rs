@@ -3,7 +3,7 @@
 //! IPv6 in particular has enough compression forms (`::`, embedded IPv4,
 //! mixed splits) that a single regex either misses cases or over-matches. A
 //! permissive regex captures an address-shaped token and these validators
-//! confirm it with [`std::net`], the reference parser — the same
+//! confirm it with [`std::net`], the reference parser, the same
 //! permissive-match-then-validate approach the checksum validators use.
 
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -32,7 +32,7 @@ pub fn ipv6(value: &str) -> bool {
     }
     // Drop a `%zone` scope id before parsing: it is valid in text but not
     // accepted by `Ipv6Addr::from_str`. The zone must be a single non-empty
-    // segment — reject an empty (`fe80::1%`) or repeated (`fe80::1%a%b`) zone.
+    // segment, reject an empty (`fe80::1%`) or repeated (`fe80::1%a%b`) zone.
     let addr = match addr.split_once('%') {
         Some((head, zone)) if !zone.is_empty() && !zone.contains('%') => head,
         Some(_) => return false,

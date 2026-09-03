@@ -45,7 +45,7 @@ async fn builtin_finance() {
     let (text, entities) = scan(include_str!("../testdata/inputs/it/finance.txt")).await;
     assert_match(&text, &entities, builtins::TAX_ID.to_ref(), "00154980569");
     // English-language nationality dictionary stays silent on an
-    // Italian document — assert it didn't fire.
+    // Italian document, assert it didn't fire.
     assert!(
         !entities
             .iter()

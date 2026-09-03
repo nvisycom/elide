@@ -2,8 +2,8 @@
 //!
 //! Inspection is fail-closed: it reports [`Full`](CoverageStatus::Full) coverage
 //! only when nothing prevents it from reasoning about the entire document. Any
-//! condition that leaves part of the document unexamined — encryption, a
-//! retained prior revision, bytes after `%%EOF` — is recorded as a
+//! condition that leaves part of the document unexamined, encryption, a
+//! retained prior revision, bytes after `%%EOF`, is recorded as a
 //! [`Gap`](CoverageGap) and downgrades coverage to
 //! [`Partial`](CoverageStatus::Partial), so a caller never mistakes an
 //! incomplete inspection for a clean one.

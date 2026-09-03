@@ -1,7 +1,7 @@
 //! Singapore-specific post-match validators.
 //!
 //! Registered under the [`ValidatorRegistry::builtin`] set with
-//! dotted names — `"sg.nric"`, `"sg.uen"`.
+//! dotted names, `"sg.nric"`, `"sg.uen"`.
 //!
 //! [`ValidatorRegistry::builtin`]: super::ValidatorRegistry::builtin
 

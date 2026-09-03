@@ -9,7 +9,7 @@ use super::{SttBackend, SttRequest, SttResponse};
 
 /// Mock STT backend: returns a fixed set of segments on every call.
 ///
-/// Empty by default ([`new`](Self::new) / [`default`](Default::default)) — the
+/// Empty by default ([`new`](Self::new) / [`default`](Default::default)), the
 /// no-op stub examples and offline wiring rely on, transcribing nothing. Give it
 /// canned segments with [`with`](Self::with) to have every call enrich with the
 /// same [`Transcription`], for tests that need a real artifact to read back.

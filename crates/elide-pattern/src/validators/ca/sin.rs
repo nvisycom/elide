@@ -41,7 +41,7 @@ mod tests {
 
     #[test]
     fn accepts_canonical_sin() {
-        // 123 456 782 — widely-quoted ESDC test value.
+        // 123 456 782, widely-quoted ESDC test value.
         assert!(sin("123456782"));
     }
 

@@ -1,4 +1,4 @@
-//! Every strong, self-identifying pattern fires on its own shape — no nearby
+//! Every strong, self-identifying pattern fires on its own shape, no nearby
 //! keyword needed. This pins the high-confidence, no-context detectors.
 
 use elide::Result;
@@ -36,7 +36,7 @@ async fn detects_every_strong_pattern() -> Result<()> {
     );
 
     // Every sensitive value is gone from the output (some are tokened, some
-    // erased — the anonymizer config decides which, but none survives).
+    // erased, the anonymizer config decides which, but none survives).
     assert_pii_removed!(
         outcome.redacted_text(),
         "dana.well@example.com",

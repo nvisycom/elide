@@ -54,7 +54,7 @@ where
     DocumentHandle<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
 {
     /// Detect the entities in `handle` (in source coordinates), without
-    /// redacting. `artifact` is the prior enrichment to restore — `Some` (even
+    /// redacting. `artifact` is the prior enrichment to restore, `Some` (even
     /// when empty) has recognition run against it instead of re-invoking the
     /// model; `None` is a first pass, so the enricher runs and produces the
     /// artifact itself. The caller may edit the returned set before applying.

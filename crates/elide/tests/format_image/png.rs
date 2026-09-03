@@ -2,7 +2,7 @@
 //!
 //! Recognition reads OCR text an `OcrEnricher` stamps onto the call; the
 //! mock OCR backend recognizes nothing, so nothing is detected and the
-//! image round-trips unchanged — exercising the whole image + OCR path on
+//! image round-trips unchanged, exercising the whole image + OCR path on
 //! real PNG bytes.
 
 use elide::Result;

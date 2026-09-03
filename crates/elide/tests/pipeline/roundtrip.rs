@@ -22,7 +22,7 @@ use crate::support::orchestrator::TestOrchestrator;
 
 const SAMPLE: &[u8] = include_bytes!("../testdata/sample.docx");
 
-/// The fixture document's name — its depth-1 part key in the report.
+/// The fixture document's name, its depth-1 part key in the report.
 const DOC: &str = "sample.docx";
 
 fn orchestrator(registry: FormatRegistry) -> Result<Orchestrator> {
@@ -31,14 +31,14 @@ fn orchestrator(registry: FormatRegistry) -> Result<Orchestrator> {
 
 /// A report survives a JSON round trip through the orchestrator: the same
 /// entities come back, keyed to the same modality, and `anonymize_with` on the
-/// rebuilt report redacts and stamps the full pick→redaction trail — exactly as
+/// rebuilt report redacts and stamps the full pick→redaction trail, exactly as
 /// applying the original would have.
 #[tokio::test]
 async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
     let orchestrator = orchestrator(registry.clone())?;
 
-    // Analyze, then serialize the report — the artifact a review layer ships.
+    // Analyze, then serialize the report, the artifact a review layer ships.
     let mut doc = registry.document(DOC, SAMPLE).await?;
     let report = orchestrator
         .analyze(&mut doc, &Directives::new())
@@ -78,7 +78,7 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
 /// A report whose group carries entities under a modality the orchestrator does
 /// not handle is rejected, rather than silently losing those (possibly
 /// reviewer-edited) entities. An *empty* unregistered group would instead be
-/// skipped — see the engine unit tests.
+/// skipped, see the engine unit tests.
 #[tokio::test]
 async fn deserialize_rejects_an_unregistered_modality_with_entities() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
@@ -97,7 +97,7 @@ async fn deserialize_rejects_an_unregistered_modality_with_entities() -> Result<
 }
 
 /// The standalone `Report::deserializer()` rebuilds a serialized report with no
-/// orchestrator — the review-layer path that carries no analyzers, anonymizers,
+/// orchestrator, the review-layer path that carries no analyzers, anonymizers,
 /// or codec registry. The rebuilt report is byte-for-byte the same shape as one
 /// deserialized through the orchestrator.
 #[tokio::test]
@@ -113,7 +113,7 @@ async fn report_deserializer_rebuilds_a_report_standalone() -> Result<()> {
     let detected = report.entities::<Text>().expect("text content").len();
     let json = serde_json::to_string(&report).expect("serializes");
 
-    // No orchestrator here — just the modalities the report may contain.
+    // No orchestrator here, just the modalities the report may contain.
     let mut de = serde_json::Deserializer::from_str(&json);
     let rebuilt = elide::Report::deserializer()
         .with_modality::<Text>()
@@ -131,7 +131,7 @@ async fn report_deserializer_rebuilds_a_report_standalone() -> Result<()> {
 }
 
 /// `with_analyzer` and `with_anonymizer` register each pipeline half separately,
-/// merging into one pipeline — equivalent to `with_modality(analyzer,
+/// merging into one pipeline, equivalent to `with_modality(analyzer,
 /// anonymizer)`. Detection and redaction both run, so neither half was lost.
 #[tokio::test]
 async fn split_pipeline_halves_detect_and_redact() -> Result<()> {
@@ -143,7 +143,7 @@ async fn split_pipeline_halves_detect_and_redact() -> Result<()> {
         .build_context_enhanced()?;
     let text_redact = Anonymizer::new().with(Rule::fallback(Replace::default()));
 
-    // Register the two halves in separate calls — no fabricated empty half.
+    // Register the two halves in separate calls, no fabricated empty half.
     let orchestrator = Orchestrator::new()
         .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
         .with_registry(registry.clone())

@@ -3,8 +3,8 @@
 //! and an [`ArtifactSet`] from their `{ parts: [..] }` wire shape.
 //!
 //! The serialized report is the part-list `{ parts: [ { id, modality, X } ] }`
-//! view a review layer consumes: every part — a named document's own content
-//! and every container part within it — is one array entry, keyed by its
+//! view a review layer consumes: every part, a named document's own content
+//! and every container part within it, is one array entry, keyed by its
 //! [`PartId`] path (a segment array, never string-joined, so a nested part can
 //! never collide with a same-named part in another document). Each entry is
 //! tagged with its [`modality`](elide_core::modality::Modality::NAME) so the
@@ -14,17 +14,17 @@
 //! group is buffered and replayed through the per-modality parser resolved from
 //! the registry.
 //!
-//! Both views share the same wire shape — `{ parts: [..] }` of `{ id, modality,
-//! X }` entries — so one generic seed family drives both, parameterized by a
+//! Both views share the same wire shape, `{ parts: [..] }` of `{ id, modality,
+//! X }` entries, so one generic seed family drives both, parameterized by a
 //! [`Leaf`]: the entities of a [`Report`] or the artifact of an [`ArtifactSet`].
 //! The two differ only at the leaf: the field name (`entities` / `artifact`),
 //! which registry parser to run, and what an *unregistered* modality means. For
 //! entities, an unregistered group is skipped when empty (nothing to lose,
 //! matching how `analyze` ignores an unmatched part) but a hard error when
-//! non-empty — its entities may carry reviewer edits that silently dropping the
+//! non-empty, its entities may carry reviewer edits that silently dropping the
 //! group would lose, and an absent/null `entities` field is likewise rejected.
 //! An artifact carries no reviewer-editable state, so anything that reconstructs
-//! to nothing — an unregistered modality, or an absent/null `artifact` field —
+//! to nothing, an unregistered modality, or an absent/null `artifact` field,
 //! is simply dropped, and a re-run re-enriches.
 //!
 //! [`Report`]: super::report::Report
@@ -44,7 +44,7 @@ use super::registry::{ModalityEntry, ModalityRegistry};
 use super::report::{PartReport, Report};
 use crate::PartId;
 
-/// A part's [`PartId`] path serialized as a segment array — the wire key. A
+/// A part's [`PartId`] path serialized as a segment array, the wire key. A
 /// path is never string-joined (a segment can contain any delimiter), so it
 /// rides as a list of strings.
 struct PathField<'a>(&'a PartId);
@@ -56,8 +56,8 @@ impl serde::Serialize for PathField<'_> {
 
 impl serde::Serialize for Report {
     /// Serialize to `{ parts: [ { id: [seg..], modality, entities } ] }` (plus
-    /// `usage` under that feature). Every part — a document's own content and
-    /// every nested container part — is one entry, keyed by its full path so no
+    /// `usage` under that feature). Every part, a document's own content and
+    /// every nested container part, is one entry, keyed by its full path so no
     /// two collide. Each carries its modality name so it can be parsed back into
     /// the right `Vec<Entity<M>>`.
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -115,8 +115,8 @@ impl serde::Serialize for Report {
 // parsed group is stored into the final set. The seeds below are generic over it.
 
 /// What the two views (a [`Report`]'s entities, an [`ArtifactSet`]'s artifacts)
-/// differ by. Everything else — the buffered, order-independent `{ id, modality,
-/// X }` traversal and the `{ parts: [..] }` assembly — is shared.
+/// differ by. Everything else, the buffered, order-independent `{ id, modality,
+/// X }` traversal and the `{ parts: [..] }` assembly, is shared.
 pub(super) trait Leaf {
     /// One reconstructed group of this leaf: the concrete boxed value plus the
     /// routing metadata the set entry keys on.
@@ -179,7 +179,7 @@ impl Leaf for EntityLeaf {
         name: &str,
         value: Value,
     ) -> Result<Option<ParsedGroup>, E> {
-        // Entities are required — an absent/null `entities` field (`Value::Unit`)
+        // Entities are required, an absent/null `entities` field (`Value::Unit`)
         // is malformed, not "no entities": unlike an artifact, a missing entity
         // group could be silently dropping a reviewer's edits.
         if matches!(value, Value::Unit) {
@@ -223,7 +223,7 @@ impl Leaf for EntityLeaf {
     }
 }
 
-/// Whether a buffered `entities` value is an empty list — the group carries no
+/// Whether a buffered `entities` value is an empty list, the group carries no
 /// entities, so skipping it (for an unregistered modality) loses nothing.
 fn is_empty_entities(entities: &Value) -> bool {
     entity_count(entities) == 0
@@ -240,7 +240,7 @@ fn entity_count(entities: &Value) -> usize {
 }
 
 /// The artifact leaf: a group's `artifact` reconstructs as a boxed
-/// `M::Artifact`. An unregistered *or* absent modality simply yields nothing —
+/// `M::Artifact`. An unregistered *or* absent modality simply yields nothing,
 /// an artifact carries no reviewer-editable state, so dropping it loses no work
 /// (a re-run re-enriches).
 pub(super) struct ArtifactLeaf;
@@ -268,7 +268,7 @@ impl Leaf for ArtifactLeaf {
         _name: &str,
         value: Value,
     ) -> Result<Option<ParsedArtifact>, E> {
-        // A dropped artifact loses no work — a re-run re-enriches — so anything
+        // A dropped artifact loses no work (a re-run re-enriches), so anything
         // that leaves nothing to reconstruct is skipped rather than rejected: an
         // unregistered modality (no parser), or an absent/null `artifact` field
         // (`Value::Unit`, a payload that was never enriched).
@@ -297,11 +297,11 @@ impl Leaf for ArtifactLeaf {
 }
 
 /// A serialized part entry: `{ id: [seg..], modality, X }` (`X` is `entities`
-/// or `artifact`). Deserializes by buffering all three fields (in any order — a
+/// or `artifact`). Deserializes by buffering all three fields (in any order, a
 /// review layer may reorder keys), resolving the `modality`'s registered entry,
 /// then running that entry's parser over the buffered payload. Yields the entry's
 /// full [`PartId`] and its parsed group (`None` when the leaf's
-/// unregistered-modality policy skips the group — the id is still returned so a
+/// unregistered-modality policy skips the group, the id is still returned so a
 /// later duplicate is caught).
 struct PartEntrySeed<'a, L> {
     registry: &'a ModalityRegistry,
@@ -371,7 +371,7 @@ impl<'de, L: Leaf> Visitor<'de> for PartEntrySeed<'_, L> {
         let name = modality.ok_or_else(|| DeError::missing_field("modality"))?;
         // An absent payload field is `Value::Unit` (the same value a JSON `null`
         // yields), so `Leaf::parse` decides what a missing payload means for its
-        // side — entities require one, an artifact treats it as "not enriched".
+        // side, entities require one, an artifact treats it as "not enriched".
         let payload = payload.unwrap_or(Value::Unit);
         let parsed = L::parse(self.registry.entry(&name), &name, payload)?;
         Ok((part_id, parsed))
@@ -402,7 +402,7 @@ impl<'de, L: Leaf> Visitor<'de> for PartsSeed<'_, L> {
 
     fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
         let mut set = L::empty();
-        // Full paths already seen — a repeated path would silently overwrite the
+        // Full paths already seen, a repeated path would silently overwrite the
         // earlier group (and its entity edits), so reject it. A skipped
         // (unregistered-and-empty) entry still records its path so a later
         // duplicate is caught.
@@ -477,7 +477,7 @@ impl<'de, L: Leaf> Visitor<'de> for SetSeed<'_, L> {
                 }
                 // `usage` (and any future field) is ignored: it is derived
                 // analysis output, not editable review state. `parts` is optional
-                // — a set with no parts is valid.
+                //, a set with no parts is valid.
                 _ => {
                     map.next_value::<serde::de::IgnoredAny>()?;
                 }
@@ -497,7 +497,7 @@ mod tests {
     use super::*;
     use crate::PartId;
 
-    /// A registry with `Text` registered — the unit under test needs only the
+    /// A registry with `Text` registered, the unit under test needs only the
     /// group parsers, not a full orchestrator.
     fn text_registry() -> ModalityRegistry {
         let mut r = ModalityRegistry::default();
@@ -536,7 +536,7 @@ mod tests {
 
     /// A nested part serializes its full path as a segment array, so a part
     /// nested inside one document never collides with a same-named part in
-    /// another — the collision the old `last_segment` wire form could hit.
+    /// another, the collision the old `last_segment` wire form could hit.
     #[test]
     fn serializes_a_nested_path_as_a_segment_array() {
         let nested = PartId::new("scan-A.docx").child("word/media/image1.png");
@@ -550,7 +550,7 @@ mod tests {
     }
 
     /// The hand-written [`JsonSchema`](super::super::schema) must accept what
-    /// [`Serialize`] produces — the drift guard. A populated report (a document
+    /// [`Serialize`] produces, the drift guard. A populated report (a document
     /// plus a nested container part), a single empty document, and an empty
     /// report all validate against `schema_for!(Report)`; any divergence between
     /// the two hand-written impls fails here rather than silently shipping a
@@ -617,7 +617,8 @@ mod tests {
     fn serializes_usage_entries() {
         use std::time::Duration;
 
-        use elide_core::recognition::{RecognizerId, Usage};
+        use elide_core::primitive::Usage;
+        use elide_core::recognition::RecognizerId;
 
         let mut report = Report::new();
         report.usage.extend([Usage::new(
@@ -653,8 +654,8 @@ mod tests {
         );
     }
 
-    /// The public [`Report::deserializer`] rebuilds a report with no orchestrator
-    /// — no analyzers, anonymizers, or codec registry.
+    /// The public [`Report::deserializer`] rebuilds a report with no orchestrator,
+    /// no analyzers, anonymizers, or codec registry.
     #[test]
     fn report_deserializer_rebuilds_without_an_orchestrator() {
         let report = Report::new().insert_part::<Text>(doc(), vec![text_entity("EMAIL_ADDRESS")]);
@@ -673,7 +674,7 @@ mod tests {
 
     #[test]
     fn round_trips_a_nested_part_by_full_path() {
-        // A document with a nested container part — its full path must survive.
+        // A document with a nested container part, its full path must survive.
         let nested = doc().child("word/media/image1.png");
         let report = Report::new()
             .insert_part::<Text>(doc(), vec![text_entity("A")])
@@ -689,7 +690,7 @@ mod tests {
     }
 
     /// Two documents that share a nested part's local id keep distinct full
-    /// paths across the round trip — the collision the segment-array wire form
+    /// paths across the round trip, the collision the segment-array wire form
     /// prevents.
     #[test]
     fn round_trips_same_named_nested_parts_in_two_documents() {
@@ -717,7 +718,7 @@ mod tests {
     }
 
     /// A *non-empty* entry naming a modality the registry does not know is
-    /// rejected — those entities may carry reviewer edits, and silently dropping
+    /// rejected, those entities may carry reviewer edits, and silently dropping
     /// them would lose that work. (The array element need not be a real entity:
     /// the emptiness check fires before any parse.)
     #[test]
@@ -737,7 +738,7 @@ mod tests {
 
     /// An *empty* entry naming an unregistered modality is skipped, not an error:
     /// an orchestrator without that pipeline could not have redacted the part
-    /// anyway, and skipping an empty group loses nothing — matching how `analyze`
+    /// anyway, and skipping an empty group loses nothing, matching how `analyze`
     /// ignores a part whose modality has no pipeline. The part is dropped.
     #[test]
     fn unregistered_empty_group_is_skipped() {
@@ -753,11 +754,11 @@ mod tests {
     }
 
     /// A review layer's JSON tooling may reorder object keys, so an entry with
-    /// `entities` before `modality` (and `id` last) must still parse — with
-    /// *real* buffered entities, not just an empty array — and the data survive.
+    /// `entities` before `modality` (and `id` last) must still parse, with
+    /// *real* buffered entities, not just an empty array, and the data survive.
     #[test]
     fn entry_fields_may_arrive_in_any_order() {
-        // A real entity array, with `entities` before `modality` and `id` last —
+        // A real entity array, with `entities` before `modality` and `id` last ,
         // the reverse of what we emit.
         let entities = serde_json::to_string(&vec![text_entity("EMAIL_ADDRESS")]).unwrap();
         let json = format!(
@@ -775,7 +776,7 @@ mod tests {
     }
 
     /// An unknown entry field (a later format version) is ignored, matching the
-    /// set-level policy — the wire format can grow additively.
+    /// set-level policy, the wire format can grow additively.
     #[test]
     fn unknown_entry_fields_are_ignored() {
         let json = r#"{"parts":[{"id":["document"],"modality":"text","entities":[],"future":42}]}"#;
@@ -823,7 +824,7 @@ mod tests {
         );
     }
 
-    /// A part entry with an empty `id` array is rejected — a part must have at
+    /// A part entry with an empty `id` array is rejected, a part must have at
     /// least one path segment (there is no "top-level document" without a name).
     #[test]
     fn empty_part_id_is_rejected() {
@@ -840,7 +841,7 @@ mod tests {
     }
 
     /// An image document's OCR [`Layout`] survives the [`ArtifactSet`] serialize
-    /// round trip — the whole point of persisting it beside the report is that a
+    /// round trip, the whole point of persisting it beside the report is that a
     /// re-run reads the same OCR without re-invoking the model. A stored *empty*
     /// artifact (an image OCR'd to no text) survives too, distinct from an
     /// un-enriched payload that was never inserted.
@@ -853,7 +854,7 @@ mod tests {
         let bbox = BoundingBox::from_origin_size(Point::new(0.0, 0.0), 100.0, 20.0);
         let layout = Layout::new(vec![LayoutBlock::new(ImageLocation::new(bbox), "hi Alice")]);
         // The sole document carries a real Layout; a nested part was enriched to
-        // an *empty* Layout (an image with no text) — both stored, both survive.
+        // an *empty* Layout (an image with no text), both stored, both survive.
         let blank = doc().child("blank");
         let set = ArtifactSet::new()
             .insert_body::<Image>(doc(), layout.clone())
@@ -876,7 +877,7 @@ mod tests {
         );
 
         // Both reconstruct through the registry: the document as the same Layout,
-        // and the nested part as an *empty* Layout that is present (Some) — so a
+        // and the nested part as an *empty* Layout that is present (Some), so a
         // re-run seeds it and the enricher skips, rather than re-OCR'ing a blank.
         let mut registry = ModalityRegistry::default();
         registry.register::<Image>();
@@ -892,7 +893,7 @@ mod tests {
         assert!(part.is_empty(), "it round-trips as the empty Layout it was");
     }
 
-    /// An entry whose `artifact` field is `null` — or absent entirely — is
+    /// An entry whose `artifact` field is `null`, or absent entirely, is
     /// dropped, not rejected. An artifact carries no reviewer edits, so a payload
     /// that reconstructs to nothing is treated as "not enriched" (a re-run
     /// re-enriches), matching the unregistered-modality drop. Our own serializer

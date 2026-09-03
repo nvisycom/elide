@@ -1,7 +1,7 @@
 //! [`Container`]: a document that holds addressable sub-parts of other
 //! modalities (a DOCX's embedded images, a PDF's image XObjects).
 //!
-//! The codec layer cannot decode or redact those parts — it knows no
+//! The codec layer cannot decode or redact those parts, it knows no
 //! recognizers and cannot reach the [`FormatRegistry`]. So a container
 //! only *exposes* its parts as opaque byte-blobs and *accepts* redacted
 //! bytes back; the toolkit's orchestrator decodes each part, drives the
@@ -21,15 +21,15 @@ use crate::LocalId;
 /// One addressable sub-part of a [`Container`].
 #[derive(Debug, Clone)]
 pub struct Part {
-    /// This container's *local*, private id for the part — a zip entry name
+    /// This container's *local*, private id for the part, a zip entry name
     /// (`"word/media/image1.png"`) for DOCX, a PDF object reference, a bundle's
     /// filename, … Unique only **within this one container**; it re-finds the
     /// part in [`Container::replace_part`]. The orchestrator composes these
     /// segments into a full tree path when a container nests another (two
-    /// containers can share a local id — `word/media/image1.png` in each of two
-    /// bundled DOCX — which the path disambiguates).
+    /// containers can share a local id, `word/media/image1.png` in each of two
+    /// bundled DOCX, which the path disambiguates).
     pub id: LocalId,
-    /// The part's raw, undecoded bytes — what the orchestrator decodes
+    /// The part's raw, undecoded bytes, what the orchestrator decodes
     /// through the registry.
     pub bytes: Bytes,
     /// A hint at the part's modality/format for the orchestrator to
@@ -43,7 +43,7 @@ pub struct Part {
 /// Implemented by container handlers (DOCX, ahead PDF). The orchestrator
 /// downcasts an erased handle to `&mut dyn Container`, lists [`parts`],
 /// redacts each out-of-band, and feeds results back through
-/// [`replace_part`]. A non-container handler simply isn't one — the
+/// [`replace_part`]. A non-container handler simply isn't one, the
 /// downcast yields `None`.
 ///
 /// [`parts`]: Container::parts
@@ -68,7 +68,7 @@ pub trait Container: Send + Sync {
 
     /// Replace the part with this container's local `id` with `bytes` (its
     /// redacted form), to be folded in when the container re-encodes. `id` is a
-    /// [`Part::id`] — this container's own segment, never a full tree path.
+    /// [`Part::id`], this container's own segment, never a full tree path.
     /// Unknown ids are an error so a caller can't silently lose a redaction.
     fn replace_part(&mut self, id: &LocalId, bytes: Bytes) -> Result<()>;
 }

@@ -4,7 +4,7 @@
 //! A born-digital PDF has a selectable text layer and is redacted by deleting
 //! glyphs; a scanned one is image-only and must be rendered to images first
 //! (for OCR, and to redact by flattening). `RasterMode` selects that policy,
-//! mirroring what established tools converge on — OCRmyPDF (`--skip-text` /
+//! mirroring what established tools converge on, OCRmyPDF (`--skip-text` /
 //! `--force-ocr`), Docling (`do_ocr` / `force_full_page_ocr`).
 
 #[cfg(feature = "serde")]

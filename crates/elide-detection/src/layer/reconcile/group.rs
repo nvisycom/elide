@@ -5,20 +5,20 @@ use std::hash::Hash;
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::{Modality, ModalityLocation};
 
-/// Decides which entities form a cluster — the *which* axis of
+/// Decides which entities form a cluster, the *which* axis of
 /// reconciliation.
 ///
 /// A *type*, the `G` parameter of [`ReconcileLayer`]. Grouping is two
 /// dimensions: a coarse [`bucket`] (a cheap `O(n)` equality partition) and a
 /// fine [`is_grouped`] (a pairwise refinement within a bucket). The crate
-/// ships [`SameLabel`] (same label, overlapping — the fusion default) and
-/// [`CrossLabel`] (different label, overlapping — the conflict default);
+/// ships [`SameLabel`] (same label, overlapping, the fusion default) and
+/// [`CrossLabel`] (different label, overlapping, the conflict default);
 /// a consumer can supply a value-aware or looser grouping.
 ///
 /// **Law:** `is_grouped(a, b)` implies `bucket(a) == bucket(b)`. The layer
 /// clusters within each bucket, so two entities the predicate considers
 /// grouped must share a bucket or they will never be compared. A grouping
-/// that can't cheaply partition uses `Bucket = ()` — one bucket, every pair
+/// that can't cheaply partition uses `Bucket = ()`, one bucket, every pair
 /// compared.
 ///
 /// [`ReconcileLayer`]: super::ReconcileLayer
@@ -63,7 +63,7 @@ impl<M: Modality> GroupPredicate<M> for SameLabel {
 ///
 /// The conflict grouping: a cross-label overlap is a candidate to arbitrate.
 /// Grouped entities differ in label, so no label-based bucket can hold them
-/// together — `Bucket = ()` places every entity in one bucket (every pair
+/// together, `Bucket = ()` places every entity in one bucket (every pair
 /// compared). Cross-label tangles are small, so the `O(n²)` within-bucket
 /// scan is cheap in practice.
 #[derive(Debug, Clone, Copy, Default)]

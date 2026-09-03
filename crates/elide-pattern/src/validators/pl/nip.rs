@@ -36,7 +36,7 @@ mod tests {
 
     #[test]
     fn accepts_canonical_nip() {
-        // 1060000062 — Ministerstwo Finansów reference NIP.
+        // 1060000062, Ministerstwo Finansów reference NIP.
         assert!(nip("1060000062"));
     }
 

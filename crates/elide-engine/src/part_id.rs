@@ -1,11 +1,11 @@
 //! [`PartId`]: the tree path that addresses one part across a nested document.
 //!
 //! A [`Container`](elide_codec::Container) knows only its own *local* part ids
-//! (a zip entry name, a PDF object ref) — unique within that one container. When
+//! (a zip entry name, a PDF object ref), unique within that one container. When
 //! one container nests another (a bundle of DOCX; a DOCX with an embedded
 //! spreadsheet), two containers can share a local id, so a local id alone can't
 //! key the report. `PartId` is the **path** the orchestrator composes as it
-//! descends — one segment per container level crossed — so every leaf has a
+//! descends, one segment per container level crossed, so every leaf has a
 //! unique address regardless of depth.
 
 use std::fmt;
@@ -19,22 +19,22 @@ use smallvec::{SmallVec, smallvec};
 ///
 /// Keyed on by [`Report`](crate::Report) / [`ArtifactSet`](crate::ArtifactSet),
 /// so it is `Hash + Eq`. Each segment is a container's own [`LocalId`], opaque
-/// to the orchestrator, joined only structurally (never string-concatenated — a
+/// to the orchestrator, joined only structurally (never string-concatenated, a
 /// segment can itself contain any delimiter). Backed by a `SmallVec` sized for
-/// one inline segment: the depth-1 case (an un-nested container — every part
+/// one inline segment: the depth-1 case (an un-nested container, every part
 /// today) allocates nothing, and only genuine nesting spills to the heap.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PartId(SmallVec<[LocalId; 1]>);
 
 impl PartId {
-    /// A one-segment path from a `&'static str` — the depth-1 case (a part in a
+    /// A one-segment path from a `&'static str`, the depth-1 case (a part in a
     /// single, un-nested container).
     #[must_use]
     pub fn new(id: &'static str) -> Self {
         Self::leaf(id)
     }
 
-    /// The empty path — the top-level document itself, not any part within it.
+    /// The empty path, the top-level document itself, not any part within it.
     /// The flatten walk starts here; each container level appends a segment.
     #[must_use]
     pub fn top() -> Self {
@@ -47,7 +47,7 @@ impl PartId {
         Self(smallvec![segment.into()])
     }
 
-    /// A path from its segments, top-level container first — the inverse of
+    /// A path from its segments, top-level container first, the inverse of
     /// [`segments`](Self::segments). The wire form (de)serializes a `PartId` as a
     /// segment array, and reconstruction rebuilds it here; a path is never
     /// string-joined, so any delimiter inside a segment survives the round trip.
@@ -56,7 +56,7 @@ impl PartId {
         Self(segments.into_iter().map(LocalId::new).collect())
     }
 
-    /// Extend `self` by one segment — the orchestrator's descent step, forming
+    /// Extend `self` by one segment, the orchestrator's descent step, forming
     /// the child part's path from its parent's path plus the child's [`LocalId`].
     #[must_use]
     pub fn child(&self, segment: impl Into<LocalId>) -> Self {
@@ -70,7 +70,7 @@ impl PartId {
         self.0.iter().map(LocalId::as_str)
     }
 
-    /// This path's last segment as a string slice — the part's local id in its
+    /// This path's last segment as a string slice, the part's local id in its
     /// *immediate* container. See [`last_segment_id`](Self::last_segment_id) for
     /// the typed form.
     #[must_use]
@@ -78,7 +78,7 @@ impl PartId {
         self.0.last().map_or("", LocalId::as_str)
     }
 
-    /// This path's last segment as a [`LocalId`] — the typed local id in its
+    /// This path's last segment as a [`LocalId`], the typed local id in its
     /// *immediate* container, the value passed to that container's
     /// `replace_part`. `None` for the empty (top-level) path.
     #[must_use]
@@ -92,7 +92,7 @@ impl PartId {
         self.0.len()
     }
 
-    /// Whether this path has no segments — the empty path that names the
+    /// Whether this path has no segments, the empty path that names the
     /// top-level document rather than any part within it.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -110,7 +110,7 @@ impl PartId {
 
 impl fmt::Display for PartId {
     /// A human-readable path, segments joined by `›` (a display convenience for
-    /// error messages and logs — never parsed back).
+    /// error messages and logs, never parsed back).
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, seg) in self.0.iter().enumerate() {
             if i > 0 {
@@ -197,7 +197,7 @@ mod tests {
         assert_eq!(round, id);
         assert_eq!(round.depth(), 2);
 
-        // A segment carrying the display delimiter survives — the wire is an
+        // A segment carrying the display delimiter survives, the wire is an
         // array, never string-joined.
         let tricky = PartId::from_segments(["a › b".to_owned(), "c".to_owned()]);
         assert_eq!(tricky.depth(), 2);

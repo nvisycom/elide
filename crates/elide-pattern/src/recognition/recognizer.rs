@@ -67,7 +67,7 @@ impl PatternRecognizer {
     /// Start a chainable builder.
     ///
     /// A recognizer built with no patterns and no dictionaries is
-    /// valid — it emits zero entities on every call.
+    /// valid, it emits zero entities on every call.
     #[must_use]
     pub fn builder() -> PatternRecognizerBuilder {
         PatternRecognizerBuilder::default()
@@ -115,7 +115,7 @@ struct ContextKeywords<'a> {
 
 /// Accumulator of rules + validator registry for [`PatternRecognizer`].
 ///
-/// Patterns and dictionaries are stored as authored — compilation
+/// Patterns and dictionaries are stored as authored, compilation
 /// into the pooled scanners happens in [`build`].
 ///
 /// [`build`]: Self::build
@@ -207,7 +207,7 @@ impl PatternRecognizerBuilder {
     /// whose compiled size can only be bounded here. [`build`] fails with a
     /// validation error when a regex or the union exceeds the limit.
     ///
-    /// Unset by default — the `regex` crate's own default budget (~10 MB)
+    /// Unset by default, the `regex` crate's own default budget (~10 MB)
     /// applies, so behavior is unchanged unless a limit is set.
     ///
     /// [`build`]: Self::build
@@ -221,7 +221,7 @@ impl PatternRecognizerBuilder {
     /// shared [`RegexSet`]. This bounds match-time memory (the DFA is built
     /// on demand while scanning) rather than compile-time automaton size.
     ///
-    /// Unset by default — the `regex` crate's own default applies.
+    /// Unset by default, the `regex` crate's own default applies.
     #[must_use]
     pub fn with_dfa_size_limit(mut self, bytes: usize) -> Self {
         self.dfa_size_limit = Some(bytes);
@@ -229,7 +229,7 @@ impl PatternRecognizerBuilder {
     }
 
     /// Cap the total number of dictionary terms across **every** registered
-    /// dictionary — they compile into one shared Aho-Corasick automaton, so
+    /// dictionary, they compile into one shared Aho-Corasick automaton, so
     /// the limit is a recognizer-wide aggregate, not per-dictionary.
     ///
     /// Dictionaries are literal-match (no regex backtracking surface); this
@@ -245,7 +245,7 @@ impl PatternRecognizerBuilder {
         self
     }
 
-    /// Cap the total bytes of all dictionary terms across every dictionary —
+    /// Cap the total bytes of all dictionary terms across every dictionary,
     /// a finer proxy for automaton size than raw term count. [`build`] fails
     /// with a validation error when the sum of term lengths exceeds `max`.
     ///
@@ -262,7 +262,7 @@ impl PatternRecognizerBuilder {
     /// declared in `catalog`.
     ///
     /// The engine uses this to build a per-request recognizer from a
-    /// workspace-wide template — rules that could emit no label any policy
+    /// workspace-wide template, rules that could emit no label any policy
     /// declared never run. A rule is kept when *any* of its candidates is in
     /// the catalog; at recognize time it emits the first one that is.
     #[must_use]
@@ -452,7 +452,7 @@ impl PatternRecognizerBuilder {
                 // Per-term `score` wins when set; otherwise ask
                 // the dictionary's `Scoring` to resolve against
                 // the term's source column. `None` means the
-                // column didn't map to a declared score —
+                // column didn't map to a declared score ,
                 // surfaced as a hard build error so silent
                 // misconfiguration can't happen.
                 let score = entry
@@ -565,7 +565,7 @@ impl PatternRecognizerBuilder {
 
         // Dictionary-sourced context: a pattern whose `[context]` names
         // dictionaries borrows their terms as boost keywords for its own
-        // labels — e.g. a `monetary_amount` pattern lifts a number beside any
+        // labels, e.g. a `monetary_amount` pattern lifts a number beside any
         // currency name from the `currencies` dictionary.
         for pattern in self.patterns.iter() {
             let names = pattern.context.dictionaries();

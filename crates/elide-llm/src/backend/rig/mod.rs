@@ -12,7 +12,7 @@ use elide_core::Result;
 use elide_core::modality::image::{Image, ImageData};
 use elide_core::modality::text::Text;
 #[cfg(feature = "usage")]
-use elide_core::recognition::TokenCounts;
+use elide_core::primitive::TokenCounts;
 use rig::ExtractionResponse;
 use rig::client::CompletionClient;
 use rig::completion::{Message, Usage};
@@ -116,7 +116,7 @@ impl RigBackend {
         let preamble = self.config.preamble.clone();
         let max_tokens = self.config.max_tokens;
         // `ExtractorBuilder` has no `temperature` setter, so pass it through
-        // `additional_params` — rig merges these into the provider request.
+        // `additional_params`, rig merges these into the provider request.
         let params = serde_json::json!({ "temperature": self.config.temperature });
         dispatch!(&self.model, |model| {
             let mut builder = ExtractorBuilder::<T>::new(model.clone())

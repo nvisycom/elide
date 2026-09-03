@@ -1,4 +1,4 @@
-//! The [`Reconciler`] trait — the *what to do* axis — and the shipped
+//! The [`Reconciler`] trait, the *what to do* axis, and the shipped
 //! reconcilers.
 //!
 //! A reconciler decides each grouped pair's fate. The crate ships [`Merging`]
@@ -29,7 +29,7 @@ pub enum Winner {
     Second,
 }
 
-/// What to do with two grouped entities — the *what* axis of reconciliation.
+/// What to do with two grouped entities, the *what* axis of reconciliation.
 ///
 /// The single outcome a [`Reconciler`] returns for a pair. The layer folds
 /// these over a cluster: drops take effect first, then contests flag, then
@@ -43,7 +43,7 @@ pub enum Disposition {
         /// The pooled confidence the merged entity takes.
         confidence: Confidence,
     },
-    /// Both entities survive, unflagged — a legitimate co-existence (a
+    /// Both entities survive, unflagged, a legitimate co-existence (a
     /// nesting, or two distinct findings that merely touch).
     KeepBoth,
     /// Both entities survive, each flagged *contested* against the other, for
@@ -58,7 +58,7 @@ pub enum Disposition {
     },
 }
 
-/// Decides what happens to two grouped entities — the `R` parameter of
+/// Decides what happens to two grouped entities, the `R` parameter of
 /// [`ReconcileLayer`].
 ///
 /// A *type*, not a stringly-tagged enum. Pairwise: the layer owns clustering

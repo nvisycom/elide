@@ -4,7 +4,7 @@
 //! (`word/document.xml`), a page header (`word/header3.xml`), and an
 //! external hyperlink `mailto:` target in `word/_rels/document.xml.rels`,
 //! so redaction must reach every text-bearing part and the relationship
-//! targets — not just the body — while the styles, theme, and
+//! targets, not just the body, while the styles, theme, and
 //! content-types parts pass through unchanged. More docx samples plug in
 //! alongside this one.
 

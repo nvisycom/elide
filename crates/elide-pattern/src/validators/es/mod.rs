@@ -1,7 +1,7 @@
 //! Spain-specific post-match validators.
 //!
 //! Registered under the [`ValidatorRegistry::builtin`] set with
-//! dotted names — `"es.nif"`, `"es.nie"`, `"es.cif"`.
+//! dotted names, `"es.nif"`, `"es.nie"`, `"es.cif"`.
 //!
 //! [`ValidatorRegistry::builtin`]: super::ValidatorRegistry::builtin
 

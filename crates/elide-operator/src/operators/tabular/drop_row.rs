@@ -4,7 +4,7 @@ use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::TextData;
-use elide_core::operator::{LeakProfile, Operator, OperatorId};
+use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -12,10 +12,10 @@ use serde::{Deserialize, Serialize};
 ///
 /// A structural treatment, not a cell edit: where [`Erase`] blanks one
 /// cell's text, [`DropRow`] removes the whole record. Useful for "this row
-/// names a sanctioned individual — drop it entirely". Any match in a row
+/// names a sanctioned individual, drop it entirely". Any match in a row
 /// drops that row, so the table shrinks by one record per matched row.
 ///
-/// The header row is never dropped — that would strip the table's schema.
+/// The header row is never dropped, that would strip the table's schema.
 ///
 /// [`Erase`]: crate::operators::Erase
 #[derive(Debug, Clone, Copy, Default)]

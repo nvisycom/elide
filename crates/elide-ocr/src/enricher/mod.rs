@@ -17,8 +17,9 @@
 use std::sync::Arc;
 
 use derive_builder::Builder;
+use elide_core::enrichment::{Enricher, Enrichment};
 use elide_core::modality::image::{Image, ImageData, Layout};
-use elide_core::recognition::{Enricher, Enrichment, RecognizerContext, RecognizerId};
+use elide_core::recognition::{RecognizerContext, RecognizerId};
 use elide_core::{Error, Result};
 use hipstr::HipStr;
 
@@ -33,8 +34,8 @@ use crate::{OcrBackend, OcrRequest};
 /// an `Analyzer<Image>` ahead of its recognizers, the same way a language
 /// detector is registered on a text analyzer.
 ///
-/// Built the same way as a NER or LLM recognizer —
-/// `OcrEnricher::builder().with_name(..).with_backend(..).build()` — so `name`
+/// Built the same way as a NER or LLM recognizer,
+/// `OcrEnricher::builder().with_name(..).with_backend(..).build()`, so `name`
 /// and `backend` are required and construction is uniform across the
 /// model-backed components.
 #[derive(Clone, Builder)]
@@ -226,15 +227,15 @@ mod tests {
         enricher.enrich(&data, &mut ctx).await.unwrap();
 
         // Re-run: seed the context with the prior (restored) artifact. The
-        // enricher self-skips — recognize is not called again, enforced by the
-        // `.times(1)` above — and the seeded OCR text is still readable.
+        // enricher self-skips, recognize is not called again, enforced by the
+        // `.times(1)` above, and the seeded OCR text is still readable.
         let restored = ctx.artifact().cloned().expect("the first pass enriched");
         let mut ctx = RecognizerContext::new(&scope).with_artifact(restored);
         enricher.enrich(&data, &mut ctx).await.unwrap();
         assert_eq!(Image::as_text(&data, ctx.artifact()), "hi Alice");
     }
 
-    /// A restored *empty* `Layout` — a payload a prior pass OCR'd to no text —
+    /// A restored *empty* `Layout`, a payload a prior pass OCR'd to no text,
     /// still counts as enriched, so the backend is not called again. Guarding on
     /// artifact *presence* rather than emptiness is what makes this hold.
     #[tokio::test]
@@ -255,7 +256,7 @@ mod tests {
         let data = ImageData::new(b"image".to_vec(), Dimensions::new(100, 20));
         let scope = Scope::new();
 
-        // Seed an empty Layout — the recorded result of a prior pass that found
+        // Seed an empty Layout, the recorded result of a prior pass that found
         // no text. The enricher must treat it as already-enriched and skip.
         let mut ctx = RecognizerContext::new(&scope).with_artifact(Layout::default());
         enricher.enrich(&data, &mut ctx).await.unwrap();

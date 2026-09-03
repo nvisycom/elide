@@ -36,13 +36,13 @@ pub(super) fn password<R: RngExt + ?Sized>(locale: Locale, rng: &mut R) -> Strin
     }
 }
 
-/// Random 32-char lowercase hex — looks like an API token without
+/// Random 32-char lowercase hex, looks like an API token without
 /// claiming any particular provider's shape.
 pub(super) fn api_key<R: RngExt + ?Sized>(rng: &mut R) -> String {
     hex_chars(32, rng)
 }
 
-/// Random 48-char lowercase hex — slightly longer than `api_key`
+/// Random 48-char lowercase hex, slightly longer than `api_key`
 /// so the two are visually distinguishable.
 pub(super) fn auth_token<R: RngExt + ?Sized>(rng: &mut R) -> String {
     hex_chars(48, rng)

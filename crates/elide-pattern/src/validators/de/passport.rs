@@ -5,7 +5,7 @@
 //! computed via 7-3-1 weighting over the first 8 characters.
 //! Letters `A`, `B`, `D`, `E`, `I`, `O`, `Q`, `S`, `U` are
 //! visually ambiguous and never appear in ICAO travel-document
-//! serials — reject outright so a lucky checksum can't promote a
+//! serials, reject outright so a lucky checksum can't promote a
 //! non-passport string.
 
 use super::icao::mrz_check_digit;

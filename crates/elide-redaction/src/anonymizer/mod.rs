@@ -1,4 +1,4 @@
-//! The [`Anonymizer`] — the "hide" engine.
+//! The [`Anonymizer`], the "hide" engine.
 //!
 //! The redaction counterpart to [`Analyzer`]: an ordered list of selection
 //! rules plus its entry points. [`pick`] resolves each entity's operator and
@@ -24,8 +24,8 @@ use elide_core::Result;
 use elide_core::entity::audit::{Attribution, AuditEvent, Redaction, RuleMatch, Selection};
 use elide_core::entity::{Entity, LabelCatalog};
 use elide_core::modality::{DataReader, DataWriter, Modality, ModalityLocation};
-use elide_core::operator::{Operator, Redactions};
 use elide_core::recognition::Scope;
+use elide_core::redaction::{Operator, Redactions};
 
 use self::registry::OperatorRegistry;
 pub use self::rule::{MatchContext, Rule};
@@ -38,7 +38,7 @@ pub(crate) type SharedOperator<M> = Arc<dyn Operator<M>>;
 /// The context bundles the entity under test, the [`LabelCatalog`] (empty when
 /// none was set), and the run [`Scope`], so a predicate can branch on the
 /// entity, a label's tags or metadata, or request context (purpose, audience,
-/// tags, languages, countries) — reading whichever fields it needs.
+/// tags, languages, countries), reading whichever fields it needs.
 ///
 /// [`Scope`]: elide_core::recognition::Scope
 pub(crate) type Predicate<M> = Box<dyn Fn(&MatchContext<'_, M>) -> bool + Send + Sync>;
@@ -109,7 +109,7 @@ impl<M: Modality> Anonymizer<M> {
         self
     }
 
-    /// Append several [`Rule`]s in order — the batch counterpart to
+    /// Append several [`Rule`]s in order, the batch counterpart to
     /// [`with`](Self::with).
     ///
     /// Handy when a policy layer holds a `Vec<Rule<M>>`, or for a single
@@ -136,13 +136,13 @@ impl<M: Modality> Anonymizer<M> {
     }
 
     /// Record the operator *pick* for every entity onto its audit trail,
-    /// without reading any data — the *decision* half of redaction, split out
+    /// without reading any data, the *decision* half of redaction, split out
     /// so the picks can be inspected (and the entities edited) before anything
     /// is applied.
     ///
     /// For each overlap cluster it resolves the winning operator (see the merge
-    /// rule below) and records a [`Selection`] event — naming the operator, the
-    /// rule that matched, and any policy attribution — on **every** entity the
+    /// rule below) and records a [`Selection`] event, naming the operator, the
+    /// rule that matched, and any policy attribution, on **every** entity the
     /// cluster covers, so a merged non-winner still shows why it will be hidden.
     /// No document data is touched. Entities whose label has no operator and no
     /// fallback get no pick; a reviewer-suppressed entity is skipped entirely.
@@ -158,16 +158,16 @@ impl<M: Modality> Anonymizer<M> {
     /// the medium (a left-over nesting, or one a user re-introduced by editing
     /// the report), redacting each separately would write competing operators
     /// over the same bytes and corrupt the output. Instead the overlapping set
-    /// resolves to *one* operator — the **safest** among them (the one whose
+    /// resolves to *one* operator, the **safest** among them (the one whose
     /// output leaks least, highest [`LeakProfile`]); ties go to the wider span,
-    /// then the earlier position — which then covers the union of their spans.
+    /// then the earlier position, which then covers the union of their spans.
     /// A purely mechanical safety step: it makes no semantic choice about which
-    /// *finding* is right — that is detection's job.
+    /// *finding* is right, that is detection's job.
     ///
     /// [`anonymize`] runs `pick` and applies in one step.
     ///
     /// [`anonymize`]: Self::anonymize
-    /// [`LeakProfile`]: elide_core::operator::LeakProfile
+    /// [`LeakProfile`]: elide_core::redaction::LeakProfile
     pub fn pick(&self, entities: &mut [Entity<M>], scope: &Scope) {
         for cluster in self.resolve_clusters(entities, scope) {
             // Record the same pick on every covered entity. Built per member
@@ -186,7 +186,7 @@ impl<M: Modality> Anonymizer<M> {
     }
 
     /// Resolve each overlap cluster to its winning operator, dropping
-    /// reviewer-suppressed entities and clusters no rule covers — the shared
+    /// reviewer-suppressed entities and clusters no rule covers, the shared
     /// decision behind [`pick`](Self::pick) and [`redact`](Self::redact).
     ///
     /// Operators are cloned out of the rule registry (config intact) so the
@@ -194,7 +194,7 @@ impl<M: Modality> Anonymizer<M> {
     fn resolve_clusters(&self, entities: &[Entity<M>], scope: &Scope) -> Vec<ResolvedCluster<M>> {
         // A reviewer-suppressed entity is left alone: it contributes no operator
         // and does not extend the redacted span. (Where it overlaps a live
-        // entity, the shared bytes still fall inside the live member's own span —
+        // entity, the shared bytes still fall inside the live member's own span ,
         // span-level redaction cannot spare those.) Exclude suppressed entities
         // from clustering entirely, so a suppressed span can never bridge two
         // live ones into a cluster that fails to coalesce once it is dropped.
@@ -203,7 +203,7 @@ impl<M: Modality> Anonymizer<M> {
             .collect();
         let mut resolved = Vec::new();
         for members in cluster_overlaps(entities, &live) {
-            // Pick the safest operator among the members — the one that leaks
+            // Pick the safest operator among the members, the one that leaks
             // least; ties go to the wider span, then the earlier position.
             // `None` means no member had an operator.
             let Some((winner, operator, matched_by, attribution)) = members
@@ -245,7 +245,7 @@ impl<M: Modality> Anonymizer<M> {
     /// The complete redaction step: [`pick`]s each entity's operator,
     /// reads its value from `target`, runs the operator, and hands the batch
     /// to [`DataWriter::write_at`] so `target` owns the *how* and *ordering*
-    /// of applying it. `target` is both the reader and the writer —
+    /// of applying it. `target` is both the reader and the writer,
     /// typically a decoded codec document. Entities must already be in
     /// `target`'s coordinate system.
     ///
@@ -276,7 +276,7 @@ impl<M: Modality> Anonymizer<M> {
     /// This is the apply half of the reviewable path. Picks live on the
     /// entities' audit trails ([`pick`]); the operator's *configuration* lives
     /// in the rules, so `redact` re-resolves the live configured operator here
-    /// rather than reading it from the audit — a reviewer overrides by editing
+    /// rather than reading it from the audit, a reviewer overrides by editing
     /// the entity (suppress, retag), not by rewriting the pick. A
     /// reviewer-suppressed entity is left alone. `scope` selects the same rules
     /// [`pick`] used.
@@ -316,8 +316,8 @@ impl<M: Modality> Anonymizer<M> {
                 tracing::debug!(modality = M::NAME, "location read no data; skipping");
                 continue;
             };
-            // Run the operator against the *winning* entity — the one the
-            // operator was resolved from — since operators may read its fields.
+            // Run the operator against the *winning* entity, the one the
+            // operator was resolved from, since operators may read its fields.
             let replacement = cluster
                 .operator
                 .anonymize(&entities[cluster.winner], &data)
@@ -355,7 +355,7 @@ impl<M: Modality> Anonymizer<M> {
 struct ResolvedCluster<M: Modality> {
     /// Every covered entity's index, in cluster order (not winner-first).
     members: Vec<usize>,
-    /// The member the operator was resolved from — the safest span in the
+    /// The member the operator was resolved from, the safest span in the
     /// cluster. An operator that reads entity fields (`Replace`, `Encrypt`, …)
     /// must run against *this* entity, not `members[0]`.
     winner: usize,
@@ -379,7 +379,7 @@ impl<M: Modality> Default for Anonymizer<M> {
 /// group even if A and C don't touch, and an entity bridging two existing
 /// groups merges them. Two entities that overlap but can't coalesce (the
 /// same byte range on different pages, say) stay in separate groups, so
-/// every group's [`union`][coalesce] is well-defined — no member is ever
+/// every group's [`union`][coalesce] is well-defined, no member is ever
 /// dropped when the span is computed.
 ///
 /// Only the `candidates` participate: the caller passes the *live* entities, so
@@ -434,7 +434,7 @@ mod tests {
     }
 
     /// `pick` records one [`Selection`] event per entity, naming the winning
-    /// operator — without reading or writing any data.
+    /// operator, without reading or writing any data.
     #[tokio::test]
     async fn pick_records_one_selection_per_entity() {
         let mut entities = vec![entity("NAME", 0, 5), entity("URL", 10, 13)];
@@ -461,7 +461,7 @@ mod tests {
 
     /// A [scope-aware predicate](Rule::predicate) reading [`MatchContext::scope`]
     /// lets the *same* entity be picked differently per request `Scope`. Here an
-    /// auditor keeps a wider prefix than a support agent — the pick's
+    /// auditor keeps a wider prefix than a support agent, the pick's
     /// [`matched_by`](AuditKind::Selection) records which rule fired.
     #[tokio::test]
     async fn scope_predicate_picks_per_audience() {
@@ -498,7 +498,7 @@ mod tests {
     }
 
     /// Overlapping entities are won by the safest operator, and the pick is
-    /// recorded on *every* member of the cluster — mirroring the merge that
+    /// recorded on *every* member of the cluster, mirroring the merge that
     /// `redact` applies.
     #[tokio::test]
     async fn pick_records_the_cluster_winner_on_every_member() {
@@ -613,8 +613,8 @@ mod tests {
         );
     }
 
-    /// In an overlap cluster the operator runs against the *winning* entity —
-    /// the safest, widest span — not `members[0]`. Two overlapping entities with
+    /// In an overlap cluster the operator runs against the *winning* entity,
+    /// the safest, widest span, not `members[0]`. Two overlapping entities with
     /// different labels both resolve to `Replace`; the wider span wins, and its
     /// label is what the `{label}` template renders.
     #[tokio::test]
@@ -671,8 +671,8 @@ mod tests {
             !of(suppressed_id).is_redacted(),
             "the suppressed entity records no redaction",
         );
-        // The redacted span is exactly the live entity's [0,17) — the suppressed
-        // one did not extend it — and the operator read the live entity, so the
+        // The redacted span is exactly the live entity's [0,17), the suppressed
+        // one did not extend it, and the operator read the live entity, so the
         // whole string becomes the live label. A leaked NAME would read "[NAME]".
         assert_eq!(
             target.text(),
@@ -683,7 +683,7 @@ mod tests {
 
     /// A suppressed entity that *bridges* two non-coalescible live spans must not
     /// merge them: it is excluded from clustering, so the two live spans stay in
-    /// separate clusters and each redacts on its own — no panic at the union.
+    /// separate clusters and each redacts on its own, no panic at the union.
     #[tokio::test]
     async fn a_suppressed_bridge_does_not_merge_live_clusters() {
         // Live [0,5) and [10,15); suppressed [4,11) overlaps both but bridges

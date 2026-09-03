@@ -1,7 +1,7 @@
 //! [`Xlsx`]: an opened XLSX workbook, its cells extracted and redacted in place
 //! over the shared [`opc`](crate::opc) engine.
 //!
-//! A workbook's user text lives in its worksheet cells — either as shared
+//! A workbook's user text lives in its worksheet cells, either as shared
 //! strings (`xl/sharedStrings.xml`, referenced by index) or inline strings (in
 //! the sheet itself). This facade reads those cells, addressed by sheet, row,
 //! and column, and rewrites them byte-faithfully. Redacting a shared-string cell
@@ -299,7 +299,7 @@ impl Xlsx {
 
         // De-sharing a `t="s"` cell drops a reference to its pooled string; a
         // pool entry that loses its last reference would otherwise linger in
-        // `sharedStrings.xml` as orphaned bytes — a leak. Blank any such entry.
+        // `sharedStrings.xml` as orphaned bytes, a leak. Blank any such entry.
         if let Some(pruned) = self.prune_orphaned_strings(&by_part)? {
             replacements.push(pruned);
         }
@@ -332,8 +332,8 @@ impl Xlsx {
     /// same PII as the cells), each as its part path and raw bytes.
     ///
     /// All are redacted through the shared markup pipeline rather than the cell
-    /// model — comments and drawings by their `<t>` / `a:t` element text, a
-    /// relationships part by its `Target` attribute values — so a container
+    /// model, comments and drawings by their `<t>` / `a:t` element text, a
+    /// relationships part by its `Target` attribute values, so a container
     /// surface exposes them for the orchestrator to drive and hands their
     /// redacted bytes back to [`rewrite_with_parts`](Xlsx::rewrite_with_parts).
     pub fn text_parts(&self) -> Vec<(String, Bytes)> {
@@ -349,7 +349,7 @@ impl Xlsx {
     }
 
     /// Blank every shared-string entry that, after the de-share edits in
-    /// `by_part`, no `t="s"` cell references any longer — so an orphaned pooled
+    /// `by_part`, no `t="s"` cell references any longer, so an orphaned pooled
     /// value cannot survive in the output. Returns the rewritten
     /// `sharedStrings.xml` part, or `None` if nothing is orphaned (or the
     /// workbook has no shared-string table).
@@ -756,7 +756,7 @@ mod tests {
             parts.contains(&"xl/drawings/drawing1.xml".to_owned()),
             "drawing part missing: {parts:?}"
         );
-        // Relationships parts are surfaced too — their external hyperlink targets
+        // Relationships parts are surfaced too, their external hyperlink targets
         // carry PII redacted as XML attribute values.
         assert!(
             parts.contains(&"xl/worksheets/_rels/sheet1.xml.rels".to_owned()),

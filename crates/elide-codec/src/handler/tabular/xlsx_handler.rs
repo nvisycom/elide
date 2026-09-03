@@ -15,7 +15,7 @@ use bytes::Bytes;
 use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
 use elide_core::modality::text::{TextData, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter, Hint};
-use elide_core::operator::Redactions;
+use elide_core::redaction::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 use elide_office::xlsx::{CellEdit, Xlsx};
 
@@ -53,7 +53,7 @@ pub(crate) struct XlsxCell {
 /// Handler for a decoded XLSX workbook. Each cell is independently addressable
 /// via a [`TabularLocation`] scoped by sheet name.
 ///
-/// A workbook also holds non-cell text — cell comments and drawing/chart text —
+/// A workbook also holds non-cell text, cell comments and drawing/chart text,
 /// in its own XML parts. Those are surfaced through the [`Container`] surface as
 /// `xml`-hinted parts the orchestrator drives with the markup pipeline, and their
 /// redacted bytes fold back into the re-packed workbook on encode.
@@ -73,7 +73,7 @@ pub(crate) struct XlsxHandler {
     /// [`Container::replace_part`] and folded in on encode.
     replacements: HashMap<String, Bytes>,
     /// Indices into `cells` of the cells a redaction actually changed, so encode
-    /// rewrites only those — leaving unedited shared-string cells shared.
+    /// rewrites only those, leaving unedited shared-string cells shared.
     changed: BTreeSet<usize>,
 }
 
@@ -500,7 +500,7 @@ mod tests {
             sheet1.contains(r#"t="inlineStr"><is><t>[EMAIL]</t>"#),
             "{sheet1}"
         );
-        // The untouched `Email` header cell stays a shared string — the workbook
+        // The untouched `Email` header cell stays a shared string, the workbook
         // is not wholesale de-shared.
         assert!(
             sheet1.contains(r#"<c r="A1" t="s"><v>0</v></c>"#),

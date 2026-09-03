@@ -1,7 +1,7 @@
 //! Shared text-extract-and-splice engine for structured formats.
 //!
-//! Many formats — markup (HTML, XML) and, ahead, rich documents (RTF,
-//! DOCX) — differ in their *parser* and *serializer* but share the same
+//! Many formats, markup (HTML, XML) and, ahead, rich documents (RTF,
+//! DOCX), differ in their *parser* and *serializer* but share the same
 //! redactable shape: a sequence of text-valued units, each carrying an
 //! encoder-private address, redacted as text and spliced back into the
 //! native container. This module is that neutral core:
@@ -27,7 +27,7 @@ use std::ops::Range;
 
 use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter, Hint};
-use elide_core::operator::Redactions;
+use elide_core::redaction::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 
 use crate::codec::Container;
@@ -99,7 +99,7 @@ pub(crate) trait Encoder: Send + Sync + 'static {
     /// runs, so the return is a `Vec`. Empty means the encoder has no exact
     /// source pre-image to offer, the default: an address that is not a source
     /// byte span (an ordinal node index) cannot map back. The markup encoders
-    /// return 0-or-1 — their value *is* the raw slice, so the mapping is an
+    /// return 0-or-1, their value *is* the raw slice, so the mapping is an
     /// offset add; the DOCX encoder returns 1-or-more via its per-block offset
     /// map.
     fn source_span(
@@ -114,14 +114,14 @@ pub(crate) trait Encoder: Send + Sync + 'static {
     /// decoded-local byte range that the raw `source` references address.
     ///
     /// This is what lets a redaction target a span the caller has only in raw
-    /// source coordinates — e.g. an entity a review layer added by selecting
+    /// source coordinates, e.g. an entity a review layer added by selecting
     /// text in a container part, which it can express as part byte spans but not
     /// as a decoded-stream offset. `source` is the entity's whole
     /// [`SourceRef`](TextLocation::source) list, which must resolve to one
     /// contiguous decoded range within a single item (the runs of one selection
     /// share an item). Returns the [`ItemEdit`] to apply, or `None` when the
     /// references do not resolve to a single item (or the encoder does not
-    /// address items by source span — the default). The returned edit feeds the
+    /// address items by source span, the default). The returned edit feeds the
     /// same path a decoded-range redaction uses.
     fn locate_source(
         &self,
@@ -194,8 +194,8 @@ impl<E: Encoder> ExtractHandler<E> {
 
     fn redact_one(&mut self, location: &TextLocation, replacement: &TextReplacement) -> Result<()> {
         // Resolve to the item and its decoded-local range. A location addressed
-        // by a raw `source` reference — e.g. an entity a review layer added by
-        // selecting text in a container part — is reverse-resolved through the
+        // by a raw `source` reference, e.g. an entity a review layer added by
+        // selecting text in a container part, is reverse-resolved through the
         // encoder; otherwise the decoded `range` locates the item directly.
         // Either way the edit path below is the same.
         let Some(ItemEdit { item, local }) = self.resolve(location)? else {
@@ -246,7 +246,7 @@ impl<E: Encoder> ExtractHandler<E> {
 }
 
 /// A location's raw [`source`](TextLocation::source) reference could not be
-/// reverse-resolved to any redactable item — a bad part name, an offset past
+/// reverse-resolved to any redactable item, a bad part name, an offset past
 /// the part, or a span crossing parts. `MalformedInput`: the caller-supplied
 /// coordinate is at fault.
 fn unresolvable_source(source: &[SourceRef]) -> Error {

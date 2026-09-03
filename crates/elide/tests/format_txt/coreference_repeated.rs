@@ -20,7 +20,7 @@ async fn repeated_values_are_all_redacted() -> Result<()> {
     let outcome = FIXTURE.run().await?;
     let redacted = outcome.redacted_text();
 
-    // Every occurrence of each repeated value is gone — no stray copy survives.
+    // Every occurrence of each repeated value is gone, no stray copy survives.
     assert_pii_removed!(
         redacted,
         "priya.rao@example.com",

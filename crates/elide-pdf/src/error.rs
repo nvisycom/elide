@@ -55,7 +55,7 @@ pub enum ErrorKind {
     /// protect against a decompression bomb.
     LimitExceeded,
     /// A redaction could not be applied safely and was refused rather than
-    /// emitting a partially-redacted document — for example a page draws text
+    /// emitting a partially-redacted document, for example a page draws text
     /// with a font whose encoding cannot be decoded (so its glyphs cannot be
     /// located for deletion), an image replacement names a non-image object, or
     /// a raster page's pixels do not match its dimensions.

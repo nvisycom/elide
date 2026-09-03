@@ -1,5 +1,5 @@
 //! XML handler side: the [`XmlHandler`] type, its [`Format`] descriptor, and the
-//! [`XmlEncoder`] that re-serializes a mutated [`ExtractedItem`] stream — the
+//! [`XmlEncoder`] that re-serializes a mutated [`ExtractedItem`] stream, the
 //! shared markup engine HTML runs on too.
 //!
 //! The encoder preserves the document **verbatim**: it splices each item's
@@ -69,7 +69,7 @@ impl Encoder for XmlEncoder {
 
     fn source_span(&self, item: &XmlItem, local: Range<usize>) -> Vec<SourceRef> {
         // The item's value is the verbatim source slice at its `XmlSpan`, so a
-        // byte offset into the value is the same offset into the source span —
+        // byte offset into the value is the same offset into the source span ,
         // the mapping is a simple add, bounded by the span's end. Single file:
         // no part. At most one range: the value carries no entity to split on.
         let base = &item.address.0;
@@ -90,7 +90,7 @@ impl Encoder for XmlEncoder {
         // Inverse of `source_span`: the item value is the verbatim source slice,
         // so a raw offset within the item's span is the same offset in the value
         // (a subtract). XML is a single file, so its source references carry no
-        // part — reject any part-tagged reference rather than misresolve it.
+        // part, reject any part-tagged reference rather than misresolve it.
         if source.iter().any(|s| s.part.is_some()) {
             return None;
         }
@@ -154,7 +154,7 @@ pub(crate) fn splice(raw: &str, items: &[XmlItem]) -> Result<String> {
 mod tests {
     use elide_core::modality::DataWriter;
     use elide_core::modality::text::{TextLocation, TextReplacement};
-    use elide_core::operator::Redactions;
+    use elide_core::redaction::Redactions;
 
     use super::*;
     #[cfg(feature = "html")]
@@ -222,7 +222,7 @@ mod tests {
                 break c;
             }
         };
-        // Redact "Carter" — value-local [6, 12).
+        // Redact "Carter", value-local [6, 12).
         let lifted = h.lift(&chunk, TextLocation::new(6, 12)).expect("in bounds");
         // "Carter" sits at raw bytes 18..24 in the document.
         let want = "<root><name>Alice Carter".find("Carter").unwrap();
@@ -236,7 +236,7 @@ mod tests {
     #[tokio::test]
     async fn redacts_a_node_located_only_by_source() {
         // A caller with only raw coordinates (no decoded range) locates the node
-        // by a bare, part-less `SourceRef` — XML is a single file.
+        // by a bare, part-less `SourceRef`, XML is a single file.
         let raw = "<root><name>Alice</name></root>";
         let mut h = load(raw).await;
         let at = raw.find("Alice").unwrap();
@@ -252,7 +252,7 @@ mod tests {
     async fn a_part_tagged_source_ref_is_rejected_for_xml() {
         // XML is single-file; a part-tagged reference does not address it. The
         // caller supplied an explicit source coordinate to redact, so an
-        // unresolvable one is an error — not a silent no-op that would leave a
+        // unresolvable one is an error, not a silent no-op that would leave a
         // green audit over an unredacted document.
         let raw = "<root><name>Alice</name></root>";
         let mut h = load(raw).await;
@@ -270,7 +270,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_out_of_range_source_ref_is_rejected_for_xml() {
-        // A source span past the document resolves to no item — a caller mistake
+        // A source span past the document resolves to no item, a caller mistake
         // (e.g. an off-by-one in a run→byte mapping), so it errors rather than
         // leaving a green audit over an unredacted document.
         let raw = "<root><name>Alice</name></root>";
@@ -366,7 +366,7 @@ mod tests {
     #[tokio::test]
     async fn redaction_after_a_skipped_script_is_byte_faithful() {
         // Redacting text that follows a skipped script leaves the script and all
-        // other markup byte-identical, changing only the targeted span — the
+        // other markup byte-identical, changing only the targeted span, the
         // splice offsets stay correct across the skipped region.
         let raw = r#"<p><script>var a="keep@x.com";</script>mail alice@example.com</p>"#;
         let mut h = handler_with(raw, MarkupConfig::lenient(TEST_BLOCKS, &["script"]));

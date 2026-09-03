@@ -3,15 +3,15 @@
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::image::{Image, ImageData, ImageReplacement};
-use elide_core::operator::{LeakProfile, Operator, OperatorId};
 use elide_core::primitive::Color;
+use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 /// Cover the matched image region with a solid color (black by default).
 ///
 /// The legal-redaction look: a visible "something was here" box. Distinct
-/// from [`Erase`], which removes the region structurally — [`Blackbox`]
+/// from [`Erase`], which removes the region structurally, [`Blackbox`]
 /// keeps it present but opaque. Contrast [`Blur`] / [`Pixelate`], which
 /// leave the region's content partly perceptible.
 ///

@@ -1,5 +1,5 @@
 //! Deeply nested elements: PII is found and redacted at any depth, and the
-//! whole element tree — indentation, container tags, and the nesting itself —
+//! whole element tree, indentation, container tags, and the nesting itself,
 //! survives.
 
 use elide::Result;
@@ -32,7 +32,7 @@ async fn deeply_nested_values_are_redacted_and_structure_survives() -> Result<()
         "GB29 NWBK 6016 1331 9268 19",
     );
 
-    // The container structure — every level of nesting — is preserved.
+    // The container structure, every level of nesting, is preserved.
     assert_content_preserved!(
         outcome.redacted_text(),
         "<organization>",

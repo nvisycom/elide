@@ -41,7 +41,7 @@ pub(super) fn parse_slots(src: &str) -> Result<Vec<Slot>> {
 /// Maximum object/array nesting depth accepted before the input is rejected.
 /// `parse_object`/`parse_array` recurse once per level and the source is
 /// caller-controlled, so an adversarial `[[[[…` would otherwise overflow the
-/// stack — an abort a `Result` cannot catch. 128 is far beyond any real
+/// stack, an abort a `Result` cannot catch. 128 is far beyond any real
 /// document's structural depth.
 const MAX_DEPTH: usize = 128;
 
@@ -167,7 +167,7 @@ impl<'a> SlotParser<'a> {
             // the located hint we hand every value under this key. The hint
             // text is the key split into words (`paymentCard` → `payment
             // card`), so a context keyword like `card` matches on a word
-            // boundary — the JSON counterpart of an XML element name or a CSV
+            // boundary, the JSON counterpart of an XML element name or a CSV
             // header vouching for its value.
             let key_start = self.pos;
             let key = self.parse_string_leaf(LeafKind::Key)?;

@@ -26,7 +26,7 @@ use super::term::Term;
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(untagged)]
 pub enum Scoring {
-    /// One confidence stamped on every match — the common case.
+    /// One confidence stamped on every match, the common case.
     Uniform(Confidence),
     /// Per-column confidence vector. Entry `i` is the score for
     /// terms loaded from CSV column `i`. A term from a column past
@@ -145,7 +145,7 @@ pub struct Dictionary {
     #[serde(default)]
     pub languages: Vec<LanguageTag>,
     /// ISO 3166-1 alpha-2 country codes the dictionary applies
-    /// to. Empty means "any country" — the dictionary fires
+    /// to. Empty means "any country", the dictionary fires
     /// regardless of the per-call jurisdiction hint.
     #[builder(default)]
     #[serde(default)]

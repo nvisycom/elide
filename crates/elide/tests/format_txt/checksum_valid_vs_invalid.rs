@@ -46,7 +46,7 @@ async fn checksum_gates_detection() -> Result<()> {
     );
 
     // The Amex's 4-6-5 grouping must not spawn a spurious `postal_code` out of
-    // its middle digit group — a valid card is one entity, not a card plus a
+    // its middle digit group, a valid card is one entity, not a card plus a
     // postal code carved from its digits.
     assert_label_absent!(outcome.entities, builtins::POSTAL_CODE.to_ref());
     Ok(())

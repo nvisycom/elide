@@ -1,4 +1,4 @@
-//! United Kingdom — patterns scoped to UK jurisdictional formats.
+//! United Kingdom, patterns scoped to UK jurisdictional formats.
 //!
 //! See `assets/NOTICE.md` for third-party attribution.
 

@@ -143,7 +143,7 @@ impl BoundingBox {
             && other.max.y <= self.max.y
     }
 
-    /// How this box sits against `other` — disjoint, one containing the
+    /// How this box sits against `other`, disjoint, one containing the
     /// other, or crossing with an area-IoU measure.
     pub fn overlap(&self, other: &Self) -> Overlap {
         if !self.overlaps(other) {

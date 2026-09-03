@@ -4,7 +4,7 @@
 //! embedded file attachments (`/Names`), the outline (`/Outlines` bookmark
 //! titles), and document-level actions (`/OpenAction`, `/AA`).
 //!
-//! Removing the reference is not enough — an orphaned object is still written by
+//! Removing the reference is not enough, an orphaned object is still written by
 //! `save_to`, so the text survives in the bytes (a real leak). Each stripped
 //! structure's whole subtree of referenced objects is therefore deleted from the
 //! document (recursively), except objects still shared with surviving content,
@@ -19,8 +19,8 @@ pub(super) fn sanitize(doc: &mut Document) {
     let mut doomed: BTreeSet<ObjectId> = BTreeSet::new();
 
     // Page annotations: delete every object reachable from each page's
-    // `/Annots` — the array object itself (when `/Annots` is a reference) and
-    // the annotation dictionaries it lists (whether inline or referenced) — then
+    // `/Annots`, the array object itself (when `/Annots` is a reference) and
+    // the annotation dictionaries it lists (whether inline or referenced), then
     // drop the key. The array object can hold the annotation dicts inline, so it
     // must be deleted too, not just the dicts it references.
     let page_ids: Vec<ObjectId> = doc.get_pages().values().copied().collect();
@@ -31,7 +31,7 @@ pub(super) fn sanitize(doc: &mut Document) {
             .and_then(|d| d.get(b"Annots"))
         {
             // If `/Annots` is a reference to an array object, that object holds
-            // the annotations — delete it and everything it owns.
+            // the annotations, delete it and everything it owns.
             if let Ok(array_id) = annots.as_reference() {
                 collect_owned(doc, array_id, &mut doomed);
             }
@@ -97,7 +97,7 @@ pub(super) fn sanitize(doc: &mut Document) {
 /// The doomed ids that are still reachable from surviving content, and so must
 /// be kept. A doomed object referenced by an object *not* in `doomed` (or by the
 /// trailer, already cleared of the stripped keys) is shared with surviving
-/// content; and so is every doomed object reachable *from* such an object — the
+/// content; and so is every doomed object reachable *from* such an object, the
 /// full closure, so keeping a shared object never leaves it with a dangling
 /// reference to a doomed descendant that was removed.
 pub(super) fn referenced_from_survivors(
@@ -188,7 +188,7 @@ fn collect_entry(doc: &Document, entry: &Object, doomed: &mut BTreeSet<ObjectId>
 /// Mark `id` and the whole subtree of objects it references for deletion,
 /// recursively. A shared object that also belongs to surviving content is
 /// pruned back later (see [`referenced_from_survivors`]), so this can gather the
-/// full subtree without fear of collateral damage — e.g. an annotation's
+/// full subtree without fear of collateral damage, e.g. an annotation's
 /// appearance stream and everything *it* references, at any depth.
 fn collect_owned(doc: &Document, id: ObjectId, doomed: &mut BTreeSet<ObjectId>) {
     let mut worklist = vec![id];

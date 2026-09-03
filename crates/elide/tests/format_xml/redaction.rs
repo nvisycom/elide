@@ -59,7 +59,7 @@ async fn xml_detects_and_redacts() -> Result<()> {
     );
 
     // The payment card is masked in place (the test anonymizer stars it, rather
-    // than tokening it), so the element keeps a star-mask — a regression that
+    // than tokening it), so the element keeps a star-mask, a regression that
     // *deleted* the card instead of masking it would leave `<paymentCard></…>`.
     assert_content_preserved!(outcome.redacted_text(), "<paymentCard>*");
 

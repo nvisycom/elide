@@ -26,6 +26,8 @@ mod language;
 mod region;
 mod rendering;
 mod time;
+#[cfg(feature = "usage")]
+mod usage;
 
 pub use self::confidence::{Confidence, ConfidenceThreshold};
 pub use self::geometry::{BoundingBox, Dimensions, PixelRegion, Point, Polygon, UnitBoundingBox};
@@ -35,3 +37,5 @@ pub use self::language::{
 pub use self::region::CountryCode;
 pub use self::rendering::{Color, Dpi, RasterMode};
 pub use self::time::TimeSpan;
+#[cfg(feature = "usage")]
+pub use self::usage::{ModelUsage, TokenCounts, Usage, UsageReport};

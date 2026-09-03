@@ -17,9 +17,9 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum Sha2Algorithm {
-    /// SHA-256 — 32-byte digest, 64-char hex.
+    /// SHA-256, 32-byte digest, 64-char hex.
     #[default]
     Sha256,
-    /// SHA-512 — 64-byte digest, 128-char hex.
+    /// SHA-512, 64-byte digest, 128-char hex.
     Sha512,
 }

@@ -17,10 +17,10 @@ use elide_core::modality::Modality;
 /// real-world entity) and falls back to the entity's UUID bytes
 /// when the recognizer did not resolve a cluster.
 pub(super) enum Identity<'a> {
-    /// Coreference cluster id — every mention of the same
+    /// Coreference cluster id, every mention of the same
     /// real-world entity shares this.
     Coref(&'a str),
-    /// Per-entity UUID bytes — distinct per recognised mention
+    /// Per-entity UUID bytes, distinct per recognised mention
     /// when no coref is set.
     Uuid([u8; 16]),
 }

@@ -152,7 +152,7 @@ impl<M: Modality> AuditLog<M> {
         })
     }
 
-    /// Whether an operator hid this entity — i.e. a [`Redaction`] event is on
+    /// Whether an operator hid this entity, i.e. a [`Redaction`] event is on
     /// the trail.
     ///
     /// [`Redaction`]: crate::entity::audit::Redaction
@@ -162,7 +162,7 @@ impl<M: Modality> AuditLog<M> {
             .any(|e| matches!(e.kind, AuditKind::Redaction(_)))
     }
 
-    /// Whether a reviewer has suppressed this entity — i.e. its most recent
+    /// Whether a reviewer has suppressed this entity, i.e. its most recent
     /// [`Manual`] event carries [`ManualIntent::Suppress`]. The audit trail is
     /// the single source of truth: there is no separate flag to keep in sync.
     /// A [flagged](ManualIntent::Flag) or [amended](ManualIntent::Amend) entity
@@ -175,7 +175,7 @@ impl<M: Modality> AuditLog<M> {
             .iter()
             .rev()
             .find_map(|e| match &e.kind {
-                // `Amend` is provenance-only — it does not decide suppression, so
+                // `Amend` is provenance-only, it does not decide suppression, so
                 // an amendment after a `Suppress` must not clear it. Skip it and
                 // read the most recent `Flag`/`Suppress` decision.
                 AuditKind::Manual(m) if m.intent != ManualIntent::Amend => {
@@ -187,7 +187,7 @@ impl<M: Modality> AuditLog<M> {
     }
 
     /// The index of the first event whose [`kind`] satisfies `predicate`, or
-    /// `None` if none do — the audit-trail counterpart to
+    /// `None` if none do, the audit-trail counterpart to
     /// [`slice::position`](https://doc.rust-lang.org/std/primitive.slice.html).
     ///
     /// Events are in the order they were recorded, so comparing two positions

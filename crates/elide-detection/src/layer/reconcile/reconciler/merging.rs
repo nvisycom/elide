@@ -8,7 +8,7 @@ use crate::layer::reconcile::scoring::{MaxConfidence, NoisyOrConfidence, Scoring
 
 /// The merging reconciler: combine every grouped pair into one entity.
 ///
-/// The fusion behavior — co-located same-label findings merge over the union
+/// The fusion behavior, co-located same-label findings merge over the union
 /// of their spans, with confidence combined by a [`Scoring`]. Generic over the
 /// scoring `S`, chosen at construction.
 ///
@@ -27,7 +27,7 @@ impl<S> Merging<S> {
 }
 
 impl Merging<MaxConfidence> {
-    /// A merging reconciler scoring by [`MaxConfidence`] — the most confident
+    /// A merging reconciler scoring by [`MaxConfidence`], the most confident
     /// finding wins (the default).
     pub fn max() -> Self {
         Self::new(MaxConfidence)
@@ -35,7 +35,7 @@ impl Merging<MaxConfidence> {
 }
 
 impl Merging<NoisyOrConfidence> {
-    /// A merging reconciler scoring by [`NoisyOrConfidence`] — agreeing
+    /// A merging reconciler scoring by [`NoisyOrConfidence`], agreeing
     /// detectors accumulate evidence (`1 − ∏(1 − pᵢ)`).
     pub fn noisy_or() -> Self {
         Self::new(NoisyOrConfidence)

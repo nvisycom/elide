@@ -1,6 +1,6 @@
 //! A set of loose files redacted as one logical document: each file is a
 //! top-level part keyed by its name, analyzed and applied on its own handle. A
-//! set has no single body — every file, container or leaf, is a part. This
+//! set has no single body, every file, container or leaf, is a part. This
 //! exercises the multi-document entry point and the `PartId` path model that
 //! keeps two files' parts distinct.
 
@@ -50,7 +50,7 @@ fn orchestrator(registry: FormatRegistry) -> Result<elide::Orchestrator> {
 /// A set of files with no wrapping archive is redacted as one logical document:
 /// each file is a top-level part keyed by its name, analyzed and applied on its
 /// own handle. Two plain image files (no container in sight) prove the
-/// files-are-parts entry point — a set has *no* single body.
+/// files-are-parts entry point, a set has *no* single body.
 #[tokio::test]
 async fn a_set_treats_each_file_as_a_named_part() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
@@ -104,7 +104,7 @@ async fn a_set_treats_each_file_as_a_named_part() -> Result<()> {
 }
 
 /// A file in the set whose own BODY carries PII (a DOCX's `word/document.xml`)
-/// is redacted, keyed by the file's name — proving each file's own content (not
+/// is redacted, keyed by the file's name, proving each file's own content (not
 /// only its embedded media) is analyzed, and that two files in one set are each
 /// reached and redacted.
 #[tokio::test]
@@ -147,7 +147,7 @@ async fn a_set_redacts_each_files_own_content() -> Result<()> {
     // Each output re-encodes AND its body no longer carries the email: decode
     // `word/document.xml` from each package and assert the PII is gone (it was
     // `[email_address]`-replaced), so both named documents are independently
-    // redacted — not merely re-encoded unchanged.
+    // redacted, not merely re-encoded unchanged.
     for file in &documents {
         let out = file.handle.encode()?;
         let body = elide_office::opc::test_util::read_part(out.as_bytes(), "word/document.xml")
@@ -167,7 +167,7 @@ async fn a_set_redacts_each_files_own_content() -> Result<()> {
 }
 
 /// A nested container whose OWN body carries PII *and* which contains a
-/// descendant that also carries PII has BOTH redacted — the container's own
+/// descendant that also carries PII has BOTH redacted, the container's own
 /// redaction is not clobbered by re-decoding the original when its descendants
 /// are folded. Regression for the fold-order data-loss bug.
 ///
@@ -206,7 +206,7 @@ async fn a_nested_container_keeps_its_own_redaction_when_a_descendant_folds() ->
         .anonymize_with(&mut document, analyzed.report)
         .await?;
 
-    // Decode the output tree and assert NO body email survives at any level —
+    // Decode the output tree and assert NO body email survives at any level ,
     // in particular middle.docx's own `bob@example.com`, which the fold bug drops.
     let out = document.handle.encode()?;
     let out_bytes = out.as_bytes().to_vec();
@@ -240,8 +240,8 @@ async fn a_nested_container_keeps_its_own_redaction_when_a_descendant_folds() ->
     Ok(())
 }
 
-/// Two documents sharing a name would collide on their depth-1 `PartId` — the
-/// second silently overwriting the first — so `analyze` rejects the set up front
+/// Two documents sharing a name would collide on their depth-1 `PartId`, the
+/// second silently overwriting the first, so `analyze` rejects the set up front
 /// rather than dropping a document's redaction.
 #[tokio::test]
 async fn duplicate_document_names_are_rejected() -> Result<()> {

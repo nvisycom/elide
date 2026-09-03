@@ -37,7 +37,7 @@ async fn a_scoped_catalog_redacts_only_the_requested_label() -> Result<()> {
 #[tokio::test]
 async fn an_empty_catalog_detects_nothing() -> Result<()> {
     // An empty catalog requests no entity types, so the analyzer detects
-    // nothing — every detectable value is left in place.
+    // nothing, every detectable value is left in place.
     let outcome = FIXTURE.run_with_labels([]).await?;
 
     // Nothing is detected...

@@ -39,7 +39,7 @@ pub struct Block {
 ///
 /// Extraction is partial-success: a page that yields no text does not fail the
 /// whole document. An `Issue` records the gap and *why*, so a caller does not
-/// silently treat a scanned or unreadable page as fully redacted — the
+/// silently treat a scanned or unreadable page as fully redacted, the
 /// dangerous failure mode for redaction. A document whose every page yields
 /// text produces none.
 #[derive(Debug, Clone, PartialEq, Eq)]

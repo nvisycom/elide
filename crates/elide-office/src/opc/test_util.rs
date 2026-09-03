@@ -3,7 +3,7 @@
 //! Reading a part out of a rewritten package means reversing the same
 //! zip container the engine writes. Downstream crates test redaction by
 //! asserting on individual parts, and doing so soundly means
-//! *decompressing* each part — a plaintext value can straddle the deflate
+//! *decompressing* each part, a plaintext value can straddle the deflate
 //! stream, so a substring check over the raw container bytes would give a
 //! false pass. This module owns that decompression so a test never has to
 //! reconstruct the packaging itself.
@@ -16,14 +16,14 @@ use std::io::{Cursor, Read, Write};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
-/// Pack `(part name, bytes)` pairs into an OPC package (a deflate zip) — the
+/// Pack `(part name, bytes)` pairs into an OPC package (a deflate zip), the
 /// inverse of [`read_part`], for building a minimal fixture package inline.
 /// A dependent crate's test supplies exactly the parts it needs (e.g. the
 /// three parts of a one-body `.docx`) without reconstructing the packaging.
 ///
 /// # Panics
 ///
-/// Panics if writing the in-memory zip fails — a fixture-builder error, never
+/// Panics if writing the in-memory zip fails, a fixture-builder error, never
 /// a runtime condition.
 pub fn pack_parts(parts: &[(&str, &[u8])]) -> Vec<u8> {
     let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
@@ -58,14 +58,14 @@ pub fn part_names(package: &[u8]) -> Vec<String> {
         .collect()
 }
 
-/// Every text-bearing part — the `.xml` and `.rels` parts — decompressed
+/// Every text-bearing part, the `.xml` and `.rels` parts, decompressed
 /// to `(name, text)`. These parts carry all of a document's text; binary
 /// parts (fonts, images, media) hold none and are skipped, so a leak scan
 /// over the result covers every part that could carry text PII.
 ///
 /// A text part that is not valid UTF-8 **panics** rather than being
 /// dropped: silently omitting a part a leak scan can't read would let PII
-/// in that part pass unseen — the same false-pass this module exists to
+/// in that part pass unseen, the same false-pass this module exists to
 /// prevent. UTF-8 is also the only encoding the package engine itself
 /// accepts (a non-UTF-8 part fails extraction as `NotUtf8`), so an
 /// undecodable part here is a malformed fixture, not an encoding the

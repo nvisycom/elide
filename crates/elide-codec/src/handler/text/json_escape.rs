@@ -1,13 +1,13 @@
 //! JSON string-escape helpers, independent of the slot/leaf model.
 //!
 //! [`decode_escape`] reads one `\`-escape and reports its source-byte span
-//! plus the character it denotes — the source↔value offset mapping and the
+//! plus the character it denotes, the source↔value offset mapping and the
 //! lexer both walk escapes through it. [`json_escape`] is the inverse used
 //! when splicing a redaction back into a quoted value.
 
 /// Escape a string so it is safe to splice inside a JSON string value:
 /// `\` and `"` take their two-char escapes, and every C0 control character
-/// (`U+0000..=U+001F`) — which is illegal raw inside a JSON string — takes
+/// (`U+0000..=U+001F`), which is illegal raw inside a JSON string, takes
 /// its short escape (`\n`, `\t`, …) or `\uXXXX`. Used when a redaction
 /// replacement is spliced back into a quoted value.
 pub(super) fn json_escape(s: &str) -> String {
@@ -35,7 +35,7 @@ pub(super) fn json_escape(s: &str) -> String {
 /// bytes; a `\uXXXX` BMP escape is 6; a `𐀀` surrogate pair is 12.
 /// `None` for a malformed or unterminated escape (bad hex, a lone or
 /// mismatched surrogate). The decoded `char`'s [`char::len_utf8`] is how many
-/// value bytes the escape contributes — the two lengths differ, which is why
+/// value bytes the escape contributes, the two lengths differ, which is why
 /// the source↔value offset mapping walks escapes through this helper.
 pub(super) fn decode_escape(bytes: &[u8]) -> Option<(usize, char)> {
     match bytes.get(1)? {

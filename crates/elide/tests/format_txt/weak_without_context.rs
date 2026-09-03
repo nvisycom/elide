@@ -24,7 +24,7 @@ async fn weak_values_without_context_stay_undetected() -> Result<()> {
     // shape must never be flagged.
     assert_label_absent!(outcome.entities, builtins::BANK_ACCOUNT.to_ref());
 
-    // The values survive verbatim — proof they were neither detected nor redacted.
+    // The values survive verbatim, proof they were neither detected nor redacted.
     assert_content_preserved!(
         outcome.redacted_text(),
         "000123456789",

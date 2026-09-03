@@ -6,8 +6,8 @@ pub mod generator;
 pub mod operators;
 pub mod vault;
 
-// The core operator contract — `Operator`, `ReversibleOperator`, `OperatorId`,
-// `LeakProfile`, `Redactions` — re-surfaced here so a caller reaches the trait
+// The core operator contract, `Operator`, `ReversibleOperator`, `OperatorId`,
+// `LeakProfile`, `Redactions`, re-surfaced here so a caller reaches the trait
 // and the shipped operators from one crate.
 #[doc(inline)]
-pub use elide_core::operator::*;
+pub use elide_core::redaction::*;

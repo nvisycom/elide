@@ -94,7 +94,7 @@ impl ModalityLocation for ImageLocation {
             return None;
         }
         // The union of two boxes is an axis-aligned rectangle, so any
-        // rotated/quadrilateral polygon is dropped — the bounding union is
+        // rotated/quadrilateral polygon is dropped, the bounding union is
         // what gets redacted.
         let mut location = Self::new(self.bounding_box.union(&other.bounding_box));
         if let Some(page) = self.page {

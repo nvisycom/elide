@@ -3,7 +3,7 @@
 //! What makes an image *recognizable*: a recognizer reads its
 //! [`text`] like any other string, finds a match at a byte
 //! range, and [`resolve`]s that range back to the
-//! [`ImageLocation`] of the words it covers — via the per-word bounding
+//! [`ImageLocation`] of the words it covers, via the per-word bounding
 //! boxes the layout carries. Populated by an OCR pass today; the structure
 //! can grow to carry richer layout (headings, tables, reading order). The
 //! image counterpart of the audio [`Transcription`].
@@ -28,7 +28,7 @@ const BLOCK_SEPARATOR: &str = "\n";
 /// An image's recognized text, laid out in space.
 ///
 /// An ordered set of [`LayoutBlock`]s (the recognized text regions). The flat
-/// [`text`] — the blocks joined — is what a recognizer
+/// [`text`], the blocks joined, is what a recognizer
 /// inspects; [`resolve`] maps a byte range of that text back
 /// to the [`ImageLocation`] it occupies, using the blocks' (and their
 /// words') bounding boxes. Empty when the backend recognized nothing.
@@ -212,7 +212,7 @@ impl RegionUnion {
             None => location.bounding_box,
         });
         // First region sets the page; a later region on a different page is
-        // a degenerate cross-page match — we keep the first page.
+        // a degenerate cross-page match, we keep the first page.
         if self.page.is_none() {
             self.page = location.page;
         }

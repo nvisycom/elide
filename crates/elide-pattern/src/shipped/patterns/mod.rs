@@ -1,11 +1,11 @@
 //! Built-in [`Regex`] rules, embedded at compile time.
 //!
-//! Accessors are grouped by region — `world::*` for universal
+//! Accessors are grouped by region, `world::*` for universal
 //! patterns, `<country>::*` (e.g. `us::*`, `uk::*`) for
 //! country-specific ones. Each returns a fresh [`Regex`] parsed
 //! from a TOML definition under
 //! `assets/patterns/<region>/<domain>/`. The parse happens on
-//! every call — rules are cheap to construct since
+//! every call, rules are cheap to construct since
 //! [`PatternRecognizer::build`] does the heavy compilation.
 //!
 //! [`Regex`]: crate::Regex

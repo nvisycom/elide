@@ -157,7 +157,7 @@ impl BoostRule {
             None => true,
             // A scoped rule applies when the call asserts no language (the
             // permissive fallback), or when *any* asserted/detected language
-            // matches the rule's scope — so a multilingual call activates every
+            // matches the rule's scope, so a multilingual call activates every
             // one of its languages' per-language context.
             Some(scope) => hints.is_empty() || hints.iter().any(|hint| scope.matches(hint)),
         }

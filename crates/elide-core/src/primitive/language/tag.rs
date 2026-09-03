@@ -65,7 +65,7 @@ impl LanguageTag {
     ///
     /// [`Label`]: crate::entity::Label
     pub fn english() -> Self {
-        // Parse once (BCP 47 validation) and clone the cached tag — `"en"`
+        // Parse once (BCP 47 validation) and clone the cached tag, `"en"`
         // inlines into `HipStr`, so the clone does not allocate. This is a
         // hot-path helper (the localization fallback calls it per label).
         static ENGLISH: LazyLock<LanguageTag> = LazyLock::new(|| {

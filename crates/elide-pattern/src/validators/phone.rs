@@ -7,7 +7,7 @@
 //!    validate directly, regardless of caller context.
 //! 2. Inputs in national format (no leading `+`) need a region
 //!    hint. When [`ValidationContext::country`] is set we use it;
-//!    otherwise we fail closed — region-less national-format
+//!    otherwise we fail closed, region-less national-format
 //!    matching is genuinely ambiguous (a 13-digit run can be a
 //!    valid IL/IN phone *and* the leading 13 digits of a Visa
 //!    PAN), so without a country signal we'd rather miss a

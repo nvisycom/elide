@@ -13,7 +13,7 @@ use super::LanguageTag;
 ///
 /// The reusable mechanism behind any text that varies by language: a
 /// [`Label`]'s display name and description, a redaction operator's bucket
-/// label, and so on. English (`"en"`) is the conventional anchor —
+/// label, and so on. English (`"en"`) is the conventional anchor,
 /// constructors seed it, and [`resolve`] falls back to it (then to any
 /// entry) when a requested locale is absent, so a caller that supplied
 /// English always gets *some* value.

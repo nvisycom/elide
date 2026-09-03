@@ -2,7 +2,7 @@
 //!
 //! Redaction resolves which operator hides each entity (and why) and records
 //! that decision as a [`Selection`] event on the entity's own audit trail,
-//! alongside the [`Redaction`] that applies it — no parallel selection object.
+//! alongside the [`Redaction`] that applies it, no parallel selection object.
 //! A review layer reads the picks straight off the entities. This exercises
 //! that over a real multi-part container: run [`anonymize`] and read the picks
 //! back from the returned report's body entities.
@@ -21,7 +21,7 @@ use crate::support::orchestrator::TestOrchestrator;
 
 const SAMPLE: &[u8] = include_bytes!("../testdata/sample.docx");
 
-/// The fixture document's name — its depth-1 part key in the report.
+/// The fixture document's name, its depth-1 part key in the report.
 const DOC: &str = "sample.docx";
 
 /// Build an orchestrator whose body rule set is deterministic enough to read
@@ -92,7 +92,7 @@ async fn anonymize_records_reviewable_body_picks() -> Result<()> {
 }
 
 /// A part with no detected entities routes through its pipeline and records no
-/// picks — nothing to redact, no error. Built from a rebuilt report so the part
+/// picks, nothing to redact, no error. Built from a rebuilt report so the part
 /// is present regardless of what the mock image backend detected.
 #[tokio::test]
 async fn anonymize_over_an_empty_part_records_nothing() -> Result<()> {
@@ -100,7 +100,7 @@ async fn anonymize_over_an_empty_part_records_nothing() -> Result<()> {
     let orchestrator = orchestrator(registry.clone())?;
 
     let mut doc = registry.document(DOC, SAMPLE).await?;
-    // A report carrying one image part with no detected entities — apply routes
+    // A report carrying one image part with no detected entities, apply routes
     // through the image pipeline (Anonymizer::new(), no rules) and does nothing.
     // The part is keyed under the document's name (a nested path) so apply
     // re-decodes it from that document.

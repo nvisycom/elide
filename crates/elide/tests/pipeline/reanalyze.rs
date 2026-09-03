@@ -19,7 +19,7 @@ use crate::support::orchestrator::{TestOrchestrator, erase_anonymizer, ocr_analy
 /// canned blocks, so the fixture only has to decode to an image.
 const SAMPLE: &[u8] = include_bytes!("../testdata/sample.png");
 
-/// The fixture document's name — its depth-1 part key in the report.
+/// The fixture document's name, its depth-1 part key in the report.
 const DOC: &str = "sample.png";
 
 fn loc() -> ImageLocation {
@@ -49,7 +49,7 @@ fn image_entities(analyzed: &elide::AnalyzedDocument) -> Vec<Entity<Image>> {
 
 /// `re_analyze` reuses the prior OCR `Layout` instead of re-enriching: the
 /// re-run finds the same entity even though its orchestrator's OCR backend is
-/// empty, because the seeded artifact — not a fresh OCR call — supplies the text.
+/// empty, because the seeded artifact, not a fresh OCR call, supplies the text.
 #[tokio::test]
 async fn re_analyze_reuses_the_prior_ocr_artifact() -> Result<()> {
     // OCR text carrying a detectable email.
@@ -96,7 +96,7 @@ async fn re_analyze_reuses_the_prior_ocr_artifact() -> Result<()> {
     Ok(())
 }
 
-/// A control: without the seed, an empty OCR backend genuinely finds nothing —
+/// A control: without the seed, an empty OCR backend genuinely finds nothing,
 /// so the reuse in the test above is what carries detection, not a stray match.
 #[tokio::test]
 async fn an_empty_backend_without_a_seed_finds_nothing() -> Result<()> {
@@ -114,7 +114,7 @@ async fn an_empty_backend_without_a_seed_finds_nothing() -> Result<()> {
 
 /// The persist path: serialize `analyze`'s artifacts, ship them across a review
 /// gap, then `Orchestrator::deserialize_artifacts` them back and feed the
-/// rebuilt set to `re_analyze` — the OCR text survives the wire, so the re-run
+/// rebuilt set to `re_analyze`, the OCR text survives the wire, so the re-run
 /// reuses it against an empty OCR backend rather than re-OCR'ing.
 #[tokio::test]
 async fn artifacts_round_trip_through_deserialize_for_a_re_run() -> Result<()> {

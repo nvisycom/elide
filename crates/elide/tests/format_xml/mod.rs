@@ -1,4 +1,4 @@
-//! XML scenarios: format-specific plumbing — attribute values, comments and
+//! XML scenarios: format-specific plumbing, attribute values, comments and
 //! CDATA, element-name-as-context, entity/escape round-trip, nesting, and
 //! namespaces. Raw-text detection itself is the txt suite's job; these pin
 //! what is unique to the XML codec.

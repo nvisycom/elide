@@ -14,12 +14,15 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use elide_core::Result;
+use elide_core::enrichment::Enricher;
 use elide_core::entity::Entity;
 use elide_core::modality::{Modality, ModalityLocation, StreamDataReader};
-use elide_core::recognition::annotation::{Annotations, Exclusion};
-use elide_core::recognition::{Enricher, Recognition, Recognizer, RecognizerContext, Scope};
 #[cfg(feature = "usage")]
-use elide_core::recognition::{RecognizerId, Usage};
+use elide_core::primitive::Usage;
+#[cfg(feature = "usage")]
+use elide_core::recognition::RecognizerId;
+use elide_core::recognition::annotation::{Annotations, Exclusion};
+use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Scope};
 use futures::future;
 
 use crate::layer::Layer;
@@ -36,7 +39,7 @@ pub struct Analysis<M: Modality> {
     /// OCR [`Layout`] / STT [`Transcription`] the recognizers read. Carried out
     /// so it can be persisted and restored for a re-run without re-enriching.
     ///
-    /// [`Some`] iff an enricher ran (or a saved artifact was restored) —
+    /// [`Some`] iff an enricher ran (or a saved artifact was restored),
     /// `Some(empty)` (an image OCR'd to no text, a silent clip) is a real
     /// enrichment, distinct from [`None`] (a modality with no enrichment, or an
     /// un-enriched payload), so it is persisted and a re-run does not re-enrich.
@@ -51,7 +54,7 @@ pub struct Analysis<M: Modality> {
 
 impl<M: Modality> Analysis<M> {
     /// An analysis carrying `entities` and no artifact (and, under the `usage`
-    /// feature, no usage yet — attach it with `with_usage`).
+    /// feature, no usage yet, attach it with `with_usage`).
     pub fn new(entities: Vec<Entity<M>>) -> Self {
         Self {
             entities,
@@ -61,8 +64,8 @@ impl<M: Modality> Analysis<M> {
         }
     }
 
-    /// Attach the enrichment [`artifact`](Self::artifact) the analysis produced
-    /// — `Some` when it enriched (even to an empty artifact), `None` otherwise.
+    /// Attach the enrichment [`artifact`](Self::artifact) the analysis produced,
+    /// `Some` when it enriched (even to an empty artifact), `None` otherwise.
     #[must_use]
     pub fn with_artifact(mut self, artifact: Option<M::Artifact>) -> Self {
         self.artifact = artifact;
@@ -169,7 +172,7 @@ impl<M: Modality> Analyzer<M> {
         // An empty catalog requests no entity types: detect nothing. Gate here,
         // the single choke point every `analyze`/`analyze_stream` entry funnels
         // through, so no enricher or recognizer runs on a scope that asked for
-        // nothing — and no detected entity can then slip through unredacted.
+        // nothing, and no detected entity can then slip through unredacted.
         if ctx.catalog().is_empty() {
             // Detect nothing, but carry the seeded artifact through: a re-run
             // seeded with a prior OCR/transcript must report it back unchanged
@@ -294,7 +297,7 @@ impl<M: Modality> Analyzer<M> {
 
     /// Analyze one payload against a caller-supplied context, so a re-run can
     /// pre-seed the enrichment [`artifact`](RecognizerContext::artifact) and
-    /// re-recognize without re-enriching — the enrichers self-skip on a present
+    /// re-recognize without re-enriching, the enrichers self-skip on a present
     /// artifact. The single-payload counterpart to [`analyze_stream_in`].
     ///
     /// [`analyze_stream_in`]: Self::analyze_stream_in
@@ -416,7 +419,7 @@ impl<M: Modality> Analyzer<M> {
             // that produce one (image, audio) are single-chunk, so exactly one
             // chunk does this; a plain text/tabular stream produces none and
             // keeps the seed. A multi-chunk *tokenizing* stream would produce a
-            // per-chunk artifact on more than one chunk — unsupported, because
+            // per-chunk artifact on more than one chunk, unsupported, because
             // one stream-level artifact cannot represent per-chunk tokens; the
             // assert catches that the day such an enricher is added.
             if analysis.artifact.is_some() && analysis.artifact != seed {

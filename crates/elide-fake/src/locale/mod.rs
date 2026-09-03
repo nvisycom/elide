@@ -4,7 +4,7 @@
 use elide_core::primitive::LanguageTag;
 
 /// Locale selector for the fake-data generator. Maps to one of the
-/// `fake` crate's locale modules. Internal — callers express locale
+/// `fake` crate's locale modules. Internal, callers express locale
 /// via [`LanguageTag`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub(crate) enum Locale {

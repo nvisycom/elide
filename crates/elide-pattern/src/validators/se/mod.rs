@@ -1,7 +1,7 @@
 //! Sweden-specific post-match validators.
 //!
 //! Registered under the [`ValidatorRegistry::builtin`] set with
-//! dotted names — `"se.personnummer"`,
+//! dotted names, `"se.personnummer"`,
 //! `"se.organisationsnummer"`.
 //!
 //! [`ValidatorRegistry::builtin`]: super::ValidatorRegistry::builtin

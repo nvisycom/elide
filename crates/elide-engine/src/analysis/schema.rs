@@ -4,7 +4,7 @@
 //!
 //! `Report` serializes through a hand-written `Serialize` (its groups are
 //! type-erased), so schemars cannot derive this. The one open piece is a group's
-//! `entities`, whose element type depends on the sibling `modality` string — a
+//! `entities`, whose element type depends on the sibling `modality` string, a
 //! discriminated union, expressed as `oneOf` over per-modality group arms with a
 //! `discriminator` on `modality`. Each arm is gated on its modality feature, so
 //! the schema enumerates exactly the modalities compiled in (`text` always).
@@ -14,7 +14,7 @@
 //! failing test rather than a lying client.
 //!
 //! Both types share the `{ parts: [..] }` shape and the same erasure problem,
-//! so both are expressed the same way — a `oneOf` over per-modality arms. They
+//! so both are expressed the same way, a `oneOf` over per-modality arms. They
 //! differ only in what an arm carries: a `Report` arm holds `entities`, an
 //! `ArtifactSet` arm holds the single `artifact` for that modality. Every arm
 //! also carries the part's `id` (a segment array), so a part is addressed by its
@@ -90,11 +90,11 @@ impl JsonSchema for Report {
             "required": ["parts"],
         });
 
-        // `usage` is present only under the `usage` feature — mirror the
+        // `usage` is present only under the `usage` feature, mirror the
         // conditional field in `Serialize`.
         #[cfg(feature = "usage")]
         {
-            let usage = generator.subschema_for::<elide_core::recognition::UsageReport>();
+            let usage = generator.subschema_for::<elide_core::primitive::UsageReport>();
             let props = schema
                 .ensure_object()
                 .entry("properties")
@@ -141,7 +141,7 @@ impl JsonSchema for ArtifactSet {
     }
 
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        // One arm per compiled-in modality, discriminated by `modality` —
+        // One arm per compiled-in modality, discriminated by `modality` ,
         // mirroring `Report`, so a client reads both halves the same way.
         let arms = vec![
             artifact_arm::<Text>(generator),
@@ -157,7 +157,7 @@ impl JsonSchema for ArtifactSet {
             "discriminator": { "propertyName": "modality" },
         });
 
-        // `parts` is an array of part entries. No `usage` here — that rides on
+        // `parts` is an array of part entries. No `usage` here, that rides on
         // the report, not the enrichment.
         json_schema!({
             "type": "object",

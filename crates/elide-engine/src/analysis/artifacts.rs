@@ -2,12 +2,12 @@
 //! keyed the same way as its [`Report`] but carrying *content* rather than
 //! *references*.
 //!
-//! A [`Report`] is references only — each entity is a location into a part plus
+//! A [`Report`] is references only, each entity is a location into a part plus
 //! its audit trail, adding no content of its own. Enrichment (an image's OCR
 //! `Layout`, an audio clip's STT `Transcription`) is the opposite: it is content
 //! *extracted from* a part, the very thing an entity's location points into.
 //! Keeping it out of the report preserves that separation; it lives here, in a
-//! parallel structure with the same parts-by-[`PartId`] shape — a named
+//! parallel structure with the same parts-by-[`PartId`] shape, a named
 //! document's own artifact is its depth-1 part.
 //!
 //! Its purpose is re-recognition after a time gap: persist the [`ArtifactSet`]
@@ -25,12 +25,12 @@ use elide_core::modality::Modality;
 use super::group::ArtifactGroup;
 use crate::PartId;
 
-/// One group's enrichment artifact plus its modality routing — the artifact-side
+/// One group's enrichment artifact plus its modality routing, the artifact-side
 /// mirror of a report entry.
 ///
 /// The [`TypeId`] downcasts the artifact for a caller; the modality *name* tags
-/// it on the wire (an artifact type is not tied to one modality — `Text` and
-/// `Tabular` share `Tokens` — so the name cannot be recovered from the artifact
+/// it on the wire (an artifact type is not tied to one modality, `Text` and
+/// `Tabular` share `Tokens`, so the name cannot be recovered from the artifact
 /// itself and is captured from `M::NAME` at insert time).
 pub(crate) struct ArtifactEntry {
     pub(crate) modality: TypeId,
@@ -39,7 +39,7 @@ pub(crate) struct ArtifactEntry {
 }
 
 /// The enrichment a document set's analysis produced: every part's artifact
-/// keyed by [`PartId`], exactly as the [`Report`] keys its parts — a named
+/// keyed by [`PartId`], exactly as the [`Report`] keys its parts, a named
 /// document's own artifact is its depth-1 part.
 ///
 /// Produced beside a [`Report`] by [`analyze`](crate::Orchestrator::analyze)
@@ -55,14 +55,14 @@ pub struct ArtifactSet {
 }
 
 impl ArtifactSet {
-    /// An empty set — no parts.
+    /// An empty set, no parts.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// The **sole enriched document's** [`artifact`](Modality::Artifact) of
-    /// modality `M` (the OCR `Layout`, STT `Transcription`, …), read-only — a
+    /// modality `M` (the OCR `Layout`, STT `Transcription`, …), read-only, a
     /// shorthand for the single-document case. A set holds an entry only for a
     /// document that *produced* enrichment, so this returns the artifact when
     /// exactly one top-level document enriched; `None` when none did, when two or
@@ -88,7 +88,7 @@ impl ArtifactSet {
         entry.artifact.as_any().downcast_ref::<P::Artifact>()
     }
 
-    /// Set the **sole document's** artifact, as modality `M` — a shorthand for
+    /// Set the **sole document's** artifact, as modality `M`, a shorthand for
     /// rebuilding a single-document set out of band (a review layer that
     /// persisted the artifacts separately). The document is keyed `name`.
     #[must_use]
@@ -118,7 +118,7 @@ impl ArtifactSet {
     }
 
     /// The single top-level (depth-1) *enriched* document's artifact entry, if
-    /// the set holds exactly one — the backing for the [`body`](Self::body)
+    /// the set holds exactly one, the backing for the [`body`](Self::body)
     /// single-document shorthand. `None` when no top-level document enriched or
     /// more than one did. A document that produced no enrichment has no entry
     /// here, so this counts enriched documents, not input documents.
@@ -184,7 +184,7 @@ impl serde::Serialize for ArtifactSet {
 
         // Every stored entry reaches the wire: the set only holds *enriched*
         // artifacts (an un-enriched payload or a no-enrichment modality is never
-        // inserted), so even an empty one — an image OCR'd to no text — is
+        // inserted), so even an empty one, an image OCR'd to no text, is
         // persisted, and a restored re-run reuses it rather than re-enriching.
         let mut parts: Vec<Entry<'_>> = self.parts.iter().map(|(id, e)| Entry(id, e)).collect();
         // Deterministic wire output, matching the report serializer: sort by path

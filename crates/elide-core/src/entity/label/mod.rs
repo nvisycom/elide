@@ -7,7 +7,7 @@
 //! [`LabelRef`] (the id only), and the localizations live once in a
 //! [`LabelCatalog`]. This keeps the per-detection footprint small while
 //! still letting a consumer resolve a reference back to its full,
-//! localized definition — the NER label set and LLM prompt render the
+//! localized definition, the NER label set and LLM prompt render the
 //! display name and description in the analysis language.
 //!
 //! [`id`]: Label::id
@@ -32,7 +32,7 @@ use crate::primitive::{LanguageTag, LocalizedText};
 /// A label's human-facing text in one language: a display name and an
 /// optional fuller description.
 ///
-/// The `name` is a short, natural-language phrase (`"phone number"`) — the
+/// The `name` is a short, natural-language phrase (`"phone number"`), the
 /// label a zero-shot NER model like GLiNER matches on, and the primary
 /// text an LLM prompt shows. The `description` is optional extra guidance
 /// for backends that consume it (GLiNER-2.0's bi-encoder, an LLM); leave
@@ -81,7 +81,7 @@ impl LabelLocale {
 ///
 /// # Identity
 ///
-/// Labels are identified by [`id`] — a stable lowercase `snake_case`
+/// Labels are identified by [`id`], a stable lowercase `snake_case`
 /// string (`"phone_number"`), never localized, and the catalog key that a
 /// [`LabelRef`] resolves through. Selectors match by id. Derived equality
 /// is *structural*: two labels with the same id but different
@@ -92,7 +92,7 @@ impl LabelLocale {
 /// The display name and description are localized per [`LanguageTag`].
 /// English (`"en"`) is required at construction and is the fallback when a
 /// requested locale is absent, so [`localization`] always returns some
-/// text — NER and LLM read the analysis language's name and description to
+/// text, NER and LLM read the analysis language's name and description to
 /// prompt the model, keyed by the stable id.
 ///
 /// # Category and tags
@@ -102,7 +102,7 @@ impl LabelLocale {
 /// labels ship with one; a custom label has none unless set.
 ///
 /// [`tags`] is a free-form list of *cross-cutting* markers a policy selector
-/// matches against — sensitivity flags a label may carry several of (`pii`,
+/// matches against, sensitivity flags a label may carry several of (`pii`,
 /// `phi`, `pci`, `sad`, `secret`). Distinct from the category: a label has at
 /// most one category but any number of tags. Custom labels can ship with zero
 /// of either.

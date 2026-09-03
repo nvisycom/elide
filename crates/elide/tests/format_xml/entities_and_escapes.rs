@@ -28,7 +28,7 @@ async fn entities_round_trip_and_neighbouring_pii_redacts() -> Result<()> {
     // The plain email beside `&lt;`/`&gt;` is removed.
     assert_pii_removed!(out, "carol.lee@example.com");
 
-    // Entity references not inside a redacted span survive verbatim — the
+    // Entity references not inside a redacted span survive verbatim, the
     // standalone `&amp;` in the note text and the `&lt;`/`&gt;` around the plain
     // contact are untouched.
     assert_content_preserved!(out, "Ampersand &amp; company", "&lt;preferred&gt;");

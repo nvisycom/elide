@@ -11,7 +11,7 @@ use super::Generator;
 /// Default text [`Generator`]: a fresh random token per distinct entity.
 ///
 /// Emits a random UUID (`v4`) as the surrogate. It carries no resemblance
-/// to a real value — the point is only that distinct entities get
+/// to a real value, the point is only that distinct entities get
 /// distinct, unguessable stand-ins; consistency across mentions is the
 /// vault's job, not the token's. Swap in a generator that produces
 /// believable names or addresses when readability matters more than

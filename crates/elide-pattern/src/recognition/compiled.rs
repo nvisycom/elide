@@ -6,7 +6,7 @@
 //! into a shared [`AhoCorasick`] automaton, then stores the
 //! per-rule emission metadata next to those scanners. This module
 //! holds the per-rule metadata structs ([`CompiledPattern`],
-//! [`CompiledDictionary`]) and their `draft` constructors — the bits that
+//! [`CompiledDictionary`]) and their `draft` constructors, the bits that
 //! turn a regex / Aho-Corasick hit into an [`EntityDraft`] (stream-positioned;
 //! the `Enhanced` adapter lifts it to an entity).
 //!
@@ -45,7 +45,7 @@ pub(super) struct RawMatch {
 /// the dispatch loop has everything it needs without a second
 /// indirection.
 ///
-/// `context` is intentionally not stored on compiled state — the
+/// `context` is intentionally not stored on compiled state, the
 /// recognizer's wrapping `Enhanced` layer harvests keywords from the source
 /// patterns at build time.
 pub(super) struct CompiledPattern {

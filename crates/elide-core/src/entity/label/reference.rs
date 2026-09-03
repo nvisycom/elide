@@ -23,7 +23,7 @@ pub struct LabelRef(#[cfg_attr(feature = "schema", schemars(with = "String"))] H
 impl LabelRef {
     /// Reference a label by id.
     ///
-    /// Accepts any id source — a `&'static str`, an owned `String`, a
+    /// Accepts any id source, a `&'static str`, an owned `String`, a
     /// [`HipStr`]. For a `&'static str` literal known at compile time, prefer
     /// [`from_static`](Self::from_static), which is `const`.
     pub fn new(name: impl Into<HipStr<'static>>) -> Self {

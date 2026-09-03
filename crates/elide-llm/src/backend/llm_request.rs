@@ -9,7 +9,7 @@ use elide_core::modality::Modality;
 ///
 /// Carries the fully-rendered prompt wording (produced by the recognizer's
 /// [`Prompt`]) plus the source payload, so the backend can assemble the
-/// provider message — folding in the image bytes for a multimodal call.
+/// provider message, folding in the image bytes for a multimodal call.
 ///
 /// [`LlmBackend<M>`]: super::LlmBackend
 /// [`Prompt`]: crate::prompt::Prompt

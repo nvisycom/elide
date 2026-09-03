@@ -29,7 +29,7 @@ impl<M: Modality> Tiebreaker<M> for HighestConfidence {
     }
 }
 
-/// Keep the entity covering the larger span — the more specific match (ties
+/// Keep the entity covering the larger span, the more specific match (ties
 /// keep the first).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LongestSpan;

@@ -11,7 +11,7 @@ use serde::Deserialize;
 /// The `column` field is `Some(i)` for CSV-loaded terms and `None`
 /// for plain-text or programmatic sources. The `score` field
 /// overrides the dictionary's [`Scoring`] for this single term
-/// when set — useful for one-off exceptions in an otherwise
+/// when set, useful for one-off exceptions in an otherwise
 /// uniform list.
 ///
 /// [`Dictionary`]: crate::Dictionary
@@ -59,7 +59,7 @@ impl Term {
         self
     }
 
-    /// Parse a list of terms from plain text — one term per line.
+    /// Parse a list of terms from plain text, one term per line.
     ///
     /// Each line is trimmed; empty lines and lines starting with
     /// `#` are skipped. Plain-text terms carry no column.

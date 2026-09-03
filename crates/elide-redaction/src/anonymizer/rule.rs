@@ -1,4 +1,4 @@
-//! [`Rule`]: a first-class anonymizer selection rule — a matcher, an
+//! [`Rule`]: a first-class anonymizer selection rule, a matcher, an
 //! operator, and an optional policy [`Attribution`].
 
 use std::sync::Arc;
@@ -6,8 +6,8 @@ use std::sync::Arc;
 use elide_core::entity::audit::{Attribution, RuleMatch};
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
 use elide_core::modality::Modality;
-use elide_core::operator::Operator;
 use elide_core::recognition::Scope;
+use elide_core::redaction::Operator;
 use hipstr::HipStr;
 
 use super::{Predicate, SharedOperator};
@@ -25,7 +25,7 @@ use super::{Predicate, SharedOperator};
 /// [`Scope`]: elide_core::recognition::Scope
 #[non_exhaustive]
 pub struct MatchContext<'a, M: Modality> {
-    /// The entity being matched — its label, confidence, location, and
+    /// The entity being matched, its label, confidence, location, and
     /// provenance.
     pub entity: &'a Entity<M>,
     /// The label catalog, for tag- and metadata-aware matching. Empty when
@@ -40,7 +40,7 @@ pub struct MatchContext<'a, M: Modality> {
 /// How a [`Rule`] decides whether it applies to an entity.
 ///
 /// An exact label, a label tag (resolved through the [`LabelCatalog`]), an
-/// arbitrary predicate, or a catch-all — one closed set so the ordered rule
+/// arbitrary predicate, or a catch-all, one closed set so the ordered rule
 /// list has no hidden precedence between kinds.
 pub(crate) enum Matcher<M: Modality> {
     /// Exact label-name match.
@@ -50,7 +50,7 @@ pub(crate) enum Matcher<M: Modality> {
     Tag(HipStr<'static>),
     /// An arbitrary predicate over the entity (with the catalog and scope).
     Predicate(Predicate<M>),
-    /// Matches every entity — the catch-all fallback.
+    /// Matches every entity, the catch-all fallback.
     Always,
 }
 
@@ -74,7 +74,7 @@ impl<M: Modality> Matcher<M> {
         }
     }
 
-    /// Summarise this matcher for provenance — the serializable "why" a rule
+    /// Summarise this matcher for provenance, the serializable "why" a rule
     /// fired, recorded on the entity's redaction event.
     fn to_rule_match(&self) -> RuleMatch {
         match self {
@@ -91,7 +91,7 @@ impl<M: Modality> Matcher<M> {
 /// A [`Rule`] is a self-contained, first-class value: build it, attribute
 /// it with [`because`](Self::because), and hand it to [`Anonymizer::with`]
 /// / [`Anonymizer::with_multiple`]. Because the attribution is a field on the
-/// rule, it is bound to *this* rule structurally — there is no positional
+/// rule, it is bound to *this* rule structurally, there is no positional
 /// "attribute the last rule" step.
 ///
 /// Rules are tried in the order they are added; the first whose matcher
@@ -137,8 +137,8 @@ impl<M: Modality> Rule<M> {
 
     /// A rule binding `operator` to every entity `predicate` accepts.
     ///
-    /// The predicate receives a [`MatchContext`] — the entity under test plus the
-    /// [`LabelCatalog`] and run [`Scope`] — and reads whichever fields it
+    /// The predicate receives a [`MatchContext`], the entity under test plus the
+    /// [`LabelCatalog`] and run [`Scope`], and reads whichever fields it
     /// needs. A confidence gate touches only `cx.entity`; a scope-aware rule
     /// reads `cx.scope`; a tag-aware one reads `cx.catalog`.
     ///
@@ -172,7 +172,7 @@ impl<M: Modality> Rule<M> {
     }
 
     /// Attribute this rule to a policy: the [`Attribution`] is recorded on the
-    /// redaction provenance of every entity this rule redacts — the *why*
+    /// redaction provenance of every entity this rule redacts, the *why*
     /// alongside the matched rule. Accepts anything that converts into an
     /// `Attribution`, so a builder chain flows in directly:
     /// `.because(Attribution::freeform("gdpr-art-17").with_description("…"))`.

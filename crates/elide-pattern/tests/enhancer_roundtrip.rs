@@ -79,8 +79,8 @@ async fn enhancer_boosts_matches_near_keyword_only() {
     );
 }
 
-/// A bare `PatternRecognizer` from `build()` is a `Recognizer` directly —
-/// no `Enhanced` wrapper — and finds + lifts matches with no boosting.
+/// A bare `PatternRecognizer` from `build()` is a `Recognizer` directly,
+/// no `Enhanced` wrapper, and finds + lifts matches with no boosting.
 #[tokio::test]
 async fn bare_recognizer_works_without_enhancement() {
     let variant = Variant::new(r"\b\d{3}-\d{2}-\d{4}\b")
@@ -94,7 +94,7 @@ async fn bare_recognizer_works_without_enhancement() {
         .build()
         .expect("ssn regex builds");
 
-    // `build()` (not `build_context_enhanced`) — used directly as a Recognizer.
+    // `build()` (not `build_context_enhanced`), used directly as a Recognizer.
     let recognizer = PatternRecognizer::builder()
         .with_pattern(regex)
         .build()
@@ -132,7 +132,7 @@ async fn context_boost_override_applies_the_custom_lift() {
     let variant = Variant::new(r"\b\d{3}-\d{2}-\d{4}\b")
         .expect("ssn variant builds")
         .with_score(Confidence::clamped(0.6));
-    // `boost = 0.1` on the context table — weaker than the default 0.35.
+    // `boost = 0.1` on the context table, weaker than the default 0.35.
     let context = Context::Global(Sourced {
         keywords: vec!["ssn".to_owned()],
         boost: Some(0.1),

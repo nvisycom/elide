@@ -2,7 +2,7 @@
 //! ([`Selection`] then [`Redaction`]), and human overrides ([`Manual`]).
 //!
 //! Each payload declares a central `TAG` discriminant byte, written before its
-//! own bytes so two kinds can never hash alike — see the [payloads
+//! own bytes so two kinds can never hash alike, see the [payloads
 //! overview](super).
 
 use hipstr::HipStr;
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use super::super::hash::AuditHasher;
 use super::super::{Attribution, AuditHash, RuleMatch};
 use crate::modality::{Modality, ModalityLocation};
-use crate::operator::{LeakProfile, OperatorId};
+use crate::redaction::{LeakProfile, OperatorId};
 
 /// An operator hid the entity.
 #[derive(Debug, Clone)]
@@ -103,7 +103,7 @@ impl Redaction {
     }
 
     /// Record what was hidden without the plaintext: the BLAKE3 `hash` of the
-    /// original span and its byte `length`. The two are set together — they are
+    /// original span and its byte `length`. The two are set together, they are
     /// meaningless apart.
     #[must_use]
     pub fn with_span(mut self, hash: AuditHash, length: u32) -> Self {
@@ -140,7 +140,7 @@ impl Redaction {
     }
 }
 
-/// An operator was *picked* to hide the entity — the redaction decision,
+/// An operator was *picked* to hide the entity, the redaction decision,
 /// recorded before it is applied so it can be reviewed (and the entity edited)
 /// first. The [`Redaction`] event that follows records the operator actually
 /// run.
@@ -149,7 +149,7 @@ impl Redaction {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Selection {
     /// Identity (name + version) of the operator picked. Its *config* is not
-    /// recorded — it lives in the policy that will run it, so apply re-resolves
+    /// recorded; it lives in the policy that will run it, so apply re-resolves
     /// the configured operator rather than reading it here.
     pub operator: OperatorId,
     /// Which selection rule chose this operator: the automatic "why" (matched a
@@ -195,7 +195,7 @@ impl Selection {
 
 /// A human override, outside automatic detection: an entity a reviewer added by
 /// hand, or a detected one they marked to ignore. Its provenance is a person's
-/// decision, not a recognizer's — so the trail records *why* (an
+/// decision, not a recognizer's, so the trail records *why* (an
 /// [`Attribution`], when supplied). *Who* made the override is the event's
 /// [`source`], not a payload field.
 ///
@@ -217,7 +217,7 @@ impl Selection {
 pub struct Manual<M: Modality> {
     /// Which human decision this records: including a missed entity, or
     /// suppressing a detected one. This is the authority on whether the entity
-    /// is redacted — [`AuditLog::is_suppressed`] reads it, so there is no
+    /// is redacted, [`AuditLog::is_suppressed`] reads it, so there is no
     /// separate flag to keep in sync.
     ///
     /// [`AuditLog::is_suppressed`]: crate::entity::audit::AuditLog::is_suppressed
@@ -263,7 +263,7 @@ impl<M: Modality> Manual<M> {
     }
 }
 
-/// Which human decision a [`Manual`] event records — the reviewer actions on a
+/// Which human decision a [`Manual`] event records, the reviewer actions on a
 /// finding: [`Flag`](ManualIntent::Flag) a miss, [`Suppress`](ManualIntent::Suppress)
 /// a false positive, or [`Amend`](ManualIntent::Amend) an existing finding.
 // Explicit discriminants: `Manual::hash_into` folds `intent as u8` into the
@@ -280,11 +280,11 @@ pub enum ManualIntent {
     /// entity is redacted like any detected one.
     Flag = 0,
     /// A reviewer marked a detected entity to leave alone (a false positive).
-    /// The redaction pass skips it — see [`AuditLog::is_suppressed`].
+    /// The redaction pass skips it, see [`AuditLog::is_suppressed`].
     ///
     /// [`AuditLog::is_suppressed`]: crate::entity::audit::AuditLog::is_suppressed
     Suppress = 1,
-    /// A reviewer amended an existing entity — retagged its label, adjusted its
+    /// A reviewer amended an existing entity, retagged its label, adjusted its
     /// span, or changed another attribute. The entity stays and is redacted
     /// normally; this records that a human changed it.
     Amend = 2,

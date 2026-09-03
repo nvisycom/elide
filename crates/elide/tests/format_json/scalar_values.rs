@@ -1,4 +1,4 @@
-//! JSON scalar values — numbers, booleans, and `null` — are parsed and passed
+//! JSON scalar values, numbers, booleans, and `null`, are parsed and passed
 //! through inertly, while string-value PII is still detected and redacted. A
 //! non-string scalar carries no PII and must not be corrupted.
 

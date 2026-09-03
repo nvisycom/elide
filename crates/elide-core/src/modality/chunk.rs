@@ -8,7 +8,7 @@ use super::{Hint, Modality};
 /// the source accepts in [`read_at`] / [`write_at`] to address the same
 /// chunk again. `hints` carries out-of-band [`Hint`]s the chunk's
 /// structural neighbours surface (CSV/XLSX column headers, JSON object
-/// keys, table headers) for context-aware recognizers — each a *located*
+/// keys, table headers) for context-aware recognizers, each a *located*
 /// piece of context, so a boost it causes can be traced back. Sources
 /// without such metadata leave it empty.
 ///

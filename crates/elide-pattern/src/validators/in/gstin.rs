@@ -54,14 +54,14 @@ mod tests {
 
     #[test]
     fn accepts_canonical_gstin() {
-        // 27AAAPL1234C1ZE — Maharashtra state 27, PAN AAAPL1234C,
+        // 27AAAPL1234C1ZE, Maharashtra state 27, PAN AAAPL1234C,
         // reg 1, Z marker, base-36 weighted check digit `E`.
         assert!(gstin("27AAAPL1234C1ZE"));
     }
 
     #[test]
     fn accepts_second_vector() {
-        // 29ABCDE1234F1ZW — Karnataka state 29, check `W`.
+        // 29ABCDE1234F1ZW, Karnataka state 29, check `W`.
         assert!(gstin("29ABCDE1234F1ZW"));
     }
 

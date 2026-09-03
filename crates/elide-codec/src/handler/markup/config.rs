@@ -1,16 +1,16 @@
-//! [`MarkupConfig`]: how the shared markup engine reads a document — strict
+//! [`MarkupConfig`]: how the shared markup engine reads a document, strict
 //! XML, or lenient HTML.
 
 /// How the markup engine reads a document.
 ///
 /// The same byte-span tokenize-and-splice engine serves both XML and HTML. XML
-/// is well-formed; HTML in the wild is not — it has void elements with no close
-/// (`<br>`, `<img>`), stray end tags, and bare `&` that is not an entity — so
+/// is well-formed; HTML in the wild is not, it has void elements with no close
+/// (`<br>`, `<img>`), stray end tags, and bare `&` that is not an entity, so
 /// HTML relaxes the reader (unmatched ends, dangling `&`, no end-name check).
 ///
 /// The engine is document-format-agnostic: it knows nothing of `<script>`,
 /// `<style>`, or "block level". The caller supplies those as plain element-name
-/// lists — XML supplies none ([`xml`](Self::xml)); HTML supplies its own
+/// lists, XML supplies none ([`xml`](Self::xml)); HTML supplies its own
 /// ([`lenient`](Self::lenient)).
 #[derive(Debug, Clone, Copy)]
 pub(super) struct MarkupConfig<'a> {
@@ -19,7 +19,7 @@ pub(super) struct MarkupConfig<'a> {
     /// Element names (lowercased) whose text children form one sibling-hint
     /// group. Empty disables sibling hints (the XML default).
     pub(super) block_elements: &'a [&'a str],
-    /// Element names (lowercased) whose body text is *not* emitted — an opaque
+    /// Element names (lowercased) whose body text is *not* emitted, an opaque
     /// body the caller does not want scanned (HTML `<script>` / `<style>` under a
     /// skip policy). Empty scans every element's text (the XML default).
     pub(super) skip_body_elements: &'a [&'a str],

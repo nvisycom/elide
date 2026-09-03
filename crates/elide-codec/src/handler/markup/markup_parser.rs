@@ -52,16 +52,16 @@ struct MarkupParser<'a> {
     /// Text-node records, kept with their engine-space span so a second pass
     /// can attach sibling hints once every text node's span is known.
     text_items: Vec<TextRecord>,
-    /// Context hints for non-text items — an attribute value keyed by its
-    /// attribute name, a CDATA body by its enclosing element name — applied
+    /// Context hints for non-text items, an attribute value keyed by its
+    /// attribute name, a CDATA body by its enclosing element name, applied
     /// alongside the text-node hints at the end.
     extra_hints: Vec<(usize, Vec<Hint<Text>>)>,
     /// The open-element stack: each frame names the element and where its text
     /// children begin, so a block element can group them for sibling hints.
     stack: Vec<Frame>,
     /// A skipped subtree (an HTML `<script>`/`<style>` the caller does not
-    /// scan) is opaque: while inside one, all content — text and any
-    /// markup-like inner tags — is ignored until the *matching* close, so a
+    /// scan) is opaque: while inside one, all content, text and any
+    /// markup-like inner tags, is ignored until the *matching* close, so a
     /// nested element or a stray end tag cannot leak the body or pop early.
     skip: Option<SkipRegion>,
 }
@@ -207,7 +207,7 @@ impl<'a> MarkupParser<'a> {
             // No matching open element: a stray end tag. Ignore it.
             return;
         };
-        // Unwind every frame from the top down to (and including) the match —
+        // Unwind every frame from the top down to (and including) the match ,
         // an intervening unclosed inline element is closed implicitly here.
         while self.stack.len() > depth {
             let frame = self.stack.pop().expect("frame above the matched depth");
@@ -236,7 +236,7 @@ impl<'a> MarkupParser<'a> {
         });
     }
 
-    /// Record a CDATA body, hinted by its enclosing element name — CDATA is
+    /// Record a CDATA body, hinted by its enclosing element name, CDATA is
     /// element content like a text node.
     fn cdata(&mut self, span: Range<usize>) {
         if let Some(inner) = strip(span, "<![CDATA[", "]]>") {
@@ -269,7 +269,7 @@ impl<'a> MarkupParser<'a> {
 }
 
 /// A text node's place in the item stream, its engine-space span, and its
-/// trimmed text — the raw material for the sibling-hint pass. `pending_hints`
+/// trimmed text, the raw material for the sibling-hint pass. `pending_hints`
 /// is filled when its block group closes and moved onto the item at the end.
 struct TextRecord {
     item_index: usize,
@@ -315,7 +315,7 @@ fn local_name(e: &BytesStart<'_>) -> String {
     e.local_name().as_ref().to_ascii_lowercase()
 }
 
-/// The start tag's local name as context words for the element's text — see
+/// The start tag's local name as context words for the element's text, see
 /// [`context_words`]: `paymentCard` becomes `"payment card"` so a keyword like
 /// `card` matches on a word boundary.
 ///
@@ -345,7 +345,7 @@ fn strip(span: Range<usize>, open: &str, close: &str) -> Option<Range<usize>> {
 const MAX_SIBLING_HINT_GROUP: usize = 64;
 
 /// Give each text record in a block group one hint per *other* record in the
-/// group, located at that sibling's engine-space span — the surrounding prose a
+/// group, located at that sibling's engine-space span, the surrounding prose a
 /// context boost points back at when a sentence is split across inline wrappers.
 fn attach_sibling_hints(group: &mut [TextRecord]) {
     let siblings: Vec<(Range<usize>, String)> = group
@@ -418,7 +418,7 @@ mod tests {
     #[tokio::test]
     async fn the_element_name_hints_its_text() {
         // `<paymentCard>` should reach its text as a `payment card` hint, so a
-        // context keyword (`card`) can boost the value inside — the markup
+        // context keyword (`card`) can boost the value inside, the markup
         // counterpart of a JSON key or CSV header vouching for its value.
         let raw = "<paymentCard>4111 1111 1111 1111</paymentCard>";
         let mut h = xml(raw);
@@ -510,7 +510,7 @@ mod tests {
         // Lenient parsing emits an `End(div)` for a `</div>` with no open
         // `<div>`. Popping unconditionally would discard the still-open
         // `<paymentCard>` frame, stripping the element-name hint from the text
-        // that follows — which can change context-gated detection. The stray
+        // that follows, which can change context-gated detection. The stray
         // end tag must be ignored so the following number keeps its hint.
         let raw = "<paymentCard>4111 <b>1111</b></div> 1111 1111</paymentCard>";
         let mut h = handler_with(raw, MarkupConfig::lenient(TEST_BLOCKS, &[]));

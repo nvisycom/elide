@@ -37,8 +37,8 @@ use self::pipeline::{AnalyzeOutcome, BoxFuture, ErasedPipeline, ModalityPipeline
 /// A container part that is itself a container is recursed into so its own parts
 /// are redacted; a document is at most a handful of levels deep in practice (a
 /// bundle → a DOCX → an embedded spreadsheet → its media is depth 4). The bound
-/// exists only to stop an adversarial or self-referential archive — a zip that
-/// contains itself — from recursing without end; exceeding it is a hard error,
+/// exists only to stop an adversarial or self-referential archive, a zip that
+/// contains itself, from recursing without end; exceeding it is a hard error,
 /// not a silent stop, so nothing nested is left un-redacted.
 const MAX_CONTAINER_DEPTH: usize = 8;
 
@@ -87,7 +87,7 @@ impl Orchestrator {
 
     /// Set the [`FormatRegistry`] used to decode a document's container parts,
     /// taking ownership. A body-only document needs no registry; a container
-    /// (DOCX, …) needs one that covers its part formats — typically
+    /// (DOCX, …) needs one that covers its part formats, typically
     /// [`FormatRegistry::with_builtin`].
     ///
     /// [`FormatRegistry::with_builtin`]: elide_codec::FormatRegistry::with_builtin
@@ -98,7 +98,7 @@ impl Orchestrator {
     }
 
     /// Set the run-wide default [`Scope`] shared across every modality
-    /// pipeline — the caller's analysis-wide assertions (languages,
+    /// pipeline, the caller's analysis-wide assertions (languages,
     /// jurisdictions, tags, catalog, correlation id).
     ///
     /// A `Scope` is modality-free, so one drives the body and every
@@ -121,7 +121,7 @@ impl Orchestrator {
     /// a modality replaces both halves.
     ///
     /// When a modality only ever detects *or* only ever redacts, register just
-    /// the half it needs with [`with_analyzer`] / [`with_anonymizer`] instead —
+    /// the half it needs with [`with_analyzer`] / [`with_anonymizer`] instead,
     /// the other half defaults to a no-op.
     ///
     /// [`with_analyzer`]: Self::with_analyzer
@@ -144,7 +144,7 @@ impl Orchestrator {
         self
     }
 
-    /// Register (or update) only the *analyzer* for modality `M` — the detection
+    /// Register (or update) only the *analyzer* for modality `M`, the detection
     /// half. If a pipeline for `M` already exists, its analyzer is replaced and
     /// its anonymizer kept; otherwise a new pipeline is created with a no-op
     /// [`Anonymizer::new`] as the redaction half.
@@ -169,7 +169,7 @@ impl Orchestrator {
         self
     }
 
-    /// Register (or update) only the *anonymizer* for modality `M` — the
+    /// Register (or update) only the *anonymizer* for modality `M`, the
     /// redaction half. If a pipeline for `M` already exists, its anonymizer is
     /// replaced and its analyzer kept; otherwise a new pipeline is created with a
     /// no-op [`Analyzer::new`] as the detection half.
@@ -281,8 +281,8 @@ impl Orchestrator {
     /// re-run recognition (e.g. under a narrowed `scope` to add one recognizer)
     /// without paying for OCR/STT again.
     ///
-    /// A group `prior` has no artifact for — a document or part it never
-    /// analyzed — re-runs from an empty (default) artifact, i.e. it re-enriches.
+    /// A group `prior` has no artifact for, a document or part it never
+    /// analyzed, re-runs from an empty (default) artifact, i.e. it re-enriches.
     /// `documents` must be the same set the `prior` artifacts were produced from.
     pub async fn re_analyze(
         &self,
@@ -301,7 +301,7 @@ impl Orchestrator {
     /// group enriches from scratch). The seeded artifact is downcast against the
     /// group's modality by the erased pipeline, so a `prior` entry for a
     /// different modality resolves to the default (empty) and that group
-    /// re-enriches — a document's own content and its parts resolve their seed
+    /// re-enriches, a document's own content and its parts resolve their seed
     /// the same way.
     async fn drive(
         &self,
@@ -316,7 +316,7 @@ impl Orchestrator {
         let annotations = &directives.annotations;
         let empty: Box<dyn ArtifactGroup> = Box::new(NoArtifact);
 
-        // A document's name is its depth-1 `PartId` — the key its own content and
+        // A document's name is its depth-1 `PartId`, the key its own content and
         // every nested part hang under. Two documents sharing a name would key to
         // the same path, so the second would overwrite the first in the report and
         // never be reached at apply. Reject the collision up front rather than
@@ -370,8 +370,8 @@ impl Orchestrator {
         Ok(AnalyzedDocument { report, artifacts })
     }
 
-    /// Analyze a *borrowed* handle's own content in place — one document's
-    /// content in the set — offering it to each pipeline until one matches its
+    /// Analyze a *borrowed* handle's own content in place, one document's
+    /// content in the set, offering it to each pipeline until one matches its
     /// modality, seeded with `seed` (its prior enrichment). The findings and any
     /// enrichment artifact are stored as the part keyed by `id` (the document's
     /// name, its depth-1 path). A handle whose modality no pipeline covers stores
@@ -424,14 +424,14 @@ impl Orchestrator {
     }
 
     /// Flatten the document's container tree into `report` / `artifacts`,
-    /// walking it **iteratively** (a work queue, not recursion — so an
+    /// walking it **iteratively** (a work queue, not recursion, so an
     /// adversarially deep archive can never blow the stack) breadth-first from
     /// the top container down. A part that is itself a container is enqueued and
     /// its own parts reached in turn (an image in a DOCX embedded in a bundle),
     /// rather than silently passed through; a leaf is driven through a pipeline.
     ///
     /// A part that no codec can decode is opaque, not a container, so it is left
-    /// as-is — the same pass-through as a leaf whose modality has no pipeline.
+    /// as-is, the same pass-through as a leaf whose modality has no pipeline.
     /// A part that *does* decode to a container is descended into; past
     /// [`MAX_CONTAINER_DEPTH`] that is an error, never a silent drop, so a
     /// redaction tool can never quietly leave a nested document un-redacted.
@@ -439,7 +439,7 @@ impl Orchestrator {
     /// `documents` seed the queue: each is a top whose parts are keyed under the
     /// document's own name (prefix [`PartId::leaf`] of the name), so two
     /// documents sharing a local part id stay distinct paths. Each enqueued item
-    /// is `(owned container handle, its tree path, its depth)` — the only state
+    /// is `(owned container handle, its tree path, its depth)`, the only state
     /// that varies per container; the shared `prior` / `scope` / `report` /
     /// `artifacts` stay in scope rather than being threaded down.
     async fn flatten(
@@ -479,12 +479,12 @@ impl Orchestrator {
                 let part_id = prefix.child(part.id);
                 let Ok(mut child) = self.registry.decode(part.bytes.clone(), &part.hint).await
                 else {
-                    continue; // no codec for this part — opaque, left as-is
+                    continue; // no codec for this part, opaque, left as-is
                 };
                 let is_container = child.as_container_mut().is_some();
 
                 // Past the depth bound a nested container is a hard error, never
-                // a silent drop — check before analyzing so nothing deeper runs.
+                // a silent drop; check before analyzing so nothing deeper runs.
                 if is_container && depth + 1 > MAX_CONTAINER_DEPTH {
                     return Err(elide_core::Error::new(
                         elide_core::ErrorKind::MalformedInput,
@@ -495,7 +495,7 @@ impl Orchestrator {
                     ));
                 }
 
-                // Analyze this part's *own* content — a leaf's payload, or a
+                // Analyze this part's *own* content, a leaf's payload, or a
                 // nested container's body (a DOCX's text), keyed under its path.
                 // A part whose modality has no pipeline passes through untouched.
                 let walk = self
@@ -510,7 +510,7 @@ impl Orchestrator {
                     )
                     .await?;
 
-                // A container is then enqueued so its own parts are reached too —
+                // A container is then enqueued so its own parts are reached too ,
                 // both its body (analyzed above) and its parts get redacted.
                 if let Some(handle) = walk
                     && is_container
@@ -525,14 +525,14 @@ impl Orchestrator {
     /// Analyze one part's own content: offer `handle` to each pipeline until one
     /// matches its modality, storing the detected entities (and any enrichment
     /// artifact) under `part_id`. Used for a leaf *and* for a nested container's
-    /// body (a DOCX's text) — a container is both analyzed here for its body and
+    /// body (a DOCX's text), a container is both analyzed here for its body and
     /// then walked for its parts. A part whose modality has no pipeline is left
     /// untouched (an intentional pass-through).
     ///
     /// Returns the live handle so the caller can walk further into it (a
     /// container's parts), or [`None`] when no pipeline accepted the part. The
-    /// handle is never cached in the report — every part is re-decoded by path at
-    /// apply — so it always comes back live when a pipeline matched.
+    /// handle is never cached in the report, every part is re-decoded by path at
+    /// apply, so it always comes back live when a pipeline matched.
     #[allow(clippy::too_many_arguments)]
     async fn analyze_part(
         &self,
@@ -566,7 +566,7 @@ impl Orchestrator {
                         part_id.clone(),
                         PartReport {
                             modality,
-                            // Re-decoded by path at apply — never cached.
+                            // Re-decoded by path at apply, never cached.
                             handle: None,
                             entities,
                         },
@@ -579,7 +579,7 @@ impl Orchestrator {
                 AnalyzeOutcome::Rejected(returned) => handle = Some(returned),
             }
         }
-        // No pipeline matched — return the handle unchanged so a container still
+        // No pipeline matched; return the handle unchanged so a container still
         // has its parts walked.
         Ok(handle)
     }
@@ -599,7 +599,7 @@ impl Orchestrator {
     ///
     /// Returns the report, now applied: redaction stamps a redaction event
     /// into each entity's provenance, so the returned report's entities carry
-    /// the full audit trail (recognition through redaction) — serialize it to
+    /// the full audit trail (recognition through redaction), serialize it to
     /// hand the audit to a caller. The report's cached part handles are spent
     /// by applying and are not part of that serialized view.
     ///
@@ -613,10 +613,10 @@ impl Orchestrator {
         // A document's own content is a depth-1 part whose one segment is the
         // document's name; a nested part is deeper. Apply the own-content parts
         // in place (through each document's borrowed handle), and collect the
-        // nested parts' redacted bytes to fold up afterward — a single bottom-up
+        // nested parts' redacted bytes to fold up afterward, a single bottom-up
         // pass, each byte encoded once.
         //
-        // Applying mutates the entities — each gains a redaction event — so it
+        // Applying mutates the entities (each gains a redaction event), so it
         // happens on `report`'s own groups, which are returned as the audit trail.
         let mut redactions: Vec<(PartId, Bytes)> = Vec::new();
         for (id, part) in &mut report.parts {
@@ -657,18 +657,18 @@ impl Orchestrator {
         Ok(report)
     }
 
-    /// Fold each redaction — a part's redacted bytes, keyed by its tree path —
+    /// Fold each redaction, a part's redacted bytes, keyed by its tree path,
     /// back into its document, bottom-up. A part at path `[…parent, leaf]` writes
     /// its bytes into the container at `[…parent]` under local id `leaf`; once a
     /// nested container has all its child replacements it is re-decoded, its
-    /// replacements applied, and re-encoded — producing bytes for *its* parent,
+    /// replacements applied, and re-encoded, producing bytes for *its* parent,
     /// a redaction one level shallower. Repeatedly resolving the deepest parent
     /// first cascades this to the top, where the depth-1 parents write into each
     /// document's own container, which re-encodes itself.
     ///
     /// A nested container that carries *its own* redaction (a DOCX whose body
     /// text was redacted) as well as descendant parts is folded onto its own
-    /// redacted bytes: those bytes — staged as a replacement in its parent — are
+    /// redacted bytes: those bytes, staged as a replacement in its parent, are
     /// the base its descendant replacements apply to, so the container's own
     /// redaction is preserved rather than lost to a re-decode of the original.
     fn fold_redactions<'a>(
@@ -678,7 +678,7 @@ impl Orchestrator {
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             // Group replacements by parent path (all segments but the last). The
-            // parent that names a *top* container — a one-segment document path —
+            // parent that names a *top* container, a one-segment document path ,
             // writes straight into that document's handle; a deeper parent
             // re-encodes and folds into its own parent.
             let mut by_parent: HashMap<PartId, Vec<(LocalId, Bytes)>> = HashMap::new();
@@ -706,7 +706,7 @@ impl Orchestrator {
 
                 // A nested container. If its *own* redaction was staged (as a
                 // replacement of `parent.local` in its grandparent), fold onto
-                // those bytes — the container's own redaction — and consume that
+                // those bytes, the container's own redaction, and consume that
                 // staged entry so it is not also applied verbatim (which would
                 // clobber the fold). Otherwise decode the container as-is from the
                 // original document.
@@ -746,7 +746,7 @@ impl Orchestrator {
     }
 
     /// Decode the part at tree path `id` by walking the container tree of its
-    /// `documents` one segment at a time — the last segment names the target
+    /// `documents` one segment at a time, the last segment names the target
     /// part, the earlier ones the containers to descend through. `None` when any
     /// segment names no part, or no codec can decode a step. The apply-time and
     /// nested path for a part whose live handle wasn't cached at analysis.
@@ -807,7 +807,7 @@ impl Orchestrator {
     }
 
     /// Convenience: [`analyze`] then [`anonymize_with`] with no editing
-    /// step — redact a whole set of documents in one call. Returns the applied
+    /// step, redact a whole set of documents in one call. Returns the applied
     /// [`Report`], whose entities carry the full audit trail (recognition
     /// through redaction).
     ///
@@ -833,7 +833,7 @@ impl Orchestrator {
     /// group back to the modality that produced it.
     ///
     /// The serialized report tags each group with its modality name but not the
-    /// concrete type, and deserialization is not object-safe — so the report
+    /// concrete type, and deserialization is not object-safe, so the report
     /// cannot rebuild itself. This orchestrator can: [`with_modality`] registered
     /// a parser per modality, so each group is parsed as the right
     /// `Vec<Entity<M>>`. Reconstructed parts carry no cached handle;
@@ -847,7 +847,7 @@ impl Orchestrator {
     /// A group naming a modality this orchestrator has no pipeline for is handled
     /// by what it would cost to drop it, deliberately splitting the difference
     /// with [`analyze`] (which silently ignores a part whose modality has no
-    /// pipeline): an *empty* such group is skipped — the part could not have been
+    /// pipeline): an *empty* such group is skipped, the part could not have been
     /// redacted anyway, so nothing is lost, and the round trip succeeds just as a
     /// fresh analysis of the same document would; a *non-empty* one is a hard
     /// error, since its entities may carry a reviewer's edits that silently
@@ -927,14 +927,14 @@ fn take_staged(
     Some(bytes)
 }
 
-/// One document the engine redacts: its name — the first segment of every
-/// [`PartId`] beneath it — and its decoded handle.
+/// One document the engine redacts: its name, the first segment of every
+/// [`PartId`] beneath it, and its decoded handle.
 ///
 /// A report describes a slice of these, analyzed and redacted as one logical
 /// unit ([`analyze`] / [`anonymize_with`]); a single document is a one-element
 /// slice. The name keys the document's own content (a depth-1 part) and prefixes
 /// its parts' paths, so two documents that share a local part id (two scans,
-/// each `page-1.png`) stay distinct — the collision a flat id would hit.
+/// each `page-1.png`) stay distinct, the collision a flat id would hit.
 ///
 /// The name is the engine's, not the codec's: [`UntypedDocumentHandle`] is bytes
 /// and format, never a filename, so identity is attached here, one layer up.
@@ -942,7 +942,7 @@ fn take_staged(
 /// [`analyze`]: Orchestrator::analyze
 /// [`anonymize_with`]: Orchestrator::anonymize_with
 pub struct Document {
-    /// The document's name — the first path segment of every part beneath it,
+    /// The document's name, the first path segment of every part beneath it,
     /// and the key of its own content in the report. Must be unique within the
     /// slice.
     pub name: String,
@@ -969,7 +969,7 @@ impl Document {
 }
 
 /// Seals [`AsDocuments`] and [`RegistryDocumentExt`] so neither is a public
-/// extension point — the engine owns their whole impl surface.
+/// extension point, the engine owns their whole impl surface.
 mod sealed {
     pub trait Sealed {}
 }
@@ -978,14 +978,14 @@ mod sealed {
 /// and [`anonymize`] accept a single `&mut Document` or a `&mut [Document]`
 /// interchangeably: a single document is a one-element slice.
 ///
-/// Sealed — implemented only for [`Document`] and `[Document]`.
+/// Sealed, implemented only for [`Document`] and `[Document]`.
 ///
 /// [`analyze`]: Orchestrator::analyze
 /// [`re_analyze`]: Orchestrator::re_analyze
 /// [`anonymize_with`]: Orchestrator::anonymize_with
 /// [`anonymize`]: Orchestrator::anonymize
 pub trait AsDocuments: sealed::Sealed {
-    /// The documents as a mutable slice — one element for a single document,
+    /// The documents as a mutable slice, one element for a single document,
     /// the slice itself for many.
     fn as_documents_mut(&mut self) -> &mut [Document];
 }
@@ -1024,7 +1024,7 @@ impl<T: AsDocuments + ?Sized> AsDocuments for &mut T {
     }
 }
 
-/// Decode raw bytes straight into a named [`Document`] — an extension trait on
+/// Decode raw bytes straight into a named [`Document`], an extension trait on
 /// [`FormatRegistry`], so the codec stays byte-and-format only (a handle carries
 /// no filename) while the engine attaches the name it owns.
 ///
@@ -1032,7 +1032,7 @@ impl<T: AsDocuments + ?Sized> AsDocuments for &mut T {
 /// like `report.docx`); [`document_with`] takes the format explicitly, for a name
 /// that carries none or a misleading one.
 ///
-/// Sealed — implemented only for [`FormatRegistry`].
+/// Sealed, implemented only for [`FormatRegistry`].
 ///
 /// [`document`]: Self::document
 /// [`document_with`]: Self::document_with
@@ -1043,7 +1043,7 @@ pub trait RegistryDocumentExt: sealed::Sealed {
     /// # Errors
     ///
     /// Returns [`MalformedInput`] when `name` carries no extension to resolve a
-    /// format from — use [`document_with`] with an explicit one. Otherwise
+    /// format from, use [`document_with`] with an explicit one. Otherwise
     /// propagates the decode error (e.g. [`CapabilityUnavailable`] for an
     /// unregistered format).
     ///
@@ -1082,7 +1082,7 @@ impl RegistryDocumentExt for FormatRegistry {
         bytes: impl Into<ContentData>,
     ) -> Result<Document> {
         let name = name.into();
-        // The format is the name's own extension, lowercased — resolved via
+        // The format is the name's own extension, lowercased, resolved via
         // `Path::extension` (which ignores a leading-dot dotfile like `.rels`).
         let extension = Path::new(&name)
             .extension()
@@ -1128,7 +1128,7 @@ fn root_container<'d, 'seg>(
     Some((&mut document.handle, rest))
 }
 
-/// The *top* container named by `parent`, if `parent` is a top-level path — a
+/// The *top* container named by `parent`, if `parent` is a top-level path, a
 /// one-segment document path. `None` for a deeper parent (a nested container to
 /// re-decode). The fold writes straight into a top container, which re-encodes
 /// itself.

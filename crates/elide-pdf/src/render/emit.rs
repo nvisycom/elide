@@ -40,8 +40,8 @@ fn digest_hex(bytes: &[u8]) -> String {
 ///
 /// Each page becomes: an image XObject (DeviceRGB, 8bpc, FlateDecode) holding
 /// the sanitised pixels, a content stream that draws it to fill the page, and a
-/// page object sized to the pixels. The document is rebuilt from scratch — a
-/// new Catalog and page tree — so no source object, metadata, or prior revision
+/// page object sized to the pixels. The document is rebuilt from scratch, a
+/// new Catalog and page tree, so no source object, metadata, or prior revision
 /// survives.
 pub(super) fn emit(source: &[u8], pages: Vec<PageObservation>) -> Result<(Vec<u8>, Certificate)> {
     // A document with no pages, or a page with a zero dimension, yields a

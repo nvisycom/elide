@@ -24,7 +24,7 @@ async fn redacts_pii_in_quoted_cells() -> Result<()> {
     assert_label_present!(outcome.entities, builtins::EMAIL_ADDRESS.to_ref());
 
     // The email appears in a plain cell and again inside a quoted cell with an
-    // embedded comma / newline / doubled-quote escape — every occurrence gone.
+    // embedded comma / newline / doubled-quote escape, every occurrence gone.
     assert_pii_removed!(
         outcome.redacted_text(),
         "alice.rivera@example.com",

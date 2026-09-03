@@ -2,7 +2,7 @@
 //!
 //! A backend turns a rendered prompt into the model's structured candidate
 //! batch. It is generic over the modality `M`: it extracts a
-//! [`Candidates<M::Item>`] — the typed candidate batch the model is asked
+//! [`Candidates<M::Item>`], the typed candidate batch the model is asked
 //! to produce. A backend declares which modalities it serves by which
 //! `LlmBackend<M>` impls it carries. Prompt wording lives in
 //! [`crate::prompt`]; localizing candidates into entities lives in the

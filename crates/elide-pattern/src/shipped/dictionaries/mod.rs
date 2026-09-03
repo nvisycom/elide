@@ -2,9 +2,9 @@
 //!
 //! Accessors are grouped by *scope*:
 //!
-//! - `world::*` — universal: brand names, ISO codes (crypto,
+//! - `world::*`, universal: brand names, ISO codes (crypto,
 //!   currencies) that work in any language.
-//! - `<lang>::*` — locale-specific: terms written in `<lang>`
+//! - `<lang>::*`, locale-specific: terms written in `<lang>`
 //!   that translate when the document language changes
 //!   (`en::nationalities`, future `fr::nationalites`, etc.).
 //!

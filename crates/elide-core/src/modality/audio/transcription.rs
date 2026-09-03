@@ -3,7 +3,7 @@
 //! A transcription is what makes audio *recognizable*: a recognizer reads
 //! its [`text`] like any other string, finds a match
 //! at a byte range, and [`resolve`]s that range back
-//! to the [`TimeSpan`] of the audio it was spoken in — via the per-word
+//! to the [`TimeSpan`] of the audio it was spoken in, via the per-word
 //! timings the transcription carries. The same shape serves any medium that
 //! turns a stream into timestamped text.
 //!
@@ -27,7 +27,7 @@ const SEGMENT_SEPARATOR: &str = " ";
 /// Timestamped transcript of an audio stream.
 ///
 /// An ordered set of [`TranscriptSegment`]s. The flat
-/// [`text`] — the segments joined — is what a recognizer
+/// [`text`], the segments joined, is what a recognizer
 /// inspects; [`resolve`] maps a byte range of that text back
 /// to the [`TimeSpan`] it occupies, using the segments' (and their words')
 /// timings. Empty when the backend produced nothing (silence, or a no-op
@@ -257,10 +257,10 @@ impl Transcription {
     /// The span runs from the start of the first overlapped word (or segment,
     /// when word timings are absent) to the end of the last, falling back to
     /// whole-segment spans without per-word timings. The speaker is carried
-    /// through only when every overlapped segment shares it — a range that
+    /// through only when every overlapped segment shares it, a range that
     /// crosses a speaker change is left speaker-less rather than mis-attributed.
     /// `None` when the range overlaps no segment (out of bounds, or an empty
-    /// transcription) — the caller drops such a match.
+    /// transcription), the caller drops such a match.
     ///
     /// [`text`]: Self::text
     #[must_use]

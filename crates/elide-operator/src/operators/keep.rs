@@ -9,7 +9,7 @@ use elide_core::modality::image::{Image, ImageData, ImageReplacement};
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::operator::{LeakProfile, Operator, OperatorId};
+use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 /// retain. The replacement records "leave this as-is" so the entity still
 /// shows up in the audit trail.
 ///
-/// Works across modalities — a text/tabular span stays verbatim, an image
+/// Works across modalities, a text/tabular span stays verbatim, an image
 /// region or audio range is left untouched. Like the other operators, [`Keep`]
 /// is implemented per modality, so the one type serves every modality.
 #[derive(Debug, Clone, Copy, Default)]
@@ -118,8 +118,8 @@ mod tests {
     use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
-    use elide_core::operator::Operator;
     use elide_core::primitive::Confidence;
+    use elide_core::redaction::Operator;
 
     use super::Keep;
 

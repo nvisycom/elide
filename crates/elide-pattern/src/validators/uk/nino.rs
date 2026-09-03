@@ -12,7 +12,7 @@
 /// - First letter `O` (HMRC reserved; not blocked by the regex
 ///   character class, which spans `j-p`).
 ///
-/// The check is structural only — it does not confirm the
+/// The check is structural only, it does not confirm the
 /// trailing suffix letter or any HMRC issuance state.
 pub fn nino(value: &str) -> bool {
     let prefix: String = value

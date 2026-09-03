@@ -1,5 +1,5 @@
-//! The cross-process path: a [`Report`] rebuilt from scratch — as a consumer
-//! would after serializing it, editing it elsewhere, and reconstructing it —
+//! The cross-process path: a [`Report`] rebuilt from scratch, as a consumer
+//! would after serializing it, editing it elsewhere, and reconstructing it,
 //! redacts the same as a freshly-analyzed one. The rebuilt report carries no
 //! cached part handles, so `anonymize_with` re-decodes each part from the
 //! container.
@@ -13,7 +13,7 @@ use elide::{Directives, PartId, RegistryDocumentExt, Report, Result};
 use super::{BODY_PART, FIXTURE};
 use crate::support::orchestrator::{TestOrchestrator, build_anonymizer, default_text_analyzer};
 
-/// The fixture document's name — its depth-1 part key in the report.
+/// The fixture document's name, its depth-1 part key in the report.
 const DOC: &str = "report.docx";
 
 #[tokio::test]
@@ -24,7 +24,7 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
         .with_text(default_text_analyzer()?, build_anonymizer::<Text>())
         .build();
 
-    // Phase 1: analyze, then copy the document's own entities out — exactly what
+    // Phase 1: analyze, then copy the document's own entities out, exactly what
     // a caller can serialize and ship to another process.
     let mut doc = registry.document(DOC, FIXTURE.source).await?;
     let report = orchestrator
@@ -39,7 +39,7 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
 
     // Phase 2: rebuild a FRESH report from the copied entities (no cached
     // handles), on a FRESH document handle, and apply. This forces the
-    // re-decode path — the proof a deserialized report still redacts.
+    // re-decode path, the proof a deserialized report still redacts.
     let rebuilt = Report::new().insert_part::<Text>(PartId::from(DOC), body);
     let mut doc2 = registry.document(DOC, FIXTURE.source).await?;
     let applied = orchestrator.anonymize_with(&mut doc2, rebuilt).await?;

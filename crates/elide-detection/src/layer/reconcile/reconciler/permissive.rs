@@ -7,7 +7,7 @@ use super::{Disposition, Reconciler};
 
 /// The permissive reconciler: every grouped pair keeps both, unresolved.
 ///
-/// Presidio-style — no cross-label resolution at detection; overlaps survive
+/// Presidio-style, no cross-label resolution at detection; overlaps survive
 /// and are left to the human edit step and the anonymizer's overlap-safe
 /// apply. Use [`contesting`] to flag them for review instead of leaving them
 /// silent.

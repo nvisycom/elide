@@ -1,8 +1,8 @@
 //! Scaffolding shared across the OOXML formats.
 //!
 //! DOCX, XLSX, and PPTX all package their parts through the same OPC
-//! engine, so the sanctioned way to inspect a redacted package — read
-//! a part back out, sweep every text-bearing part for leaked PII — is one
+//! engine, so the sanctioned way to inspect a redacted package, read
+//! a part back out, sweep every text-bearing part for leaked PII, is one
 //! surface, provided by [`PipelineOutcome`] in `support`. What lives here
 //! is the content the formats have in common: the synthetic PII set the
 //! shared `sample.*` fixtures carry.

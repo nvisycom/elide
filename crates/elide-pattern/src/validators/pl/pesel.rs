@@ -28,7 +28,7 @@ mod tests {
 
     #[test]
     fn accepts_canonical_pesel() {
-        // 44051401359 — widely-quoted example from official PESEL
+        // 44051401359, widely-quoted example from official PESEL
         // documentation: born 1944-05-14, male, serial 0135,
         // check 9.
         assert!(pesel("44051401359"));

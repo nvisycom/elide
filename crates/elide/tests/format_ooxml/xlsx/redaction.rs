@@ -13,7 +13,7 @@ use crate::support::asserts::assert_label_present;
 async fn xlsx_detects_and_redacts_every_part() -> Result<()> {
     let outcome = FIXTURE.run_tabular().await?;
     // The shipped patterns find every sensitive label across the workbook's
-    // cells — including the payment card, which needs its column header (`card`)
+    // cells, including the payment card, which needs its column header (`card`)
     // as context to reach the detection threshold.
     assert_label_present!(
         outcome.entities,
@@ -36,7 +36,7 @@ async fn xlsx_detects_and_redacts_every_part() -> Result<()> {
     );
 
     // The real guarantee: no PII value survives in any text-bearing part of
-    // the output package — not in a sheet, and not as an orphaned shared string.
+    // the output package, not in a sheet, and not as an orphaned shared string.
     outcome.assert_no_pii(SHARED_PII);
 
     // The output is still a valid workbook: the structural parts pass through.

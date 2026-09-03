@@ -1,7 +1,7 @@
 //! The Office Open XML packaging (OPC) engine: a zip of parts, opened once,
-//! extracted, and rewritten in place — format-neutral.
+//! extracted, and rewritten in place, format-neutral.
 //!
-//! [`Package`] is the shared core every OOXML format (DOCX, and — ahead — XLSX,
+//! [`Package`] is the shared core every OOXML format (DOCX, and, ahead, XLSX,
 //! PPTX) builds on. A format supplies a [`PartClassifier`] that assigns each
 //! part a [`PartRole`]; the engine acts on the role alone, so it never needs to
 //! know one format's part schema from another's. The engine extracts the
@@ -67,7 +67,7 @@ impl<C: PartClassifier> Package<C> {
     ///
     /// This is the neutral open: it validates the zip and reads every part, but
     /// applies no format-specific structural requirement (e.g. "a body part must
-    /// exist") — a format facade layers that on top.
+    /// exist"), a format facade layers that on top.
     ///
     /// # Errors
     ///
@@ -258,7 +258,7 @@ impl<C: PartClassifier> Package<C> {
                     pr.part
                 )));
             };
-            // A whole-part replacement may only overwrite a redactable part — a
+            // A whole-part replacement may only overwrite a redactable part, a
             // binary embedding, or a text part redacted out of band. Refusing a
             // `Structure` part closes the hole where redacted bytes could
             // overwrite styles, the theme, or the content-types manifest.

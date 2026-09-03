@@ -4,8 +4,8 @@ use std::borrow::Cow;
 use std::fmt;
 use std::path::Path;
 
-/// A container's own, local id for a part — a zip entry name
-/// (`word/media/image1.png`), a PDF object reference — unique only **within
+/// A container's own, local id for a part, a zip entry name
+/// (`word/media/image1.png`), a PDF object reference, unique only **within
 /// that one container**.
 ///
 /// The orchestrator composes these into a `PartId` tree path when containers
@@ -15,7 +15,7 @@ use std::path::Path;
 pub struct LocalId(Cow<'static, str>);
 
 impl LocalId {
-    /// A local id from anything that becomes a `Cow<'static, str>` — a
+    /// A local id from anything that becomes a `Cow<'static, str>`, a
     /// `&'static str` (no allocation) or an owned `String`.
     #[must_use]
     pub fn new(id: impl Into<Cow<'static, str>>) -> Self {
@@ -28,7 +28,7 @@ impl LocalId {
         &self.0
     }
 
-    /// The id's filename extension, for resolving a decoder — plain-filename
+    /// The id's filename extension, for resolving a decoder, plain-filename
     /// semantics, so a leading-dot dotfile (`.rels`) has none. `None` when the
     /// id carries no extension.
     #[must_use]

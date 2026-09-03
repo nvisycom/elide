@@ -10,14 +10,14 @@ use elide_core::modality::image::{Image, ImageReplacement};
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextReplacement};
-use elide_core::operator::{LeakProfile, Operator, OperatorId};
+use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 /// Remove the matched entity entirely.
 ///
 /// The strongest treatment: no trace of the value, its shape, or its extent
-/// remains — text drops the characters, audio cuts the interval, an image
+/// remains, text drops the characters, audio cuts the interval, an image
 /// clears the region. One [`Erase`] serves every medium, with a per-modality
 /// [`Operator`] impl that maps to that modality's "removed" replacement.
 #[derive(Debug, Clone, Copy, Default)]

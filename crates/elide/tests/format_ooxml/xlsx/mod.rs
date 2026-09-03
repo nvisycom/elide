@@ -3,7 +3,7 @@
 //! The primary fixture is a real Excel-authored workbook whose cell text
 //! lives in the shared-string table; redacting a shared-string cell
 //! de-shares it (the cell becomes an inline string) and blanks any pooled
-//! value left with no reference — so no PII survives anywhere in the
+//! value left with no reference, so no PII survives anywhere in the
 //! output package, not even as an orphaned shared string. A second fixture
 //! carries non-cell PII (a cell comment, a drawing's text) surfaced as XML
 //! container parts.

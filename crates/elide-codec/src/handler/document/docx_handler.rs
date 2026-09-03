@@ -144,9 +144,9 @@ impl Encoder for DocxEncoder {
 
 impl Container for DocxEncoder {
     fn parts(&self) -> Vec<Part> {
-        // Surface every binary embedding the engine classifies — images
+        // Surface every binary embedding the engine classifies, images
         // (`word/media/`), embedded objects (`word/embeddings/`), and fonts
-        // (`word/fonts/`) — from the set cached at decode.
+        // (`word/fonts/`), from the set cached at decode.
         self.embeddings
             .iter()
             .map(|embedding| {
@@ -173,7 +173,7 @@ impl Container for DocxEncoder {
             ));
         }
         // And reject ids that name no embedding the document actually carries,
-        // validated against the set cached at decode — an unknown id must not
+        // validated against the set cached at decode, an unknown id must not
         // be silently stored and dropped on rewrite.
         let is_known = self
             .embeddings
@@ -245,7 +245,7 @@ mod tests {
     async fn source_span_maps_a_finding_across_an_entity_including_its_raw_bytes() {
         // The body text is `Alice &amp; Bob`, decoded to `Alice & Bob`. A finding
         // over the whole decoded text must point back at the raw bytes including
-        // the `&amp;` — one contiguous raw range, entity bytes and all.
+        // the `&amp;`, one contiguous raw range, entity bytes and all.
         let raw = r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Alice &amp; Bob</w:t></w:r></w:p></w:body></w:document>"#;
         let mut handler = DocxLoader
             .decode(docx_with_body("Alice &amp; Bob"))
@@ -311,12 +311,12 @@ mod tests {
 
     #[tokio::test]
     async fn redacts_an_entity_located_only_by_source() {
-        // A review layer adds an entity by selecting text in the part — it can
+        // A review layer adds an entity by selecting text in the part, it can
         // express the raw part byte span but not the decoded-stream `range`. The
         // redaction is located purely by `.source` and must edit the right bytes.
         use elide_core::modality::DataWriter;
         use elide_core::modality::text::TextReplacement;
-        use elide_core::operator::Redactions;
+        use elide_core::redaction::Redactions;
 
         let raw = r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Alice Bob</w:t></w:r></w:p></w:body></w:document>"#;
         let mut handler = DocxLoader
@@ -324,7 +324,7 @@ mod tests {
             .await
             .unwrap();
 
-        // The raw span of "Bob" in the part — what a DOM selection yields.
+        // The raw span of "Bob" in the part, what a DOM selection yields.
         let bob = raw.find("Bob").unwrap();
         let location = TextLocation::new(0, 0) // no usable decoded range
             .with_source([SourceRef::in_part(bob..bob + 3, BODY_PART)]);

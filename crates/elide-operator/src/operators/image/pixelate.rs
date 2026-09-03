@@ -3,14 +3,14 @@
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::image::{Image, ImageData, ImageReplacement};
-use elide_core::operator::{LeakProfile, Operator, OperatorId};
+use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 /// Mosaic-pixelate the matched image region.
 ///
 /// The "pixelated face" look: the region is reduced to coarse blocks. A
-/// common compliance default — more obviously redacted than [`Blur`] while
+/// common compliance default, more obviously redacted than [`Blur`] while
 /// still keeping the region's footprint visible. Contrast [`Blackbox`],
 /// which hides it behind a solid fill.
 ///

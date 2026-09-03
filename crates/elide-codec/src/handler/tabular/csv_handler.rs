@@ -3,7 +3,7 @@
 //!
 //! Cells hold text, so the handler applies a [`TabularReplacement`]'s cell
 //! treatment through the shared text-redaction helper, and its structural
-//! treatments — dropping a whole row or column — by removing them from the
+//! treatments, dropping a whole row or column, by removing them from the
 //! parsed rows. Only the *location* is tabular: a `(row, column)` address
 //! plus an optional intra-cell byte range.
 
@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
 use elide_core::modality::text::{TextData, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter, Hint};
-use elide_core::operator::Redactions;
+use elide_core::redaction::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 
 use super::csv_loader::CsvLoader;
@@ -163,8 +163,8 @@ impl CsvHandler {
     }
 
     /// Drop the data row at `row_index` (the same addressing as
-    /// [`row_cells`]). The header row is never dropped — removing it would
-    /// strip the table's schema — so a drop targeting it is a no-op.
+    /// [`row_cells`]). The header row is never dropped, removing it would
+    /// strip the table's schema, so a drop targeting it is a no-op.
     ///
     /// [`row_cells`]: Self::row_cells
     fn drop_row(&mut self, row_index: u32) {
@@ -231,7 +231,7 @@ impl Handler<Tabular> for CsvHandler {
             if let Some(name) = self.column_name(col) {
                 location = location.with_column_name(name.to_owned());
                 // The header label lives in the header cell at row 0, same
-                // column — a real tabular location the boost can point at.
+                // column, a real tabular location the boost can point at.
                 let header_location =
                     TabularLocation::new(0, col).with_column_name(name.to_owned());
                 hints.push(Hint::new(header_location, TextData::new(name.to_owned())));
@@ -416,7 +416,7 @@ mod tests {
     async fn drop_row_never_drops_the_header() {
         let mut h = load("name,city\nAlice,NYC\n").await;
         let mut batch: Redactions<Tabular> = Redactions::new();
-        // Targeting the header row (0) is a no-op — the schema survives.
+        // Targeting the header row (0) is a no-op, the schema survives.
         batch.push(TabularLocation::new(0, 0), TabularReplacement::DropRow);
         h.write_at(batch).await.unwrap();
         assert_eq!(

@@ -3,7 +3,7 @@
 //! recognizer metadata ([`PatternEvent`] / [`ModelEvent`]).
 //!
 //! Each payload declares a central `TAG` discriminant byte, written before its
-//! own bytes so two kinds can never hash alike — see the [payloads
+//! own bytes so two kinds can never hash alike, see the [payloads
 //! overview](super).
 
 use hipstr::HipStr;
@@ -37,7 +37,7 @@ pub struct Pattern<M: Modality> {
 }
 
 impl<M: Modality> Pattern<M> {
-    /// This kind's discriminant byte — unique across all kinds, written before
+    /// This kind's discriminant byte, unique across all kinds, written before
     /// the payload's own bytes (see the [payloads overview](super)).
     pub(crate) const TAG: u8 = 0;
 

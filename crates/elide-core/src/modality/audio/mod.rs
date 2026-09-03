@@ -31,7 +31,7 @@ impl Modality for Audio {
 impl TextRecognizable for Audio {
     /// The transcript text a recognizer inspects: the [`Transcription`] an
     /// enricher stamped onto the call, or `""` when it is empty (a clip that
-    /// was never transcribed) — a recognizer then finds nothing, rather than
+    /// was never transcribed), a recognizer then finds nothing, rather than
     /// erroring.
     fn as_text<'a>(_data: &'a AudioData, artifact: Option<&'a Transcription>) -> &'a str {
         artifact.map_or("", Transcription::text)
@@ -43,7 +43,7 @@ impl TextRecognizable for Audio {
     /// span, so `locate` resolves `range` immediately against the
     /// [`Transcription`]'s word timings rather than deferring to a lift.
     /// Returns `None` when the range resolves to nothing (an empty transcript,
-    /// or out of bounds) — there is no time span to address, so the caller
+    /// or out of bounds), there is no time span to address, so the caller
     /// drops the match.
     fn locate(
         range: Range<usize>,

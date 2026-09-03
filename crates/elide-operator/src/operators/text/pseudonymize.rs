@@ -7,7 +7,7 @@ use elide_core::modality::Modality;
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::operator::{LeakProfile, Operator, OperatorId};
+use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 #[cfg(feature = "tabular")]
 use elide_core::{Error, ErrorKind};
 
@@ -18,7 +18,7 @@ use crate::vault::Vault;
 ///
 /// The pseudonymizing operator: where [`Replace`] writes a fixed marker
 /// and [`Sha2Hash`] a digest, [`Pseudonymize`] substitutes a per-entity
-/// surrogate from a [`Generator`] and — crucially — replays the *same*
+/// surrogate from a [`Generator`] and, crucially, replays the *same*
 /// surrogate every time that entity recurs. That consistency is what
 /// preserves a document's referential structure: "Alice told Bob, then
 /// Alice left" keeps two distinct, stable stand-ins for Alice and Bob
@@ -37,7 +37,7 @@ use crate::vault::Vault;
 ///
 /// The key resolves through the vault with [`get_or_try_insert_with`], so
 /// the first mention generates and stores the surrogate and every later
-/// mention reads it back — atomically, even if mentions are pseudonymized
+/// mention reads it back, atomically, even if mentions are pseudonymized
 /// concurrently. Folding the `label` into the key lets one vault back
 /// several `Pseudonymize` operators without their surrogates colliding.
 ///
@@ -79,13 +79,13 @@ impl<V, G> Pseudonymize<V, G> {
 ///
 /// Folding the label into the key lets one vault back several `Pseudonymize`
 /// operators without their surrogates colliding across labels. It is named in
-/// the operator's [`Vault`] bound — `V: Vault<PseudonymizeKey, TextReplacement>`
-/// — so a caller wiring a custom vault for `Pseudonymize` can spell that bound.
+/// the operator's [`Vault`] bound, `V: Vault<PseudonymizeKey, TextReplacement>`,
+/// so a caller wiring a custom vault for `Pseudonymize` can spell that bound.
 ///
 /// [`Vault`]: crate::vault::Vault
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PseudonymizeKey {
-    /// The entity's label — the class the surrogate belongs to.
+    /// The entity's label, the class the surrogate belongs to.
     pub label: LabelRef,
     /// The cluster seed: the coreference id when present, else the original
     /// value. Equal seeds under the same label share one surrogate.

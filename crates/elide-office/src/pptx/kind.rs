@@ -176,7 +176,7 @@ mod tests {
         assert_eq!(kind("ppt/notesSlides/notesSlide1.xml"), PartKind::Notes);
         assert_eq!(kind("ppt/comments/comment1.xml"), PartKind::Comments);
         // Threaded comments (PowerPoint 2021+) carry comment text too, so they
-        // must classify as text-bearing — not fall through to `Other` and leak.
+        // must classify as text-bearing, not fall through to `Other` and leak.
         assert_eq!(
             kind("ppt/threadedComments/threadedComment1.xml"),
             PartKind::Comments

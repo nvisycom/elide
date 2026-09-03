@@ -137,7 +137,7 @@ impl Encoder for PptxEncoder {
 
 impl Container for PptxEncoder {
     fn parts(&self) -> Vec<Part> {
-        // Surface every binary embedding the engine classifies — images and
+        // Surface every binary embedding the engine classifies, images and
         // media under `ppt/media/`, embedded objects under `ppt/embeddings/`.
         self.embeddings
             .iter()
@@ -166,7 +166,7 @@ impl Container for PptxEncoder {
             ));
         }
         // And reject ids that name no embedding the presentation actually
-        // carries — an unknown id must not be silently stored and dropped.
+        // carries, an unknown id must not be silently stored and dropped.
         let is_known = self
             .embeddings
             .iter()

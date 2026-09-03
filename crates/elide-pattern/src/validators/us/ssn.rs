@@ -9,7 +9,7 @@
 /// - **Group** (`GG`): 01–99.
 /// - **Serial** (`SSSS`): 0001–9999.
 ///
-/// This is a format check only — not a verification against SSA
+/// This is a format check only, not a verification against SSA
 /// records.
 pub fn ssn(value: &str) -> bool {
     let parts: Vec<&str> = value.split(['-', ' ', '.']).collect();

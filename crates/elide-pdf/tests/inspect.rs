@@ -7,7 +7,7 @@ use lopdf::content::{Content, Operation};
 use lopdf::{Document, Object, Stream, dictionary};
 
 /// A one-page PDF with a text layer, plus an `/Info` dictionary and one
-/// annotation — enough to exercise the risk inventory.
+/// annotation, enough to exercise the risk inventory.
 fn rich_pdf() -> Vec<u8> {
     let mut doc = Document::with_version("1.5");
     let pages_id = doc.new_object_id();

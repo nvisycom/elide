@@ -27,7 +27,7 @@ pub(crate) struct Sheet {
 /// its relationships `rels`.
 ///
 /// **Fail-closed:** a `<sheet>` that names a worksheet the relationships cannot
-/// resolve is an error, not a skipped sheet — a workbook must never report a
+/// resolve is an error, not a skipped sheet, a workbook must never report a
 /// successful redaction while an unresolved worksheet's text ships unread.
 pub(crate) fn resolve_sheets(raw: &str, rels: &str) -> Result<Vec<Sheet>> {
     let targets = relationship_targets(rels)?;
@@ -194,7 +194,7 @@ mod tests {
     #[test]
     fn an_unresolved_sheet_fails_closed() {
         // A sheet whose `r:id` resolves to no worksheet relationship must be an
-        // error, not silently dropped — otherwise its cells would ship unread.
+        // error, not silently dropped, otherwise its cells would ship unread.
         let workbook = concat!(
             r#"<?xml version="1.0"?>"#,
             r#"<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,

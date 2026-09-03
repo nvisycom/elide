@@ -57,7 +57,7 @@ impl TextRecognizable for Text {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::operator::Redactions;
+    use crate::redaction::Redactions;
 
     #[test]
     fn sort_by_position_orders_in_place() {
@@ -90,7 +90,7 @@ mod tests {
     #[test]
     fn as_tokens_is_none_without_an_artifact() {
         // No tokenizing enricher ran (None), or one ran and produced nothing
-        // (an empty artifact): either way, no tokens — context matching falls
+        // (an empty artifact): either way, no tokens, context matching falls
         // back to the surface text.
         assert!(Text::as_tokens(None).is_none());
         assert!(Text::as_tokens(Some(&Tokens::default())).is_none());

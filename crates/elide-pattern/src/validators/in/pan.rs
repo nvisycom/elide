@@ -36,7 +36,7 @@ mod tests {
 
     #[test]
     fn accepts_canonical_pan() {
-        // ABCPK1234E — individual entity (`P` at position 4).
+        // ABCPK1234E, individual entity (`P` at position 4).
         assert!(pan("ABCPK1234E"));
     }
 
@@ -47,7 +47,7 @@ mod tests {
 
     #[test]
     fn accepts_company_pan() {
-        // ABCCD1234E — company entity (`C` at position 4).
+        // ABCCD1234E, company entity (`C` at position 4).
         assert!(pan("ABCCD1234E"));
     }
 

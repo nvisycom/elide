@@ -6,7 +6,7 @@
 //! obvious garbage (wrong length, non-digit, all-zero); the
 //! `\b\d{9}\b` regex is too broad to promote a 2-digit prefix
 //! whitelist into a high-confidence signal, so the upstream
-//! `valid_kv_codes` table is left out — context keywords
+//! `valid_kv_codes` table is left out, context keywords
 //! ("Betriebsstättennummer", "Praxis", …) drive final confidence
 //! via the enhancer.
 

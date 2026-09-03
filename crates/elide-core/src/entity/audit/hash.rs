@@ -40,7 +40,7 @@ impl AuditHash {
 /// Streaming builder for an [`AuditHash`]: audit payloads fold their fields in
 /// through its methods, and [`finish`](AuditHasher::finish) yields the digest.
 ///
-/// Feeds a BLAKE3 hasher directly — no intermediate buffer is allocated.
+/// Feeds a BLAKE3 hasher directly, no intermediate buffer is allocated.
 /// [`bytes`](Self::bytes) / [`opt`](Self::opt) length-prefix each field so
 /// concatenated fields cannot be confused across a boundary (`"ab" + "c"`
 /// differs from `"a" + "bc"`); [`raw`](Self::raw) / [`byte`](Self::byte) write
@@ -55,7 +55,7 @@ impl AuditHasher {
         Self(blake3::Hasher::new())
     }
 
-    /// Fold in raw bytes with no length prefix — for fixed-width spine values
+    /// Fold in raw bytes with no length prefix, for fixed-width spine values
     /// (a hash, a little-endian integer) whose width is known, so no delimiter
     /// is needed.
     pub(crate) fn raw(&mut self, bytes: &[u8]) -> &mut Self {

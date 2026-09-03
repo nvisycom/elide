@@ -16,9 +16,9 @@ use super::text::Token;
 /// over text but redacts in its own medium qualifies.
 ///
 /// [`Text`] and `Tabular` project their payload identically (their payload
-/// *is* [`TextData`]). A medium whose recognizable text is not its payload —
+/// *is* [`TextData`]). A medium whose recognizable text is not its payload,
 /// audio, whose transcript an enricher stamps onto the call's
-/// [`Artifact`](Modality::Artifact) — reads it from there instead. Both methods
+/// [`Artifact`](Modality::Artifact), reads it from there instead. Both methods
 /// receive the chunk `data` *and* the medium's `artifact` so each modality draws
 /// from wherever its text and coordinate metadata live: text from `data`, audio
 /// from the artifact.
@@ -41,9 +41,9 @@ pub trait TextRecognizable: Modality + Sized {
     /// Build the location of a match spanning `range` of the recognizable
     /// text, or `None` when the range cannot be placed in the medium.
     ///
-    /// For `Text` and `Tabular` the location is *chunk-local* — it carries
+    /// For `Text` and `Tabular` the location is *chunk-local*: it carries
     /// the byte range and lifting fills the outer coordinates (a cell's
-    /// row/column) later — so it always succeeds. For a medium whose location
+    /// row/column) later, so it always succeeds. For a medium whose location
     /// is not byte-based (audio time spans, image regions), `locate` resolves
     /// `range` against `artifact` (the transcript's timings, the OCR layout)
     /// into the native coordinate, and returns `None` when no enrichment covers
@@ -56,7 +56,7 @@ pub trait TextRecognizable: Modality + Sized {
     ) -> Option<Self::Location>;
 
     /// The producer-provided [`Token`]s over the recognizable text, when the
-    /// modality carries them — `Text` and `Tabular` tokenize into their
+    /// modality carries them, `Text` and `Tabular` tokenize into their
     /// [`Artifact`](Modality::Artifact), so their tokens (with each token's
     /// lemma) feed lemma-aware context matching. Modalities that do not
     /// tokenize return `None`, the default, and context matches on the surface
