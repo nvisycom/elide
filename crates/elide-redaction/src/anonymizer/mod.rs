@@ -147,6 +147,11 @@ impl<M: Modality> Anonymizer<M> {
     /// No document data is touched. Entities whose label has no operator and no
     /// fallback get no pick; a reviewer-suppressed entity is skipped entirely.
     ///
+    /// Idempotent per operator: re-running `pick` (or calling it before
+    /// [`anonymize`], which picks again) does not stack a second identical
+    /// [`Selection`] on an entity whose latest pick already names the same
+    /// operator. A pick that resolves to a *different* operator still records.
+    ///
     /// `scope` is the caller-asserted request [`Scope`], passed to
     /// [predicate rules](Rule::predicate) via [`MatchContext::scope`] so the pick
     /// can branch on request context.
@@ -174,6 +179,17 @@ impl<M: Modality> Anonymizer<M> {
             // (rather than cloned) because `AuditEvent<M>: Clone` would demand
             // `M: Clone`, which a modality marker need not be.
             for &i in &cluster.members {
+                // Idempotent: a consumer that reviews picks then applies calls
+                // pick() then anonymize() (which picks again). Skip when this
+                // entity's latest selection already names the same operator, so
+                // re-picking never stacks a duplicate event.
+                if entities[i]
+                    .audit
+                    .selection()
+                    .is_some_and(|s| s.operator == cluster.operator.id())
+                {
+                    continue;
+                }
                 let mut selection =
                     Selection::new(cluster.operator.id(), cluster.matched_by.clone());
                 if let Some(attribution) = cluster.attribution.clone() {
@@ -457,6 +473,26 @@ mod tests {
             entities.iter().all(|e| !e.is_redacted()),
             "pick never redacts"
         );
+    }
+
+    #[tokio::test]
+    async fn pick_is_idempotent() {
+        // A consumer that reviews the picks and then applies calls pick() and
+        // then anonymize() (which picks again); re-picking the same operator must
+        // not stack a second identical Selection event.
+        let mut entities = vec![entity("NAME", 0, 5)];
+        let anonymizer = Anonymizer::new().with(Rule::label(LabelRef::new("NAME"), Erase));
+
+        anonymizer.pick(&mut entities, &Scope::default());
+        anonymizer.pick(&mut entities, &Scope::default());
+
+        let selections = entities[0]
+            .audit
+            .events()
+            .iter()
+            .filter(|e| matches!(e.kind, AuditKind::Selection(_)))
+            .count();
+        assert_eq!(selections, 1, "re-picking the same operator records once");
     }
 
     /// A [scope-aware predicate](Rule::predicate) reading [`MatchContext::scope`]
