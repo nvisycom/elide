@@ -477,20 +477,24 @@ mod tests {
 
     #[tokio::test]
     async fn pick_is_idempotent() {
-        // A consumer that reviews the picks and then applies calls pick() and
-        // then anonymize() (which picks again); re-picking the same operator must
-        // not stack a second identical Selection event.
+        // The path that caused the duplicate: a consumer reviews the picks
+        // (pick), then applies (anonymize, which picks again). Re-picking the
+        // same operator must not stack a second identical Selection event.
+        let mut target = TextDoc::new("alice");
         let mut entities = vec![entity("NAME", 0, 5)];
         let anonymizer = Anonymizer::new().with(Rule::label(LabelRef::new("NAME"), Erase));
 
         anonymizer.pick(&mut entities, &Scope::default());
-        anonymizer.pick(&mut entities, &Scope::default());
+        anonymizer
+            .anonymize(&mut target, &mut entities, &Scope::default())
+            .await
+            .unwrap();
 
         let selections = entities[0]
             .audit
             .events()
             .iter()
-            .filter(|e| matches!(e.kind, AuditKind::Selection(_)))
+            .filter(|e| matches!(&e.kind, AuditKind::Selection(_)))
             .count();
         assert_eq!(selections, 1, "re-picking the same operator records once");
     }
