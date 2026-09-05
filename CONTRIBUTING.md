@@ -42,9 +42,10 @@ pattern detection (`elide-pattern`), and redaction selection/apply
 cargo bench --features engine,codec-txt         # run all
 cargo bench -p elide-pattern --bench scan       # one suite
 
-# Track regressions: save a baseline, then compare against it.
-cargo bench -- --save-baseline main
-cargo bench -- --baseline main                  # reports % change vs `main`
+# Track regressions: save a baseline, then compare against it. Pass the pipeline
+# features so the e2e suite is included in the baseline.
+cargo bench --features engine,codec-txt -- --save-baseline main
+cargo bench --features engine,codec-txt -- --baseline main   # % change vs `main`
 ```
 
 ## Pull Request Process

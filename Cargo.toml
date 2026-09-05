@@ -154,3 +154,8 @@ jsonschema = { version = "0.52.0", default-features = false }
 reqwest-middleware = { version = "0.5", features = ["json", "multipart"] }
 reqwest-retry = { version = "0.9", features = [] }
 reqwest-tracing = { version = "0.7", features = [] }
+
+# Line-table debug info in the bench profile so a profiler (samply, Instruments)
+# resolves frames; does not affect the optimized codegen.
+[profile.bench]
+debug = true
