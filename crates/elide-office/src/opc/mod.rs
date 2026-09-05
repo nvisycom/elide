@@ -61,8 +61,13 @@ pub struct Package<C: PartClassifier> {
     classifier: C,
     /// The original archive bytes, retained so [`rewrite`](Self::rewrite) can
     /// copy an untouched part's already-compressed data straight through instead
-    /// of inflating and re-deflating it. Cheap to hold (the compressed archive is
-    /// smaller than the decompressed parts already kept).
+    /// of inflating and re-deflating it.
+    ///
+    /// Bounded by the same open-time caps as the parts: deflate does not expand
+    /// content, so the compressed archive is within `MAX_PACKAGE_BYTES` (plus
+    /// small per-entry zip overhead) of the decompressed parts already retained.
+    /// It adds at most a second copy of the already-in-memory input, never an
+    /// unbounded allocation.
     source: Bytes,
 }
 
