@@ -57,3 +57,10 @@ elide-operator = { workspace = true, features = ["aes", "hmac", "datetime"] }
 
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["rt", "macros"] }
+
+# Testing and benchmarking
+criterion = { workspace = true }
+
+[[bench]]
+name = "anonymize"
+harness = false
