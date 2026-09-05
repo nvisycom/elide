@@ -104,6 +104,7 @@ rayon = { version = "1.10", features = [] }
 
 # Testing and benchmarking
 mockall = { version = "0.15", features = [] }
+criterion = { version = "0.7", features = [] }
 
 # Observability
 tracing = { version = "0.1", features = ["attributes"] }

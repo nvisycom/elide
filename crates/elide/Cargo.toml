@@ -199,6 +199,14 @@ uuid = { workspace = true, features = ["v4"] }
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
+# Testing and benchmarking
+criterion = { workspace = true }
+
+[[bench]]
+name = "pipeline"
+harness = false
+required-features = ["engine", "codec-txt"]
+
 # Format families: one test binary per format (or format family), each a
 # folder of scenario files under a same-named driver. The OOXML formats
 # (docx, xlsx, …) share the OPC package engine, so they share one `office`
