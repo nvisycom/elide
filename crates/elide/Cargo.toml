@@ -205,7 +205,7 @@ criterion = { workspace = true }
 [[bench]]
 name = "pipeline"
 harness = false
-required-features = ["engine", "codec-txt"]
+required-features = ["engine", "codec-txt", "codec-docx"]
 
 # Format families: one test binary per format (or format family), each a
 # folder of scenario files under a same-named driver. The OOXML formats

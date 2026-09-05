@@ -52,12 +52,30 @@ fn build_orchestrator() -> Orchestrator {
         .with_modality::<Text>(analyzer, anonymizer)
 }
 
-/// Decode a fresh document from the corpus (async: the codec runs on the rt).
-async fn fresh_document(registry: &FormatRegistry, text: &str) -> Document {
+/// A big, PII-dense `.docx`: a real OPC package (~100 KB of decoded text) so the
+/// bench exercises the container decode + part model + encode, not just plain
+/// text. Committed under testdata so the bench has no synthesis code.
+const LARGE_DOCX: &[u8] = include_bytes!("../tests/testdata/docx/large.docx");
+
+/// Approximate decoded body-text size of `large.docx` (400 PII-dense paragraphs,
+/// ~255 bytes each). The zipped file is ~1 KB; this is the size that drives the
+/// pipeline's cost, so throughput is reported against it.
+const DECODED_TEXT_LEN: u64 = 102_000;
+
+/// Decode a fresh text document from the corpus (async: the codec runs on the rt).
+async fn fresh_text(registry: &FormatRegistry, text: &str) -> Document {
     registry
         .document("sample.txt", text)
         .await
-        .expect("decode document")
+        .expect("decode text document")
+}
+
+/// Decode a fresh document from the big `.docx` bytes.
+async fn fresh_docx(registry: &FormatRegistry) -> Document {
+    registry
+        .document("large.docx", LARGE_DOCX)
+        .await
+        .expect("decode docx document")
 }
 
 fn bench_pipeline(c: &mut Criterion) {
@@ -72,7 +90,7 @@ fn bench_pipeline(c: &mut Criterion) {
     group.bench_function("analyze", |b| {
         b.iter(|| {
             rt.block_on(async {
-                let mut doc = fresh_document(&registry, &text).await;
+                let mut doc = fresh_text(&registry, &text).await;
                 orchestrator
                     .analyze(black_box(&mut doc), &Directives::new())
                     .await
@@ -84,7 +102,7 @@ fn bench_pipeline(c: &mut Criterion) {
     group.bench_function("anonymize", |b| {
         b.iter(|| {
             rt.block_on(async {
-                let mut doc = fresh_document(&registry, &text).await;
+                let mut doc = fresh_text(&registry, &text).await;
                 orchestrator
                     .anonymize(black_box(&mut doc), &Directives::new())
                     .await
@@ -96,5 +114,49 @@ fn bench_pipeline(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_pipeline);
+/// The same pipeline over a big `.docx`, so decode/part-model/encode cost is
+/// visible alongside the plain-text number. Throughput is the decoded-text size.
+fn bench_docx(c: &mut Criterion) {
+    let rt = runtime();
+    let orchestrator = build_orchestrator();
+    let registry = FormatRegistry::with_builtin();
+
+    let mut group = c.benchmark_group("docx");
+    // Decoded text length drives detection/redaction cost; the zipped file is
+    // tiny (deflate crushes the repetition), so it is not the meaningful size.
+    // `large.docx` carries ~100 KB of body text (see its generator note).
+    group.throughput(Throughput::Bytes(DECODED_TEXT_LEN));
+    // Each iteration is ~0.5s, so the default 100 samples take minutes; a
+    // smaller sample keeps the suite CI-friendly while staying statistically
+    // usable for regression tracking.
+    group.sample_size(20);
+
+    group.bench_function("analyze", |b| {
+        b.iter(|| {
+            rt.block_on(async {
+                let mut doc = fresh_docx(&registry).await;
+                orchestrator
+                    .analyze(black_box(&mut doc), &Directives::new())
+                    .await
+                    .expect("analyze")
+            })
+        });
+    });
+
+    group.bench_function("anonymize", |b| {
+        b.iter(|| {
+            rt.block_on(async {
+                let mut doc = fresh_docx(&registry).await;
+                orchestrator
+                    .anonymize(black_box(&mut doc), &Directives::new())
+                    .await
+                    .expect("anonymize")
+            })
+        });
+    });
+
+    group.finish();
+}
+
+criterion_group!(benches, bench_pipeline, bench_docx);
 criterion_main!(benches);
