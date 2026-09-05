@@ -19,6 +19,8 @@ use elide::recognition::pattern::PatternRecognizer;
 use elide::redaction::operators::{Mask, Replace};
 use elide::redaction::{Anonymizer, Rule};
 use elide::{Directives, Document, Orchestrator, RegistryDocumentExt};
+use elide_office::docx::Docx;
+use elide_office::opc::Replacement;
 use tokio::runtime::{Builder, Runtime};
 
 const PARAGRAPH: &str = "Contact alice.johnson@example.com or call +1 (628) 555-0175. \
@@ -158,5 +160,38 @@ fn bench_docx(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_pipeline, bench_docx);
+/// Isolate the DOCX codec cost from detection: pure decode (open + extract text
+/// blocks) and pure encode (rewrite every block back), calling the office engine
+/// directly. This attributes the anonymize gap to decode / encode / detection.
+fn bench_docx_codec(c: &mut Criterion) {
+    let mut group = c.benchmark_group("docx_codec");
+    group.throughput(Throughput::Bytes(DECODED_TEXT_LEN));
+
+    group.bench_function("decode", |b| {
+        b.iter(|| {
+            let docx = Docx::open(black_box(LARGE_DOCX)).expect("open");
+            black_box(docx.extract())
+        });
+    });
+
+    // Redact every extracted block (the maximal rewrite), so encode cost is
+    // measured against a fully-edited body plus the untouched parts the raw-copy
+    // path skips re-deflating.
+    let docx = Docx::open(LARGE_DOCX).expect("open");
+    let replacements: Vec<Replacement> = docx
+        .extract()
+        .blocks
+        .iter()
+        .map(|block| Replacement::for_block(block, "[REDACTED]"))
+        .collect();
+    group.bench_function("encode", |b| {
+        b.iter(|| {
+            black_box(docx.rewrite(black_box(&replacements)).expect("rewrite"));
+        });
+    });
+
+    group.finish();
+}
+
+criterion_group!(benches, bench_pipeline, bench_docx, bench_docx_codec);
 criterion_main!(benches);
