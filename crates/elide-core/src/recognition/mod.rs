@@ -125,8 +125,8 @@ where
 
 /// A shared recognizer is a recognizer.
 ///
-/// Both methods take `&self`, so an [`Arc`] forwards them without
-/// interior mutability. This is what lets a caller build an
+/// Both methods take `&self`, so an [`Arc`](std::sync::Arc) forwards them
+/// without interior mutability. This is what lets a caller build an
 /// expensive recognizer once and attach the same instance to
 /// several analyzers: the built-in pattern set compiles a large
 /// regex set, and a deployment running four modalities would
