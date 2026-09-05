@@ -39,15 +39,20 @@ pub(super) fn word_window(
     let prefix_text = &text[..start.min(text.len())];
     let suffix_text = &text[end.min(text.len())..];
 
-    // `unicode_word_indices` yields `(byte_offset, word_str)` for
-    // every "word" (alphanumeric run) in source order. Take the
-    // last `prefix` on the prefix side, the first `suffix` on the
-    // suffix side, and compute the spanning byte range.
-    let prefix_words: Vec<(usize, &str)> = prefix_text.unicode_word_indices().collect();
-    let prefix_take = prefix_words.len().saturating_sub(prefix);
-    let prefix_byte = prefix_words
-        .get(prefix_take)
-        .map(|(idx, _)| *idx)
+    // `unicode_word_indices` yields `(byte_offset, word_str)` for every "word"
+    // (alphanumeric run) in source order. Take the last `prefix` on the prefix
+    // side, the first `suffix` on the suffix side, and compute the spanning byte
+    // range.
+    //
+    // The prefix side iterates from the *end* (the iterator is double-ended), so
+    // it visits at most `prefix` words rather than segmenting the whole prefix,
+    // which would re-scan a growing span per entity (quadratic in document size).
+    let prefix_byte = prefix_text
+        .unicode_word_indices()
+        .rev()
+        .take(prefix)
+        .last()
+        .map(|(idx, _)| idx)
         .unwrap_or(start.min(text.len()));
 
     let suffix_byte = if suffix == 0 {

@@ -31,6 +31,23 @@ To auto-fix formatting:
 cargo fmt
 ```
 
+### Benchmarks
+
+The hot paths carry [Criterion](https://bheisler.github.io/criterion.rs/book/)
+benchmarks: the end-to-end pipeline (`elide`, needs `engine,codec-txt,codec-docx`),
+pattern detection (`elide-pattern`), and redaction selection/apply
+(`elide-redaction`).
+
+```bash
+cargo bench --features engine,codec-txt,codec-docx         # run all
+cargo bench -p elide-pattern --bench scan       # one suite
+
+# Track regressions: save a baseline, then compare against it. Pass the pipeline
+# features so the e2e suite is included in the baseline.
+cargo bench --features engine,codec-txt,codec-docx -- --save-baseline main
+cargo bench --features engine,codec-txt,codec-docx -- --baseline main   # % change vs `main`
+```
+
 ## Pull Request Process
 
 1. Fork the repository

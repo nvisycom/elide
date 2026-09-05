@@ -59,6 +59,16 @@ pub struct Package<C: PartClassifier> {
     /// The format's part classifier, retained for rewrite-time protection
     /// checks.
     classifier: C,
+    /// The original archive bytes, retained so [`rewrite`](Self::rewrite) can
+    /// copy an untouched part's already-compressed data straight through instead
+    /// of inflating and re-deflating it.
+    ///
+    /// Bounded by the same open-time caps as the parts: deflate does not expand
+    /// content, so the compressed archive is within `MAX_PACKAGE_BYTES` (plus
+    /// small per-entry zip overhead) of the decompressed parts already retained.
+    /// It adds at most a second copy of the already-in-memory input, never an
+    /// unbounded allocation.
+    source: Bytes,
 }
 
 impl<C: PartClassifier> Package<C> {
@@ -122,7 +132,11 @@ impl<C: PartClassifier> Package<C> {
             parts.push(StoredPart::new(path, role, Bytes::from(buf)));
         }
 
-        Ok(Self { parts, classifier })
+        Ok(Self {
+            parts,
+            classifier,
+            source: Bytes::copy_from_slice(document),
+        })
     }
 
     /// Whether the package contains a part at `path`, so a facade can enforce a
@@ -283,22 +297,40 @@ impl<C: PartClassifier> Package<C> {
             part_bytes.insert(&pr.part, &pr.bytes);
         }
 
-        // Re-pack: each part gets its spliced text, its replaced bytes, or its
-        // original bytes, in archive order.
+        // Re-pack in archive order: a changed part (spliced text or replaced
+        // bytes) is re-deflated; an untouched part is copied straight from the
+        // source with its data still compressed, no inflate/deflate round-trip.
+        let mut source = ZipArchive::new(Cursor::new(self.source.clone()))
+            .map_err(|e| Error::invalid_package(format!("reopen source: {e}")))?;
         let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
         let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
         for part in &self.parts {
-            let bytes: Vec<u8> = if let Some(edits) = by_part.get(part.path()) {
-                part.splice(edits)?.into_bytes()
-            } else if let Some(replaced) = part_bytes.get(part.path()) {
-                replaced.to_vec()
-            } else {
-                part.bytes().to_vec()
-            };
             let fail = |e: String| Error::invalid_package(format!("repack `{}`: {e}", part.path()));
-            zip.start_file(part.path().as_str(), opts)
-                .map_err(|e| fail(e.to_string()))?;
-            zip.write_all(&bytes).map_err(|e| fail(e.to_string()))?;
+            let changed: Option<Vec<u8>> = match by_part.get(part.path()) {
+                Some(edits) => Some(part.splice(edits)?.into_bytes()),
+                None => part_bytes
+                    .get(part.path())
+                    .map(|replaced| replaced.to_vec()),
+            };
+            match changed {
+                Some(bytes) => {
+                    zip.start_file(part.path().as_str(), opts)
+                        .map_err(|e| fail(e.to_string()))?;
+                    zip.write_all(&bytes).map_err(|e| fail(e.to_string()))?;
+                }
+                // Copy the already-compressed entry through. Fall back to a fresh
+                // deflate if the source entry cannot be reached (it always
+                // should, the part came from this archive).
+                None => match source.by_name(part.path().as_str()) {
+                    Ok(entry) => zip.raw_copy_file(entry).map_err(|e| fail(e.to_string()))?,
+                    Err(_) => {
+                        zip.start_file(part.path().as_str(), opts)
+                            .map_err(|e| fail(e.to_string()))?;
+                        zip.write_all(&part.bytes())
+                            .map_err(|e| fail(e.to_string()))?;
+                    }
+                },
+            }
         }
         let cursor = zip
             .finish()

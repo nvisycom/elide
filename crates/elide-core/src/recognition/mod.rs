@@ -101,6 +101,55 @@ where
     ) -> Result<Recognition<M>>;
 }
 
+/// A boxed recognizer is a recognizer, so a caller can hold a
+/// `Box<dyn Recognizer<M>>` (e.g. a heterogeneous set of recognizers behind one
+/// type) and still call it directly.
+#[async_trait::async_trait]
+impl<M, R> Recognizer<M> for Box<R>
+where
+    M: Modality,
+    R: Recognizer<M> + ?Sized,
+{
+    fn id(&self) -> RecognizerId {
+        (**self).id()
+    }
+
+    async fn recognize(
+        &self,
+        data: &M::Data,
+        ctx: &RecognizerContext<'_, M>,
+    ) -> Result<Recognition<M>> {
+        (**self).recognize(data, ctx).await
+    }
+}
+
+/// A shared recognizer is a recognizer.
+///
+/// Both methods take `&self`, so an [`Arc`](std::sync::Arc) forwards them
+/// without interior mutability. This is what lets a caller build an
+/// expensive recognizer once and attach the same instance to
+/// several analyzers: the built-in pattern set compiles a large
+/// regex set, and a deployment running four modalities would
+/// otherwise pay for it four times per request.
+#[async_trait::async_trait]
+impl<M, R> Recognizer<M> for std::sync::Arc<R>
+where
+    M: Modality,
+    R: Recognizer<M> + ?Sized,
+{
+    fn id(&self) -> RecognizerId {
+        (**self).id()
+    }
+
+    async fn recognize(
+        &self,
+        data: &M::Data,
+        ctx: &RecognizerContext<'_, M>,
+    ) -> Result<Recognition<M>> {
+        (**self).recognize(data, ctx).await
+    }
+}
+
 /// What a [`Recognizer`] returns from one call.
 ///
 /// The entities it found. Under the `usage` feature it also carries the
