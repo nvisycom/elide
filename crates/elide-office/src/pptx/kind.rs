@@ -59,21 +59,21 @@ impl PartKind {
         if path == "ppt/presentation.xml" {
             return Self::Presentation;
         }
-        if Self::is_numbered(path, "ppt/slides/slide", ".xml") {
+        if part.numbered("ppt/slides/slide", ".xml") {
             return Self::Slide;
         }
-        if Self::is_numbered(path, "ppt/slideLayouts/slideLayout", ".xml") {
+        if part.numbered("ppt/slideLayouts/slideLayout", ".xml") {
             return Self::SlideLayout;
         }
-        if Self::is_numbered(path, "ppt/slideMasters/slideMaster", ".xml") {
+        if part.numbered("ppt/slideMasters/slideMaster", ".xml") {
             return Self::SlideMaster;
         }
-        if Self::is_numbered(path, "ppt/notesSlides/notesSlide", ".xml")
-            || Self::is_numbered(path, "ppt/notesMasters/notesMaster", ".xml")
+        if part.numbered("ppt/notesSlides/notesSlide", ".xml")
+            || part.numbered("ppt/notesMasters/notesMaster", ".xml")
         {
             return Self::Notes;
         }
-        if Self::is_numbered(path, "ppt/handoutMasters/handoutMaster", ".xml") {
+        if part.numbered("ppt/handoutMasters/handoutMaster", ".xml") {
             return Self::HandoutMaster;
         }
         // Comments come in three layouts, all holding the comment text: the
@@ -85,15 +85,13 @@ impl PartKind {
         {
             return Self::Comments;
         }
-        if Self::is_numbered(path, "ppt/charts/chart", ".xml")
-            || Self::is_numbered(path, "ppt/diagrams/data", ".xml")
-        {
+        if part.numbered("ppt/charts/chart", ".xml") || part.numbered("ppt/diagrams/data", ".xml") {
             return Self::Chart;
         }
         if part.is_relationships() {
             return Self::Relationships;
         }
-        if let Some(kind) = embedding_kind(part) {
+        if let Some(kind) = part.embedding_under("ppt") {
             return Self::Embedding(kind);
         }
         if path.starts_with("docProps/") {
@@ -116,43 +114,9 @@ impl PartKind {
             | Self::Chart => PartRole::ElementText,
             Self::Relationships => PartRole::RelationshipTargets,
             Self::Embedding(kind) => PartRole::Binary(kind),
-            Self::Presentation | Self::Metadata | Self::Other => PartRole::Structure,
+            Self::Metadata => PartRole::Property,
+            Self::Presentation | Self::Other => PartRole::Structure,
         }
-    }
-
-    /// The [`EmbeddingKind`] when this part is a binary embedding.
-    pub fn embedding(self) -> Option<EmbeddingKind> {
-        match self {
-            Self::Embedding(kind) => Some(kind),
-            _ => None,
-        }
-    }
-
-    /// Whether `path` is `{prefix}{n}{suffix}` for some run of digits `n`.
-    fn is_numbered(path: &str, prefix: &str, suffix: &str) -> bool {
-        let Some(rest) = path.strip_prefix(prefix) else {
-            return false;
-        };
-        let Some(digits) = rest.strip_suffix(suffix) else {
-            return false;
-        };
-        !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
-    }
-}
-
-/// The [`EmbeddingKind`] of a binary media part, if `part` names one.
-///
-/// `ppt/media/` mixes images, audio, and video, so the kind is taken from the
-/// file extension (a slide's embedded `.mp3` is [`Audio`], not an image).
-///
-/// [`Audio`]: EmbeddingKind::Audio
-fn embedding_kind(part: &PartPath) -> Option<EmbeddingKind> {
-    if part.in_dir("ppt/media") {
-        Some(EmbeddingKind::from_path(part.as_str()))
-    } else if part.in_dir("ppt/embeddings") {
-        Some(EmbeddingKind::Object)
-    } else {
-        None
     }
 }
 
@@ -211,6 +175,8 @@ mod tests {
             PartRole::RelationshipTargets
         );
         assert_eq!(PartKind::Presentation.role(), PartRole::Structure);
+        // docProps carry redactable properties: whole-part replaceable, not text.
+        assert_eq!(PartKind::Metadata.role(), PartRole::Property);
         assert_eq!(
             PartKind::Embedding(EmbeddingKind::Image).role(),
             PartRole::Binary(EmbeddingKind::Image)

@@ -20,6 +20,8 @@
 mod docx_handler;
 #[cfg(feature = "docx")]
 mod docx_loader;
+#[cfg(any(feature = "docx", feature = "pptx"))]
+mod ooxml;
 #[cfg(feature = "pdf")]
 mod pdf_handler;
 #[cfg(feature = "pdf")]

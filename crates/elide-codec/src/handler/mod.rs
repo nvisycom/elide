@@ -28,6 +28,8 @@ pub(crate) mod extract;
 pub(crate) mod image;
 #[cfg(any(feature = "html", feature = "xml"))]
 pub(crate) mod markup;
+#[cfg(feature = "internal_office")]
+pub(crate) mod office;
 #[cfg(feature = "internal_tabular")]
 pub(crate) mod tabular;
 #[cfg(any(feature = "txt", feature = "json"))]
@@ -35,6 +37,12 @@ pub(crate) mod text;
 
 // Public contract: the per-format constructors, plus the HTML
 // script-handling config its `format_with` constructor takes.
+/// The recognizer that classifies an image's EXIF fields into
+/// `Entity<Metadata>` values, for a caller wiring the metadata pipeline.
+#[cfg(any(feature = "png", feature = "jpeg"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "png", feature = "jpeg"))))]
+pub use ::elide_image::ExifRecognizer;
+
 #[cfg(feature = "mp3")]
 #[cfg_attr(docsrs, doc(cfg(feature = "mp3")))]
 pub use self::audio::mp3_format;
@@ -56,21 +64,32 @@ pub use self::document::rtf_format;
 #[cfg(feature = "pdf")]
 #[cfg_attr(docsrs, doc(cfg(feature = "pdf")))]
 pub use self::document::{RasterMode, pdf_format};
+#[cfg(any(feature = "png", feature = "jpeg"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "png", feature = "jpeg"))))]
+pub use self::image::exif_format;
 #[cfg(feature = "jpeg")]
 #[cfg_attr(docsrs, doc(cfg(feature = "jpeg")))]
 pub use self::image::jpeg_format;
 #[cfg(feature = "png")]
 #[cfg_attr(docsrs, doc(cfg(feature = "png")))]
 pub use self::image::png_format;
-#[cfg(feature = "tiff")]
-#[cfg_attr(docsrs, doc(cfg(feature = "tiff")))]
-pub use self::image::tiff_format;
 #[cfg(feature = "xml")]
 #[cfg_attr(docsrs, doc(cfg(feature = "xml")))]
 pub use self::markup::xml_format;
 #[cfg(feature = "html")]
 #[cfg_attr(docsrs, doc(cfg(feature = "html")))]
 pub use self::markup::{ScriptPolicy, html_format, html_format_with};
+#[cfg(feature = "internal_office")]
+pub(crate) use self::office::docprops_hint;
+/// The OOXML document-property (`docProps/*`) metadata format + its recognizer,
+/// for a caller wiring the metadata pipeline to strip document properties from
+/// docx/pptx/xlsx.
+#[cfg(feature = "internal_office")]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(any(feature = "docx", feature = "pptx", feature = "xlsx")))
+)]
+pub use self::office::{DocPropsRecognizer, docprops_format};
 #[cfg(feature = "csv")]
 #[cfg_attr(docsrs, doc(cfg(feature = "csv")))]
 pub use self::tabular::csv_format;

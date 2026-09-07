@@ -13,6 +13,7 @@ members = [
     "./crates/elide-stt",
     "./crates/elide-ocr",
     "./crates/elide-office",
+    "./crates/elide-image",
     "./crates/elide-pdf",
     "./crates/elide-codec",
     "./crates/elide-fake",
@@ -52,6 +53,7 @@ elide-llm = { path = "./crates/elide-llm", version = "0.1.0" }
 elide-stt = { path = "./crates/elide-stt", version = "0.1.0" }
 elide-ocr = { path = "./crates/elide-ocr", version = "0.1.0" }
 elide-office = { path = "./crates/elide-office", version = "0.1.0" }
+elide-image = { path = "./crates/elide-image", version = "0.1.0" }
 elide-pdf = { path = "./crates/elide-pdf", version = "0.1.0" }
 elide-codec = { path = "./crates/elide-codec", version = "0.1.0" }
 elide-fake = { path = "./crates/elide-fake", version = "0.1.0" }
@@ -131,8 +133,9 @@ lopdf = { version = "0.44", default-features = false }
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 
 # Image processing
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tiff"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 imageproc = { version = "0.27", default-features = false, features = ["rayon"] }
+little_exif = { version = "0.6", features = [] }
 
 # Rendering
 pdfium-render = { version = "0.9", features = [] }

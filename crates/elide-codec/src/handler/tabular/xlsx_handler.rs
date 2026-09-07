@@ -69,8 +69,12 @@ pub(crate) struct XlsxHandler {
     /// The non-cell text parts (comments, drawings, charts), path → bytes, cached
     /// at decode so the [`Container`] surface lists them without re-opening.
     text_parts: Vec<(String, Bytes)>,
-    /// Redacted bytes for text parts, keyed by part path, filled through
-    /// [`Container::replace_part`] and folded in on encode.
+    /// The document-property parts (`docProps/core.xml`, `app.xml`), path → bytes,
+    /// cached at decode so the [`Container`] surface lists them as metadata
+    /// sub-parts.
+    doc_props: Vec<(String, Bytes)>,
+    /// Redacted bytes for text and property parts, keyed by part path, filled
+    /// through [`Container::replace_part`] and folded in on encode.
     replacements: HashMap<String, Bytes>,
     /// Indices into `cells` of the cells a redaction actually changed, so encode
     /// rewrites only those, leaving unedited shared-string cells shared.
@@ -84,12 +88,14 @@ impl XlsxHandler {
         archive: Bytes,
         cells: Vec<XlsxCell>,
         text_parts: Vec<(String, Bytes)>,
+        doc_props: Vec<(String, Bytes)>,
     ) -> Self {
         Self {
             archive,
             cells,
             cursor: 0,
             text_parts,
+            doc_props,
             replacements: HashMap::new(),
             changed: BTreeSet::new(),
         }
@@ -199,7 +205,7 @@ impl Handler<Tabular> for XlsxHandler {
             .collect();
         let bytes = Xlsx::open(&self.archive)
             .and_then(|xlsx| xlsx.rewrite_with_parts(&edits, &part_edits))
-            .map_err(xlsx_error)?;
+            .map_err(crate::handler::office::office_error)?;
         Ok(ContentData::new(Bytes::from(bytes)))
     }
 
@@ -265,23 +271,30 @@ impl Container for XlsxHandler {
     fn parts(&self) -> Vec<Part> {
         // Surface every non-cell text part (comments, drawings, charts) as an
         // `xml`-hinted blob the orchestrator decodes with the markup pipeline.
-        self.text_parts
-            .iter()
-            .map(|(path, bytes)| Part {
-                id: LocalId::new(path.clone()),
-                bytes: bytes.clone(),
-                hint: "xml".to_owned(),
-            })
-            .collect()
+        let text = self.text_parts.iter().map(|(path, bytes)| Part {
+            id: LocalId::new(path.clone()),
+            bytes: bytes.clone(),
+            hint: "xml".to_owned(),
+        });
+        // Plus each document-property part, decoded as the metadata modality.
+        let props = self.doc_props.iter().map(|(path, bytes)| Part {
+            id: LocalId::new(path.clone()),
+            bytes: bytes.clone(),
+            hint: crate::handler::docprops_hint().to_owned(),
+        });
+        text.chain(props).collect()
     }
 
     fn replace_part(&mut self, id: &LocalId, bytes: Bytes) -> Result<()> {
-        // Only a part the workbook actually surfaced can be replaced, so a caller
-        // can't smuggle bytes into a cell or structure part through this surface.
-        if !self.text_parts.iter().any(|(path, _)| path == id.as_str()) {
+        // Only a part the workbook actually surfaced, a text part or a property
+        // part, can be replaced, so a caller can't smuggle bytes into a cell or
+        // structure part through this surface.
+        let is_text = self.text_parts.iter().any(|(path, _)| path == id.as_str());
+        let is_property = self.doc_props.iter().any(|(path, _)| path == id.as_str());
+        if !is_text && !is_property {
             return Err(Error::new(
                 ErrorKind::MalformedInput,
-                format!("xlsx replace_part: `{id}` is not a text-bearing part"),
+                format!("xlsx replace_part: `{id}` is not a text-bearing or property part"),
             ));
         }
         self.replacements.insert(id.as_str().to_owned(), bytes);
@@ -330,19 +343,6 @@ impl DataWriter<Tabular> for XlsxHandler {
         }
         Ok(())
     }
-}
-
-/// Map an [`elide_office`] error into the codec's error type.
-pub(crate) fn xlsx_error(err: elide_office::Error) -> Error {
-    use elide_office::ErrorKind as OfficeKind;
-    let kind = match err.kind() {
-        OfficeKind::InvalidArchive | OfficeKind::InvalidPackage | OfficeKind::InvalidXml => {
-            ErrorKind::MalformedInput
-        }
-        OfficeKind::UnsafeRewrite => ErrorKind::Processing,
-        _ => ErrorKind::Processing,
-    };
-    Error::new(kind, err.to_string())
 }
 
 #[cfg(test)]

@@ -45,6 +45,7 @@ schema = [
 image = ["elide-core/image"]
 audio = ["elide-core/audio"]
 tabular = ["elide-core/tabular"]
+metadata = ["elide-core/metadata"]
 
 ## Resource-usage accounting: carry the per-recognizer / per-enricher usage a
 ## document's analysis incurred on the [`Report`]. Off by default.
@@ -72,12 +73,21 @@ uuid = { workspace = true, features = [] }
 schemars = { workspace = true, features = [], optional = true }
 
 [dev-dependencies]
+# Internal crates
+elide-codec = { workspace = true, features = ["serde", "png", "jpeg"] }
+elide-image = { workspace = true, features = ["exif", "jpeg", "png"] }
+elide-operator = { workspace = true, features = ["image", "metadata"] }
+
 # (De)serialization
 serde_json = { workspace = true, features = [] }
 
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["macros", "rt"] }
 async-trait = { workspace = true, features = [] }
+
+# Image processing
+image = { workspace = true, features = [] }
+little_exif = { workspace = true, features = [] }
 
 # Templating & schema
 jsonschema = { workspace = true, features = [] }

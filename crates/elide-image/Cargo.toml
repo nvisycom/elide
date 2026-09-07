@@ -1,0 +1,73 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "elide-image"
+description = "Raster image decode/encode, EXIF metadata read and strip, and pixel-region redaction: bytes in, bytes out"
+keywords = ["image", "exif", "metadata", "redaction", "privacy"]
+categories = ["multimedia::images", "computer-vision"]
+readme = "README.md"
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+
+[features]
+## No default features: bytes-in/bytes-out, no format enabled until asked.
+default = []
+
+## The JPEG format: decode/encode and lossless metadata strip.
+jpeg = ["image/jpeg"]
+
+## The PNG format: decode/encode and lossless metadata strip.
+png = ["image/png"]
+
+## EXIF metadata: read the privacy-relevant fields, strip them, and surface each
+## as an `Entity<Metadata>` so a stripped field flows through the same
+## detect/audit pipeline as a redacted text span. Pulls in `little_exif`,
+## elide-core's `metadata` modality, and the recognizer's async-trait; a
+## bytes-only consumer (pixel decode without metadata) needn't enable it.
+exif = ["dep:little_exif", "dep:async-trait", "elide-core/metadata"]
+
+## Expose `test_util`: build small in-memory image fixtures (a JPEG carrying a
+## GPS EXIF tag) and inspect them, so a downstream crate can exercise the EXIF
+## path without depending on `image`/`little_exif` itself. Implies `exif`.
+test-util = ["exif", "jpeg"]
+
+## Derive `serde::{Serialize, Deserialize}` on the metadata model, so a caller
+## can ship a metadata read across a boundary. Implies the same on elide-core's
+## image types the engine speaks in.
+serde = ["dep:serde", "elide-core/serde"]
+
+[dependencies]
+# Internal crates
+elide-core = { workspace = true, features = ["image"] }
+
+# (De)serialization
+serde = { workspace = true, features = ["derive"], optional = true }
+
+# Primitive datatypes
+bytes = { workspace = true, features = [] }
+
+# Async runtime & parallelism
+async-trait = { workspace = true, features = [], optional = true }
+
+# Image processing
+image = { workspace = true, features = [] }
+imageproc = { workspace = true, features = ["rayon"] }
+little_exif = { workspace = true, features = [], optional = true }
+
+[dev-dependencies]
+# (De)serialization
+serde_json = { workspace = true, features = [] }

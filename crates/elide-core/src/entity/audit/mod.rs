@@ -13,7 +13,8 @@ use serde::{Deserialize, Serialize};
 pub use self::attribution::{Attribution, CitedAttribution, FreeformAttribution};
 pub use self::event::{
     AuditEvent, AuditKind, Calibration, Conflict, Contested, Deduplication, Manual, ManualIntent,
-    Model, ModelEvent, Pattern, PatternEvent, Redaction, Refinement, Selection,
+    Metadata, MetadataEvent, Model, ModelEvent, Pattern, PatternEvent, Redaction, Refinement,
+    Selection,
 };
 pub use self::hash::AuditHash;
 pub use self::rule_match::RuleMatch;

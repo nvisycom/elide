@@ -32,6 +32,8 @@ use std::path::Path;
 pub mod audio;
 #[cfg(feature = "image")]
 pub mod image;
+#[cfg(feature = "metadata")]
+pub mod metadata;
 #[cfg(feature = "tabular")]
 pub mod tabular;
 pub mod text;

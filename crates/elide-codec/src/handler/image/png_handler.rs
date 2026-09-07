@@ -10,5 +10,4 @@ impl_image_handler!(
     format_id = "elide.image.png",
     extensions = ["png"],
     content_types = ["image/png"],
-    image_format = image::ImageFormat::Png,
 );

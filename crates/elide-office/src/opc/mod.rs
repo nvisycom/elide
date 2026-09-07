@@ -12,6 +12,7 @@
 mod block;
 mod offset;
 mod part;
+pub mod props;
 mod store;
 #[cfg(feature = "test-util")]
 pub mod test_util;
@@ -272,11 +273,12 @@ impl<C: PartClassifier> Package<C> {
                     pr.part
                 )));
             };
-            // A whole-part replacement may only overwrite a redactable part, a
-            // binary embedding, or a text part redacted out of band. Refusing a
-            // `Structure` part closes the hole where redacted bytes could
-            // overwrite styles, the theme, or the content-types manifest.
-            if part.role() == PartRole::Structure {
+            // A whole-part replacement may only overwrite a part whose role
+            // admits it: a binary embedding or a document-property part. Refusing
+            // every other role closes the hole where redacted bytes could
+            // overwrite styles, the theme, the content-types manifest, or splice
+            // a text part out of band.
+            if !part.role().is_whole_part_replaceable() {
                 return Err(Error::unsafe_rewrite(format!(
                     "part replacement targets non-redactable part `{}`",
                     pr.part

@@ -7,6 +7,8 @@ use elide_core::modality::Modality;
 use elide_core::modality::audio::{Audio, AudioReplacement};
 #[cfg(feature = "image")]
 use elide_core::modality::image::{Image, ImageReplacement};
+#[cfg(feature = "metadata")]
+use elide_core::modality::metadata::{Metadata, MetadataReplacement};
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextReplacement};
@@ -109,5 +111,25 @@ impl Operator<Image> for Erase {
         _data: &<Image as Modality>::Data,
     ) -> Result<ImageReplacement> {
         Ok(ImageReplacement::Removed)
+    }
+}
+
+#[cfg(feature = "metadata")]
+#[async_trait::async_trait]
+impl Operator<Metadata> for Erase {
+    fn id(&self) -> OperatorId {
+        Erase::id()
+    }
+
+    fn leak_profile(&self) -> LeakProfile {
+        LeakProfile::Irrecoverable
+    }
+
+    async fn anonymize(
+        &self,
+        _entity: &Entity<Metadata>,
+        _data: &<Metadata as Modality>::Data,
+    ) -> Result<MetadataReplacement> {
+        Ok(MetadataReplacement::Removed)
     }
 }

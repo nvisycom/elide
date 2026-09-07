@@ -36,6 +36,8 @@ audio = ["elide-core/audio"]
 image = ["elide-core/image"]
 ## The `tabular` modality operators (`DropRow`, `DropColumn`).
 tabular = ["elide-core/tabular"]
+## The `metadata` modality: `Erase` removes a metadata field.
+metadata = ["elide-core/metadata"]
 
 ## The one-way `Sha2Hash` operator (SHA-256 / SHA-512).
 sha2 = ["dep:sha2", "dep:hex"]

@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 
 pub use self::apply::{Manual, ManualIntent, Redaction, Selection};
 pub use self::kind::AuditKind;
-pub use self::recognition::{Model, ModelEvent, Pattern, PatternEvent};
+pub use self::recognition::{Metadata, MetadataEvent, Model, ModelEvent, Pattern, PatternEvent};
 pub use self::reconcile::{Calibration, Conflict, Contested, Deduplication, Refinement};
 use super::AuditHash;
 use super::hash::AuditHasher;
@@ -195,6 +195,19 @@ impl<M: Modality> AuditEvent<M> {
         Self::new(source, confidence, Model { location, model })
     }
 
+    /// Metadata-field detection: the `source` reader surfaced a named field at
+    /// `location` as a redaction subject. Unlike [`pattern`](Self::pattern) /
+    /// [`model`](Self::model), a metadata field is present rather than matched,
+    /// so it carries its own event kind.
+    pub fn metadata(
+        source: impl Into<HipStr<'static>>,
+        confidence: Confidence,
+        location: M::Location,
+        metadata: MetadataEvent,
+    ) -> Self {
+        Self::new(source, confidence, Metadata { location, metadata })
+    }
+
     /// Deduplication (fusion) event combining several detections. Its
     /// `confidence` is the pooled score of the fused entities; the `source` is
     /// the fusion strategy's name.
@@ -298,9 +311,12 @@ impl<M: Modality> AuditEvent<M> {
         )
     }
 
-    /// Whether this event is a recognition (pattern or model).
+    /// Whether this event is a recognition (pattern, model, or metadata field).
     pub fn is_recognition(&self) -> bool {
-        matches!(self.kind, AuditKind::Pattern(_) | AuditKind::Model(_))
+        matches!(
+            self.kind,
+            AuditKind::Pattern(_) | AuditKind::Model(_) | AuditKind::Metadata(_)
+        )
     }
 
     /// The events this one follows, by their [`hash`](Self::hash): none for a

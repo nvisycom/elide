@@ -5,7 +5,7 @@ use elide_core::Result;
 use elide_core::modality::tabular::Tabular;
 use elide_office::xlsx::Xlsx;
 
-use super::xlsx_handler::{XlsxCell, XlsxHandler, xlsx_error};
+use super::xlsx_handler::{XlsxCell, XlsxHandler};
 use crate::Loader;
 use crate::content::ContentData;
 
@@ -19,10 +19,10 @@ impl Loader<Tabular> for XlsxLoader {
 
     async fn decode(&self, content: ContentData) -> Result<XlsxHandler> {
         let archive = content.to_bytes();
-        let workbook = Xlsx::open(&archive).map_err(xlsx_error)?;
+        let workbook = Xlsx::open(&archive).map_err(crate::handler::office::office_error)?;
         let cells = workbook
             .extract()
-            .map_err(xlsx_error)?
+            .map_err(crate::handler::office::office_error)?
             .into_iter()
             .map(|cell| XlsxCell {
                 sheet: cell.sheet.as_str().to_owned(),
@@ -32,6 +32,8 @@ impl Loader<Tabular> for XlsxLoader {
             })
             .collect();
         let text_parts = workbook.text_parts();
-        Ok(XlsxHandler::new(archive, cells, text_parts))
+        let doc_props =
+            crate::handler::office::props::read_doc_props(|path| workbook.part_bytes(path));
+        Ok(XlsxHandler::new(archive, cells, text_parts, doc_props))
     }
 }
