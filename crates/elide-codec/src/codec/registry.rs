@@ -108,8 +108,8 @@ impl FormatRegistry {
         registry.add_format(crate::handler::png_format());
         #[cfg(feature = "jpeg")]
         registry.add_format(crate::handler::jpeg_format());
-        #[cfg(feature = "tiff")]
-        registry.add_format(crate::handler::tiff_format());
+        #[cfg(any(feature = "png", feature = "jpeg"))]
+        registry.add_format(crate::handler::exif_format());
         #[cfg(feature = "wav")]
         registry.add_format(crate::handler::wav_format());
         #[cfg(feature = "mp3")]
@@ -120,6 +120,8 @@ impl FormatRegistry {
         registry.add_format(crate::handler::xlsx_format());
         #[cfg(feature = "docx")]
         registry.add_format(crate::handler::docx_format());
+        #[cfg(feature = "internal_office")]
+        registry.add_format(crate::handler::docprops_format());
         #[cfg(feature = "pptx")]
         registry.add_format(crate::handler::pptx_format());
         #[cfg(feature = "pdf")]

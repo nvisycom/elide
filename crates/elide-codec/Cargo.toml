@@ -53,8 +53,8 @@ document = ["docx", "pptx", "pdf", "rtf"]
 ## standalone `elide-office` crate; this codec adapts it to the `Handler`
 ## contract (via the shared `ExtractHandler`, hence `internal_extract`).
 ## Embedded media surfaces through `elide-office`'s typed extraction.
-docx = ["internal_document", "internal_extract", "dep:elide-office"]
-pptx = ["internal_document", "internal_extract", "dep:elide-office"]
+docx = ["internal_document", "internal_extract", "dep:elide-office", "internal_office"]
+pptx = ["internal_document", "internal_extract", "dep:elide-office", "internal_office"]
 
 ## PDF: born-digital text extraction and redaction come from the standalone
 ## `elide-pdf` crate; this codec adapts it to the `Handler` contract.
@@ -74,13 +74,13 @@ pdf-render = ["pdf", "internal_image", "elide-pdf/render"]
 rtf = ["internal_document"]
 
 ## The image formats.
-image = ["png", "jpeg", "tiff"]
+image = ["png", "jpeg"]
 
-## Individual image formats (all share the `image` + `imageproc` stack
-## pulled in by `internal_image`).
-png = ["internal_image"]
-jpeg = ["internal_image"]
-tiff = ["internal_image"]
+## Individual image formats (all share the `elide-image` engine pulled in
+## by `internal_image`). Each also enables its codec inside `elide-image`,
+## whose own formats are off by default, so `ImageBuffer::open` can decode it.
+png = ["internal_image", "elide-image/png"]
+jpeg = ["internal_image", "elide-image/jpeg"]
 
 ## The audio formats.
 audio = ["wav", "mp3"]
@@ -101,7 +101,7 @@ tabular = ["csv", "xlsx"]
 csv = ["internal_tabular", "dep:csv"]
 ## XLSX: an OOXML spreadsheet; cells redact like text via the shared
 ## tabular surface, backed by the `elide-office` package engine.
-xlsx = ["internal_tabular", "xml", "dep:elide-office"]
+xlsx = ["internal_tabular", "xml", "dep:elide-office", "internal_office"]
 
 # Internal markers: set automatically by any format feature above. Code
 # uses `#[cfg(feature = "internal_image")]` to mean "any image format is
@@ -112,7 +112,7 @@ xlsx = ["internal_tabular", "xml", "dep:elide-office"]
 # is already a dependency (i.e. the `pdf` feature is on) — so an image build
 # without `pdf` doesn't force `elide-pdf` in, and a text-only `pdf` build
 # doesn't compile the image stack.
-internal_image = ["elide-core/image", "dep:image", "dep:imageproc", "elide-pdf?/image"]
+internal_image = ["elide-core/image", "elide-core/metadata", "dep:elide-image", "elide-image/exif", "dep:image", "elide-pdf?/image"]
 internal_audio = ["elide-core/audio"]
 internal_tabular = ["elide-core/tabular", "internal_text"]
 internal_text = []
@@ -126,11 +126,17 @@ internal_extract = ["internal_text"]
 # (so `docx` also enables `internal_extract`), while PDF uses its own
 # bespoke handler — and each format's parsing lives in its dedicated crate.
 internal_document = []
+# The shared OOXML codec layer (docx, pptx, xlsx): the generic package facade,
+# the shared encoder/loader helpers, the `office_error` mapper, and the
+# `Metadata`-modality `#docprops` sub-part handler + recognizer. Pulls
+# elide-core's `metadata` modality for the docProps path.
+internal_office = ["elide-core/metadata"]
 
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }
 elide-office = { workspace = true, features = [], optional = true }
+elide-image = { workspace = true, features = [], optional = true }
 elide-pdf = { workspace = true, features = [], optional = true }
 
 # (De)serialization
@@ -155,7 +161,6 @@ quick-xml = { workspace = true, features = [], optional = true }
 
 # Image processing
 image = { workspace = true, features = [], optional = true }
-imageproc = { workspace = true, features = [], optional = true }
 
 # Audio processing
 hound = { workspace = true, features = [], optional = true }
@@ -171,3 +176,6 @@ tokio = { workspace = true, features = ["macros", "rt"] }
 
 # Markup parsing
 lopdf = { workspace = true, default-features = false }
+
+# Image processing
+little_exif = { workspace = true, features = [] }

@@ -41,6 +41,9 @@ pub use elide_core::modality::audio::Audio;
 #[cfg(feature = "image")]
 #[doc(no_inline)]
 pub use elide_core::modality::image::Image;
+#[cfg(feature = "metadata")]
+#[doc(no_inline)]
+pub use elide_core::modality::metadata::Metadata;
 #[cfg(feature = "tabular")]
 #[doc(no_inline)]
 pub use elide_core::modality::tabular::Tabular;

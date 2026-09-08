@@ -1,21 +1,24 @@
 //! [`Docx`]: an opened DOCX package, extracted and rewritten in place over the
 //! shared [`opc`](crate::opc) engine.
+//!
+//! A WordprocessingML document is text-only to the engine, so it is just the
+//! shared [`OoxmlPackage`] facade specialized to the Word part classifier; only
+//! the classifier and the required body part are Word-specific.
 
 mod kind;
 
 pub use self::kind::PartKind;
-use crate::error::{Error, Result};
-use crate::opc::{
-    Extraction, Package, PartClassifier, PartPath, PartReplacement, PartRole, Replacement,
-};
+use crate::ooxml::{OoxmlFormat, OoxmlPackage};
+use crate::opc::{PartClassifier, PartPath, PartRole};
 
-/// The Word part classifier: maps a package path to its Word [`PartKind`], then
-/// down to the neutral [`PartRole`] the engine acts on, and marks the parts
-/// whose bytes a binary replacement must never overwrite.
+/// The Word part classifier and format seam: maps a package path to its Word
+/// [`PartKind`], then down to the neutral [`PartRole`] the engine acts on, marks
+/// the parts whose bytes a binary replacement must never overwrite, and names
+/// the body part every document must have.
 #[derive(Debug, Clone, Copy)]
-struct WordClassifier;
+pub struct WordFormat;
 
-impl PartClassifier for WordClassifier {
+impl PartClassifier for WordFormat {
     fn role(&self, path: &PartPath) -> PartRole {
         PartKind::of(path).role()
     }
@@ -28,83 +31,19 @@ impl PartClassifier for WordClassifier {
     }
 }
 
+impl OoxmlFormat for WordFormat {
+    const ROOT_LABEL: &'static str = "body";
+    const ROOT_PART: &'static str = "word/document.xml";
+
+    fn classifier() -> Self {
+        Self
+    }
+}
+
 /// An opened DOCX package: every part read once and classified, ready to
-/// [`extract`](Docx::extract) the text of every text-bearing part or
-/// [`rewrite`](Docx::rewrite) them back to bytes.
+/// [`extract`](OoxmlPackage::extract) the text of every text-bearing part or
+/// [`rewrite`](OoxmlPackage::rewrite) them back to bytes.
 ///
 /// Open a document once and reuse it for both operations; the package is parsed
 /// a single time.
-#[derive(Debug, Clone)]
-pub struct Docx {
-    package: Package<WordClassifier>,
-}
-
-impl Docx {
-    /// Open a DOCX from its bytes, reading and classifying every part.
-    ///
-    /// # Errors
-    ///
-    /// - [`ErrorKind::InvalidArchive`](crate::ErrorKind::InvalidArchive) if the
-    ///   bytes are not a zip;
-    /// - [`ErrorKind::InvalidPackage`](crate::ErrorKind::InvalidPackage) if the
-    ///   body part is missing.
-    pub fn open(document: &[u8]) -> Result<Self> {
-        let package = Package::open(document, WordClassifier)?;
-        // A WordprocessingML document must have a body part; without it the
-        // bytes are a zip but not a usable DOCX.
-        if !package.contains_part("word/document.xml") {
-            return Err(Error::invalid_package(
-                "missing body part `word/document.xml`",
-            ));
-        }
-        Ok(Self { package })
-    }
-
-    /// Extract the redactable text and embedded images of the document.
-    ///
-    /// Each [`Block`](crate::opc::Block) is addressed by its part and an exact
-    /// byte span into that part's XML; each [`Embedding`](crate::opc::Embedding)
-    /// by its part. Metadata and structure parts are carried through untouched.
-    /// Extraction is partial-success: a text part that cannot be parsed is
-    /// recorded in [`issues`](Extraction::issues) rather than failing the whole
-    /// document.
-    pub fn extract(&self) -> Extraction {
-        self.package.extract()
-    }
-
-    /// Rewrite text `replacements` across their parts and re-pack every other
-    /// part byte-for-byte.
-    ///
-    /// See [`rewrite_with_parts`](Docx::rewrite_with_parts) to also replace
-    /// binary parts (e.g. redact an embedded image).
-    ///
-    /// **Fail-closed:** an out-of-bounds, overlapping, or mid-character
-    /// replacement, or one naming a part not in the package, refuses the whole
-    /// rewrite with [`ErrorKind::UnsafeRewrite`](crate::ErrorKind::UnsafeRewrite)
-    /// rather than emitting a partially-redacted document.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::UnsafeRewrite`](crate::ErrorKind::UnsafeRewrite) if a
-    /// replacement can't be applied.
-    pub fn rewrite(&self, replacements: &[Replacement]) -> Result<Vec<u8>> {
-        self.package.rewrite(replacements)
-    }
-
-    /// Rewrite text `replacements` *and* replace binary `parts` (each a part
-    /// path mapped to its new bytes).
-    ///
-    /// A [`PartReplacement`] naming a part not in the package refuses the
-    /// rewrite; the text rules match [`rewrite`](Docx::rewrite).
-    ///
-    /// # Errors
-    ///
-    /// As [`rewrite`](Docx::rewrite).
-    pub fn rewrite_with_parts(
-        &self,
-        replacements: &[Replacement],
-        parts: &[PartReplacement],
-    ) -> Result<Vec<u8>> {
-        self.package.rewrite_with_parts(replacements, parts)
-    }
-}
+pub type Docx = OoxmlPackage<WordFormat>;

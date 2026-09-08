@@ -101,3 +101,32 @@ pub use elide_ner as ner;
 #[cfg_attr(docsrs, doc(cfg(feature = "pattern")))]
 #[doc(inline)]
 pub use elide_pattern as pattern;
+
+/// EXIF metadata recognition: surface an image's privacy-relevant EXIF fields
+/// as `Entity<Metadata>` values.
+///
+/// Wire it into a `Metadata` pipeline to strip an image's metadata alongside its
+/// pixels: `.with_modality::<Metadata>(Analyzer::new().with_recognizer(exif::ExifRecognizer),
+/// Anonymizer::new().with(Rule::fallback(Erase)))`.
+#[cfg(any(feature = "codec-png", feature = "codec-jpeg"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "codec-png", feature = "codec-jpeg"))))]
+pub mod exif {
+    #[doc(inline)]
+    pub use elide_codec::handler::ExifRecognizer;
+}
+
+/// OOXML document-property recognition: surface a Word/PowerPoint/Excel
+/// document's `docProps` fields (author, last editor, company, timestamps) as
+/// `Entity<Metadata>`.
+///
+/// Wire it into a `Metadata` pipeline to strip document properties alongside the
+/// body text.
+#[cfg(any(feature = "codec-docx", feature = "codec-pptx", feature = "codec-xlsx"))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(any(feature = "codec-docx", feature = "codec-pptx", feature = "codec-xlsx")))
+)]
+pub mod docprops {
+    #[doc(inline)]
+    pub use elide_codec::handler::DocPropsRecognizer;
+}

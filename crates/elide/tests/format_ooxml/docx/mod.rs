@@ -11,6 +11,7 @@
 // Each scenario module uses a different subset of these.
 #![allow(dead_code)]
 
+mod docprops;
 mod rebuilt_report;
 mod redaction;
 

@@ -1,53 +1,29 @@
 //! `impl_image_handler!`: generate a per-format image handler + loader +
 //! `format()` constructor.
 //!
-//! PNG, JPEG, and TIFF differ only in their [`FormatId`], lookup keys,
-//! and the [`image::ImageFormat`] used to re-encode; everything else (the
-//! decoded [`DynamicImage`] they hold, the single-chunk streaming, the
-//! crop-based read, the redaction pass) is identical. The macro stamps
-//! out that shared body so the per-format files stay declarative.
+//! PNG and JPEG differ only in their [`FormatId`], lookup keys, and
+//! content types; everything else (holding a
+//! decoded [`ImageBuffer`], the single-chunk streaming, the crop-based read, the
+//! redaction pass) is identical and delegates to the standalone
+//! [`elide_image`] engine. The macro stamps out that shared body so the
+//! per-format files stay declarative.
 //!
 //! [`FormatId`]: crate::FormatId
-
-/// Encode a [`DynamicImage`] to bytes in `fmt`.
-///
-/// Shared by every generated handler's `encode`/`read_next`/`read_at`, so it
-/// is gated on the same set of formats as [`impl_image_handler!`], a build
-/// that pulls `internal_image` without any concrete image format (e.g.
-/// `pdf-render`, which only decodes/redacts embedded images) never encodes.
-///
-/// [`DynamicImage`]: image::DynamicImage
-#[cfg(any(feature = "png", feature = "jpeg", feature = "tiff"))]
-pub(crate) fn encode_image(
-    img: &image::DynamicImage,
-    fmt: image::ImageFormat,
-) -> elide_core::Result<bytes::Bytes> {
-    use std::io::Cursor;
-
-    let mut buf = Cursor::new(Vec::new());
-    img.write_to(&mut buf, fmt).map_err(|e| {
-        elide_core::Error::new(
-            elide_core::ErrorKind::Processing,
-            format!("image encode failed: {e}"),
-        )
-    })?;
-    Ok(bytes::Bytes::from(buf.into_inner()))
-}
+//! [`ImageBuffer`]: elide_image::ImageBuffer
 
 /// Stamp out the handler, loader, and `format()` for one image format.
 ///
-/// Only defined when at least one image format is enabled; `internal_image`
-/// can also be pulled on its own (e.g. by `pdf-render`, which decodes and
-/// redacts a PDF's embedded images without instantiating a format handler).
-#[cfg(any(feature = "png", feature = "jpeg", feature = "tiff"))]
+/// Only defined when at least one image format is enabled; `internal_image` can
+/// also be pulled on its own (e.g. by `pdf-render`, which decodes and redacts a
+/// PDF's embedded images without instantiating a format handler).
+#[cfg(any(feature = "png", feature = "jpeg"))]
 macro_rules! impl_image_handler {
     (
         handler = $handler:ident,
         loader = $loader:ident,
         format_id = $format_id:literal,
         extensions = [$($ext:literal),* $(,)?],
-        content_types = [$($mime:literal),* $(,)?],
-        image_format = $img_fmt:expr $(,)?
+        content_types = [$($mime:literal),* $(,)?] $(,)?
     ) => {
         /// Stable [`FormatId`] for this image codec.
         ///
@@ -66,22 +42,25 @@ macro_rules! impl_image_handler {
 
         #[doc = concat!("Handler for a decoded ", $format_id, " image.")]
         ///
-        /// Holds the whole image in memory as a
-        /// [`DynamicImage`]; redaction paints over
-        /// regions in place and `encode` re-serializes to the original
-        /// format.
+        /// Holds the whole image as an [`ImageBuffer`]; redaction paints over
+        /// regions in place and `encode` re-serializes to the original format.
+        /// All pixel work delegates to the [`elide_image`] engine.
         ///
-        /// [`DynamicImage`]: image::DynamicImage
+        /// [`ImageBuffer`]: elide_image::ImageBuffer
         #[derive(Debug)]
         pub(crate) struct $handler {
-            image: ::image::DynamicImage,
+            buffer: ::elide_image::ImageBuffer,
             yielded: bool,
+            /// The metadata-stripped image bytes folded in from the `#exif`
+            /// sub-part, if its metadata was redacted. `encode` lays the pixel
+            /// redactions over these; `None` keeps the original metadata.
+            metadata: ::std::option::Option<::bytes::Bytes>,
         }
 
         impl $handler {
             /// Wrap a decoded image; the streaming cursor starts unyielded.
-            pub(crate) fn new(image: ::image::DynamicImage) -> Self {
-                Self { image, yielded: false }
+            pub(crate) fn new(buffer: ::elide_image::ImageBuffer) -> Self {
+                Self { buffer, yielded: false, metadata: ::std::option::Option::None }
             }
         }
 
@@ -92,8 +71,20 @@ macro_rules! impl_image_handler {
             }
 
             fn encode(&self) -> ::elide_core::Result<crate::content::ContentData> {
-                let bytes = $crate::handler::image::macros::encode_image(&self.image, $img_fmt)?;
+                // Compose the two tracks into one image: if the `#exif` sub-part
+                // edited the metadata, lay the pixel redactions over its stripped
+                // container; otherwise re-encode pixels keeping the metadata.
+                let bytes = match &self.metadata {
+                    ::std::option::Option::Some(container) =>
+                        self.buffer.encode_over_metadata(container)?,
+                    ::std::option::Option::None =>
+                        self.buffer.encode(::elide_image::ExifPolicy::Keep)?,
+                };
                 Ok(crate::content::ContentData::new(bytes))
+            }
+
+            fn as_container_mut(&mut self) -> ::std::option::Option<&mut dyn crate::Container> {
+                ::std::option::Option::Some(self)
             }
 
             async fn read_next(
@@ -101,21 +92,18 @@ macro_rules! impl_image_handler {
             ) -> ::elide_core::Result<
                 ::std::option::Option<::elide_core::modality::Chunk<::elide_core::modality::image::Image>>,
             > {
-                use ::image::GenericImageView;
-
                 if self.yielded {
                     return Ok(None);
                 }
-                let (w, h) = self.image.dimensions();
+                let dims = self.buffer.dimensions();
                 let bbox = ::elide_core::primitive::BoundingBox::from_origin_size(
                     ::elide_core::primitive::Point::new(0.0, 0.0),
-                    w as f64,
-                    h as f64,
+                    dims.width as f64,
+                    dims.height as f64,
                 );
-                let bytes = $crate::handler::image::macros::encode_image(&self.image, $img_fmt)?;
                 let data = ::elide_core::modality::image::ImageData::new(
-                    bytes,
-                    ::elide_core::primitive::Dimensions::new(w, h),
+                    self.buffer.encode(::elide_image::ExifPolicy::Keep)?,
+                    dims,
                 );
                 self.yielded = true;
                 Ok(Some(::elide_core::modality::Chunk {
@@ -134,21 +122,14 @@ macro_rules! impl_image_handler {
             ) -> ::elide_core::Result<
                 ::std::option::Option<::elide_core::modality::image::ImageData>,
             > {
-                use ::image::GenericImageView;
-
-                let (img_w, img_h) = self.image.dimensions();
-                let dims = ::elide_core::primitive::Dimensions::new(img_w, img_h);
+                let dims = self.buffer.dimensions();
                 let Some(region) = location.bounding_box.to_pixels(dims) else {
                     return Ok(None);
                 };
-                let cropped =
-                    self.image
-                        .crop_imm(region.x, region.y, region.width, region.height);
-                let bytes = $crate::handler::image::macros::encode_image(&cropped, $img_fmt)?;
-                Ok(Some(::elide_core::modality::image::ImageData::new(
-                    bytes,
-                    region.dimensions(),
-                )))
+                let region_dims = region.dimensions();
+                Ok(self.buffer.crop(region)?.map(|bytes| {
+                    ::elide_core::modality::image::ImageData::new(bytes, region_dims)
+                }))
             }
         }
 
@@ -158,12 +139,11 @@ macro_rules! impl_image_handler {
                 &mut self,
                 redactions: ::elide_core::redaction::Redactions<::elide_core::modality::image::Image>,
             ) -> ::elide_core::Result<()> {
+                let dims = self.buffer.dimensions();
                 for (location, replacement) in redactions.into_iter() {
-                    $crate::handler::image::redact::apply(
-                        &mut self.image,
-                        &replacement,
-                        &location.bounding_box,
-                    );
+                    if let Some(region) = location.bounding_box.to_pixels(dims) {
+                        self.buffer.redact(region, &replacement);
+                    }
                 }
                 Ok(())
             }
@@ -182,17 +162,52 @@ macro_rules! impl_image_handler {
                 &self,
                 content: crate::content::ContentData,
             ) -> ::elide_core::Result<$handler> {
-                let image = ::image::load_from_memory(content.as_bytes()).map_err(|e| {
-                    ::elide_core::Error::new(
+                let buffer =
+                    ::elide_image::ImageBuffer::open(content.as_bytes())?;
+                Ok($handler::new(buffer))
+            }
+        }
+
+        impl crate::Container for $handler {
+            fn parts(&self) -> ::std::vec::Vec<crate::Part> {
+                // One sub-part: the image's EXIF metadata track, decoded as the
+                // metadata modality. Its bytes are the whole image; the metadata
+                // handler reads the fields out of them.
+                ::std::vec![crate::Part {
+                    id: crate::LocalId::new(crate::handler::image::macros::EXIF_PART_ID),
+                    bytes: self.buffer.source_bytes(),
+                    hint: crate::handler::image::macros::EXIF_PART_HINT.to_owned(),
+                }]
+            }
+
+            fn replace_part(
+                &mut self,
+                id: &crate::LocalId,
+                bytes: ::bytes::Bytes,
+            ) -> ::elide_core::Result<()> {
+                if id.as_str() != crate::handler::image::macros::EXIF_PART_ID {
+                    return ::std::result::Result::Err(::elide_core::Error::new(
                         ::elide_core::ErrorKind::MalformedInput,
-                        format!(concat!($format_id, " decode failed: {}"), e),
-                    )
-                })?;
-                Ok($handler::new(image))
+                        ::std::format!("image replace_part: `{id}` is not the `#exif` sub-part"),
+                    ));
+                }
+                // The metadata-stripped image the `#exif` handler produced;
+                // `encode` lays the pixel redactions over it.
+                self.metadata = ::std::option::Option::Some(bytes);
+                ::std::result::Result::Ok(())
             }
         }
     };
 }
 
-#[cfg(any(feature = "png", feature = "jpeg", feature = "tiff"))]
+/// The local id of the image's EXIF metadata sub-part.
+#[cfg(any(feature = "png", feature = "jpeg"))]
+pub(crate) const EXIF_PART_ID: &str = "#exif";
+
+/// The format hint the `#exif` sub-part decodes with — the metadata handler's
+/// registered extension, which the fold resolves it by.
+#[cfg(any(feature = "png", feature = "jpeg"))]
+pub(crate) const EXIF_PART_HINT: &str = super::exif_handler::EXIF_HINT;
+
+#[cfg(any(feature = "png", feature = "jpeg"))]
 pub(crate) use impl_image_handler;

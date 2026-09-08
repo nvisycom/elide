@@ -89,8 +89,13 @@ ocr = ["dep:elide-ocr", "image"]
 
 ## The `audio` modality. Implied by the audio codec formats.
 audio = ["elide-core/audio", "elide-operator/audio", "elide-engine?/audio"]
-## The `image` modality. Implied by the image codec formats.
-image = ["elide-core/image", "elide-operator/image", "elide-engine?/image"]
+## The `image` modality. Implied by the image codec formats. Pulls in the
+## `metadata` modality too: a raster image carries EXIF metadata as a redactable
+## sub-part.
+image = ["elide-core/image", "elide-operator/image", "elide-engine?/image", "metadata"]
+## The `metadata` modality: a document's out-of-band fields (EXIF, document
+## properties) as redaction subjects.
+metadata = ["elide-core/metadata", "elide-operator/metadata", "elide-engine?/metadata"]
 ## The `tabular` modality. Implied by the tabular codec formats.
 tabular = ["elide-core/tabular", "elide-operator/tabular", "elide-redaction/tabular", "elide-engine?/tabular"]
 
@@ -110,7 +115,7 @@ engine = ["dep:elide-engine", "codec", "serde"]
 ## Per-modality format groups (each aggregates its per-format features).
 codec-text = ["codec-txt", "codec-json", "codec-html", "codec-xml"]
 codec-tabular = ["codec-csv", "codec-xlsx"]
-codec-image = ["codec-png", "codec-jpeg", "codec-tiff"]
+codec-image = ["codec-png", "codec-jpeg"]
 codec-audio = ["codec-wav", "codec-mp3"]
 codec-document = ["codec-docx", "codec-pptx", "codec-pdf", "codec-rtf"]
 
@@ -120,19 +125,14 @@ codec-json = ["codec", "elide-codec/json"]
 codec-html = ["codec", "elide-codec/html"]
 codec-xml = ["codec", "elide-codec/xml"]
 codec-csv = ["codec", "tabular", "elide-codec/csv"]
-codec-xlsx = ["codec", "tabular", "codec-xml", "elide-codec/xlsx"]
+codec-xlsx = ["codec", "tabular", "codec-xml", "elide-codec/xlsx", "metadata"]
 codec-png = ["codec", "image", "elide-codec/png"]
 codec-jpeg = ["codec", "image", "elide-codec/jpeg"]
-codec-tiff = ["codec", "image", "elide-codec/tiff"]
 codec-wav = ["codec", "audio", "elide-codec/wav"]
 codec-mp3 = ["codec", "audio", "elide-codec/mp3"]
-codec-docx = ["codec", "elide-codec/docx"]
-codec-pptx = ["codec", "elide-codec/pptx"]
+codec-docx = ["codec", "elide-codec/docx", "metadata"]
+codec-pptx = ["codec", "elide-codec/pptx", "metadata"]
 codec-pdf = ["codec", "elide-codec/pdf"]
-## PDF page rendering for OCR of scanned/image-only PDFs. Requires the native
-## PDFium library present at runtime (see `scripts/install-pdfium.sh`); pulls
-## `pdfium-render` + `rayon` + the image stack. Opt-in on its own — not part of
-## `codec-document` — so the document group stays free of native deps.
 codec-pdf-render = ["codec-pdf", "elide-codec/pdf-render"]
 codec-rtf = ["codec", "elide-codec/rtf"]
 
@@ -187,6 +187,7 @@ async-trait = { workspace = true, features = [] }
 [dev-dependencies]
 # Internal crates
 elide-office = { workspace = true, features = ["test-util"] }
+elide-image = { workspace = true, features = ["test-util"] }
 
 # (De)serialization
 serde = { workspace = true, features = [] }
@@ -241,7 +242,7 @@ required-features = ["codec-csv", "ner", "llm", "lingua-common", "test-utils", "
 
 [[test]]
 name = "format_image"
-required-features = ["codec-png", "codec-jpeg", "codec-tiff", "ocr", "test-utils", "engine", "serde"]
+required-features = ["codec-png", "codec-jpeg", "ocr", "test-utils", "engine", "serde"]
 
 [[test]]
 name = "format_audio"

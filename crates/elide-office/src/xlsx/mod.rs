@@ -23,7 +23,7 @@ use self::sheet::{CellSource, parse_cells};
 use self::strings::{parse_shared_strings, shared_string_items};
 use self::workbook::{Sheet, resolve_sheets};
 use crate::error::{Error, Result};
-use crate::opc::{EmbeddingKind, Package, PartClassifier, PartPath, PartReplacement, PartRole};
+use crate::opc::{Package, PartClassifier, PartPath, PartReplacement, PartRole};
 
 /// The well-known part path of the workbook and its shared-string table.
 const WORKBOOK_PART: &str = "xl/workbook.xml";
@@ -44,8 +44,12 @@ impl PartClassifier for SheetClassifier {
             || is_extra_text_part(path)
         {
             PartRole::ElementText
-        } else if let Some(kind) = embedding_kind(path) {
+        } else if let Some(kind) = path.embedding_under("xl") {
             PartRole::Binary(kind)
+        } else if path.as_str().starts_with("docProps/") {
+            // Document properties carry author/company/timestamps: replaceable
+            // as a whole part, but not text-spliced.
+            PartRole::Property
         } else {
             PartRole::Structure
         }
@@ -83,20 +87,6 @@ fn is_extra_text_part(part: &PartPath) -> bool {
 /// exposes and what [`rewrite_with_parts`](Xlsx::rewrite_with_parts) accepts.
 fn is_surfaced_text_part(part: &PartPath) -> bool {
     is_extra_text_part(part) || part.is_relationships()
-}
-
-/// The [`EmbeddingKind`] of a binary media part, if `part` names one. Excel keeps
-/// images and media under `xl/media/` (classified by extension, so an embedded
-/// audio or video clip is not reported as an image) and embedded objects under
-/// `xl/embeddings/`.
-fn embedding_kind(part: &PartPath) -> Option<EmbeddingKind> {
-    if part.in_dir("xl/media") {
-        Some(EmbeddingKind::from_path(part.as_str()))
-    } else if part.in_dir("xl/embeddings") {
-        Some(EmbeddingKind::Object)
-    } else {
-        None
-    }
 }
 
 /// One text-bearing cell of the workbook: its sheet, its zero-based cell
@@ -249,6 +239,20 @@ impl Xlsx {
         self.rewrite_with_parts(edits, &[])
     }
 
+    /// The raw bytes of the part at `path`, or `None` if the workbook has no
+    /// such part. For a caller parsing a property part (`docProps/*`) before
+    /// deciding what to redact, then feeding edited bytes back through
+    /// [`rewrite_with_parts`](Xlsx::rewrite_with_parts).
+    pub fn part_bytes(&self, path: &str) -> Option<Bytes> {
+        self.package.part_bytes(path)
+    }
+
+    /// Every part path in the workbook, for a caller enumerating the property
+    /// parts it wants to inspect.
+    pub fn part_paths(&self) -> impl Iterator<Item = &PartPath> {
+        self.package.part_paths()
+    }
+
     /// Rewrite cell `edits` *and* replace whole non-cell text parts with
     /// `part_bytes` (each a part path mapped to its already-redacted bytes, e.g. a
     /// comment or drawing part redacted through the markup pipeline), re-packing
@@ -304,12 +308,16 @@ impl Xlsx {
             replacements.push(pruned);
         }
 
-        // Fold in the externally-redacted non-cell text parts. Each must name a
-        // text part the workbook carries and must not collide with a cell part.
+        // Fold in the externally-redacted non-cell parts: a surfaced text part
+        // (comment, drawing, chart) or a document-property part. Each must name a
+        // part the workbook carries and must not collide with a cell part.
         for (part, bytes) in part_bytes {
-            if !is_surfaced_text_part(&PartPath::from(part.clone())) {
+            let path = PartPath::from(part.clone());
+            let is_replaceable =
+                is_surfaced_text_part(&path) || SheetClassifier.role(&path) == PartRole::Property;
+            if !is_replaceable {
                 return Err(Error::unsafe_rewrite(format!(
-                    "part replacement targets non-text part `{part}`"
+                    "part replacement targets non-redactable part `{part}`"
                 )));
             }
             if self.package.part_bytes(part).is_none() {
@@ -548,6 +556,21 @@ mod tests {
         let xlsx = Xlsx::open(SAMPLE).expect("opens");
         assert_eq!(xlsx.sheets.len(), 1);
         assert_eq!(xlsx.sheets[0].name, "in");
+    }
+
+    #[test]
+    fn classifier_maps_docprops_to_the_property_role() {
+        let role = SheetClassifier.role(&PartPath::new("docProps/core.xml"));
+        assert_eq!(role, PartRole::Property);
+        // A worksheet stays text, a structure part stays structure.
+        assert_eq!(
+            SheetClassifier.role(&PartPath::new("xl/worksheets/sheet1.xml")),
+            PartRole::ElementText
+        );
+        assert_eq!(
+            SheetClassifier.role(&PartPath::new("xl/styles.xml")),
+            PartRole::Structure
+        );
     }
 
     #[test]

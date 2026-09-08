@@ -3,4 +3,5 @@
 //! shared helpers live here as the family grows.
 #![allow(dead_code)]
 
+mod jpeg_exif;
 mod png;

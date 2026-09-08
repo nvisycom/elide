@@ -132,8 +132,6 @@ fn part_kind_classifies_from_path() {
     assert_eq!(kind("word/diagrams/data1.xml"), PartKind::Diagram);
     assert_eq!(kind("word/glossary/document.xml"), PartKind::Glossary);
     assert_eq!(kind("word/glossary/header1.xml"), PartKind::Glossary);
-    assert!(PartKind::Chart.is_text());
-    assert!(PartKind::Diagram.is_text());
 }
 
 #[test]

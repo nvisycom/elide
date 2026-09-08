@@ -3,6 +3,7 @@
 #![doc = include_str!("../README.md")]
 
 pub mod docx;
+pub mod ooxml;
 pub mod opc;
 pub mod pptx;
 pub mod xlsx;

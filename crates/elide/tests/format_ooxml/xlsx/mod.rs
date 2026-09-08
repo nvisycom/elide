@@ -12,6 +12,7 @@
 #![allow(dead_code)]
 
 mod comments;
+mod docprops;
 mod redaction;
 
 use crate::support::fixture::Fixture;
