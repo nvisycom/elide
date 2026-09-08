@@ -145,8 +145,12 @@ impl ImageBuffer {
     /// When no redaction has been applied, an EXIF strip edits the source
     /// container losslessly (no pixel recompression) and [`Keep`](ExifPolicy::Keep)
     /// returns the source untouched. When pixels have been redacted, the modified
-    /// image is re-encoded, and [`Keep`](ExifPolicy::Keep) carries the source's
-    /// metadata onto the result (the decode dropped it).
+    /// image is re-encoded (the fresh bytes carry no EXIF), and the source's
+    /// metadata is carried onto the result according to `policy`:
+    /// [`Keep`](ExifPolicy::Keep) transfers all of it,
+    /// [`StripSensitive`](ExifPolicy::StripSensitive) transfers only the
+    /// non-sensitive fields the policy retains (e.g. `Orientation`), and
+    /// [`StripAll`](ExifPolicy::StripAll) transfers none.
     ///
     /// # Errors
     ///
@@ -158,12 +162,24 @@ impl ImageBuffer {
             // Pixels unchanged: act on the source container directly (lossless).
             return Ok(self.exif_source().strip(policy)?.into());
         }
-        // Pixels redacted: re-encode them. The re-encoded bytes carry no EXIF,
-        // so a strip is already satisfied; Keep must carry the source's over.
+        // Pixels redacted: re-encode them. The fresh bytes carry no EXIF, so the
+        // metadata to keep is transferred from the source onto them.
         let encoded = Self::encode_image(&self.inner, self.format)?;
         Ok(match policy {
-            ExifPolicy::StripAll | ExifPolicy::StripSensitive => encoded,
+            // Nothing to carry: the re-encoded bytes already hold no metadata.
+            ExifPolicy::StripAll => encoded,
+            // Transfer everything from the original source.
             ExifPolicy::Keep => self.exif_source().transfer(encoded.into())?.into(),
+            // Transfer only what survives a sensitive strip: apply the strip to
+            // the source container first, then carry its remaining (non-sensitive)
+            // metadata onto the fresh pixels, so benign fields like Orientation
+            // are retained rather than dropped with everything else.
+            ExifPolicy::StripSensitive => {
+                let retained = self.exif_source().strip(ExifPolicy::StripSensitive)?;
+                Source::new(&retained, self.format.to_exif())
+                    .transfer(encoded.into())?
+                    .into()
+            }
         })
     }
 
@@ -470,5 +486,58 @@ mod tests {
         let out = encode_buffer(&buffer);
         assert_eq!(pixel_at(&out, 0, 0), Rgba([0, 0, 0, 255]));
         assert_eq!(pixel_at(&out, 5, 1), Rgba([200, 30, 30, 255]));
+    }
+
+    /// After a pixel redaction, `StripSensitive` must retain benign metadata
+    /// (Orientation) while dropping sensitive fields (GPS) — not throw away all
+    /// EXIF with the re-encode, which the policy promises to preserve.
+    #[cfg(all(feature = "jpeg", feature = "exif"))]
+    #[test]
+    fn strip_sensitive_after_redaction_keeps_benign_metadata() {
+        use little_exif::exif_tag::ExifTag;
+        use little_exif::filetype::FileExtension;
+        use little_exif::metadata::Metadata as ExifMetadata;
+
+        // A JPEG carrying a benign Orientation and a sensitive GPS latitude.
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgb8(RgbImage::from_pixel(4, 4, image::Rgb([10, 20, 30])))
+            .write_to(&mut std::io::Cursor::new(&mut bytes), ImgFormat::Jpeg)
+            .expect("encode jpeg");
+        let mut exif = ExifMetadata::new();
+        exif.set_tag(ExifTag::Orientation(vec![1]));
+        exif.set_tag(ExifTag::GPSLatitude(vec![little_exif::rational::uR64 {
+            nominator: 51,
+            denominator: 1,
+        }]));
+        exif.write_to_vec(&mut bytes, FileExtension::JPEG)
+            .expect("write exif");
+
+        // Redact a pixel so the buffer is dirty (forces the re-encode path).
+        let mut buffer = ImageBuffer::open(&bytes).expect("open");
+        buffer.redact(
+            PixelRegion::new(0, 0, 2, 2),
+            &ImageReplacement::Block {
+                color: Color::BLACK,
+            },
+        );
+        let out = buffer.encode(ExifPolicy::StripSensitive).expect("encode");
+
+        // The GPS field is gone; the benign Orientation survives.
+        let out_exif = ExifMetadata::new_from_vec(&out.to_vec(), FileExtension::JPEG)
+            .expect("parse output exif");
+        assert!(
+            out_exif
+                .get_tag(&ExifTag::GPSLatitude(Vec::new()))
+                .next()
+                .is_none(),
+            "sensitive GPS survived a StripSensitive re-encode"
+        );
+        assert!(
+            out_exif
+                .get_tag(&ExifTag::Orientation(Vec::new()))
+                .next()
+                .is_some(),
+            "benign Orientation was dropped by a StripSensitive re-encode"
+        );
     }
 }

@@ -75,6 +75,13 @@ pub fn fields(xml: &[u8]) -> Vec<(String, String)> {
             Ok(Event::CData(t)) if current.is_some() => {
                 value.push_str(&t);
             }
+            // quick-xml emits an entity reference (`&#233;`, `&amp;`) as its own
+            // event, not as part of the surrounding text. Resolve it into the
+            // value; without this a name like `Jos&#233;`, or a wholly
+            // entity-encoded value, would be read short and slip past detection.
+            Ok(Event::GeneralRef(r)) if current.is_some() => {
+                value.push_str(&resolve_ref(&r));
+            }
             Ok(Event::End(_)) => {
                 if let Some(name) = current.take()
                     && !value.trim().is_empty()
@@ -146,6 +153,17 @@ pub fn strip(xml: &[u8], keys: &[&str]) -> Bytes {
                     let _ = writer.write_event(Event::Text(BytesText::new("")));
                 }
             }
+            // An entity reference is field text quick-xml surfaces separately:
+            // keep it verbatim outside a clearing region, drop it inside one.
+            // Without this arm the catch-all below would forward the reference
+            // and leave part of a cleared field's value (e.g. `Jos&#233;`) behind.
+            Ok(Event::GeneralRef(r)) => {
+                if clearing == 0 {
+                    let _ = writer.write_event(Event::GeneralRef(r));
+                } else {
+                    let _ = writer.write_event(Event::Text(BytesText::new("")));
+                }
+            }
             Ok(Event::Eof) => break,
             Ok(other) => {
                 let _ = writer.write_event(other);
@@ -178,6 +196,25 @@ fn strip_bom(bytes: &[u8]) -> Option<&str> {
 /// `creator`), via quick-xml's own prefix handling.
 fn local_name(elem: &quick_xml::events::BytesStart<'_>) -> String {
     elem.local_name().as_ref().to_owned()
+}
+
+/// Resolve an entity reference to the text it stands for, so an entity-encoded
+/// field value is read as the character a reader would see.
+///
+/// A numeric reference (`&#233;`, `&#xE9;`) resolves directly to its code point.
+/// A named reference resolves through quick-xml's unescaper, which knows the five
+/// XML predefined entities (`amp`, `lt`, `gt`, `quot`, `apos`). An unknown named
+/// entity (a DTD-defined one, which OOXML property parts do not declare) has no
+/// value here and contributes nothing, which is the safe reading: it cannot
+/// smuggle text past detection.
+fn resolve_ref(r: &quick_xml::events::BytesRef<'_>) -> String {
+    if let Ok(Some(ch)) = r.resolve_char_ref() {
+        return ch.to_string();
+    }
+    let name = r.clone().into_inner();
+    unescape(&format!("&{name};"))
+        .map(|c| c.into_owned())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -268,5 +305,65 @@ mod tests {
             text.contains("creator"),
             "the element itself should survive"
         );
+    }
+
+    #[test]
+    fn a_numeric_entity_reference_is_read_and_stripped() {
+        // `José` written with a numeric character reference. quick-xml surfaces
+        // the `&#233;` as its own event; the value must still read as `José` for
+        // detection, and strip must clear the whole thing including the entity.
+        let xml = br#"<coreProperties xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>Jos&#233; Bob</dc:creator></coreProperties>"#;
+        assert!(
+            fields(xml).contains(&("creator".to_owned(), "José Bob".to_owned())),
+            "numeric-entity value not fully surfaced: {:?}",
+            fields(xml)
+        );
+
+        let out = strip(xml, &["creator"]);
+        let text = std::str::from_utf8(&out).unwrap();
+        assert!(
+            !text.contains("Bob"),
+            "value text leaked past strip: {text}"
+        );
+        assert!(
+            !text.contains("&#233;"),
+            "entity ref leaked past strip: {text}"
+        );
+        assert!(
+            text.contains("creator"),
+            "the element itself should survive"
+        );
+    }
+
+    #[test]
+    fn a_wholly_entity_encoded_value_is_surfaced() {
+        // A value made entirely of character references (`Hi`) must not vanish
+        // from detection just because it carries no plain text node.
+        let xml = br#"<coreProperties xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>&#72;&#105;</dc:creator></coreProperties>"#;
+        assert!(
+            fields(xml).contains(&("creator".to_owned(), "Hi".to_owned())),
+            "all-entity value not surfaced: {:?}",
+            fields(xml)
+        );
+    }
+
+    #[test]
+    fn a_named_entity_reference_is_read_and_stripped() {
+        // A predefined named entity (`&amp;`) inside a value: read as `&` and
+        // cleared on strip.
+        let xml = br#"<coreProperties xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>A &amp; B</dc:creator></coreProperties>"#;
+        assert!(
+            fields(xml).contains(&("creator".to_owned(), "A & B".to_owned())),
+            "named-entity value not surfaced: {:?}",
+            fields(xml)
+        );
+
+        let out = strip(xml, &["creator"]);
+        let text = std::str::from_utf8(&out).unwrap();
+        assert!(
+            !text.contains("&amp;"),
+            "named entity leaked past strip: {text}"
+        );
+        assert!(!text.contains(" B"), "value text leaked past strip: {text}");
     }
 }
