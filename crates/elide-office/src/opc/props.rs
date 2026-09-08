@@ -69,6 +69,12 @@ pub fn fields(xml: &[u8]) -> Vec<(String, String)> {
             Ok(Event::Text(t)) if current.is_some() => {
                 value.push_str(&unescape(t.as_ref()).unwrap_or_default());
             }
+            // A field value written as CDATA carries its text verbatim (no entity
+            // escaping), so it is appended as-is; without this a `<dc:creator>`
+            // stored as CDATA would read as empty and never be surfaced.
+            Ok(Event::CData(t)) if current.is_some() => {
+                value.push_str(&t);
+            }
             Ok(Event::End(_)) => {
                 if let Some(name) = current.take()
                     && !value.trim().is_empty()
@@ -127,6 +133,16 @@ pub fn strip(xml: &[u8], keys: &[&str]) -> Bytes {
                     let _ = writer.write_event(Event::Text(t));
                 } else {
                     // Drop the text, emitting nothing between the tags.
+                    let _ = writer.write_event(Event::Text(BytesText::new("")));
+                }
+            }
+            // A CDATA-wrapped value is field text too: keep it outside a clearing
+            // region, drop it inside one. Without this arm the catch-all below
+            // would pass CDATA through and leave a cleared field's value behind.
+            Ok(Event::CData(t)) => {
+                if clearing == 0 {
+                    let _ = writer.write_event(Event::CData(t));
+                } else {
                     let _ = writer.write_event(Event::Text(BytesText::new("")));
                 }
             }
@@ -229,6 +245,28 @@ mod tests {
         assert!(
             std::str::from_utf8(&out).unwrap().contains("creator"),
             "self-closing element should survive structurally"
+        );
+    }
+
+    #[test]
+    fn a_cdata_field_value_is_read_and_stripped() {
+        // A value wrapped in CDATA is field text like any other: it must be
+        // surfaced for detection and removed on strip, not passed through.
+        let xml = br#"<coreProperties xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator><![CDATA[Ada Lovelace]]></dc:creator></coreProperties>"#;
+        assert!(
+            fields(xml).contains(&("creator".to_owned(), "Ada Lovelace".to_owned())),
+            "CDATA field value not surfaced"
+        );
+
+        let out = strip(xml, &["creator"]);
+        let text = std::str::from_utf8(&out).unwrap();
+        assert!(
+            !text.contains("Ada Lovelace"),
+            "CDATA value leaked past strip: {text}"
+        );
+        assert!(
+            text.contains("creator"),
+            "the element itself should survive"
         );
     }
 }

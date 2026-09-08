@@ -20,6 +20,15 @@ ignore = [
     # of `image` (image -> exr -> pulp -> paste) with no workspace-level
     # control; nothing to act on until the upstream image stack drops it.
     "RUSTSEC-2024-0436",
+    # quick-xml 0.37.5 XML-parsing DoS advisories, reached only transitively
+    # through `little_exif 0.6.23` (which pins `^0.37`). The workspace's own
+    # quick-xml is 0.42 (patched). `little_exif` 0.6.23 is the latest release
+    # and the fix landed in the semver-incompatible quick-xml 0.41, so there is
+    # no in-range update; both are unresolvable until upstream `little_exif`
+    # bumps. RUSTSEC-2026-0195 additionally does not apply to a non-namespace
+    # reader, and `little_exif` parses binary EXIF/TIFF, not namespaced XML.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
 ]
 
 [licenses]

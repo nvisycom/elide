@@ -15,7 +15,7 @@
 use bytes::Bytes;
 use elide_core::Result;
 use elide_core::entity::{LabelRef, builtins};
-use elide_core::modality::metadata::{Metadata, MetadataData, MetadataLocation, field_entity};
+use elide_core::modality::metadata::{Metadata, MetadataData, MetadataLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId};
 use elide_core::redaction::Redactions;
@@ -63,7 +63,7 @@ impl Recognizer<Metadata> for DocPropsRecognizer {
         _ctx: &RecognizerContext<'_, Metadata>,
     ) -> Result<Recognition<Metadata>> {
         let entities = label_for(data.key())
-            .and_then(|label| field_entity(data.key(), label, SOURCE))
+            .and_then(|label| Metadata::field_entity(data.key(), label, SOURCE))
             .into_iter()
             .collect();
         Ok(Recognition::new(entities))
@@ -99,6 +99,10 @@ pub(crate) fn read_doc_props(
 pub(crate) struct DocPropsHandler {
     /// The property part's XML bytes.
     xml: Bytes,
+    /// Every field, parsed once at decode and kept in document order so
+    /// [`read_at`](DataReader::read_at) can look one up without re-parsing the
+    /// XML.
+    fields: Vec<MetadataData>,
     /// The fields yet to stream, drained by `read_next` (reversed for pop).
     pending: Vec<MetadataData>,
     /// Field keys (local names) picked for removal, applied on `encode`.
@@ -108,13 +112,15 @@ pub(crate) struct DocPropsHandler {
 impl DocPropsHandler {
     /// Wrap a property part's XML, priming its fields for streaming.
     pub(crate) fn new(xml: Bytes) -> Self {
-        let mut pending: Vec<MetadataData> = props::fields(&xml)
+        let fields: Vec<MetadataData> = props::fields(&xml)
             .into_iter()
             .map(|(key, value)| MetadataData::new(key, value))
             .collect();
+        let mut pending = fields.clone();
         pending.reverse(); // popped, so reverse for first-field-first order
         Self {
             xml,
+            fields,
             pending,
             removed: Vec::new(),
         }
@@ -145,10 +151,7 @@ impl Handler<Metadata> for DocPropsHandler {
 impl DataReader<Metadata> for DocPropsHandler {
     async fn read_at(&self, location: &MetadataLocation) -> Result<Option<MetadataData>> {
         let key = location.key.as_str();
-        Ok(props::fields(&self.xml)
-            .into_iter()
-            .find(|(k, _)| k == key)
-            .map(|(k, v)| MetadataData::new(k, v)))
+        Ok(self.fields.iter().find(|field| field.key == key).cloned())
     }
 }
 

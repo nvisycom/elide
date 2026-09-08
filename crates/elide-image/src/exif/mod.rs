@@ -110,26 +110,41 @@ impl<'a> Source<'a> {
     }
 
     /// Clear every metadata field, returning the result.
+    ///
+    /// Clears the EXIF block wholesale, then runs the baseline scrub so the
+    /// APP12/APP13 provenance segments go too: `clear_metadata` addresses the
+    /// EXIF block but not those dedicated application segments.
     fn strip_all(&self) -> Result<Vec<u8>> {
         let mut buf = self.bytes.to_vec();
         let format = self.format;
         guard(|| ExifMetadata::clear_metadata(&mut buf, format))?
             .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("exif strip: {e}")))?;
+        self.baseline_scrub(&mut buf)?;
         Ok(buf)
     }
 
     /// Remove only the privacy fields, leaving the rest intact.
+    ///
+    /// When the EXIF block is absent or cannot be decoded, `little_exif` reads no
+    /// tags, so a selective removal has nothing to act on and would leave
+    /// undecodable EXIF in place. That case fails closed to
+    /// [`strip_all`](Self::strip_all), which clears the block by bytes; a genuine
+    /// no-EXIF image is a harmless no-op there. Either way the baseline scrub of
+    /// the APP12/APP13 provenance segments always runs.
     fn strip_sensitive(&self) -> Result<Vec<u8>> {
         let Some(mut exif) = self.parse()? else {
-            // No EXIF to edit: nothing sensitive to remove.
-            return Ok(self.bytes.to_vec());
+            // No decodable EXIF: clear the block by bytes rather than trusting a
+            // possibly-undecodable block was truly absent, and scrub the rest.
+            return self.strip_all();
         };
         guard(AssertUnwindSafe(|| {
             for tag in sensitive_tags() {
                 exif.remove_tag(tag);
             }
         }))?;
-        self.write(&exif)
+        let mut buf = self.write(&exif)?;
+        self.baseline_scrub(&mut buf)?;
+        Ok(buf)
     }
 
     /// Remove exactly the fields named by `keys` (each an EXIF tag key such as
@@ -429,6 +444,51 @@ mod tests {
         let bytes = jpeg_with(vec![ExifTag::Make("Nvisy".into())]);
         let kept = source(&bytes).strip(ExifPolicy::Keep).expect("keep");
         assert_eq!(kept, bytes);
+    }
+
+    #[test]
+    fn strip_sensitive_on_a_bare_image_is_a_successful_no_op() {
+        // No decodable EXIF: strip_sensitive falls through to the byte-level
+        // clear, which must succeed (not error) on an image that simply has no
+        // metadata, and leave it readable with nothing sensitive.
+        let bytes = jpeg_bare();
+        let stripped = source(&bytes)
+            .strip(ExifPolicy::StripSensitive)
+            .expect("strip sensitive on bare image must succeed");
+        let meta = source(&stripped).read().expect("read back");
+        assert!(is_empty(&meta));
+    }
+
+    /// The same bare-image fallthrough on PNG, whose format has no APP12/APP13
+    /// segments (so `baseline_scrub` is a no-op): the byte-level clear must still
+    /// succeed rather than error on an image that carries no metadata.
+    #[cfg(feature = "png")]
+    #[test]
+    fn strip_sensitive_on_a_bare_png_is_a_successful_no_op() {
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgb8(RgbImage::from_pixel(2, 2, image::Rgb([10, 20, 30])))
+            .write_to(&mut std::io::Cursor::new(&mut bytes), ImgFormat::Png)
+            .expect("encode png");
+        let src = Source::new(
+            &bytes,
+            FileExtension::PNG {
+                as_zTXt_chunk: false,
+            },
+        );
+        let stripped = src
+            .strip(ExifPolicy::StripSensitive)
+            .expect("strip sensitive on bare png must succeed");
+        assert!(
+            Source::new(
+                &stripped,
+                FileExtension::PNG {
+                    as_zTXt_chunk: false
+                }
+            )
+            .read()
+            .map(|m| is_empty(&m))
+            .unwrap_or(true)
+        );
     }
 
     #[test]

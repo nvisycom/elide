@@ -77,9 +77,10 @@ rtf = ["internal_document"]
 image = ["png", "jpeg"]
 
 ## Individual image formats (all share the `elide-image` engine pulled in
-## by `internal_image`).
-png = ["internal_image"]
-jpeg = ["internal_image"]
+## by `internal_image`). Each also enables its codec inside `elide-image`,
+## whose own formats are off by default, so `ImageBuffer::open` can decode it.
+png = ["internal_image", "elide-image/png"]
+jpeg = ["internal_image", "elide-image/jpeg"]
 
 ## The audio formats.
 audio = ["wav", "mp3"]

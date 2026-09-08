@@ -30,6 +30,10 @@ pub const FORMAT_ID: crate::FormatId = crate::FormatId::new("elide.image.exif");
 pub(crate) struct ExifHandler {
     /// The decoded image, holding the source container the EXIF lives in.
     buffer: ImageBuffer,
+    /// Every privacy-relevant field, read once at decode and kept in document
+    /// order so [`read_at`](DataReader::read_at) can look one up without
+    /// re-parsing the image.
+    fields: Vec<MetadataData>,
     /// The fields yet to stream, drained by `read_next` (reversed for pop).
     pending: Vec<MetadataData>,
     /// Keys picked for removal, applied on `encode`.
@@ -39,10 +43,12 @@ pub(crate) struct ExifHandler {
 impl ExifHandler {
     /// Wrap a decoded image, priming its fields for streaming.
     pub(crate) fn new(buffer: ImageBuffer) -> Result<Self> {
-        let mut pending = buffer.metadata_fields()?;
+        let fields = buffer.metadata_fields()?;
+        let mut pending = fields.clone();
         pending.reverse(); // popped, so reverse for first-field-first order
         Ok(Self {
             buffer,
+            fields,
             pending,
             removed: Vec::new(),
         })
@@ -73,11 +79,7 @@ impl Handler<Metadata> for ExifHandler {
 impl DataReader<Metadata> for ExifHandler {
     async fn read_at(&self, location: &MetadataLocation) -> Result<Option<MetadataData>> {
         let key = location.key.as_str();
-        Ok(self
-            .buffer
-            .metadata_fields()?
-            .into_iter()
-            .find(|field| field.key == key))
+        Ok(self.fields.iter().find(|field| field.key == key).cloned())
     }
 }
 

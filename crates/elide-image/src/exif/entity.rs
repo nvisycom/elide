@@ -12,7 +12,7 @@
 
 use elide_core::Result;
 use elide_core::entity::{Entity, LabelRef, builtins};
-use elide_core::modality::metadata::{Metadata, MetadataData, field_entity};
+use elide_core::modality::metadata::{Metadata, MetadataData};
 
 use super::Source;
 
@@ -50,7 +50,7 @@ impl Source<'_> {
         let mut push = |present: bool, key: &'static str| {
             if present
                 && let Some(label) = label_for(key)
-                && let Some(entity) = field_entity(key, label, SOURCE)
+                && let Some(entity) = Metadata::field_entity(key, label, SOURCE)
             {
                 entities.push(entity);
             }

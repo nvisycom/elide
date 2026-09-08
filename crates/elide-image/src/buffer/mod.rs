@@ -45,6 +45,17 @@ impl ImageBuffer {
     ///
     /// The one place format is determined; nothing downstream sniffs magic bytes.
     ///
+    /// # Coordinate space
+    ///
+    /// The pixels are decoded as stored, with the EXIF `Orientation` tag *not*
+    /// applied, so a coordinate is a raw stored-pixel coordinate, not a
+    /// display-space one. This is deliberate: detection reads these same stored
+    /// pixels, so a region it reports and a region [`redact`](Self::redact) paints
+    /// share one coordinate system and always line up. A caller that holds
+    /// display-space coordinates (e.g. from a viewer that honours `Orientation`)
+    /// must map them into stored space before calling in, or the wrong pixels are
+    /// edited. [`dimensions`](Self::dimensions) likewise reports stored size.
+    ///
     /// # Errors
     ///
     /// [`ErrorKind::MalformedInput`] if the bytes are not a readable image, or
@@ -199,12 +210,36 @@ impl ImageBuffer {
         Ok(source.transfer(encoded.into())?.into())
     }
 
-    /// Crop `region` out and encode it, or `None` when the region is empty (out
-    /// of bounds or zero-area). The crop carries no metadata.
-    pub fn crop(&self, region: PixelRegion) -> Result<Option<Bytes>> {
-        if region.width == 0 || region.height == 0 {
-            return Ok(None);
+    /// `region` clamped to the image bounds, or `None` when the overlap is empty.
+    ///
+    /// A caller can hand in a region that runs past the edges or lies wholly
+    /// outside. `image`'s `crop_imm` silently clips such a region, so a
+    /// wholly-outside region would collapse to a zero-sized crop, and a partly
+    /// outside one would act on fewer pixels than the caller named. Resolving the
+    /// intersection here makes both cases explicit: a real overlap is clamped to
+    /// exactly the in-bounds pixels, and no overlap is `None`.
+    fn clamp(&self, region: PixelRegion) -> Option<PixelRegion> {
+        let (w, h) = self.inner.dimensions();
+        let x = region.x.min(w);
+        let y = region.y.min(h);
+        // Saturating: a caller-supplied region near `u32::MAX` must not overflow
+        // the edge sum (`x + width`), which would panic in debug and wrap in
+        // release. The edges are clamped to the image, so saturation is harmless.
+        let right = region.x.saturating_add(region.width).min(w);
+        let bottom = region.y.saturating_add(region.height).min(h);
+        if right <= x || bottom <= y {
+            return None;
         }
+        Some(PixelRegion::new(x, y, right - x, bottom - y))
+    }
+
+    /// Crop `region` out and encode it, or `None` when the region does not
+    /// overlap the image (out of bounds or zero-area). The crop is the in-bounds
+    /// intersection and carries no metadata.
+    pub fn crop(&self, region: PixelRegion) -> Result<Option<Bytes>> {
+        let Some(region) = self.clamp(region) else {
+            return Ok(None);
+        };
         let cropped = self
             .inner
             .crop_imm(region.x, region.y, region.width, region.height);
@@ -212,9 +247,12 @@ impl ImageBuffer {
     }
 
     /// Paint `replacement` over `region` in place (blur, pixelate, block, or
-    /// remove). A zero-area region is a silent no-op; redaction is best-effort
-    /// over whatever pixels exist.
+    /// remove). A region that does not overlap the image is a silent no-op, and
+    /// leaves the buffer clean; redaction acts on the in-bounds intersection.
     pub fn redact(&mut self, region: PixelRegion, replacement: &ImageReplacement) {
+        let Some(region) = self.clamp(region) else {
+            return;
+        };
         match replacement {
             ImageReplacement::Blur { sigma } => self.blur(region, *sigma),
             ImageReplacement::Pixelate { block_size } => self.pixelate(region, *block_size),
@@ -272,5 +310,165 @@ impl ImageBuffer {
         img.write_to(&mut buf, format.to_image())
             .map_err(|e| Error::new(ErrorKind::Processing, format!("image encode: {e}")))?;
         Ok(Bytes::from(buf.into_inner()))
+    }
+}
+
+#[cfg(all(test, feature = "png"))]
+mod tests {
+    use image::{ImageFormat as ImgFormat, RgbImage};
+
+    use super::*;
+
+    /// An `w`x`h` solid-red PNG, as container bytes.
+    fn png(w: u32, h: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgb8(RgbImage::from_pixel(w, h, image::Rgb([200, 30, 30])))
+            .write_to(&mut std::io::Cursor::new(&mut bytes), ImgFormat::Png)
+            .expect("encode png");
+        bytes
+    }
+
+    /// The color at `(x, y)` of a decoded image.
+    fn pixel_at(bytes: &[u8], x: u32, y: u32) -> Rgba<u8> {
+        image::load_from_memory(bytes)
+            .expect("decode")
+            .get_pixel(x, y)
+    }
+
+    #[test]
+    fn crop_wholly_outside_the_image_is_none() {
+        let buffer = ImageBuffer::open(&png(4, 4)).expect("open");
+        // A region past the right/bottom edges has no overlap with the image.
+        assert!(
+            buffer
+                .crop(PixelRegion::new(10, 10, 4, 4))
+                .expect("crop")
+                .is_none()
+        );
+        // A zero-area region is likewise nothing to crop.
+        assert!(
+            buffer
+                .crop(PixelRegion::new(0, 0, 0, 4))
+                .expect("crop")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_region_near_u32_max_does_not_overflow() {
+        // The edge sum `x + width` must not overflow: a huge origin plus a huge
+        // width has no overlap with the image and resolves to a clean `None`,
+        // not a debug panic or a wrapped-around bogus region.
+        let buffer = ImageBuffer::open(&png(4, 4)).expect("open");
+        assert!(
+            buffer
+                .crop(PixelRegion::new(u32::MAX - 1, 0, 100, 4))
+                .expect("crop")
+                .is_none()
+        );
+        let mut buffer = buffer;
+        buffer.redact(
+            PixelRegion::new(u32::MAX - 1, u32::MAX - 1, u32::MAX, u32::MAX),
+            &ImageReplacement::Block {
+                color: Color::BLACK,
+            },
+        );
+        assert!(
+            !buffer.dirty,
+            "an overflowing out-of-bounds redaction is a no-op"
+        );
+    }
+
+    #[test]
+    fn crop_partly_outside_is_clamped_to_the_overlap() {
+        let buffer = ImageBuffer::open(&png(4, 4)).expect("open");
+        // Starts inside, runs two pixels past each edge → a 2x2 overlap.
+        let cropped = buffer
+            .crop(PixelRegion::new(2, 2, 4, 4))
+            .expect("crop")
+            .expect("some overlap");
+        let (w, h) = image::load_from_memory(&cropped)
+            .expect("decode")
+            .dimensions();
+        assert_eq!((w, h), (2, 2));
+    }
+
+    #[test]
+    fn redact_wholly_outside_is_a_clean_no_op() {
+        let mut buffer = ImageBuffer::open(&png(4, 4)).expect("open");
+        buffer.redact(
+            PixelRegion::new(10, 10, 4, 4),
+            &ImageReplacement::Block {
+                color: Color::BLACK,
+            },
+        );
+        // No overlap: nothing was painted, so the buffer stays clean and an
+        // encode round-trips the source untouched.
+        assert!(
+            !buffer.dirty,
+            "an out-of-bounds redaction must not dirty the buffer"
+        );
+    }
+
+    #[test]
+    fn redact_paints_only_the_in_bounds_intersection() {
+        let mut buffer = ImageBuffer::open(&png(4, 4)).expect("open");
+        // A 2x2 block starting at (3,3) reaches one pixel past each edge; only the
+        // single in-bounds pixel (3,3) must turn black, and (0,0) stays red.
+        buffer.redact(
+            PixelRegion::new(3, 3, 2, 2),
+            &ImageReplacement::Block {
+                color: Color::BLACK,
+            },
+        );
+        assert!(buffer.dirty);
+        let out = encode_buffer(&buffer);
+        assert_eq!(
+            pixel_at(&out, 3, 3),
+            Rgba([0, 0, 0, 255]),
+            "target pixel not blacked"
+        );
+        assert_eq!(
+            pixel_at(&out, 0, 0),
+            Rgba([200, 30, 30, 255]),
+            "untargeted pixel changed"
+        );
+    }
+
+    /// Encode a redacted PNG buffer to bytes, feature-agnostic across the two
+    /// `encode` signatures.
+    fn encode_buffer(buffer: &ImageBuffer) -> Bytes {
+        #[cfg(feature = "exif")]
+        {
+            buffer.encode(ExifPolicy::StripAll).expect("encode")
+        }
+        #[cfg(not(feature = "exif"))]
+        {
+            buffer.encode().expect("encode")
+        }
+    }
+
+    #[test]
+    fn coordinates_are_stored_pixel_space_not_display_space() {
+        // The buffer decodes pixels as stored and does not apply EXIF
+        // Orientation, so a redaction at a stored coordinate hits that stored
+        // pixel regardless of any orientation a viewer would apply. A 6x2 image
+        // (portrait-when-rotated) blacked at stored (0,0) has (0,0) black and the
+        // far corner untouched, proving no implicit rotation moved the target.
+        let mut buffer = ImageBuffer::open(&png(6, 2)).expect("open");
+        assert_eq!(
+            buffer.dimensions(),
+            Dimensions::new(6, 2),
+            "stored size, un-rotated"
+        );
+        buffer.redact(
+            PixelRegion::new(0, 0, 1, 1),
+            &ImageReplacement::Block {
+                color: Color::BLACK,
+            },
+        );
+        let out = encode_buffer(&buffer);
+        assert_eq!(pixel_at(&out, 0, 0), Rgba([0, 0, 0, 255]));
+        assert_eq!(pixel_at(&out, 5, 1), Rgba([200, 30, 30, 255]));
     }
 }
