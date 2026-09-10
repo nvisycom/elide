@@ -5,32 +5,53 @@
 //! WebAssembly bindings that run the Elide detect-and-redact pipeline in a
 //! browser.
 //!
-//! This is a thin boundary over the [`elide`] facade: it decodes a piece of
-//! text, runs the built-in pattern recognizers over it, and applies a
-//! per-label redaction policy, returning the redacted text plus the list of
-//! entities that were found. The whole pipeline is `async`, and on wasm its
-//! futures are driven by the browser's own event loop through
-//! [`wasm_bindgen_futures`] — there is no Tokio runtime.
+//! The pipeline is exposed to JavaScript as a set of opaque handles composed by
+//! factory functions, mirroring the [`elide`] facade's own split between
+//! detection and redaction. JavaScript builds a [`RecognizerHandle`] from a
+//! [`PatternRecognizerConfig`], folds one or more recognizers into an
+//! [`AnalyzerHandle`], creates an [`AnonymizerHandle`] policy, and runs them
+//! over a piece of text with [`redact`]. The rich Rust objects stay in wasm
+//! memory behind the handles; only the config and the [`RedactionResult`] cross
+//! the boundary as data.
 //!
-//! The exported [`redact_text`] function is the single entry point JavaScript
-//! calls; everything else is private wiring.
+//! The whole pipeline is `async`, and on wasm its futures are driven by the
+//! browser's own event loop through [`wasm_bindgen_futures`] — there is no Tokio
+//! runtime.
 
 mod analyzer;
 mod anonymizer;
 
 use elide::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tsify::{Ts, Tsify};
 use wasm_bindgen::prelude::*;
 
-use self::analyzer::build_analyzer;
-use self::anonymizer::build_anonymizer;
+pub use self::analyzer::{
+    AnalyzerHandle, RecognizerHandle, create_analyzer, create_pattern_recognizer,
+};
+pub use self::anonymizer::{AnonymizerHandle, create_anonymizer};
 
 /// Install the panic hook once, so a Rust panic surfaces in the browser console
 /// with a readable message instead of an opaque `unreachable`.
 #[wasm_bindgen(start)]
 pub fn start() {
     console_error_panic_hook::set_once();
+}
+
+/// Which built-in recognizer sources a [`RecognizerHandle`] draws on.
+///
+/// `Tsify` generates the matching TypeScript `interface` (with camelCase
+/// fields), so the JS side passes a typed `{ builtinPatterns, builtinDictionaries }`
+/// object. With both `false`, the recognizer detects nothing. It crosses the
+/// boundary as a [`Ts<PatternRecognizerConfig>`], tsify's transparent wrapper
+/// that deserializes inside the factory without leaking a table slot.
+#[derive(Deserialize, Tsify)]
+#[serde(rename_all = "camelCase")]
+pub struct PatternRecognizerConfig {
+    /// Enable the shipped regex patterns (emails, phone numbers, cards, URLs).
+    pub builtin_patterns: bool,
+    /// Enable the shipped dictionaries.
+    pub builtin_dictionaries: bool,
 }
 
 /// One detected entity, in the shape the JavaScript side consumes.
@@ -58,16 +79,11 @@ pub struct RedactionResult {
     pub findings: Vec<Finding>,
 }
 
-/// Detect and redact the personal data in `input`, returning
-/// `{ redacted, findings }` as a plain JS object.
+/// Detect and redact the personal data in `input` using a composed `analyzer`
+/// and `anonymizer`, returning `{ redacted, findings }` as a plain JS object.
 ///
-/// This runs the built-in pattern + dictionary recognizers (emails, phone
-/// numbers, payment cards, URLs, and the shipped dictionaries) and applies a
-/// per-label redaction policy. It is `async`: `await` it from JavaScript.
-///
-/// The `patterns` and `dictionaries` flags select which recognizer sources run,
-/// so the page can show what each contributes; with both off, nothing is
-/// detected and the input is returned unchanged.
+/// Both handles are borrowed and stay reusable across calls. It is `async`:
+/// `await` it from JavaScript.
 ///
 /// # Errors
 ///
@@ -79,12 +95,12 @@ pub struct RedactionResult {
 /// here, inside the function, so destructors run normally. The generated
 /// TypeScript still reports the return as `Promise<RedactionResult>`.
 #[wasm_bindgen]
-pub async fn redact_text(
+pub async fn redact(
+    analyzer: &AnalyzerHandle,
+    anonymizer: &AnonymizerHandle,
     input: String,
-    patterns: bool,
-    dictionaries: bool,
 ) -> Result<Ts<RedactionResult>, JsError> {
-    let result = run(input, patterns, dictionaries)
+    let result = run(analyzer, anonymizer, input)
         .await
         .map_err(|e| JsError::new(&e.to_string()))?;
     Ts::from_rust(&result).map_err(|e| JsError::new(&e.to_string()))
@@ -92,7 +108,11 @@ pub async fn redact_text(
 
 /// The pipeline proper, kept separate so it returns the crate's own [`Result`]
 /// and the wasm boundary only deals with `JsValue`.
-async fn run(input: String, patterns: bool, dictionaries: bool) -> Result<RedactionResult> {
+async fn run(
+    analyzer: &AnalyzerHandle,
+    anonymizer: &AnonymizerHandle,
+    input: String,
+) -> Result<RedactionResult> {
     // Decode the raw text through the codec layer, as any other input would be.
     let registry = FormatRegistry::with_builtin();
     let handle = registry.decode(input, "txt").await?;
@@ -100,13 +120,13 @@ async fn run(input: String, patterns: bool, dictionaries: bool) -> Result<Redact
         .into::<Text>()
         .expect("the txt codec yields a text document");
 
-    let analyzer = build_analyzer(patterns, dictionaries)?;
-    let anonymizer = build_anonymizer();
-
     // Detect over the built-in catalog. No language is asserted, so detection
     // is language-agnostic.
     let scope = Scope::new().with_catalog(LabelCatalog::with_builtins());
-    let analysis = analyzer.analyze_stream(&mut document, &scope).await?;
+    let analysis = analyzer
+        .analyzer()
+        .analyze_stream(&mut document, &scope)
+        .await?;
     let mut entities = analysis.entities;
 
     let findings = entities
@@ -124,6 +144,7 @@ async fn run(input: String, patterns: bool, dictionaries: bool) -> Result<Redact
 
     // Apply the redaction policy and re-encode the document back to text.
     anonymizer
+        .anonymizer()
         .anonymize(&mut document, &mut entities, &scope)
         .await?;
     let encoded = document.encode()?;
