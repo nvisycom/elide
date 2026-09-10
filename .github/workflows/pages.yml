@@ -1,0 +1,112 @@
+name: Pages
+
+# Builds the elide-wasm browser demo and publishes it to GitHub Pages. The demo
+# is fully static (HTML + JS + wasm) and runs the redaction pipeline entirely in
+# the visitor's browser.
+
+on:
+  push:
+    branches:
+      - "main"
+    paths:
+      - "crates/elide-wasm/**"
+      - "crates/elide/**"
+      - "crates/elide-core/**"
+      - "crates/elide-pattern/**"
+      - "crates/elide-detection/**"
+      - "crates/elide-redaction/**"
+      - "crates/elide-operator/**"
+      - "crates/elide-engine/**"
+      - "crates/elide-codec/**"
+      - "crates/elide-fake/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/config.toml"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+# The demo is served from `https://<owner>.github.io/<repo>/`, so Vite must build
+# with a matching base path.
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.95.0"
+  BASE_PATH: "/${{ github.event.repository.name }}/"
+
+# Allow one concurrent deployment; a newer push supersedes an in-flight one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    name: Build demo
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install wasm-bindgen-cli
+        run: cargo binstall wasm-bindgen-cli --no-confirm --no-symlinks
+
+      - name: Build wasm and generate bindings
+        run: |
+          cargo build -p elide-wasm --target wasm32-unknown-unknown --release
+          wasm-bindgen target/wasm32-unknown-unknown/release/elide_wasm.wasm \
+            --out-dir crates/elide-wasm/www/pkg --target web
+          # wasm-bindgen's `web` target does not emit a package.json; write the
+          # one the demo imports `elide-wasm` through.
+          cat > crates/elide-wasm/www/pkg/package.json <<'JSON'
+          {
+            "name": "elide-wasm",
+            "version": "0.1.0",
+            "type": "module",
+            "main": "elide_wasm.js",
+            "types": "elide_wasm.d.ts",
+            "sideEffects": ["./elide_wasm.js"]
+          }
+          JSON
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build demo
+        working-directory: crates/elide-wasm/www
+        run: |
+          npm ci
+          npm run build
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: crates/elide-wasm/www/dist
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

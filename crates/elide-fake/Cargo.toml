@@ -33,6 +33,15 @@ fake = { workspace = true, features = [] }
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
 
+# On wasm the RNG that `fake`/`rand` and uuid v4 pull needs its browser entropy
+# backend enabled. `fake` seeds deterministically at runtime, but its `rand`
+# dependency still compiles `getrandom`, which must be told to use the JS
+# backend (paired with the `getrandom_backend` cfg in `.cargo/config.toml`).
+# Native builds are unaffected.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.4", features = ["wasm_js"] }
+uuid = { workspace = true, features = ["v4", "js"] }
+
 [dev-dependencies]
 # Internal crates
 elide = { path = "../elide", default-features = false, features = ["tabular"] }

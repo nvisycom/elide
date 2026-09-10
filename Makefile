@@ -33,6 +33,41 @@ install-tools: ## Installs CLI tools required for development.
 		$(call log,cargo-watch already installed.); \
 	fi
 
+.PHONY: wasm-pkg
+wasm-pkg: ## Builds elide-wasm and generates its JS/TS bindings into www/pkg.
+	@$(call log,Adding wasm32 target...)
+	@rustup target add wasm32-unknown-unknown
+	@if ! command -v wasm-bindgen >/dev/null 2>&1; then \
+		$(call log,Installing wasm-bindgen-cli...); \
+		cargo install wasm-bindgen-cli --locked; \
+	fi
+	@$(call log,Building elide-wasm (release)...)
+	@cargo build -p elide-wasm --target wasm32-unknown-unknown --release
+	@$(call log,Generating JS/TS bindings...)
+	@wasm-bindgen target/wasm32-unknown-unknown/release/elide_wasm.wasm \
+		--out-dir crates/elide-wasm/www/pkg --target web
+	@printf '%s\n' \
+		'{' \
+		'  "name": "elide-wasm",' \
+		'  "version": "0.1.0",' \
+		'  "type": "module",' \
+		'  "main": "elide_wasm.js",' \
+		'  "types": "elide_wasm.d.ts",' \
+		'  "sideEffects": ["./elide_wasm.js"]' \
+		'}' > crates/elide-wasm/www/pkg/package.json
+	@$(call log,Bindings written to crates/elide-wasm/www/pkg.)
+
+.PHONY: wasm-demo
+wasm-demo: wasm-pkg ## Builds the full browser demo (elide-wasm + Vite app).
+	@$(call log,Building demo (Vite)...)
+	@cd crates/elide-wasm/www && npm install && npm run build
+	@$(call log,Demo built to crates/elide-wasm/www/dist.)
+	@$(call log,Preview it with: cd crates/elide-wasm/www && npm run preview)
+
+.PHONY: wasm-dev
+wasm-dev: wasm-pkg ## Runs the demo dev server with hot reload.
+	@cd crates/elide-wasm/www && npm install && npm run dev
+
 .PHONY: lint
 lint: ## Runs clippy and format check.
 	@$(call log,Running format check...)

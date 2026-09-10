@@ -1,0 +1,58 @@
+# OS
+Thumbs.db
+.DS_Store
+
+# IDE and Editors
+.vs/
+.vscode/
+.idea/
+.zed/
+.fleet/
+
+# Node & JavaScript
+node_modules/
+.vite/
+.output/
+.nuxt/
+.nitro/
+.cache/
+.data/
+
+# Testing
+playwright-report/
+test-results/
+coverage/
+*.lcov
+.lighthouse/
+
+# Build output
+dist
+build/
+output/
+
+# Generated wasm-bindgen
+pkg/
+
+# Environment
+.env*
+!.env.example
+
+# Logs
+logs/
+*.log
+*.log*
+
+# Backup and temporary files
+*.pem
+*.bak
+*.backup
+*.tmp
+tmp/
+temp/
+
+# Other
+.ignore*/
+.probe/
+LLM.md
+.claude
+CLAUDE.md
