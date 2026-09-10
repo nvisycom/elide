@@ -13,7 +13,7 @@ with a full audit trail for every entity.
 [![Security](https://img.shields.io/github/actions/workflow/status/nvisycom/elide/security.yml?branch=main&label=security&style=flat-square)](https://github.com/nvisycom/elide/actions/workflows/security.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](LICENSE.txt)
 
-[**nvisy.com**](https://nvisy.com) · [**docs.nvisy.com**](https://docs.nvisy.com)
+[**nvisy.com**](https://nvisy.com) · [**docs.nvisy.com**](https://docs.nvisy.com) · [**live demo**](https://nvisycom.github.io/elide/)
 
 </div>
 
@@ -50,6 +50,13 @@ Every entity carries its full audit trail of how it was found, scored, and hidde
 
 Everything is feature-gated: take only the modalities, recognizers, and codecs
 you need.
+
+## Try it
+
+A [live demo](https://nvisycom.github.io/elide/) runs the pattern-and-dictionary
+detection and redaction pipeline compiled to WebAssembly, entirely in your
+browser: paste text, redact it, and nothing you type leaves the page. The source
+is [`crates/elide-wasm`](crates/elide-wasm); build it locally with `make wasm-demo`.
 
 ## Documentation
 
