@@ -2,7 +2,10 @@
 #
 # Brand-prefix variants matching Visa, Mastercard, Discover, etc.
 # Luhn-validated. The Luhn validator drops false positives that
-# a length-based fallback regex would otherwise pick up.
+# a length-based fallback regex would otherwise pick up. Because a
+# Luhn-valid card is strong evidence on its own, the score clears the
+# detection threshold without a nearby context keyword; context only
+# raises confidence further.
 
 name = "credit-card"
 labels = ["payment_card"]
@@ -18,5 +21,5 @@ fr = ["carte", "crédit", "credit", "débit", "debit", "paiement", "visa", "mast
 # and a loose 1xxx catch-all that Luhn filters down.
 [[variants]]
 regex = '\b(?:(?:4\d{3})|(?:5[0-5]\d{2})|(?:2[2-7]\d{2})|(?:6\d{3})|(?:1\d{3})|(?:3\d{3}))[- ]?(?:\d{3,4})[- ]?(?:\d{3,4})[- ]?(?:\d{3,5})\b'
-score = 0.3
+score = 0.5
 validator = "luhn"
