@@ -13,7 +13,12 @@
 
     "skipLibCheck": true,
     "isolatedModules": true,
-    "noEmit": true
+    "noEmit": true,
+
+    // Type resolution for the `elide-wasm` import, mirroring the Vite alias.
+    "paths": {
+      "elide-wasm": ["./pkg/elide_wasm.d.ts"]
+    }
   },
 
   "include": ["src", "vite.config.ts"]

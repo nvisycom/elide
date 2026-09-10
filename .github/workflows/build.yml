@@ -241,3 +241,17 @@ jobs:
           cargo build -p elide --no-default-features
           --features engine,pattern,fake,codec-text
           --target wasm32-unknown-unknown
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      # Generate the bindings and build the demo through the Makefile (the single
+      # source of truth), so a broken TypeScript API or Vite build fails the PR
+      # rather than only surfacing post-merge in the Pages deploy.
+      - name: Build demo
+        run: make wasm-demo

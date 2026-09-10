@@ -37,15 +37,14 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
 jobs:
   build:
     name: Build demo
     runs-on: ubuntu-latest
+    # The build only reads the repo and uploads an artifact; it needs no
+    # deployment credentials. Only the deploy job below holds those.
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -59,40 +58,18 @@ jobs:
       - name: Cache cargo registry and build
         uses: Swatinem/rust-cache@v2
 
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
-
-      - name: Install wasm-bindgen-cli
-        run: cargo binstall wasm-bindgen-cli --no-confirm --no-symlinks
-
-      - name: Build wasm and generate bindings
-        run: |
-          cargo build -p elide-wasm --target wasm32-unknown-unknown --release
-          wasm-bindgen target/wasm32-unknown-unknown/release/elide_wasm.wasm \
-            --out-dir crates/elide-wasm/www/pkg --target web
-          # wasm-bindgen's `web` target does not emit a package.json; write the
-          # one the demo imports `elide-wasm` through.
-          cat > crates/elide-wasm/www/pkg/package.json <<'JSON'
-          {
-            "name": "elide-wasm",
-            "version": "0.1.0",
-            "type": "module",
-            "main": "elide_wasm.js",
-            "types": "elide_wasm.d.ts",
-            "sideEffects": ["./elide_wasm.js"]
-          }
-          JSON
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "22"
 
+      # `make wasm-demo` installs the version-matched wasm-bindgen CLI itself;
+      # cargo-binstall lets it grab a prebuilt binary instead of compiling one.
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
       - name: Build demo
-        working-directory: crates/elide-wasm/www
-        run: |
-          npm ci
-          npm run build
+        run: make wasm-demo
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
@@ -103,6 +80,10 @@ jobs:
     name: Deploy
     needs: build
     runs-on: ubuntu-latest
+    # Only the deploy step needs the Pages deployment credentials.
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
