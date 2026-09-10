@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <title>Elide: in-browser redaction</title>
+  </head>
+  <body class="min-h-screen bg-bg text-ink antialiased">
+    <main class="mx-auto max-w-3xl px-5 pt-10 pb-16 sm:pt-16">
+      <!-- Header -->
+      <header class="mb-9">
+        <div class="mb-7 flex items-center justify-between">
+          <a
+            class="inline-flex items-center gap-2.5 no-underline"
+            href="https://github.com/nvisycom/elide"
+          >
+            <img class="block rounded-lg" src="/logo.svg" alt="" width="34" height="34" />
+            <span class="text-lg font-semibold tracking-tight">Elide</span>
+          </a>
+          <a
+            class="font-mono text-xs text-muted no-underline hover:text-ink"
+            href="https://github.com/nvisycom/elide"
+            >GitHub</a
+          >
+        </div>
+
+        <h1 class="text-3xl font-bold tracking-tight text-balance sm:text-4xl">
+          Detect and redact PII, running as
+          <span class="text-accent">WebAssembly</span> in your browser.
+        </h1>
+        <p class="mt-3 max-w-[52ch] text-[0.98rem] text-muted">
+          The text below is analysed and rewritten on this page. Nothing is
+          uploaded.
+        </p>
+      </header>
+
+      <!-- Input -->
+      <section class="mb-4 rounded-2xl border border-line bg-panel p-5">
+        <label
+          class="mb-2.5 block font-mono text-xs uppercase tracking-wider text-muted"
+          for="input"
+        >
+          Text to redact
+        </label>
+        <textarea
+          id="input"
+          spellcheck="false"
+          class="min-h-[132px] w-full resize-y rounded-xl border border-line bg-bg px-3.5 py-3 font-mono text-sm leading-relaxed focus:outline-2 focus:outline-offset-1 focus:outline-ink"
+        >
+Hi, this is Dana Reed. Reach me at dana.reed@example.com or +1 (415) 555-0132.
+My card is 4111 1111 1111 1111 and the docs are at https://intranet.example.com/hr.</textarea
+        >
+
+        <div class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3">
+          <button
+            id="run"
+            disabled
+            class="cursor-pointer rounded-full bg-ink px-6 py-2.5 text-sm font-semibold text-bg transition-opacity hover:opacity-85 disabled:cursor-default disabled:opacity-45"
+          >
+            Redact
+          </button>
+
+          <label class="inline-flex cursor-pointer items-center gap-2 font-mono text-xs text-muted select-none">
+            <input id="opt-patterns" type="checkbox" checked class="accent-ink" />
+            patterns
+          </label>
+          <label class="inline-flex cursor-pointer items-center gap-2 font-mono text-xs text-muted select-none">
+            <input id="opt-dictionaries" type="checkbox" checked class="accent-ink" />
+            dictionaries
+          </label>
+
+          <span id="status" class="ml-auto font-mono text-xs text-muted">Loading…</span>
+        </div>
+      </section>
+
+      <!-- Redacted output -->
+      <section
+        id="result"
+        hidden
+        class="mb-4 rounded-2xl border border-line bg-panel p-5"
+      >
+        <label class="mb-2.5 block font-mono text-xs uppercase tracking-wider text-muted">
+          Redacted output
+        </label>
+        <pre id="output" class="m-0 font-mono text-sm leading-relaxed whitespace-pre-wrap break-words"></pre>
+      </section>
+
+      <!-- Findings -->
+      <section
+        id="findings-panel"
+        hidden
+        class="rounded-2xl border border-line bg-panel p-5"
+      >
+        <label class="mb-2.5 block font-mono text-xs uppercase tracking-wider text-muted">
+          Findings
+        </label>
+        <table class="w-full border-collapse text-sm">
+          <thead>
+            <tr class="[&>th]:border-b [&>th]:border-line [&>th]:px-2.5 [&>th]:py-2 [&>th]:text-left [&>th]:font-mono [&>th]:text-[0.7rem] [&>th]:font-semibold [&>th]:uppercase [&>th]:tracking-wide [&>th]:text-muted">
+              <th>Label</th>
+              <th>Span</th>
+              <th>Confidence</th>
+            </tr>
+          </thead>
+          <tbody
+            id="findings-body"
+            class="[&>tr>td]:border-b [&>tr>td]:border-line [&>tr>td]:px-2.5 [&>tr>td]:py-2 [&>tr>td]:tabular-nums [&>tr:last-child>td]:border-0"
+          ></tbody>
+        </table>
+        <p id="no-findings" hidden class="m-0 text-sm text-muted">
+          No personal data detected.
+        </p>
+      </section>
+
+      <footer class="mt-7 text-center font-mono text-xs text-muted">
+        <span>elide-wasm</span> · pattern &amp; dictionary only ·
+        <a href="https://github.com/nvisycom/elide" class="text-ink no-underline">source</a>
+      </footer>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

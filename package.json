@@ -1,0 +1,10 @@
+{
+  "name": "elide",
+  "private": true,
+  "type": "module",
+  "description": "Elide monorepo: the WebAssembly package and its in-browser demo.",
+  "workspaces": ["packages/*"],
+  "allowScripts": {
+    "esbuild@0.25.12": true
+  }
+}

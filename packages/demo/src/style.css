@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+/* Brand palette as Tailwind theme tokens, so utilities like `bg-panel`,
+   `text-muted`, `border-line`, `text-accent` read from one place. These are the
+   light defaults. Tailwind v4 hoists every `@theme` into one `:root`, so the
+   dark variant must be a plain rule (below), not a second `@theme`. */
+@theme {
+  --color-bg: #fafafa;
+  --color-panel: #ffffff;
+  --color-ink: #1a1c20;
+  --color-muted: #6b7280;
+  --color-line: #e6e7e9;
+  --color-accent: #2f9e6e;
+  --color-grid: rgba(26, 28, 32, 0.045);
+
+  --font-mono:
+    ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+}
+
+/* Dark overrides, applied only under the OS dark preference. Plain custom-
+   property reassignment so it layers over the `@theme` defaults at runtime. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #131417;
+    --color-panel: #1a1c20;
+    --color-ink: #f4f5f7;
+    --color-muted: #9aa2b1;
+    --color-line: #2a2d33;
+    --color-accent: #5fce9f;
+    --color-grid: rgba(244, 245, 247, 0.04);
+  }
+}
+
+/* Faint grid ground — two layered gradients a background utility can't express. */
+body {
+  background-color: var(--color-bg);
+  background-image:
+    linear-gradient(var(--color-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-grid) 1px, transparent 1px);
+  background-size: 46px 46px;
+}

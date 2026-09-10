@@ -34,28 +34,35 @@ install-tools: ## Installs CLI tools required for development.
 	fi
 
 .PHONY: wasm-pkg
-wasm-pkg: ## Builds elide-wasm and generates its JS/TS bindings into www/pkg.
+wasm-pkg: ## Builds @nvisy/elide-wasm into packages/wasm/dist via wasm-pack.
 	@$(call log,Adding wasm32 target...)
 	@rustup target add wasm32-unknown-unknown
-	@chmod +x scripts/install-wasm-bindgen.sh
-	@./scripts/install-wasm-bindgen.sh
-	@$(call log,Building elide-wasm (release)...)
-	@cargo build -p elide-wasm --target wasm32-unknown-unknown --release
-	@$(call log,Generating JS/TS bindings...)
-	@wasm-bindgen target/wasm32-unknown-unknown/release/elide_wasm.wasm \
-		--out-dir crates/elide-wasm/www/pkg --target web
-	@$(call log,Bindings written to crates/elide-wasm/www/pkg.)
+	@$(call log,Ensuring wasm-pack is installed...)
+	@command -v wasm-pack >/dev/null 2>&1 || \
+		cargo binstall wasm-pack --no-confirm || \
+		cargo install wasm-pack --locked
+	@$(call log,Building @nvisy/elide-wasm (release)...)
+	@# wasm-pack reads the wasm-bindgen version from Cargo.lock and fetches a
+	@# matching CLI itself; --no-pack skips its package.json so the hand-authored
+	@# packages/wasm/package.json (with exports + publishConfig) is authoritative.
+	@# --out-dir is relative to the crate manifest.
+	@wasm-pack build crates/elide-wasm --release --target bundler --no-pack \
+		--out-dir ../../packages/wasm/dist --out-name elide_wasm
+	@$(call log,Copying logo from the master asset...)
+	@mkdir -p packages/demo/public
+	@cp .github/assets/logo.svg packages/demo/public/logo.svg
+	@$(call log,Package built to packages/wasm/dist.)
 
 .PHONY: wasm-demo
-wasm-demo: wasm-pkg ## Builds the full browser demo (elide-wasm + Vite app).
+wasm-demo: wasm-pkg ## Builds the full browser demo (Vite app + wasm package).
 	@$(call log,Building demo (Vite)...)
-	@cd crates/elide-wasm/www && npm ci && npm run build
-	@$(call log,Demo built to crates/elide-wasm/www/dist.)
-	@$(call log,Preview it with: cd crates/elide-wasm/www && npm run preview)
+	@npm ci && npm run build -w @nvisy/elide-demo
+	@$(call log,Demo built to packages/demo/dist.)
+	@$(call log,Preview it with: npm run preview -w @nvisy/elide-demo)
 
 .PHONY: wasm-dev
 wasm-dev: wasm-pkg ## Runs the demo dev server with hot reload.
-	@cd crates/elide-wasm/www && npm install && npm run dev
+	@npm install && npm run dev -w @nvisy/elide-demo
 
 .PHONY: lint
 lint: ## Runs clippy and format check.

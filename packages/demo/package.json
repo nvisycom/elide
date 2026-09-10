@@ -1,5 +1,5 @@
 {
-  "name": "elide-wasm-demo",
+  "name": "@nvisy/elide-demo",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -9,13 +9,15 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview"
   },
+  "dependencies": {
+    "@nvisy/elide-wasm": "*"
+  },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^22.20.2",
+    "tailwindcss": "^4.3.3",
     "typescript": "^5.6.0",
     "vite": "^6.0.0",
     "vite-plugin-wasm": "^3.3.0"
-  },
-  "allowScripts": {
-    "esbuild@0.25.12": true
   }
 }
