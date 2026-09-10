@@ -10,6 +10,8 @@ on:
       - "main"
     paths:
       - "packages/**"
+      - "package.json"
+      - "package-lock.json"
       - "crates/elide-wasm/**"
       - "crates/elide/**"
       - "crates/elide-core/**"
