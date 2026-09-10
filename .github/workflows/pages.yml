@@ -9,6 +9,7 @@ on:
     branches:
       - "main"
     paths:
+      - "packages/**"
       - "crates/elide-wasm/**"
       - "crates/elide/**"
       - "crates/elide-core/**"
@@ -63,8 +64,9 @@ jobs:
         with:
           node-version: "22"
 
-      # `make wasm-demo` installs the version-matched wasm-bindgen CLI itself;
-      # cargo-binstall lets it grab a prebuilt binary instead of compiling one.
+      # `make wasm-demo` runs wasm-pack, which reads the wasm-bindgen version
+      # from Cargo.lock and fetches a matching CLI itself; cargo-binstall lets
+      # it grab prebuilt binaries instead of compiling them.
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@main
 
@@ -74,7 +76,7 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: crates/elide-wasm/www/dist
+          path: packages/demo/dist
 
   deploy:
     name: Deploy

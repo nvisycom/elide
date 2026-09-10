@@ -1,4 +1,12 @@
-import { initElide, redactText, type Finding } from "./elide";
+import {
+  createAnalyzer,
+  createAnonymizer,
+  createPatternRecognizer,
+  redact,
+  type AnalyzerHandle,
+  type AnonymizerHandle,
+  type Finding,
+} from "./elide";
 import "./style.css";
 
 const $ = <T extends HTMLElement>(id: string): T => {
@@ -17,6 +25,19 @@ const output = $<HTMLPreElement>("output");
 const findingsPanel = $<HTMLDivElement>("findings-panel");
 const findingsBody = $<HTMLTableSectionElement>("findings-body");
 const noFindings = $<HTMLParagraphElement>("no-findings");
+
+// The analyzer only depends on the two source checkboxes, so build the pipeline
+// once and reuse it; rebuild lazily when a checkbox changes.
+let pipeline: { analyzer: AnalyzerHandle; anonymizer: AnonymizerHandle } | null =
+  null;
+
+function invalidatePipeline(): void {
+  pipeline?.analyzer.free();
+  pipeline?.anonymizer.free();
+  pipeline = null;
+}
+optPatterns.addEventListener("change", invalidatePipeline);
+optDictionaries.addEventListener("change", invalidatePipeline);
 
 const escapeHtml = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -40,11 +61,17 @@ async function run(): Promise<void> {
   statusEl.textContent = "Redacting…";
   const t0 = performance.now();
   try {
-    const res = await redactText(
-      input.value,
-      optPatterns.checked,
-      optDictionaries.checked,
-    );
+    if (!pipeline) {
+      const recognizer = createPatternRecognizer({
+        builtinPatterns: optPatterns.checked,
+        builtinDictionaries: optDictionaries.checked,
+      });
+      pipeline = {
+        analyzer: createAnalyzer([recognizer]),
+        anonymizer: createAnonymizer(),
+      };
+    }
+    const res = await redact(pipeline.analyzer, pipeline.anonymizer, input.value);
     const ms = (performance.now() - t0).toFixed(1);
 
     output.textContent = res.redacted;
@@ -59,16 +86,10 @@ async function run(): Promise<void> {
   }
 }
 
-async function main(): Promise<void> {
+function main(): void {
   runBtn.addEventListener("click", () => void run());
-  try {
-    await initElide();
-    statusEl.textContent = "Ready.";
-    runBtn.disabled = false;
-  } catch (err) {
-    statusEl.textContent = "Failed to load WebAssembly module.";
-    console.error(err);
-  }
+  statusEl.textContent = "Ready.";
+  runBtn.disabled = false;
 }
 
-void main();
+main();

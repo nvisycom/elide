@@ -23,6 +23,10 @@ encryption.key
 coverage/
 *.lcov
 
+# Node / npm workspaces
+node_modules/
+.vite/
+
 # Build output
 dist/
 build/
@@ -56,3 +60,6 @@ CLAUDE.md
 
 # Example output
 examples/data/*.redacted.*
+
+# Copied from .github/assets/logo.svg
+packages/demo/public/logo.svg

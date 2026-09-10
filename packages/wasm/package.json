@@ -1,0 +1,26 @@
+{
+  "name": "@nvisy/elide-wasm",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "In-browser PII detection and redaction, compiled to WebAssembly.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nvisycom/elide"
+  },
+  "homepage": "https://github.com/nvisycom/elide",
+  "keywords": ["pii", "redaction", "webassembly", "wasm", "privacy"],
+  "files": ["dist"],
+  "module": "./dist/elide_wasm.js",
+  "types": "./dist/elide_wasm.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/elide_wasm.d.ts",
+      "default": "./dist/elide_wasm.js"
+    }
+  },
+  "sideEffects": ["./dist/elide_wasm.js", "./dist/snippets/*"],
+  "publishConfig": {
+    "access": "public"
+  }
+}
