@@ -15,7 +15,7 @@ use elide::prelude::operators::*;
 use elide::prelude::*;
 use elide::recognition::pattern::PatternRecognizer;
 use serde::Serialize;
-use tsify::Tsify;
+use tsify::{Ts, Tsify};
 use wasm_bindgen::prelude::*;
 
 /// Install the panic hook once, so a Rust panic surfaces in the browser console
@@ -30,7 +30,6 @@ pub fn start() {
 /// `Tsify` generates the matching TypeScript `interface`, so the JS side sees a
 /// typed `Finding` rather than an opaque object.
 #[derive(Serialize, Tsify)]
-#[tsify(into_wasm_abi)]
 pub struct Finding {
     /// The entity's label id (e.g. `email_address`).
     pub label: String,
@@ -44,7 +43,6 @@ pub struct Finding {
 
 /// The result handed back to JavaScript: the redacted text and what was found.
 #[derive(Serialize, Tsify)]
-#[tsify(into_wasm_abi)]
 pub struct RedactionResult {
     /// The input text with every matched entity replaced by its policy output.
     pub redacted: String,
@@ -63,9 +61,15 @@ pub struct RedactionResult {
 ///
 /// Rejects with a JS error string if the pipeline fails (e.g. the text cannot
 /// be decoded or analyzed).
+///
+/// Returns a [`Ts<RedactionResult>`], tsify's transparent wrapper that carries a
+/// typed value across the wasm boundary without leaking: deserialization happens
+/// here, inside the function, so destructors run normally. The generated
+/// TypeScript still reports the return as `Promise<RedactionResult>`.
 #[wasm_bindgen]
-pub async fn redact_text(input: String) -> Result<RedactionResult, JsError> {
-    run(input).await.map_err(|e| JsError::new(&e.to_string()))
+pub async fn redact_text(input: String) -> Result<Ts<RedactionResult>, JsError> {
+    let result = run(input).await.map_err(|e| JsError::new(&e.to_string()))?;
+    Ts::from_rust(&result).map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// The pipeline proper, kept separate so it returns the crate's own [`Result`]
