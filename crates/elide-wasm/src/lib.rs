@@ -1,3 +1,7 @@
+#![forbid(unsafe_code)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc = include_str!("../README.md")]
+
 //! WebAssembly bindings that run the Elide detect-and-redact pipeline in a
 //! browser.
 //!
@@ -11,12 +15,16 @@
 //! The exported [`redact_text`] function is the single entry point JavaScript
 //! calls; everything else is private wiring.
 
-use elide::prelude::operators::*;
+mod analyzer;
+mod anonymizer;
+
 use elide::prelude::*;
-use elide::recognition::pattern::PatternRecognizer;
 use serde::Serialize;
 use tsify::{Ts, Tsify};
 use wasm_bindgen::prelude::*;
+
+use self::analyzer::build_analyzer;
+use self::anonymizer::build_anonymizer;
 
 /// Install the panic hook once, so a Rust panic surfaces in the browser console
 /// with a readable message instead of an opaque `unreachable`.
@@ -57,6 +65,10 @@ pub struct RedactionResult {
 /// numbers, payment cards, URLs, and the shipped dictionaries) and applies a
 /// per-label redaction policy. It is `async`: `await` it from JavaScript.
 ///
+/// The `patterns` and `dictionaries` flags select which recognizer sources run,
+/// so the page can show what each contributes; with both off, nothing is
+/// detected and the input is returned unchanged.
+///
 /// # Errors
 ///
 /// Rejects with a JS error string if the pipeline fails (e.g. the text cannot
@@ -67,14 +79,20 @@ pub struct RedactionResult {
 /// here, inside the function, so destructors run normally. The generated
 /// TypeScript still reports the return as `Promise<RedactionResult>`.
 #[wasm_bindgen]
-pub async fn redact_text(input: String) -> Result<Ts<RedactionResult>, JsError> {
-    let result = run(input).await.map_err(|e| JsError::new(&e.to_string()))?;
+pub async fn redact_text(
+    input: String,
+    patterns: bool,
+    dictionaries: bool,
+) -> Result<Ts<RedactionResult>, JsError> {
+    let result = run(input, patterns, dictionaries)
+        .await
+        .map_err(|e| JsError::new(&e.to_string()))?;
     Ts::from_rust(&result).map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// The pipeline proper, kept separate so it returns the crate's own [`Result`]
 /// and the wasm boundary only deals with `JsValue`.
-async fn run(input: String) -> Result<RedactionResult> {
+async fn run(input: String, patterns: bool, dictionaries: bool) -> Result<RedactionResult> {
     // Decode the raw text through the codec layer, as any other input would be.
     let registry = FormatRegistry::with_builtin();
     let handle = registry.decode(input, "txt").await?;
@@ -82,7 +100,7 @@ async fn run(input: String) -> Result<RedactionResult> {
         .into::<Text>()
         .expect("the txt codec yields a text document");
 
-    let analyzer = build_analyzer()?;
+    let analyzer = build_analyzer(patterns, dictionaries)?;
     let anonymizer = build_anonymizer();
 
     // Detect over the built-in catalog. No language is asserted, so detection
@@ -112,44 +130,4 @@ async fn run(input: String) -> Result<RedactionResult> {
     let redacted = String::from_utf8_lossy(encoded.as_bytes()).into_owned();
 
     Ok(RedactionResult { redacted, findings })
-}
-
-/// The pattern-recognizer analyzer plus its deduplication pipeline. Mirrors the
-/// native `redact_txt` example, minus the offline NER/LLM mocks (which add
-/// nothing in a browser and only enlarge the build).
-fn build_analyzer() -> Result<Analyzer<Text>> {
-    let patterns = PatternRecognizer::builder()
-        .with_builtin_patterns()
-        .with_builtin_dictionaries()
-        .build_context_enhanced()?;
-
-    Ok(Analyzer::new()
-        .with_recognizer(patterns)
-        .with_layer(ReconcileLayer::same_label(Merging::max()))
-        .with_layer(ReconcileLayer::cross_label(Structural::default()))
-        .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE)))
-}
-
-/// A redaction policy: a readable token per common label, a masked tail for
-/// payment cards, and full erasure for anything else detected.
-fn build_anonymizer() -> Anonymizer<Text> {
-    Anonymizer::new()
-        .with(Rule::predicate(
-            |cx| !ConfidenceThreshold::BASELINE.passes(cx.entity.confidence),
-            Keep,
-        ))
-        .with(Rule::label(
-            builtins::EMAIL_ADDRESS.to_ref(),
-            Replace::new("[EMAIL]"),
-        ))
-        .with(Rule::label(
-            builtins::PHONE_NUMBER.to_ref(),
-            Replace::new("[PHONE]"),
-        ))
-        .with(Rule::label(builtins::URL.to_ref(), Replace::new("[URL]")))
-        .with(Rule::label(
-            builtins::PAYMENT_CARD.to_ref(),
-            Mask::stars().with_keep_suffix(4),
-        ))
-        .with(Rule::fallback(Erase))
 }

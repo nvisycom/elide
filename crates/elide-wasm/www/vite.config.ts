@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 import wasm from "vite-plugin-wasm";
 
@@ -14,7 +15,7 @@ const elideWasm = fileURLToPath(
 // defaults to root so `npm run dev` and `npm run preview` work unchanged.
 export default defineConfig({
   base: process.env.BASE_PATH ?? "/",
-  plugins: [wasm()],
+  plugins: [tailwindcss(), wasm()],
   resolve: {
     alias: { "elide-wasm": elideWasm },
   },

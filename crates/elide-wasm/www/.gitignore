@@ -33,6 +33,9 @@ output/
 # Generated wasm-bindgen
 pkg/
 
+# Copied from .github/assets/logo.svg
+public/logo.svg
+
 # Environment
 .env*
 !.env.example

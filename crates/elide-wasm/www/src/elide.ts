@@ -19,9 +19,14 @@ export function initElide(): Promise<void> {
   return ready;
 }
 
-/** Detect and redact the personal data in `input`. Initializes the module on
- * first use. */
-export async function redactText(input: string) {
+/** Detect and redact the personal data in `input`. The `patterns` and
+ * `dictionaries` flags select which recognizer sources run. Initializes the
+ * module on first use. */
+export async function redactText(
+  input: string,
+  patterns: boolean,
+  dictionaries: boolean,
+) {
   await initElide();
-  return redact_text(input);
+  return redact_text(input, patterns, dictionaries);
 }

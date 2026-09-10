@@ -8,6 +8,8 @@ const $ = <T extends HTMLElement>(id: string): T => {
 };
 
 const input = $<HTMLTextAreaElement>("input");
+const optPatterns = $<HTMLInputElement>("opt-patterns");
+const optDictionaries = $<HTMLInputElement>("opt-dictionaries");
 const runBtn = $<HTMLButtonElement>("run");
 const statusEl = $<HTMLSpanElement>("status");
 const result = $<HTMLDivElement>("result");
@@ -24,7 +26,7 @@ function renderFindings(findings: Finding[]): void {
   for (const f of findings) {
     const tr = document.createElement("tr");
     tr.innerHTML =
-      `<td class="tag">${escapeHtml(f.label)}</td>` +
+      `<td class="font-mono">${escapeHtml(f.label)}</td>` +
       `<td>${f.start}-${f.end}</td>` +
       `<td>${f.confidence.toFixed(2)}</td>`;
     findingsBody.appendChild(tr);
@@ -38,7 +40,11 @@ async function run(): Promise<void> {
   statusEl.textContent = "Redacting…";
   const t0 = performance.now();
   try {
-    const res = await redactText(input.value);
+    const res = await redactText(
+      input.value,
+      optPatterns.checked,
+      optDictionaries.checked,
+    );
     const ms = (performance.now() - t0).toFixed(1);
 
     output.textContent = res.redacted;

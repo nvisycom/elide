@@ -44,6 +44,9 @@ wasm-pkg: ## Builds elide-wasm and generates its JS/TS bindings into www/pkg.
 	@$(call log,Generating JS/TS bindings...)
 	@wasm-bindgen target/wasm32-unknown-unknown/release/elide_wasm.wasm \
 		--out-dir crates/elide-wasm/www/pkg --target web
+	@$(call log,Copying logo from the master asset...)
+	@mkdir -p crates/elide-wasm/www/public
+	@cp .github/assets/logo.svg crates/elide-wasm/www/public/logo.svg
 	@$(call log,Bindings written to crates/elide-wasm/www/pkg.)
 
 .PHONY: wasm-demo
