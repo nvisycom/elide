@@ -209,3 +209,49 @@ jobs:
 
       - name: Run machete
         run: cargo machete
+
+  wasm:
+    name: WebAssembly
+    runs-on: ubuntu-latest
+    needs: check
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@v2
+
+      # The browser bindings and their wasm-clean slice of the facade must keep
+      # compiling for the web target. `.cargo/config.toml` selects the JS
+      # getrandom backend for this target.
+      - name: Build elide-wasm (wasm32)
+        run: cargo build -p elide-wasm --target wasm32-unknown-unknown
+
+      # The detect + redact core path (no native codecs, no hosted models) is
+      # the surface the browser build depends on; guard that it stays portable.
+      - name: Build facade core path (wasm32)
+        run: >
+          cargo build -p elide --no-default-features
+          --features engine,pattern,fake,codec-text
+          --target wasm32-unknown-unknown
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      # Generate the bindings and build the demo through the Makefile (the single
+      # source of truth), so a broken TypeScript API or Vite build fails the PR
+      # rather than only surfacing post-merge in the Pages deploy.
+      - name: Build demo
+        run: make wasm-demo

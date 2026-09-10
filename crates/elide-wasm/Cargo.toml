@@ -1,0 +1,48 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "elide-wasm"
+description = "WebAssembly bindings that run the Elide detect-and-redact pipeline in a browser"
+keywords = ["elide", "wasm", "redaction", "pii", "browser"]
+categories = ["wasm", "text-processing"]
+readme = "README.md"
+publish = false
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[lib]
+# A dynamic library so wasm-bindgen / wasm-pack can emit the `.wasm` plus its
+# JS glue; nothing links this as a normal Rust rlib.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Internal crates
+# Declared by path (not inherited) so `default-features = false` applies:
+# a workspace dependency cannot turn the root's default features back off.
+elide = { path = "../elide", version = "0.1.0", default-features = false, features = [
+    "engine",
+    "pattern",
+    "fake",
+    "codec-text",
+] }
+
+# Derive macros & error handling
+wasm-bindgen = { workspace = true, features = [] }
+wasm-bindgen-futures = { workspace = true, features = [] }
+serde = { workspace = true, features = ["derive"] }
+tsify = { workspace = true, features = [] }
+console_error_panic_hook = { workspace = true, features = [] }
+
+[package.metadata.cargo-machete]
+# `wasm-bindgen-futures` is pulled in by the `#[wasm_bindgen]` codegen for the
+# async `redact_text` export, not referenced by name in source, so machete
+# cannot see the use.
+ignored = ["wasm-bindgen-futures"]

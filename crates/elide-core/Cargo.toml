@@ -90,6 +90,14 @@ async-trait = { workspace = true, features = [] }
 # Templating & schema
 schemars = { workspace = true, features = [], optional = true }
 
+# On wasm there is no ambient OS clock or entropy source, so the crates that
+# reach for one (uuid v7 entity ids, jiff audit timestamps) need their
+# browser-backed `js` path enabled. This applies only to wasm targets; native
+# builds are unaffected.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+uuid = { workspace = true, features = ["v7", "js"] }
+jiff = { workspace = true, features = ["js"] }
+
 [dev-dependencies]
 # (De)serialization
 serde_json = { workspace = true, features = [] }

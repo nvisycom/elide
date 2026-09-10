@@ -1,0 +1,93 @@
+name: Pages
+
+# Builds the elide-wasm browser demo and publishes it to GitHub Pages. The demo
+# is fully static (HTML + JS + wasm) and runs the redaction pipeline entirely in
+# the visitor's browser.
+
+on:
+  push:
+    branches:
+      - "main"
+    paths:
+      - "crates/elide-wasm/**"
+      - "crates/elide/**"
+      - "crates/elide-core/**"
+      - "crates/elide-pattern/**"
+      - "crates/elide-detection/**"
+      - "crates/elide-redaction/**"
+      - "crates/elide-operator/**"
+      - "crates/elide-engine/**"
+      - "crates/elide-codec/**"
+      - "crates/elide-fake/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/config.toml"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+# The demo is served from `https://<owner>.github.io/<repo>/`, so Vite must build
+# with a matching base path.
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.95.0"
+  BASE_PATH: "/${{ github.event.repository.name }}/"
+
+# Allow one concurrent deployment; a newer push supersedes an in-flight one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build demo
+    runs-on: ubuntu-latest
+    # The build only reads the repo and uploads an artifact; it needs no
+    # deployment credentials. Only the deploy job below holds those.
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # `make wasm-demo` installs the version-matched wasm-bindgen CLI itself;
+      # cargo-binstall lets it grab a prebuilt binary instead of compiling one.
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Build demo
+        run: make wasm-demo
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: crates/elide-wasm/www/dist
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    # Only the deploy step needs the Pages deployment credentials.
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

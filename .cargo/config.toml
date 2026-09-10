@@ -1,0 +1,8 @@
+# Browser (wasm32) build configuration.
+#
+# `getrandom` 0.4 (pulled transitively by `rand` 0.10 via `fake`) has no default
+# entropy source on `wasm32-unknown-unknown`; it must be told to use the JS
+# `crypto.getRandomValues` backend. That backend is selected by this cfg flag in
+# addition to the crate's `wasm_js` feature. The flag is inert on native targets.
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"']
