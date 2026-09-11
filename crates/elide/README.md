@@ -34,7 +34,7 @@ See [CHANGELOG.md](../../CHANGELOG.md) for release notes and version history.
 
 ## License
 
-Apache 2.0 License, see [LICENSE.txt](../../LICENSE.txt)
+Apache 2.0 License, see [LICENSE](../../LICENSE)
 
 ## Support
 
