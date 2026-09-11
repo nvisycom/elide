@@ -1,7 +1,8 @@
 //! EXIF metadata read, strip, and field-level removal.
 //!
 //! Backed by `little_exif`, the one permissive pure-Rust crate that both reads
-//! and edits EXIF for JPEG and PNG. Its parser can panic on malformed input, so
+//! and edits EXIF for JPEG, PNG, and TIFF. Its parser can panic on malformed
+//! input, so
 //! every call into it is wrapped in a panic guard ([`guard`]): a panic becomes a
 //! fail-closed error, never an aborted process, since this runs on the
 //! redaction path where a crash mid-strip is unacceptable.
@@ -204,11 +205,43 @@ impl<'a> Source<'a> {
             // Source had no metadata: nothing to carry over.
             return Ok(dest);
         };
+        // TIFF stores EXIF *as* the file's IFD, so `little_exif`'s TIFF writer
+        // rebuilds the whole file from the metadata and ignores `dest`'s pixels
+        // — the JPEG/PNG segment-layering below would silently drop the pixel
+        // redactions. Instead transplant this source's non-structural tags onto
+        // the freshly-encoded (redacted) container's own metadata, which already
+        // carries the redacted pixels as its strip data.
+        if matches!(self.format, FileExtension::TIFF) {
+            return self.transfer_tiff(&exif, dest);
+        }
         let format = self.format;
         let mut out = dest;
         guard(AssertUnwindSafe(|| exif.write_to_vec(&mut out, format)))?
             .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("exif transfer: {e}")))?;
         Ok(out)
+    }
+
+    /// The TIFF path for [`transfer`](Self::transfer): parse the redacted
+    /// container `dest` (whose metadata already holds the redacted pixels and the
+    /// mandatory TIFF-structural tags) and copy every non-structural tag from
+    /// `source` onto it, so the output carries the redacted pixels plus the
+    /// source's kept EXIF.
+    fn transfer_tiff(&self, source: &ExifMetadata, dest: Vec<u8>) -> Result<Vec<u8>> {
+        let mut out = guard(|| ExifMetadata::new_from_vec(&dest, FileExtension::TIFF))?
+            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("tiff reparse: {e}")))?;
+        guard(AssertUnwindSafe(|| {
+            for tag in source {
+                if !is_tiff_structural(tag) {
+                    out.set_tag(tag.clone());
+                }
+            }
+        }))?;
+        let mut buf = dest;
+        guard(AssertUnwindSafe(|| {
+            out.write_to_vec(&mut buf, FileExtension::TIFF)
+        }))?
+        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("tiff transfer: {e}")))?;
+        Ok(buf)
     }
 
     /// Write `exif` back onto this source's bytes.
@@ -219,6 +252,35 @@ impl<'a> Source<'a> {
             .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("exif rewrite: {e}")))?;
         Ok(buf)
     }
+}
+
+/// Whether `tag` is a TIFF-structural tag that describes the pixel layout
+/// (dimensions, strips, compression, resolution) rather than carried metadata.
+///
+/// On the TIFF transfer path these must stay as the freshly-encoded container's
+/// own values — copying the source's would point the IFD at the original,
+/// un-redacted pixels. Mirrors the set `little_exif`'s `reduce_to_a_minimum`
+/// preserves.
+#[cfg(feature = "exif")]
+fn is_tiff_structural(tag: &ExifTag) -> bool {
+    matches!(
+        tag,
+        ExifTag::StripOffsets(_, _)
+            | ExifTag::StripByteCounts(_)
+            | ExifTag::ThumbnailOffset(_, _)
+            | ExifTag::ThumbnailLength(_)
+            | ExifTag::ImageWidth(_)
+            | ExifTag::ImageHeight(_)
+            | ExifTag::BitsPerSample(_)
+            | ExifTag::Compression(_)
+            | ExifTag::PhotometricInterpretation(_)
+            | ExifTag::SamplesPerPixel(_)
+            | ExifTag::RowsPerStrip(_)
+            | ExifTag::XResolution(_)
+            | ExifTag::YResolution(_)
+            | ExifTag::ResolutionUnit(_)
+            | ExifTag::ColorMap(_)
+    )
 }
 
 /// The `little_exif` tag matching a field `key` this crate surfaces as an

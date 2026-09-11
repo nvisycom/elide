@@ -108,7 +108,9 @@ impl FormatRegistry {
         registry.add_format(crate::handler::png_format());
         #[cfg(feature = "jpeg")]
         registry.add_format(crate::handler::jpeg_format());
-        #[cfg(any(feature = "png", feature = "jpeg"))]
+        #[cfg(feature = "tiff")]
+        registry.add_format(crate::handler::tiff_format());
+        #[cfg(any(feature = "png", feature = "jpeg", feature = "tiff"))]
         registry.add_format(crate::handler::exif_format());
         #[cfg(feature = "wav")]
         registry.add_format(crate::handler::wav_format());

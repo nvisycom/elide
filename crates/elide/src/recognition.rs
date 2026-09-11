@@ -108,8 +108,11 @@ pub use elide_pattern as pattern;
 /// Wire it into a `Metadata` pipeline to strip an image's metadata alongside its
 /// pixels: `.with_modality::<Metadata>(Analyzer::new().with_recognizer(exif::ExifRecognizer),
 /// Anonymizer::new().with(Rule::fallback(Erase)))`.
-#[cfg(any(feature = "codec-png", feature = "codec-jpeg"))]
-#[cfg_attr(docsrs, doc(cfg(any(feature = "codec-png", feature = "codec-jpeg"))))]
+#[cfg(any(feature = "codec-png", feature = "codec-jpeg", feature = "codec-tiff"))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(any(feature = "codec-png", feature = "codec-jpeg", feature = "codec-tiff")))
+)]
 pub mod exif {
     #[doc(inline)]
     pub use elide_codec::handler::ExifRecognizer;

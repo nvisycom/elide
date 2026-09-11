@@ -115,7 +115,7 @@ engine = ["dep:elide-engine", "codec", "serde"]
 ## Per-modality format groups (each aggregates its per-format features).
 codec-text = ["codec-txt", "codec-json", "codec-html", "codec-xml"]
 codec-tabular = ["codec-csv", "codec-xlsx"]
-codec-image = ["codec-png", "codec-jpeg"]
+codec-image = ["codec-png", "codec-jpeg", "codec-tiff"]
 codec-audio = ["codec-wav", "codec-mp3"]
 codec-document = ["codec-docx", "codec-pptx", "codec-pdf", "codec-rtf"]
 
@@ -128,6 +128,7 @@ codec-csv = ["codec", "tabular", "elide-codec/csv"]
 codec-xlsx = ["codec", "tabular", "codec-xml", "elide-codec/xlsx", "metadata"]
 codec-png = ["codec", "image", "elide-codec/png"]
 codec-jpeg = ["codec", "image", "elide-codec/jpeg"]
+codec-tiff = ["codec", "image", "elide-codec/tiff"]
 codec-wav = ["codec", "audio", "elide-codec/wav"]
 codec-mp3 = ["codec", "audio", "elide-codec/mp3"]
 codec-docx = ["codec", "elide-codec/docx", "metadata"]
@@ -242,7 +243,7 @@ required-features = ["codec-csv", "ner", "llm", "lingua-common", "test-utils", "
 
 [[test]]
 name = "format_image"
-required-features = ["codec-png", "codec-jpeg", "ocr", "test-utils", "engine", "serde"]
+required-features = ["codec-png", "codec-jpeg", "codec-tiff", "ocr", "test-utils", "engine", "serde"]
 
 [[test]]
 name = "format_audio"

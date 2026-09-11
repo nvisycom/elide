@@ -540,4 +540,117 @@ mod tests {
             "benign Orientation was dropped by a StripSensitive re-encode"
         );
     }
+
+    /// Metadata-only strip on a TIFF (pixels untouched): the lossless path reads
+    /// the source TIFF's IFD, drops the sensitive tags, and writes the whole
+    /// file back. TIFF stores EXIF as its own IFD, so this exercises the
+    /// EXIF-as-IFD read-modify-write.
+    #[cfg(all(feature = "tiff", feature = "exif"))]
+    #[test]
+    fn strip_gps_without_redaction_round_trips_tiff() {
+        use little_exif::exif_tag::ExifTag;
+        use little_exif::filetype::FileExtension;
+        use little_exif::metadata::Metadata as ExifMetadata;
+
+        let bytes = crate::test_util::tiff_with_gps();
+        assert!(
+            crate::test_util::has_gps_tiff(&bytes),
+            "fixture should carry GPS before the strip"
+        );
+
+        // No pixel redaction: the lossless strip path.
+        let buffer = ImageBuffer::open(&bytes).expect("open");
+        let out = buffer.encode(ExifPolicy::StripSensitive).expect("encode");
+
+        // Pixels intact, GPS gone.
+        assert_eq!(
+            pixel_at(&out, 0, 0),
+            Rgba([200, 30, 30, 255]),
+            "pixels changed"
+        );
+        assert!(
+            ExifMetadata::new_from_vec(&out.to_vec(), FileExtension::TIFF)
+                .expect("parse output")
+                .get_tag(&ExifTag::GPSLatitude(Vec::new()))
+                .next()
+                .is_none(),
+            "GPS survived the TIFF strip"
+        );
+    }
+
+    /// Pixel redaction + metadata on a TIFF: the re-encode path. `little_exif`'s
+    /// TIFF writer serializes a whole TIFF from the parsed metadata, so the
+    /// transfer path transplants the source's kept tags onto the freshly-encoded
+    /// (redacted) container. Both the pixel redaction and the kept EXIF must
+    /// survive one encode.
+    #[cfg(all(feature = "tiff", feature = "exif"))]
+    #[test]
+    fn redact_then_keep_metadata_tiff() {
+        use little_exif::exif_tag::ExifTag;
+        use little_exif::filetype::FileExtension;
+        use little_exif::metadata::Metadata as ExifMetadata;
+
+        let bytes = crate::test_util::tiff_with_gps();
+        let mut buffer = ImageBuffer::open(&bytes).expect("open");
+        buffer.redact(
+            PixelRegion::new(0, 0, 2, 2),
+            &ImageReplacement::Block {
+                color: Color::BLACK,
+            },
+        );
+        let out = buffer.encode(ExifPolicy::Keep).expect("encode");
+        // The pixel redaction survives.
+        assert_eq!(
+            pixel_at(&out, 0, 0),
+            Rgba([0, 0, 0, 255]),
+            "pixel not redacted"
+        );
+        assert_eq!(
+            pixel_at(&out, 3, 3),
+            Rgba([200, 30, 30, 255]),
+            "untargeted pixel changed"
+        );
+        // And the kept EXIF (GPS, under Keep) is carried onto the redacted TIFF.
+        assert!(
+            ExifMetadata::new_from_vec(&out.to_vec(), FileExtension::TIFF)
+                .expect("parse output")
+                .get_tag(&ExifTag::GPSLatitude(Vec::new()))
+                .next()
+                .is_some(),
+            "kept GPS was dropped on the TIFF transfer"
+        );
+    }
+
+    /// Pixel redaction + `StripSensitive` on a TIFF: both edits compose — the
+    /// redacted pixels survive AND the sensitive EXIF is gone.
+    #[cfg(all(feature = "tiff", feature = "exif"))]
+    #[test]
+    fn redact_then_strip_sensitive_tiff() {
+        use little_exif::exif_tag::ExifTag;
+        use little_exif::filetype::FileExtension;
+        use little_exif::metadata::Metadata as ExifMetadata;
+
+        let bytes = crate::test_util::tiff_with_gps();
+        let mut buffer = ImageBuffer::open(&bytes).expect("open");
+        buffer.redact(
+            PixelRegion::new(0, 0, 2, 2),
+            &ImageReplacement::Block {
+                color: Color::BLACK,
+            },
+        );
+        let out = buffer.encode(ExifPolicy::StripSensitive).expect("encode");
+        assert_eq!(
+            pixel_at(&out, 0, 0),
+            Rgba([0, 0, 0, 255]),
+            "pixel not redacted"
+        );
+        assert!(
+            ExifMetadata::new_from_vec(&out.to_vec(), FileExtension::TIFF)
+                .expect("parse output")
+                .get_tag(&ExifTag::GPSLatitude(Vec::new()))
+                .next()
+                .is_none(),
+            "sensitive GPS survived the TIFF strip+redact"
+        );
+    }
 }

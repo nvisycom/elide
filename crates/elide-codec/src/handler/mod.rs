@@ -39,8 +39,11 @@ pub(crate) mod text;
 // script-handling config its `format_with` constructor takes.
 /// The recognizer that classifies an image's EXIF fields into
 /// `Entity<Metadata>` values, for a caller wiring the metadata pipeline.
-#[cfg(any(feature = "png", feature = "jpeg"))]
-#[cfg_attr(docsrs, doc(cfg(any(feature = "png", feature = "jpeg"))))]
+#[cfg(any(feature = "png", feature = "jpeg", feature = "tiff"))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(any(feature = "png", feature = "jpeg", feature = "tiff")))
+)]
 pub use ::elide_image::ExifRecognizer;
 
 #[cfg(feature = "mp3")]
@@ -64,8 +67,11 @@ pub use self::document::rtf_format;
 #[cfg(feature = "pdf")]
 #[cfg_attr(docsrs, doc(cfg(feature = "pdf")))]
 pub use self::document::{RasterMode, pdf_format};
-#[cfg(any(feature = "png", feature = "jpeg"))]
-#[cfg_attr(docsrs, doc(cfg(any(feature = "png", feature = "jpeg"))))]
+#[cfg(any(feature = "png", feature = "jpeg", feature = "tiff"))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(any(feature = "png", feature = "jpeg", feature = "tiff")))
+)]
 pub use self::image::exif_format;
 #[cfg(feature = "jpeg")]
 #[cfg_attr(docsrs, doc(cfg(feature = "jpeg")))]
@@ -73,6 +79,9 @@ pub use self::image::jpeg_format;
 #[cfg(feature = "png")]
 #[cfg_attr(docsrs, doc(cfg(feature = "png")))]
 pub use self::image::png_format;
+#[cfg(feature = "tiff")]
+#[cfg_attr(docsrs, doc(cfg(feature = "tiff")))]
+pub use self::image::tiff_format;
 #[cfg(feature = "xml")]
 #[cfg_attr(docsrs, doc(cfg(feature = "xml")))]
 pub use self::markup::xml_format;

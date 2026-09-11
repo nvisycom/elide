@@ -1,4 +1,4 @@
-//! Image modality: raster format handlers (PNG, JPEG) that decode
+//! Image modality: raster format handlers (PNG, JPEG, TIFF) that decode
 //! to an in-memory image and redact regions of it.
 //!
 //! Every format shares one handler shape stamped out by
@@ -13,22 +13,26 @@
 
 pub(crate) mod macros;
 
-#[cfg(any(feature = "png", feature = "jpeg"))]
+#[cfg(any(feature = "png", feature = "jpeg", feature = "tiff"))]
 mod exif_handler;
 #[cfg(feature = "jpeg")]
 mod jpeg_handler;
 #[cfg(feature = "png")]
 mod png_handler;
+#[cfg(feature = "tiff")]
+mod tiff_handler;
 
 // `*_format` is `pub` so the parent `handler` module re-exports it as the
 // crate's public contract. The macro defines each handler/loader pair in
 // one file, so nothing else needs to name them.
-#[cfg(any(feature = "png", feature = "jpeg"))]
+#[cfg(any(feature = "png", feature = "jpeg", feature = "tiff"))]
 pub use self::exif_handler::format as exif_format;
 #[cfg(feature = "jpeg")]
 pub use self::jpeg_handler::format as jpeg_format;
 #[cfg(feature = "png")]
 pub use self::png_handler::format as png_format;
+#[cfg(feature = "tiff")]
+pub use self::tiff_handler::format as tiff_format;
 
 #[cfg(all(test, feature = "png"))]
 mod tests {
