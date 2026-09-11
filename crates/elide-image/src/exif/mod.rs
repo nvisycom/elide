@@ -1,7 +1,8 @@
 //! EXIF metadata read, strip, and field-level removal.
 //!
 //! Backed by `little_exif`, the one permissive pure-Rust crate that both reads
-//! and edits EXIF for JPEG and PNG. Its parser can panic on malformed input, so
+//! and edits EXIF for JPEG, PNG, and TIFF. Its parser can panic on malformed
+//! input, so
 //! every call into it is wrapped in a panic guard ([`guard`]): a panic becomes a
 //! fail-closed error, never an aborted process, since this runs on the
 //! redaction path where a crash mid-strip is unacceptable.
@@ -204,11 +205,58 @@ impl<'a> Source<'a> {
             // Source had no metadata: nothing to carry over.
             return Ok(dest);
         };
+        // TIFF stores EXIF *as* the file's IFD, so `little_exif`'s TIFF writer
+        // rebuilds the whole file from the metadata and ignores `dest`'s pixels
+        // — the JPEG/PNG segment-layering below would silently drop the pixel
+        // redactions. Instead transplant this source's non-structural tags onto
+        // the freshly-encoded (redacted) container's own metadata, which already
+        // carries the redacted pixels as its strip data.
+        if matches!(self.format, FileExtension::TIFF) {
+            return self.transfer_tiff(&exif, dest);
+        }
         let format = self.format;
         let mut out = dest;
         guard(AssertUnwindSafe(|| exif.write_to_vec(&mut out, format)))?
             .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("exif transfer: {e}")))?;
         Ok(out)
+    }
+
+    /// The TIFF path for [`transfer`](Self::transfer): parse the redacted
+    /// container `dest` (whose metadata already holds the redacted pixels and its
+    /// own correct pixel-layout tags) and copy `source`'s *metadata* tags onto
+    /// it, so the output carries the redacted pixels plus the source's kept EXIF.
+    ///
+    /// The transfer is an allowlist, not a denylist: only tags in the EXIF, GPS,
+    /// and Interop sub-IFDs (which are pure metadata) plus a fixed set of benign
+    /// IFD0 descriptive tags are carried. Every pixel-layout tag — strips, tiles,
+    /// planar config, dimensions, compression, and any tag `little_exif` parses
+    /// as an `Unknown*` variant — is left as `dest`'s own value, so a source
+    /// whose layout differs from the encoder's (e.g. a tiled source vs. the
+    /// strip-based re-encode) can never point the output IFD at the wrong pixels.
+    fn transfer_tiff(&self, source: &ExifMetadata, dest: Vec<u8>) -> Result<Vec<u8>> {
+        use little_exif::ifd::ExifTagGroup;
+
+        let mut out = guard(|| ExifMetadata::new_from_vec(&dest, FileExtension::TIFF))?
+            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("tiff reparse: {e}")))?;
+        guard(AssertUnwindSafe(|| {
+            for ifd in source.get_ifds() {
+                let generic = ifd.get_ifd_type() == ExifTagGroup::GENERIC;
+                for tag in ifd.get_tags() {
+                    // Sub-IFD tags are all metadata; IFD0 mixes metadata with
+                    // pixel layout, so there only known-safe descriptive tags
+                    // cross.
+                    if !generic || is_transferable_ifd0_tag(tag) {
+                        out.set_tag(tag.clone());
+                    }
+                }
+            }
+        }))?;
+        let mut buf = dest;
+        guard(AssertUnwindSafe(|| {
+            out.write_to_vec(&mut buf, FileExtension::TIFF)
+        }))?
+        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("tiff transfer: {e}")))?;
+        Ok(buf)
     }
 
     /// Write `exif` back onto this source's bytes.
@@ -219,6 +267,34 @@ impl<'a> Source<'a> {
             .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("exif rewrite: {e}")))?;
         Ok(buf)
     }
+}
+
+/// Whether `tag` is a benign IFD0 (GENERIC) descriptive tag safe to carry from
+/// the source onto a freshly-encoded TIFF.
+///
+/// An allowlist, deliberately: IFD0 holds both descriptive metadata and the
+/// pixel-layout tags (strips, tiles, planar config, dimensions, compression,
+/// resolution, colour), and `little_exif` surfaces any tag it does not model as
+/// an `Unknown*` variant — so a denylist could never be exhaustive, and copying
+/// a stale layout tag would point the output IFD at the wrong pixels. Only the
+/// tags named here cross; everything else in IFD0 stays as the encoder wrote it.
+/// The sub-IFDs (EXIF/GPS/Interop) are pure metadata and transfer wholesale, so
+/// their tags need not be listed.
+#[cfg(feature = "exif")]
+fn is_transferable_ifd0_tag(tag: &ExifTag) -> bool {
+    matches!(
+        tag,
+        ExifTag::Make(_)
+            | ExifTag::Model(_)
+            | ExifTag::Software(_)
+            | ExifTag::Artist(_)
+            | ExifTag::Copyright(_)
+            | ExifTag::ImageDescription(_)
+            | ExifTag::ModifyDate(_)
+            | ExifTag::Orientation(_)
+            | ExifTag::ExifOffset(_)
+            | ExifTag::GPSInfo(_)
+    )
 }
 
 /// The `little_exif` tag matching a field `key` this crate surfaces as an

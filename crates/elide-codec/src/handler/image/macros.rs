@@ -16,7 +16,7 @@
 /// Only defined when at least one image format is enabled; `internal_image` can
 /// also be pulled on its own (e.g. by `pdf-render`, which decodes and redacts a
 /// PDF's embedded images without instantiating a format handler).
-#[cfg(any(feature = "png", feature = "jpeg"))]
+#[cfg(any(feature = "png", feature = "jpeg", feature = "tiff"))]
 macro_rules! impl_image_handler {
     (
         handler = $handler:ident,
@@ -201,13 +201,13 @@ macro_rules! impl_image_handler {
 }
 
 /// The local id of the image's EXIF metadata sub-part.
-#[cfg(any(feature = "png", feature = "jpeg"))]
+#[cfg(any(feature = "png", feature = "jpeg", feature = "tiff"))]
 pub(crate) const EXIF_PART_ID: &str = "#exif";
 
 /// The format hint the `#exif` sub-part decodes with — the metadata handler's
 /// registered extension, which the fold resolves it by.
-#[cfg(any(feature = "png", feature = "jpeg"))]
+#[cfg(any(feature = "png", feature = "jpeg", feature = "tiff"))]
 pub(crate) const EXIF_PART_HINT: &str = super::exif_handler::EXIF_HINT;
 
-#[cfg(any(feature = "png", feature = "jpeg"))]
+#[cfg(any(feature = "png", feature = "jpeg", feature = "tiff"))]
 pub(crate) use impl_image_handler;

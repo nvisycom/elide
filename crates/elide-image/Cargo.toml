@@ -33,6 +33,9 @@ jpeg = ["image/jpeg"]
 ## The PNG format: decode/encode and lossless metadata strip.
 png = ["image/png"]
 
+## The TIFF format: decode/encode and lossless metadata strip.
+tiff = ["image/tiff"]
+
 ## EXIF metadata: read the privacy-relevant fields, strip them, and surface each
 ## as an `Entity<Metadata>` so a stripped field flows through the same
 ## detect/audit pipeline as a redacted text span. Pulls in `little_exif`,

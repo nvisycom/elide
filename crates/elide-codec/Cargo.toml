@@ -74,13 +74,14 @@ pdf-render = ["pdf", "internal_image", "elide-pdf/render"]
 rtf = ["internal_document"]
 
 ## The image formats.
-image = ["png", "jpeg"]
+image = ["png", "jpeg", "tiff"]
 
 ## Individual image formats (all share the `elide-image` engine pulled in
 ## by `internal_image`). Each also enables its codec inside `elide-image`,
 ## whose own formats are off by default, so `ImageBuffer::open` can decode it.
 png = ["internal_image", "elide-image/png"]
 jpeg = ["internal_image", "elide-image/jpeg"]
+tiff = ["internal_image", "elide-image/tiff"]
 
 ## The audio formats.
 audio = ["wav", "mp3"]

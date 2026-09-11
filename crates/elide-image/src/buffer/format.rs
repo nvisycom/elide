@@ -2,8 +2,7 @@
 
 use elide_core::{Error, ErrorKind, Result};
 
-/// A raster image format this crate can decode, encode, and (for JPEG/PNG)
-/// strip metadata from.
+/// A raster image format this crate can decode, encode, and strip metadata from.
 ///
 /// A closed set, not a re-export of [`image::ImageFormat`]: the `image` crate
 /// knows many formats this crate does not handle, so a caller can only name one
@@ -18,6 +17,8 @@ pub enum ImageFormat {
     Png,
     /// JPEG.
     Jpeg,
+    /// TIFF.
+    Tiff,
 }
 
 impl ImageFormat {
@@ -26,6 +27,7 @@ impl ImageFormat {
         match self {
             ImageFormat::Png => image::ImageFormat::Png,
             ImageFormat::Jpeg => image::ImageFormat::Jpeg,
+            ImageFormat::Tiff => image::ImageFormat::Tiff,
         }
     }
 
@@ -40,6 +42,7 @@ impl ImageFormat {
         match format {
             image::ImageFormat::Png => Ok(ImageFormat::Png),
             image::ImageFormat::Jpeg => Ok(ImageFormat::Jpeg),
+            image::ImageFormat::Tiff => Ok(ImageFormat::Tiff),
             other => Err(Error::new(
                 ErrorKind::CapabilityUnavailable,
                 format!("unsupported image format: {other:?}"),
@@ -56,6 +59,7 @@ impl ImageFormat {
                 as_zTXt_chunk: false,
             },
             ImageFormat::Jpeg => FileExtension::JPEG,
+            ImageFormat::Tiff => FileExtension::TIFF,
         }
     }
 }
