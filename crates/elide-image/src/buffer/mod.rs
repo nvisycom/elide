@@ -621,8 +621,11 @@ mod tests {
         );
     }
 
-    /// Pixel redaction + `StripSensitive` on a TIFF: both edits compose — the
-    /// redacted pixels survive AND the sensitive EXIF is gone.
+    /// Pixel redaction + `StripSensitive` on a TIFF, the leak-safety contract:
+    /// after redacting pixels, every sensitive field (GPS in its sub-IFD, a
+    /// device Make in IFD0) is gone, the redacted pixels survive, and a benign
+    /// field (Orientation) is retained — proving the sub-IFD wholesale transfer
+    /// and the IFD0 allowlist neither leak PII nor drop render-critical metadata.
     #[cfg(all(feature = "tiff", feature = "exif"))]
     #[test]
     fn redact_then_strip_sensitive_tiff() {
@@ -630,7 +633,22 @@ mod tests {
         use little_exif::filetype::FileExtension;
         use little_exif::metadata::Metadata as ExifMetadata;
 
-        let bytes = crate::test_util::tiff_with_gps();
+        // A TIFF carrying GPS (sensitive, GPS sub-IFD), Make (sensitive, IFD0),
+        // and Orientation (benign, IFD0).
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgb8(RgbImage::from_pixel(4, 4, image::Rgb([200, 30, 30])))
+            .write_to(&mut std::io::Cursor::new(&mut bytes), ImgFormat::Tiff)
+            .expect("encode tiff");
+        let mut exif = ExifMetadata::new_from_vec(&bytes, FileExtension::TIFF).expect("parse ifd");
+        exif.set_tag(ExifTag::GPSLatitude(vec![little_exif::rational::uR64 {
+            nominator: 51,
+            denominator: 1,
+        }]));
+        exif.set_tag(ExifTag::Make("Nvisy".into()));
+        exif.set_tag(ExifTag::Orientation(vec![1]));
+        exif.write_to_vec(&mut bytes, FileExtension::TIFF)
+            .expect("write exif");
+
         let mut buffer = ImageBuffer::open(&bytes).expect("open");
         buffer.redact(
             PixelRegion::new(0, 0, 2, 2),
@@ -639,18 +657,34 @@ mod tests {
             },
         );
         let out = buffer.encode(ExifPolicy::StripSensitive).expect("encode");
+        let out_exif =
+            ExifMetadata::new_from_vec(&out.to_vec(), FileExtension::TIFF).expect("parse output");
+        let has = |tag: &ExifTag| out_exif.get_tag(tag).next().is_some();
+
+        // Pixels redacted, and still a valid TIFF.
         assert_eq!(
             pixel_at(&out, 0, 0),
             Rgba([0, 0, 0, 255]),
             "pixel not redacted"
         );
+        assert_eq!(
+            pixel_at(&out, 3, 3),
+            Rgba([200, 30, 30, 255]),
+            "untargeted pixel changed"
+        );
+        // Every sensitive field is gone.
         assert!(
-            ExifMetadata::new_from_vec(&out.to_vec(), FileExtension::TIFF)
-                .expect("parse output")
-                .get_tag(&ExifTag::GPSLatitude(Vec::new()))
-                .next()
-                .is_none(),
-            "sensitive GPS survived the TIFF strip+redact"
+            !has(&ExifTag::GPSLatitude(Vec::new())),
+            "sensitive GPS survived"
+        );
+        assert!(
+            !has(&ExifTag::Make(String::new())),
+            "sensitive Make survived"
+        );
+        // The benign field is retained.
+        assert!(
+            has(&ExifTag::Orientation(Vec::new())),
+            "benign Orientation was dropped"
         );
     }
 }

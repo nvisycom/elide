@@ -222,17 +222,32 @@ impl<'a> Source<'a> {
     }
 
     /// The TIFF path for [`transfer`](Self::transfer): parse the redacted
-    /// container `dest` (whose metadata already holds the redacted pixels and the
-    /// mandatory TIFF-structural tags) and copy every non-structural tag from
-    /// `source` onto it, so the output carries the redacted pixels plus the
-    /// source's kept EXIF.
+    /// container `dest` (whose metadata already holds the redacted pixels and its
+    /// own correct pixel-layout tags) and copy `source`'s *metadata* tags onto
+    /// it, so the output carries the redacted pixels plus the source's kept EXIF.
+    ///
+    /// The transfer is an allowlist, not a denylist: only tags in the EXIF, GPS,
+    /// and Interop sub-IFDs (which are pure metadata) plus a fixed set of benign
+    /// IFD0 descriptive tags are carried. Every pixel-layout tag — strips, tiles,
+    /// planar config, dimensions, compression, and any tag `little_exif` parses
+    /// as an `Unknown*` variant — is left as `dest`'s own value, so a source
+    /// whose layout differs from the encoder's (e.g. a tiled source vs. the
+    /// strip-based re-encode) can never point the output IFD at the wrong pixels.
     fn transfer_tiff(&self, source: &ExifMetadata, dest: Vec<u8>) -> Result<Vec<u8>> {
+        use little_exif::ifd::ExifTagGroup;
+
         let mut out = guard(|| ExifMetadata::new_from_vec(&dest, FileExtension::TIFF))?
             .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("tiff reparse: {e}")))?;
         guard(AssertUnwindSafe(|| {
-            for tag in source {
-                if !is_tiff_structural(tag) {
-                    out.set_tag(tag.clone());
+            for ifd in source.get_ifds() {
+                let generic = ifd.get_ifd_type() == ExifTagGroup::GENERIC;
+                for tag in ifd.get_tags() {
+                    // Sub-IFD tags are all metadata; IFD0 mixes metadata with
+                    // pixel layout, so there only known-safe descriptive tags
+                    // cross.
+                    if !generic || is_transferable_ifd0_tag(tag) {
+                        out.set_tag(tag.clone());
+                    }
                 }
             }
         }))?;
@@ -254,32 +269,31 @@ impl<'a> Source<'a> {
     }
 }
 
-/// Whether `tag` is a TIFF-structural tag that describes the pixel layout
-/// (dimensions, strips, compression, resolution) rather than carried metadata.
+/// Whether `tag` is a benign IFD0 (GENERIC) descriptive tag safe to carry from
+/// the source onto a freshly-encoded TIFF.
 ///
-/// On the TIFF transfer path these must stay as the freshly-encoded container's
-/// own values — copying the source's would point the IFD at the original,
-/// un-redacted pixels. Mirrors the set `little_exif`'s `reduce_to_a_minimum`
-/// preserves.
+/// An allowlist, deliberately: IFD0 holds both descriptive metadata and the
+/// pixel-layout tags (strips, tiles, planar config, dimensions, compression,
+/// resolution, colour), and `little_exif` surfaces any tag it does not model as
+/// an `Unknown*` variant — so a denylist could never be exhaustive, and copying
+/// a stale layout tag would point the output IFD at the wrong pixels. Only the
+/// tags named here cross; everything else in IFD0 stays as the encoder wrote it.
+/// The sub-IFDs (EXIF/GPS/Interop) are pure metadata and transfer wholesale, so
+/// their tags need not be listed.
 #[cfg(feature = "exif")]
-fn is_tiff_structural(tag: &ExifTag) -> bool {
+fn is_transferable_ifd0_tag(tag: &ExifTag) -> bool {
     matches!(
         tag,
-        ExifTag::StripOffsets(_, _)
-            | ExifTag::StripByteCounts(_)
-            | ExifTag::ThumbnailOffset(_, _)
-            | ExifTag::ThumbnailLength(_)
-            | ExifTag::ImageWidth(_)
-            | ExifTag::ImageHeight(_)
-            | ExifTag::BitsPerSample(_)
-            | ExifTag::Compression(_)
-            | ExifTag::PhotometricInterpretation(_)
-            | ExifTag::SamplesPerPixel(_)
-            | ExifTag::RowsPerStrip(_)
-            | ExifTag::XResolution(_)
-            | ExifTag::YResolution(_)
-            | ExifTag::ResolutionUnit(_)
-            | ExifTag::ColorMap(_)
+        ExifTag::Make(_)
+            | ExifTag::Model(_)
+            | ExifTag::Software(_)
+            | ExifTag::Artist(_)
+            | ExifTag::Copyright(_)
+            | ExifTag::ImageDescription(_)
+            | ExifTag::ModifyDate(_)
+            | ExifTag::Orientation(_)
+            | ExifTag::ExifOffset(_)
+            | ExifTag::GPSInfo(_)
     )
 }
 
