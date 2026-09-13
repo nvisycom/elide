@@ -19,6 +19,18 @@ pub(crate) struct CsvLoader {
     delimiter: Option<u8>,
 }
 
+impl CsvLoader {
+    /// A loader with explicit options: `has_headers` chooses whether the first
+    /// row is the header, `delimiter` sets the field separator (`None`
+    /// auto-detects).
+    pub(crate) fn new(has_headers: bool, delimiter: Option<u8>) -> Self {
+        Self {
+            has_headers,
+            delimiter,
+        }
+    }
+}
+
 impl Default for CsvLoader {
     fn default() -> Self {
         Self {

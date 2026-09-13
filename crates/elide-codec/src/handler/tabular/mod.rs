@@ -23,6 +23,6 @@ mod xlsx_loader;
 // `*_format` is `pub` so the parent `handler` module re-exports it as the
 // crate's public contract; the loader/handler pairs stay `pub(crate)`.
 #[cfg(feature = "csv")]
-pub use self::csv_handler::format as csv_format;
+pub use self::csv_handler::{format as csv_format, format_with as csv_format_with};
 #[cfg(feature = "xlsx")]
 pub use self::xlsx_handler::format as xlsx_format;

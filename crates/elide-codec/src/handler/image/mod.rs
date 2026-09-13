@@ -28,11 +28,11 @@ mod tiff_handler;
 #[cfg(any(feature = "png", feature = "jpeg", feature = "tiff"))]
 pub use self::exif_handler::format as exif_format;
 #[cfg(feature = "jpeg")]
-pub use self::jpeg_handler::format as jpeg_format;
+pub use self::jpeg_handler::{format as jpeg_format, format_with as jpeg_format_with};
 #[cfg(feature = "png")]
-pub use self::png_handler::format as png_format;
+pub use self::png_handler::{format as png_format, format_with as png_format_with};
 #[cfg(feature = "tiff")]
-pub use self::tiff_handler::format as tiff_format;
+pub use self::tiff_handler::{format as tiff_format, format_with as tiff_format_with};
 
 #[cfg(all(test, feature = "png"))]
 mod tests {
@@ -64,7 +64,7 @@ mod tests {
 
     #[tokio::test]
     async fn decode_stream_reports_full_frame() {
-        let mut h = PngLoader.decode(white_png()).await.unwrap();
+        let mut h = PngLoader::default().decode(white_png()).await.unwrap();
         assert_eq!(h.format().as_str(), "elide.image.png");
         let chunk = h.read_next().await.unwrap().expect("one chunk");
         assert_eq!(chunk.data.dimensions.width, 4);
@@ -75,7 +75,7 @@ mod tests {
 
     #[tokio::test]
     async fn read_at_crops_region() {
-        let h = PngLoader.decode(white_png()).await.unwrap();
+        let h = PngLoader::default().decode(white_png()).await.unwrap();
         let data = h
             .read_at(&bbox(1.0, 1.0, 2.0, 2.0))
             .await
@@ -93,7 +93,7 @@ mod tests {
 
     #[tokio::test]
     async fn redact_block_paints_region_and_reencodes() {
-        let mut h = PngLoader.decode(white_png()).await.unwrap();
+        let mut h = PngLoader::default().decode(white_png()).await.unwrap();
         let mut batch: Redactions<Image> = Redactions::new();
         batch.push(
             bbox(0.0, 0.0, 2.0, 2.0),
@@ -141,7 +141,7 @@ mod tests {
         let original = bytes::Bytes::from(bytes);
 
         // Decode the image handler; it is a Container exposing `#exif`.
-        let mut image = JpegLoader
+        let mut image = JpegLoader::default()
             .decode(ContentData::new(original.clone()))
             .await
             .unwrap();
@@ -207,5 +207,145 @@ mod tests {
             })
             .unwrap_or(false);
         assert!(!has_gps, "GPS survived the composed encode");
+    }
+
+    /// A 4x4 red PNG carrying a GPS latitude EXIF tag.
+    fn png_with_gps() -> bytes::Bytes {
+        use little_exif::exif_tag::ExifTag;
+        use little_exif::filetype::FileExtension;
+        use little_exif::metadata::Metadata as ExifMetadata;
+
+        let mut bytes = Vec::new();
+        DynamicImage::ImageRgb8(image::RgbImage::from_pixel(4, 4, image::Rgb([200, 30, 30])))
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
+            .unwrap();
+        let mut exif = ExifMetadata::new();
+        exif.set_tag(ExifTag::GPSLatitude(vec![little_exif::rational::uR64 {
+            nominator: 51,
+            denominator: 1,
+        }]));
+        exif.write_to_vec(
+            &mut bytes,
+            FileExtension::PNG {
+                as_zTXt_chunk: false,
+            },
+        )
+        .unwrap();
+        bytes::Bytes::from(bytes)
+    }
+
+    fn png_has_gps(png: &[u8]) -> bool {
+        use little_exif::exif_tag::ExifTag;
+        use little_exif::filetype::FileExtension;
+        use little_exif::metadata::Metadata as ExifMetadata;
+
+        ExifMetadata::new_from_vec(
+            &png.to_vec(),
+            FileExtension::PNG {
+                as_zTXt_chunk: false,
+            },
+        )
+        .map(|m| {
+            m.get_tag(&ExifTag::GPSLatitude(Vec::new()))
+                .next()
+                .is_some()
+        })
+        .unwrap_or(false)
+    }
+
+    /// `format_with(StripAll)` strips a redacted image's EXIF when NO metadata
+    /// pipeline ran (the `#exif` sub-part was never driven), while the default
+    /// `format()` keeps it.
+    #[tokio::test]
+    async fn format_with_strip_all_drops_exif_without_a_metadata_pipeline() {
+        use elide_image::ExifPolicy;
+
+        use super::png_handler::PngLoader;
+
+        let original = png_with_gps();
+        assert!(png_has_gps(&original), "fixture should carry GPS");
+
+        // A loader carrying StripAll — mirrors png_format_with(ExifPolicy::StripAll).
+        let mut h = PngLoader::with_policy(ExifPolicy::StripAll)
+            .decode(ContentData::new(original.clone()))
+            .await
+            .unwrap();
+        // Redact a pixel so encode takes the re-encode path.
+        let mut batch: Redactions<Image> = Redactions::new();
+        batch.push(
+            bbox(0.0, 0.0, 2.0, 2.0),
+            ImageReplacement::Block {
+                color: Color::BLACK,
+            },
+        );
+        h.write_at(batch).await.unwrap();
+        let out = h.encode().unwrap();
+        assert!(!png_has_gps(out.as_bytes()), "StripAll fallback kept EXIF");
+
+        // The default keeps it.
+        let mut keep = PngLoader::default()
+            .decode(ContentData::new(original.clone()))
+            .await
+            .unwrap();
+        let mut batch: Redactions<Image> = Redactions::new();
+        batch.push(
+            bbox(0.0, 0.0, 2.0, 2.0),
+            ImageReplacement::Block {
+                color: Color::BLACK,
+            },
+        );
+        keep.write_at(batch).await.unwrap();
+        assert!(
+            png_has_gps(keep.encode().unwrap().as_bytes()),
+            "default dropped EXIF"
+        );
+    }
+
+    /// When the `#exif` sub-part IS driven, its result wins and the fallback
+    /// policy is ignored — even a `Keep` loader emits the metadata-stripped
+    /// container. Locks in the scope boundary of the policy knob.
+    #[tokio::test]
+    async fn exif_subpart_overrides_the_fallback_policy() {
+        use elide_image::ExifPolicy;
+
+        use super::exif_handler::ExifLoader;
+        use super::png_handler::PngLoader;
+
+        // A Keep loader (would preserve EXIF on the None branch)...
+        let mut image = PngLoader::with_policy(ExifPolicy::Keep)
+            .decode(ContentData::new(png_with_gps()))
+            .await
+            .unwrap();
+
+        // ...but drive the #exif sub-part to strip GPS.
+        let parts = image.as_container_mut().unwrap().parts();
+        let mut meta = ExifLoader
+            .decode(ContentData::new(parts[0].bytes.clone()))
+            .await
+            .unwrap();
+        let mut meta_batch: elide_core::redaction::Redactions<
+            elide_core::modality::metadata::Metadata,
+        > = elide_core::redaction::Redactions::new();
+        meta_batch.push(
+            elide_core::modality::metadata::MetadataLocation::new("GPSLatitude"),
+            elide_core::modality::metadata::MetadataReplacement::Removed,
+        );
+        DataWriter::write_at(&mut meta, meta_batch).await.unwrap();
+        let stripped = Handler::encode(&meta).unwrap().to_bytes();
+        image
+            .as_container_mut()
+            .unwrap()
+            .replace_part(&crate::LocalId::new("#exif"), stripped)
+            .unwrap();
+
+        // Despite the Keep policy, the #exif result wins: GPS is gone.
+        let out = Handler::encode(&image).unwrap();
+        assert!(
+            !png_has_gps(out.as_bytes()),
+            "Keep policy leaked past the #exif strip"
+        );
     }
 }
