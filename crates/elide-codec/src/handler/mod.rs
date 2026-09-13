@@ -37,16 +37,20 @@ pub(crate) mod text;
 
 // Public contract: the per-format constructors, plus the HTML
 // script-handling config its `format_with` constructor takes.
+/// The [`ExifPolicy`] an image `format_with` takes as its no-pipeline metadata
+/// fallback — a dependency-free config value, gated only on the image engine
+/// being present (`internal_image`), not on the metadata recognizer.
+#[cfg(feature = "internal_image")]
+#[cfg_attr(docsrs, doc(cfg(feature = "internal_image")))]
+pub use ::elide_image::ExifPolicy;
 /// The recognizer that classifies an image's EXIF fields into
-/// `Entity<Metadata>` values, for a caller wiring the metadata pipeline, and the
-/// [`ExifPolicy`] an image `format_with` takes as its no-pipeline metadata
-/// fallback.
+/// `Entity<Metadata>` values, for a caller wiring the metadata pipeline.
 #[cfg(any(feature = "png", feature = "jpeg", feature = "tiff"))]
 #[cfg_attr(
     docsrs,
     doc(cfg(any(feature = "png", feature = "jpeg", feature = "tiff")))
 )]
-pub use ::elide_image::{ExifPolicy, ExifRecognizer};
+pub use ::elide_image::ExifRecognizer;
 
 #[cfg(feature = "mp3")]
 #[cfg_attr(docsrs, doc(cfg(feature = "mp3")))]
