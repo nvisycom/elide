@@ -25,7 +25,8 @@ The rich Rust objects stay in wasm memory behind the handles, and only the
 config and the redaction result cross the boundary as data, typed through
 generated TypeScript definitions so the browser code stays fully typed. Build
 the package with `make wasm-pkg`; the in-browser demo that consumes it lives
-alongside this crate and is published to GitHub Pages on each change to `main`.
+alongside this crate and is published to GitHub Pages when a push to `main`
+touches the wasm sources (or on demand via the workflow).
 
 ## Documentation
 
