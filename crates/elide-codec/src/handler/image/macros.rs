@@ -32,12 +32,42 @@ macro_rules! impl_image_handler {
 
         /// [`Format`] descriptor registered into [`FormatRegistry`].
         ///
+        /// Keeps the image's EXIF metadata on encode. Use [`format_with`] to set
+        /// a different fallback [`ExifPolicy`] for a build with no `Metadata`
+        /// pipeline wired.
+        ///
         /// [`Format`]: crate::Format
         /// [`FormatRegistry`]: crate::FormatRegistry
+        /// [`ExifPolicy`]: elide_image::ExifPolicy
         pub fn format() -> crate::Format {
-            crate::Format::new::<::elide_core::modality::image::Image, _>(FORMAT_ID.clone(), $loader)
-                .with_extensions([$($ext),*])
-                .with_content_types([$($mime),*])
+            format_from(::elide_image::ExifPolicy::Keep)
+        }
+
+        /// [`Format`] descriptor with an explicit fallback EXIF policy.
+        ///
+        /// `policy` governs the metadata of the encoded image **only when no
+        /// `Metadata` pipeline touched it** — the redaction path where a wired
+        /// `ExifRecognizer` + anonymizer strips fields through the `#exif`
+        /// sub-part always wins and ignores `policy`. So this is the "strip all
+        /// (or sensitive) EXIF unconditionally, without wiring a metadata
+        /// recognizer" knob: pass [`ExifPolicy::StripAll`] or
+        /// [`StripSensitive`](elide_image::ExifPolicy::StripSensitive).
+        ///
+        /// [`Format`]: crate::Format
+        /// [`ExifPolicy::StripAll`]: elide_image::ExifPolicy::StripAll
+        pub fn format_with(policy: ::elide_image::ExifPolicy) -> crate::Format {
+            format_from(policy)
+        }
+
+        /// Build this format's [`Format`](crate::Format) from a configured
+        /// fallback policy.
+        fn format_from(policy: ::elide_image::ExifPolicy) -> crate::Format {
+            crate::Format::new::<::elide_core::modality::image::Image, _>(
+                FORMAT_ID.clone(),
+                $loader { policy },
+            )
+            .with_extensions([$($ext),*])
+            .with_content_types([$($mime),*])
         }
 
         #[doc = concat!("Handler for a decoded ", $format_id, " image.")]
@@ -55,12 +85,23 @@ macro_rules! impl_image_handler {
             /// sub-part, if its metadata was redacted. `encode` lays the pixel
             /// redactions over these; `None` keeps the original metadata.
             metadata: ::std::option::Option<::bytes::Bytes>,
+            /// Fallback EXIF policy, applied on encode only when no `Metadata`
+            /// pipeline populated `metadata`.
+            policy: ::elide_image::ExifPolicy,
         }
 
         impl $handler {
             /// Wrap a decoded image; the streaming cursor starts unyielded.
-            pub(crate) fn new(buffer: ::elide_image::ImageBuffer) -> Self {
-                Self { buffer, yielded: false, metadata: ::std::option::Option::None }
+            pub(crate) fn new(
+                buffer: ::elide_image::ImageBuffer,
+                policy: ::elide_image::ExifPolicy,
+            ) -> Self {
+                Self {
+                    buffer,
+                    yielded: false,
+                    metadata: ::std::option::Option::None,
+                    policy,
+                }
             }
         }
 
@@ -77,8 +118,10 @@ macro_rules! impl_image_handler {
                 let bytes = match &self.metadata {
                     ::std::option::Option::Some(container) =>
                         self.buffer.encode_over_metadata(container)?,
+                    // No `Metadata` pipeline ran; apply the format's fallback
+                    // EXIF policy.
                     ::std::option::Option::None =>
-                        self.buffer.encode(::elide_image::ExifPolicy::Keep)?,
+                        self.buffer.encode(self.policy)?,
                 };
                 Ok(crate::content::ContentData::new(bytes))
             }
@@ -151,8 +194,33 @@ macro_rules! impl_image_handler {
 
         /// Loader that decodes raw bytes into a
         #[doc = concat!("[`", stringify!($handler), "`].")]
+        ///
+        /// Carries the format's fallback [`ExifPolicy`](elide_image::ExifPolicy),
+        /// handed to each decoded handler.
         #[derive(Debug)]
-        pub(crate) struct $loader;
+        pub(crate) struct $loader {
+            policy: ::elide_image::ExifPolicy,
+        }
+
+        impl $loader {
+            /// A loader with an explicit fallback [`ExifPolicy`], for tests that
+            /// exercise a non-default policy directly (the registered path is
+            /// [`format_with`]).
+            ///
+            /// [`ExifPolicy`]: elide_image::ExifPolicy
+            #[allow(dead_code)]
+            pub(crate) fn with_policy(policy: ::elide_image::ExifPolicy) -> Self {
+                Self { policy }
+            }
+        }
+
+        impl ::std::default::Default for $loader {
+            /// The registered default: keep the image's EXIF (the `format()`
+            /// policy), not `ExifPolicy`'s own `StripAll` default.
+            fn default() -> Self {
+                Self { policy: ::elide_image::ExifPolicy::Keep }
+            }
+        }
 
         #[::async_trait::async_trait]
         impl crate::Loader<::elide_core::modality::image::Image> for $loader {
@@ -164,7 +232,7 @@ macro_rules! impl_image_handler {
             ) -> ::elide_core::Result<$handler> {
                 let buffer =
                     ::elide_image::ImageBuffer::open(content.as_bytes())?;
-                Ok($handler::new(buffer))
+                Ok($handler::new(buffer, self.policy))
             }
         }
 

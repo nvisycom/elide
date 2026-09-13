@@ -25,9 +25,33 @@ pub const FORMAT_ID: FormatId = FormatId::new("elide.tabular.csv");
 
 /// [`Format`] descriptor registered into [`FormatRegistry`].
 ///
+/// Treats the first row as a header and auto-detects the field delimiter. Use
+/// [`format_with`] to override either for a headerless file or a non-comma
+/// delimiter (TSV, semicolon).
+///
 /// [`FormatRegistry`]: crate::FormatRegistry
 pub fn format() -> Format {
-    Format::new::<Tabular, _>(FORMAT_ID.clone(), CsvLoader::default())
+    format_from(CsvLoader::default())
+}
+
+/// [`Format`] descriptor with explicit CSV parsing options.
+///
+/// `has_headers` chooses whether the first row is the header (its default,
+/// `true`). A header row still enters the detection stream, but it gains
+/// column-name context hints for the data below it and is protected from a
+/// [`DropRow`](elide_core::redaction) redaction; a headerless file wants
+/// `false` so its first row is an ordinary, droppable data row.
+///
+/// `delimiter` sets the field separator; `None` auto-detects it (a comma when
+/// nothing stands out), which can misread a TSV or semicolon-delimited file, so
+/// pass `Some(b'\t')` / `Some(b';')` when the format is known.
+pub fn format_with(has_headers: bool, delimiter: Option<u8>) -> Format {
+    format_from(CsvLoader::new(has_headers, delimiter))
+}
+
+/// Build the CSV [`Format`] from a configured loader.
+fn format_from(loader: CsvLoader) -> Format {
+    Format::new::<Tabular, _>(FORMAT_ID.clone(), loader)
         .with_extensions(["csv"])
         .with_content_types(["text/csv"])
 }
@@ -453,5 +477,40 @@ mod tests {
         // No header row, so a cell carries no column name.
         assert!(first.location.column_name.is_none());
         assert_eq!(handler.encode().unwrap().decode().unwrap(), "a,b\nc,d\n");
+    }
+
+    #[tokio::test]
+    async fn options_disable_headers_so_the_first_row_is_droppable() {
+        // The header-protecting default (`has_headers = true`) refuses to drop
+        // row 0; `has_headers = false` makes it an ordinary droppable row.
+        let mut handler = CsvLoader::new(false, None)
+            .decode(ContentData::from_text("a@x.test,b\nc,d\n"))
+            .await
+            .unwrap();
+        let first = handler.read_next().await.unwrap().unwrap();
+        assert_eq!(first.location.row_index, 0);
+        assert!(first.location.column_name.is_none());
+        // Dropping row 0 removes it (a header would be protected).
+        handler.drop_row(0);
+        assert_eq!(handler.encode().unwrap().decode().unwrap(), "c,d\n");
+    }
+
+    #[tokio::test]
+    async fn options_set_the_delimiter_the_sniffer_would_miss() {
+        // A single-column-looking TSV: auto-detect would read it as one comma
+        // field; an explicit tab splits it into two columns.
+        let handler = CsvLoader::new(true, Some(b'\t'))
+            .decode(ContentData::from_text("name\temail\nAlice\ta@x.test\n"))
+            .await
+            .unwrap();
+        assert_eq!(handler.row_cells(1).unwrap(), &["Alice", "a@x.test"]);
+    }
+
+    #[test]
+    fn format_with_registers_the_same_extension_and_content_type() {
+        let a = super::format();
+        let b = super::format_with(false, Some(b';'));
+        assert_eq!(a.extensions(), b.extensions());
+        assert_eq!(a.content_types(), b.content_types());
     }
 }
