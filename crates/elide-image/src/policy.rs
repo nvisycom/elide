@@ -1,4 +1,10 @@
 //! [`ExifPolicy`]: what to do with an image's EXIF metadata on re-encode.
+//!
+//! A dependency-free configuration value, so it is always available — a caller
+//! can name a policy without enabling the `exif` feature and its metadata
+//! engine (`little_exif`). [`ImageBuffer::encode`](crate::ImageBuffer::encode)
+//! consumes one; applying it needs the `exif` feature, but expressing the
+//! intent does not.
 
 /// What to do with an image's EXIF metadata when re-encoding it.
 ///

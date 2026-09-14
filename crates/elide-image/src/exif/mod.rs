@@ -12,7 +12,6 @@
 //! sniffs magic bytes.
 
 mod entity;
-mod policy;
 mod recognizer;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -22,8 +21,8 @@ use little_exif::exif_tag::ExifTag;
 use little_exif::filetype::FileExtension;
 use little_exif::metadata::Metadata as ExifMetadata;
 
-pub use self::policy::ExifPolicy;
 pub use self::recognizer::ExifRecognizer;
+use crate::policy::ExifPolicy;
 
 /// The privacy-relevant metadata read out of an image: the fields that can
 /// identify a person, place, device, or time.

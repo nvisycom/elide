@@ -16,7 +16,9 @@ use image::{DynamicImage, GenericImageView, Rgba, RgbaImage};
 
 pub use self::format::ImageFormat;
 #[cfg(feature = "exif")]
-use crate::exif::{ExifPolicy, Source};
+use crate::exif::Source;
+#[cfg(feature = "exif")]
+use crate::policy::ExifPolicy;
 
 /// A decoded raster image, the single entry point into the crate.
 ///
@@ -24,9 +26,9 @@ use crate::exif::{ExifPolicy, Source};
 /// the pixels, and retains the source container so metadata is available without
 /// a second decode or any magic-byte sniffing elsewhere. Reuse the buffer to
 /// [`redact`](Self::redact) pixel regions and [`encode`](Self::encode) back out
-/// under an [`ExifPolicy`], all paying the decode cost a single time. With the
-/// `entities` feature it also surfaces the source's privacy-relevant EXIF fields
-/// as [`metadata_entities`](Self::metadata_entities).
+/// under an [`ExifPolicy`](crate::ExifPolicy), all paying the decode cost a
+/// single time. With the `exif` feature it also surfaces the source's
+/// privacy-relevant EXIF fields as `Entity<Metadata>` values.
 #[derive(Debug, Clone)]
 pub struct ImageBuffer {
     inner: DynamicImage,
