@@ -68,6 +68,7 @@ of a document's path through the toolkit.
 | [Ingestion](docs/INGESTION.md) | Raw bytes to a typed, addressable handle: format resolution, streaming, and coordinate promotion. |
 | [Detection](docs/DETECTION.md) | Composing rule-based, statistical, and generative recognizers into one annotation set. |
 | [Redaction](docs/REDACTION.md) | Turning entities into concrete rewrites: operator kinds, leak profiles, and the reversible boundary. |
+| [Comparison](docs/COMPARISON.md) | How elide relates to Microsoft Presidio: shared model, architectural differences, and an honest account of where each is ahead. |
 
 API documentation lives at [docs.nvisy.com](https://docs.nvisy.com).
 
