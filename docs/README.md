@@ -4,12 +4,13 @@
 
 This document series describes the conceptual architecture of `elide`, a library
 for detecting and redacting personally identifiable information across
-heterogeneous data: free text, tabular records, still images, and recorded
-audio. The toolkit addresses three problems that a single-modality redactor
-cannot. First, sensitive content surfaces through different carriers in each
-modality (a span of characters, a cell value, a region of pixels, an interval of
-waveform), and any unified treatment must respect those carriers rather than
-reduce them to a common substrate. Second, no single detection technique is
+heterogeneous data: free text, tabular records, still images, recorded audio,
+and the out-of-band metadata that documents carry alongside their content. The
+toolkit addresses three problems that a single-modality redactor cannot. First,
+sensitive content surfaces through different carriers in each modality (a span of
+characters, a cell value, a region of pixels, an interval of waveform, a named
+metadata field), and any unified treatment must respect those carriers rather
+than reduce them to a common substrate. Second, no single detection technique is
 sufficient: deterministic patterns recover structured identifiers with high
 precision, statistical models recover unstructured entities with useful recall,
 and generative models recover context-dependent mentions that neither of the
@@ -45,14 +46,16 @@ The terms below are used throughout the series with the meanings given here.
 They are conceptual definitions, not references to any particular interface.
 
 - **Modality**: a class of data carrier with its own internal structure and its
-  own notion of location: text, tabular records, still images, and recorded
-  audio are the four modalities the toolkit treats.
+  own notion of location. The toolkit treats five: text, tabular records, still
+  images, and recorded audio, each addressed by a coordinate within the content,
+  plus the out-of-band metadata a document carries alongside its content
+  (EXIF tags, document properties), addressed by field key.
 - **Entity**: a single occurrence of sensitive information within a document,
   located in one modality, of one declared kind (person name, identifier, face
   region, spoken interval, and so on).
-- **Location**: the modality-specific coordinate that identifies where an entity
+- **Location**: the modality-specific address that identifies where an entity
   lives in its host document: a character span, a row and column, a pixel
-  region, or a time interval.
+  region, a time interval, or, for metadata, the key of an out-of-band field.
 - **Chunk**: a unit of a document a handle yields while streaming, in the
   modality's own coordinate system. A recognizer sees a chunk and reports
   findings in chunk-local coordinates.
