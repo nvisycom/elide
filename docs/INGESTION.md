@@ -165,7 +165,7 @@ available everywhere the moment its decoder is registered.
 
 A modality ties together three things: the data a chunk carries, the location
 that addresses it, and the replacement that redaction writes. The toolkit
-defines four modalities:
+defines five modalities:
 
 ```
 modality   data            location            replacement
@@ -174,6 +174,7 @@ text     | text payload  | byte span         | substitute / remove
 tabular  | text payload  | row/column + span | substitute / remove
 image    | pixel buffer  | bounding box      | blur/pixelate/block
 audio    | sample stream | time span (ms)    | silence / remove
+metadata | field value   | out-of-band key   | drop / rewrite
 ```
 
 Text addresses a span within the decoded payload. Tabular reuses the text
@@ -182,6 +183,17 @@ only its location differs, carrying a row index, a column index, and the
 cell-local span. Image addresses a rectangle in pixel space and replaces it by
 compositing a blur, a pixelation, or a solid block. Audio addresses a half-open
 interval of time and replaces it with silence or removal.
+
+Metadata is the odd modality of the five: its subjects are not spans within the
+decoded content but a document's named out-of-band fields, a photo's EXIF tags
+or a Word document's core properties, each a `key -> value` pair that can name a
+person, place, device, or time just as content can. A field is addressed by its
+key rather than a spatial or temporal coordinate, and, being atomic, is redacted
+by dropping or rewriting it whole. The *source* of a field is not a modality
+distinction: EXIF, document properties, and filesystem attributes are all one
+metadata modality, told apart by which part of the document they belong to, and
+each format's handler reads and writes its own metadata within its single
+encode.
 
 Some formats produce a homogeneous decoded view: a plain-text file decodes to
 text, an image file decodes to an image, an audio file decodes to audio. Others
@@ -274,7 +286,8 @@ The lifting contract closes this gap. It is uniform across every modality:
 lifting takes a chunk-local location and returns the corresponding source-global
 location, or nothing when the local location has no source pre-image. The
 operation is location to location; there is no byte-range special case, and no
-modality is privileged. The same promotion runs across all four modalities; what
+modality is privileged. The same promotion runs across every modality whose
+locations are chunk-local coordinates (text, tabular, image, and audio); what
 varies is only the bookkeeping each handle supplies behind that uniform
 operation:
 
