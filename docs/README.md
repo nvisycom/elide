@@ -37,7 +37,7 @@ below reflects the flow of a document through the toolkit.
 | [Ingestion](INGESTION.md) | How raw bytes become a typed, addressable handle on which the rest of the toolkit operates: format resolution, the decoder-and-handle split, streaming by chunk, the decode-redact-encode loop, and the uniform promotion of chunk-local coordinates to source coordinates.                              |
 | [Detection](DETECTION.md) | The composition of rule-based, statistical, and generative recognizers into a single layer that produces a unified set of entity annotations, including the per-call scope, caller-supplied include and exclude regions, and the treatment of overlap, disagreement, and confidence between recognizers. |
 | [Redaction](REDACTION.md) | The translation of detected entities into concrete rewrites or removals on the original document, the catalogue of operator kinds, the leak profile that classifies each, the per-modality replacement semantics, and the reversible-operator boundary.                                                  |
-| [Comparison](COMPARISON.md) | How `elide` relates to Microsoft Presidio, the closest prior art: the shared recognizer/operator model, the differences by design (multimodal core, format ownership, provenance-first audit, Rust/WASM), and an honest account of where Presidio is more complete today.                                  |
+| [Comparison](COMPARISON.md) | How `elide` relates to Presidio, the closest prior art: the shared recognizer/operator model, the differences by design (multimodal core, format ownership, provenance-first audit, Rust/WASM), and an honest account of where Presidio is more complete today.                                  |
 
 ## Glossary
 

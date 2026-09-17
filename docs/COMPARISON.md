@@ -1,10 +1,12 @@
-# Elide and Microsoft Presidio
+# Elide and Presidio
 
 ## Abstract
 
-[Microsoft Presidio](https://github.com/microsoft/presidio) is the reference
+[Presidio](https://github.com/data-privacy-stack/presidio) is the reference
 open-source system for PII detection and de-identification, and the closest prior
-art to `elide`. `elide`'s core model is shaped in part by Presidio's: the
+art to `elide`. Originally created at Microsoft, it is now a community-governed
+project under the Data Privacy Stack organization. `elide`'s core model is shaped
+in part by Presidio's: the
 recognizer/operator split, the pattern-plus-context detection style, and several
 shipped patterns and validators are adapted from it. This document sets the two
 side by side, covering where they agree, where they differ by design, and,
@@ -154,9 +156,10 @@ DataFrames, JSON objects, and image pixels. Parsing a `.docx`, native PDF text, 
 `.csv`, or HTML into that content is the caller's responsibility.
 
 Elide owns the codec layer end to end. `elide-codec` decodes bytes to a typed,
-addressable handle, mediates redaction, and re-encodes to the original format,
-across txt/json/html/xml, csv/xlsx, docx/pptx (byte-faithful via the OPC package
-model), born-digital pdf (fail-closed glyph deletion), and png/jpeg/tiff/wav/mp3.
+addressable handle, mediates redaction, and re-encodes to the original format.
+The formats it handles include txt/json/html/xml, csv/xlsx, docx/pptx
+(byte-faithful via the OPC package model), born-digital pdf (fail-closed glyph
+deletion), and png/jpeg/tiff/wav/mp3.
 It also redacts container **metadata** (image EXIF and OOXML document
 properties) as distinct sub-parts, which is out of scope for Presidio entirely.
 
