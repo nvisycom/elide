@@ -256,11 +256,11 @@ mod tests {
         .unwrap_or(false)
     }
 
-    /// `format_with(StripAll)` strips a redacted image's EXIF when NO metadata
-    /// pipeline ran (the `#exif` sub-part was never driven), while the default
-    /// `format()` keeps it.
+    /// Without a metadata pipeline, the fallback `ExifPolicy` governs the output.
+    /// The registered default (`format()`) is the privacy default and strips
+    /// EXIF; `format_with(ExifPolicy::Retain)` is the opt-in that keeps it.
     #[tokio::test]
-    async fn format_with_strip_all_drops_exif_without_a_metadata_pipeline() {
+    async fn default_strips_exif_without_a_metadata_pipeline() {
         use elide_image::ExifPolicy;
 
         use super::png_handler::PngLoader;
@@ -268,44 +268,41 @@ mod tests {
         let original = png_with_gps();
         assert!(png_has_gps(&original), "fixture should carry GPS");
 
-        // A loader carrying StripAll — mirrors png_format_with(ExifPolicy::StripAll).
-        let mut h = PngLoader::with_policy(ExifPolicy::StripAll)
-            .decode(ContentData::new(original.clone()))
-            .await
-            .unwrap();
-        // Redact a pixel so encode takes the re-encode path.
-        let mut batch: Redactions<Image> = Redactions::new();
-        batch.push(
-            bbox(0.0, 0.0, 2.0, 2.0),
-            ImageReplacement::Block {
-                color: Color::BLACK,
-            },
-        );
-        h.write_at(batch).await.unwrap();
-        let out = h.encode().unwrap();
-        assert!(!png_has_gps(out.as_bytes()), "StripAll fallback kept EXIF");
+        let redact = |mut h: super::png_handler::PngHandler| async move {
+            let mut batch: Redactions<Image> = Redactions::new();
+            batch.push(
+                bbox(0.0, 0.0, 2.0, 2.0),
+                ImageReplacement::Block {
+                    color: Color::BLACK,
+                },
+            );
+            h.write_at(batch).await.unwrap();
+            h.encode().unwrap()
+        };
 
-        // The default keeps it.
-        let mut keep = PngLoader::default()
+        // The registered default strips EXIF (privacy default).
+        let default = PngLoader::default()
             .decode(ContentData::new(original.clone()))
             .await
             .unwrap();
-        let mut batch: Redactions<Image> = Redactions::new();
-        batch.push(
-            bbox(0.0, 0.0, 2.0, 2.0),
-            ImageReplacement::Block {
-                color: Color::BLACK,
-            },
-        );
-        keep.write_at(batch).await.unwrap();
         assert!(
-            png_has_gps(keep.encode().unwrap().as_bytes()),
-            "default dropped EXIF"
+            !png_has_gps(redact(default).await.as_bytes()),
+            "default kept EXIF (should strip)"
+        );
+
+        // An explicit Retain policy keeps it.
+        let retain = PngLoader::with_policy(ExifPolicy::Retain)
+            .decode(ContentData::new(original.clone()))
+            .await
+            .unwrap();
+        assert!(
+            png_has_gps(redact(retain).await.as_bytes()),
+            "Retain policy dropped EXIF (should keep)"
         );
     }
 
     /// When the `#exif` sub-part IS driven, its result wins and the fallback
-    /// policy is ignored — even a `Keep` loader emits the metadata-stripped
+    /// policy is ignored — even a `Retain` loader emits the metadata-stripped
     /// container. Locks in the scope boundary of the policy knob.
     #[tokio::test]
     async fn exif_subpart_overrides_the_fallback_policy() {
@@ -314,8 +311,8 @@ mod tests {
         use super::exif_handler::ExifLoader;
         use super::png_handler::PngLoader;
 
-        // A Keep loader (would preserve EXIF on the None branch)...
-        let mut image = PngLoader::with_policy(ExifPolicy::Keep)
+        // A Retain loader (would preserve EXIF on the None branch)...
+        let mut image = PngLoader::with_policy(ExifPolicy::Retain)
             .decode(ContentData::new(png_with_gps()))
             .await
             .unwrap();
@@ -341,11 +338,11 @@ mod tests {
             .replace_part(&crate::LocalId::new("#exif"), stripped)
             .unwrap();
 
-        // Despite the Keep policy, the #exif result wins: GPS is gone.
+        // Despite the Retain policy, the #exif result wins: GPS is gone.
         let out = Handler::encode(&image).unwrap();
         assert!(
             !png_has_gps(out.as_bytes()),
-            "Keep policy leaked past the #exif strip"
+            "Retain policy leaked past the #exif strip"
         );
     }
 }

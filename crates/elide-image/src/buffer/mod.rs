@@ -145,14 +145,14 @@ impl ImageBuffer {
     /// Re-encode the image under `policy`, returning the container bytes.
     ///
     /// When no redaction has been applied, an EXIF strip edits the source
-    /// container losslessly (no pixel recompression) and [`Keep`](ExifPolicy::Keep)
+    /// container losslessly (no pixel recompression) and [`Retain`](ExifPolicy::Retain)
     /// returns the source untouched. When pixels have been redacted, the modified
     /// image is re-encoded (the fresh bytes carry no EXIF), and the source's
     /// metadata is carried onto the result according to `policy`:
-    /// [`Keep`](ExifPolicy::Keep) transfers all of it,
+    /// [`Retain`](ExifPolicy::Retain) transfers all of it,
     /// [`StripSensitive`](ExifPolicy::StripSensitive) transfers only the
     /// non-sensitive fields the policy retains (e.g. `Orientation`), and
-    /// [`StripAll`](ExifPolicy::StripAll) transfers none.
+    /// [`Strip`](ExifPolicy::Strip) transfers none.
     ///
     /// # Errors
     ///
@@ -169,9 +169,9 @@ impl ImageBuffer {
         let encoded = Self::encode_image(&self.inner, self.format)?;
         Ok(match policy {
             // Nothing to carry: the re-encoded bytes already hold no metadata.
-            ExifPolicy::StripAll => encoded,
+            ExifPolicy::Strip => encoded,
             // Transfer everything from the original source.
-            ExifPolicy::Keep => self.exif_source().transfer(encoded.into())?.into(),
+            ExifPolicy::Retain => self.exif_source().transfer(encoded.into())?.into(),
             // Transfer only what survives a sensitive strip: apply the strip to
             // the source container first, then carry its remaining (non-sensitive)
             // metadata onto the fresh pixels, so benign fields like Orientation
@@ -458,7 +458,7 @@ mod tests {
     fn encode_buffer(buffer: &ImageBuffer) -> Bytes {
         #[cfg(feature = "exif")]
         {
-            buffer.encode(ExifPolicy::StripAll).expect("encode")
+            buffer.encode(ExifPolicy::Strip).expect("encode")
         }
         #[cfg(not(feature = "exif"))]
         {
@@ -600,7 +600,7 @@ mod tests {
                 color: Color::BLACK,
             },
         );
-        let out = buffer.encode(ExifPolicy::Keep).expect("encode");
+        let out = buffer.encode(ExifPolicy::Retain).expect("encode");
         // The pixel redaction survives.
         assert_eq!(
             pixel_at(&out, 0, 0),
@@ -612,7 +612,7 @@ mod tests {
             Rgba([200, 30, 30, 255]),
             "untargeted pixel changed"
         );
-        // And the kept EXIF (GPS, under Keep) is carried onto the redacted TIFF.
+        // And the kept EXIF (GPS, under Retain) is carried onto the redacted TIFF.
         assert!(
             ExifMetadata::new_from_vec(&out.to_vec(), FileExtension::TIFF)
                 .expect("parse output")

@@ -32,15 +32,17 @@ macro_rules! impl_image_handler {
 
         /// [`Format`] descriptor registered into [`FormatRegistry`].
         ///
-        /// Keeps the image's EXIF metadata on encode. Use [`format_with`] to set
-        /// a different fallback [`ExifPolicy`] for a build with no `Metadata`
-        /// pipeline wired.
+        /// Applies [`ExifPolicy::default`] to the image's EXIF metadata on encode
+        /// (strip all but the structurally-required tags), for a build with no
+        /// `Metadata` pipeline wired. Use [`format_with`] to set a different
+        /// fallback policy.
         ///
         /// [`Format`]: crate::Format
         /// [`FormatRegistry`]: crate::FormatRegistry
         /// [`ExifPolicy`]: elide_image::ExifPolicy
+        /// [`ExifPolicy::default`]: elide_image::ExifPolicy
         pub fn format() -> crate::Format {
-            format_from(::elide_image::ExifPolicy::Keep)
+            format_from(::core::default::Default::default())
         }
 
         /// [`Format`] descriptor with an explicit fallback EXIF policy.
@@ -50,11 +52,11 @@ macro_rules! impl_image_handler {
         /// `ExifRecognizer` + anonymizer strips fields through the `#exif`
         /// sub-part always wins and ignores `policy`. So this is the "strip all
         /// (or sensitive) EXIF unconditionally, without wiring a metadata
-        /// recognizer" knob: pass [`ExifPolicy::StripAll`] or
+        /// recognizer" knob: pass [`ExifPolicy::Strip`] or
         /// [`StripSensitive`](elide_image::ExifPolicy::StripSensitive).
         ///
         /// [`Format`]: crate::Format
-        /// [`ExifPolicy::StripAll`]: elide_image::ExifPolicy::StripAll
+        /// [`ExifPolicy::Strip`]: elide_image::ExifPolicy::Strip
         pub fn format_with(policy: ::elide_image::ExifPolicy) -> crate::Format {
             format_from(policy)
         }
@@ -144,8 +146,13 @@ macro_rules! impl_image_handler {
                     dims.width as f64,
                     dims.height as f64,
                 );
+                // The detection chunk carries the same fallback policy as the
+                // output: a pixel recognizer reads pixels (EXIF detection runs on
+                // the `#exif` sub-part, not here), so stripping metadata costs
+                // detection nothing and keeps EXIF out of a recognizer call that
+                // may leave the process (e.g. a VLM request).
                 let data = ::elide_core::modality::image::ImageData::new(
-                    self.buffer.encode(::elide_image::ExifPolicy::Keep)?,
+                    self.buffer.encode(self.policy)?,
                     dims,
                 );
                 self.yielded = true;
@@ -215,10 +222,12 @@ macro_rules! impl_image_handler {
         }
 
         impl ::std::default::Default for $loader {
-            /// The registered default: keep the image's EXIF (the `format()`
-            /// policy), not `ExifPolicy`'s own `StripAll` default.
+            /// The registered default follows [`ExifPolicy::default`]: strip all
+            /// but the structurally-required metadata.
+            ///
+            /// [`ExifPolicy::default`]: elide_image::ExifPolicy
             fn default() -> Self {
-                Self { policy: ::elide_image::ExifPolicy::Keep }
+                Self { policy: ::core::default::Default::default() }
             }
         }
 
