@@ -1,6 +1,6 @@
 //! [`ExifPolicy`]: what to do with an image's EXIF metadata on re-encode.
 //!
-//! A dependency-free configuration value, so it is always available — a caller
+//! A dependency-free configuration value, so it is always available: a caller
 //! can name a policy without enabling the `exif` feature and its metadata
 //! engine (`little_exif`). [`ImageBuffer::encode`](crate::ImageBuffer::encode)
 //! consumes one; applying it needs the `exif` feature, but expressing the
@@ -17,15 +17,16 @@
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 pub enum ExifPolicy {
-    /// Drop the entire metadata block. The safest default: nothing personal
-    /// survives, though benign fields (a viewer's orientation hint) go too.
+    /// Drop the metadata, keeping only the tags an image structurally requires
+    /// to stay a valid, renderable image. The safe default: nothing personal
+    /// survives, though benign hints (a viewer's orientation tag) go too.
     #[default]
-    StripAll,
+    Strip,
     /// Drop only the privacy-sensitive fields (GPS, device, timestamps), keeping
     /// the rest so the image still renders as intended.
     StripSensitive,
     /// Leave the metadata untouched.
-    Keep,
+    Retain,
 }
 
 #[cfg(all(test, feature = "schema"))]
@@ -38,9 +39,9 @@ mod tests {
     fn derives_json_schema() {
         let schema = schemars::schema_for!(ExifPolicy);
         let json = serde_json::to_string(&schema).expect("schema serializes");
-        // The three variants surface in the generated schema.
-        assert!(json.contains("strip_all"));
+        // The three variants surface in the generated schema (snake_case).
+        assert!(json.contains("strip"));
         assert!(json.contains("strip_sensitive"));
-        assert!(json.contains("keep"));
+        assert!(json.contains("retain"));
     }
 }

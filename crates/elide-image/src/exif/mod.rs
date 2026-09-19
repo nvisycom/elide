@@ -103,8 +103,8 @@ impl<'a> Source<'a> {
     /// Apply `policy`, returning the resulting container bytes.
     pub(crate) fn strip(&self, policy: ExifPolicy) -> Result<Vec<u8>> {
         match policy {
-            ExifPolicy::Keep => Ok(self.bytes.to_vec()),
-            ExifPolicy::StripAll => self.strip_all(),
+            ExifPolicy::Retain => Ok(self.bytes.to_vec()),
+            ExifPolicy::Strip => self.strip_all(),
             ExifPolicy::StripSensitive => self.strip_sensitive(),
         }
     }
@@ -197,7 +197,7 @@ impl<'a> Source<'a> {
     }
 
     /// Copy this source's full metadata onto `dest` (freshly re-encoded pixels
-    /// that carry none), so a [`Keep`](ExifPolicy::Keep) policy survives a pixel
+    /// that carry none), so a [`Retain`](ExifPolicy::Retain) policy survives a pixel
     /// edit.
     pub(crate) fn transfer(&self, dest: Vec<u8>) -> Result<Vec<u8>> {
         let Some(exif) = self.parse()? else {
@@ -382,7 +382,7 @@ fn device_tags() -> Vec<ExifTag> {
 /// This is a denylist, not an allowlist: a proprietary MakerNote sub-tag not
 /// modelled by `little_exif`, or a new tag added to a future EXIF revision, can
 /// slip through. For a hard guarantee that nothing personal survives, use
-/// [`StripAll`](ExifPolicy::StripAll), which drops the block wholesale.
+/// [`Strip`](ExifPolicy::Strip), which drops the block wholesale.
 fn sensitive_tags() -> Vec<ExifTag> {
     let mut tags = gps_tags();
     tags.extend(timestamp_tags());
@@ -488,9 +488,7 @@ mod tests {
                 denominator: 1,
             }]),
         ]);
-        let stripped = source(&bytes)
-            .strip(ExifPolicy::StripAll)
-            .expect("strip all");
+        let stripped = source(&bytes).strip(ExifPolicy::Strip).expect("strip all");
         let meta = source(&stripped).read().expect("read back");
         assert!(is_empty(&meta), "strip_all left: {meta:?}");
     }
@@ -517,7 +515,7 @@ mod tests {
     #[test]
     fn keep_leaves_the_bytes_untouched() {
         let bytes = jpeg_with(vec![ExifTag::Make("Nvisy".into())]);
-        let kept = source(&bytes).strip(ExifPolicy::Keep).expect("keep");
+        let kept = source(&bytes).strip(ExifPolicy::Retain).expect("keep");
         assert_eq!(kept, bytes);
     }
 
