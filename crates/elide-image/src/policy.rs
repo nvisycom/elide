@@ -14,6 +14,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 pub enum ExifPolicy {
     /// Drop the entire metadata block. The safest default: nothing personal
@@ -25,4 +26,21 @@ pub enum ExifPolicy {
     StripSensitive,
     /// Leave the metadata untouched.
     Keep,
+}
+
+#[cfg(all(test, feature = "schema"))]
+mod tests {
+    use super::ExifPolicy;
+
+    /// The `schema` feature derives `JsonSchema`, so a caller can emit a JSON
+    /// schema for a config surface `ExifPolicy` appears in.
+    #[test]
+    fn derives_json_schema() {
+        let schema = schemars::schema_for!(ExifPolicy);
+        let json = serde_json::to_string(&schema).expect("schema serializes");
+        // The three variants surface in the generated schema.
+        assert!(json.contains("strip_all"));
+        assert!(json.contains("strip_sensitive"));
+        assert!(json.contains("keep"));
+    }
 }

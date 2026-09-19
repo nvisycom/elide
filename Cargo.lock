@@ -1291,6 +1291,7 @@ dependencies = [
  "image",
  "imageproc",
  "little_exif",
+ "schemars",
  "serde",
  "serde_json",
 ]

@@ -53,12 +53,18 @@ test-util = ["exif", "jpeg"]
 ## image types the engine speaks in.
 serde = ["dep:serde", "elide-core/serde"]
 
+## Derive `schemars::JsonSchema` on the schema-relevant types (e.g. `ExifPolicy`),
+## for a caller that emits a JSON schema for a config surface the enum appears in.
+## Implies `serde`.
+schema = ["serde", "dep:schemars"]
+
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = ["image"] }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }
+schemars = { workspace = true, features = [], optional = true }
 
 # Primitive datatypes
 bytes = { workspace = true, features = [] }
