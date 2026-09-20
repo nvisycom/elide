@@ -1171,26 +1171,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "elide-audio"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "elide-core",
+ "hound",
+ "mp3lame-encoder",
+ "schemars",
+ "serde",
+ "symphonia",
+]
+
+[[package]]
 name = "elide-codec"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
  "csv",
+ "elide-audio",
  "elide-core",
  "elide-image",
  "elide-office",
  "elide-pdf",
  "hex",
- "hound",
  "image",
- "little_exif",
  "lopdf",
- "mp3lame-encoder",
  "quick-xml 0.42.0",
  "serde_json",
  "sha2 0.11.0",
- "symphonia",
  "tokio",
  "tracing",
 ]

@@ -1,0 +1,73 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "elide-audio"
+description = "Audio clip decode/encode and time-span redaction (silence, tone, remove): bytes in, bytes out"
+keywords = ["audio", "wav", "mp3", "redaction", "privacy"]
+categories = ["multimedia::audio"]
+readme = "README.md"
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+
+[features]
+## No default features: bytes-in/bytes-out, no format enabled until asked.
+default = []
+
+## Internal marker: at least one format is enabled, so the shared decode/redact
+## engine (`AudioBuffer`'s format dispatch, the duration and sample helpers) is
+## compiled. Enabled by any format feature; not meant to be named directly.
+_internal = []
+
+## The WAV format: `hound` reads and re-writes samples; `symphonia` probes the
+## clip duration.
+wav = ["_internal", "dep:hound", "dep:symphonia"]
+
+## The MP3 format: `symphonia` probes duration and decodes to PCM; `mp3lame-encoder`
+## (LGPL-3.0 via libmp3lame, needs a C toolchain at build) re-encodes for the
+## redaction round-trip.
+mp3 = ["_internal", "dep:symphonia", "dep:mp3lame-encoder"]
+
+## Derive `serde::{Serialize, Deserialize}` on the config types (`AudioFormat`),
+## so a caller can ship one across a boundary. Implies the same on elide-core's
+## audio types the engine speaks in.
+serde = ["dep:serde", "elide-core/serde"]
+
+## Derive `schemars::JsonSchema` on the schema-relevant types (e.g. `AudioFormat`),
+## for a caller that emits a JSON schema for a config surface the enum appears in.
+## Implies `serde`.
+schema = ["serde", "dep:schemars"]
+
+## Expose `test_util`: build small in-memory audio fixtures (a WAV ramp, an MP3
+## tone), so a downstream crate can exercise an audio handler without depending
+## on `hound`/`mp3lame-encoder` itself. Implies both formats.
+test-util = ["wav", "mp3"]
+
+[dependencies]
+# Internal crates
+elide-core = { workspace = true, features = ["audio"] }
+
+# (De)serialization
+serde = { workspace = true, features = ["derive"], optional = true }
+schemars = { workspace = true, features = [], optional = true }
+
+# Primitive datatypes
+bytes = { workspace = true, features = [] }
+
+# Audio processing
+hound = { workspace = true, features = [], optional = true }
+symphonia = { workspace = true, features = [], optional = true }
+mp3lame-encoder = { workspace = true, features = [], optional = true }

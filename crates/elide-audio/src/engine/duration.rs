@@ -1,8 +1,8 @@
 //! Clip-duration probe via `symphonia`.
 //!
-//! Both audio handlers report a single full-clip chunk, so they need the
-//! total duration in milliseconds. `symphonia` reads it from the first
-//! track's container metadata without decoding any audio.
+//! Both formats report a single full-clip chunk, so they need the total
+//! duration in milliseconds. `symphonia` reads it from the first track's
+//! container metadata without decoding any audio.
 
 use std::io::Cursor;
 
@@ -26,7 +26,7 @@ use symphonia::default::get_probe;
 /// Returns a malformed-input error when the container can't be probed or the
 /// first track lacks the timebase/duration metadata needed to compute a
 /// duration.
-pub(super) fn probe_duration_ms(bytes: &Bytes, extension_hint: &str) -> Result<u64> {
+pub(crate) fn probe_duration_ms(bytes: &Bytes, extension_hint: &str) -> Result<u64> {
     let mss = MediaSourceStream::new(Box::new(Cursor::new(bytes.clone())), Default::default());
 
     let mut hint = Hint::new();

@@ -1,6 +1,6 @@
 //! Shared audio redaction over a decoded interleaved sample buffer.
 //!
-//! Both handlers decode to interleaved samples, redact, then re-encode.
+//! Both formats decode to interleaved samples, redact, then re-encode.
 //! The redaction itself is format- and sample-type-agnostic: given a
 //! [`TimeSpan`], it silences or removes the corresponding span of the
 //! buffer. Callers must apply a batch in descending time order so a
@@ -21,7 +21,7 @@ const MICROS_PER_SECOND: u128 = 1_000_000;
 ///
 /// Maps a normalized amplitude in `-1.0..=1.0` onto the concrete sample
 /// representation, so tone synthesis stays format-agnostic.
-pub(super) trait ToneSample {
+pub(crate) trait ToneSample {
     /// Convert a normalized `-1.0..=1.0` amplitude to this sample type.
     fn from_unit(value: f32) -> Self;
 }
@@ -63,7 +63,7 @@ fn sample_index(micros: u64, sample_rate: u32, channels: u16, buffer_len: usize)
 /// `Silenced` zeroes the span in place; `Tone` overlays a synthesized tone
 /// (both preserve duration); `Removed` drains it (the clip shortens). A
 /// zero-length or out-of-range span is a no-op.
-pub(super) fn apply<S: Default + Clone + ToneSample>(
+pub(crate) fn apply<S: Default + Clone + ToneSample>(
     samples: &mut Vec<S>,
     span: TimeSpan,
     replacement: &AudioReplacement,

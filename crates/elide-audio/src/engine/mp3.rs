@@ -4,6 +4,8 @@
 use std::io::{Cursor, ErrorKind as IoErrorKind};
 
 use bytes::Bytes;
+use elide_core::modality::audio::Audio;
+use elide_core::redaction::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 use mp3lame_encoder::{Builder, FlushNoGap, InterleavedPcm, MonoPcm};
 use symphonia::core::audio::conv::{ConvertibleSample, FromSample};
@@ -17,10 +19,11 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::default::{get_codecs, get_probe};
 
 use super::duration::probe_duration_ms;
+use super::redact;
 
 /// Decoded MP3 as interleaved f32 PCM, with the parameters needed to
 /// re-encode.
-pub(super) struct DecodedMp3 {
+pub(crate) struct DecodedMp3 {
     pub samples: Vec<f32>,
     pub sample_rate: u32,
     pub channels: u16,
@@ -28,10 +31,10 @@ pub(super) struct DecodedMp3 {
 
 /// Probe the channel count of the first audio track without decoding.
 ///
-/// The loader uses this to reject >2-channel inputs before they reach
-/// the redact path: LAME encodes only mono and stereo, and silently
-/// downmixing would edit the unredacted audio.
-pub(super) fn probe_channels(bytes: &Bytes) -> Result<u16> {
+/// `open` uses this to reject >2-channel inputs before they reach the redact
+/// path: LAME encodes only mono and stereo, and silently downmixing would
+/// edit the unredacted audio.
+pub(crate) fn probe_channels(bytes: &Bytes) -> Result<u16> {
     let mss = MediaSourceStream::new(Box::new(Cursor::new(bytes.clone())), Default::default());
     let mut hint = Hint::new();
     hint.with_extension("mp3");
@@ -67,7 +70,7 @@ pub(super) fn probe_channels(bytes: &Bytes) -> Result<u16> {
 }
 
 /// Decode the whole MP3 to interleaved f32 PCM.
-pub(super) fn decode_to_pcm(bytes: &Bytes) -> Result<DecodedMp3> {
+pub(crate) fn decode_to_pcm(bytes: &Bytes) -> Result<DecodedMp3> {
     let mss = MediaSourceStream::new(Box::new(Cursor::new(bytes.clone())), Default::default());
     let mut hint = Hint::new();
     hint.with_extension("mp3");
@@ -204,7 +207,7 @@ fn append_interleaved_f32(
 }
 
 /// Encode interleaved f32 PCM back to MP3 at `bitrate_bps`.
-pub(super) fn encode_from_pcm(
+pub(crate) fn encode_from_pcm(
     samples: &[f32],
     sample_rate: u32,
     channels: u16,
@@ -262,7 +265,7 @@ pub(super) fn encode_from_pcm(
 /// the sample rate.
 ///
 /// [`probe_duration_ms`]: super::duration::probe_duration_ms
-pub(super) fn duration_ms(bytes: &Bytes) -> Result<u64> {
+pub(crate) fn duration_ms(bytes: &Bytes) -> Result<u64> {
     if let Ok(ms) = probe_duration_ms(bytes, "mp3") {
         return Ok(ms);
     }
@@ -273,7 +276,7 @@ pub(super) fn duration_ms(bytes: &Bytes) -> Result<u64> {
 
 /// Average bitrate (bits/sec) of a clip from its byte size and duration.
 /// Falls back to 128 kbps for a zero-length clip.
-pub(super) fn average_bitrate_bps(file_bytes: usize, duration_ms: u64) -> u32 {
+pub(crate) fn average_bitrate_bps(file_bytes: usize, duration_ms: u64) -> u32 {
     if duration_ms == 0 {
         return 128_000;
     }
@@ -294,6 +297,37 @@ fn snap_bitrate(bps: u32) -> mp3lame_encoder::Bitrate {
         .copied()
         .min_by_key(|b| ((*b as u32) as i64 - kbps as i64).abs())
         .unwrap_or(Kbps128)
+}
+
+/// Redact `redactions` over the MP3 clip `source`, returning fresh MP3 bytes.
+///
+/// Decodes the clip to PCM, applies the batch right-to-left (so a `Removed`
+/// span doesn't shift the sample indices of spans not yet applied), and
+/// re-encodes at the source clip's average bitrate.
+pub(crate) fn redact_all(source: &Bytes, redactions: &Redactions<Audio>) -> Result<Bytes> {
+    let total_ms = duration_ms(source)?;
+    let bitrate_bps = average_bitrate_bps(source.len(), total_ms);
+
+    let mut decoded = decode_to_pcm(source)?;
+    let mut sorted = redactions.clone();
+    sorted.sort_by_position();
+    for (location, replacement) in sorted.iter().rev() {
+        redact::apply(
+            &mut decoded.samples,
+            location.span,
+            replacement,
+            decoded.sample_rate,
+            decoded.channels,
+        );
+    }
+
+    let reencoded = encode_from_pcm(
+        &decoded.samples,
+        decoded.sample_rate,
+        decoded.channels,
+        bitrate_bps,
+    )?;
+    Ok(Bytes::from(reencoded))
 }
 
 #[cfg(test)]
