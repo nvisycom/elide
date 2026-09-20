@@ -15,6 +15,8 @@
 mod glyphs;
 #[cfg(feature = "image")]
 mod images;
+#[cfg(feature = "image")]
+mod pages;
 mod sanitize;
 mod tounicode;
 
@@ -26,6 +28,8 @@ use lopdf::{Encoding, Object, ObjectId};
 use self::glyphs::decode_glyphs;
 #[cfg(feature = "image")]
 pub use self::images::ImageReplacement;
+#[cfg(feature = "image")]
+pub use self::pages::PageReplacement;
 use crate::Pdf;
 use crate::error::{Error, Result};
 
