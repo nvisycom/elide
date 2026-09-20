@@ -66,6 +66,15 @@ where
         .collect::<result::Result<_, _>>()
         .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("WAV decode failed: {e}")))?;
 
+    // The peak a `Tone` scales to. For integer WAV the container's range is
+    // set by the bit depth, not the decode type: a 24-bit clip decodes into
+    // `i32` but a sample must stay within `2^23 - 1`, so scale to that, not
+    // `i32::MAX`. Float samples use unit scale.
+    let full_scale = match spec.sample_format {
+        SampleFormat::Int => (1u64 << (spec.bits_per_sample - 1)) as f32 - 1.0,
+        SampleFormat::Float => 1.0,
+    };
+
     // Walk the position-sorted batch in reverse, applying right-to-left so a
     // `Removed` span doesn't shift the sample indices of spans not yet
     // applied.
@@ -76,6 +85,7 @@ where
             replacement,
             spec.sample_rate,
             spec.channels,
+            full_scale,
         );
     }
 
@@ -101,4 +111,59 @@ fn wav_spec(bytes: &Bytes) -> Result<WavSpec> {
     let reader = WavReader::new(Cursor::new(bytes.clone()))
         .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("not a valid WAV: {e}")))?;
     Ok(reader.spec())
+}
+
+#[cfg(test)]
+mod tests {
+    use elide_core::modality::audio::{AudioLocation, AudioReplacement, Waveform};
+
+    use super::*;
+
+    /// A `secs`-second 8 kHz mono `bits`-bit integer WAV of silence.
+    fn silent_wav(bits: u16, secs: u32) -> Bytes {
+        let spec = WavSpec {
+            channels: 1,
+            sample_rate: 8_000,
+            bits_per_sample: bits,
+            sample_format: SampleFormat::Int,
+        };
+        let mut buf = Cursor::new(Vec::new());
+        {
+            let mut w = WavWriter::new(&mut buf, spec).unwrap();
+            for _ in 0..(8_000 * secs) {
+                w.write_sample(0i32).unwrap();
+            }
+            w.finalize().unwrap();
+        }
+        Bytes::from(buf.into_inner())
+    }
+
+    /// A `Tone` on a 24-bit clip must scale to the 24-bit range, not the
+    /// `i32` the samples decode into: an `i32::MAX`-scaled sample overflows
+    /// what `hound` can write as 24-bit and corrupts the clip.
+    #[test]
+    fn tone_stays_within_24_bit_range() {
+        let mut batch: Redactions<Audio> = Redactions::new();
+        batch.push(
+            AudioLocation::from_millis(0, 100),
+            AudioReplacement::Tone {
+                hz: 440.0,
+                amplitude: 1.0,
+                waveform: Waveform::Sine,
+            },
+        );
+
+        let out = redact_all(&silent_wav(24, 1), &batch).expect("24-bit tone re-encodes");
+
+        // The clip still decodes, and every sample fits the 24-bit signed range.
+        let mut reader = WavReader::new(Cursor::new(out)).unwrap();
+        let peak = (1i32 << 23) - 1;
+        assert!(
+            reader
+                .samples::<i32>()
+                .map(|s| s.unwrap())
+                .all(|s| s.abs() <= peak),
+            "a sample exceeded the 24-bit range"
+        );
+    }
 }

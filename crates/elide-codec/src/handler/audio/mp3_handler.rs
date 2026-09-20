@@ -10,6 +10,7 @@ impl_audio_handler! {
     handler = Mp3Handler,
     loader = Mp3Loader,
     format_id = "elide.audio.mp3",
+    audio_format = elide_audio::AudioFormat::Mp3,
     extensions = ["mp3"],
     content_types = ["audio/mpeg"],
 }

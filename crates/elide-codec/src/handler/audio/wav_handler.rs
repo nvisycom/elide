@@ -10,6 +10,7 @@ impl_audio_handler! {
     handler = WavHandler,
     loader = WavLoader,
     format_id = "elide.audio.wav",
+    audio_format = elide_audio::AudioFormat::Wav,
     extensions = ["wav"],
     content_types = ["audio/wav", "audio/x-wav"],
 }
@@ -19,7 +20,8 @@ mod tests {
     use elide_audio::{AudioBuffer, test_util};
 
     use super::*;
-    use crate::Handler as _;
+    use crate::content::ContentData;
+    use crate::{Handler as _, Loader as _};
 
     #[tokio::test]
     async fn stream_reports_one_second() {
@@ -29,5 +31,18 @@ mod tests {
         assert_eq!(chunk.location.span.start_millis(), 0);
         assert_eq!(chunk.location.span.end_millis(), 1_000);
         assert!(h.read_next().await.unwrap().is_none());
+    }
+
+    /// The WAV loader rejects content that opens as another format: MP3 bytes
+    /// must not decode into a `WavHandler` just because `AudioBuffer::open`
+    /// accepts them.
+    #[cfg(feature = "mp3")]
+    #[tokio::test]
+    async fn loader_rejects_content_of_another_format() {
+        let err = WavLoader
+            .decode(ContentData::new(test_util::mp3_tone(1)))
+            .await
+            .expect_err("mp3 content should not decode as wav");
+        assert_eq!(err.kind(), elide_core::ErrorKind::MalformedInput);
     }
 }

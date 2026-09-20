@@ -312,12 +312,14 @@ pub(crate) fn redact_all(source: &Bytes, redactions: &Redactions<Audio>) -> Resu
     let mut sorted = redactions.clone();
     sorted.sort_by_position();
     for (location, replacement) in sorted.iter().rev() {
+        // MP3 decodes to `f32` PCM, so a synthesized tone uses unit full-scale.
         redact::apply(
             &mut decoded.samples,
             location.span,
             replacement,
             decoded.sample_rate,
             decoded.channels,
+            1.0,
         );
     }
 
