@@ -87,13 +87,15 @@ tiff = ["internal_image", "elide-image/tiff"]
 ## The audio formats.
 audio = ["wav", "mp3"]
 
-## WAV: `hound` reads and re-writes samples; `symphonia` probes the
-## clip duration.
-wav = ["internal_audio", "dep:hound", "dep:symphonia"]
-## MP3: `symphonia` probes duration and decodes to PCM; `mp3lame-encoder`
-## (LGPL-3.0 via libmp3lame, needs a C toolchain at build) re-encodes for
-## the redaction round-trip.
-mp3 = ["internal_audio", "dep:symphonia", "dep:mp3lame-encoder"]
+## WAV: the `elide-audio` engine reads and re-writes samples (`hound`) and
+## probes the clip duration (`symphonia`).
+wav = ["internal_audio", "elide-audio/wav"]
+## MP3: the `elide-audio` engine probes duration and decodes to PCM
+## (`symphonia`) and re-encodes with `mp3lame-encoder` (LGPL-3.0 via
+## libmp3lame, needs a C toolchain at build) for the redaction round-trip.
+## The LGPL dep lives on `elide-audio`, so a codec build without `mp3` never
+## pulls it in.
+mp3 = ["internal_audio", "elide-audio/mp3"]
 
 ## The tabular formats.
 tabular = ["csv", "xlsx"]
@@ -115,7 +117,7 @@ xlsx = ["internal_tabular", "xml", "dep:elide-office", "internal_office"]
 # without `pdf` doesn't force `elide-pdf` in, and a text-only `pdf` build
 # doesn't compile the image stack.
 internal_image = ["elide-core/image", "elide-core/metadata", "dep:elide-image", "elide-image/exif", "dep:image", "elide-pdf?/image"]
-internal_audio = ["elide-core/audio"]
+internal_audio = ["elide-core/audio", "dep:elide-audio"]
 internal_tabular = ["elide-core/tabular", "internal_text"]
 internal_text = []
 # The shared text-extract-and-splice engine, used by the markup formats
@@ -138,6 +140,7 @@ internal_office = ["elide-core/metadata"]
 # Internal crates
 elide-core = { workspace = true, features = [] }
 elide-office = { workspace = true, features = [], optional = true }
+elide-audio = { workspace = true, features = [], optional = true }
 elide-image = { workspace = true, features = [], optional = true }
 elide-pdf = { workspace = true, features = [], optional = true }
 
@@ -164,20 +167,14 @@ quick-xml = { workspace = true, features = [], optional = true }
 # Image processing
 image = { workspace = true, features = [], optional = true }
 
-# Audio processing
-hound = { workspace = true, features = [], optional = true }
-symphonia = { workspace = true, features = [], optional = true }
-mp3lame-encoder = { workspace = true, features = [], optional = true }
-
 [dev-dependencies]
 # Internal crates
 elide-office = { workspace = true, features = ["test-util"] }
+elide-image = { workspace = true, features = ["test-util"] }
+elide-audio = { workspace = true, features = ["test-util"] }
 
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["macros", "rt"] }
 
 # Markup parsing
 lopdf = { workspace = true, default-features = false }
-
-# Image processing
-little_exif = { workspace = true, features = [] }

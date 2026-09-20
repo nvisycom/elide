@@ -117,28 +117,13 @@ mod tests {
     #[cfg(feature = "jpeg")]
     #[tokio::test]
     async fn pixel_redaction_and_exif_strip_compose_into_one_image() {
-        use little_exif::exif_tag::ExifTag;
-        use little_exif::filetype::FileExtension;
-        use little_exif::metadata::Metadata as ExifMetadata;
+        use elide_image::test_util;
 
         use super::exif_handler::ExifLoader;
         use super::jpeg_handler::JpegLoader;
 
         // A 4x4 red JPEG carrying a GPS latitude tag.
-        let mut bytes = Vec::new();
-        DynamicImage::ImageRgb8(image::RgbImage::from_pixel(4, 4, image::Rgb([200, 30, 30])))
-            .write_to(
-                &mut std::io::Cursor::new(&mut bytes),
-                image::ImageFormat::Jpeg,
-            )
-            .unwrap();
-        let mut exif = ExifMetadata::new();
-        exif.set_tag(ExifTag::GPSLatitude(vec![little_exif::rational::uR64 {
-            nominator: 51,
-            denominator: 1,
-        }]));
-        exif.write_to_vec(&mut bytes, FileExtension::JPEG).unwrap();
-        let original = bytes::Bytes::from(bytes);
+        let original = test_util::jpeg_with_gps();
 
         // Decode the image handler; it is a Container exposing `#exif`.
         let mut image = JpegLoader::default()
@@ -197,63 +182,10 @@ mod tests {
         );
 
         // And the GPS tag is gone.
-        let readback = ExifMetadata::new_from_vec(&out.as_bytes().to_vec(), FileExtension::JPEG);
-        let has_gps = readback
-            .ok()
-            .map(|m| {
-                m.get_tag(&ExifTag::GPSLatitude(Vec::new()))
-                    .next()
-                    .is_some()
-            })
-            .unwrap_or(false);
-        assert!(!has_gps, "GPS survived the composed encode");
-    }
-
-    /// A 4x4 red PNG carrying a GPS latitude EXIF tag.
-    fn png_with_gps() -> bytes::Bytes {
-        use little_exif::exif_tag::ExifTag;
-        use little_exif::filetype::FileExtension;
-        use little_exif::metadata::Metadata as ExifMetadata;
-
-        let mut bytes = Vec::new();
-        DynamicImage::ImageRgb8(image::RgbImage::from_pixel(4, 4, image::Rgb([200, 30, 30])))
-            .write_to(
-                &mut std::io::Cursor::new(&mut bytes),
-                image::ImageFormat::Png,
-            )
-            .unwrap();
-        let mut exif = ExifMetadata::new();
-        exif.set_tag(ExifTag::GPSLatitude(vec![little_exif::rational::uR64 {
-            nominator: 51,
-            denominator: 1,
-        }]));
-        exif.write_to_vec(
-            &mut bytes,
-            FileExtension::PNG {
-                as_zTXt_chunk: false,
-            },
-        )
-        .unwrap();
-        bytes::Bytes::from(bytes)
-    }
-
-    fn png_has_gps(png: &[u8]) -> bool {
-        use little_exif::exif_tag::ExifTag;
-        use little_exif::filetype::FileExtension;
-        use little_exif::metadata::Metadata as ExifMetadata;
-
-        ExifMetadata::new_from_vec(
-            &png.to_vec(),
-            FileExtension::PNG {
-                as_zTXt_chunk: false,
-            },
-        )
-        .map(|m| {
-            m.get_tag(&ExifTag::GPSLatitude(Vec::new()))
-                .next()
-                .is_some()
-        })
-        .unwrap_or(false)
+        assert!(
+            !test_util::has_gps(out.as_bytes()),
+            "GPS survived the composed encode"
+        );
     }
 
     /// Without a metadata pipeline, the fallback `ExifPolicy` governs the output.
@@ -261,12 +193,15 @@ mod tests {
     /// EXIF; `format_with(ExifPolicy::Retain)` is the opt-in that keeps it.
     #[tokio::test]
     async fn default_strips_exif_without_a_metadata_pipeline() {
-        use elide_image::ExifPolicy;
+        use elide_image::{ExifPolicy, test_util};
 
         use super::png_handler::PngLoader;
 
-        let original = png_with_gps();
-        assert!(png_has_gps(&original), "fixture should carry GPS");
+        let original = test_util::png_with_gps();
+        assert!(
+            test_util::has_gps_png(&original),
+            "fixture should carry GPS"
+        );
 
         let redact = |mut h: super::png_handler::PngHandler| async move {
             let mut batch: Redactions<Image> = Redactions::new();
@@ -286,7 +221,7 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            !png_has_gps(redact(default).await.as_bytes()),
+            !test_util::has_gps_png(redact(default).await.as_bytes()),
             "default kept EXIF (should strip)"
         );
 
@@ -296,7 +231,7 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            png_has_gps(redact(retain).await.as_bytes()),
+            test_util::has_gps_png(redact(retain).await.as_bytes()),
             "Retain policy dropped EXIF (should keep)"
         );
     }
@@ -306,14 +241,14 @@ mod tests {
     /// container. Locks in the scope boundary of the policy knob.
     #[tokio::test]
     async fn exif_subpart_overrides_the_fallback_policy() {
-        use elide_image::ExifPolicy;
+        use elide_image::{ExifPolicy, test_util};
 
         use super::exif_handler::ExifLoader;
         use super::png_handler::PngLoader;
 
         // A Retain loader (would preserve EXIF on the None branch)...
         let mut image = PngLoader::with_policy(ExifPolicy::Retain)
-            .decode(ContentData::new(png_with_gps()))
+            .decode(ContentData::new(test_util::png_with_gps()))
             .await
             .unwrap();
 
@@ -341,7 +276,7 @@ mod tests {
         // Despite the Retain policy, the #exif result wins: GPS is gone.
         let out = Handler::encode(&image).unwrap();
         assert!(
-            !png_has_gps(out.as_bytes()),
+            !test_util::has_gps_png(out.as_bytes()),
             "Retain policy leaked past the #exif strip"
         );
     }
