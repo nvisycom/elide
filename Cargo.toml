@@ -149,6 +149,11 @@ little_exif = { version = "0.6", features = [] }
 # Rendering
 pdfium-render = { version = "0.9", features = [] }
 
+# OCR (pure-Rust; models loaded at runtime, no native lib)
+ocrs = { version = "0.13", features = [] }
+rten = { version = "0.26", features = [] }
+rten-imageproc = { version = "0.26", features = [] }
+
 # Audio processing
 hound = { version = "3.5", features = [] }
 symphonia = { version = "0.6", default-features = false, features = ["wav", "pcm", "mp3"] }
