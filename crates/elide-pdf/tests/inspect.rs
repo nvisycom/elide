@@ -122,3 +122,87 @@ fn a_second_revision_is_an_incremental_revision() {
             .contains(&CoverageGap::RetainedDocumentBytes)
     );
 }
+
+#[test]
+fn verify_flattened_rejects_a_retained_revision_and_a_redaction_flattens_it() {
+    use lopdf::IncrementalDocument;
+
+    // A document with a superseded incremental revision fails the flatten check.
+    let base = rich_pdf();
+    let prev = Document::load_mem(&base).unwrap();
+    let mut incremental = IncrementalDocument::create_from(base, prev);
+    incremental
+        .new_document
+        .add_object(dictionary! { "Note" => Object::string_literal("second-revision") });
+    let mut two_rev = Vec::new();
+    incremental.save_to(&mut two_rev).unwrap();
+
+    assert!(
+        Pdf::open(&two_rev).unwrap().verify_flattened().is_err(),
+        "a two-revision document should not verify as flattened"
+    );
+
+    // Running a redaction re-saves as a single revision: the output flattens.
+    let redacted = Pdf::open(&two_rev).unwrap().redact_text(&[]).unwrap();
+    assert!(
+        Pdf::open(&redacted).unwrap().verify_flattened().is_ok(),
+        "redaction output should be flattened"
+    );
+}
+
+#[test]
+fn counts_and_strips_a_page_thumbnail() {
+    // A page carrying a `/Thumb` image preview.
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let content_id = doc.add_object(Stream::new(dictionary! {}, b"BT ET".to_vec()));
+    let thumb_id = doc.add_object(Stream::new(
+        dictionary! {
+            "Type" => "XObject", "Subtype" => "Image",
+            "Width" => 1, "Height" => 1, "ColorSpace" => "DeviceGray",
+            "BitsPerComponent" => 8,
+        },
+        b"THUMBNAIL-PIXELS".to_vec(),
+    ));
+    let page_id = doc.add_object(dictionary! {
+        "Type" => "Page", "Parent" => pages_id,
+        "Contents" => content_id, "Thumb" => Object::Reference(thumb_id),
+    });
+    let pages = dictionary! {
+        "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1,
+        "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
+    };
+    doc.objects.insert(pages_id, Object::Dictionary(pages));
+    let catalog_id = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+    doc.trailer.set("Root", catalog_id);
+    let mut pdf = Vec::new();
+    doc.save_to(&mut pdf).unwrap();
+
+    // The inventory counts the thumbnail, and its pixels are in the source.
+    assert_eq!(
+        Pdf::open(&pdf)
+            .unwrap()
+            .inspect()
+            .unwrap()
+            .risks
+            .thumbnail_count,
+        1
+    );
+    assert!(String::from_utf8_lossy(&pdf).contains("THUMBNAIL-PIXELS"));
+
+    // Sanitising (a no-op redaction) removes the thumbnail and its object.
+    let out = Pdf::open(&pdf).unwrap().redact_text(&[]).unwrap();
+    assert_eq!(
+        Pdf::open(&out)
+            .unwrap()
+            .inspect()
+            .unwrap()
+            .risks
+            .thumbnail_count,
+        0
+    );
+    assert!(
+        !String::from_utf8_lossy(&out).contains("THUMBNAIL-PIXELS"),
+        "thumbnail pixels survived sanitize"
+    );
+}

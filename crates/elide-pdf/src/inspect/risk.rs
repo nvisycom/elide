@@ -47,6 +47,8 @@ pub struct RiskInventory {
     pub optional_content_group_count: u32,
     /// Digital signature dictionaries.
     pub signature_count: u32,
+    /// Page thumbnail images (`/Thumb`, a preview reproducing the page).
+    pub thumbnail_count: u32,
     /// Non-whitespace bytes after the final `%%EOF` marker.
     pub trailing_non_whitespace_byte_count: u64,
     /// Actions of a kind this inspector does not classify.

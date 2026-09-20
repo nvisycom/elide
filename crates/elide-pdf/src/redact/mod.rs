@@ -16,8 +16,9 @@ mod glyphs;
 #[cfg(feature = "image")]
 mod images;
 mod sanitize;
+mod tounicode;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use lopdf::content::Content;
 use lopdf::{Encoding, Object, ObjectId};
@@ -60,6 +61,9 @@ struct PageText {
     /// One entry per character of `text`, naming the glyph that produced it.
     /// Characters with no glyph (synthetic spaces between text runs) are `None`.
     per_char: Vec<Option<GlyphRef>>,
+    /// The resource names of the fonts referenced by `per_char`, indexed by
+    /// [`GlyphRef::font`]. Used to reach a font's `/ToUnicode` CMap.
+    fonts: Vec<Vec<u8>>,
 }
 
 /// Address of the string that draws text: which content operation, which
@@ -84,6 +88,10 @@ struct GlyphRef {
     site: GlyphSite,
     byte_start: usize,
     byte_end: usize,
+    /// Index into the page's font-name table ([`PageText::fonts`]) naming the
+    /// font that drew the glyph, so a deleted glyph's raw code can be scrubbed
+    /// from that font's `/ToUnicode` CMap.
+    font: u16,
 }
 
 /// A page's text under construction, char for char aligned with the per-char
@@ -93,6 +101,9 @@ struct GlyphRef {
 struct TextRun<'a> {
     text: &'a mut String,
     per_char: &'a mut Vec<Option<GlyphRef>>,
+    /// The font-table index of the currently selected font, stamped onto every
+    /// glyph pushed so a deletion can later reach that font's `/ToUnicode`.
+    font: u16,
 }
 
 impl TextRun<'_> {
@@ -113,8 +124,20 @@ impl TextRun<'_> {
     /// originating glyph. Mirrors lopdf's `collect_text`: a `TJ` array's strings
     /// are decoded in order, and a large-negative kerning number inserts a space
     /// (with no glyph).
-    fn show_text(&mut self, enc: &Encoding, operands: &[Object], op: usize) -> Result<()> {
-        for (operand, value) in operands.iter().enumerate() {
+    ///
+    /// `operand_base` is the index of `operands[0]` within the operation's full
+    /// operand list, so the recorded [`GlyphSite`] addresses the true operand
+    /// even when the caller passes a sub-slice (as `"` does, whose string is
+    /// operand 2). It is 0 when the whole operand list is passed.
+    fn show_text(
+        &mut self,
+        enc: &Encoding,
+        operands: &[Object],
+        op: usize,
+        operand_base: usize,
+    ) -> Result<()> {
+        for (i, value) in operands.iter().enumerate() {
+            let operand = operand_base + i;
             match value {
                 Object::String(bytes, _) => {
                     let site = GlyphSite {
@@ -170,6 +193,7 @@ impl TextRun<'_> {
                         site,
                         byte_start: glyph.byte_start,
                         byte_end: glyph.byte_end,
+                        font: self.font,
                     },
                 );
             }
@@ -219,6 +243,48 @@ impl Pdf {
         let pages = self.page_texts_inner()?;
         let mut doc = self.doc.clone();
 
+        // Raw glyph codes deleted from each font, keyed by that font's
+        // `/ToUnicode` stream object id, gathered across pages so a shared CMap is
+        // scrubbed once after the content edits. Fonts without a `/ToUnicode`
+        // contribute nothing (there is no code->Unicode table to leak).
+        let mut deleted_codes: BTreeMap<ObjectId, BTreeSet<Vec<u8>>> = BTreeMap::new();
+        // Codes still drawn by surviving text, per CMap. A code is only scrubbed
+        // from a `/ToUnicode` if no surviving glyph anywhere uses it: fonts and
+        // their CMaps are routinely shared, and the same code (e.g. the letter
+        // `a`) recurs in text that stays, so scrubbing a still-used code would
+        // corrupt the surviving text's extraction.
+        let mut surviving_codes: BTreeMap<ObjectId, BTreeSet<Vec<u8>>> = BTreeMap::new();
+
+        // First pass over every page: record the codes of glyphs that will
+        // survive, so the scrub can spare any code still in use.
+        for page in &pages {
+            let deleted_here: BTreeSet<usize> = detections
+                .iter()
+                .filter(|d| d.page == page.page)
+                .flat_map(|d| d.start..d.end)
+                .collect();
+            let font_tounicode = tounicode::page_font_cmaps(&doc, page.page_id);
+            if font_tounicode.is_empty() {
+                continue;
+            }
+            let content = Content::decode(&doc.get_page_content(page.page_id))
+                .map_err(|e| Error::invalid_document(format!("decode page content: {e}")))?;
+            let survivors: Vec<GlyphRef> = page
+                .per_char
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !deleted_here.contains(i))
+                .filter_map(|(_, g)| *g)
+                .collect();
+            collect_deleted_codes(
+                &content,
+                page,
+                &survivors,
+                &font_tounicode,
+                &mut surviving_codes,
+            );
+        }
+
         for page in &pages {
             let dels: Vec<&Detection> = detections.iter().filter(|d| d.page == page.page).collect();
             if dels.is_empty() {
@@ -226,8 +292,11 @@ impl Pdf {
             }
 
             // Collect glyph byte ranges to delete, grouped by the exact string
-            // they live in: (op, operand, item-within-TJ-array).
+            // they live in: (op, operand, item-within-TJ-array). Remember each
+            // deleted glyph's font too, so its raw code can be scrubbed from the
+            // font's `/ToUnicode`.
             let mut to_delete: Deletions = BTreeMap::new();
+            let mut deleted_glyphs: Vec<GlyphRef> = Vec::new();
             for d in dels {
                 for ch in d.start..d.end {
                     if let Some(Some(g)) = page.per_char.get(ch) {
@@ -235,6 +304,7 @@ impl Pdf {
                             .entry(g.site)
                             .or_default()
                             .push((g.byte_start, g.byte_end));
+                        deleted_glyphs.push(*g);
                     }
                 }
             }
@@ -242,9 +312,23 @@ impl Pdf {
                 continue;
             }
 
+            // Map this page's font names to their `/ToUnicode` stream ids (only
+            // fonts that have one), so a deleted glyph's code is filed under the
+            // exact CMap object to scrub.
+            let font_tounicode = tounicode::page_font_cmaps(&doc, page.page_id);
+
             let content_data = doc.get_page_content(page.page_id);
             let mut content = Content::decode(&content_data)
                 .map_err(|e| Error::invalid_document(format!("decode page content: {e}")))?;
+            // Before mutating, record each deleted glyph's raw code bytes against
+            // its font's CMap, read straight from the string operand it lives in.
+            collect_deleted_codes(
+                &content,
+                page,
+                &deleted_glyphs,
+                &font_tounicode,
+                &mut deleted_codes,
+            );
             apply_deletions(&mut content, &to_delete);
             let new_content = content
                 .encode()
@@ -252,6 +336,11 @@ impl Pdf {
             doc.change_page_content(page.page_id, new_content)
                 .map_err(|e| Error::invalid_document(format!("write page content: {e}")))?;
         }
+
+        // Scrub the deleted codes from each affected font's `/ToUnicode` CMap
+        // (sparing any code still used by surviving text), so the removed text
+        // can't be recovered through the code->Unicode table.
+        tounicode::scrub(&mut doc, &deleted_codes, &surviving_codes)?;
 
         sanitize::sanitize(&mut doc);
 
@@ -281,6 +370,14 @@ impl Pdf {
                 .into_iter()
                 .map(|(name, font)| (name, font.get_font_encoding(&self.doc).ok()))
                 .collect();
+            // A stable index per font name (the `GlyphRef::font` table), so a
+            // deleted glyph can later be traced to the font that drew it.
+            let font_names: Vec<Vec<u8>> = encodings.keys().cloned().collect();
+            let font_index: BTreeMap<&[u8], u16> = font_names
+                .iter()
+                .enumerate()
+                .map(|(i, name)| (name.as_slice(), i as u16))
+                .collect();
 
             let content_data = self.doc.get_page_content(page_id);
             let content = Content::decode(&content_data)
@@ -291,6 +388,7 @@ impl Pdf {
             let mut run = TextRun {
                 text: &mut text,
                 per_char: &mut per_char,
+                font: 0,
             };
             // The current font's resolved encoding: `None` before any `Tf`, or
             // `Some(None)` when the selected font could not be decoded or names
@@ -307,11 +405,33 @@ impl Pdf {
                             // next text op fails closed rather than reading as
                             // "no font selected".
                             current = Some(encodings.get(name).unwrap_or(UNRESOLVED));
+                            // Point the run at this font's table slot (an unknown
+                            // name keeps the previous slot; such text fails closed
+                            // at the show operator anyway).
+                            if let Some(&idx) = font_index.get(name.as_slice()) {
+                                run.font = idx;
+                            }
                         }
                     }
-                    "Tj" | "TJ" => match current {
+                    // The four text-showing operators (PDF 32000-1 §9.4.3). All
+                    // draw glyphs and so must be decoded for redaction; they
+                    // differ only in which operands carry the string(s):
+                    // - `Tj`/`TJ`/`'` show from their whole operand list;
+                    // - `"` (`aw ac string`) shows only its third operand, the
+                    //   first two set spacing and draw nothing.
+                    "Tj" | "TJ" | "'" | "\"" => match current {
                         Some(Some(enc)) => {
-                            run.show_text(enc, &op.operands, op_idx)?;
+                            // `"` shows only its third operand; the recorded site
+                            // must still address it as operand 2.
+                            let (operands, base): (&[Object], usize) = if op.operator == "\"" {
+                                match op.operands.get(2) {
+                                    Some(s) => (std::slice::from_ref(s), 2),
+                                    None => (&[], 0),
+                                }
+                            } else {
+                                (&op.operands, 0)
+                            };
+                            run.show_text(enc, operands, op_idx, base)?;
                         }
                         // Text drawn under a font we could not decode or resolve:
                         // fail closed, its glyphs cannot be located for
@@ -336,14 +456,67 @@ impl Pdf {
                 page_id,
                 text,
                 per_char,
+                fonts: font_names,
             });
         }
         Ok(out)
     }
 }
 
+/// Read the raw glyph-code bytes of each deleted glyph out of the (still
+/// unmutated) decoded content, and record them against the object id of the
+/// glyph's font `/ToUnicode` CMap in `out`. Glyphs whose font has no CMap are
+/// skipped. These codes drive the `/ToUnicode` scrub.
+fn collect_deleted_codes(
+    content: &Content,
+    page: &PageText,
+    deleted: &[GlyphRef],
+    font_tounicode: &BTreeMap<Vec<u8>, ObjectId>,
+    out: &mut BTreeMap<ObjectId, BTreeSet<Vec<u8>>>,
+) {
+    for g in deleted {
+        let Some(name) = page.fonts.get(g.font as usize) else {
+            continue;
+        };
+        let Some(&cmap_id) = font_tounicode.get(name) else {
+            continue;
+        };
+        let Some(op) = content.operations.get(g.site.op) else {
+            continue;
+        };
+        // Resolve the string operand the glyph lives in (plain `Tj` string, or
+        // an element of a `TJ` array).
+        let bytes: Option<&Vec<u8>> = match (op.operands.get(g.site.operand), g.site.item) {
+            (Some(Object::String(b, _)), None) => Some(b),
+            (Some(Object::Array(arr)), Some(k)) => match arr.get(k) {
+                Some(Object::String(b, _)) => Some(b),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(b) = bytes
+            && g.byte_end <= b.len()
+            && g.byte_start < g.byte_end
+        {
+            out.entry(cmap_id)
+                .or_default()
+                .insert(b[g.byte_start..g.byte_end].to_vec());
+        }
+    }
+}
+
 /// Remove the marked glyph byte ranges from each exact string, high-to-low so
 /// earlier offsets stay valid.
+///
+/// Deleting glyph bytes alone is not enough to redact text: a `TJ` array
+/// interleaves strings with numeric position adjustments (kerns, in thousandths
+/// of an em), and those numbers, plus the advances of the removed glyphs, still
+/// encode where the deleted text sat and how wide it was, enough to reconstruct
+/// it (the sub-pixel glyph-position leak). So when a deletion empties a `TJ`
+/// string element, the adjacent numeric adjustments are zeroed too, destroying
+/// the positional residue. The surviving text reflows (there are no font metrics
+/// here to preserve exact layout); a caller needing pixel-faithful layout uses
+/// the raster path instead.
 fn apply_deletions(content: &mut Content, to_delete: &Deletions) {
     for (&GlyphSite { op, operand, item }, ranges) in to_delete {
         let Some(op) = content.operations.get_mut(op) else {
@@ -357,28 +530,187 @@ fn apply_deletions(content: &mut Content, to_delete: &Deletions) {
             },
             _ => None,
         };
-        if let Some(bytes) = target {
-            // The same glyph range can be collected more than once (a ligature
-            // whose one code spans several detected characters, or overlapping
-            // detections). Merge overlapping/adjacent ranges so each byte span
-            // is drained exactly once, draining a span twice would corrupt the
-            // string by consuming later, still-valid bytes.
-            let mut merged: Vec<(usize, usize)> = ranges.clone();
-            merged.sort_unstable();
-            merged.dedup();
-            let mut coalesced: Vec<(usize, usize)> = Vec::with_capacity(merged.len());
-            for (s, e) in merged {
-                match coalesced.last_mut() {
-                    Some(last) if s <= last.1 => last.1 = last.1.max(e),
-                    _ => coalesced.push((s, e)),
-                }
-            }
-            // Drain high-to-low so earlier offsets stay valid.
-            for &(s, e) in coalesced.iter().rev() {
-                if e <= bytes.len() && s < e {
-                    bytes.drain(s..e);
-                }
+        let Some(bytes) = target else {
+            continue;
+        };
+        // The same glyph range can be collected more than once (a ligature
+        // whose one code spans several detected characters, or overlapping
+        // detections). Merge overlapping/adjacent ranges so each byte span
+        // is drained exactly once, draining a span twice would corrupt the
+        // string by consuming later, still-valid bytes.
+        let mut merged: Vec<(usize, usize)> = ranges.clone();
+        merged.sort_unstable();
+        merged.dedup();
+        let mut coalesced: Vec<(usize, usize)> = Vec::with_capacity(merged.len());
+        for (s, e) in merged {
+            match coalesced.last_mut() {
+                Some(last) if s <= last.1 => last.1 = last.1.max(e),
+                _ => coalesced.push((s, e)),
             }
         }
+        // Drain high-to-low so earlier offsets stay valid.
+        for &(s, e) in coalesced.iter().rev() {
+            if e <= bytes.len() && s < e {
+                bytes.drain(s..e);
+            }
+        }
+
+        // If this emptied a `TJ` string element, zero the numeric position
+        // adjustments around it so no positional residue of the removed glyphs
+        // survives. Re-borrow the array (the `bytes` borrow has ended) to reach
+        // the sibling numbers.
+        if let (Some(Object::Array(arr)), Some(k)) = (op.operands.get_mut(operand), item)
+            && matches!(arr.get(k), Some(Object::String(b, _)) if b.is_empty())
+        {
+            neutralize_kern_neighbors(arr, k);
+        }
+    }
+}
+
+/// Zero the numeric position adjustments contiguous to `arr[k]` (an emptied
+/// `TJ` string element) on each side, up to the next string element.
+///
+/// The numbers are zeroed in place rather than removed: other [`Deletions`]
+/// entries for the same operation address array elements by index, so removing
+/// an element would invalidate those indices. A zero adjustment draws nothing
+/// and carries no position information.
+fn neutralize_kern_neighbors(arr: &mut [Object], k: usize) {
+    let is_kern = |o: &Object| matches!(o, Object::Integer(_) | Object::Real(_));
+    let zero = |o: &mut Object| {
+        *o = match o {
+            Object::Real(_) => Object::Real(0.0),
+            _ => Object::Integer(0),
+        };
+    };
+    // Walk left from k until a non-numeric element (the previous string).
+    for i in (0..k).rev() {
+        if is_kern(&arr[i]) {
+            zero(&mut arr[i]);
+        } else {
+            break;
+        }
+    }
+    // Walk right from k until a non-numeric element (the next string).
+    for elem in &mut arr[k + 1..] {
+        if is_kern(elem) {
+            zero(elem);
+        } else {
+            break;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lopdf::content::{Content, Operation};
+
+    use super::*;
+
+    /// A single `TJ` operation whose array is `elems`.
+    fn tj(elems: Vec<Object>) -> Content {
+        Content {
+            operations: vec![Operation::new("TJ", vec![Object::Array(elems)])],
+        }
+    }
+
+    /// The array of the first `TJ` operation.
+    fn tj_array(content: &Content) -> &[Object] {
+        match content.operations[0].operands.first() {
+            Some(Object::Array(a)) => a,
+            _ => panic!("not a TJ array"),
+        }
+    }
+
+    /// Deleting every glyph of a `TJ` string element empties it AND zeroes the
+    /// numeric position adjustments on both sides, so no positional residue of
+    /// the removed glyphs survives. The neighbours of the untouched string keep
+    /// their values.
+    #[test]
+    fn emptying_a_tj_string_zeroes_its_kern_neighbors() {
+        // [(Sec) -40 (ret) -55 ( Agent)] — delete "ret" (item 2, bytes 0..3).
+        let mut content = tj(vec![
+            Object::string_literal("Sec"),
+            (-40).into(),
+            Object::string_literal("ret"),
+            (-55).into(),
+            Object::string_literal(" Agent"),
+        ]);
+        let mut to_delete: Deletions = BTreeMap::new();
+        to_delete.insert(
+            GlyphSite {
+                op: 0,
+                operand: 0,
+                item: Some(2),
+            },
+            vec![(0, 3)],
+        );
+        apply_deletions(&mut content, &to_delete);
+
+        let arr = tj_array(&content);
+        // "ret" is now empty; both adjacent kerns (-40 before, -55 after) zeroed.
+        assert_eq!(arr[0], Object::string_literal("Sec"));
+        assert_eq!(arr[1], Object::Integer(0), "left kern not zeroed");
+        assert!(matches!(&arr[2], Object::String(b, _) if b.is_empty()));
+        assert_eq!(arr[3], Object::Integer(0), "right kern not zeroed");
+        assert_eq!(arr[4], Object::string_literal(" Agent"));
+    }
+
+    /// A partial deletion (some glyphs left in the string) shortens the string
+    /// but does not touch the surrounding kerns: the survivors still advance, so
+    /// their adjustments stay meaningful.
+    #[test]
+    fn a_partial_deletion_leaves_the_kerns() {
+        // [(Secret) -40 (Agent)] — delete "Sec" (bytes 0..3 of item 0).
+        let mut content = tj(vec![
+            Object::string_literal("Secret"),
+            (-40).into(),
+            Object::string_literal("Agent"),
+        ]);
+        let mut to_delete: Deletions = BTreeMap::new();
+        to_delete.insert(
+            GlyphSite {
+                op: 0,
+                operand: 0,
+                item: Some(0),
+            },
+            vec![(0, 3)],
+        );
+        apply_deletions(&mut content, &to_delete);
+
+        let arr = tj_array(&content);
+        assert_eq!(arr[0], Object::string_literal("ret"), "survivors mangled");
+        assert_eq!(arr[1], Object::Integer(-40), "kern wrongly zeroed");
+        assert_eq!(arr[2], Object::string_literal("Agent"));
+    }
+
+    /// Zeroing stops at the neighbouring string: a kern next to a different,
+    /// still-populated string is not zeroed.
+    #[test]
+    fn zeroing_stops_at_the_next_string() {
+        // [(a) 5 (bb) 9 (c)] — empty the middle "bb"; the 5 and 9 flank it and
+        // are zeroed, but nothing beyond the flanking strings is touched.
+        let mut content = tj(vec![
+            Object::string_literal("a"),
+            5.into(),
+            Object::string_literal("bb"),
+            9.into(),
+            Object::string_literal("c"),
+        ]);
+        let mut to_delete: Deletions = BTreeMap::new();
+        to_delete.insert(
+            GlyphSite {
+                op: 0,
+                operand: 0,
+                item: Some(2),
+            },
+            vec![(0, 2)],
+        );
+        apply_deletions(&mut content, &to_delete);
+
+        let arr = tj_array(&content);
+        assert_eq!(arr[0], Object::string_literal("a"));
+        assert_eq!(arr[1], Object::Integer(0));
+        assert_eq!(arr[3], Object::Integer(0));
+        assert_eq!(arr[4], Object::string_literal("c"));
     }
 }

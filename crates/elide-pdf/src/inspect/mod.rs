@@ -115,9 +115,50 @@ impl Pdf {
         })
     }
 
+    /// Verify the document carries no superseded revision or trailing bytes: the
+    /// bytes are a single, flattened revision with nothing recoverable from a
+    /// prior incremental update.
+    ///
+    /// A redaction re-save (`redact_text`, the raster emit) rewrites the whole
+    /// document, so its output is flattened; this checks that invariant holds.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::InvalidDocument`](crate::ErrorKind::InvalidDocument) if the
+    /// document retains a superseded incremental revision or non-whitespace bytes
+    /// after the final `%%EOF`.
+    pub fn verify_flattened(&self) -> Result<()> {
+        let (revisions, trailing) = retained_bytes(&self.source_bytes());
+        if revisions > 0 {
+            return Err(Error::invalid_document(format!(
+                "document retains {revisions} superseded incremental revision(s)"
+            )));
+        }
+        if trailing > 0 {
+            return Err(Error::invalid_document(format!(
+                "document has {trailing} non-whitespace byte(s) after the final %%EOF"
+            )));
+        }
+        Ok(())
+    }
+
     /// Walk the object graph once and tally every risk-bearing structure.
     fn risk_inventory(&self) -> RiskInventory {
         let mut risks = RiskInventory::default();
+
+        // Page thumbnails (`/Thumb`): a per-page key, not a typed object, so it
+        // is counted by walking the pages rather than the object graph below.
+        for page_id in self.doc.get_pages().values() {
+            if self
+                .doc
+                .get_object(*page_id)
+                .and_then(Object::as_dict)
+                .map(|d| d.has(b"Thumb"))
+                .unwrap_or(false)
+            {
+                risks.thumbnail_count += 1;
+            }
+        }
 
         // Trailer-rooted structures.
         if let Ok(info) = self

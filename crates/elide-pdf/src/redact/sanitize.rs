@@ -42,8 +42,20 @@ pub(super) fn sanitize(doc: &mut Document) {
                 }
             }
         }
+        // Page thumbnail (`/Thumb`): a small rendered preview of the page, which
+        // reproduces the redacted page pixels. Delete its object subtree and drop
+        // the key.
+        if let Ok(thumb) = doc
+            .get_object(page_id)
+            .and_then(Object::as_dict)
+            .and_then(|d| d.get(b"Thumb"))
+            && let Ok(thumb_id) = thumb.as_reference()
+        {
+            collect_owned(doc, thumb_id, &mut doomed);
+        }
         if let Ok(dict) = doc.get_object_mut(page_id).and_then(Object::as_dict_mut) {
             dict.remove(b"Annots");
+            dict.remove(b"Thumb");
         }
     }
 
@@ -82,6 +94,11 @@ pub(super) fn sanitize(doc: &mut Document) {
         }
     }
 
+    // Optional-content (layers): remove the catalog's `/OCProperties`
+    // configuration and clear every object's `/OC` membership mark, so no
+    // content is gated behind a hidden layer and no layer config survives.
+    strip_optional_content(doc, &mut doomed);
+
     // A doomed object that is still referenced from a *surviving* object is
     // shared (e.g. a font or resource the page content also uses) and must not
     // be deleted. Keep only the objects unreferenced from outside the doomed
@@ -91,6 +108,44 @@ pub(super) fn sanitize(doc: &mut Document) {
         if !referenced_by_survivors.contains(id) {
             doc.objects.remove(id);
         }
+    }
+}
+
+/// Remove optional-content (layer) machinery: the catalog's `/OCProperties`
+/// configuration and every `/OC` membership mark.
+///
+/// Content in a hidden layer is still in the file; a viewer that turns the layer
+/// on reveals it. Clearing the `/OC` marks first detaches all content from its
+/// layers (so nothing stays hidden and no surviving object references an OCG),
+/// then the `/OCProperties` subtree is doomed. Because the marks are already
+/// gone, the survivor guard no longer keeps the OCG dictionaries, so the whole
+/// layer configuration is pruned.
+fn strip_optional_content(doc: &mut Document, doomed: &mut BTreeSet<ObjectId>) {
+    // Detach every object from its layer: drop `/OC` on dictionaries and on
+    // stream dictionaries (XObjects, annotations carry it there).
+    for object in doc.objects.values_mut() {
+        match object {
+            Object::Dictionary(dict) => {
+                dict.remove(b"OC");
+            }
+            Object::Stream(stream) => {
+                stream.dict.remove(b"OC");
+            }
+            _ => {}
+        }
+    }
+
+    // Doom the catalog's optional-content configuration and drop the key.
+    let oc = doc
+        .catalog()
+        .and_then(|c| c.get(b"OCProperties"))
+        .ok()
+        .cloned();
+    if let Some(oc) = oc {
+        collect_entry(doc, &oc, doomed);
+    }
+    if let Ok(catalog) = doc.catalog_mut() {
+        catalog.remove(b"OCProperties");
     }
 }
 
