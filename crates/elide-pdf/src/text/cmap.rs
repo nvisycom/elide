@@ -21,7 +21,7 @@ use lopdf::{Document, Object, ObjectId};
 /// code falls inside a multi-code `bfrange` (which cannot be scrubbed without
 /// re-deriving the range) or if a CMap stream cannot be read, so the redaction
 /// fails closed rather than leaving a recoverable code->Unicode entry.
-pub(super) fn scrub(
+pub(crate) fn scrub(
     doc: &mut Document,
     deleted: &BTreeMap<ObjectId, BTreeSet<Vec<u8>>>,
     surviving: &BTreeMap<ObjectId, BTreeSet<Vec<u8>>>,

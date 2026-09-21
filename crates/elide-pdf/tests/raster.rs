@@ -4,7 +4,8 @@
 #![cfg(feature = "render")]
 
 use elide_pdf::Pdf;
-use elide_pdf::render::{Detection, Glyph, GlyphSource, PageObservation, PixelRect};
+use elide_pdf::redact::Detection;
+use elide_pdf::render::{Glyph, GlyphSource, PageObservation, PixelRect};
 use lopdf::content::{Content, Operation};
 use lopdf::{Document, Object, Stream, dictionary};
 
@@ -125,7 +126,7 @@ fn fills_only_detected_glyph_pixels() {
     let pdf = Pdf::open(&source_pdf()).unwrap();
     // Redact "BC", UTF-16 [1, 3): the middle two pixels of the 4x1 page.
     let (out, _cert) = pdf
-        .redact_raster(vec![observation()], &[Detection::new(1, 1, 3)], [0, 0, 0])
+        .redact_raster(&[observation()], &[Detection::new(1, 1, 3)], [0, 0, 0])
         .unwrap();
 
     // Decode the emitted image and check the actual filled pixels.
@@ -140,7 +141,7 @@ fn fills_only_detected_glyph_pixels() {
 fn output_is_a_fresh_image_only_pdf() {
     let pdf = Pdf::open(&source_pdf()).unwrap();
     let (out, _cert) = pdf
-        .redact_raster(vec![observation()], &[Detection::new(1, 0, 4)], [0, 0, 0])
+        .redact_raster(&[observation()], &[Detection::new(1, 0, 4)], [0, 0, 0])
         .unwrap();
 
     // The output parses, has one page, and its page draws an image XObject.
@@ -176,7 +177,7 @@ fn output_drops_source_metadata() {
 
     let pdf = Pdf::open(&source).unwrap();
     let (out, _cert) = pdf
-        .redact_raster(vec![observation()], &[Detection::new(1, 0, 4)], [0, 0, 0])
+        .redact_raster(&[observation()], &[Detection::new(1, 0, 4)], [0, 0, 0])
         .unwrap();
 
     // The fresh image-only output copies nothing from the source: no `/Info`
@@ -197,7 +198,7 @@ fn certificate_binds_source_pages_and_output() {
     let source = source_pdf();
     let pdf = Pdf::open(&source).unwrap();
     let (out, cert) = pdf
-        .redact_raster(vec![observation()], &[Detection::new(1, 0, 2)], [0, 0, 0])
+        .redact_raster(&[observation()], &[Detection::new(1, 0, 2)], [0, 0, 0])
         .unwrap();
 
     // 64 hex chars per SHA-256; one page digest; output digest matches `out`.
@@ -218,7 +219,7 @@ fn rejects_a_mismatched_pixel_buffer() {
     let pdf = Pdf::open(&source_pdf()).unwrap();
     let mut obs = observation();
     obs.pixels.truncate(5); // a buffer that is not width*height*3
-    let err = pdf.redact_raster(vec![obs], &[], [0, 0, 0]).unwrap_err();
+    let err = pdf.redact_raster(&[obs], &[], [0, 0, 0]).unwrap_err();
     assert_eq!(err.kind(), elide_pdf::ErrorKind::Redaction);
 }
 
@@ -226,7 +227,7 @@ fn rejects_a_mismatched_pixel_buffer() {
 fn rejects_a_detection_on_an_absent_page() {
     let pdf = Pdf::open(&source_pdf()).unwrap();
     let err = pdf
-        .redact_raster(vec![observation()], &[Detection::new(9, 0, 1)], [0, 0, 0])
+        .redact_raster(&[observation()], &[Detection::new(9, 0, 1)], [0, 0, 0])
         .unwrap_err();
     assert_eq!(err.kind(), elide_pdf::ErrorKind::Redaction);
 }

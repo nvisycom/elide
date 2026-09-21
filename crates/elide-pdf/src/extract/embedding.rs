@@ -21,6 +21,7 @@ pub struct ImageId {
 
 impl ImageId {
     /// The image at object `(number, generation)`.
+    #[must_use]
     pub fn new(number: u32, generation: u16) -> Self {
         Self { number, generation }
     }

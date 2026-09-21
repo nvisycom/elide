@@ -10,6 +10,7 @@
 
 use elide_core::Result;
 use elide_core::modality::text::Text;
+use elide_pdf::extract::Block;
 
 #[cfg(feature = "pdf-render")]
 use super::RasterMode;
@@ -56,17 +57,21 @@ impl Loader<Text> for PdfLoader {
         #[cfg(feature = "pdf-render")]
         if self.raster.render_dpi().is_some() {
             let observations = observe_pages(&document)?;
-            let pages = pages_from_texts(observations.iter().map(|o| (o.page, o.text.clone())));
+            let pages = pages_from_blocks(
+                observations
+                    .iter()
+                    .map(|o| Block::new(o.page, o.text.clone())),
+            );
             return Ok(PdfHandler::raster(document, pages, observations));
         }
 
         // Default (`Auto`/`Never`, and the whole pure-Rust build): glyph
-        // deletion. The page text comes from `page_texts`, the same walk
-        // `redact_text` uses, so a detection's character span maps to the
-        // glyphs it drew. On encode the glyphs are deleted and
-        // annotations/metadata stripped, keeping a selectable text layer.
+        // deletion. The page text comes from `extract`, the same content walk
+        // `redact_text` uses, so a detection's character span maps to the glyphs
+        // it drew. On encode the glyphs are deleted and annotations/metadata
+        // stripped, keeping a selectable text layer.
         let pdf = elide_pdf::Pdf::open(&document)?;
-        let pages = pages_from_texts(pdf.page_texts()?);
+        let pages = pages_from_blocks(pdf.extract().blocks);
 
         // `RasterMode::Auto` (feature `pdf-render` + an image codec): a textless
         // (scanned) page has no glyphs to delete, so render it and surface it as
@@ -113,19 +118,20 @@ fn scanned_pages(pdf: &elide_pdf::Pdf) -> Result<std::collections::BTreeMap<u32,
         .collect())
 }
 
-/// Assemble [`PdfPage`]s from `(page number, text)` pairs, assigning each its
-/// start offset in the concatenated text stream.
+/// Assemble [`PdfPage`]s from the engine's per-page text [`Block`]s, assigning
+/// each its start offset in the concatenated text stream.
 ///
 /// Pages are separated by [`PAGE_SEPARATOR`] in the stream coordinate space: the
 /// cumulative offset advances by each page's length *plus* the separator width,
 /// so no detected span can straddle two pages (which encode would then drop).
-fn pages_from_texts(texts: impl IntoIterator<Item = (u32, String)>) -> Vec<PdfPage> {
+fn pages_from_blocks(blocks: impl IntoIterator<Item = Block>) -> Vec<PdfPage> {
     let mut pages = Vec::new();
     let mut offset = 0usize;
-    for (number, text) in texts {
+    for block in blocks {
+        let text = block.text.to_string();
         let len = text.len();
         pages.push(PdfPage {
-            number,
+            number: block.page,
             text,
             start: offset,
         });

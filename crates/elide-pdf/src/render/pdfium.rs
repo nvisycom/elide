@@ -219,18 +219,19 @@ impl Binding {
 
             let mut text = String::new();
             let mut glyphs = Vec::new();
-            // Running UTF-16 offset, so `start`/`end` share the page text's
-            // coordinate system without re-counting the whole string per char.
-            let mut utf16_offset: u32 = 0;
+            // Running character offset, so `start`/`end` share the page text's
+            // coordinate system (character offsets, as a `Detection` carries)
+            // without re-counting the whole string per char.
+            let mut char_offset: usize = 0;
             if let Ok(page_text) = page.text() {
                 for ch in page_text.chars().iter() {
                     let Some(c) = ch.unicode_char() else {
                         continue; // no glyph text (e.g. a control char)
                     };
-                    let start = utf16_offset;
+                    let start = char_offset;
                     text.push(c);
-                    utf16_offset += c.len_utf16() as u32;
-                    let end = utf16_offset;
+                    char_offset += 1;
+                    let end = char_offset;
                     if let Ok(b) = ch.loose_bounds() {
                         glyphs.push(Glyph {
                             start,

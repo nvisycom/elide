@@ -94,15 +94,16 @@ pub enum GlyphSource {
 
 /// One glyph: the span of page text it covers and its box in rendered pixels.
 ///
-/// `start`/`end` are UTF-16 code-unit offsets into the page's text, so a
-/// detected span (also in UTF-16) selects the glyphs to redact.
+/// `start`/`end` are Unicode scalar (`char`) offsets into the page's text, the
+/// same unit a [`Detection`](crate::Detection) carries, so a detected span
+/// selects the glyphs to redact.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Glyph {
-    /// Start UTF-16 code-unit offset into the page text (inclusive).
-    pub start: u32,
-    /// End UTF-16 code-unit offset into the page text (exclusive).
-    pub end: u32,
+    /// Start character offset into the page text (inclusive).
+    pub start: usize,
+    /// End character offset into the page text (exclusive).
+    pub end: usize,
     /// The glyph's box in rendered-page pixels.
     pub rect: PixelRect,
     /// Where the geometry came from.
@@ -113,7 +114,7 @@ pub struct Glyph {
 ///
 /// This is the observation the raster redaction consumes: `pixels` is the RGB8
 /// image to overwrite, `text` is what detection ran over, and `glyphs` maps
-/// detected UTF-16 spans back to pixel rectangles.
+/// detected character spans back to pixel rectangles.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PageObservation {
@@ -123,7 +124,7 @@ pub struct PageObservation {
     pub width: u32,
     /// Rendered height in pixels.
     pub height: u32,
-    /// The page's text (the string `start`/`end` offsets index, in UTF-16).
+    /// The page's text (the string `start`/`end` offsets index, in characters).
     pub text: String,
     /// Every glyph's span and pixel box, in reading order.
     pub glyphs: Vec<Glyph>,

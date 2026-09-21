@@ -22,15 +22,15 @@ use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 use elide_pdf::Pdf;
+use elide_pdf::redact::Detection;
 #[cfg(feature = "internal_image")]
 use elide_pdf::extract::{EmbeddingKind, ImageId};
-use elide_pdf::redact::Detection;
 #[cfg(feature = "internal_image")]
 use elide_pdf::redact::ImageReplacement;
 #[cfg(all(feature = "pdf-render", feature = "internal_image"))]
 use elide_pdf::redact::PageReplacement;
 #[cfg(feature = "pdf-render")]
-use elide_pdf::render::{Detection as RasterDetection, PageObservation};
+use elide_pdf::render::PageObservation;
 
 use super::PdfLoader;
 #[cfg(feature = "pdf-render")]
@@ -96,8 +96,8 @@ pub(crate) enum RedactMode {
     Raster {
         /// Per-page observations (text, glyph boxes, pixels) from `observe`.
         observations: Vec<PageObservation>,
-        /// Recorded pixel-span detections, applied at encode.
-        detections: Vec<RasterDetection>,
+        /// Recorded detections (page + character span), applied at encode.
+        detections: Vec<Detection>,
     },
 }
 
@@ -283,9 +283,8 @@ impl Handler<Text> for PdfHandler {
                 }
                 // Fill the detected glyph boxes and emit a fresh image-only PDF
                 //, the strong redaction guarantee. Black fill.
-                let (out, _certificate) = Pdf::open(&self.document).and_then(|pdf| {
-                    pdf.redact_raster(observations.clone(), detections, [0, 0, 0])
-                })?;
+                let (out, _certificate) = Pdf::open(&self.document)
+                    .and_then(|pdf| pdf.redact_raster(observations, detections, [0, 0, 0]))?;
                 Ok(ContentData::new(Bytes::from(out)))
             }
         }
@@ -372,21 +371,16 @@ impl DataWriter<Text> for PdfHandler {
             }
             let page_number = page.number;
 
-            // Measure the span for the active mode only, then drop the page
-            // borrow before recording (so the sink can be borrowed mutably).
-            if self.mode.is_raster() {
+            // Both paths address glyphs by the same character span into the page
+            // text, so the span is measured once as character offsets; drop the
+            // page borrow before recording so the sink can be borrowed mutably.
+            let start = page.text[..local].chars().count();
+            let end = page.text[..local_end].chars().count();
+            let detection = Detection::new(page_number, start, end);
+            match &mut self.mode {
                 #[cfg(feature = "pdf-render")]
-                {
-                    let start = page.text[..local].encode_utf16().count() as u32;
-                    let end = page.text[..local_end].encode_utf16().count() as u32;
-                    if let RedactMode::Raster { detections, .. } = &mut self.mode {
-                        detections.push(RasterDetection::new(page_number, start, end));
-                    }
-                }
-            } else {
-                let start = page.text[..local].chars().count();
-                let end = page.text[..local_end].chars().count();
-                self.deletions.push(Detection::new(page_number, start, end));
+                RedactMode::Raster { detections, .. } => detections.push(detection),
+                _ => self.deletions.push(detection),
             }
         }
         Ok(())

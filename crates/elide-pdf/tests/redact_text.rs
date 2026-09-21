@@ -26,12 +26,17 @@ fn extracted(pdf_bytes: &[u8]) -> String {
 /// Char spans on any page whose text equals `needle`.
 fn spans_for(pdf: &Pdf, needle: &str) -> Vec<Detection> {
     let mut out = Vec::new();
-    for (page, text) in pdf.page_texts().unwrap() {
+    for block in pdf.extract().blocks {
+        let text = block.text.as_str();
         let mut from = 0;
         while let Some(pos) = text[from..].find(needle) {
             let byte_at = from + pos;
             let start = text[..byte_at].chars().count();
-            out.push(Detection::new(page, start, start + needle.chars().count()));
+            out.push(Detection::new(
+                block.page,
+                start,
+                start + needle.chars().count(),
+            ));
             from = byte_at + needle.len();
         }
     }
@@ -429,12 +434,12 @@ fn redacts_text_inside_a_form_xobject() {
     let pdf = form_xobject_with_text();
     let doc = Pdf::open(&pdf).unwrap();
 
-    // The XObject text appears in page_texts (proving the walker recursed).
+    // The XObject text appears in the extraction (proving the walker recursed).
     let joined: String = doc
-        .page_texts()
-        .unwrap()
+        .extract()
+        .blocks
         .into_iter()
-        .map(|(_, t)| t)
+        .map(|b| b.text.to_string())
         .collect();
     assert!(joined.contains("bob@corp.com"), "XObject text not walked");
     assert!(joined.contains("PAGEMARK"), "page text missing");
@@ -448,10 +453,10 @@ fn redacts_text_inside_a_form_xobject() {
     // text survive, and the PII is absent from the raw output bytes.
     let reopened = Pdf::open(&out).unwrap();
     let walked: String = reopened
-        .page_texts()
-        .unwrap()
+        .extract()
+        .blocks
         .into_iter()
-        .map(|(_, t)| t)
+        .map(|b| b.text.to_string())
         .collect();
     assert!(!walked.contains("bob@corp.com"), "XObject PII survived");
     assert!(
@@ -520,7 +525,7 @@ fn a_form_xobject_do_cycle_terminates() {
 
     // Terminates (no hang, no stack overflow) and yields text (empty here).
     let opened = Pdf::open(&pdf).unwrap();
-    let _ = opened.page_texts().unwrap();
+    let _ = opened.extract();
     let _ = opened.redact_text(&[]).unwrap();
 }
 
