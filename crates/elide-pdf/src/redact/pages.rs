@@ -13,10 +13,10 @@
 
 use std::collections::BTreeSet;
 
+use elide_core::{Error, ErrorKind, Result};
 use lopdf::{Object, ObjectId, dictionary};
 
 use super::sanitize::referenced_from_survivors;
-use crate::error::{Error, Result};
 
 /// One page reflatten: replace page [`number`](PageReplacement::number)'s whole
 /// content with a redacted image of the page.
@@ -46,7 +46,7 @@ impl crate::Pdf {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::UnsafeRewrite`](crate::ErrorKind::UnsafeRewrite) if a
+    /// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a
     /// replacement could not be applied.
     #[cfg_attr(docsrs, doc(cfg(feature = "image")))]
     pub fn redact_pages(&self, replacements: &[PageReplacement]) -> Result<Vec<u8>> {
@@ -61,10 +61,10 @@ impl crate::Pdf {
 
         for replacement in replacements {
             let Some(&page_id) = pages.get(&replacement.number) else {
-                return Err(Error::unsafe_rewrite(format!(
-                    "page {} does not exist",
-                    replacement.number
-                )));
+                return Err(Error::new(
+                    ErrorKind::Redaction,
+                    format!("page {} does not exist", replacement.number),
+                ));
             };
 
             // The page's current content and resource subtrees, doomed once the
@@ -74,10 +74,10 @@ impl crate::Pdf {
             // Build a valid image XObject from the encoded bytes; lopdf sets the
             // dimensions, colour space, and filter to match.
             let image = lopdf::xobject::image_from(replacement.image.clone()).map_err(|e| {
-                Error::unsafe_rewrite(format!(
-                    "could not build image for page {}: {e}",
-                    replacement.number
-                ))
+                Error::new(
+                    ErrorKind::Redaction,
+                    format!("could not build image for page {}: {e}", replacement.number),
+                )
             })?;
             let (width, height) = image_dimensions(&image, replacement.number)?;
             let image_id = doc.add_object(image);
@@ -96,22 +96,29 @@ impl crate::Pdf {
             // dropped by the object-graph write below (they are page-owned, not
             // shared with a surviving page).
             let page = doc.get_dictionary_mut(page_id).map_err(|e| {
-                Error::unsafe_rewrite(format!("page {} is unreadable: {e}", replacement.number))
+                Error::new(
+                    ErrorKind::Redaction,
+                    format!("page {} is unreadable: {e}", replacement.number),
+                )
             })?;
             page.set("Contents", Object::Reference(content_id));
             page.set("Resources", Object::Reference(resources_id));
-            page.set(
-                "MediaBox",
-                vec![
-                    0.into(),
-                    0.into(),
-                    (i64::from(width)).into(),
-                    (i64::from(height)).into(),
-                ],
-            );
-            // A cropped page would otherwise clip the full-page image.
-            page.remove(b"CropBox");
-            page.remove(b"Rotate");
+            // The redacted image is the page as displayed (rendered post-crop
+            // and post-rotation), so the flattened page carries no crop or
+            // rotation. `MediaBox`, `CropBox`, `Rotate`, and `UserUnit` are all
+            // set explicitly, page-local, so an inherited value from an ancestor
+            // `Pages` node cannot clip, rotate, or rescale the image, removing
+            // only the page's own keys would leave an inherited one effective.
+            let box_rect = vec![
+                0.into(),
+                0.into(),
+                i64::from(width).into(),
+                i64::from(height).into(),
+            ];
+            page.set("MediaBox", box_rect.clone());
+            page.set("CropBox", box_rect);
+            page.set("Rotate", 0);
+            page.set("UserUnit", 1);
         }
 
         // The new content/resources/image were just added, so they are the
@@ -125,8 +132,12 @@ impl crate::Pdf {
         }
 
         let mut out = Vec::new();
-        doc.save_to(&mut out)
-            .map_err(|e| Error::invalid_document(format!("could not save PDF: {e}")))?;
+        doc.save_to(&mut out).map_err(|e| {
+            Error::new(
+                ErrorKind::MalformedInput,
+                format!("could not save PDF: {e}"),
+            )
+        })?;
         Ok(out)
     }
 }
@@ -199,8 +210,9 @@ fn image_dimensions(image: &lopdf::Stream, page: u32) -> Result<(u32, u32)> {
         .and_then(|h| u32::try_from(h).ok());
     match (width, height) {
         (Some(w), Some(h)) if w > 0 && h > 0 => Ok((w, h)),
-        _ => Err(Error::unsafe_rewrite(format!(
-            "page {page} image has no valid dimensions"
-        ))),
+        _ => Err(Error::new(
+            ErrorKind::Redaction,
+            format!("page {page} image has no valid dimensions"),
+        )),
     }
 }

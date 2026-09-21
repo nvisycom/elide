@@ -121,17 +121,43 @@ pub(super) fn sanitize(doc: &mut Document) {
 /// gone, the survivor guard no longer keeps the OCG dictionaries, so the whole
 /// layer configuration is pruned.
 fn strip_optional_content(doc: &mut Document, doomed: &mut BTreeSet<ObjectId>) {
-    // Detach every object from its layer: drop `/OC` on dictionaries and on
-    // stream dictionaries (XObjects, annotations carry it there).
+    // A resource dictionary's `/Properties` holds the marked-content property
+    // lists a `/OC /MC0 BDC ... EMC` sequence resolves `/MC0` through (OCGs or
+    // OCMDs). Find every resource dictionary (reached via a `/Resources` key,
+    // inline or referenced) so its `/Properties` can be cleared, detaching those
+    // OCGs. `/Properties` is scoped to resource dictionaries here rather than
+    // stripped from every dictionary, since the key is meaningful elsewhere.
+    let mut resource_dict_ids: BTreeSet<ObjectId> = BTreeSet::new();
+    for object in doc.objects.values() {
+        let dict = match object {
+            Object::Dictionary(dict) => dict,
+            Object::Stream(stream) => &stream.dict,
+            _ => continue,
+        };
+        if let Ok(resources) = dict.get(b"Resources")
+            && let Ok(id) = resources.as_reference()
+        {
+            resource_dict_ids.insert(id);
+        }
+    }
+
+    // Detach every object from its layer: drop the `/OC` membership mark on any
+    // dictionary or stream dict, and clear an inline `/Resources`' `/Properties`.
     for object in doc.objects.values_mut() {
-        match object {
-            Object::Dictionary(dict) => {
-                dict.remove(b"OC");
-            }
-            Object::Stream(stream) => {
-                stream.dict.remove(b"OC");
-            }
-            _ => {}
+        let dict = match object {
+            Object::Dictionary(dict) => dict,
+            Object::Stream(stream) => &mut stream.dict,
+            _ => continue,
+        };
+        dict.remove(b"OC");
+        if let Ok(Object::Dictionary(resources)) = dict.get_mut(b"Resources") {
+            resources.remove(b"Properties");
+        }
+    }
+    // Clear `/Properties` on each standalone (referenced) resource dictionary.
+    for id in resource_dict_ids {
+        if let Some(Object::Dictionary(dict)) = doc.objects.get_mut(&id) {
+            dict.remove(b"Properties");
         }
     }
 

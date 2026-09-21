@@ -240,9 +240,8 @@ impl Handler<Text> for PdfHandler {
                 // keeping a selectable text layer. (`mut` is used only when the
                 // image fold below is compiled in.)
                 #[cfg_attr(not(feature = "internal_image"), allow(unused_mut))]
-                let mut out = Pdf::open(&self.document)
-                    .and_then(|pdf| pdf.redact_text(&self.deletions))
-                    .map_err(pdf_error)?;
+                let mut out =
+                    Pdf::open(&self.document).and_then(|pdf| pdf.redact_text(&self.deletions))?;
 
                 // Then fold in any redacted embedded images.
                 #[cfg(feature = "internal_image")]
@@ -255,9 +254,7 @@ impl Handler<Text> for PdfHandler {
                             image: bytes.to_vec(),
                         })
                         .collect();
-                    out = Pdf::open(&out)
-                        .and_then(|pdf| pdf.redact_images(&replacements))
-                        .map_err(pdf_error)?;
+                    out = Pdf::open(&out).and_then(|pdf| pdf.redact_images(&replacements))?;
                 }
 
                 // Then reflatten any scanned pages to their redacted raster.
@@ -271,9 +268,7 @@ impl Handler<Text> for PdfHandler {
                             image: bytes.to_vec(),
                         })
                         .collect();
-                    out = Pdf::open(&out)
-                        .and_then(|pdf| pdf.redact_pages(&replacements))
-                        .map_err(pdf_error)?;
+                    out = Pdf::open(&out).and_then(|pdf| pdf.redact_pages(&replacements))?;
                 }
 
                 Ok(ContentData::new(Bytes::from(out)))
@@ -288,9 +283,9 @@ impl Handler<Text> for PdfHandler {
                 }
                 // Fill the detected glyph boxes and emit a fresh image-only PDF
                 //, the strong redaction guarantee. Black fill.
-                let (out, _certificate) = Pdf::open(&self.document)
-                    .and_then(|pdf| pdf.redact_raster(observations.clone(), detections, [0, 0, 0]))
-                    .map_err(pdf_error)?;
+                let (out, _certificate) = Pdf::open(&self.document).and_then(|pdf| {
+                    pdf.redact_raster(observations.clone(), detections, [0, 0, 0])
+                })?;
                 Ok(ContentData::new(Bytes::from(out)))
             }
         }
@@ -557,17 +552,6 @@ fn embedding_hint(kind: EmbeddingKind) -> Option<&'static str> {
         EmbeddingKind::CcittFax | EmbeddingKind::Jbig2 | EmbeddingKind::Raw => None,
         _ => None,
     }
-}
-
-/// Map an [`elide_pdf`] error into the codec's error type.
-pub(super) fn pdf_error(err: elide_pdf::Error) -> Error {
-    use elide_pdf::ErrorKind as PdfKind;
-    let kind = match err.kind() {
-        PdfKind::InvalidDocument | PdfKind::LimitExceeded => ErrorKind::MalformedInput,
-        PdfKind::UnsafeRewrite => ErrorKind::Processing,
-        _ => ErrorKind::Processing,
-    };
-    Error::new(kind, err.to_string())
 }
 
 #[cfg(all(test, feature = "internal_image"))]

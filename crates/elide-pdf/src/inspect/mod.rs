@@ -11,6 +11,7 @@
 mod coverage;
 mod risk;
 
+use elide_core::{Error, ErrorKind, Result};
 use lopdf::Object;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -18,7 +19,6 @@ use serde::{Deserialize, Serialize};
 pub use self::coverage::{Coverage, CoverageGap, CoverageStatus};
 pub use self::risk::RiskInventory;
 use crate::Pdf;
-use crate::error::{Error, Result};
 
 /// A bounded inventory of a PDF's risk-bearing structures and inspection
 /// coverage, produced by [`Pdf::inspect`].
@@ -66,25 +66,31 @@ impl Pdf {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if the
+    /// [`ErrorKind::ResourceLimit`](crate::ErrorKind::ResourceLimit) if the
     /// document exceeds the object-count ([`MAX_OBJECTS`](Inspection::MAX_OBJECTS))
     /// or page-count ([`MAX_PAGES`](Inspection::MAX_PAGES)) bound, refused
     /// rather than walked unboundedly.
     pub fn inspect(&self) -> Result<Inspection> {
         let object_count = self.doc.objects.len();
         if object_count > Inspection::MAX_OBJECTS {
-            return Err(Error::limit_exceeded(format!(
-                "document has {object_count} objects, over the {}-object limit",
-                Inspection::MAX_OBJECTS
-            )));
+            return Err(Error::new(
+                ErrorKind::ResourceLimit,
+                format!(
+                    "document has {object_count} objects, over the {}-object limit",
+                    Inspection::MAX_OBJECTS
+                ),
+            ));
         }
         let pages = self.doc.get_pages();
         if pages.len() > Inspection::MAX_PAGES {
-            return Err(Error::limit_exceeded(format!(
-                "document has {} pages, over the {}-page limit",
-                pages.len(),
-                Inspection::MAX_PAGES
-            )));
+            return Err(Error::new(
+                ErrorKind::ResourceLimit,
+                format!(
+                    "document has {} pages, over the {}-page limit",
+                    pages.len(),
+                    Inspection::MAX_PAGES
+                ),
+            ));
         }
 
         let encrypted = self.doc.is_encrypted();
@@ -124,20 +130,22 @@ impl Pdf {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::InvalidDocument`](crate::ErrorKind::InvalidDocument) if the
+    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if the
     /// document retains a superseded incremental revision or non-whitespace bytes
     /// after the final `%%EOF`.
     pub fn verify_flattened(&self) -> Result<()> {
         let (revisions, trailing) = retained_bytes(&self.source_bytes());
         if revisions > 0 {
-            return Err(Error::invalid_document(format!(
-                "document retains {revisions} superseded incremental revision(s)"
-            )));
+            return Err(Error::new(
+                ErrorKind::MalformedInput,
+                format!("document retains {revisions} superseded incremental revision(s)"),
+            ));
         }
         if trailing > 0 {
-            return Err(Error::invalid_document(format!(
-                "document has {trailing} non-whitespace byte(s) after the final %%EOF"
-            )));
+            return Err(Error::new(
+                ErrorKind::MalformedInput,
+                format!("document has {trailing} non-whitespace byte(s) after the final %%EOF"),
+            ));
         }
         Ok(())
     }

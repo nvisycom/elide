@@ -5,10 +5,10 @@ use std::collections::HashSet;
 use std::num::NonZeroUsize;
 
 use bytes::Bytes;
+use elide_core::{Error, ErrorKind, Result};
 use hipstr::HipStr;
 use lopdf::Document;
 
-use crate::error::{Error, Result};
 use crate::extract::{Block, Embedding, EmbeddingKind, Extraction, ImageId, Issue, IssueKind};
 
 /// An opened PDF document: parsed once, ready to [`extract`](Pdf::extract) its
@@ -43,9 +43,9 @@ impl Pdf {
     ///
     /// # Errors
     ///
-    /// - [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if the
+    /// - [`ErrorKind::ResourceLimit`](crate::ErrorKind::ResourceLimit) if the
     ///   input exceeds [`MAX_DOCUMENT_BYTES`](Pdf::MAX_DOCUMENT_BYTES);
-    /// - [`ErrorKind::InvalidDocument`](crate::ErrorKind::InvalidDocument) if the
+    /// - [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if the
     ///   bytes are not a readable PDF.
     pub fn open(document: &[u8]) -> Result<Self> {
         Self::open_with_limit(document, Self::DEFAULT_MAX_PAGE_BYTES)
@@ -55,20 +55,27 @@ impl Pdf {
     ///
     /// # Errors
     ///
-    /// - [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if the
+    /// - [`ErrorKind::ResourceLimit`](crate::ErrorKind::ResourceLimit) if the
     ///   input exceeds [`MAX_DOCUMENT_BYTES`](Pdf::MAX_DOCUMENT_BYTES);
-    /// - [`ErrorKind::InvalidDocument`](crate::ErrorKind::InvalidDocument) if the
+    /// - [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if the
     ///   bytes are not a readable PDF.
     pub fn open_with_limit(document: &[u8], max_page_bytes: NonZeroUsize) -> Result<Self> {
         if document.len() > Self::MAX_DOCUMENT_BYTES {
-            return Err(Error::limit_exceeded(format!(
-                "document is {} bytes, over the {}-byte limit",
-                document.len(),
-                Self::MAX_DOCUMENT_BYTES
-            )));
+            return Err(Error::new(
+                ErrorKind::ResourceLimit,
+                format!(
+                    "document is {} bytes, over the {}-byte limit",
+                    document.len(),
+                    Self::MAX_DOCUMENT_BYTES
+                ),
+            ));
         }
-        let doc = Document::load_mem(document)
-            .map_err(|e| Error::invalid_document(format!("not a readable PDF: {e}")))?;
+        let doc = Document::load_mem(document).map_err(|e| {
+            Error::new(
+                ErrorKind::MalformedInput,
+                format!("not a readable PDF: {e}"),
+            )
+        })?;
         Ok(Self {
             doc,
             max_page_bytes,

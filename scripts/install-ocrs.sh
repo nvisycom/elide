@@ -10,9 +10,9 @@
 # OcrsBackend::from_env() finds them. Pass a directory to override the default.
 #
 # Usage:
-#   ./scripts/install-ocr-models.sh                    # default dir
-#   ./scripts/install-ocr-models.sh /path/to/models    # custom dir
-#   ELIDE_OCR_MODELS_DIR=/path ./scripts/install-ocr-models.sh
+#   ./scripts/install-ocrs.sh                    # default dir
+#   ./scripts/install-ocrs.sh /path/to/models    # custom dir
+#   ELIDE_OCR_MODELS_DIR=/path ./scripts/install-ocrs.sh
 
 set -euo pipefail
 
@@ -27,8 +27,23 @@ DEST="${1:-${ELIDE_OCR_MODELS_DIR:-$DEFAULT_DIR}}"
 
 mkdir -p "$DEST"
 
+# Download a URL to a temporary file and move it into place only on success, so
+# a failed or partial download never leaves a stale, invalid model at the final
+# path (curl -fSL can fail after writing part of the response).
+download_model() {
+	url="$1"
+	dest="$2"
+	tmp="$(mktemp "${dest}.XXXXXX")"
+	if ! curl -fSL "$url" -o "$tmp"; then
+		rm -f "$tmp"
+		echo "failed to download $url" >&2
+		exit 1
+	fi
+	mv -f "$tmp" "$dest"
+}
+
 echo "Downloading ocrs models to $DEST"
-curl -fSL "$DETECTION_URL" -o "$DEST/text-detection.onnx"
-curl -fSL "$RECOGNITION_URL" -o "$DEST/text-recognition.onnx"
+download_model "$DETECTION_URL" "$DEST/text-detection.onnx"
+download_model "$RECOGNITION_URL" "$DEST/text-recognition.onnx"
 
 echo "Done. Set ELIDE_OCR_MODELS_DIR=$DEST to use these models."

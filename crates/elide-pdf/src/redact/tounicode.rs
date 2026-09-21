@@ -10,32 +10,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use elide_core::{Error, ErrorKind, Result};
 use lopdf::{Document, Object, ObjectId};
-
-use crate::error::{Error, Result};
-
-/// Map a page's font resource names to the object id of each font's `/ToUnicode`
-/// stream, for fonts that have one (both simple and Type0 fonts may).
-pub(super) fn page_font_cmaps(doc: &Document, page_id: ObjectId) -> BTreeMap<Vec<u8>, ObjectId> {
-    let mut out = BTreeMap::new();
-    let Ok(fonts) = doc.get_page_fonts(page_id) else {
-        return out;
-    };
-    for (name, font) in fonts {
-        if let Ok(to_unicode) = font.get(b"ToUnicode")
-            && let Ok(id) = to_unicode.as_reference()
-        {
-            out.insert(name, id);
-        }
-    }
-    out
-}
 
 /// Remove `deleted` codes from each named `/ToUnicode` CMap stream.
 ///
 /// # Errors
 ///
-/// [`ErrorKind::UnsafeRewrite`](crate::ErrorKind::UnsafeRewrite) if a deleted
+/// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a deleted
 /// code falls inside a multi-code `bfrange` (which cannot be scrubbed without
 /// re-deriving the range) or if a CMap stream cannot be read, so the redaction
 /// fails closed rather than leaving a recoverable code->Unicode entry.
@@ -61,7 +43,7 @@ pub(super) fn scrub(
         };
         let text = stream
             .decompressed_content()
-            .map_err(|e| Error::unsafe_rewrite(format!("read /ToUnicode CMap: {e}")))?;
+            .map_err(|e| Error::new(ErrorKind::Redaction, format!("read /ToUnicode CMap: {e}")))?;
         let edited = strip_codes(&text, codes)?;
 
         let Ok(Object::Stream(stream)) = doc.get_object_mut(cmap_id) else {
@@ -74,85 +56,212 @@ pub(super) fn scrub(
 
 /// Remove the `bfchar` entries whose source code is in `codes`, and fail closed
 /// if any code falls inside a multi-code `bfrange`.
+///
+/// CMap syntax is PostScript-like, not line-oriented: `beginbfchar`/`endbfchar`
+/// and several `<src> <dst>` pairs may share a line, so the stream is tokenized
+/// rather than split on newlines. Inside a `bfchar` section a pair whose source
+/// is a deleted code is dropped; every other token is re-emitted verbatim. A
+/// deleted code inside a genuine (multi-code) `bfrange` cannot be excised
+/// textually, so the whole rewrite fails closed rather than leaving the mapping.
 fn strip_codes(cmap: &[u8], codes: &BTreeSet<Vec<u8>>) -> Result<Vec<u8>> {
     let text = String::from_utf8_lossy(cmap);
+    let tokens = tokenize(&text);
     let mut out = String::with_capacity(text.len());
-    let mut in_bfchar = false;
-    let mut in_bfrange = false;
+    let mut i = 0;
 
-    for line in text.split_inclusive('\n') {
-        let trimmed = line.trim();
-        if trimmed.ends_with("beginbfchar") {
-            in_bfchar = true;
-            out.push_str(line);
-            continue;
-        }
-        if trimmed.ends_with("beginbfrange") {
-            in_bfrange = true;
-            out.push_str(line);
-            continue;
-        }
-        if trimmed == "endbfchar" {
-            in_bfchar = false;
-            out.push_str(line);
-            continue;
-        }
-        if trimmed == "endbfrange" {
-            in_bfrange = false;
-            out.push_str(line);
-            continue;
-        }
-
-        if in_bfchar {
-            // `<src> <dst>` — drop the line when `<src>` is a deleted code.
-            if let Some(src) = first_hex_code(trimmed)
-                && codes.contains(&src)
-            {
-                continue;
+    while i < tokens.len() {
+        let tok = &tokens[i];
+        match tok.word() {
+            "beginbfchar" => {
+                out.push_str(tok.text);
+                i += 1;
+                i = copy_bfchar_section(&tokens, i, codes, &mut out)?;
             }
-        } else if in_bfrange {
-            // `<lo> <hi> <dst>` — a deleted code inside a genuine range can't be
-            // excised textually; fail closed. A degenerate range (lo == hi) that
-            // equals a deleted code is safe to drop.
-            let hexes = hex_codes(trimmed);
-            if let (Some(lo), Some(hi)) = (hexes.first(), hexes.get(1)) {
-                let hit = codes.iter().any(|c| c >= lo && c <= hi);
-                if hit {
-                    if lo == hi && codes.contains(lo) {
-                        continue;
-                    }
-                    return Err(Error::unsafe_rewrite(
-                        "a deleted glyph's code falls inside a /ToUnicode bfrange; \
-                         the code->Unicode mapping cannot be scrubbed safely",
-                    ));
-                }
+            "beginbfrange" => {
+                out.push_str(tok.text);
+                i += 1;
+                i = copy_bfrange_section(&tokens, i, codes, &mut out)?;
+            }
+            _ => {
+                out.push_str(tok.text);
+                i += 1;
             }
         }
-        out.push_str(line);
     }
     Ok(out.into_bytes())
 }
 
-/// The first `<hex>` token on a line, as raw bytes (e.g. `<0041>` -> `[0x00,0x41]`).
-fn first_hex_code(line: &str) -> Option<Vec<u8>> {
-    hex_codes(line).into_iter().next()
+/// Copy a `bfchar` section, dropping any `<src> <dst>` pair whose source is a
+/// deleted code. Returns the index just past `endbfchar`.
+fn copy_bfchar_section(
+    tokens: &[Token<'_>],
+    mut i: usize,
+    codes: &BTreeSet<Vec<u8>>,
+    out: &mut String,
+) -> Result<usize> {
+    while i < tokens.len() && tokens[i].word() != "endbfchar" {
+        // A `bfchar` entry is `<src> <dst>`. Read the source hex; if the next
+        // token isn't a second hex the section is malformed, re-emit and move on.
+        let src = tokens[i].hex_bytes();
+        if let (Some(src), Some(dst)) = (src, tokens.get(i + 1))
+            && dst.hex_bytes().is_some()
+        {
+            if codes.contains(&src) {
+                // Drop both tokens of this pair.
+                i += 2;
+                continue;
+            }
+            out.push_str(tokens[i].text);
+            out.push_str(tokens[i + 1].text);
+            i += 2;
+            continue;
+        }
+        out.push_str(tokens[i].text);
+        i += 1;
+    }
+    if i < tokens.len() {
+        out.push_str(tokens[i].text); // endbfchar
+        i += 1;
+    }
+    Ok(i)
 }
 
-/// Every `<hex>` token on a line, each decoded to raw bytes.
-fn hex_codes(line: &str) -> Vec<Vec<u8>> {
-    let mut out = Vec::new();
-    let mut rest = line;
-    while let Some(open) = rest.find('<') {
-        let after = &rest[open + 1..];
-        let Some(close) = after.find('>') else {
-            break;
-        };
-        if let Some(bytes) = hex_to_bytes(&after[..close]) {
-            out.push(bytes);
+/// Copy a `bfrange` section verbatim, failing closed if a deleted code falls in
+/// a genuine range (a degenerate `lo == hi` range that is deleted is dropped).
+/// Returns the index just past `endbfrange`.
+fn copy_bfrange_section(
+    tokens: &[Token<'_>],
+    mut i: usize,
+    codes: &BTreeSet<Vec<u8>>,
+    out: &mut String,
+) -> Result<usize> {
+    while i < tokens.len() && tokens[i].word() != "endbfrange" {
+        // A `bfrange` entry is `<lo> <hi> <dst-or-array>`. Inspect lo/hi.
+        let lo = tokens[i].hex_bytes();
+        let hi = tokens.get(i + 1).and_then(Token::hex_bytes);
+        if let (Some(lo), Some(hi)) = (lo, hi) {
+            let hit = codes.iter().any(|c| *c >= lo && *c <= hi);
+            if hit {
+                if lo == hi && codes.contains(&lo) {
+                    // Degenerate single-code range: drop lo, hi, and the target
+                    // token that follows.
+                    i += if tokens.get(i + 2).is_some() { 3 } else { 2 };
+                    continue;
+                }
+                return Err(Error::new(
+                    ErrorKind::Redaction,
+                    "a deleted glyph's code falls inside a /ToUnicode bfrange; \
+                     the code->Unicode mapping cannot be scrubbed safely",
+                ));
+            }
         }
-        rest = &after[close + 1..];
+        out.push_str(tokens[i].text);
+        i += 1;
     }
-    out
+    if i < tokens.len() {
+        out.push_str(tokens[i].text); // endbfrange
+        i += 1;
+    }
+    Ok(i)
+}
+
+/// One lexical token of a CMap stream, carrying its exact source slice (so
+/// re-emitting a token preserves the original bytes and whitespace).
+struct Token<'a> {
+    /// The token's source text, including any leading whitespace, so the tokens
+    /// concatenated reproduce the input minus the dropped ones.
+    text: &'a str,
+    /// The token kind, so consumers can recognize hex strings.
+    kind: TokenKind,
+}
+
+/// The kinds of CMap token this scrubber distinguishes.
+enum TokenKind {
+    /// A `<hex>` string.
+    Hex,
+    /// Anything else (keyword, name, integer, array, delimiter, whitespace run).
+    Other,
+}
+
+impl Token<'_> {
+    /// The token's text with its leading whitespace trimmed, for matching
+    /// keywords (`beginbfchar`, `endbfchar`, ...).
+    fn word(&self) -> &str {
+        self.text.trim()
+    }
+
+    /// The decoded bytes of a `<hex>` token, or `None` for any other kind.
+    fn hex_bytes(&self) -> Option<Vec<u8>> {
+        if !matches!(self.kind, TokenKind::Hex) {
+            return None;
+        }
+        let inner = self.text.trim().strip_prefix('<')?.strip_suffix('>')?;
+        hex_to_bytes(inner)
+    }
+}
+
+/// Tokenize a CMap stream into tokens whose concatenated `text` reproduces the
+/// input exactly. Leading whitespace is attached to the token that follows it,
+/// so re-emitting the kept tokens preserves layout. A `<hex>` string is one
+/// token; an array `[...]` is kept whole; everything else is a whitespace-
+/// delimited word.
+fn tokenize(text: &str) -> Vec<Token<'_>> {
+    let bytes = text.as_bytes();
+    let mut tokens = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        let start = i;
+        // Attach the leading whitespace run to the next token.
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= bytes.len() {
+            // Trailing whitespace: emit it as an `Other` token so it survives.
+            tokens.push(Token {
+                text: &text[start..i],
+                kind: TokenKind::Other,
+            });
+            break;
+        }
+        let kind = match bytes[i] {
+            b'<' => {
+                // A hex string runs to the closing `>`.
+                while i < bytes.len() && bytes[i] != b'>' {
+                    i += 1;
+                }
+                if i < bytes.len() {
+                    i += 1; // include `>`
+                }
+                TokenKind::Hex
+            }
+            b'[' => {
+                // An array runs to the closing `]`.
+                while i < bytes.len() && bytes[i] != b']' {
+                    i += 1;
+                }
+                if i < bytes.len() {
+                    i += 1; // include `]`
+                }
+                TokenKind::Other
+            }
+            _ => {
+                // A word runs to the next whitespace or delimiter.
+                while i < bytes.len()
+                    && !bytes[i].is_ascii_whitespace()
+                    && bytes[i] != b'<'
+                    && bytes[i] != b'['
+                {
+                    i += 1;
+                }
+                TokenKind::Other
+            }
+        };
+        tokens.push(Token {
+            text: &text[start..i],
+            kind,
+        });
+    }
+    tokens
 }
 
 /// Decode an even-length hex string to bytes; `None` if malformed.
@@ -207,7 +316,39 @@ mod tests {
     fn fails_closed_on_a_code_inside_a_real_bfrange() {
         let cmap = b"1 beginbfrange\n<0041> <005A> <0041>\nendbfrange\n";
         let err = strip_codes(cmap, &codes(&[&[0x00, 0x42]])).unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::UnsafeRewrite);
+        assert_eq!(err.kind(), crate::ErrorKind::Redaction);
+    }
+
+    #[test]
+    fn drops_the_right_pair_when_several_share_a_line() {
+        // Three pairs on ONE line; the deleted code is the middle one. A
+        // line-oriented scrubber would keep the whole line (leak); the token
+        // scrubber drops only the middle pair.
+        let cmap = b"beginbfchar <0041> <0041> <0042> <0042> <0043> <0043> endbfchar\n";
+        let out = strip_codes(cmap, &codes(&[&[0x00, 0x42]])).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(!s.contains("<0042> <0042>"), "deleted middle pair leaked");
+        assert!(s.contains("<0041> <0041>"), "first pair lost");
+        assert!(s.contains("<0043> <0043>"), "last pair lost");
+    }
+
+    #[test]
+    fn drops_a_pair_from_a_fully_inline_section() {
+        // `beginbfchar`, the pair, and `endbfchar` all on one line.
+        let cmap = b"begincmap beginbfchar <0041> <0041> endbfchar endcmap\n";
+        let out = strip_codes(cmap, &codes(&[&[0x00, 0x41]])).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(!s.contains("<0041>"), "inline deleted pair leaked");
+        assert!(s.contains("endcmap"), "surrounding structure lost");
+    }
+
+    #[test]
+    fn tokenize_round_trips_the_input() {
+        // Concatenating every token reproduces the input exactly (so kept
+        // tokens preserve the original layout).
+        let cmap = "begincmap\n2 beginbfchar\n<0041> <0041>\nendbfchar\nendcmap\n";
+        let joined: String = tokenize(cmap).iter().map(|t| t.text).collect();
+        assert_eq!(joined, cmap);
     }
 
     #[test]

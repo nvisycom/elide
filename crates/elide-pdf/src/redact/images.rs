@@ -13,10 +13,10 @@
 
 use std::collections::BTreeSet;
 
+use elide_core::{Error, ErrorKind, Result};
 use lopdf::{Object, ObjectId};
 
 use super::sanitize::referenced_from_survivors;
-use crate::error::{Error, Result};
 use crate::extract::ImageId;
 
 /// One image replacement: overwrite the image XObject [`id`](ImageReplacement::id)
@@ -47,7 +47,7 @@ impl crate::Pdf {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::UnsafeRewrite`](crate::ErrorKind::UnsafeRewrite) if a
+    /// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a
     /// replacement could not be applied.
     #[cfg_attr(docsrs, doc(cfg(feature = "image")))]
     pub fn redact_images(&self, replacements: &[ImageReplacement]) -> Result<Vec<u8>> {
@@ -72,10 +72,13 @@ impl crate::Pdf {
             let is_image = old.and_then(|s| s.dict.get(b"Subtype").and_then(Object::as_name).ok())
                 == Some(b"Image".as_slice());
             if !is_image {
-                return Err(Error::unsafe_rewrite(format!(
-                    "object ({}, {}) is not an image XObject",
-                    replacement.id.number, replacement.id.generation
-                )));
+                return Err(Error::new(
+                    ErrorKind::Redaction,
+                    format!(
+                        "object ({}, {}) is not an image XObject",
+                        replacement.id.number, replacement.id.generation
+                    ),
+                ));
             }
 
             if let Some(stream) = old {
@@ -89,10 +92,13 @@ impl crate::Pdf {
             // Rebuild a valid image XObject from the encoded bytes (lopdf sets
             // the dictionary, dimensions, colour space, filter, to match).
             let stream = lopdf::xobject::image_from(replacement.image.clone()).map_err(|e| {
-                Error::unsafe_rewrite(format!(
-                    "could not build image ({}, {}): {e}",
-                    replacement.id.number, replacement.id.generation
-                ))
+                Error::new(
+                    ErrorKind::Redaction,
+                    format!(
+                        "could not build image ({}, {}): {e}",
+                        replacement.id.number, replacement.id.generation
+                    ),
+                )
             })?;
             doc.objects.insert(id, Object::Stream(stream));
         }
@@ -107,8 +113,12 @@ impl crate::Pdf {
         }
 
         let mut out = Vec::new();
-        doc.save_to(&mut out)
-            .map_err(|e| Error::invalid_document(format!("could not save PDF: {e}")))?;
+        doc.save_to(&mut out).map_err(|e| {
+            Error::new(
+                ErrorKind::MalformedInput,
+                format!("could not save PDF: {e}"),
+            )
+        })?;
         Ok(out)
     }
 }

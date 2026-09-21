@@ -22,6 +22,7 @@ mod tounicode;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use elide_core::{Error, ErrorKind, Result};
 use lopdf::content::Content;
 use lopdf::{Encoding, Object, ObjectId};
 
@@ -31,7 +32,6 @@ pub use self::images::ImageReplacement;
 #[cfg(feature = "image")]
 pub use self::pages::PageReplacement;
 use crate::Pdf;
-use crate::error::{Error, Result};
 
 /// A detected span to redact: a character range into a page's text, as produced
 /// by [`page_texts`](Pdf::page_texts).
@@ -65,16 +65,40 @@ struct PageText {
     /// One entry per character of `text`, naming the glyph that produced it.
     /// Characters with no glyph (synthetic spaces between text runs) are `None`.
     per_char: Vec<Option<GlyphRef>>,
-    /// The resource names of the fonts referenced by `per_char`, indexed by
-    /// [`GlyphRef::font`]. Used to reach a font's `/ToUnicode` CMap.
-    fonts: Vec<Vec<u8>>,
+    /// The fonts referenced by `per_char`, indexed by [`GlyphRef::font`]. Each
+    /// entry carries the resolved `/ToUnicode` CMap object id (if the font has
+    /// one), so a deleted glyph's raw code can be scrubbed from the right CMap
+    /// even when the same font name recurs in a different resource scope (a Form
+    /// XObject) with a different CMap.
+    fonts: Vec<FontEntry>,
 }
 
-/// Address of the string that draws text: which content operation, which
-/// operand, and which string *within* that operand (for a `TJ` array, or `None`
-/// for a plain `Tj` string).
+/// A font referenced while walking content, resolved to its `/ToUnicode` CMap.
+#[derive(Debug, Clone, Copy)]
+struct FontEntry {
+    /// The font's `/ToUnicode` stream object id, or `None` when the font has no
+    /// CMap (nothing to scrub).
+    to_unicode: Option<ObjectId>,
+}
+
+/// Which content stream a glyph lives in: the page's own content, or the content
+/// of a Form XObject the page (or another XObject) draws with `Do`. A glyph's
+/// byte offsets are relative to the operand string within *this* stream, and a
+/// deletion edits *this* stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum StreamTarget {
+    /// The page's concatenated content stream.
+    PageContent,
+    /// A Form XObject's content stream, addressed by its object id.
+    XObject(ObjectId),
+}
+
+/// Address of the string that draws text: which content stream, which operation,
+/// which operand, and which string *within* that operand (for a `TJ` array, or
+/// `None` for a plain `Tj` string).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct GlyphSite {
+    stream: StreamTarget,
     op: usize,
     operand: usize,
     /// Index of the string within a `TJ` array operand, or `None` for a plain
@@ -92,19 +116,24 @@ struct GlyphRef {
     site: GlyphSite,
     byte_start: usize,
     byte_end: usize,
-    /// Index into the page's font-name table ([`PageText::fonts`]) naming the
-    /// font that drew the glyph, so a deleted glyph's raw code can be scrubbed
-    /// from that font's `/ToUnicode` CMap.
+    /// Index into the page's font table ([`PageText::fonts`]) naming the font
+    /// that drew the glyph, so a deleted glyph's raw code can be scrubbed from
+    /// that font's `/ToUnicode` CMap.
     font: u16,
 }
 
 /// A page's text under construction, char for char aligned with the per-char
 /// glyph map: [`push_char`](TextRun::push_char) appends a decoded character with
 /// its originating glyph, [`push_gap`](TextRun::push_gap) a synthetic space with
-/// no glyph.
+/// no glyph. The same run accumulates text across the page's own content and the
+/// Form XObjects it draws, so a detected span can straddle neither, each glyph
+/// records which stream it lives in.
 struct TextRun<'a> {
     text: &'a mut String,
     per_char: &'a mut Vec<Option<GlyphRef>>,
+    /// The content stream currently being walked, stamped onto every glyph so a
+    /// deletion edits the right stream.
+    stream: StreamTarget,
     /// The font-table index of the currently selected font, stamped onto every
     /// glyph pushed so a deletion can later reach that font's `/ToUnicode`.
     font: u16,
@@ -145,6 +174,7 @@ impl TextRun<'_> {
             match value {
                 Object::String(bytes, _) => {
                     let site = GlyphSite {
+                        stream: self.stream,
                         op,
                         operand,
                         item: None,
@@ -167,6 +197,7 @@ impl TextRun<'_> {
                         match item {
                             Object::String(bytes, _) => {
                                 let site = GlyphSite {
+                                    stream: self.stream,
                                     op,
                                     operand,
                                     item: Some(item_idx),
@@ -213,9 +244,9 @@ impl Pdf {
     ///
     /// # Errors
     ///
-    /// - [`ErrorKind::InvalidDocument`](crate::ErrorKind::InvalidDocument) if a
+    /// - [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if a
     ///   page's content or fonts cannot be read;
-    /// - [`ErrorKind::UnsafeRewrite`](crate::ErrorKind::UnsafeRewrite) if a page
+    /// - [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a page
     ///   draws text with a font whose encoding cannot be decoded, that text
     ///   cannot be mapped to glyphs for redaction, so it is surfaced as an error
     ///   rather than silently omitted.
@@ -238,9 +269,9 @@ impl Pdf {
     ///
     /// # Errors
     ///
-    /// - [`ErrorKind::InvalidDocument`](crate::ErrorKind::InvalidDocument) if the
+    /// - [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if the
     ///   document cannot be read or re-saved;
-    /// - [`ErrorKind::UnsafeRewrite`](crate::ErrorKind::UnsafeRewrite) if a page
+    /// - [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a page
     ///   draws text with an undecodable font (see [`page_texts`](Pdf::page_texts)),
     ///   redaction is refused rather than silently leaving that text in place.
     pub fn redact_text(&self, detections: &[Detection]) -> Result<Vec<u8>> {
@@ -256,7 +287,8 @@ impl Pdf {
         // from a `/ToUnicode` if no surviving glyph anywhere uses it: fonts and
         // their CMaps are routinely shared, and the same code (e.g. the letter
         // `a`) recurs in text that stays, so scrubbing a still-used code would
-        // corrupt the surviving text's extraction.
+        // corrupt the surviving text's extraction. Surviving text includes text
+        // drawn through Form XObjects, which the walk records too.
         let mut surviving_codes: BTreeMap<ObjectId, BTreeSet<Vec<u8>>> = BTreeMap::new();
 
         // First pass over every page: record the codes of glyphs that will
@@ -267,12 +299,6 @@ impl Pdf {
                 .filter(|d| d.page == page.page)
                 .flat_map(|d| d.start..d.end)
                 .collect();
-            let font_tounicode = tounicode::page_font_cmaps(&doc, page.page_id);
-            if font_tounicode.is_empty() {
-                continue;
-            }
-            let content = Content::decode(&doc.get_page_content(page.page_id))
-                .map_err(|e| Error::invalid_document(format!("decode page content: {e}")))?;
             let survivors: Vec<GlyphRef> = page
                 .per_char
                 .iter()
@@ -280,13 +306,8 @@ impl Pdf {
                 .filter(|(i, _)| !deleted_here.contains(i))
                 .filter_map(|(_, g)| *g)
                 .collect();
-            collect_deleted_codes(
-                &content,
-                page,
-                &survivors,
-                &font_tounicode,
-                &mut surviving_codes,
-            );
+            let streams = self.decode_glyph_streams(&survivors, page.page_id)?;
+            collect_deleted_codes(&streams, page, &survivors, &mut surviving_codes);
         }
 
         for page in &pages {
@@ -296,8 +317,8 @@ impl Pdf {
             }
 
             // Collect glyph byte ranges to delete, grouped by the exact string
-            // they live in: (op, operand, item-within-TJ-array). Remember each
-            // deleted glyph's font too, so its raw code can be scrubbed from the
+            // they live in: (stream, op, operand, item-within-TJ-array). Remember
+            // each deleted glyph too, so its raw code can be scrubbed from the
             // font's `/ToUnicode`.
             let mut to_delete: Deletions = BTreeMap::new();
             let mut deleted_glyphs: Vec<GlyphRef> = Vec::new();
@@ -316,29 +337,32 @@ impl Pdf {
                 continue;
             }
 
-            // Map this page's font names to their `/ToUnicode` stream ids (only
-            // fonts that have one), so a deleted glyph's code is filed under the
-            // exact CMap object to scrub.
-            let font_tounicode = tounicode::page_font_cmaps(&doc, page.page_id);
+            // Decode every stream a deleted glyph lives in (page content and any
+            // Form XObjects it draws), record the deleted codes for the CMap
+            // scrub, then apply the deletions and write each stream back.
+            let mut streams = self.decode_glyph_streams(&deleted_glyphs, page.page_id)?;
+            collect_deleted_codes(&streams, page, &deleted_glyphs, &mut deleted_codes);
 
-            let content_data = doc.get_page_content(page.page_id);
-            let mut content = Content::decode(&content_data)
-                .map_err(|e| Error::invalid_document(format!("decode page content: {e}")))?;
-            // Before mutating, record each deleted glyph's raw code bytes against
-            // its font's CMap, read straight from the string operand it lives in.
-            collect_deleted_codes(
-                &content,
-                page,
-                &deleted_glyphs,
-                &font_tounicode,
-                &mut deleted_codes,
-            );
-            apply_deletions(&mut content, &to_delete);
-            let new_content = content
-                .encode()
-                .map_err(|e| Error::invalid_document(format!("encode page content: {e}")))?;
-            doc.change_page_content(page.page_id, new_content)
-                .map_err(|e| Error::invalid_document(format!("write page content: {e}")))?;
+            for (target, content) in &mut streams {
+                apply_deletions(content, &to_delete, *target);
+                let new_content = content.encode().map_err(|e| {
+                    Error::new(ErrorKind::MalformedInput, format!("encode content: {e}"))
+                })?;
+                match target {
+                    StreamTarget::PageContent => {
+                        doc.change_page_content(page.page_id, new_content)
+                            .map_err(|e| {
+                                Error::new(
+                                    ErrorKind::MalformedInput,
+                                    format!("write page content: {e}"),
+                                )
+                            })?;
+                    }
+                    StreamTarget::XObject(id) => {
+                        write_xobject_content(&mut doc, *id, new_content)?;
+                    }
+                }
+            }
         }
 
         // Scrub the deleted codes from each affected font's `/ToUnicode` CMap
@@ -349,140 +373,396 @@ impl Pdf {
         sanitize::sanitize(&mut doc);
 
         let mut out = Vec::new();
-        doc.save_to(&mut out)
-            .map_err(|e| Error::invalid_document(format!("save redacted PDF: {e}")))?;
+        doc.save_to(&mut out).map_err(|e| {
+            Error::new(ErrorKind::MalformedInput, format!("save redacted PDF: {e}"))
+        })?;
+        Ok(out)
+    }
+
+    /// Decode each distinct content stream the given glyphs live in (the page's
+    /// own content, plus each Form XObject any glyph came from), keyed by target.
+    fn decode_glyph_streams(
+        &self,
+        glyphs: &[GlyphRef],
+        page_id: ObjectId,
+    ) -> Result<BTreeMap<StreamTarget, Content>> {
+        let mut out: BTreeMap<StreamTarget, Content> = BTreeMap::new();
+        for g in glyphs {
+            if out.contains_key(&g.site.stream) {
+                continue;
+            }
+            let bytes = match g.site.stream {
+                StreamTarget::PageContent => self.doc.get_page_content(page_id),
+                StreamTarget::XObject(id) => match self.doc.get_object(id) {
+                    Ok(Object::Stream(s)) => s.decompressed_content().map_err(|e| {
+                        Error::new(ErrorKind::MalformedInput, format!("XObject content: {e}"))
+                    })?,
+                    _ => continue,
+                },
+            };
+            let content = Content::decode(&bytes).map_err(|e| {
+                Error::new(ErrorKind::MalformedInput, format!("decode content: {e}"))
+            })?;
+            out.insert(g.site.stream, content);
+        }
         Ok(out)
     }
 
     /// Build the per-page text and per-character glyph map by walking each
     /// page's content in operator order, the same order lopdf's text
     /// extraction uses, so a character offset maps to the glyph that drew it.
+    /// Text drawn through a `Do`-invoked Form XObject is walked in place, so it
+    /// is located and redactable like page-level text.
     fn page_texts_inner(&self) -> Result<Vec<PageText>> {
         let pages = self.doc.get_pages();
         let mut out = Vec::with_capacity(pages.len());
 
         for (&page, &page_id) in &pages {
-            let fonts = self
-                .doc
-                .get_page_fonts(page_id)
-                .map_err(|e| Error::invalid_document(format!("page {page} fonts: {e}")))?;
-            // Resolve every font's encoding. A font whose encoding cannot be
-            // resolved maps to `None` (not omitted): if text is later drawn with
-            // it, that text is undecodable and redaction must fail closed rather
-            // than silently leave it in the output.
-            let encodings: BTreeMap<Vec<u8>, Option<Encoding>> = fonts
-                .into_iter()
-                .map(|(name, font)| (name, font.get_font_encoding(&self.doc).ok()))
-                .collect();
-            // A stable index per font name (the `GlyphRef::font` table), so a
-            // deleted glyph can later be traced to the font that drew it.
-            let font_names: Vec<Vec<u8>> = encodings.keys().cloned().collect();
-            let font_index: BTreeMap<&[u8], u16> = font_names
-                .iter()
-                .enumerate()
-                .map(|(i, name)| (name.as_slice(), i as u16))
-                .collect();
-
             let content_data = self.doc.get_page_content(page_id);
-            let content = Content::decode(&content_data)
-                .map_err(|e| Error::invalid_document(format!("page {page} content: {e}")))?;
+            let content = Content::decode(&content_data).map_err(|e| {
+                Error::new(
+                    ErrorKind::MalformedInput,
+                    format!("page {page} content: {e}"),
+                )
+            })?;
+
+            // The page's own resources, the scope its `Tf`/`Do` names resolve in.
+            let (resources, resource_ids) = self.doc.get_page_resources(page_id).map_err(|e| {
+                Error::new(
+                    ErrorKind::MalformedInput,
+                    format!("page {page} resources: {e}"),
+                )
+            })?;
 
             let mut text = String::new();
             let mut per_char: Vec<Option<GlyphRef>> = Vec::new();
-            let mut run = TextRun {
-                text: &mut text,
-                per_char: &mut per_char,
-                font: 0,
+            let mut fonts: Vec<FontEntry> = Vec::new();
+            let mut ctx = Walk {
+                accum: TextAccum {
+                    text: &mut text,
+                    per_char: &mut per_char,
+                    fonts: &mut fonts,
+                },
+                active: BTreeSet::new(),
+                page,
             };
-            // The current font's resolved encoding: `None` before any `Tf`, or
-            // `Some(None)` when the selected font could not be decoded or names
-            // a font absent from the page's resources.
-            const UNRESOLVED: &Option<Encoding> = &None;
-            let mut current: Option<&Option<Encoding>> = None;
 
-            for (op_idx, op) in content.operations.iter().enumerate() {
-                match op.operator.as_str() {
-                    "Tf" => {
-                        if let Some(Object::Name(name)) = op.operands.first() {
-                            // A `Tf` naming a font not in the resources is an
-                            // unresolved selection, held as `Some(None)` so the
-                            // next text op fails closed rather than reading as
-                            // "no font selected".
-                            current = Some(encodings.get(name).unwrap_or(UNRESOLVED));
-                            // Point the run at this font's table slot (an unknown
-                            // name keeps the previous slot; such text fails closed
-                            // at the show operator anyway).
-                            if let Some(&idx) = font_index.get(name.as_slice()) {
-                                run.font = idx;
-                            }
-                        }
-                    }
-                    // The four text-showing operators (PDF 32000-1 §9.4.3). All
-                    // draw glyphs and so must be decoded for redaction; they
-                    // differ only in which operands carry the string(s):
-                    // - `Tj`/`TJ`/`'` show from their whole operand list;
-                    // - `"` (`aw ac string`) shows only its third operand, the
-                    //   first two set spacing and draw nothing.
-                    "Tj" | "TJ" | "'" | "\"" => match current {
-                        Some(Some(enc)) => {
-                            // `"` shows only its third operand; the recorded site
-                            // must still address it as operand 2.
-                            let (operands, base): (&[Object], usize) = if op.operator == "\"" {
-                                match op.operands.get(2) {
-                                    Some(s) => (std::slice::from_ref(s), 2),
-                                    None => (&[], 0),
-                                }
-                            } else {
-                                (&op.operands, 0)
-                            };
-                            run.show_text(enc, operands, op_idx, base)?;
-                        }
-                        // Text drawn under a font we could not decode or resolve:
-                        // fail closed, its glyphs cannot be located for
-                        // deletion, so redacting this document would silently
-                        // leave them in.
-                        Some(None) => {
-                            return Err(Error::unsafe_rewrite(format!(
-                                "page {page} draws text with a font whose encoding \
-                                 could not be decoded or was not found in the page \
-                                 resources; its text cannot be redacted"
-                            )));
-                        }
-                        // No font selected yet (malformed stream): skip.
-                        None => {}
-                    },
-                    _ => {}
-                }
-            }
+            self.walk_stream(
+                &content,
+                StreamTarget::PageContent,
+                &Scope {
+                    inline: resources,
+                    referenced: &resource_ids,
+                },
+                MAX_XOBJECT_DEPTH,
+                &mut ctx,
+            )?;
 
             out.push(PageText {
                 page,
                 page_id,
                 text,
                 per_char,
-                fonts: font_names,
+                fonts,
             });
         }
         Ok(out)
     }
+
+    /// Walk one content stream in operator order, appending its text and glyph
+    /// map to `accum`, and recursing into each Form XObject drawn with `Do`.
+    ///
+    /// `scope` is the resource dictionary a `Tf`/`Do` resolves names in. `stream`
+    /// is stamped onto every glyph so a deletion edits the correct stream.
+    /// `active` holds the XObjects currently on the recursion stack (cycle
+    /// guard); `depth` bounds nesting. Text under an undecodable font fails
+    /// closed, as at page level.
+    fn walk_stream(
+        &self,
+        content: &Content,
+        stream: StreamTarget,
+        scope: &Scope<'_>,
+        depth: u8,
+        ctx: &mut Walk<'_>,
+    ) -> Result<()> {
+        // Resolve this scope's fonts to encodings, and append a `FontEntry` per
+        // font to the shared table. A local name->table-index map points the run
+        // at the right entry on each `Tf`.
+        let font_dicts = self.scope_fonts(scope);
+        let mut font_slot: BTreeMap<Vec<u8>, u16> = BTreeMap::new();
+        let mut encodings: BTreeMap<Vec<u8>, Option<Encoding>> = BTreeMap::new();
+        for (name, font) in &font_dicts {
+            let to_unicode = font
+                .get(b"ToUnicode")
+                .ok()
+                .and_then(|o| o.as_reference().ok());
+            let slot = ctx.accum.fonts.len() as u16;
+            ctx.accum.fonts.push(FontEntry { to_unicode });
+            font_slot.insert(name.clone(), slot);
+            encodings.insert(name.clone(), font.get_font_encoding(&self.doc).ok());
+        }
+
+        // The current font's resolved encoding: `None` before any `Tf`, or
+        // `Some(None)` when the selected font could not be decoded or names a
+        // font absent from this scope's resources.
+        const UNRESOLVED: &Option<Encoding> = &None;
+        let mut current: Option<&Option<Encoding>> = None;
+        // The font-table slot of the selected font, stamped onto its glyphs. A
+        // plain local (not held on a borrow of `accum`), so the `Do` arm can
+        // re-borrow `accum` to recurse.
+        let mut font_slot_current: u16 = 0;
+
+        for (op_idx, op) in content.operations.iter().enumerate() {
+            match op.operator.as_str() {
+                "Tf" => {
+                    if let Some(Object::Name(name)) = op.operands.first() {
+                        current = Some(encodings.get(name).unwrap_or(UNRESOLVED));
+                        if let Some(&slot) = font_slot.get(name.as_slice()) {
+                            font_slot_current = slot;
+                        }
+                    }
+                }
+                "Tj" | "TJ" | "'" | "\"" => match current {
+                    Some(Some(enc)) => {
+                        let (operands, base): (&[Object], usize) = if op.operator == "\"" {
+                            match op.operands.get(2) {
+                                Some(s) => (std::slice::from_ref(s), 2),
+                                None => (&[], 0),
+                            }
+                        } else {
+                            (&op.operands, 0)
+                        };
+                        // A short-lived run so its borrow of `accum` ends before
+                        // the `Do` arm needs `accum` again.
+                        let mut run = ctx.accum.run(stream);
+                        run.font = font_slot_current;
+                        run.show_text(enc, operands, op_idx, base)?;
+                    }
+                    Some(None) => {
+                        return Err(Error::new(
+                            ErrorKind::Redaction,
+                            format!(
+                                "page {} draws text with a font whose encoding \
+                             could not be decoded or was not found in the page \
+                             resources; its text cannot be redacted",
+                                ctx.page
+                            ),
+                        ));
+                    }
+                    None => {}
+                },
+                // A `Do` may draw a Form XObject, whose content draws text in its
+                // own stream and resources. Recurse so that text is located and
+                // redactable too.
+                "Do" => {
+                    if let Some(Object::Name(name)) = op.operands.first() {
+                        self.walk_xobject(name, scope, depth, ctx)?;
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Resolve and recurse into the Form XObject named `name` in `scope`.
+    ///
+    /// Skips a non-form (e.g. image) XObject, a name absent from the scope, and a
+    /// re-entrant or too-deep reference (cycle/limit guard). A form's own
+    /// `/Resources` become the scope for its content; when it has none the
+    /// parent scope stands in, as the spec allows.
+    fn walk_xobject(
+        &self,
+        name: &[u8],
+        scope: &Scope<'_>,
+        depth: u8,
+        ctx: &mut Walk<'_>,
+    ) -> Result<()> {
+        if depth == 0 {
+            return Ok(());
+        }
+        let Some(xobject_id) = self.scope_xobject_id(scope, name) else {
+            return Ok(());
+        };
+        // Cycle guard: an XObject already on the stack (or that we cannot read as
+        // a stream) is skipped.
+        if ctx.active.contains(&xobject_id) {
+            return Ok(());
+        }
+        let Ok(Object::Stream(stream_obj)) = self.doc.get_object(xobject_id) else {
+            return Ok(());
+        };
+        // Only Form XObjects carry content to walk; images are not text.
+        if stream_obj
+            .dict
+            .get(b"Subtype")
+            .and_then(Object::as_name)
+            .ok()
+            != Some(b"Form")
+        {
+            return Ok(());
+        }
+        let bytes = stream_obj
+            .decompressed_content()
+            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("XObject content: {e}")))?;
+        let content = Content::decode(&bytes).map_err(|e| {
+            Error::new(
+                ErrorKind::MalformedInput,
+                format!("decode XObject content: {e}"),
+            )
+        })?;
+
+        // The form's own resources, or the parent scope when it declares none.
+        let inner_resources = stream_obj
+            .dict
+            .get(b"Resources")
+            .ok()
+            .and_then(|r| self.dict_or_ref(r));
+        let inner_scope = match inner_resources {
+            Some(res) => Scope {
+                inline: Some(res),
+                referenced: &[],
+            },
+            None => *scope,
+        };
+
+        ctx.active.insert(xobject_id);
+        let result = self.walk_stream(
+            &content,
+            StreamTarget::XObject(xobject_id),
+            &inner_scope,
+            depth - 1,
+            ctx,
+        );
+        ctx.active.remove(&xobject_id);
+        result
+    }
+
+    /// Collect the `/Font` entries of a resource scope (inline plus any
+    /// referenced resource dictionaries), name -> font dictionary.
+    fn scope_fonts<'a>(&'a self, scope: &Scope<'a>) -> BTreeMap<Vec<u8>, &'a lopdf::Dictionary> {
+        let mut out = BTreeMap::new();
+        let mut add = |resources: &'a lopdf::Dictionary| {
+            if let Ok(font) = resources.get(b"Font")
+                && let Some(font_dict) = self.dict_or_ref(font)
+            {
+                for (name, value) in font_dict.iter() {
+                    let font = match value {
+                        Object::Reference(id) => self.doc.get_dictionary(*id).ok(),
+                        Object::Dictionary(dict) => Some(dict),
+                        _ => None,
+                    };
+                    if let Some(font) = font {
+                        out.entry(name.clone()).or_insert(font);
+                    }
+                }
+            }
+        };
+        if let Some(inline) = scope.inline {
+            add(inline);
+        }
+        for &id in scope.referenced {
+            if let Ok(resources) = self.doc.get_dictionary(id) {
+                add(resources);
+            }
+        }
+        out
+    }
+
+    /// Resolve the object id of the XObject named `name` in `scope`'s
+    /// `/XObject` dictionary, if it is an indirect reference.
+    fn scope_xobject_id(&self, scope: &Scope<'_>, name: &[u8]) -> Option<ObjectId> {
+        let resource_dicts = scope.inline.into_iter().chain(
+            scope
+                .referenced
+                .iter()
+                .filter_map(|&id| self.doc.get_dictionary(id).ok()),
+        );
+        for resources in resource_dicts {
+            if let Ok(xobjects) = resources.get(b"XObject")
+                && let Some(xobjects) = self.dict_or_ref(xobjects)
+                && let Ok(entry) = xobjects.get(name)
+                && let Ok(id) = entry.as_reference()
+            {
+                return Some(id);
+            }
+        }
+        None
+    }
+
+    /// Resolve an object that is a dictionary, inline or by reference.
+    fn dict_or_ref<'a>(&'a self, object: &'a Object) -> Option<&'a lopdf::Dictionary> {
+        match object {
+            Object::Dictionary(dict) => Some(dict),
+            Object::Reference(id) => self.doc.get_dictionary(*id).ok(),
+            _ => None,
+        }
+    }
 }
 
-/// Read the raw glyph-code bytes of each deleted glyph out of the (still
-/// unmutated) decoded content, and record them against the object id of the
-/// glyph's font `/ToUnicode` CMap in `out`. Glyphs whose font has no CMap are
-/// skipped. These codes drive the `/ToUnicode` scrub.
+/// A resource dictionary scope a stream's `Tf`/`Do` names resolve in: an inline
+/// dictionary and any referenced resource dictionaries (a page can inherit
+/// several through its tree).
+#[derive(Clone, Copy)]
+struct Scope<'a> {
+    inline: Option<&'a lopdf::Dictionary>,
+    referenced: &'a [ObjectId],
+}
+
+/// The growing text, glyph map, and font table a walk appends to. Borrowed so a
+/// single accumulation spans the page content and every Form XObject it draws.
+struct TextAccum<'a> {
+    text: &'a mut String,
+    per_char: &'a mut Vec<Option<GlyphRef>>,
+    fonts: &'a mut Vec<FontEntry>,
+}
+
+impl<'a> TextAccum<'a> {
+    /// Borrow the accumulator as a [`TextRun`] stamping glyphs into `stream`,
+    /// starting on font slot 0.
+    fn run<'b>(&'b mut self, stream: StreamTarget) -> TextRun<'b> {
+        TextRun {
+            text: self.text,
+            per_char: self.per_char,
+            stream,
+            font: 0,
+        }
+    }
+}
+
+/// The mutable state threaded through a page's content walk, unchanged as it
+/// recurses into Form XObjects: the accumulating text/glyph/font output, the
+/// XObjects currently on the recursion stack (cycle guard), and the 1-based page
+/// number for diagnostics.
+struct Walk<'a> {
+    accum: TextAccum<'a>,
+    active: BTreeSet<ObjectId>,
+    page: u32,
+}
+
+/// Deepest Form-XObject nesting the walker follows, a guard against pathological
+/// or cyclic documents (the cycle guard already stops re-entry; this bounds
+/// legitimately deep nesting).
+const MAX_XOBJECT_DEPTH: u8 = 12;
+
+/// Read the raw glyph-code bytes of each glyph out of its (still unmutated)
+/// decoded stream, and record them against the object id of the glyph's font
+/// `/ToUnicode` CMap in `out`. Glyphs whose font has no CMap are skipped. These
+/// codes drive the `/ToUnicode` scrub (as both the deleted and surviving sets).
 fn collect_deleted_codes(
-    content: &Content,
+    streams: &BTreeMap<StreamTarget, Content>,
     page: &PageText,
-    deleted: &[GlyphRef],
-    font_tounicode: &BTreeMap<Vec<u8>, ObjectId>,
+    glyphs: &[GlyphRef],
     out: &mut BTreeMap<ObjectId, BTreeSet<Vec<u8>>>,
 ) {
-    for g in deleted {
-        let Some(name) = page.fonts.get(g.font as usize) else {
+    for g in glyphs {
+        let Some(entry) = page.fonts.get(g.font as usize) else {
             continue;
         };
-        let Some(&cmap_id) = font_tounicode.get(name) else {
+        let Some(cmap_id) = entry.to_unicode else {
+            continue;
+        };
+        let Some(content) = streams.get(&g.site.stream) else {
             continue;
         };
         let Some(op) = content.operations.get(g.site.op) else {
@@ -509,6 +789,21 @@ fn collect_deleted_codes(
     }
 }
 
+/// Write `content` back as the decompressed body of the Form XObject `id`,
+/// leaving its other stream keys intact.
+fn write_xobject_content(doc: &mut lopdf::Document, id: ObjectId, content: Vec<u8>) -> Result<()> {
+    match doc.get_object_mut(id) {
+        Ok(Object::Stream(stream)) => {
+            stream.set_plain_content(content);
+            Ok(())
+        }
+        _ => Err(Error::new(
+            ErrorKind::MalformedInput,
+            format!("XObject {id:?} is not a stream to rewrite"),
+        )),
+    }
+}
+
 /// Remove the marked glyph byte ranges from each exact string, high-to-low so
 /// earlier offsets stay valid.
 ///
@@ -521,8 +816,22 @@ fn collect_deleted_codes(
 /// the positional residue. The surviving text reflows (there are no font metrics
 /// here to preserve exact layout); a caller needing pixel-faithful layout uses
 /// the raster path instead.
-fn apply_deletions(content: &mut Content, to_delete: &Deletions) {
-    for (&GlyphSite { op, operand, item }, ranges) in to_delete {
+fn apply_deletions(content: &mut Content, to_delete: &Deletions, stream: StreamTarget) {
+    for (
+        &GlyphSite {
+            stream: site_stream,
+            op,
+            operand,
+            item,
+        },
+        ranges,
+    ) in to_delete
+    {
+        // Apply only the deletions targeting this stream; the batch spans the
+        // page content and every Form XObject it draws.
+        if site_stream != stream {
+            continue;
+        }
         let Some(op) = content.operations.get_mut(op) else {
             continue;
         };
@@ -642,13 +951,14 @@ mod tests {
         let mut to_delete: Deletions = BTreeMap::new();
         to_delete.insert(
             GlyphSite {
+                stream: StreamTarget::PageContent,
                 op: 0,
                 operand: 0,
                 item: Some(2),
             },
             vec![(0, 3)],
         );
-        apply_deletions(&mut content, &to_delete);
+        apply_deletions(&mut content, &to_delete, StreamTarget::PageContent);
 
         let arr = tj_array(&content);
         // "ret" is now empty; both adjacent kerns (-40 before, -55 after) zeroed.
@@ -673,13 +983,14 @@ mod tests {
         let mut to_delete: Deletions = BTreeMap::new();
         to_delete.insert(
             GlyphSite {
+                stream: StreamTarget::PageContent,
                 op: 0,
                 operand: 0,
                 item: Some(0),
             },
             vec![(0, 3)],
         );
-        apply_deletions(&mut content, &to_delete);
+        apply_deletions(&mut content, &to_delete, StreamTarget::PageContent);
 
         let arr = tj_array(&content);
         assert_eq!(arr[0], Object::string_literal("ret"), "survivors mangled");
@@ -703,13 +1014,14 @@ mod tests {
         let mut to_delete: Deletions = BTreeMap::new();
         to_delete.insert(
             GlyphSite {
+                stream: StreamTarget::PageContent,
                 op: 0,
                 operand: 0,
                 item: Some(2),
             },
             vec![(0, 2)],
         );
-        apply_deletions(&mut content, &to_delete);
+        apply_deletions(&mut content, &to_delete, StreamTarget::PageContent);
 
         let arr = tj_array(&content);
         assert_eq!(arr[0], Object::string_literal("a"));

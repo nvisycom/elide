@@ -105,7 +105,7 @@ fn a_textless_page_is_flagged_needs_ocr() {
 #[test]
 fn not_a_pdf_is_invalid_document() {
     let err = Pdf::open(b"this is not a pdf").unwrap_err();
-    assert_eq!(err.kind(), ErrorKind::InvalidDocument);
+    assert_eq!(err.kind(), ErrorKind::MalformedInput);
 }
 
 /// A one-page PDF carrying `text` and one embedded image XObject (a tiny raw

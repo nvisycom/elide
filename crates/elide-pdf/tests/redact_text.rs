@@ -287,8 +287,15 @@ fn sanitize_strips_optional_content_layers() {
         },
         b"q Q".to_vec(),
     ));
+    // A second OCG reachable only through the page's `/Resources /Properties`,
+    // the marked-content path (`/OC /MC0 BDC ... EMC`). A scrub that only
+    // clears `/OC` marks would leave this one reachable and retained.
+    let mc_ocg_id = doc.add_object(dictionary! {
+        "Type" => "OCG", "Name" => Object::string_literal("MARKED-LAYER"),
+    });
     let resources_id = doc.add_object(dictionary! {
         "XObject" => dictionary! { "Fm0" => Object::Reference(form_id) },
+        "Properties" => dictionary! { "MC0" => Object::Reference(mc_ocg_id) },
     });
     let page_id = doc.add_object(dictionary! {
         "Type" => "Page", "Parent" => pages_id,
@@ -302,16 +309,19 @@ fn sanitize_strips_optional_content_layers() {
     let catalog_id = doc.add_object(dictionary! {
         "Type" => "Catalog", "Pages" => pages_id,
         "OCProperties" => dictionary! {
-            "OCGs" => vec![Object::Reference(ocg_id)],
-            "D" => dictionary! { "ON" => vec![Object::Reference(ocg_id)] },
+            "OCGs" => vec![Object::Reference(ocg_id), Object::Reference(mc_ocg_id)],
+            "D" => dictionary! {
+                "ON" => vec![Object::Reference(ocg_id), Object::Reference(mc_ocg_id)],
+            },
         },
     });
     doc.trailer.set("Root", catalog_id);
     let mut pdf = Vec::new();
     doc.save_to(&mut pdf).unwrap();
 
-    // Sanity: the source has the OCG and reports one in the inventory.
+    // Sanity: the source has both OCGs and reports them in the inventory.
     assert!(String::from_utf8_lossy(&pdf).contains("HIDDEN-LAYER"));
+    assert!(String::from_utf8_lossy(&pdf).contains("MARKED-LAYER"));
     assert_eq!(
         Pdf::open(&pdf)
             .unwrap()
@@ -319,15 +329,20 @@ fn sanitize_strips_optional_content_layers() {
             .unwrap()
             .risks
             .optional_content_group_count,
-        1
+        2
     );
 
     let out = Pdf::open(&pdf).unwrap().redact_text(&[]).unwrap();
 
-    // The OCG object is gone, and no OCG remains in the inventory.
+    // Both OCG objects are gone: the `/OC`-marked one and the one reachable
+    // only through `/Resources /Properties`.
     assert!(
         !String::from_utf8_lossy(&out).contains("HIDDEN-LAYER"),
-        "OCG dictionary survived"
+        "OC-marked OCG survived"
+    );
+    assert!(
+        !String::from_utf8_lossy(&out).contains("MARKED-LAYER"),
+        "marked-content OCG (via /Properties) survived"
     );
     let after = Pdf::open(&out).unwrap().inspect().unwrap();
     assert_eq!(after.risks.optional_content_group_count, 0);
@@ -335,5 +350,276 @@ fn sanitize_strips_optional_content_layers() {
     assert!(
         !String::from_utf8_lossy(&out).contains("/OC "),
         "an /OC membership mark survived"
+    );
+}
+
+/// A one-page PDF whose PII text is drawn INSIDE a Form XObject invoked with
+/// `Do` from the page content. The page content itself draws only a marker; the
+/// XObject's own content stream holds `Tj (Contact bob@corp.com now)`.
+fn form_xobject_with_text() -> Vec<u8> {
+    use lopdf::content::{Content, Operation};
+    use lopdf::{Document, Object, Stream, dictionary};
+
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let font_id = doc.add_object(dictionary! {
+        "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Courier",
+    });
+    // The Form XObject's own content + resources.
+    let form_body = Content {
+        operations: vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            Operation::new("Td", vec![10.into(), 10.into()]),
+            Operation::new(
+                "Tj",
+                vec![Object::string_literal("Contact bob@corp.com now")],
+            ),
+            Operation::new("ET", vec![]),
+        ],
+    };
+    let form_resources = doc.add_object(dictionary! {
+        "Font" => dictionary! { "F1" => font_id },
+    });
+    let form_id = doc.add_object(Stream::new(
+        dictionary! {
+            "Type" => "XObject", "Subtype" => "Form",
+            "BBox" => vec![0.into(), 0.into(), 200.into(), 50.into()],
+            "Resources" => Object::Reference(form_resources),
+        },
+        form_body.encode().unwrap(),
+    ));
+    // The page draws a marker of its own, then the form via `Do`.
+    let page_body = Content {
+        operations: vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            Operation::new("Td", vec![72.into(), 700.into()]),
+            Operation::new("Tj", vec![Object::string_literal("PAGEMARK")]),
+            Operation::new("ET", vec![]),
+            Operation::new("Do", vec!["Fm0".into()]),
+        ],
+    };
+    let content_id = doc.add_object(Stream::new(dictionary! {}, page_body.encode().unwrap()));
+    let resources_id = doc.add_object(dictionary! {
+        "Font" => dictionary! { "F1" => font_id },
+        "XObject" => dictionary! { "Fm0" => Object::Reference(form_id) },
+    });
+    let page_id = doc.add_object(dictionary! {
+        "Type" => "Page", "Parent" => pages_id,
+        "Contents" => content_id, "Resources" => resources_id,
+    });
+    let pages = dictionary! {
+        "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1,
+        "MediaBox" => vec![0.into(), 0.into(), 300.into(), 800.into()],
+    };
+    doc.objects.insert(pages_id, Object::Dictionary(pages));
+    let catalog_id = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+    doc.trailer.set("Root", catalog_id);
+    let mut pdf = Vec::new();
+    doc.save_to(&mut pdf).unwrap();
+    pdf
+}
+
+/// Text drawn inside a `Do`-invoked Form XObject is located and redactable: the
+/// walker recurses into the XObject's content stream, so its PII is found and
+/// deleted from that stream, while the page's own text survives.
+#[test]
+fn redacts_text_inside_a_form_xobject() {
+    let pdf = form_xobject_with_text();
+    let doc = Pdf::open(&pdf).unwrap();
+
+    // The XObject text appears in page_texts (proving the walker recursed).
+    let joined: String = doc
+        .page_texts()
+        .unwrap()
+        .into_iter()
+        .map(|(_, t)| t)
+        .collect();
+    assert!(joined.contains("bob@corp.com"), "XObject text not walked");
+    assert!(joined.contains("PAGEMARK"), "page text missing");
+
+    let dets = spans_for(&doc, "bob@corp.com");
+    assert!(!dets.is_empty(), "target not located");
+    let out = doc.redact_text(&dets).unwrap();
+
+    // Re-walk the output (our walker recurses into the XObject; lopdf's own
+    // extraction does not): the PII is gone, its XObject context and the page
+    // text survive, and the PII is absent from the raw output bytes.
+    let reopened = Pdf::open(&out).unwrap();
+    let walked: String = reopened
+        .page_texts()
+        .unwrap()
+        .into_iter()
+        .map(|(_, t)| t)
+        .collect();
+    assert!(!walked.contains("bob@corp.com"), "XObject PII survived");
+    assert!(
+        walked.contains("Contact") && walked.contains("now"),
+        "XObject context lost"
+    );
+    assert!(walked.contains("PAGEMARK"), "page text lost");
+    assert!(
+        !String::from_utf8_lossy(&out).contains("bob@corp.com"),
+        "XObject PII still in raw bytes"
+    );
+}
+
+/// A Form XObject that draws itself (a `Do` cycle) must not hang or crash: the
+/// walker's cycle guard stops re-entry.
+#[test]
+fn a_form_xobject_do_cycle_terminates() {
+    use lopdf::content::{Content, Operation};
+    use lopdf::{Document, Object, Stream, dictionary};
+
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let form_id = doc.new_object_id();
+    // The form draws itself via `Do Fm0`, with its own resources naming Fm0.
+    let form_body = Content {
+        operations: vec![Operation::new("Do", vec!["Fm0".into()])],
+    };
+    let form_resources = doc.add_object(dictionary! {
+        "XObject" => dictionary! { "Fm0" => Object::Reference(form_id) },
+    });
+    doc.objects.insert(
+        form_id,
+        Object::Stream(Stream::new(
+            dictionary! {
+                "Type" => "XObject", "Subtype" => "Form",
+                "BBox" => vec![0.into(), 0.into(), 10.into(), 10.into()],
+                "Resources" => Object::Reference(form_resources),
+            },
+            form_body.encode().unwrap(),
+        )),
+    );
+    let content_id = doc.add_object(Stream::new(
+        dictionary! {},
+        Content {
+            operations: vec![Operation::new("Do", vec!["Fm0".into()])],
+        }
+        .encode()
+        .unwrap(),
+    ));
+    let resources_id = doc.add_object(dictionary! {
+        "XObject" => dictionary! { "Fm0" => Object::Reference(form_id) },
+    });
+    let page_id = doc.add_object(dictionary! {
+        "Type" => "Page", "Parent" => pages_id,
+        "Contents" => content_id, "Resources" => resources_id,
+    });
+    let pages = dictionary! {
+        "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1,
+        "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
+    };
+    doc.objects.insert(pages_id, Object::Dictionary(pages));
+    let catalog_id = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+    doc.trailer.set("Root", catalog_id);
+    let mut pdf = Vec::new();
+    doc.save_to(&mut pdf).unwrap();
+
+    // Terminates (no hang, no stack overflow) and yields text (empty here).
+    let opened = Pdf::open(&pdf).unwrap();
+    let _ = opened.page_texts().unwrap();
+    let _ = opened.redact_text(&[]).unwrap();
+}
+
+/// A `/ToUnicode` CMap shared by page text and Form-XObject text. Deleting a
+/// code the (redacted) page draws must scrub only codes NOT still drawn by the
+/// surviving XObject text: the surviving-code inventory covers XObject glyphs,
+/// so a code the XObject still uses is spared and its text stays extractable.
+#[test]
+fn a_code_kept_by_surviving_xobject_text_is_spared() {
+    use lopdf::content::{Content, Operation};
+    use lopdf::{Document, Object, Stream, dictionary};
+
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+
+    // A ToUnicode CMap mapping code 0x41 'A' and 0x42 'B'. Both simple-font
+    // codes; the CMap is shared by the page's font and the XObject's font.
+    let cmap = b"/CIDInit /ProcSet findresource begin 12 dict begin begincmap\n\
+1 begincodespacerange <00> <ff> endcodespacerange\n\
+2 beginbfchar\n<41> <0041>\n<42> <0042>\nendbfchar\nendcmap end end\n";
+    let cmap_id = doc.add_object(Stream::new(dictionary! {}, cmap.to_vec()));
+    let font_id = doc.add_object(dictionary! {
+        "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Courier",
+        "ToUnicode" => Object::Reference(cmap_id),
+    });
+
+    // The XObject draws "B" (code 0x42) and survives.
+    let form_body = Content {
+        operations: vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            Operation::new(
+                "Tj",
+                vec![Object::String(vec![0x42], lopdf::StringFormat::Literal)],
+            ),
+            Operation::new("ET", vec![]),
+        ],
+    };
+    let form_resources = doc.add_object(dictionary! { "Font" => dictionary! { "F1" => font_id } });
+    let form_id = doc.add_object(Stream::new(
+        dictionary! {
+            "Type" => "XObject", "Subtype" => "Form",
+            "BBox" => vec![0.into(), 0.into(), 50.into(), 50.into()],
+            "Resources" => Object::Reference(form_resources),
+        },
+        form_body.encode().unwrap(),
+    ));
+
+    // The page draws "A" (code 0x41, redacted) then invokes the form.
+    let page_body = Content {
+        operations: vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            Operation::new("Td", vec![72.into(), 700.into()]),
+            Operation::new(
+                "Tj",
+                vec![Object::String(vec![0x41], lopdf::StringFormat::Literal)],
+            ),
+            Operation::new("ET", vec![]),
+            Operation::new("Do", vec!["Fm0".into()]),
+        ],
+    };
+    let content_id = doc.add_object(Stream::new(dictionary! {}, page_body.encode().unwrap()));
+    let resources_id = doc.add_object(dictionary! {
+        "Font" => dictionary! { "F1" => font_id },
+        "XObject" => dictionary! { "Fm0" => Object::Reference(form_id) },
+    });
+    let page_id = doc.add_object(dictionary! {
+        "Type" => "Page", "Parent" => pages_id,
+        "Contents" => content_id, "Resources" => resources_id,
+    });
+    let pages = dictionary! {
+        "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1,
+        "MediaBox" => vec![0.into(), 0.into(), 300.into(), 800.into()],
+    };
+    doc.objects.insert(pages_id, Object::Dictionary(pages));
+    let catalog_id = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+    doc.trailer.set("Root", catalog_id);
+    let mut pdf = Vec::new();
+    doc.save_to(&mut pdf).unwrap();
+
+    // Redact the page's "A".
+    let opened = Pdf::open(&pdf).unwrap();
+    let dets = spans_for(&opened, "A");
+    assert!(!dets.is_empty(), "page 'A' not located");
+    let out = opened.redact_text(&dets).unwrap();
+
+    // The shared `/ToUnicode` CMap keeps the `<42>` ('B') entry the surviving
+    // XObject text still needs, and drops the `<41>` ('A') entry the redacted
+    // page drew: the surviving-code inventory counted the XObject's glyph, so
+    // its mapping was spared. (Asserted on the CMap bytes: the code->Unicode
+    // table is exactly what the scrub edits.)
+    let raw = String::from_utf8_lossy(&out);
+    assert!(
+        raw.contains("<42>"),
+        "surviving XObject's CMap entry was scrubbed"
+    );
+    assert!(
+        !raw.contains("<41>"),
+        "redacted page's CMap entry was not scrubbed"
     );
 }

@@ -8,8 +8,8 @@ pub mod redact;
 #[cfg(feature = "render")]
 pub mod render;
 
-mod error;
 mod pdf;
 
-pub use self::error::{Error, ErrorKind, Result};
+pub use elide_core::{Error, ErrorKind, Result};
+
 pub use self::pdf::Pdf;

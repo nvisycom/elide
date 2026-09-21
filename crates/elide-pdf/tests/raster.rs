@@ -219,7 +219,7 @@ fn rejects_a_mismatched_pixel_buffer() {
     let mut obs = observation();
     obs.pixels.truncate(5); // a buffer that is not width*height*3
     let err = pdf.redact_raster(vec![obs], &[], [0, 0, 0]).unwrap_err();
-    assert_eq!(err.kind(), elide_pdf::ErrorKind::UnsafeRewrite);
+    assert_eq!(err.kind(), elide_pdf::ErrorKind::Redaction);
 }
 
 #[test]
@@ -228,7 +228,7 @@ fn rejects_a_detection_on_an_absent_page() {
     let err = pdf
         .redact_raster(vec![observation()], &[Detection::new(9, 0, 1)], [0, 0, 0])
         .unwrap_err();
-    assert_eq!(err.kind(), elide_pdf::ErrorKind::UnsafeRewrite);
+    assert_eq!(err.kind(), elide_pdf::ErrorKind::Redaction);
 }
 
 /// Fill the detected glyph boxes on `pages` in place with `fill`, the same
@@ -278,5 +278,5 @@ fn verify_raster_coverage_catches_an_unpainted_region() {
     // original white pixels, verification must fail closed.
     let err = verify_raster_coverage(&[observation()], &[Detection::new(1, 1, 3)], [0, 0, 0])
         .unwrap_err();
-    assert_eq!(err.kind(), elide_pdf::ErrorKind::UnsafeRewrite);
+    assert_eq!(err.kind(), elide_pdf::ErrorKind::Redaction);
 }

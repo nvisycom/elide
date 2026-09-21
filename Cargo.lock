@@ -1359,10 +1359,12 @@ dependencies = [
  "async-trait",
  "derive_builder",
  "elide-core",
+ "futures",
  "hipstr",
  "image",
  "mockall",
  "ocrs",
+ "rayon",
  "rten",
  "rten-imageproc",
  "tokio",
@@ -1430,6 +1432,7 @@ name = "elide-pdf"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "elide-core",
  "hipstr",
  "image",
  "lopdf",
@@ -1437,7 +1440,6 @@ dependencies = [
  "rayon",
  "serde",
  "sha2 0.11.0",
- "thiserror",
 ]
 
 [[package]]

@@ -134,6 +134,104 @@ fn reflattens_only_the_named_page() {
     assert_eq!(reopened.inspect().unwrap().page_count, 2);
 }
 
+/// A reflattened page carries explicit, page-local geometry that neutralizes
+/// any inherited crop or rotation: the redacted image is the page as displayed,
+/// so an inherited `/CropBox` or `/Rotate` must not clip or turn it.
+#[test]
+fn reflatten_neutralizes_inherited_geometry() {
+    use lopdf::{Document, Object, Stream, dictionary};
+
+    // A one-page doc whose `/Rotate` and `/CropBox` are inherited from the
+    // `Pages` node, not set on the page itself.
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let img = doc.add_object({
+        let mut s = Stream::new(
+            dictionary! {
+                "Type" => "XObject", "Subtype" => "Image",
+                "Width" => 2, "Height" => 2, "ColorSpace" => "DeviceGray",
+                "BitsPerComponent" => 8,
+            },
+            b"SCAN".to_vec(),
+        );
+        s.set_plain_content(b"SCAN".to_vec());
+        s
+    });
+    let res = doc
+        .add_object(dictionary! { "XObject" => dictionary! { "Im0" => Object::Reference(img) } });
+    let content = doc.add_object(Stream::new(
+        dictionary! {},
+        b"q 10 0 0 10 0 0 cm /Im0 Do Q".to_vec(),
+    ));
+    let page = doc.add_object(dictionary! {
+        "Type" => "Page", "Parent" => pages_id,
+        "Contents" => content, "Resources" => res,
+        "MediaBox" => vec![0.into(), 0.into(), 200.into(), 300.into()],
+    });
+    // Inherited on the Pages node: a 90-degree rotation and a tight crop.
+    let pages = dictionary! {
+        "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1,
+        "Rotate" => 90,
+        "CropBox" => vec![10.into(), 10.into(), 100.into(), 100.into()],
+    };
+    doc.objects.insert(pages_id, Object::Dictionary(pages));
+    let catalog_id = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+    doc.trailer.set("Root", catalog_id);
+    let mut src = Vec::new();
+    doc.save_to(&mut src).unwrap();
+
+    let out = Pdf::open(&src)
+        .unwrap()
+        .redact_pages(&[PageReplacement {
+            number: 1,
+            image: png(120, 80, [0, 0, 0]),
+        }])
+        .unwrap();
+
+    // Re-open with lopdf and inspect the page's explicit geometry.
+    let re = Document::load_mem(&out).unwrap();
+    let (_n, page_id) = re.get_pages().into_iter().next().unwrap();
+    let page = re.get_dictionary(page_id).unwrap();
+    let media: Vec<i64> = page
+        .get(b"MediaBox")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| o.as_i64().unwrap())
+        .collect();
+    assert_eq!(
+        media,
+        vec![0, 0, 120, 80],
+        "MediaBox not sized to the image"
+    );
+    // CropBox matches MediaBox, rotation cleared, unit reset — all page-local,
+    // shadowing the inherited Rotate/CropBox.
+    let crop: Vec<i64> = page
+        .get(b"CropBox")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| o.as_i64().unwrap())
+        .collect();
+    assert_eq!(
+        crop,
+        vec![0, 0, 120, 80],
+        "CropBox does not shadow inherited"
+    );
+    assert_eq!(
+        page.get(b"Rotate").unwrap().as_i64().unwrap(),
+        0,
+        "Rotate not cleared"
+    );
+    assert_eq!(
+        page.get(b"UserUnit").unwrap().as_i64().unwrap(),
+        1,
+        "UserUnit not reset"
+    );
+}
+
 #[test]
 fn is_fail_closed_on_a_missing_page() {
     let doc = two_page_doc();
@@ -144,7 +242,7 @@ fn is_fail_closed_on_a_missing_page() {
             image: png(2, 2, [0, 0, 0]),
         }])
         .expect_err("missing page should be refused");
-    assert_eq!(err.kind(), elide_pdf::ErrorKind::UnsafeRewrite);
+    assert_eq!(err.kind(), elide_pdf::ErrorKind::Redaction);
 }
 
 #[test]
@@ -157,5 +255,5 @@ fn is_fail_closed_on_undecodable_image() {
             image: b"not an image".to_vec(),
         }])
         .expect_err("undecodable image should be refused");
-    assert_eq!(err.kind(), elide_pdf::ErrorKind::UnsafeRewrite);
+    assert_eq!(err.kind(), elide_pdf::ErrorKind::Redaction);
 }

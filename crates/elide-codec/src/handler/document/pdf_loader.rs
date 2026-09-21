@@ -13,7 +13,7 @@ use elide_core::modality::text::Text;
 
 #[cfg(feature = "pdf-render")]
 use super::RasterMode;
-use super::pdf_handler::{PdfHandler, PdfPage, pdf_error};
+use super::pdf_handler::{PdfHandler, PdfPage};
 use crate::Loader;
 use crate::content::ContentData;
 
@@ -65,8 +65,8 @@ impl Loader<Text> for PdfLoader {
         // `redact_text` uses, so a detection's character span maps to the
         // glyphs it drew. On encode the glyphs are deleted and
         // annotations/metadata stripped, keeping a selectable text layer.
-        let pdf = elide_pdf::Pdf::open(&document).map_err(pdf_error)?;
-        let pages = pages_from_texts(pdf.page_texts().map_err(pdf_error)?);
+        let pdf = elide_pdf::Pdf::open(&document)?;
+        let pages = pages_from_texts(pdf.page_texts()?);
 
         // `RasterMode::Auto` (feature `pdf-render` + an image codec): a textless
         // (scanned) page has no glyphs to delete, so render it and surface it as
@@ -75,7 +75,7 @@ impl Loader<Text> for PdfLoader {
         // where present, image where absent.
         #[cfg(all(feature = "pdf-render", feature = "internal_image"))]
         if matches!(self.raster, RasterMode::Auto) {
-            let scanned = scanned_pages(&document, &pdf)?;
+            let scanned = scanned_pages(&pdf)?;
             if !scanned.is_empty() {
                 return Ok(PdfHandler::text_auto(document, pages, scanned));
             }
@@ -88,10 +88,7 @@ impl Loader<Text> for PdfLoader {
 /// Render each textless (`NeedsOcr`) page to a PNG, keyed by page number, for
 /// the [`Container`](crate::codec::Container) to surface as an image part.
 #[cfg(all(feature = "pdf-render", feature = "internal_image"))]
-fn scanned_pages(
-    document: &[u8],
-    pdf: &elide_pdf::Pdf,
-) -> Result<std::collections::BTreeMap<u32, bytes::Bytes>> {
+fn scanned_pages(pdf: &elide_pdf::Pdf) -> Result<std::collections::BTreeMap<u32, bytes::Bytes>> {
     use elide_pdf::extract::IssueKind;
 
     // Which 1-based pages have no text layer.
@@ -106,21 +103,13 @@ fn scanned_pages(
         return Ok(std::collections::BTreeMap::new());
     }
 
-    // `render` returns one image per page in page order (1-based by index+1);
-    // keep only the textless pages' rasters.
+    // Render only the textless pages, not the whole document: a mostly
+    // born-digital PDF with a few scanned pages pays to rasterise just those.
     const RASTER_SCALE: f32 = 2.0;
-    let rendered = elide_pdf::Pdf::open(document)
-        .and_then(|pdf| pdf.render(RASTER_SCALE))
-        .map_err(pdf_error)?;
+    let rendered = pdf.render_pages(textless, RASTER_SCALE)?;
     Ok(rendered
         .into_iter()
-        .enumerate()
-        .filter_map(|(idx, page)| {
-            let number = u32::try_from(idx).ok()?.checked_add(1)?;
-            textless
-                .contains(&number)
-                .then(|| (number, bytes::Bytes::from(page.png)))
-        })
+        .map(|(number, page)| (number, bytes::Bytes::from(page.png)))
         .collect())
 }
 
@@ -156,7 +145,5 @@ const PAGE_SEPARATOR: &str = "\n";
 fn observe_pages(document: &[u8]) -> Result<Vec<elide_pdf::render::PageObservation>> {
     // A default render scale; higher scales trade output size for fidelity.
     const RASTER_SCALE: f32 = 2.0;
-    elide_pdf::Pdf::open(document)
-        .and_then(|pdf| pdf.observe(RASTER_SCALE))
-        .map_err(pdf_error)
+    elide_pdf::Pdf::open(document).and_then(|pdf| pdf.observe(RASTER_SCALE))
 }

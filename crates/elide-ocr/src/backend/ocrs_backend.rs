@@ -89,7 +89,7 @@ impl OcrsBackend {
     }
 
     /// Load the models from `dir`, expecting `text-detection.onnx` and
-    /// `text-recognition.onnx` (as produced by `scripts/install-ocr-models.sh`).
+    /// `text-recognition.onnx` (as produced by `scripts/install-ocrs.sh`).
     ///
     /// # Errors
     ///
@@ -115,38 +115,36 @@ impl OcrsBackend {
         })?;
         Self::from_models_dir(&PathBuf::from(dir))
     }
+}
 
-    /// Recognize `image` bytes (any format the `image` crate decodes) into
-    /// layout blocks, one per recognized text line.
-    fn recognize_image(&self, image: &[u8]) -> Result<Vec<LayoutBlock>> {
-        // Decode to RGB8; ocrs takes raw interleaved pixels plus dimensions.
-        let decoded = image::load_from_memory(image)
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("decode OCR image: {e}")))?
-            .to_rgb8();
-        let (width, height) = decoded.dimensions();
-        let source = ImageSource::from_bytes(decoded.as_raw(), (width, height))
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("OCR image source: {e}")))?;
+/// Recognize `image` bytes (any format the `image` crate decodes) into layout
+/// blocks, one per recognized text line. A free function so it can run on a
+/// Rayon worker with a cloned `Arc<OcrEngine>`, off the async executor.
+fn recognize_image(engine: &OcrEngine, image: &[u8]) -> Result<Vec<LayoutBlock>> {
+    // Decode to RGB8; ocrs takes raw interleaved pixels plus dimensions.
+    let decoded = image::load_from_memory(image)
+        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("decode OCR image: {e}")))?
+        .to_rgb8();
+    let (width, height) = decoded.dimensions();
+    let source = ImageSource::from_bytes(decoded.as_raw(), (width, height))
+        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("OCR image source: {e}")))?;
 
-        let input = self
-            .engine
-            .prepare_input(source)
-            .map_err(|e| Error::new(ErrorKind::Processing, format!("OCR prepare input: {e}")))?;
-        let word_rects = self
-            .engine
-            .detect_words(&input)
-            .map_err(|e| Error::new(ErrorKind::Processing, format!("OCR detect words: {e}")))?;
-        let line_rects = self.engine.find_text_lines(&input, &word_rects);
-        let lines = self
-            .engine
-            .recognize_text(&input, &line_rects)
-            .map_err(|e| Error::new(ErrorKind::Processing, format!("OCR recognize: {e}")))?;
+    let input = engine
+        .prepare_input(source)
+        .map_err(|e| Error::new(ErrorKind::Processing, format!("OCR prepare input: {e}")))?;
+    let word_rects = engine
+        .detect_words(&input)
+        .map_err(|e| Error::new(ErrorKind::Processing, format!("OCR detect words: {e}")))?;
+    let line_rects = engine.find_text_lines(&input, &word_rects);
+    let lines = engine
+        .recognize_text(&input, &line_rects)
+        .map_err(|e| Error::new(ErrorKind::Processing, format!("OCR recognize: {e}")))?;
 
-        Ok(lines
-            .into_iter()
-            .flatten()
-            .filter_map(line_to_block)
-            .collect())
-    }
+    Ok(lines
+        .into_iter()
+        .flatten()
+        .filter_map(line_to_block)
+        .collect())
 }
 
 /// Convert one recognized `ocrs` text line into a [`LayoutBlock`] with per-word
@@ -185,7 +183,26 @@ impl OcrBackend for OcrsBackend {
     }
 
     async fn recognize(&self, request: OcrRequest<'_>) -> Result<OcrResponse> {
-        let blocks = self.recognize_image(request.image)?;
+        // OCR inference is CPU-bound and has no await points; running it inline
+        // would occupy the polling worker for the whole inference. Offload it to
+        // a Rayon worker (runtime-neutral, no Tokio) and await the result over a
+        // oneshot channel. The engine is shared via `Arc`; the borrowed image is
+        // copied so the closure owns everything it touches.
+        let engine = Arc::clone(&self.engine);
+        let image = request.image.to_vec();
+        let (tx, rx) = futures::channel::oneshot::channel();
+        rayon::spawn(move || {
+            let result = recognize_image(&engine, &image);
+            // The receiver is dropped only if the caller's future was cancelled;
+            // nothing to do with the result then.
+            let _ = tx.send(result);
+        });
+        let blocks = rx.await.map_err(|_| {
+            Error::new(
+                ErrorKind::Processing,
+                "OCR worker canceled before returning a result",
+            )
+        })??;
         Ok(OcrResponse::new(blocks))
     }
 }

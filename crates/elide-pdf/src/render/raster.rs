@@ -12,8 +12,9 @@
 //! The output is not searchable or accessible: it is images. That is the
 //! deliberate trade for a guarantee that the original text is gone.
 
+use elide_core::{Error, ErrorKind, Result};
+
 use super::{Glyph, PageObservation, PixelRect, emit};
-use crate::error::{Error, Result};
 
 /// A detected span to redact on a page: a **UTF-16 code-unit** range into the
 /// page's text, matched against the rendered [`glyphs`](PageObservation::glyphs).
@@ -59,7 +60,7 @@ impl super::Pdf {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::UnsafeRewrite`](crate::ErrorKind::UnsafeRewrite) if a page's
+    /// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a page's
     /// pixel buffer size does not match its dimensions, or a detection names a
     /// page not present in `pages`.
     #[cfg_attr(docsrs, doc(cfg(feature = "render")))]
@@ -111,7 +112,7 @@ impl super::Pdf {
 ///
 /// # Errors
 ///
-/// [`ErrorKind::UnsafeRewrite`](crate::ErrorKind::UnsafeRewrite) if a page's
+/// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a page's
 /// pixel buffer size does not match its dimensions, a detection names a page
 /// not present in `pages`, or a covered pixel is not `fill_rgb` (naming the
 /// page and the offending pixel).
@@ -128,10 +129,13 @@ pub fn verify_raster_coverage(
         for d in detections.iter().filter(|d| d.page == page.page) {
             for rect in glyph_rects(&page.glyphs, d.start, d.end) {
                 if let Some((x, y)) = unfilled_pixel(&page.pixels, page.width, rect, fill_rgb) {
-                    return Err(Error::unsafe_rewrite(format!(
-                        "page {} pixel ({x}, {y}) in glyph box {rect:?} is not the fill colour {fill_rgb:?}",
-                        page.page
-                    )));
+                    return Err(Error::new(
+                        ErrorKind::Redaction,
+                        format!(
+                            "page {} pixel ({x}, {y}) in glyph box {rect:?} is not the fill colour {fill_rgb:?}",
+                            page.page
+                        ),
+                    ));
                 }
             }
         }
@@ -151,21 +155,24 @@ fn validate_pages(pages: &[PageObservation], detections: &[Detection]) -> Result
             .checked_mul(page.height as usize)
             .and_then(|n| n.checked_mul(3));
         if expected != Some(page.pixels.len()) {
-            return Err(Error::unsafe_rewrite(format!(
-                "page {} pixel buffer is {} bytes, expected {:?}",
-                page.page,
-                page.pixels.len(),
-                expected
-            )));
+            return Err(Error::new(
+                ErrorKind::Redaction,
+                format!(
+                    "page {} pixel buffer is {} bytes, expected {:?}",
+                    page.page,
+                    page.pixels.len(),
+                    expected
+                ),
+            ));
         }
     }
 
     for d in detections {
         if !pages.iter().any(|p| p.page == d.page) {
-            return Err(Error::unsafe_rewrite(format!(
-                "detection names page {} not in the observed pages",
-                d.page
-            )));
+            return Err(Error::new(
+                ErrorKind::Redaction,
+                format!("detection names page {} not in the observed pages", d.page),
+            ));
         }
     }
 
@@ -233,8 +240,9 @@ fn unfilled_pixel(pixels: &[u8], width: u32, rect: PixelRect, fill: [u8; 3]) -> 
 
 #[cfg(all(test, feature = "test-utils"))]
 mod tests {
+    use elide_core::ErrorKind;
+
     use super::{Detection, verify_raster_coverage};
-    use crate::error::ErrorKind;
     use crate::render::{Glyph, GlyphSource, PageObservation, PixelRect};
 
     const FILL: [u8; 3] = [255, 0, 0];
@@ -292,7 +300,7 @@ mod tests {
 
         let detections = [Detection::new(1, 0, 1)];
         let err = verify_raster_coverage(&[p], &detections, FILL).unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::UnsafeRewrite);
+        assert_eq!(err.kind(), ErrorKind::Redaction);
     }
 
     #[test]
@@ -301,7 +309,7 @@ mod tests {
 
         let detections = [Detection::new(2, 0, 1)];
         let err = verify_raster_coverage(&[p], &detections, FILL).unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::UnsafeRewrite);
+        assert_eq!(err.kind(), ErrorKind::Redaction);
     }
 
     #[test]

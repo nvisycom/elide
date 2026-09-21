@@ -1,11 +1,11 @@
 //! Build a fresh image-only PDF from sanitised page pixels, and the
 //! [`Certificate`] that binds it to its source.
 
+use elide_core::{Error, ErrorKind, Result};
 use lopdf::{Object, Stream, dictionary};
 use sha2::{Digest, Sha256};
 
 use super::PageObservation;
-use crate::error::{Error, Result};
 
 /// Verifiable provenance of a raster redaction: the SHA-256 of the source, of
 /// each page's sanitised pixels, and of the emitted output.
@@ -48,16 +48,20 @@ pub(super) fn emit(source: &[u8], pages: Vec<PageObservation>) -> Result<(Vec<u8
     // degenerate PDF (empty page tree, or a zero-area MediaBox / image XObject).
     // Refuse both before building anything.
     if pages.is_empty() {
-        return Err(Error::invalid_document(
+        return Err(Error::new(
+            ErrorKind::MalformedInput,
             "cannot emit a PDF with no pages".to_string(),
         ));
     }
     for page in &pages {
         if page.width == 0 || page.height == 0 {
-            return Err(Error::invalid_document(format!(
-                "page {} has a zero dimension ({}x{})",
-                page.page, page.width, page.height
-            )));
+            return Err(Error::new(
+                ErrorKind::MalformedInput,
+                format!(
+                    "page {} has a zero dimension ({}x{})",
+                    page.page, page.width, page.height
+                ),
+            ));
         }
     }
 
@@ -82,9 +86,12 @@ pub(super) fn emit(source: &[u8], pages: Vec<PageObservation>) -> Result<(Vec<u8
             },
             page.pixels.clone(),
         );
-        image
-            .compress()
-            .map_err(|e| Error::invalid_document(format!("failed to compress page image: {e}")))?;
+        image.compress().map_err(|e| {
+            Error::new(
+                ErrorKind::MalformedInput,
+                format!("failed to compress page image: {e}"),
+            )
+        })?;
         let image_id = doc.add_object(image);
 
         // Draw the image to fill the whole page: `q W 0 0 H cm /Im Do Q`, with
@@ -124,8 +131,12 @@ pub(super) fn emit(source: &[u8], pages: Vec<PageObservation>) -> Result<(Vec<u8
     doc.trailer.set("Root", Object::Reference(catalog_id));
 
     let mut out = Vec::new();
-    doc.save_to(&mut out)
-        .map_err(|e| Error::invalid_document(format!("failed to save redacted PDF: {e}")))?;
+    doc.save_to(&mut out).map_err(|e| {
+        Error::new(
+            ErrorKind::MalformedInput,
+            format!("failed to save redacted PDF: {e}"),
+        )
+    })?;
 
     let certificate = Certificate {
         source_sha256: digest_hex(source),

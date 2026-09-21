@@ -16,13 +16,14 @@ mod geometry;
 mod pdfium;
 mod raster;
 
+use elide_core::Result;
+
 pub use self::emit::Certificate;
 pub use self::geometry::{Glyph, GlyphSource, PageObservation, PixelRect};
 pub use self::raster::Detection;
 #[cfg(feature = "test-utils")]
 pub use self::raster::verify_raster_coverage;
 use crate::Pdf;
-use crate::error::Result;
 
 /// A page rendered to a PNG image, with its pixel dimensions.
 ///
@@ -52,7 +53,7 @@ impl Pdf {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::InvalidDocument`](crate::ErrorKind::InvalidDocument) if
+    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if
     /// PDFium cannot load or render the document (or the native library is
     /// unavailable).
     #[cfg_attr(docsrs, doc(cfg(feature = "render")))]
@@ -61,6 +62,27 @@ impl Pdf {
         // re-serialisation, which can degrade the scanned or malformed PDFs OCR
         // most needs, on the dedicated PDFium thread.
         pdfium::render(self.source_bytes().to_vec(), scale)
+    }
+
+    /// Render only the 1-based pages in `numbers` at `scale`, returning each
+    /// keyed by its page number.
+    ///
+    /// Pages not named are not rasterised, so a pass that needs only a few pages
+    /// (e.g. the scanned pages of a mostly born-digital document) does not pay to
+    /// render the whole document.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if
+    /// PDFium cannot load or render the document (or the native library is
+    /// unavailable).
+    #[cfg_attr(docsrs, doc(cfg(feature = "render")))]
+    pub fn render_pages(
+        &self,
+        numbers: std::collections::BTreeSet<u32>,
+        scale: f32,
+    ) -> Result<std::collections::BTreeMap<u32, RenderedPage>> {
+        pdfium::render_pages(self.source_bytes().to_vec(), numbers, scale)
     }
 
     /// Observe every page at `scale`: render it to RGB8 pixels and extract its
@@ -74,7 +96,7 @@ impl Pdf {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::InvalidDocument`](crate::ErrorKind::InvalidDocument) if
+    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if
     /// PDFium cannot load or render the document (or the native library is
     /// unavailable).
     #[cfg_attr(docsrs, doc(cfg(feature = "render")))]
