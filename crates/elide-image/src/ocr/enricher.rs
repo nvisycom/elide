@@ -10,7 +10,7 @@
 //!
 //! [`ImageData`]: crate::modality::ImageData
 //! [`artifact`]: elide_core::recognition::RecognizerContext::artifact
-//! [`OcrBackend`]: crate::ocr::OcrBackend
+//! [`OcrBackend`]: super::OcrBackend
 //! [`Image`]: crate::modality::Image
 //! [`TextRecognizable`]: elide_core::modality::TextRecognizable
 
@@ -22,10 +22,10 @@ use elide_core::recognition::{RecognizerContext, RecognizerId};
 use elide_core::{Error, Result};
 use hipstr::HipStr;
 
-use crate::modality::{Image, ImageData, Layout};
 #[cfg(any(test, feature = "test-utils"))]
-use crate::ocr::MockBackend;
-use crate::ocr::{OcrBackend, OcrRequest};
+use super::MockBackend;
+use super::{OcrBackend, OcrRequest};
+use crate::modality::{Image, ImageData, Layout};
 
 /// An [`Enricher<Image>`] that OCRs the image.
 ///
@@ -88,7 +88,7 @@ impl OcrEnricherBuilder {
 
     /// Wire the no-op [`MockBackend`] as this enricher's backend.
     ///
-    /// [`MockBackend`]: crate::ocr::MockBackend
+    /// [`MockBackend`]: super::MockBackend
     #[cfg(any(test, feature = "test-utils"))]
     #[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
     #[must_use]

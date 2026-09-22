@@ -10,7 +10,7 @@
 //!
 //! [`AudioData`]: crate::modality::AudioData
 //! [`artifact`]: elide_core::recognition::RecognizerContext::artifact
-//! [`SttBackend`]: crate::stt::SttBackend
+//! [`SttBackend`]: super::SttBackend
 //! [`Audio`]: crate::modality::Audio
 //! [`TextRecognizable`]: elide_core::modality::TextRecognizable
 
@@ -22,10 +22,10 @@ use elide_core::recognition::{RecognizerContext, RecognizerId};
 use elide_core::{Error, Result};
 use hipstr::HipStr;
 
-use crate::modality::{Audio, AudioData, Transcription};
 #[cfg(any(test, feature = "test-utils"))]
-use crate::stt::MockBackend;
-use crate::stt::{SttBackend, SttRequest};
+use super::MockBackend;
+use super::{SttBackend, SttRequest};
+use crate::modality::{Audio, AudioData, Transcription};
 
 /// An [`Enricher<Audio>`] that transcribes the clip.
 ///
@@ -88,7 +88,7 @@ impl SttEnricherBuilder {
 
     /// Wire the no-op [`MockBackend`] as this enricher's backend.
     ///
-    /// [`MockBackend`]: crate::stt::MockBackend
+    /// [`MockBackend`]: super::MockBackend
     #[cfg(any(test, feature = "test-utils"))]
     #[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
     #[must_use]

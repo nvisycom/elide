@@ -81,15 +81,20 @@ impl ModalityData for AudioData {}
 mod tests {
     use super::*;
 
-    #[cfg(feature = "mp3")]
     #[test]
     fn format_is_none_without_a_known_extension() {
         // No filename: no format hint (do not guess a default).
         let d = AudioData::new(Bytes::new());
         assert_eq!(d.format(), None);
-        // An unknown extension is not a supported format.
-        assert_eq!(d.clone().with_filename("call.aac").format(), None);
-        // A known extension maps to the typed format, case-insensitively.
-        assert_eq!(d.with_filename("call.MP3").format(), Some(AudioFormat::Mp3));
+        // An unknown extension is never a supported format.
+        assert_eq!(d.with_filename("call.aac").format(), None);
+    }
+
+    #[cfg(feature = "mp3")]
+    #[test]
+    fn a_known_extension_maps_to_the_typed_format() {
+        // Case-insensitive; requires the format's feature to be enabled.
+        let d = AudioData::new(Bytes::new()).with_filename("call.MP3");
+        assert_eq!(d.format(), Some(AudioFormat::Mp3));
     }
 }

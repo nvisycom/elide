@@ -86,12 +86,15 @@ mod tests {
         // No filename: no format hint (do not guess a default).
         let d = ImageData::new(Bytes::new(), Dimensions::new(10, 10));
         assert_eq!(d.format(), None);
-        // An unknown extension is not a supported format.
-        assert_eq!(d.clone().with_filename("scan.bmp").format(), None);
-        // A known extension maps to the typed format, case-insensitively.
-        assert_eq!(
-            d.with_filename("scan.JPEG").format(),
-            Some(ImageFormat::Jpeg)
-        );
+        // An unknown extension is never a supported format.
+        assert_eq!(d.with_filename("scan.bmp").format(), None);
+    }
+
+    #[cfg(feature = "jpeg")]
+    #[test]
+    fn a_known_extension_maps_to_the_typed_format() {
+        // Case-insensitive; requires the format's feature to be enabled.
+        let d = ImageData::new(Bytes::new(), Dimensions::new(10, 10)).with_filename("scan.JPEG");
+        assert_eq!(d.format(), Some(ImageFormat::Jpeg));
     }
 }
