@@ -346,10 +346,10 @@ impl DataWriter<Text> for PdfHandler {
         for (location, _replacement) in redactions.into_iter() {
             // Resolve the redaction to the index of the page it falls on and its
             // byte range within that page's text. Both modes address glyphs by
-            // span, not replacement text; the span is measured per mode below
-            // (char offsets for glyph deletion, UTF-16 for raster) so only the
-            // counts a mode needs are computed. PDF text is addressed by decoded
-            // range only; a source-only location has none, so it is skipped.
+            // the same character span into the page text (not replacement text),
+            // so the span is measured once as character offsets below. PDF text
+            // is addressed by decoded range only; a source-only location has
+            // none, so it is skipped.
             let Some(range) = location.range() else {
                 continue;
             };

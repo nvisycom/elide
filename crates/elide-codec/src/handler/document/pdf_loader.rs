@@ -71,7 +71,11 @@ impl Loader<Text> for PdfLoader {
         // it drew. On encode the glyphs are deleted and annotations/metadata
         // stripped, keeping a selectable text layer.
         let pdf = elide_pdf::Pdf::open(&document)?;
-        let pages = pages_from_blocks(pdf.extract().blocks);
+        // Extract once: `blocks` drive glyph deletion, and (in `Auto`) `issues`
+        // name the textless pages to render. A second `extract()` would re-walk
+        // every page and re-copy the embedded image bytes for nothing.
+        let extraction = pdf.extract();
+        let pages = pages_from_blocks(extraction.blocks);
 
         // `RasterMode::Auto` (feature `pdf-render` + an image codec): a textless
         // (scanned) page has no glyphs to delete, so render it and surface it as
@@ -80,7 +84,7 @@ impl Loader<Text> for PdfLoader {
         // where present, image where absent.
         #[cfg(all(feature = "pdf-render", feature = "internal_image"))]
         if matches!(self.raster, RasterMode::Auto) {
-            let scanned = scanned_pages(&pdf)?;
+            let scanned = scanned_pages(&pdf, &extraction.issues)?;
             if !scanned.is_empty() {
                 return Ok(PdfHandler::text_auto(document, pages, scanned));
             }
@@ -93,14 +97,15 @@ impl Loader<Text> for PdfLoader {
 /// Render each textless (`NeedsOcr`) page to a PNG, keyed by page number, for
 /// the [`Container`](crate::codec::Container) to surface as an image part.
 #[cfg(all(feature = "pdf-render", feature = "internal_image"))]
-fn scanned_pages(pdf: &elide_pdf::Pdf) -> Result<std::collections::BTreeMap<u32, bytes::Bytes>> {
+fn scanned_pages(
+    pdf: &elide_pdf::Pdf,
+    issues: &[elide_pdf::extract::Issue],
+) -> Result<std::collections::BTreeMap<u32, bytes::Bytes>> {
     use elide_pdf::extract::IssueKind;
 
     // Which 1-based pages have no text layer.
-    let textless: std::collections::BTreeSet<u32> = pdf
-        .extract()
-        .issues
-        .into_iter()
+    let textless: std::collections::BTreeSet<u32> = issues
+        .iter()
         .filter(|issue| matches!(issue.kind, IssueKind::NeedsOcr))
         .map(|issue| issue.page)
         .collect();
