@@ -9,11 +9,11 @@
 #![cfg(feature = "jinja2")]
 
 use elide_core::entity::builtins;
-use elide_core::modality::image::{Image, ImageData, ImageLocation};
 use elide_core::modality::text::{Text, TextData, TextLocation};
-use elide_core::primitive::{BoundingBox, Dimensions, Point};
 use elide_core::recognition::annotation::{Annotations, Inclusion};
 use elide_core::recognition::{RecognizerContext, Scope};
+use elide_image::modality::{Image, ImageData, ImageLocation};
+use elide_image::primitive::{BoundingBox, Dimensions, Point};
 use elide_llm::prompt::{Jinja2Prompt, Prompt};
 
 const TEXT_J2: &str = include_str!("../testdata/text.j2");

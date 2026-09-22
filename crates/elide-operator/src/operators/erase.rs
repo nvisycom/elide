@@ -1,18 +1,18 @@
 //! [`Erase`]: remove the matched entity entirely, in any modality.
 
+#[cfg(feature = "audio")]
+use elide_audio::modality::{Audio, AudioReplacement};
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
-#[cfg(feature = "audio")]
-use elide_core::modality::audio::{Audio, AudioReplacement};
-#[cfg(feature = "image")]
-use elide_core::modality::image::{Image, ImageReplacement};
 #[cfg(feature = "metadata")]
 use elide_core::modality::metadata::{Metadata, MetadataReplacement};
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextReplacement};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+#[cfg(feature = "image")]
+use elide_image::modality::{Image, ImageReplacement};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 

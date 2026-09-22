@@ -1,24 +1,21 @@
 //! [`ImageBuffer`]: a decoded raster image, opened once, then read, redacted,
 //! and re-encoded, the single entry point into this crate.
 
-mod format;
-
 use bytes::Bytes;
 #[cfg(feature = "exif")]
 use elide_core::entity::Entity;
-use elide_core::modality::image::ImageReplacement;
 #[cfg(feature = "exif")]
 use elide_core::modality::metadata::{Metadata, MetadataData};
-use elide_core::primitive::{Color, Dimensions, PixelRegion};
 use elide_core::{Error, ErrorKind, Result};
 use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView, Rgba, RgbaImage};
 
-pub use self::format::ImageFormat;
 #[cfg(feature = "exif")]
 use crate::exif::Source;
+use crate::modality::{ImageFormat, ImageReplacement};
 #[cfg(feature = "exif")]
 use crate::policy::ExifPolicy;
+use crate::primitive::{Color, Dimensions, PixelRegion};
 
 /// A decoded raster image, the single entry point into the crate.
 ///

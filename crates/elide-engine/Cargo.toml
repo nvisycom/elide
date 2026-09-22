@@ -37,13 +37,15 @@ schema = [
     "elide-detection/schema",
     "elide-redaction/schema",
     "elide-codec/schema",
+    "elide-image?/schema",
+    "elide-audio?/schema",
 ]
 
 ## The non-text modalities, forwarded to `elide-core`. A report can carry a
 ## group of any compiled-in modality, so these gate the matching arm of the
 ## `Report` JSON schema; `text` is always available.
-image = ["elide-core/image"]
-audio = ["elide-core/audio"]
+image = ["dep:elide-image"]
+audio = ["dep:elide-audio"]
 tabular = ["elide-core/tabular"]
 metadata = ["elide-core/metadata"]
 
@@ -57,6 +59,8 @@ elide-core = { workspace = true, features = ["serde"] }
 elide-detection = { workspace = true, features = ["serde"] }
 elide-redaction = { workspace = true, features = ["serde"] }
 elide-codec = { workspace = true, features = ["serde"] }
+elide-image = { workspace = true, features = ["serde"], optional = true }
+elide-audio = { workspace = true, features = ["serde"], optional = true }
 
 # (De)serialization
 serde = { workspace = true, features = [] }

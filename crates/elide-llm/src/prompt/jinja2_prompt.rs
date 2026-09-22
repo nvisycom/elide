@@ -20,10 +20,10 @@ use std::ops::Range;
 use std::path::Path;
 
 use elide_core::modality::Modality;
-use elide_core::modality::image::{Image, ImageData};
 use elide_core::modality::text::{Text, TextData};
 use elide_core::recognition::RecognizerContext;
 use elide_core::{Error, ErrorKind, Result};
+use elide_image::modality::{Image, ImageData};
 use minijinja::{Environment, context};
 
 use super::Prompt;

@@ -82,17 +82,17 @@ llm-anthropic = ["llm", "elide-llm/anthropic-claude"]
 ## The Google Gemini provider for the rig LLM backend (implies `llm-rig`).
 llm-gemini = ["llm", "elide-llm/google-gemini"]
 
-## Re-export the STT (speech-to-text) recognizer crate.
-stt = ["dep:elide-stt", "audio"]
-## Re-export the OCR recognizer crate.
-ocr = ["dep:elide-ocr", "image"]
+## Re-export the STT (speech-to-text) recognizer (from the audio crate).
+stt = ["dep:elide-audio", "elide-audio/stt", "audio"]
+## Re-export the OCR recognizer (from the image crate).
+ocr = ["dep:elide-image", "elide-image/ocr", "image"]
 
 ## The `audio` modality. Implied by the audio codec formats.
-audio = ["elide-core/audio", "elide-operator/audio", "elide-engine?/audio"]
+audio = ["dep:elide-audio", "elide-operator/audio", "elide-engine?/audio"]
 ## The `image` modality. Implied by the image codec formats. Pulls in the
 ## `metadata` modality too: a raster image carries EXIF metadata as a redactable
 ## sub-part.
-image = ["elide-core/image", "elide-operator/image", "elide-engine?/image", "metadata"]
+image = ["dep:elide-image", "elide-operator/image", "elide-engine?/image", "metadata"]
 ## The `metadata` modality: a document's out-of-band fields (EXIF, document
 ## properties) as redaction subjects.
 metadata = ["elide-core/metadata", "elide-operator/metadata", "elide-engine?/metadata"]
@@ -138,7 +138,7 @@ codec-pdf-render = ["codec-pdf", "elide-codec/pdf-render"]
 codec-rtf = ["codec", "elide-codec/rtf"]
 
 ## Ship the no-op mock backends in the re-exported recognizer crates.
-test-utils = ["elide-ner?/test-utils", "elide-llm?/test-utils", "elide-stt?/test-utils", "elide-ocr?/test-utils"]
+test-utils = ["elide-ner?/test-utils", "elide-llm?/test-utils", "elide-audio?/test-utils", "elide-image?/test-utils"]
 
 ## Resource-usage accounting across the toolkit: the [`Usage`] vocabulary, the
 ## per-recognizer / per-enricher model-usage recognitions and enrichments
@@ -151,8 +151,8 @@ usage = [
     "elide-engine?/usage",
     "elide-llm?/usage",
     "elide-ner?/usage",
-    "elide-ocr?/usage",
-    "elide-stt?/usage",
+    "elide-image?/usage",
+    "elide-audio?/usage",
 ]
 
 ## The one-way `Sha2Hash` operator (SHA-256 / SHA-512).
@@ -175,8 +175,8 @@ elide-pattern = { workspace = true, features = [], optional = true }
 elide-ner = { workspace = true, features = [], optional = true }
 elide-lingua = { workspace = true, features = [], optional = true }
 elide-llm = { workspace = true, features = [], optional = true }
-elide-stt = { workspace = true, features = [], optional = true }
-elide-ocr = { workspace = true, features = [], optional = true }
+elide-audio = { workspace = true, features = [], optional = true }
+elide-image = { workspace = true, features = [], optional = true }
 elide-codec = { workspace = true, features = [], optional = true }
 elide-engine = { workspace = true, features = [], optional = true }
 elide-operator = { workspace = true, features = [] }

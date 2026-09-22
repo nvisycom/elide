@@ -9,22 +9,22 @@
 //!
 //! [`Enricher`]: elide_core::enrichment::Enricher
 
-#[doc(inline)]
-pub use elide_core::enrichment::{Enricher, Enrichment};
-/// Language detection for language-aware recognizers and policies.
-#[cfg(feature = "lingua")]
-#[cfg_attr(docsrs, doc(cfg(feature = "lingua")))]
-#[doc(inline)]
-pub use elide_lingua as lingua;
-/// OCR backends and the enricher that runs text recognizers over the
-/// recognized image text.
-#[cfg(feature = "ocr")]
-#[cfg_attr(docsrs, doc(cfg(feature = "ocr")))]
-#[doc(inline)]
-pub use elide_ocr as ocr;
 /// Speech-to-text backends and the enricher that runs text recognizers
 /// over the transcript.
 #[cfg(feature = "stt")]
 #[cfg_attr(docsrs, doc(cfg(feature = "stt")))]
 #[doc(inline)]
-pub use elide_stt as stt;
+pub use elide_audio::stt;
+#[doc(inline)]
+pub use elide_core::enrichment::{Enricher, Enrichment};
+/// OCR backends and the enricher that runs text recognizers over the
+/// recognized image text.
+#[cfg(feature = "ocr")]
+#[cfg_attr(docsrs, doc(cfg(feature = "ocr")))]
+#[doc(inline)]
+pub use elide_image::ocr;
+/// Language detection for language-aware recognizers and policies.
+#[cfg(feature = "lingua")]
+#[cfg_attr(docsrs, doc(cfg(feature = "lingua")))]
+#[doc(inline)]
+pub use elide_lingua as lingua;

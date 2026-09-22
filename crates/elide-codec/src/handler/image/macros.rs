@@ -64,7 +64,7 @@ macro_rules! impl_image_handler {
         /// Build this format's [`Format`](crate::Format) from a configured
         /// fallback policy.
         fn format_from(policy: ::elide_image::ExifPolicy) -> crate::Format {
-            crate::Format::new::<::elide_core::modality::image::Image, _>(
+            crate::Format::new::<::elide_image::modality::Image, _>(
                 FORMAT_ID.clone(),
                 $loader { policy },
             )
@@ -108,7 +108,7 @@ macro_rules! impl_image_handler {
         }
 
         #[::async_trait::async_trait]
-        impl crate::Handler<::elide_core::modality::image::Image> for $handler {
+        impl crate::Handler<::elide_image::modality::Image> for $handler {
             fn format(&self) -> crate::FormatId {
                 FORMAT_ID.clone()
             }
@@ -135,14 +135,14 @@ macro_rules! impl_image_handler {
             async fn read_next(
                 &mut self,
             ) -> ::elide_core::Result<
-                ::std::option::Option<::elide_core::modality::Chunk<::elide_core::modality::image::Image>>,
+                ::std::option::Option<::elide_core::modality::Chunk<::elide_image::modality::Image>>,
             > {
                 if self.yielded {
                     return Ok(None);
                 }
                 let dims = self.buffer.dimensions();
-                let bbox = ::elide_core::primitive::BoundingBox::from_origin_size(
-                    ::elide_core::primitive::Point::new(0.0, 0.0),
+                let bbox = ::elide_image::primitive::BoundingBox::from_origin_size(
+                    ::elide_image::primitive::Point::new(0.0, 0.0),
                     dims.width as f64,
                     dims.height as f64,
                 );
@@ -151,13 +151,13 @@ macro_rules! impl_image_handler {
                 // the `#exif` sub-part, not here), so stripping metadata costs
                 // detection nothing and keeps EXIF out of a recognizer call that
                 // may leave the process (e.g. a VLM request).
-                let data = ::elide_core::modality::image::ImageData::new(
+                let data = ::elide_image::modality::ImageData::new(
                     self.buffer.encode(self.policy)?,
                     dims,
                 );
                 self.yielded = true;
                 Ok(Some(::elide_core::modality::Chunk {
-                    location: ::elide_core::modality::image::ImageLocation::new(bbox),
+                    location: ::elide_image::modality::ImageLocation::new(bbox),
                     data,
                     hints: ::std::vec::Vec::new(),
                 }))
@@ -165,12 +165,12 @@ macro_rules! impl_image_handler {
         }
 
         #[::async_trait::async_trait]
-        impl ::elide_core::modality::DataReader<::elide_core::modality::image::Image> for $handler {
+        impl ::elide_core::modality::DataReader<::elide_image::modality::Image> for $handler {
             async fn read_at(
                 &self,
-                location: &::elide_core::modality::image::ImageLocation,
+                location: &::elide_image::modality::ImageLocation,
             ) -> ::elide_core::Result<
-                ::std::option::Option<::elide_core::modality::image::ImageData>,
+                ::std::option::Option<::elide_image::modality::ImageData>,
             > {
                 let dims = self.buffer.dimensions();
                 let Some(region) = location.bounding_box.to_pixels(dims) else {
@@ -178,16 +178,16 @@ macro_rules! impl_image_handler {
                 };
                 let region_dims = region.dimensions();
                 Ok(self.buffer.crop(region)?.map(|bytes| {
-                    ::elide_core::modality::image::ImageData::new(bytes, region_dims)
+                    ::elide_image::modality::ImageData::new(bytes, region_dims)
                 }))
             }
         }
 
         #[::async_trait::async_trait]
-        impl ::elide_core::modality::DataWriter<::elide_core::modality::image::Image> for $handler {
+        impl ::elide_core::modality::DataWriter<::elide_image::modality::Image> for $handler {
             async fn write_at(
                 &mut self,
-                redactions: ::elide_core::redaction::Redactions<::elide_core::modality::image::Image>,
+                redactions: ::elide_core::redaction::Redactions<::elide_image::modality::Image>,
             ) -> ::elide_core::Result<()> {
                 let dims = self.buffer.dimensions();
                 for (location, replacement) in redactions.into_iter() {
@@ -232,7 +232,7 @@ macro_rules! impl_image_handler {
         }
 
         #[::async_trait::async_trait]
-        impl crate::Loader<::elide_core::modality::image::Image> for $loader {
+        impl crate::Loader<::elide_image::modality::Image> for $loader {
             type Handler = $handler;
 
             async fn decode(

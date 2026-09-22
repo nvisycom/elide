@@ -5,6 +5,7 @@
 pub mod detection;
 pub mod enrichment;
 pub mod modality;
+pub mod primitive;
 pub mod recognition;
 pub mod redaction;
 
@@ -27,9 +28,9 @@ pub mod codec;
 /// [`async_trait`]: async_trait::async_trait
 pub use async_trait::async_trait;
 #[doc(inline)]
-pub use elide_core::{Error, ErrorKind, Result};
+pub use elide_core::entity;
 #[doc(inline)]
-pub use elide_core::{entity, primitive};
+pub use elide_core::{Error, ErrorKind, Result};
 // The orchestration engine (`Orchestrator`, `Report`, `Directives`, …), a
 // small curated set, re-exported flat at the root under the `engine` feature.
 // `engine` implies `codec` (the orchestrator decodes through it) and serde.

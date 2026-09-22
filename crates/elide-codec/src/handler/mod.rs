@@ -72,7 +72,7 @@ pub use self::document::pptx_format;
 pub use self::document::rtf_format;
 #[cfg(feature = "pdf")]
 #[cfg_attr(docsrs, doc(cfg(feature = "pdf")))]
-pub use self::document::{RasterMode, pdf_format};
+pub use self::document::{Dpi, RasterMode, pdf_format};
 #[cfg(any(feature = "png", feature = "jpeg", feature = "tiff"))]
 #[cfg_attr(
     docsrs,

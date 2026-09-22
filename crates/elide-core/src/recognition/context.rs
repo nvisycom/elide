@@ -40,14 +40,12 @@ pub struct RecognizerContext<'a, M: Modality> {
     /// [`inclusions`]: Self::inclusions
     /// [`exclusions`]: Self::exclusions
     annotations: Option<&'a Annotations<M>>,
-    /// The medium's per-payload enrichment ([`Layout`] for an image, a
-    /// [`Transcription`] for audio, [`NoArtifact`] for plain text). An enricher
+    /// The medium's per-payload enrichment (a `Layout` for an image, a
+    /// `Transcription` for audio, [`NoArtifact`] for plain text). An enricher
     /// produces it once; the recognizers read the text and coordinates it
     /// carries through [`as_text`] / [`locate`]. Empty ([`Default`]) until an
     /// enricher fills it.
     ///
-    /// [`Layout`]: crate::modality::image::Layout
-    /// [`Transcription`]: crate::modality::audio::Transcription
     /// [`NoArtifact`]: crate::modality::NoArtifact
     /// [`as_text`]: crate::modality::TextRecognizable::as_text
     /// [`locate`]: crate::modality::TextRecognizable::locate

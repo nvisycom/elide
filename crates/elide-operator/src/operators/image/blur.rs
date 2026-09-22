@@ -2,8 +2,8 @@
 
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::modality::image::{Image, ImageData, ImageReplacement};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_image::modality::{Image, ImageData, ImageReplacement};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -63,9 +63,10 @@ impl Operator<Image> for Blur {
 mod tests {
     use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
     use elide_core::entity::{Entity, LabelRef};
-    use elide_core::modality::image::{Image, ImageData, ImageLocation, ImageReplacement};
-    use elide_core::primitive::{BoundingBox, Confidence, Dimensions, Point};
+    use elide_core::primitive::Confidence;
     use elide_core::redaction::Operator;
+    use elide_image::modality::{Image, ImageData, ImageLocation, ImageReplacement};
+    use elide_image::primitive::{BoundingBox, Dimensions, Point};
 
     use crate::operators::{Blackbox, Blur, Pixelate};
 

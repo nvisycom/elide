@@ -6,7 +6,7 @@
 //! ([`TextCandidate`] / [`ImageCandidate`]); the recognizer localizes each
 //! candidate into the source and builds the final entity.
 
-use elide_core::primitive::UnitBoundingBox;
+use elide_image::primitive::UnitBoundingBox;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

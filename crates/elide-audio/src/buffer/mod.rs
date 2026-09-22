@@ -1,15 +1,12 @@
 //! [`AudioBuffer`]: an audio clip opened once, then read, redacted, and
 //! re-encoded, the single entry point into this crate.
 
-mod format;
-
 use bytes::Bytes;
-use elide_core::modality::audio::{Audio, AudioLocation, AudioReplacement};
-use elide_core::primitive::TimeSpan;
 use elide_core::redaction::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 
-pub use self::format::AudioFormat;
+use crate::modality::{Audio, AudioFormat, AudioLocation, AudioReplacement};
+use crate::primitive::TimeSpan;
 
 /// An audio clip, the single entry point into the crate.
 ///
@@ -158,10 +155,10 @@ impl AudioBuffer {
 mod tests {
     use std::io::Cursor;
 
-    use elide_core::modality::audio::{AudioLocation, AudioReplacement};
     use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 
     use super::*;
+    use crate::modality::{AudioLocation, AudioReplacement};
 
     /// A 1-second 8000 Hz mono i16 WAV ramp, encoded to bytes.
     fn ramp_wav() -> Bytes {
@@ -237,11 +234,11 @@ mod tests {
 #[cfg(all(test, feature = "mp3"))]
 mod mp3_tests {
     use bytes::Bytes;
-    use elide_core::modality::audio::{Audio, AudioLocation, AudioReplacement};
     use elide_core::redaction::Redactions;
 
     use super::{AudioBuffer, AudioFormat};
     use crate::engine::mp3::{decode_to_pcm, encode_from_pcm};
+    use crate::modality::{Audio, AudioLocation, AudioReplacement};
 
     /// ~0.5s of mono 16 kHz tone, encoded to MP3 bytes.
     fn tone_mp3() -> Bytes {

@@ -1,15 +1,15 @@
 //! [`Keep`]: pass the matched entity through unchanged.
 
+#[cfg(feature = "audio")]
+use elide_audio::modality::{Audio, AudioData, AudioReplacement};
 use elide_core::Result;
 use elide_core::entity::Entity;
-#[cfg(feature = "audio")]
-use elide_core::modality::audio::{Audio, AudioData, AudioReplacement};
-#[cfg(feature = "image")]
-use elide_core::modality::image::{Image, ImageData, ImageReplacement};
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+#[cfg(feature = "image")]
+use elide_image::modality::{Image, ImageData, ImageReplacement};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -146,8 +146,8 @@ mod tests {
     #[cfg(feature = "image")]
     #[tokio::test]
     async fn image_keep_leaves_the_region_unchanged() {
-        use elide_core::modality::image::{Image, ImageData, ImageLocation, ImageReplacement};
-        use elide_core::primitive::{BoundingBox, Dimensions, Point};
+        use elide_image::modality::{Image, ImageData, ImageLocation, ImageReplacement};
+        use elide_image::primitive::{BoundingBox, Dimensions, Point};
 
         let bbox = BoundingBox::from_origin_size(Point::new(0.0, 0.0), 2.0, 2.0);
         let location = ImageLocation::new(bbox);

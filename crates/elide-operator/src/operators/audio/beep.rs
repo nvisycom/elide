@@ -1,8 +1,8 @@
 //! [`Beep`]: overlay a tone over the matched audio range.
 
+use elide_audio::modality::{Audio, AudioData, AudioReplacement, Waveform};
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::modality::audio::{Audio, AudioData, AudioReplacement, Waveform};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -93,10 +93,11 @@ impl Operator<Audio> for Beep {
 
 #[cfg(test)]
 mod tests {
+    use elide_audio::modality::{AudioData, AudioLocation};
+    use elide_audio::primitive::TimeSpan;
     use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
     use elide_core::entity::{Entity, LabelRef};
-    use elide_core::modality::audio::{AudioData, AudioLocation};
-    use elide_core::primitive::{Confidence, TimeSpan};
+    use elide_core::primitive::Confidence;
 
     use super::*;
 

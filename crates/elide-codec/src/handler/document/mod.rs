@@ -20,6 +20,8 @@
 mod docx_handler;
 #[cfg(feature = "docx")]
 mod docx_loader;
+#[cfg(feature = "pdf")]
+mod dpi;
 #[cfg(any(feature = "docx", feature = "pptx"))]
 mod ooxml;
 #[cfg(feature = "pdf")]
@@ -30,18 +32,19 @@ mod pdf_loader;
 mod pptx_handler;
 #[cfg(feature = "pptx")]
 mod pptx_loader;
+#[cfg(feature = "pdf")]
+mod raster_mode;
 #[cfg(feature = "rtf")]
 mod rtf_handler;
 #[cfg(feature = "rtf")]
 mod rtf_loader;
 
-#[cfg(feature = "pdf")]
-pub use elide_core::primitive::RasterMode;
-
 #[cfg(feature = "docx")]
 pub use self::docx_handler::format as docx_format;
 #[cfg(feature = "docx")]
 pub(crate) use self::docx_loader::DocxLoader;
+#[cfg(feature = "pdf")]
+pub use self::dpi::Dpi;
 #[cfg(feature = "pdf")]
 pub use self::pdf_handler::format as pdf_format;
 #[cfg(feature = "pdf-render")]
@@ -52,6 +55,8 @@ pub(crate) use self::pdf_loader::PdfLoader;
 pub use self::pptx_handler::format as pptx_format;
 #[cfg(feature = "pptx")]
 pub(crate) use self::pptx_loader::PptxLoader;
+#[cfg(feature = "pdf")]
+pub use self::raster_mode::RasterMode;
 #[cfg(feature = "rtf")]
 pub use self::rtf_handler::format as rtf_format;
 #[cfg(feature = "rtf")]

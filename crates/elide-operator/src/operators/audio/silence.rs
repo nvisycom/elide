@@ -1,8 +1,8 @@
 //! [`Silence`]: replace the matched audio interval with silence.
 
+use elide_audio::modality::{Audio, AudioData, AudioReplacement};
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::modality::audio::{Audio, AudioData, AudioReplacement};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
