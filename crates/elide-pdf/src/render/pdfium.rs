@@ -119,6 +119,14 @@ impl Binding {
             })?;
         let config = PdfRenderConfig::new().scale_page_by_factor(scale);
 
+        let page_count = document.pages().len() as usize;
+        if page_count > MAX_PAGES {
+            return Err(Error::new(
+                ErrorKind::ResourceLimit,
+                format!("document has {page_count} pages, over the {MAX_PAGES}-page render limit"),
+            ));
+        }
+
         let mut pages = Vec::new();
         for page in document.pages().iter() {
             pages.push(render_page(&page, &config)?);

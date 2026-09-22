@@ -298,7 +298,23 @@ fn walk_stream(
             .get(b"ToUnicode")
             .ok()
             .and_then(|o| o.as_reference().ok());
-        let slot = ctx.accum.fonts.len() as u16;
+        // The font-table index is a `u16` a glyph records to route its code to
+        // the right `/ToUnicode` CMap at scrub time. Every stream walk (including
+        // each re-walk allowed by the walk budget) appends its scope's fonts, so
+        // the table can grow; if it would exceed the `u16` range the slot would
+        // truncate and misroute the scrub, leaving deleted text recoverable.
+        // Fail closed instead, as everywhere else a glyph might slip the scrub.
+        let Ok(slot) = u16::try_from(ctx.accum.fonts.len()) else {
+            return Err(Error::new(
+                ErrorKind::Redaction,
+                format!(
+                    "page {} references more than {} fonts across its content \
+                     streams; its text cannot be safely redacted",
+                    ctx.page,
+                    u16::MAX,
+                ),
+            ));
+        };
         ctx.accum.fonts.push(FontEntry { to_unicode });
         font_slot.insert(name.clone(), slot);
         encodings.insert(name.clone(), font.get_font_encoding(doc).ok());

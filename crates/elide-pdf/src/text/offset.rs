@@ -6,8 +6,8 @@
 //! records that correspondence as a list of [`runs`](OffsetRun): each run ties a
 //! contiguous stretch of decoded characters to the glyph bytes (at one address)
 //! that drew them. A synthetic gap (a word space no glyph drew) is a run with no
-//! address. Resolving a detected character range to the exact glyph byte ranges
-//! it must delete is then [`resolve`](OffsetMap::resolve).
+//! address. Mapping a detected character range to the exact glyph bytes it must
+//! delete is then [`glyph_bytes`](OffsetMap::glyph_bytes).
 
 use super::Address;
 

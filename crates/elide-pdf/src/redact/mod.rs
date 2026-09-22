@@ -57,9 +57,12 @@ enum StreamKey {
     XObject(ObjectId),
 }
 
-/// Glyph byte ranges to delete, grouped by the physical stream and the string
-/// operand within it they live in.
-type Deletions = BTreeMap<(StreamKey, Address), Vec<(usize, usize)>>;
+/// Glyph byte ranges to delete: grouped first by the physical stream
+/// ([`StreamKey`]) they edit, then by the string operand ([`Address`]) within
+/// that stream. Nesting the map on the stream lets a rewrite look up just its own
+/// stream's deletions instead of scanning every stream's. Each value is the list
+/// of byte ranges (`(start, end)`) within that operand's string to drain.
+type Deletions = BTreeMap<StreamKey, BTreeMap<Address, Vec<(usize, usize)>>>;
 
 /// Redact `detections` by deleting the glyphs that drew them, then sanitise the
 /// document (strip annotations, form values, embedded files, the outline,
@@ -143,7 +146,9 @@ pub(crate) fn redact_text(store: &Store, detections: &[Detection]) -> Result<Vec
                     StreamTarget::XObject(id) => StreamKey::XObject(id),
                 };
                 to_delete
-                    .entry((key, glyph.address))
+                    .entry(key)
+                    .or_default()
+                    .entry(glyph.address)
                     .or_default()
                     .push((glyph.byte_start, glyph.byte_end));
                 deleted_glyphs.push(glyph);
@@ -331,22 +336,18 @@ fn write_xobject_content(doc: &mut lopdf::Document, id: ObjectId, content: Vec<u
 /// here to preserve exact layout); a caller needing pixel-faithful layout uses
 /// the raster path instead.
 fn apply_deletions(content: &mut Content, to_delete: &Deletions, stream: &StreamKey) {
+    // Only this physical stream's deletions; other streams are rewritten in their
+    // own passes.
+    let Some(sites) = to_delete.get(stream) else {
+        return;
+    };
     for (
-        (
-            site_stream,
-            Address {
-                op, operand, item, ..
-            },
-        ),
+        &Address {
+            op, operand, item, ..
+        },
         ranges,
-    ) in to_delete
+    ) in sites
     {
-        let (op, operand, item) = (*op, *operand, *item);
-        // Apply only the deletions targeting this exact physical stream; the
-        // batch spans every page's content and every Form XObject drawn.
-        if site_stream != stream {
-            continue;
-        }
         let Some(op) = content.operations.get_mut(op) else {
             continue;
         };
@@ -455,18 +456,20 @@ mod tests {
         StreamKey::Page(vec![(1, 0)])
     }
 
-    /// The `(StreamKey, Address)` deletion key for the page content's first
-    /// operation, naming `TJ` array element `item`.
-    fn addr(item: usize) -> (StreamKey, Address) {
-        (
-            page_key(),
-            Address {
-                stream: StreamTarget::PageContent,
-                op: 0,
-                operand: 0,
-                item: Some(item),
-            },
-        )
+    /// A [`Deletions`] map deleting `ranges` from `TJ` array element `item` of the
+    /// page content's first operation (the single stream these tests edit).
+    fn deletions(item: usize, ranges: Vec<(usize, usize)>) -> Deletions {
+        let address = Address {
+            stream: StreamTarget::PageContent,
+            op: 0,
+            operand: 0,
+            item: Some(item),
+        };
+        let mut sites = BTreeMap::new();
+        sites.insert(address, ranges);
+        let mut out = Deletions::new();
+        out.insert(page_key(), sites);
+        out
     }
 
     /// Deleting every glyph of a `TJ` string element empties it AND zeroes the
@@ -483,8 +486,7 @@ mod tests {
             (-55).into(),
             Object::string_literal(" Agent"),
         ]);
-        let mut to_delete: Deletions = BTreeMap::new();
-        to_delete.insert(addr(2), vec![(0, 3)]);
+        let to_delete = deletions(2, vec![(0, 3)]);
         apply_deletions(&mut content, &to_delete, &page_key());
 
         let arr = tj_array(&content);
@@ -507,8 +509,7 @@ mod tests {
             (-40).into(),
             Object::string_literal("Agent"),
         ]);
-        let mut to_delete: Deletions = BTreeMap::new();
-        to_delete.insert(addr(0), vec![(0, 3)]);
+        let to_delete = deletions(0, vec![(0, 3)]);
         apply_deletions(&mut content, &to_delete, &page_key());
 
         let arr = tj_array(&content);
@@ -530,8 +531,7 @@ mod tests {
             9.into(),
             Object::string_literal("c"),
         ]);
-        let mut to_delete: Deletions = BTreeMap::new();
-        to_delete.insert(addr(2), vec![(0, 2)]);
+        let to_delete = deletions(2, vec![(0, 2)]);
         apply_deletions(&mut content, &to_delete, &page_key());
 
         let arr = tj_array(&content);
