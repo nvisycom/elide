@@ -47,11 +47,11 @@ render = ["dep:pdfium-render", "dep:rayon", "dep:image", "dep:sha2"]
 test-utils = ["render"]
 
 [dependencies]
+# Internal crates
+elide-core = { workspace = true, features = [] }
+
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }
-
-# Derive macros & error handling
-thiserror = { workspace = true, features = [] }
 
 # Primitive datatypes
 hipstr = { workspace = true, features = [] }

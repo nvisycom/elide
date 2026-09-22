@@ -26,6 +26,12 @@ default = []
 ## Ship the no-op `MockBackend` for tests, examples, and offline wiring.
 test-utils = []
 
+## The `ocrs` engine backend: a pure-Rust OCR engine (ocrs + the RTen runtime,
+## both MIT/Apache-2.0, no native library). Off by default; the detection and
+## recognition models are loaded from disk at runtime (see `OcrsBackend`).
+## `image` decodes the request's encoded bytes to the raw pixels ocrs expects.
+ocrs = ["dep:ocrs", "dep:rten", "dep:rten-imageproc", "dep:image", "dep:rayon", "dep:futures"]
+
 ## Resource-usage accounting: surface the `ModelUsage` the OCR enricher
 ## attaches to its `Enrichment`. Off by default.
 usage = ["elide-core/usage"]
@@ -47,6 +53,14 @@ uuid = { workspace = true, features = ["v7"] }
 
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
+
+# OCR engine (optional; the `ocrs` feature)
+ocrs = { workspace = true, features = [], optional = true }
+rten = { workspace = true, features = [], optional = true }
+rten-imageproc = { workspace = true, features = [], optional = true }
+image = { workspace = true, features = [], optional = true }
+rayon = { workspace = true, features = [], optional = true }
+futures = { workspace = true, features = [], optional = true }
 
 [dev-dependencies]
 # Async runtime & parallelism

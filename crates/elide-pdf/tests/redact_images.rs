@@ -99,7 +99,7 @@ fn is_fail_closed_on_a_non_image_object() {
             image: black_png(),
         }])
         .unwrap_err();
-    assert_eq!(err.kind(), elide_pdf::ErrorKind::UnsafeRewrite);
+    assert_eq!(err.kind(), elide_pdf::ErrorKind::Redaction);
 }
 
 #[test]
@@ -113,7 +113,7 @@ fn is_fail_closed_on_undecodable_image_bytes() {
             image: b"not a real image".to_vec(),
         }])
         .unwrap_err();
-    assert_eq!(err.kind(), elide_pdf::ErrorKind::UnsafeRewrite);
+    assert_eq!(err.kind(), elide_pdf::ErrorKind::Redaction);
 }
 
 /// A one-page PDF with an image XObject that has a soft mask (`/SMask`)

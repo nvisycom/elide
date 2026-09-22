@@ -16,13 +16,16 @@ mod geometry;
 mod pdfium;
 mod raster;
 
+use std::collections::{BTreeMap, BTreeSet};
+
+use elide_core::Result;
+
 pub use self::emit::Certificate;
 pub use self::geometry::{Glyph, GlyphSource, PageObservation, PixelRect};
-pub use self::raster::Detection;
+pub(crate) use self::raster::redact_raster;
 #[cfg(feature = "test-utils")]
 pub use self::raster::verify_raster_coverage;
-use crate::Pdf;
-use crate::error::Result;
+use crate::document::Store;
 
 /// A page rendered to a PNG image, with its pixel dimensions.
 ///
@@ -38,47 +41,60 @@ pub struct RenderedPage {
     pub height: u32,
 }
 
-impl Pdf {
-    /// Render every page of the document to a PNG image at `scale` (1.0 is the
-    /// page's natural size; e.g. 2.0 doubles resolution).
-    ///
-    /// For a scanned or image-only PDF whose text cannot be extracted, this
-    /// produces page images an OCR engine can read. Requires the PDFium shared
-    /// library at runtime.
-    ///
-    /// The pristine bytes the document was opened from are rendered, so a
-    /// redaction is not reflected; to rasterise a redacted document, re-open its
-    /// output bytes and render that.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::InvalidDocument`](crate::ErrorKind::InvalidDocument) if
-    /// PDFium cannot load or render the document (or the native library is
-    /// unavailable).
-    #[cfg_attr(docsrs, doc(cfg(feature = "render")))]
-    pub fn render(&self, scale: f32) -> Result<Vec<RenderedPage>> {
-        // Render the pristine bytes this document was opened from, not a lopdf
-        // re-serialisation, which can degrade the scanned or malformed PDFs OCR
-        // most needs, on the dedicated PDFium thread.
-        pdfium::render(self.source_bytes().to_vec(), scale)
-    }
+/// Render every page of the document in `store` to a PNG image at `scale` (1.0
+/// is the page's natural size; e.g. 2.0 doubles resolution).
+///
+/// For a scanned or image-only PDF whose text cannot be extracted, this produces
+/// page images an OCR engine can read. Requires the PDFium shared library at
+/// runtime.
+///
+/// The pristine bytes the document was opened from are rendered, so a redaction
+/// is not reflected; to rasterise a redacted document, re-open its output bytes
+/// and render that.
+///
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if PDFium
+/// cannot load or render the document (or the native library is unavailable).
+pub(crate) fn render(store: &Store, scale: f32) -> Result<Vec<RenderedPage>> {
+    // Render the pristine bytes this document was opened from, not a lopdf
+    // re-serialisation, which can degrade the scanned or malformed PDFs OCR most
+    // needs, on the dedicated PDFium thread.
+    pdfium::render(store.source_bytes().to_vec(), scale)
+}
 
-    /// Observe every page at `scale`: render it to RGB8 pixels and extract its
-    /// text-layer glyphs in rendered-pixel space.
-    ///
-    /// This is the input to raster redaction: each [`PageObservation`] carries
-    /// the pixels to overwrite, the page text detection runs over, and the
-    /// glyph boxes that map a detected UTF-16 span back to pixels. A page with
-    /// no text layer yields an observation with pixels but no glyphs, a caller
-    /// supplies OCR glyphs for those.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::InvalidDocument`](crate::ErrorKind::InvalidDocument) if
-    /// PDFium cannot load or render the document (or the native library is
-    /// unavailable).
-    #[cfg_attr(docsrs, doc(cfg(feature = "render")))]
-    pub fn observe(&self, scale: f32) -> Result<Vec<PageObservation>> {
-        pdfium::observe(self.source_bytes().to_vec(), scale)
-    }
+/// Render only the 1-based pages in `numbers` at `scale`, returning each keyed
+/// by its page number.
+///
+/// Pages not named are not rasterised, so a pass that needs only a few pages
+/// (e.g. the scanned pages of a mostly born-digital document) does not pay to
+/// render the whole document.
+///
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if PDFium
+/// cannot load or render the document (or the native library is unavailable).
+pub(crate) fn render_pages(
+    store: &Store,
+    numbers: BTreeSet<u32>,
+    scale: f32,
+) -> Result<BTreeMap<u32, RenderedPage>> {
+    pdfium::render_pages(store.source_bytes().to_vec(), numbers, scale)
+}
+
+/// Observe every page at `scale`: render it to RGB8 pixels and extract its
+/// text-layer glyphs in rendered-pixel space.
+///
+/// This is the input to raster redaction: each [`PageObservation`] carries the
+/// pixels to overwrite, the page text detection runs over, and the glyph boxes
+/// that map a detected character span back to pixels. A page with no text layer
+/// yields an observation with pixels but no glyphs, a caller supplies OCR glyphs
+/// for those.
+///
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if PDFium
+/// cannot load or render the document (or the native library is unavailable).
+pub(crate) fn observe(store: &Store, scale: f32) -> Result<Vec<PageObservation>> {
+    pdfium::observe(store.source_bytes().to_vec(), scale)
 }

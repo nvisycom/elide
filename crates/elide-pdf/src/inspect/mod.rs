@@ -11,17 +11,17 @@
 mod coverage;
 mod risk;
 
-use lopdf::Object;
+use elide_core::{Error, ErrorKind, Result};
+use lopdf::{Document, Object};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 pub use self::coverage::{Coverage, CoverageGap, CoverageStatus};
 pub use self::risk::RiskInventory;
-use crate::Pdf;
-use crate::error::{Error, Result};
+use crate::document::Store;
 
 /// A bounded inventory of a PDF's risk-bearing structures and inspection
-/// coverage, produced by [`Pdf::inspect`].
+/// coverage, produced by [`Pdf::inspect`](crate::Pdf::inspect).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(
     feature = "serde",
@@ -46,54 +46,60 @@ pub struct Inspection {
 
 impl Inspection {
     /// Maximum number of indirect objects an inspected document may hold. A
-    /// larger graph is refused by [`Pdf::inspect`] rather than walked unbounded.
+    /// larger graph is refused by [`Pdf::inspect`](crate::Pdf::inspect) rather
+    /// than walked unbounded.
     pub const MAX_OBJECTS: usize = 200_000;
     /// Maximum number of pages an inspected document may hold.
     pub const MAX_PAGES: usize = 10_000;
-}
 
-impl Pdf {
-    /// Inspect the document: inventory its risk-bearing structures and report
-    /// how completely it could be inspected.
+    /// Inspect the document in `store`: inventory its risk-bearing structures and
+    /// report how completely it could be inspected.
     ///
     /// This reads the current object graph only. An encrypted document, a
-    /// retained prior revision, or bytes after the final `%%EOF` are recorded
-    /// as [coverage gaps](CoverageGap) rather than silently ignored, so a
-    /// caller never treats an incomplete inspection as a clean one.
+    /// retained prior revision, or bytes after the final `%%EOF` are recorded as
+    /// [coverage gaps](CoverageGap) rather than silently ignored, so a caller
+    /// never treats an incomplete inspection as a clean one.
     ///
     /// Inspection alone is **not** anonymisation: it says what sensitive
     /// structures exist, not that they have been removed.
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::LimitExceeded`](crate::ErrorKind::LimitExceeded) if the
-    /// document exceeds the object-count ([`MAX_OBJECTS`](Inspection::MAX_OBJECTS))
-    /// or page-count ([`MAX_PAGES`](Inspection::MAX_PAGES)) bound, refused
-    /// rather than walked unboundedly.
-    pub fn inspect(&self) -> Result<Inspection> {
-        let object_count = self.doc.objects.len();
-        if object_count > Inspection::MAX_OBJECTS {
-            return Err(Error::limit_exceeded(format!(
-                "document has {object_count} objects, over the {}-object limit",
-                Inspection::MAX_OBJECTS
-            )));
+    /// [`ErrorKind::ResourceLimit`](crate::ErrorKind::ResourceLimit) if the
+    /// document exceeds the object-count ([`MAX_OBJECTS`](Self::MAX_OBJECTS)) or
+    /// page-count ([`MAX_PAGES`](Self::MAX_PAGES)) bound, refused rather than
+    /// walked unboundedly.
+    pub(crate) fn of(store: &Store) -> Result<Self> {
+        let doc = store.doc();
+        let object_count = doc.objects.len();
+        if object_count > Self::MAX_OBJECTS {
+            return Err(Error::new(
+                ErrorKind::ResourceLimit,
+                format!(
+                    "document has {object_count} objects, over the {}-object limit",
+                    Self::MAX_OBJECTS
+                ),
+            ));
         }
-        let pages = self.doc.get_pages();
-        if pages.len() > Inspection::MAX_PAGES {
-            return Err(Error::limit_exceeded(format!(
-                "document has {} pages, over the {}-page limit",
-                pages.len(),
-                Inspection::MAX_PAGES
-            )));
+        let pages = doc.get_pages();
+        if pages.len() > Self::MAX_PAGES {
+            return Err(Error::new(
+                ErrorKind::ResourceLimit,
+                format!(
+                    "document has {} pages, over the {}-page limit",
+                    pages.len(),
+                    Self::MAX_PAGES
+                ),
+            ));
         }
 
-        let encrypted = self.doc.is_encrypted();
-        let mut risks = self.risk_inventory();
+        let encrypted = doc.is_encrypted();
+        let mut risks = risk_inventory(doc);
 
         // Retained-bytes accounting works on the raw source, independent of the
         // parsed graph: extra `%%EOF` markers mean superseded revisions, and
         // non-whitespace bytes after the last one are unaccounted content.
-        let (revisions, trailing) = retained_bytes(&self.source_bytes());
+        let (revisions, trailing) = retained_bytes(&store.source_bytes());
         risks.incremental_revision_count = revisions;
         risks.trailing_non_whitespace_byte_count = trailing;
 
@@ -105,8 +111,8 @@ impl Pdf {
             gaps.push(CoverageGap::RetainedDocumentBytes);
         }
 
-        Ok(Inspection {
-            pdf_version: self.doc.version.clone(),
+        Ok(Self {
+            pdf_version: doc.version.clone(),
             object_count: object_count.min(u32::MAX as usize) as u32,
             page_count: pages.len().min(u32::MAX as usize) as u32,
             encrypted,
@@ -114,88 +120,128 @@ impl Pdf {
             coverage: Coverage::from_gaps(gaps),
         })
     }
+}
 
-    /// Walk the object graph once and tally every risk-bearing structure.
-    fn risk_inventory(&self) -> RiskInventory {
-        let mut risks = RiskInventory::default();
+/// Verify the document in `store` carries no superseded revision or trailing
+/// bytes: the bytes are a single, flattened revision with nothing recoverable
+/// from a prior incremental update.
+///
+/// A redaction re-save (`redact_text`, the raster emit) rewrites the whole
+/// document, so its output is flattened; this checks that invariant holds.
+///
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if the
+/// document retains a superseded incremental revision or non-whitespace bytes
+/// after the final `%%EOF`.
+pub(crate) fn verify_flattened(store: &Store) -> Result<()> {
+    let (revisions, trailing) = retained_bytes(&store.source_bytes());
+    if revisions > 0 {
+        return Err(Error::new(
+            ErrorKind::MalformedInput,
+            format!("document retains {revisions} superseded incremental revision(s)"),
+        ));
+    }
+    if trailing > 0 {
+        return Err(Error::new(
+            ErrorKind::MalformedInput,
+            format!("document has {trailing} non-whitespace byte(s) after the final %%EOF"),
+        ));
+    }
+    Ok(())
+}
 
-        // Trailer-rooted structures.
-        if let Ok(info) = self
-            .doc
-            .trailer
-            .get(b"Info")
-            .and_then(Object::as_reference)
-            .and_then(|id| self.doc.get_object(id))
+/// Walk the object graph once and tally every risk-bearing structure.
+fn risk_inventory(doc: &Document) -> RiskInventory {
+    let mut risks = RiskInventory::default();
+
+    // Page thumbnails (`/Thumb`): a per-page key, not a typed object, so it is
+    // counted by walking the pages rather than the object graph below.
+    for page_id in doc.get_pages().values() {
+        if doc
+            .get_object(*page_id)
             .and_then(Object::as_dict)
+            .map(|d| d.has(b"Thumb"))
+            .unwrap_or(false)
         {
-            risks.document_info_entry_count = info.len().min(u32::MAX as usize) as u32;
+            risks.thumbnail_count += 1;
         }
-        if let Ok(form) = self
-            .doc
-            .catalog()
-            .and_then(|catalog| catalog.get(b"AcroForm"))
-            .and_then(|o| self.resolve_dict(o))
-        {
-            if let Ok(fields) = form.get(b"Fields").and_then(Object::as_array) {
-                risks.acro_form_field_count = fields.len().min(u32::MAX as usize) as u32;
-            }
-            if form.has(b"XFA") {
-                risks.xfa_entry_count = xfa_entry_count(form.get(b"XFA").ok());
-            }
-        }
-
-        // Per-object classification: one pass over the whole graph.
-        for object in self.doc.objects.values() {
-            let Ok(dict) = object
-                .as_dict()
-                .or_else(|_| object.as_stream().map(|s| &s.dict))
-            else {
-                continue;
-            };
-            let ty = dict.get(b"Type").and_then(Object::as_name).ok();
-            let subtype = dict.get(b"Subtype").and_then(Object::as_name).ok();
-
-            match ty {
-                Some(b"Metadata") => risks.metadata_stream_count += 1,
-                Some(b"Annot") => risks.annotation_count += 1,
-                Some(b"Sig") => risks.signature_count += 1,
-                Some(b"Filespec") | Some(b"EmbeddedFile") => risks.embedded_file_count += 1,
-                Some(b"OCG") => risks.optional_content_group_count += 1,
-                _ => {}
-            }
-            match subtype {
-                Some(b"Image") => risks.image_object_count += 1,
-                Some(b"Form") => risks.form_x_object_count += 1,
-                _ => {}
-            }
-
-            // Action dictionaries: classify by `/S` (action subtype).
-            if dict.has(b"S")
-                && (dict.has(b"URI")
-                    || dict.has(b"JS")
-                    || dict.has(b"F")
-                    || matches!(ty, Some(b"Action")))
-            {
-                match dict.get(b"S").and_then(Object::as_name).ok() {
-                    Some(b"JavaScript") => risks.javascript_action_count += 1,
-                    Some(b"URI") | Some(b"Launch") | Some(b"GoToR") | Some(b"SubmitForm") => {
-                        risks.external_action_count += 1
-                    }
-                    Some(_) => risks.unsupported_action_count += 1,
-                    None => {}
-                }
-            }
-        }
-
-        risks
     }
 
-    /// Resolve an object that may be an indirect reference to its dictionary.
-    fn resolve_dict<'a>(&'a self, object: &'a Object) -> lopdf::Result<&'a lopdf::Dictionary> {
-        match object {
-            Object::Reference(id) => self.doc.get_object(*id).and_then(Object::as_dict),
-            other => other.as_dict(),
+    // Trailer-rooted structures.
+    if let Ok(info) = doc
+        .trailer
+        .get(b"Info")
+        .and_then(Object::as_reference)
+        .and_then(|id| doc.get_object(id))
+        .and_then(Object::as_dict)
+    {
+        risks.document_info_entry_count = info.len().min(u32::MAX as usize) as u32;
+    }
+    if let Ok(form) = doc
+        .catalog()
+        .and_then(|catalog| catalog.get(b"AcroForm"))
+        .and_then(|o| resolve_dict(doc, o))
+    {
+        if let Ok(fields) = form.get(b"Fields").and_then(Object::as_array) {
+            risks.acro_form_field_count = fields.len().min(u32::MAX as usize) as u32;
         }
+        if form.has(b"XFA") {
+            risks.xfa_entry_count = xfa_entry_count(form.get(b"XFA").ok());
+        }
+    }
+
+    // Per-object classification: one pass over the whole graph.
+    for object in doc.objects.values() {
+        let Ok(dict) = object
+            .as_dict()
+            .or_else(|_| object.as_stream().map(|s| &s.dict))
+        else {
+            continue;
+        };
+        let ty = dict.get(b"Type").and_then(Object::as_name).ok();
+        let subtype = dict.get(b"Subtype").and_then(Object::as_name).ok();
+
+        match ty {
+            Some(b"Metadata") => risks.metadata_stream_count += 1,
+            Some(b"Annot") => risks.annotation_count += 1,
+            Some(b"Sig") => risks.signature_count += 1,
+            Some(b"Filespec") | Some(b"EmbeddedFile") => risks.embedded_file_count += 1,
+            Some(b"OCG") => risks.optional_content_group_count += 1,
+            _ => {}
+        }
+        match subtype {
+            Some(b"Image") => risks.image_object_count += 1,
+            Some(b"Form") => risks.form_x_object_count += 1,
+            _ => {}
+        }
+
+        // Action dictionaries: classify by `/S` (action subtype).
+        if dict.has(b"S")
+            && (dict.has(b"URI")
+                || dict.has(b"JS")
+                || dict.has(b"F")
+                || matches!(ty, Some(b"Action")))
+        {
+            match dict.get(b"S").and_then(Object::as_name).ok() {
+                Some(b"JavaScript") => risks.javascript_action_count += 1,
+                Some(b"URI") | Some(b"Launch") | Some(b"GoToR") | Some(b"SubmitForm") => {
+                    risks.external_action_count += 1
+                }
+                Some(_) => risks.unsupported_action_count += 1,
+                None => {}
+            }
+        }
+    }
+
+    risks
+}
+
+/// Resolve an object that may be an indirect reference to its dictionary.
+fn resolve_dict<'a>(doc: &'a Document, object: &'a Object) -> lopdf::Result<&'a lopdf::Dictionary> {
+    match object {
+        Object::Reference(id) => doc.get_object(*id).and_then(Object::as_dict),
+        other => other.as_dict(),
     }
 }
 

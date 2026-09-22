@@ -27,8 +27,10 @@ use elide_pdf::extract::{EmbeddingKind, ImageId};
 use elide_pdf::redact::Detection;
 #[cfg(feature = "internal_image")]
 use elide_pdf::redact::ImageReplacement;
+#[cfg(all(feature = "pdf-render", feature = "internal_image"))]
+use elide_pdf::redact::PageReplacement;
 #[cfg(feature = "pdf-render")]
-use elide_pdf::render::{Detection as RasterDetection, PageObservation};
+use elide_pdf::render::PageObservation;
 
 use super::PdfLoader;
 #[cfg(feature = "pdf-render")]
@@ -94,8 +96,8 @@ pub(crate) enum RedactMode {
     Raster {
         /// Per-page observations (text, glyph boxes, pixels) from `observe`.
         observations: Vec<PageObservation>,
-        /// Recorded pixel-span detections, applied at encode.
-        detections: Vec<RasterDetection>,
+        /// Recorded detections (page + character span), applied at encode.
+        detections: Vec<Detection>,
     },
 }
 
@@ -135,6 +137,15 @@ pub(crate) struct PdfHandler {
     /// image codec (`internal_image`) able to redact the surfaced images.
     #[cfg(feature = "internal_image")]
     pub(crate) image_replacements: std::collections::HashMap<ImageId, Bytes>,
+    /// Textless (scanned) pages rendered to a PNG, keyed by 1-based page number,
+    /// surfaced by the [`Container`] as image parts so the image pipeline OCRs
+    /// and redacts them. Populated under [`RasterMode::Auto`] with `pdf-render`.
+    #[cfg(all(feature = "pdf-render", feature = "internal_image"))]
+    pub(crate) scanned_pages: std::collections::BTreeMap<u32, Bytes>,
+    /// Redacted replacement images for scanned pages, keyed by page number,
+    /// filled through the [`Container`] surface and reflattened on encode.
+    #[cfg(all(feature = "pdf-render", feature = "internal_image"))]
+    pub(crate) page_replacements: std::collections::HashMap<u32, Bytes>,
     /// How recorded redactions are applied on encode.
     pub(crate) mode: RedactMode,
 }
@@ -149,6 +160,28 @@ impl PdfHandler {
             redactable_image_ids: redactable_image_ids(&document),
             document,
             pages,
+            mode: RedactMode::GlyphDelete,
+            ..Self::default()
+        }
+    }
+
+    /// A glyph-deletion handler that also surfaces `scanned_pages` (textless
+    /// pages rendered to PNG) as image parts, so the image pipeline OCRs and
+    /// redacts them while born-digital pages keep their selectable text. The
+    /// [`RasterMode::Auto`] path.
+    ///
+    /// [`RasterMode::Auto`]: super::RasterMode::Auto
+    #[cfg(all(feature = "pdf-render", feature = "internal_image"))]
+    pub(crate) fn text_auto(
+        document: Bytes,
+        pages: Vec<PdfPage>,
+        scanned_pages: std::collections::BTreeMap<u32, Bytes>,
+    ) -> Self {
+        Self {
+            redactable_image_ids: redactable_image_ids(&document),
+            document,
+            pages,
+            scanned_pages,
             mode: RedactMode::GlyphDelete,
             ..Self::default()
         }
@@ -195,7 +228,11 @@ impl Handler<Text> for PdfHandler {
                 let has_images = !self.image_replacements.is_empty();
                 #[cfg(not(feature = "internal_image"))]
                 let has_images = false;
-                if self.deletions.is_empty() && !has_images {
+                #[cfg(all(feature = "pdf-render", feature = "internal_image"))]
+                let has_pages = !self.page_replacements.is_empty();
+                #[cfg(not(all(feature = "pdf-render", feature = "internal_image")))]
+                let has_pages = false;
+                if self.deletions.is_empty() && !has_images && !has_pages {
                     return Ok(ContentData::new(self.document.clone()));
                 }
 
@@ -203,9 +240,8 @@ impl Handler<Text> for PdfHandler {
                 // keeping a selectable text layer. (`mut` is used only when the
                 // image fold below is compiled in.)
                 #[cfg_attr(not(feature = "internal_image"), allow(unused_mut))]
-                let mut out = Pdf::open(&self.document)
-                    .and_then(|pdf| pdf.redact_text(&self.deletions))
-                    .map_err(pdf_error)?;
+                let mut out =
+                    Pdf::open(&self.document).and_then(|pdf| pdf.redact_text(&self.deletions))?;
 
                 // Then fold in any redacted embedded images.
                 #[cfg(feature = "internal_image")]
@@ -218,9 +254,21 @@ impl Handler<Text> for PdfHandler {
                             image: bytes.to_vec(),
                         })
                         .collect();
-                    out = Pdf::open(&out)
-                        .and_then(|pdf| pdf.redact_images(&replacements))
-                        .map_err(pdf_error)?;
+                    out = Pdf::open(&out).and_then(|pdf| pdf.redact_images(&replacements))?;
+                }
+
+                // Then reflatten any scanned pages to their redacted raster.
+                #[cfg(all(feature = "pdf-render", feature = "internal_image"))]
+                if has_pages {
+                    let replacements: Vec<PageReplacement> = self
+                        .page_replacements
+                        .iter()
+                        .map(|(&number, bytes)| PageReplacement {
+                            number,
+                            image: bytes.to_vec(),
+                        })
+                        .collect();
+                    out = Pdf::open(&out).and_then(|pdf| pdf.redact_pages(&replacements))?;
                 }
 
                 Ok(ContentData::new(Bytes::from(out)))
@@ -236,8 +284,7 @@ impl Handler<Text> for PdfHandler {
                 // Fill the detected glyph boxes and emit a fresh image-only PDF
                 //, the strong redaction guarantee. Black fill.
                 let (out, _certificate) = Pdf::open(&self.document)
-                    .and_then(|pdf| pdf.redact_raster(observations.clone(), detections, [0, 0, 0]))
-                    .map_err(pdf_error)?;
+                    .and_then(|pdf| pdf.redact_raster(observations, detections, [0, 0, 0]))?;
                 Ok(ContentData::new(Bytes::from(out)))
             }
         }
@@ -299,10 +346,10 @@ impl DataWriter<Text> for PdfHandler {
         for (location, _replacement) in redactions.into_iter() {
             // Resolve the redaction to the index of the page it falls on and its
             // byte range within that page's text. Both modes address glyphs by
-            // span, not replacement text; the span is measured per mode below
-            // (char offsets for glyph deletion, UTF-16 for raster) so only the
-            // counts a mode needs are computed. PDF text is addressed by decoded
-            // range only; a source-only location has none, so it is skipped.
+            // the same character span into the page text (not replacement text),
+            // so the span is measured once as character offsets below. PDF text
+            // is addressed by decoded range only; a source-only location has
+            // none, so it is skipped.
             let Some(range) = location.range() else {
                 continue;
             };
@@ -324,21 +371,16 @@ impl DataWriter<Text> for PdfHandler {
             }
             let page_number = page.number;
 
-            // Measure the span for the active mode only, then drop the page
-            // borrow before recording (so the sink can be borrowed mutably).
-            if self.mode.is_raster() {
+            // Both paths address glyphs by the same character span into the page
+            // text, so the span is measured once as character offsets; drop the
+            // page borrow before recording so the sink can be borrowed mutably.
+            let start = page.text[..local].chars().count();
+            let end = page.text[..local_end].chars().count();
+            let detection = Detection::new(page_number, start, end);
+            match &mut self.mode {
                 #[cfg(feature = "pdf-render")]
-                {
-                    let start = page.text[..local].encode_utf16().count() as u32;
-                    let end = page.text[..local_end].encode_utf16().count() as u32;
-                    if let RedactMode::Raster { detections, .. } = &mut self.mode {
-                        detections.push(RasterDetection::new(page_number, start, end));
-                    }
-                }
-            } else {
-                let start = page.text[..local].chars().count();
-                let end = page.text[..local_end].chars().count();
-                self.deletions.push(Detection::new(page_number, start, end));
+                RedactMode::Raster { detections, .. } => detections.push(detection),
+                _ => self.deletions.push(detection),
             }
         }
         Ok(())
@@ -366,7 +408,8 @@ impl Container for PdfHandler {
             let Ok(pdf) = Pdf::open(&self.document) else {
                 return Vec::new();
             };
-            pdf.extract()
+            let mut parts: Vec<Part> = pdf
+                .extract()
                 .embeddings
                 .into_iter()
                 .filter_map(|embedding| {
@@ -377,7 +420,21 @@ impl Container for PdfHandler {
                         hint: hint.to_string(),
                     })
                 })
-                .collect()
+                .collect();
+
+            // Textless (scanned) pages, rendered to a PNG, are surfaced as image
+            // parts so the image pipeline OCRs and redacts them. Their part ids
+            // (`page-N`) are a distinct namespace from embedded images (`img-N-G`).
+            #[cfg(feature = "pdf-render")]
+            for (&number, png) in &self.scanned_pages {
+                parts.push(Part {
+                    id: LocalId::new(page_part_id(number)),
+                    bytes: png.clone(),
+                    hint: "png".to_string(),
+                });
+            }
+
+            parts
         }
         #[cfg(not(feature = "internal_image"))]
         Vec::new()
@@ -395,6 +452,16 @@ impl Container for PdfHandler {
         }
         #[cfg(feature = "internal_image")]
         {
+            // A scanned page's redacted raster (`page-N`): store it for the
+            // encode-time reflatten. Validated against the surfaced set.
+            #[cfg(feature = "pdf-render")]
+            if let Some(number) =
+                parse_page_part_id(id.as_str()).filter(|n| self.scanned_pages.contains_key(n))
+            {
+                self.page_replacements.insert(number, bytes);
+                return Ok(());
+            }
+
             // Accept only ids naming an image the container surfaced, validated
             // against the cached id set (no re-extraction per call).
             let image_id = parse_image_part_id(id.as_str())
@@ -442,6 +509,19 @@ fn parse_image_part_id(s: &str) -> Option<ImageId> {
     Some(ImageId::new(number.parse().ok()?, generation.parse().ok()?))
 }
 
+/// The local part-id string for a scanned page: `"page-{number}"`. A distinct
+/// namespace from embedded images (`img-{number}-{generation}`).
+#[cfg(all(feature = "pdf-render", feature = "internal_image"))]
+fn page_part_id(number: u32) -> String {
+    format!("page-{number}")
+}
+
+/// Parse a scanned-page part-id string back into its 1-based page number.
+#[cfg(all(feature = "pdf-render", feature = "internal_image"))]
+fn parse_page_part_id(s: &str) -> Option<u32> {
+    s.strip_prefix("page-")?.parse().ok()
+}
+
 /// A filename-extension hint for an embedded image whose *raw stream bytes* are
 /// a self-contained image file the orchestrator can decode, or `None` when they
 /// are not.
@@ -466,17 +546,6 @@ fn embedding_hint(kind: EmbeddingKind) -> Option<&'static str> {
         EmbeddingKind::CcittFax | EmbeddingKind::Jbig2 | EmbeddingKind::Raw => None,
         _ => None,
     }
-}
-
-/// Map an [`elide_pdf`] error into the codec's error type.
-pub(super) fn pdf_error(err: elide_pdf::Error) -> Error {
-    use elide_pdf::ErrorKind as PdfKind;
-    let kind = match err.kind() {
-        PdfKind::InvalidDocument | PdfKind::LimitExceeded => ErrorKind::MalformedInput,
-        PdfKind::UnsafeRewrite => ErrorKind::Processing,
-        _ => ErrorKind::Processing,
-    };
-    Error::new(kind, err.to_string())
 }
 
 #[cfg(all(test, feature = "internal_image"))]
@@ -620,5 +689,101 @@ mod raster_tests {
             .replace_part(&LocalId::new("img-1-0"), Bytes::from_static(b"x"))
             .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
+    }
+}
+
+/// The scanned-page image-part path (`RasterMode::Auto`), exercised without
+/// PDFium by handing the handler a pre-rendered page raster directly. Proves the
+/// container surfaces a textless page as an image part, accepts a redacted
+/// replacement, and reflattens it on encode, with no OCR backend involved.
+#[cfg(all(test, feature = "pdf-render", feature = "internal_image"))]
+mod scanned_page_tests {
+    use std::collections::BTreeMap;
+    use std::io::Cursor;
+
+    use bytes::Bytes;
+    use elide_pdf::Pdf;
+    use lopdf::{Document, Object, Stream, dictionary};
+
+    use super::{PdfHandler, PdfPage};
+    use crate::codec::Container;
+    use crate::content::ContentData;
+    use crate::{Handler, LocalId};
+
+    /// A solid-colour PNG of `w`x`h`.
+    fn png(w: u32, h: u32, colour: [u8; 3]) -> Vec<u8> {
+        let img = image::RgbImage::from_pixel(w, h, image::Rgb(colour));
+        let mut out = Vec::new();
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut Cursor::new(&mut out), image::ImageFormat::Png)
+            .unwrap();
+        out
+    }
+
+    /// A one-page image-only PDF whose content stream carries a marker so we can
+    /// tell whether the original page content survives a reflatten.
+    fn scanned_doc() -> Bytes {
+        let mut doc = Document::with_version("1.5");
+        let pages_id = doc.new_object_id();
+        let content = doc.add_object(Stream::new(
+            dictionary! {},
+            b"q 1 0 0 1 0 0 cm % SCANNED-PAGE-MARKER".to_vec(),
+        ));
+        let page = doc.add_object(dictionary! {
+            "Type" => "Page", "Parent" => pages_id, "Contents" => content,
+            "MediaBox" => vec![0.into(), 0.into(), 100.into(), 100.into()],
+        });
+        let pages = dictionary! {
+            "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1,
+        };
+        doc.objects.insert(pages_id, Object::Dictionary(pages));
+        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+        doc.trailer.set("Root", catalog);
+        let mut out = Vec::new();
+        doc.save_to(&mut out).unwrap();
+        Bytes::from(out)
+    }
+
+    #[tokio::test]
+    async fn surfaces_a_scanned_page_and_reflattens_it_on_encode() {
+        let document = scanned_doc();
+        // Stand in for the loader's render step: page 1 is textless, so it is
+        // supplied as a rendered raster.
+        let mut scanned = BTreeMap::new();
+        scanned.insert(1u32, Bytes::from(png(100, 100, [200, 200, 200])));
+        let mut handler = PdfHandler::text_auto(document, Vec::<PdfPage>::new(), scanned);
+
+        // The container surfaces the scanned page as a `page-1` image part.
+        let parts = handler.parts();
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].id.as_str(), "page-1");
+        assert_eq!(parts[0].hint, "png");
+
+        // Feed back a redacted (black) raster for that page.
+        let redacted = Bytes::from(png(100, 100, [0, 0, 0]));
+        handler
+            .replace_part(&LocalId::new("page-1"), redacted)
+            .expect("page-1 accepted");
+
+        // Encode reflattens the page: the original page content is gone.
+        let out = Handler::encode(&handler).unwrap();
+        let bytes = ContentData::to_bytes(&out);
+        assert!(
+            !String::from_utf8_lossy(&bytes).contains("SCANNED-PAGE-MARKER"),
+            "original scanned page content survived reflatten"
+        );
+        // The output still opens as a one-page PDF.
+        assert_eq!(Pdf::open(&bytes).unwrap().inspect().unwrap().page_count, 1);
+    }
+
+    #[tokio::test]
+    async fn rejects_a_page_id_the_container_did_not_surface() {
+        let mut handler =
+            PdfHandler::text_auto(scanned_doc(), Vec::<PdfPage>::new(), BTreeMap::new());
+        // No scanned pages were surfaced, so `page-1` is not accepted.
+        let err = handler
+            .replace_part(&LocalId::new("page-1"), Bytes::from_static(b"x"))
+            .unwrap_err();
+        assert_eq!(err.kind(), elide_core::ErrorKind::MalformedInput);
     }
 }

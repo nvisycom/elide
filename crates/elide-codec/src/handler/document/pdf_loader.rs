@@ -10,10 +10,11 @@
 
 use elide_core::Result;
 use elide_core::modality::text::Text;
+use elide_pdf::extract::Block;
 
 #[cfg(feature = "pdf-render")]
 use super::RasterMode;
-use super::pdf_handler::{PdfHandler, PdfPage, pdf_error};
+use super::pdf_handler::{PdfHandler, PdfPage};
 use crate::Loader;
 use crate::content::ContentData;
 
@@ -56,34 +57,86 @@ impl Loader<Text> for PdfLoader {
         #[cfg(feature = "pdf-render")]
         if self.raster.render_dpi().is_some() {
             let observations = observe_pages(&document)?;
-            let pages = pages_from_texts(observations.iter().map(|o| (o.page, o.text.clone())));
+            let pages = pages_from_blocks(
+                observations
+                    .iter()
+                    .map(|o| Block::new(o.page, o.text.clone())),
+            );
             return Ok(PdfHandler::raster(document, pages, observations));
         }
 
         // Default (`Auto`/`Never`, and the whole pure-Rust build): glyph
-        // deletion. The page text comes from `page_texts`, the same walk
-        // `redact_text` uses, so a detection's character span maps to the
-        // glyphs it drew. On encode the glyphs are deleted and
-        // annotations/metadata stripped, keeping a selectable text layer.
-        let pdf = elide_pdf::Pdf::open(&document).map_err(pdf_error)?;
-        let pages = pages_from_texts(pdf.page_texts().map_err(pdf_error)?);
+        // deletion. The page text comes from `extract`, the same content walk
+        // `redact_text` uses, so a detection's character span maps to the glyphs
+        // it drew. On encode the glyphs are deleted and annotations/metadata
+        // stripped, keeping a selectable text layer.
+        let pdf = elide_pdf::Pdf::open(&document)?;
+        // Extract once: `blocks` drive glyph deletion, and (in `Auto`) `issues`
+        // name the textless pages to render. A second `extract()` would re-walk
+        // every page and re-copy the embedded image bytes for nothing.
+        let extraction = pdf.extract();
+        let pages = pages_from_blocks(extraction.blocks);
+
+        // `RasterMode::Auto` (feature `pdf-render` + an image codec): a textless
+        // (scanned) page has no glyphs to delete, so render it and surface it as
+        // an image part for the image pipeline to OCR and redact, while
+        // born-digital pages keep glyph deletion. This is the Auto promise: text
+        // where present, image where absent.
+        #[cfg(all(feature = "pdf-render", feature = "internal_image"))]
+        if matches!(self.raster, RasterMode::Auto) {
+            let scanned = scanned_pages(&pdf, &extraction.issues)?;
+            if !scanned.is_empty() {
+                return Ok(PdfHandler::text_auto(document, pages, scanned));
+            }
+        }
+
         Ok(PdfHandler::text(document, pages))
     }
 }
 
-/// Assemble [`PdfPage`]s from `(page number, text)` pairs, assigning each its
-/// start offset in the concatenated text stream.
+/// Render each textless (`NeedsOcr`) page to a PNG, keyed by page number, for
+/// the [`Container`](crate::codec::Container) to surface as an image part.
+#[cfg(all(feature = "pdf-render", feature = "internal_image"))]
+fn scanned_pages(
+    pdf: &elide_pdf::Pdf,
+    issues: &[elide_pdf::extract::Issue],
+) -> Result<std::collections::BTreeMap<u32, bytes::Bytes>> {
+    use elide_pdf::extract::IssueKind;
+
+    // Which 1-based pages have no text layer.
+    let textless: std::collections::BTreeSet<u32> = issues
+        .iter()
+        .filter(|issue| matches!(issue.kind, IssueKind::NeedsOcr))
+        .map(|issue| issue.page)
+        .collect();
+    if textless.is_empty() {
+        return Ok(std::collections::BTreeMap::new());
+    }
+
+    // Render only the textless pages, not the whole document: a mostly
+    // born-digital PDF with a few scanned pages pays to rasterise just those.
+    const RASTER_SCALE: f32 = 2.0;
+    let rendered = pdf.render_pages(textless, RASTER_SCALE)?;
+    Ok(rendered
+        .into_iter()
+        .map(|(number, page)| (number, bytes::Bytes::from(page.png)))
+        .collect())
+}
+
+/// Assemble [`PdfPage`]s from the engine's per-page text [`Block`]s, assigning
+/// each its start offset in the concatenated text stream.
 ///
 /// Pages are separated by [`PAGE_SEPARATOR`] in the stream coordinate space: the
 /// cumulative offset advances by each page's length *plus* the separator width,
 /// so no detected span can straddle two pages (which encode would then drop).
-fn pages_from_texts(texts: impl IntoIterator<Item = (u32, String)>) -> Vec<PdfPage> {
+fn pages_from_blocks(blocks: impl IntoIterator<Item = Block>) -> Vec<PdfPage> {
     let mut pages = Vec::new();
     let mut offset = 0usize;
-    for (number, text) in texts {
+    for block in blocks {
+        let text = block.text.to_string();
         let len = text.len();
         pages.push(PdfPage {
-            number,
+            number: block.page,
             text,
             start: offset,
         });
@@ -103,7 +156,5 @@ const PAGE_SEPARATOR: &str = "\n";
 fn observe_pages(document: &[u8]) -> Result<Vec<elide_pdf::render::PageObservation>> {
     // A default render scale; higher scales trade output size for fidelity.
     const RASTER_SCALE: f32 = 2.0;
-    elide_pdf::Pdf::open(document)
-        .and_then(|pdf| pdf.observe(RASTER_SCALE))
-        .map_err(pdf_error)
+    elide_pdf::Pdf::open(document).and_then(|pdf| pdf.observe(RASTER_SCALE))
 }

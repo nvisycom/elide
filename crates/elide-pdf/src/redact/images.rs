@@ -13,10 +13,11 @@
 
 use std::collections::BTreeSet;
 
+use elide_core::{Error, ErrorKind, Result};
 use lopdf::{Object, ObjectId};
 
-use super::sanitize::referenced_from_survivors;
-use crate::error::{Error, Result};
+use super::graph::referenced_from_survivors;
+use crate::document::{ObjectRole, Store};
 use crate::extract::ImageId;
 
 /// One image replacement: overwrite the image XObject [`id`](ImageReplacement::id)
@@ -33,82 +34,87 @@ pub struct ImageReplacement {
     pub image: Vec<u8>,
 }
 
-impl crate::Pdf {
-    /// Replace the embedded images named in `replacements` with redacted images,
-    /// returning the new document bytes.
-    ///
-    /// Each [`ImageReplacement`] carries an encoded image (PNG/JPEG); its XObject
-    /// is rebuilt so the stream and dictionary stay consistent. The rest of the
-    /// document is re-saved unchanged.
-    ///
-    /// **Fail-closed:** a replacement naming an object that is not an image
-    /// XObject, or an image that cannot be decoded, refuses the whole rewrite
-    /// rather than emitting a document with a broken or unredacted image.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::UnsafeRewrite`](crate::ErrorKind::UnsafeRewrite) if a
-    /// replacement could not be applied.
-    #[cfg_attr(docsrs, doc(cfg(feature = "image")))]
-    pub fn redact_images(&self, replacements: &[ImageReplacement]) -> Result<Vec<u8>> {
-        let mut doc = self.doc.clone();
+/// Replace the embedded images named in `replacements` with redacted images,
+/// returning the new document bytes.
+///
+/// Each [`ImageReplacement`] carries an encoded image (PNG/JPEG); its XObject is
+/// rebuilt so the stream and dictionary stay consistent. The rest of the
+/// document is re-saved unchanged.
+///
+/// **Fail-closed:** a replacement naming an object that is not an image XObject,
+/// or an image that cannot be decoded, refuses the whole rewrite rather than
+/// emitting a document with a broken or unredacted image.
+///
+/// # Errors
+///
+/// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a replacement could
+/// not be applied.
+pub(crate) fn redact_images(store: &Store, replacements: &[ImageReplacement]) -> Result<Vec<u8>> {
+    let mut doc = store.clone_doc();
 
-        // The original images' sub-objects that encode pixel content, soft
-        // masks, stencil masks, alternate representations, become orphaned when
-        // the rebuilt XObject drops these dict keys. They must be deleted (else
-        // `save_to` still serialises them, leaving a mask that carries the
-        // sensitive shape in the bytes), but only if no *surviving* object still
-        // references them: a mask shared with a retained object would corrupt
-        // the PDF if removed. So gather candidates now, insert all replacements,
-        // then prune with a survivor-reference guard.
-        let mut orphans: BTreeSet<ObjectId> = BTreeSet::new();
+    // The original images' sub-objects that encode pixel content, soft
+    // masks, stencil masks, alternate representations, become orphaned when
+    // the rebuilt XObject drops these dict keys. They must be deleted (else
+    // `save_to` still serialises them, leaving a mask that carries the
+    // sensitive shape in the bytes), but only if no *surviving* object still
+    // references them: a mask shared with a retained object would corrupt
+    // the PDF if removed. So gather candidates now, insert all replacements,
+    // then prune with a survivor-reference guard.
+    let mut orphans: BTreeSet<ObjectId> = BTreeSet::new();
 
-        for replacement in replacements {
-            let id = replacement.id.object();
+    for replacement in replacements {
+        let id = replacement.id.object();
 
-            // The target must already be an image XObject, not a content or
-            // font stream that happens to share the id.
-            let old = doc.get_object(id).ok().and_then(|o| o.as_stream().ok());
-            let is_image = old.and_then(|s| s.dict.get(b"Subtype").and_then(Object::as_name).ok())
-                == Some(b"Image".as_slice());
-            if !is_image {
-                return Err(Error::unsafe_rewrite(format!(
-                    "object ({}, {}) is not an image XObject",
+        // The target must be an image XObject the role seam classifies as
+        // whole-object-replaceable, not a content or font stream, or a
+        // structural object, that happens to share the id.
+        if !ObjectRole::of(&doc, id).is_whole_object_replaceable() {
+            return Err(Error::new(
+                ErrorKind::Redaction,
+                format!(
+                    "object ({}, {}) is not a replaceable image XObject",
                     replacement.id.number, replacement.id.generation
-                )));
-            }
+                ),
+            ));
+        }
 
-            if let Some(stream) = old {
-                orphans.extend(
-                    [b"SMask".as_slice(), b"Mask", b"Alternates"]
-                        .iter()
-                        .filter_map(|key| stream.dict.get(key).and_then(Object::as_reference).ok()),
-                );
-            }
+        if let Some(stream) = doc.get_object(id).ok().and_then(|o| o.as_stream().ok()) {
+            orphans.extend(
+                [b"SMask".as_slice(), b"Mask", b"Alternates"]
+                    .iter()
+                    .filter_map(|key| stream.dict.get(key).and_then(Object::as_reference).ok()),
+            );
+        }
 
-            // Rebuild a valid image XObject from the encoded bytes (lopdf sets
-            // the dictionary, dimensions, colour space, filter, to match).
-            let stream = lopdf::xobject::image_from(replacement.image.clone()).map_err(|e| {
-                Error::unsafe_rewrite(format!(
+        // Rebuild a valid image XObject from the encoded bytes (lopdf sets
+        // the dictionary, dimensions, colour space, filter, to match).
+        let stream = lopdf::xobject::image_from(replacement.image.clone()).map_err(|e| {
+            Error::new(
+                ErrorKind::Redaction,
+                format!(
                     "could not build image ({}, {}): {e}",
                     replacement.id.number, replacement.id.generation
-                ))
-            })?;
-            doc.objects.insert(id, Object::Stream(stream));
-        }
-
-        // With every replacement inserted, an orphan still referenced from a
-        // surviving object is shared and must be kept; delete only the rest.
-        let referenced_by_survivors = referenced_from_survivors(&doc, &orphans);
-        for orphan in &orphans {
-            if !referenced_by_survivors.contains(orphan) {
-                doc.objects.remove(orphan);
-            }
-        }
-
-        let mut out = Vec::new();
-        doc.save_to(&mut out)
-            .map_err(|e| Error::invalid_document(format!("could not save PDF: {e}")))?;
-        Ok(out)
+                ),
+            )
+        })?;
+        doc.objects.insert(id, Object::Stream(stream));
     }
+
+    // With every replacement inserted, an orphan still referenced from a
+    // surviving object is shared and must be kept; delete only the rest.
+    let referenced_by_survivors = referenced_from_survivors(&doc, &orphans);
+    for orphan in &orphans {
+        if !referenced_by_survivors.contains(orphan) {
+            doc.objects.remove(orphan);
+        }
+    }
+
+    let mut out = Vec::new();
+    doc.save_to(&mut out).map_err(|e| {
+        Error::new(
+            ErrorKind::MalformedInput,
+            format!("could not save PDF: {e}"),
+        )
+    })?;
+    Ok(out)
 }

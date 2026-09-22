@@ -15,6 +15,8 @@
 mod mock_backend;
 mod ocr_request;
 mod ocr_response;
+#[cfg(feature = "ocrs")]
+mod ocrs;
 
 use elide_core::Result;
 use elide_core::entity::audit::ModelEvent;
@@ -24,6 +26,9 @@ use elide_core::entity::audit::ModelEvent;
 pub use self::mock_backend::MockBackend;
 pub use self::ocr_request::OcrRequest;
 pub use self::ocr_response::OcrResponse;
+#[cfg(feature = "ocrs")]
+#[cfg_attr(docsrs, doc(cfg(feature = "ocrs")))]
+pub use self::ocrs::{OCRS_MODELS_DIR_ENV, OcrsBackend};
 
 /// Per-call OCR backend.
 ///

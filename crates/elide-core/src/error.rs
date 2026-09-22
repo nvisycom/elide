@@ -153,6 +153,15 @@ pub enum ErrorKind {
     ///
     /// [`MalformedInput`]: Self::MalformedInput
     Processing,
+    /// A configured resource bound was exceeded and the operation was refused
+    /// to stay safe: a decompression bomb (a stream that expands past a size
+    /// cap), an input too large to process, a recursion or iteration limit hit.
+    /// Distinct from [`MalformedInput`]: the input is well-formed, it is the
+    /// scale that is refused, so a caller can treat "too large" (a safety trip)
+    /// differently from "corrupt".
+    ///
+    /// [`MalformedInput`]: Self::MalformedInput
+    ResourceLimit,
     /// A requested capability is not wired up: no codec registered for a
     /// format, no backend for a modality, no handler for a container part.
     /// Distinct from [`Configuration`]: the request is well-formed, but the
@@ -190,6 +199,7 @@ impl ErrorKind {
             Self::MalformedInput => "input is malformed",
             Self::Configuration => "configuration is invalid",
             Self::Processing => "processing failed",
+            Self::ResourceLimit => "resource limit exceeded",
             Self::CapabilityUnavailable => "required capability is unavailable",
             Self::Recognition => "recognition failed",
             Self::Redaction => "redaction failed",
@@ -214,6 +224,7 @@ impl ErrorKind {
             Self::MalformedInput
             | Self::Configuration
             | Self::Processing
+            | Self::ResourceLimit
             | Self::CapabilityUnavailable
             | Self::Recognition
             | Self::Redaction

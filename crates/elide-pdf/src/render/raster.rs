@@ -12,94 +12,64 @@
 //! The output is not searchable or accessible: it is images. That is the
 //! deliberate trade for a guarantee that the original text is gone.
 
+use elide_core::{Error, ErrorKind, Result};
+
 use super::{Glyph, PageObservation, PixelRect, emit};
-use crate::error::{Error, Result};
+use crate::document::Store;
+use crate::redact::Detection;
 
-/// A detected span to redact on a page: a **UTF-16 code-unit** range into the
-/// page's text, matched against the rendered [`glyphs`](PageObservation::glyphs).
+/// Redact `detections` by destructively overwriting their pixels in the rendered
+/// `pages`, then emit a fresh image-only PDF from the document in `store`.
 ///
-/// The range selects the glyphs whose boxes are filled; spans are matched
-/// against the same UTF-16 offsets the glyphs carry.
+/// `pages` are the observations from [`observe`](crate::Pdf::observe) (or an
+/// equivalent with OCR-sourced glyphs for scanned pages). Each detection's glyph
+/// boxes are filled with `fill_rgb`; the output PDF's only content is the
+/// sanitised page images. No source object is copied forward.
 ///
-/// This is **not** interchangeable with [`redact::Detection`](crate::redact::Detection):
-/// that one's `start`/`end` are Unicode *character* offsets into a page's text
-/// for the text-layer rewrite, whereas these are UTF-16 code-unit offsets into a
-/// rendered [`PageObservation`]'s text. The two constructors look identical but
-/// carry different offset units, pass the offsets that belong to this raster
-/// path, not character offsets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Detection {
-    /// 1-based page number the span is on.
-    pub page: u32,
-    /// Start UTF-16 code-unit offset into the page text (inclusive).
-    pub start: u32,
-    /// End UTF-16 code-unit offset into the page text (exclusive).
-    pub end: u32,
-}
+/// Returns the new document bytes and a [`Certificate`](super::Certificate)
+/// binding the source, the sanitised pixels, and the output by SHA-256.
+///
+/// # Errors
+///
+/// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a page's pixel buffer
+/// size does not match its dimensions, or a detection names a page not present in
+/// `pages` or selects no glyph to redact.
+pub(crate) fn redact_raster(
+    store: &Store,
+    pages: &[PageObservation],
+    detections: &[Detection],
+    fill_rgb: [u8; 3],
+) -> Result<(Vec<u8>, emit::Certificate)> {
+    let mut pages = pages.to_vec();
 
-impl Detection {
-    /// A detection of `[start, end)` on `page`, where `start`/`end` are UTF-16
-    /// code-unit offsets into the rendered page's text.
-    pub fn new(page: u32, start: u32, end: u32) -> Self {
-        Self { page, start, end }
-    }
-}
+    validate_pages(&pages, detections)?;
 
-impl super::Pdf {
-    /// Redact `detections` by destructively overwriting their pixels in the
-    /// rendered `pages`, then emit a fresh image-only PDF.
-    ///
-    /// `pages` are the observations from [`observe`](super::Pdf::observe) (or an
-    /// equivalent with OCR-sourced glyphs for scanned pages). Each detection's
-    /// glyph boxes are filled with `fill_rgb`; the output PDF's only content is
-    /// the sanitised page images. No source object is copied forward.
-    ///
-    /// Returns the new document bytes and a [`Certificate`](super::Certificate) binding the source,
-    /// the sanitised pixels, and the output by SHA-256.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::UnsafeRewrite`](crate::ErrorKind::UnsafeRewrite) if a page's
-    /// pixel buffer size does not match its dimensions, or a detection names a
-    /// page not present in `pages`.
-    #[cfg_attr(docsrs, doc(cfg(feature = "render")))]
-    pub fn redact_raster(
-        &self,
-        pages: Vec<PageObservation>,
-        detections: &[Detection],
-        fill_rgb: [u8; 3],
-    ) -> Result<(Vec<u8>, emit::Certificate)> {
-        let mut pages = pages;
-
-        validate_pages(&pages, detections)?;
-
-        // Fill each detection's glyph boxes on its page.
-        for page in &mut pages {
-            for d in detections.iter().filter(|d| d.page == page.page) {
-                for rect in glyph_rects(&page.glyphs, d.start, d.end) {
-                    fill_rect(&mut page.pixels, page.width, page.height, rect, fill_rgb);
-                }
+    // Fill each detection's glyph boxes on its page.
+    for page in &mut pages {
+        for d in detections.iter().filter(|d| d.page == page.page) {
+            for rect in glyph_rects(&page.glyphs, d.start, d.end) {
+                fill_rect(&mut page.pixels, page.width, page.height, rect, fill_rgb);
             }
         }
-
-        // The fill above set every covered pixel to `fill_rgb`; a mismatch here
-        // would mean the fill and verify disagree on which pixels a detection
-        // selects, which must never ship.
-        #[cfg(feature = "test-utils")]
-        debug_assert!(
-            verify_raster_coverage(&pages, detections, fill_rgb).is_ok(),
-            "redact_raster left a covered pixel unfilled"
-        );
-
-        emit::emit(&self.source_bytes(), pages)
     }
+
+    // The fill above set every covered pixel to `fill_rgb`; a mismatch here would
+    // mean the fill and verify disagree on which pixels a detection selects,
+    // which must never ship.
+    #[cfg(feature = "test-utils")]
+    debug_assert!(
+        verify_raster_coverage(&pages, detections, fill_rgb).is_ok(),
+        "redact_raster left a covered pixel unfilled"
+    );
+
+    emit::emit(&store.source_bytes(), pages)
 }
 
 /// Verify that every detection's glyph boxes are painted `fill_rgb` in `pages`.
 ///
 /// Returns `Ok(())` iff, for every detection, every pixel of every glyph box it
 /// selects, by the same span-overlap rule and page-bounds clipping
-/// [`redact_raster`](super::Pdf::redact_raster) fills with, is exactly
+/// [`redact_raster`](crate::Pdf::redact_raster) fills with, is exactly
 /// `fill_rgb` in that page's [`pixels`](PageObservation::pixels).
 ///
 /// A raster redaction's output is an image-only PDF with no text layer, so
@@ -111,10 +81,10 @@ impl super::Pdf {
 ///
 /// # Errors
 ///
-/// [`ErrorKind::UnsafeRewrite`](crate::ErrorKind::UnsafeRewrite) if a page's
+/// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a page's
 /// pixel buffer size does not match its dimensions, a detection names a page
-/// not present in `pages`, or a covered pixel is not `fill_rgb` (naming the
-/// page and the offending pixel).
+/// not present in `pages` or selects no glyph, or a covered pixel is not
+/// `fill_rgb` (naming the page and the offending pixel).
 #[cfg(feature = "test-utils")]
 #[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
 pub fn verify_raster_coverage(
@@ -128,10 +98,13 @@ pub fn verify_raster_coverage(
         for d in detections.iter().filter(|d| d.page == page.page) {
             for rect in glyph_rects(&page.glyphs, d.start, d.end) {
                 if let Some((x, y)) = unfilled_pixel(&page.pixels, page.width, rect, fill_rgb) {
-                    return Err(Error::unsafe_rewrite(format!(
-                        "page {} pixel ({x}, {y}) in glyph box {rect:?} is not the fill colour {fill_rgb:?}",
-                        page.page
-                    )));
+                    return Err(Error::new(
+                        ErrorKind::Redaction,
+                        format!(
+                            "page {} pixel ({x}, {y}) in glyph box {rect:?} is not the fill colour {fill_rgb:?}",
+                            page.page
+                        ),
+                    ));
                 }
             }
         }
@@ -143,29 +116,46 @@ pub fn verify_raster_coverage(
 /// Validate every page buffer and detection target, fail-closed.
 ///
 /// An RGB8 buffer must be exactly `width * height * 3` bytes, or the fill would
-/// read/write out of bounds; every detection must name a page present in
-/// `pages`.
+/// read/write out of bounds; every detection must name a page present in `pages`
+/// and select at least one glyph on it.
 fn validate_pages(pages: &[PageObservation], detections: &[Detection]) -> Result<()> {
     for page in pages {
         let expected = (page.width as usize)
             .checked_mul(page.height as usize)
             .and_then(|n| n.checked_mul(3));
         if expected != Some(page.pixels.len()) {
-            return Err(Error::unsafe_rewrite(format!(
-                "page {} pixel buffer is {} bytes, expected {:?}",
-                page.page,
-                page.pixels.len(),
-                expected
-            )));
+            return Err(Error::new(
+                ErrorKind::Redaction,
+                format!(
+                    "page {} pixel buffer is {} bytes, expected {:?}",
+                    page.page,
+                    page.pixels.len(),
+                    expected
+                ),
+            ));
         }
     }
 
     for d in detections {
-        if !pages.iter().any(|p| p.page == d.page) {
-            return Err(Error::unsafe_rewrite(format!(
-                "detection names page {} not in the observed pages",
-                d.page
-            )));
+        let Some(page) = pages.iter().find(|p| p.page == d.page) else {
+            return Err(Error::new(
+                ErrorKind::Redaction,
+                format!("detection names page {} not in the observed pages", d.page),
+            ));
+        };
+        // A detection that maps to no glyph would paint nothing, and both the
+        // fill and the coverage check would then "succeed" over an empty set,
+        // silently leaving the span in the output. Fail closed instead: an
+        // empty, out-of-range, or unmapped span is a redaction that cannot be
+        // carried out, not a no-op.
+        if glyph_rects(&page.glyphs, d.start, d.end).next().is_none() {
+            return Err(Error::new(
+                ErrorKind::Redaction,
+                format!(
+                    "detection on page {} (chars {}..{}) selects no glyph to redact",
+                    d.page, d.start, d.end
+                ),
+            ));
         }
     }
 
@@ -173,7 +163,7 @@ fn validate_pages(pages: &[PageObservation], detections: &[Detection]) -> Result
 }
 
 /// The pixel boxes of every glyph whose span overlaps `[start, end)`.
-fn glyph_rects(glyphs: &[Glyph], start: u32, end: u32) -> impl Iterator<Item = PixelRect> + '_ {
+fn glyph_rects(glyphs: &[Glyph], start: usize, end: usize) -> impl Iterator<Item = PixelRect> + '_ {
     glyphs
         .iter()
         .filter(move |g| g.start < end && g.end > start)
@@ -233,8 +223,10 @@ fn unfilled_pixel(pixels: &[u8], width: u32, rect: PixelRect, fill: [u8; 3]) -> 
 
 #[cfg(all(test, feature = "test-utils"))]
 mod tests {
-    use super::{Detection, verify_raster_coverage};
-    use crate::error::ErrorKind;
+    use elide_core::ErrorKind;
+
+    use super::verify_raster_coverage;
+    use crate::redact::Detection;
     use crate::render::{Glyph, GlyphSource, PageObservation, PixelRect};
 
     const FILL: [u8; 3] = [255, 0, 0];
@@ -259,7 +251,7 @@ mod tests {
     }
 
     /// A text-sourced glyph spanning `[start, end)` with box `rect`.
-    fn glyph(start: u32, end: u32, rect: PixelRect) -> Glyph {
+    fn glyph(start: usize, end: usize, rect: PixelRect) -> Glyph {
         Glyph {
             start,
             end,
@@ -292,7 +284,7 @@ mod tests {
 
         let detections = [Detection::new(1, 0, 1)];
         let err = verify_raster_coverage(&[p], &detections, FILL).unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::UnsafeRewrite);
+        assert_eq!(err.kind(), ErrorKind::Redaction);
     }
 
     #[test]
@@ -301,7 +293,20 @@ mod tests {
 
         let detections = [Detection::new(2, 0, 1)];
         let err = verify_raster_coverage(&[p], &detections, FILL).unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::UnsafeRewrite);
+        assert_eq!(err.kind(), ErrorKind::Redaction);
+    }
+
+    #[test]
+    fn err_when_detection_selects_no_glyph() {
+        // The page exists and its buffer is valid, but no glyph overlaps the
+        // detected span, so a fill would paint nothing. This must fail closed
+        // rather than "succeed" over an empty pixel set and leave the span in.
+        let g = glyph(5, 6, PixelRect::new(1, 1, 2, 2));
+        let p = page(1, 4, 4, FILL, vec![g]);
+
+        let detections = [Detection::new(1, 0, 1)];
+        let err = verify_raster_coverage(&[p], &detections, FILL).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Redaction);
     }
 
     #[test]
