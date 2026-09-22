@@ -3,8 +3,9 @@
 
 use elide_core::entity::audit::{AuditEvent, ModelEvent};
 use elide_core::entity::{Entity, EntityCoRef, LabelRef};
-use elide_core::modality::image::{Image, ImageData, ImageLocation};
-use elide_core::primitive::{Confidence, UnitBoundingBox};
+use elide_core::primitive::Confidence;
+use elide_image::modality::{Image, ImageData, ImageLocation};
+use elide_image::primitive::UnitBoundingBox;
 
 use super::{DEFAULT_CONFIDENCE, LlmModality};
 use crate::candidates::{Candidates, ImageCandidate};

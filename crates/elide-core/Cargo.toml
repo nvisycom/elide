@@ -27,16 +27,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 ## ships only the `text` modality unless a feature opts in more.
 default = []
 
-## The `image` modality (`Image`, `ImageData`, `ImageLocation`,
-## `ImageReplacement`). Off by default; text-only consumers don't pay for
-## it.
-image = ["dep:bytes"]
-
-## The `audio` modality (`Audio`, `AudioData`, `AudioLocation`,
-## `AudioReplacement`). Off by default; text-only consumers don't pay for
-## it.
-audio = ["dep:bytes"]
-
 ## The `tabular` modality (`Tabular`, `TabularLocation`). Cells reuse the
 ## text payload and replacement, so this adds no dependency. Off by
 ## default; text-only consumers don't pay for it.
@@ -51,7 +41,7 @@ metadata = []
 ## Derive `serde::{Serialize, Deserialize}` on the domain types, and
 ## enable serde support in the underlying primitive crates. (`celes`
 ## and `oxilangtag` carry their serde impls unconditionally.)
-serde = ["dep:serde", "hipstr/serde", "jiff/serde", "uuid/serde", "bytes?/serde"]
+serde = ["dep:serde", "hipstr/serde", "jiff/serde", "uuid/serde"]
 
 ## Derive `schemars::JsonSchema` on the domain types, for emitting JSON
 ## Schemas of the serialized model. Implies `serde`: the schema describes
@@ -82,7 +72,6 @@ hex = { workspace = true, features = [] }
 jiff = { workspace = true, features = [] }
 oxilangtag = { workspace = true, features = [] }
 celes = { workspace = true, features = [] }
-bytes = { workspace = true, features = [], optional = true }
 
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }

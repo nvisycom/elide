@@ -10,7 +10,7 @@ impl_audio_handler! {
     handler = WavHandler,
     loader = WavLoader,
     format_id = "elide.audio.wav",
-    audio_format = elide_audio::AudioFormat::Wav,
+    audio_format = elide_audio::modality::AudioFormat::Wav,
     extensions = ["wav"],
     content_types = ["audio/wav", "audio/x-wav"],
 }

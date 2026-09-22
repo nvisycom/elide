@@ -5,11 +5,15 @@
 mod buffer;
 #[cfg(feature = "exif")]
 mod exif;
+pub mod modality;
+#[cfg(feature = "ocr")]
+pub mod ocr;
 mod policy;
+pub mod primitive;
 #[cfg(feature = "test-util")]
 pub mod test_util;
 
-pub use self::buffer::{ImageBuffer, ImageFormat};
+pub use self::buffer::ImageBuffer;
 #[cfg(feature = "exif")]
 pub use self::exif::ExifRecognizer;
 // A dependency-free config value: always exported, no `exif` feature needed.

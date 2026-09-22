@@ -25,13 +25,7 @@
 
 use std::cmp::Ordering;
 use std::fmt;
-#[cfg(any(feature = "audio", feature = "image"))]
-use std::path::Path;
 
-#[cfg(feature = "audio")]
-pub mod audio;
-#[cfg(feature = "image")]
-pub mod image;
 #[cfg(feature = "metadata")]
 pub mod metadata;
 #[cfg(feature = "tabular")]
@@ -56,19 +50,6 @@ pub use self::text_recognizable::TextRecognizable;
 /// a decoded image, an audio buffer. A near-empty marker: it only fixes
 /// the bounds a payload must satisfy to flow through the model.
 pub trait ModalityData: Clone + fmt::Debug + Send + Sync + 'static {}
-
-/// The lowercase-free extension of `filename`, or `fallback` when there is
-/// no filename or it has no extension. Shared by the byte-backed payloads
-/// ([`AudioData`], [`ImageData`]) that infer a codec from a name.
-///
-/// [`AudioData`]: audio::AudioData
-/// [`ImageData`]: image::ImageData
-#[cfg(any(feature = "audio", feature = "image"))]
-pub(crate) fn extension_or<'a>(filename: Option<&'a str>, fallback: &'a str) -> &'a str {
-    filename
-        .and_then(|name| Path::new(name).extension().and_then(|e| e.to_str()))
-        .unwrap_or(fallback)
-}
 
 /// The spatial relationship between two locations.
 ///
@@ -203,7 +184,7 @@ pub trait ModalityReplacement: Clone + fmt::Debug + Send + Sync + 'static {}
 
 /// Enrichment an [`Enricher`] derives from a payload for recognizers to read.
 ///
-/// An image's OCR [`Layout`], an audio clip's STT [`Transcription`]: context
+/// An image's OCR `Layout`, an audio clip's STT `Transcription`: context
 /// state produced once per payload and read through the medium's text/location
 /// projection, never entering an entity. A medium with no enrichment uses
 /// [`NoArtifact`].
@@ -215,8 +196,6 @@ pub trait ModalityReplacement: Clone + fmt::Debug + Send + Sync + 'static {}
 /// sentinel.
 ///
 /// [`Enricher`]: crate::enrichment::Enricher
-/// [`Layout`]: crate::modality::image::Layout
-/// [`Transcription`]: crate::modality::audio::Transcription
 pub trait ModalityArtifact:
     Clone + fmt::Debug + Default + PartialEq + Send + Sync + 'static
 {

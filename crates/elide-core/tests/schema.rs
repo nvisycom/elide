@@ -41,13 +41,6 @@ fn event_schema() {
     let _ = schema_for!(AuditEvent<Text>);
 }
 
-#[cfg(feature = "image")]
-#[test]
-fn image_modality_schema() {
-    use elide_core::modality::image::ImageLocation;
-    let _ = schema_for!(ImageLocation);
-}
-
 /// The caller-config `Scope` generates a schema covering its fields.
 #[test]
 fn scope_schema() {
@@ -72,15 +65,13 @@ fn annotations_schema() {
 /// Generic types carry the modality in their schema name, so two modalities'
 /// schemas do not collide into `AuditLog` / `AuditLog2` in a combined
 /// OpenAPI document. See the `schemars(rename = "{M}...")` on these types.
-#[cfg(feature = "image")]
+/// (The cross-modality collision is exercised with a non-core modality in that
+/// modality crate's own tests, e.g. `elide-image`.)
 #[test]
-fn generic_schema_names_carry_modality_prefix() {
+fn generic_schema_name_carries_modality_prefix() {
     use elide_core::entity::audit::AuditLog;
-    use elide_core::modality::image::Image;
     use schemars::JsonSchema;
 
     assert_eq!(Entity::<Text>::schema_name(), "TextEntity");
-    assert_eq!(Entity::<Image>::schema_name(), "ImageEntity");
     assert_eq!(AuditLog::<Text>::schema_name(), "TextAuditLog");
-    assert_eq!(AuditLog::<Image>::schema_name(), "ImageAuditLog");
 }

@@ -5,7 +5,11 @@
 mod buffer;
 #[cfg(feature = "_internal")]
 mod engine;
+pub mod modality;
+pub mod primitive;
+#[cfg(feature = "stt")]
+pub mod stt;
 #[cfg(feature = "test-util")]
 pub mod test_util;
 
-pub use self::buffer::{AudioBuffer, AudioFormat};
+pub use self::buffer::AudioBuffer;

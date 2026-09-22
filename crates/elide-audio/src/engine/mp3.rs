@@ -4,7 +4,6 @@
 use std::io::{Cursor, ErrorKind as IoErrorKind};
 
 use bytes::Bytes;
-use elide_core::modality::audio::Audio;
 use elide_core::redaction::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 use mp3lame_encoder::{Builder, FlushNoGap, InterleavedPcm, MonoPcm};
@@ -20,6 +19,7 @@ use symphonia::default::{get_codecs, get_probe};
 
 use super::duration::probe_duration_ms;
 use super::redact;
+use crate::modality::Audio;
 
 /// Decoded MP3 as interleaved f32 PCM, with the parameters needed to
 /// re-encode.

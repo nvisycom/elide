@@ -8,11 +8,11 @@
 //! wording.
 //!
 //! [`Text`]: elide_core::modality::text::Text
-//! [`Image`]: elide_core::modality::image::Image
+//! [`Image`]: elide_image::modality::Image
 
-use elide_core::modality::image::{Image, ImageData};
 use elide_core::modality::text::{Text, TextData};
 use elide_core::recognition::RecognizerContext;
+use elide_image::modality::{Image, ImageData};
 
 use super::Prompt;
 use super::image_prompt::ImagePromptBuilder;
@@ -24,7 +24,7 @@ use super::text_prompt::TextPromptBuilder;
 /// [`Prompt<M>`] impl rather than tweaking this one.
 ///
 /// [`Text`]: elide_core::modality::text::Text
-/// [`Image`]: elide_core::modality::image::Image
+/// [`Image`]: elide_image::modality::Image
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultPrompt;
 

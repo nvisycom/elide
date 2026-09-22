@@ -9,10 +9,10 @@ mod config;
 mod dispatch;
 
 use elide_core::Result;
-use elide_core::modality::image::{Image, ImageData};
 use elide_core::modality::text::Text;
 #[cfg(feature = "usage")]
 use elide_core::primitive::TokenCounts;
+use elide_image::modality::{Image, ImageData, ImageFormat};
 use rig::ExtractionResponse;
 use rig::client::CompletionClient;
 use rig::completion::{Message, Usage};
@@ -186,11 +186,11 @@ impl LlmBackend<Image> for RigBackend {
 /// Build a multimodal user [`Message`] carrying the prompt wording plus the
 /// source image as a proper image content block.
 fn image_message(prompt: &str, data: &ImageData) -> Message {
-    let media_type = match data.extension() {
-        "jpg" | "jpeg" => Some(ImageMediaType::JPEG),
-        "png" => Some(ImageMediaType::PNG),
-        "gif" => Some(ImageMediaType::GIF),
-        "webp" => Some(ImageMediaType::WEBP),
+    let media_type = match data.format() {
+        Some(ImageFormat::Jpeg) => Some(ImageMediaType::JPEG),
+        Some(ImageFormat::Png) => Some(ImageMediaType::PNG),
+        // TIFF is not a media type a vision model accepts, and an unknown or
+        // absent format leaves the block untyped (the provider sniffs the bytes).
         _ => None,
     };
     let content = vec![

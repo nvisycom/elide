@@ -68,9 +68,9 @@ impl JsonSchema for Report {
         let arms = vec![
             group_arm::<Text>(generator),
             #[cfg(feature = "image")]
-            group_arm::<elide_core::modality::image::Image>(generator),
+            group_arm::<elide_image::modality::Image>(generator),
             #[cfg(feature = "audio")]
-            group_arm::<elide_core::modality::audio::Audio>(generator),
+            group_arm::<elide_audio::modality::Audio>(generator),
             #[cfg(feature = "tabular")]
             group_arm::<elide_core::modality::tabular::Tabular>(generator),
         ];
@@ -146,9 +146,9 @@ impl JsonSchema for ArtifactSet {
         let arms = vec![
             artifact_arm::<Text>(generator),
             #[cfg(feature = "image")]
-            artifact_arm::<elide_core::modality::image::Image>(generator),
+            artifact_arm::<elide_image::modality::Image>(generator),
             #[cfg(feature = "audio")]
-            artifact_arm::<elide_core::modality::audio::Audio>(generator),
+            artifact_arm::<elide_audio::modality::Audio>(generator),
             #[cfg(feature = "tabular")]
             artifact_arm::<elide_core::modality::tabular::Tabular>(generator),
         ];

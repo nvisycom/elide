@@ -1149,6 +1149,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "criterion",
+ "elide-audio",
  "elide-codec",
  "elide-context",
  "elide-core",
@@ -1158,12 +1159,10 @@ dependencies = [
  "elide-lingua",
  "elide-llm",
  "elide-ner",
- "elide-ocr",
  "elide-office",
  "elide-operator",
  "elide-pattern",
  "elide-redaction",
- "elide-stt",
  "serde",
  "serde_json",
  "tokio",
@@ -1174,13 +1173,19 @@ dependencies = [
 name = "elide-audio"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "bytes",
+ "derive_builder",
  "elide-core",
+ "hipstr",
  "hound",
+ "mockall",
  "mp3lame-encoder",
  "schemars",
  "serde",
  "symphonia",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -1199,6 +1204,8 @@ dependencies = [
  "image",
  "lopdf",
  "quick-xml 0.42.0",
+ "schemars",
+ "serde",
  "serde_json",
  "sha2 0.11.0",
  "tokio",
@@ -1221,7 +1228,6 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "blake3",
- "bytes",
  "celes",
  "derive_builder",
  "hex",
@@ -1251,6 +1257,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "elide-audio",
  "elide-codec",
  "elide-core",
  "elide-detection",
@@ -1297,13 +1304,23 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "derive_builder",
  "elide-core",
+ "futures",
+ "hipstr",
  "image",
  "imageproc",
  "little_exif",
+ "mockall",
+ "ocrs",
+ "rayon",
+ "rten",
+ "rten-imageproc",
  "schemars",
  "serde",
  "serde_json",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -1324,6 +1341,7 @@ dependencies = [
  "async-trait",
  "derive_builder",
  "elide-core",
+ "elide-image",
  "hipstr",
  "minijinja",
  "reqwest-middleware",
@@ -1353,25 +1371,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "elide-ocr"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "derive_builder",
- "elide-core",
- "futures",
- "hipstr",
- "image",
- "mockall",
- "ocrs",
- "rayon",
- "rten",
- "rten-imageproc",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "elide-office"
 version = "0.1.0"
 dependencies = [
@@ -1392,8 +1391,10 @@ dependencies = [
  "async-trait",
  "base64 0.23.1",
  "bytes",
+ "elide-audio",
  "elide-core",
  "elide-fake",
+ "elide-image",
  "hex",
  "hipstr",
  "hmac",
@@ -1452,19 +1453,6 @@ dependencies = [
  "hipstr",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "elide-stt"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "derive_builder",
- "elide-core",
- "hipstr",
- "mockall",
- "tokio",
- "uuid",
 ]
 
 [[package]]

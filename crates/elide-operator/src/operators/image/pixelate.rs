@@ -2,8 +2,8 @@
 
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::modality::image::{Image, ImageData, ImageReplacement};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_image::modality::{Image, ImageData, ImageReplacement};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 

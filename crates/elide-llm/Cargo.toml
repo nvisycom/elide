@@ -58,7 +58,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 # Internal crates
-elide-core = { workspace = true, features = ["image", "serde"] }
+elide-core = { workspace = true, features = ["serde"] }
+elide-image = { workspace = true, features = ["serde"] }
 
 # (De)serialization
 serde = { workspace = true, features = [] }

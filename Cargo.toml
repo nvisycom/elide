@@ -10,8 +10,6 @@ members = [
     "./crates/elide-ner",
     "./crates/elide-lingua",
     "./crates/elide-llm",
-    "./crates/elide-stt",
-    "./crates/elide-ocr",
     "./crates/elide-office",
     "./crates/elide-audio",
     "./crates/elide-image",
@@ -52,8 +50,6 @@ elide-pattern = { path = "./crates/elide-pattern", version = "0.1.0" }
 elide-ner = { path = "./crates/elide-ner", version = "0.1.0" }
 elide-lingua = { path = "./crates/elide-lingua", version = "0.1.0" }
 elide-llm = { path = "./crates/elide-llm", version = "0.1.0" }
-elide-stt = { path = "./crates/elide-stt", version = "0.1.0" }
-elide-ocr = { path = "./crates/elide-ocr", version = "0.1.0" }
 elide-office = { path = "./crates/elide-office", version = "0.1.0" }
 elide-audio = { path = "./crates/elide-audio", version = "0.1.0" }
 elide-image = { path = "./crates/elide-image", version = "0.1.0" }

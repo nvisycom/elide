@@ -17,10 +17,9 @@
 
 use elide::Result;
 use elide::codec::FormatRegistry;
-use elide::codec::handler::pdf_format_with;
+use elide::codec::handler::{RasterMode, pdf_format_with};
 use elide::modality::StreamDataReader;
 use elide::modality::text::Text;
-use elide::primitive::RasterMode;
 
 use crate::support::fixture::Fixture;
 

@@ -32,7 +32,7 @@ macro_rules! impl_audio_handler {
         /// [`Format`]: crate::Format
         /// [`FormatRegistry`]: crate::FormatRegistry
         pub fn format() -> crate::Format {
-            crate::Format::new::<::elide_core::modality::audio::Audio, _>(
+            crate::Format::new::<::elide_audio::modality::Audio, _>(
                 FORMAT_ID.clone(),
                 $loader,
             )
@@ -64,7 +64,7 @@ macro_rules! impl_audio_handler {
         }
 
         #[::async_trait::async_trait]
-        impl crate::Handler<::elide_core::modality::audio::Audio> for $handler {
+        impl crate::Handler<::elide_audio::modality::Audio> for $handler {
             fn format(&self) -> crate::FormatId {
                 FORMAT_ID.clone()
             }
@@ -77,7 +77,7 @@ macro_rules! impl_audio_handler {
                 &mut self,
             ) -> ::elide_core::Result<
                 ::std::option::Option<
-                    ::elide_core::modality::Chunk<::elide_core::modality::audio::Audio>,
+                    ::elide_core::modality::Chunk<::elide_audio::modality::Audio>,
                 >,
             > {
                 if self.yielded {
@@ -86,35 +86,35 @@ macro_rules! impl_audio_handler {
                 let total_ms = self.clip.duration_ms()?;
                 self.yielded = true;
                 Ok(Some(::elide_core::modality::Chunk {
-                    location: ::elide_core::modality::audio::AudioLocation::from_millis(0, total_ms),
-                    data: ::elide_core::modality::audio::AudioData::new(self.clip.encode()?),
+                    location: ::elide_audio::modality::AudioLocation::from_millis(0, total_ms),
+                    data: ::elide_audio::modality::AudioData::new(self.clip.encode()?),
                     hints: ::std::vec::Vec::new(),
                 }))
             }
         }
 
         #[::async_trait::async_trait]
-        impl ::elide_core::modality::DataReader<::elide_core::modality::audio::Audio> for $handler {
+        impl ::elide_core::modality::DataReader<::elide_audio::modality::Audio> for $handler {
             async fn read_at(
                 &self,
-                _location: &::elide_core::modality::audio::AudioLocation,
+                _location: &::elide_audio::modality::AudioLocation,
             ) -> ::elide_core::Result<
-                ::std::option::Option<::elide_core::modality::audio::AudioData>,
+                ::std::option::Option<::elide_audio::modality::AudioData>,
             > {
                 // The whole clip is the addressable unit; a partial time range
                 // still resolves to the full audio for downstream extraction.
-                Ok(Some(::elide_core::modality::audio::AudioData::new(
+                Ok(Some(::elide_audio::modality::AudioData::new(
                     self.clip.encode()?,
                 )))
             }
         }
 
         #[::async_trait::async_trait]
-        impl ::elide_core::modality::DataWriter<::elide_core::modality::audio::Audio> for $handler {
+        impl ::elide_core::modality::DataWriter<::elide_audio::modality::Audio> for $handler {
             async fn write_at(
                 &mut self,
                 redactions: ::elide_core::redaction::Redactions<
-                    ::elide_core::modality::audio::Audio,
+                    ::elide_audio::modality::Audio,
                 >,
             ) -> ::elide_core::Result<()> {
                 self.clip.redact_batch(redactions);
@@ -128,7 +128,7 @@ macro_rules! impl_audio_handler {
         pub(crate) struct $loader;
 
         #[::async_trait::async_trait]
-        impl crate::Loader<::elide_core::modality::audio::Audio> for $loader {
+        impl crate::Loader<::elide_audio::modality::Audio> for $loader {
             type Handler = $handler;
 
             async fn decode(

@@ -56,11 +56,36 @@ serde = ["dep:serde", "elide-core/serde"]
 ## Derive `schemars::JsonSchema` on the schema-relevant types (e.g. `ExifPolicy`),
 ## for a caller that emits a JSON schema for a config surface the enum appears in.
 ## Implies `serde`.
-schema = ["serde", "dep:schemars"]
+schema = ["serde", "dep:schemars", "elide-core/schema"]
+
+## OCR: the `OcrBackend` trait, the `OcrEnricher`, and the request/response
+## types. The traits ship bare (no OCR engine); enable `ocrs` for the pure-Rust
+## engine or `test-utils` for the no-op backend.
+ocr = ["dep:async-trait", "dep:derive_builder", "dep:uuid"]
+
+## The `ocrs` engine backend: a pure-Rust OCR engine (ocrs + the RTen runtime,
+## both MIT/Apache-2.0, no native library). Off by default; the detection and
+## recognition models are loaded from disk at runtime (see `OcrsBackend`).
+ocrs = [
+    "ocr",
+    "dep:ocrs",
+    "dep:rten",
+    "dep:rten-imageproc",
+    "dep:rayon",
+    "dep:futures",
+]
+
+## Ship the no-op OCR `MockBackend` for tests, examples, and offline wiring.
+## Implies `ocr`.
+test-utils = ["ocr"]
+
+## Resource-usage accounting: surface the `ModelUsage` the OCR enricher attaches
+## to its `Enrichment`. Off by default.
+usage = ["elide-core/usage"]
 
 [dependencies]
 # Internal crates
-elide-core = { workspace = true, features = ["image"] }
+elide-core = { workspace = true, features = [] }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }
@@ -68,6 +93,11 @@ schemars = { workspace = true, features = [], optional = true }
 
 # Primitive datatypes
 bytes = { workspace = true, features = [] }
+hipstr = { workspace = true, features = [] }
+
+# Derive macros (the OCR enricher builder)
+derive_builder = { workspace = true, features = [], optional = true }
+uuid = { workspace = true, features = ["v7"], optional = true }
 
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [], optional = true }
@@ -77,6 +107,19 @@ image = { workspace = true, features = [] }
 imageproc = { workspace = true, features = ["rayon"] }
 little_exif = { workspace = true, features = [], optional = true }
 
+# OCR engine (optional; the `ocrs` feature)
+ocrs = { workspace = true, features = [], optional = true }
+rten = { workspace = true, features = [], optional = true }
+rten-imageproc = { workspace = true, features = [], optional = true }
+rayon = { workspace = true, features = [], optional = true }
+futures = { workspace = true, features = [], optional = true }
+
 [dev-dependencies]
 # (De)serialization
 serde_json = { workspace = true, features = [] }
+
+# Async runtime & parallelism (OCR enricher tests)
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+# Testing
+mockall = { workspace = true, features = [] }

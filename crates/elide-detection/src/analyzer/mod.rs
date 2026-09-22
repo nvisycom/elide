@@ -36,16 +36,13 @@ pub struct Analysis<M: Modality> {
     /// The reconciled entities, in the caller's coordinate system.
     pub entities: Vec<Entity<M>>,
     /// The enrichment artifact the analysis produced (or was seeded with): the
-    /// OCR [`Layout`] / STT [`Transcription`] the recognizers read. Carried out
+    /// OCR `Layout` / STT `Transcription` the recognizers read. Carried out
     /// so it can be persisted and restored for a re-run without re-enriching.
     ///
     /// [`Some`] iff an enricher ran (or a saved artifact was restored),
     /// `Some(empty)` (an image OCR'd to no text, a silent clip) is a real
     /// enrichment, distinct from [`None`] (a modality with no enrichment, or an
     /// un-enriched payload), so it is persisted and a re-run does not re-enrich.
-    ///
-    /// [`Layout`]: elide_core::modality::image::Layout
-    /// [`Transcription`]: elide_core::modality::audio::Transcription
     pub artifact: Option<M::Artifact>,
     /// Per-recognizer / per-enricher resource usage for this analysis.
     #[cfg(feature = "usage")]

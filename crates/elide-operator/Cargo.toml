@@ -31,9 +31,9 @@ serde = ["dep:serde", "elide-core/serde", "bytes/serde"]
 schema = ["dep:schemars", "serde", "elide-core/schema"]
 
 ## The `audio` modality operators (`Silence`, `Beep`).
-audio = ["elide-core/audio"]
+audio = ["dep:elide-audio"]
 ## The `image` modality operators (`Blur`, `Pixelate`, `Blackbox`).
-image = ["elide-core/image"]
+image = ["dep:elide-image"]
 ## The `tabular` modality operators (`DropRow`, `DropColumn`).
 tabular = ["elide-core/tabular"]
 ## The `metadata` modality: `Erase` removes a metadata field.
@@ -53,6 +53,8 @@ fake = ["dep:elide-fake", "tabular"]
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }
+elide-audio = { workspace = true, features = [], optional = true }
+elide-image = { workspace = true, features = [], optional = true }
 elide-fake = { workspace = true, features = [], optional = true }
 
 # (De)serialization

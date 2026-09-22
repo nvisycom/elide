@@ -49,25 +49,53 @@ serde = ["dep:serde", "elide-core/serde"]
 ## Derive `schemars::JsonSchema` on the schema-relevant types (e.g. `AudioFormat`),
 ## for a caller that emits a JSON schema for a config surface the enum appears in.
 ## Implies `serde`.
-schema = ["serde", "dep:schemars"]
+schema = ["serde", "dep:schemars", "elide-core/schema"]
 
 ## Expose `test_util`: build small in-memory audio fixtures (a WAV ramp, an MP3
 ## tone), so a downstream crate can exercise an audio handler without depending
 ## on `hound`/`mp3lame-encoder` itself. Implies both formats.
 test-util = ["wav", "mp3"]
 
+## Speech-to-text: the `SttBackend` trait, the `SttEnricher`, and the
+## request/response types. The traits ship bare (no STT engine); enable
+## `test-utils` for the no-op backend.
+stt = ["dep:async-trait", "dep:derive_builder", "dep:uuid"]
+
+## Ship the no-op STT `MockBackend` for tests, examples, and offline wiring
+## (distinct from `test-util`, which builds decoded-audio fixtures). Implies `stt`.
+test-utils = ["stt"]
+
+## Resource-usage accounting: surface the `ModelUsage` the STT enricher attaches
+## to its `Enrichment`. Off by default.
+usage = ["elide-core/usage"]
+
 [dependencies]
 # Internal crates
-elide-core = { workspace = true, features = ["audio"] }
+elide-core = { workspace = true, features = [] }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }
 schemars = { workspace = true, features = [], optional = true }
 
+# Derive macros (the STT enricher builder)
+derive_builder = { workspace = true, features = [], optional = true }
+uuid = { workspace = true, features = ["v7"], optional = true }
+
 # Primitive datatypes
 bytes = { workspace = true, features = [] }
+hipstr = { workspace = true, features = [] }
+
+# Async runtime & parallelism
+async-trait = { workspace = true, features = [], optional = true }
 
 # Audio processing
 hound = { workspace = true, features = [], optional = true }
 symphonia = { workspace = true, features = [], optional = true }
 mp3lame-encoder = { workspace = true, features = [], optional = true }
+
+[dev-dependencies]
+# Async runtime & parallelism (STT enricher tests)
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+# Testing
+mockall = { workspace = true, features = [] }

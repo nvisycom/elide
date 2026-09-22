@@ -5,9 +5,9 @@
 //! [`Prompt<Image>`]: super::Prompt
 
 use elide_core::entity::Label;
-use elide_core::modality::image::Image;
 use elide_core::primitive::LanguageTag;
 use elide_core::recognition::annotation::Inclusion;
+use elide_image::modality::Image;
 use hipstr::HipStr;
 
 use super::target_labels_block;

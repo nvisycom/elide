@@ -11,8 +11,8 @@
 
 use std::f32::consts::TAU;
 
-use elide_core::modality::audio::{AudioReplacement, Waveform};
-use elide_core::primitive::TimeSpan;
+use crate::modality::{AudioReplacement, Waveform};
+use crate::primitive::TimeSpan;
 
 /// Microseconds per second.
 const MICROS_PER_SECOND: u128 = 1_000_000;

@@ -594,8 +594,8 @@ mod tests {
     #[cfg(all(feature = "schema", feature = "image"))]
     #[test]
     fn serialized_artifact_sets_validate_against_the_schema() {
-        use elide_core::modality::image::{Image, ImageLocation, Layout, LayoutBlock};
-        use elide_core::primitive::{BoundingBox, Point};
+        use elide_image::modality::{Image, ImageLocation, Layout, LayoutBlock};
+        use elide_image::primitive::{BoundingBox, Point};
 
         let schema = serde_json::to_value(schemars::schema_for!(ArtifactSet)).unwrap();
 
@@ -853,8 +853,8 @@ mod tests {
     #[cfg(feature = "image")]
     #[test]
     fn round_trips_an_artifact_set() {
-        use elide_core::modality::image::{Image, ImageLocation, Layout, LayoutBlock};
-        use elide_core::primitive::{BoundingBox, Point};
+        use elide_image::modality::{Image, ImageLocation, Layout, LayoutBlock};
+        use elide_image::primitive::{BoundingBox, Point};
 
         let bbox = BoundingBox::from_origin_size(Point::new(0.0, 0.0), 100.0, 20.0);
         let layout = Layout::new(vec![LayoutBlock::new(ImageLocation::new(bbox), "hi Alice")]);
@@ -906,7 +906,7 @@ mod tests {
     #[cfg(feature = "image")]
     #[test]
     fn a_null_or_absent_artifact_is_dropped() {
-        use elide_core::modality::image::Image;
+        use elide_image::modality::Image;
 
         let mut registry = ModalityRegistry::default();
         registry.register::<Image>();

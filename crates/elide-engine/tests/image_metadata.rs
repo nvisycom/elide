@@ -11,12 +11,12 @@
 
 use elide_codec::FormatRegistry;
 use elide_core::entity::LabelCatalog;
-use elide_core::modality::image::Image;
 use elide_core::modality::metadata::Metadata;
 use elide_core::recognition::Scope;
 use elide_detection::Analyzer;
 use elide_engine::{Directives, Document, Orchestrator};
 use elide_image::ExifRecognizer;
+use elide_image::modality::Image;
 use elide_operator::operators::Erase;
 use elide_redaction::{Anonymizer, Rule};
 use little_exif::exif_tag::ExifTag;
@@ -122,13 +122,14 @@ impl elide_core::recognition::Recognizer<Image> for WholeFrame {
 
     async fn recognize(
         &self,
-        data: &elide_core::modality::image::ImageData,
+        data: &elide_image::modality::ImageData,
         _ctx: &elide_core::recognition::RecognizerContext<'_, Image>,
     ) -> elide_core::Result<elide_core::recognition::Recognition<Image>> {
         use elide_core::entity::audit::{AuditEvent, ModelEvent};
         use elide_core::entity::{Entity, builtins};
-        use elide_core::modality::image::ImageLocation;
-        use elide_core::primitive::{BoundingBox, Confidence, Point};
+        use elide_core::primitive::Confidence;
+        use elide_image::modality::ImageLocation;
+        use elide_image::primitive::{BoundingBox, Point};
 
         let dims = &data.dimensions;
         let bbox = BoundingBox::from_origin_size(

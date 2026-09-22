@@ -9,7 +9,7 @@
 //!
 //! [`impl_image_handler!`]: macros::impl_image_handler
 //! [`Chunk`]: elide_core::modality::Chunk
-//! [`ImageReplacement`]: elide_core::modality::image::ImageReplacement
+//! [`ImageReplacement`]: elide_image::modality::ImageReplacement
 
 pub(crate) mod macros;
 
@@ -36,10 +36,10 @@ pub use self::tiff_handler::{format as tiff_format, format_with as tiff_format_w
 
 #[cfg(all(test, feature = "png"))]
 mod tests {
-    use elide_core::modality::image::{Image, ImageLocation, ImageReplacement};
     use elide_core::modality::{DataReader, DataWriter};
-    use elide_core::primitive::{BoundingBox, Color, Point};
     use elide_core::redaction::Redactions;
+    use elide_image::modality::{Image, ImageLocation, ImageReplacement};
+    use elide_image::primitive::{BoundingBox, Color, Point};
     use image::{DynamicImage, GenericImageView, RgbaImage};
 
     use super::png_handler::PngLoader;

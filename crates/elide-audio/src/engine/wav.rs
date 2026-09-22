@@ -5,12 +5,12 @@ use std::io::Cursor;
 use std::result;
 
 use bytes::Bytes;
-use elide_core::modality::audio::Audio;
 use elide_core::redaction::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 
 use super::redact;
+use crate::modality::Audio;
 
 /// Validate that `bytes` parse as WAV.
 ///
@@ -115,9 +115,8 @@ fn wav_spec(bytes: &Bytes) -> Result<WavSpec> {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::modality::audio::{AudioLocation, AudioReplacement, Waveform};
-
     use super::*;
+    use crate::modality::{AudioLocation, AudioReplacement, Waveform};
 
     /// A `secs`-second 8 kHz mono `bits`-bit integer WAV of silence.
     fn silent_wav(bits: u16, secs: u32) -> Bytes {
