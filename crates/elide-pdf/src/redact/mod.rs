@@ -39,8 +39,27 @@ pub(crate) use self::pages::redact_pages;
 use crate::document::Store;
 use crate::text::{Address, GlyphBytes, StreamTarget, TextBlock, scrub, text_blocks};
 
-/// Glyph byte ranges to delete, grouped by the string operand they live in.
-type Deletions = BTreeMap<Address, Vec<(usize, usize)>>;
+/// The physical content stream a deletion edits, distinguishing streams an
+/// [`Address`] alone cannot.
+///
+/// [`StreamTarget::PageContent`] is the *same* value for every page, so an
+/// `Address` cannot tell two pages' content streams apart: two pages whose text
+/// happens to sit at the same operation/operand indexes would share an `Address`
+/// and drain each other's bytes. Keying by the physical stream, a page's
+/// content-object id set (shared pages compare equal), or a Form XObject's id,
+/// scopes each deletion to the exact stream it belongs to.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum StreamKey {
+    /// A page's content, identified by the object id(s) of its `Contents`
+    /// stream(s); pages that share the same content object(s) compare equal.
+    Page(Vec<ObjectId>),
+    /// A Form XObject, globally unique by its object id.
+    XObject(ObjectId),
+}
+
+/// Glyph byte ranges to delete, grouped by the physical stream and the string
+/// operand within it they live in.
+type Deletions = BTreeMap<(StreamKey, Address), Vec<(usize, usize)>>;
 
 /// Redact `detections` by deleting the glyphs that drew them, then sanitise the
 /// document (strip annotations, form values, embedded files, the outline,
@@ -101,23 +120,30 @@ pub(crate) fn redact_text(store: &Store, detections: &[Detection]) -> Result<Vec
     // `Contents` stream shared by two pages. So collect all deletions first, then
     // decode, edit, and write each physical stream exactly once.
     //
-    // `to_delete` is keyed by `Address`, which already names its `StreamTarget`;
-    // `apply_deletions` filters by target, so one document-wide map is correct.
+    // Each deletion is keyed by its physical [`StreamKey`] *and* `Address`: a
+    // page-content `Address` does not name its page (every page's is
+    // `StreamTarget::PageContent`), so two pages whose text sits at the same
+    // operation indexes would otherwise share a key and drain each other's bytes.
     let mut to_delete: Deletions = BTreeMap::new();
-    // Every physical stream a deletion touches, so each is rewritten once. A
-    // page's content stream is not unique across pages (all are
-    // `StreamTarget::PageContent`), so page content is keyed by its owning
-    // `page_id`; a Form XObject is globally unique by its object id.
+    // Every physical stream a deletion touches, so each is rewritten once, and
+    // the page ids to visit (deduped to their content-object sets at write time).
     let mut edited_pages: BTreeSet<ObjectId> = BTreeSet::new();
     let mut edited_xobjects: BTreeSet<ObjectId> = BTreeSet::new();
 
     for block in &blocks {
         let dels = detections.iter().filter(|d| d.page == block.page);
+        // The page's own content-object id set, this block's key for
+        // `PageContent` glyphs (computed once; constant within the block).
+        let page_content_key = StreamKey::Page(doc.get_page_contents(block.page_id));
         let mut deleted_glyphs: Vec<GlyphBytes> = Vec::new();
         for d in dels {
             for glyph in block.offsets.glyph_bytes(d.start..d.end) {
+                let key = match glyph.address.stream {
+                    StreamTarget::PageContent => page_content_key.clone(),
+                    StreamTarget::XObject(id) => StreamKey::XObject(id),
+                };
                 to_delete
-                    .entry(glyph.address)
+                    .entry((key, glyph.address))
                     .or_default()
                     .push((glyph.byte_start, glyph.byte_end));
                 deleted_glyphs.push(glyph);
@@ -158,13 +184,13 @@ pub(crate) fn redact_text(store: &Store, detections: &[Detection]) -> Result<Vec
     let mut written_contents: BTreeSet<Vec<ObjectId>> = BTreeSet::new();
     for page_id in edited_pages {
         let content_ids = doc.get_page_contents(page_id);
-        if !written_contents.insert(content_ids) {
+        if !written_contents.insert(content_ids.clone()) {
             continue;
         }
         let bytes = pristine.get_page_content(page_id);
         let mut content = Content::decode(&bytes)
             .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("decode content: {e}")))?;
-        apply_deletions(&mut content, &to_delete, StreamTarget::PageContent);
+        apply_deletions(&mut content, &to_delete, &StreamKey::Page(content_ids));
         let new_content = content
             .encode()
             .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("encode content: {e}")))?;
@@ -184,7 +210,7 @@ pub(crate) fn redact_text(store: &Store, detections: &[Detection]) -> Result<Vec
         };
         let mut content = Content::decode(&bytes)
             .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("decode content: {e}")))?;
-        apply_deletions(&mut content, &to_delete, StreamTarget::XObject(id));
+        apply_deletions(&mut content, &to_delete, &StreamKey::XObject(id));
         let new_content = content
             .encode()
             .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("encode content: {e}")))?;
@@ -304,19 +330,20 @@ fn write_xobject_content(doc: &mut lopdf::Document, id: ObjectId, content: Vec<u
 /// the positional residue. The surviving text reflows (there are no font metrics
 /// here to preserve exact layout); a caller needing pixel-faithful layout uses
 /// the raster path instead.
-fn apply_deletions(content: &mut Content, to_delete: &Deletions, stream: StreamTarget) {
+fn apply_deletions(content: &mut Content, to_delete: &Deletions, stream: &StreamKey) {
     for (
-        &Address {
-            stream: site_stream,
-            op,
-            operand,
-            item,
-        },
+        (
+            site_stream,
+            Address {
+                op, operand, item, ..
+            },
+        ),
         ranges,
     ) in to_delete
     {
-        // Apply only the deletions targeting this stream; the batch spans the
-        // page content and every Form XObject it draws.
+        let (op, operand, item) = (*op, *operand, *item);
+        // Apply only the deletions targeting this exact physical stream; the
+        // batch spans every page's content and every Form XObject drawn.
         if site_stream != stream {
             continue;
         }
@@ -422,15 +449,24 @@ mod tests {
         }
     }
 
-    /// An `Address` into the page content's first operation, naming `TJ` array
-    /// element `item`.
-    fn addr(item: usize) -> Address {
-        Address {
-            stream: StreamTarget::PageContent,
-            op: 0,
-            operand: 0,
-            item: Some(item),
-        }
+    /// The physical stream key these single-page tests edit: page content with
+    /// one synthetic `Contents` object.
+    fn page_key() -> StreamKey {
+        StreamKey::Page(vec![(1, 0)])
+    }
+
+    /// The `(StreamKey, Address)` deletion key for the page content's first
+    /// operation, naming `TJ` array element `item`.
+    fn addr(item: usize) -> (StreamKey, Address) {
+        (
+            page_key(),
+            Address {
+                stream: StreamTarget::PageContent,
+                op: 0,
+                operand: 0,
+                item: Some(item),
+            },
+        )
     }
 
     /// Deleting every glyph of a `TJ` string element empties it AND zeroes the
@@ -449,7 +485,7 @@ mod tests {
         ]);
         let mut to_delete: Deletions = BTreeMap::new();
         to_delete.insert(addr(2), vec![(0, 3)]);
-        apply_deletions(&mut content, &to_delete, StreamTarget::PageContent);
+        apply_deletions(&mut content, &to_delete, &page_key());
 
         let arr = tj_array(&content);
         // "ret" is now empty; both adjacent kerns (-40 before, -55 after) zeroed.
@@ -473,7 +509,7 @@ mod tests {
         ]);
         let mut to_delete: Deletions = BTreeMap::new();
         to_delete.insert(addr(0), vec![(0, 3)]);
-        apply_deletions(&mut content, &to_delete, StreamTarget::PageContent);
+        apply_deletions(&mut content, &to_delete, &page_key());
 
         let arr = tj_array(&content);
         assert_eq!(arr[0], Object::string_literal("ret"), "survivors mangled");
@@ -496,7 +532,7 @@ mod tests {
         ]);
         let mut to_delete: Deletions = BTreeMap::new();
         to_delete.insert(addr(2), vec![(0, 2)]);
-        apply_deletions(&mut content, &to_delete, StreamTarget::PageContent);
+        apply_deletions(&mut content, &to_delete, &page_key());
 
         let arr = tj_array(&content);
         assert_eq!(arr[0], Object::string_literal("a"));

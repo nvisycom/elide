@@ -837,3 +837,79 @@ fn a_form_xobject_shared_by_two_pages_keeps_every_page_deletion() {
         "second target still in raw bytes"
     );
 }
+
+/// Two pages with SEPARATE content streams whose text sits at the same
+/// operation/operand indexes. A detection on each page must delete only that
+/// page's target and leave the other page's text (at the identical index)
+/// untouched. Deletions are scoped by physical stream, not by operand address
+/// alone, so page 1's ranges never drain page 2's bytes.
+#[test]
+fn distinct_page_streams_with_matching_indexes_do_not_cross_contaminate() {
+    use lopdf::content::{Content, Operation};
+    use lopdf::{Document, Object, Stream, dictionary};
+
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let font_id = doc.add_object(dictionary! {
+        "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Courier",
+    });
+
+    // Each page's single Tj sits at the same operation index (op 3) but in its
+    // own Contents object, and draws a different string of the same length.
+    let page_body = |text: &str| Content {
+        operations: vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            Operation::new("Td", vec![72.into(), 700.into()]),
+            Operation::new("Tj", vec![Object::string_literal(text)]),
+            Operation::new("ET", vec![]),
+        ],
+    };
+    let mut page_ids = Vec::new();
+    for text in ["alice@x.com KEEP1", "bob@y.com   KEEP2"] {
+        let content_id = doc.add_object(Stream::new(
+            dictionary! {},
+            page_body(text).encode().unwrap(),
+        ));
+        let resources_id =
+            doc.add_object(dictionary! { "Font" => dictionary! { "F1" => font_id } });
+        page_ids.push(
+            doc.add_object(dictionary! {
+                "Type" => "Page", "Parent" => pages_id,
+                "Contents" => content_id, "Resources" => resources_id,
+            })
+            .into(),
+        );
+    }
+    let pages = dictionary! {
+        "Type" => "Pages", "Kids" => page_ids, "Count" => 2,
+        "MediaBox" => vec![0.into(), 0.into(), 300.into(), 800.into()],
+    };
+    doc.objects.insert(pages_id, Object::Dictionary(pages));
+    let catalog_id = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+    doc.trailer.set("Root", catalog_id);
+    let mut pdf = Vec::new();
+    doc.save_to(&mut pdf).unwrap();
+
+    // Redact one email per page (each on its own page/stream, same op index).
+    let opened = Pdf::open(&pdf).unwrap();
+    let mut dets = spans_for(&opened, "alice@x.com");
+    dets.extend(spans_for(&opened, "bob@y.com"));
+    assert_eq!(dets.len(), 2, "one target on each page");
+
+    let out = opened.redact_text(&dets).unwrap();
+    let text = extracted(&out);
+
+    // Both targets gone; both pages' non-detected text survives intact, neither
+    // page's deletion drained the other page's same-index bytes.
+    assert!(!text.contains("alice@x.com"), "page 1 target survived");
+    assert!(!text.contains("bob@y.com"), "page 2 target survived");
+    assert!(
+        text.contains("KEEP1"),
+        "page 1 surviving text was corrupted"
+    );
+    assert!(
+        text.contains("KEEP2"),
+        "page 2 surviving text was corrupted"
+    );
+}
