@@ -106,7 +106,20 @@ impl OcrBackend for OcrsBackend {
         let image = request.image.to_vec();
         let (tx, rx) = futures::channel::oneshot::channel();
         rayon::spawn(move || {
-            let result = engine.recognize(&image);
+            // Catch a panic inside the engine (an incompatible RTen model can
+            // panic during recognition). The Rayon pool has no panic handler, so
+            // an escaping panic would abort the whole process; convert it into a
+            // recoverable error instead. `AssertUnwindSafe` is sound here: the
+            // closure only borrows the shared engine and an owned image, and a
+            // panic leaves nothing observably inconsistent.
+            let result =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| engine.recognize(&image)))
+                    .unwrap_or_else(|_| {
+                        Err(Error::new(
+                            ErrorKind::Processing,
+                            "OCR engine panicked during recognition",
+                        ))
+                    });
             // The receiver is dropped only if the caller's future was cancelled;
             // nothing to do with the result then.
             let _ = tx.send(result);
