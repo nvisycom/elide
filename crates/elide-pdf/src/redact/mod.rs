@@ -93,16 +93,26 @@ pub(crate) fn redact_text(store: &Store, detections: &[Detection]) -> Result<Vec
         collect_deleted_codes(&streams, block, &survivors, &mut surviving_codes);
     }
 
-    for block in &blocks {
-        let dels: Vec<&Detection> = detections.iter().filter(|d| d.page == block.page).collect();
-        if dels.is_empty() {
-            continue;
-        }
+    // Aggregate every block's deletions before touching any stream. A Form
+    // XObject (a shared header/footer form) is drawn by several pages and is one
+    // physical stream; if each page decoded it from `store` (unmutated) and wrote
+    // its own ranges back in turn, the last write would drop the earlier pages'
+    // deletions and the redacted text would reappear. The same applies to a
+    // `Contents` stream shared by two pages. So collect all deletions first, then
+    // decode, edit, and write each physical stream exactly once.
+    //
+    // `to_delete` is keyed by `Address`, which already names its `StreamTarget`;
+    // `apply_deletions` filters by target, so one document-wide map is correct.
+    let mut to_delete: Deletions = BTreeMap::new();
+    // Every physical stream a deletion touches, so each is rewritten once. A
+    // page's content stream is not unique across pages (all are
+    // `StreamTarget::PageContent`), so page content is keyed by its owning
+    // `page_id`; a Form XObject is globally unique by its object id.
+    let mut edited_pages: BTreeSet<ObjectId> = BTreeSet::new();
+    let mut edited_xobjects: BTreeSet<ObjectId> = BTreeSet::new();
 
-        // Collect glyph byte ranges to delete, grouped by the exact string
-        // they live in (the `Address`). Remember each deleted glyph too, so
-        // its raw code can be scrubbed from the font's `/ToUnicode`.
-        let mut to_delete: Deletions = BTreeMap::new();
+    for block in &blocks {
+        let dels = detections.iter().filter(|d| d.page == block.page);
         let mut deleted_glyphs: Vec<GlyphBytes> = Vec::new();
         for d in dels {
             for glyph in block.offsets.glyph_bytes(d.start..d.end) {
@@ -113,36 +123,72 @@ pub(crate) fn redact_text(store: &Store, detections: &[Detection]) -> Result<Vec
                 deleted_glyphs.push(glyph);
             }
         }
-        if to_delete.is_empty() {
+        if deleted_glyphs.is_empty() {
             continue;
         }
 
-        // Decode every stream a deleted glyph lives in (page content and any
-        // Form XObjects it draws), record the deleted codes for the CMap
-        // scrub, then apply the deletions and write each stream back.
-        let mut streams = decode_glyph_streams(store, &deleted_glyphs, block.page_id)?;
+        // Record the deleted codes for the `/ToUnicode` scrub from the pristine
+        // streams (this reads only the unmutated `store`, so it is independent of
+        // the write pass below), and note each physical stream to rewrite. A
+        // glyph's font slot indexes *this* block's font table, so codes must be
+        // collected per block even for a stream shared across pages.
+        let streams = decode_glyph_streams(store, &deleted_glyphs, block.page_id)?;
         collect_deleted_codes(&streams, block, &deleted_glyphs, &mut deleted_codes);
-
-        for (target, content) in &mut streams {
-            apply_deletions(content, &to_delete, *target);
-            let new_content = content.encode().map_err(|e| {
-                Error::new(ErrorKind::MalformedInput, format!("encode content: {e}"))
-            })?;
-            match target {
+        for g in &deleted_glyphs {
+            match g.address.stream {
                 StreamTarget::PageContent => {
-                    doc.change_page_content(block.page_id, new_content)
-                        .map_err(|e| {
-                            Error::new(
-                                ErrorKind::MalformedInput,
-                                format!("write page content: {e}"),
-                            )
-                        })?;
+                    edited_pages.insert(block.page_id);
                 }
                 StreamTarget::XObject(id) => {
-                    write_xobject_content(&mut doc, *id, new_content)?;
+                    edited_xobjects.insert(id);
                 }
             }
         }
+    }
+
+    // Rewrite each physical stream once, applying every block's deletions.
+    //
+    // `change_page_content` edits the underlying content-stream object(s) a page
+    // points at. Two pages can point at the *same* content object(s) (a template
+    // reused across pages); editing it once per page would drain already-deleted
+    // byte ranges a second time and corrupt the stream. So dedup by the page's
+    // content-object id set, and decode the pristine bytes from `store` (never
+    // mutated), never from the document being edited in place.
+    let pristine = store.doc();
+    let mut written_contents: BTreeSet<Vec<ObjectId>> = BTreeSet::new();
+    for page_id in edited_pages {
+        let content_ids = doc.get_page_contents(page_id);
+        if !written_contents.insert(content_ids) {
+            continue;
+        }
+        let bytes = pristine.get_page_content(page_id);
+        let mut content = Content::decode(&bytes)
+            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("decode content: {e}")))?;
+        apply_deletions(&mut content, &to_delete, StreamTarget::PageContent);
+        let new_content = content
+            .encode()
+            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("encode content: {e}")))?;
+        doc.change_page_content(page_id, new_content).map_err(|e| {
+            Error::new(
+                ErrorKind::MalformedInput,
+                format!("write page content: {e}"),
+            )
+        })?;
+    }
+    for id in edited_xobjects {
+        let bytes = match pristine.get_object(id) {
+            Ok(Object::Stream(s)) => s.decompressed_content().map_err(|e| {
+                Error::new(ErrorKind::MalformedInput, format!("XObject content: {e}"))
+            })?,
+            _ => continue,
+        };
+        let mut content = Content::decode(&bytes)
+            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("decode content: {e}")))?;
+        apply_deletions(&mut content, &to_delete, StreamTarget::XObject(id));
+        let new_content = content
+            .encode()
+            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("encode content: {e}")))?;
+        write_xobject_content(&mut doc, id, new_content)?;
     }
 
     // Scrub the deleted codes from each affected font's `/ToUnicode` CMap

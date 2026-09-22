@@ -23,6 +23,13 @@ use crate::document::Store;
 /// legitimately deep nesting).
 const MAX_XOBJECT_DEPTH: u8 = 12;
 
+/// Total Form-XObject walks permitted per page. Depth and the cycle guard bound
+/// how *deep* and how re-entrant the walk is, but a form reached through many
+/// distinct paths is re-walked on each, so a small document can still fan out to
+/// an enormous number of decodes. This caps the total; a genuine page draws far
+/// fewer forms than this, so it only bites pathological fan-out.
+const MAX_XOBJECT_WALKS: u32 = 4_096;
+
 /// A page's text and glyph map under construction: [`push_glyph`](TextRun::push_glyph)
 /// appends the characters a glyph drew (one [`OffsetRun`]), and
 /// [`push_gap`](TextRun::push_gap) a synthetic space no glyph drew. The same run
@@ -233,6 +240,7 @@ pub(crate) fn text_block_for_page(
         active: BTreeSet::new(),
         page,
         max_page_bytes,
+        walks_remaining: MAX_XOBJECT_WALKS,
     };
 
     walk_stream(
@@ -244,6 +252,7 @@ pub(crate) fn text_block_for_page(
             referenced: &resource_ids,
         },
         MAX_XOBJECT_DEPTH,
+        None,
         &mut ctx,
     )?;
 
@@ -263,12 +272,19 @@ pub(crate) fn text_block_for_page(
 /// stamped onto every glyph so a deletion edits the correct stream. `active`
 /// holds the XObjects currently on the recursion stack (cycle guard); `depth`
 /// bounds nesting. Text under an undecodable font fails closed, as at page level.
+///
+/// `inherited` is the caller's selected font at the `Do` that invoked this
+/// stream: a Form XObject inherits the graphics-state font, so text it draws
+/// before its own `Tf` is drawn with the caller's font. It is the font-table
+/// slot plus the resolved encoding (`&Some` decodable, `&Some(None)` selected
+/// but undecodable, `&None`/`None` no font selected). `None` at page level.
 fn walk_stream(
     doc: &Document,
     content: &Content,
     stream: StreamTarget,
     scope: &Scope<'_>,
     depth: u8,
+    inherited: Option<(u16, &Option<Encoding>)>,
     ctx: &mut Walk<'_>,
 ) -> Result<()> {
     // Resolve this scope's fonts to encodings, and append a `FontEntry` per font
@@ -288,15 +304,17 @@ fn walk_stream(
         encodings.insert(name.clone(), font.get_font_encoding(doc).ok());
     }
 
-    // The current font's resolved encoding: `None` before any `Tf`, or
-    // `Some(None)` when the selected font could not be decoded or names a font
-    // absent from this scope's resources.
+    // The current font's resolved encoding: `None` before any `Tf` (unless a
+    // font is inherited from the caller's graphics state, below), or `Some(None)`
+    // when the selected font could not be decoded or names a font absent from
+    // this scope's resources.
     const UNRESOLVED: &Option<Encoding> = &None;
-    let mut current: Option<&Option<Encoding>> = None;
-    // The font-table slot of the selected font, stamped onto its glyphs. A plain
-    // local (not held on a borrow of `accum`), so the `Do` arm can re-borrow
-    // `accum` to recurse.
-    let mut font_slot_current: u16 = 0;
+    // A Form XObject inherits the caller's font, so text it draws before its own
+    // `Tf` uses that font; at page level there is nothing to inherit.
+    let (mut current, mut font_slot_current): (Option<&Option<Encoding>>, u16) = match inherited {
+        Some((slot, enc)) => (Some(enc), slot),
+        None => (None, 0),
+    };
 
     for (op_idx, op) in content.operations.iter().enumerate() {
         match op.operator.as_str() {
@@ -342,7 +360,10 @@ fn walk_stream(
             // redactable too.
             "Do" => {
                 if let Some(Object::Name(name)) = op.operands.first() {
-                    walk_xobject(doc, name, scope, depth, ctx)?;
+                    // Pass the currently selected font down: the form inherits it
+                    // and may draw text before selecting its own.
+                    let inherited = current.map(|enc| (font_slot_current, enc));
+                    walk_xobject(doc, name, scope, depth, inherited, ctx)?;
                 }
             }
             _ => {}
@@ -362,6 +383,7 @@ fn walk_xobject(
     name: &[u8],
     scope: &Scope<'_>,
     depth: u8,
+    inherited: Option<(u16, &Option<Encoding>)>,
     ctx: &mut Walk<'_>,
 ) -> Result<()> {
     if depth == 0 {
@@ -424,6 +446,21 @@ fn walk_xobject(
         None => *scope,
     };
 
+    // Charge the total-walk budget for this form (only now that it is a real form
+    // we will decode). Exhausting it means a page fans out to more walks than any
+    // legitimate document, so fail closed rather than let the walk run away.
+    let Some(remaining) = ctx.walks_remaining.checked_sub(1) else {
+        return Err(Error::new(
+            ErrorKind::ResourceLimit,
+            format!(
+                "page {} draws more than {MAX_XOBJECT_WALKS} Form XObjects; \
+                 its text cannot be walked within the resource budget",
+                ctx.page
+            ),
+        ));
+    };
+    ctx.walks_remaining = remaining;
+
     ctx.active.insert(xobject_id);
     let result = walk_stream(
         doc,
@@ -431,6 +468,7 @@ fn walk_xobject(
         StreamTarget::XObject(xobject_id),
         &inner_scope,
         depth - 1,
+        inherited,
         ctx,
     );
     ctx.active.remove(&xobject_id);
@@ -536,7 +574,8 @@ impl TextAccum<'_> {
 /// The mutable state threaded through a page's content walk, unchanged as it
 /// recurses into Form XObjects: the accumulating text/glyph/font output, the
 /// XObjects currently on the recursion stack (cycle guard), the 1-based page
-/// number for diagnostics, and the per-stream decompression-bomb bound.
+/// number for diagnostics, the per-stream decompression-bomb bound, and the
+/// remaining total-walk budget.
 struct Walk<'a> {
     accum: TextAccum<'a>,
     active: BTreeSet<ObjectId>,
@@ -544,4 +583,11 @@ struct Walk<'a> {
     /// Maximum decompressed size of any single content stream (page or XObject),
     /// refusing a decompression bomb.
     max_page_bytes: usize,
+    /// Form XObject walks still permitted on this page. The stack-based `active`
+    /// guard stops re-entry (cycles) but not re-walks: a form reached through
+    /// several distinct paths is walked once per path, so a shallow tree that
+    /// draws each child many times per level can fan out to a huge number of
+    /// stream decodes without ever recursing cyclically. This bounds the total,
+    /// independent of nesting depth.
+    walks_remaining: u32,
 }

@@ -22,9 +22,9 @@ use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 use elide_pdf::Pdf;
-use elide_pdf::redact::Detection;
 #[cfg(feature = "internal_image")]
 use elide_pdf::extract::{EmbeddingKind, ImageId};
+use elide_pdf::redact::Detection;
 #[cfg(feature = "internal_image")]
 use elide_pdf::redact::ImageReplacement;
 #[cfg(all(feature = "pdf-render", feature = "internal_image"))]

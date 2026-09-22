@@ -426,6 +426,114 @@ fn form_xobject_with_text() -> Vec<u8> {
     pdf
 }
 
+/// A Form XObject that draws text WITHOUT selecting its own font: it inherits the
+/// font the caller selected with `Tf` before the `Do`. The form's content shares
+/// the caller's resources (it has no `/Resources` of its own), so `F1` resolves
+/// in the parent scope.
+fn form_xobject_inheriting_font() -> Vec<u8> {
+    use lopdf::content::{Content, Operation};
+    use lopdf::{Document, Object, Stream, dictionary};
+
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let font_id = doc.add_object(dictionary! {
+        "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Courier",
+    });
+    // The form draws text but never issues its own `Tf`; it relies on the font
+    // the page selected before the `Do`. It declares no `/Resources`, so the
+    // page's resources stand in.
+    let form_body = Content {
+        operations: vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Td", vec![10.into(), 10.into()]),
+            Operation::new(
+                "Tj",
+                vec![Object::string_literal("Contact bob@corp.com now")],
+            ),
+            Operation::new("ET", vec![]),
+        ],
+    };
+    let form_id = doc.add_object(Stream::new(
+        dictionary! {
+            "Type" => "XObject", "Subtype" => "Form",
+            "BBox" => vec![0.into(), 0.into(), 200.into(), 50.into()],
+        },
+        form_body.encode().unwrap(),
+    ));
+    // The page selects F1, then draws the form via `Do`.
+    let page_body = Content {
+        operations: vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            Operation::new("Td", vec![72.into(), 700.into()]),
+            Operation::new("Tj", vec![Object::string_literal("PAGEMARK")]),
+            Operation::new("ET", vec![]),
+            Operation::new("Do", vec!["Fm0".into()]),
+        ],
+    };
+    let content_id = doc.add_object(Stream::new(dictionary! {}, page_body.encode().unwrap()));
+    let resources_id = doc.add_object(dictionary! {
+        "Font" => dictionary! { "F1" => font_id },
+        "XObject" => dictionary! { "Fm0" => Object::Reference(form_id) },
+    });
+    let page_id = doc.add_object(dictionary! {
+        "Type" => "Page", "Parent" => pages_id,
+        "Contents" => content_id, "Resources" => resources_id,
+    });
+    let pages = dictionary! {
+        "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1,
+        "MediaBox" => vec![0.into(), 0.into(), 300.into(), 800.into()],
+    };
+    doc.objects.insert(pages_id, Object::Dictionary(pages));
+    let catalog_id = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+    doc.trailer.set("Root", catalog_id);
+    let mut pdf = Vec::new();
+    doc.save_to(&mut pdf).unwrap();
+    pdf
+}
+
+/// Text a Form XObject draws with the caller's inherited font (no `Tf` of its
+/// own) is walked and redactable, not silently skipped. Before the walker
+/// carried the inherited font into the form, `current` was `None` there and the
+/// text was dropped, so it was neither extracted nor redacted, a leak.
+#[test]
+fn redacts_text_drawn_with_an_inherited_font() {
+    let pdf = form_xobject_inheriting_font();
+    let doc = Pdf::open(&pdf).unwrap();
+
+    let joined: String = doc
+        .extract()
+        .blocks
+        .into_iter()
+        .map(|b| b.text.to_string())
+        .collect();
+    assert!(
+        joined.contains("bob@corp.com"),
+        "inherited-font XObject text not walked"
+    );
+
+    let dets = spans_for(&doc, "bob@corp.com");
+    assert!(!dets.is_empty(), "target not located");
+    let out = doc.redact_text(&dets).unwrap();
+
+    let reopened = Pdf::open(&out).unwrap();
+    let walked: String = reopened
+        .extract()
+        .blocks
+        .into_iter()
+        .map(|b| b.text.to_string())
+        .collect();
+    assert!(
+        !walked.contains("bob@corp.com"),
+        "inherited-font PII survived"
+    );
+    assert!(walked.contains("PAGEMARK"), "page text lost");
+    assert!(
+        !String::from_utf8_lossy(&out).contains("bob@corp.com"),
+        "inherited-font PII still in raw bytes"
+    );
+}
+
 /// Text drawn inside a `Do`-invoked Form XObject is located and redactable: the
 /// walker recurses into the XObject's content stream, so its PII is found and
 /// deleted from that stream, while the page's own text survives.
@@ -626,5 +734,106 @@ fn a_code_kept_by_surviving_xobject_text_is_spared() {
     assert!(
         !raw.contains("<41>"),
         "redacted page's CMap entry was not scrubbed"
+    );
+}
+
+/// A Form XObject drawn by two pages (a shared header/footer form) with PII in
+/// its own stream. Redacting spans located on both pages must delete every
+/// targeted glyph from the single shared stream, not just those from the last
+/// page written. The redactor accumulates deletions across all pages before
+/// rewriting each physical stream once; a per-page decode-and-write would let
+/// the second page overwrite the first page's edit with the pristine bytes,
+/// resurrecting the redacted text.
+#[test]
+fn a_form_xobject_shared_by_two_pages_keeps_every_page_deletion() {
+    use lopdf::content::{Content, Operation};
+    use lopdf::{Document, Object, Stream, dictionary};
+
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let font_id = doc.add_object(dictionary! {
+        "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Courier",
+    });
+    // One form, drawing two distinct emails, shared by both pages.
+    let form_body = Content {
+        operations: vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            Operation::new("Td", vec![10.into(), 10.into()]),
+            Operation::new(
+                "Tj",
+                vec![Object::string_literal("alice@x.com and bob@y.com")],
+            ),
+            Operation::new("ET", vec![]),
+        ],
+    };
+    let form_resources = doc.add_object(dictionary! { "Font" => dictionary! { "F1" => font_id } });
+    let form_id = doc.add_object(Stream::new(
+        dictionary! {
+            "Type" => "XObject", "Subtype" => "Form",
+            "BBox" => vec![0.into(), 0.into(), 200.into(), 50.into()],
+            "Resources" => Object::Reference(form_resources),
+        },
+        form_body.encode().unwrap(),
+    ));
+
+    // Two pages, each drawing the same form via `Do`.
+    let resources = dictionary! {
+        "Font" => dictionary! { "F1" => font_id },
+        "XObject" => dictionary! { "Fm0" => Object::Reference(form_id) },
+    };
+    let mut page_ids = Vec::new();
+    for _ in 0..2 {
+        let body = Content {
+            operations: vec![Operation::new("Do", vec!["Fm0".into()])],
+        };
+        let content_id = doc.add_object(Stream::new(dictionary! {}, body.encode().unwrap()));
+        let resources_id = doc.add_object(resources.clone());
+        page_ids.push(
+            doc.add_object(dictionary! {
+                "Type" => "Page", "Parent" => pages_id,
+                "Contents" => content_id, "Resources" => resources_id,
+            })
+            .into(),
+        );
+    }
+    let pages = dictionary! {
+        "Type" => "Pages", "Kids" => page_ids, "Count" => 2,
+        "MediaBox" => vec![0.into(), 0.into(), 300.into(), 100.into()],
+    };
+    doc.objects.insert(pages_id, Object::Dictionary(pages));
+    let catalog_id = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+    doc.trailer.set("Root", catalog_id);
+    let mut pdf = Vec::new();
+    doc.save_to(&mut pdf).unwrap();
+
+    // Both emails appear once per page (the form is walked under each), so a
+    // detection lands on both pages, each resolving to the same shared stream.
+    let opened = Pdf::open(&pdf).unwrap();
+    let mut dets = spans_for(&opened, "alice@x.com");
+    dets.extend(spans_for(&opened, "bob@y.com"));
+    assert!(
+        dets.len() >= 4,
+        "both targets should be found on both pages"
+    );
+
+    let out = opened.redact_text(&dets).unwrap();
+
+    // Neither email survives, in the re-extracted text or the raw bytes: the
+    // shared stream kept every page's deletion.
+    let text = extracted(&out);
+    assert!(
+        !text.contains("alice@x.com"),
+        "first-page deletion was lost"
+    );
+    assert!(!text.contains("bob@y.com"), "second-page deletion was lost");
+    let raw = String::from_utf8_lossy(&out);
+    assert!(
+        !raw.contains("alice@x.com"),
+        "first target still in raw bytes"
+    );
+    assert!(
+        !raw.contains("bob@y.com"),
+        "second target still in raw bytes"
     );
 }

@@ -33,7 +33,7 @@ use crate::redact::Detection;
 ///
 /// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a page's pixel buffer
 /// size does not match its dimensions, or a detection names a page not present in
-/// `pages`.
+/// `pages` or selects no glyph to redact.
 pub(crate) fn redact_raster(
     store: &Store,
     pages: &[PageObservation],
@@ -83,8 +83,8 @@ pub(crate) fn redact_raster(
 ///
 /// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a page's
 /// pixel buffer size does not match its dimensions, a detection names a page
-/// not present in `pages`, or a covered pixel is not `fill_rgb` (naming the
-/// page and the offending pixel).
+/// not present in `pages` or selects no glyph, or a covered pixel is not
+/// `fill_rgb` (naming the page and the offending pixel).
 #[cfg(feature = "test-utils")]
 #[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
 pub fn verify_raster_coverage(
@@ -116,8 +116,8 @@ pub fn verify_raster_coverage(
 /// Validate every page buffer and detection target, fail-closed.
 ///
 /// An RGB8 buffer must be exactly `width * height * 3` bytes, or the fill would
-/// read/write out of bounds; every detection must name a page present in
-/// `pages`.
+/// read/write out of bounds; every detection must name a page present in `pages`
+/// and select at least one glyph on it.
 fn validate_pages(pages: &[PageObservation], detections: &[Detection]) -> Result<()> {
     for page in pages {
         let expected = (page.width as usize)
@@ -137,10 +137,24 @@ fn validate_pages(pages: &[PageObservation], detections: &[Detection]) -> Result
     }
 
     for d in detections {
-        if !pages.iter().any(|p| p.page == d.page) {
+        let Some(page) = pages.iter().find(|p| p.page == d.page) else {
             return Err(Error::new(
                 ErrorKind::Redaction,
                 format!("detection names page {} not in the observed pages", d.page),
+            ));
+        };
+        // A detection that maps to no glyph would paint nothing, and both the
+        // fill and the coverage check would then "succeed" over an empty set,
+        // silently leaving the span in the output. Fail closed instead: an
+        // empty, out-of-range, or unmapped span is a redaction that cannot be
+        // carried out, not a no-op.
+        if glyph_rects(&page.glyphs, d.start, d.end).next().is_none() {
+            return Err(Error::new(
+                ErrorKind::Redaction,
+                format!(
+                    "detection on page {} (chars {}..{}) selects no glyph to redact",
+                    d.page, d.start, d.end
+                ),
             ));
         }
     }
@@ -278,6 +292,19 @@ mod tests {
         let p = page(1, 2, 2, FILL, vec![]);
 
         let detections = [Detection::new(2, 0, 1)];
+        let err = verify_raster_coverage(&[p], &detections, FILL).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Redaction);
+    }
+
+    #[test]
+    fn err_when_detection_selects_no_glyph() {
+        // The page exists and its buffer is valid, but no glyph overlaps the
+        // detected span, so a fill would paint nothing. This must fail closed
+        // rather than "succeed" over an empty pixel set and leave the span in.
+        let g = glyph(5, 6, PixelRect::new(1, 1, 2, 2));
+        let p = page(1, 4, 4, FILL, vec![g]);
+
+        let detections = [Detection::new(1, 0, 1)];
         let err = verify_raster_coverage(&[p], &detections, FILL).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::Redaction);
     }

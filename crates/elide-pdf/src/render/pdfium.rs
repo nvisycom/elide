@@ -144,6 +144,14 @@ impl Binding {
             })?;
         let config = PdfRenderConfig::new().scale_page_by_factor(scale);
 
+        let page_count = document.pages().len() as usize;
+        if page_count > MAX_PAGES {
+            return Err(Error::new(
+                ErrorKind::ResourceLimit,
+                format!("document has {page_count} pages, over the {MAX_PAGES}-page render limit"),
+            ));
+        }
+
         let mut out = BTreeMap::new();
         for (index, page) in document.pages().iter().enumerate() {
             // Page objects are 0-based here; the API numbers pages from 1.
@@ -175,7 +183,7 @@ impl Binding {
         let page_count = document.pages().len() as usize;
         if page_count > MAX_PAGES {
             return Err(Error::new(
-                ErrorKind::MalformedInput,
+                ErrorKind::ResourceLimit,
                 format!("document has {page_count} pages, over the {MAX_PAGES}-page render limit"),
             ));
         }
@@ -200,7 +208,7 @@ impl Binding {
             let (width, height) = image.dimensions();
             if width > MAX_PAGE_DIMENSION_PX || height > MAX_PAGE_DIMENSION_PX {
                 return Err(Error::new(
-                    ErrorKind::MalformedInput,
+                    ErrorKind::ResourceLimit,
                     format!(
                         "page {} renders to {width}x{height} px, over the \
                      {MAX_PAGE_DIMENSION_PX}px per-side render limit",
@@ -279,6 +287,18 @@ fn render_page(page: &PdfPage, config: &PdfRenderConfig) -> Result<RenderedPage>
         )
     })?;
     let (width, height) = image.dimensions();
+    // Reject an oversized render before encoding, so a page that rasterises to a
+    // huge bitmap cannot drive unbounded PNG-encoding memory (the same bound
+    // `observe_all` applies to the glyph-observation path).
+    if width > MAX_PAGE_DIMENSION_PX || height > MAX_PAGE_DIMENSION_PX {
+        return Err(Error::new(
+            ErrorKind::ResourceLimit,
+            format!(
+                "page renders to {width}x{height} px, over the \
+                 {MAX_PAGE_DIMENSION_PX}px per-side render limit"
+            ),
+        ));
+    }
     let mut png = std::io::Cursor::new(Vec::new());
     image.write_to(&mut png, ImageFormat::Png).map_err(|e| {
         Error::new(

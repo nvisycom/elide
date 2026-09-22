@@ -2,10 +2,10 @@
 //! strategies act on.
 //!
 //! An object-editing strategy (image replacement, page reflatten, sanitize) must
-//! never clobber a structural object, the catalog, the page tree, a resource
-//! dictionary, since doing so corrupts the document rather than redacting it.
-//! Rather than each strategy hand-inspecting `/Type`/`/Subtype`, they ask an
-//! object's [`ObjectRole`] and consult [`is_protected`](ObjectRole::is_protected)
+//! never clobber a structural object, the catalog, the page tree, a page, since
+//! doing so corrupts the document rather than redacting it. Rather than each
+//! strategy hand-inspecting `/Type`/`/Subtype`, they ask an object's
+//! [`ObjectRole`] and consult [`is_protected`](ObjectRole::is_protected)
 //! / [`is_whole_object_replaceable`](ObjectRole::is_whole_object_replaceable).
 //! This is the PDF analogue of the OOXML `PartRole` seam.
 
@@ -18,9 +18,12 @@ pub enum ObjectRole {
     /// An image XObject (`/Subtype /Image`): pixel content that a redaction may
     /// replace wholesale with a redacted image.
     ImageXObject,
-    /// A structural object that defines the document's shape: the catalog, the
-    /// page tree (`/Pages`), a page, or a resource dictionary. Never replaced or
-    /// deleted wholesale, that would corrupt the document.
+    /// A structural object that defines the document's shape, identified by its
+    /// `/Type`: the catalog, the page tree (`/Pages`), or a page. Never replaced
+    /// or deleted wholesale, that would corrupt the document. (A resource
+    /// dictionary is also structural, but carries no `/Type` and is only
+    /// recognisable through the `/Resources` entry that references it, so it is
+    /// not classified from the object alone here.)
     Structure,
     /// Anything else (a content stream, a font, an annotation, a plain
     /// dictionary): not classified more finely here.
