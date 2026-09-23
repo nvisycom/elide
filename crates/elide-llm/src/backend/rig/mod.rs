@@ -12,12 +12,16 @@ use elide_core::Result;
 use elide_core::modality::text::Text;
 #[cfg(feature = "usage")]
 use elide_core::primitive::TokenCounts;
-use elide_image::modality::{Image, ImageData, ImageFormat};
+#[cfg(any(feature = "png", feature = "jpeg"))]
+use elide_image::modality::ImageFormat;
+use elide_image::modality::{Image, ImageData};
 use rig::ExtractionResponse;
 use rig::client::CompletionClient;
 use rig::completion::{Message, Usage};
 use rig::extractor::ExtractorBuilder;
-use rig::message::{ImageMediaType, UserContent};
+#[cfg(any(feature = "png", feature = "jpeg"))]
+use rig::message::ImageMediaType;
+use rig::message::UserContent;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -187,10 +191,13 @@ impl LlmBackend<Image> for RigBackend {
 /// source image as a proper image content block.
 fn image_message(prompt: &str, data: &ImageData) -> Message {
     let media_type = match data.format() {
+        #[cfg(feature = "jpeg")]
         Some(ImageFormat::Jpeg) => Some(ImageMediaType::JPEG),
+        #[cfg(feature = "png")]
         Some(ImageFormat::Png) => Some(ImageMediaType::PNG),
         // TIFF is not a media type a vision model accepts, and an unknown or
-        // absent format leaves the block untyped (the provider sniffs the bytes).
+        // absent format (or one whose feature is not enabled) leaves the block
+        // untyped (the provider sniffs the bytes).
         _ => None,
     };
     let content = vec![

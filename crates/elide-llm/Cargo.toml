@@ -5,7 +5,6 @@ name = "elide-llm"
 description = "LLM-mediated entity recognizer (text NER + image VLM) for the Elide toolkit"
 keywords = ["rig", "llm", "ner", "pii"]
 categories = ["text-processing", "api-bindings"]
-readme = "README.md"
 
 version = { workspace = true }
 rust-version = { workspace = true }
@@ -15,7 +14,6 @@ publish = { workspace = true }
 
 authors = { workspace = true }
 repository = { workspace = true }
-homepage = { workspace = true }
 documentation = { workspace = true }
 
 [features]
@@ -38,6 +36,11 @@ rig = [
 
 ## Ship the no-op `MockBackend` for tests, examples, and offline wiring.
 test-utils = []
+## Name a PNG / JPEG image's media type on an outgoing vision-model message.
+## Each forwards to the matching `elide-image` format; without it a message of
+## that format is sent untyped (the provider infers it from the bytes).
+png = ["elide-image/png"]
+jpeg = ["elide-image/jpeg"]
 ## Load prompt wording from a Jinja2 template file (`Jinja2Prompt`).
 jinja2 = ["dep:minijinja"]
 

@@ -5,7 +5,6 @@ name = "elide"
 description = "Composable component library for Elide pipelines: recognizers, dedup layers, checks, redaction strategies"
 keywords = ["elide", "toolkit", "components", "pipeline"]
 categories = ["data-structures"]
-readme = "README.md"
 
 version = { workspace = true }
 rust-version = { workspace = true }
@@ -15,7 +14,6 @@ publish = { workspace = true }
 
 authors = { workspace = true }
 repository = { workspace = true }
-homepage = { workspace = true }
 documentation = { workspace = true }
 
 [package.metadata.docs.rs]
@@ -126,8 +124,8 @@ codec-html = ["codec", "elide-codec/html"]
 codec-xml = ["codec", "elide-codec/xml"]
 codec-csv = ["codec", "tabular", "elide-codec/csv"]
 codec-xlsx = ["codec", "tabular", "codec-xml", "elide-codec/xlsx", "metadata"]
-codec-png = ["codec", "image", "elide-codec/png"]
-codec-jpeg = ["codec", "image", "elide-codec/jpeg"]
+codec-png = ["codec", "image", "elide-codec/png", "elide-llm?/png"]
+codec-jpeg = ["codec", "image", "elide-codec/jpeg", "elide-llm?/jpeg"]
 codec-tiff = ["codec", "image", "elide-codec/tiff"]
 codec-wav = ["codec", "audio", "elide-codec/wav"]
 codec-mp3 = ["codec", "audio", "elide-codec/mp3"]
