@@ -109,7 +109,6 @@ impl<M: TextRecognizable> Enricher<M> for LinguaEnricher {
 mod tests {
     use elide_core::modality::tabular::Tabular;
     use elide_core::modality::text::{Text, TextData};
-    use elide_core::primitive::LanguageClaim;
     use elide_core::recognition::{Scope, Subject};
 
     use super::*;
@@ -152,7 +151,7 @@ mod tests {
     async fn asserted_language_skips_detection() {
         let de: LanguageTag = "de".parse().unwrap();
         let data = TextData::new("The quick brown fox");
-        let scope = Scope::new().with_language(LanguageClaim::asserted(de));
+        let scope = Scope::new().with_language(de);
         let ctx = RecognizerContext::<Text>::new(&scope);
         let mut subject = Subject::new(data);
         LinguaEnricher::unrestricted()

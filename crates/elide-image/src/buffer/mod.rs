@@ -80,6 +80,27 @@ impl ImageBuffer {
         })
     }
 
+    /// The image's pixel dimensions, read from the container header **without
+    /// decoding the pixels**.
+    ///
+    /// A cheap probe for a caller that needs only the size (e.g. to scale a
+    /// vision model's normalized boxes): it parses the header, not every pixel,
+    /// and does not retain the source. Use [`open`](Self::open) when the pixels
+    /// are needed too.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`] if the bytes are not a readable image.
+    pub fn dimensions_of(bytes: &[u8]) -> Result<Dimensions<u32>> {
+        let reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+            .with_guessed_format()
+            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("unknown image: {e}")))?;
+        let (w, h) = reader
+            .into_dimensions()
+            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("image header: {e}")))?;
+        Ok(Dimensions::new(w, h))
+    }
+
     /// The decoded pixels, for a caller that wants the raster directly.
     #[must_use]
     pub fn raster(&self) -> &RasterImage {
@@ -276,6 +297,15 @@ mod tests {
         image::load_from_memory(bytes)
             .expect("decode")
             .get_pixel(x, y)
+    }
+
+    #[test]
+    fn dimensions_of_reads_the_header_without_decoding() {
+        // The header probe reports the true pixel size without a full decode.
+        let dims = ImageBuffer::dimensions_of(&png(7, 3)).expect("header dimensions");
+        assert_eq!(dims, Dimensions::new(7, 3));
+        // Non-image bytes are a malformed-input error, not a panic.
+        assert!(ImageBuffer::dimensions_of(b"not an image").is_err());
     }
 
     #[test]

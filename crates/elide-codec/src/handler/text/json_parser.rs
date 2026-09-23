@@ -10,7 +10,7 @@
 use std::mem;
 
 use elide_core::modality::ResolvedHint;
-use elide_core::modality::text::{Text, TextData, TextLocation};
+use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation};
 use elide_core::{Error, ErrorKind, Result};
 
 use super::json_escape::decode_escape;
@@ -171,8 +171,10 @@ impl<'a> SlotParser<'a> {
             // header vouching for its value.
             let key_start = self.pos;
             let key = self.parse_string_leaf(LeafKind::Key)?;
+            // The key span is a raw *source* range, so the hint is a source-only
+            // location, resolved against the source, not the value it labels.
             let key_hint = ResolvedHint::new(
-                TextLocation::new(key_start, self.pos),
+                TextLocation::from_source([SourceRef::new(key_start..self.pos)]),
                 TextData::new(context_words(&key.value)),
             );
             self.push_leaf(key);

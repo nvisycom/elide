@@ -202,7 +202,7 @@ fn recognizer_context_scopes_by_language_and_country() {
     // Assertions live on the scope; the query methods live on the
     // context, which borrows the scope.
     let scope = Scope::new()
-        .with_language(LanguageClaim::asserted(en_us.clone()))
+        .with_language(en_us.clone())
         .with_country(CountryCode::from_alpha2("US").unwrap());
     let ctx: RecognizerContext<'_, Text> = RecognizerContext::new(&scope);
     // The language queries combine the scope's asserted languages with a

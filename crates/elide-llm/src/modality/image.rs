@@ -16,11 +16,11 @@ impl LlmModality for Image {
 
     fn lift(batch: Candidates<ImageCandidate>, data: &ImageData) -> Vec<Entity<Image>> {
         // The model reports boxes in normalised `0.0..=1.0` coordinates; scaling
-        // them to pixels needs the image's pixel size, decoded from the bytes
-        // (the authoritative source, unlike a cached dimension that could drift).
-        // If the bytes will not decode there is nothing to scale against, so no
-        // candidate can be placed.
-        let Ok(dims) = ImageBuffer::open(&data.bytes).map(|b| b.dimensions()) else {
+        // them to pixels needs the image's pixel size, read from the container
+        // header (the authoritative source, unlike a cached dimension that could
+        // drift) — a header probe, not a full decode. If the bytes will not read
+        // there is nothing to scale against, so no candidate can be placed.
+        let Ok(dims) = ImageBuffer::dimensions_of(&data.bytes) else {
             return Vec::new();
         };
 

@@ -22,7 +22,7 @@
 use std::ops::Range;
 
 use elide_core::modality::ResolvedHint;
-use elide_core::modality::text::{Text, TextData, TextLocation};
+use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation};
 use elide_core::{Error, ErrorKind, Result};
 use quick_xml::Reader;
 use quick_xml::events::{BytesEnd, BytesStart, Event};
@@ -178,11 +178,11 @@ impl<'a> MarkupParser<'a> {
             if let Some(name) = attr.name {
                 let raw = self.source.slice(name.clone());
                 let local = raw.rsplit(':').next().unwrap_or(raw);
-                self.hint_item(
-                    idx,
-                    TextLocation::new(name.start, name.end),
-                    context_words(local),
-                );
+                // The attribute name is a raw *source* span, not a decoded one, so
+                // it is a source-only location; a consumer must resolve it against
+                // the source bytes, never the extracted value.
+                let location = TextLocation::from_source([SourceRef::new(name)]);
+                self.hint_item(idx, location, context_words(local));
             }
         }
         Ok(())
@@ -270,10 +270,10 @@ impl<'a> MarkupParser<'a> {
     /// boundary.
     fn enclosing_hint(&self) -> Option<ResolvedHint<Text>> {
         self.stack.last().map(|frame| {
-            ResolvedHint::new(
-                TextLocation::new(frame.tag_span.start, frame.tag_span.end),
-                TextData::new(frame.hint.clone()),
-            )
+            // The start-tag span is a raw *source* range, so the hint is a
+            // source-only location, resolved against the source, not the value.
+            let location = TextLocation::from_source([SourceRef::new(frame.tag_span.clone())]);
+            ResolvedHint::new(location, TextData::new(frame.hint.clone()))
         })
     }
 
@@ -448,9 +448,15 @@ mod tests {
         let hint = chunk.hints.first().expect("attribute-name hint present");
         // The name is split into context words for word-boundary matching.
         assert_eq!(hint.data.as_str(), "payment Card");
-        // Located at the attribute name in the source, not the value.
-        let range = hint.hint.location.range().expect("hint has a range");
-        assert_eq!(&raw[range.clone()], "paymentCard");
+        // A raw-source location (not a decoded range), pointing at the attribute
+        // name in the source: a consumer resolves it against the source bytes.
+        assert!(
+            hint.hint.location.range().is_none(),
+            "source-only, no decoded range"
+        );
+        let refs = hint.hint.location.source();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(&raw[refs[0].range.clone()], "paymentCard");
     }
 
     #[tokio::test]

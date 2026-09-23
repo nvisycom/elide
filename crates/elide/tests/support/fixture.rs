@@ -20,7 +20,7 @@ use elide::modality::image::Image;
 use elide::modality::tabular::Tabular;
 use elide::modality::text::Text;
 use elide::modality::{Modality, StreamDataReader, TextRecognizable};
-use elide::primitive::{LanguageClaim, LanguageTag};
+use elide::primitive::LanguageTag;
 use elide::recognition::Scope;
 use elide::redaction::operators::{Erase, Mask, Replace};
 use elide::redaction::{Anonymizer, Operator, Rule};
@@ -158,7 +158,7 @@ impl Fixture {
     /// language *detection* (the assertion is authoritative).
     pub async fn run_with_language(&self, language: LanguageTag) -> Result<PipelineOutcome<Text>> {
         let scope = Scope::new()
-            .with_language(LanguageClaim::asserted(language))
+            .with_language(language)
             .with_catalog(LabelCatalog::with_builtins());
         self.run_typed_with::<Text>(FormatRegistry::with_builtin(), scope)
             .await

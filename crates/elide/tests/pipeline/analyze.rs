@@ -195,7 +195,7 @@ async fn fusion_keeps_both_operands_source_refs() {
 
 #[tokio::test]
 async fn analyze_stamps_language_from_recognized_range() {
-    use elide_core::primitive::{LanguageClaim, LanguageTag};
+    use elide_core::primitive::LanguageTag;
 
     // An entity carrying a recognized_range (where it was found in the text).
     let mut e = detected("pattern", "PERSON", (0, 5), 0.9);
@@ -205,7 +205,7 @@ async fn analyze_stamps_language_from_recognized_range() {
 
     // The caller asserts the document language; it applies span-less (whole
     // payload), so every ranged entity is attributed to it.
-    let de = LanguageClaim::asserted(LanguageTag::parse("de").unwrap());
+    let de = LanguageTag::parse("de").unwrap();
     let scope = scope_for(&["PERSON"]).with_language(de);
 
     let entities = analyzer

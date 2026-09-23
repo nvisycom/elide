@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::entity::LabelCatalog;
-use crate::primitive::{CountryCode, LanguageClaim};
+use crate::primitive::{CountryCode, LanguageClaim, LanguageTag};
 
 /// Caller-asserted scope shared across every payload of one analysis.
 ///
@@ -145,13 +145,16 @@ impl Scope {
         }
     }
 
-    /// Assert a language for the analysis, returning `self` for chaining.
+    /// Assert a `language` for the analysis, returning `self` for chaining.
     ///
-    /// Build the [`LanguageClaim`] with [`LanguageClaim::asserted`]; an
-    /// assertion is full confidence, so it outranks any detection.
+    /// The tag is recorded as a caller [`asserted`](LanguageClaim::asserted)
+    /// claim (full confidence, outranks any detection). Taking a bare
+    /// [`LanguageTag`] keeps the scope's languages *asserted* by construction —
+    /// a detected claim can never leak in and suppress a locale filter.
     #[must_use]
-    pub fn with_language(mut self, language: LanguageClaim) -> Self {
-        self.languages.push(language);
+    pub fn with_language(mut self, language: impl Into<LanguageTag>) -> Self {
+        self.languages
+            .push(LanguageClaim::asserted(language.into()));
         self
     }
 
