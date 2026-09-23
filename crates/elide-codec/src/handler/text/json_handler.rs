@@ -18,7 +18,7 @@
 use std::ops::Range;
 
 use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation};
-use elide_core::modality::{Chunk, DataReader, DataWriter, Hint};
+use elide_core::modality::{Chunk, DataReader, DataWriter, ResolvedHint};
 use elide_core::redaction::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 
@@ -115,7 +115,7 @@ pub(super) struct Leaf {
     /// surfaced to recognizers as hints; empty for keys and for value
     /// leaves outside any object (e.g. a top-level scalar). Each hint
     /// carries the key's source span so a boost can point back at the key.
-    pub hints: Vec<Hint<Text>>,
+    pub hints: Vec<ResolvedHint<Text>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

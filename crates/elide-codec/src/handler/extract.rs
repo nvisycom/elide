@@ -26,7 +26,7 @@
 use std::ops::Range;
 
 use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation, TextReplacement};
-use elide_core::modality::{Chunk, DataReader, DataWriter, Hint};
+use elide_core::modality::{Chunk, DataReader, DataWriter, ResolvedHint};
 use elide_core::redaction::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 
@@ -51,10 +51,10 @@ pub(crate) struct ExtractedItem<A> {
     /// Text-node text, comment body, attribute value, or element text.
     pub value: String,
     /// Out-of-band located context surfaced from the item's structural
-    /// neighbours (e.g. a sibling element's text), each carrying the source
-    /// span where its text sits. Empty when there's no useful surrounding
-    /// context.
-    pub hints: Vec<Hint<Text>>,
+    /// neighbours (e.g. a column header, a sibling element's text), each pairing
+    /// the source span where its text sits with that text (for keyword
+    /// matching). Empty when there's no useful surrounding context.
+    pub hints: Vec<ResolvedHint<Text>>,
 }
 
 /// A resolved redaction target: which item to edit, and the byte range within

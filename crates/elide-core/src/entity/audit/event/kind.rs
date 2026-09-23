@@ -47,15 +47,14 @@ use crate::modality::Modality;
         tag = "kind",
         content = "detail",
         rename_all = "snake_case",
-        bound = "M::Location: Serialize + for<'a> Deserialize<'a>, \
-                 M::Data: Serialize + for<'a> Deserialize<'a>"
+        bound = "M::Location: Serialize + for<'a> Deserialize<'a>"
     )
 )]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
     schemars(
-        bound = "M: schemars::JsonSchema, M::Location: schemars::JsonSchema, M::Data: schemars::JsonSchema",
+        bound = "M: schemars::JsonSchema, M::Location: schemars::JsonSchema",
         rename = "{M}AuditKind"
     )
 )]

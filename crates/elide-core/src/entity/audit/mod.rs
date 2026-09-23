@@ -62,8 +62,7 @@ use crate::{Error, ErrorKind, Result};
     feature = "serde",
     serde(
         transparent,
-        bound = "M::Location: Serialize + for<'a> Deserialize<'a>, \
-                 M::Data: Serialize + for<'a> Deserialize<'a>"
+        bound = "M::Location: Serialize + for<'a> Deserialize<'a>"
     )
 )]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -71,7 +70,7 @@ use crate::{Error, ErrorKind, Result};
     feature = "schema",
     schemars(
         transparent,
-        bound = "M: schemars::JsonSchema, M::Location: schemars::JsonSchema, M::Data: schemars::JsonSchema",
+        bound = "M: schemars::JsonSchema, M::Location: schemars::JsonSchema",
         rename = "{M}AuditLog"
     )
 )]

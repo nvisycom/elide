@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 
 use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
 use elide_core::modality::text::{TextData, TextReplacement};
-use elide_core::modality::{Chunk, DataReader, DataWriter, Hint};
+use elide_core::modality::{Chunk, DataReader, DataWriter, ResolvedHint};
 use elide_core::redaction::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 
@@ -258,7 +258,10 @@ impl Handler<Tabular> for CsvHandler {
                 // column, a real tabular location the boost can point at.
                 let header_location =
                     TabularLocation::new(0, col).with_column_name(name.to_owned());
-                hints.push(Hint::new(header_location, TextData::new(name.to_owned())));
+                hints.push(ResolvedHint::new(
+                    header_location,
+                    TextData::new(name.to_owned()),
+                ));
             }
             return Ok(Some(Chunk {
                 location,

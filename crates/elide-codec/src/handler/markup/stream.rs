@@ -6,13 +6,21 @@
 use std::borrow::Cow;
 use std::ops::Range;
 
-use elide_core::modality::Hint;
+use elide_core::modality::ResolvedHint;
 use elide_core::modality::text::Text;
 use elide_core::{Error, ErrorKind, Result};
 use quick_xml::events::BytesStart;
 
 use super::xml_handler::{XmlItem, XmlSpan};
 use crate::handler::extract::ExtractedItem;
+
+/// One redactable attribute's source spans: its `value` (the redactable inner
+/// bytes) and its `name` (the located context hint), the latter `None` when the
+/// name could not be placed in the source.
+pub(super) struct AttributeSpan {
+    pub(super) name: Option<Range<usize>>,
+    pub(super) value: Range<usize>,
+}
 
 /// The retained source document, read-only. Owns the span queries the engine
 /// runs against it: slicing a range, finding an attribute value's source span,
@@ -43,10 +51,11 @@ impl<'a> MarkupSource<'a> {
         (!self.raw[span.clone()].trim().is_empty()).then_some(span)
     }
 
-    /// Each redactable attribute of an element: its local name (for context)
-    /// and the source byte span of its value, the inner bytes between the
-    /// quotes. Values pass through verbatim, so a `mailto:` URL has its email
-    /// matched in place; the name lets a context-gated value (`ssn="…"`) be
+    /// Each redactable attribute of an element: the source span of its name (a
+    /// located context hint) and the source byte span of its value, the inner
+    /// bytes between the quotes. Values pass through verbatim, so a `mailto:` URL
+    /// has its email matched in place; the name lets a context-gated value
+    /// (`ssn="…"`) be
     /// boosted by its attribute name.
     ///
     /// Strict XML validates attributes (rejecting e.g. a duplicate key) and
@@ -59,7 +68,7 @@ impl<'a> MarkupSource<'a> {
         &self,
         e: &BytesStart<'_>,
         lenient: bool,
-    ) -> Result<Vec<(String, Range<usize>)>> {
+    ) -> Result<Vec<AttributeSpan>> {
         let mut out = Vec::new();
         for attr in e.attributes().with_checks(!lenient) {
             let attr = match attr {
@@ -85,14 +94,20 @@ impl<'a> MarkupSource<'a> {
             let Cow::Borrowed(value) = attr.value else {
                 continue;
             };
-            let Some(inner) = self.slice_span(value) else {
+            let Some(value_span) = self.slice_span(value) else {
                 continue;
             };
-            if self.raw[inner.clone()].trim().is_empty() {
+            if self.raw[value_span.clone()].trim().is_empty() {
                 continue;
             }
-            let key = attr.key.local_name().as_ref().to_owned();
-            out.push((key, inner));
+            // The key borrows from the same source buffer, so its bytes locate
+            // the attribute name in the source, the out-of-band context whose
+            // presence boosts the value.
+            let name_span = self.slice_span(attr.key.as_ref());
+            out.push(AttributeSpan {
+                name: name_span,
+                value: value_span,
+            });
         }
         Ok(out)
     }
@@ -149,7 +164,7 @@ impl MarkupSink {
     /// Empty hint lists are ignored.
     pub(super) fn apply_hints(
         &mut self,
-        hints: impl IntoIterator<Item = (usize, Vec<Hint<Text>>)>,
+        hints: impl IntoIterator<Item = (usize, Vec<ResolvedHint<Text>>)>,
     ) {
         for (index, hints) in hints {
             if !hints.is_empty() {
