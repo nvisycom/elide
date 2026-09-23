@@ -53,7 +53,7 @@ async fn main() -> Result<()> {
     // 4. Detect: stream the document and get entities already in the
     //    document's source coordinates (lift is folded in). The context
     //    carries per-call assertions (here, that the document is English).
-    let en = LanguageClaim::asserted(LanguageTag::parse("en")?);
+    let en = LanguageTag::parse("en")?;
     let scope = Scope::new()
         .with_language(en)
         .with_catalog(LabelCatalog::with_builtins());

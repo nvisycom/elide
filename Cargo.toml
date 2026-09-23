@@ -67,7 +67,6 @@ erased-serde = { version = "0.4", features = [] }
 serde-value = { version = "0.7", features = [] }
 toml = { version = "1.1", features = [] }
 csv = { version = "1.0", features = [] }
-humantime-serde = { version = "1.1", features = [] }
 
 # WebAssembly / browser bindings
 wasm-bindgen = { version = "0.2", features = [] }
@@ -79,7 +78,6 @@ tsify = { version = "0.5", default-features = false, features = ["js"] }
 thiserror = { version = "2.0", features = [] }
 derive_more = { version = "2.0", features = ["as_ref", "deref", "deref_mut", "display", "from", "from_str", "into", "into_iterator", "is_variant"] }
 derive_builder = { version = "0.20", features = [] }
-strum = { version = "0.28", features = ["derive"] }
 
 # Primitive datatypes
 uuid = { version = "1.23", features = ["serde", "v4", "v7"] }
