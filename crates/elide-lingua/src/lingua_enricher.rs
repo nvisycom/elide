@@ -15,8 +15,8 @@
 use elide_core::Result;
 use elide_core::enrichment::{Enricher, Enrichment};
 use elide_core::modality::TextRecognizable;
-use elide_core::primitive::LanguageTag;
-use elide_core::recognition::{RecognizerContext, RecognizerId, Subject};
+use elide_core::primitive::{ComponentId, LanguageTag};
+use elide_core::recognition::{RecognizerContext, Subject};
 
 use crate::lingua_detector::LinguaDetector;
 
@@ -76,8 +76,8 @@ impl Default for LinguaEnricher {
 /// tabular (CSV/XLSX), or transcript pipeline to its detected language.
 #[async_trait::async_trait]
 impl<M: TextRecognizable> Enricher<M> for LinguaEnricher {
-    fn id(&self) -> RecognizerId {
-        RecognizerId::new("elide-lingua", env!("CARGO_PKG_VERSION"))
+    fn id(&self) -> ComponentId {
+        ComponentId::new("elide-lingua", env!("CARGO_PKG_VERSION"))
     }
 
     async fn enrich(
@@ -109,7 +109,7 @@ impl<M: TextRecognizable> Enricher<M> for LinguaEnricher {
 mod tests {
     use elide_core::modality::tabular::Tabular;
     use elide_core::modality::text::{Text, TextData};
-    use elide_core::primitive::Language;
+    use elide_core::primitive::LanguageClaim;
     use elide_core::recognition::{Scope, Subject};
 
     use super::*;
@@ -125,7 +125,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            ctx.primary_language(&subject).unwrap().primary_language(),
+            ctx.languages(&subject).primary().unwrap().primary_subtag(),
             "en"
         );
     }
@@ -143,7 +143,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            ctx.primary_language(&subject).unwrap().primary_language(),
+            ctx.languages(&subject).primary().unwrap().primary_subtag(),
             "en"
         );
     }
@@ -152,7 +152,7 @@ mod tests {
     async fn asserted_language_skips_detection() {
         let de: LanguageTag = "de".parse().unwrap();
         let data = TextData::new("The quick brown fox");
-        let scope = Scope::new().with_language(Language::asserted(de));
+        let scope = Scope::new().with_language(LanguageClaim::asserted(de));
         let ctx = RecognizerContext::<Text>::new(&scope);
         let mut subject = Subject::new(data);
         LinguaEnricher::unrestricted()
@@ -160,9 +160,9 @@ mod tests {
             .await
             .unwrap();
         // Only the asserted German remains; English was never detected.
-        assert_eq!(ctx.ranked_languages(&subject).len(), 1);
+        assert_eq!(ctx.languages(&subject).ranked().len(), 1);
         assert_eq!(
-            ctx.primary_language(&subject).unwrap().primary_language(),
+            ctx.languages(&subject).primary().unwrap().primary_subtag(),
             "de"
         );
     }

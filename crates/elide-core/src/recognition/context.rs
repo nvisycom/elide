@@ -5,11 +5,11 @@
 use hipstr::HipStr;
 use uuid::Uuid;
 
-use crate::entity::{Entity, Label, LabelCatalog, LabelRef};
+use crate::entity::{Label, LabelCatalog, LabelRef};
 use crate::modality::Modality;
-use crate::primitive::{CountryCode, Language, LanguageTag};
+use crate::primitive::CountryCode;
 use crate::recognition::annotation::{Annotations, Exclusion, Inclusion};
-use crate::recognition::{Scope, Subject};
+use crate::recognition::{Languages, Scope, Subject};
 
 /// Analysis-wide context handed to a [`Recognizer`] alongside the [`Subject`].
 ///
@@ -133,11 +133,9 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
     }
 
     /// The entity types to emit, as full [`Label`]s, so a prompt or backend
-    /// can render each label's localized display name and description in
-    /// this call's [`primary_language`] (English fallback) while still
-    /// keying on the stable id. The catalog's labels, cloned.
-    ///
-    /// [`primary_language`]: Self::primary_language
+    /// can render each label's localized display name and description in the
+    /// call's primary language (English fallback) while still keying on the
+    /// stable id. The catalog's labels, cloned.
     #[must_use]
     pub fn target_label_defs(&self) -> Vec<Label> {
         self.scope.catalog.iter().cloned().collect()
@@ -158,82 +156,16 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
         !self.scope.languages.is_empty()
     }
 
-    /// Call's languages (asserted on the scope plus the ones a detector found on
-    /// `subject`), ranked best-first.
-    ///
-    /// Sorted by confidence descending (a missing confidence ranks last),
-    /// with an asserted language breaking ties ahead of a detected one.
-    /// Empty when the call has no language information.
+    /// The call's languages — the caller-asserted ones (scope) and the ones a
+    /// detector found (on `subject`) — as a [`Languages`] view to query
+    /// together: which is primary, whether a language-scoped rule applies, and
+    /// span-based entity attribution.
     #[must_use]
-    pub fn ranked_languages<'s>(&'s self, subject: &'s Subject<M>) -> Vec<&'s Language> {
-        let mut all: Vec<&Language> = self
-            .scope
-            .languages
-            .as_slice()
-            .iter()
-            .chain(subject.detected_languages())
-            .collect();
-        all.sort_by(|a, b| b.rank(a));
-        all
-    }
-
-    /// The caller-*asserted* language tags for this call, the scope's
-    /// languages only, *excluding* anything a detector added.
-    ///
-    /// Use this where a *detected* language must not participate because
-    /// detection is unreliable on the input (short, word-poor chunks resolve
-    /// to arbitrary languages): selecting which per-language context to
-    /// activate keys on this, so a misdetected chunk language can't deactivate
-    /// the context whose keyword actually sits in the text. Empty when the
-    /// caller asserted no language, which callers read as "any".
-    #[must_use]
-    pub fn asserted_languages(&self) -> Vec<&LanguageTag> {
-        self.scope
-            .languages
-            .as_slice()
-            .iter()
-            .map(|l| &l.language)
-            .collect()
-    }
-
-    /// Single most likely language tag for this call, or `None` when no
-    /// language is known.
-    #[must_use]
-    pub fn primary_language<'s>(&'s self, subject: &'s Subject<M>) -> Option<&'s LanguageTag> {
-        self.ranked_languages(subject).first().map(|d| &d.language)
-    }
-
-    /// Stamp each entity's [`language`] from this call's detected-language
-    /// spans: match the entity's [`recognized_range`] against the [`Language`]
-    /// a detector resolved for that span of the recognized text.
-    ///
-    /// A span-less detection (one covering the whole payload) applies to any
-    /// range, so a monolingual document attributes every entity to its single
-    /// language. Entities with no `recognized_range` (a natively-located VLM
-    /// box) are left untouched, as is the whole set when no language is known.
-    ///
-    /// [`language`]: crate::entity::Entity::language
-    /// [`recognized_range`]: crate::entity::Entity::recognized_range
-    pub fn stamp_languages(&self, subject: &Subject<M>, entities: &mut [Entity<M>]) {
-        let languages = self.ranked_languages(subject);
-        if languages.is_empty() {
-            return;
-        }
-        for entity in entities.iter_mut() {
-            let Some(range) = entity.recognized_range.clone() else {
-                continue;
-            };
-            // First detected language whose span covers the entity's range;
-            // a span-less language matches any range (whole-payload scope).
-            let resolved = languages.iter().find(|lang| {
-                lang.span
-                    .as_ref()
-                    .is_none_or(|span| range.start >= span.start && range.end <= span.end)
-            });
-            if let Some(lang) = resolved {
-                entity.language = Some(lang.language.clone());
-            }
-        }
+    pub fn languages<'s>(&'s self, subject: &'s Subject<M>) -> Languages<'s> {
+        Languages::new(
+            self.scope.languages.as_slice(),
+            subject.detected_languages(),
+        )
     }
 
     /// Whether a recognizer rule scoped to `allowed` countries should run
@@ -251,64 +183,5 @@ impl<'a, M: Modality> RecognizerContext<'a, M> {
             return true;
         }
         self.scope.countries.iter().any(|c| allowed.contains(c))
-    }
-
-    /// Whether a recognizer rule scoped to `allowed` languages should run
-    /// for this call.
-    ///
-    /// - An empty `allowed` list means the rule is language-agnostic and
-    ///   always runs.
-    /// - Otherwise the rule runs when *any* of the call's languages
-    ///   (asserted or detected) shares a primary subtag with an entry in
-    ///   `allowed` (so an `["en"]` rule fires on `"en-US"`).
-    /// - When the call has no languages, the rule still runs: we can't
-    ///   disprove applicability without information.
-    #[must_use]
-    pub fn applies_to_language(&self, subject: &Subject<M>, allowed: &[LanguageTag]) -> bool {
-        if allowed.is_empty() {
-            return true;
-        }
-        let mut langs = self
-            .scope
-            .languages
-            .as_slice()
-            .iter()
-            .chain(subject.detected_languages())
-            .peekable();
-        if langs.peek().is_none() {
-            return true;
-        }
-        langs.any(|d| allowed.iter().any(|a| a.matches(&d.language)))
-    }
-
-    /// Whether a recognizer rule scoped to `allowed` languages should run,
-    /// filtering **only** on caller-*asserted* languages.
-    ///
-    /// The locale hard filter: a language-scoped pattern is suppressed when
-    /// the caller asserted a language and none of the asserted languages
-    /// match the rule's scope (so declaring a document Spanish stops the
-    /// German/Italian/… locale patterns from firing on same-shaped values).
-    ///
-    /// Unlike [`applies_to_language`], a *detected* language never
-    /// participates: detection is unreliable on short, word-poor input (a
-    /// bare identifier cell resolves to an arbitrary language) and its
-    /// confidence scale shifts with the compiled model set, so a detected
-    /// language must not suppress a valid match. When the caller asserts no
-    /// language the rule always runs.
-    ///
-    /// Returns `true` for a language-agnostic rule (empty `allowed`) and when
-    /// no language is asserted.
-    ///
-    /// [`applies_to_language`]: Self::applies_to_language
-    #[must_use]
-    pub fn applies_to_asserted_language(&self, allowed: &[LanguageTag]) -> bool {
-        if allowed.is_empty() {
-            return true;
-        }
-        let mut asserted = self.scope.languages.as_slice().iter().peekable();
-        if asserted.peek().is_none() {
-            return true;
-        }
-        asserted.any(|d| allowed.iter().any(|a| a.matches(&d.language)))
     }
 }

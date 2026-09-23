@@ -24,8 +24,7 @@
 pub use elide_core::primitive::{ModelUsage, TokenCounts, Usage, UsageReport};
 #[doc(inline)]
 pub use elide_core::recognition::{
-    LabelMap, Recognition, Recognizer, RecognizerContext, RecognizerId, Scope, ScopeMetadata,
-    Subject, annotation,
+    LabelMap, Recognition, Recognizer, RecognizerContext, Scope, ScopeMetadata, Subject, annotation,
 };
 
 /// Context-enhanced recognition: keyword-boosted confidence over another

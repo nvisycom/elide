@@ -3,7 +3,7 @@
 //! [`Recognizer`]: super::Recognizer
 
 use crate::modality::{Modality, ResolvedHint};
-use crate::primitive::Language;
+use crate::primitive::LanguageClaim;
 
 /// The thing under recognition: one chunk of a source together with everything
 /// known about it.
@@ -36,8 +36,8 @@ pub struct Subject<M: Modality> {
     artifact: Option<M::Artifact>,
     /// Languages a detector found for this chunk. The caller's *asserted*
     /// languages live on the scope; the two are combined by
-    /// [`RecognizerContext::ranked_languages`](super::RecognizerContext::ranked_languages).
-    detected_languages: Vec<Language>,
+    /// [`RecognizerContext::languages`](super::RecognizerContext::languages).
+    detected_languages: Vec<LanguageClaim>,
     /// Out-of-band located context hints (a CSV column header, a JSON object
     /// key), each paired with its content, for a context enhancer to match
     /// keywords against. A codec surfaces these per chunk; recognizers without
@@ -102,20 +102,19 @@ impl<M: Modality> Subject<M> {
         self.artifact.is_some()
     }
 
-    /// Record a [`Language`] a detector found for this chunk. Build it with
-    /// [`Language::detected`] (optionally
-    /// [`with_confidence`](Language::with_confidence) /
-    /// [`with_span`](Language::with_span)).
-    pub fn detect_language(&mut self, language: Language) {
+    /// Record a [`LanguageClaim`] a detector found for this chunk. Build it with
+    /// [`LanguageClaim::detected`] (optionally
+    /// [`with_span`](LanguageClaim::with_span)).
+    pub fn detect_language(&mut self, language: LanguageClaim) {
         self.detected_languages.push(language);
     }
 
     /// The languages a detector found for this chunk, in detection order.
     ///
     /// The caller's asserted languages are *not* here; combine both through
-    /// [`RecognizerContext::ranked_languages`](super::RecognizerContext::ranked_languages).
+    /// [`RecognizerContext::languages`](super::RecognizerContext::languages).
     #[must_use]
-    pub fn detected_languages(&self) -> &[Language] {
+    pub fn detected_languages(&self) -> &[LanguageClaim] {
         &self.detected_languages
     }
 }

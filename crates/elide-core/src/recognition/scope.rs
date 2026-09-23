@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::entity::LabelCatalog;
-use crate::primitive::{CountryCode, Language};
+use crate::primitive::{CountryCode, LanguageClaim};
 
 /// Caller-asserted scope shared across every payload of one analysis.
 ///
@@ -107,7 +107,7 @@ impl ScopeMetadata {
 pub struct Scope {
     /// Caller-asserted languages for the analysis. Empty means the caller
     /// asserted none, leaving detection (if an enricher runs) to fill in.
-    pub languages: Vec<Language>,
+    pub languages: Vec<LanguageClaim>,
     /// Caller-asserted jurisdictions. When non-empty, recognizers that
     /// carry per-rule country scopes skip rules that match none of them.
     /// An empty list means "any": rules that declare countries still run
@@ -147,13 +147,10 @@ impl Scope {
 
     /// Assert a language for the analysis, returning `self` for chaining.
     ///
-    /// Build the [`Language`] with [`Language::asserted`] (optionally
-    /// [`with_confidence`]); an assertion outranks a detection at equal
-    /// confidence.
-    ///
-    /// [`with_confidence`]: Language::with_confidence
+    /// Build the [`LanguageClaim`] with [`LanguageClaim::asserted`]; an
+    /// assertion is full confidence, so it outranks any detection.
     #[must_use]
-    pub fn with_language(mut self, language: Language) -> Self {
+    pub fn with_language(mut self, language: LanguageClaim) -> Self {
         self.languages.push(language);
         self
     }

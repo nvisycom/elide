@@ -8,8 +8,8 @@ use elide_context::{BoostRule, Enhanced, Enhancer};
 use elide_core::entity::audit::AuditEvent;
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
-use elide_core::primitive::{Confidence, LanguageTag};
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId, Subject};
+use elide_core::primitive::{ComponentId, Confidence, LanguageTag};
+use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Subject};
 use elide_core::{Error, ErrorKind, Result};
 // The external `regex` crate is aliased throughout because `Regex` is already
 // this crate's rule type (`super::regex::Regex`, imported below).
@@ -668,8 +668,8 @@ impl PatternRecognizer {
 
 #[async_trait::async_trait]
 impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
-    fn id(&self) -> RecognizerId {
-        RecognizerId::new("elide-pattern", env!("CARGO_PKG_VERSION"))
+    fn id(&self) -> ComponentId {
+        ComponentId::new("elide-pattern", env!("CARGO_PKG_VERSION"))
     }
 
     async fn recognize(
@@ -694,7 +694,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
                 // and would wrongly suppress a valid locale-scoped match. When
                 // the caller asserts a language or country, that assertion is
                 // authoritative and gates the locale patterns.
-                if !ctx.applies_to_asserted_language(&pat.languages) {
+                if !ctx.languages(subject).asserted_apply_to(&pat.languages) {
                     continue;
                 }
                 if !ctx.applies_to_country(&pat.countries) {
@@ -708,7 +708,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
                 };
                 let validation_ctx = ValidationContext {
                     countries: ctx.scope().countries.clone(),
-                    language: ctx.primary_language(subject).cloned(),
+                    language: ctx.languages(subject).primary().cloned(),
                 };
                 for m in pat.regex.find_iter(text) {
                     if let Some(validator) = pat.validator.as_ref()
@@ -733,7 +733,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
                 };
                 // Asserted-language + country locale filter (see the pattern
                 // loop above); a detected language never suppresses a match.
-                if !ctx.applies_to_asserted_language(&dict.languages) {
+                if !ctx.languages(subject).asserted_apply_to(&dict.languages) {
                     continue;
                 }
                 if !ctx.applies_to_country(&dict.countries) {

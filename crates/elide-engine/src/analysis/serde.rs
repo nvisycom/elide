@@ -622,12 +622,11 @@ mod tests {
     fn serializes_usage_entries() {
         use std::time::Duration;
 
-        use elide_core::primitive::Usage;
-        use elide_core::recognition::RecognizerId;
+        use elide_core::primitive::{ComponentId, Usage};
 
         let mut report = Report::new();
         report.usage.extend([Usage::new(
-            RecognizerId::new("elide-pattern", "1"),
+            ComponentId::new("elide-pattern", "1"),
             Duration::from_millis(5),
             3,
         )]);

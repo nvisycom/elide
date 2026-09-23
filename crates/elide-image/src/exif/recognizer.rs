@@ -2,7 +2,8 @@
 
 use elide_core::Result;
 use elide_core::modality::metadata::Metadata;
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId, Subject};
+use elide_core::primitive::ComponentId;
+use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Subject};
 
 use super::entity::{SOURCE, label_for};
 
@@ -17,8 +18,8 @@ pub struct ExifRecognizer;
 
 #[async_trait::async_trait]
 impl Recognizer<Metadata> for ExifRecognizer {
-    fn id(&self) -> RecognizerId {
-        RecognizerId::new(SOURCE, env!("CARGO_PKG_VERSION"))
+    fn id(&self) -> ComponentId {
+        ComponentId::new(SOURCE, env!("CARGO_PKG_VERSION"))
     }
 
     async fn recognize(

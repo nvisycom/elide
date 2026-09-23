@@ -18,7 +18,8 @@ use std::sync::Arc;
 
 use derive_builder::Builder;
 use elide_core::enrichment::{Enricher, Enrichment};
-use elide_core::recognition::{RecognizerContext, RecognizerId, Subject};
+use elide_core::primitive::ComponentId;
+use elide_core::recognition::{RecognizerContext, Subject};
 use elide_core::{Error, Result};
 use hipstr::HipStr;
 
@@ -104,8 +105,8 @@ impl SttEnricherBuilder {
 
 #[async_trait::async_trait]
 impl Enricher<Audio> for SttEnricher {
-    fn id(&self) -> RecognizerId {
-        RecognizerId::new(self.name.clone(), env!("CARGO_PKG_VERSION"))
+    fn id(&self) -> ComponentId {
+        ComponentId::new(self.name.clone(), env!("CARGO_PKG_VERSION"))
     }
 
     async fn enrich(

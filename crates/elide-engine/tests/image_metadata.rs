@@ -116,8 +116,8 @@ struct WholeFrame;
 
 #[async_trait::async_trait]
 impl elide_core::recognition::Recognizer<Image> for WholeFrame {
-    fn id(&self) -> elide_core::recognition::RecognizerId {
-        elide_core::recognition::RecognizerId::new("whole-frame", "1.0.0")
+    fn id(&self) -> elide_core::primitive::ComponentId {
+        elide_core::primitive::ComponentId::new("whole-frame", "1.0.0")
     }
 
     async fn recognize(

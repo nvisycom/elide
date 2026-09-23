@@ -11,60 +11,21 @@
 pub mod annotation;
 mod context;
 mod label;
+mod languages;
 mod scope;
 mod subject;
 
-use std::fmt;
-
-use hipstr::HipStr;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 pub use self::context::RecognizerContext;
 pub use self::label::LabelMap;
+pub use self::languages::Languages;
 pub use self::scope::{Scope, ScopeMetadata};
 pub use self::subject::Subject;
 use crate::entity::Entity;
 use crate::error::Result;
 use crate::modality::Modality;
+use crate::primitive::ComponentId;
 #[cfg(feature = "usage")]
 use crate::primitive::ModelUsage;
-
-/// Identifies a recognizer (name + version).
-///
-/// Pairs a stable name with a free-form version string so the audit
-/// trail records not just *which* recognizer fired but *which build* of
-/// it: a rerun against an updated ruleset or model is then
-/// distinguishable from the original. The version is opaque text (a
-/// semver, a checkpoint hash, a ruleset date); the core attaches no
-/// ordering or comparison semantics to it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct RecognizerId {
-    /// Stable, human-readable recognizer name (e.g. `"us-ssn-pattern"`).
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
-    pub name: HipStr<'static>,
-    /// Recognizer's version at the time it ran.
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
-    pub version: HipStr<'static>,
-}
-
-impl RecognizerId {
-    /// Construct a recognizer identifier.
-    pub fn new(name: impl Into<HipStr<'static>>, version: impl Into<HipStr<'static>>) -> Self {
-        Self {
-            name: name.into(),
-            version: version.into(),
-        }
-    }
-}
-
-impl fmt::Display for RecognizerId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}@{}", self.name, self.version)
-    }
-}
 
 /// Detection layer: inspects content and reports recognized entities.
 ///
@@ -92,7 +53,7 @@ where
     M: Modality,
 {
     /// This recognizer's identity (name + version).
-    fn id(&self) -> RecognizerId;
+    fn id(&self) -> ComponentId;
 
     /// Inspect the [`Subject`] in the given context and return the recognized
     /// entities, in modality-local coordinates, together with any
@@ -113,7 +74,7 @@ where
     M: Modality,
     R: Recognizer<M> + ?Sized,
 {
-    fn id(&self) -> RecognizerId {
+    fn id(&self) -> ComponentId {
         (**self).id()
     }
 
@@ -140,7 +101,7 @@ where
     M: Modality,
     R: Recognizer<M> + ?Sized,
 {
-    fn id(&self) -> RecognizerId {
+    fn id(&self) -> ComponentId {
         (**self).id()
     }
 

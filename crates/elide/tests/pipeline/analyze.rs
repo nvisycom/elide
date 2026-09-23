@@ -9,10 +9,8 @@ use elide::detection::reconcile::{Merging, ReconcileLayer, Structural};
 use elide_core::Result;
 use elide_core::entity::audit::{AuditEvent, AuditKind, AuditLog, PatternEvent};
 use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
-use elide_core::primitive::{Confidence, ConfidenceThreshold};
-use elide_core::recognition::{
-    Recognition, Recognizer, RecognizerContext, RecognizerId, Scope, Subject,
-};
+use elide_core::primitive::{ComponentId, Confidence, ConfidenceThreshold};
+use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Scope, Subject};
 
 use crate::support::{SourceRef, Text, TextData, TextLocation};
 
@@ -61,8 +59,8 @@ struct Fixed(Vec<Entity<Text>>);
 
 #[async_trait::async_trait]
 impl Recognizer<Text> for Fixed {
-    fn id(&self) -> RecognizerId {
-        RecognizerId::new("fixed", "1.0.0")
+    fn id(&self) -> ComponentId {
+        ComponentId::new("fixed", "1.0.0")
     }
 
     async fn recognize(
@@ -197,7 +195,7 @@ async fn fusion_keeps_both_operands_source_refs() {
 
 #[tokio::test]
 async fn analyze_stamps_language_from_recognized_range() {
-    use elide_core::primitive::{Language, LanguageTag};
+    use elide_core::primitive::{LanguageClaim, LanguageTag};
 
     // An entity carrying a recognized_range (where it was found in the text).
     let mut e = detected("pattern", "PERSON", (0, 5), 0.9);
@@ -207,7 +205,7 @@ async fn analyze_stamps_language_from_recognized_range() {
 
     // The caller asserts the document language; it applies span-less (whole
     // payload), so every ranged entity is attributed to it.
-    let de = Language::asserted(LanguageTag::parse("de").unwrap());
+    let de = LanguageClaim::asserted(LanguageTag::parse("de").unwrap());
     let scope = scope_for(&["PERSON"]).with_language(de);
 
     let entities = analyzer
@@ -217,7 +215,7 @@ async fn analyze_stamps_language_from_recognized_range() {
         .entities;
     assert_eq!(entities.len(), 1);
     assert_eq!(
-        entities[0].language.as_ref().map(|l| l.primary_language()),
+        entities[0].language.as_ref().map(|l| l.primary_subtag()),
         Some("de")
     );
 }

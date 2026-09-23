@@ -18,9 +18,9 @@ use elide_core::enrichment::Enricher;
 use elide_core::entity::Entity;
 use elide_core::modality::{Modality, ModalityLocation, StreamDataReader};
 #[cfg(feature = "usage")]
-use elide_core::primitive::Usage;
+use elide_core::primitive::ComponentId;
 #[cfg(feature = "usage")]
-use elide_core::recognition::RecognizerId;
+use elide_core::primitive::Usage;
 use elide_core::recognition::annotation::{Annotations, Exclusion};
 use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Scope, Subject};
 use futures::future;
@@ -203,7 +203,7 @@ impl<M: Modality> Analyzer<M> {
         let mut entities = self.recognize(subject, ctx).await?;
         #[cfg(feature = "usage")]
         usage.extend(recognizer_usage);
-        ctx.stamp_languages(subject, &mut entities);
+        ctx.languages(subject).stamp(&mut entities);
         let reduced = self.reduce(entities);
         // Restrict the *output* to the requested catalog only after
         // reconciliation, so a strong out-of-catalog detection can subsume a
@@ -482,7 +482,7 @@ impl<M: Modality> Analyzer<M> {
         let mut entities = Vec::new();
         let mut usage = Vec::with_capacity(self.recognizers.len());
         for found in future::join_all(futures).await {
-            let (id, elapsed, recognition): (RecognizerId, Duration, Recognition<M>) = found?;
+            let (id, elapsed, recognition): (ComponentId, Duration, Recognition<M>) = found?;
             let count = recognition.entities.len() as u64;
             let mut record = Usage::new(id, elapsed, count);
             if let Some(model) = recognition.model_usage {

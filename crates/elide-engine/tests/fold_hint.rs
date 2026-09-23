@@ -23,10 +23,8 @@ use elide_core::entity::builtins::EMAIL_ADDRESS;
 use elide_core::entity::{Entity, LabelCatalog};
 use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
-use elide_core::primitive::Confidence;
-use elide_core::recognition::{
-    Recognition, Recognizer, RecognizerContext, RecognizerId, Scope, Subject,
-};
+use elide_core::primitive::{ComponentId, Confidence};
+use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Scope, Subject};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId, Redactions};
 use elide_detection::Analyzer;
 use elide_engine::{Directives, Document, Orchestrator};
@@ -235,8 +233,8 @@ struct PiiRecognizer;
 
 #[async_trait::async_trait]
 impl Recognizer<Text> for PiiRecognizer {
-    fn id(&self) -> RecognizerId {
-        RecognizerId::new("mock-pii", "1")
+    fn id(&self) -> ComponentId {
+        ComponentId::new("mock-pii", "1")
     }
 
     async fn recognize(

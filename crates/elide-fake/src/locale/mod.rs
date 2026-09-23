@@ -29,7 +29,7 @@ impl Locale {
     /// Map a BCP-47 language tag to the closest supported locale.
     /// Unknown primary languages fall back to [`Locale::En`].
     pub(crate) fn from_tag(tag: &LanguageTag) -> Self {
-        let primary = tag.primary_language().to_ascii_lowercase();
+        let primary = tag.primary_subtag().to_ascii_lowercase();
         let region = region_subtag(tag.as_str()).map(|s| s.to_ascii_uppercase());
 
         match (primary.as_str(), region.as_deref()) {

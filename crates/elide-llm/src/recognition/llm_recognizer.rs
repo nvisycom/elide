@@ -10,9 +10,10 @@
 use std::sync::Arc;
 
 use derive_builder::Builder;
+use elide_core::primitive::ComponentId;
 #[cfg(feature = "usage")]
 use elide_core::primitive::ModelUsage;
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId, Subject};
+use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Subject};
 use elide_core::{Error, Result};
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -76,8 +77,8 @@ impl<M: LlmModality> LlmRecognizer<M> {
         &self.prompt
     }
 
-    fn recognizer_id(&self) -> RecognizerId {
-        RecognizerId::new(self.name.clone(), env!("CARGO_PKG_VERSION"))
+    fn recognizer_id(&self) -> ComponentId {
+        ComponentId::new(self.name.clone(), env!("CARGO_PKG_VERSION"))
     }
 }
 
@@ -140,7 +141,7 @@ impl<M: LlmModality> LlmRecognizerBuilder<M> {
 
 #[async_trait::async_trait]
 impl<M: LlmModality> Recognizer<M> for LlmRecognizer<M> {
-    fn id(&self) -> RecognizerId {
+    fn id(&self) -> ComponentId {
         self.recognizer_id()
     }
 

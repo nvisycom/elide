@@ -11,14 +11,16 @@
 //! Modality-specific recognition artifacts live with their modality: a
 //! `Transcription` in the audio crate, a `Layout` in the image crate.
 
+mod component;
 mod confidence;
 mod language;
 mod region;
 #[cfg(feature = "usage")]
 mod usage;
 
+pub use self::component::ComponentId;
 pub use self::confidence::{Confidence, ConfidenceThreshold};
-pub use self::language::{Language, LanguageProvenance, LanguageTag, LocalizedText};
+pub use self::language::{LanguageClaim, LanguageSource, LanguageTag, LocalizedText};
 pub use self::region::CountryCode;
 #[cfg(feature = "usage")]
 pub use self::usage::{ModelUsage, TokenCounts, Usage, UsageReport};

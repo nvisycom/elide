@@ -36,7 +36,7 @@ impl Prompt<Text> for DefaultPrompt {
             ctx.inclusions(),
             ctx.tags(),
             &target_labels,
-            ctx.primary_language(subject),
+            ctx.languages(subject).primary(),
         )
         .build()
     }
@@ -49,7 +49,7 @@ impl Prompt<Image> for DefaultPrompt {
             ctx.inclusions(),
             ctx.tags(),
             &target_labels,
-            ctx.primary_language(subject),
+            ctx.languages(subject).primary(),
         )
         .build()
     }

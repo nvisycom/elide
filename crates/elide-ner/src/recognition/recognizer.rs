@@ -24,9 +24,10 @@ use derive_builder::Builder;
 use elide_core::entity::audit::{AuditEvent, ModelEvent};
 use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
+use elide_core::primitive::ComponentId;
 #[cfg(feature = "usage")]
 use elide_core::primitive::ModelUsage;
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId, Subject};
+use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Subject};
 use elide_core::{Error, Result};
 use hipstr::HipStr;
 
@@ -196,8 +197,8 @@ impl NerRecognizerBuilder {
 
 #[async_trait::async_trait]
 impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
-    fn id(&self) -> RecognizerId {
-        RecognizerId::new(self.name.clone(), env!("CARGO_PKG_VERSION"))
+    fn id(&self) -> ComponentId {
+        ComponentId::new(self.name.clone(), env!("CARGO_PKG_VERSION"))
     }
 
     async fn recognize(
@@ -219,7 +220,7 @@ impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
         let request = NerRequest {
             text,
             labels,
-            language: ctx.primary_language(subject),
+            language: ctx.languages(subject).primary(),
             correlation_id: ctx.correlation_id(),
         };
         let response = self.backend.recognize(request).await?;

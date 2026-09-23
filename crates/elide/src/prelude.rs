@@ -47,7 +47,7 @@ pub use elide_core::modality::tabular::Tabular;
 #[doc(no_inline)]
 pub use elide_core::modality::text::Text;
 #[doc(no_inline)]
-pub use elide_core::primitive::{Confidence, ConfidenceThreshold, Language, LanguageTag};
+pub use elide_core::primitive::{Confidence, ConfidenceThreshold, LanguageClaim, LanguageTag};
 #[doc(no_inline)]
 pub use elide_core::recognition::{Recognizer, Scope};
 #[doc(no_inline)]

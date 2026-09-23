@@ -17,7 +17,8 @@ use elide_core::Result;
 use elide_core::entity::{LabelRef, builtins};
 use elide_core::modality::metadata::{Metadata, MetadataData, MetadataLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId, Subject};
+use elide_core::primitive::ComponentId;
+use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Subject};
 use elide_core::redaction::Redactions;
 use elide_office::opc::props;
 
@@ -53,8 +54,8 @@ pub struct DocPropsRecognizer;
 
 #[::async_trait::async_trait]
 impl Recognizer<Metadata> for DocPropsRecognizer {
-    fn id(&self) -> RecognizerId {
-        RecognizerId::new(SOURCE, env!("CARGO_PKG_VERSION"))
+    fn id(&self) -> ComponentId {
+        ComponentId::new(SOURCE, env!("CARGO_PKG_VERSION"))
     }
 
     async fn recognize(

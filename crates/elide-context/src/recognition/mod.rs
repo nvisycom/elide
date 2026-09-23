@@ -17,8 +17,8 @@
 use elide_core::Result;
 use elide_core::entity::audit::{AuditEvent, Refinement};
 use elide_core::modality::TextRecognizable;
-use elide_core::primitive::LanguageTag;
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId, Subject};
+use elide_core::primitive::{ComponentId, LanguageTag};
+use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Subject};
 
 use crate::{Context, Enhancer};
 
@@ -59,7 +59,7 @@ where
     M: TextRecognizable,
     R: Recognizer<M> + 'static,
 {
-    fn id(&self) -> RecognizerId {
+    fn id(&self) -> ComponentId {
         self.inner.id()
     }
 
@@ -112,7 +112,7 @@ where
         // that actually appears (`card`, `tarjeta`, `Kreditkarte`, …) fires
         // regardless of the surrounding language. Activating a language's
         // context is harmless when its keyword is absent.
-        let languages: Vec<&LanguageTag> = ctx.asserted_languages();
+        let languages: Vec<&LanguageTag> = ctx.languages(subject).asserted();
         let mut context = Context::new(text)
             .with_hints(&hint_texts)
             .with_languages(&languages);
