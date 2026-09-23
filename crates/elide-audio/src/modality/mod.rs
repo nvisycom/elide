@@ -33,11 +33,11 @@ impl Modality for Audio {
 
 impl TextRecognizable for Audio {
     /// The transcript text a recognizer inspects: the [`Transcription`] an
-    /// enricher stamped onto the call, or `""` when it is empty (a clip that
-    /// was never transcribed), a recognizer then finds nothing, rather than
-    /// erroring.
-    fn as_text<'a>(_data: &'a AudioData, artifact: Option<&'a Transcription>) -> &'a str {
-        artifact.map_or("", Transcription::text)
+    /// enricher stamped onto the call, or [`None`] when the clip was never
+    /// transcribed (no artifact), so a recognizer skips it rather than scanning
+    /// an empty string.
+    fn as_text<'a>(_data: &'a AudioData, artifact: Option<&'a Transcription>) -> Option<&'a str> {
+        artifact.map(Transcription::text)
     }
 
     /// Resolve a transcript byte `range` to the audio time it was spoken in.
@@ -68,11 +68,11 @@ mod tests {
     use crate::primitive::TimeSpan;
 
     #[test]
-    fn as_text_is_empty_without_a_transcript() {
+    fn as_text_is_none_without_a_transcript() {
         let data = AudioData::new(bytes::Bytes::new());
         let scope = Scope::new();
         let ctx = RecognizerContext::<Audio>::new(&scope);
-        assert_eq!(Audio::as_text(&data, ctx.artifact()), "");
+        assert_eq!(Audio::as_text(&data, ctx.artifact()), None);
     }
 
     /// A context whose artifacts carry the phone-number transcript.
@@ -95,7 +95,7 @@ mod tests {
         let ctx = phone_context(&scope);
         assert_eq!(
             Audio::as_text(&data, ctx.artifact()),
-            "Call Alice at 555-1234"
+            Some("Call Alice at 555-1234")
         );
     }
 

@@ -206,6 +206,11 @@ impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
         data: &M::Data,
         ctx: &RecognizerContext<'_, M>,
     ) -> Result<Recognition<M>> {
+        // No recognizable text at this chunk (an un-transcribed clip, an
+        // un-OCR'd image): skip the model call and recognize nothing.
+        let Some(text) = M::as_text(data, ctx.artifact()) else {
+            return Ok(Recognition::default());
+        };
         let effective_labels = self.effective_labels(ctx.catalog());
         let labels = if effective_labels.is_empty() {
             None
@@ -213,7 +218,7 @@ impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
             Some(effective_labels.as_slice())
         };
         let request = NerRequest {
-            text: M::as_text(data, ctx.artifact()),
+            text,
             labels,
             language: ctx.primary_language(),
             correlation_id: ctx.correlation_id(),

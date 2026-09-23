@@ -89,9 +89,14 @@ impl<M: TextRecognizable> Enricher<M> for LinguaEnricher {
         if ctx.has_asserted_language() {
             return Ok(Enrichment::none());
         }
+        // No recognizable text at this chunk (an un-transcribed clip, an
+        // un-OCR'd image): no language to detect.
+        let Some(text) = M::as_text(data, ctx.artifact()) else {
+            return Ok(Enrichment::none());
+        };
         // Detect into an owned list first so the immutable borrow of the payload
         // text ends before `detect_language` takes `&mut ctx`.
-        let detections = self.detector().detect(M::as_text(data, ctx.artifact()))?;
+        let detections = self.detector().detect(text)?;
         for detection in detections {
             ctx.detect_language(detection);
         }

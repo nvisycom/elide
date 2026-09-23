@@ -678,7 +678,11 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
         data: &M::Data,
         ctx: &RecognizerContext<'_, M>,
     ) -> Result<Recognition<M>> {
-        let text = M::as_text(data, ctx.artifact());
+        // No recognizable text at this chunk (an un-transcribed clip, an
+        // un-OCR'd image): nothing to match.
+        let Some(text) = M::as_text(data, ctx.artifact()) else {
+            return Ok(Recognition::default());
+        };
         let mut entities: Vec<Entity<M>> = Vec::new();
 
         if let Some(set) = self.regex_set.as_ref() {

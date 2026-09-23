@@ -181,7 +181,7 @@ mod tests {
         }
 
         // Recognizers read the transcript from the call's artifact.
-        assert_eq!(Audio::as_text(&data, ctx.artifact()), "hi Alice");
+        assert_eq!(Audio::as_text(&data, ctx.artifact()), Some("hi Alice"));
         // "Alice" is at bytes 3..8; locate resolves it to the word's time.
         let loc = Audio::locate(3..8, &data, ctx.artifact()).expect("range resolves");
         assert_eq!(loc.span.start_millis(), 300);
@@ -236,7 +236,7 @@ mod tests {
         let restored = ctx.artifact().cloned().expect("the first pass enriched");
         let mut ctx = RecognizerContext::new(&scope).with_artifact(restored);
         enricher.enrich(&data, &mut ctx).await.unwrap();
-        assert_eq!(Audio::as_text(&data, ctx.artifact()), "hi Alice");
+        assert_eq!(Audio::as_text(&data, ctx.artifact()), Some("hi Alice"));
     }
 
     /// A restored *empty* `Transcription`, a clip a prior pass transcribed to
@@ -265,6 +265,8 @@ mod tests {
         // found silence. The enricher must treat it as enriched and skip.
         let mut ctx = RecognizerContext::new(&scope).with_artifact(Transcription::default());
         enricher.enrich(&data, &mut ctx).await.unwrap();
-        assert_eq!(Audio::as_text(&data, ctx.artifact()), "");
+        // A present-but-empty artifact reads as `Some("")`, not `None`: the clip
+        // *was* enriched (to silence), which is distinct from never-transcribed.
+        assert_eq!(Audio::as_text(&data, ctx.artifact()), Some(""));
     }
 }

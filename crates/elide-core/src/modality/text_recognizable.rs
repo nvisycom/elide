@@ -29,14 +29,17 @@ use super::text::Token;
 /// [`Text`]: crate::modality::text::Text
 /// [`TextData`]: crate::modality::text::TextData
 pub trait TextRecognizable: Modality + Sized {
-    /// View the recognizable text a recognizer inspects.
+    /// View the recognizable text a recognizer inspects, or [`None`] when the
+    /// medium has no recognizable text at this chunk.
     ///
-    /// `Text` and `Tabular` return their payload string from `data`, ignoring
-    /// `artifact`. A medium whose text is enriched onto the call (audio's
-    /// transcript) returns it from `artifact`; when `artifact` is [`None`] (not
-    /// enriched) or empty it returns `""`, so a recognizer simply finds nothing
-    /// rather than erroring.
-    fn as_text<'a>(data: &'a Self::Data, artifact: Option<&'a Self::Artifact>) -> &'a str;
+    /// `Text` and `Tabular` always have text, their payload, so they return
+    /// `Some` from `data` (even `Some("")` for a genuinely empty chunk),
+    /// ignoring `artifact`. A medium whose text is enriched onto the call
+    /// (audio's transcript, an image's OCR layout) returns it from `artifact`,
+    /// and [`None`] when `artifact` is absent (not enriched): the medium has no
+    /// text to recognize yet, so a recognizer skips it rather than scanning an
+    /// empty string.
+    fn as_text<'a>(data: &'a Self::Data, artifact: Option<&'a Self::Artifact>) -> Option<&'a str>;
 
     /// Build the location of a match spanning `range` of the recognizable
     /// text, or `None` when the range cannot be placed in the medium.

@@ -37,8 +37,8 @@ impl Modality for Text {
 }
 
 impl TextRecognizable for Text {
-    fn as_text<'a>(data: &'a TextData, _artifact: Option<&'a Tokens>) -> &'a str {
-        data.text.as_str()
+    fn as_text<'a>(data: &'a TextData, _artifact: Option<&'a Tokens>) -> Option<&'a str> {
+        Some(data.text.as_str())
     }
 
     fn locate(

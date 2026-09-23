@@ -32,11 +32,11 @@ impl Modality for Image {
 }
 
 impl TextRecognizable for Image {
-    /// The OCR text a recognizer inspects: the [`Layout`] an enricher
-    /// stamped onto the call, or `""` when it is empty (an image that was
-    /// never OCR'd), a recognizer then finds nothing, rather than erroring.
-    fn as_text<'a>(_data: &'a ImageData, artifact: Option<&'a Layout>) -> &'a str {
-        artifact.map_or("", Layout::text)
+    /// The OCR text a recognizer inspects: the [`Layout`] an enricher stamped
+    /// onto the call, or [`None`] when the image was never OCR'd (no artifact),
+    /// so a recognizer skips it rather than scanning an empty string.
+    fn as_text<'a>(_data: &'a ImageData, artifact: Option<&'a Layout>) -> Option<&'a str> {
+        artifact.map(Layout::text)
     }
 
     /// Resolve an OCR-text byte `range` to the region of the image it
@@ -65,15 +65,18 @@ mod tests {
     use crate::primitive::{BoundingBox, Dimensions, Point};
 
     fn loc(x: f64, y: f64, w: f64, h: f64) -> ImageLocation {
-        ImageLocation::new(BoundingBox::from_origin_size(Point::new(x, y), w, h))
+        ImageLocation::new(BoundingBox::from_origin(
+            Point::new(x, y),
+            Dimensions::new(w, h),
+        ))
     }
 
     #[test]
-    fn as_text_is_empty_without_ocr() {
+    fn as_text_is_none_without_ocr() {
         let data = ImageData::new(bytes::Bytes::new(), Dimensions::new(10, 10));
         let scope = Scope::new();
         let ctx = RecognizerContext::<Image>::new(&scope);
-        assert_eq!(Image::as_text(&data, ctx.artifact()), "");
+        assert_eq!(Image::as_text(&data, ctx.artifact()), None);
     }
 
     /// A context whose artifacts carry a one-block, one-word OCR result.
@@ -90,7 +93,7 @@ mod tests {
         let data = ImageData::new(bytes::Bytes::new(), Dimensions::new(10, 10));
         let scope = Scope::new();
         let ctx = ocr_context(&scope);
-        assert_eq!(Image::as_text(&data, ctx.artifact()), "Alice");
+        assert_eq!(Image::as_text(&data, ctx.artifact()), Some("Alice"));
     }
 
     #[test]

@@ -82,14 +82,25 @@ where
             return Ok(recognition);
         }
 
-        let text = M::as_text(data, ctx.artifact());
+        // No recognizable text at this chunk (an un-transcribed clip, an
+        // un-OCR'd image): there is nothing for context to enhance against, so
+        // return the wrapped recognizer's entities unchanged.
+        let Some(text) = M::as_text(data, ctx.artifact()) else {
+            let recognition = Recognition::new(entities);
+            #[cfg(feature = "usage")]
+            let recognition = match model_usage {
+                Some(model_usage) => recognition.with_model_usage(model_usage),
+                None => recognition,
+            };
+            return Ok(recognition);
+        };
         // A hint is a text annotation (a header, a field name). Read each
         // through the modality's text view; for text/tabular that is the
-        // hint's own payload.
+        // hint's own payload. Hints with no text view are skipped.
         let hint_texts: Vec<&str> = ctx
             .context_hints
             .iter()
-            .map(|h| M::as_text(&h.data, ctx.artifact()))
+            .filter_map(|h| M::as_text(&h.data, ctx.artifact()))
             .collect();
         // Only *asserted* languages select which per-language context fires; a
         // *detected* language does not. Detection is unreliable on the short,

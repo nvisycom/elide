@@ -148,7 +148,10 @@ mod tests {
     use crate::primitive::{BoundingBox, Dimensions, Point};
 
     fn loc(x: f64, y: f64, w: f64, h: f64) -> ImageLocation {
-        ImageLocation::new(BoundingBox::from_origin_size(Point::new(x, y), w, h))
+        ImageLocation::new(BoundingBox::from_origin(
+            Point::new(x, y),
+            Dimensions::new(w, h),
+        ))
     }
 
     /// A fixed one-block, two-word OCR result the enricher stamps as a `Layout`.
@@ -177,7 +180,7 @@ mod tests {
         enricher.enrich(&data, &mut ctx).await.unwrap();
 
         // Recognizers read the OCR text from the call's artifact.
-        assert_eq!(Image::as_text(&data, ctx.artifact()), "hi Alice");
+        assert_eq!(Image::as_text(&data, ctx.artifact()), Some("hi Alice"));
         // "Alice" is at bytes 3..8; locate resolves it to the word's box.
         let region = Image::locate(3..8, &data, ctx.artifact()).expect("range resolves");
         assert_eq!(region.bounding_box.min.x, 40.0);
@@ -232,7 +235,7 @@ mod tests {
         let restored = ctx.artifact().cloned().expect("the first pass enriched");
         let mut ctx = RecognizerContext::new(&scope).with_artifact(restored);
         enricher.enrich(&data, &mut ctx).await.unwrap();
-        assert_eq!(Image::as_text(&data, ctx.artifact()), "hi Alice");
+        assert_eq!(Image::as_text(&data, ctx.artifact()), Some("hi Alice"));
     }
 
     /// A restored *empty* `Layout`, a payload a prior pass OCR'd to no text,
@@ -260,6 +263,8 @@ mod tests {
         // no text. The enricher must treat it as already-enriched and skip.
         let mut ctx = RecognizerContext::new(&scope).with_artifact(Layout::default());
         enricher.enrich(&data, &mut ctx).await.unwrap();
-        assert_eq!(Image::as_text(&data, ctx.artifact()), "");
+        // A present-but-empty artifact reads as `Some("")`, not `None`: the image
+        // *was* OCR'd (to no text), which is distinct from never-OCR'd.
+        assert_eq!(Image::as_text(&data, ctx.artifact()), Some(""));
     }
 }
