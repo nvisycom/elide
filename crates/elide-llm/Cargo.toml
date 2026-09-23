@@ -27,20 +27,22 @@ default = []
 ## `LlmBackend` trait, the recognizer, candidates, prompts.
 rig = [
     "dep:rig",
+    "dep:base64",
     "dep:reqwest-middleware",
     "dep:reqwest-retry",
     "dep:reqwest-tracing",
     "dep:thiserror",
     "dep:serde_json",
+    # The vision path transcodes any source image to PNG before sending (rig's
+    # providers reject a raw source, and every model takes PNG). PNG is the
+    # required target; JPEG and TIFF are enabled so those inputs decode.
+    "elide-image/png",
+    "elide-image/jpeg",
+    "elide-image/tiff",
 ]
 
 ## Ship the no-op `MockBackend` for tests, examples, and offline wiring.
 test-utils = []
-## Name a PNG / JPEG image's media type on an outgoing vision-model message.
-## Each forwards to the matching `elide-image` format; without it a message of
-## that format is sent untyped (the provider infers it from the bytes).
-png = ["elide-image/png"]
-jpeg = ["elide-image/jpeg"]
 ## Load prompt wording from a Jinja2 template file (`Jinja2Prompt`).
 jinja2 = ["dep:minijinja"]
 
@@ -86,6 +88,7 @@ unicode-normalization = { workspace = true, features = [] }
 
 # AI & LLM frameworks
 rig = { workspace = true, features = ["derive", "reqwest-middleware"], optional = true }
+base64 = { workspace = true, features = [], optional = true }
 
 # Templating & schema
 minijinja = { workspace = true, features = [], optional = true }
@@ -95,3 +98,8 @@ schemars = { workspace = true, features = [] }
 reqwest-middleware = { workspace = true, features = [], optional = true }
 reqwest-retry = { workspace = true, features = [], optional = true }
 reqwest-tracing = { workspace = true, features = [], optional = true }
+
+[dev-dependencies]
+# elide-image test fixtures (a real in-memory PNG) so the image `lift` test can
+# decode true dimensions without pulling in the `image` crate directly.
+elide-image = { workspace = true, features = ["test-util"] }

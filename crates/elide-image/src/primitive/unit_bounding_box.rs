@@ -25,11 +25,50 @@ use super::{BoundingBox, Dimensions, Point};
 /// [`denormalize`]: Self::denormalize
 /// [`normalize`]: Self::normalize
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(
+    feature = "serde",
+    derive(Serialize, Deserialize),
+    serde(into = "UnitWire", from = "UnitWire")
+)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(transparent))]
-pub struct UnitBoundingBox(BoundingBox<f64>);
+pub struct UnitBoundingBox(
+    #[cfg_attr(feature = "schema", schemars(with = "UnitWire"))] BoundingBox<f64>,
+);
+
+/// The flat `{ x, y, width, height }` wire form of a [`UnitBoundingBox`].
+///
+/// The public newtype carries two corner points internally, but the serialized
+/// contract is the origin-plus-size shape a vision model emits, so serde and the
+/// JSON schema go through this DTO rather than exposing the corner layout.
+#[cfg(feature = "serde")]
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+struct UnitWire {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+#[cfg(feature = "serde")]
+impl From<UnitBoundingBox> for UnitWire {
+    fn from(unit: UnitBoundingBox) -> Self {
+        let bbox = unit.0;
+        Self {
+            x: bbox.min.x,
+            y: bbox.min.y,
+            width: bbox.max.x - bbox.min.x,
+            height: bbox.max.y - bbox.min.y,
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl From<UnitWire> for UnitBoundingBox {
+    fn from(dto: UnitWire) -> Self {
+        Self::new(dto.x, dto.y, dto.width, dto.height)
+    }
+}
 
 impl UnitBoundingBox {
     /// Normalized box from a top-left origin `(x, y)` and a size, all in
@@ -92,5 +131,20 @@ mod tests {
         let unit = UnitBoundingBox::new(0.1, 0.2, 0.5, 0.25);
         let round_trip = UnitBoundingBox::normalize(&unit.denormalize(dims), dims);
         assert_eq!(round_trip, unit);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serializes_as_flat_origin_size() {
+        // The wire form is `{ x, y, width, height }`, not the internal corner
+        // pair — a producer (e.g. a vision model) emits origin-plus-size.
+        let unit = UnitBoundingBox::new(0.1, 0.2, 0.5, 0.25);
+        let json = serde_json::to_value(unit).expect("serialize");
+        assert_eq!(
+            json,
+            serde_json::json!({ "x": 0.1, "y": 0.2, "width": 0.5, "height": 0.25 })
+        );
+        let back: UnitBoundingBox = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(back, unit);
     }
 }

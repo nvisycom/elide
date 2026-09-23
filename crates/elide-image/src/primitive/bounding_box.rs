@@ -76,26 +76,25 @@ impl<C: Coordinate> BoundingBox<C> {
 impl BoundingBox<f64> {
     /// Clamp this box to the integer-pixel box lying inside an image of `dims`.
     ///
-    /// Floors the float corners to pixel indices, drops any part that falls
-    /// outside `[0, width) x [0, height)`, and returns the resulting pixel box.
-    /// Returns `None` when nothing of the box lands inside the image (its origin
-    /// is past an edge, or it clamps to zero area), so a caller can
-    /// `let region = bbox.to_pixels(dims)?;` and skip empty regions.
+    /// Rounds *outward* — floors the minimum corner, ceils the maximum — then
+    /// intersects with `[0, width) x [0, height)` and returns the resulting pixel
+    /// box. Outward rounding is deliberate: this is what a redaction paints, so
+    /// any pixel the float box touches at all must be covered; truncating instead
+    /// could leave a fractional edge pixel visible. Returns `None` when the
+    /// intersection is empty (the box lies past an edge, or spans no whole pixel),
+    /// so a caller can `let region = bbox.to_pixels(dims)?;` and skip it.
     #[must_use]
     pub fn to_pixels(&self, dims: Dimensions<u32>) -> Option<BoundingBox<u32>> {
-        let x = self.min.x.max(0.0) as u32;
-        let y = self.min.y.max(0.0) as u32;
-        if x >= dims.width || y >= dims.height {
+        let left = self.min.x.floor().clamp(0.0, f64::from(dims.width)) as u32;
+        let top = self.min.y.floor().clamp(0.0, f64::from(dims.height)) as u32;
+        let right = self.max.x.ceil().clamp(0.0, f64::from(dims.width)) as u32;
+        let bottom = self.max.y.ceil().clamp(0.0, f64::from(dims.height)) as u32;
+        if right <= left || bottom <= top {
             return None;
         }
-        let w = (self.width().max(0.0) as u32).min(dims.width - x);
-        let h = (self.height().max(0.0) as u32).min(dims.height - y);
-        if w == 0 || h == 0 {
-            return None;
-        }
-        Some(BoundingBox::from_origin(
-            Point::new(x, y),
-            Dimensions::new(w, h),
+        Some(BoundingBox::new(
+            Point::new(left, top),
+            Point::new(right, bottom),
         ))
     }
 
@@ -246,6 +245,19 @@ mod tests {
     }
 
     #[test]
+    fn to_pixels_rounds_outward() {
+        let dims = Dimensions::new(100, 80);
+        // A box `0.9..2.1` must cover every pixel it touches (0, 1, 2), so it
+        // floors the min and ceils the max: `0..3`, not the truncated `0..1`.
+        let frac = BoundingBox::new(Point::new(0.9, 0.9), Point::new(2.1, 2.1));
+        let region = frac.to_pixels(dims).expect("inside");
+        assert_eq!(
+            (region.left(), region.top(), region.right(), region.bottom()),
+            (0, 0, 3, 3)
+        );
+    }
+
+    #[test]
     fn to_pixels_rejects_fully_outside_or_empty() {
         let dims = Dimensions::new(100, 80);
         // Origin past the edge: nothing inside.
@@ -254,12 +266,14 @@ mod tests {
         // Zero-size box clamps to empty.
         let empty = BoundingBox::from_origin(Point::new(10.0, 10.0), Dimensions::new(0.0, 0.0));
         assert_eq!(empty.to_pixels(dims), None);
-        // Negative origin floors to 0 and still yields the in-image part.
+        // Negative origin clamps to 0 and yields only the in-image part: the box
+        // spans `-5..5`, so after clamping the left edge to 0 the region is
+        // `0..5`, not `0..10`.
         let neg = BoundingBox::from_origin(Point::new(-5.0, -5.0), Dimensions::new(10.0, 10.0));
         let region = neg.to_pixels(dims).expect("partly inside");
         assert_eq!(
             (region.left(), region.top(), region.width(), region.height()),
-            (0, 0, 10, 10)
+            (0, 0, 5, 5)
         );
     }
 

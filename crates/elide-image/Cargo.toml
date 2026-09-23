@@ -44,7 +44,7 @@ exif = ["dep:little_exif", "dep:async-trait", "elide-core/metadata"]
 ## Expose `test_util`: build small in-memory image fixtures (a JPEG carrying a
 ## GPS EXIF tag) and inspect them, so a downstream crate can exercise the EXIF
 ## path without depending on `image`/`little_exif` itself. Implies `exif`.
-test-util = ["exif", "jpeg"]
+test-util = ["exif", "jpeg", "png"]
 
 ## Derive `serde::{Serialize, Deserialize}` on the metadata model, so a caller
 ## can ship a metadata read across a boundary. Implies the same on elide-core's

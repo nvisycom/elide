@@ -8,9 +8,9 @@ use uuid::Uuid;
 
 /// One per-call STT request handed to an [`SttBackend`].
 ///
-/// Bundles the audio bytes with advisory hints (filename, language,
-/// correlation id). Borrowed (`SttRequest<'a>`) so call sites that already
-/// own the underlying values hand them through without cloning.
+/// Bundles the audio bytes with advisory hints (language, correlation id).
+/// Borrowed (`SttRequest<'a>`) so call sites that already own the underlying
+/// values hand them through without cloning.
 ///
 /// [`SttBackend`]: super::SttBackend
 #[derive(Debug, Clone)]
@@ -19,9 +19,6 @@ pub struct SttRequest<'a> {
     /// container and codec it accepts; returned segment timings refer back
     /// into this clip.
     pub audio: &'a [u8],
-    /// Original filename, when known. Some backends use the extension for
-    /// MIME-type detection on multipart uploads.
-    pub filename: Option<&'a str>,
     /// Caller-asserted language. Backends that support per-call language
     /// hinting use this to pick a model variant; others ignore it.
     pub language: Option<&'a LanguageTag>,
@@ -34,17 +31,9 @@ impl<'a> SttRequest<'a> {
     pub fn new(audio: &'a [u8]) -> Self {
         Self {
             audio,
-            filename: None,
             language: None,
             correlation_id: None,
         }
-    }
-
-    /// Builder-style setter for the original filename.
-    #[must_use]
-    pub fn with_filename(mut self, filename: &'a str) -> Self {
-        self.filename = Some(filename);
-        self
     }
 
     /// Builder-style setter for the language hint.

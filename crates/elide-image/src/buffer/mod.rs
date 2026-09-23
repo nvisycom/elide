@@ -1,5 +1,8 @@
-//! [`ImageBuffer`]: a decoded raster image, opened once, then read, redacted,
-//! and re-encoded, the single entry point into this crate.
+//! [`ImageBuffer`]: an opened image source — its decoded pixels plus its
+//! original container and metadata — opened once, then read, redacted, and
+//! re-encoded, the single entry point into this crate.
+
+mod raster;
 
 use bytes::Bytes;
 #[cfg(feature = "exif")]
@@ -7,29 +10,33 @@ use elide_core::entity::Entity;
 #[cfg(feature = "exif")]
 use elide_core::modality::metadata::{Metadata, MetadataData};
 use elide_core::{Error, ErrorKind, Result};
-use image::imageops::FilterType;
-use image::{DynamicImage, GenericImageView, Rgba, RgbaImage};
 
+pub use self::raster::RasterImage;
 #[cfg(feature = "exif")]
 use crate::exif::Source;
 use crate::modality::{ImageFormat, ImageReplacement};
 #[cfg(feature = "exif")]
 use crate::policy::ExifPolicy;
-use crate::primitive::{BoundingBox, Color, Dimensions, Point};
+use crate::primitive::{BoundingBox, Dimensions};
 
-/// A decoded raster image, the single entry point into the crate.
+/// An opened image source, the single entry point into the crate.
 ///
 /// [`open`](Self::open) ingests the bytes once: it detects the format, decodes
-/// the pixels, and retains the source container so metadata is available without
-/// a second decode or any magic-byte sniffing elsewhere. Reuse the buffer to
-/// [`redact`](Self::redact) pixel regions and [`encode`](Self::encode) back out
-/// under an [`ExifPolicy`](crate::ExifPolicy), all paying the decode cost a
-/// single time. With the `exif` feature it also surfaces the source's
-/// privacy-relevant EXIF fields as `Entity<Metadata>` values.
+/// the pixels into a [`RasterImage`], and retains the source container so
+/// metadata is available without a second decode or any magic-byte sniffing
+/// elsewhere. Reuse the buffer to [`redact`](Self::redact) pixel regions and
+/// [`encode`](Self::encode) back out under an [`ExifPolicy`](crate::ExifPolicy),
+/// all paying the decode cost a single time. With the `exif` feature it also
+/// surfaces the source's privacy-relevant EXIF fields as `Entity<Metadata>`
+/// values.
+///
+/// The pixel work is the [`RasterImage`]'s; this type adds the source container
+/// and metadata story on top. Cropping a buffer ([`crop`](Self::crop)) hands
+/// back a bare `RasterImage` — a sub-image has no source of its own.
 #[derive(Debug, Clone)]
 pub struct ImageBuffer {
-    inner: DynamicImage,
-    format: ImageFormat,
+    /// The decoded pixels and their format; all pixel operations delegate here.
+    raster: RasterImage,
     /// The original container bytes, kept so metadata (which the pixel decode
     /// discards) can be read or carried through on encode.
     source: Bytes,
@@ -67,30 +74,34 @@ impl ImageBuffer {
         let inner = image::load_from_memory_with_format(bytes, format.to_image())
             .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("image decode: {e}")))?;
         Ok(Self {
-            inner,
-            format,
+            raster: RasterImage::new(inner, format),
             source: Bytes::copy_from_slice(bytes),
             dirty: false,
         })
     }
 
+    /// The decoded pixels, for a caller that wants the raster directly.
+    #[must_use]
+    pub fn raster(&self) -> &RasterImage {
+        &self.raster
+    }
+
     /// The image's pixel dimensions.
     #[must_use]
     pub fn dimensions(&self) -> Dimensions<u32> {
-        let (w, h) = self.inner.dimensions();
-        Dimensions::new(w, h)
+        self.raster.dimensions()
     }
 
     /// The format the image was opened as, and re-encodes to.
     #[must_use]
     pub fn format(&self) -> ImageFormat {
-        self.format
+        self.raster.format()
     }
 
     /// The source container as an EXIF [`Source`], the receiver for metadata ops.
     #[cfg(feature = "exif")]
     fn exif_source(&self) -> Source<'_> {
-        Source::new(&self.source, self.format.to_exif())
+        Source::new(&self.source, self.format().to_exif())
     }
 
     /// One entity per privacy-relevant EXIF field the source image carries, so a
@@ -163,7 +174,7 @@ impl ImageBuffer {
         }
         // Pixels redacted: re-encode them. The fresh bytes carry no EXIF, so the
         // metadata to keep is transferred from the source onto them.
-        let encoded = Self::encode_image(&self.inner, self.format)?;
+        let encoded = self.raster.encode_raw()?;
         Ok(match policy {
             // Nothing to carry: the re-encoded bytes already hold no metadata.
             ExifPolicy::Strip => encoded,
@@ -175,7 +186,7 @@ impl ImageBuffer {
             // are retained rather than dropped with everything else.
             ExifPolicy::StripSensitive => {
                 let retained = self.exif_source().strip(ExifPolicy::StripSensitive)?;
-                Source::new(&retained, self.format.to_exif())
+                Source::new(&retained, self.format().to_exif())
                     .transfer(encoded.into())?
                     .into()
             }
@@ -196,7 +207,7 @@ impl ImageBuffer {
         if !self.dirty {
             return Ok(self.source.clone());
         }
-        Self::encode_image(&self.inner, self.format)
+        self.raster.encode_raw()
     }
 
     /// Re-encode the current (possibly redacted) pixels, carrying the EXIF
@@ -220,127 +231,36 @@ impl ImageBuffer {
             // original pixels plus its metadata edit.
             return Ok(Bytes::copy_from_slice(container));
         }
-        let encoded = Self::encode_image(&self.inner, self.format)?;
-        let source = Source::new(container, self.format.to_exif());
+        let encoded = self.raster.encode_raw()?;
+        let source = Source::new(container, self.format().to_exif());
         Ok(source.transfer(encoded.into())?.into())
     }
 
-    /// `region` clamped to the image bounds, or `None` when the overlap is empty.
-    ///
-    /// A caller can hand in a region that runs past the edges or lies wholly
-    /// outside. `image`'s `crop_imm` silently clips such a region, so a
-    /// wholly-outside region would collapse to a zero-sized crop, and a partly
-    /// outside one would act on fewer pixels than the caller named. Resolving the
-    /// intersection here makes both cases explicit: a real overlap is clamped to
-    /// exactly the in-bounds pixels, and no overlap is `None`.
-    fn clamp(&self, region: BoundingBox<u32>) -> Option<BoundingBox<u32>> {
-        let (w, h) = self.inner.dimensions();
-        let x = region.left().min(w);
-        let y = region.top().min(h);
-        // Saturating: a caller-supplied region near `u32::MAX` must not overflow
-        // the edge sum (`x + width`), which would panic in debug and wrap in
-        // release. The edges are clamped to the image, so saturation is harmless.
-        let right = region.left().saturating_add(region.width()).min(w);
-        let bottom = region.top().saturating_add(region.height()).min(h);
-        if right <= x || bottom <= y {
-            return None;
-        }
-        Some(BoundingBox::from_origin(
-            Point::new(x, y),
-            Dimensions::new(right - x, bottom - y),
-        ))
-    }
-
-    /// Crop `region` out and encode it, or `None` when the region does not
-    /// overlap the image (out of bounds or zero-area). The crop is the in-bounds
-    /// intersection and carries no metadata.
-    pub fn crop(&self, region: BoundingBox<u32>) -> Result<Option<Bytes>> {
-        let Some(region) = self.clamp(region) else {
-            return Ok(None);
-        };
-        let cropped =
-            self.inner
-                .crop_imm(region.left(), region.top(), region.width(), region.height());
-        Ok(Some(Self::encode_image(&cropped, self.format)?))
+    /// Crop the in-bounds intersection of `region` out as a bare
+    /// [`RasterImage`], or `None` when the region does not overlap the image (out
+    /// of bounds or zero-area). The crop carries no source or metadata.
+    #[must_use]
+    pub fn crop(&self, region: BoundingBox<u32>) -> Option<RasterImage> {
+        self.raster.crop(region)
     }
 
     /// Paint `replacement` over `region` in place (blur, pixelate, block, or
     /// remove). A region that does not overlap the image is a silent no-op, and
     /// leaves the buffer clean; redaction acts on the in-bounds intersection.
     pub fn redact(&mut self, region: BoundingBox<u32>, replacement: &ImageReplacement) {
-        let Some(region) = self.clamp(region) else {
-            return;
-        };
-        match replacement {
-            ImageReplacement::Blur { sigma } => self.blur(region, *sigma),
-            ImageReplacement::Pixelate { block_size } => self.pixelate(region, *block_size),
-            ImageReplacement::Block { color } => self.block(region, *color),
-            ImageReplacement::Removed => self.block(region, Color::BLACK),
-            ImageReplacement::Unchanged => return,
+        if self.raster.redact(region, replacement) {
+            self.dirty = true;
         }
-        self.dirty = true;
-    }
-
-    /// Gaussian blur over the region: crop, blur the crop, overlay it back.
-    fn blur(&mut self, region: BoundingBox<u32>, sigma: f32) {
-        let sub = self
-            .inner
-            .crop_imm(region.left(), region.top(), region.width(), region.height())
-            .to_rgba8();
-        let blurred = imageproc::filter::gaussian_blur_f32(&sub, sigma.max(f32::MIN_POSITIVE));
-        self.overlay(&DynamicImage::ImageRgba8(blurred), region);
-    }
-
-    /// Solid-color block over the region.
-    fn block(&mut self, region: BoundingBox<u32>, color: Color) {
-        let fill = RgbaImage::from_pixel(
-            region.width(),
-            region.height(),
-            Rgba([color.r, color.g, color.b, 255]),
-        );
-        self.overlay(&DynamicImage::ImageRgba8(fill), region);
-    }
-
-    /// Mosaic pixelation: downscale the region with nearest-neighbor, scale it
-    /// back up, and overlay.
-    fn pixelate(&mut self, region: BoundingBox<u32>, block_size: u32) {
-        let block_size = block_size.max(1);
-        let small_w = (region.width() / block_size).max(1);
-        let small_h = (region.height() / block_size).max(1);
-        let sub = self
-            .inner
-            .crop_imm(region.left(), region.top(), region.width(), region.height());
-        let small = sub.resize_exact(small_w, small_h, FilterType::Nearest);
-        let mosaic = small.resize_exact(region.width(), region.height(), FilterType::Nearest);
-        self.overlay(&mosaic, region);
-    }
-
-    /// Overlay `patch` onto the image at the region's top-left corner.
-    fn overlay(&mut self, patch: &DynamicImage, region: BoundingBox<u32>) {
-        image::imageops::overlay(
-            &mut self.inner,
-            patch,
-            region.left() as i64,
-            region.top() as i64,
-        );
-    }
-
-    /// Encode `img` to bytes in `format`.
-    fn encode_image(img: &DynamicImage, format: ImageFormat) -> Result<Bytes> {
-        use std::io::Cursor;
-
-        let mut buf = Cursor::new(Vec::new());
-        img.write_to(&mut buf, format.to_image())
-            .map_err(|e| Error::new(ErrorKind::Processing, format!("image encode: {e}")))?;
-        Ok(Bytes::from(buf.into_inner()))
     }
 }
 
 #[cfg(all(test, feature = "png"))]
 mod tests {
-    use image::{ImageFormat as ImgFormat, RgbImage};
+    use image::{GenericImageView, ImageFormat as ImgFormat, RgbImage, Rgba};
 
     use super::*;
+    use crate::modality::ImageReplacement;
+    use crate::primitive::{Color, Point};
 
     /// An `w`x`h` solid-red PNG, as container bytes.
     fn png(w: u32, h: u32) -> Vec<u8> {
@@ -368,7 +288,6 @@ mod tests {
                     Point::new(10, 10),
                     Dimensions::new(4, 4)
                 ))
-                .expect("crop")
                 .is_none()
         );
         // A zero-area region is likewise nothing to crop.
@@ -378,7 +297,6 @@ mod tests {
                     Point::new(0, 0),
                     Dimensions::new(0, 4)
                 ))
-                .expect("crop")
                 .is_none()
         );
     }
@@ -395,7 +313,6 @@ mod tests {
                     Point::new(u32::MAX - 1, 0),
                     Dimensions::new(100, 4)
                 ))
-                .expect("crop")
                 .is_none()
         );
         let mut buffer = buffer;
@@ -423,12 +340,8 @@ mod tests {
                 Point::new(2, 2),
                 Dimensions::new(4, 4),
             ))
-            .expect("crop")
             .expect("some overlap");
-        let (w, h) = image::load_from_memory(&cropped)
-            .expect("decode")
-            .dimensions();
-        assert_eq!((w, h), (2, 2));
+        assert_eq!(cropped.dimensions(), Dimensions::new(2, 2));
     }
 
     #[test]
