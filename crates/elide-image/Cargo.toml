@@ -5,7 +5,6 @@ name = "elide-image"
 description = "Raster image decode/encode, EXIF metadata read and strip, and pixel-region redaction: bytes in, bytes out"
 keywords = ["image", "exif", "metadata", "redaction", "privacy"]
 categories = ["multimedia::images", "computer-vision"]
-readme = "README.md"
 
 version = { workspace = true }
 rust-version = { workspace = true }
@@ -15,7 +14,6 @@ publish = { workspace = true }
 
 authors = { workspace = true }
 repository = { workspace = true }
-homepage = { workspace = true }
 documentation = { workspace = true }
 
 [package.metadata.docs.rs]

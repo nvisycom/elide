@@ -5,7 +5,6 @@ name = "elide-fake"
 description = "Locale-aware fake-data anonymizer operator for the Elide toolkit"
 keywords = ["elide", "fake", "anonymizer", "pii"]
 categories = ["text-processing"]
-readme = "README.md"
 
 version = { workspace = true }
 rust-version = { workspace = true }
@@ -15,7 +14,6 @@ publish = { workspace = true }
 
 authors = { workspace = true }
 repository = { workspace = true }
-homepage = { workspace = true }
 documentation = { workspace = true }
 
 [package.metadata.docs.rs]

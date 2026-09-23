@@ -5,7 +5,6 @@ name = "elide-wasm"
 description = "WebAssembly bindings that run the Elide detect-and-redact pipeline in a browser"
 keywords = ["elide", "wasm", "redaction", "pii", "browser"]
 categories = ["wasm", "text-processing"]
-readme = "README.md"
 publish = false
 
 version = { workspace = true }
@@ -15,7 +14,6 @@ license = { workspace = true }
 
 authors = { workspace = true }
 repository = { workspace = true }
-homepage = { workspace = true }
 documentation = { workspace = true }
 
 [lib]

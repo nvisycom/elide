@@ -5,7 +5,6 @@ name = "elide-office"
 description = "Office Open XML (DOCX today; XLSX/PPTX planned) text extraction and byte-faithful redaction: bytes in, bytes out"
 keywords = ["ooxml", "docx", "office", "redaction", "extraction"]
 categories = ["parsing", "text-processing"]
-readme = "README.md"
 
 version = { workspace = true }
 rust-version = { workspace = true }
@@ -15,7 +14,6 @@ publish = { workspace = true }
 
 authors = { workspace = true }
 repository = { workspace = true }
-homepage = { workspace = true }
 documentation = { workspace = true }
 
 [package.metadata.docs.rs]

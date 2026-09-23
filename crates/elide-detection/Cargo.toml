@@ -5,7 +5,6 @@ name = "elide-detection"
 description = "Detection engine for the Elide toolkit: the Analyzer and its deduplication layers"
 keywords = ["pii", "detection", "deduplication", "ner"]
 categories = ["text-processing"]
-readme = "README.md"
 
 version = { workspace = true }
 rust-version = { workspace = true }
@@ -15,7 +14,6 @@ publish = { workspace = true }
 
 authors = { workspace = true }
 repository = { workspace = true }
-homepage = { workspace = true }
 documentation = { workspace = true }
 
 [package.metadata.docs.rs]

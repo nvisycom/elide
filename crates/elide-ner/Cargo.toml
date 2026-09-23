@@ -5,7 +5,6 @@ name = "elide-ner"
 description = "NER traits and language detection for the Elide toolkit"
 keywords = ["ner", "nlp", "pii"]
 categories = ["text-processing"]
-readme = "README.md"
 
 version = { workspace = true }
 rust-version = { workspace = true }
@@ -15,7 +14,6 @@ publish = { workspace = true }
 
 authors = { workspace = true }
 repository = { workspace = true }
-homepage = { workspace = true }
 documentation = { workspace = true }
 
 [features]

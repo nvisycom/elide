@@ -15,7 +15,6 @@ license = { workspace = true }
 
 authors = { workspace = true }
 repository = { workspace = true }
-homepage = { workspace = true }
 
 ## Each example is a self-contained binary, run with
 ## `cargo run -p elide-examples --bin <name>`.
