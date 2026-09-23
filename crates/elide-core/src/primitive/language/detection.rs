@@ -2,12 +2,12 @@
 //!
 //! [`Language`] pairs a [`LanguageTag`] with how it was obtained
 //! ([`LanguageProvenance`]: detected by a backend, or asserted by the
-//! caller), an optional confidence, and the [`LanguageSpan`] byte-offset
-//! range it applies to when the detector reports per-region results.
-//! [`Languages`] is the list a detector (or the caller) builds
-//! for one text scan.
+//! caller), an optional confidence, and the byte-offset range it applies to
+//! when the detector reports per-region results. A detector (or the caller)
+//! builds a `Vec<Language>` for one text scan.
 
 use std::cmp::Ordering;
+use std::ops::Range;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,12 @@ use crate::primitive::Confidence;
 /// Lets consumers distinguish "a detector ran and got this answer" from
 /// "the caller asserted this language". An assertion may still carry an
 /// optional confidence, so this is independent of the confidence field.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// The variants are declared weakest-first, so the derived [`Ord`] makes an
+/// [`Asserted`](Self::Asserted) provenance outrank a
+/// [`Detected`](Self::Detected) one — the tiebreak a language ranking applies at
+/// equal confidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -31,27 +36,10 @@ pub enum LanguageProvenance {
     Asserted,
 }
 
-/// Byte-offset range within the analyzed text.
-///
-/// Attached to a [`Language`] when the detector knows the span
-/// its answer covers (mixed-language input produces multiple detections,
-/// each with a distinct span). Single-language detections from
-/// non-segmenting backends, and caller-asserted answers, typically leave
-/// the span as `None`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct LanguageSpan {
-    /// Byte offset of the span start in the original text.
-    pub start: usize,
-    /// Byte offset of the span end in the original text.
-    pub end: usize,
-}
-
 /// Single language detection result.
 ///
 /// Carries the language plus an optional confidence and an optional
-/// byte-offset [`LanguageSpan`]. Backends that don't expose confidence
+/// byte-offset range. Backends that don't expose confidence
 /// leave it `None`; single-language detectors that don't track per-region
 /// information leave `span` as `None`. The `provenance` field records
 /// whether the answer came from a detector or was asserted by the caller.
@@ -76,7 +64,8 @@ pub struct Language {
         feature = "serde",
         serde(default, skip_serializing_if = "Option::is_none")
     )]
-    pub span: Option<LanguageSpan>,
+    #[cfg_attr(feature = "schema", schemars(with = "Option<Range<usize>>"))]
+    pub span: Option<Range<usize>>,
 }
 
 impl Language {
@@ -119,7 +108,7 @@ impl Language {
 
     /// Attach a byte-offset span this detection covers.
     #[must_use]
-    pub fn with_span(mut self, span: LanguageSpan) -> Self {
+    pub fn with_span(mut self, span: Range<usize>) -> Self {
         self.span = Some(span);
         self
     }
@@ -135,111 +124,17 @@ impl Language {
     /// [`Asserted`]: LanguageProvenance::Asserted
     /// [`Detected`]: LanguageProvenance::Detected
     pub(crate) fn rank(&self, other: &Self) -> Ordering {
-        confidence_key(self)
-            .total_cmp(&confidence_key(other))
-            .then_with(|| provenance_rank(self).cmp(&provenance_rank(other)))
-    }
-}
-
-/// List of [`Language`]s resolved for one text scan.
-///
-/// Built by a detector (one entry per detected region) or by the caller
-/// asserting languages. Carried on a [`RecognizerContext`] so every
-/// recognizer and the context enhancer can consult the call's languages.
-///
-/// [`RecognizerContext`]: crate::recognition::RecognizerContext
-#[derive(Debug, Clone, Default, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(transparent))]
-pub struct Languages(pub Vec<Language>);
-
-impl Languages {
-    /// Construct from a list of detections.
-    #[must_use]
-    pub fn new(detections: Vec<Language>) -> Self {
-        Self(detections)
+        self.confidence_key()
+            .total_cmp(&other.confidence_key())
+            .then_with(|| self.provenance.cmp(&other.provenance))
     }
 
-    /// Add a detection to the list.
-    pub fn push(&mut self, detection: Language) {
-        self.0.push(detection);
-    }
-
-    /// Borrow the detections in their stored order.
-    #[must_use]
-    pub fn as_slice(&self) -> &[Language] {
-        &self.0
-    }
-
-    /// Whether the list is empty.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    /// Detections ranked best-first: by confidence descending (a missing
-    /// confidence sorts last), with an asserted language breaking ties
-    /// ahead of a detected one. The sort is stable.
-    #[must_use]
-    pub fn ranked(&self) -> Vec<&Language> {
-        let mut out: Vec<&Language> = self.0.iter().collect();
-        out.sort_by(|a, b| b.rank(a));
-        out
-    }
-
-    /// Single best language, or `None` when the list is empty.
-    #[must_use]
-    pub fn best(&self) -> Option<&Language> {
-        self.0.iter().max_by(|a, b| a.rank(b))
-    }
-
-    /// Language covering the most bytes of the source text, breaking ties
-    /// on confidence.
-    ///
-    /// Caller-asserted or whole-document detections (no `span`) are
-    /// treated as covering the whole text, so they win against any single
-    /// region. Returns `None` iff the list is empty.
-    #[must_use]
-    pub fn dominant(&self) -> Option<&Language> {
-        self.0.iter().max_by(|a, b| {
-            span_bytes(a)
-                .cmp(&span_bytes(b))
-                .then_with(|| confidence_key(a).total_cmp(&confidence_key(b)))
-        })
-    }
-}
-
-impl From<Vec<Language>> for Languages {
-    fn from(detections: Vec<Language>) -> Self {
-        Self::new(detections)
-    }
-}
-
-/// Confidence as a sort key: present scores by value, a missing score as
-/// negative infinity so it ranks below any present one.
-fn confidence_key(d: &Language) -> f32 {
-    d.confidence
-        .map(Confidence::get)
-        .unwrap_or(f32::NEG_INFINITY)
-}
-
-/// Provenance tiebreak: a higher number wins, so an assertion outranks a
-/// detection at equal confidence.
-fn provenance_rank(d: &Language) -> u8 {
-    match d.provenance {
-        LanguageProvenance::Asserted => 1,
-        LanguageProvenance::Detected => 0,
-    }
-}
-
-/// Byte coverage of a detection, treating a missing span as the whole
-/// document (maximal coverage).
-fn span_bytes(d: &Language) -> usize {
-    match d.span {
-        Some(s) => s.end.saturating_sub(s.start),
-        None => usize::MAX,
+    /// Confidence as a sort key: the score when present, and negative infinity
+    /// when absent so an unscored language ranks below any scored one.
+    fn confidence_key(&self) -> f32 {
+        self.confidence
+            .map(Confidence::get)
+            .unwrap_or(f32::NEG_INFINITY)
     }
 }
 
@@ -252,15 +147,18 @@ mod tests {
     }
 
     #[test]
-    fn ranked_orders_by_confidence_then_assertion() {
-        let dets = Languages::new(vec![
+    fn rank_orders_by_confidence_then_assertion() {
+        // `rank` is the ordering the recognition context sorts a call's
+        // languages by (best-first): higher confidence wins, and an asserted
+        // language breaks a tie ahead of a detected one.
+        let mut langs = [
             Language::detected(tag("fr")).with_confidence(Confidence::new(0.8).unwrap()),
             Language::asserted(tag("de")),
             Language::detected(tag("es")),
             Language::asserted(tag("it")).with_confidence(Confidence::new(0.8).unwrap()),
-        ]);
-        let order: Vec<&str> = dets
-            .ranked()
+        ];
+        langs.sort_by(|a, b| b.rank(a));
+        let order: Vec<&str> = langs
             .iter()
             .map(|d| d.language.primary_language())
             .collect();
@@ -270,32 +168,11 @@ mod tests {
     }
 
     #[test]
-    fn best_is_top_of_ranked() {
-        let dets = Languages::new(vec![
-            Language::detected(tag("fr")).with_confidence(Confidence::new(0.8).unwrap()),
-            Language::asserted(tag("de")),
-        ]);
-        // Confidence-first: detected French (0.8) beats asserted German (None).
-        assert_eq!(dets.best().unwrap().language, tag("fr"));
-    }
-
-    #[test]
-    fn dominant_prefers_largest_span() {
-        let small = Language::detected(tag("de"))
-            .with_confidence(Confidence::new(0.99).unwrap())
-            .with_span(LanguageSpan { start: 0, end: 5 });
-        let large = Language::detected(tag("en"))
-            .with_confidence(Confidence::new(0.6).unwrap())
-            .with_span(LanguageSpan { start: 5, end: 40 });
-        let dets = Languages::new(vec![small, large]);
-        assert_eq!(dets.dominant().unwrap().language, tag("en"));
-    }
-
-    #[test]
-    fn empty_has_no_best_or_dominant() {
-        let dets = Languages::default();
-        assert!(dets.is_empty());
-        assert!(dets.best().is_none());
-        assert!(dets.dominant().is_none());
+    fn rank_puts_confidence_before_provenance() {
+        // Confidence-first: detected French (0.8) outranks asserted German
+        // (no confidence).
+        let fr = Language::detected(tag("fr")).with_confidence(Confidence::new(0.8).unwrap());
+        let de = Language::asserted(tag("de"));
+        assert_eq!(fr.rank(&de), Ordering::Greater);
     }
 }

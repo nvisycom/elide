@@ -18,9 +18,7 @@ mod region;
 mod usage;
 
 pub use self::confidence::{Confidence, ConfidenceThreshold};
-pub use self::language::{
-    Language, LanguageProvenance, LanguageSpan, LanguageTag, Languages, LocalizedText,
-};
+pub use self::language::{Language, LanguageProvenance, LanguageTag, LocalizedText};
 pub use self::region::CountryCode;
 #[cfg(feature = "usage")]
 pub use self::usage::{ModelUsage, TokenCounts, Usage, UsageReport};

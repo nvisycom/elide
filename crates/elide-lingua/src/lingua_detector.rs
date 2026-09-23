@@ -21,7 +21,7 @@ use std::str::FromStr;
 use std::sync::{Mutex, OnceLock};
 
 use elide_core::Result;
-use elide_core::primitive::{Confidence, Language, LanguageProvenance, LanguageSpan, LanguageTag};
+use elide_core::primitive::{Confidence, Language, LanguageProvenance, LanguageTag};
 use lingua::{
     IsoCode639_1, Language as LinguaLanguage, LanguageDetector as LinguaInner,
     LanguageDetectorBuilder,
@@ -90,10 +90,7 @@ impl LinguaDetector {
                     language,
                     confidence,
                     provenance: LanguageProvenance::Detected,
-                    span: Some(LanguageSpan {
-                        start: result.start_index(),
-                        end: result.end_index(),
-                    }),
+                    span: Some(result.start_index()..result.end_index()),
                 })
             })
             .collect();
