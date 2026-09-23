@@ -49,7 +49,7 @@ async fn main() -> Result<()> {
     // 2. Assemble the orchestrator: one shared scope, plus a text pipeline
     //    for the body and an image pipeline for the embedded media. The
     //    scope is modality-free, so it is set once for every pipeline.
-    let en = Language::asserted(LanguageTag::parse("en").unwrap());
+    let en = LanguageTag::parse("en")?;
     let orchestrator = Orchestrator::new()
         .with_registry(registry)
         .with_scope(

@@ -17,7 +17,7 @@ use elide::codec::FormatRegistry;
 use elide::enrichment::ocr::MockBackend;
 use elide::modality::image::{Image, ImageLocation, LayoutBlock};
 use elide::modality::text::Text;
-use elide::primitive::{BoundingBox, Point};
+use elide::primitive::{BoundingBox, Dimensions, Point};
 use elide::{Directives, PartId, RegistryDocumentExt, Result};
 
 use crate::support::orchestrator::{
@@ -31,10 +31,9 @@ const SAMPLE_PNG: &[u8] = include_bytes!("../testdata/sample.png");
 /// email, a pattern recognizer over it, an erase anonymizer.
 fn orchestrator(registry: FormatRegistry) -> Result<elide::Orchestrator> {
     let block = LayoutBlock::new(
-        ImageLocation::new(BoundingBox::from_origin_size(
+        ImageLocation::new(BoundingBox::from_origin(
             Point::new(0.0, 0.0),
-            200.0,
-            20.0,
+            Dimensions::new(200.0, 20.0),
         )),
         "write to alice@example.com today",
     );

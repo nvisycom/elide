@@ -9,11 +9,11 @@ use serde::{Deserialize, Serialize};
 /// Identifies a redaction operator, for the redaction audit a higher
 /// layer assembles.
 ///
-/// As with [`RecognizerId`], the version is part of the identity so the
+/// As with [`ComponentId`], the version is part of the identity so the
 /// audit trail records which build of the operator ran. The version is
 /// opaque text; the core attaches no ordering semantics to it.
 ///
-/// [`RecognizerId`]: crate::recognition::RecognizerId
+/// [`ComponentId`]: crate::primitive::ComponentId
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

@@ -35,8 +35,8 @@ impl Modality for Tabular {
 }
 
 impl TextRecognizable for Tabular {
-    fn as_text<'a>(data: &'a TextData, _artifact: Option<&'a Tokens>) -> &'a str {
-        data.text.as_str()
+    fn as_text<'a>(data: &'a TextData, _artifact: Option<&'a Tokens>) -> Option<&'a str> {
+        Some(data.text.as_str())
     }
 
     fn locate(

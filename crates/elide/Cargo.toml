@@ -5,7 +5,6 @@ name = "elide"
 description = "Composable component library for Elide pipelines: recognizers, dedup layers, checks, redaction strategies"
 keywords = ["elide", "toolkit", "components", "pipeline"]
 categories = ["data-structures"]
-readme = "README.md"
 
 version = { workspace = true }
 rust-version = { workspace = true }
@@ -15,7 +14,6 @@ publish = { workspace = true }
 
 authors = { workspace = true }
 repository = { workspace = true }
-homepage = { workspace = true }
 documentation = { workspace = true }
 
 [package.metadata.docs.rs]

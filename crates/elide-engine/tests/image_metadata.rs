@@ -116,26 +116,28 @@ struct WholeFrame;
 
 #[async_trait::async_trait]
 impl elide_core::recognition::Recognizer<Image> for WholeFrame {
-    fn id(&self) -> elide_core::recognition::RecognizerId {
-        elide_core::recognition::RecognizerId::new("whole-frame", "1.0.0")
+    fn id(&self) -> elide_core::primitive::ComponentId {
+        elide_core::primitive::ComponentId::new("whole-frame", "1.0.0")
     }
 
     async fn recognize(
         &self,
-        data: &elide_image::modality::ImageData,
+        subject: &elide_core::recognition::Subject<Image>,
         _ctx: &elide_core::recognition::RecognizerContext<'_, Image>,
     ) -> elide_core::Result<elide_core::recognition::Recognition<Image>> {
         use elide_core::entity::audit::{AuditEvent, ModelEvent};
         use elide_core::entity::{Entity, builtins};
         use elide_core::primitive::Confidence;
+        use elide_image::ImageBuffer;
         use elide_image::modality::ImageLocation;
-        use elide_image::primitive::{BoundingBox, Point};
+        use elide_image::primitive::{BoundingBox, Dimensions, Point};
 
-        let dims = &data.dimensions;
-        let bbox = BoundingBox::from_origin_size(
+        let dims = ImageBuffer::open(&subject.data().bytes)
+            .map(|b| b.dimensions())
+            .unwrap_or_default();
+        let bbox = BoundingBox::from_origin(
             Point::new(0.0, 0.0),
-            f64::from(dims.width),
-            f64::from(dims.height),
+            Dimensions::new(f64::from(dims.width), f64::from(dims.height)),
         );
         let location = ImageLocation::new(bbox);
         let event = AuditEvent::model(

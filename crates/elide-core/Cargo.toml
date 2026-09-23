@@ -5,7 +5,6 @@ name = "elide-core"
 description = "Domain types, traits, and errors for the Elide toolkit"
 keywords = ["elide", "core", "domain", "types"]
 categories = ["data-structures"]
-readme = "README.md"
 
 version = { workspace = true }
 rust-version = { workspace = true }
@@ -15,7 +14,6 @@ publish = { workspace = true }
 
 authors = { workspace = true }
 repository = { workspace = true }
-homepage = { workspace = true }
 documentation = { workspace = true }
 
 [package.metadata.docs.rs]

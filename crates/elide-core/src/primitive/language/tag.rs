@@ -7,6 +7,8 @@ use std::sync::LazyLock;
 use hipstr::HipStr;
 use oxilangtag::LanguageTag as RawLanguageTag;
 
+use crate::{Error, ErrorKind, Result};
+
 /// Well-formed [BCP 47] language tag, such as `en`, `en-US`, or
 /// `zh-Hant-HK`.
 ///
@@ -32,17 +34,21 @@ pub struct LanguageTag(
 impl LanguageTag {
     /// Parse and validate a BCP 47 language tag.
     ///
-    /// Returns [`LanguageTagParseError`] if `tag` is not well-formed.
+    /// # Errors
     ///
-    /// [`LanguageTagParseError`]: oxilangtag::LanguageTagParseError
-    pub fn parse(
-        tag: impl Into<HipStr<'static>>,
-    ) -> Result<Self, oxilangtag::LanguageTagParseError> {
-        RawLanguageTag::parse(tag.into()).map(Self)
+    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if `tag`
+    /// is not a well-formed BCP 47 tag.
+    pub fn parse(tag: impl Into<HipStr<'static>>) -> Result<Self> {
+        RawLanguageTag::parse(tag.into()).map(Self).map_err(|e| {
+            Error::new(
+                ErrorKind::MalformedInput,
+                format!("invalid language tag: {e}"),
+            )
+        })
     }
 
     /// Primary language subtag (e.g. `"en"` for `"en-US"`).
-    pub fn primary_language(&self) -> &str {
+    pub fn primary_subtag(&self) -> &str {
         self.0.primary_language()
     }
 
@@ -82,15 +88,15 @@ impl LanguageTag {
     /// whether a language-scoped recognizer rule applies to a hinted content
     /// language.
     pub fn matches(&self, other: &LanguageTag) -> bool {
-        self.primary_language()
-            .eq_ignore_ascii_case(other.primary_language())
+        self.primary_subtag()
+            .eq_ignore_ascii_case(other.primary_subtag())
     }
 }
 
 impl FromStr for LanguageTag {
-    type Err = oxilangtag::LanguageTagParseError;
+    type Err = Error;
 
-    fn from_str(tag: &str) -> Result<Self, Self::Err> {
+    fn from_str(tag: &str) -> Result<Self> {
         Self::parse(HipStr::from(tag))
     }
 }

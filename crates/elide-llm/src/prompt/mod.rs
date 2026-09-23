@@ -15,7 +15,7 @@
 use elide_core::entity::Label;
 use elide_core::modality::Modality;
 use elide_core::primitive::LanguageTag;
-use elide_core::recognition::RecognizerContext;
+use elide_core::recognition::{RecognizerContext, Subject};
 
 mod default_prompt;
 mod image_prompt;
@@ -64,15 +64,15 @@ pub use self::jinja2_prompt::Jinja2Prompt;
 
 /// The per-modality prompt wording.
 ///
-/// Renders the user prompt for one modality's payload (`data`) plus its
+/// Renders the user prompt for one modality's [`Subject`] plus its
 /// [`RecognizerContext<'_, M>`]. Wording only: the response shape and how
 /// candidates become entities are not the prompt's concern.
 pub trait Prompt<M>: Send + Sync + 'static
 where
     M: Modality,
 {
-    /// Render the user prompt for `data` in `ctx`. Fold in hints, tags,
+    /// Render the user prompt for `subject` in `ctx`. Fold in hints, tags,
     /// and any instruction the model needs; the source payload (text,
     /// image bytes) is attached to the provider message by the backend.
-    fn build(&self, data: &M::Data, ctx: &RecognizerContext<'_, M>) -> String;
+    fn build(&self, subject: &Subject<M>, ctx: &RecognizerContext<'_, M>) -> String;
 }

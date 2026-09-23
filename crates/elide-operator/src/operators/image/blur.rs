@@ -72,7 +72,7 @@ mod tests {
 
     /// A 4x4 image entity with a small region, enough to drive an operator.
     fn image_entity() -> (Entity<Image>, ImageData) {
-        let bbox = BoundingBox::from_origin_size(Point::new(0.0, 0.0), 2.0, 2.0);
+        let bbox = BoundingBox::from_origin(Point::new(0.0, 0.0), Dimensions::new(2.0, 2.0));
         let location = ImageLocation::new(bbox);
         let event = AuditEvent::pattern(
             "t",
@@ -81,7 +81,7 @@ mod tests {
             PatternEvent::default(),
         );
         let entity = Entity::new(LabelRef::new("FACE"), location, AuditLog::new(event));
-        let data = ImageData::new(vec![0u8; 4], Dimensions::new(4, 4));
+        let data = ImageData::new(vec![0u8; 4]);
         (entity, data)
     }
 

@@ -5,7 +5,6 @@ name = "elide-pdf"
 description = "Standalone PDF text extraction and born-digital redaction: bytes in, bytes out"
 keywords = ["pdf", "redaction", "extraction", "lopdf", "elide"]
 categories = ["parsing", "text-processing"]
-readme = "README.md"
 
 version = { workspace = true }
 rust-version = { workspace = true }
@@ -15,7 +14,6 @@ publish = { workspace = true }
 
 authors = { workspace = true }
 repository = { workspace = true }
-homepage = { workspace = true }
 documentation = { workspace = true }
 
 [package.metadata.docs.rs]

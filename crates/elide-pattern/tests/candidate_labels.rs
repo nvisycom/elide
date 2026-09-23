@@ -4,7 +4,7 @@
 
 use elide_core::entity::{Label, LabelCatalog, LabelRef, builtins};
 use elide_core::modality::text::{Text, TextData};
-use elide_core::recognition::{Recognizer, RecognizerContext, Scope};
+use elide_core::recognition::{Recognizer, RecognizerContext, Scope, Subject};
 use elide_pattern::{PatternRecognizer, Regex, Variant};
 
 /// A pattern matching a street-address-like token, listing the specific label
@@ -30,8 +30,9 @@ fn address_recognizer() -> PatternRecognizer {
 async fn emitted_label(recognizer: &PatternRecognizer, scope: &Scope) -> LabelRef {
     let data = TextData::new("12 Main St".to_owned());
     let ctx = RecognizerContext::<Text>::new(scope);
+    let subject = Subject::new(data);
     let entities = recognizer
-        .recognize(&data, &ctx)
+        .recognize(&subject, &ctx)
         .await
         .expect("recognize")
         .entities;

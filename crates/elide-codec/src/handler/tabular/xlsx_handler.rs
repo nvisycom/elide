@@ -14,7 +14,7 @@ use std::collections::{BTreeSet, HashMap};
 use bytes::Bytes;
 use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
 use elide_core::modality::text::{TextData, TextReplacement};
-use elide_core::modality::{Chunk, DataReader, DataWriter, Hint};
+use elide_core::modality::{Chunk, DataReader, DataWriter, ResolvedHint};
 use elide_core::redaction::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 use elide_office::xlsx::{CellEdit, Xlsx};
@@ -230,7 +230,10 @@ impl Handler<Tabular> for XlsxHandler {
             let header_location = TabularLocation::new(0, cell.column)
                 .with_sheet_name(cell.sheet.clone())
                 .with_column_name(header.to_owned());
-            hints.push(Hint::new(header_location, TextData::new(header.to_owned())));
+            hints.push(ResolvedHint::new(
+                header_location,
+                TextData::new(header.to_owned()),
+            ));
         }
         Ok(Some(Chunk {
             location,

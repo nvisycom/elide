@@ -18,7 +18,7 @@ use hipstr::HipStr;
 use serde::{Deserialize, Serialize};
 
 use crate::entity::audit::ModelEvent;
-use crate::recognition::RecognizerId;
+use crate::primitive::ComponentId;
 
 /// Serialize a [`Duration`] as a whole number of milliseconds (and read it
 /// back), keeping the wire form a plain integer rather than serde's default
@@ -148,7 +148,7 @@ impl From<ModelEvent> for ModelUsage {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Usage {
     /// Which recognizer / enricher this describes.
-    pub id: RecognizerId,
+    pub id: ComponentId,
     /// Wall-clock execution time. Serialized as integer milliseconds.
     #[cfg_attr(feature = "serde", serde(with = "duration_millis"))]
     #[cfg_attr(feature = "schema", schemars(with = "u64"))]
@@ -171,7 +171,7 @@ pub struct Usage {
 impl Usage {
     /// A record with a duration and a count, and no model detail, the shape a
     /// pure-CPU recognizer produces.
-    pub fn new(id: RecognizerId, duration: Duration, count: u64) -> Self {
+    pub fn new(id: ComponentId, duration: Duration, count: u64) -> Self {
         Self {
             id,
             duration,
@@ -182,7 +182,7 @@ impl Usage {
 
     /// A record with a duration and no count, the shape an enricher produces
     /// (an enricher yields context, not counted entities).
-    pub fn timed(id: RecognizerId, duration: Duration) -> Self {
+    pub fn timed(id: ComponentId, duration: Duration) -> Self {
         Self {
             id,
             duration,
@@ -230,7 +230,7 @@ impl UsageReport {
     }
 
     /// Every entry recorded for the component named `name` (a recognizer's or
-    /// enricher's [`RecognizerId::name`]), in run order.
+    /// enricher's [`ComponentId::name`]), in run order.
     ///
     /// The pure-CPU singletons report a fixed name, `"elide-pattern"`,
     /// `"elide-lingua"`, but each model-backed component (NER, LLM, OCR, STT)
@@ -239,7 +239,7 @@ impl UsageReport {
     /// deliberately: tokens are not comparable across models (their prices
     /// differ), so this returns the raw entries rather than any summed figure.
     ///
-    /// [`RecognizerId::name`]: crate::recognition::RecognizerId::name
+    /// [`ComponentId::name`]: crate::primitive::ComponentId::name
     pub fn by_name<'a>(&'a self, name: &str) -> impl Iterator<Item = &'a Usage> {
         let name = name.to_owned();
         self.entries.iter().filter(move |u| u.id.name == name)
@@ -259,9 +259,9 @@ mod report_tests {
     fn by_name_filters_to_one_component() {
         let mut report = UsageReport::new();
         report.extend([
-            Usage::new(RecognizerId::new("elide-pattern", "1"), Duration::ZERO, 2),
-            Usage::new(RecognizerId::new("acme-ner", "1"), Duration::ZERO, 1),
-            Usage::new(RecognizerId::new("elide-pattern", "1"), Duration::ZERO, 3),
+            Usage::new(ComponentId::new("elide-pattern", "1"), Duration::ZERO, 2),
+            Usage::new(ComponentId::new("acme-ner", "1"), Duration::ZERO, 1),
+            Usage::new(ComponentId::new("elide-pattern", "1"), Duration::ZERO, 3),
         ]);
         let counts: Vec<_> = report.by_name("elide-pattern").map(|u| u.count).collect();
         assert_eq!(counts, [Some(2), Some(3)]);
@@ -276,8 +276,8 @@ mod report_tests {
 mod tests {
     use super::*;
 
-    fn id() -> RecognizerId {
-        RecognizerId::new("elide-pattern", "1.2.3")
+    fn id() -> ComponentId {
+        ComponentId::new("elide-pattern", "1.2.3")
     }
 
     #[test]

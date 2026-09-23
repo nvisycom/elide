@@ -12,6 +12,24 @@ use little_exif::filetype::FileExtension;
 use little_exif::metadata::Metadata as ExifMetadata;
 use little_exif::rational::uR64;
 
+/// A plain solid-colour PNG of `width`x`height` pixels, no metadata.
+///
+/// For a downstream test that needs a real, decodable image of a *known size*
+/// (e.g. to check a normalized box scales to the right pixels) without taking a
+/// direct dependency on the `image` crate.
+#[must_use]
+pub fn png(width: u32, height: u32) -> Bytes {
+    let mut bytes = Vec::new();
+    let image = image::RgbImage::from_pixel(width, height, image::Rgb([200, 30, 30]));
+    image::DynamicImage::ImageRgb8(image)
+        .write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )
+        .expect("encode png fixture");
+    Bytes::from(bytes)
+}
+
 /// A tiny solid-colour JPEG carrying a GPS latitude EXIF tag.
 ///
 /// The smallest fixture that exercises the full metadata path: a real JPEG a

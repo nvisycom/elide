@@ -32,11 +32,11 @@ impl Modality for Image {
 }
 
 impl TextRecognizable for Image {
-    /// The OCR text a recognizer inspects: the [`Layout`] an enricher
-    /// stamped onto the call, or `""` when it is empty (an image that was
-    /// never OCR'd), a recognizer then finds nothing, rather than erroring.
-    fn as_text<'a>(_data: &'a ImageData, artifact: Option<&'a Layout>) -> &'a str {
-        artifact.map_or("", Layout::text)
+    /// The OCR text a recognizer inspects: the [`Layout`] an enricher stamped
+    /// onto the call, or [`None`] when the image was never OCR'd (no artifact),
+    /// so a recognizer skips it rather than scanning an empty string.
+    fn as_text<'a>(_data: &'a ImageData, artifact: Option<&'a Layout>) -> Option<&'a str> {
+        artifact.map(Layout::text)
     }
 
     /// Resolve an OCR-text byte `range` to the region of the image it
@@ -59,57 +59,54 @@ impl TextRecognizable for Image {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::recognition::{RecognizerContext, Scope};
+    use elide_core::recognition::Subject;
 
     use super::*;
     use crate::primitive::{BoundingBox, Dimensions, Point};
 
     fn loc(x: f64, y: f64, w: f64, h: f64) -> ImageLocation {
-        ImageLocation::new(BoundingBox::from_origin_size(Point::new(x, y), w, h))
+        ImageLocation::new(BoundingBox::from_origin(
+            Point::new(x, y),
+            Dimensions::new(w, h),
+        ))
     }
 
     #[test]
-    fn as_text_is_empty_without_ocr() {
-        let data = ImageData::new(bytes::Bytes::new(), Dimensions::new(10, 10));
-        let scope = Scope::new();
-        let ctx = RecognizerContext::<Image>::new(&scope);
-        assert_eq!(Image::as_text(&data, ctx.artifact()), "");
+    fn as_text_is_none_without_ocr() {
+        let subject = Subject::<Image>::new(ImageData::new(bytes::Bytes::new()));
+        assert_eq!(Image::as_text(subject.data(), subject.artifact()), None);
     }
 
-    /// A context whose artifacts carry a one-block, one-word OCR result.
-    fn ocr_context(scope: &Scope) -> RecognizerContext<'_, Image> {
+    /// A subject whose artifact carries a one-block, one-word OCR result.
+    fn ocr_subject() -> Subject<Image> {
         let block = LayoutBlock::new(loc(0.0, 0.0, 100.0, 20.0), "Alice")
             .with_words(vec![LayoutWord::new(loc(0.0, 0.0, 100.0, 20.0), "Alice")]);
-        let mut ctx = RecognizerContext::new(scope);
-        ctx.set_artifact(Layout::new(vec![block]));
-        ctx
+        Subject::new(ImageData::new(bytes::Bytes::new())).with_artifact(Layout::new(vec![block]))
     }
 
     #[test]
     fn as_text_reads_the_ocr_artifact() {
-        let data = ImageData::new(bytes::Bytes::new(), Dimensions::new(10, 10));
-        let scope = Scope::new();
-        let ctx = ocr_context(&scope);
-        assert_eq!(Image::as_text(&data, ctx.artifact()), "Alice");
+        let subject = ocr_subject();
+        assert_eq!(
+            Image::as_text(subject.data(), subject.artifact()),
+            Some("Alice")
+        );
     }
 
     #[test]
     fn locate_resolves_a_range_to_the_word_box() {
-        let data = ImageData::new(bytes::Bytes::new(), Dimensions::new(10, 10));
-        let scope = Scope::new();
-        let ctx = ocr_context(&scope);
+        let subject = ocr_subject();
         // "Alice" is bytes 0..5.
-        let region = Image::locate(0..5, &data, ctx.artifact()).expect("range resolves");
+        let region =
+            Image::locate(0..5, subject.data(), subject.artifact()).expect("range resolves");
         assert_eq!(region.bounding_box.min.x, 0.0);
         assert_eq!(region.bounding_box.max.x, 100.0);
     }
 
     #[test]
     fn locate_without_ocr_is_none() {
-        let data = ImageData::new(bytes::Bytes::new(), Dimensions::new(10, 10));
-        let scope = Scope::new();
-        let ctx = RecognizerContext::<Image>::new(&scope);
+        let subject = Subject::<Image>::new(ImageData::new(bytes::Bytes::new()));
         // No OCR layout: the range can't be placed, so no location.
-        assert!(Image::locate(0..5, &data, ctx.artifact()).is_none());
+        assert!(Image::locate(0..5, subject.data(), subject.artifact()).is_none());
     }
 }

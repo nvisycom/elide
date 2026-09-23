@@ -9,8 +9,8 @@
 
 use std::mem;
 
-use elide_core::modality::Hint;
-use elide_core::modality::text::{Text, TextData, TextLocation};
+use elide_core::modality::ResolvedHint;
+use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation};
 use elide_core::{Error, ErrorKind, Result};
 
 use super::json_escape::decode_escape;
@@ -117,7 +117,7 @@ impl<'a> SlotParser<'a> {
         result
     }
 
-    fn parse_value(&mut self, key_context: Option<&Hint<Text>>) -> Result<()> {
+    fn parse_value(&mut self, key_context: Option<&ResolvedHint<Text>>) -> Result<()> {
         self.consume_whitespace();
         match self.peek() {
             Some(b'{') | Some(b'[') if self.depth >= MAX_DEPTH => Err(Error::new(
@@ -171,8 +171,10 @@ impl<'a> SlotParser<'a> {
             // header vouching for its value.
             let key_start = self.pos;
             let key = self.parse_string_leaf(LeafKind::Key)?;
-            let key_hint = Hint::new(
-                TextLocation::new(key_start, self.pos),
+            // The key span is a raw *source* range, so the hint is a source-only
+            // location, resolved against the source, not the value it labels.
+            let key_hint = ResolvedHint::new(
+                TextLocation::from_source([SourceRef::new(key_start..self.pos)]),
                 TextData::new(context_words(&key.value)),
             );
             self.push_leaf(key);
@@ -198,7 +200,7 @@ impl<'a> SlotParser<'a> {
         }
     }
 
-    fn parse_array(&mut self, key_context: Option<&Hint<Text>>) -> Result<()> {
+    fn parse_array(&mut self, key_context: Option<&ResolvedHint<Text>>) -> Result<()> {
         self.consume_punct(b'[')?;
         self.consume_whitespace();
         if self.peek() == Some(b']') {

@@ -9,7 +9,7 @@ use std::hint::black_box;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use elide_core::modality::text::{Text, TextData};
-use elide_core::recognition::{Recognizer, RecognizerContext, Scope};
+use elide_core::recognition::{Recognizer, RecognizerContext, Scope, Subject};
 use elide_pattern::PatternRecognizer;
 use tokio::runtime::{Builder, Runtime};
 
@@ -34,6 +34,7 @@ fn bench_scan(c: &mut Criterion) {
     let rt = runtime();
     let text = corpus();
     let data = TextData::new(text.clone());
+    let subject = Subject::new(data);
     let scope = Scope::new();
     let ctx = RecognizerContext::new(&scope);
 
@@ -52,7 +53,7 @@ fn bench_scan(c: &mut Criterion) {
     group.throughput(Throughput::Bytes(text.len() as u64));
     group.bench_function("patterns", |b| {
         b.iter(|| {
-            rt.block_on(bare.recognize(black_box(&data), &ctx))
+            rt.block_on(bare.recognize(black_box(&subject), &ctx))
                 .expect("recognize")
         });
     });
@@ -60,7 +61,7 @@ fn bench_scan(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(Recognizer::<Text>::recognize(
                 &enhanced,
-                black_box(&data),
+                black_box(&subject),
                 &ctx,
             ))
             .expect("recognize")

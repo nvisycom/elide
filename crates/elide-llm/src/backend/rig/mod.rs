@@ -8,10 +8,13 @@
 mod config;
 mod dispatch;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use elide_core::Result;
 use elide_core::modality::text::Text;
 #[cfg(feature = "usage")]
 use elide_core::primitive::TokenCounts;
+use elide_image::ImageBuffer;
 use elide_image::modality::{Image, ImageData, ImageFormat};
 use rig::ExtractionResponse;
 use rig::client::CompletionClient;
@@ -173,7 +176,7 @@ impl LlmBackend<Text> for RigBackend {
 impl LlmBackend<Image> for RigBackend {
     #[tracing::instrument(target = TARGET, skip_all, fields(model = %self.model_name))]
     async fn extract(&self, request: LlmRequest<'_, Image>) -> Result<LlmResponse<Image>> {
-        let message = image_message(request.prompt, request.data);
+        let message = image_message(request.prompt, request.data)?;
         let (candidates, usage) = self.extract_batch(message).await?;
         Ok(with_usage(LlmResponse::new(candidates), usage))
     }
@@ -184,18 +187,28 @@ impl LlmBackend<Image> for RigBackend {
 }
 
 /// Build a multimodal user [`Message`] carrying the prompt wording plus the
-/// source image as a proper image content block.
-fn image_message(prompt: &str, data: &ImageData) -> Message {
-    let media_type = match data.format() {
-        Some(ImageFormat::Jpeg) => Some(ImageMediaType::JPEG),
-        Some(ImageFormat::Png) => Some(ImageMediaType::PNG),
-        // TIFF is not a media type a vision model accepts, and an unknown or
-        // absent format leaves the block untyped (the provider sniffs the bytes).
-        _ => None,
-    };
+/// source image as a base64 PNG image content block.
+///
+/// The image is decoded and re-encoded to PNG regardless of its source format,
+/// then base64-encoded: rig's providers reject a raw-bytes source and every
+/// vision model accepts PNG, so this normalizes any input (including a TIFF, or
+/// bytes with no filename to hint the format) to one the model takes. PNG is
+/// lossless, so a detection request loses no detail to the transcode.
+///
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the
+/// bytes are not a decodable image, or
+/// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) if the PNG
+/// re-encode fails.
+fn image_message(prompt: &str, data: &ImageData) -> Result<Message> {
+    let png = ImageBuffer::open(&data.bytes)?
+        .raster()
+        .encode_as(ImageFormat::Png)?;
+    let encoded = BASE64.encode(&png.bytes);
     let content = vec![
         UserContent::text(prompt),
-        UserContent::image_raw(data.bytes.to_vec(), media_type, None),
+        UserContent::image_base64(encoded, Some(ImageMediaType::PNG), None),
     ];
-    Message::User { content }
+    Ok(Message::User { content })
 }

@@ -1,36 +1,44 @@
-//! Image or canvas dimensions in integer pixels.
+//! [`Dimensions`]: a width and a height over a coordinate scalar.
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Pixel dimensions of an image or any 2-D canvas.
+use super::Coordinate;
+
+/// A `width` x `height` size, generic over the coordinate scalar (a
+/// [`Coordinate`]).
 ///
-/// Converts between normalized `0.0..=1.0` coordinates (what vision
-/// models typically emit) and absolute pixel coordinates (what renderers
-/// consume). See
-/// [`UnitBoundingBox::denormalize`]
-/// for the conversion.
-///
-/// [`UnitBoundingBox::denormalize`]: super::UnitBoundingBox::denormalize
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// `Dimensions<u32>` is an image or canvas size in whole pixels;
+/// `Dimensions<f64>` a fractional extent. Paired with a [`Point`](super::Point)
+/// origin, it constructs a [`BoundingBox`](super::BoundingBox). It also converts
+/// between normalized `0.0..=1.0` coordinates (what vision models typically emit)
+/// and absolute pixels; see
+/// [`UnitBoundingBox::denormalize`](super::UnitBoundingBox::denormalize).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct Dimensions {
-    /// Width in pixels.
-    pub width: u32,
-    /// Height in pixels.
-    pub height: u32,
+pub struct Dimensions<C: Coordinate> {
+    /// Width.
+    pub width: C,
+    /// Height.
+    pub height: C,
 }
 
-impl Dimensions {
-    /// Dimensions from explicit width and height.
-    pub const fn new(width: u32, height: u32) -> Self {
+impl<C: Coordinate> Dimensions<C> {
+    /// Dimensions from an explicit width and height.
+    pub const fn new(width: C, height: C) -> Self {
         Self { width, height }
     }
 }
 
-impl From<(u32, u32)> for Dimensions {
-    fn from((width, height): (u32, u32)) -> Self {
+// `Eq` where the scalar is: an integer `Dimensions` (e.g. `Dimensions<u32>`) is a
+// total equality, so it can sit inside `Eq` types like `ImageData`. The derive
+// cannot express the `C: Eq` bound (a `Coordinate` need not be `Eq` — `f64` is
+// not), so this is written by hand; the float dimensions simply lack `Eq`.
+impl<C: Coordinate + Eq> Eq for Dimensions<C> {}
+
+impl<C: Coordinate> From<(C, C)> for Dimensions<C> {
+    fn from((width, height): (C, C)) -> Self {
         Self { width, height }
     }
 }

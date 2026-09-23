@@ -10,9 +10,10 @@
 use std::sync::Arc;
 
 use derive_builder::Builder;
+use elide_core::primitive::ComponentId;
 #[cfg(feature = "usage")]
 use elide_core::primitive::ModelUsage;
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId};
+use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Subject};
 use elide_core::{Error, Result};
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -76,8 +77,8 @@ impl<M: LlmModality> LlmRecognizer<M> {
         &self.prompt
     }
 
-    fn recognizer_id(&self) -> RecognizerId {
-        RecognizerId::new(self.name.clone(), env!("CARGO_PKG_VERSION"))
+    fn recognizer_id(&self) -> ComponentId {
+        ComponentId::new(self.name.clone(), env!("CARGO_PKG_VERSION"))
     }
 }
 
@@ -140,23 +141,26 @@ impl<M: LlmModality> LlmRecognizerBuilder<M> {
 
 #[async_trait::async_trait]
 impl<M: LlmModality> Recognizer<M> for LlmRecognizer<M> {
-    fn id(&self) -> RecognizerId {
+    fn id(&self) -> ComponentId {
         self.recognizer_id()
     }
 
     async fn recognize(
         &self,
-        data: &M::Data,
+        subject: &Subject<M>,
         ctx: &RecognizerContext<'_, M>,
     ) -> Result<Recognition<M>> {
-        let prompt = self.prompt.build(data, ctx);
-        let response = self.backend.extract(LlmRequest::new(&prompt, data)).await?;
+        let prompt = self.prompt.build(subject, ctx);
+        let response = self
+            .backend
+            .extract(LlmRequest::new(&prompt, subject.data()))
+            .await?;
         // The backend names the model it called; token counts are whatever the
         // response carries (empty when the backend cannot surface them).
         #[cfg(feature = "usage")]
         let model_usage =
             ModelUsage::new(self.backend.model().to_owned()).with_tokens(response.tokens);
-        let entities = M::lift(response.candidates, data);
+        let entities = M::lift(response.candidates, subject.data());
         let recognition = Recognition::new(entities);
         #[cfg(feature = "usage")]
         let recognition = recognition.with_model_usage(model_usage);

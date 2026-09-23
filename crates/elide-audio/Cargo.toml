@@ -5,7 +5,6 @@ name = "elide-audio"
 description = "Audio clip decode/encode and time-span redaction (silence, tone, remove): bytes in, bytes out"
 keywords = ["audio", "wav", "mp3", "redaction", "privacy"]
 categories = ["multimedia::audio"]
-readme = "README.md"
 
 version = { workspace = true }
 rust-version = { workspace = true }
@@ -15,7 +14,6 @@ publish = { workspace = true }
 
 authors = { workspace = true }
 repository = { workspace = true }
-homepage = { workspace = true }
 documentation = { workspace = true }
 
 [package.metadata.docs.rs]

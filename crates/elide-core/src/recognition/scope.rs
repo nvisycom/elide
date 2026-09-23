@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::entity::LabelCatalog;
-use crate::primitive::{CountryCode, Language, Languages};
+use crate::primitive::{CountryCode, LanguageClaim, LanguageTag};
 
 /// Caller-asserted scope shared across every payload of one analysis.
 ///
@@ -107,7 +107,7 @@ impl ScopeMetadata {
 pub struct Scope {
     /// Caller-asserted languages for the analysis. Empty means the caller
     /// asserted none, leaving detection (if an enricher runs) to fill in.
-    pub languages: Languages,
+    pub languages: Vec<LanguageClaim>,
     /// Caller-asserted jurisdictions. When non-empty, recognizers that
     /// carry per-rule country scopes skip rules that match none of them.
     /// An empty list means "any": rules that declare countries still run
@@ -137,7 +137,7 @@ impl Scope {
     /// `.with_catalog(`[`LabelCatalog::with_builtins`]`())`) to detect.
     pub fn new() -> Self {
         Self {
-            languages: Languages::default(),
+            languages: Vec::new(),
             countries: Vec::new(),
             metadata: ScopeMetadata::default(),
             catalog: LabelCatalog::new(),
@@ -145,16 +145,16 @@ impl Scope {
         }
     }
 
-    /// Assert a language for the analysis, returning `self` for chaining.
+    /// Assert a `language` for the analysis, returning `self` for chaining.
     ///
-    /// Build the [`Language`] with [`Language::asserted`] (optionally
-    /// [`with_confidence`]); an assertion outranks a detection at equal
-    /// confidence.
-    ///
-    /// [`with_confidence`]: Language::with_confidence
+    /// The tag is recorded as a caller [`asserted`](LanguageClaim::asserted)
+    /// claim (full confidence, outranks any detection). Taking a bare
+    /// [`LanguageTag`] keeps the scope's languages *asserted* by construction —
+    /// a detected claim can never leak in and suppress a locale filter.
     #[must_use]
-    pub fn with_language(mut self, language: Language) -> Self {
-        self.languages.push(language);
+    pub fn with_language(mut self, language: impl Into<LanguageTag>) -> Self {
+        self.languages
+            .push(LanguageClaim::asserted(language.into()));
         self
     }
 

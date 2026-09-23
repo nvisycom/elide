@@ -7,7 +7,9 @@ use elide_core::Result;
 use elide_core::entity::audit::{AuditEvent, AuditKind, AuditLog, ModelEvent, PatternEvent};
 use elide_core::entity::{Entity, EntityCoRef, Label, LabelCatalog, LabelLocale, LabelRef};
 use elide_core::modality::Modality;
-use elide_core::primitive::{Confidence, ConfidenceThreshold, CountryCode, Language, LanguageTag};
+use elide_core::primitive::{
+    Confidence, ConfidenceThreshold, CountryCode, LanguageClaim, LanguageTag,
+};
 
 mod fixtures;
 use fixtures::{Text, TextData, TextLocation, TextReplacement};
@@ -150,7 +152,7 @@ fn threshold_filters_by_confidence() {
 #[test]
 fn language_tag_parses_and_exposes_subtags() {
     let tag = LanguageTag::parse("en-US").unwrap();
-    assert_eq!(tag.primary_language(), "en");
+    assert_eq!(tag.primary_subtag(), "en");
     assert_eq!(tag.region(), Some("US"));
     assert_eq!(tag.as_str(), "en-US");
 
@@ -187,7 +189,7 @@ fn label_map_translates_raw_labels() {
 
 #[test]
 fn recognizer_context_scopes_by_language_and_country() {
-    use elide_core::recognition::{RecognizerContext, Scope};
+    use elide_core::recognition::{RecognizerContext, Scope, Subject};
 
     let en_us = LanguageTag::parse("en-US").unwrap();
     let en = LanguageTag::parse("en").unwrap();
@@ -200,12 +202,15 @@ fn recognizer_context_scopes_by_language_and_country() {
     // Assertions live on the scope; the query methods live on the
     // context, which borrows the scope.
     let scope = Scope::new()
-        .with_language(Language::asserted(en_us.clone()))
+        .with_language(en_us.clone())
         .with_country(CountryCode::from_alpha2("US").unwrap());
     let ctx: RecognizerContext<'_, Text> = RecognizerContext::new(&scope);
+    // The language queries combine the scope's asserted languages with a
+    // subject's detected ones; here the subject detected nothing.
+    let subject = Subject::new(TextData::new(""));
 
     // The asserted language is the primary one.
-    assert_eq!(ctx.primary_language(), Some(&en_us));
+    assert_eq!(ctx.languages(&subject).primary(), Some(&en_us));
 
     // Country scope: empty always applies; matching applies, non-matching not.
     assert!(ctx.applies_to_country(&[]));
@@ -218,39 +223,41 @@ fn recognizer_context_scopes_by_language_and_country() {
     // agree here, each rule scope is checked through both.
     let en_scope = [en];
     let fr_scope = [fr];
-    assert!(ctx.applies_to_language(&[]));
-    assert!(ctx.applies_to_language(&en_scope));
-    assert!(!ctx.applies_to_language(&fr_scope));
-    assert!(ctx.applies_to_asserted_language(&[]));
-    assert!(ctx.applies_to_asserted_language(&en_scope));
-    assert!(!ctx.applies_to_asserted_language(&fr_scope));
+    assert!(ctx.languages(&subject).apply_to(&[]));
+    assert!(ctx.languages(&subject).apply_to(&en_scope));
+    assert!(!ctx.languages(&subject).apply_to(&fr_scope));
+    assert!(ctx.languages(&subject).asserted_apply_to(&[]));
+    assert!(ctx.languages(&subject).asserted_apply_to(&en_scope));
+    assert!(!ctx.languages(&subject).asserted_apply_to(&fr_scope));
 }
 
 #[test]
 fn a_detected_language_never_filters() {
-    use elide_core::recognition::{RecognizerContext, Scope};
+    use elide_core::recognition::{RecognizerContext, Scope, Subject};
 
     let de = LanguageTag::parse("de").unwrap();
     let es = LanguageTag::parse("es").unwrap();
 
-    // No asserted language; a detector reports Spanish with high confidence.
+    // No asserted language; a detector reports Spanish with high confidence
+    // onto the subject.
     let scope = Scope::new();
-    let mut ctx: RecognizerContext<'_, Text> = RecognizerContext::new(&scope);
-    ctx.detect_language(Language::detected(es).with_confidence(Confidence::clamped(0.9)));
+    let ctx: RecognizerContext<'_, Text> = RecognizerContext::new(&scope);
+    let mut subject = Subject::new(TextData::new(""));
+    subject.detect_language(LanguageClaim::detected(es, Confidence::clamped(0.9)));
 
     // A German-scoped rule still runs: detection is unreliable and must never
     // suppress a match, only a caller assertion filters by language.
     let de_scope = [de];
-    assert!(ctx.applies_to_asserted_language(&de_scope));
+    assert!(ctx.languages(&subject).asserted_apply_to(&de_scope));
     // The old asserted-OR-detected filter WOULD suppress it (detected es ≠ de).
-    assert!(!ctx.applies_to_language(&de_scope));
+    assert!(!ctx.languages(&subject).apply_to(&de_scope));
 
     // `asserted_languages` excludes the detected one, the caller asserted
     // nothing, so per-language context selection stays permissive rather than
     // keying on the (unreliable) detected `es`.
-    assert!(ctx.asserted_languages().is_empty());
+    assert!(ctx.languages(&subject).asserted().is_empty());
     assert_eq!(
-        ctx.ranked_languages().len(),
+        ctx.languages(&subject).ranked().len(),
         1,
         "detection is still recorded"
     );

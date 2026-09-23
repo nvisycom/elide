@@ -5,7 +5,6 @@ name = "elide-operator"
 description = "Redaction operators for the Elide toolkit: the shipped Operators, the key Vault, and pseudonym Generators"
 keywords = ["pii", "redaction", "anonymization", "masking"]
 categories = ["text-processing"]
-readme = "README.md"
 
 version = { workspace = true }
 rust-version = { workspace = true }
@@ -15,7 +14,6 @@ publish = { workspace = true }
 
 authors = { workspace = true }
 repository = { workspace = true }
-homepage = { workspace = true }
 documentation = { workspace = true }
 
 [package.metadata.docs.rs]

@@ -4,7 +4,7 @@
 //!
 //! Owns the lingua detector and exposes one method,
 //! [`detect`], that returns a
-//! [`Vec<Language>`] in our ontology shape. Used by
+//! `Vec<LanguageClaim>` in our ontology shape. Used by
 //! [`LinguaEnricher`].
 //!
 //! Construction takes either a candidate-language set or "all
@@ -21,7 +21,7 @@ use std::str::FromStr;
 use std::sync::{Mutex, OnceLock};
 
 use elide_core::Result;
-use elide_core::primitive::{Confidence, Language, LanguageProvenance, LanguageSpan, LanguageTag};
+use elide_core::primitive::{Confidence, LanguageClaim, LanguageTag};
 use lingua::{
     IsoCode639_1, Language as LinguaLanguage, LanguageDetector as LinguaInner,
     LanguageDetectorBuilder,
@@ -30,8 +30,8 @@ use lingua::{
 /// Lingua-backed language detector.
 ///
 /// Detects per-region languages: for mixed-language input,
-/// returns one [`Language`] per detected region with a
-/// populated [`LanguageSpan`]. Monolingual input returns a single
+/// returns one [`LanguageClaim`] per detected region with a
+/// populated span. Monolingual input returns a single
 /// detection covering the whole text.
 ///
 /// Internal helper for [`LinguaEnricher`], which builds a fresh detector
@@ -75,7 +75,7 @@ impl LinguaDetector {
     /// or more entries otherwise. Each entry has a populated
     /// [`LanguageSpan`] so mixed-language input can be attributed
     /// region-by-region.
-    pub fn detect(&self, text: &str) -> Result<Vec<Language>> {
+    pub fn detect(&self, text: &str) -> Result<Vec<LanguageClaim>> {
         let detections = self
             .inner
             .detect_multiple_languages_of(text)
@@ -85,16 +85,11 @@ impl LinguaDetector {
                 let raw_confidence = self
                     .inner
                     .compute_language_confidence(text, result.language());
-                let confidence = Confidence::new(raw_confidence.clamp(0.0, 1.0) as f32);
-                Some(Language {
-                    language,
-                    confidence,
-                    provenance: LanguageProvenance::Detected,
-                    span: Some(LanguageSpan {
-                        start: result.start_index(),
-                        end: result.end_index(),
-                    }),
-                })
+                let confidence = Confidence::clamped(raw_confidence as f32);
+                Some(
+                    LanguageClaim::detected(language, confidence)
+                        .with_span(result.start_index()..result.end_index()),
+                )
             })
             .collect();
         Ok(detections)
@@ -135,7 +130,7 @@ fn warn_once_unmappable(iso: &str, error: &str) {
 
 fn tags_to_languages(tags: &[LanguageTag]) -> Vec<LinguaLanguage> {
     tags.iter()
-        .filter_map(|t| IsoCode639_1::from_str(t.primary_language()).ok())
+        .filter_map(|t| IsoCode639_1::from_str(t.primary_subtag()).ok())
         .map(|iso| LinguaLanguage::from_iso_code_639_1(&iso))
         .collect()
 }
@@ -163,7 +158,7 @@ mod tests {
             .unwrap();
         assert!(!detections.is_empty());
         let first = &detections[0];
-        assert_eq!(first.language.primary_language(), "en");
+        assert_eq!(first.language.primary_subtag(), "en");
         assert!(first.span.is_some());
     }
 

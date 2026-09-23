@@ -53,14 +53,13 @@ use crate::primitive::{Confidence, LanguageTag};
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     feature = "serde",
-    serde(bound = "M::Location: Serialize + for<'a> Deserialize<'a>, \
-                   M::Data: Serialize + for<'a> Deserialize<'a>")
+    serde(bound = "M::Location: Serialize + for<'a> Deserialize<'a>")
 )]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
     schemars(
-        bound = "M: schemars::JsonSchema, M::Location: schemars::JsonSchema, M::Data: schemars::JsonSchema",
+        bound = "M: schemars::JsonSchema, M::Location: schemars::JsonSchema",
         rename = "{M}Entity"
     )
 )]

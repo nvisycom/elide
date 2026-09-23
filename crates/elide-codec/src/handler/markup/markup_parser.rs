@@ -21,8 +21,8 @@
 
 use std::ops::Range;
 
-use elide_core::modality::Hint;
-use elide_core::modality::text::{Text, TextData, TextLocation};
+use elide_core::modality::ResolvedHint;
+use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation};
 use elide_core::{Error, ErrorKind, Result};
 use quick_xml::Reader;
 use quick_xml::events::{BytesEnd, BytesStart, Event};
@@ -55,7 +55,7 @@ struct MarkupParser<'a> {
     /// Context hints for non-text items, an attribute value keyed by its
     /// attribute name, a CDATA body by its enclosing element name, applied
     /// alongside the text-node hints at the end.
-    extra_hints: Vec<(usize, Vec<Hint<Text>>)>,
+    extra_hints: Vec<(usize, Vec<ResolvedHint<Text>>)>,
     /// The open-element stack: each frame names the element and where its text
     /// children begin, so a block element can group them for sibling hints.
     stack: Vec<Frame>,
@@ -166,15 +166,24 @@ impl<'a> MarkupParser<'a> {
     /// Push each redactable attribute value as an item hinted by its attribute
     /// name (`ssn="123-45-6789"` → the value is boosted by `ssn`).
     fn attributes(&mut self, e: &BytesStart<'_>) -> Result<()> {
-        for (key, inner) in self.source.attributes(e, self.config.lenient)? {
+        for attr in self.source.attributes(e, self.config.lenient)? {
+            let value = attr.value;
             let idx = self
                 .items
-                .push(self.source.slice(inner.clone()).to_owned(), inner.clone());
-            self.hint_item(
-                idx,
-                TextLocation::new(inner.start, inner.end),
-                &context_words(&key),
-            );
+                .push(self.source.slice(value.clone()).to_owned(), value);
+            // Hint the value with its attribute name's location and context
+            // words, when the name was placed in the source (the out-of-band
+            // context that boosts it). Strip any namespace prefix (`ns:attr`)
+            // so the hint keys on the local name, as the element path does.
+            if let Some(name) = attr.name {
+                let raw = self.source.slice(name.clone());
+                let local = raw.rsplit(':').next().unwrap_or(raw);
+                // The attribute name is a raw *source* span, not a decoded one, so
+                // it is a source-only location; a consumer must resolve it against
+                // the source bytes, never the extracted value.
+                let location = TextLocation::from_source([SourceRef::new(name)]);
+                self.hint_item(idx, location, context_words(local));
+            }
         }
         Ok(())
     }
@@ -186,9 +195,15 @@ impl<'a> MarkupParser<'a> {
         if self.config.skips_body(&name) {
             self.skip = Some(SkipRegion { name, depth: 1 });
         } else {
+            // The hint text is the element name split into context words,
+            // computed from the *original-case* local name so a camelCase
+            // boundary (`paymentCard` → `payment Card`) survives; `name` itself
+            // is lowercased for tag matching and would lose that boundary.
+            let local = e.local_name();
+            let hint = context_words(local.as_ref());
             self.stack.push(Frame {
                 name,
-                hint: hint_words(e),
+                hint,
                 tag_span: span,
                 text_start: self.text_items.len(),
             });
@@ -249,40 +264,43 @@ impl<'a> MarkupParser<'a> {
         }
     }
 
-    /// The enclosing element's name as a located context hint, if inside one.
-    fn enclosing_hint(&self) -> Option<Hint<Text>> {
+    /// The enclosing element's name as a located context hint, if inside one:
+    /// located at the start tag, carrying the element name split into context
+    /// words (`paymentCard` → `payment Card`) so a keyword matches on a word
+    /// boundary.
+    fn enclosing_hint(&self) -> Option<ResolvedHint<Text>> {
         self.stack.last().map(|frame| {
-            Hint::new(
-                TextLocation::new(frame.tag_span.start, frame.tag_span.end),
-                TextData::new(frame.hint.clone()),
-            )
+            // The start-tag span is a raw *source* range, so the hint is a
+            // source-only location, resolved against the source, not the value.
+            let location = TextLocation::from_source([SourceRef::new(frame.tag_span.clone())]);
+            ResolvedHint::new(location, TextData::new(frame.hint.clone()))
         })
     }
 
-    /// Record a single located context hint (`text`) on the item at `idx`.
-    fn hint_item(&mut self, idx: usize, location: TextLocation, text: &str) {
-        self.extra_hints.push((
-            idx,
-            vec![Hint::new(location, TextData::new(text.to_owned()))],
-        ));
+    /// Record a located context hint on the item at `idx`, carrying `text` (the
+    /// context words of the labelling name) at `location`.
+    fn hint_item(&mut self, idx: usize, location: TextLocation, text: String) {
+        self.extra_hints
+            .push((idx, vec![ResolvedHint::new(location, TextData::new(text))]));
     }
 }
 
 /// A text node's place in the item stream, its engine-space span, and its
-/// trimmed text, the raw material for the sibling-hint pass. `pending_hints`
-/// is filled when its block group closes and moved onto the item at the end.
+/// trimmed text, the raw material for the sibling-hint pass. `pending_hints` is
+/// filled when its block group closes and moved onto the item at the end.
 struct TextRecord {
     item_index: usize,
     engine: Range<usize>,
     text: String,
-    pending_hints: Vec<Hint<Text>>,
+    pending_hints: Vec<ResolvedHint<Text>>,
 }
 
 /// An open element on the parse stack.
 struct Frame {
     name: String,
-    /// The element name as space-separated words (`paymentCard` → `payment
-    /// card`), the text of the context hint attached to the element's content.
+    /// The element name as context words (`paymentCard` → `payment Card`),
+    /// pre-computed from the original-case local name at open time; the hint
+    /// text attached to the element's content.
     hint: String,
     /// Source span of this element's start tag (`<name …>`), used as the
     /// location of the element-name hint attached to the element's text.
@@ -313,16 +331,6 @@ fn bom_len(raw: &str) -> usize {
 /// makes `<SCRIPT>` and `<P>` match too).
 fn local_name(e: &BytesStart<'_>) -> String {
     e.local_name().as_ref().to_ascii_lowercase()
-}
-
-/// The start tag's local name as context words for the element's text, see
-/// [`context_words`]: `paymentCard` becomes `"payment card"` so a keyword like
-/// `card` matches on a word boundary.
-///
-/// [`context_words`]: crate::handler::context::context_words
-fn hint_words(e: &BytesStart<'_>) -> String {
-    let local = e.local_name();
-    context_words(local.as_ref())
 }
 
 /// The end tag's lowercased local name, matched against an open skip element.
@@ -361,7 +369,7 @@ fn attach_sibling_hints(group: &mut [TextRecord]) {
             .iter()
             .filter(|(engine, _)| *engine != record.engine)
             .map(|(engine, text)| {
-                Hint::new(
+                ResolvedHint::new(
                     TextLocation::new(engine.start, engine.end),
                     TextData::new(text.clone()),
                 )
@@ -404,20 +412,9 @@ mod tests {
         out
     }
 
-    #[test]
-    fn hint_words_reads_the_local_name_through_context_words() {
-        // The splitting rules are exercised in `handler::context`; here we only
-        // confirm the element's *local* name (namespace prefix stripped) is what
-        // gets tokenized.
-        assert_eq!(
-            hint_words(&BytesStart::new("c:paymentCard")),
-            "payment Card"
-        );
-    }
-
     #[tokio::test]
     async fn the_element_name_hints_its_text() {
-        // `<paymentCard>` should reach its text as a `payment card` hint, so a
+        // `<paymentCard>` should reach its text as a `payment Card` hint, so a
         // context keyword (`card`) can boost the value inside, the markup
         // counterpart of a JSON key or CSV header vouching for its value.
         let raw = "<paymentCard>4111 1111 1111 1111</paymentCard>";
@@ -436,6 +433,41 @@ mod tests {
                 .map(|h| h.data.as_str())
                 .collect::<Vec<_>>(),
         );
+    }
+
+    #[tokio::test]
+    async fn an_attribute_value_is_hinted_by_its_name() {
+        // `ssn="123-45-6789"` reaches its value as an `ssn` hint located at the
+        // attribute name, so a context keyword can boost the value. This also
+        // pins that the name's source span resolves (the hint text and location
+        // both come from slicing the source at the name).
+        let raw = r#"<r paymentCard="4111 1111 1111 1111"/>"#;
+        let mut h = xml(raw);
+        let chunk = h.read_next().await.unwrap().expect("one attribute chunk");
+        assert_eq!(chunk.data.as_str(), "4111 1111 1111 1111");
+        let hint = chunk.hints.first().expect("attribute-name hint present");
+        // The name is split into context words for word-boundary matching.
+        assert_eq!(hint.data.as_str(), "payment Card");
+        // A raw-source location (not a decoded range), pointing at the attribute
+        // name in the source: a consumer resolves it against the source bytes.
+        assert!(
+            hint.hint.location.range().is_none(),
+            "source-only, no decoded range"
+        );
+        let refs = hint.hint.location.source();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(&raw[refs[0].range.clone()], "paymentCard");
+    }
+
+    #[tokio::test]
+    async fn a_namespaced_attribute_hint_keys_on_the_local_name() {
+        // A namespace prefix (`c:ssn`) is stripped so the hint keys on the local
+        // name, matching how the element path uses the local name.
+        let raw = r#"<r c:ssn="123-45-6789"/>"#;
+        let mut h = xml(raw);
+        let chunk = h.read_next().await.unwrap().expect("one attribute chunk");
+        let hint = chunk.hints.first().expect("attribute-name hint present");
+        assert_eq!(hint.data.as_str(), "ssn");
     }
 
     #[tokio::test]

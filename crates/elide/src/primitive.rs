@@ -16,6 +16,4 @@ pub use elide_core::primitive::*;
 /// redaction paints.
 #[cfg(feature = "image")]
 #[doc(inline)]
-pub use elide_image::primitive::{
-    BoundingBox, Color, Dimensions, PixelRegion, Point, Polygon, UnitBoundingBox,
-};
+pub use elide_image::primitive::{BoundingBox, Color, Dimensions, Point, Polygon, UnitBoundingBox};

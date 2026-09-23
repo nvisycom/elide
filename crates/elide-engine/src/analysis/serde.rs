@@ -595,11 +595,11 @@ mod tests {
     #[test]
     fn serialized_artifact_sets_validate_against_the_schema() {
         use elide_image::modality::{Image, ImageLocation, Layout, LayoutBlock};
-        use elide_image::primitive::{BoundingBox, Point};
+        use elide_image::primitive::{BoundingBox, Dimensions, Point};
 
         let schema = serde_json::to_value(schemars::schema_for!(ArtifactSet)).unwrap();
 
-        let bbox = BoundingBox::from_origin_size(Point::new(0.0, 0.0), 100.0, 20.0);
+        let bbox = BoundingBox::from_origin(Point::new(0.0, 0.0), Dimensions::new(100.0, 20.0));
         let layout = Layout::new(vec![LayoutBlock::new(ImageLocation::new(bbox), "hi Alice")]);
         let with_part = ArtifactSet::new()
             .insert_body::<Image>(doc(), layout)
@@ -622,12 +622,11 @@ mod tests {
     fn serializes_usage_entries() {
         use std::time::Duration;
 
-        use elide_core::primitive::Usage;
-        use elide_core::recognition::RecognizerId;
+        use elide_core::primitive::{ComponentId, Usage};
 
         let mut report = Report::new();
         report.usage.extend([Usage::new(
-            RecognizerId::new("elide-pattern", "1"),
+            ComponentId::new("elide-pattern", "1"),
             Duration::from_millis(5),
             3,
         )]);
@@ -854,9 +853,9 @@ mod tests {
     #[test]
     fn round_trips_an_artifact_set() {
         use elide_image::modality::{Image, ImageLocation, Layout, LayoutBlock};
-        use elide_image::primitive::{BoundingBox, Point};
+        use elide_image::primitive::{BoundingBox, Dimensions, Point};
 
-        let bbox = BoundingBox::from_origin_size(Point::new(0.0, 0.0), 100.0, 20.0);
+        let bbox = BoundingBox::from_origin(Point::new(0.0, 0.0), Dimensions::new(100.0, 20.0));
         let layout = Layout::new(vec![LayoutBlock::new(ImageLocation::new(bbox), "hi Alice")]);
         // The sole document carries a real Layout; a nested part was enriched to
         // an *empty* Layout (an image with no text), both stored, both survive.

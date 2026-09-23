@@ -10,7 +10,7 @@ use elide_core::entity::audit::AuditKind;
 use elide_core::entity::builtins;
 use elide_core::modality::text::{Text, TextData};
 use elide_core::primitive::Confidence;
-use elide_core::recognition::{Recognizer, RecognizerContext, Scope};
+use elide_core::recognition::{Recognizer, RecognizerContext, Scope, Subject};
 use elide_pattern::{Context, PatternRecognizer, Regex, Sourced, Variant};
 
 #[tokio::test]
@@ -36,8 +36,9 @@ async fn enhancer_boosts_matches_near_keyword_only() {
     let data = TextData::new(text.to_owned());
     let scope = Scope::new();
     let ctx = RecognizerContext::<Text>::new(&scope);
+    let subject = Subject::new(data);
     let entities = recognizer
-        .recognize(&data, &ctx)
+        .recognize(&subject, &ctx)
         .await
         .expect("recognize")
         .entities;
@@ -112,8 +113,9 @@ async fn bare_recognizer_works_without_enhancement() {
     let data = TextData::new(text.to_owned());
     let scope = Scope::new();
     let ctx = RecognizerContext::<Text>::new(&scope);
+    let subject = Subject::new(data);
     let entities = recognizer
-        .recognize(&data, &ctx)
+        .recognize(&subject, &ctx)
         .await
         .expect("recognize")
         .entities;
@@ -163,8 +165,9 @@ async fn context_boost_override_applies_the_custom_lift() {
     let data = TextData::new(text.to_owned());
     let scope = Scope::new();
     let ctx = RecognizerContext::<Text>::new(&scope);
+    let subject = Subject::new(data);
     let entities = recognizer
-        .recognize(&data, &ctx)
+        .recognize(&subject, &ctx)
         .await
         .expect("recognize")
         .entities;

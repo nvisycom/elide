@@ -8,8 +8,8 @@ use elide_context::{BoostRule, Enhanced, Enhancer};
 use elide_core::entity::audit::AuditEvent;
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
-use elide_core::primitive::{Confidence, LanguageTag};
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId};
+use elide_core::primitive::{ComponentId, Confidence, LanguageTag};
+use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Subject};
 use elide_core::{Error, ErrorKind, Result};
 // The external `regex` crate is aliased throughout because `Regex` is already
 // this crate's rule type (`super::regex::Regex`, imported below).
@@ -649,10 +649,9 @@ impl PatternRecognizer {
     fn build_entity<M: TextRecognizable>(
         &self,
         raw: RawMatch,
-        data: &M::Data,
-        ctx: &RecognizerContext<'_, M>,
+        subject: &Subject<M>,
     ) -> Option<Entity<M>> {
-        let location = M::locate(raw.range.clone(), data, ctx.artifact())?;
+        let location = M::locate(raw.range.clone(), subject.data(), subject.artifact())?;
         let event = AuditEvent::pattern("pattern", raw.confidence, location.clone(), raw.pattern);
         Some(
             Entity::builder()
@@ -669,16 +668,20 @@ impl PatternRecognizer {
 
 #[async_trait::async_trait]
 impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
-    fn id(&self) -> RecognizerId {
-        RecognizerId::new("elide-pattern", env!("CARGO_PKG_VERSION"))
+    fn id(&self) -> ComponentId {
+        ComponentId::new("elide-pattern", env!("CARGO_PKG_VERSION"))
     }
 
     async fn recognize(
         &self,
-        data: &M::Data,
+        subject: &Subject<M>,
         ctx: &RecognizerContext<'_, M>,
     ) -> Result<Recognition<M>> {
-        let text = M::as_text(data, ctx.artifact());
+        // No recognizable text at this chunk (an un-transcribed clip, an
+        // un-OCR'd image): nothing to match.
+        let Some(text) = M::as_text(subject.data(), subject.artifact()) else {
+            return Ok(Recognition::default());
+        };
         let mut entities: Vec<Entity<M>> = Vec::new();
 
         if let Some(set) = self.regex_set.as_ref() {
@@ -691,7 +694,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
                 // and would wrongly suppress a valid locale-scoped match. When
                 // the caller asserts a language or country, that assertion is
                 // authoritative and gates the locale patterns.
-                if !ctx.applies_to_asserted_language(&pat.languages) {
+                if !ctx.languages(subject).asserted_apply_to(&pat.languages) {
                     continue;
                 }
                 if !ctx.applies_to_country(&pat.countries) {
@@ -705,7 +708,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
                 };
                 let validation_ctx = ValidationContext {
                     countries: ctx.scope().countries.clone(),
-                    language: ctx.primary_language().cloned(),
+                    language: ctx.languages(subject).primary().cloned(),
                 };
                 for m in pat.regex.find_iter(text) {
                     if let Some(validator) = pat.validator.as_ref()
@@ -714,7 +717,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
                         continue;
                     }
                     if let Some(entity) =
-                        self.build_entity::<M>(pat.raw_match(label.clone(), m.range()), data, ctx)
+                        self.build_entity::<M>(pat.raw_match(label.clone(), m.range()), subject)
                     {
                         entities.push(entity);
                     }
@@ -730,7 +733,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
                 };
                 // Asserted-language + country locale filter (see the pattern
                 // loop above); a detected language never suppresses a match.
-                if !ctx.applies_to_asserted_language(&dict.languages) {
+                if !ctx.languages(subject).asserted_apply_to(&dict.languages) {
                     continue;
                 }
                 if !ctx.applies_to_country(&dict.countries) {
@@ -745,7 +748,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
                 }
                 let score = dict.term_scores[term_id - dict.term_start];
                 if let Some(entity) =
-                    self.build_entity::<M>(dict.raw_match(label.clone(), score, range), data, ctx)
+                    self.build_entity::<M>(dict.raw_match(label.clone(), score, range), subject)
                 {
                     entities.push(entity);
                 }

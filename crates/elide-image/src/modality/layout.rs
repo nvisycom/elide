@@ -197,7 +197,7 @@ impl ModalityArtifact for Layout {}
 /// Accumulates the bounding boxes of covered regions into one location.
 #[derive(Default)]
 struct RegionUnion {
-    bbox: Option<BoundingBox>,
+    bbox: Option<BoundingBox<f64>>,
     page: Option<u32>,
     /// The single region added so far, kept so a lone covered word can pass
     /// its polygon through. Cleared once more than one region is unioned.
@@ -270,10 +270,13 @@ impl RegionUnion {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::primitive::Point;
+    use crate::primitive::{Dimensions, Point};
 
     fn loc(x: f64, y: f64, w: f64, h: f64) -> ImageLocation {
-        ImageLocation::new(BoundingBox::from_origin_size(Point::new(x, y), w, h))
+        ImageLocation::new(BoundingBox::from_origin(
+            Point::new(x, y),
+            Dimensions::new(w, h),
+        ))
     }
 
     fn word(x: f64, y: f64, w: f64, h: f64, text: &str) -> LayoutWord {

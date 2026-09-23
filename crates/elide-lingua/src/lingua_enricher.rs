@@ -15,8 +15,8 @@
 use elide_core::Result;
 use elide_core::enrichment::{Enricher, Enrichment};
 use elide_core::modality::TextRecognizable;
-use elide_core::primitive::LanguageTag;
-use elide_core::recognition::{RecognizerContext, RecognizerId};
+use elide_core::primitive::{ComponentId, LanguageTag};
+use elide_core::recognition::{RecognizerContext, Subject};
 
 use crate::lingua_detector::LinguaDetector;
 
@@ -76,24 +76,29 @@ impl Default for LinguaEnricher {
 /// tabular (CSV/XLSX), or transcript pipeline to its detected language.
 #[async_trait::async_trait]
 impl<M: TextRecognizable> Enricher<M> for LinguaEnricher {
-    fn id(&self) -> RecognizerId {
-        RecognizerId::new("elide-lingua", env!("CARGO_PKG_VERSION"))
+    fn id(&self) -> ComponentId {
+        ComponentId::new("elide-lingua", env!("CARGO_PKG_VERSION"))
     }
 
     async fn enrich(
         &self,
-        data: &M::Data,
-        ctx: &mut RecognizerContext<'_, M>,
+        subject: &mut Subject<M>,
+        ctx: &RecognizerContext<'_, M>,
     ) -> Result<Enrichment> {
         // A caller-asserted language is authoritative; skip detection.
         if ctx.has_asserted_language() {
             return Ok(Enrichment::none());
         }
+        // No recognizable text at this chunk (an un-transcribed clip, an
+        // un-OCR'd image): no language to detect.
+        let Some(text) = M::as_text(subject.data(), subject.artifact()) else {
+            return Ok(Enrichment::none());
+        };
         // Detect into an owned list first so the immutable borrow of the payload
-        // text ends before `detect_language` takes `&mut ctx`.
-        let detections = self.detector().detect(M::as_text(data, ctx.artifact()))?;
+        // text ends before `detect_language` takes `&mut subject`.
+        let detections = self.detector().detect(text)?;
         for detection in detections {
-            ctx.detect_language(detection);
+            subject.detect_language(detection);
         }
         // Language detection is pure-CPU: no model tokens to report.
         Ok(Enrichment::none())
@@ -104,8 +109,7 @@ impl<M: TextRecognizable> Enricher<M> for LinguaEnricher {
 mod tests {
     use elide_core::modality::tabular::Tabular;
     use elide_core::modality::text::{Text, TextData};
-    use elide_core::primitive::Language;
-    use elide_core::recognition::Scope;
+    use elide_core::recognition::{Scope, Subject};
 
     use super::*;
 
@@ -113,12 +117,16 @@ mod tests {
     async fn detects_english_onto_input() {
         let data = TextData::new("The quick brown fox jumps over the lazy dog.");
         let scope = Scope::new();
-        let mut ctx = RecognizerContext::<Text>::new(&scope);
+        let ctx = RecognizerContext::<Text>::new(&scope);
+        let mut subject = Subject::new(data);
         LinguaEnricher::unrestricted()
-            .enrich(&data, &mut ctx)
+            .enrich(&mut subject, &ctx)
             .await
             .unwrap();
-        assert_eq!(ctx.primary_language().unwrap().primary_language(), "en");
+        assert_eq!(
+            ctx.languages(&subject).primary().unwrap().primary_subtag(),
+            "en"
+        );
     }
 
     #[tokio::test]
@@ -127,26 +135,34 @@ mod tests {
         // pipeline to its detected language.
         let data = TextData::new("The quick brown fox jumps over the lazy dog.");
         let scope = Scope::new();
-        let mut ctx = RecognizerContext::<Tabular>::new(&scope);
+        let ctx = RecognizerContext::<Tabular>::new(&scope);
+        let mut subject = Subject::new(data);
         LinguaEnricher::unrestricted()
-            .enrich(&data, &mut ctx)
+            .enrich(&mut subject, &ctx)
             .await
             .unwrap();
-        assert_eq!(ctx.primary_language().unwrap().primary_language(), "en");
+        assert_eq!(
+            ctx.languages(&subject).primary().unwrap().primary_subtag(),
+            "en"
+        );
     }
 
     #[tokio::test]
     async fn asserted_language_skips_detection() {
         let de: LanguageTag = "de".parse().unwrap();
         let data = TextData::new("The quick brown fox");
-        let scope = Scope::new().with_language(Language::asserted(de));
-        let mut ctx = RecognizerContext::<Text>::new(&scope);
+        let scope = Scope::new().with_language(de);
+        let ctx = RecognizerContext::<Text>::new(&scope);
+        let mut subject = Subject::new(data);
         LinguaEnricher::unrestricted()
-            .enrich(&data, &mut ctx)
+            .enrich(&mut subject, &ctx)
             .await
             .unwrap();
         // Only the asserted German remains; English was never detected.
-        assert_eq!(ctx.ranked_languages().len(), 1);
-        assert_eq!(ctx.primary_language().unwrap().primary_language(), "de");
+        assert_eq!(ctx.languages(&subject).ranked().len(), 1);
+        assert_eq!(
+            ctx.languages(&subject).primary().unwrap().primary_subtag(),
+            "de"
+        );
     }
 }

@@ -14,7 +14,7 @@ use elide::modality::audio::{Audio, AudioData, TranscriptSegment, TranscriptWord
 use elide::modality::image::{Image, ImageData, ImageLocation, Layout, LayoutBlock, LayoutWord};
 use elide::primitive::{BoundingBox, Confidence, ConfidenceThreshold, Dimensions, Point, TimeSpan};
 use elide::recognition::pattern::{PatternRecognizer, Regex, Variant};
-use elide::recognition::{Recognizer, RecognizerContext, Scope};
+use elide::recognition::{Recognizer, RecognizerContext, Scope, Subject};
 
 /// A pattern recognizer that matches a 9-digit run, boosted by the keyword
 /// "ssn" nearby, wrapped in the `Enhanced` context layer.
@@ -36,7 +36,10 @@ fn ssn_recognizer() -> impl Recognizer<Image> + Recognizer<Audio> {
 }
 
 fn img_loc(x: f64, y: f64, w: f64, h: f64) -> ImageLocation {
-    ImageLocation::new(BoundingBox::from_origin_size(Point::new(x, y), w, h))
+    ImageLocation::new(BoundingBox::from_origin(
+        Point::new(x, y),
+        Dimensions::new(w, h),
+    ))
 }
 
 #[tokio::test]
@@ -48,12 +51,11 @@ async fn image_context_boosts_and_keeps_the_native_region() {
             LayoutWord::new(img_loc(45.0, 0.0, 155.0, 20.0), "123-45-6789"),
         ]);
     let scope = Scope::new();
-    let mut ctx = RecognizerContext::<Image>::new(&scope);
-    ctx.set_artifact(Layout::new(vec![block]));
-
-    let data = ImageData::new(bytes::Bytes::new(), Dimensions::new(200, 20));
+    let ctx = RecognizerContext::<Image>::new(&scope);
+    let subject =
+        Subject::new(ImageData::new(bytes::Bytes::new())).with_artifact(Layout::new(vec![block]));
     let entities = ssn_recognizer()
-        .recognize(&data, &ctx)
+        .recognize(&subject, &ctx)
         .await
         .unwrap()
         .entities;
@@ -91,12 +93,11 @@ async fn audio_context_boosts_and_keeps_the_native_timespan() {
             TranscriptWord::new(TimeSpan::from_millis(400, 1500), "123-45-6789"),
         ]);
     let scope = Scope::new();
-    let mut ctx = RecognizerContext::<Audio>::new(&scope);
-    ctx.set_artifact(Transcription::new(vec![segment]));
-
-    let data = AudioData::new(bytes::Bytes::new());
+    let ctx = RecognizerContext::<Audio>::new(&scope);
+    let subject = Subject::new(AudioData::new(bytes::Bytes::new()))
+        .with_artifact(Transcription::new(vec![segment]));
     let entities = ssn_recognizer()
-        .recognize(&data, &ctx)
+        .recognize(&subject, &ctx)
         .await
         .unwrap()
         .entities;

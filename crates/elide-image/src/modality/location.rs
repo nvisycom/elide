@@ -19,14 +19,14 @@ use crate::primitive::{BoundingBox, Point, Polygon};
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ImageLocation {
     /// Axis-aligned bounding box of the region, in pixel coordinates.
-    pub bounding_box: BoundingBox,
+    pub bounding_box: BoundingBox<f64>,
     /// Polygon vertices when the region is rotated or quadrilateral.
     /// Axis-aligned-only sources leave this unset.
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "Option::is_none")
     )]
-    pub polygon: Option<Polygon>,
+    pub polygon: Option<Polygon<f64>>,
     /// 1-based page number, for multi-page documents like PDFs.
     #[cfg_attr(
         feature = "serde",
@@ -37,7 +37,7 @@ pub struct ImageLocation {
 
 impl ImageLocation {
     /// Location from the bounding box alone, every optional field unset.
-    pub fn new(bounding_box: BoundingBox) -> Self {
+    pub fn new(bounding_box: BoundingBox<f64>) -> Self {
         Self {
             bounding_box,
             polygon: None,
@@ -54,7 +54,7 @@ impl ImageLocation {
 
     /// Set the region polygon.
     #[must_use]
-    pub fn with_polygon(mut self, polygon: Polygon) -> Self {
+    pub fn with_polygon(mut self, polygon: Polygon<f64>) -> Self {
         self.polygon = Some(polygon);
         self
     }
@@ -63,7 +63,7 @@ impl ImageLocation {
     /// otherwise its bounding box as a rectangle.
     ///
     /// [`polygon`]: Self::polygon
-    fn shape(&self) -> Polygon {
+    fn shape(&self) -> Polygon<f64> {
         self.polygon
             .clone()
             .unwrap_or_else(|| self.bounding_box.to_polygon())
@@ -120,7 +120,7 @@ impl ModalityLocation for ImageLocation {
     }
 
     fn hash(&self) -> Vec<u8> {
-        fn point(bytes: &mut Vec<u8>, p: &Point) {
+        fn point(bytes: &mut Vec<u8>, p: &Point<f64>) {
             bytes.extend_from_slice(&p.x.to_bits().to_le_bytes());
             bytes.extend_from_slice(&p.y.to_bits().to_le_bytes());
         }
@@ -151,10 +151,13 @@ impl ModalityLocation for ImageLocation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::primitive::Point;
+    use crate::primitive::{Dimensions, Point};
 
     fn loc(x: f64, y: f64, w: f64, h: f64) -> ImageLocation {
-        ImageLocation::new(BoundingBox::from_origin_size(Point::new(x, y), w, h))
+        ImageLocation::new(BoundingBox::from_origin(
+            Point::new(x, y),
+            Dimensions::new(w, h),
+        ))
     }
 
     #[test]

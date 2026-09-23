@@ -15,16 +15,15 @@ license = { workspace = true }
 
 authors = { workspace = true }
 repository = { workspace = true }
-homepage = { workspace = true }
 
 ## Each example is a self-contained binary, run with
 ## `cargo run -p elide-examples --bin <name>`.
 [[bin]]
-name = "redact_txt"
+name = "redact-txt"
 path = "redact_txt.rs"
 
 [[bin]]
-name = "redact_docx"
+name = "redact-docx"
 path = "redact_docx.rs"
 
 [features]

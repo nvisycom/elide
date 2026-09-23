@@ -2,9 +2,10 @@
 
 use crate::error::Result;
 use crate::modality::Modality;
+use crate::primitive::ComponentId;
 #[cfg(feature = "usage")]
 use crate::primitive::ModelUsage;
-use crate::recognition::{RecognizerContext, RecognizerId};
+use crate::recognition::{RecognizerContext, Subject};
 
 /// Enriches a [`RecognizerContext`] before recognizers run over it.
 ///
@@ -25,19 +26,24 @@ where
 {
     /// This enricher's identity (name + version), so its usage is labelled
     /// the way a recognizer's is.
-    fn id(&self) -> RecognizerId;
+    fn id(&self) -> ComponentId;
 
-    /// Inspect `data` and enrich `ctx` in place, returning any model-usage
-    /// detail the enrichment incurred (see [`Enrichment`]).
+    /// Inspect the [`Subject`] and enrich it in place, returning any model-usage
+    /// detail the enrichment incurred (see [`Enrichment`]). The analysis-wide
+    /// [`RecognizerContext`] is read-only (a detector may consult the caller's
+    /// asserted languages or correlation id).
     ///
     /// # Errors
     ///
     /// Returns an error when enrichment fails (e.g. a detection backend is
     /// unreachable). A failed enricher aborts the call before recognition.
+    ///
+    /// [`Subject`]: crate::recognition::Subject
+    /// [`RecognizerContext`]: crate::recognition::RecognizerContext
     async fn enrich(
         &self,
-        data: &M::Data,
-        ctx: &mut RecognizerContext<'_, M>,
+        subject: &mut Subject<M>,
+        ctx: &RecognizerContext<'_, M>,
     ) -> Result<Enrichment>;
 }
 

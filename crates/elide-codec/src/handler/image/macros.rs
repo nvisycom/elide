@@ -141,10 +141,9 @@ macro_rules! impl_image_handler {
                     return Ok(None);
                 }
                 let dims = self.buffer.dimensions();
-                let bbox = ::elide_image::primitive::BoundingBox::from_origin_size(
+                let bbox = ::elide_image::primitive::BoundingBox::from_origin(
                     ::elide_image::primitive::Point::new(0.0, 0.0),
-                    dims.width as f64,
-                    dims.height as f64,
+                    ::elide_image::primitive::Dimensions::new(dims.width as f64, dims.height as f64),
                 );
                 // The detection chunk carries the same fallback policy as the
                 // output: a pixel recognizer reads pixels (EXIF detection runs on
@@ -153,7 +152,6 @@ macro_rules! impl_image_handler {
                 // may leave the process (e.g. a VLM request).
                 let data = ::elide_image::modality::ImageData::new(
                     self.buffer.encode(self.policy)?,
-                    dims,
                 );
                 self.yielded = true;
                 Ok(Some(::elide_core::modality::Chunk {
@@ -176,10 +174,10 @@ macro_rules! impl_image_handler {
                 let Some(region) = location.bounding_box.to_pixels(dims) else {
                     return Ok(None);
                 };
-                let region_dims = region.dimensions();
-                Ok(self.buffer.crop(region)?.map(|bytes| {
-                    ::elide_image::modality::ImageData::new(bytes, region_dims)
-                }))
+                self.buffer
+                    .crop(region)
+                    .map(|raster| raster.encode())
+                    .transpose()
             }
         }
 
