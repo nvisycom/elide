@@ -149,7 +149,7 @@ mod tests {
         use elide_image::modality::{Image, ImageData, ImageLocation, ImageReplacement};
         use elide_image::primitive::{BoundingBox, Dimensions, Point};
 
-        let bbox = BoundingBox::from_origin_size(Point::new(0.0, 0.0), 2.0, 2.0);
+        let bbox = BoundingBox::from_origin(Point::new(0.0, 0.0), Dimensions::new(2.0, 2.0));
         let location = ImageLocation::new(bbox);
         let event = AuditEvent::pattern(
             "t",

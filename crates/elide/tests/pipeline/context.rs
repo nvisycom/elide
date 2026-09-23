@@ -36,7 +36,10 @@ fn ssn_recognizer() -> impl Recognizer<Image> + Recognizer<Audio> {
 }
 
 fn img_loc(x: f64, y: f64, w: f64, h: f64) -> ImageLocation {
-    ImageLocation::new(BoundingBox::from_origin_size(Point::new(x, y), w, h))
+    ImageLocation::new(BoundingBox::from_origin(
+        Point::new(x, y),
+        Dimensions::new(w, h),
+    ))
 }
 
 #[tokio::test]

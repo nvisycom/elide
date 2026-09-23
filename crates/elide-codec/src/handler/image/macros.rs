@@ -141,10 +141,9 @@ macro_rules! impl_image_handler {
                     return Ok(None);
                 }
                 let dims = self.buffer.dimensions();
-                let bbox = ::elide_image::primitive::BoundingBox::from_origin_size(
+                let bbox = ::elide_image::primitive::BoundingBox::from_origin(
                     ::elide_image::primitive::Point::new(0.0, 0.0),
-                    dims.width as f64,
-                    dims.height as f64,
+                    ::elide_image::primitive::Dimensions::new(dims.width as f64, dims.height as f64),
                 );
                 // The detection chunk carries the same fallback policy as the
                 // output: a pixel recognizer reads pixels (EXIF detection runs on

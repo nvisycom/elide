@@ -1,103 +1,88 @@
-//! 2-D point and the axis-aligned bounding box built from it.
-
-use std::ops::Sub;
+//! [`BoundingBox`]: an axis-aligned rectangle over a coordinate scalar.
 
 use elide_core::modality::Overlap;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{Dimensions, PixelRegion, Polygon};
-
-/// Point in a 2-D coordinate space.
-///
-/// The coordinate basis is left to the consumer: pixel coordinates for a
-/// raster image, normalized `0.0..=1.0` coordinates for a
-/// resolution-independent region, or page units for a document. The
-/// model only requires the two scalars.
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct Point {
-    /// Horizontal coordinate.
-    pub x: f64,
-    /// Vertical coordinate.
-    pub y: f64,
-}
-
-impl Point {
-    /// Point at `(x, y)`.
-    pub const fn new(x: f64, y: f64) -> Self {
-        Self { x, y }
-    }
-
-    /// Dot product of `self` and `other` as vectors.
-    pub fn dot(self, other: Self) -> f64 {
-        self.x * other.x + self.y * other.y
-    }
-
-    /// Left perpendicular of `self` as a vector: `(-y, x)`.
-    ///
-    /// Rotating a vector 90 degrees counter-clockwise. Used to turn an
-    /// edge direction into the axis normal to it.
-    pub fn perp(self) -> Self {
-        Self::new(-self.y, self.x)
-    }
-}
-
-impl Sub for Point {
-    type Output = Self;
-
-    /// Component-wise subtraction, treating both points as position
-    /// vectors: the displacement (edge) vector from `rhs` to `self`.
-    fn sub(self, rhs: Self) -> Self {
-        Self::new(self.x - rhs.x, self.y - rhs.y)
-    }
-}
+use super::{Coordinate, Dimensions, Point, Polygon};
 
 /// Axis-aligned rectangle, given by its minimum and maximum corners.
 ///
-/// The location type for the image and document modalities: where a
-/// detected entity sits within a rendered page. [`min`] is the top-left
-/// corner and [`max`] the bottom-right under the usual screen convention
-/// (y grows downward), though the box itself is agnostic to coordinate
+/// Generic over the coordinate scalar (a [`Coordinate`]): `BoundingBox<f64>` is a
+/// fractional geometric *claim* (a recognizer's or model's possibly-out-of-bounds
+/// region), while `BoundingBox<u32>` is a concrete set of image pixels, the corners
+/// are exact indices, `min` inclusive and `max` exclusive, as an image crop reads
+/// or paints. The two share the corner representation and the pure-comparison
+/// operations ([`overlaps`], [`contains`]); the rest is scalar-specific, the float
+/// box carries geometry (IoU, polygon, pixel clamping) and the pixel box the
+/// integer indexing helpers.
+///
+/// [`min`] is the top-left corner and [`max`] the bottom-right under the usual
+/// screen convention (y grows downward), though the box is agnostic to coordinate
 /// orientation.
 ///
 /// [`min`]: Self::min
 /// [`max`]: Self::max
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// [`overlaps`]: Self::overlaps
+/// [`contains`]: Self::contains
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct BoundingBox {
+pub struct BoundingBox<C: Coordinate> {
     /// Minimum corner (top-left, conventionally).
-    pub min: Point,
+    pub min: Point<C>,
     /// Maximum corner (bottom-right, conventionally).
-    pub max: Point,
+    pub max: Point<C>,
 }
 
-impl BoundingBox {
+impl<C: Coordinate> BoundingBox<C> {
     /// Box spanning the two corners.
-    pub const fn new(min: Point, max: Point) -> Self {
+    pub const fn new(min: Point<C>, max: Point<C>) -> Self {
         Self { min, max }
     }
 
-    /// Box from a top-left origin and a size.
-    pub fn from_origin_size(origin: Point, width: f64, height: f64) -> Self {
+    /// Box from a top-left `origin` and a `size`: the corners are `origin`
+    /// (inclusive) and `origin + size` (exclusive).
+    ///
+    /// For an integer (pixel) box the far corner saturates at the coordinate's
+    /// maximum, so a far-off origin plus a large size does not overflow; such a
+    /// box has no overlap with any real image and clamps to nothing.
+    #[must_use]
+    pub fn from_origin(origin: Point<C>, size: Dimensions<C>) -> Self {
         Self {
             min: origin,
-            max: Point::new(origin.x + width, origin.y + height),
+            max: Point::new(origin.x.advance(size.width), origin.y.advance(size.height)),
         }
     }
 
-    /// Clamp this box to integer pixels lying inside an image of `dims`.
+    /// Whether this box overlaps `other`: they share interior area. Touching
+    /// edges alone do not count.
+    pub fn overlaps(&self, other: &Self) -> bool {
+        self.min.x < other.max.x
+            && other.min.x < self.max.x
+            && self.min.y < other.max.y
+            && other.min.y < self.max.y
+    }
+
+    /// Whether this box fully contains `other`.
+    pub fn contains(&self, other: &Self) -> bool {
+        self.min.x <= other.min.x
+            && self.min.y <= other.min.y
+            && other.max.x <= self.max.x
+            && other.max.y <= self.max.y
+    }
+}
+
+impl BoundingBox<f64> {
+    /// Clamp this box to the integer-pixel box lying inside an image of `dims`.
     ///
-    /// Floors the float corners to pixel indices, drops any part that
-    /// falls outside `[0, width) x [0, height)`, and returns the
-    /// resulting [`PixelRegion`]. Returns `None` when nothing of the box
-    /// lands inside the image (its origin is past an edge, or it clamps to
-    /// zero area), so a caller can `let region = bbox.to_pixels(dims)?;`
-    /// and skip empty regions.
+    /// Floors the float corners to pixel indices, drops any part that falls
+    /// outside `[0, width) x [0, height)`, and returns the resulting pixel box.
+    /// Returns `None` when nothing of the box lands inside the image (its origin
+    /// is past an edge, or it clamps to zero area), so a caller can
+    /// `let region = bbox.to_pixels(dims)?;` and skip empty regions.
     #[must_use]
-    pub fn to_pixels(&self, dims: Dimensions) -> Option<PixelRegion> {
+    pub fn to_pixels(&self, dims: Dimensions<u32>) -> Option<BoundingBox<u32>> {
         let x = self.min.x.max(0.0) as u32;
         let y = self.min.y.max(0.0) as u32;
         if x >= dims.width || y >= dims.height {
@@ -108,7 +93,10 @@ impl BoundingBox {
         if w == 0 || h == 0 {
             return None;
         }
-        Some(PixelRegion::new(x, y, w, h))
+        Some(BoundingBox::from_origin(
+            Point::new(x, y),
+            Dimensions::new(w, h),
+        ))
     }
 
     /// Box width (`max.x - min.x`).
@@ -126,25 +114,8 @@ impl BoundingBox {
         self.width() * self.height()
     }
 
-    /// Whether this box overlaps `other`: they share interior area.
-    /// Touching edges alone do not count.
-    pub fn overlaps(&self, other: &Self) -> bool {
-        self.min.x < other.max.x
-            && other.min.x < self.max.x
-            && self.min.y < other.max.y
-            && other.min.y < self.max.y
-    }
-
-    /// Whether this box fully contains `other`.
-    pub fn contains(&self, other: &Self) -> bool {
-        self.min.x <= other.min.x
-            && self.min.y <= other.min.y
-            && other.max.x <= self.max.x
-            && other.max.y <= self.max.y
-    }
-
-    /// How this box sits against `other`, disjoint, one containing the
-    /// other, or crossing with an area-IoU measure.
+    /// How this box sits against `other`, disjoint, one containing the other, or
+    /// crossing with an area-IoU measure.
     pub fn overlap(&self, other: &Self) -> Overlap {
         if !self.overlaps(other) {
             return Overlap::Disjoint;
@@ -176,12 +147,12 @@ impl BoundingBox {
         )
     }
 
-    /// Box as a four-vertex [`Polygon`] (clockwise from the top-left
-    /// corner under the usual screen convention).
+    /// Box as a four-vertex [`Polygon`] (clockwise from the top-left corner under
+    /// the usual screen convention).
     ///
-    /// Lets a box be compared against a rotated or quadrilateral region
-    /// through [`Polygon::overlaps`].
-    pub fn to_polygon(&self) -> Polygon {
+    /// Lets a box be compared against a rotated or quadrilateral region through
+    /// [`Polygon::overlaps`].
+    pub fn to_polygon(&self) -> Polygon<f64> {
         Polygon::new(vec![
             self.min,
             Point::new(self.max.x, self.min.y),
@@ -191,27 +162,74 @@ impl BoundingBox {
     }
 }
 
+impl BoundingBox<u32> {
+    /// Width in pixels (`max.x - min.x`).
+    #[must_use]
+    pub const fn width(&self) -> u32 {
+        self.max.x.saturating_sub(self.min.x)
+    }
+
+    /// Height in pixels (`max.y - min.y`).
+    #[must_use]
+    pub const fn height(&self) -> u32 {
+        self.max.y.saturating_sub(self.min.y)
+    }
+
+    /// Left edge (inclusive): `min.x`.
+    #[must_use]
+    pub const fn left(&self) -> u32 {
+        self.min.x
+    }
+
+    /// Top edge (inclusive): `min.y`.
+    #[must_use]
+    pub const fn top(&self) -> u32 {
+        self.min.y
+    }
+
+    /// Right edge (exclusive): `max.x`.
+    #[must_use]
+    pub const fn right(&self) -> u32 {
+        self.max.x
+    }
+
+    /// Bottom edge (exclusive): `max.y`.
+    #[must_use]
+    pub const fn bottom(&self) -> u32 {
+        self.max.y
+    }
+
+    /// Pixel count covered by the box (`width * height`).
+    #[must_use]
+    pub const fn area(&self) -> u64 {
+        self.width() as u64 * self.height() as u64
+    }
+
+    /// Whether the box has zero area.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.width() == 0 || self.height() == 0
+    }
+
+    /// Size of the box as [`Dimensions`].
+    #[must_use]
+    pub const fn dimensions(&self) -> Dimensions<u32> {
+        Dimensions::new(self.width(), self.height())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn point_vector_ops() {
-        let a = Point::new(3.0, 4.0);
-        let b = Point::new(1.0, 2.0);
-        assert_eq!(a - b, Point::new(2.0, 2.0));
-        assert_eq!(a.dot(b), 11.0);
-        assert_eq!(a.perp(), Point::new(-4.0, 3.0));
-    }
-
-    #[test]
     fn overlaps_and_area() {
-        let a = BoundingBox::from_origin_size(Point::new(0.0, 0.0), 10.0, 10.0);
-        let b = BoundingBox::from_origin_size(Point::new(5.0, 5.0), 10.0, 10.0);
+        let a = BoundingBox::from_origin(Point::new(0.0, 0.0), Dimensions::new(10.0, 10.0));
+        let b = BoundingBox::from_origin(Point::new(5.0, 5.0), Dimensions::new(10.0, 10.0));
         assert!(a.overlaps(&b));
         assert_eq!(a.area(), 100.0);
         // Touching edge only: not an overlap.
-        let c = BoundingBox::from_origin_size(Point::new(10.0, 0.0), 5.0, 5.0);
+        let c = BoundingBox::from_origin(Point::new(10.0, 0.0), Dimensions::new(5.0, 5.0));
         assert!(!a.overlaps(&c));
     }
 
@@ -219,10 +237,10 @@ mod tests {
     fn to_pixels_clamps_inside_the_image() {
         let dims = Dimensions::new(100, 80);
         // A box partly past the right/bottom edge clamps to what fits.
-        let b = BoundingBox::from_origin_size(Point::new(90.0, 70.0), 50.0, 50.0);
+        let b = BoundingBox::from_origin(Point::new(90.0, 70.0), Dimensions::new(50.0, 50.0));
         let region = b.to_pixels(dims).expect("partly inside");
-        assert_eq!((region.x, region.y), (90, 70));
-        assert_eq!((region.width, region.height), (10, 10));
+        assert_eq!((region.left(), region.top()), (90, 70));
+        assert_eq!((region.width(), region.height()), (10, 10));
         assert_eq!(region.right(), 100);
         assert_eq!(region.bottom(), 80);
     }
@@ -231,17 +249,29 @@ mod tests {
     fn to_pixels_rejects_fully_outside_or_empty() {
         let dims = Dimensions::new(100, 80);
         // Origin past the edge: nothing inside.
-        let outside = BoundingBox::from_origin_size(Point::new(100.0, 0.0), 10.0, 10.0);
+        let outside = BoundingBox::from_origin(Point::new(100.0, 0.0), Dimensions::new(10.0, 10.0));
         assert_eq!(outside.to_pixels(dims), None);
         // Zero-size box clamps to empty.
-        let empty = BoundingBox::from_origin_size(Point::new(10.0, 10.0), 0.0, 0.0);
+        let empty = BoundingBox::from_origin(Point::new(10.0, 10.0), Dimensions::new(0.0, 0.0));
         assert_eq!(empty.to_pixels(dims), None);
         // Negative origin floors to 0 and still yields the in-image part.
-        let neg = BoundingBox::from_origin_size(Point::new(-5.0, -5.0), 10.0, 10.0);
+        let neg = BoundingBox::from_origin(Point::new(-5.0, -5.0), Dimensions::new(10.0, 10.0));
         let region = neg.to_pixels(dims).expect("partly inside");
         assert_eq!(
-            (region.x, region.y, region.width, region.height),
+            (region.left(), region.top(), region.width(), region.height()),
             (0, 0, 10, 10)
         );
+    }
+
+    #[test]
+    fn pixel_box_indexing() {
+        let r = BoundingBox::from_origin(Point::new(90, 70), Dimensions::new(10, 10));
+        assert_eq!(
+            (r.left(), r.top(), r.right(), r.bottom()),
+            (90, 70, 100, 80)
+        );
+        assert_eq!(r.area(), 100);
+        assert!(!r.is_empty());
+        assert_eq!(r.dimensions(), Dimensions::new(10, 10));
     }
 }

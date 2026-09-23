@@ -64,10 +64,9 @@ fn image_prompt_renders_template() {
     let bytes = b"\x89PNG\r\n\x1a\nfake-image-bytes".to_vec();
     let dims = Dimensions::new(640, 480);
 
-    let inclusion = Inclusion::<Image>::new(ImageLocation::new(BoundingBox::from_origin_size(
+    let inclusion = Inclusion::<Image>::new(ImageLocation::new(BoundingBox::from_origin(
         Point::new(10.0, 20.0),
-        100.0,
-        50.0,
+        Dimensions::new(100.0, 50.0),
     )))
     .with_name("uploader-face")
     .with_label(builtins::PERSON_NAME.to_ref());

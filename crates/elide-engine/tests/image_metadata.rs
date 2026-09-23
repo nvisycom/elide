@@ -129,13 +129,12 @@ impl elide_core::recognition::Recognizer<Image> for WholeFrame {
         use elide_core::entity::{Entity, builtins};
         use elide_core::primitive::Confidence;
         use elide_image::modality::ImageLocation;
-        use elide_image::primitive::{BoundingBox, Point};
+        use elide_image::primitive::{BoundingBox, Dimensions, Point};
 
         let dims = &data.dimensions;
-        let bbox = BoundingBox::from_origin_size(
+        let bbox = BoundingBox::from_origin(
             Point::new(0.0, 0.0),
-            f64::from(dims.width),
-            f64::from(dims.height),
+            Dimensions::new(f64::from(dims.width), f64::from(dims.height)),
         );
         let location = ImageLocation::new(bbox);
         let event = AuditEvent::model(

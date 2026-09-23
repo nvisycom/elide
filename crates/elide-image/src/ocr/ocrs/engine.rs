@@ -18,7 +18,7 @@ use ocrs::{ImageSource, OcrEngine, OcrEngineParams, TextItem, TextLine};
 use rten_imageproc::Rect;
 
 use crate::modality::{ImageLocation, LayoutBlock, LayoutWord};
-use crate::primitive::{BoundingBox, Point};
+use crate::primitive::{BoundingBox, Dimensions, Point};
 
 /// Environment variable naming the directory that holds the two `ocrs` model
 /// files, read by [`OcrsBackend::from_env`](super::OcrsBackend::from_env).
@@ -160,10 +160,9 @@ fn line_to_block(line: TextLine) -> Option<LayoutBlock> {
 /// image) to an [`ImageLocation`].
 fn rect_to_location(rect: Rect<i32>) -> ImageLocation {
     let origin = Point::new(f64::from(rect.left()), f64::from(rect.top()));
-    ImageLocation::new(BoundingBox::from_origin_size(
+    ImageLocation::new(BoundingBox::from_origin(
         origin,
-        f64::from(rect.width()),
-        f64::from(rect.height()),
+        Dimensions::new(f64::from(rect.width()), f64::from(rect.height())),
     ))
 }
 

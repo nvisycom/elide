@@ -3,31 +3,37 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::Point;
+use super::{Coordinate, Point};
 
-/// Closed polygon, given by its ordered vertices.
+/// Closed polygon, given by its ordered vertices, generic over the coordinate
+/// scalar (a [`Coordinate`]).
 ///
 /// A richer location than a [`BoundingBox`] for detections whose extent
 /// is not rectangular: rotated text, a region traced by a vision model, a
 /// signature. The boundary is implicitly closed, so the last vertex
 /// connects back to the first.
 ///
+/// Like [`BoundingBox`], `Polygon<f64>` is a fractional geometric claim; the
+/// overlap test ([`overlaps`]) lives only on that float instantiation, as it is
+/// pure floating-point geometry.
+///
 /// [`BoundingBox`]: super::BoundingBox
+/// [`overlaps`]: Self::overlaps
 #[derive(Debug, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(transparent))]
-pub struct Polygon(Vec<Point>);
+pub struct Polygon<C: Coordinate>(Vec<Point<C>>);
 
-impl Polygon {
+impl<C: Coordinate> Polygon<C> {
     /// Polygon from its ordered vertices.
-    pub fn new(vertices: impl Into<Vec<Point>>) -> Self {
+    pub fn new(vertices: impl Into<Vec<Point<C>>>) -> Self {
         Self(vertices.into())
     }
 
     /// Polygon's vertices, in order.
-    pub fn vertices(&self) -> &[Point] {
+    pub fn vertices(&self) -> &[Point<C>] {
         &self.0
     }
 
@@ -40,7 +46,9 @@ impl Polygon {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+}
 
+impl Polygon<f64> {
     /// Whether this polygon overlaps `other`.
     ///
     /// Uses the separating-axis theorem, which is exact for **convex**
@@ -58,42 +66,42 @@ impl Polygon {
         if self.0.len() < 3 || other.0.len() < 3 {
             return false;
         }
-        !has_separating_axis(&self.0, &other.0) && !has_separating_axis(&other.0, &self.0)
+        !self.separates(other) && !other.separates(self)
     }
-}
 
-/// Whether any edge of `a` yields an axis that separates `a` from `b`
-/// (their projections onto the edge normal don't overlap).
-fn has_separating_axis(a: &[Point], b: &[Point]) -> bool {
-    for i in 0..a.len() {
-        let edge = a[(i + 1) % a.len()] - a[i];
-        let axis = edge.perp();
-        let (a_min, a_max) = project(a, axis);
-        let (b_min, b_max) = project(b, axis);
-        // A strict gap means a separating axis exists (touching is
-        // disjoint).
-        if a_max <= b_min || b_max <= a_min {
-            return true;
+    /// Whether any edge of `self` yields an axis that separates it from
+    /// `other` (their projections onto that edge normal don't overlap).
+    fn separates(&self, other: &Self) -> bool {
+        for i in 0..self.0.len() {
+            let edge = self.0[(i + 1) % self.0.len()] - self.0[i];
+            let axis = edge.perp();
+            let (a_min, a_max) = self.project(axis);
+            let (b_min, b_max) = other.project(axis);
+            // A strict gap means a separating axis exists (touching is
+            // disjoint).
+            if a_max <= b_min || b_max <= a_min {
+                return true;
+            }
         }
+        false
     }
-    false
+
+    /// Project the vertices onto `axis`, returning the `(min, max)` of the dot
+    /// products.
+    fn project(&self, axis: Point<f64>) -> (f64, f64) {
+        let mut min = f64::INFINITY;
+        let mut max = f64::NEG_INFINITY;
+        for &p in &self.0 {
+            let d = p.dot(axis);
+            min = min.min(d);
+            max = max.max(d);
+        }
+        (min, max)
+    }
 }
 
-/// Project `points` onto `axis`, returning the `(min, max)` of the dot
-/// products.
-fn project(points: &[Point], axis: Point) -> (f64, f64) {
-    let mut min = f64::INFINITY;
-    let mut max = f64::NEG_INFINITY;
-    for &p in points {
-        let dot = p.dot(axis);
-        min = min.min(dot);
-        max = max.max(dot);
-    }
-    (min, max)
-}
-
-impl FromIterator<Point> for Polygon {
-    fn from_iter<I: IntoIterator<Item = Point>>(vertices: I) -> Self {
+impl<C: Coordinate> FromIterator<Point<C>> for Polygon<C> {
+    fn from_iter<I: IntoIterator<Item = Point<C>>>(vertices: I) -> Self {
         Self(vertices.into_iter().collect())
     }
 }
@@ -103,7 +111,7 @@ mod tests {
     use super::*;
 
     /// Axis-aligned square `[x, x+s] x [y, y+s]` as a polygon.
-    fn square(x: f64, y: f64, s: f64) -> Polygon {
+    fn square(x: f64, y: f64, s: f64) -> Polygon<f64> {
         Polygon::new(vec![
             Point::new(x, y),
             Point::new(x + s, y),

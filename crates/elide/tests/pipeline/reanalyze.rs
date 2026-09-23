@@ -10,7 +10,7 @@ use elide::codec::FormatRegistry;
 use elide::enrichment::ocr::MockBackend;
 use elide::entity::Entity;
 use elide::modality::image::{Image, ImageLocation, LayoutBlock};
-use elide::primitive::{BoundingBox, Point};
+use elide::primitive::{BoundingBox, Dimensions, Point};
 use elide::{Directives, Orchestrator, PartId, RegistryDocumentExt, Result};
 
 use crate::support::orchestrator::{TestOrchestrator, erase_anonymizer, ocr_analyzer};
@@ -23,10 +23,9 @@ const SAMPLE: &[u8] = include_bytes!("../testdata/sample.png");
 const DOC: &str = "sample.png";
 
 fn loc() -> ImageLocation {
-    ImageLocation::new(BoundingBox::from_origin_size(
+    ImageLocation::new(BoundingBox::from_origin(
         Point::new(0.0, 0.0),
-        200.0,
-        20.0,
+        Dimensions::new(200.0, 20.0),
     ))
 }
 

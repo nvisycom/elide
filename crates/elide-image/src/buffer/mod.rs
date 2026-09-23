@@ -15,7 +15,7 @@ use crate::exif::Source;
 use crate::modality::{ImageFormat, ImageReplacement};
 #[cfg(feature = "exif")]
 use crate::policy::ExifPolicy;
-use crate::primitive::{Color, Dimensions, PixelRegion};
+use crate::primitive::{BoundingBox, Color, Dimensions, Point};
 
 /// A decoded raster image, the single entry point into the crate.
 ///
@@ -76,7 +76,7 @@ impl ImageBuffer {
 
     /// The image's pixel dimensions.
     #[must_use]
-    pub fn dimensions(&self) -> Dimensions {
+    pub fn dimensions(&self) -> Dimensions<u32> {
         let (w, h) = self.inner.dimensions();
         Dimensions::new(w, h)
     }
@@ -233,38 +233,41 @@ impl ImageBuffer {
     /// outside one would act on fewer pixels than the caller named. Resolving the
     /// intersection here makes both cases explicit: a real overlap is clamped to
     /// exactly the in-bounds pixels, and no overlap is `None`.
-    fn clamp(&self, region: PixelRegion) -> Option<PixelRegion> {
+    fn clamp(&self, region: BoundingBox<u32>) -> Option<BoundingBox<u32>> {
         let (w, h) = self.inner.dimensions();
-        let x = region.x.min(w);
-        let y = region.y.min(h);
+        let x = region.left().min(w);
+        let y = region.top().min(h);
         // Saturating: a caller-supplied region near `u32::MAX` must not overflow
         // the edge sum (`x + width`), which would panic in debug and wrap in
         // release. The edges are clamped to the image, so saturation is harmless.
-        let right = region.x.saturating_add(region.width).min(w);
-        let bottom = region.y.saturating_add(region.height).min(h);
+        let right = region.left().saturating_add(region.width()).min(w);
+        let bottom = region.top().saturating_add(region.height()).min(h);
         if right <= x || bottom <= y {
             return None;
         }
-        Some(PixelRegion::new(x, y, right - x, bottom - y))
+        Some(BoundingBox::from_origin(
+            Point::new(x, y),
+            Dimensions::new(right - x, bottom - y),
+        ))
     }
 
     /// Crop `region` out and encode it, or `None` when the region does not
     /// overlap the image (out of bounds or zero-area). The crop is the in-bounds
     /// intersection and carries no metadata.
-    pub fn crop(&self, region: PixelRegion) -> Result<Option<Bytes>> {
+    pub fn crop(&self, region: BoundingBox<u32>) -> Result<Option<Bytes>> {
         let Some(region) = self.clamp(region) else {
             return Ok(None);
         };
-        let cropped = self
-            .inner
-            .crop_imm(region.x, region.y, region.width, region.height);
+        let cropped =
+            self.inner
+                .crop_imm(region.left(), region.top(), region.width(), region.height());
         Ok(Some(Self::encode_image(&cropped, self.format)?))
     }
 
     /// Paint `replacement` over `region` in place (blur, pixelate, block, or
     /// remove). A region that does not overlap the image is a silent no-op, and
     /// leaves the buffer clean; redaction acts on the in-bounds intersection.
-    pub fn redact(&mut self, region: PixelRegion, replacement: &ImageReplacement) {
+    pub fn redact(&mut self, region: BoundingBox<u32>, replacement: &ImageReplacement) {
         let Some(region) = self.clamp(region) else {
             return;
         };
@@ -279,20 +282,20 @@ impl ImageBuffer {
     }
 
     /// Gaussian blur over the region: crop, blur the crop, overlay it back.
-    fn blur(&mut self, region: PixelRegion, sigma: f32) {
+    fn blur(&mut self, region: BoundingBox<u32>, sigma: f32) {
         let sub = self
             .inner
-            .crop_imm(region.x, region.y, region.width, region.height)
+            .crop_imm(region.left(), region.top(), region.width(), region.height())
             .to_rgba8();
         let blurred = imageproc::filter::gaussian_blur_f32(&sub, sigma.max(f32::MIN_POSITIVE));
         self.overlay(&DynamicImage::ImageRgba8(blurred), region);
     }
 
     /// Solid-color block over the region.
-    fn block(&mut self, region: PixelRegion, color: Color) {
+    fn block(&mut self, region: BoundingBox<u32>, color: Color) {
         let fill = RgbaImage::from_pixel(
-            region.width,
-            region.height,
+            region.width(),
+            region.height(),
             Rgba([color.r, color.g, color.b, 255]),
         );
         self.overlay(&DynamicImage::ImageRgba8(fill), region);
@@ -300,21 +303,26 @@ impl ImageBuffer {
 
     /// Mosaic pixelation: downscale the region with nearest-neighbor, scale it
     /// back up, and overlay.
-    fn pixelate(&mut self, region: PixelRegion, block_size: u32) {
+    fn pixelate(&mut self, region: BoundingBox<u32>, block_size: u32) {
         let block_size = block_size.max(1);
-        let small_w = (region.width / block_size).max(1);
-        let small_h = (region.height / block_size).max(1);
+        let small_w = (region.width() / block_size).max(1);
+        let small_h = (region.height() / block_size).max(1);
         let sub = self
             .inner
-            .crop_imm(region.x, region.y, region.width, region.height);
+            .crop_imm(region.left(), region.top(), region.width(), region.height());
         let small = sub.resize_exact(small_w, small_h, FilterType::Nearest);
-        let mosaic = small.resize_exact(region.width, region.height, FilterType::Nearest);
+        let mosaic = small.resize_exact(region.width(), region.height(), FilterType::Nearest);
         self.overlay(&mosaic, region);
     }
 
     /// Overlay `patch` onto the image at the region's top-left corner.
-    fn overlay(&mut self, patch: &DynamicImage, region: PixelRegion) {
-        image::imageops::overlay(&mut self.inner, patch, region.x as i64, region.y as i64);
+    fn overlay(&mut self, patch: &DynamicImage, region: BoundingBox<u32>) {
+        image::imageops::overlay(
+            &mut self.inner,
+            patch,
+            region.left() as i64,
+            region.top() as i64,
+        );
     }
 
     /// Encode `img` to bytes in `format`.
@@ -356,14 +364,20 @@ mod tests {
         // A region past the right/bottom edges has no overlap with the image.
         assert!(
             buffer
-                .crop(PixelRegion::new(10, 10, 4, 4))
+                .crop(BoundingBox::from_origin(
+                    Point::new(10, 10),
+                    Dimensions::new(4, 4)
+                ))
                 .expect("crop")
                 .is_none()
         );
         // A zero-area region is likewise nothing to crop.
         assert!(
             buffer
-                .crop(PixelRegion::new(0, 0, 0, 4))
+                .crop(BoundingBox::from_origin(
+                    Point::new(0, 0),
+                    Dimensions::new(0, 4)
+                ))
                 .expect("crop")
                 .is_none()
         );
@@ -377,13 +391,19 @@ mod tests {
         let buffer = ImageBuffer::open(&png(4, 4)).expect("open");
         assert!(
             buffer
-                .crop(PixelRegion::new(u32::MAX - 1, 0, 100, 4))
+                .crop(BoundingBox::from_origin(
+                    Point::new(u32::MAX - 1, 0),
+                    Dimensions::new(100, 4)
+                ))
                 .expect("crop")
                 .is_none()
         );
         let mut buffer = buffer;
         buffer.redact(
-            PixelRegion::new(u32::MAX - 1, u32::MAX - 1, u32::MAX, u32::MAX),
+            BoundingBox::from_origin(
+                Point::new(u32::MAX - 1, u32::MAX - 1),
+                Dimensions::new(u32::MAX, u32::MAX),
+            ),
             &ImageReplacement::Block {
                 color: Color::BLACK,
             },
@@ -399,7 +419,10 @@ mod tests {
         let buffer = ImageBuffer::open(&png(4, 4)).expect("open");
         // Starts inside, runs two pixels past each edge → a 2x2 overlap.
         let cropped = buffer
-            .crop(PixelRegion::new(2, 2, 4, 4))
+            .crop(BoundingBox::from_origin(
+                Point::new(2, 2),
+                Dimensions::new(4, 4),
+            ))
             .expect("crop")
             .expect("some overlap");
         let (w, h) = image::load_from_memory(&cropped)
@@ -412,7 +435,7 @@ mod tests {
     fn redact_wholly_outside_is_a_clean_no_op() {
         let mut buffer = ImageBuffer::open(&png(4, 4)).expect("open");
         buffer.redact(
-            PixelRegion::new(10, 10, 4, 4),
+            BoundingBox::from_origin(Point::new(10, 10), Dimensions::new(4, 4)),
             &ImageReplacement::Block {
                 color: Color::BLACK,
             },
@@ -431,7 +454,7 @@ mod tests {
         // A 2x2 block starting at (3,3) reaches one pixel past each edge; only the
         // single in-bounds pixel (3,3) must turn black, and (0,0) stays red.
         buffer.redact(
-            PixelRegion::new(3, 3, 2, 2),
+            BoundingBox::from_origin(Point::new(3, 3), Dimensions::new(2, 2)),
             &ImageReplacement::Block {
                 color: Color::BLACK,
             },
@@ -477,7 +500,7 @@ mod tests {
             "stored size, un-rotated"
         );
         buffer.redact(
-            PixelRegion::new(0, 0, 1, 1),
+            BoundingBox::from_origin(Point::new(0, 0), Dimensions::new(1, 1)),
             &ImageReplacement::Block {
                 color: Color::BLACK,
             },
@@ -514,7 +537,7 @@ mod tests {
         // Redact a pixel so the buffer is dirty (forces the re-encode path).
         let mut buffer = ImageBuffer::open(&bytes).expect("open");
         buffer.redact(
-            PixelRegion::new(0, 0, 2, 2),
+            BoundingBox::from_origin(Point::new(0, 0), Dimensions::new(2, 2)),
             &ImageReplacement::Block {
                 color: Color::BLACK,
             },
@@ -592,7 +615,7 @@ mod tests {
         let bytes = crate::test_util::tiff_with_gps();
         let mut buffer = ImageBuffer::open(&bytes).expect("open");
         buffer.redact(
-            PixelRegion::new(0, 0, 2, 2),
+            BoundingBox::from_origin(Point::new(0, 0), Dimensions::new(2, 2)),
             &ImageReplacement::Block {
                 color: Color::BLACK,
             },
@@ -650,7 +673,7 @@ mod tests {
 
         let mut buffer = ImageBuffer::open(&bytes).expect("open");
         buffer.redact(
-            PixelRegion::new(0, 0, 2, 2),
+            BoundingBox::from_origin(Point::new(0, 0), Dimensions::new(2, 2)),
             &ImageReplacement::Block {
                 color: Color::BLACK,
             },

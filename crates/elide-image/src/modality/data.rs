@@ -31,7 +31,7 @@ pub struct ImageData {
     #[cfg_attr(feature = "serde", serde(skip))]
     pub bytes: Bytes,
     /// Pixel dimensions of the encoded image.
-    pub dimensions: Dimensions,
+    pub dimensions: Dimensions<u32>,
     /// Original filename, when known.
     #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub filename: Option<HipStr<'static>>,
@@ -39,7 +39,7 @@ pub struct ImageData {
 
 impl ImageData {
     /// Wrap encoded bytes and their pixel dimensions; filename unset.
-    pub fn new(bytes: impl Into<Bytes>, dimensions: Dimensions) -> Self {
+    pub fn new(bytes: impl Into<Bytes>, dimensions: Dimensions<u32>) -> Self {
         Self {
             bytes: bytes.into(),
             dimensions,

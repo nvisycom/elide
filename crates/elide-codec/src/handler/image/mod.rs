@@ -39,7 +39,7 @@ mod tests {
     use elide_core::modality::{DataReader, DataWriter};
     use elide_core::redaction::Redactions;
     use elide_image::modality::{Image, ImageLocation, ImageReplacement};
-    use elide_image::primitive::{BoundingBox, Color, Point};
+    use elide_image::primitive::{BoundingBox, Color, Dimensions, Point};
     use image::{DynamicImage, GenericImageView, RgbaImage};
 
     use super::png_handler::PngLoader;
@@ -59,7 +59,10 @@ mod tests {
     }
 
     fn bbox(x: f64, y: f64, w: f64, h: f64) -> ImageLocation {
-        ImageLocation::new(BoundingBox::from_origin_size(Point::new(x, y), w, h))
+        ImageLocation::new(BoundingBox::from_origin(
+            Point::new(x, y),
+            Dimensions::new(w, h),
+        ))
     }
 
     #[tokio::test]
