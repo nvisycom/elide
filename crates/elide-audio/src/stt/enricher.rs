@@ -9,7 +9,7 @@
 //! spoken in (see [`Audio`]'s [`TextRecognizable`] impl).
 //!
 //! [`AudioData`]: crate::modality::AudioData
-//! [`artifact`]: elide_core::recognition::RecognizerContext::artifact
+//! [`artifact`]: elide_core::recognition::Subject::artifact
 //! [`SttBackend`]: super::SttBackend
 //! [`Audio`]: crate::modality::Audio
 //! [`TextRecognizable`]: elide_core::modality::TextRecognizable
@@ -18,14 +18,14 @@ use std::sync::Arc;
 
 use derive_builder::Builder;
 use elide_core::enrichment::{Enricher, Enrichment};
-use elide_core::recognition::{RecognizerContext, RecognizerId};
+use elide_core::recognition::{RecognizerContext, RecognizerId, Subject};
 use elide_core::{Error, Result};
 use hipstr::HipStr;
 
 #[cfg(any(test, feature = "test-utils"))]
 use super::MockBackend;
 use super::{SttBackend, SttRequest};
-use crate::modality::{Audio, AudioData, Transcription};
+use crate::modality::{Audio, Transcription};
 
 /// An [`Enricher<Audio>`] that transcribes the clip.
 ///
@@ -110,23 +110,20 @@ impl Enricher<Audio> for SttEnricher {
 
     async fn enrich(
         &self,
-        data: &AudioData,
-        ctx: &mut RecognizerContext<'_, Audio>,
+        subject: &mut Subject<Audio>,
+        ctx: &RecognizerContext<'_, Audio>,
     ) -> Result<Enrichment> {
         // Already transcribed (a second enricher pass, or a restored artifact on
         // a re-run): leave it, so re-recognition never re-invokes the model.
-        if ctx.is_enriched() {
+        if subject.is_enriched() {
             return Ok(Enrichment::none());
         }
-        let mut request = SttRequest::new(&data.bytes);
-        if let Some(name) = data.filename.as_deref() {
-            request = request.with_filename(name);
-        }
+        let mut request = SttRequest::new(&subject.data().bytes);
         if let Some(id) = ctx.correlation_id() {
             request = request.with_correlation_id(id);
         }
         let response = self.backend.transcribe(request).await?;
-        ctx.set_artifact(Transcription::new(response.segments));
+        subject.set_artifact(Transcription::new(response.segments));
         // The transcription model vouches for its own identity; STT reports no
         // token counts today.
         #[cfg(feature = "usage")]
@@ -143,7 +140,7 @@ mod tests {
     use elide_core::recognition::Scope;
 
     use super::*;
-    use crate::modality::{TranscriptSegment, TranscriptWord};
+    use crate::modality::{AudioData, TranscriptSegment, TranscriptWord};
     use crate::primitive::TimeSpan;
     use crate::stt::SttResponse;
 
@@ -168,9 +165,10 @@ mod tests {
 
         let data = AudioData::new(b"audio".to_vec());
         let scope = Scope::new();
-        let mut ctx = RecognizerContext::new(&scope);
+        let ctx = RecognizerContext::new(&scope);
+        let mut subject = Subject::new(data);
 
-        let _enrichment = enricher.enrich(&data, &mut ctx).await.unwrap();
+        let _enrichment = enricher.enrich(&mut subject, &ctx).await.unwrap();
 
         // The enrichment reports the transcription model that ran, taken from
         // the backend's `provenance()`.
@@ -181,9 +179,12 @@ mod tests {
         }
 
         // Recognizers read the transcript from the call's artifact.
-        assert_eq!(Audio::as_text(&data, ctx.artifact()), Some("hi Alice"));
+        assert_eq!(
+            Audio::as_text(subject.data(), subject.artifact()),
+            Some("hi Alice")
+        );
         // "Alice" is at bytes 3..8; locate resolves it to the word's time.
-        let loc = Audio::locate(3..8, &data, ctx.artifact()).expect("range resolves");
+        let loc = Audio::locate(3..8, subject.data(), subject.artifact()).expect("range resolves");
         assert_eq!(loc.span.start_millis(), 300);
         assert_eq!(loc.span.end_millis(), 900);
     }
@@ -225,18 +226,25 @@ mod tests {
             .expect("builder succeeds");
         let data = AudioData::new(b"audio".to_vec());
         let scope = Scope::new();
+        let ctx = RecognizerContext::new(&scope);
 
         // First pass: empty artifact → the backend runs once.
-        let mut ctx = RecognizerContext::new(&scope);
-        enricher.enrich(&data, &mut ctx).await.unwrap();
+        let mut subject = Subject::new(data.clone());
+        enricher.enrich(&mut subject, &ctx).await.unwrap();
 
-        // Re-run: seed the context with the prior (restored) artifact. The
+        // Re-run: seed the subject with the prior (restored) artifact. The
         // enricher self-skips, transcribe is not called again, enforced by the
         // `.times(1)` above, and the seeded transcript is still readable.
-        let restored = ctx.artifact().cloned().expect("the first pass enriched");
-        let mut ctx = RecognizerContext::new(&scope).with_artifact(restored);
-        enricher.enrich(&data, &mut ctx).await.unwrap();
-        assert_eq!(Audio::as_text(&data, ctx.artifact()), Some("hi Alice"));
+        let restored = subject
+            .artifact()
+            .cloned()
+            .expect("the first pass enriched");
+        let mut subject = Subject::new(data).with_artifact(restored);
+        enricher.enrich(&mut subject, &ctx).await.unwrap();
+        assert_eq!(
+            Audio::as_text(subject.data(), subject.artifact()),
+            Some("hi Alice")
+        );
     }
 
     /// A restored *empty* `Transcription`, a clip a prior pass transcribed to
@@ -260,13 +268,14 @@ mod tests {
             .expect("builder succeeds");
         let data = AudioData::new(b"audio".to_vec());
         let scope = Scope::new();
+        let ctx = RecognizerContext::new(&scope);
 
         // Seed an empty Transcription, the recorded result of a prior pass that
         // found silence. The enricher must treat it as enriched and skip.
-        let mut ctx = RecognizerContext::new(&scope).with_artifact(Transcription::default());
-        enricher.enrich(&data, &mut ctx).await.unwrap();
+        let mut subject = Subject::new(data).with_artifact(Transcription::default());
+        enricher.enrich(&mut subject, &ctx).await.unwrap();
         // A present-but-empty artifact reads as `Some("")`, not `None`: the clip
         // *was* enriched (to silence), which is distinct from never-transcribed.
-        assert_eq!(Audio::as_text(&data, ctx.artifact()), Some(""));
+        assert_eq!(Audio::as_text(subject.data(), subject.artifact()), Some(""));
     }
 }

@@ -20,10 +20,10 @@ use std::ops::Range;
 use std::path::Path;
 
 use elide_core::modality::Modality;
-use elide_core::modality::text::{Text, TextData};
-use elide_core::recognition::RecognizerContext;
+use elide_core::modality::text::Text;
+use elide_core::recognition::{RecognizerContext, Subject};
 use elide_core::{Error, ErrorKind, Result};
-use elide_image::modality::{Image, ImageData};
+use elide_image::modality::Image;
 use minijinja::{Environment, context};
 
 use super::Prompt;
@@ -89,8 +89,8 @@ impl<M> Jinja2Prompt<M> {
 }
 
 impl Prompt<Text> for Jinja2Prompt<Text> {
-    fn build(&self, data: &TextData, ctx: &RecognizerContext<'_, Text>) -> String {
-        let text = data.text.as_str();
+    fn build(&self, subject: &Subject<Text>, ctx: &RecognizerContext<'_, Text>) -> String {
+        let text = subject.data().text.as_str();
         let hints: Vec<_> = ctx
             .inclusions()
             .iter()
@@ -119,7 +119,7 @@ impl Prompt<Text> for Jinja2Prompt<Text> {
 }
 
 impl Prompt<Image> for Jinja2Prompt<Image> {
-    fn build(&self, _data: &ImageData, ctx: &RecognizerContext<'_, Image>) -> String {
+    fn build(&self, _subject: &Subject<Image>, ctx: &RecognizerContext<'_, Image>) -> String {
         let hints: Vec<_> = ctx
             .inclusions()
             .iter()

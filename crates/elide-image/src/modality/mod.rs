@@ -59,7 +59,7 @@ impl TextRecognizable for Image {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::recognition::{RecognizerContext, Scope};
+    use elide_core::recognition::Subject;
 
     use super::*;
     use crate::primitive::{BoundingBox, Dimensions, Point};
@@ -73,46 +73,40 @@ mod tests {
 
     #[test]
     fn as_text_is_none_without_ocr() {
-        let data = ImageData::new(bytes::Bytes::new(), Dimensions::new(10, 10));
-        let scope = Scope::new();
-        let ctx = RecognizerContext::<Image>::new(&scope);
-        assert_eq!(Image::as_text(&data, ctx.artifact()), None);
+        let subject = Subject::<Image>::new(ImageData::new(bytes::Bytes::new()));
+        assert_eq!(Image::as_text(subject.data(), subject.artifact()), None);
     }
 
-    /// A context whose artifacts carry a one-block, one-word OCR result.
-    fn ocr_context(scope: &Scope) -> RecognizerContext<'_, Image> {
+    /// A subject whose artifact carries a one-block, one-word OCR result.
+    fn ocr_subject() -> Subject<Image> {
         let block = LayoutBlock::new(loc(0.0, 0.0, 100.0, 20.0), "Alice")
             .with_words(vec![LayoutWord::new(loc(0.0, 0.0, 100.0, 20.0), "Alice")]);
-        let mut ctx = RecognizerContext::new(scope);
-        ctx.set_artifact(Layout::new(vec![block]));
-        ctx
+        Subject::new(ImageData::new(bytes::Bytes::new())).with_artifact(Layout::new(vec![block]))
     }
 
     #[test]
     fn as_text_reads_the_ocr_artifact() {
-        let data = ImageData::new(bytes::Bytes::new(), Dimensions::new(10, 10));
-        let scope = Scope::new();
-        let ctx = ocr_context(&scope);
-        assert_eq!(Image::as_text(&data, ctx.artifact()), Some("Alice"));
+        let subject = ocr_subject();
+        assert_eq!(
+            Image::as_text(subject.data(), subject.artifact()),
+            Some("Alice")
+        );
     }
 
     #[test]
     fn locate_resolves_a_range_to_the_word_box() {
-        let data = ImageData::new(bytes::Bytes::new(), Dimensions::new(10, 10));
-        let scope = Scope::new();
-        let ctx = ocr_context(&scope);
+        let subject = ocr_subject();
         // "Alice" is bytes 0..5.
-        let region = Image::locate(0..5, &data, ctx.artifact()).expect("range resolves");
+        let region =
+            Image::locate(0..5, subject.data(), subject.artifact()).expect("range resolves");
         assert_eq!(region.bounding_box.min.x, 0.0);
         assert_eq!(region.bounding_box.max.x, 100.0);
     }
 
     #[test]
     fn locate_without_ocr_is_none() {
-        let data = ImageData::new(bytes::Bytes::new(), Dimensions::new(10, 10));
-        let scope = Scope::new();
-        let ctx = RecognizerContext::<Image>::new(&scope);
+        let subject = Subject::<Image>::new(ImageData::new(bytes::Bytes::new()));
         // No OCR layout: the range can't be placed, so no location.
-        assert!(Image::locate(0..5, &data, ctx.artifact()).is_none());
+        assert!(Image::locate(0..5, subject.data(), subject.artifact()).is_none());
     }
 }

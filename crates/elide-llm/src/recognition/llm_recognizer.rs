@@ -12,7 +12,7 @@ use std::sync::Arc;
 use derive_builder::Builder;
 #[cfg(feature = "usage")]
 use elide_core::primitive::ModelUsage;
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId};
+use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId, Subject};
 use elide_core::{Error, Result};
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -146,17 +146,20 @@ impl<M: LlmModality> Recognizer<M> for LlmRecognizer<M> {
 
     async fn recognize(
         &self,
-        data: &M::Data,
+        subject: &Subject<M>,
         ctx: &RecognizerContext<'_, M>,
     ) -> Result<Recognition<M>> {
-        let prompt = self.prompt.build(data, ctx);
-        let response = self.backend.extract(LlmRequest::new(&prompt, data)).await?;
+        let prompt = self.prompt.build(subject, ctx);
+        let response = self
+            .backend
+            .extract(LlmRequest::new(&prompt, subject.data()))
+            .await?;
         // The backend names the model it called; token counts are whatever the
         // response carries (empty when the backend cannot surface them).
         #[cfg(feature = "usage")]
         let model_usage =
             ModelUsage::new(self.backend.model().to_owned()).with_tokens(response.tokens);
-        let entities = M::lift(response.candidates, data);
+        let entities = M::lift(response.candidates, subject.data());
         let recognition = Recognition::new(entities);
         #[cfg(feature = "usage")]
         let recognition = recognition.with_model_usage(model_usage);

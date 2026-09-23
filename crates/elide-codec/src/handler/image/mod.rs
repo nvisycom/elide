@@ -38,6 +38,7 @@ pub use self::tiff_handler::{format as tiff_format, format_with as tiff_format_w
 mod tests {
     use elide_core::modality::{DataReader, DataWriter};
     use elide_core::redaction::Redactions;
+    use elide_image::ImageBuffer;
     use elide_image::modality::{Image, ImageLocation, ImageReplacement};
     use elide_image::primitive::{BoundingBox, Color, Dimensions, Point};
     use image::{DynamicImage, GenericImageView, RgbaImage};
@@ -70,8 +71,8 @@ mod tests {
         let mut h = PngLoader::default().decode(white_png()).await.unwrap();
         assert_eq!(h.format().as_str(), "elide.image.png");
         let chunk = h.read_next().await.unwrap().expect("one chunk");
-        assert_eq!(chunk.data.dimensions.width, 4);
-        assert_eq!(chunk.data.dimensions.height, 4);
+        let dims = ImageBuffer::open(&chunk.data.bytes).unwrap().dimensions();
+        assert_eq!((dims.width, dims.height), (4, 4));
         // The stream yields exactly one full-frame chunk.
         assert!(h.read_next().await.unwrap().is_none());
     }
@@ -84,7 +85,8 @@ mod tests {
             .await
             .unwrap()
             .expect("crop");
-        assert_eq!((data.dimensions.width, data.dimensions.height), (2, 2));
+        let dims = ImageBuffer::open(&data.bytes).unwrap().dimensions();
+        assert_eq!((dims.width, dims.height), (2, 2));
         // An off-image region reads nothing.
         assert!(
             h.read_at(&bbox(99.0, 99.0, 2.0, 2.0))

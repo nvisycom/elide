@@ -11,7 +11,7 @@
 use elide_core::entity::builtins;
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::recognition::annotation::{Annotations, Inclusion};
-use elide_core::recognition::{RecognizerContext, Scope};
+use elide_core::recognition::{RecognizerContext, Scope, Subject};
 use elide_image::modality::{Image, ImageData, ImageLocation};
 use elide_image::primitive::{BoundingBox, Dimensions, Point};
 use elide_llm::prompt::{Jinja2Prompt, Prompt};
@@ -35,8 +35,9 @@ fn text_prompt_renders_template() {
     let scope = Scope::new().with_tags(vec!["medical".to_owned(), "gdpr-request".to_owned()]);
     let annotations: Annotations<Text> = Annotations::new().with_inclusions(vec![inclusion]);
     let ctx = RecognizerContext::new(&scope).with_annotations(&annotations);
+    let subject = Subject::new(data);
 
-    let rendered = prompt.build(&data, &ctx);
+    let rendered = prompt.build(&subject, &ctx);
     assert!(rendered.contains(body), "source text missing: {rendered}");
     assert!(
         rendered.contains("Document tags: medical, gdpr-request"),
@@ -62,7 +63,6 @@ fn image_prompt_renders_template() {
     let prompt = Jinja2Prompt::<Image>::from_template(IMAGE_J2).expect("image.j2 compiles");
 
     let bytes = b"\x89PNG\r\n\x1a\nfake-image-bytes".to_vec();
-    let dims = Dimensions::new(640, 480);
 
     let inclusion = Inclusion::<Image>::new(ImageLocation::new(BoundingBox::from_origin(
         Point::new(10.0, 20.0),
@@ -71,12 +71,13 @@ fn image_prompt_renders_template() {
     .with_name("uploader-face")
     .with_label(builtins::PERSON_NAME.to_ref());
 
-    let data = ImageData::new(bytes, dims);
+    let data = ImageData::new(bytes);
     let scope = Scope::new().with_tags(vec!["badge".to_owned()]);
     let annotations: Annotations<Image> = Annotations::new().with_inclusions(vec![inclusion]);
     let ctx = RecognizerContext::new(&scope).with_annotations(&annotations);
+    let subject = Subject::new(data);
 
-    let rendered = prompt.build(&data, &ctx);
+    let rendered = prompt.build(&subject, &ctx);
     assert!(
         rendered.contains("Tags: badge"),
         "tags `| join` not rendered: {rendered}",

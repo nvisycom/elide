@@ -9,7 +9,7 @@
 //! [`TextRecognizable`] impl).
 //!
 //! [`ImageData`]: crate::modality::ImageData
-//! [`artifact`]: elide_core::recognition::RecognizerContext::artifact
+//! [`artifact`]: elide_core::recognition::Subject::artifact
 //! [`OcrBackend`]: super::OcrBackend
 //! [`Image`]: crate::modality::Image
 //! [`TextRecognizable`]: elide_core::modality::TextRecognizable
@@ -18,14 +18,14 @@ use std::sync::Arc;
 
 use derive_builder::Builder;
 use elide_core::enrichment::{Enricher, Enrichment};
-use elide_core::recognition::{RecognizerContext, RecognizerId};
+use elide_core::recognition::{RecognizerContext, RecognizerId, Subject};
 use elide_core::{Error, Result};
 use hipstr::HipStr;
 
 #[cfg(any(test, feature = "test-utils"))]
 use super::MockBackend;
 use super::{OcrBackend, OcrRequest};
-use crate::modality::{Image, ImageData, Layout};
+use crate::modality::{Image, Layout};
 
 /// An [`Enricher<Image>`] that OCRs the image.
 ///
@@ -110,23 +110,20 @@ impl Enricher<Image> for OcrEnricher {
 
     async fn enrich(
         &self,
-        data: &ImageData,
-        ctx: &mut RecognizerContext<'_, Image>,
+        subject: &mut Subject<Image>,
+        ctx: &RecognizerContext<'_, Image>,
     ) -> Result<Enrichment> {
         // Already OCR'd (a second enricher pass, or a restored artifact on a
         // re-run): leave it, so re-recognition never re-invokes the model.
-        if ctx.is_enriched() {
+        if subject.is_enriched() {
             return Ok(Enrichment::none());
         }
-        let mut request = OcrRequest::new(&data.bytes);
-        if let Some(name) = data.filename.as_deref() {
-            request = request.with_filename(name);
-        }
+        let mut request = OcrRequest::new(&subject.data().bytes);
         if let Some(id) = ctx.correlation_id() {
             request = request.with_correlation_id(id);
         }
         let response = self.backend.recognize(request).await?;
-        ctx.set_artifact(Layout::new(response.blocks));
+        subject.set_artifact(Layout::new(response.blocks));
         // The OCR model vouches for its own identity; OCR reports no token
         // counts today.
         #[cfg(feature = "usage")]
@@ -143,7 +140,7 @@ mod tests {
     use elide_core::recognition::Scope;
 
     use super::*;
-    use crate::modality::{ImageLocation, LayoutBlock, LayoutWord};
+    use crate::modality::{ImageData, ImageLocation, LayoutBlock, LayoutWord};
     use crate::ocr::OcrResponse;
     use crate::primitive::{BoundingBox, Dimensions, Point};
 
@@ -173,16 +170,21 @@ mod tests {
         // so two OCR enrichers can be told apart in the usage report.
         assert_eq!(enricher.id().name, "ocr");
 
-        let data = ImageData::new(b"image".to_vec(), Dimensions::new(100, 20));
+        let data = ImageData::new(b"image".to_vec());
         let scope = Scope::new();
-        let mut ctx = RecognizerContext::new(&scope);
+        let ctx = RecognizerContext::new(&scope);
+        let mut subject = Subject::new(data);
 
-        enricher.enrich(&data, &mut ctx).await.unwrap();
+        enricher.enrich(&mut subject, &ctx).await.unwrap();
 
         // Recognizers read the OCR text from the call's artifact.
-        assert_eq!(Image::as_text(&data, ctx.artifact()), Some("hi Alice"));
+        assert_eq!(
+            Image::as_text(subject.data(), subject.artifact()),
+            Some("hi Alice")
+        );
         // "Alice" is at bytes 3..8; locate resolves it to the word's box.
-        let region = Image::locate(3..8, &data, ctx.artifact()).expect("range resolves");
+        let region =
+            Image::locate(3..8, subject.data(), subject.artifact()).expect("range resolves");
         assert_eq!(region.bounding_box.min.x, 40.0);
         assert_eq!(region.bounding_box.max.x, 100.0);
     }
@@ -222,20 +224,27 @@ mod tests {
             .with_backend(backend)
             .build()
             .expect("builder succeeds");
-        let data = ImageData::new(b"image".to_vec(), Dimensions::new(100, 20));
+        let data = ImageData::new(b"image".to_vec());
         let scope = Scope::new();
+        let ctx = RecognizerContext::new(&scope);
 
         // First pass: empty artifact → the backend runs once.
-        let mut ctx = RecognizerContext::new(&scope);
-        enricher.enrich(&data, &mut ctx).await.unwrap();
+        let mut subject = Subject::new(data.clone());
+        enricher.enrich(&mut subject, &ctx).await.unwrap();
 
-        // Re-run: seed the context with the prior (restored) artifact. The
+        // Re-run: seed the subject with the prior (restored) artifact. The
         // enricher self-skips, recognize is not called again, enforced by the
         // `.times(1)` above, and the seeded OCR text is still readable.
-        let restored = ctx.artifact().cloned().expect("the first pass enriched");
-        let mut ctx = RecognizerContext::new(&scope).with_artifact(restored);
-        enricher.enrich(&data, &mut ctx).await.unwrap();
-        assert_eq!(Image::as_text(&data, ctx.artifact()), Some("hi Alice"));
+        let restored = subject
+            .artifact()
+            .cloned()
+            .expect("the first pass enriched");
+        let mut subject = Subject::new(data).with_artifact(restored);
+        enricher.enrich(&mut subject, &ctx).await.unwrap();
+        assert_eq!(
+            Image::as_text(subject.data(), subject.artifact()),
+            Some("hi Alice")
+        );
     }
 
     /// A restored *empty* `Layout`, a payload a prior pass OCR'd to no text,
@@ -256,15 +265,16 @@ mod tests {
             .with_backend(backend)
             .build()
             .expect("builder succeeds");
-        let data = ImageData::new(b"image".to_vec(), Dimensions::new(100, 20));
+        let data = ImageData::new(b"image".to_vec());
         let scope = Scope::new();
+        let ctx = RecognizerContext::new(&scope);
 
         // Seed an empty Layout, the recorded result of a prior pass that found
         // no text. The enricher must treat it as already-enriched and skip.
-        let mut ctx = RecognizerContext::new(&scope).with_artifact(Layout::default());
-        enricher.enrich(&data, &mut ctx).await.unwrap();
+        let mut subject = Subject::new(data).with_artifact(Layout::default());
+        enricher.enrich(&mut subject, &ctx).await.unwrap();
         // A present-but-empty artifact reads as `Some("")`, not `None`: the image
         // *was* OCR'd (to no text), which is distinct from never-OCR'd.
-        assert_eq!(Image::as_text(&data, ctx.artifact()), Some(""));
+        assert_eq!(Image::as_text(subject.data(), subject.artifact()), Some(""));
     }
 }

@@ -152,7 +152,6 @@ macro_rules! impl_image_handler {
                 // may leave the process (e.g. a VLM request).
                 let data = ::elide_image::modality::ImageData::new(
                     self.buffer.encode(self.policy)?,
-                    dims,
                 );
                 self.yielded = true;
                 Ok(Some(::elide_core::modality::Chunk {
@@ -175,10 +174,10 @@ macro_rules! impl_image_handler {
                 let Some(region) = location.bounding_box.to_pixels(dims) else {
                     return Ok(None);
                 };
-                let region_dims = region.dimensions();
-                Ok(self.buffer.crop(region)?.map(|bytes| {
-                    ::elide_image::modality::ImageData::new(bytes, region_dims)
-                }))
+                self.buffer
+                    .crop(region)
+                    .map(|raster| raster.encode())
+                    .transpose()
             }
         }
 

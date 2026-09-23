@@ -10,7 +10,9 @@ use elide_core::Result;
 use elide_core::entity::audit::{AuditEvent, AuditKind, AuditLog, PatternEvent};
 use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
 use elide_core::primitive::{Confidence, ConfidenceThreshold};
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId, Scope};
+use elide_core::recognition::{
+    Recognition, Recognizer, RecognizerContext, RecognizerId, Scope, Subject,
+};
 
 use crate::support::{SourceRef, Text, TextData, TextLocation};
 
@@ -65,7 +67,7 @@ impl Recognizer<Text> for Fixed {
 
     async fn recognize(
         &self,
-        _data: &TextData,
+        _subject: &Subject<Text>,
         _ctx: &RecognizerContext<'_, Text>,
     ) -> Result<Recognition<Text>> {
         Ok(self.0.clone().into())

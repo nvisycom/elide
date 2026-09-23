@@ -18,7 +18,7 @@ use elide_core::Result;
 use elide_core::entity::audit::{AuditEvent, Refinement};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::LanguageTag;
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId};
+use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId, Subject};
 
 use crate::{Context, Enhancer};
 
@@ -65,10 +65,10 @@ where
 
     async fn recognize(
         &self,
-        data: &M::Data,
+        subject: &Subject<M>,
         ctx: &RecognizerContext<'_, M>,
     ) -> Result<Recognition<M>> {
-        let recognition = self.inner.recognize(data, ctx).await?;
+        let recognition = self.inner.recognize(subject, ctx).await?;
         #[cfg(feature = "usage")]
         let model_usage = recognition.model_usage;
         let mut entities = recognition.entities;
@@ -85,7 +85,7 @@ where
         // No recognizable text at this chunk (an un-transcribed clip, an
         // un-OCR'd image): there is nothing for context to enhance against, so
         // return the wrapped recognizer's entities unchanged.
-        let Some(text) = M::as_text(data, ctx.artifact()) else {
+        let Some(text) = M::as_text(subject.data(), subject.artifact()) else {
             let recognition = Recognition::new(entities);
             #[cfg(feature = "usage")]
             let recognition = match model_usage {
@@ -94,13 +94,13 @@ where
             };
             return Ok(recognition);
         };
-        // A hint is a text annotation (a header, a field name). Read each
-        // through the modality's text view; for text/tabular that is the
-        // hint's own payload. Hints with no text view are skipped.
-        let hint_texts: Vec<&str> = ctx
-            .context_hints
+        // A hint pairs a location with its content (a header, a field name).
+        // Read each hint's content through the modality's text view for keyword
+        // matching; hints with no text view are skipped.
+        let hint_texts: Vec<&str> = subject
+            .hints
             .iter()
-            .filter_map(|h| M::as_text(&h.data, ctx.artifact()))
+            .filter_map(|h| M::as_text(&h.data, subject.artifact()))
             .collect();
         // Only *asserted* languages select which per-language context fires; a
         // *detected* language does not. Detection is unreliable on the short,
@@ -120,20 +120,20 @@ where
         // has them, Text/Tabular tokenize into their artifact, so lemma-aware
         // keyword boosts fire even where a token's lemma differs from its
         // surface text. Modalities that do not tokenize match on text alone.
-        if let Some(tokens) = M::as_tokens(ctx.artifact()) {
+        if let Some(tokens) = M::as_tokens(subject.artifact()) {
             context = context.with_tokens(tokens);
         }
 
         let boosts = self.enhancer.enhance(&mut entities, &context);
         for boost in boosts {
-            let hint = boost.hint_index.map(|i| ctx.context_hints[i].clone());
+            let hint = boost.hint_index.map(|i| subject.hints[i].hint.clone());
             // Where the boosting keyword sits: a hint carries its own
             // location; an in-text match resolves its keyword range through
             // the modality (a pixel box / time span), mirroring how the entity
             // itself was located. `None` when it can't be placed.
             let location = match (&hint, boost.keyword_range) {
                 (Some(h), _) => Some(h.location.clone()),
-                (None, Some(range)) => M::locate(range, data, ctx.artifact()),
+                (None, Some(range)) => M::locate(range, subject.data(), subject.artifact()),
                 (None, None) => None,
             };
             let entity = &mut entities[boost.entity_index];

@@ -62,60 +62,52 @@ impl TextRecognizable for Audio {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::recognition::{RecognizerContext, Scope};
+    use elide_core::recognition::Subject;
 
     use super::{TranscriptSegment, TranscriptWord, *};
     use crate::primitive::TimeSpan;
 
     #[test]
     fn as_text_is_none_without_a_transcript() {
-        let data = AudioData::new(bytes::Bytes::new());
-        let scope = Scope::new();
-        let ctx = RecognizerContext::<Audio>::new(&scope);
-        assert_eq!(Audio::as_text(&data, ctx.artifact()), None);
+        let subject = Subject::<Audio>::new(AudioData::new(bytes::Bytes::new()));
+        assert_eq!(Audio::as_text(subject.data(), subject.artifact()), None);
     }
 
-    /// A context whose artifacts carry the phone-number transcript.
-    fn phone_context(scope: &Scope) -> RecognizerContext<'_, Audio> {
+    /// A subject whose artifact carries the phone-number transcript.
+    fn phone_subject() -> Subject<Audio> {
         let segment =
             TranscriptSegment::new(TimeSpan::from_millis(0, 1_800), "Call Alice at 555-1234")
                 .with_words(vec![TranscriptWord::new(
                     TimeSpan::from_millis(1_100, 1_800),
                     "555-1234",
                 )]);
-        let mut ctx = RecognizerContext::new(scope);
-        ctx.set_artifact(Transcription::new(vec![segment]));
-        ctx
+        Subject::new(AudioData::new(bytes::Bytes::new()))
+            .with_artifact(Transcription::new(vec![segment]))
     }
 
     #[test]
     fn as_text_reads_the_transcript_artifact() {
-        let data = AudioData::new(bytes::Bytes::new());
-        let scope = Scope::new();
-        let ctx = phone_context(&scope);
+        let subject = phone_subject();
         assert_eq!(
-            Audio::as_text(&data, ctx.artifact()),
+            Audio::as_text(subject.data(), subject.artifact()),
             Some("Call Alice at 555-1234")
         );
     }
 
     #[test]
     fn locate_resolves_a_transcript_range_to_audio_time() {
-        let data = AudioData::new(bytes::Bytes::new());
-        let scope = Scope::new();
-        let ctx = phone_context(&scope);
+        let subject = phone_subject();
         // "555-1234" is at bytes 14..22.
-        let loc = Audio::locate(14..22, &data, ctx.artifact()).expect("range resolves");
+        let loc =
+            Audio::locate(14..22, subject.data(), subject.artifact()).expect("range resolves");
         assert_eq!(loc.span.start_millis(), 1_100);
         assert_eq!(loc.span.end_millis(), 1_800);
     }
 
     #[test]
     fn locate_without_transcript_is_none() {
-        let data = AudioData::new(bytes::Bytes::new());
-        let scope = Scope::new();
-        let ctx = RecognizerContext::<Audio>::new(&scope);
+        let subject = Subject::<Audio>::new(AudioData::new(bytes::Bytes::new()));
         // No transcript: the range can't be placed, so no location.
-        assert!(Audio::locate(0..5, &data, ctx.artifact()).is_none());
+        assert!(Audio::locate(0..5, subject.data(), subject.artifact()).is_none());
     }
 }

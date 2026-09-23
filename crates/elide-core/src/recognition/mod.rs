@@ -12,6 +12,7 @@ pub mod annotation;
 mod context;
 mod label;
 mod scope;
+mod subject;
 
 use std::fmt;
 
@@ -22,6 +23,7 @@ use serde::{Deserialize, Serialize};
 pub use self::context::RecognizerContext;
 pub use self::label::LabelMap;
 pub use self::scope::{Scope, ScopeMetadata};
+pub use self::subject::Subject;
 use crate::entity::Entity;
 use crate::error::Result;
 use crate::modality::Modality;
@@ -77,9 +79,10 @@ impl fmt::Display for RecognizerId {
 /// fusion step in `elide`; pruning and orchestration belong to a
 /// higher layer, not to the recognizer itself.
 ///
-/// Per call, a recognizer receives the modality payload (`data`) plus a
-/// [`RecognizerContext<M>`] (the call's languages, jurisdictions, label
-/// and annotation hints), and returns the entities it found.
+/// Per call, a recognizer receives the [`Subject`] (the chunk's payload plus
+/// its enrichment, detected languages, and hints) and a
+/// [`RecognizerContext<M>`] (the analysis-wide languages, jurisdictions, label
+/// and annotation state), and returns the entities it found.
 ///
 /// [`Entity`]: crate::entity::Entity
 /// [`AuditEvent`]: crate::entity::audit::AuditEvent
@@ -91,12 +94,12 @@ where
     /// This recognizer's identity (name + version).
     fn id(&self) -> RecognizerId;
 
-    /// Inspect `data` in the given context and return the recognized
+    /// Inspect the [`Subject`] in the given context and return the recognized
     /// entities, in modality-local coordinates, together with any
     /// model-usage detail the call incurred (see [`Recognition`]).
     async fn recognize(
         &self,
-        data: &M::Data,
+        subject: &Subject<M>,
         ctx: &RecognizerContext<'_, M>,
     ) -> Result<Recognition<M>>;
 }
@@ -116,10 +119,10 @@ where
 
     async fn recognize(
         &self,
-        data: &M::Data,
+        subject: &Subject<M>,
         ctx: &RecognizerContext<'_, M>,
     ) -> Result<Recognition<M>> {
-        (**self).recognize(data, ctx).await
+        (**self).recognize(subject, ctx).await
     }
 }
 
@@ -143,10 +146,10 @@ where
 
     async fn recognize(
         &self,
-        data: &M::Data,
+        subject: &Subject<M>,
         ctx: &RecognizerContext<'_, M>,
     ) -> Result<Recognition<M>> {
-        (**self).recognize(data, ctx).await
+        (**self).recognize(subject, ctx).await
     }
 }
 

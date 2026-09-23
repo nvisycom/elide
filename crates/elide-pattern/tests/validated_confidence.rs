@@ -6,7 +6,7 @@
 use elide_core::entity::{LabelCatalog, builtins};
 use elide_core::modality::text::{Text, TextData};
 use elide_core::primitive::ConfidenceThreshold;
-use elide_core::recognition::{Recognizer, RecognizerContext, Scope};
+use elide_core::recognition::{Recognizer, RecognizerContext, Scope, Subject};
 use elide_pattern::PatternRecognizer;
 
 /// Scan `text` with the shipped patterns (no context enhancer) and return every
@@ -19,7 +19,8 @@ async fn card_confidences(text: &str) -> Vec<f32> {
     let data = TextData::new(text.to_owned());
     let scope = Scope::new().with_catalog(LabelCatalog::with_builtins());
     let ctx = RecognizerContext::<Text>::new(&scope);
-    Recognizer::<Text>::recognize(&recognizer, &data, &ctx)
+    let subject = Subject::new(data);
+    Recognizer::<Text>::recognize(&recognizer, &subject, &ctx)
         .await
         .expect("recognize")
         .entities

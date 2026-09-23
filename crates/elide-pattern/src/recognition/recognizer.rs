@@ -9,7 +9,7 @@ use elide_core::entity::audit::AuditEvent;
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::{Confidence, LanguageTag};
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId};
+use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId, Subject};
 use elide_core::{Error, ErrorKind, Result};
 // The external `regex` crate is aliased throughout because `Regex` is already
 // this crate's rule type (`super::regex::Regex`, imported below).
@@ -649,10 +649,9 @@ impl PatternRecognizer {
     fn build_entity<M: TextRecognizable>(
         &self,
         raw: RawMatch,
-        data: &M::Data,
-        ctx: &RecognizerContext<'_, M>,
+        subject: &Subject<M>,
     ) -> Option<Entity<M>> {
-        let location = M::locate(raw.range.clone(), data, ctx.artifact())?;
+        let location = M::locate(raw.range.clone(), subject.data(), subject.artifact())?;
         let event = AuditEvent::pattern("pattern", raw.confidence, location.clone(), raw.pattern);
         Some(
             Entity::builder()
@@ -675,12 +674,12 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
 
     async fn recognize(
         &self,
-        data: &M::Data,
+        subject: &Subject<M>,
         ctx: &RecognizerContext<'_, M>,
     ) -> Result<Recognition<M>> {
         // No recognizable text at this chunk (an un-transcribed clip, an
         // un-OCR'd image): nothing to match.
-        let Some(text) = M::as_text(data, ctx.artifact()) else {
+        let Some(text) = M::as_text(subject.data(), subject.artifact()) else {
             return Ok(Recognition::default());
         };
         let mut entities: Vec<Entity<M>> = Vec::new();
@@ -709,7 +708,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
                 };
                 let validation_ctx = ValidationContext {
                     countries: ctx.scope().countries.clone(),
-                    language: ctx.primary_language().cloned(),
+                    language: ctx.primary_language(subject).cloned(),
                 };
                 for m in pat.regex.find_iter(text) {
                     if let Some(validator) = pat.validator.as_ref()
@@ -718,7 +717,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
                         continue;
                     }
                     if let Some(entity) =
-                        self.build_entity::<M>(pat.raw_match(label.clone(), m.range()), data, ctx)
+                        self.build_entity::<M>(pat.raw_match(label.clone(), m.range()), subject)
                     {
                         entities.push(entity);
                     }
@@ -749,7 +748,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
                 }
                 let score = dict.term_scores[term_id - dict.term_start];
                 if let Some(entity) =
-                    self.build_entity::<M>(dict.raw_match(label.clone(), score, range), data, ctx)
+                    self.build_entity::<M>(dict.raw_match(label.clone(), score, range), subject)
                 {
                     entities.push(entity);
                 }

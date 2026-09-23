@@ -22,7 +22,7 @@ use elide_core::primitive::Usage;
 #[cfg(feature = "usage")]
 use elide_core::recognition::RecognizerId;
 use elide_core::recognition::annotation::{Annotations, Exclusion};
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Scope};
+use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Scope, Subject};
 use futures::future;
 
 use crate::layer::Layer;
@@ -163,8 +163,8 @@ impl<M: Modality> Analyzer<M> {
     /// [`analyze_stream`]: Self::analyze_stream
     async fn analyze_core(
         &self,
-        data: M::Data,
-        ctx: &mut RecognizerContext<'_, M>,
+        subject: &mut Subject<M>,
+        ctx: &RecognizerContext<'_, M>,
     ) -> Result<Analysis<M>> {
         // An empty catalog requests no entity types: detect nothing. Gate here,
         // the single choke point every `analyze`/`analyze_stream` entry funnels
@@ -174,7 +174,7 @@ impl<M: Modality> Analyzer<M> {
             // Detect nothing, but carry the seeded artifact through: a re-run
             // seeded with a prior OCR/transcript must report it back unchanged
             // so `drive` persists it, or the next re-run would re-enrich.
-            return Ok(Analysis::new(Vec::new()).with_artifact(ctx.artifact().cloned()));
+            return Ok(Analysis::new(Vec::new()).with_artifact(subject.artifact().cloned()));
         }
         // Usage accumulates in run order: enrichers (sequential) first, then
         // recognizers.
@@ -183,7 +183,7 @@ impl<M: Modality> Analyzer<M> {
         for enricher in &self.enrichers {
             #[cfg(feature = "usage")]
             let start = Instant::now();
-            let enrichment = enricher.enrich(&data, ctx).await?;
+            let enrichment = enricher.enrich(subject, ctx).await?;
             // An enricher yields context, not counted entities, so its usage
             // carries a duration but no count.
             #[cfg(feature = "usage")]
@@ -198,12 +198,12 @@ impl<M: Modality> Analyzer<M> {
             let _ = enrichment;
         }
         #[cfg(feature = "usage")]
-        let (mut entities, recognizer_usage) = self.recognize(&data, ctx).await?;
+        let (mut entities, recognizer_usage) = self.recognize(subject, ctx).await?;
         #[cfg(not(feature = "usage"))]
-        let mut entities = self.recognize(&data, ctx).await?;
+        let mut entities = self.recognize(subject, ctx).await?;
         #[cfg(feature = "usage")]
         usage.extend(recognizer_usage);
-        ctx.stamp_languages(&mut entities);
+        ctx.stamp_languages(subject, &mut entities);
         let reduced = self.reduce(entities);
         // Restrict the *output* to the requested catalog only after
         // reconciliation, so a strong out-of-catalog detection can subsume a
@@ -212,7 +212,7 @@ impl<M: Modality> Analyzer<M> {
         let entities = Self::apply_exclusions(in_catalog, ctx.exclusions());
         // Carry the enrichment artifact out with the entities so it can be
         // persisted and restored for a re-run without re-enriching.
-        let analysis = Analysis::new(entities).with_artifact(ctx.artifact().cloned());
+        let analysis = Analysis::new(entities).with_artifact(subject.artifact().cloned());
         #[cfg(feature = "usage")]
         let analysis = analysis.with_usage(usage);
         Ok(analysis)
@@ -288,22 +288,30 @@ impl<M: Modality> Analyzer<M> {
         scope: &Scope,
         annotations: &Annotations<M>,
     ) -> Result<Analysis<M>> {
-        let mut ctx = RecognizerContext::new(scope).with_annotations(annotations);
-        self.analyze_core(data, &mut ctx).await
+        let ctx = RecognizerContext::new(scope).with_annotations(annotations);
+        let mut subject = Subject::new(data);
+        self.analyze_core(&mut subject, &ctx).await
     }
 
-    /// Analyze one payload against a caller-supplied context, so a re-run can
-    /// pre-seed the enrichment [`artifact`](RecognizerContext::artifact) and
-    /// re-recognize without re-enriching, the enrichers self-skip on a present
-    /// artifact. The single-payload counterpart to [`analyze_stream_in`].
+    /// Analyze one payload, optionally pre-seeded with a prior enrichment
+    /// `artifact` so a re-run re-recognizes without re-enriching (the enrichers
+    /// self-skip on a present artifact). The single-payload counterpart to
+    /// [`analyze_stream_in`].
     ///
     /// [`analyze_stream_in`]: Self::analyze_stream_in
     pub async fn analyze_in(
         &self,
         data: M::Data,
-        ctx: &mut RecognizerContext<'_, M>,
+        scope: &Scope,
+        annotations: &Annotations<M>,
+        seed: Option<M::Artifact>,
     ) -> Result<Analysis<M>> {
-        self.analyze_core(data, ctx).await
+        let ctx = RecognizerContext::new(scope).with_annotations(annotations);
+        let mut subject = Subject::new(data);
+        if let Some(seed) = seed {
+            subject = subject.with_artifact(seed);
+        }
+        self.analyze_core(&mut subject, &ctx).await
     }
 
     /// Analyze a streamed source end to end, returning entities in the
@@ -399,14 +407,13 @@ impl<M: Modality> Analyzer<M> {
         let mut artifact = seed.clone();
         #[cfg(feature = "usage")]
         let mut usage = Vec::new();
+        let ctx = RecognizerContext::new(scope).with_annotations(annotations);
         while let Some(chunk) = source.read_next().await? {
-            let mut ctx = RecognizerContext::new(scope)
-                .with_annotations(annotations)
-                .with_context_hints(chunk.hints.clone());
+            let mut subject = Subject::new(chunk.data.clone()).with_hints(chunk.hints.clone());
             if let Some(seed) = &seed {
-                ctx = ctx.with_artifact(seed.clone());
+                subject = subject.with_artifact(seed.clone());
             }
-            let analysis = self.analyze_core(chunk.data.clone(), &mut ctx).await?;
+            let analysis = self.analyze_core(&mut subject, &ctx).await?;
             // Usage accrues across chunks: each chunk re-runs every recognizer
             // and enricher, so the stream's total is the sum of its chunks'.
             #[cfg(feature = "usage")]
@@ -450,7 +457,7 @@ impl<M: Modality> Analyzer<M> {
     #[cfg(feature = "usage")]
     async fn recognize(
         &self,
-        data: &M::Data,
+        subject: &Subject<M>,
         ctx: &RecognizerContext<'_, M>,
     ) -> Result<(Vec<Entity<M>>, Vec<Usage>)> {
         if self.recognizers.is_empty() {
@@ -466,7 +473,7 @@ impl<M: Modality> Analyzer<M> {
             let id = recognizer.id();
             async move {
                 let start = Instant::now();
-                let recognition: Recognition<M> = recognizer.recognize(data, ctx).await?;
+                let recognition: Recognition<M> = recognizer.recognize(subject, ctx).await?;
                 let elapsed = start.elapsed();
                 Result::<_>::Ok((id, elapsed, recognition))
             }
@@ -495,13 +502,13 @@ impl<M: Modality> Analyzer<M> {
     #[cfg(not(feature = "usage"))]
     async fn recognize(
         &self,
-        data: &M::Data,
+        subject: &Subject<M>,
         ctx: &RecognizerContext<'_, M>,
     ) -> Result<Vec<Entity<M>>> {
         let futures = self
             .recognizers
             .iter()
-            .map(|recognizer| recognizer.recognize(data, ctx));
+            .map(|recognizer| recognizer.recognize(subject, ctx));
 
         let mut entities = Vec::new();
         for found in future::join_all(futures).await {

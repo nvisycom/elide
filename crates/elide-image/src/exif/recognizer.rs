@@ -1,8 +1,8 @@
 //! [`ExifRecognizer`]: classifies an EXIF field chunk into an entity.
 
 use elide_core::Result;
-use elide_core::modality::metadata::{Metadata, MetadataData};
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId};
+use elide_core::modality::metadata::Metadata;
+use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId, Subject};
 
 use super::entity::{SOURCE, label_for};
 
@@ -23,9 +23,10 @@ impl Recognizer<Metadata> for ExifRecognizer {
 
     async fn recognize(
         &self,
-        data: &MetadataData,
+        subject: &Subject<Metadata>,
         _ctx: &RecognizerContext<'_, Metadata>,
     ) -> Result<Recognition<Metadata>> {
+        let data = subject.data();
         let entities = label_for(data.key())
             .and_then(|label| Metadata::field_entity(data.key(), label, SOURCE))
             .into_iter()

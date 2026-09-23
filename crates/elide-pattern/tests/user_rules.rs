@@ -8,7 +8,7 @@
 
 use elide_core::entity::builtins;
 use elide_core::modality::text::{Text, TextData};
-use elide_core::recognition::{Recognizer, RecognizerContext, Scope};
+use elide_core::recognition::{Recognizer, RecognizerContext, Scope, Subject};
 use elide_pattern::{Dictionary, PatternRecognizer, Regex, Term};
 
 #[tokio::test]
@@ -44,8 +44,9 @@ async fn user_toml_rules_load_and_detect() {
     let data = TextData::new(text.to_owned());
     let scope = Scope::new();
     let ctx = RecognizerContext::<Text>::new(&scope);
+    let subject = Subject::new(data);
     let entities = recognizer
-        .recognize(&data, &ctx)
+        .recognize(&subject, &ctx)
         .await
         .expect("recognize")
         .entities;

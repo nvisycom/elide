@@ -26,7 +26,7 @@ use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
 #[cfg(feature = "usage")]
 use elide_core::primitive::ModelUsage;
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId};
+use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, RecognizerId, Subject};
 use elide_core::{Error, Result};
 use hipstr::HipStr;
 
@@ -138,11 +138,10 @@ impl NerRecognizer {
         &self,
         span: &NerSpan,
         label: LabelRef,
-        data: &M::Data,
-        ctx: &RecognizerContext<'_, M>,
+        subject: &Subject<M>,
     ) -> Option<Entity<M>> {
         let range = span.offset.clone();
-        let location = M::locate(range.clone(), data, ctx.artifact())?;
+        let location = M::locate(range.clone(), subject.data(), subject.artifact())?;
         let event = AuditEvent::model(
             "ner",
             span.confidence,
@@ -203,12 +202,12 @@ impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
 
     async fn recognize(
         &self,
-        data: &M::Data,
+        subject: &Subject<M>,
         ctx: &RecognizerContext<'_, M>,
     ) -> Result<Recognition<M>> {
         // No recognizable text at this chunk (an un-transcribed clip, an
         // un-OCR'd image): skip the model call and recognize nothing.
-        let Some(text) = M::as_text(data, ctx.artifact()) else {
+        let Some(text) = M::as_text(subject.data(), subject.artifact()) else {
             return Ok(Recognition::default());
         };
         let effective_labels = self.effective_labels(ctx.catalog());
@@ -220,7 +219,7 @@ impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
         let request = NerRequest {
             text,
             labels,
-            language: ctx.primary_language(),
+            language: ctx.primary_language(subject),
             correlation_id: ctx.correlation_id(),
         };
         let response = self.backend.recognize(request).await?;
@@ -242,7 +241,7 @@ impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
                 effective_labels.is_empty()
                     || effective_labels.iter().any(|l| l.to_ref() == s.label)
             })
-            .filter_map(|s| self.build_entity::<M>(s, s.label.clone(), data, ctx))
+            .filter_map(|s| self.build_entity::<M>(s, s.label.clone(), subject))
             .collect();
         let recognition = Recognition::new(entities);
         #[cfg(feature = "usage")]
@@ -274,7 +273,8 @@ mod tests {
         let data = TextData::new("Alice Smith".to_owned());
         let scope = Scope::new();
         let ctx = RecognizerContext::<Text>::new(&scope);
-        let out = rec.recognize(&data, &ctx).await.unwrap().entities;
+        let subject = Subject::new(data);
+        let out = rec.recognize(&subject, &ctx).await.unwrap().entities;
         assert!(out.is_empty());
     }
 
@@ -288,7 +288,8 @@ mod tests {
         let data = TextData::new("Alice Smith".to_owned());
         let scope = Scope::new();
         let ctx = RecognizerContext::<Text>::new(&scope);
-        let out = rec.recognize(&data, &ctx).await.unwrap().entities;
+        let subject = Subject::new(data);
+        let out = rec.recognize(&subject, &ctx).await.unwrap().entities;
         assert!(out.is_empty());
     }
 
