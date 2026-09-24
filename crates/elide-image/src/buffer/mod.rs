@@ -1,6 +1,7 @@
-//! [`ImageBuffer`]: an opened image source — its decoded pixels plus its
-//! original container and metadata — opened once, then read, redacted, and
-//! re-encoded, the single entry point into this crate.
+//! [`ImageBuffer`]: the single entry point into this crate.
+//!
+//! An opened image source — its decoded pixels plus its original container and
+//! metadata — opened once, then read, redacted, and re-encoded.
 
 mod raster;
 

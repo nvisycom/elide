@@ -1,5 +1,7 @@
-//! A mock codec format for exercising registry, handler, and orchestration
-//! behavior without a real file format.
+//! A mock codec format, behind the `test-util` feature.
+//!
+//! For exercising registry, handler, and orchestration behavior without a real
+//! file format.
 //!
 //! [`MockHandler`] is a functional [`Text`] handler: it decodes a body plus any
 //! number of embedded [`Part`]s, streams the body as one chunk, redacts it by

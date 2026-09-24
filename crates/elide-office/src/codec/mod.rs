@@ -1,7 +1,8 @@
-//! Codec adapters: the OOXML format handlers (DOCX, PPTX, XLSX) that adapt
-//! this crate's package engine to the `elide-codec` `Handler`/`Loader`
-//! contracts, plus the shared `docProps/*` document-property sub-part every
-//! OOXML container surfaces.
+//! Codec adapters: the OOXML format handlers (DOCX, PPTX, XLSX).
+//!
+//! They adapt this crate's package engine to the `elide-codec`
+//! `Handler`/`Loader` contracts, plus the shared `docProps/*`
+//! document-property sub-part every OOXML container surfaces.
 //!
 //! The three container formats decode to the same [`crate::ooxml::OoxmlPackage`]
 //! (docx, pptx) or [`crate::xlsx::Xlsx`] engine and adapt the same way; the

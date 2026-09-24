@@ -1,5 +1,6 @@
-//! [`ContextWords`]: split a structural name into the context words a
-//! recognizer's context boost matches on.
+//! [`ContextWords`]: split a structural name into context words.
+//!
+//! The words a recognizer's context boost matches on.
 
 /// Turn a structural *name* — an XML element or attribute name, a JSON object
 /// key — into context words for the value it labels, so a recognizer's context

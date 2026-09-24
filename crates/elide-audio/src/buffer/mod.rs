@@ -1,5 +1,6 @@
-//! [`AudioBuffer`]: an audio clip opened once, then read, redacted, and
-//! re-encoded, the single entry point into this crate.
+//! [`AudioBuffer`]: the single entry point into this crate.
+//!
+//! An audio clip opened once, then read, redacted, and re-encoded.
 
 use bytes::Bytes;
 use elide_core::redaction::Redactions;

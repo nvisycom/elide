@@ -1,5 +1,7 @@
-//! Codec adapters: the audio format handlers (WAV, MP3) that stream the whole
-//! clip as one chunk and redact time ranges by editing decoded samples.
+//! Codec adapters: the audio format handlers (WAV, MP3).
+//!
+//! Each handler streams the whole clip as one chunk and redacts time ranges by
+//! editing decoded samples.
 //!
 //! Each format wraps this crate's [`AudioBuffer`] engine, which holds the
 //! encoded bytes and decodes to samples only when a redaction is applied on

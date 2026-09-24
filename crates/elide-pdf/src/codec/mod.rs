@@ -1,4 +1,6 @@
-//! Codec adapter: binds this crate's PDF engine to the `elide-codec`
+//! Codec adapter: the PDF format handler.
+//!
+//! Binds this crate's PDF engine to the `elide-codec`
 //! [`Handler`](elide_codec::Handler)/[`Loader`](elide_codec::Loader) contracts.
 //!
 //! [`pdf_format`] decodes on the glyph-deletion redaction path (the default,

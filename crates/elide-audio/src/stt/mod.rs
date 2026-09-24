@@ -1,4 +1,6 @@
-//! Speech-to-text: transcribe an audio clip and enrich the call with a
+//! Speech-to-text: transcribe an audio clip.
+//!
+//! Enriches the call with a
 //! [`Transcription`](crate::modality::Transcription).
 //!
 //! The [`SttBackend`] trait covers every STT engine, hosted APIs that emit a

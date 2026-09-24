@@ -1,5 +1,6 @@
-//! Codec adapters: the raster format handlers (PNG, JPEG, TIFF) that decode
-//! to an in-memory image and redact regions of it.
+//! Codec adapters: the raster format handlers (PNG, JPEG, TIFF).
+//!
+//! Each handler decodes to an in-memory image and redacts regions of it.
 //!
 //! Every format shares one handler shape stamped out by the
 //! `impl_image_handler!` macro: the decoded image is held whole, streamed as

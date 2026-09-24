@@ -1,5 +1,6 @@
-//! Test doubles for the recognition and redaction contracts: a
-//! [`Recognizer`] that replays a canned entity list and an [`Operator`] that
+//! Test doubles for the recognition and redaction contracts.
+//!
+//! A [`Recognizer`] that replays a canned entity list and an [`Operator`] that
 //! substitutes a fixed string, so a downstream crate can drive a pipeline
 //! without a real detection model or operator.
 
