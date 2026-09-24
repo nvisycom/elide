@@ -21,132 +21,35 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-## Only the plain-text format. Opt into more individually (`json`,
-## `html`, `xml`) or take the `text` umbrella for all of them. The
-## registry's `with_builtin` wires up only enabled formats.
-default = ["txt"]
+## No format by default: `elide-codec` ships the codec contracts and the
+## shared text-extract / redact helpers. Every format handler lives with its
+## own engine crate (`elide-audio`, `elide-image`, `elide-office`, `elide-pdf`)
+## behind that crate's own `codec` feature; the `FormatRegistry` assembling
+## them lives in `elide-format`.
+default = []
 
-## Derive `serde::{Serialize, Deserialize}` on the re-exported core
-## domain types, and on the codec's own config types (`RasterMode`, `Dpi`). Also
-## forwards to `elide-core` for consumers who serialize the entities a codec reads.
-serde = ["dep:serde", "elide-core/serde"]
+## Forward `serde::{Serialize, Deserialize}` derives to `elide-core`, for
+## consumers who serialize the entities a codec reads.
+serde = ["elide-core/serde"]
 
-## Derive `schemars::JsonSchema` on the re-exported domain types and the codec's
-## own config types. Forwards to `elide-core`, and to `elide-image` (when an image
-## format pulled it in) for the re-exported `ExifPolicy` config enum.
-schema = ["dep:schemars", "elide-core/schema", "elide-image?/schema", "elide-audio?/schema"]
+## Forward `schemars::JsonSchema` derives to `elide-core`.
+schema = ["elide-core/schema"]
 
-## The text-shaped formats.
-text = ["txt", "json", "html", "xml"]
+## Compile the `extract` module: the shared text-extract-and-splice engine
+## (`Encoder`, `ExtractHandler`) that maps a decoded value back to raw source
+## offsets. Enabled by a crate that drives a structured text format on it
+## (`elide-plain`'s markup handlers, `elide-office`'s OOXML). The `string` and
+## `content` helpers it builds on are always compiled.
+extract = []
 
-## Individual text formats.
-txt = ["internal_text"]
-json = ["internal_text", "dep:serde_json"]
-xml = ["internal_extract", "dep:quick-xml"]
-html = ["xml"]
-
-## The rich-document formats.
-document = ["docx", "pptx", "pdf", "rtf"]
-
-## DOCX: OOXML text extraction and byte-faithful redaction come from the
-## standalone `elide-office` crate; this codec adapts it to the `Handler`
-## contract (via the shared `ExtractHandler`, hence `internal_extract`).
-## Embedded media surfaces through `elide-office`'s typed extraction.
-docx = ["internal_document", "internal_extract", "dep:elide-office", "internal_office"]
-pptx = ["internal_document", "internal_extract", "dep:elide-office", "internal_office"]
-
-## PDF: born-digital text extraction and redaction come from the standalone
-## `elide-pdf` crate; this codec adapts it to the `Handler` contract.
-## Embedded-image redaction (`elide-pdf/image`) is pulled by `internal_image`
-## instead, so a text-only PDF build does not compile the `image` stack.
-pdf = ["internal_document", "dep:elide-pdf"]
-
-## PDF page rendering to images (for OCR), via `elide-pdf`'s native PDFium
-## path. Off by default and separate from `pdf` because it needs the PDFium
-## `.so`/`.dylib` present at runtime (see `scripts/install-pdfium.sh`). Pulls
-## `pdf` (the loader/handler it extends), `internal_image` (to re-encode
-## rendered pages as `ImageData`), and forwards to `elide-pdf/render`.
-pdf-render = ["pdf", "internal_image", "elide-pdf/render"]
-
-## RTF: flat rich text (control words and groups), a leaf text handler
-## alongside the other document formats.
-rtf = ["internal_document"]
-
-## The image formats.
-image = ["png", "jpeg", "tiff"]
-
-## Individual image formats (all share the `elide-image` engine pulled in
-## by `internal_image`). Each also enables its codec inside `elide-image`,
-## whose own formats are off by default, so `ImageBuffer::open` can decode it.
-png = ["internal_image", "elide-image/png"]
-jpeg = ["internal_image", "elide-image/jpeg"]
-tiff = ["internal_image", "elide-image/tiff"]
-
-## The audio formats.
-audio = ["wav", "mp3"]
-
-## WAV: the `elide-audio` engine reads and re-writes samples (`hound`) and
-## probes the clip duration (`symphonia`).
-wav = ["internal_audio", "elide-audio/wav"]
-## MP3: the `elide-audio` engine probes duration and decodes to PCM
-## (`symphonia`) and re-encodes with `mp3lame-encoder` (LGPL-3.0 via
-## libmp3lame, needs a C toolchain at build) for the redaction round-trip.
-## The LGPL dep lives on `elide-audio`, so a codec build without `mp3` never
-## pulls it in.
-mp3 = ["internal_audio", "elide-audio/mp3"]
-
-## The tabular formats.
-tabular = ["csv", "xlsx"]
-
-## CSV: `csv` parses and re-writes rows. Cells hold text and redact like
-## text, so this pulls the shared text-redaction helper.
-csv = ["internal_tabular", "dep:csv"]
-## XLSX: an OOXML spreadsheet; cells redact like text via the shared
-## tabular surface, backed by the `elide-office` package engine.
-xlsx = ["internal_tabular", "xml", "dep:elide-office", "internal_office"]
-
-# Internal markers: set automatically by any format feature above. Code
-# uses `#[cfg(feature = "internal_image")]` to mean "any image format is
-# enabled", the gate for the shared per-modality infrastructure. Not meant
-# to be enabled directly. `internal_tabular` also pulls `internal_text`
-# because tabular cells reuse the text-redaction helper.
-# `elide-pdf?/image` enables PDF embedded-image redaction only when `elide-pdf`
-# is already a dependency (i.e. the `pdf` feature is on) — so an image build
-# without `pdf` doesn't force `elide-pdf` in, and a text-only `pdf` build
-# doesn't compile the image stack.
-internal_image = ["elide-core/metadata", "dep:elide-image", "elide-image/exif", "dep:image", "elide-pdf?/image"]
-internal_audio = ["dep:elide-audio"]
-internal_tabular = ["elide-core/tabular", "internal_text"]
-internal_text = []
-# The shared text-extract-and-splice engine, used by the markup formats
-# and rich documents. Pulls `internal_text` because items are text and
-# reuse the text-redaction helper.
-internal_extract = ["internal_text"]
-# The rich-document container machinery (`handler::document`): the
-# modality-neutral part surface shared by the document formats. Each
-# format brings its own engine — DOCX drives the shared `ExtractHandler`
-# (so `docx` also enables `internal_extract`), while PDF uses its own
-# bespoke handler — and each format's parsing lives in its dedicated crate.
-internal_document = []
-# The shared OOXML codec layer (docx, pptx, xlsx): the generic package facade,
-# the shared encoder/loader helpers, the `office_error` mapper, and the
-# `Metadata`-modality `#docprops` sub-part handler + recognizer. Pulls
-# elide-core's `metadata` modality for the docProps path.
-internal_office = ["elide-core/metadata"]
+## Expose `test_util`: a mock `Text` codec format (a body plus embedded
+## container parts) for a downstream crate to exercise the registry, handler,
+## and orchestration paths without a real file format.
+test-util = []
 
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }
-elide-office = { workspace = true, features = [], optional = true }
-elide-audio = { workspace = true, features = [], optional = true }
-elide-image = { workspace = true, features = [], optional = true }
-elide-pdf = { workspace = true, features = [], optional = true }
-
-# (De)serialization
-serde = { workspace = true, features = ["derive"], optional = true }
-schemars = { workspace = true, features = [], optional = true }
-serde_json = { workspace = true, features = [], optional = true }
-csv = { workspace = true, features = [], optional = true }
 
 # Primitive datatypes
 bytes = { workspace = true, features = [] }
@@ -158,23 +61,9 @@ hex = { workspace = true, features = [] }
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
 
-# Observability
-tracing = { workspace = true, features = [] }
-
-# Markup parsing
-quick-xml = { workspace = true, features = [], optional = true }
-
-# Image processing
-image = { workspace = true, features = [], optional = true }
-
 [dev-dependencies]
-# Internal crates
-elide-office = { workspace = true, features = ["test-util"] }
-elide-image = { workspace = true, features = ["test-util"] }
-elide-audio = { workspace = true, features = ["test-util"] }
+# (De)serialization
+serde_json = { workspace = true, features = [] }
 
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["macros", "rt"] }
-
-# Markup parsing
-lopdf = { workspace = true, default-features = false }

@@ -6,11 +6,13 @@
 use elide_core::primitive::LanguageTag;
 use uuid::Uuid;
 
+use crate::modality::AudioFormat;
+
 /// One per-call STT request handed to an [`SttBackend`].
 ///
-/// Bundles the audio bytes with advisory hints (language, correlation id).
-/// Borrowed (`SttRequest<'a>`) so call sites that already own the underlying
-/// values hand them through without cloning.
+/// Bundles the audio bytes with advisory hints (format, language, correlation
+/// id). Borrowed (`SttRequest<'a>`) so call sites that already own the
+/// underlying values hand them through without cloning.
 ///
 /// [`SttBackend`]: super::SttBackend
 #[derive(Debug, Clone)]
@@ -19,6 +21,12 @@ pub struct SttRequest<'a> {
     /// container and codec it accepts; returned segment timings refer back
     /// into this clip.
     pub audio: &'a [u8],
+    /// Caller-asserted container format. A remote backend that never decodes
+    /// the bytes locally needs an out-of-band format hint (a MIME type or
+    /// extension); the caller, which read the source, knows it losslessly,
+    /// whereas byte-sniffing downstream can only approximate it. `None` leaves
+    /// the backend to sniff.
+    pub format: Option<AudioFormat>,
     /// Caller-asserted language. Backends that support per-call language
     /// hinting use this to pick a model variant; others ignore it.
     pub language: Option<&'a LanguageTag>,
@@ -31,9 +39,17 @@ impl<'a> SttRequest<'a> {
     pub fn new(audio: &'a [u8]) -> Self {
         Self {
             audio,
+            format: None,
             language: None,
             correlation_id: None,
         }
+    }
+
+    /// Builder-style setter for the caller-asserted container format.
+    #[must_use]
+    pub fn with_format(mut self, format: AudioFormat) -> Self {
+        self.format = Some(format);
+        self
     }
 
     /// Builder-style setter for the language hint.

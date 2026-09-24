@@ -43,7 +43,7 @@ Nearby keywords lift ambiguous matches, and overlapping findings reconcile into 
 Mask, replace, truncate, HMAC, hash, generalize, or clamp text; blur, pixelate, or black out image regions; silence or beep audio; drop rows and columns. Reversible encryption and pseudonymization round-trip.
 
 **Format codecs**  
-Read and rewrite TXT, CSV, JSON, XML, HTML, RTF, PDF, DOCX, PPTX, XLSX, images (PNG, JPEG, TIFF), and audio (WAV, MP3), changing only the redacted spans and leaving every other byte intact.
+Read and rewrite TXT, CSV, JSON, XML, HTML, PDF, DOCX, PPTX, XLSX, images (PNG, JPEG, TIFF), and audio (WAV, MP3), changing only the redacted spans and leaving every other byte intact.
 
 **Provenance-first**  
 Every entity carries its full audit trail of how it was found, scored, and hidden, and the trail verifies.

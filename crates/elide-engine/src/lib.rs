@@ -12,12 +12,13 @@ use std::any::TypeId;
 use std::collections::{HashMap, VecDeque};
 
 use bytes::Bytes;
-use elide_codec::{DocumentHandle, FormatRegistry, LocalId, Part, UntypedDocumentHandle};
+use elide_codec::{DocumentHandle, LocalId, Part, UntypedDocumentHandle};
 use elide_core::entity::Entity;
 use elide_core::modality::{DataReader, DataWriter, Modality, NoArtifact, StreamDataReader};
 use elide_core::recognition::Scope;
 use elide_core::{Error, ErrorKind, Result};
 use elide_detection::Analyzer;
+use elide_format::FormatRegistry;
 use elide_redaction::Anonymizer;
 
 pub use self::analysis::{AnalyzedDocument, ArtifactSet, Report, ReportDeserializer};
@@ -91,7 +92,7 @@ impl Orchestrator {
     /// (DOCX, …) needs one that covers its part formats, typically
     /// [`FormatRegistry::with_builtin`].
     ///
-    /// [`FormatRegistry::with_builtin`]: elide_codec::FormatRegistry::with_builtin
+    /// [`FormatRegistry::with_builtin`]: elide_format::FormatRegistry::with_builtin
     #[must_use]
     pub fn with_registry(mut self, registry: FormatRegistry) -> Self {
         self.registry = registry;

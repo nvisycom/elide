@@ -114,7 +114,7 @@ pub use elide_pattern as pattern;
 )]
 pub mod exif {
     #[doc(inline)]
-    pub use elide_codec::handler::ExifRecognizer;
+    pub use elide_image::ExifRecognizer;
 }
 
 /// OOXML document-property recognition: surface a Word/PowerPoint/Excel
@@ -130,5 +130,5 @@ pub mod exif {
 )]
 pub mod docprops {
     #[doc(inline)]
-    pub use elide_codec::handler::DocPropsRecognizer;
+    pub use elide_office::codec::DocPropsRecognizer;
 }

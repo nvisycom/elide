@@ -6,11 +6,11 @@ use elide::detection::Analyzer;
 use elide::detection::calibrate::{CalibrateLayer, CalibrationMap};
 use elide::detection::filter::FilterLayer;
 use elide::detection::reconcile::{Merging, ReconcileLayer, Structural};
-use elide_core::Result;
 use elide_core::entity::audit::{AuditEvent, AuditKind, AuditLog, PatternEvent};
 use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
-use elide_core::primitive::{ComponentId, Confidence, ConfidenceThreshold};
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Scope, Subject};
+use elide_core::primitive::{Confidence, ConfidenceThreshold};
+use elide_core::recognition::Scope;
+use elide_core::test_util::MockRecognizer;
 
 use crate::support::{SourceRef, Text, TextData, TextLocation};
 
@@ -47,40 +47,22 @@ fn detected_with_source(
 }
 
 /// A request [`Scope`] whose catalog declares exactly `ids`, the labels a test
-/// wants to survive the analyzer's output cull. (The [`Fixed`] recognizer emits
-/// its list regardless of the catalog; the catalog gates what is kept.)
+/// wants to survive the analyzer's output cull. (The mock recognizer emits its
+/// list regardless of the catalog; the catalog gates what is kept.)
 fn scope_for(ids: &[&str]) -> Scope {
     let catalog: LabelCatalog = ids.iter().map(|id| Label::new(*id, *id)).collect();
     Scope::new().with_catalog(catalog)
 }
 
-/// A recognizer that just replays a fixed entity list.
-struct Fixed(Vec<Entity<Text>>);
-
-#[async_trait::async_trait]
-impl Recognizer<Text> for Fixed {
-    fn id(&self) -> ComponentId {
-        ComponentId::new("fixed", "1.0.0")
-    }
-
-    async fn recognize(
-        &self,
-        _subject: &Subject<Text>,
-        _ctx: &RecognizerContext<'_, Text>,
-    ) -> Result<Recognition<Text>> {
-        Ok(self.0.clone().into())
-    }
-}
-
 #[tokio::test]
 async fn analyze_fuses_resolves_filters() {
     // Recognizer A: a phone at 10..22 and a weak stray at 40..44.
-    let a = Fixed(vec![
+    let a = MockRecognizer::new(vec![
         detected("pattern", "PHONE_NUMBER", (10, 22), 0.8),
         detected("pattern", "WEAK", (40, 44), 0.1),
     ]);
     // Recognizer B: the same phone, slightly wider, higher confidence.
-    let b = Fixed(vec![detected("ner", "PHONE_NUMBER", (10, 23), 0.95)]);
+    let b = MockRecognizer::new(vec![detected("ner", "PHONE_NUMBER", (10, 23), 0.95)]);
 
     let analyzer = Analyzer::<Text>::new()
         .with_recognizer(a)
@@ -122,11 +104,11 @@ async fn analyze_records_per_recognizer_usage() {
     // Two recognizers: A finds 2, B finds 1. Each should get one Usage entry
     // carrying its id, its own found-count (measured before reduction), a
     // duration, and, being pure-CPU doubles, no model detail.
-    let a = Fixed(vec![
+    let a = MockRecognizer::new(vec![
         detected("pattern", "PHONE_NUMBER", (10, 22), 0.8),
         detected("pattern", "WEAK", (40, 44), 0.1),
     ]);
-    let b = Fixed(vec![detected("ner", "PHONE_NUMBER", (10, 23), 0.95)]);
+    let b = MockRecognizer::new(vec![detected("ner", "PHONE_NUMBER", (10, 23), 0.95)]);
 
     let analyzer = Analyzer::<Text>::new()
         .with_recognizer(a)
@@ -141,7 +123,7 @@ async fn analyze_records_per_recognizer_usage() {
     // One usage entry per recognizer, in registration order.
     assert_eq!(analysis.usage.len(), 2);
     for usage in &analysis.usage {
-        assert_eq!(usage.id.name, "fixed");
+        assert_eq!(usage.id.name, "mock-recognizer");
         assert!(usage.model.is_none(), "a pure-CPU double reports no model");
     }
     // Counts reflect what each recognizer returned (pre-reduction): 2 and 1.
@@ -155,14 +137,14 @@ async fn fusion_keeps_both_operands_source_refs() {
     // source reference (as a markup/DOCX codec would attach). Reconciliation
     // fuses them; the surviving entity must keep *both* source refs, normalized
     //, so a client can still point at every source run behind the fused span.
-    let a = Fixed(vec![detected_with_source(
+    let a = MockRecognizer::new(vec![detected_with_source(
         "pattern",
         "PHONE_NUMBER",
         (10, 22),
         0.8,
         SourceRef::in_part(200..212, "word/document.xml"),
     )]);
-    let b = Fixed(vec![detected_with_source(
+    let b = MockRecognizer::new(vec![detected_with_source(
         "ner",
         "PHONE_NUMBER",
         (10, 23),
@@ -201,7 +183,7 @@ async fn analyze_stamps_language_from_recognized_range() {
     let mut e = detected("pattern", "PERSON", (0, 5), 0.9);
     e.recognized_range = Some(0..5);
 
-    let analyzer = Analyzer::<Text>::new().with_recognizer(Fixed(vec![e]));
+    let analyzer = Analyzer::<Text>::new().with_recognizer(MockRecognizer::new(vec![e]));
 
     // The caller asserts the document language; it applies span-less (whole
     // payload), so every ranged entity is attributed to it.
@@ -254,7 +236,7 @@ async fn out_of_catalog_container_subsumes_then_is_culled() {
 
     // A validated IBAN (0.85) fully containing a loose driver's-license
     // prefix (0.4), plus an in-catalog SSN elsewhere.
-    let recognizer = Fixed(vec![
+    let recognizer = MockRecognizer::new(vec![
         detected("pattern", "IBAN", (0, 27), 0.85),
         detected("pattern", "DRIVERS_LICENSE", (0, 4), 0.4),
         detected("pattern", "GOVERNMENT_ID", (40, 51), 0.85),

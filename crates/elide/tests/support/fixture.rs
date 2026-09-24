@@ -133,7 +133,7 @@ impl Fixture {
     /// test can swap in a customized format (e.g. the raster PDF handler
     /// via [`pdf_format_with`]).
     ///
-    /// [`pdf_format_with`]: elide::codec::handler::pdf_format_with
+    /// [`pdf_format_with`]: elide::codec::pdf::pdf_format_with
     pub async fn run_with(&self, registry: FormatRegistry) -> Result<PipelineOutcome<Text>> {
         self.run_typed::<Text>(registry).await
     }

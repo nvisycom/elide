@@ -1,0 +1,62 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "elide-plain"
+description = "Leaf text-shaped format handlers (TXT, JSON, HTML, XML, CSV) adapting the elide-codec contracts"
+keywords = ["elide", "codec", "text", "markup", "csv"]
+categories = ["encoding", "text-processing"]
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+## No format enabled by default.
+default = []
+
+## Individual text formats.
+txt = []
+json = ["dep:serde_json"]
+## XML and HTML drive `elide-codec`'s shared extract-and-splice engine.
+xml = ["elide-codec/extract", "dep:quick-xml"]
+html = ["xml"]
+## CSV cells are addressed as the `Tabular` modality.
+csv = ["elide-core/tabular", "dep:csv"]
+
+## The text-shaped leaf formats.
+text = ["txt", "json", "html", "xml"]
+
+[dependencies]
+# Internal crates
+elide-core = { workspace = true, features = [] }
+elide-codec = { workspace = true, features = [] }
+
+# (De)serialization
+serde_json = { workspace = true, features = [], optional = true }
+csv = { workspace = true, features = [], optional = true }
+
+# Primitive datatypes
+bytes = { workspace = true, features = [] }
+
+# Async runtime & parallelism
+async-trait = { workspace = true, features = [] }
+
+# Observability
+tracing = { workspace = true, features = [] }
+
+# Markup parsing
+quick-xml = { workspace = true, features = [], optional = true }
+
+[dev-dependencies]
+# Async runtime & parallelism
+tokio = { workspace = true, features = ["macros", "rt"] }

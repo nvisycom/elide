@@ -166,17 +166,15 @@ where
         Box::pin(async move {
             // The handle and entities were matched to this pipeline's `M` by
             // the orchestrator (stored modality `TypeId`), so both downcasts
-            // hold. Take the typed handle out, redact, and put it back.
-            let mut typed = handle
-                .take::<M>()
+            // hold. Borrow the typed handle in place and redact through it.
+            let typed = handle
+                .downcast_mut::<M>()
                 .unwrap_or_else(|| unreachable!("apply_in_place handle modality mismatch"));
             let entities = entities
                 .as_any_mut()
                 .downcast_mut::<Vec<Entity<M>>>()
                 .expect("apply_in_place entities modality mismatch");
-            self.apply(&mut typed, entities, scope).await?;
-            *handle = UntypedDocumentHandle::new(typed);
-            Ok(())
+            self.apply(typed, entities, scope).await
         })
     }
 
