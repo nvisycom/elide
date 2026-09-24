@@ -13,7 +13,8 @@ use std::collections::{BTreeSet, HashMap};
 
 use bytes::Bytes;
 use elide_codec::content::ContentData;
-use elide_codec::{Container, Format, FormatId, Handler, LocalId, Part, redact};
+use elide_codec::string::RedactRange;
+use elide_codec::{Container, Format, FormatId, Handler, LocalId, Part};
 use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
 use elide_core::modality::text::{TextData, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter, ResolvedHint};
@@ -28,7 +29,7 @@ pub const FORMAT_ID: FormatId = FormatId::new("elide.tabular.xlsx");
 
 /// [`Format`] descriptor registered into `FormatRegistry`.
 pub fn format() -> Format {
-    Format::new::<Tabular, _>(FORMAT_ID.clone(), XlsxLoader)
+    Format::new::<Tabular>(FORMAT_ID.clone(), XlsxLoader)
         .with_extensions(["xlsx"])
         .with_content_types(["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"])
 }
@@ -165,7 +166,7 @@ impl XlsxHandler {
         let start = location.start_offset.unwrap_or(0);
         let end = location.end_offset.unwrap_or(cell.text.len());
         let value = replacement.value().unwrap_or_default();
-        redact::replace_range(&mut cell.text, value, start..end)?;
+        cell.text.redact_range(value, start..end)?;
         // Only a cell that was actually edited is sent for rewrite, so unchanged
         // shared-string cells are not needlessly de-shared.
         self.changed.insert(index);

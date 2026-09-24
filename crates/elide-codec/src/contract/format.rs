@@ -85,17 +85,16 @@ impl Format {
     /// [`M::NAME`]: Modality::NAME
     /// [`with_extensions`]: Self::with_extensions
     /// [`with_content_types`]: Self::with_content_types
-    pub fn new<M, L>(id: FormatId, loader: L) -> Self
+    pub fn new<M>(id: FormatId, loader: impl Loader<M>) -> Self
     where
         M: Modality,
-        L: Loader<M>,
     {
         Self {
             id,
             modality: M::NAME,
             extensions: Vec::new(),
             content_types: Vec::new(),
-            loader: erase::<M, L>(loader),
+            loader: erase(loader),
         }
     }
 

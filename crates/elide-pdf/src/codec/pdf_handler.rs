@@ -46,7 +46,7 @@ pub const FORMAT_ID: FormatId = FormatId::new("elide.document.pdf");
 /// Decodes on the glyph-deletion redaction path. To flatten pages to images
 /// instead, build the format with `format_with` and `RasterMode::Always`.
 pub fn format() -> Format {
-    Format::new::<Text, _>(FORMAT_ID.clone(), PdfLoader::new())
+    Format::new::<Text>(FORMAT_ID.clone(), PdfLoader::new())
         .with_extensions(["pdf"])
         .with_content_types(["application/pdf"])
 }
@@ -61,7 +61,7 @@ pub fn format() -> Format {
 #[cfg(feature = "render")]
 #[cfg_attr(docsrs, doc(cfg(feature = "render")))]
 pub fn format_with(raster: RasterMode) -> Format {
-    Format::new::<Text, _>(FORMAT_ID.clone(), PdfLoader::with_raster(raster))
+    Format::new::<Text>(FORMAT_ID.clone(), PdfLoader::with_raster(raster))
         .with_extensions(["pdf"])
         .with_content_types(["application/pdf"])
 }

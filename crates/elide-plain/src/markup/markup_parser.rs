@@ -21,7 +21,7 @@
 
 use std::ops::Range;
 
-use elide_codec::context::context_words;
+use elide_codec::string::ContextWords;
 use elide_core::modality::ResolvedHint;
 use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation};
 use elide_core::{Error, ErrorKind, Result};
@@ -182,7 +182,7 @@ impl<'a> MarkupParser<'a> {
                 // it is a source-only location; a consumer must resolve it against
                 // the source bytes, never the extracted value.
                 let location = TextLocation::from_source([SourceRef::new(name)]);
-                self.hint_item(idx, location, context_words(local));
+                self.hint_item(idx, location, local.context_words());
             }
         }
         Ok(())
@@ -200,7 +200,7 @@ impl<'a> MarkupParser<'a> {
             // boundary (`paymentCard` → `payment Card`) survives; `name` itself
             // is lowercased for tag matching and would lose that boundary.
             let local = e.local_name();
-            let hint = context_words(local.as_ref());
+            let hint = AsRef::<str>::as_ref(&local).context_words();
             self.stack.push(Frame {
                 name,
                 hint,

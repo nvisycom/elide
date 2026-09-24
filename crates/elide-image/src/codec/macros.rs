@@ -57,7 +57,7 @@ macro_rules! impl_image_handler {
         /// Build this format's [`Format`](elide_codec::Format) from a configured
         /// fallback policy.
         fn format_from(policy: crate::ExifPolicy) -> ::elide_codec::Format {
-            ::elide_codec::Format::new::<crate::modality::Image, _>(
+            ::elide_codec::Format::new::<crate::modality::Image>(
                 FORMAT_ID.clone(),
                 $loader { policy },
             )

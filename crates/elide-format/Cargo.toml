@@ -26,10 +26,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 ## `with_builtin` wires up only enabled formats.
 default = ["txt"]
 
-## Derive `serde::{Serialize, Deserialize}` on the re-exported domain types and
-## the codec config types. Forwards to `elide-codec` and the engines it drives.
+## Forward `serde::{Serialize, Deserialize}` derives to `elide-codec` and the
+## engines it drives, so a caller can serialize the domain types and codec config
+## they expose.
 serde = [
-    "dep:serde",
     "elide-codec/serde",
     "elide-audio?/serde",
     "elide-image?/serde",
@@ -37,10 +37,9 @@ serde = [
     "elide-pdf?/serde",
 ]
 
-## Derive `schemars::JsonSchema` on the schema-relevant types. Forwards to
-## `elide-codec` and the engines it drives.
+## Forward `schemars::JsonSchema` derives to `elide-codec` and the engines it
+## drives, for a caller emitting a JSON schema over a config surface.
 schema = [
-    "dep:schemars",
     "elide-codec/schema",
     "elide-audio?/schema",
     "elide-image?/schema",
@@ -97,18 +96,8 @@ elide-image = { workspace = true, features = [], optional = true }
 elide-office = { workspace = true, features = [], optional = true }
 elide-pdf = { workspace = true, features = [], optional = true }
 
-# (De)serialization
-serde = { workspace = true, features = ["derive"], optional = true }
-schemars = { workspace = true, features = [], optional = true }
-
-# Primitive datatypes
-bytes = { workspace = true, features = [] }
-
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
-
-# Observability
-tracing = { workspace = true, features = [] }
 
 [dev-dependencies]
 # Internal crates

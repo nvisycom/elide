@@ -390,7 +390,7 @@ mod tests {
     /// A format reusing the txt id but claiming a different extension, to
     /// stand in for a customized built-in.
     fn txt_variant() -> Format {
-        Format::new::<Text, _>(txt_format().id().clone(), StubLoader)
+        Format::new::<Text>(txt_format().id().clone(), StubLoader)
             .with_extensions(["variant"])
             .with_content_types(["text/variant"])
     }

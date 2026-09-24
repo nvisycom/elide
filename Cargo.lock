@@ -1199,12 +1199,9 @@ dependencies = [
  "bytes",
  "elide-core",
  "hex",
- "schemars",
- "serde",
  "serde_json",
  "sha2 0.11.0",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -1299,7 +1296,6 @@ name = "elide-format"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "bytes",
  "elide-audio",
  "elide-codec",
  "elide-core",
@@ -1307,10 +1303,7 @@ dependencies = [
  "elide-office",
  "elide-pdf",
  "elide-plain",
- "schemars",
- "serde",
  "tokio",
- "tracing",
 ]
 
 [[package]]

@@ -30,7 +30,7 @@ macro_rules! impl_audio_handler {
         ///
         /// [`Format`]: elide_codec::Format
         pub fn format() -> ::elide_codec::Format {
-            ::elide_codec::Format::new::<crate::modality::Audio, _>(
+            ::elide_codec::Format::new::<crate::modality::Audio>(
                 FORMAT_ID.clone(),
                 $loader,
             )

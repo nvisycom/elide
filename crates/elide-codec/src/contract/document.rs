@@ -29,7 +29,7 @@ use elide_core::modality::{Chunk, DataReader, DataWriter, Modality, StreamDataRe
 use elide_core::redaction::Redactions;
 
 use super::{FormatId, Handler};
-use crate::codec::Container;
+use crate::Container;
 use crate::content::ContentData;
 
 /// Modality-erased handle the registry returns.

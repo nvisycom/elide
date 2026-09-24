@@ -32,7 +32,7 @@ pub(crate) type DocxHandler = OoxmlHandler<DocxCodec>;
 
 /// [`Format`] descriptor registered into `FormatRegistry`.
 pub fn format() -> Format {
-    Format::new::<Text, _>(FORMAT_ID.clone(), DocxLoader)
+    Format::new::<Text>(FORMAT_ID.clone(), DocxLoader)
         .with_extensions(["docx"])
         .with_content_types([
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",

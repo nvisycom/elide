@@ -10,7 +10,8 @@
 use std::collections::BTreeSet;
 
 use elide_codec::content::ContentData;
-use elide_codec::{Format, FormatId, Handler, redact};
+use elide_codec::string::RedactRange;
+use elide_codec::{Format, FormatId, Handler};
 use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
 use elide_core::modality::text::{TextData, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter, ResolvedHint};
@@ -48,7 +49,7 @@ pub fn format_with(has_headers: bool, delimiter: Option<u8>) -> Format {
 
 /// Build the CSV [`Format`] from a configured loader.
 fn format_from(loader: CsvLoader) -> Format {
-    Format::new::<Tabular, _>(FORMAT_ID.clone(), loader)
+    Format::new::<Tabular>(FORMAT_ID.clone(), loader)
         .with_extensions(["csv"])
         .with_content_types(["text/csv"])
 }
@@ -180,7 +181,7 @@ impl CsvHandler {
         let start = location.start_offset.unwrap_or(0);
         let end = location.end_offset.unwrap_or(cell.len());
         let value = replacement.value().unwrap_or_default();
-        redact::replace_range(cell, value, start..end)
+        cell.redact_range(value, start..end)
     }
 
     /// Drop the data row at `row_index` (the same addressing as

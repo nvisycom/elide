@@ -45,7 +45,7 @@ pub(crate) struct XmlSpan(pub(super) Range<usize>);
 
 /// [`Format`] descriptor registered into `FormatRegistry`.
 pub fn format() -> Format {
-    Format::new::<Text, _>(FORMAT_ID.clone(), XmlLoader)
+    Format::new::<Text>(FORMAT_ID.clone(), XmlLoader)
         .with_extensions(["xml"])
         .with_content_types(["application/xml", "text/xml"])
 }

@@ -2,15 +2,13 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 
-mod codec;
 pub mod content;
-pub mod context;
-#[cfg(feature = "internal_extract")]
+mod contract;
+#[cfg(feature = "extract")]
 pub mod extract;
-#[cfg(feature = "internal_text")]
-pub mod redact;
+pub mod string;
 
-pub use self::codec::{
+pub use self::contract::{
     Container, DocumentHandle, Format, FormatId, Handler, Loader, LocalId, Part,
     UntypedDocumentHandle,
 };

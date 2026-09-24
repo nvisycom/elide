@@ -9,7 +9,7 @@
 
 use std::mem;
 
-use elide_codec::context::context_words;
+use elide_codec::string::ContextWords;
 use elide_core::modality::ResolvedHint;
 use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation};
 use elide_core::{Error, ErrorKind, Result};
@@ -175,7 +175,7 @@ impl<'a> SlotParser<'a> {
             // location, resolved against the source, not the value it labels.
             let key_hint = ResolvedHint::new(
                 TextLocation::from_source([SourceRef::new(key_start..self.pos)]),
-                TextData::new(context_words(&key.value)),
+                TextData::new(key.value.context_words()),
             );
             self.push_leaf(key);
             self.consume_whitespace();

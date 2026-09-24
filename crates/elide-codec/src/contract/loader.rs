@@ -73,11 +73,7 @@ pub(crate) trait ErasedLoader: Send + Sync + 'static {
 /// registry can store. Called only by [`Format::new`].
 ///
 /// [`Format::new`]: super::Format::new
-pub(crate) fn erase<M, L>(loader: L) -> Arc<dyn ErasedLoader>
-where
-    M: Modality,
-    L: Loader<M>,
-{
+pub(crate) fn erase<M: Modality>(loader: impl Loader<M>) -> Arc<dyn ErasedLoader> {
     Arc::new(LoaderAdapter {
         loader,
         _phantom: PhantomData,

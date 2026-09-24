@@ -224,7 +224,7 @@ impl Loader<Text> for MockLoader {
 }
 
 fn mock_format() -> Format {
-    Format::new::<Text, _>(MOCK_FORMAT_ID.clone(), MockLoader).with_extensions([MOCK_EXT])
+    Format::new::<Text>(MOCK_FORMAT_ID.clone(), MockLoader).with_extensions([MOCK_EXT])
 }
 
 // ---- a trivial recognizer + operator that redact PII -------------------------

@@ -28,29 +28,23 @@ rustdoc-args = ["--cfg", "docsrs"]
 ## them lives in `elide-format`.
 default = []
 
-## Derive `serde::{Serialize, Deserialize}` on the re-exported core
-## domain types. Also forwards to `elide-core` for consumers who serialize the
-## entities a codec reads.
-serde = ["dep:serde", "elide-core/serde"]
+## Forward `serde::{Serialize, Deserialize}` derives to `elide-core`, for
+## consumers who serialize the entities a codec reads.
+serde = ["elide-core/serde"]
 
-## Derive `schemars::JsonSchema` on the re-exported domain types. Forwards to
-## `elide-core`.
-schema = ["dep:schemars", "elide-core/schema"]
+## Forward `schemars::JsonSchema` derives to `elide-core`.
+schema = ["elide-core/schema"]
 
-# The shared text-extract-and-splice engine (`extract`) and the byte-level
-# string-redaction helper (`redact`): public helper surface, not gated behind
-# a format feature here since no format in this crate uses them (`elide-office`
-# and `elide-image` drive their own OOXML/text-shaped handlers on top of them).
-internal_text = []
-internal_extract = ["internal_text"]
+## Compile the `extract` module: the shared text-extract-and-splice engine
+## (`Encoder`, `ExtractHandler`) that maps a decoded value back to raw source
+## offsets. Enabled by a crate that drives a structured text format on it
+## (`elide-plain`'s markup handlers, `elide-office`'s OOXML). The `string` and
+## `content` helpers it builds on are always compiled.
+extract = []
 
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }
-
-# (De)serialization
-serde = { workspace = true, features = ["derive"], optional = true }
-schemars = { workspace = true, features = [], optional = true }
 
 # Primitive datatypes
 bytes = { workspace = true, features = [] }
@@ -61,9 +55,6 @@ hex = { workspace = true, features = [] }
 
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
-
-# Observability
-tracing = { workspace = true, features = [] }
 
 [dev-dependencies]
 # (De)serialization

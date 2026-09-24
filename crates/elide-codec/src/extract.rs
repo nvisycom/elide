@@ -30,9 +30,9 @@ use elide_core::modality::{Chunk, DataReader, DataWriter, ResolvedHint};
 use elide_core::redaction::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 
-use crate::codec::Container;
 use crate::content::ContentData;
-use crate::{FormatId, Handler, redact};
+use crate::string::RedactRange;
+use crate::{Container, FormatId, Handler};
 
 /// One redactable unit in a structured document.
 ///
@@ -136,7 +136,7 @@ pub trait Encoder: Send + Sync + 'static {
     /// encoder because that is where a container format holds its retained
     /// package and part replacements.
     ///
-    /// [`Container`]: crate::codec::Container
+    /// [`Container`]: crate::Container
     fn as_container_mut(&mut self) -> Option<&mut dyn Container> {
         None
     }
@@ -202,7 +202,7 @@ impl<E: Encoder> ExtractHandler<E> {
         };
         let value = replacement.value().unwrap_or_default();
         let before_len = self.items[item].value.len();
-        redact::replace_range(&mut self.items[item].value, value, local)?;
+        self.items[item].value.redact_range(value, local)?;
         let delta = self.items[item].value.len() as isize - before_len as isize;
         self.shift_starts_after(item, delta);
         Ok(())

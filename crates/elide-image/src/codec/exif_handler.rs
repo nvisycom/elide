@@ -118,7 +118,7 @@ pub const EXIF_HINT: &str = "x-elide-exif";
 
 /// [`Format`] descriptor for the image-metadata sub-part.
 pub fn format() -> Format {
-    Format::new::<Metadata, _>(FORMAT_ID.clone(), ExifLoader)
+    Format::new::<Metadata>(FORMAT_ID.clone(), ExifLoader)
         .with_extensions([EXIF_HINT])
         .with_content_types(["application/x-elide-image-metadata"])
 }

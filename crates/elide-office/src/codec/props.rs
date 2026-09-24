@@ -187,7 +187,7 @@ impl Loader<Metadata> for DocPropsLoader {
 
 /// [`Format`](elide_codec::Format) descriptor for an OOXML property sub-part.
 pub fn format() -> elide_codec::Format {
-    elide_codec::Format::new::<Metadata, _>(FORMAT_ID.clone(), DocPropsLoader)
+    elide_codec::Format::new::<Metadata>(FORMAT_ID.clone(), DocPropsLoader)
         .with_extensions([PROPS_HINT])
         .with_content_types(["application/x-elide-docprops"])
 }

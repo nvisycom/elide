@@ -17,7 +17,8 @@
 use std::ops::Range;
 
 use elide_codec::content::ContentData;
-use elide_codec::{Format, FormatId, Handler, redact};
+use elide_codec::string::RedactRange;
+use elide_codec::{Format, FormatId, Handler};
 use elide_core::Result;
 use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
@@ -30,7 +31,7 @@ pub const FORMAT_ID: FormatId = FormatId::new("elide.text.txt");
 
 /// [`Format`] descriptor registered into `FormatRegistry`.
 pub fn format() -> Format {
-    Format::new::<Text, _>(FORMAT_ID.clone(), TxtLoader)
+    Format::new::<Text>(FORMAT_ID.clone(), TxtLoader)
         .with_extensions(["txt", "log"])
         .with_content_types(["text/plain"])
 }
@@ -144,7 +145,7 @@ impl TxtHandler {
             return Ok(());
         }
         let value = replacement.value().unwrap_or_default();
-        redact::replace_range(&mut self.text, value, range)?;
+        self.text.redact_range(value, range)?;
         Ok(())
     }
 }

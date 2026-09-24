@@ -51,7 +51,7 @@ pub fn format_with(script_policy: ScriptPolicy, style_policy: ScriptPolicy) -> F
 
 /// Build the HTML [`Format`] from a configured loader.
 fn format_from(loader: HtmlLoader) -> Format {
-    Format::new::<Text, _>(FORMAT_ID.clone(), loader)
+    Format::new::<Text>(FORMAT_ID.clone(), loader)
         .with_extensions(["html", "htm"])
         .with_content_types(["text/html"])
 }

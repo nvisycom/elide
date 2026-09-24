@@ -18,7 +18,8 @@
 use std::ops::Range;
 
 use elide_codec::content::ContentData;
-use elide_codec::{Format, FormatId, Handler, redact};
+use elide_codec::string::RedactRange;
+use elide_codec::{Format, FormatId, Handler};
 use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter, ResolvedHint};
 use elide_core::redaction::Redactions;
@@ -33,7 +34,7 @@ pub const FORMAT_ID: FormatId = FormatId::new("elide.text.json");
 
 /// [`Format`] descriptor registered into `FormatRegistry`.
 pub fn format() -> Format {
-    Format::new::<Text, _>(FORMAT_ID.clone(), JsonLoader)
+    Format::new::<Text>(FORMAT_ID.clone(), JsonLoader)
         .with_extensions(["json"])
         .with_content_types(["application/json"])
 }
@@ -137,8 +138,8 @@ impl Leaf {
         if !self.is_quoted() {
             // A scalar has no escapes and no quotes; value and serialized are
             // the same bytes, so a direct splice of both keeps them in step.
-            redact::replace_range(&mut self.value, replacement, value_range.clone())?;
-            redact::replace_range(&mut self.serialized, replacement, value_range)?;
+            self.value.redact_range(replacement, value_range.clone())?;
+            self.serialized.redact_range(replacement, value_range)?;
             // A spliced scalar may no longer be a valid JSON literal (masking
             // `42` with `XXX` yields bare `XXX`). Promote such a value to a
             // quoted string so the document stays valid JSON.
@@ -156,12 +157,9 @@ impl Leaf {
         let source_end = self
             .value_to_source(0, value_range.end)
             .ok_or_else(|| Error::new(ErrorKind::MalformedInput, "value offset out of range"))?;
-        redact::replace_range(
-            &mut self.serialized,
-            &json_escape(replacement),
-            source_start..source_end,
-        )?;
-        redact::replace_range(&mut self.value, replacement, value_range)?;
+        self.serialized
+            .redact_range(&json_escape(replacement), source_start..source_end)?;
+        self.value.redact_range(replacement, value_range)?;
         Ok(())
     }
 

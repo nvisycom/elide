@@ -25,21 +25,16 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 
 ## Individual text formats.
-txt = ["internal_text"]
-json = ["internal_text", "dep:serde_json"]
-xml = ["internal_extract", "dep:quick-xml"]
+txt = []
+json = ["dep:serde_json"]
+## XML and HTML drive `elide-codec`'s shared extract-and-splice engine.
+xml = ["elide-codec/extract", "dep:quick-xml"]
 html = ["xml"]
-csv = ["internal_tabular", "dep:csv"]
+## CSV cells are addressed as the `Tabular` modality.
+csv = ["elide-core/tabular", "dep:csv"]
 
 ## The text-shaped leaf formats.
 text = ["txt", "json", "html", "xml"]
-
-# Internal markers, mirroring `elide-codec`: set automatically by a format
-# feature; not meant to be enabled directly. `internal_tabular` pulls
-# `internal_text` because tabular cells reuse the text-redaction helper.
-internal_text = ["elide-codec/internal_text"]
-internal_extract = ["internal_text", "elide-codec/internal_extract"]
-internal_tabular = ["internal_text", "elide-core/tabular"]
 
 [dependencies]
 # Internal crates
