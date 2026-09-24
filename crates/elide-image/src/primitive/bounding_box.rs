@@ -27,13 +27,15 @@ use super::{Coordinate, Dimensions, Point, Polygon};
 /// [`contains`]: Self::contains
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BoundingBox<C: Coordinate> {
     /// Minimum corner (top-left, conventionally).
     pub min: Point<C>,
     /// Maximum corner (bottom-right, conventionally).
     pub max: Point<C>,
 }
+
+#[cfg(feature = "schema")]
+super::schema::coordinate_object_schema!(BoundingBox { min: Point<C>, max: Point<C> });
 
 impl<C: Coordinate> BoundingBox<C> {
     /// Box spanning the two corners.

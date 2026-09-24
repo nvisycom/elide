@@ -22,9 +22,10 @@ use super::{Coordinate, Point};
 #[derive(Debug, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(transparent))]
 pub struct Polygon<C: Coordinate>(Vec<Point<C>>);
+
+#[cfg(feature = "schema")]
+super::schema::coordinate_transparent_schema!(Polygon(Vec<Point<C>>));
 
 impl<C: Coordinate> Polygon<C> {
     /// Polygon from its ordered vertices.

@@ -1,5 +1,4 @@
-//! Image primitives: the 2-D geometry an image location is built from, and the
-//! [`Color`] a redaction paints.
+//! Image primitives: the 2-D geometry an image location is built from.
 //!
 //! A [`Point`] and the axis-aligned [`BoundingBox`] built from two of them,
 //! generic over the coordinate scalar: `BoundingBox<f64>` is a fractional
@@ -14,6 +13,8 @@ mod color;
 mod dimensions;
 mod point;
 mod polygon;
+#[cfg(feature = "schema")]
+mod schema;
 mod unit_bounding_box;
 
 pub use self::bounding_box::BoundingBox;
