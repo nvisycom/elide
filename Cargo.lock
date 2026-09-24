@@ -1302,6 +1302,7 @@ dependencies = [
  "elide-office",
  "elide-pdf",
  "elide-plain",
+ "infer",
  "tokio",
 ]
 
@@ -2416,6 +2417,12 @@ dependencies = [
  "equivalent",
  "hashbrown 0.17.1",
 ]
+
+[[package]]
+name = "infer"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4200d433cbd5178df7797c9c2e75b348b728e39631cf14520d1e2fc424201f4"
 
 [[package]]
 name = "inout"

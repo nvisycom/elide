@@ -111,6 +111,11 @@ codec = ["dep:elide-codec", "dep:elide-format"]
 ## serialized for review and reconstructed with `deserialize_report`).
 engine = ["dep:elide-engine", "codec", "serde"]
 
+## Magic-byte sniffing: infer a binary format from the leading bytes when a
+## document carries no filename extension or content type (see
+## `FormatRegistry::decode_content`).
+codec-sniff = ["codec", "elide-format/sniff"]
+
 ## Per-modality format groups (each aggregates its per-format features).
 codec-text = ["codec-txt", "codec-json", "codec-html", "codec-xml"]
 codec-tabular = ["codec-csv", "codec-xlsx"]

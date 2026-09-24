@@ -46,6 +46,12 @@ schema = [
     "elide-pdf?/schema",
 ]
 
+## Magic-byte sniffing: when `decode_content` finds no filename extension or
+## content type, infer the format from the leading bytes (`infer`) as a last
+## resort. Only the binary formats carry magic bytes; the text-shaped formats
+## are unaffected.
+sniff = ["dep:infer"]
+
 ## The text-shaped leaf formats (handlers live in the `elide-plain` engine).
 text = ["txt", "json", "html", "xml"]
 
@@ -96,10 +102,14 @@ elide-image = { workspace = true, features = [], optional = true }
 elide-office = { workspace = true, features = [], optional = true }
 elide-pdf = { workspace = true, features = [], optional = true }
 
+# File-type inference (magic-byte sniffing)
+infer = { workspace = true, features = [], optional = true }
+
 [dev-dependencies]
 # Internal crates
 elide-audio = { workspace = true, features = ["test-util"] }
 elide-codec = { workspace = true, features = ["test-util"] }
+elide-image = { workspace = true, features = ["test-util"] }
 elide-plain = { workspace = true, features = ["txt"] }
 
 # Async runtime & parallelism

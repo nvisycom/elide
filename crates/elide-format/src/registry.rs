@@ -255,14 +255,19 @@ impl FormatRegistry {
     }
 
     /// Decode [`ContentData`], resolving the format from the metadata it
-    /// carries: its [`extension`] first, then its declared
-    /// [`content_type`].
+    /// carries: its [`extension`] first, then its declared [`content_type`].
+    ///
+    /// With the `sniff` feature, a last resort infers the format from the
+    /// leading bytes when the content asserts neither — so a caller who holds
+    /// only raw bytes can still decode a binary format (the text-shaped formats
+    /// carry no magic bytes). A caller-asserted extension or content type always
+    /// wins over a sniff.
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorKind::CapabilityUnavailable`] when the content carries
-    /// neither a resolvable filename extension nor a known content type;
-    /// otherwise propagates the loader's decode error.
+    /// Returns [`ErrorKind::CapabilityUnavailable`] when the format cannot be
+    /// resolved from the content's extension, content type, or (with `sniff`)
+    /// its bytes; otherwise propagates the loader's decode error.
     ///
     /// [`extension`]: ContentData::extension
     /// [`content_type`]: ContentData::content_type
@@ -271,12 +276,14 @@ impl FormatRegistry {
             .extension()
             .and_then(|ext| self.by_extension(&ext))
             .map(|f| f.id().clone());
-        let format_id = by_ext.or_else(|| {
-            content
-                .content_type()
-                .and_then(|ct| self.by_content_type(ct))
-                .map(|f| f.id().clone())
-        });
+        let format_id = by_ext
+            .or_else(|| {
+                content
+                    .content_type()
+                    .and_then(|ct| self.by_content_type(ct))
+                    .map(|f| f.id().clone())
+            })
+            .or_else(|| self.sniff(content.as_bytes()).map(|f| f.id().clone()));
         let Some(format_id) = format_id else {
             return Err(Error::new(
                 ErrorKind::CapabilityUnavailable,
@@ -286,6 +293,21 @@ impl FormatRegistry {
         // `format_id` came from a lookup above, so this is present.
         let format = self.by_id(&format_id).expect("resolved format present");
         format.decode(content).await
+    }
+
+    /// The format inferred from the leading bytes' magic number, when the
+    /// `sniff` feature is enabled and a registered format matches the inferred
+    /// extension. Only the binary formats carry magic bytes; the text-shaped
+    /// formats never match. Always `None` without the feature.
+    #[cfg(feature = "sniff")]
+    fn sniff(&self, bytes: &[u8]) -> Option<&Format> {
+        let kind = infer::get(bytes)?;
+        self.by_extension(kind.extension())
+    }
+
+    #[cfg(not(feature = "sniff"))]
+    fn sniff(&self, _bytes: &[u8]) -> Option<&Format> {
+        None
     }
 }
 
