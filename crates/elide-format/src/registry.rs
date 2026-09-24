@@ -331,67 +331,17 @@ impl FormatRegistryInner {
 
 #[cfg(all(test, feature = "txt"))]
 mod tests {
-    use elide_codec::content::ContentData;
-    use elide_codec::{Format, FormatId, Handler, Loader};
-    use elide_core::Result;
-    use elide_core::modality::text::{Text, TextData, TextLocation};
-    use elide_core::modality::{Chunk, DataReader, DataWriter};
-    use elide_core::redaction::Redactions;
+    use elide_codec::Format;
+    use elide_codec::test_util::MockLoader;
     use elide_plain::txt_format;
 
     use super::*;
 
-    /// A stand-in [`Handler`]/[`Loader`] pair for [`txt_variant`]: the
-    /// registry bookkeeping under test never decodes through it.
-    #[derive(Debug, Default)]
-    struct StubHandler;
-
-    #[async_trait::async_trait]
-    impl Handler<Text> for StubHandler {
-        fn format(&self) -> FormatId {
-            txt_format().id().clone()
-        }
-
-        fn encode(&self) -> Result<ContentData> {
-            unimplemented!("registry bookkeeping tests never encode")
-        }
-
-        async fn read_next(&mut self) -> Result<Option<Chunk<Text>>> {
-            Ok(None)
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl DataReader<Text> for StubHandler {
-        async fn read_at(&self, _location: &TextLocation) -> Result<Option<TextData>> {
-            Ok(None)
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl DataWriter<Text> for StubHandler {
-        async fn write_at(&mut self, _redactions: Redactions<Text>) -> Result<()> {
-            Ok(())
-        }
-    }
-
-    #[derive(Debug)]
-    struct StubLoader;
-
-    #[async_trait::async_trait]
-    impl Loader for StubLoader {
-        type Handler = StubHandler;
-        type Modality = Text;
-
-        async fn decode(&self, _content: ContentData) -> Result<StubHandler> {
-            Ok(StubHandler)
-        }
-    }
-
     /// A format reusing the txt id but claiming a different extension, to
-    /// stand in for a customized built-in.
+    /// stand in for a customized built-in. The registry bookkeeping under test
+    /// never decodes through it, so any loader with the right id serves.
     fn txt_variant() -> Format {
-        Format::new(txt_format().id().clone(), StubLoader)
+        Format::new(txt_format().id().clone(), MockLoader)
             .with_extensions(["variant"])
             .with_content_types(["text/variant"])
     }

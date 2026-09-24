@@ -78,7 +78,8 @@ schemars = { workspace = true, features = [], optional = true }
 
 [dev-dependencies]
 # Internal crates
-elide-codec = { workspace = true, features = ["serde"] }
+elide-core = { workspace = true, features = ["test-util"] }
+elide-codec = { workspace = true, features = ["serde", "test-util"] }
 elide-format = { workspace = true, features = ["serde", "png", "jpeg"] }
 elide-image = { workspace = true, features = ["exif", "jpeg", "png"] }
 elide-operator = { workspace = true, features = ["image", "metadata"] }

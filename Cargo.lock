@@ -1295,7 +1295,6 @@ dependencies = [
 name = "elide-format"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "elide-audio",
  "elide-codec",
  "elide-core",

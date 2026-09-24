@@ -9,5 +9,7 @@ pub mod modality;
 pub mod primitive;
 pub mod recognition;
 pub mod redaction;
+#[cfg(feature = "test-util")]
+pub mod test_util;
 
 pub use self::error::{Error, ErrorKind, Result};

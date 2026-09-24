@@ -42,6 +42,11 @@ schema = ["elide-core/schema"]
 ## `content` helpers it builds on are always compiled.
 extract = []
 
+## Expose `test_util`: a mock `Text` codec format (a body plus embedded
+## container parts) for a downstream crate to exercise the registry, handler,
+## and orchestration paths without a real file format.
+test-util = []
+
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }

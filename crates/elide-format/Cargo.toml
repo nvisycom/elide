@@ -96,12 +96,11 @@ elide-image = { workspace = true, features = [], optional = true }
 elide-office = { workspace = true, features = [], optional = true }
 elide-pdf = { workspace = true, features = [], optional = true }
 
-# Async runtime & parallelism
-async-trait = { workspace = true, features = [] }
-
 [dev-dependencies]
 # Internal crates
 elide-audio = { workspace = true, features = ["test-util"] }
+elide-codec = { workspace = true, features = ["test-util"] }
+elide-plain = { workspace = true, features = ["txt"] }
 
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["macros", "rt"] }
