@@ -31,9 +31,6 @@ pub use async_trait::async_trait;
 #[cfg(feature = "audio")]
 #[doc(no_inline)]
 pub use elide_audio::modality::Audio;
-#[cfg(feature = "codec")]
-#[doc(no_inline)]
-pub use elide_codec::FormatRegistry;
 #[doc(no_inline)]
 pub use elide_core::entity::{Category, Entity, LabelCatalog, LabelRef, builtins};
 #[doc(no_inline)]
@@ -68,6 +65,9 @@ pub use elide_detection::{
 pub use elide_engine::{
     AsDocuments, Directives, Document, Orchestrator, PartId, RegistryDocumentExt, Report,
 };
+#[cfg(feature = "codec")]
+#[doc(no_inline)]
+pub use elide_format::FormatRegistry;
 #[cfg(feature = "image")]
 #[doc(no_inline)]
 pub use elide_image::modality::Image;

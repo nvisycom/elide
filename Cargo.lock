@@ -1155,6 +1155,7 @@ dependencies = [
  "elide-core",
  "elide-detection",
  "elide-engine",
+ "elide-format",
  "elide-image",
  "elide-lingua",
  "elide-llm",
@@ -1162,6 +1163,7 @@ dependencies = [
  "elide-office",
  "elide-operator",
  "elide-pattern",
+ "elide-pdf",
  "elide-redaction",
  "serde",
  "serde_json",
@@ -1176,6 +1178,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "derive_builder",
+ "elide-codec",
  "elide-core",
  "hipstr",
  "hound",
@@ -1194,16 +1197,8 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
- "csv",
- "elide-audio",
  "elide-core",
- "elide-image",
- "elide-office",
- "elide-pdf",
  "hex",
- "image",
- "lopdf",
- "quick-xml 0.42.0",
  "schemars",
  "serde",
  "serde_json",
@@ -1261,6 +1256,7 @@ dependencies = [
  "elide-codec",
  "elide-core",
  "elide-detection",
+ "elide-format",
  "elide-image",
  "elide-operator",
  "elide-redaction",
@@ -1299,12 +1295,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "elide-format"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "elide-audio",
+ "elide-codec",
+ "elide-core",
+ "elide-image",
+ "elide-office",
+ "elide-pdf",
+ "elide-plain",
+ "schemars",
+ "serde",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "elide-image"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
  "derive_builder",
+ "elide-codec",
  "elide-core",
  "futures",
  "hipstr",
@@ -1375,12 +1391,16 @@ dependencies = [
 name = "elide-office"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "bytes",
+ "elide-codec",
+ "elide-core",
  "hipstr",
  "quick-xml 0.42.0",
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
  "zip",
 ]
 
@@ -1433,15 +1453,35 @@ dependencies = [
 name = "elide-pdf"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "bytes",
+ "elide-codec",
  "elide-core",
  "hipstr",
  "image",
  "lopdf",
  "pdfium-render",
  "rayon",
+ "schemars",
  "serde",
+ "serde_json",
  "sha2 0.11.0",
+ "tokio",
+]
+
+[[package]]
+name = "elide-plain"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "csv",
+ "elide-codec",
+ "elide-core",
+ "quick-xml 0.42.0",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

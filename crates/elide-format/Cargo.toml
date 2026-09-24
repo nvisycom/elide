@@ -1,0 +1,118 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "elide-format"
+description = "Format registry and built-in handlers assembling the elide codecs"
+keywords = ["elide", "codec", "format", "registry"]
+categories = ["encoding", "text-processing"]
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+## Only the plain-text format. Opt into more individually (`json`, `html`,
+## `xml`) or take the `text` umbrella for all of them. The registry's
+## `with_builtin` wires up only enabled formats.
+default = ["txt"]
+
+## Derive `serde::{Serialize, Deserialize}` on the re-exported domain types and
+## the codec config types. Forwards to `elide-codec` and the engines it drives.
+serde = [
+    "dep:serde",
+    "elide-codec/serde",
+    "elide-audio?/serde",
+    "elide-image?/serde",
+    "elide-office?/serde",
+    "elide-pdf?/serde",
+]
+
+## Derive `schemars::JsonSchema` on the schema-relevant types. Forwards to
+## `elide-codec` and the engines it drives.
+schema = [
+    "dep:schemars",
+    "elide-codec/schema",
+    "elide-audio?/schema",
+    "elide-image?/schema",
+    "elide-pdf?/schema",
+]
+
+## The text-shaped leaf formats (handlers live in the `elide-plain` engine).
+text = ["txt", "json", "html", "xml"]
+
+## Individual text formats.
+txt = ["dep:elide-plain", "elide-plain/txt"]
+json = ["dep:elide-plain", "elide-plain/json"]
+xml = ["dep:elide-plain", "elide-plain/xml"]
+html = ["dep:elide-plain", "elide-plain/html"]
+
+## The audio formats (handlers live in the `elide-audio` engine).
+audio = ["wav", "mp3"]
+## WAV / MP3: the `elide-audio` engine reads and re-writes samples.
+wav = ["dep:elide-audio", "elide-audio/codec", "elide-audio/wav"]
+mp3 = ["dep:elide-audio", "elide-audio/codec", "elide-audio/mp3"]
+
+## The image formats (handlers live in the `elide-image` engine).
+image = ["png", "jpeg", "tiff"]
+png = ["dep:elide-image", "elide-image/codec", "elide-image/png"]
+jpeg = ["dep:elide-image", "elide-image/codec", "elide-image/jpeg"]
+tiff = ["dep:elide-image", "elide-image/codec", "elide-image/tiff"]
+
+## The rich-document formats. docx/pptx adapt the `elide-office`-hosted OOXML
+## engine; PDF adapts the `elide-pdf`-hosted document engine.
+document = ["docx", "pptx", "pdf"]
+docx = ["dep:elide-office", "elide-office/codec", "internal_office"]
+pptx = ["dep:elide-office", "elide-office/codec", "internal_office"]
+pdf = ["dep:elide-pdf", "elide-pdf/codec"]
+pdf-render = ["pdf", "elide-pdf/render", "elide-pdf/image"]
+
+## The tabular formats: CSV's handler lives in the `elide-plain` engine; XLSX
+## adapts the `elide-office`-hosted OOXML engine.
+tabular = ["csv", "xlsx"]
+csv = ["dep:elide-plain", "elide-plain/csv"]
+xlsx = ["dep:elide-office", "elide-office/codec", "internal_office"]
+
+# Internal marker, mirroring `elide-codec`: set automatically by a format
+# feature; not meant to be enabled directly. Gates registering the shared
+# OOXML docProps format, hosted in `elide-office`.
+internal_office = ["dep:elide-office", "elide-office/codec"]
+
+[dependencies]
+# Internal crates
+elide-core = { workspace = true, features = [] }
+elide-codec = { workspace = true, features = [] }
+elide-plain = { workspace = true, features = [], optional = true }
+elide-audio = { workspace = true, features = [], optional = true }
+elide-image = { workspace = true, features = [], optional = true }
+elide-office = { workspace = true, features = [], optional = true }
+elide-pdf = { workspace = true, features = [], optional = true }
+
+# (De)serialization
+serde = { workspace = true, features = ["derive"], optional = true }
+schemars = { workspace = true, features = [], optional = true }
+
+# Primitive datatypes
+bytes = { workspace = true, features = [] }
+
+# Async runtime & parallelism
+async-trait = { workspace = true, features = [] }
+
+# Observability
+tracing = { workspace = true, features = [] }
+
+[dev-dependencies]
+# Internal crates
+elide-audio = { workspace = true, features = ["test-util"] }
+
+# Async runtime & parallelism
+tokio = { workspace = true, features = ["macros", "rt"] }

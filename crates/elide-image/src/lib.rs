@@ -3,6 +3,8 @@
 #![doc = include_str!("../README.md")]
 
 mod buffer;
+#[cfg(feature = "codec")]
+pub mod codec;
 #[cfg(feature = "exif")]
 mod exif;
 pub mod modality;

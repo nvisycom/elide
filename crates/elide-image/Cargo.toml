@@ -41,6 +41,13 @@ tiff = ["image/tiff"]
 ## bytes-only consumer (pixel decode without metadata) needn't enable it.
 exif = ["dep:little_exif", "dep:async-trait", "elide-core/metadata"]
 
+## Adapt the image formats to the `elide-codec` `Handler`/`Loader` contracts:
+## the per-format pixel handlers (PNG, JPEG, TIFF), the `#exif` metadata
+## sub-part handler, and their `*_format()` descriptors the format registry
+## assembles. Pulls `exif` (the sub-part reads and strips EXIF fields); needs at
+## least one format feature (`png`/`jpeg`/`tiff`) to register a pixel format.
+codec = ["dep:elide-codec", "dep:async-trait", "exif"]
+
 ## Expose `test_util`: build small in-memory image fixtures (a JPEG carrying a
 ## GPS EXIF tag) and inspect them, so a downstream crate can exercise the EXIF
 ## path without depending on `image`/`little_exif` itself. Implies `exif`.
@@ -84,6 +91,7 @@ usage = ["elide-core/usage"]
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }
+elide-codec = { workspace = true, features = [], optional = true }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }

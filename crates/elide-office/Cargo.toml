@@ -34,7 +34,27 @@ serde = ["dep:serde"]
 ## not part of the shipped surface.
 test-util = []
 
+## Adapt the OOXML formats (DOCX, PPTX, XLSX) to the `elide-codec`
+## `Handler`/`Loader` contracts: the per-format seams over the shared OOXML
+## codec adapter, plus the `Metadata`-modality `#docprops` sub-part handler +
+## recognizer shared by all three. Pulls `elide-codec`'s `internal_extract`
+## helper (DOCX/PPTX splice text through the shared extract-and-splice engine)
+## and `internal_text` (XLSX cells redact through the shared byte-range
+## helper), and elide-core's `metadata` modality for the docProps path.
+codec = [
+    "dep:elide-codec",
+    "dep:async-trait",
+    "elide-codec/internal_extract",
+    "elide-codec/internal_text",
+    "elide-core/metadata",
+    "elide-core/tabular",
+]
+
 [dependencies]
+# Internal crates
+elide-core = { workspace = true, features = [], optional = true }
+elide-codec = { workspace = true, features = [], optional = true }
+
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }
 
@@ -45,6 +65,9 @@ thiserror = { workspace = true, features = [] }
 hipstr = { workspace = true, features = [] }
 bytes = { workspace = true, features = [] }
 
+# Async runtime & parallelism
+async-trait = { workspace = true, features = [], optional = true }
+
 # Markup parsing
 quick-xml = { workspace = true, features = [] }
 
@@ -52,5 +75,12 @@ quick-xml = { workspace = true, features = [] }
 zip = { workspace = true, features = [] }
 
 [dev-dependencies]
+# Internal crates
+elide-codec = { workspace = true, features = [] }
+elide-core = { workspace = true, features = [] }
+
 # (De)serialization
 serde_json = { workspace = true, features = [] }
+
+# Async runtime & parallelism
+tokio = { workspace = true, features = ["macros", "rt"] }

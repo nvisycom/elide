@@ -2,6 +2,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 
+#[cfg(feature = "codec")]
+pub mod codec;
 pub mod docx;
 pub mod ooxml;
 pub mod opc;

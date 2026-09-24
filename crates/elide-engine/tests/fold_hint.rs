@@ -16,7 +16,7 @@
 
 use bytes::Bytes;
 use elide_codec::content::ContentData;
-use elide_codec::{Container, Format, FormatId, FormatRegistry, Handler, Loader, LocalId, Part};
+use elide_codec::{Container, Format, FormatId, Handler, Loader, LocalId, Part};
 use elide_core::Result;
 use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
 use elide_core::entity::builtins::EMAIL_ADDRESS;
@@ -28,6 +28,7 @@ use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Scope,
 use elide_core::redaction::{LeakProfile, Operator, OperatorId, Redactions};
 use elide_detection::Analyzer;
 use elide_engine::{Directives, Document, Orchestrator};
+use elide_format::FormatRegistry;
 use elide_redaction::{Anonymizer, Rule};
 
 const MOCK_FORMAT_ID: FormatId = FormatId::new("elide.test.mock");

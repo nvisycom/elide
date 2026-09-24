@@ -12,11 +12,10 @@
 //!   [`Format::new`] / [`Format::decode`].
 //! - `document`: *the decoded handle*. [`DocumentHandle<M>`] (typed) and
 //!   [`UntypedDocumentHandle`] (modality-erased, recovered by `TypeId`).
-//! - `registry`: *the lookup engine*. [`FormatRegistry`] indexes
-//!   [`Format`]s by id, extension, and content type, and decodes bytes
-//!   through the matching loader.
 //!
-//! Concrete format implementations live in `crate::handler::*`.
+//! The `FormatRegistry` that indexes these formats and the concrete handlers
+//! that implement them live in the assembly crates (`elide-format` and the
+//! per-modality engines).
 
 mod container;
 mod document;
@@ -24,7 +23,6 @@ mod format;
 mod handler;
 pub(crate) mod loader;
 mod local_id;
-mod registry;
 
 pub use self::container::{Container, Part};
 pub use self::document::{DocumentHandle, UntypedDocumentHandle};
@@ -32,4 +30,3 @@ pub use self::format::{Format, FormatId};
 pub use self::handler::Handler;
 pub use self::loader::Loader;
 pub use self::local_id::LocalId;
-pub use self::registry::FormatRegistry;

@@ -9,9 +9,10 @@
 
 use std::path::Path;
 
+use elide_codec::UntypedDocumentHandle;
 use elide_codec::content::ContentData;
-use elide_codec::{FormatRegistry, UntypedDocumentHandle};
 use elide_core::{Error, ErrorKind, Result};
+use elide_format::FormatRegistry;
 
 use crate::PartId;
 

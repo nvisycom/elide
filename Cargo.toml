@@ -15,6 +15,8 @@ members = [
     "./crates/elide-image",
     "./crates/elide-pdf",
     "./crates/elide-codec",
+    "./crates/elide-format",
+    "./crates/elide-plain",
     "./crates/elide-fake",
     "./crates/elide-operator",
     "./crates/elide-redaction",
@@ -54,6 +56,8 @@ elide-audio = { path = "./crates/elide-audio", version = "0.1.0" }
 elide-image = { path = "./crates/elide-image", version = "0.1.0" }
 elide-pdf = { path = "./crates/elide-pdf", version = "0.1.0" }
 elide-codec = { path = "./crates/elide-codec", version = "0.1.0" }
+elide-format = { path = "./crates/elide-format", version = "0.1.0" }
+elide-plain = { path = "./crates/elide-plain", version = "0.1.0" }
 elide-fake = { path = "./crates/elide-fake", version = "0.1.0" }
 elide-operator = { path = "./crates/elide-operator", version = "0.1.0" }
 elide-redaction = { path = "./crates/elide-redaction", version = "0.1.0" }

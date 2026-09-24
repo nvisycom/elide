@@ -2,7 +2,7 @@
 //! modalities (a DOCX's embedded images, a PDF's image XObjects).
 //!
 //! The codec layer cannot decode or redact those parts, it knows no
-//! recognizers and cannot reach the [`FormatRegistry`]. So a container
+//! recognizers and cannot reach the `FormatRegistry`. So a container
 //! only *exposes* its parts as opaque byte-blobs and *accepts* redacted
 //! bytes back; the toolkit's orchestrator decodes each part, drives the
 //! right modality pipeline over it, and writes the result back by id.
@@ -10,8 +10,6 @@
 //! Modality-neutral by construction: a [`Part`] is `(id, bytes, hint)`,
 //! so a zip-entry container (DOCX) and a region/object container (PDF)
 //! present the same surface even though their internals differ.
-//!
-//! [`FormatRegistry`]: crate::FormatRegistry
 
 use bytes::Bytes;
 use elide_core::Result;

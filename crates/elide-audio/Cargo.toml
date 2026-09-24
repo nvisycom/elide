@@ -54,6 +54,12 @@ schema = ["serde", "dep:schemars", "elide-core/schema"]
 ## on `hound`/`mp3lame-encoder` itself. Implies both formats.
 test-util = ["wav", "mp3"]
 
+## Adapt the audio formats to the `elide-codec` `Handler`/`Loader` contracts:
+## the per-format handlers + loaders + `*_format()` descriptors the format
+## registry assembles. Needs at least one format feature (`wav`/`mp3`) to
+## register anything; a bare `codec` build compiles only the adapter glue.
+codec = ["dep:elide-codec", "dep:async-trait"]
+
 ## Speech-to-text: the `SttBackend` trait, the `SttEnricher`, and the
 ## request/response types. The traits ship bare (no STT engine); enable
 ## `test-utils` for the no-op backend.
@@ -70,6 +76,7 @@ usage = ["elide-core/usage"]
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }
+elide-codec = { workspace = true, features = [], optional = true }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }

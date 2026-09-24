@@ -25,8 +25,13 @@ rustdoc-args = ["--cfg", "docsrs"]
 ## pure-Rust parser, no native dependency.
 default = []
 
-## Derive `serde::{Serialize, Deserialize}` on the extraction/coverage model.
+## Derive `serde::{Serialize, Deserialize}` on the extraction/coverage model,
+## and on the codec config types (`RasterMode`, `Dpi`).
 serde = ["dep:serde"]
+
+## Derive `schemars::JsonSchema` on the codec config types (`RasterMode`,
+## `Dpi`). Implies `serde`.
+schema = ["serde", "dep:schemars"]
 
 ## Redact embedded images by replacing an image XObject's stream with new
 ## (redacted) bytes, rebuilding a valid XObject from an encoded PNG/JPEG.
@@ -44,12 +49,23 @@ render = ["dep:pdfium-render", "dep:rayon", "dep:image", "dep:sha2"]
 ## the pixels it claimed. Pulls `render`.
 test-utils = ["render"]
 
+## Adapt the PDF engine to the `elide-codec` `Handler`/`Loader` contracts: the
+## text handler ([`pdf_format`](codec::pdf_format), glyph-deletion redaction),
+## and, with `render`, the raster path
+## ([`pdf_format_with`](codec::pdf_format_with)). Embedded-image and
+## scanned-page redaction through the `Handler`'s `Container` surface need
+## this crate's own `image`/`render` features, independently opt-in, so a
+## text-only codec build compiles just the glyph-delete path.
+codec = ["dep:elide-codec", "dep:async-trait"]
+
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }
+elide-codec = { workspace = true, features = [], optional = true }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }
+schemars = { workspace = true, features = [], optional = true }
 
 # Primitive datatypes
 hipstr = { workspace = true, features = [] }
@@ -60,6 +76,7 @@ sha2 = { workspace = true, features = [], optional = true }
 
 # Async runtime & parallelism
 rayon = { workspace = true, features = [], optional = true }
+async-trait = { workspace = true, features = [], optional = true }
 
 # Markup parsing
 lopdf = { workspace = true, default-features = false }
@@ -71,6 +88,12 @@ image = { workspace = true, features = [], optional = true }
 pdfium-render = { workspace = true, features = [], optional = true }
 
 [dev-dependencies]
+# (De)serialization
+serde_json = { workspace = true, features = [] }
+
+# Async runtime & parallelism
+tokio = { workspace = true, features = ["macros", "rt"] }
+
 # Markup parsing
 lopdf = { workspace = true, default-features = false }
 

@@ -2,12 +2,10 @@
 //!
 //! - [`FormatId`]: stable string identifier (e.g. `"elide.text.txt"`).
 //!   Open namespace, no central enum.
-//! - [`Format`]: descriptor the [`FormatRegistry`] indexes by id /
+//! - [`Format`]: descriptor the `FormatRegistry` indexes by id /
 //!   extension / content type. Bundles a [`FormatId`], the modality name
 //!   it produces, lookup keys, and an erased loader that decodes bytes
 //!   into a typed handle.
-//!
-//! [`FormatRegistry`]: super::FormatRegistry
 
 use std::borrow::Cow;
 use std::fmt;
@@ -58,7 +56,7 @@ impl AsRef<str> for FormatId {
 
 /// Descriptor for one registered codec format.
 ///
-/// Indexed by [`FormatRegistry`] under its [`FormatId`], every extension
+/// Indexed by `FormatRegistry` under its [`FormatId`], every extension
 /// in `extensions`, and every MIME in `content_types`.
 ///
 /// Construct via [`Format::new`]; read the parts via the accessor
@@ -66,8 +64,6 @@ impl AsRef<str> for FormatId {
 /// only path that produces a [`Format`]: that way the modality name is
 /// always derived from the loader's modality and never hand-set, and
 /// the loader is erased internally.
-///
-/// [`FormatRegistry`]: super::FormatRegistry
 #[derive(Clone)]
 pub struct Format {
     pub(crate) id: FormatId,
@@ -84,12 +80,11 @@ impl Format {
     ///
     /// Extensions and content types default to empty; chain
     /// [`with_extensions`] / [`with_content_types`] to declare the lookup
-    /// keys the [`FormatRegistry`] indexes this format under.
+    /// keys the `FormatRegistry` indexes this format under.
     ///
     /// [`M::NAME`]: Modality::NAME
     /// [`with_extensions`]: Self::with_extensions
     /// [`with_content_types`]: Self::with_content_types
-    /// [`FormatRegistry`]: super::FormatRegistry
     pub fn new<M, L>(id: FormatId, loader: L) -> Self
     where
         M: Modality,
@@ -153,13 +148,11 @@ impl Format {
 
     /// Decode raw content through this format's loader, returning the
     /// erased handle. Equivalent to resolving the format yourself and
-    /// calling [`FormatRegistry::decode`].
+    /// calling `FormatRegistry::decode`.
     ///
     /// # Errors
     ///
     /// Propagates the loader's decode error.
-    ///
-    /// [`FormatRegistry::decode`]: super::FormatRegistry::decode
     pub async fn decode(&self, content: ContentData) -> Result<UntypedDocumentHandle> {
         self.loader.decode(content).await
     }

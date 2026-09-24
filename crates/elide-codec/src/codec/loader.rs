@@ -3,13 +3,12 @@
 //!
 //! - [`Loader<M>`]: per-modality decoder a format implementation
 //!   writes. Returns a concrete handler implementing [`Handler<M>`].
-//! - [`ErasedLoader`]: modality-erased loader the [`FormatRegistry`]
+//! - [`ErasedLoader`]: modality-erased loader the `FormatRegistry`
 //!   holds behind `Arc`.
 //! - [`erase`]: bridge from a typed `Loader<M>` to
 //!   `Arc<dyn ErasedLoader>`.
 //!
 //! [`Handler<M>`]: super::Handler
-//! [`FormatRegistry`]: super::FormatRegistry
 
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -25,7 +24,7 @@ use crate::content::ContentData;
 ///
 /// A loader validates and parses raw content for modality `M`,
 /// producing a handler that implements [`Handler<M>`]. Loaders are the
-/// leaves the [`FormatRegistry`] composes: registering a format means
+/// leaves the `FormatRegistry` composes: registering a format means
 /// registering its loader.
 ///
 /// # Implementing a third-party format
@@ -35,13 +34,12 @@ use crate::content::ContentData;
 /// 2. Implement `Loader<M>` for a stateless type whose [`decode`]
 ///    validates raw [`ContentData`] and returns the handler.
 /// 3. Build a [`Format`] with [`Format::new`], chain extensions /
-///    content types as needed, and register it on a [`FormatRegistry`].
+///    content types as needed, and register it on a `FormatRegistry`.
 ///
 /// The registry erases `M` internally; third-party callers never touch
 /// the object-safe surface.
 ///
 /// [`Handler<M>`]: super::Handler
-/// [`FormatRegistry`]: super::FormatRegistry
 /// [`decode`]: Loader::decode
 /// [`Format`]: super::Format
 /// [`Format::new`]: super::Format::new
@@ -58,16 +56,14 @@ pub trait Loader<M: Modality>: Send + Sync + 'static {
     async fn decode(&self, content: ContentData) -> Result<Self::Handler>;
 }
 
-/// Modality-erased loader the [`FormatRegistry`] holds behind `Arc`.
+/// Modality-erased loader the `FormatRegistry` holds behind `Arc`.
 /// Adapts a per-modality [`Loader<M>`] into a uniform `decode` returning
 /// an [`UntypedDocumentHandle`].
 ///
 /// Crate-internal: every consumer goes through [`Format::decode`] or
-/// [`FormatRegistry::decode`] instead.
+/// `FormatRegistry::decode` instead.
 ///
-/// [`FormatRegistry`]: super::FormatRegistry
 /// [`Format::decode`]: super::Format::decode
-/// [`FormatRegistry::decode`]: super::FormatRegistry::decode
 #[async_trait::async_trait]
 pub(crate) trait ErasedLoader: Send + Sync + 'static {
     async fn decode(&self, content: ContentData) -> Result<UntypedDocumentHandle>;

@@ -32,7 +32,7 @@ default = ["pattern", "ner", "llm"]
 ## are enabled.
 ## (`elide-engine` requires serde unconditionally, so the `engine` feature
 ## pulls it in on its own — no forward needed here.)
-serde = ["elide-core/serde", "elide-detection/serde", "elide-operator/serde", "elide-redaction/serde", "elide-codec?/serde"]
+serde = ["elide-core/serde", "elide-detection/serde", "elide-operator/serde", "elide-redaction/serde", "elide-codec?/serde", "elide-format?/serde"]
 
 ## Derive `schemars::JsonSchema` on the re-exported domain types, for
 ## emitting JSON Schemas of the serialized model. Implies serde. Forwards to
@@ -45,6 +45,7 @@ schema = [
     "elide-operator/schema",
     "elide-redaction/schema",
     "elide-codec?/schema",
+    "elide-format?/schema",
     "elide-engine?/schema",
     "elide-ner?/schema",
 ]
@@ -102,7 +103,7 @@ tabular = ["elide-core/tabular", "elide-operator/tabular", "elide-redaction/tabu
 ## per-format `codec-*` features below to pull in the shipped handlers. For the
 ## `Orchestrator` / `Report` that drive analyze + redact across a decoded
 ## document, enable `engine`.
-codec = ["dep:elide-codec"]
+codec = ["dep:elide-codec", "dep:elide-format"]
 
 ## Re-export the orchestration engine: the `engine` module (`Orchestrator`,
 ## `Report`, `Directives`). Implies `codec` (the orchestrator decodes documents
@@ -115,25 +116,24 @@ codec-text = ["codec-txt", "codec-json", "codec-html", "codec-xml"]
 codec-tabular = ["codec-csv", "codec-xlsx"]
 codec-image = ["codec-png", "codec-jpeg", "codec-tiff"]
 codec-audio = ["codec-wav", "codec-mp3"]
-codec-document = ["codec-docx", "codec-pptx", "codec-pdf", "codec-rtf"]
+codec-document = ["codec-docx", "codec-pptx", "codec-pdf"]
 
 ## Per-format handlers.
-codec-txt = ["codec", "elide-codec/txt"]
-codec-json = ["codec", "elide-codec/json"]
-codec-html = ["codec", "elide-codec/html"]
-codec-xml = ["codec", "elide-codec/xml"]
-codec-csv = ["codec", "tabular", "elide-codec/csv"]
-codec-xlsx = ["codec", "tabular", "codec-xml", "elide-codec/xlsx", "metadata"]
-codec-png = ["codec", "image", "elide-codec/png"]
-codec-jpeg = ["codec", "image", "elide-codec/jpeg"]
-codec-tiff = ["codec", "image", "elide-codec/tiff"]
-codec-wav = ["codec", "audio", "elide-codec/wav"]
-codec-mp3 = ["codec", "audio", "elide-codec/mp3"]
-codec-docx = ["codec", "elide-codec/docx", "metadata"]
-codec-pptx = ["codec", "elide-codec/pptx", "metadata"]
-codec-pdf = ["codec", "elide-codec/pdf"]
-codec-pdf-render = ["codec-pdf", "elide-codec/pdf-render"]
-codec-rtf = ["codec", "elide-codec/rtf"]
+codec-txt = ["codec", "elide-format/txt"]
+codec-json = ["codec", "elide-format/json"]
+codec-html = ["codec", "elide-format/html"]
+codec-xml = ["codec", "elide-format/xml"]
+codec-csv = ["codec", "tabular", "elide-format/csv"]
+codec-xlsx = ["codec", "tabular", "dep:elide-office", "elide-format/xlsx", "metadata"]
+codec-png = ["codec", "image", "elide-format/png"]
+codec-jpeg = ["codec", "image", "elide-format/jpeg"]
+codec-tiff = ["codec", "image", "elide-format/tiff"]
+codec-wav = ["codec", "audio", "elide-format/wav"]
+codec-mp3 = ["codec", "audio", "elide-format/mp3"]
+codec-docx = ["codec", "dep:elide-office", "elide-format/docx", "metadata"]
+codec-pptx = ["codec", "dep:elide-office", "elide-format/pptx", "metadata"]
+codec-pdf = ["codec", "dep:elide-pdf", "elide-format/pdf"]
+codec-pdf-render = ["codec-pdf", "elide-format/pdf-render"]
 
 ## Ship the no-op mock backends in the re-exported recognizer crates.
 test-utils = ["elide-ner?/test-utils", "elide-llm?/test-utils", "elide-audio?/test-utils", "elide-image?/test-utils"]
@@ -175,7 +175,10 @@ elide-lingua = { workspace = true, features = [], optional = true }
 elide-llm = { workspace = true, features = [], optional = true }
 elide-audio = { workspace = true, features = [], optional = true }
 elide-image = { workspace = true, features = [], optional = true }
+elide-office = { workspace = true, features = [], optional = true }
+elide-pdf = { workspace = true, features = [], optional = true }
 elide-codec = { workspace = true, features = [], optional = true }
+elide-format = { workspace = true, features = [], optional = true }
 elide-engine = { workspace = true, features = [], optional = true }
 elide-operator = { workspace = true, features = [] }
 elide-redaction = { workspace = true, features = [] }
@@ -185,7 +188,7 @@ async-trait = { workspace = true, features = [] }
 
 [dev-dependencies]
 # Internal crates
-elide-office = { workspace = true, features = ["test-util"] }
+elide-office = { workspace = true, features = ["test-util", "codec"] }
 elide-image = { workspace = true, features = ["test-util"] }
 
 # (De)serialization
