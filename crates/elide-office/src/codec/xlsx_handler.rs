@@ -29,7 +29,7 @@ pub const FORMAT_ID: FormatId = FormatId::new("elide.tabular.xlsx");
 
 /// [`Format`] descriptor registered into `FormatRegistry`.
 pub fn format() -> Format {
-    Format::new::<Tabular>(FORMAT_ID.clone(), XlsxLoader)
+    Format::new(FORMAT_ID.clone(), XlsxLoader)
         .with_extensions(["xlsx"])
         .with_content_types(["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"])
 }

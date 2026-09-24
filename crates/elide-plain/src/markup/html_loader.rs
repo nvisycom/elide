@@ -84,8 +84,9 @@ impl HtmlLoader {
 }
 
 #[async_trait::async_trait]
-impl Loader<Text> for HtmlLoader {
+impl Loader for HtmlLoader {
     type Handler = HtmlHandler;
+    type Modality = Text;
 
     async fn decode(&self, content: ContentData) -> Result<HtmlHandler> {
         let text = content.decode()?;

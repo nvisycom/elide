@@ -16,7 +16,7 @@ use std::ops::Range;
 use elide_codec::content::ContentData;
 use elide_codec::extract::{Encoder, ExtractHandler, ExtractedItem, ItemEdit};
 use elide_codec::{Format, FormatId};
-use elide_core::modality::text::{SourceRef, Text};
+use elide_core::modality::text::SourceRef;
 use elide_core::{Error, ErrorKind, Result};
 
 use super::XmlLoader;
@@ -45,7 +45,7 @@ pub(crate) struct XmlSpan(pub(super) Range<usize>);
 
 /// [`Format`] descriptor registered into `FormatRegistry`.
 pub fn format() -> Format {
-    Format::new::<Text>(FORMAT_ID.clone(), XmlLoader)
+    Format::new(FORMAT_ID.clone(), XmlLoader)
         .with_extensions(["xml"])
         .with_content_types(["application/xml", "text/xml"])
 }

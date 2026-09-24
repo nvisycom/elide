@@ -15,8 +15,9 @@ use crate::xlsx::Xlsx;
 pub(crate) struct XlsxLoader;
 
 #[async_trait::async_trait]
-impl Loader<Tabular> for XlsxLoader {
+impl Loader for XlsxLoader {
     type Handler = XlsxHandler;
+    type Modality = Tabular;
 
     async fn decode(&self, content: ContentData) -> Result<XlsxHandler> {
         let archive = content.to_bytes();

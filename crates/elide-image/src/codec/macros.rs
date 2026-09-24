@@ -57,10 +57,7 @@ macro_rules! impl_image_handler {
         /// Build this format's [`Format`](elide_codec::Format) from a configured
         /// fallback policy.
         fn format_from(policy: crate::ExifPolicy) -> ::elide_codec::Format {
-            ::elide_codec::Format::new::<crate::modality::Image>(
-                FORMAT_ID.clone(),
-                $loader { policy },
-            )
+            ::elide_codec::Format::new(FORMAT_ID.clone(), $loader { policy })
             .with_extensions([$($ext),*])
             .with_content_types([$($mime),*])
         }
@@ -223,7 +220,8 @@ macro_rules! impl_image_handler {
         }
 
         #[::async_trait::async_trait]
-        impl ::elide_codec::Loader<crate::modality::Image> for $loader {
+        impl ::elide_codec::Loader for $loader {
+            type Modality = crate::modality::Image;
             type Handler = $handler;
 
             async fn decode(

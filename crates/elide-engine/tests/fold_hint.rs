@@ -215,8 +215,9 @@ impl Container for MockHandler {
 struct MockLoader;
 
 #[async_trait::async_trait]
-impl Loader<Text> for MockLoader {
+impl Loader for MockLoader {
     type Handler = MockHandler;
+    type Modality = Text;
 
     async fn decode(&self, content: ContentData) -> Result<MockHandler> {
         Ok(MockHandler::parse(content.as_bytes()))
@@ -224,7 +225,7 @@ impl Loader<Text> for MockLoader {
 }
 
 fn mock_format() -> Format {
-    Format::new::<Text>(MOCK_FORMAT_ID.clone(), MockLoader).with_extensions([MOCK_EXT])
+    Format::new(MOCK_FORMAT_ID.clone(), MockLoader).with_extensions([MOCK_EXT])
 }
 
 // ---- a trivial recognizer + operator that redact PII -------------------------

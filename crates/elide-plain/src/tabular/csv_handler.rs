@@ -49,7 +49,7 @@ pub fn format_with(has_headers: bool, delimiter: Option<u8>) -> Format {
 
 /// Build the CSV [`Format`] from a configured loader.
 fn format_from(loader: CsvLoader) -> Format {
-    Format::new::<Tabular>(FORMAT_ID.clone(), loader)
+    Format::new(FORMAT_ID.clone(), loader)
         .with_extensions(["csv"])
         .with_content_types(["text/csv"])
 }

@@ -15,8 +15,9 @@ use super::JsonHandler;
 pub(crate) struct JsonLoader;
 
 #[async_trait::async_trait]
-impl Loader<Text> for JsonLoader {
+impl Loader for JsonLoader {
     type Handler = JsonHandler;
+    type Modality = Text;
 
     async fn decode(&self, content: ContentData) -> Result<JsonHandler> {
         let text = content.decode()?;

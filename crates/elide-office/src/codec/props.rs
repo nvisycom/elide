@@ -177,8 +177,9 @@ impl DataWriter<Metadata> for DocPropsHandler {
 pub(crate) struct DocPropsLoader;
 
 #[::async_trait::async_trait]
-impl Loader<Metadata> for DocPropsLoader {
+impl Loader for DocPropsLoader {
     type Handler = DocPropsHandler;
+    type Modality = Metadata;
 
     async fn decode(&self, content: ContentData) -> Result<DocPropsHandler> {
         Ok(DocPropsHandler::new(content.to_bytes()))
@@ -187,7 +188,7 @@ impl Loader<Metadata> for DocPropsLoader {
 
 /// [`Format`](elide_codec::Format) descriptor for an OOXML property sub-part.
 pub fn format() -> elide_codec::Format {
-    elide_codec::Format::new::<Metadata>(FORMAT_ID.clone(), DocPropsLoader)
+    elide_codec::Format::new(FORMAT_ID.clone(), DocPropsLoader)
         .with_extensions([PROPS_HINT])
         .with_content_types(["application/x-elide-docprops"])
 }

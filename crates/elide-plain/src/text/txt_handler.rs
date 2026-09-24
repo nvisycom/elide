@@ -31,7 +31,7 @@ pub const FORMAT_ID: FormatId = FormatId::new("elide.text.txt");
 
 /// [`Format`] descriptor registered into `FormatRegistry`.
 pub fn format() -> Format {
-    Format::new::<Text>(FORMAT_ID.clone(), TxtLoader)
+    Format::new(FORMAT_ID.clone(), TxtLoader)
         .with_extensions(["txt", "log"])
         .with_content_types(["text/plain"])
 }

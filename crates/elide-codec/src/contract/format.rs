@@ -16,7 +16,7 @@ use elide_core::modality::Modality;
 
 use super::Loader;
 use super::document::UntypedDocumentHandle;
-use super::loader::{ErasedLoader, erase};
+use super::loader::ErasedLoader;
 use crate::content::ContentData;
 
 /// Stable identifier for a registered codec format.
@@ -85,16 +85,13 @@ impl Format {
     /// [`M::NAME`]: Modality::NAME
     /// [`with_extensions`]: Self::with_extensions
     /// [`with_content_types`]: Self::with_content_types
-    pub fn new<M>(id: FormatId, loader: impl Loader<M>) -> Self
-    where
-        M: Modality,
-    {
+    pub fn new<L: Loader>(id: FormatId, loader: L) -> Self {
         Self {
             id,
-            modality: M::NAME,
+            modality: <L::Modality as Modality>::NAME,
             extensions: Vec::new(),
             content_types: Vec::new(),
-            loader: erase(loader),
+            loader: Arc::new(loader),
         }
     }
 

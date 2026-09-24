@@ -45,8 +45,9 @@ impl PdfLoader {
 }
 
 #[async_trait::async_trait]
-impl Loader<Text> for PdfLoader {
+impl Loader for PdfLoader {
     type Handler = PdfHandler;
+    type Modality = Text;
 
     async fn decode(&self, content: ContentData) -> Result<PdfHandler> {
         let document = content.to_bytes();

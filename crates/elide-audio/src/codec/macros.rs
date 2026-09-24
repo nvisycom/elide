@@ -30,12 +30,9 @@ macro_rules! impl_audio_handler {
         ///
         /// [`Format`]: elide_codec::Format
         pub fn format() -> ::elide_codec::Format {
-            ::elide_codec::Format::new::<crate::modality::Audio>(
-                FORMAT_ID.clone(),
-                $loader,
-            )
-            .with_extensions([$($ext),*])
-            .with_content_types([$($mime),*])
+            ::elide_codec::Format::new(FORMAT_ID.clone(), $loader)
+                .with_extensions([$($ext),*])
+                .with_content_types([$($mime),*])
         }
 
         #[doc = concat!("Handler for a loaded ", $format_id, " clip.")]
@@ -126,7 +123,8 @@ macro_rules! impl_audio_handler {
         pub(crate) struct $loader;
 
         #[::async_trait::async_trait]
-        impl ::elide_codec::Loader<crate::modality::Audio> for $loader {
+        impl ::elide_codec::Loader for $loader {
+            type Modality = crate::modality::Audio;
             type Handler = $handler;
 
             async fn decode(

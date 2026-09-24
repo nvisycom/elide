@@ -41,8 +41,9 @@ impl Default for CsvLoader {
 }
 
 #[async_trait::async_trait]
-impl Loader<Tabular> for CsvLoader {
+impl Loader for CsvLoader {
     type Handler = CsvHandler;
+    type Modality = Tabular;
 
     async fn decode(&self, content: ContentData) -> Result<CsvHandler> {
         let text = content.decode()?;

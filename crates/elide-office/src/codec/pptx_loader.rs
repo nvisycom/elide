@@ -13,8 +13,9 @@ use super::pptx_handler::{PptxCodec, PptxHandler};
 pub(crate) struct PptxLoader;
 
 #[async_trait::async_trait]
-impl Loader<Text> for PptxLoader {
+impl Loader for PptxLoader {
     type Handler = PptxHandler;
+    type Modality = Text;
 
     async fn decode(&self, content: ContentData) -> Result<PptxHandler> {
         decode_extract::<PptxCodec>(content)

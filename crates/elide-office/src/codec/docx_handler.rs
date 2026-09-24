@@ -7,7 +7,6 @@
 //! the shared [`OoxmlEncoder`](super::ooxml::OoxmlEncoder).
 
 use elide_codec::{Format, FormatId};
-use elide_core::modality::text::Text;
 
 use super::DocxLoader;
 use super::ooxml::{OoxmlCodec, OoxmlHandler};
@@ -32,7 +31,7 @@ pub(crate) type DocxHandler = OoxmlHandler<DocxCodec>;
 
 /// [`Format`] descriptor registered into `FormatRegistry`.
 pub fn format() -> Format {
-    Format::new::<Text>(FORMAT_ID.clone(), DocxLoader)
+    Format::new(FORMAT_ID.clone(), DocxLoader)
         .with_extensions(["docx"])
         .with_content_types([
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -43,7 +42,7 @@ pub fn format() -> Format {
 mod tests {
     use elide_codec::content::ContentData;
     use elide_codec::{Handler, Loader};
-    use elide_core::modality::text::{SourceRef, TextLocation};
+    use elide_core::modality::text::{SourceRef, Text, TextLocation};
 
     use super::*;
     use crate::codec::DocxLoader;

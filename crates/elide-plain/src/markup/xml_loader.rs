@@ -19,8 +19,9 @@ use super::xml_handler::{FORMAT_ID, XmlEncoder, XmlHandler};
 pub(crate) struct XmlLoader;
 
 #[async_trait::async_trait]
-impl Loader<Text> for XmlLoader {
+impl Loader for XmlLoader {
     type Handler = XmlHandler;
+    type Modality = Text;
 
     async fn decode(&self, content: ContentData) -> Result<XmlHandler> {
         let text = content.decode()?;

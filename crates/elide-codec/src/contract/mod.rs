@@ -5,10 +5,10 @@
 //! - `handler`: *what a handler exposes*. [`Handler<M>`] (per-modality
 //!   capability surface: identify, encode, stream, plus the inherited
 //!   read/write and lift). The streamed unit is [`elide_core::modality::Chunk`].
-//! - `loader`: *how raw bytes become a handle*. [`Loader<M>`] (per-modality
-//!   decoder). The registry-side modality-erasure machinery (`ErasedLoader`,
-//!   `erase`) is crate-internal and wired through [`Format::new`] /
-//!   [`Format::decode`].
+//! - `loader`: *how raw bytes become a handle*. [`Loader`] (a per-modality
+//!   decoder, its [`Modality`](Loader::Modality) an associated type). The
+//!   registry-side erasure (`ErasedLoader`, a blanket impl over every `Loader`)
+//!   is crate-internal and wired through [`Format::new`] / [`Format::decode`].
 //! - `document`: *the decoded handle*. [`DocumentHandle<M>`] (typed) and
 //!   [`UntypedDocumentHandle`] (modality-erased, recovered by `TypeId`).
 //! - `container`: *a document that nests sub-parts of other modalities*.

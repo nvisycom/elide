@@ -34,7 +34,7 @@ pub const FORMAT_ID: FormatId = FormatId::new("elide.text.json");
 
 /// [`Format`] descriptor registered into `FormatRegistry`.
 pub fn format() -> Format {
-    Format::new::<Text>(FORMAT_ID.clone(), JsonLoader)
+    Format::new(FORMAT_ID.clone(), JsonLoader)
         .with_extensions(["json"])
         .with_content_types(["application/json"])
 }

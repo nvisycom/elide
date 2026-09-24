@@ -103,8 +103,9 @@ impl DataWriter<Metadata> for ExifHandler {
 pub(crate) struct ExifLoader;
 
 #[::async_trait::async_trait]
-impl Loader<Metadata> for ExifLoader {
+impl Loader for ExifLoader {
     type Handler = ExifHandler;
+    type Modality = Metadata;
 
     async fn decode(&self, content: ContentData) -> Result<ExifHandler> {
         ExifHandler::new(ImageBuffer::open(content.as_bytes())?)
@@ -118,7 +119,7 @@ pub const EXIF_HINT: &str = "x-elide-exif";
 
 /// [`Format`] descriptor for the image-metadata sub-part.
 pub fn format() -> Format {
-    Format::new::<Metadata>(FORMAT_ID.clone(), ExifLoader)
+    Format::new(FORMAT_ID.clone(), ExifLoader)
         .with_extensions([EXIF_HINT])
         .with_content_types(["application/x-elide-image-metadata"])
 }

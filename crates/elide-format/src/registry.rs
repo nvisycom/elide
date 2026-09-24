@@ -379,8 +379,9 @@ mod tests {
     struct StubLoader;
 
     #[async_trait::async_trait]
-    impl Loader<Text> for StubLoader {
+    impl Loader for StubLoader {
         type Handler = StubHandler;
+        type Modality = Text;
 
         async fn decode(&self, _content: ContentData) -> Result<StubHandler> {
             Ok(StubHandler)
@@ -390,7 +391,7 @@ mod tests {
     /// A format reusing the txt id but claiming a different extension, to
     /// stand in for a customized built-in.
     fn txt_variant() -> Format {
-        Format::new::<Text>(txt_format().id().clone(), StubLoader)
+        Format::new(txt_format().id().clone(), StubLoader)
             .with_extensions(["variant"])
             .with_content_types(["text/variant"])
     }

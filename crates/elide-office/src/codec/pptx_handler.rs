@@ -7,7 +7,6 @@
 //! the shared [`OoxmlEncoder`](super::ooxml::OoxmlEncoder).
 
 use elide_codec::{Format, FormatId};
-use elide_core::modality::text::Text;
 
 use super::PptxLoader;
 use super::ooxml::{OoxmlCodec, OoxmlHandler};
@@ -32,7 +31,7 @@ pub(crate) type PptxHandler = OoxmlHandler<PptxCodec>;
 
 /// [`Format`] descriptor registered into `FormatRegistry`.
 pub fn format() -> Format {
-    Format::new::<Text>(FORMAT_ID.clone(), PptxLoader)
+    Format::new(FORMAT_ID.clone(), PptxLoader)
         .with_extensions(["pptx"])
         .with_content_types([
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",

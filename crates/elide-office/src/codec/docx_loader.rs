@@ -13,8 +13,9 @@ use super::ooxml::decode_extract;
 pub(crate) struct DocxLoader;
 
 #[async_trait::async_trait]
-impl Loader<Text> for DocxLoader {
+impl Loader for DocxLoader {
     type Handler = DocxHandler;
+    type Modality = Text;
 
     async fn decode(&self, content: ContentData) -> Result<DocxHandler> {
         decode_extract::<DocxCodec>(content)

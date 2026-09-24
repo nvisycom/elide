@@ -14,8 +14,9 @@ use super::TxtHandler;
 pub(crate) struct TxtLoader;
 
 #[async_trait::async_trait]
-impl Loader<Text> for TxtLoader {
+impl Loader for TxtLoader {
     type Handler = TxtHandler;
+    type Modality = Text;
 
     async fn decode(&self, content: ContentData) -> Result<TxtHandler> {
         Ok(TxtHandler::new(content.decode()?))
