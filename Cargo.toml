@@ -135,6 +135,9 @@ phonenumber = { version = "0.3", default-features = false }
 quick-xml = { version = "0.42", features = [] }
 lopdf = { version = "0.45", default-features = false }
 
+# File-type inference (magic-byte sniffing)
+infer = { version = "0.22", default-features = false }
+
 # Compression
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 
