@@ -45,3 +45,16 @@ async fn plain_text_does_not_sniff() {
     let content = ContentData::from_text("just some words");
     assert!(reg.decode_content(content).await.is_err());
 }
+
+/// An unregistered but *present* hint suppresses the sniff: the caller asserted
+/// a format (an extension we do not handle), so PNG bytes named `.unknown` fail
+/// rather than being silently sniffed as an image.
+#[tokio::test]
+async fn an_unregistered_extension_suppresses_the_sniff() {
+    let reg = FormatRegistry::with_builtin();
+    let content = ContentData::new(elide_image::test_util::png(2, 2)).with_filename("data.unknown");
+    assert!(
+        reg.decode_content(content).await.is_err(),
+        "a present-but-unregistered extension must not fall through to a sniff"
+    );
+}

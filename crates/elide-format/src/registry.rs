@@ -276,14 +276,21 @@ impl FormatRegistry {
             .extension()
             .and_then(|ext| self.by_extension(&ext))
             .map(|f| f.id().clone());
-        let format_id = by_ext
-            .or_else(|| {
-                content
-                    .content_type()
-                    .and_then(|ct| self.by_content_type(ct))
-                    .map(|f| f.id().clone())
-            })
-            .or_else(|| self.sniff(content.as_bytes()).map(|f| f.id().clone()));
+        let format_id = by_ext.or_else(|| {
+            content
+                .content_type()
+                .and_then(|ct| self.by_content_type(ct))
+                .map(|f| f.id().clone())
+        });
+        // Sniff the bytes only when the caller asserted nothing at all. An
+        // extension or content type that is present but unregistered is still a
+        // claim about the format, so honor the caller's intent by failing rather
+        // than second-guessing it — the sniff is for the "no hints" case.
+        let format_id = format_id.or_else(|| {
+            (content.extension().is_none() && content.content_type().is_none())
+                .then(|| self.sniff(content.as_bytes()).map(|f| f.id().clone()))
+                .flatten()
+        });
         let Some(format_id) = format_id else {
             return Err(Error::new(
                 ErrorKind::CapabilityUnavailable,
