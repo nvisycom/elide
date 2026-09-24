@@ -23,6 +23,7 @@ use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
 
 use crate::content::ContentData;
+use crate::string::RedactRange;
 use crate::{Container, Format, FormatId, Handler, Loader, LocalId, Part};
 
 /// Stable [`FormatId`] for the mock format.
@@ -178,11 +179,10 @@ impl DataWriter<Text> for MockHandler {
             let Some(range) = location.range() else {
                 continue;
             };
-            let range = range.start..range.end;
-            if range.end <= self.body.len() {
-                let value = replacement.value().unwrap_or_default();
-                self.body.replace_range(range, value);
-            }
+            let value = replacement.value().unwrap_or_default();
+            // `redact_range` clamps the endpoints and errors on a mid-character
+            // boundary rather than panicking like `String::replace_range`.
+            self.body.redact_range(value, range.start..range.end)?;
         }
         Ok(())
     }
