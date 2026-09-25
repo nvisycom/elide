@@ -8,7 +8,7 @@
 //! content survives underneath, while every other page of the document is left
 //! untouched (a born-digital page keeps its selectable, glyph-redacted text).
 //!
-//! Behind the `image` feature (like [`redact_images`](crate::Pdf::redact_images)),
+//! Behind the `image` feature (like [`redact_images`](crate::document::Pdf::redact_images)),
 //! which pulls the `image` crate to build the XObject.
 
 use std::collections::BTreeSet;

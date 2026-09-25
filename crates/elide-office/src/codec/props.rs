@@ -1,4 +1,4 @@
-//! Handler and loader for an OOXML document-property part, a `docProps/*`
+//! Stream and loader for an OOXML document-property part, a `docProps/*`
 //! sub-part shared by docx, pptx, and xlsx.
 //!
 //! Every OOXML package exposes its property parts (`docProps/core.xml`,
@@ -14,7 +14,7 @@
 
 use bytes::Bytes;
 use elide_codec::content::ContentData;
-use elide_codec::{FormatId, Handler, Loader};
+use elide_codec::{FormatId, Loader, Stream};
 use elide_core::Result;
 use elide_core::entity::{LabelRef, builtins};
 use elide_core::modality::metadata::{Metadata, MetadataData, MetadataLocation};
@@ -95,7 +95,7 @@ pub(crate) fn read_doc_props(
         .collect()
 }
 
-/// Handler for an OOXML property part: streams fields, clears chosen ones,
+/// Stream for an OOXML property part: streams fields, clears chosen ones,
 /// re-encodes the property XML.
 #[derive(Debug)]
 pub(crate) struct DocPropsHandler {
@@ -130,7 +130,7 @@ impl DocPropsHandler {
 }
 
 #[::async_trait::async_trait]
-impl Handler<Metadata> for DocPropsHandler {
+impl Stream<Metadata> for DocPropsHandler {
     fn format(&self) -> FormatId {
         FORMAT_ID.clone()
     }
@@ -178,8 +178,8 @@ pub(crate) struct DocPropsLoader;
 
 #[::async_trait::async_trait]
 impl Loader for DocPropsLoader {
-    type Handler = DocPropsHandler;
     type Modality = Metadata;
+    type Stream = DocPropsHandler;
 
     async fn decode(&self, content: ContentData) -> Result<DocPropsHandler> {
         Ok(DocPropsHandler::new(content.to_bytes()))

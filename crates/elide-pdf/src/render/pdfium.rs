@@ -39,23 +39,11 @@ thread_local! {
     static RENDERER: RefCell<Option<Binding>> = const { RefCell::new(None) };
 }
 
-/// Render every page of `pdf_bytes` to a [`RenderedPage`] at `scale`, on the
-/// dedicated PDFium thread where the binding is valid.
-pub(super) fn render(pdf_bytes: Vec<u8>, scale: f32) -> Result<Vec<RenderedPage>> {
-    PDF_POOL.install(move || {
-        RENDERER.with_borrow_mut(|slot| {
-            if slot.is_none() {
-                *slot = Some(Binding::new()?);
-            }
-            slot.as_ref().unwrap().render_all(&pdf_bytes, scale)
-        })
-    })
-}
-
 /// Render only the 1-based pages in `numbers`, returning each keyed by its page
 /// number, on the dedicated PDFium thread. Pages not in `numbers` are not
 /// rendered at all (so a scanned-page pass over a mostly-text document does not
 /// pay to rasterise every page).
+#[cfg(feature = "image")]
 pub(crate) fn render_pages(
     pdf_bytes: Vec<u8>,
     numbers: BTreeSet<u32>,
@@ -107,34 +95,8 @@ impl Binding {
         })
     }
 
-    fn render_all(&self, pdf_bytes: &[u8], scale: f32) -> Result<Vec<RenderedPage>> {
-        let document = self
-            .pdfium
-            .load_pdf_from_byte_slice(pdf_bytes, None)
-            .map_err(|e| {
-                Error::new(
-                    ErrorKind::MalformedInput,
-                    format!("failed to load PDF: {e}"),
-                )
-            })?;
-        let config = PdfRenderConfig::new().scale_page_by_factor(scale);
-
-        let page_count = document.pages().len() as usize;
-        if page_count > MAX_PAGES {
-            return Err(Error::new(
-                ErrorKind::ResourceLimit,
-                format!("document has {page_count} pages, over the {MAX_PAGES}-page render limit"),
-            ));
-        }
-
-        let mut pages = Vec::new();
-        for page in document.pages().iter() {
-            pages.push(render_page(&page, &config)?);
-        }
-        Ok(pages)
-    }
-
     /// Render only the 1-based pages in `numbers`, keyed by page number.
+    #[cfg(feature = "image")]
     fn render_pages(
         &self,
         pdf_bytes: &[u8],
@@ -281,6 +243,7 @@ impl Binding {
 }
 
 /// Render one page to a PNG at `config`'s scale.
+#[cfg(feature = "image")]
 fn render_page(page: &PdfPage, config: &PdfRenderConfig) -> Result<RenderedPage> {
     let bitmap = page.render_with_config(config).map_err(|e| {
         Error::new(

@@ -14,9 +14,9 @@
 //! element-text path, so it keeps its own facade.
 
 use bytes::Bytes;
+use elide_core::{Error, ErrorKind, Result};
 
-use crate::error::{Error, Result};
-use crate::opc::{Extraction, Package, PartClassifier, PartPath, PartReplacement, Replacement};
+use crate::opc::{Extraction, Package, PartClassifier, PartReplacement, Replacement};
 
 /// A text-only OOXML format's seam: how it classifies a part, and which single
 /// part must be present for the bytes to be a valid document of the format.
@@ -40,7 +40,7 @@ pub trait OoxmlFormat: PartClassifier + Clone {
 
 /// An opened text-only OOXML package: every part read once and classified by the
 /// format `F`, ready to [`extract`](Self::extract) the text of every
-/// text-bearing part or [`rewrite`](Self::rewrite) them back to bytes.
+/// text-bearing part or [`rewrite_with_parts`](Self::rewrite_with_parts) them back to bytes.
 ///
 /// Open a document once and reuse it for both operations; the package is parsed
 /// a single time.
@@ -56,20 +56,19 @@ impl<F: OoxmlFormat> OoxmlPackage<F> {
     ///
     /// # Errors
     ///
-    /// - [`ErrorKind::InvalidArchive`](crate::ErrorKind::InvalidArchive) if the
+    /// - [`ErrorKind::MalformedInput`] if the
     ///   bytes are not a zip;
-    /// - [`ErrorKind::InvalidPackage`](crate::ErrorKind::InvalidPackage) if the
+    /// - [`ErrorKind::MalformedInput`] if the
     ///   format's required part is missing.
     pub fn open(document: &[u8]) -> Result<Self> {
         let package = Package::open(document, F::classifier())?;
         // Without the format's root part the bytes are a zip but not a usable
         // document of this format.
         if !package.contains_part(F::ROOT_PART) {
-            return Err(Error::invalid_package(format!(
-                "missing {} part `{}`",
-                F::ROOT_LABEL,
-                F::ROOT_PART
-            )));
+            return Err(Error::new(
+                ErrorKind::MalformedInput,
+                format!("missing {} part `{}`", F::ROOT_LABEL, F::ROOT_PART),
+            ));
         }
         Ok(Self { package })
     }
@@ -96,40 +95,15 @@ impl<F: OoxmlFormat> OoxmlPackage<F> {
         self.package.part_bytes(path)
     }
 
-    /// Every part path in the package, for a caller enumerating the property
-    /// parts it wants to inspect (`docProps/core.xml`, `docProps/app.xml`).
-    pub fn part_paths(&self) -> impl Iterator<Item = &PartPath> {
-        self.package.part_paths()
-    }
-
-    /// Rewrite text `replacements` across their parts and re-pack every other
-    /// part byte-for-byte.
-    ///
-    /// See [`rewrite_with_parts`](Self::rewrite_with_parts) to also replace
-    /// binary parts (e.g. redact an embedded image).
-    ///
-    /// **Fail-closed:** an out-of-bounds, overlapping, or mid-character
-    /// replacement, or one naming a part not in the package, refuses the whole
-    /// rewrite with [`ErrorKind::UnsafeRewrite`](crate::ErrorKind::UnsafeRewrite)
-    /// rather than emitting a partially-redacted document.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::UnsafeRewrite`](crate::ErrorKind::UnsafeRewrite) if a
-    /// replacement can't be applied.
-    pub fn rewrite(&self, replacements: &[Replacement]) -> Result<Vec<u8>> {
-        self.package.rewrite(replacements)
-    }
-
     /// Rewrite text `replacements` *and* replace binary `parts` (each a part
     /// path mapped to its new bytes).
     ///
     /// A [`PartReplacement`] naming a part not in the package refuses the
-    /// rewrite; the text rules match [`rewrite`](Self::rewrite).
+    /// rewrite; the text rules match [`rewrite_with_parts`](Self::rewrite_with_parts).
     ///
     /// # Errors
     ///
-    /// As [`rewrite`](Self::rewrite).
+    /// As [`rewrite_with_parts`](Self::rewrite_with_parts).
     pub fn rewrite_with_parts(
         &self,
         replacements: &[Replacement],

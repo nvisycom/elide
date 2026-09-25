@@ -216,7 +216,6 @@ impl Leaf for EntityLeaf {
             id,
             PartReport {
                 modality: parsed.modality,
-                handle: None,
                 entities: parsed.entities,
             },
         );

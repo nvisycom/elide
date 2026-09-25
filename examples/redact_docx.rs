@@ -6,8 +6,8 @@
 //! example wires the [`Orchestrator`], which drives each document and every
 //! container part through the right per-modality pipeline:
 //!
-//! 1. [`FormatRegistry`] decodes the `.docx` into an
-//!    [`UntypedDocumentHandle`], wrapped as a named [`Document`].
+//! 1. [`FormatRegistry`] decodes the `.docx` into a codec `Document`, wrapped
+//!    as a named engine [`Document`].
 //! 2. An [`Orchestrator`] is assembled with a text pipeline for the body
 //!    text and an image pipeline for the embedded media (mock LLM backend,
 //!    so the example runs offline; swap in a real backend to detect in
@@ -22,7 +22,6 @@
 //! Run with: `cargo run -p elide-examples --bin redact_docx`.
 //!
 //! [`redact_txt`]: ./redact_txt.rs
-//! [`UntypedDocumentHandle`]: elide::codec::UntypedDocumentHandle
 //! [`Orchestrator`]: elide::Orchestrator
 //! [`Report`]: elide::Report
 //! [`analyze`]: elide::Orchestrator::analyze
@@ -41,8 +40,7 @@ const SAMPLE: &[u8] = include_bytes!("data/contact.docx");
 #[tokio::main]
 async fn main() -> Result<()> {
     // 1. Decode the container through the codec layer. The orchestrator
-    //    works on the untyped handle, it discovers the body's modality by
-    //    trial, so no `.into::<Text>()` turbofish is needed here.
+    //    discovers each part's modality by trial, so no modality is named here.
     let registry = FormatRegistry::with_builtin();
     let mut document = registry.document("contact.docx", SAMPLE).await?;
 
@@ -75,7 +73,7 @@ async fn main() -> Result<()> {
     orchestrator
         .anonymize_with(&mut document, analyzed.report)
         .await?;
-    let encoded = document.handle.encode()?;
+    let encoded = document.document.encode()?;
 
     // 5. Write the redacted `.docx` out. That is the whole deliverable: a
     //    drop-in replacement package the caller saves or forwards.

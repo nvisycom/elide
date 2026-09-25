@@ -279,7 +279,7 @@ impl<M: Modality> Anonymizer<M> {
         scope: &Scope,
     ) -> Result<()>
     where
-        T: DataReader<M> + DataWriter<M>,
+        T: DataReader<M> + DataWriter<M> + ?Sized,
     {
         self.pick(entities, scope);
         self.redact(target, entities, scope).await
@@ -306,7 +306,7 @@ impl<M: Modality> Anonymizer<M> {
         scope: &Scope,
     ) -> Result<()>
     where
-        T: DataReader<M> + DataWriter<M>,
+        T: DataReader<M> + DataWriter<M> + ?Sized,
     {
         let clusters = self.resolve_clusters(entities, scope);
         let mut redactions = Redactions::new();

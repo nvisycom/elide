@@ -21,6 +21,7 @@
 mod analyzer;
 mod anonymizer;
 
+use elide::codec::DocumentPart;
 use elide::prelude::*;
 use serde::{Deserialize, Serialize};
 use tsify::{Ts, Tsify};
@@ -114,19 +115,20 @@ async fn run(
     input: String,
 ) -> Result<RedactionResult> {
     // Decode the raw text through the codec layer, as any other input would be.
+    // A txt file is a leaf document: one text stream part.
     let registry = FormatRegistry::with_builtin();
-    let handle = registry.decode(input, "txt").await?;
-    let mut document = handle
-        .into::<Text>()
+    let mut document = registry.decode(input, "txt").await?;
+    let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else {
+        panic!("the txt codec yields a text stream")
+    };
+    let stream = handle
+        .downcast_mut::<Text>()
         .expect("the txt codec yields a text document");
 
     // Detect over the built-in catalog. No language is asserted, so detection
     // is language-agnostic.
     let scope = Scope::new().with_catalog(LabelCatalog::with_builtins());
-    let analysis = analyzer
-        .analyzer()
-        .analyze_stream(&mut document, &scope)
-        .await?;
+    let analysis = analyzer.analyzer().analyze_stream(stream, &scope).await?;
     let mut entities = analysis.entities;
 
     let findings = entities
@@ -143,9 +145,15 @@ async fn run(
         .collect();
 
     // Apply the redaction policy and re-encode the document back to text.
+    let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else {
+        panic!("the txt codec yields a text stream")
+    };
+    let stream = handle
+        .downcast_mut::<Text>()
+        .expect("the txt codec yields a text document");
     anonymizer
         .anonymizer()
-        .anonymize(&mut document, &mut entities, &scope)
+        .anonymize(stream, &mut entities, &scope)
         .await?;
     let encoded = document.encode()?;
     let redacted = String::from_utf8_lossy(encoded.as_bytes()).into_owned();

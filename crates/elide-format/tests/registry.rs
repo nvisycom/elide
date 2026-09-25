@@ -4,6 +4,7 @@
 
 #![cfg(feature = "txt")]
 
+use elide_codec::DocumentPart;
 use elide_codec::content::ContentData;
 use elide_core::modality::DataWriter;
 use elide_core::modality::text::{Text, TextLocation, TextReplacement};
@@ -13,11 +14,15 @@ use elide_format::FormatRegistry;
 #[tokio::test]
 async fn registry_decodes_txt_by_extension() {
     let reg = FormatRegistry::with_builtin();
-    let handle = reg
+    let document = reg
         .decode("hello\nworld\n", "txt")
         .await
         .expect("txt decoded");
-    assert_eq!(handle.format_id().as_str(), "elide.text.txt");
+    assert_eq!(document.format_id().as_str(), "elide.text.txt");
+    // A leaf txt document is one text stream part.
+    let DocumentPart::Stream { handle, .. } = &document.parts()[0] else {
+        panic!("txt is a leaf stream document")
+    };
     assert!(handle.is::<Text>());
 }
 
@@ -54,22 +59,28 @@ async fn decode_content_without_hints_is_an_error() {
 }
 
 #[tokio::test]
-async fn untyped_into_wrong_modality_returns_self() {
+async fn stream_part_recovers_its_modality() {
     let reg = FormatRegistry::with_builtin();
-    let handle = reg.decode("hi", "txt").await.expect("decoded");
-    // Recover as Text succeeds; the TypeId downcast is exact.
-    let typed = handle.into::<Text>().expect("text handle");
-    assert_eq!(typed.format_id().as_str(), "elide.text.txt");
+    let mut document = reg.decode("hi", "txt").await.expect("decoded");
+    assert_eq!(document.format_id().as_str(), "elide.text.txt");
+    // The body stream recovers as Text; the TypeId downcast is exact.
+    let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else {
+        panic!("txt is a leaf stream document")
+    };
+    assert!(handle.downcast_mut::<Text>().is_some());
 }
 
 #[tokio::test]
 async fn decode_redact_reencode_round_trip() {
     let reg = FormatRegistry::with_builtin();
-    let handle = reg
+    let mut document = reg
         .decode("contact alice@example.test today", "txt")
         .await
         .expect("decoded");
-    let mut doc = handle.into::<Text>().expect("text handle");
+    let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else {
+        panic!("txt is a leaf stream document")
+    };
+    let stream = handle.downcast_mut::<Text>().expect("text stream");
 
     let mut batch = Redactions::new();
     // "contact " is 8 bytes; "alice@example.test" is 18 → 8..26.
@@ -77,9 +88,9 @@ async fn decode_redact_reencode_round_trip() {
         TextLocation::new(8, 26),
         TextReplacement::substituted("[EMAIL]"),
     );
-    doc.write_at(batch).await.expect("redacted");
+    stream.write_at(batch).await.expect("redacted");
 
-    let out = doc.encode().expect("re-encoded");
+    let out = document.encode().expect("re-encoded");
     assert_eq!(out.as_bytes(), b"contact [EMAIL] today");
 }
 
@@ -96,16 +107,19 @@ async fn registry_decodes_and_redacts_csv() {
     use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
 
     let reg = FormatRegistry::with_builtin();
-    let handle = reg
+    let mut document = reg
         .decode("name,email\nAlice,alice@x.test\n", "csv")
         .await
         .expect("csv decoded");
-    assert_eq!(handle.format_id().as_str(), "elide.tabular.csv");
-    let mut doc = handle.into::<Tabular>().expect("tabular handle");
+    assert_eq!(document.format_id().as_str(), "elide.tabular.csv");
+    let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else {
+        panic!("csv is a leaf stream document")
+    };
+    let stream = handle.downcast_mut::<Tabular>().expect("tabular stream");
 
     // Stream to the email cell, then redact it.
     let mut email_chunk = None;
-    while let Some(chunk) = doc.read_next().await.expect("read") {
+    while let Some(chunk) = stream.read_next().await.expect("read") {
         if chunk.location.row_index == 1 && chunk.location.column_index == 1 {
             email_chunk = Some(chunk);
         }
@@ -117,8 +131,8 @@ async fn registry_decodes_and_redacts_csv() {
         TabularLocation::new(1, 1),
         TabularReplacement::Cell(TextReplacement::substituted("[EMAIL]")),
     );
-    doc.write_at(batch).await.expect("redacted");
+    stream.write_at(batch).await.expect("redacted");
 
-    let out = doc.encode().expect("re-encoded");
+    let out = document.encode().expect("re-encoded");
     assert_eq!(out.decode().unwrap(), "name,email\nAlice,[EMAIL]\n");
 }

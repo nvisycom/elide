@@ -100,7 +100,7 @@ async fn jpeg_gps_is_detected_and_stripped_through_the_orchestrator() {
         .await
         .expect("anonymize");
 
-    let out = documents[0].handle.encode().expect("encode").to_bytes();
+    let out = documents[0].document.encode().expect("encode").to_bytes();
     assert!(!has_gps(&out), "GPS survived the end-to-end strip");
     // The output is still a valid decodable JPEG.
     assert!(
@@ -194,7 +194,7 @@ async fn pixel_redaction_and_gps_strip_compose_end_to_end() {
         .await
         .expect("anonymize");
 
-    let out = documents[0].handle.encode().expect("encode").to_bytes();
+    let out = documents[0].document.encode().expect("encode").to_bytes();
     // Metadata track: GPS is gone.
     assert!(!has_gps(&out), "GPS survived the both-track strip");
     // Pixel track: the frame was erased (blacked out), so the top-left pixel is

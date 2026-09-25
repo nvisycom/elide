@@ -1,14 +1,16 @@
-//! [`LocalId`]: a container's own, local id for one of its parts.
+//! [`LocalId`]: a [`Document`](super::Document)'s own, local id for one of its
+//! [`DocumentPart`](super::DocumentPart)s.
 
 use std::borrow::Cow;
 use std::fmt;
 use std::path::Path;
 
-/// A container's own, local id for one of its parts.
+/// A [`Document`](super::Document)'s own, local id for one of its
+/// [`DocumentPart`](super::DocumentPart)s.
 ///
 /// A zip entry name (`word/media/image1.png`) or a PDF object reference, unique
-/// only **within that one container**. The orchestrator composes these into a
-/// `PartId` tree path when containers nest (two containers can share a local id,
+/// only **within that one document**. The orchestrator composes these into a
+/// `PartId` tree path when documents nest (two documents can share a local id,
 /// which the path disambiguates). Backed by a `Cow<'static, str>`, so a
 /// `&'static str` id costs no allocation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

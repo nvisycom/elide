@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 
 use elide_codec::content::ContentData;
 use elide_codec::string::RedactRange;
-use elide_codec::{Format, FormatId, Handler};
+use elide_codec::{Format, FormatId, Stream};
 use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
 use elide_core::modality::text::{TextData, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter, ResolvedHint};
@@ -220,7 +220,7 @@ impl CsvHandler {
 }
 
 #[async_trait::async_trait]
-impl Handler<Tabular> for CsvHandler {
+impl Stream<Tabular> for CsvHandler {
     fn format(&self) -> FormatId {
         FORMAT_ID.clone()
     }

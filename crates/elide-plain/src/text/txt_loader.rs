@@ -15,8 +15,8 @@ pub(crate) struct TxtLoader;
 
 #[async_trait::async_trait]
 impl Loader for TxtLoader {
-    type Handler = TxtHandler;
     type Modality = Text;
+    type Stream = TxtHandler;
 
     async fn decode(&self, content: ContentData) -> Result<TxtHandler> {
         Ok(TxtHandler::new(content.decode()?))
@@ -26,7 +26,7 @@ impl Loader for TxtLoader {
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
-    use elide_codec::Handler;
+    use elide_codec::Stream;
 
     use super::*;
 

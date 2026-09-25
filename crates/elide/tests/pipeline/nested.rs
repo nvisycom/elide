@@ -95,7 +95,7 @@ async fn a_set_treats_each_file_as_a_named_part() -> Result<()> {
     assert!(!report.part_ids().collect::<Vec<_>>().is_empty());
     for file in &documents {
         assert!(
-            !file.handle.encode()?.as_bytes().is_empty(),
+            !file.document.encode()?.as_bytes().is_empty(),
             "each file re-encodes to non-empty bytes",
         );
     }
@@ -148,7 +148,7 @@ async fn a_set_redacts_each_files_own_content() -> Result<()> {
     // `[email_address]`-replaced), so both named documents are independently
     // redacted, not merely re-encoded unchanged.
     for file in &documents {
-        let out = file.handle.encode()?;
+        let out = file.document.encode()?;
         let body = elide_office::opc::test_util::read_part(out.as_bytes(), "word/document.xml")
             .expect("output has a word/document.xml part");
         let body = String::from_utf8(body).expect("body is UTF-8");
@@ -207,7 +207,7 @@ async fn a_nested_container_keeps_its_own_redaction_when_a_descendant_folds() ->
 
     // Decode the output tree and assert NO body email survives at any level ,
     // in particular middle.docx's own `bob@example.com`, which the fold bug drops.
-    let out = document.handle.encode()?;
+    let out = document.document.encode()?;
     let out_bytes = out.as_bytes().to_vec();
     let read = |pkg: &[u8], part: &str| {
         elide_office::opc::test_util::read_part(pkg, part)

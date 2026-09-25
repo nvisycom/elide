@@ -205,7 +205,7 @@ async-trait = { workspace = true, features = [] }
 [dev-dependencies]
 # Internal crates
 elide-core = { workspace = true, features = ["test-util"] }
-elide-office = { workspace = true, features = ["test-util", "codec"] }
+elide-office = { workspace = true, features = ["test-util"] }
 elide-image = { workspace = true, features = ["test-util"] }
 
 # (De)serialization

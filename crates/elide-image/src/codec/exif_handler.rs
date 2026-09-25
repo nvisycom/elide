@@ -1,19 +1,19 @@
-//! Handler and loader for an image's EXIF metadata, the `#exif` sub-part.
+//! Stream and loader for an image's EXIF metadata, the `#exif` sub-part.
 //!
-//! An image's pixel handler is a [`Container`](elide_codec::Container) that
-//! exposes its EXIF as a nested `#exif` sub-part whose bytes are the whole
-//! image, the same way a DOCX exposes its embedded images. This handler decodes
-//! that part as the [`Metadata`] modality: it streams each privacy-relevant
-//! EXIF field as a chunk for the recognizer, records the fields picked for
-//! removal via [`write_at`], and re-encodes the image with exactly those fields
-//! stripped. The parent image handler then adopts those stripped bytes and
-//! folds its own pixel redactions on top, so the image is written once.
+//! An image [`Document`](elide_codec::Document) carries its EXIF as a nested
+//! `#exif` blob part whose bytes are the whole image, the same way a DOCX
+//! carries its embedded images. This stream decodes that part as the
+//! [`Metadata`] modality: it streams each privacy-relevant EXIF field as a chunk
+//! for the recognizer, records the fields picked for removal via [`write_at`],
+//! and re-encodes the image with exactly those fields stripped. The image's
+//! recombiner then lays its pixel redactions over those stripped bytes, so the
+//! image is written once.
 //!
 //! [`Metadata`]: elide_core::modality::metadata::Metadata
 //! [`write_at`]: elide_core::modality::DataWriter::write_at
 
 use elide_codec::content::ContentData;
-use elide_codec::{Format, FormatId, Handler, Loader};
+use elide_codec::{Format, FormatId, Loader, Stream};
 use elide_core::Result;
 use elide_core::modality::metadata::{Metadata, MetadataData, MetadataLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
@@ -56,7 +56,7 @@ impl ExifHandler {
 }
 
 #[::async_trait::async_trait]
-impl Handler<Metadata> for ExifHandler {
+impl Stream<Metadata> for ExifHandler {
     fn format(&self) -> FormatId {
         FORMAT_ID.clone()
     }
@@ -104,8 +104,8 @@ pub(crate) struct ExifLoader;
 
 #[::async_trait::async_trait]
 impl Loader for ExifLoader {
-    type Handler = ExifHandler;
     type Modality = Metadata;
+    type Stream = ExifHandler;
 
     async fn decode(&self, content: ContentData) -> Result<ExifHandler> {
         ExifHandler::new(ImageBuffer::open(content.as_bytes())?)

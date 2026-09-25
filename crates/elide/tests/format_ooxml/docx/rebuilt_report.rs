@@ -46,7 +46,7 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
 
     // Scan the *decompressed* body part, not the deflated archive bytes: a
     // substring check on the container could pass while the email survives.
-    let encoded = doc2.handle.encode()?;
+    let encoded = doc2.document.encode()?;
     let body_part = elide_office::opc::test_util::read_part(encoded.as_bytes(), BODY_PART)
         .expect("body part present");
     let body_part = String::from_utf8(body_part).expect("body XML is UTF-8");

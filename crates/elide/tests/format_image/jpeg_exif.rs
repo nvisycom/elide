@@ -53,7 +53,7 @@ async fn jpeg_gps_is_stripped_through_the_facade() {
         .await
         .expect("anonymize");
 
-    let out = documents[0].handle.encode().expect("encode").to_bytes();
+    let out = documents[0].document.encode().expect("encode").to_bytes();
     assert!(!has_gps(&out), "GPS survived the facade end-to-end strip");
     assert!(is_valid_image(&out), "output not a valid image");
 }

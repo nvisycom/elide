@@ -28,7 +28,6 @@ use std::any::TypeId;
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 
-use elide_codec::UntypedDocumentHandle;
 #[cfg(doc)]
 use elide_core::entity::CustomEntity;
 use elide_core::entity::Entity;
@@ -43,26 +42,15 @@ use super::registry::ReportDeserializer;
 use crate::PartId;
 
 /// One part captured during analysis, a named document's own content (a
-/// depth-1 part) or a container part nested within one: its detected entities,
-/// the modality they belong to, and, for the same-process fast path, the
-/// decoded part handle.
+/// depth-1 part) or a container part nested within one: its detected entities
+/// and the modality they belong to.
 pub(crate) struct PartReport {
-    /// The part's modality, the routing key for [`anonymize_with`]: it
-    /// re-fetches the part from the container and applies through the
-    /// pipeline registered for this modality.
+    /// The part's modality, the routing key for [`anonymize_with`]: it re-walks
+    /// the document's part tree to this part and applies through the pipeline
+    /// registered for this modality.
     ///
     /// [`anonymize_with`]: crate::Orchestrator::anonymize_with
     pub(crate) modality: TypeId,
-    /// The decoded part handle, retained from analysis as a same-process
-    /// cache. `Some` after [`analyze`] (so apply re-drives it directly with
-    /// no second decode); `None` for a [`Report`] built by hand or rebuilt
-    /// from serialized entities, where apply re-decodes the part from the
-    /// container instead.
-    ///
-    /// Never serialized, a live decoded document is not data.
-    ///
-    /// [`analyze`]: crate::Orchestrator::analyze
-    pub(crate) handle: Option<UntypedDocumentHandle>,
     /// The part's detected entities (a `Vec<Entity<P>>`).
     pub(crate) entities: Box<dyn EntityGroup>,
 }
@@ -183,7 +171,6 @@ impl Report {
             id,
             PartReport {
                 modality: TypeId::of::<P>(),
-                handle: None,
                 entities: Box::new(entities),
             },
         );

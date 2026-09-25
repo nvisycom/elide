@@ -3,12 +3,13 @@
 //! For exercising registry, handler, and orchestration behavior without a real
 //! file format.
 //!
-//! [`MockHandler`] is a functional [`Text`] handler: it decodes a body plus any
-//! number of embedded [`Part`]s, streams the body as one chunk, redacts it by
-//! byte range, and folds staged part replacements back on encode. Each part
-//! carries a decoder [`hint`](Part) independent of its id, so a test can key a
-//! part by an extensionless id yet still name a real hint — the shape a
-//! container fold must honor.
+//! The mock document is a [`Document`] of a body [`Stream`] plus any number of
+//! [`Blob`](DocumentPart::Blob) sub-parts: [`MockStream`] streams the body as one
+//! chunk and redacts it by byte range, and [`MockRecombine`] re-serializes the
+//! body with the (possibly redacted) blob bytes. Each blob carries a decoder
+//! [`hint`](DocumentPart::Blob) independent of its id, so a test can key a part
+//! by an extensionless id yet still name a real hint — the shape a container fold
+//! must honor.
 //!
 //! # Wire format
 //!
@@ -26,7 +27,10 @@ use elide_core::redaction::Redactions;
 
 use crate::content::ContentData;
 use crate::string::RedactRange;
-use crate::{Container, Format, FormatId, Handler, Loader, LocalId, Part};
+use crate::{
+    Document, DocumentLoader, DocumentPart, EncodedPart, ErasedStream, Format, FormatId, LocalId,
+    Recombine, Stream,
+};
 
 /// Stable [`FormatId`] for the mock format.
 pub const MOCK_FORMAT_ID: FormatId = FormatId::new("elide.test.mock");
@@ -34,8 +38,8 @@ pub const MOCK_FORMAT_ID: FormatId = FormatId::new("elide.test.mock");
 /// The extension the registry resolves the mock format on.
 pub const MOCK_EXT: &str = "mock";
 
-/// One embedded part of a [`MockHandler`]: its local id, its decoder hint, and
-/// its raw bytes. The hint is stored independent of the id so a part can be
+/// One embedded blob part of a mock document: its local id, its decoder hint,
+/// and its raw bytes. The hint is stored independent of the id so a part can be
 /// keyed by an extensionless id yet still carry a real hint.
 #[derive(Clone, Debug)]
 pub struct MockPart {
@@ -98,50 +102,27 @@ fn unhex(s: &str) -> Bytes {
     Bytes::from(bytes)
 }
 
-/// A mock [`Text`] handler: a text body plus embedded parts, with staged
-/// part replacements.
+/// The stream part id of a mock document's body.
+pub const MOCK_BODY_ID: &str = "body";
+
+/// The body [`Stream`] of a mock document: an editable text line, streamed as one
+/// chunk and redacted by byte range. Its [`encode`](Stream::encode) yields the
+/// body alone; [`MockRecombine`] re-attaches the blob parts.
 #[derive(Debug)]
-pub struct MockHandler {
+pub struct MockStream {
     body: String,
-    parts: Vec<MockPart>,
-    /// Redacted bytes staged through [`Container::replace_part`], keyed by id.
-    replaced: std::collections::HashMap<String, Bytes>,
-    /// Streaming cursor: the body is a single chunk.
     yielded: bool,
 }
 
-impl MockHandler {
-    /// Decode a mock document from its wire bytes.
-    #[must_use]
-    pub fn parse(bytes: &[u8]) -> Self {
-        let (body, parts) = decode_mock(bytes);
-        Self {
-            body,
-            parts,
-            replaced: std::collections::HashMap::new(),
-            yielded: false,
-        }
-    }
-}
-
 #[async_trait::async_trait]
-impl Handler<Text> for MockHandler {
+impl Stream<Text> for MockStream {
     fn format(&self) -> FormatId {
         MOCK_FORMAT_ID.clone()
     }
 
     fn encode(&self) -> Result<ContentData> {
-        // Re-serialize, substituting any staged replacement bytes for a part.
-        let parts: Vec<MockPart> = self
-            .parts
-            .iter()
-            .map(|p| MockPart {
-                id: p.id.clone(),
-                hint: p.hint.clone(),
-                bytes: self.replaced.get(&p.id).cloned().unwrap_or(p.bytes.clone()),
-            })
-            .collect();
-        Ok(ContentData::new(encode_mock(&self.body, &parts)))
+        // The body only; the recombiner re-attaches the blob parts.
+        Ok(ContentData::from_text(self.body.clone()))
     }
 
     async fn read_next(&mut self) -> Result<Option<Chunk<Text>>> {
@@ -155,14 +136,10 @@ impl Handler<Text> for MockHandler {
             hints: Vec::new(),
         }))
     }
-
-    fn as_container_mut(&mut self) -> Option<&mut dyn Container> {
-        Some(self)
-    }
 }
 
 #[async_trait::async_trait]
-impl DataReader<Text> for MockHandler {
+impl DataReader<Text> for MockStream {
     async fn read_at(&self, location: &TextLocation) -> Result<Option<TextData>> {
         let Some(range) = location.range() else {
             return Ok(None);
@@ -172,7 +149,7 @@ impl DataReader<Text> for MockHandler {
 }
 
 #[async_trait::async_trait]
-impl DataWriter<Text> for MockHandler {
+impl DataWriter<Text> for MockStream {
     async fn write_at(&mut self, mut redactions: Redactions<Text>) -> Result<()> {
         // Apply right-to-left so each edit's length delta leaves earlier
         // locations valid.
@@ -190,40 +167,81 @@ impl DataWriter<Text> for MockHandler {
     }
 }
 
-impl Container for MockHandler {
-    fn parts(&self) -> Vec<Part> {
-        self.parts
-            .iter()
-            .map(|p| Part {
-                id: LocalId::new(p.id.clone()),
-                bytes: p.bytes.clone(),
-                hint: p.hint.clone(),
-            })
-            .collect()
-    }
+/// The recombiner for a mock document: re-serialize the body (the [`MockStream`]'s
+/// re-encoded bytes) with each blob part's `@PART <id> <hint> <hex>` line, using
+/// the decode-time hints. A blob's bytes are its current (possibly redacted) ones.
+#[derive(Debug)]
+pub struct MockRecombine {
+    /// The `(id, hint)` of each blob part, in document order, captured at decode.
+    hints: Vec<(String, String)>,
+}
 
-    fn replace_part(&mut self, id: &LocalId, bytes: Bytes) -> Result<()> {
-        self.replaced.insert(id.as_str().to_owned(), bytes);
-        Ok(())
+impl Recombine for MockRecombine {
+    fn assemble(&self, parts: &[EncodedPart]) -> Result<ContentData> {
+        let body = parts
+            .iter()
+            .find(|p| p.id.as_str() == MOCK_BODY_ID)
+            .map(|p| String::from_utf8_lossy(&p.bytes).into_owned())
+            .unwrap_or_default();
+        let blobs: Vec<MockPart> = self
+            .hints
+            .iter()
+            .filter_map(|(id, hint)| {
+                let bytes = parts.iter().find(|p| p.id.as_str() == id)?.bytes.clone();
+                Some(MockPart {
+                    id: id.clone(),
+                    hint: hint.clone(),
+                    bytes,
+                })
+            })
+            .collect();
+        Ok(ContentData::new(encode_mock(&body, &blobs)))
     }
 }
 
-/// A loader that decodes the mock wire format into a [`MockHandler`].
+/// A [`DocumentLoader`] that decodes the mock wire format into a [`Document`]: a
+/// body [`MockStream`] plus one [`Blob`](DocumentPart::Blob) per embedded part.
 #[derive(Debug)]
 pub struct MockLoader;
 
 #[async_trait::async_trait]
-impl Loader for MockLoader {
-    type Handler = MockHandler;
-    type Modality = Text;
+impl DocumentLoader for MockLoader {
+    async fn decode(&self, content: ContentData) -> Result<Document> {
+        let (body, parts) = decode_mock(content.as_bytes());
+        let hints = parts
+            .iter()
+            .map(|p| (p.id.clone(), p.hint.clone()))
+            .collect();
 
-    async fn decode(&self, content: ContentData) -> Result<MockHandler> {
-        Ok(MockHandler::parse(content.as_bytes()))
+        let mut document_parts = Vec::with_capacity(parts.len() + 1);
+        document_parts.push(DocumentPart::Stream {
+            id: LocalId::new(MOCK_BODY_ID),
+            handle: ErasedStream::new(
+                MOCK_FORMAT_ID.clone(),
+                Box::new(MockStream {
+                    body,
+                    yielded: false,
+                }) as Box<dyn Stream<Text>>,
+            ),
+        });
+        for p in parts {
+            document_parts.push(DocumentPart::Blob {
+                id: LocalId::new(p.id),
+                bytes: p.bytes,
+                hint: p.hint,
+            });
+        }
+
+        Ok(Document::new(
+            MOCK_FORMAT_ID.clone(),
+            document_parts,
+            Box::new(MockRecombine { hints }),
+        ))
     }
 }
 
 /// The mock [`Format`], registered on [`MOCK_EXT`].
 #[must_use]
 pub fn mock_format() -> Format {
-    Format::new(MOCK_FORMAT_ID.clone(), MockLoader).with_extensions([MOCK_EXT])
+    Format::with_document_loader(MOCK_FORMAT_ID.clone(), MockLoader).with_extensions([MOCK_EXT])
 }

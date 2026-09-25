@@ -4,10 +4,10 @@
 //! [`Slot::Passthrough`] (whitespace + structural punctuation, kept
 //! verbatim) or [`Slot::Leaf`] (a key, string value, or scalar). Leaves
 //! carry both the original source bytes (`serialized`) and the unescaped
-//! UTF-8 value the recognizer sees (`value`). [`Handler::read_next`]
+//! UTF-8 value the recognizer sees (`value`). [`Stream::read_next`]
 //! yields leaves in document order; `write_at` splices each redaction into
 //! the leaf's `serialized` bytes at the mapped source span (keeping `value`
-//! in sync); [`Handler::encode`] concatenates every slot.
+//! in sync); [`Stream::encode`] concatenates every slot.
 //!
 //! Because a redaction is spliced rather than re-rendered from the decoded
 //! value, formatting (indentation, key order, whitespace) *and* every byte
@@ -19,7 +19,7 @@ use std::ops::Range;
 
 use elide_codec::content::ContentData;
 use elide_codec::string::RedactRange;
-use elide_codec::{Format, FormatId, Handler};
+use elide_codec::{Format, FormatId, Stream};
 use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter, ResolvedHint};
 use elide_core::redaction::Redactions;
@@ -362,7 +362,7 @@ pub(crate) struct JsonHandler {
 }
 
 #[async_trait::async_trait]
-impl Handler<Text> for JsonHandler {
+impl Stream<Text> for JsonHandler {
     fn format(&self) -> FormatId {
         FORMAT_ID.clone()
     }
@@ -484,7 +484,7 @@ impl JsonHandler {
     }
 
     /// The serialized byte offset where the slot at `idx` starts, what
-    /// [`encode`](Handler::encode) emits and what a raw [`SourceRef`] addresses.
+    /// [`encode`](Stream::encode) emits and what a raw [`SourceRef`] addresses.
     fn source_offset_of(&self, idx: usize) -> usize {
         self.slots[..idx].iter().map(Slot::source_len).sum()
     }

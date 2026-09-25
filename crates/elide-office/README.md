@@ -17,9 +17,9 @@ supplies document bytes and receives extracted text or a rewritten document.
 The [`opc`](crate::opc) module is the format-neutral core: the package
 container, the typed part path, the decoded-to-raw offset map, and the
 escape-aware span engine. A format module supplies only its part-classification
-rules and drives the shared engine: [`docx`](crate::docx) for Word,
-[`pptx`](crate::pptx) for PowerPoint — both plain element text — and
-[`xlsx`](crate::xlsx) for Excel, whose cells reach the same engine through the
+rules and drives the shared engine: `docx` for Word, `pptx` for PowerPoint —
+both plain element text — and `xlsx` for Excel, whose cells reach the same
+engine through the
 shared-string pool, redacting a pooled cell by de-sharing it into an inline
 string so the values other cells reference stay untouched.
 

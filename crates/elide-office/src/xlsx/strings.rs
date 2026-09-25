@@ -7,11 +7,10 @@
 
 use std::ops::Range;
 
+use elide_core::{Error, ErrorKind, Result};
 use quick_xml::Reader;
 use quick_xml::escape::unescape;
 use quick_xml::events::Event;
-
-use crate::error::{Error, Result};
 
 /// The decoded strings of a shared-string table, indexed as the cells reference
 /// them. Index `i` is the text of the `i`-th `<si>` in document order.
@@ -41,8 +40,12 @@ pub(crate) struct SharedItem {
 /// The shared-string table with each entry's `<si>` inner byte range, in
 /// document order. Index `i` is the `i`-th `<si>`.
 pub(crate) fn shared_string_items(raw: &str) -> Result<Vec<SharedItem>> {
-    let malformed =
-        |e: quick_xml::Error| Error::invalid_xml(format!("sharedStrings.xml malformed: {e}"));
+    let malformed = |e: quick_xml::Error| {
+        Error::new(
+            ErrorKind::MalformedInput,
+            format!("sharedStrings.xml malformed: {e}"),
+        )
+    };
     let mut reader = Reader::from_str(raw);
     let bom = bom_len(raw);
     let mut last = bom;
@@ -90,7 +93,10 @@ pub(crate) fn shared_string_items(raw: &str) -> Result<Vec<SharedItem>> {
             Event::End(e) if e.local_name().as_ref() == "t" => {
                 if let Some(start) = text_open.take() {
                     let decoded = unescape(&raw[start..span.start]).map_err(|e| {
-                        Error::invalid_xml(format!("sharedStrings.xml entity: {e}"))
+                        Error::new(
+                            ErrorKind::MalformedInput,
+                            format!("sharedStrings.xml entity: {e}"),
+                        )
                     })?;
                     current.push_str(&decoded);
                 }

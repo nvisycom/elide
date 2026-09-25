@@ -4,18 +4,19 @@
 //! Markup formats differ in their *parser* and *serializer* but share the
 //! same redactable units (text nodes, element attributes, comments) and
 //! the same streaming/redaction bookkeeping. That bookkeeping is the
-//! format-neutral [`extract`] engine ([`ExtractedItem`], [`ExtractHandler`],
-//! [`Encoder`]); this module supplies only the HTML and XML parser /
+//! format-neutral [`extract`] engine ([`ExtractedItem`], [`ExtractStream`],
+//! [`SourceAddresser`]); this module supplies only the HTML and XML parser /
 //! serializer pairs on top of it.
 //!
 //! Each format (e.g. the `html_loader` / `html_handler` pair) supplies a
-//! parser that produces the item stream and an [`Encoder`] that splices
+//! parser that produces the item stream and a [`Recombine`] that splices
 //! mutated values back into its native tree; everything between is shared.
 //!
 //! [`extract`]: elide_codec::extract
 //! [`ExtractedItem`]: elide_codec::extract::ExtractedItem
-//! [`ExtractHandler`]: elide_codec::extract::ExtractHandler
-//! [`Encoder`]: elide_codec::extract::Encoder
+//! [`ExtractStream`]: elide_codec::extract::ExtractStream
+//! [`SourceAddresser`]: elide_codec::extract::SourceAddresser
+//! [`Recombine`]: elide_codec::Recombine
 
 // XML is the shared markup engine; `html` enables `xml`, so the engine, config,
 // and XML modules compile whenever any markup format is on.

@@ -1,6 +1,6 @@
 //! Markup parser: a single streaming pass over an XML (or, leniently, HTML)
 //! document into the shared [`ExtractedItem`] stream, recording each item's
-//! source byte span so the [`XmlEncoder`] can splice mutated values back
+//! source byte span so the [`MarkupRecombine`] can splice mutated values back
 //! **verbatim**.
 //!
 //! Emits items for element text content, attribute values, comment bodies, and
@@ -16,7 +16,7 @@
 //! the parser itself knows nothing of `<script>` or "block level".
 //!
 //! [`ExtractedItem`]: elide_codec::extract::ExtractedItem
-//! [`XmlEncoder`]: super::xml_handler::XmlEncoder
+//! [`MarkupRecombine`]: super::xml_handler::MarkupRecombine
 //! [`MarkupConfig`]: super::config::MarkupConfig
 
 use std::ops::Range;
@@ -382,30 +382,27 @@ fn attach_sibling_hints(group: &mut [TextRecord]) {
 
 #[cfg(test)]
 mod tests {
-    use elide_codec::Handler;
-    use elide_codec::extract::ExtractHandler;
+    use std::sync::Arc;
+
+    use elide_codec::Stream;
+    use elide_codec::extract::{ExtractStream, SharedSplice};
 
     use super::*;
-    use crate::markup::xml_handler::{FORMAT_ID, XmlEncoder, XmlHandler};
+    use crate::markup::xml_handler::{FORMAT_ID, MarkupAddresser, XmlSpan};
 
-    /// Build a handler over `raw` with an explicit config so a test can read
+    /// Build a body stream over `raw` with an explicit config so a test can read
     /// out what the parser extracted (values and hints).
-    fn handler_with(raw: &str, config: MarkupConfig<'_>) -> XmlHandler {
+    fn handler_with(raw: &str, config: MarkupConfig<'_>) -> ExtractStream<XmlSpan> {
         let items = build_items(raw, config).expect("markup decode succeeds");
-        ExtractHandler::new(
-            FORMAT_ID.clone(),
-            XmlEncoder {
-                raw: raw.to_owned(),
-            },
-            items,
-        )
+        let state = SharedSplice::new(items);
+        ExtractStream::new(FORMAT_ID.clone(), state, Arc::new(MarkupAddresser))
     }
 
-    fn xml(raw: &str) -> XmlHandler {
+    fn xml(raw: &str) -> ExtractStream<XmlSpan> {
         handler_with(raw, MarkupConfig::xml())
     }
 
-    async fn values(h: &mut XmlHandler) -> Vec<String> {
+    async fn values(h: &mut ExtractStream<XmlSpan>) -> Vec<String> {
         let mut out = Vec::new();
         while let Some(chunk) = h.read_next().await.unwrap() {
             out.push(chunk.data.as_str().to_owned());

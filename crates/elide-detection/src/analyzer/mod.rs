@@ -339,7 +339,7 @@ impl<M: Modality> Analyzer<M> {
     /// [`lift`]: elide_core::modality::StreamDataReader::lift
     pub async fn analyze_stream<S>(&self, source: &mut S, scope: &Scope) -> Result<Analysis<M>>
     where
-        S: StreamDataReader<M>,
+        S: StreamDataReader<M> + ?Sized,
     {
         self.analyze_stream_with(source, scope, &Annotations::new())
             .await
@@ -358,7 +358,7 @@ impl<M: Modality> Analyzer<M> {
         annotations: &Annotations<M>,
     ) -> Result<Analysis<M>>
     where
-        S: StreamDataReader<M>,
+        S: StreamDataReader<M> + ?Sized,
     {
         self.analyze_stream_seeded(source, scope, annotations, None)
             .await
@@ -380,7 +380,7 @@ impl<M: Modality> Analyzer<M> {
         artifact: Option<M::Artifact>,
     ) -> Result<Analysis<M>>
     where
-        S: StreamDataReader<M>,
+        S: StreamDataReader<M> + ?Sized,
     {
         self.analyze_stream_seeded(source, scope, annotations, artifact)
             .await
@@ -397,7 +397,7 @@ impl<M: Modality> Analyzer<M> {
         seed: Option<M::Artifact>,
     ) -> Result<Analysis<M>>
     where
-        S: StreamDataReader<M>,
+        S: StreamDataReader<M> + ?Sized,
     {
         let mut out = Vec::new();
         // The stream's artifact: the seed when re-running (every chunk self-skips

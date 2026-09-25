@@ -16,8 +16,8 @@ pub(crate) struct JsonLoader;
 
 #[async_trait::async_trait]
 impl Loader for JsonLoader {
-    type Handler = JsonHandler;
     type Modality = Text;
+    type Stream = JsonHandler;
 
     async fn decode(&self, content: ContentData) -> Result<JsonHandler> {
         let text = content.decode()?;
@@ -32,7 +32,7 @@ impl Loader for JsonLoader {
 
 #[cfg(test)]
 mod tests {
-    use elide_codec::Handler;
+    use elide_codec::Stream;
 
     use super::*;
 

@@ -1,7 +1,7 @@
 //! Redaction that preserves the document (no rasterising): delete text glyphs
 //! and replace embedded images.
 //!
-//! [`redact_text`](crate::Pdf::redact_text) **deletes** the glyphs of detected
+//! [`redact_text`](crate::document::Pdf::redact_text) **deletes** the glyphs of detected
 //! spans from the content streams (rather than re-encoding a replacement, which
 //! corrupts subset/CID fonts) and strips the structures that retain copies of
 //! the text (annotations, `/Info`, `/Metadata`), keeping a real selectable text
@@ -17,7 +17,7 @@ mod detection;
 mod graph;
 #[cfg(feature = "image")]
 mod images;
-#[cfg(feature = "image")]
+#[cfg(feature = "render")]
 mod pages;
 mod sanitize;
 
@@ -32,9 +32,9 @@ pub use self::detection::Detection;
 pub use self::images::ImageReplacement;
 #[cfg(feature = "image")]
 pub(crate) use self::images::redact_images;
-#[cfg(feature = "image")]
+#[cfg(feature = "render")]
 pub use self::pages::PageReplacement;
-#[cfg(feature = "image")]
+#[cfg(feature = "render")]
 pub(crate) use self::pages::redact_pages;
 use crate::document::Store;
 use crate::text::{Address, GlyphBytes, StreamTarget, TextBlock, scrub, text_blocks};

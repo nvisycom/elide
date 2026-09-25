@@ -11,6 +11,6 @@ pub mod string;
 pub mod test_util;
 
 pub use self::contract::{
-    Container, DocumentHandle, Format, FormatId, Handler, Loader, LocalId, Part,
-    UntypedDocumentHandle,
+    Document, DocumentLoader, DocumentPart, EncodedPart, ErasedStream, Format, FormatId,
+    LeafLoader, LeafRecombine, Loader, LocalId, Recombine, Stream, TypedStream,
 };

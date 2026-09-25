@@ -1,22 +1,18 @@
-//! HTML handler side: the [`Format`] descriptor for HTML.
+//! HTML codec side: the [`Format`] descriptor for HTML.
 //!
-//! HTML runs on the XML markup engine, the same byte-span tokenize-and-splice
-//! `XmlEncoder` and `ExtractHandler`, configured leniently (see
-//! [`MarkupConfig::lenient`](super::config::MarkupConfig::lenient)). There is no
-//! separate HTML handler or encoder type; [`HtmlHandler`] is the XML handler,
-//! and this module supplies only the [`Format`] and its `<script>` / `<style>`
-//! policy entry points.
+//! HTML runs on the shared markup engine, the same byte-span tokenize-and-splice
+//! [`ExtractStream`](elide_codec::extract::ExtractStream) /
+//! [`MarkupRecombine`](super::xml_handler::MarkupRecombine), configured leniently
+//! (see [`MarkupConfig::lenient`](super::config::MarkupConfig::lenient)). There is
+//! no separate HTML stream or recombine type; this module supplies only the
+//! [`Format`] and its `<script>` / `<style>` policy entry points.
 
 use elide_codec::{Format, FormatId};
 
 use super::HtmlLoader;
-use super::xml_handler::XmlHandler;
 
 /// Stable [`FormatId`] for the HTML codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.text.html");
-
-/// Handler type for loaded HTML content: the XML markup engine's handler.
-pub(crate) type HtmlHandler = XmlHandler;
 
 /// How the HTML loader handles a `<script>` or `<style>` element body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -50,7 +46,7 @@ pub fn format_with(script_policy: ScriptPolicy, style_policy: ScriptPolicy) -> F
 
 /// Build the HTML [`Format`] from a configured loader.
 fn format_from(loader: HtmlLoader) -> Format {
-    Format::new(FORMAT_ID.clone(), loader)
+    Format::with_document_loader(FORMAT_ID.clone(), loader)
         .with_extensions(["html", "htm"])
         .with_content_types(["text/html"])
 }
