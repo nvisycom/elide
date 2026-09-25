@@ -33,8 +33,8 @@ macro_rules! impl_image_handler {
         /// fallback policy.
         ///
         /// [`Format`]: elide_codec::Format
-        /// [`ExifPolicy`]: crate::ExifPolicy
-        /// [`ExifPolicy::default`]: crate::ExifPolicy
+        /// [`ExifPolicy`]: crate::exif::ExifPolicy
+        /// [`ExifPolicy::default`]: crate::exif::ExifPolicy
         pub fn format() -> ::elide_codec::Format {
             format_from(::core::default::Default::default())
         }
@@ -47,18 +47,18 @@ macro_rules! impl_image_handler {
         /// sub-part always wins and ignores `policy`. So this is the "strip all
         /// (or sensitive) EXIF unconditionally, without wiring a metadata
         /// recognizer" knob: pass [`ExifPolicy::Strip`] or
-        /// [`StripSensitive`](crate::ExifPolicy::StripSensitive).
+        /// [`StripSensitive`](crate::exif::ExifPolicy::StripSensitive).
         ///
         /// [`Format`]: elide_codec::Format
-        /// [`ExifPolicy::Strip`]: crate::ExifPolicy::Strip
-        pub fn format_with(policy: crate::ExifPolicy) -> ::elide_codec::Format {
+        /// [`ExifPolicy::Strip`]: crate::exif::ExifPolicy::Strip
+        pub fn format_with(policy: crate::exif::ExifPolicy) -> ::elide_codec::Format {
             format_from(policy)
         }
 
         /// Build this format's [`Format`](elide_codec::Format) from a configured
         /// fallback policy: a [`Document`](elide_codec::Document) format whose
         /// loader is the shared [`ImageDocumentLoader`](super::document::ImageDocumentLoader).
-        fn format_from(policy: crate::ExifPolicy) -> ::elide_codec::Format {
+        fn format_from(policy: crate::exif::ExifPolicy) -> ::elide_codec::Format {
             ::elide_codec::Format::with_document_loader(
                 FORMAT_ID.clone(),
                 super::document::ImageDocumentLoader::new(FORMAT_ID.clone(), policy),

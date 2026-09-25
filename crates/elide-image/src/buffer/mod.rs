@@ -14,10 +14,10 @@ use elide_core::{Error, ErrorKind, Result};
 
 pub use self::raster::RasterImage;
 #[cfg(feature = "exif")]
+use crate::exif::ExifPolicy;
+#[cfg(feature = "exif")]
 use crate::exif::Source;
 use crate::modality::{ImageFormat, ImageReplacement};
-#[cfg(feature = "exif")]
-use crate::policy::ExifPolicy;
 use crate::primitive::{BoundingBox, Dimensions};
 
 /// An opened image source, the single entry point into the crate.
@@ -26,7 +26,7 @@ use crate::primitive::{BoundingBox, Dimensions};
 /// the pixels into a [`RasterImage`], and retains the source container so
 /// metadata is available without a second decode or any magic-byte sniffing
 /// elsewhere. Reuse the buffer to [`redact`](Self::redact) pixel regions and
-/// [`encode`](Self::encode) back out under an [`ExifPolicy`](crate::ExifPolicy),
+/// [`encode`](Self::encode) back out under an [`ExifPolicy`](crate::exif::ExifPolicy),
 /// all paying the decode cost a single time. With the `exif` feature it also
 /// surfaces the source's privacy-relevant EXIF fields as `Entity<Metadata>`
 /// values.

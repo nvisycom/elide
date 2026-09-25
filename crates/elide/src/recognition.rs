@@ -86,19 +86,19 @@ pub mod context {
 /// text and images.
 #[cfg(feature = "llm")]
 #[cfg_attr(docsrs, doc(cfg(feature = "llm")))]
-#[doc(inline)]
+#[doc(no_inline)]
 pub use elide_llm as llm;
 /// Model-based named-entity recognition: detect entities and their
 /// language.
 #[cfg(feature = "ner")]
 #[cfg_attr(docsrs, doc(cfg(feature = "ner")))]
-#[doc(inline)]
+#[doc(no_inline)]
 pub use elide_ner as ner;
 /// Dictionary- and pattern-based recognition: match entities by regex
 /// and term lists.
 #[cfg(feature = "pattern")]
 #[cfg_attr(docsrs, doc(cfg(feature = "pattern")))]
-#[doc(inline)]
+#[doc(no_inline)]
 pub use elide_pattern as pattern;
 
 /// EXIF metadata recognition: surface an image's privacy-relevant EXIF fields
@@ -114,7 +114,7 @@ pub use elide_pattern as pattern;
 )]
 pub mod exif {
     #[doc(inline)]
-    pub use elide_image::ExifRecognizer;
+    pub use elide_image::exif::ExifRecognizer;
 }
 
 /// OOXML document-property recognition: surface a Word/PowerPoint/Excel

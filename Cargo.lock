@@ -1164,6 +1164,7 @@ dependencies = [
  "elide-operator",
  "elide-pattern",
  "elide-pdf",
+ "elide-plain",
  "elide-redaction",
  "serde",
  "serde_json",
