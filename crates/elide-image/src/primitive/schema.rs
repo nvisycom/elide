@@ -13,9 +13,11 @@
 
 /// Hand-write a `JsonSchema` impl for a two-field geometry struct, naming the
 /// schema `<Ty><suffix>` and referencing each field's schema through the
-/// generator so nested primitives stay shared `$defs`.
+/// generator so nested primitives stay shared `$defs`. Each field carries its
+/// documentation string, which becomes the property's `description` — the same
+/// text `#[derive(JsonSchema)]` would lift from the field doc-comment.
 macro_rules! coordinate_object_schema {
-    ($ty:ident { $($field:ident : $fty:ty),+ $(,)? }) => {
+    ($ty:ident { $($field:ident : $fty:ty = $desc:literal),+ $(,)? }) => {
         impl<C: super::Coordinate + schemars::JsonSchema> schemars::JsonSchema for $ty<C> {
             fn schema_name() -> ::std::borrow::Cow<'static, str> {
                 ::std::format!(concat!(stringify!($ty), "{}"), C::SCHEMA_SUFFIX).into()
@@ -30,7 +32,10 @@ macro_rules! coordinate_object_schema {
             }
 
             fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-                $( let $field = generator.subschema_for::<$fty>(); )+
+                $(
+                    let mut $field = generator.subschema_for::<$fty>();
+                    $field.insert("description".to_owned(), $desc.into());
+                )+
                 schemars::json_schema!({
                     "type": "object",
                     "properties": { $( stringify!($field): $field ),+ },

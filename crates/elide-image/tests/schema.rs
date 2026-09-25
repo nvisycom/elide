@@ -67,4 +67,14 @@ fn geometry_variants_share_defs_without_collision() {
         defs["BoundingBoxU32"]["properties"]["min"]["$ref"],
         "#/$defs/PointU32"
     );
+    // Field doc-comments are preserved as property descriptions (as the derive
+    // would have), alongside the `$ref` to the shared coordinate schema.
+    assert_eq!(
+        defs["BoundingBoxU32"]["properties"]["min"]["description"],
+        "Minimum corner (top-left, conventionally)."
+    );
+    assert_eq!(
+        defs["PointU32"]["properties"]["x"]["description"],
+        "Horizontal coordinate."
+    );
 }

@@ -81,7 +81,10 @@ pub struct Point<T: Coordinate> {
 }
 
 #[cfg(feature = "schema")]
-super::schema::coordinate_object_schema!(Point { x: C, y: C });
+super::schema::coordinate_object_schema!(Point {
+    x: C = "Horizontal coordinate.",
+    y: C = "Vertical coordinate."
+});
 
 impl<T: Coordinate> Point<T> {
     /// Point at `(x, y)`.

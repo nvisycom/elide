@@ -35,7 +35,10 @@ pub struct BoundingBox<C: Coordinate> {
 }
 
 #[cfg(feature = "schema")]
-super::schema::coordinate_object_schema!(BoundingBox { min: Point<C>, max: Point<C> });
+super::schema::coordinate_object_schema!(BoundingBox {
+    min: Point<C> = "Minimum corner (top-left, conventionally).",
+    max: Point<C> = "Maximum corner (bottom-right, conventionally).",
+});
 
 impl<C: Coordinate> BoundingBox<C> {
     /// Box spanning the two corners.

@@ -25,8 +25,8 @@ pub struct Dimensions<C: Coordinate> {
 
 #[cfg(feature = "schema")]
 super::schema::coordinate_object_schema!(Dimensions {
-    width: C,
-    height: C
+    width: C = "Width.",
+    height: C = "Height.",
 });
 
 impl<C: Coordinate> Dimensions<C> {
