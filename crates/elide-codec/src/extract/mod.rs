@@ -23,11 +23,11 @@
 //! A concrete format supplies a parser that produces the item stream, a
 //! `SourceAddresser` for its address type, and a `Recombine` that splices the
 //! (mutated) values back into its native bytes; everything between is shared.
-//! The item value is always [`Text`](elide_core::modality::text::Text), so a
-//! recognizer or operator written for text serves every format built on this
-//! engine unchanged.
+//! The item value is always [`Text`], so a recognizer or operator written for
+//! text serves every format built on this engine unchanged.
 //!
 //! [`Stream`]: crate::Stream
+//! [`Text`]: elide_core::modality::text::Text
 
 mod addresser;
 mod state;

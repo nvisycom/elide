@@ -23,6 +23,9 @@ use crate::{ExifPolicy, ImageBuffer};
 /// The `#exif` sub-part id: the image's own bytes, re-read as `Metadata`.
 const EXIF_PART_ID: &str = "#exif";
 
+/// The pixel body part id: the decoded (redacted) image.
+const PIXEL_PART_ID: &str = "pixels";
+
 /// The decoded image, shared between the pixel [`PixelStream`] and the
 /// [`ImageRecombine`] so a redaction on the stream is visible when the
 /// recombiner re-encodes. `Clone` shares the one buffer (an `Arc` bump); the
@@ -147,19 +150,26 @@ struct ImageRecombine {
 
 impl Recombine for ImageRecombine {
     fn assemble(&self, parts: &[EncodedPart]) -> Result<ContentData> {
-        // The pixel stream's bytes are ignored here — the state holds the
-        // (redacted) pixels. Only the `#exif` blob matters: a metadata pipeline
-        // redacts it in place, changing its bytes.
+        // A metadata pipeline redacts the `#exif` blob in place, changing its
+        // bytes; only then does its container matter here.
         let exif = parts.iter().find(|p| p.id.as_str() == EXIF_PART_ID);
-        let redacted = exif.is_some_and(|p| p.bytes != self.original_exif);
-        let bytes = if redacted {
+        let bytes = if exif.is_some_and(|p| p.bytes != self.original_exif) {
             // A metadata pipeline stripped the `#exif` container; lay the redacted
-            // pixels over it.
+            // pixels over it. The pixel part's own encoding used the fallback
+            // policy, so it can't be reused: the pixels must be re-laid over this
+            // stripped container instead.
             let container = &exif.expect("checked present").bytes;
             self.state.encode_over_metadata(container)?
         } else {
-            // Untouched metadata: the fallback policy governs it.
-            self.state.encode(self.policy)?
+            // Untouched metadata: the fallback policy governs it, which is exactly
+            // how `PixelStream::encode` already encoded the pixel body part. Reuse
+            // those bytes rather than encoding the image a second time.
+            parts
+                .iter()
+                .find(|p| p.id.as_str() == PIXEL_PART_ID)
+                .map(|p| p.bytes.clone())
+                .map(Ok)
+                .unwrap_or_else(|| self.state.encode(self.policy))?
         };
         Ok(ContentData::new(bytes))
     }
@@ -217,7 +227,10 @@ impl DocumentLoader for ImageDocumentLoader {
     }
 }
 
-#[cfg(test)]
+// `test-util` provides the fixtures below and implies `exif`, `jpeg`, and `png`,
+// the decoders these tests exercise; without it (e.g. `--features codec` alone)
+// the module would not compile.
+#[cfg(all(test, feature = "test-util"))]
 mod tests {
     use elide_codec::{DocumentLoader as _, LeafLoader};
     use elide_core::modality::StreamDataReader as _;

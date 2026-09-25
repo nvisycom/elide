@@ -7,10 +7,10 @@
 use std::any::Any;
 
 use elide_codec::{ErasedStream, TypedStream};
-use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::recognition::Scope;
+use elide_core::{Error, ErrorKind, Result};
 
 use super::ModalityPipeline;
 use super::outcome::{BoxFuture, InPlaceAnalysis};
@@ -109,15 +109,23 @@ where
         scope: &'a Scope,
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            // The stream and entities were matched to this pipeline's `M` by the
-            // orchestrator (stored modality `TypeId`), so both downcasts hold.
-            let stream = handle
-                .downcast_mut::<M>()
-                .unwrap_or_else(|| unreachable!("apply_stream modality mismatch"));
-            let entities = entities
-                .as_any_mut()
-                .downcast_mut::<Vec<Entity<M>>>()
-                .expect("apply_stream entities modality mismatch");
+            // `apply_parts` picks this pipeline from the report's stored modality,
+            // not from the stream, and `anonymize_with` accepts a hand-built or
+            // deserialized report. Such a report can key a part under one modality
+            // while the stream there is another, so a mismatch is malformed input,
+            // not an invariant break.
+            let Some(stream) = handle.downcast_mut::<M>() else {
+                return Err(Error::new(
+                    ErrorKind::MalformedInput,
+                    format!("report keys this part as {} but its stream is not", M::NAME),
+                ));
+            };
+            let Some(entities) = entities.as_any_mut().downcast_mut::<Vec<Entity<M>>>() else {
+                return Err(Error::new(
+                    ErrorKind::MalformedInput,
+                    format!("report entities for this part are not {}", M::NAME),
+                ));
+            };
             self.anonymizer.anonymize(stream, entities, scope).await
         })
     }

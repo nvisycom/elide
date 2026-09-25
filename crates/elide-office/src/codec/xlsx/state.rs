@@ -1,7 +1,7 @@
 //! [`XlsxState`]: the workbook's editable cell state, shared between the body
 //! stream and the recombiner.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 use elide_codec::string::RedactRange;
@@ -45,20 +45,6 @@ impl XlsxInner {
         }
         Ok(first)
     }
-}
-
-/// One cell edit resolved against the workbook: the target cell's index and the
-/// intra-cell splice to apply. Resolved for the whole batch before any cell is
-/// mutated, so a batch that names a missing cell fails without a partial edit.
-struct ResolvedEdit {
-    /// Index of the target cell in extraction order.
-    index: usize,
-    /// Start of the intra-cell byte range to overwrite.
-    start: usize,
-    /// End of the intra-cell byte range to overwrite.
-    end: usize,
-    /// The replacement text.
-    value: String,
 }
 
 /// The workbook's editable cell state, shared between the body
@@ -117,10 +103,13 @@ impl XlsxState {
     pub(super) fn redact_cells(&self, edits: &[(TabularLocation, TextReplacement)]) -> Result<()> {
         let mut inner = self.0.lock().unwrap();
 
-        // Resolve every edit first — its cell index, intra-cell splice range, and
-        // replacement value — so an edit that names no cell fails the batch before
-        // a single cell changes.
-        let mut resolved: Vec<ResolvedEdit> = Vec::with_capacity(edits.len());
+        // Splice every edit into a per-cell working copy first, so both the cell
+        // lookup and the splice itself (`redact_range` errors on a mid-character
+        // range) are validated for the whole batch before any cell changes. A
+        // batch with a later invalid edit fails without leaving an earlier one
+        // committed. Several edits may target the same cell, so each works from
+        // the running copy, not the original.
+        let mut working: BTreeMap<usize, String> = BTreeMap::new();
         for (location, replacement) in edits {
             let sheet = location.sheet_name.as_deref();
             let index = inner
@@ -134,25 +123,20 @@ impl XlsxState {
                         ),
                     )
                 })?;
-            let cell_len = inner.cells[index].text.len();
-            resolved.push(ResolvedEdit {
-                index,
-                start: location.start_offset.unwrap_or(0),
-                end: location.end_offset.unwrap_or(cell_len),
-                value: replacement.value().unwrap_or_default().to_owned(),
-            });
+            let text = working
+                .entry(index)
+                .or_insert_with(|| inner.cells[index].text.clone());
+            let start = location.start_offset.unwrap_or(0);
+            let end = location.end_offset.unwrap_or(text.len());
+            text.redact_range(replacement.value().unwrap_or_default(), start..end)?;
         }
 
-        // All resolved: apply. `redact_range` still errors on an out-of-bounds or
-        // mid-character splice, so a splice that can't be applied also fails the
-        // batch — the ranges were resolved per cell above, so this is a clean
-        // commit.
-        for edit in resolved {
-            let cell = &mut inner.cells[edit.index];
-            cell.text.redact_range(&edit.value, edit.start..edit.end)?;
-            // Only a cell that was actually edited is sent for rewrite, so
-            // unchanged shared-string cells are not needlessly de-shared.
-            inner.changed.insert(edit.index);
+        // Every splice succeeded: commit each cell's final text. Only a cell that
+        // was actually edited is sent for rewrite, so unchanged shared-string
+        // cells are not needlessly de-shared.
+        for (index, text) in working {
+            inner.cells[index].text = text;
+            inner.changed.insert(index);
         }
         Ok(())
     }

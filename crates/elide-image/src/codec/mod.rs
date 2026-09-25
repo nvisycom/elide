@@ -6,7 +6,7 @@
 //! (the image's own bytes, re-read as the `Metadata` modality), recombined by
 //! laying the redacted pixels over the metadata-stripped container. The three
 //! formats differ only in their id and lookup keys (the `impl_image_handler!`
-//! macro); the shared decode-redact-recompose body is [`document`]'s
+//! macro); the shared decode-redact-recompose body is `document`'s
 //! `ImageDocumentLoader`.
 
 mod macros;

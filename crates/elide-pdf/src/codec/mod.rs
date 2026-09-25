@@ -3,25 +3,23 @@
 //! Binds this crate's PDF engine to the `elide-codec`
 //! [`DocumentLoader`](elide_codec::DocumentLoader)/[`Stream`](elide_codec::Stream)/
 //! [`Recombine`](elide_codec::Recombine) contracts: a document is a page-text
-//! body [`Stream<Text>`](pdf_stream::PdfStream) plus, on the glyph-deletion path,
-//! a [`Blob`](elide_codec::DocumentPart::Blob) per redactable embedded image
+//! body `Stream<Text>` (`PdfStream`) plus, on the glyph-deletion path, a
+//! [`Blob`](elide_codec::DocumentPart::Blob) per redactable embedded image
 //! XObject and per textless (scanned) page. A redaction on the body stream is
-//! recorded on the shared [`PdfState`](pdf_state::PdfState) and applied by
-//! [`PdfRecombine`](pdf_recombine::PdfRecombine) per the document's [`RedactMode`]:
+//! recorded on the shared `PdfState` and applied by `PdfRecombine` per the
+//! document's `RedactMode`:
 //!
 //! - **Glyph deletion** (default, pure-Rust): the detected glyphs are deleted
 //!   from the content streams and annotations/metadata stripped, keeping a
-//!   selectable text layer with the detected spans gone ([`Pdf::redact_text`]).
+//!   selectable text layer with the detected spans gone (`Pdf::redact_text`).
 //! - **Raster** (feature `render`, [`RasterMode::Always`]): the page text comes
-//!   from [`Pdf::observe`] alongside its glyph geometry, so a redaction's span
+//!   from `Pdf::observe` alongside its glyph geometry, so a redaction's span
 //!   maps to pixel boxes; encode fills them and emits a fresh image-only PDF, the
 //!   text layer is gone entirely.
 //!
 //! [`pdf_format`] decodes on the glyph-deletion path; with the `render` feature
 //! [`pdf_format_with`] takes an explicit [`RasterMode`].
 //!
-//! [`Pdf::redact_text`]: crate::document::Pdf::redact_text
-//! [`Pdf::observe`]: crate::document::Pdf::observe
 //! [`RasterMode::Always`]: crate::primitive::RasterMode::Always
 
 mod pdf_loader;

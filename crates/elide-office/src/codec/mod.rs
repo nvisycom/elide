@@ -1,11 +1,10 @@
 //! Codec adapters: the OOXML formats (DOCX, PPTX, XLSX) on the parts model.
 //!
-//! [`docx`] and [`pptx`] are thin [`OoxmlCodec`](ooxml::OoxmlCodec) seams — a
-//! marker plus a `format()` — over the shared element-text [`ooxml`] adapter;
-//! [`xlsx`] is its own codec (shared-string cells are not the element-text path).
-//! The shared `docProps/*` document-property sub-part every OOXML container
-//! surfaces is handled once in [`props`], and the OPC source-span helpers in
-//! [`opc_source`].
+//! `docx` and `pptx` are thin `OoxmlCodec` seams — a marker plus a `format()` —
+//! over the shared element-text `ooxml` adapter; `xlsx` is its own codec
+//! (shared-string cells are not the element-text path). The shared `docProps/*`
+//! document-property sub-part every OOXML container surfaces is handled once in
+//! `props`, and the OPC source-span helpers in `opc_source`.
 
 mod docx;
 pub(crate) mod ooxml;

@@ -32,12 +32,15 @@ impl<A> SpliceState<A> {
 
     /// The item whose value contains `byte_offset` in the concatenated stream.
     pub(super) fn item_for(&self, byte_offset: usize) -> Option<usize> {
-        match self.item_starts.binary_search(&byte_offset) {
-            Ok(i) if i < self.items.len() => Some(i),
-            Ok(_) => None,
-            Err(i) if i > 0 && i <= self.items.len() => Some(i - 1),
-            _ => None,
-        }
+        // The last item whose start is `<= byte_offset`. An empty item shares its
+        // start with the next, so several starts tie at one offset; only the last
+        // of them can hold a non-empty range, and `binary_search` would pick an
+        // arbitrary tie (possibly the empty item, skipping the redaction).
+        let i = self
+            .item_starts
+            .partition_point(|&start| start <= byte_offset)
+            .checked_sub(1)?;
+        (i < self.items.len()).then_some(i)
     }
 
     /// Shift every offset after item `i` by `delta` (an edit's length change).

@@ -9,7 +9,7 @@
 //!
 //! [`TestOrchestrator`]: super::orchestrator::TestOrchestrator
 
-use elide::codec::{FormatRegistry, TypedStream};
+use elide::codec::{DocumentPart, FormatRegistry, TypedStream};
 use elide::detection::Analyzer;
 use elide::entity::{Entity, Label, LabelCatalog, builtins};
 #[cfg(feature = "stt")]
@@ -192,7 +192,7 @@ impl Fixture {
         use elide::redaction::operators::{Erase, Silence};
 
         let registry = FormatRegistry::with_builtin();
-        let mut document = self.decode_document(&registry).await?;
+        let mut document = self.decode_document::<Audio>(&registry).await?;
 
         // The mock STT backend transcribes nothing, so recognition finds
         // nothing; the anonymizer would silence/erase any time spans it did.
@@ -256,7 +256,7 @@ impl Fixture {
         use elide::redaction::operators::Erase;
 
         let registry = FormatRegistry::with_builtin();
-        let mut document = self.decode_document(&registry).await?;
+        let mut document = self.decode_document::<Image>(&registry).await?;
 
         // The mock OCR backend recognizes nothing, so recognition finds
         // nothing; the anonymizer would clear any regions it did.
@@ -351,7 +351,7 @@ impl Fixture {
         Mask: Operator<M>,
         Erase: Operator<M>,
     {
-        let mut document = self.decode_document(&registry).await?;
+        let mut document = self.decode_document::<M>(&registry).await?;
 
         // One scope, shared across every modality pipeline. Built through
         // `TestOrchestrator`, the shared construction path.
@@ -401,12 +401,37 @@ impl Fixture {
         })
     }
 
-    /// Decode this fixture's bytes into a named [`Document`], resolving the
-    /// format from the fixture's extension.
-    async fn decode_document(&self, registry: &FormatRegistry) -> Result<Document> {
-        registry
+    /// Decode this fixture's bytes into a named [`Document`] whose body stream is
+    /// the `M` modality, resolving the format from the fixture's extension.
+    ///
+    /// Asserts the body modality so a fixture whose extension decodes to another
+    /// modality (a `.txt` run through `run_audio`) fails here with
+    /// [`CapabilityUnavailable`](ErrorKind::CapabilityUnavailable), rather than
+    /// analyzing to no findings and reporting a hollow round trip.
+    async fn decode_document<M: Modality>(&self, registry: &FormatRegistry) -> Result<Document> {
+        let document = registry
             .document_with(DOC, self.extension, self.source)
-            .await
+            .await?;
+        let body_is_m = document
+            .document
+            .parts()
+            .iter()
+            .find_map(|part| match part {
+                DocumentPart::Stream { handle, .. } => Some(handle.is::<M>()),
+                DocumentPart::Blob { .. } => None,
+            })
+            .unwrap_or(false);
+        if !body_is_m {
+            return Err(Error::new(
+                ErrorKind::CapabilityUnavailable,
+                format!(
+                    "{} did not resolve to the {} modality",
+                    self.extension,
+                    M::NAME
+                ),
+            ));
+        }
+        Ok(document)
     }
 
     /// Write the serialized detection [`Report`] to `testdata/audits/` as

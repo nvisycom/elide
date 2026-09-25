@@ -283,6 +283,22 @@ mod tests {
     use crate::document::Pdf;
     use crate::extract::ImageId;
 
+    /// A loader on the glyph-deletion path, so decode surfaces embedded images
+    /// without rendering. These tests exercise embedded-image surfacing and
+    /// replacement (the `image` feature); the synthetic PDF has no text layer, so
+    /// the default `Auto` mode would render the page as scanned and pull in PDFium
+    /// for nothing. `Never` keeps the decode pure-Rust.
+    fn image_loader() -> PdfDocumentLoader {
+        #[cfg(feature = "render")]
+        {
+            PdfDocumentLoader::with_raster(crate::primitive::RasterMode::Never)
+        }
+        #[cfg(not(feature = "render"))]
+        {
+            PdfDocumentLoader::new()
+        }
+    }
+
     /// A JPEG-encoded image of a solid colour, as bytes (a self-contained
     /// `.jpg` file, so the loader surfaces it, see `embedding_hint`).
     fn jpeg(rgb: [u8; 3]) -> Vec<u8> {
@@ -364,7 +380,7 @@ mod tests {
     #[tokio::test]
     async fn document_surfaces_and_replaces_an_image() {
         let (pdf, image_id) = image_pdf();
-        let mut doc = PdfDocumentLoader::new()
+        let mut doc = image_loader()
             .decode(ContentData::new(Bytes::from(pdf)))
             .await
             .unwrap();
@@ -393,7 +409,7 @@ mod tests {
     #[tokio::test]
     async fn replace_part_rejects_an_unknown_id() {
         let (pdf, _) = image_pdf();
-        let mut doc = PdfDocumentLoader::new()
+        let mut doc = image_loader()
             .decode(ContentData::new(Bytes::from(pdf)))
             .await
             .unwrap();
