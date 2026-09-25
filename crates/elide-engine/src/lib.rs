@@ -512,7 +512,7 @@ impl Orchestrator {
         // blob sub-parts bottom-up through the recursion.
         for document in documents.iter_mut() {
             let prefix = PartId::leaf(document.name.clone());
-            self.apply_parts(&mut document.document, &prefix, &mut report)
+            self.apply_parts(&mut document.document, &prefix, &mut report, 0)
                 .await?;
         }
         Ok(report)
@@ -529,18 +529,33 @@ impl Orchestrator {
     /// assembles it.
     ///
     /// A blob that no codec can decode, or has no redacted descendant, is left
-    /// as-is (its original bytes fold through unchanged).
+    /// as-is (its original bytes fold through unchanged): a child is re-encoded
+    /// and folded back only when applying actually changed something beneath it,
+    /// so an untouched embedding is never re-serialized (which would, e.g.,
+    /// re-encode an unredacted image and drop its metadata under the codec's
+    /// policy).
+    ///
+    /// Returns whether any redaction landed in this subtree, so a parent folds a
+    /// blob back only when its child changed.
+    ///
+    /// Descends at most [`MAX_CONTAINER_DEPTH`] levels: `anonymize_with` accepts a
+    /// hand-built or deserialized report with no prior `analyze` on the same
+    /// documents, so a self-nesting container (a zip quine) could otherwise
+    /// recurse without bound. Exceeding the limit is a hard error, matching
+    /// [`analyze_parts`](Self::analyze_parts), never a silent stop.
     fn apply_parts<'a>(
         &'a self,
         document: &'a mut CodecDocument,
         prefix: &'a PartId,
         report: &'a mut Report,
-    ) -> BoxFuture<'a, Result<()>> {
+        depth: usize,
+    ) -> BoxFuture<'a, Result<bool>> {
         Box::pin(async move {
             // Blob sub-parts fold back after the walk: `replace_part` needs a
             // fresh `&mut document`, which the `parts_mut` borrow holds for the
             // loop, so stage each blob's redacted bytes and apply them after.
             let mut folded: Vec<(LocalId, Bytes)> = Vec::new();
+            let mut changed = false;
             let mut body_seen = false;
             for part in document.parts_mut() {
                 match part {
@@ -555,23 +570,42 @@ impl Orchestrator {
                         pipeline
                             .apply_stream(handle, entry.entities.as_mut(), &self.scope)
                             .await?;
+                        changed = true;
                     }
                     DocumentPart::Blob { id, bytes, hint } => {
                         let part_id = prefix.child(id.clone());
+                        // Past the depth bound a nested document is a hard error,
+                        // never an unbounded recursion; check before decoding so
+                        // nothing deeper runs.
+                        if depth + 1 > MAX_CONTAINER_DEPTH {
+                            return Err(Error::new(
+                                ErrorKind::MalformedInput,
+                                format!(
+                                    "container nesting exceeds the depth limit of \
+                                     {MAX_CONTAINER_DEPTH} at part `{part_id}`"
+                                ),
+                            ));
+                        }
                         let Ok(mut child) = self.registry.decode(bytes.clone(), hint).await else {
                             continue; // no codec for this blob, opaque, left as-is
                         };
                         // Recurse first (post-order): the child re-encodes its own
-                        // redacted streams, then folds back into this document.
-                        self.apply_parts(&mut child, &part_id, report).await?;
-                        folded.push((id.clone(), child.encode()?.into_bytes()));
+                        // redacted streams, then folds back into this document, but
+                        // only when the recursion actually changed it.
+                        if self
+                            .apply_parts(&mut child, &part_id, report, depth + 1)
+                            .await?
+                        {
+                            folded.push((id.clone(), child.encode()?.into_bytes()));
+                        }
                     }
                 }
             }
+            changed |= !folded.is_empty();
             for (id, bytes) in folded {
                 document.replace_part(&id, bytes)?;
             }
-            Ok(())
+            Ok(changed)
         })
     }
 

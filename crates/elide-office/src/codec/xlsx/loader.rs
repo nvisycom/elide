@@ -232,6 +232,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_batch_with_an_unsupported_edit_leaves_the_workbook_unchanged() {
+        // A valid cell edit followed by an unsupported `DropRow` in the same batch
+        // must fail the whole batch atomically — the valid edit must NOT survive
+        // into the encoded workbook (a partial redaction is worse than none).
+        let mut doc = decode(SAMPLE).await;
+        let mut batch: Redactions<Tabular> = Redactions::new();
+        batch.push(
+            TabularLocation::new(1, 0).with_sheet_name("Customers"),
+            TabularReplacement::Cell(TextReplacement::substituted("[EMAIL]")),
+        );
+        batch.push(
+            TabularLocation::new(1, 1).with_sheet_name("Customers"),
+            TabularReplacement::DropRow,
+        );
+        assert!(body(&mut doc).write_at(batch).await.is_err());
+
+        // The encode carries none of the batch: Customers!A2 still reads alice.
+        let out = doc.encode().unwrap();
+        let mut reopened = XlsxDocumentLoader
+            .decode(ContentData::new(out.to_bytes()))
+            .await
+            .unwrap();
+        let seen = cells_of(&mut reopened).await;
+        assert!(seen.contains(&(
+            Some("Customers".to_owned()),
+            1,
+            0,
+            "alice@example.com".to_owned()
+        )));
+    }
+
+    #[tokio::test]
     async fn encode_only_de_shares_redacted_cells() {
         let mut doc = decode(SAMPLE).await;
         let mut batch: Redactions<Tabular> = Redactions::new();

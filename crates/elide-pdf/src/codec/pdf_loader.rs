@@ -103,9 +103,10 @@ impl DocumentLoader for PdfDocumentLoader {
         // it drew. On encode the glyphs are deleted and annotations/metadata
         // stripped, keeping a selectable text layer.
         let pdf = Pdf::open(&document)?;
-        // Extract once: `blocks` drive glyph deletion, and (in `Auto`) `issues`
-        // name the textless pages to render. A second `extract()` would re-walk
-        // every page and re-copy the embedded image bytes for nothing.
+        // Extract once: `blocks` drive glyph deletion, `embeddings` become image
+        // blobs, and (in `Auto`) `issues` name the textless pages to render. A
+        // second `extract()` would re-walk every page and re-copy the embedded
+        // image bytes for nothing, so move each field out of this one result.
         let extraction = pdf.extract();
         let pages = pages_from_blocks(extraction.blocks);
 
@@ -117,8 +118,7 @@ impl DocumentLoader for PdfDocumentLoader {
         // compiled in; under `image` alone nothing else extends the list.
         #[cfg(feature = "image")]
         #[cfg_attr(not(feature = "render"), allow(unused_mut))]
-        let mut blobs: Vec<DocumentPart> = pdf
-            .extract()
+        let mut blobs: Vec<DocumentPart> = extraction
             .embeddings
             .into_iter()
             .filter_map(|embedding| {

@@ -23,8 +23,6 @@ use elide_core::Result;
 pub use self::emit::Certificate;
 pub use self::geometry::{Glyph, GlyphSource, PageObservation, PixelRect};
 pub(crate) use self::raster::redact_raster;
-#[cfg(feature = "test-utils")]
-pub use self::raster::verify_raster_coverage;
 use crate::document::Store;
 
 /// A page rendered to a PNG image, with its pixel dimensions.

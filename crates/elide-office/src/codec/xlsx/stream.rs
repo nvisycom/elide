@@ -109,11 +109,16 @@ impl DataReader<Tabular> for XlsxStream {
 impl DataWriter<Tabular> for XlsxStream {
     async fn write_at(&mut self, mut redactions: Redactions<Tabular>) -> Result<()> {
         redactions.sort_by_position();
+        // Collect the cell edits, rejecting the whole batch on any unsupported or
+        // unresolvable replacement BEFORE mutating any cell — so a failed batch
+        // (e.g. a valid cell followed by a `DropRow`) never leaves a partial edit
+        // that a later encode would ship.
+        let mut edits = Vec::new();
         // Right-to-left so an edit's length delta does not move earlier
         // intra-cell offsets in the same cell.
         for (location, replacement) in redactions.into_iter().rev() {
             match replacement {
-                TabularReplacement::Cell(cell) => self.state.redact_one(&location, &cell)?,
+                TabularReplacement::Cell(cell) => edits.push((location, cell)),
                 // A whole-row or whole-column drop would renumber every `r=`
                 // reference across the sheet; that structural rewrite is not yet
                 // supported, so refuse it rather than silently keep the data.
@@ -125,6 +130,8 @@ impl DataWriter<Tabular> for XlsxStream {
                 }
             }
         }
-        Ok(())
+        // Applied atomically: every edit is resolved and validated before any
+        // cell is mutated, so an unresolvable location fails the whole batch clean.
+        self.state.redact_cells(&edits)
     }
 }

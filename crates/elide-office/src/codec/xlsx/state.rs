@@ -47,6 +47,20 @@ impl XlsxInner {
     }
 }
 
+/// One cell edit resolved against the workbook: the target cell's index and the
+/// intra-cell splice to apply. Resolved for the whole batch before any cell is
+/// mutated, so a batch that names a missing cell fails without a partial edit.
+struct ResolvedEdit {
+    /// Index of the target cell in extraction order.
+    index: usize,
+    /// Start of the intra-cell byte range to overwrite.
+    start: usize,
+    /// End of the intra-cell byte range to overwrite.
+    end: usize,
+    /// The replacement text.
+    value: String,
+}
+
 /// The workbook's editable cell state, shared between the body
 /// [`XlsxStream`](super::stream::XlsxStream) and the
 /// [`XlsxRecombine`](super::recombine::XlsxRecombine) so a redaction on the
@@ -92,38 +106,54 @@ impl XlsxState {
         Ok(Some(inner.cells[index].text.clone()))
     }
 
-    /// Apply one cell edit at `location`, replacing its intra-cell range (or the
-    /// whole cell when no range is set) with the replacement text.
+    /// Apply a batch of cell edits atomically: every edit's cell is resolved and
+    /// its splice range validated *before* any cell is mutated, so an
+    /// unresolvable location (or an out-of-bounds / mid-character splice) fails
+    /// the whole batch without leaving a partial edit behind.
     ///
     /// Fail-closed: a redaction that matches no cell is an error, not a silent
     /// no-op, so a request can never appear to succeed without changing the
     /// intended cell.
-    pub(super) fn redact_one(
-        &self,
-        location: &TabularLocation,
-        replacement: &TextReplacement,
-    ) -> Result<()> {
+    pub(super) fn redact_cells(&self, edits: &[(TabularLocation, TextReplacement)]) -> Result<()> {
         let mut inner = self.0.lock().unwrap();
-        let sheet = location.sheet_name.as_deref();
-        let index = inner
-            .cell_index(sheet, location.row_index, location.column_index)?
-            .ok_or_else(|| {
-                Error::new(
-                    ErrorKind::MalformedInput,
-                    format!(
-                        "xlsx redaction targets no cell at sheet {:?} (row {}, column {})",
-                        sheet, location.row_index, location.column_index
-                    ),
-                )
-            })?;
-        let cell = &mut inner.cells[index];
-        let start = location.start_offset.unwrap_or(0);
-        let end = location.end_offset.unwrap_or(cell.text.len());
-        let value = replacement.value().unwrap_or_default();
-        cell.text.redact_range(value, start..end)?;
-        // Only a cell that was actually edited is sent for rewrite, so unchanged
-        // shared-string cells are not needlessly de-shared.
-        inner.changed.insert(index);
+
+        // Resolve every edit first — its cell index, intra-cell splice range, and
+        // replacement value — so an edit that names no cell fails the batch before
+        // a single cell changes.
+        let mut resolved: Vec<ResolvedEdit> = Vec::with_capacity(edits.len());
+        for (location, replacement) in edits {
+            let sheet = location.sheet_name.as_deref();
+            let index = inner
+                .cell_index(sheet, location.row_index, location.column_index)?
+                .ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::MalformedInput,
+                        format!(
+                            "xlsx redaction targets no cell at sheet {:?} (row {}, column {})",
+                            sheet, location.row_index, location.column_index
+                        ),
+                    )
+                })?;
+            let cell_len = inner.cells[index].text.len();
+            resolved.push(ResolvedEdit {
+                index,
+                start: location.start_offset.unwrap_or(0),
+                end: location.end_offset.unwrap_or(cell_len),
+                value: replacement.value().unwrap_or_default().to_owned(),
+            });
+        }
+
+        // All resolved: apply. `redact_range` still errors on an out-of-bounds or
+        // mid-character splice, so a splice that can't be applied also fails the
+        // batch — the ranges were resolved per cell above, so this is a clean
+        // commit.
+        for edit in resolved {
+            let cell = &mut inner.cells[edit.index];
+            cell.text.redact_range(&edit.value, edit.start..edit.end)?;
+            // Only a cell that was actually edited is sent for rewrite, so
+            // unchanged shared-string cells are not needlessly de-shared.
+            inner.changed.insert(edit.index);
+        }
         Ok(())
     }
 
