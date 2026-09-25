@@ -22,6 +22,7 @@ use std::collections::HashMap;
 use std::io::{Cursor, Read, Write};
 
 use bytes::Bytes;
+use elide_core::{Error, ErrorKind, Result};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
@@ -31,7 +32,6 @@ pub use self::block::{
 pub use self::offset::{OffsetMap, OffsetRun, RunKind};
 pub use self::part::{PartClassifier, PartPath, PartRole};
 use self::store::StoredPart;
-use crate::error::{Error, Result};
 
 /// The largest a single package part may be. A zip entry may claim any
 /// uncompressed size, so extraction is capped and the read is bounded to this
@@ -60,7 +60,7 @@ pub struct Package<C: PartClassifier> {
     /// The format's part classifier, retained for rewrite-time protection
     /// checks.
     classifier: C,
-    /// The original archive bytes, retained so [`rewrite`](Self::rewrite) can
+    /// The original archive bytes, retained so [`rewrite_with_parts`](Self::rewrite_with_parts) can
     /// copy an untouched part's already-compressed data straight through instead
     /// of inflating and re-deflating it.
     ///
@@ -82,7 +82,7 @@ impl<C: PartClassifier> Package<C> {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::InvalidArchive`](crate::ErrorKind::InvalidArchive) if the
+    /// [`ErrorKind::MalformedInput`] if the
     /// bytes are not a readable zip, a part is unreadable, or a part exceeds the
     /// size cap.
     pub fn open(document: &[u8], classifier: C) -> Result<Self> {
@@ -99,7 +99,7 @@ impl<C: PartClassifier> Package<C> {
         package_cap: u64,
     ) -> Result<Self> {
         let mut zip = ZipArchive::new(Cursor::new(document))
-            .map_err(|e| Error::invalid_archive(format!("not a zip: {e}")))?;
+            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("not a zip: {e}")))?;
 
         let mut parts = Vec::with_capacity(zip.len());
         // Bytes still allowed across the whole package; each part's read and
@@ -107,9 +107,9 @@ impl<C: PartClassifier> Package<C> {
         // before it can inflate past the package cap.
         let mut budget = package_cap;
         for i in 0..zip.len() {
-            let entry = zip
-                .by_index(i)
-                .map_err(|e| Error::invalid_archive(format!("bad zip entry: {e}")))?;
+            let entry = zip.by_index(i).map_err(|e| {
+                Error::new(ErrorKind::MalformedInput, format!("bad zip entry: {e}"))
+            })?;
             let path = PartPath::from(entry.name());
             let role = classifier.role(&path);
             // Cap this part at the smaller of the per-part limit and what remains
@@ -119,15 +119,20 @@ impl<C: PartClassifier> Package<C> {
             let cap = part_cap.min(budget);
             let claimed = entry.size().min(cap);
             let mut buf = Vec::with_capacity(claimed as usize);
-            let read = entry
-                .take(cap + 1)
-                .read_to_end(&mut buf)
-                .map_err(|e| Error::invalid_archive(format!("part `{path}` unreadable: {e}")))?;
+            let read = entry.take(cap + 1).read_to_end(&mut buf).map_err(|e| {
+                Error::new(
+                    ErrorKind::MalformedInput,
+                    format!("part `{path}` unreadable: {e}"),
+                )
+            })?;
             if read as u64 > cap {
-                return Err(Error::invalid_archive(format!(
-                    "package exceeds size limits at part `{path}` \
+                return Err(Error::new(
+                    ErrorKind::MalformedInput,
+                    format!(
+                        "package exceeds size limits at part `{path}` \
                      (part cap {part_cap}, package cap {package_cap} bytes)"
-                )));
+                    ),
+                ));
             }
             budget -= read as u64;
             parts.push(StoredPart::new(path, role, Bytes::from(buf)));
@@ -214,12 +219,12 @@ impl<C: PartClassifier> Package<C> {
     ///
     /// **Fail-closed:** an out-of-bounds, overlapping, or mid-character
     /// replacement, or one naming a part not in the package, refuses the whole
-    /// rewrite with [`ErrorKind::UnsafeRewrite`](crate::ErrorKind::UnsafeRewrite)
+    /// rewrite with [`ErrorKind::Processing`]
     /// rather than emitting a partially-redacted document.
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::UnsafeRewrite`](crate::ErrorKind::UnsafeRewrite) if a
+    /// [`ErrorKind::Processing`] if a
     /// replacement can't be applied.
     pub fn rewrite(&self, replacements: &[Replacement]) -> Result<Vec<u8>> {
         self.rewrite_with_parts(replacements, &[])
@@ -248,16 +253,16 @@ impl<C: PartClassifier> Package<C> {
         let mut by_part: HashMap<&PartPath, Vec<&Replacement>> = HashMap::new();
         for r in replacements {
             let Some(part) = index.get(&r.part) else {
-                return Err(Error::unsafe_rewrite(format!(
-                    "replacement names unknown part `{}`",
-                    r.part
-                )));
+                return Err(Error::new(
+                    ErrorKind::Processing,
+                    format!("replacement names unknown part `{}`", r.part),
+                ));
             };
             if !part.role().is_redactable() {
-                return Err(Error::unsafe_rewrite(format!(
-                    "replacement names non-text part `{}`",
-                    r.part
-                )));
+                return Err(Error::new(
+                    ErrorKind::Processing,
+                    format!("replacement names non-text part `{}`", r.part),
+                ));
             }
             by_part.entry(&r.part).or_default().push(r);
         }
@@ -268,10 +273,10 @@ impl<C: PartClassifier> Package<C> {
         let mut part_bytes: HashMap<&PartPath, &[u8]> = HashMap::new();
         for pr in parts {
             let Some(part) = index.get(&pr.part) else {
-                return Err(Error::unsafe_rewrite(format!(
-                    "part replacement names unknown part `{}`",
-                    pr.part
-                )));
+                return Err(Error::new(
+                    ErrorKind::Processing,
+                    format!("part replacement names unknown part `{}`", pr.part),
+                ));
             };
             // A whole-part replacement may only overwrite a part whose role
             // admits it: a binary embedding or a document-property part. Refusing
@@ -279,22 +284,28 @@ impl<C: PartClassifier> Package<C> {
             // overwrite styles, the theme, the content-types manifest, or splice
             // a text part out of band.
             if !part.role().is_whole_part_replaceable() {
-                return Err(Error::unsafe_rewrite(format!(
-                    "part replacement targets non-redactable part `{}`",
-                    pr.part
-                )));
+                return Err(Error::new(
+                    ErrorKind::Processing,
+                    format!("part replacement targets non-redactable part `{}`", pr.part),
+                ));
             }
             if self.classifier.is_protected(&pr.part) {
-                return Err(Error::unsafe_rewrite(format!(
-                    "part replacement targets protected structural part `{}`",
-                    pr.part
-                )));
+                return Err(Error::new(
+                    ErrorKind::Processing,
+                    format!(
+                        "part replacement targets protected structural part `{}`",
+                        pr.part
+                    ),
+                ));
             }
             if by_part.contains_key(&pr.part) {
-                return Err(Error::unsafe_rewrite(format!(
-                    "part `{}` has both a text splice and a binary replacement",
-                    pr.part
-                )));
+                return Err(Error::new(
+                    ErrorKind::Processing,
+                    format!(
+                        "part `{}` has both a text splice and a binary replacement",
+                        pr.part
+                    ),
+                ));
             }
             part_bytes.insert(&pr.part, &pr.bytes);
         }
@@ -303,11 +314,16 @@ impl<C: PartClassifier> Package<C> {
         // bytes) is re-deflated; an untouched part is copied straight from the
         // source with its data still compressed, no inflate/deflate round-trip.
         let mut source = ZipArchive::new(Cursor::new(self.source.clone()))
-            .map_err(|e| Error::invalid_package(format!("reopen source: {e}")))?;
+            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("reopen source: {e}")))?;
         let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
         let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
         for part in &self.parts {
-            let fail = |e: String| Error::invalid_package(format!("repack `{}`: {e}", part.path()));
+            let fail = |e: String| {
+                Error::new(
+                    ErrorKind::MalformedInput,
+                    format!("repack `{}`: {e}", part.path()),
+                )
+            };
             let changed: Option<Vec<u8>> = match by_part.get(part.path()) {
                 Some(edits) => Some(part.splice(edits)?.into_bytes()),
                 None => part_bytes
@@ -336,7 +352,7 @@ impl<C: PartClassifier> Package<C> {
         }
         let cursor = zip
             .finish()
-            .map_err(|e| Error::invalid_package(format!("repack failed: {e}")))?;
+            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("repack failed: {e}")))?;
         Ok(cursor.into_inner())
     }
 }

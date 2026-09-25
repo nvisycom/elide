@@ -1,9 +1,9 @@
 //! Text modality: concrete format implementations that produce text
 //! handles (TXT, JSON, Markdown, HTML). The per-modality capability
-//! surface lives on the generic [`Handler<Text>`] trait; replacements
+//! surface lives on the generic [`Stream<Text>`] trait; replacements
 //! written during redaction use [`TextReplacement`].
 //!
-//! [`Handler<Text>`]: elide_codec::Handler
+//! [`Stream<Text>`]: elide_codec::Stream
 //! [`TextReplacement`]: elide_core::modality::text::TextReplacement
 
 #[cfg(feature = "json")]

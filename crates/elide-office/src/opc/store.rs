@@ -2,9 +2,9 @@
 //! [`PartRole`], with the XML text extraction and splicing it supports.
 
 use bytes::Bytes;
+use elide_core::{Error, ErrorKind, Result};
 use hipstr::HipStr;
 
-use crate::error::{Error, Result};
 use crate::opc::block::{Block, IssueKind, Replacement};
 use crate::opc::part::{PartPath, PartRole};
 use crate::opc::xml_span::{Span, relationship_spans, text_spans};
@@ -86,34 +86,46 @@ impl StoredPart {
     /// Splice `replacements` into this part's XML, leaving every byte outside a
     /// replaced span identical. Fail-closed: validates the whole set first.
     pub(crate) fn splice(&self, replacements: &[&Replacement]) -> Result<String> {
-        let raw = self
-            .as_text()
-            .map_err(|_| Error::invalid_xml(format!("part `{}` not UTF-8", self.path)))?;
+        let raw = self.as_text().map_err(|_| {
+            Error::new(
+                ErrorKind::MalformedInput,
+                format!("part `{}` not UTF-8", self.path),
+            )
+        })?;
         let mut ordered = replacements.to_vec();
         ordered.sort_by_key(|r| (r.start, r.end));
 
         let mut prev_end = 0usize;
         for r in &ordered {
             if r.start > r.end || r.end > raw.len() {
-                return Err(Error::unsafe_rewrite(format!(
-                    "span {}..{} out of bounds in `{}` (len {})",
-                    r.start,
-                    r.end,
-                    r.part,
-                    raw.len()
-                )));
+                return Err(Error::new(
+                    ErrorKind::Processing,
+                    format!(
+                        "span {}..{} out of bounds in `{}` (len {})",
+                        r.start,
+                        r.end,
+                        r.part,
+                        raw.len()
+                    ),
+                ));
             }
             if !raw.is_char_boundary(r.start) || !raw.is_char_boundary(r.end) {
-                return Err(Error::unsafe_rewrite(format!(
-                    "span {}..{} falls mid-character in `{}`",
-                    r.start, r.end, r.part
-                )));
+                return Err(Error::new(
+                    ErrorKind::Processing,
+                    format!(
+                        "span {}..{} falls mid-character in `{}`",
+                        r.start, r.end, r.part
+                    ),
+                ));
             }
             if r.start < prev_end {
-                return Err(Error::unsafe_rewrite(format!(
-                    "span {}..{} overlaps an earlier one in `{}`",
-                    r.start, r.end, r.part
-                )));
+                return Err(Error::new(
+                    ErrorKind::Processing,
+                    format!(
+                        "span {}..{} overlaps an earlier one in `{}`",
+                        r.start, r.end, r.part
+                    ),
+                ));
             }
             prev_end = r.end;
         }
@@ -121,18 +133,24 @@ impl StoredPart {
         // Recover each span's event kind so the replacement text is escaped for
         // its context (text content, attribute value) or validated against
         // comment/CDATA framing, before it enters the byte stream.
-        let spans = self
-            .spans(raw)
-            .map_err(|_| Error::invalid_xml(format!("part `{}` malformed XML", self.path)))?;
+        let spans = self.spans(raw).map_err(|_| {
+            Error::new(
+                ErrorKind::MalformedInput,
+                format!("part `{}` malformed XML", self.path),
+            )
+        })?;
 
         let mut out = String::with_capacity(raw.len());
         let mut cursor = 0usize;
         for r in ordered {
             let span = Span::covering(&spans, r.start, r.end).ok_or_else(|| {
-                Error::unsafe_rewrite(format!(
-                    "span {}..{} is not a text span in `{}`",
-                    r.start, r.end, r.part
-                ))
+                Error::new(
+                    ErrorKind::Processing,
+                    format!(
+                        "span {}..{} is not a text span in `{}`",
+                        r.start, r.end, r.part
+                    ),
+                )
             })?;
             let safe = span.escape(&r.text, r)?;
             out.push_str(&raw[cursor..r.start]);

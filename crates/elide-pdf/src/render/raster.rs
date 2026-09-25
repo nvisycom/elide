@@ -21,7 +21,7 @@ use crate::redact::Detection;
 /// Redact `detections` by destructively overwriting their pixels in the rendered
 /// `pages`, then emit a fresh image-only PDF from the document in `store`.
 ///
-/// `pages` are the observations from [`observe`](crate::Pdf::observe) (or an
+/// `pages` are the observations from [`observe`](crate::document::Pdf::observe) (or an
 /// equivalent with OCR-sourced glyphs for scanned pages). Each detection's glyph
 /// boxes are filled with `fill_rgb`; the output PDF's only content is the
 /// sanitised page images. No source object is copied forward.
@@ -69,7 +69,7 @@ pub(crate) fn redact_raster(
 ///
 /// Returns `Ok(())` iff, for every detection, every pixel of every glyph box it
 /// selects, by the same span-overlap rule and page-bounds clipping
-/// [`redact_raster`](crate::Pdf::redact_raster) fills with, is exactly
+/// [`redact_raster`](crate::document::Pdf::redact_raster) fills with, is exactly
 /// `fill_rgb` in that page's [`pixels`](PageObservation::pixels).
 ///
 /// A raster redaction's output is an image-only PDF with no text layer, so

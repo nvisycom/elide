@@ -35,7 +35,7 @@ macro_rules! impl_audio_handler {
                 .with_content_types([$($mime),*])
         }
 
-        #[doc = concat!("Handler for a loaded ", $format_id, " clip.")]
+        #[doc = concat!("Stream for a loaded ", $format_id, " clip.")]
         ///
         /// Holds the clip as an [`AudioBuffer`]; redaction accumulates on it and
         /// `encode` applies the batch and re-serializes to the original format.
@@ -59,7 +59,7 @@ macro_rules! impl_audio_handler {
         }
 
         #[::async_trait::async_trait]
-        impl ::elide_codec::Handler<crate::modality::Audio> for $handler {
+        impl ::elide_codec::Stream<crate::modality::Audio> for $handler {
             fn format(&self) -> ::elide_codec::FormatId {
                 FORMAT_ID.clone()
             }
@@ -125,7 +125,7 @@ macro_rules! impl_audio_handler {
         #[::async_trait::async_trait]
         impl ::elide_codec::Loader for $loader {
             type Modality = crate::modality::Audio;
-            type Handler = $handler;
+            type Stream = $handler;
 
             async fn decode(
                 &self,

@@ -4,20 +4,15 @@
 //! - [`AsDocuments`] lets the orchestrator's methods accept a single
 //!   `&mut Document` or a `&mut [Document]` interchangeably.
 //! - [`RegistryDocumentExt`] decodes raw bytes straight into a named `Document`.
-//! - [`DocumentsExt`] resolves a [`PartId`] path against a slice of documents
-//!   (the container the orchestrator's flatten and fold descend from).
 
 use std::path::Path;
 
-use elide_codec::UntypedDocumentHandle;
 use elide_codec::content::ContentData;
+use elide_codec::{Document as CodecDocument, FormatId};
 use elide_core::{Error, ErrorKind, Result};
 use elide_format::FormatRegistry;
 
-use crate::PartId;
-
-/// One document the engine redacts: its name, the first segment of every
-/// [`PartId`] beneath it, and its decoded handle.
+/// One document the engine redacts: its name and its decoded parts.
 ///
 /// A report describes a slice of these, analyzed and redacted as one logical
 /// unit ([`analyze`] / [`anonymize_with`]); a single document is a one-element
@@ -25,8 +20,8 @@ use crate::PartId;
 /// its parts' paths, so two documents that share a local part id (two scans,
 /// each `page-1.png`) stay distinct, the collision a flat id would hit.
 ///
-/// The name is the engine's, not the codec's: [`UntypedDocumentHandle`] is bytes
-/// and format, never a filename, so identity is attached here, one layer up.
+/// The name is the engine's, not the codec's: a [`CodecDocument`] is bytes and
+/// format, never a filename, so identity is attached here, one layer up.
 ///
 /// [`analyze`]: crate::Orchestrator::analyze
 /// [`anonymize_with`]: crate::Orchestrator::anonymize_with
@@ -35,13 +30,13 @@ pub struct Document {
     /// and the key of its own content in the report. Must be unique within the
     /// slice.
     pub name: String,
-    /// The document's decoded handle. Redacted in place, ready for its own
-    /// `encode`.
-    pub handle: UntypedDocumentHandle,
+    /// The document's decoded parts. Stream parts are redacted in place; blob
+    /// sub-parts fold back on [`encode`](CodecDocument::encode).
+    pub document: CodecDocument,
 }
 
 impl Document {
-    /// A document from a name and an already-decoded handle.
+    /// A document from a name and an already-decoded [`CodecDocument`].
     ///
     /// For the common case of decoding raw bytes into a document in one step,
     /// prefer [`FormatRegistry::document`] / [`FormatRegistry::document_with`]
@@ -49,11 +44,16 @@ impl Document {
     ///
     /// [`FormatRegistry::document`]: RegistryDocumentExt::document
     /// [`FormatRegistry::document_with`]: RegistryDocumentExt::document_with
-    pub fn new(name: impl Into<String>, handle: UntypedDocumentHandle) -> Self {
+    pub fn new(name: impl Into<String>, document: CodecDocument) -> Self {
         Self {
             name: name.into(),
-            handle,
+            document,
         }
+    }
+
+    /// This document's format id.
+    pub fn format_id(&self) -> &FormatId {
+        self.document.format_id()
     }
 }
 
@@ -113,56 +113,9 @@ impl<T: AsDocuments + ?Sized> AsDocuments for &mut T {
     }
 }
 
-/// Resolve a [`PartId`] path against a slice of documents: the container tree the
-/// orchestrator's flatten and fold descend from. Implemented only for
-/// `[Document]`, the shape those passes hold.
-pub(crate) trait DocumentsExt {
-    /// The document a path descent starts from, and the segments still to walk
-    /// within it: the leading segment selects the document, the remaining
-    /// segments walk it. `None` when no document matches the leading segment, or
-    /// the path is empty.
-    ///
-    /// Used by [`decode_by_path`](crate::Orchestrator::decode_by_path) so a path
-    /// resolves its starting container the same way everywhere.
-    fn root_container<'d, 'seg>(
-        &'d mut self,
-        segments: &'seg [&str],
-    ) -> Option<(&'d mut UntypedDocumentHandle, &'seg [&'seg str])>;
-
-    /// The *top* container named by `parent`, if `parent` is a top-level path, a
-    /// one-segment document path. `None` for a deeper parent (a nested container
-    /// to re-decode). The fold writes straight into a top container, which
-    /// re-encodes itself.
-    fn top_container(&mut self, parent: &PartId) -> Option<&mut UntypedDocumentHandle>;
-}
-
-impl DocumentsExt for [Document] {
-    fn root_container<'d, 'seg>(
-        &'d mut self,
-        segments: &'seg [&str],
-    ) -> Option<(&'d mut UntypedDocumentHandle, &'seg [&'seg str])> {
-        let (name, rest) = segments.split_first()?;
-        let document = self.iter_mut().find(|d| d.name == *name)?;
-        Some((&mut document.handle, rest))
-    }
-
-    fn top_container(&mut self, parent: &PartId) -> Option<&mut UntypedDocumentHandle> {
-        let mut segments = parent.segments();
-        let name = segments.next()?;
-        // A top document is exactly a one-segment path; anything deeper is a
-        // nested container, not a root.
-        if segments.next().is_some() {
-            return None;
-        }
-        self.iter_mut()
-            .find(|d| d.name == name)
-            .map(|d| &mut d.handle)
-    }
-}
-
 /// Decode raw bytes straight into a named [`Document`], an extension trait on
-/// [`FormatRegistry`], so the codec stays byte-and-format only (a handle carries
-/// no filename) while the engine attaches the name it owns.
+/// [`FormatRegistry`], so the codec stays byte-and-format only (a document
+/// carries no filename) while the engine attaches the name it owns.
 ///
 /// [`document`] infers the format from the name's own extension (a real filename
 /// like `report.docx`); [`document_with`] takes the format explicitly, for a name
@@ -233,8 +186,8 @@ impl RegistryDocumentExt for FormatRegistry {
                 ),
             ));
         };
-        let handle = self.decode(bytes, &extension).await?;
-        Ok(Document::new(name, handle))
+        let document = self.decode(bytes, &extension).await?;
+        Ok(Document::new(name, document))
     }
 
     async fn document_with(
@@ -243,7 +196,7 @@ impl RegistryDocumentExt for FormatRegistry {
         extension: &str,
         bytes: impl Into<ContentData>,
     ) -> Result<Document> {
-        let handle = self.decode(bytes, extension).await?;
-        Ok(Document::new(name, handle))
+        let document = self.decode(bytes, extension).await?;
+        Ok(Document::new(name, document))
     }
 }

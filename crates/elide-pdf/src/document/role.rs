@@ -5,8 +5,8 @@
 //! never clobber a structural object, the catalog, the page tree, a page, since
 //! doing so corrupts the document rather than redacting it. Rather than each
 //! strategy hand-inspecting `/Type`/`/Subtype`, they ask an object's
-//! [`ObjectRole`] and consult [`is_protected`](ObjectRole::is_protected)
-//! / [`is_whole_object_replaceable`](ObjectRole::is_whole_object_replaceable).
+//! [`ObjectRole`] and consult
+//! [`is_whole_object_replaceable`](ObjectRole::is_whole_object_replaceable).
 //! This is the PDF analogue of the OOXML `PartRole` seam.
 
 use lopdf::{Document, Object, ObjectId};
@@ -53,13 +53,6 @@ impl ObjectRole {
         Self::Other
     }
 
-    /// Whether this object defines document structure and so must never be
-    /// deleted or replaced wholesale.
-    #[must_use]
-    pub fn is_protected(self) -> bool {
-        matches!(self, Self::Structure)
-    }
-
     /// Whether an object of this role may be replaced wholesale with new bytes
     /// (an image XObject swapped for a redacted image). Structural objects never
     /// may; only their referenced content is edited.
@@ -87,22 +80,19 @@ mod tests {
         ));
         let font = doc.add_object(dictionary! { "Type" => "Font", "Subtype" => "Type1" });
 
-        // Structural objects are protected and never wholesale-replaceable.
+        // Structural objects are never wholesale-replaceable.
         for id in [catalog, pages, page] {
             let role = ObjectRole::of(&doc, id);
             assert_eq!(role, ObjectRole::Structure);
-            assert!(role.is_protected());
             assert!(!role.is_whole_object_replaceable());
         }
-        // An image XObject is the one replaceable role, and not protected.
+        // An image XObject is the one replaceable role.
         let image_role = ObjectRole::of(&doc, image);
         assert_eq!(image_role, ObjectRole::ImageXObject);
         assert!(image_role.is_whole_object_replaceable());
-        assert!(!image_role.is_protected());
-        // A font is neither protected nor replaceable.
+        // A font is not replaceable.
         let font_role = ObjectRole::of(&doc, font);
         assert_eq!(font_role, ObjectRole::Other);
-        assert!(!font_role.is_protected());
         assert!(!font_role.is_whole_object_replaceable());
     }
 }

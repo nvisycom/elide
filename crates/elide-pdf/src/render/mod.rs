@@ -23,8 +23,6 @@ use elide_core::Result;
 pub use self::emit::Certificate;
 pub use self::geometry::{Glyph, GlyphSource, PageObservation, PixelRect};
 pub(crate) use self::raster::redact_raster;
-#[cfg(feature = "test-utils")]
-pub use self::raster::verify_raster_coverage;
 use crate::document::Store;
 
 /// A page rendered to a PNG image, with its pixel dimensions.
@@ -41,28 +39,6 @@ pub struct RenderedPage {
     pub height: u32,
 }
 
-/// Render every page of the document in `store` to a PNG image at `scale` (1.0
-/// is the page's natural size; e.g. 2.0 doubles resolution).
-///
-/// For a scanned or image-only PDF whose text cannot be extracted, this produces
-/// page images an OCR engine can read. Requires the PDFium shared library at
-/// runtime.
-///
-/// The pristine bytes the document was opened from are rendered, so a redaction
-/// is not reflected; to rasterise a redacted document, re-open its output bytes
-/// and render that.
-///
-/// # Errors
-///
-/// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if PDFium
-/// cannot load or render the document (or the native library is unavailable).
-pub(crate) fn render(store: &Store, scale: f32) -> Result<Vec<RenderedPage>> {
-    // Render the pristine bytes this document was opened from, not a lopdf
-    // re-serialisation, which can degrade the scanned or malformed PDFs OCR most
-    // needs, on the dedicated PDFium thread.
-    pdfium::render(store.source_bytes().to_vec(), scale)
-}
-
 /// Render only the 1-based pages in `numbers` at `scale`, returning each keyed
 /// by its page number.
 ///
@@ -74,6 +50,7 @@ pub(crate) fn render(store: &Store, scale: f32) -> Result<Vec<RenderedPage>> {
 ///
 /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if PDFium
 /// cannot load or render the document (or the native library is unavailable).
+#[cfg(feature = "image")]
 pub(crate) fn render_pages(
     store: &Store,
     numbers: BTreeSet<u32>,

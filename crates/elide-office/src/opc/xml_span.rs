@@ -16,11 +16,11 @@
 use std::borrow::Cow;
 use std::ops::Range;
 
+use elide_core::{Error, ErrorKind, Result};
 use quick_xml::Reader;
 use quick_xml::escape::{escape, partial_escape, unescape};
 use quick_xml::events::Event;
 
-use crate::error::{Error, Result};
 use crate::opc::block::Replacement;
 use crate::opc::offset::{OffsetMap, OffsetRun};
 
@@ -100,19 +100,25 @@ impl Span {
             BlockKind::Attribute => Ok(escape(text)),
             BlockKind::Comment => {
                 if text.contains("--") || text.ends_with('-') {
-                    return Err(Error::unsafe_rewrite(format!(
-                        "replacement `{}` breaks comment framing in `{}`",
-                        text, r.part
-                    )));
+                    return Err(Error::new(
+                        ErrorKind::Processing,
+                        format!(
+                            "replacement `{}` breaks comment framing in `{}`",
+                            text, r.part
+                        ),
+                    ));
                 }
                 Ok(Cow::Borrowed(text))
             }
             BlockKind::Cdata => {
                 if text.contains("]]>") {
-                    return Err(Error::unsafe_rewrite(format!(
-                        "replacement `{}` breaks CDATA framing in `{}`",
-                        text, r.part
-                    )));
+                    return Err(Error::new(
+                        ErrorKind::Processing,
+                        format!(
+                            "replacement `{}` breaks CDATA framing in `{}`",
+                            text, r.part
+                        ),
+                    ));
                 }
                 Ok(Cow::Borrowed(text))
             }

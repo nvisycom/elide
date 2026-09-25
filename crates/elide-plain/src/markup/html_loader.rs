@@ -8,16 +8,14 @@
 //! `<script>` / `<style>` bodies not to scan. Everything downstream,
 //! streaming, redaction, byte-faithful splice, is the XML handler.
 
-use elide_codec::Loader;
 use elide_codec::content::ContentData;
-use elide_codec::extract::ExtractHandler;
+use elide_codec::{Document, DocumentLoader};
 use elide_core::Result;
-use elide_core::modality::text::Text;
 
 use super::config::MarkupConfig;
-use super::html_handler::{FORMAT_ID, HtmlHandler, ScriptPolicy};
+use super::html_handler::{FORMAT_ID, ScriptPolicy};
 use super::markup_parser::build_items;
-use super::xml_handler::XmlEncoder;
+use super::xml_handler::markup_document;
 
 /// HTML block-level elements: their text children form one sibling-hint group,
 /// so prose split across inline wrappers (`Card <code>4111…</code> on file`)
@@ -58,7 +56,7 @@ const BLOCK_ELEMENTS: &[&str] = &[
     "ul",
 ];
 
-/// Loader for HTML files. Produces one [`HtmlHandler`] per input.
+/// Loader for HTML files. Produces one leaf [`Document`] per input.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct HtmlLoader {
     /// How `<script>` element bodies enter the detection stream.
@@ -84,51 +82,55 @@ impl HtmlLoader {
 }
 
 #[async_trait::async_trait]
-impl Loader for HtmlLoader {
-    type Handler = HtmlHandler;
-    type Modality = Text;
-
-    async fn decode(&self, content: ContentData) -> Result<HtmlHandler> {
+impl DocumentLoader for HtmlLoader {
+    async fn decode(&self, content: ContentData) -> Result<Document> {
         let text = content.decode()?;
         let skip = self.skip_body_elements();
         let config = MarkupConfig::lenient(BLOCK_ELEMENTS, &skip);
         // `build_items` already reports a `MalformedInput` parse error.
         let items = build_items(&text, config)?;
-        Ok(ExtractHandler::new(
-            FORMAT_ID.clone(),
-            XmlEncoder { raw: text },
-            items,
-        ))
+        Ok(markup_document(FORMAT_ID.clone(), text, items))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use elide_codec::Handler;
-    use elide_core::modality::DataWriter;
-    use elide_core::modality::text::TextReplacement;
+    use elide_codec::{Document, DocumentPart};
+    use elide_core::modality::text::{Text, TextReplacement};
+    use elide_core::modality::{DataWriter, StreamDataReader};
     use elide_core::redaction::Redactions;
 
     use super::*;
 
-    async fn load_with(raw: &str, loader: HtmlLoader) -> HtmlHandler {
+    /// The body stream part of a decoded HTML document, downcast to `Text`.
+    fn body(doc: &mut Document) -> &mut elide_codec::TypedStream<Text> {
+        match &mut doc.parts_mut()[0] {
+            DocumentPart::Stream { handle, .. } => {
+                handle.downcast_mut::<Text>().expect("text body")
+            }
+            _ => panic!("part 0 is the body stream"),
+        }
+    }
+
+    async fn load_with(raw: &str, loader: HtmlLoader) -> Document {
         loader
             .decode(ContentData::from_text(raw))
             .await
             .expect("html decode succeeds")
     }
 
-    async fn load(raw: &str) -> HtmlHandler {
+    async fn load(raw: &str) -> Document {
         load_with(raw, HtmlLoader::default()).await
     }
 
-    fn encoded(h: &HtmlHandler) -> String {
-        h.encode().unwrap().decode().unwrap()
+    fn encoded(doc: &Document) -> String {
+        doc.encode().unwrap().decode().unwrap()
     }
 
-    async fn values(h: &mut HtmlHandler) -> Vec<String> {
+    async fn values(doc: &mut Document) -> Vec<String> {
+        let body = body(doc);
         let mut out = Vec::new();
-        while let Some(chunk) = h.read_next().await.unwrap() {
+        while let Some(chunk) = body.read_next().await.unwrap() {
             out.push(chunk.data.as_str().to_owned());
         }
         out
@@ -137,15 +139,15 @@ mod tests {
     #[tokio::test]
     async fn encode_unchanged_round_trips() {
         let raw = "<html><head></head><body><p>Hello</p></body></html>";
-        let h = load(raw).await;
-        assert_eq!(encoded(&h), raw);
+        let doc = load(raw).await;
+        assert_eq!(encoded(&doc), raw);
     }
 
     #[tokio::test]
     async fn stream_yields_text_attribute_and_comment() {
         let raw = r#"<html><body><!-- secret 1 --><img alt="hello" title="alt"></body></html>"#;
-        let mut h = load(raw).await;
-        let vs = values(&mut h).await;
+        let mut doc = load(raw).await;
+        let vs = values(&mut doc).await;
         assert!(vs.iter().any(|v| v == " secret 1 "), "comment: {vs:?}");
         assert!(vs.iter().any(|v| v == "hello"), "alt: {vs:?}");
         assert!(vs.iter().any(|v| v == "alt"), "title: {vs:?}");
@@ -154,20 +156,20 @@ mod tests {
     #[tokio::test]
     async fn attribute_redact_round_trips() {
         let raw = r#"<html><body><img alt="alice@example.com"></body></html>"#;
-        let mut h = load(raw).await;
+        let mut doc = load(raw).await;
         let chunk = loop {
-            let c = h.read_next().await.unwrap().unwrap();
+            let c = body(&mut doc).read_next().await.unwrap().unwrap();
             if c.data.as_str() == "alice@example.com" {
                 break c;
             }
         };
         let mut rs = Redactions::new();
         rs.push(chunk.location, TextReplacement::substituted("[email]"));
-        h.write_at(rs).await.unwrap();
+        body(&mut doc).write_at(rs).await.unwrap();
         assert!(
-            encoded(&h).contains(r#"alt="[email]""#),
+            encoded(&doc).contains(r#"alt="[email]""#),
             "alt not rewritten: {}",
-            encoded(&h)
+            encoded(&doc)
         );
     }
 
@@ -200,9 +202,9 @@ mod tests {
     async fn sibling_hints_span_the_real_block_vocabulary() {
         // A <td> (in the real BLOCK_ELEMENTS) groups its split text for hints.
         let raw = "<table><tr><td>Card <code>4111 1111 1111 1111</code> on file</td></tr></table>";
-        let mut h = load(raw).await;
+        let mut doc = load(raw).await;
         let mut any_hint = false;
-        while let Some(chunk) = h.read_next().await.unwrap() {
+        while let Some(chunk) = body(&mut doc).read_next().await.unwrap() {
             if !chunk.hints.is_empty() {
                 any_hint = true;
             }

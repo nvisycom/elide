@@ -71,7 +71,7 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
         assert!(entity.is_redacted(), "records the redaction");
     }
     // The document re-encodes after redaction.
-    assert!(!doc2.handle.encode()?.as_bytes().is_empty());
+    assert!(!doc2.document.encode()?.as_bytes().is_empty());
     Ok(())
 }
 

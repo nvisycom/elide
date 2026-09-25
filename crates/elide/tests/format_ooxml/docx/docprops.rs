@@ -71,7 +71,7 @@ async fn docx_core_properties_are_stripped_through_the_facade() {
         .await
         .expect("anonymize");
 
-    let out = documents[0].handle.encode().expect("encode").to_bytes();
+    let out = documents[0].document.encode().expect("encode").to_bytes();
     assert!(!has_editor(&out), "editor survived the docProps strip");
 
     // The output must still be a valid DOCX package whose other parts survive:

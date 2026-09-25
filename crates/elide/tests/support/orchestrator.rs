@@ -8,7 +8,7 @@
 //!
 //! [`Fixture`]: super::fixture::Fixture
 
-use elide::codec::{DocumentHandle, FormatRegistry};
+use elide::codec::{FormatRegistry, TypedStream};
 use elide::detection::Analyzer;
 use elide::detection::filter::FilterLayer;
 use elide::detection::reconcile::{Merging, ReconcileLayer, Structural};
@@ -234,7 +234,7 @@ impl TestOrchestrator {
         M: Modality,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
-        DocumentHandle<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
+        TypedStream<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
     {
         self.inner = self.inner.with_modality::<M>(analyzer, anonymizer);
         self

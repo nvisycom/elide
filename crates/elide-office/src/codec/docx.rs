@@ -1,15 +1,15 @@
 //! DOCX codec: binds the WordprocessingML engine format to the shared
 //! [`ooxml`](super::ooxml) codec adapter.
 //!
-//! Everything but the format identity lives in [`super::ooxml`]: the handler is
-//! an [`OoxmlHandler`] over the element-text blocks
-//! [`Docx::extract`](crate::docx::Docx::extract) recovers, re-packed via
-//! the shared [`OoxmlEncoder`](super::ooxml::OoxmlEncoder).
+//! Everything but the format identity lives in [`super::ooxml`]: the document is
+//! a body [`ExtractStream`](elide_codec::extract::ExtractStream) over the
+//! element-text blocks [`Docx::extract`](crate::docx::Docx::extract) recovers
+//! plus its embedding / document-property blobs, re-packed via the shared
+//! [`OoxmlRecombine`](super::ooxml::OoxmlRecombine).
 
 use elide_codec::{Format, FormatId};
 
-use super::DocxLoader;
-use super::ooxml::{OoxmlCodec, OoxmlHandler};
+use super::ooxml::{OoxmlCodec, OoxmlLoader};
 use crate::docx::WordFormat;
 
 /// The DOCX codec seam: WordprocessingML over the shared OOXML adapter.
@@ -26,12 +26,9 @@ impl OoxmlCodec for DocxCodec {
 /// Stable [`FormatId`] for the DOCX codec.
 pub const FORMAT_ID: FormatId = DocxCodec::FORMAT_ID;
 
-/// Handler type for loaded DOCX content.
-pub(crate) type DocxHandler = OoxmlHandler<DocxCodec>;
-
 /// [`Format`] descriptor registered into `FormatRegistry`.
 pub fn format() -> Format {
-    Format::new(FORMAT_ID.clone(), DocxLoader)
+    Format::with_document_loader(FORMAT_ID.clone(), OoxmlLoader::<DocxCodec>::new())
         .with_extensions(["docx"])
         .with_content_types([
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -41,11 +38,12 @@ pub fn format() -> Format {
 #[cfg(test)]
 mod tests {
     use elide_codec::content::ContentData;
-    use elide_codec::{Handler, Loader};
+    use elide_codec::extract::ExtractStream;
+    use elide_codec::{Recombine, Stream};
     use elide_core::modality::text::{SourceRef, Text, TextLocation};
 
     use super::*;
-    use crate::codec::DocxLoader;
+    use crate::codec::ooxml::{OoxmlAddress, OoxmlRecombine, decode_parts};
     use crate::opc::test_util;
 
     const BODY_PART: &str = "word/document.xml";
@@ -63,13 +61,18 @@ mod tests {
         ContentData::new(package.into())
     }
 
+    /// Decode `content` into the DOCX body stream and its recombiner.
+    fn decode(content: ContentData) -> (ExtractStream<OoxmlAddress>, OoxmlRecombine<DocxCodec>) {
+        decode_parts::<DocxCodec>(content).unwrap()
+    }
+
     /// Read chunks until the one whose decoded text equals `value`.
     async fn chunk_for(
-        handler: &mut DocxHandler,
+        stream: &mut ExtractStream<OoxmlAddress>,
         value: &str,
     ) -> elide_core::modality::Chunk<Text> {
         loop {
-            let chunk = handler.read_next().await.unwrap().unwrap();
+            let chunk = stream.read_next().await.unwrap().unwrap();
             if chunk.data.as_str() == value {
                 break chunk;
             }
@@ -82,14 +85,11 @@ mod tests {
         // over the whole decoded text must point back at the raw bytes including
         // the `&amp;`, one contiguous raw range, entity bytes and all.
         let raw = r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Alice &amp; Bob</w:t></w:r></w:p></w:body></w:document>"#;
-        let mut handler = DocxLoader
-            .decode(docx_with_body("Alice &amp; Bob"))
-            .await
-            .unwrap();
-        let chunk = chunk_for(&mut handler, "Alice & Bob").await;
+        let (mut stream, _recombine) = decode(docx_with_body("Alice &amp; Bob"));
+        let chunk = chunk_for(&mut stream, "Alice & Bob").await;
 
         // Decoded "Alice & Bob" is 11 bytes; lift the whole value.
-        let lifted = handler
+        let lifted = stream
             .lift(&chunk, TextLocation::new(0, 11))
             .expect("in bounds");
 
@@ -108,13 +108,10 @@ mod tests {
         // Redacting only the decoded `&` (offset 6..7) must point at all 5 raw
         // bytes of `&amp;`, never an empty or partial range.
         let raw = r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Alice &amp; Bob</w:t></w:r></w:p></w:body></w:document>"#;
-        let mut handler = DocxLoader
-            .decode(docx_with_body("Alice &amp; Bob"))
-            .await
-            .unwrap();
-        let chunk = chunk_for(&mut handler, "Alice & Bob").await;
+        let (mut stream, _recombine) = decode(docx_with_body("Alice &amp; Bob"));
+        let chunk = chunk_for(&mut stream, "Alice & Bob").await;
 
-        let lifted = handler
+        let lifted = stream
             .lift(&chunk, TextLocation::new(6, 7))
             .expect("in bounds");
         let amp = raw.find("&amp;").unwrap();
@@ -127,14 +124,11 @@ mod tests {
     #[tokio::test]
     async fn source_span_of_a_finding_before_the_entity_is_one_run() {
         let raw = r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Alice &amp; Bob</w:t></w:r></w:p></w:body></w:document>"#;
-        let mut handler = DocxLoader
-            .decode(docx_with_body("Alice &amp; Bob"))
-            .await
-            .unwrap();
-        let chunk = chunk_for(&mut handler, "Alice & Bob").await;
+        let (mut stream, _recombine) = decode(docx_with_body("Alice &amp; Bob"));
+        let chunk = chunk_for(&mut stream, "Alice & Bob").await;
 
         // Decoded "Alice" is 0..5, wholly before the entity → a single raw run.
-        let lifted = handler
+        let lifted = stream
             .lift(&chunk, TextLocation::new(0, 5))
             .expect("in bounds");
         let head = raw.find("Alice").unwrap();
@@ -154,10 +148,7 @@ mod tests {
         use elide_core::redaction::Redactions;
 
         let raw = r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Alice Bob</w:t></w:r></w:p></w:body></w:document>"#;
-        let mut handler = DocxLoader
-            .decode(docx_with_body("Alice Bob"))
-            .await
-            .unwrap();
+        let (mut stream, recombine) = decode(docx_with_body("Alice Bob"));
 
         // The raw span of "Bob" in the part, what a DOM selection yields. The
         // reviewer has no decoded-stream range, only this raw span, so the
@@ -168,10 +159,10 @@ mod tests {
 
         let mut redactions = Redactions::new();
         redactions.push(location, TextReplacement::substituted("[NAME]"));
-        handler.write_at(redactions).await.unwrap();
+        stream.write_at(redactions).await.unwrap();
 
         // The rebuilt part has "Bob" replaced, "Alice" untouched.
-        let out = handler.encode().unwrap();
+        let out = recombine.assemble(&[]).unwrap();
         // The output is an OPC package; the body part contains the replacement.
         let body_bytes =
             test_util::read_part(out.as_bytes(), BODY_PART).expect("body part present");

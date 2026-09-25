@@ -6,7 +6,7 @@
 //! Each format wraps this crate's [`AudioBuffer`] engine, which holds the
 //! encoded bytes and decodes to samples only when a redaction is applied on
 //! encode. The handlers here are thin adapters onto the [`elide_codec`]
-//! `Handler`/`Loader` contracts, stamped out by the `impl_audio_handler!`
+//! `Stream`/`Loader` contracts, stamped out by the `impl_audio_handler!`
 //! macro.
 //!
 //! [`AudioBuffer`]: crate::AudioBuffer

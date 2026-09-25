@@ -2,7 +2,8 @@
 //!
 //! Wires the full toolkit pipeline over a `.txt` document:
 //!
-//! 1. [`FormatRegistry`] decodes the file into a [`DocumentHandle<Text>`].
+//! 1. [`FormatRegistry`] decodes the file into a [`Document`] whose one stream
+//!    part is the text body.
 //! 2. [`Analyzer::analyze_stream`] streams the document and runs three
 //!    recognizers concurrently: a real built-in [`PatternRecognizer`]
 //!    (emails, phone numbers, payment cards, URLs, …), an
@@ -19,13 +20,14 @@
 //!
 //! Run with: `cargo run -p elide-examples --bin redact_txt`.
 //!
-//! [`DocumentHandle<Text>`]: elide::codec::DocumentHandle
+//! [`Document`]: elide::codec::Document
 //! [`Analyzer::analyze_stream`]: elide::detection::Analyzer::analyze_stream
 //! [`Anonymizer::anonymize`]: elide::redaction::Anonymizer::anonymize
 //! [`PatternRecognizer`]: elide::recognition::pattern::PatternRecognizer
 //! [`NerRecognizer`]: elide::recognition::ner::NerRecognizer
 //! [`LlmRecognizer`]: elide::recognition::llm::LlmRecognizer
 
+use elide::codec::DocumentPart;
 use elide::prelude::operators::*;
 use elide::prelude::*;
 use elide::recognition::llm::LlmRecognizer;
@@ -37,12 +39,10 @@ const SAMPLE: &str = include_str!("data/sample.txt");
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // 1. Decode the text file through the codec layer.
+    // 1. Decode the text file through the codec layer. A txt file is a leaf
+    //    document: one text stream part.
     let registry = FormatRegistry::with_builtin();
-    let handle = registry.decode(SAMPLE, "txt").await?;
-    let mut document = handle
-        .into::<Text>()
-        .expect("the txt codec yields a text document");
+    let mut document = registry.decode(SAMPLE, "txt").await?;
 
     // 2. Assemble the analyzer once; it is reused for every chunk.
     let analyzer = build_analyzer()?;
@@ -57,14 +57,24 @@ async fn main() -> Result<()> {
     let scope = Scope::new()
         .with_language(en)
         .with_catalog(LabelCatalog::with_builtins());
-    let analysis = analyzer.analyze_stream(&mut document, &scope).await?;
+    let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else {
+        panic!("the txt codec yields a text stream")
+    };
+    let stream = handle
+        .downcast_mut::<Text>()
+        .expect("the txt codec yields a text document");
+    let analysis = analyzer.analyze_stream(stream, &scope).await?;
     let mut entities = analysis.entities;
 
     // 5. Redact: apply each entity's operator back into the document,
     //    then re-encode.
-    anonymizer
-        .anonymize(&mut document, &mut entities, &scope)
-        .await?;
+    let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else {
+        panic!("the txt codec yields a text stream")
+    };
+    let stream = handle
+        .downcast_mut::<Text>()
+        .expect("the txt codec yields a text document");
+    anonymizer.anonymize(stream, &mut entities, &scope).await?;
     let encoded = document.encode()?;
     let redacted = String::from_utf8_lossy(encoded.as_bytes());
 

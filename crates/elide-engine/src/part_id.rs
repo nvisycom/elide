@@ -1,11 +1,11 @@
 //! [`PartId`]: the tree path that addresses one part across a nested document.
 //!
-//! A [`Container`](elide_codec::Container) knows only its own *local* part ids
-//! (a zip entry name, a PDF object ref), unique within that one container. When
-//! one container nests another (a bundle of DOCX; a DOCX with an embedded
-//! spreadsheet), two containers can share a local id, so a local id alone can't
+//! A [`Document`](elide_codec::Document) knows only its own parts' *local* ids
+//! (a zip entry name, a PDF object ref), unique within that one document. When
+//! one document nests another (a bundle of DOCX; a DOCX with an embedded
+//! spreadsheet), two documents can share a local id, so a local id alone can't
 //! key the report. `PartId` is the **path** the orchestrator composes as it
-//! descends, one segment per container level crossed, so every leaf has a
+//! descends, one segment per document level crossed, so every leaf has a
 //! unique address regardless of depth.
 
 use std::fmt;
@@ -98,14 +98,6 @@ impl PartId {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
-
-    /// Split off the last segment: the *parent* path (this part's immediate
-    /// container) and this part's [`LocalId`] in it. `None` for an empty path.
-    #[must_use]
-    pub(crate) fn split_last(&self) -> Option<(PartId, LocalId)> {
-        let (local, prefix) = self.0.split_last()?;
-        Some((PartId(prefix.iter().cloned().collect()), local.clone()))
-    }
 }
 
 impl fmt::Display for PartId {
@@ -173,21 +165,6 @@ mod tests {
         assert_ne!(a, b);
         assert_eq!(a.last_segment(), b.last_segment()); // same local id …
         // … but the parent segment disambiguates them.
-    }
-
-    #[test]
-    fn split_last_peels_the_parent_path_and_local_id() {
-        let nested = PartId::leaf("scan-A.docx").child("word/media/image1.png");
-        let (parent, local) = nested.split_last().expect("has a last segment");
-        assert_eq!(parent, PartId::leaf("scan-A.docx"));
-        assert_eq!(local, "word/media/image1.png");
-
-        // A depth-1 part's parent is the empty (top-level) path.
-        let leaf = PartId::leaf("image1.png");
-        let (parent, local) = leaf.split_last().expect("has a last segment");
-        assert!(parent.is_empty());
-        assert_eq!(parent.depth(), 0);
-        assert_eq!(local, "image1.png");
     }
 
     #[test]

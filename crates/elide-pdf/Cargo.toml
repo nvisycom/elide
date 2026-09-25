@@ -25,8 +25,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 ## pure-Rust parser, no native dependency.
 default = []
 
-## Derive `serde::{Serialize, Deserialize}` on the extraction/coverage model,
-## and on the codec config types (`RasterMode`, `Dpi`).
+## Derive `serde::{Serialize, Deserialize}` on the extraction model, and on the
+## codec config types (`RasterMode`, `Dpi`).
 serde = ["dep:serde"]
 
 ## Derive `schemars::JsonSchema` on the codec config types (`RasterMode`,
@@ -40,28 +40,20 @@ schema = ["serde", "dep:schemars"]
 image = ["dep:image", "lopdf/embed_image"]
 
 ## Render pages to images (for OCR of scanned/image-only PDFs) via the native
-## PDFium shared library. Off by default: the default build is pure-Rust with
-## no native dependency. Requires the PDFium `.so`/`.dylib` at runtime (see
-## `scripts/install-pdfium.sh`); pulls `pdfium-render`, `rayon`, and `image`.
-render = ["dep:pdfium-render", "dep:rayon", "dep:image", "dep:sha2"]
+## PDFium shared library, and redact them by reflattening — so `render` implies
+## `image`. Off by default: the default build is pure-Rust with no native
+## dependency. Requires the PDFium `.so`/`.dylib` at runtime (see
+## `scripts/install-pdfium.sh`); pulls `pdfium-render`, `rayon`, and `sha2`.
+render = ["image", "dep:pdfium-render", "dep:rayon", "dep:sha2"]
 
 ## Verification helpers for tests: confirm a raster redaction actually painted
 ## the pixels it claimed. Pulls `render`.
 test-utils = ["render"]
 
-## Adapt the PDF engine to the `elide-codec` `Handler`/`Loader` contracts: the
-## text handler ([`pdf_format`](codec::pdf_format), glyph-deletion redaction),
-## and, with `render`, the raster path
-## ([`pdf_format_with`](codec::pdf_format_with)). Embedded-image and
-## scanned-page redaction through the `Handler`'s `Container` surface need
-## this crate's own `image`/`render` features, independently opt-in, so a
-## text-only codec build compiles just the glyph-delete path.
-codec = ["dep:elide-codec", "dep:async-trait"]
-
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }
-elide-codec = { workspace = true, features = [], optional = true }
+elide-codec = { workspace = true, features = [] }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }
@@ -76,7 +68,7 @@ sha2 = { workspace = true, features = [], optional = true }
 
 # Async runtime & parallelism
 rayon = { workspace = true, features = [], optional = true }
-async-trait = { workspace = true, features = [], optional = true }
+async-trait = { workspace = true, features = [] }
 
 # Markup parsing
 lopdf = { workspace = true, default-features = false }

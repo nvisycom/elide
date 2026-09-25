@@ -1,7 +1,7 @@
 //! WAV handler + loader: adapt this crate's WAV engine to the
-//! [`elide_codec`] [`Handler`]/[`Loader`] contracts.
+//! [`elide_codec`] [`Stream`]/[`Loader`] contracts.
 //!
-//! [`Handler`]: elide_codec::Handler
+//! [`Stream`]: elide_codec::Stream
 //! [`Loader`]: elide_codec::Loader
 
 use super::macros::impl_audio_handler;
@@ -18,7 +18,7 @@ impl_audio_handler! {
 #[cfg(test)]
 mod tests {
     use elide_codec::content::ContentData;
-    use elide_codec::{Handler as _, Loader as _};
+    use elide_codec::{Loader as _, Stream as _};
 
     use super::*;
     use crate::{AudioBuffer, test_util};

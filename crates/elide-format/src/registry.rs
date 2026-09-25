@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use elide_codec::content::ContentData;
-use elide_codec::{Format, FormatId, UntypedDocumentHandle};
+use elide_codec::{Document, Format, FormatId};
 use elide_core::{Error, ErrorKind, Result};
 
 /// Lowercase `s` for ASCII case-insensitive extension / content-type keys,
@@ -244,7 +244,7 @@ impl FormatRegistry {
         &self,
         content: impl Into<ContentData>,
         extension: &str,
-    ) -> Result<UntypedDocumentHandle> {
+    ) -> Result<Document> {
         let format = self.by_extension(extension).ok_or_else(|| {
             Error::new(
                 ErrorKind::CapabilityUnavailable,
@@ -271,7 +271,7 @@ impl FormatRegistry {
     ///
     /// [`extension`]: ContentData::extension
     /// [`content_type`]: ContentData::content_type
-    pub async fn decode_content(&self, content: ContentData) -> Result<UntypedDocumentHandle> {
+    pub async fn decode_content(&self, content: ContentData) -> Result<Document> {
         let by_ext = content
             .extension()
             .and_then(|ext| self.by_extension(&ext))
@@ -370,7 +370,7 @@ mod tests {
     /// stand in for a customized built-in. The registry bookkeeping under test
     /// never decodes through it, so any loader with the right id serves.
     fn txt_variant() -> Format {
-        Format::new(txt_format().id().clone(), MockLoader)
+        Format::with_document_loader(txt_format().id().clone(), MockLoader)
             .with_extensions(["variant"])
             .with_content_types(["text/variant"])
     }

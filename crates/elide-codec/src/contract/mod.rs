@@ -2,33 +2,30 @@
 //!
 //! - `format`: *what kind of thing a codec is*. [`FormatId`], [`Format`]
 //!   descriptor.
-//! - `handler`: *what a handler exposes*. [`Handler<M>`] (per-modality
-//!   capability surface: identify, encode, stream, plus the inherited
-//!   read/write and lift). The streamed unit is [`elide_core::modality::Chunk`].
-//! - `loader`: *how raw bytes become a handle*. [`Loader`] (a per-modality
-//!   decoder, its [`Modality`](Loader::Modality) an associated type). The
-//!   registry-side erasure (`ErasedLoader`, a blanket impl over every `Loader`)
-//!   is crate-internal and wired through [`Format::new`] / [`Format::decode`].
-//! - `document`: *the decoded handle*. [`DocumentHandle<M>`] (typed) and
-//!   [`UntypedDocumentHandle`] (modality-erased, recovered by `TypeId`).
-//! - `container`: *a document that nests sub-parts of other modalities*.
-//!   [`Container`] exposing [`Part`]s.
-//! - `local_id`: [`LocalId`], a container's own id for one of its parts.
+//! - `stream`: *one decoded modality stream*. [`Stream<M>`] (identify, encode,
+//!   stream, plus the inherited read/write and lift), the per-part surface of a
+//!   [`Document`], with [`ErasedStream`] / [`TypedStream`] the modality erasure a
+//!   stream part is stored behind. The streamed unit is
+//!   [`elide_core::modality::Chunk`].
+//! - `loader`: *how raw bytes become a [`Document`]*. [`DocumentLoader`]
+//!   produces the whole document (stream parts, blob sub-parts, recombiner);
+//!   [`Loader`] is the per-modality leaf decoder, adapted by [`LeafLoader`].
+//! - `document`: *the decoded document*. [`Document`] is a `Vec` of
+//!   [`DocumentPart`]s (a [`Stream`] or a [`Blob`](DocumentPart::Blob)),
+//!   recomposed by its [`Recombine`]; a part is keyed by its [`LocalId`].
 //!
-//! The `FormatRegistry` that indexes these formats and the concrete handlers
+//! The `FormatRegistry` that indexes these formats and the concrete streams
 //! that implement them live in the assembly crates (`elide-format` and the
 //! per-modality engines).
 
-mod container;
 mod document;
 mod format;
-mod handler;
 pub(crate) mod loader;
-mod local_id;
+mod stream;
+#[cfg(test)]
+mod test_support;
 
-pub use self::container::{Container, Part};
-pub use self::document::{DocumentHandle, UntypedDocumentHandle};
+pub use self::document::{Document, DocumentPart, EncodedPart, LeafRecombine, LocalId, Recombine};
 pub use self::format::{Format, FormatId};
-pub use self::handler::Handler;
-pub use self::loader::Loader;
-pub use self::local_id::LocalId;
+pub use self::loader::{DocumentLoader, LeafLoader, Loader};
+pub use self::stream::{ErasedStream, Stream, TypedStream};

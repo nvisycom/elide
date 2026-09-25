@@ -18,7 +18,7 @@ use std::ops::Range;
 
 use elide_codec::content::ContentData;
 use elide_codec::string::RedactRange;
-use elide_codec::{Format, FormatId, Handler};
+use elide_codec::{Format, FormatId, Stream};
 use elide_core::Result;
 use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
@@ -49,7 +49,7 @@ pub(crate) struct TxtHandler {
 }
 
 #[async_trait::async_trait]
-impl Handler<Text> for TxtHandler {
+impl Stream<Text> for TxtHandler {
     fn format(&self) -> FormatId {
         FORMAT_ID.clone()
     }
@@ -336,6 +336,36 @@ mod tests {
         // Blank lines are not chunks but must survive in the output verbatim.
         let h = handler("a\n\n\n\nb\n");
         assert_eq!(h.encode()?.as_bytes(), b"a\n\n\n\nb\n");
+        Ok(())
+    }
+
+    /// Stage-1 parts model: txt decodes into a leaf [`Document`] (one `Text`
+    /// stream part), whose stream can be redacted in place and re-encoded.
+    #[tokio::test]
+    async fn leaf_document_decodes_redacts_and_encodes() -> Result<()> {
+        use elide_codec::content::ContentData;
+        use elide_codec::{Document, DocumentLoader, DocumentPart, LeafLoader};
+
+        let doc: Document = LeafLoader(TxtLoader)
+            .decode(ContentData::from_text("contact alice@example.test"))
+            .await?;
+        assert_eq!(doc.parts().len(), 1);
+        let mut doc = doc;
+
+        // Redact the one stream part in place.
+        let DocumentPart::Stream { handle, .. } = &mut doc.parts_mut()[0] else {
+            panic!("txt is a stream part");
+        };
+        let stream = handle.downcast_mut::<Text>().expect("text stream");
+        let mut batch = Redactions::new();
+        // "contact " = 8 bytes; the email is 18 → 8..26.
+        batch.push(
+            TextLocation::new(8, 26),
+            TextReplacement::substituted("[EMAIL]"),
+        );
+        DataWriter::write_at(stream, batch).await?;
+
+        assert_eq!(doc.encode()?.as_bytes(), b"contact [EMAIL]");
         Ok(())
     }
 }

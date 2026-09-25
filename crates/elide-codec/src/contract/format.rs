@@ -12,11 +12,9 @@ use std::fmt;
 use std::sync::Arc;
 
 use elide_core::Result;
-use elide_core::modality::Modality;
 
-use super::Loader;
-use super::document::UntypedDocumentHandle;
-use super::loader::ErasedLoader;
+use super::loader::LeafLoader;
+use super::{Document, DocumentLoader, Loader};
 use crate::content::ContentData;
 
 /// Stable identifier for a registered codec format.
@@ -59,36 +57,46 @@ impl AsRef<str> for FormatId {
 /// Indexed by `FormatRegistry` under its [`FormatId`], every extension
 /// in `extensions`, and every MIME in `content_types`.
 ///
-/// Construct via [`Format::new`]; read the parts via the accessor
-/// methods. The fields are crate-private so the constructor stays the
-/// only path that produces a [`Format`]: that way the modality name is
-/// always derived from the loader's modality and never hand-set, and
-/// the loader is erased internally.
+/// Construct via [`Format::new`] (a leaf format from its [`Loader`]) or
+/// [`Format::with_document_loader`] (a multi-part format from its
+/// [`DocumentLoader`]); read the parts via the accessor methods. The fields
+/// are crate-private so a constructor stays the only path that produces a
+/// [`Format`], and every format decodes into a [`Document`].
 #[derive(Clone)]
 pub struct Format {
     pub(crate) id: FormatId,
-    pub(crate) modality: &'static str,
     pub(crate) extensions: Vec<Cow<'static, str>>,
     pub(crate) content_types: Vec<Cow<'static, str>>,
-    pub(crate) loader: Arc<dyn ErasedLoader>,
+    pub(crate) loader: Arc<dyn DocumentLoader>,
 }
 
 impl Format {
-    /// Build a [`Format`] for modality `M`. The modality name is taken
-    /// from [`M::NAME`] and the loader is erased internally; neither
-    /// needs naming at the call site.
+    /// Build a leaf [`Format`] from a per-modality [`Loader`]: its one handler
+    /// becomes the single stream of a leaf [`Document`] (wrapped in
+    /// [`LeafLoader`]).
     ///
     /// Extensions and content types default to empty; chain
     /// [`with_extensions`] / [`with_content_types`] to declare the lookup
     /// keys the `FormatRegistry` indexes this format under.
     ///
-    /// [`M::NAME`]: Modality::NAME
     /// [`with_extensions`]: Self::with_extensions
     /// [`with_content_types`]: Self::with_content_types
     pub fn new<L: Loader>(id: FormatId, loader: L) -> Self {
         Self {
             id,
-            modality: <L::Modality as Modality>::NAME,
+            extensions: Vec::new(),
+            content_types: Vec::new(),
+            loader: Arc::new(LeafLoader(loader)),
+        }
+    }
+
+    /// Build a multi-part [`Format`] from a [`DocumentLoader`], which decodes
+    /// bytes into a [`Document`] of several parts (a stream plus blob sub-parts)
+    /// and its recombiner (e.g. a raster format whose `#exif` sub-part is
+    /// metadata).
+    pub fn with_document_loader<D: DocumentLoader>(id: FormatId, loader: D) -> Self {
+        Self {
+            id,
             extensions: Vec::new(),
             content_types: Vec::new(),
             loader: Arc::new(loader),
@@ -126,11 +134,6 @@ impl Format {
         &self.id
     }
 
-    /// The name of the modality this format produces (e.g. `"text"`).
-    pub fn modality(&self) -> &'static str {
-        self.modality
-    }
-
     /// File extensions (lowercased, no leading dot) that resolve to this
     /// format.
     pub fn extensions(&self) -> &[Cow<'static, str>] {
@@ -142,14 +145,14 @@ impl Format {
         &self.content_types
     }
 
-    /// Decode raw content through this format's loader, returning the
-    /// erased handle. Equivalent to resolving the format yourself and
-    /// calling `FormatRegistry::decode`.
+    /// Decode raw content through this format's loader into a [`Document`].
+    /// Equivalent to resolving the format yourself and calling
+    /// `FormatRegistry::decode`.
     ///
     /// # Errors
     ///
     /// Propagates the loader's decode error.
-    pub async fn decode(&self, content: ContentData) -> Result<UntypedDocumentHandle> {
+    pub async fn decode(&self, content: ContentData) -> Result<Document> {
         self.loader.decode(content).await
     }
 }
@@ -158,7 +161,6 @@ impl fmt::Debug for Format {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Format")
             .field("id", &self.id)
-            .field("modality", &self.modality)
             .field("extensions", &self.extensions)
             .field("content_types", &self.content_types)
             .finish_non_exhaustive()

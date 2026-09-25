@@ -137,7 +137,7 @@ async fn nested_container_keeps_its_own_redaction_with_an_extensionless_id() -> 
     // Re-encode and walk the tree: no level's body PII may survive. The inner
     // assertion is the regression: under the old id-extension hint, `inner`'s
     // empty extension made the re-decode fail and dropped its own redaction.
-    let out = documents[0].handle.encode()?.to_bytes();
+    let out = documents[0].document.encode()?.to_bytes();
     let (outer_body, outer_parts) = decode_mock(&out);
     assert!(!outer_body.contains(PII), "outer body leaked: {outer_body}");
 

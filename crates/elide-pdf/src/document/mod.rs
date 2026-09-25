@@ -9,6 +9,7 @@
 //! container holds no capability logic itself.
 
 mod data;
+#[cfg(feature = "image")]
 mod role;
 
 use std::num::NonZeroUsize;
@@ -16,12 +17,14 @@ use std::num::NonZeroUsize;
 use elide_core::Result;
 
 pub(crate) use self::data::Store;
-pub use self::role::ObjectRole;
+#[cfg(feature = "image")]
+pub(crate) use self::role::ObjectRole;
 use crate::extract::Extraction;
-use crate::inspect::Inspection;
 use crate::redact::Detection;
 #[cfg(feature = "image")]
-use crate::redact::{ImageReplacement, PageReplacement};
+use crate::redact::ImageReplacement;
+#[cfg(feature = "render")]
+use crate::redact::PageReplacement;
 #[cfg(feature = "render")]
 use crate::render::{PageObservation, RenderedPage};
 
@@ -39,9 +42,6 @@ impl Pdf {
     /// Default bound on a single page's decompressed content, guarding against a
     /// decompression bomb. Override with [`open_with_limit`](Pdf::open_with_limit).
     pub const DEFAULT_MAX_PAGE_BYTES: NonZeroUsize = Store::DEFAULT_MAX_PAGE_BYTES;
-    /// Maximum accepted source-document size (64 MiB). A larger input is refused
-    /// by [`open`](Pdf::open) before parsing.
-    pub const MAX_DOCUMENT_BYTES: usize = Store::MAX_DOCUMENT_BYTES;
 
     /// Open a PDF from its bytes, using the
     /// [default page bound](Pdf::DEFAULT_MAX_PAGE_BYTES).
@@ -111,44 +111,10 @@ impl Pdf {
     ///
     /// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a replacement
     /// names a page that does not exist or an undecodable image.
-    #[cfg(feature = "image")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "image")))]
-    pub fn redact_pages(&self, replacements: &[PageReplacement]) -> Result<Vec<u8>> {
-        crate::redact::redact_pages(&self.0, replacements)
-    }
-
-    /// Inspect the document: inventory its risk-bearing structures and report how
-    /// completely it could be inspected.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::ResourceLimit`](crate::ErrorKind::ResourceLimit) if the
-    /// document exceeds the object-count or page-count bound.
-    pub fn inspect(&self) -> Result<Inspection> {
-        Inspection::of(&self.0)
-    }
-
-    /// Verify the document carries no superseded revision or trailing bytes.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if the
-    /// document retains a superseded incremental revision or non-whitespace bytes
-    /// after the final `%%EOF`.
-    pub fn verify_flattened(&self) -> Result<()> {
-        crate::inspect::verify_flattened(&self.0)
-    }
-
-    /// Render every page to a PNG image at `scale`.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if PDFium
-    /// cannot load or render the document (or the native library is unavailable).
     #[cfg(feature = "render")]
     #[cfg_attr(docsrs, doc(cfg(feature = "render")))]
-    pub fn render(&self, scale: f32) -> Result<Vec<RenderedPage>> {
-        crate::render::render(&self.0, scale)
+    pub fn redact_pages(&self, replacements: &[PageReplacement]) -> Result<Vec<u8>> {
+        crate::redact::redact_pages(&self.0, replacements)
     }
 
     /// Render only the 1-based pages in `numbers` at `scale`, keyed by page
@@ -157,7 +123,8 @@ impl Pdf {
     ///
     /// # Errors
     ///
-    /// As [`render`](Pdf::render).
+    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if PDFium
+    /// cannot load or render the document (or the native library is unavailable).
     #[cfg(feature = "render")]
     #[cfg_attr(docsrs, doc(cfg(feature = "render")))]
     pub fn render_pages(
@@ -173,7 +140,7 @@ impl Pdf {
     ///
     /// # Errors
     ///
-    /// As [`render`](Pdf::render).
+    /// As [`render_pages`](Pdf::render_pages).
     #[cfg(feature = "render")]
     #[cfg_attr(docsrs, doc(cfg(feature = "render")))]
     pub fn observe(&self, scale: f32) -> Result<Vec<PageObservation>> {

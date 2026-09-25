@@ -1,37 +1,33 @@
-//! Decoding raw bytes into a typed handle, plus the erasure the registry
-//! stores.
+//! Decoding raw bytes into a [`Document`].
 //!
-//! - [`Loader`]: per-modality decoder a format implementation writes. Returns a
-//!   concrete handler implementing [`Handler`](super::Handler).
-//! - [`ErasedLoader`]: modality-erased loader the `FormatRegistry` holds behind
-//!   `Arc`; every [`Loader`] is one through a blanket impl.
+//! - [`Loader`]: per-modality decoder a leaf format implementation writes.
+//!   Returns a concrete [`Stream`](super::Stream).
+//! - [`DocumentLoader`]: the parts-model decoder the `FormatRegistry` holds
+//!   behind `Arc`; it produces the whole [`Document`]. [`LeafLoader`] adapts a
+//!   [`Loader`] into one for a leaf format.
 
 use elide_core::Result;
 use elide_core::modality::Modality;
 
-use super::Handler;
-use super::document::{DocumentHandle, UntypedDocumentHandle};
+use super::{Document, Stream};
 use crate::content::ContentData;
 
-/// Per-modality format loader.
+/// Per-modality leaf-format loader.
 ///
 /// A loader validates and parses raw content for its [`Modality`], producing a
-/// handler that implements [`Handler`](super::Handler). Loaders are the leaves
-/// the `FormatRegistry` composes: registering a format means registering its
-/// loader. A loader serves exactly one modality — its [`Modality`] associated
-/// type — so the registry recovers that modality from the loader type alone.
+/// single [`Stream`](super::Stream). Leaf formats (a `.txt`, a bare image or
+/// audio clip) implement this; [`Format::new`] wraps it in a [`LeafLoader`] to a
+/// one-[`Stream`](super::Stream) [`Document`]. A multi-part format implements
+/// [`DocumentLoader`] directly instead.
 ///
-/// # Implementing a third-party format
+/// # Implementing a third-party leaf format
 ///
-/// 1. Implement [`Handler`](super::Handler) for the per-format handler type
-///    that owns the parsed in-memory representation.
+/// 1. Implement [`Stream`](super::Stream) for the per-format type that owns the
+///    parsed in-memory representation.
 /// 2. Implement `Loader` for a stateless type whose [`decode`] validates raw
-///    [`ContentData`] and returns the handler.
+///    [`ContentData`] and returns the stream.
 /// 3. Build a [`Format`] with [`Format::new`], chain extensions / content types
 ///    as needed, and register it on a `FormatRegistry`.
-///
-/// The registry erases the modality internally; third-party callers never touch
-/// the object-safe surface.
 ///
 /// [`Modality`]: Self::Modality
 /// [`decode`]: Loader::decode
@@ -42,38 +38,45 @@ pub trait Loader: Send + Sync + 'static {
     /// The modality this loader decodes into.
     type Modality: Modality;
 
-    /// The handler type this loader produces.
-    type Handler: Handler<Self::Modality>;
+    /// The stream type this loader produces.
+    type Stream: Stream<Self::Modality>;
 
-    /// Validate and parse the content, returning the loaded handler.
+    /// Validate and parse the content, returning the loaded stream.
     ///
     /// # Errors
     ///
     /// Returns an error when the content is malformed for this format.
-    async fn decode(&self, content: ContentData) -> Result<Self::Handler>;
+    async fn decode(&self, content: ContentData) -> Result<Self::Stream>;
 }
 
-/// Modality-erased loader the `FormatRegistry` holds behind `Arc`.
-/// Adapts a [`Loader`] into a uniform `decode` returning an
-/// [`UntypedDocumentHandle`].
+/// Decode raw content into a [`Document`] — the parts model's loader.
 ///
-/// Crate-internal: every consumer goes through [`Format::decode`] or
-/// `FormatRegistry::decode` instead. Every [`Loader`] is an `ErasedLoader`
-/// through the blanket impl below.
-///
-/// [`Format::decode`]: super::Format::decode
+/// Where a [`Loader`] produces a single [`Stream`](super::Stream), a
+/// `DocumentLoader` produces
+/// the whole [`Document`]: its stream part(s), any blob sub-parts, and the
+/// format's recombiner. A leaf format returns a one-[`Stream`](super::Stream)
+/// document with a trivial recombiner.
 #[async_trait::async_trait]
-pub(crate) trait ErasedLoader: Send + Sync + 'static {
-    async fn decode(&self, content: ContentData) -> Result<UntypedDocumentHandle>;
+pub trait DocumentLoader: Send + Sync + 'static {
+    /// Validate and parse the content into a [`Document`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the content is malformed for this format.
+    async fn decode(&self, content: ContentData) -> Result<Document>;
 }
 
+/// A [`Loader`] wrapped so it produces a leaf [`Document`] (its one handler as a
+/// stream, with a trivial recombiner). The transitional bridge for a leaf
+/// format that has only a [`Loader`] and no sub-parts.
+pub struct LeafLoader<L>(pub L);
+
 #[async_trait::async_trait]
-impl<L: Loader> ErasedLoader for L {
-    async fn decode(&self, content: ContentData) -> Result<UntypedDocumentHandle> {
-        let handler = Loader::decode(self, content).await?;
-        let format_id = Handler::format(&handler);
-        let boxed: Box<dyn Handler<L::Modality>> = Box::new(handler);
-        let handle = DocumentHandle::<L::Modality>::new(format_id, boxed);
-        Ok(UntypedDocumentHandle::new(handle))
+impl<L: Loader> DocumentLoader for LeafLoader<L> {
+    async fn decode(&self, content: ContentData) -> Result<Document> {
+        let stream = Loader::decode(&self.0, content).await?;
+        let format_id = Stream::format(&stream);
+        let stream: Box<dyn Stream<L::Modality>> = Box::new(stream);
+        Ok(Document::leaf(format_id, stream))
     }
 }

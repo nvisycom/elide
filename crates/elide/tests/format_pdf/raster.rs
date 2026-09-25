@@ -16,8 +16,8 @@
 //! it is images, and none of the original PII survives.
 
 use elide::Result;
-use elide::codec::FormatRegistry;
 use elide::codec::pdf::{RasterMode, pdf_format_with};
+use elide::codec::{DocumentPart, FormatRegistry};
 use elide::modality::StreamDataReader;
 use elide::modality::text::Text;
 
@@ -32,13 +32,13 @@ const FIXTURE: Fixture = Fixture {
 /// Re-decode a PDF through the registry and concatenate its extracted text.
 async fn extracted_text(pdf: &[u8]) -> Result<String> {
     let registry = FormatRegistry::with_builtin();
-    let mut handle = registry
-        .decode(pdf, "pdf")
-        .await?
-        .into::<Text>()
-        .expect("pdf is text");
+    let mut document = registry.decode(pdf, "pdf").await?;
+    let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else {
+        panic!("the pdf codec yields a text body stream")
+    };
+    let stream = handle.downcast_mut::<Text>().expect("pdf is text");
     let mut text = String::new();
-    while let Some(chunk) = handle.read_next().await? {
+    while let Some(chunk) = stream.read_next().await? {
         text.push_str(chunk.data.as_str());
     }
     Ok(text)

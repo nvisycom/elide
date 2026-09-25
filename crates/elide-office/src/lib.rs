@@ -2,14 +2,12 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 
-#[cfg(feature = "codec")]
 pub mod codec;
-pub mod docx;
-pub mod ooxml;
 pub mod opc;
-pub mod pptx;
-pub mod xlsx;
 
-mod error;
+pub(crate) mod docx;
+pub(crate) mod ooxml;
+pub(crate) mod pptx;
+pub(crate) mod xlsx;
 
-pub use self::error::{Error, ErrorKind, Result};
+pub use elide_core::{Error, ErrorKind, Result};

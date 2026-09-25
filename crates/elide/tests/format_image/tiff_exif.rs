@@ -53,7 +53,7 @@ async fn tiff_gps_is_stripped_through_the_facade() {
         .await
         .expect("anonymize");
 
-    let out = documents[0].handle.encode().expect("encode").to_bytes();
+    let out = documents[0].document.encode().expect("encode").to_bytes();
     assert!(
         !has_gps_tiff(&out),
         "GPS survived the facade end-to-end strip"

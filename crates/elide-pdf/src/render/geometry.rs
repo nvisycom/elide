@@ -88,8 +88,6 @@ impl PixelRect {
 pub enum GlyphSource {
     /// From the PDF's own text layer (a text-drawing operator).
     Text,
-    /// From OCR over the rendered pixels (a caller-supplied source).
-    Ocr,
 }
 
 /// One glyph: the span of page text it covers and its box in rendered pixels.

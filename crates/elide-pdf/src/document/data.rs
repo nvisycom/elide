@@ -9,6 +9,7 @@
 
 use std::num::NonZeroUsize;
 
+#[cfg(feature = "render")]
 use bytes::Bytes;
 use elide_core::{Error, ErrorKind, Result};
 use lopdf::Document;
@@ -20,9 +21,10 @@ pub(crate) struct Store {
     /// The parsed object graph. Capabilities read and clone it through the
     /// crate-visible accessors below.
     doc: Document,
-    /// The original bytes the document was opened from, retained so inspection
-    /// can account for retained/superseded bytes and the `render` feature can
-    /// rasterise the pristine PDF rather than a lossy lopdf re-serialisation.
+    /// The original bytes the document was opened from, retained so the `render`
+    /// feature can rasterise the pristine PDF rather than a lossy lopdf
+    /// re-serialisation.
+    #[cfg(feature = "render")]
     source: Bytes,
     /// Bound on a single page's decompressed content, guarding against a
     /// decompression bomb.
@@ -63,6 +65,7 @@ impl Store {
         })?;
         Ok(Self {
             doc,
+            #[cfg(feature = "render")]
             source: Bytes::copy_from_slice(document),
             max_page_bytes,
         })
@@ -80,6 +83,7 @@ impl Store {
     }
 
     /// The pristine bytes the document was opened from.
+    #[cfg(feature = "render")]
     pub(crate) fn source_bytes(&self) -> Bytes {
         self.source.clone()
     }

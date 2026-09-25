@@ -4,7 +4,7 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// A page that [`Pdf::extract`](crate::Pdf::extract) recovered no text from, so
+/// A page that [`Pdf::extract`](crate::document::Pdf::extract) recovered no text from, so
 /// its text is **not** covered by the extracted blocks.
 ///
 /// Extraction is partial-success: a page that yields no text does not fail the

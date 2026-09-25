@@ -1,14 +1,14 @@
-//! [`Docx`]: an opened DOCX package, extracted and rewritten in place over the
-//! shared [`opc`](crate::opc) engine.
+//! [`WordFormat`]: the DOCX part-classifier seam over the shared
+//! [`opc`](crate::opc) engine.
 //!
 //! A WordprocessingML document is text-only to the engine, so it is just the
-//! shared [`OoxmlPackage`] facade specialized to the Word part classifier; only
-//! the classifier and the required body part are Word-specific.
+//! shared `OoxmlPackage` facade specialized to this classifier; only the
+//! classifier and the required body part are Word-specific.
 
 mod kind;
 
 pub use self::kind::PartKind;
-use crate::ooxml::{OoxmlFormat, OoxmlPackage};
+use crate::ooxml::OoxmlFormat;
 use crate::opc::{PartClassifier, PartPath, PartRole};
 
 /// The Word part classifier and format seam: maps a package path to its Word
@@ -39,11 +39,3 @@ impl OoxmlFormat for WordFormat {
         Self
     }
 }
-
-/// An opened DOCX package: every part read once and classified, ready to
-/// [`extract`](OoxmlPackage::extract) the text of every text-bearing part or
-/// [`rewrite`](OoxmlPackage::rewrite) them back to bytes.
-///
-/// Open a document once and reuse it for both operations; the package is parsed
-/// a single time.
-pub type Docx = OoxmlPackage<WordFormat>;

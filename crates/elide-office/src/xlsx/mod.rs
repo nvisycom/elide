@@ -17,12 +17,12 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use bytes::Bytes;
+use elide_core::{Error, ErrorKind, Result};
 use quick_xml::escape::escape;
 
 use self::sheet::{CellSource, parse_cells};
 use self::strings::{parse_shared_strings, shared_string_items};
 use self::workbook::{Sheet, resolve_sheets};
-use crate::error::{Error, Result};
 use crate::opc::{Package, PartClassifier, PartPath, PartReplacement, PartRole};
 
 /// The well-known part path of the workbook and its shared-string table.
@@ -129,7 +129,7 @@ impl CellEdit {
 }
 
 /// An opened XLSX workbook: its parts read once, ready to
-/// [`extract`](Xlsx::extract) its cells or [`rewrite`](Xlsx::rewrite) them back
+/// [`extract`](Xlsx::extract) its cells or [`rewrite_with_parts`](Xlsx::rewrite_with_parts) them back
 /// to bytes.
 #[derive(Debug, Clone)]
 pub struct Xlsx {
@@ -143,16 +143,17 @@ impl Xlsx {
     ///
     /// # Errors
     ///
-    /// - [`ErrorKind::InvalidArchive`](crate::ErrorKind::InvalidArchive) if the
+    /// - [`ErrorKind::MalformedInput`] if the
     ///   bytes are not a zip;
-    /// - [`ErrorKind::InvalidPackage`](crate::ErrorKind::InvalidPackage) if the
+    /// - [`ErrorKind::MalformedInput`] if the
     ///   workbook part is missing;
-    /// - [`ErrorKind::InvalidXml`](crate::ErrorKind::InvalidXml) if the workbook
+    /// - [`ErrorKind::MalformedInput`] if the workbook
     ///   or its relationships are malformed.
     pub fn open(document: &[u8]) -> Result<Self> {
         let package = Package::open(document, SheetClassifier)?;
         if !package.contains_part(WORKBOOK_PART) {
-            return Err(Error::invalid_package(
+            return Err(Error::new(
+                ErrorKind::MalformedInput,
                 "missing workbook part `xl/workbook.xml`",
             ));
         }
@@ -181,19 +182,22 @@ impl Xlsx {
     ///
     /// # Errors
     ///
-    /// - [`ErrorKind::InvalidPackage`](crate::ErrorKind::InvalidPackage) if a
+    /// - [`ErrorKind::MalformedInput`] if a
     ///   referenced worksheet part is missing;
-    /// - [`ErrorKind::InvalidXml`](crate::ErrorKind::InvalidXml) if a sheet or the
+    /// - [`ErrorKind::MalformedInput`] if a sheet or the
     ///   shared-string table is not UTF-8 or is malformed.
     pub fn extract(&self) -> Result<Vec<Cell>> {
         let shared = self.shared_strings()?;
         let mut cells = Vec::new();
         for sheet in &self.sheets {
             let bytes = self.package.part_bytes(&sheet.part).ok_or_else(|| {
-                Error::invalid_package(format!(
-                    "worksheet `{}` referenced by sheet `{}` is missing",
-                    sheet.part, sheet.name
-                ))
+                Error::new(
+                    ErrorKind::MalformedInput,
+                    format!(
+                        "worksheet `{}` referenced by sheet `{}` is missing",
+                        sheet.part, sheet.name
+                    ),
+                )
             })?;
             let raw = decode_part(&sheet.part, &bytes)?;
             for cell in parse_cells(&raw)? {
@@ -218,39 +222,12 @@ impl Xlsx {
         Ok(cells)
     }
 
-    /// Rewrite `edits` into their cells and re-pack every other part
-    /// byte-for-byte.
-    ///
-    /// An inline-string cell is spliced in place. A shared-string cell is
-    /// *de-shared*: its `<c>` element becomes an inline string carrying the
-    /// replacement, so the pooled value other cells reference is unchanged.
-    ///
-    /// **Fail-closed:** an edit naming an unknown sheet or a cell that is not
-    /// text-bearing, or a splice that would land out of bounds, refuses the whole
-    /// rewrite rather than emitting a partially-redacted workbook.
-    ///
-    /// # Errors
-    ///
-    /// - [`ErrorKind::InvalidXml`](crate::ErrorKind::InvalidXml) on a malformed
-    ///   or non-UTF-8 sheet;
-    /// - [`ErrorKind::UnsafeRewrite`](crate::ErrorKind::UnsafeRewrite) if an edit
-    ///   cannot be applied.
-    pub fn rewrite(&self, edits: &[CellEdit]) -> Result<Vec<u8>> {
-        self.rewrite_with_parts(edits, &[])
-    }
-
     /// The raw bytes of the part at `path`, or `None` if the workbook has no
     /// such part. For a caller parsing a property part (`docProps/*`) before
     /// deciding what to redact, then feeding edited bytes back through
     /// [`rewrite_with_parts`](Xlsx::rewrite_with_parts).
     pub fn part_bytes(&self, path: &str) -> Option<Bytes> {
         self.package.part_bytes(path)
-    }
-
-    /// Every part path in the workbook, for a caller enumerating the property
-    /// parts it wants to inspect.
-    pub fn part_paths(&self) -> impl Iterator<Item = &PartPath> {
-        self.package.part_paths()
     }
 
     /// Rewrite cell `edits` *and* replace whole non-cell text parts with
@@ -263,7 +240,7 @@ impl Xlsx {
     ///
     /// # Errors
     ///
-    /// As [`rewrite`](Xlsx::rewrite).
+    /// As [`rewrite_with_parts`](Xlsx::rewrite_with_parts).
     pub fn rewrite_with_parts(
         &self,
         edits: &[CellEdit],
@@ -277,7 +254,10 @@ impl Xlsx {
                 .iter()
                 .find(|s| s.name == edit.sheet.as_str())
                 .ok_or_else(|| {
-                    Error::unsafe_rewrite(format!("edit names unknown sheet `{}`", edit.sheet))
+                    Error::new(
+                        ErrorKind::Processing,
+                        format!("edit names unknown sheet `{}`", edit.sheet),
+                    )
                 })?;
             by_part
                 .entry(sheet.part.clone())
@@ -289,10 +269,12 @@ impl Xlsx {
         // as whole-part replacements for the byte-faithful re-zip.
         let mut replacements = Vec::new();
         for (part, cell_edits) in &by_part {
-            let bytes = self
-                .package
-                .part_bytes(part)
-                .ok_or_else(|| Error::unsafe_rewrite(format!("sheet part `{part}` not found")))?;
+            let bytes = self.package.part_bytes(part).ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Processing,
+                    format!("sheet part `{part}` not found"),
+                )
+            })?;
             let raw = decode_part(part, &bytes)?;
             let spliced = self.splice_sheet(part, &raw, cell_edits)?;
             replacements.push(PartReplacement::new(
@@ -316,14 +298,16 @@ impl Xlsx {
             let is_replaceable =
                 is_surfaced_text_part(&path) || SheetClassifier.role(&path) == PartRole::Property;
             if !is_replaceable {
-                return Err(Error::unsafe_rewrite(format!(
-                    "part replacement targets non-redactable part `{part}`"
-                )));
+                return Err(Error::new(
+                    ErrorKind::Processing,
+                    format!("part replacement targets non-redactable part `{part}`"),
+                ));
             }
             if self.package.part_bytes(part).is_none() {
-                return Err(Error::unsafe_rewrite(format!(
-                    "part replacement names unknown part `{part}`"
-                )));
+                return Err(Error::new(
+                    ErrorKind::Processing,
+                    format!("part replacement names unknown part `{part}`"),
+                ));
             }
             replacements.push(PartReplacement::new(
                 PartPath::from(part.clone()),
@@ -471,11 +455,14 @@ impl Xlsx {
         // Fail closed if any edit did not land on a text-bearing cell: a redaction
         // that produced no splice would otherwise leave its target untouched.
         if matched != edits.len() {
-            return Err(Error::unsafe_rewrite(format!(
-                "in `{part}`, {} of {} cell edits matched no text-bearing cell",
-                edits.len() - matched,
-                edits.len()
-            )));
+            return Err(Error::new(
+                ErrorKind::Processing,
+                format!(
+                    "in `{part}`, {} of {} cell edits matched no text-bearing cell",
+                    edits.len() - matched,
+                    edits.len()
+                ),
+            ));
         }
 
         // Reject overlapping splices (two edits landing on the same/nested span)
@@ -485,18 +472,22 @@ impl Xlsx {
         let mut prev_end = 0usize;
         for (range, _) in &splices {
             if range.start < prev_end {
-                return Err(Error::unsafe_rewrite(format!(
-                    "overlapping cell edits in `{part}`"
-                )));
+                return Err(Error::new(
+                    ErrorKind::Processing,
+                    format!("overlapping cell edits in `{part}`"),
+                ));
             }
             if range.end > raw.len()
                 || !raw.is_char_boundary(range.start)
                 || !raw.is_char_boundary(range.end)
             {
-                return Err(Error::unsafe_rewrite(format!(
-                    "cell edit span {}..{} out of bounds in `{part}`",
-                    range.start, range.end
-                )));
+                return Err(Error::new(
+                    ErrorKind::Processing,
+                    format!(
+                        "cell edit span {}..{} out of bounds in `{part}`",
+                        range.start, range.end
+                    ),
+                ));
             }
             prev_end = range.end;
         }
@@ -517,17 +508,20 @@ impl Xlsx {
 fn part_text(package: &Package<SheetClassifier>, path: &str) -> Result<String> {
     let bytes = package
         .part_bytes(path)
-        .ok_or_else(|| Error::invalid_package(format!("missing part `{path}`")))?;
+        .ok_or_else(|| Error::new(ErrorKind::MalformedInput, format!("missing part `{path}`")))?;
     decode_part(path, &bytes)
 }
 
-/// Decode a part's bytes as UTF-8, or an [`ErrorKind::InvalidXml`] naming it.
+/// Decode a part's bytes as UTF-8, or an [`ErrorKind::MalformedInput`] naming it.
 ///
-/// [`ErrorKind::InvalidXml`]: crate::ErrorKind::InvalidXml
+/// [`ErrorKind::MalformedInput`]: elide_core::ErrorKind::MalformedInput
 fn decode_part(path: &str, bytes: &[u8]) -> Result<String> {
-    std::str::from_utf8(bytes)
-        .map(str::to_owned)
-        .map_err(|_| Error::invalid_xml(format!("part `{path}` is not UTF-8")))
+    std::str::from_utf8(bytes).map(str::to_owned).map_err(|_| {
+        Error::new(
+            ErrorKind::MalformedInput,
+            format!("part `{path}` is not UTF-8"),
+        )
+    })
 }
 
 #[cfg(test)]
@@ -636,7 +630,7 @@ mod tests {
             column: 0,
             text: String::from("[EMAIL]"),
         };
-        let out = xlsx.rewrite(&[edit]).unwrap();
+        let out = xlsx.rewrite_with_parts(&[edit], &[]).unwrap();
 
         // Re-open the output and read it back.
         let cells = Xlsx::open(&out).unwrap().extract().unwrap();
@@ -676,7 +670,7 @@ mod tests {
                 text: String::from("[EMAIL]"),
             },
         ];
-        let out = xlsx.rewrite(&edits).unwrap();
+        let out = xlsx.rewrite_with_parts(&edits, &[]).unwrap();
 
         // The orphaned pool entry is blanked; alice is gone from every part.
         let pool = String::from_utf8(read_part(&out, SHARED_STRINGS_PART)).unwrap();
@@ -712,7 +706,7 @@ mod tests {
             column: 1,
             text: String::from("[SSN]"),
         };
-        let out = xlsx.rewrite(&[edit]).unwrap();
+        let out = xlsx.rewrite_with_parts(&[edit], &[]).unwrap();
         let sheet1 = String::from_utf8(read_part(&out, "xl/worksheets/sheet1.xml")).unwrap();
         assert!(sheet1.contains("<t>[SSN]</t>"), "sheet1: {sheet1}");
         assert!(!sheet1.contains("123-45-6789"));
@@ -727,7 +721,7 @@ mod tests {
             column: 1,
             text: String::from("a & b <c>"),
         };
-        let out = xlsx.rewrite(&[edit]).unwrap();
+        let out = xlsx.rewrite_with_parts(&[edit], &[]).unwrap();
         let cells = Xlsx::open(&out).unwrap().extract().unwrap();
         // Round-trips through escaping back to the literal text.
         assert_eq!(cell(&cells, "Customers", 1, 1).unwrap().text, "a & b <c>");
@@ -742,7 +736,7 @@ mod tests {
             column: 0,
             text: String::from("x"),
         };
-        assert!(xlsx.rewrite(&[edit]).is_err());
+        assert!(xlsx.rewrite_with_parts(&[edit], &[]).is_err());
     }
 
     #[test]
@@ -754,7 +748,7 @@ mod tests {
             column: 1,
             text: String::from("[SSN]"),
         };
-        let out = xlsx.rewrite(&[edit]).unwrap();
+        let out = xlsx.rewrite_with_parts(&[edit], &[]).unwrap();
         // sheet2 was not edited, so its bytes are unchanged.
         assert_eq!(
             read_part(&out, "xl/worksheets/sheet2.xml"),

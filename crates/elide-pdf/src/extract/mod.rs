@@ -1,4 +1,4 @@
-//! The result of [`Pdf::extract`](crate::Pdf::extract): the [`Extraction`] and
+//! The result of [`Pdf::extract`](crate::document::Pdf::extract): the [`Extraction`] and
 //! its per-page text [`Block`]s, the [`Embedding`]s it surfaces for image
 //! redaction, and the [`Issue`]s recording pages it could not read.
 
@@ -17,7 +17,7 @@ pub use self::issue::{Issue, IssueKind};
 use crate::document::Store;
 use crate::text::text_block_for_page;
 
-/// The result of [`Pdf::extract`](crate::Pdf::extract): per-page text blocks,
+/// The result of [`Pdf::extract`](crate::document::Pdf::extract): per-page text blocks,
 /// the embedded images surfaced for redaction, and any [`issues`](Extraction::issues)
 /// for pages that yielded no text.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +44,7 @@ pub struct Block {
 
 impl Block {
     /// A block of `text` on 1-based `page`.
+    #[cfg(feature = "render")]
     #[must_use]
     pub fn new(page: u32, text: impl Into<HipStr<'static>>) -> Self {
         Self {

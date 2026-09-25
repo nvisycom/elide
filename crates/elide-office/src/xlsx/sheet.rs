@@ -12,11 +12,11 @@
 
 use std::ops::Range;
 
+use elide_core::{Error, ErrorKind, Result};
 use quick_xml::events::Event;
 use quick_xml::events::attributes::Attribute;
 use quick_xml::{Reader, XmlVersion};
 
-use crate::error::{Error, Result};
 use crate::xlsx::cellref::parse_cell_ref;
 
 /// The entity-decoded value of an attribute, for comparison or parsing.
@@ -29,7 +29,7 @@ use crate::xlsx::cellref::parse_cell_ref;
 fn normalized(attr: &Attribute<'_>) -> Result<String> {
     attr.normalized_value(XmlVersion::Implicit1_0)
         .map(|value| value.into_owned())
-        .map_err(|e| Error::invalid_xml(format!("attribute value: {e}")))
+        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("attribute value: {e}")))
 }
 
 /// Where a cell's text lives, and the byte spans to rewrite it.
@@ -84,7 +84,12 @@ pub(crate) struct SheetCell {
 /// quick-xml reports byte positions relative to the text after a leading BOM, so
 /// every recorded span is shifted back onto the original bytes.
 pub(crate) fn parse_cells(raw: &str) -> Result<Vec<SheetCell>> {
-    let malformed = |e: quick_xml::Error| Error::invalid_xml(format!("worksheet malformed: {e}"));
+    let malformed = |e: quick_xml::Error| {
+        Error::new(
+            ErrorKind::MalformedInput,
+            format!("worksheet malformed: {e}"),
+        )
+    };
     let mut reader = Reader::from_str(raw);
     let bom = bom_len(raw);
     let mut last = bom;
@@ -168,11 +173,16 @@ pub(crate) fn parse_cells(raw: &str) -> Result<Vec<SheetCell>> {
 /// one-based in the file). `None` when the row has no `r`.
 fn row_index(e: &quick_xml::events::BytesStart<'_>) -> Result<Option<u32>> {
     for attr in e.attributes() {
-        let attr = attr.map_err(|err| Error::invalid_xml(format!("row attribute: {err}")))?;
+        let attr = attr.map_err(|err| {
+            Error::new(ErrorKind::MalformedInput, format!("row attribute: {err}"))
+        })?;
         if attr.key.local_name().as_ref() == "r" {
             let text = normalized(&attr)?;
             let one_based: u32 = text.trim().parse().map_err(|_| {
-                Error::invalid_xml(format!("row reference `{text}` is not a number"))
+                Error::new(
+                    ErrorKind::MalformedInput,
+                    format!("row reference `{text}` is not a number"),
+                )
             })?;
             return Ok(Some(one_based.saturating_sub(1)));
         }
@@ -227,7 +237,9 @@ impl OpenCell {
         let mut cell_type = CellType::Other;
         let mut attributes = String::new();
         for attr in e.attributes() {
-            let attr = attr.map_err(|err| Error::invalid_xml(format!("cell attribute: {err}")))?;
+            let attr = attr.map_err(|err| {
+                Error::new(ErrorKind::MalformedInput, format!("cell attribute: {err}"))
+            })?;
             let local = attr.key.local_name();
             if local.as_ref() == "t" {
                 // Compare the decoded value: `t` may be written with character
@@ -256,7 +268,10 @@ impl OpenCell {
         // A cell may omit `r`; when present it must be a valid reference.
         let (row, column) = match reference.as_deref() {
             Some(reference) => parse_cell_ref(reference).ok_or_else(|| {
-                Error::invalid_xml(format!("cell reference `{reference}` is malformed"))
+                Error::new(
+                    ErrorKind::MalformedInput,
+                    format!("cell reference `{reference}` is malformed"),
+                )
             })?,
             None => (default_row, default_column),
         };

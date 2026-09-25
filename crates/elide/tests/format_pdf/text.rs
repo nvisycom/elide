@@ -6,7 +6,7 @@
 //! in the re-encoded document.
 
 use elide::Result;
-use elide::codec::FormatRegistry;
+use elide::codec::{DocumentPart, FormatRegistry};
 use elide::entity::audit::AuditKind;
 use elide::entity::builtins;
 use elide::modality::StreamDataReader;
@@ -20,13 +20,13 @@ use crate::support::fixture::Fixture;
 /// so the text is only legible through a real decode, not by grepping bytes.
 async fn extracted_text(pdf: &[u8]) -> Result<String> {
     let registry = FormatRegistry::with_builtin();
-    let mut handle = registry
-        .decode(pdf, "pdf")
-        .await?
-        .into::<Text>()
-        .expect("pdf is text");
+    let mut document = registry.decode(pdf, "pdf").await?;
+    let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else {
+        panic!("the pdf codec yields a text body stream")
+    };
+    let stream = handle.downcast_mut::<Text>().expect("pdf is text");
     let mut text = String::new();
-    while let Some(chunk) = handle.read_next().await? {
+    while let Some(chunk) = stream.read_next().await? {
         text.push_str(chunk.data.as_str());
     }
     Ok(text)

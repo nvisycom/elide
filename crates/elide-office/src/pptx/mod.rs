@@ -1,16 +1,16 @@
-//! [`Pptx`]: an opened PPTX presentation, extracted and rewritten in place over
-//! the shared [`opc`](crate::opc) engine.
+//! [`SlideFormat`]: the PPTX part-classifier seam over the shared
+//! [`opc`](crate::opc) engine.
 //!
 //! A presentation's user text lives as DrawingML `a:t` runs in its slides,
 //! notes, and slide masters/layouts, and as `<t>` in its comments, all element
 //! text, with no shared-string indirection. So a PPTX is just the shared
-//! [`OoxmlPackage`] facade specialized to the PresentationML part classifier;
-//! only the classifier and the required presentation part are PPTX-specific.
+//! `OoxmlPackage` facade specialized to this classifier; only the classifier
+//! and the required presentation part are PPTX-specific.
 
 mod kind;
 
 pub use self::kind::PartKind;
-use crate::ooxml::{OoxmlFormat, OoxmlPackage};
+use crate::ooxml::OoxmlFormat;
 use crate::opc::{PartClassifier, PartPath, PartRole};
 
 /// The PresentationML part classifier and format seam: maps a package path to
@@ -42,18 +42,14 @@ impl OoxmlFormat for SlideFormat {
     }
 }
 
-/// An opened PPTX presentation: every part read once and classified, ready to
-/// [`extract`](OoxmlPackage::extract) the text of every text-bearing part or
-/// [`rewrite`](OoxmlPackage::rewrite) them back to bytes.
-///
-/// Open a presentation once and reuse it for both operations; the package is
-/// parsed a single time.
-pub type Pptx = OoxmlPackage<SlideFormat>;
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ooxml::OoxmlPackage;
     use crate::opc::Replacement;
+
+    /// The opened PPTX package under test.
+    type Pptx = OoxmlPackage<SlideFormat>;
 
     /// A hand-built presentation: one slide with two `a:t` runs (an email and a
     /// phone), and a slide relationships part with an external `mailto:` target.
@@ -89,7 +85,7 @@ mod tests {
             .find(|b| b.text.contains("alice@example.com"))
             .expect("slide email block");
         let replacement = Replacement::for_block(block, "[EMAIL]");
-        let out = pptx.rewrite(&[replacement]).unwrap();
+        let out = pptx.rewrite_with_parts(&[replacement], &[]).unwrap();
 
         let slide = read_part(&out, "ppt/slides/slide1.xml");
         let slide = String::from_utf8(slide).unwrap();

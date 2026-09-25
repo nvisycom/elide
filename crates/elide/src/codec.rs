@@ -19,16 +19,18 @@ pub use elide_format::FormatRegistry;
 /// built with, plus the [`pdf_format`]/[`pdf_format_with`] constructors for
 /// swapping the registered handler (e.g. the raster path).
 ///
-/// [`RasterMode`]: elide_pdf::codec::RasterMode
-/// [`Dpi`]: elide_pdf::codec::Dpi
+/// [`RasterMode`]: elide_pdf::primitive::RasterMode
+/// [`Dpi`]: elide_pdf::primitive::Dpi
 /// [`pdf_format`]: elide_pdf::codec::pdf_format
 /// [`pdf_format_with`]: elide_pdf::codec::pdf_format_with
 #[cfg(feature = "codec-pdf")]
 #[cfg_attr(docsrs, doc(cfg(feature = "codec-pdf")))]
 pub mod pdf {
+    #[doc(no_inline)]
+    pub use elide_pdf::codec::pdf_format;
     #[cfg(feature = "codec-pdf-render")]
     #[doc(no_inline)]
     pub use elide_pdf::codec::pdf_format_with;
     #[doc(no_inline)]
-    pub use elide_pdf::codec::{Dpi, RasterMode, pdf_format};
+    pub use elide_pdf::primitive::{Dpi, RasterMode};
 }

@@ -9,7 +9,7 @@
 //!
 //! [`TestOrchestrator`]: super::orchestrator::TestOrchestrator
 
-use elide::codec::{DocumentHandle, FormatRegistry, UntypedDocumentHandle};
+use elide::codec::{DocumentPart, FormatRegistry, TypedStream};
 use elide::detection::Analyzer;
 use elide::entity::{Entity, Label, LabelCatalog, builtins};
 #[cfg(feature = "stt")]
@@ -19,12 +19,14 @@ use elide::modality::image::Image;
 #[cfg(feature = "tabular")]
 use elide::modality::tabular::Tabular;
 use elide::modality::text::Text;
-use elide::modality::{Modality, StreamDataReader, TextRecognizable};
+use elide::modality::{DataReader, DataWriter, Modality, StreamDataReader, TextRecognizable};
 use elide::primitive::LanguageTag;
 use elide::recognition::Scope;
 use elide::redaction::operators::{Erase, Mask, Replace};
 use elide::redaction::{Anonymizer, Operator, Rule};
-use elide::{Directives, Document, Error, ErrorKind, Orchestrator, Report, Result};
+use elide::{
+    Directives, Document, Error, ErrorKind, Orchestrator, RegistryDocumentExt, Report, Result,
+};
 
 #[cfg(all(feature = "image", feature = "llm"))]
 use super::orchestrator::image_analyzer;
@@ -190,10 +192,7 @@ impl Fixture {
         use elide::redaction::operators::{Erase, Silence};
 
         let registry = FormatRegistry::with_builtin();
-        let mut document = Document::new(
-            DOC,
-            UntypedDocumentHandle::new(self.decode_as::<Audio>(&registry).await?),
-        );
+        let mut document = self.decode_document::<Audio>(&registry).await?;
 
         // The mock STT backend transcribes nothing, so recognition finds
         // nothing; the anonymizer would silence/erase any time spans it did.
@@ -231,7 +230,7 @@ impl Fixture {
             .map(|e| e.to_vec())
             .unwrap_or_default();
 
-        let redacted = document.handle.encode()?.as_bytes().to_vec();
+        let redacted = document.document.encode()?.as_bytes().to_vec();
         self.write_redacted(&redacted);
         Ok(PipelineOutcome {
             entities,
@@ -257,10 +256,7 @@ impl Fixture {
         use elide::redaction::operators::Erase;
 
         let registry = FormatRegistry::with_builtin();
-        let mut document = Document::new(
-            DOC,
-            UntypedDocumentHandle::new(self.decode_as::<Image>(&registry).await?),
-        );
+        let mut document = self.decode_document::<Image>(&registry).await?;
 
         // The mock OCR backend recognizes nothing, so recognition finds
         // nothing; the anonymizer would clear any regions it did.
@@ -296,7 +292,7 @@ impl Fixture {
             .map(|e| e.to_vec())
             .unwrap_or_default();
 
-        let redacted = document.handle.encode()?.as_bytes().to_vec();
+        let redacted = document.document.encode()?.as_bytes().to_vec();
         self.write_redacted(&redacted);
         Ok(PipelineOutcome {
             entities,
@@ -321,7 +317,7 @@ impl Fixture {
         Entity<M>: Clone,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
-        DocumentHandle<M>: StreamDataReader<M>,
+        TypedStream<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
         Replace: Operator<M>,
         Mask: Operator<M>,
         Erase: Operator<M>,
@@ -350,15 +346,12 @@ impl Fixture {
         Entity<M>: Clone,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
-        DocumentHandle<M>: StreamDataReader<M>,
+        TypedStream<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
         Replace: Operator<M>,
         Mask: Operator<M>,
         Erase: Operator<M>,
     {
-        let mut document = Document::new(
-            DOC,
-            UntypedDocumentHandle::new(self.decode_as::<M>(&registry).await?),
-        );
+        let mut document = self.decode_document::<M>(&registry).await?;
 
         // One scope, shared across every modality pipeline. Built through
         // `TestOrchestrator`, the shared construction path.
@@ -398,7 +391,7 @@ impl Fixture {
             .map(|e| e.to_vec())
             .unwrap_or_default();
 
-        let redacted = document.handle.encode()?.as_bytes().to_vec();
+        let redacted = document.document.encode()?.as_bytes().to_vec();
 
         self.write_redacted(&redacted);
         Ok(PipelineOutcome {
@@ -408,23 +401,37 @@ impl Fixture {
         })
     }
 
-    /// Decode this fixture's bytes and recover the [`DocumentHandle`] as
-    /// modality `M`, erroring if the format resolves to a different one.
-    async fn decode_as<M: Modality>(&self, registry: &FormatRegistry) -> Result<DocumentHandle<M>>
-    where
-        DocumentHandle<M>: StreamDataReader<M>,
-    {
-        let untyped = registry.decode(self.source, self.extension).await?;
-        untyped.into::<M>().map_err(|_| {
-            Error::new(
+    /// Decode this fixture's bytes into a named [`Document`] whose body stream is
+    /// the `M` modality, resolving the format from the fixture's extension.
+    ///
+    /// Asserts the body modality so a fixture whose extension decodes to another
+    /// modality (a `.txt` run through `run_audio`) fails here with
+    /// [`CapabilityUnavailable`](ErrorKind::CapabilityUnavailable), rather than
+    /// analyzing to no findings and reporting a hollow round trip.
+    async fn decode_document<M: Modality>(&self, registry: &FormatRegistry) -> Result<Document> {
+        let document = registry
+            .document_with(DOC, self.extension, self.source)
+            .await?;
+        let body_is_m = document
+            .document
+            .parts()
+            .iter()
+            .find_map(|part| match part {
+                DocumentPart::Stream { handle, .. } => Some(handle.is::<M>()),
+                DocumentPart::Blob { .. } => None,
+            })
+            .unwrap_or(false);
+        if !body_is_m {
+            return Err(Error::new(
                 ErrorKind::CapabilityUnavailable,
                 format!(
                     "{} did not resolve to the {} modality",
                     self.extension,
                     M::NAME
                 ),
-            )
-        })
+            ));
+        }
+        Ok(document)
     }
 
     /// Write the serialized detection [`Report`] to `testdata/audits/` as
