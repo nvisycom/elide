@@ -32,7 +32,16 @@ default = ["pattern", "ner", "llm"]
 ## are enabled.
 ## (`elide-engine` requires serde unconditionally, so the `engine` feature
 ## pulls it in on its own — no forward needed here.)
-serde = ["elide-core/serde", "elide-detection/serde", "elide-operator/serde", "elide-redaction/serde", "elide-codec?/serde", "elide-format?/serde"]
+serde = [
+    "elide-core/serde",
+    "elide-detection/serde",
+    "elide-operator/serde",
+    "elide-redaction/serde",
+    "elide-audio?/serde",
+    "elide-image?/serde",
+    "elide-codec?/serde",
+    "elide-format?/serde"
+]
 
 ## Derive `schemars::JsonSchema` on the re-exported domain types, for
 ## emitting JSON Schemas of the serialized model. Implies serde. Forwards to
@@ -44,6 +53,8 @@ schema = [
     "elide-detection/schema",
     "elide-operator/schema",
     "elide-redaction/schema",
+    "elide-audio?/schema",
+    "elide-image?/schema",
     "elide-codec?/schema",
     "elide-format?/schema",
     "elide-engine?/schema",

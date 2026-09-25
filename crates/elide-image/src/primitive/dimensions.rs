@@ -16,13 +16,18 @@ use super::Coordinate;
 /// [`UnitBoundingBox::denormalize`](super::UnitBoundingBox::denormalize).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Dimensions<C: Coordinate> {
     /// Width.
     pub width: C,
     /// Height.
     pub height: C,
 }
+
+#[cfg(feature = "schema")]
+super::schema::coordinate_object_schema!(Dimensions {
+    width: C = "Width.",
+    height: C = "Height.",
+});
 
 impl<C: Coordinate> Dimensions<C> {
     /// Dimensions from an explicit width and height.

@@ -1,5 +1,7 @@
-//! String extension traits the text-shaped handlers build on: derive context
-//! words from a structural name, and splice a redaction into a byte range.
+//! String extension traits the text-shaped handlers build on.
+//!
+//! Derive context words from a structural name ([`ContextWords`]), and splice a
+//! redaction into a byte range ([`RedactRange`]).
 
 mod context_words;
 mod redact_range;

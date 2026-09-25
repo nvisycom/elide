@@ -1,5 +1,6 @@
-//! OCR: recognize the text laid out in an image and enrich the call with a
-//! [`Layout`](crate::modality::Layout).
+//! OCR: recognize the text laid out in an image.
+//!
+//! Enriches the call with a [`Layout`](crate::modality::Layout).
 //!
 //! The [`OcrBackend`] trait covers every OCR engine, hosted document-AI APIs
 //! (Google Document AI, Azure, AWS Textract), local engines (Tesseract, PaddleOCR
