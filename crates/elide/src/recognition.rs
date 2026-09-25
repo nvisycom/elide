@@ -86,20 +86,26 @@ pub mod context {
 /// text and images.
 #[cfg(feature = "llm")]
 #[cfg_attr(docsrs, doc(cfg(feature = "llm")))]
-#[doc(no_inline)]
-pub use elide_llm as llm;
+pub mod llm {
+    #[doc(inline)]
+    pub use elide_llm::*;
+}
 /// Model-based named-entity recognition: detect entities and their
 /// language.
 #[cfg(feature = "ner")]
 #[cfg_attr(docsrs, doc(cfg(feature = "ner")))]
-#[doc(no_inline)]
-pub use elide_ner as ner;
+pub mod ner {
+    #[doc(inline)]
+    pub use elide_ner::*;
+}
 /// Dictionary- and pattern-based recognition: match entities by regex
 /// and term lists.
 #[cfg(feature = "pattern")]
 #[cfg_attr(docsrs, doc(cfg(feature = "pattern")))]
-#[doc(no_inline)]
-pub use elide_pattern as pattern;
+pub mod pattern {
+    #[doc(inline)]
+    pub use elide_pattern::*;
+}
 
 /// EXIF metadata recognition: surface an image's privacy-relevant EXIF fields
 /// as `Entity<Metadata>` values.

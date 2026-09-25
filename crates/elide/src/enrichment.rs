@@ -22,5 +22,7 @@ pub use elide_image::ocr;
 /// Language detection for language-aware recognizers and policies.
 #[cfg(feature = "lingua")]
 #[cfg_attr(docsrs, doc(cfg(feature = "lingua")))]
-#[doc(no_inline)]
-pub use elide_lingua as lingua;
+pub mod lingua {
+    #[doc(inline)]
+    pub use elide_lingua::*;
+}
