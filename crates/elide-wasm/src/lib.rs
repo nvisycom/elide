@@ -15,7 +15,7 @@
 //! codec, the codec decodes the bytes into a modality, and the pipeline
 //! dispatches to the matching detect-and-redact stage. The rich Rust objects
 //! stay in wasm memory behind the handles; only config and the
-//! [`RedactionResult`](result::RedactionResult) cross the boundary as data.
+//! [`Report`](orchestrator::Report) cross the boundary as data.
 //!
 //! The whole pipeline is `async`, and on wasm its futures are driven by the
 //! browser's own event loop through [`wasm_bindgen_futures`] — there is no Tokio
@@ -29,7 +29,6 @@ pub mod layer;
 pub mod operator;
 pub mod orchestrator;
 pub mod recognizer;
-pub mod result;
 pub mod rule;
 
 use wasm_bindgen::prelude::*;

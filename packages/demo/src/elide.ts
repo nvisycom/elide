@@ -6,14 +6,14 @@
 // pipeline handle from the selected sources, reuses it across redactions, and
 // frees it safely even when the sources change mid-redaction.
 
-import { Orchestrator, type Finding } from "@nvisy/elide";
+import { Orchestrator, type Entity } from "@nvisy/elide";
 import { Analyzer, Recognizer } from "@nvisy/elide/analyzer";
 import { Anonymizer, Label, Operator, Rule } from "@nvisy/elide/anonymizer";
 
-export type { Finding } from "@nvisy/elide";
+export type { Entity } from "@nvisy/elide";
 
 /** A redaction result with the redacted bytes decoded back to text. */
-export type TextRedaction = { redacted: string; findings: Finding[] };
+export type TextRedaction = { redacted: string; entities: Entity[] };
 
 /** Which built-in recognizer sources the pipeline draws on. */
 export type Sources = { patterns: boolean; dictionaries: boolean };
@@ -79,7 +79,7 @@ export class Pipeline {
       const result = await active.redact(bytes, "txt");
       return {
         redacted: new TextDecoder().decode(result.redacted),
-        findings: result.findings,
+        entities: result.entities,
       };
     } finally {
       this.#inFlight = null;

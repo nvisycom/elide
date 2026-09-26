@@ -38,7 +38,7 @@ and container metadata. It is Apache-2.0-licensed and explicitly a *toolkit*: it
 detects and redacts, and does not host a server, schedule work, or persist an
 audit log (those belong to an embedding runtime). It compiles to WebAssembly, and
 a subset (pattern/dictionary detection plus the redaction operators) runs
-entirely in the browser via the published `@nvisy/elide-wasm` package. Its API is
+entirely in the browser via the published `@nvisy/elide` package. Its API is
 not yet stable.
 
 The clearest structural contrast: Presidio is a two-stage pipeline (AnalyzerEngine
@@ -188,7 +188,7 @@ durable append-only log; that belongs to the runtime that embeds the toolkit.
 through Spark/Databricks and Azure. `elide` is a Rust library with an
 `unsafe`-free core, plus a WebAssembly build: the pattern/dictionary detectors
 and the redaction operators run in the browser with no network, threads, or
-filesystem, shipped as the `@nvisy/elide-wasm` npm package with a live demo.
+filesystem, shipped as the `@nvisy/elide` npm package with a live demo.
 `elide` intentionally ships no server; a gateway or orchestrating runtime is a
 separate concern.
 

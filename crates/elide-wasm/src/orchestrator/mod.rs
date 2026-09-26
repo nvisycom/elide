@@ -3,12 +3,14 @@
 //! [`redact`](Orchestrator::redact).
 
 mod image;
+mod report;
 
-use elide::Orchestrator as CoreOrchestrator;
 use elide::prelude::*;
+use elide::{Orchestrator as CoreOrchestrator, Report as CoreReport};
 use tsify::Ts;
 use wasm_bindgen::prelude::*;
 
+pub use self::report::{Entity, Location, Modality, Report};
 use crate::analyzer::{Analyzer, StageModality};
 use crate::anonymizer::Anonymizer;
 use crate::error::{ElideError, ElideErrorKind};
@@ -123,11 +125,7 @@ impl Orchestrator {
     /// Rejects with an [`ElideError`] if the format is unknown or the pipeline
     /// fails.
     #[wasm_bindgen]
-    pub async fn redact(
-        &self,
-        bytes: Vec<u8>,
-        hint: String,
-    ) -> Result<Ts<crate::result::RedactionResult>, ElideError> {
+    pub async fn redact(&self, bytes: Vec<u8>, hint: String) -> Result<Ts<Report>, ElideError> {
         let result = run(self, bytes, hint).await?;
         Ts::from_rust(&result).map_err(|e| {
             ElideError::new(
@@ -147,13 +145,7 @@ impl Orchestrator {
 
 /// The pipeline proper, returning the crate's own [`Result`] so the boundary
 /// only deals with [`ElideError`].
-async fn run(
-    pipeline: &Orchestrator,
-    bytes: Vec<u8>,
-    hint: String,
-) -> Result<crate::result::RedactionResult> {
-    use crate::result::{ByteRange, Finding, RedactionResult};
-
+async fn run(pipeline: &Orchestrator, bytes: Vec<u8>, hint: String) -> Result<Report> {
     let registry = FormatRegistry::with_builtin();
     let mut document = registry.document_with("input", &hint, bytes).await?;
     let report = pipeline
@@ -161,47 +153,75 @@ async fn run(
         .anonymize(&mut document, &Directives::new())
         .await?;
 
-    let mut findings = Vec::new();
-
-    // Text is the one modality whose location is a byte range in the decoded
-    // stream; the rest are located in their own coordinate space (a cell, a time
-    // span, a metadata key), so they carry no `range`.
-    if let Some(entities) = report.entities::<Text>() {
-        for entity in entities {
-            findings.push(Finding {
-                modality: Text::NAME.to_owned(),
-                label: entity.label.as_str().to_owned(),
-                range: entity.location.range().map(|r| ByteRange {
-                    start: r.start,
-                    end: r.end,
-                }),
-                confidence: f32::from(entity.confidence),
-            });
+    // Each modality locates its entities in its own coordinate space, so the
+    // `Location` is built per modality (a text byte span, an image box, an audio
+    // time span, a tabular cell, a metadata key).
+    let mut entities = Vec::new();
+    collect::<Text>(&report, &mut entities, Modality::Text, |e| {
+        e.location
+            .range()
+            .map(|r| Location::Text {
+                start: r.start,
+                end: r.end,
+            })
+            .unwrap_or(Location::Text { start: 0, end: 0 })
+    });
+    collect::<Tabular>(&report, &mut entities, Modality::Tabular, |e| {
+        Location::Tabular {
+            sheet: e.location.sheet_name.as_ref().map(|s| s.to_string()),
+            row: e.location.row_index,
+            column: e.location.column_index,
         }
-    }
-    collect_rangeless::<Tabular>(&report, &mut findings);
-    collect_rangeless::<Metadata>(&report, &mut findings);
-    collect_rangeless::<Image>(&report, &mut findings);
-    collect_rangeless::<Audio>(&report, &mut findings);
+    });
+    collect::<Image>(&report, &mut entities, Modality::Image, |e| {
+        let bbox = &e.location.bounding_box;
+        Location::Image {
+            x: bbox.min.x,
+            y: bbox.min.y,
+            width: bbox.width(),
+            height: bbox.height(),
+        }
+    });
+    collect::<Audio>(&report, &mut entities, Modality::Audio, |e| {
+        Location::Audio {
+            start_ms: e.location.span.start_millis(),
+            end_ms: e.location.span.end_millis(),
+            speaker: e.location.speaker_id.as_ref().map(|s| s.to_string()),
+        }
+    });
+    collect::<Metadata>(&report, &mut entities, Modality::Metadata, |e| {
+        Location::Metadata {
+            key: e.location.key.to_string(),
+        }
+    });
 
     let encoded = document.document.encode()?;
-    Ok(RedactionResult {
+    Ok(Report {
         redacted: encoded.as_bytes().to_vec(),
-        findings,
+        entities,
     })
 }
 
-/// Append the findings of a non-text modality `M`, whose location is not a byte
-/// range, so each finding carries only its label and confidence.
-fn collect_rangeless<M: Modality>(report: &Report, findings: &mut Vec<crate::result::Finding>) {
-    if let Some(entities) = report.entities::<M>() {
-        for entity in entities {
-            findings.push(crate::result::Finding {
-                modality: M::NAME.to_owned(),
-                label: entity.label.as_str().to_owned(),
-                range: None,
-                confidence: f32::from(entity.confidence),
-            });
-        }
+/// Append modality `M`'s entities, mapping each one's location to a [`Location`]
+/// with `locate`.
+fn collect<M: elide::modality::Modality>(
+    report: &CoreReport,
+    out: &mut Vec<Entity>,
+    modality: Modality,
+    locate: impl Fn(&elide::entity::Entity<M>) -> Location,
+) {
+    let Some(entities) = report.entities::<M>() else {
+        return;
+    };
+    for entity in entities {
+        out.push(Entity {
+            id: entity.id.to_string(),
+            modality,
+            label: entity.label.as_str().to_owned(),
+            location: locate(entity),
+            confidence: f32::from(entity.confidence),
+            language: entity.language.as_ref().map(|l| l.to_string()),
+            coref: entity.coref.as_ref().map(|c| c.as_str().to_owned()),
+        });
     }
 }

@@ -34,14 +34,14 @@ install-tools: ## Installs CLI tools required for development.
 	fi
 
 .PHONY: wasm-pkg
-wasm-pkg: ## Builds @nvisy/elide-wasm into packages/wasm/dist via wasm-pack.
+wasm-pkg: ## Builds @nvisy/elide into packages/wasm/dist via wasm-pack.
 	@$(call log,Adding wasm32 target...)
 	@rustup target add wasm32-unknown-unknown
 	@$(call log,Ensuring wasm-pack is installed...)
 	@command -v wasm-pack >/dev/null 2>&1 || \
 		cargo binstall wasm-pack --no-confirm || \
 		cargo install wasm-pack --locked
-	@$(call log,Building @nvisy/elide-wasm (release)...)
+	@$(call log,Building @nvisy/elide (release)...)
 	@# wasm-pack reads the wasm-bindgen version from Cargo.lock and fetches a
 	@# matching CLI itself; --no-pack skips its package.json so the hand-authored
 	@# packages/wasm/package.json (with exports + publishConfig) is authoritative.
