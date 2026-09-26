@@ -1,4 +1,4 @@
-//! The redaction rules: which entities an [`Operator`](crate::operator::Operator)
+//! The redaction rules: which entities an [`Operator`]
 //! acts on.
 //!
 //! Built with [`Rule::label`] (act on entities of one label) or [`Rule::fallback`]

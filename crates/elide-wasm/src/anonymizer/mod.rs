@@ -2,7 +2,7 @@
 //! Rust [`Anonymizer`](elide::redaction::Anonymizer) builder.
 //!
 //! A caller builds one per modality — [`Anonymizer::text`], [`Anonymizer::image`],
-//! … — folds in [`Rule`](crate::rule::Rule)s, and hands it to
+//! … — folds in [`Rule`]s, and hands it to
 //! [`Orchestrator::with`](crate::orchestrator::Orchestrator::with) alongside the
 //! matching analyzer. With no rules added, the stage uses a readable default
 //! policy. An operator that does not apply to the modality (a black box on text)

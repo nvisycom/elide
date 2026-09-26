@@ -4,7 +4,7 @@
 //! A recognizer is compiled once ([`Recognizer::pattern`]) or wired to a JS
 //! callback ([`Recognizer::ner`]) and handed to
 //! [`Analyzer::recognize`](crate::analyzer::Analyzer::recognize). Both shipped
-//! kinds recognize over any [`TextRecognizable`](elide::modality::TextRecognizable)
+//! kinds recognize over any [`TextRecognizable`]
 //! modality, so one handle folds into any text-shaped stage.
 
 mod ner;

@@ -1,6 +1,6 @@
 //! [`ElideError`]: the error every fallible export throws, as a real JS class.
 //!
-//! A [`wasm_bindgen`] class rather than a bare `Error`, so a caller can tell an
+//! A `wasm_bindgen` class rather than a bare `Error`, so a caller can tell an
 //! elide pipeline failure from any other with `e instanceof ElideError` and
 //! branch on its [`kind`](ElideError::kind).
 

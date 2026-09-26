@@ -1,6 +1,6 @@
 //! The composed pipeline: a fluent [`Orchestrator`] that folds per-modality
-//! detect-and-redact stages, and the [`redact`]
-//! entry point that drives it over a blob.
+//! detect-and-redact stages, and drives them over a blob with
+//! [`redact`](Orchestrator::redact).
 
 mod image;
 
@@ -18,8 +18,8 @@ use crate::error::{ElideError, ElideErrorKind};
 /// built-in codec registry and label catalog.
 ///
 /// Add a modality's stage with [`with`](Self::with) — an [`Analyzer`] paired with
-/// the modality's redaction policy — then run it over a blob with [`redact`].
-/// Reusable across calls.
+/// the modality's redaction policy — then run it over a blob with
+/// [`redact`](Self::redact). Reusable across calls.
 #[wasm_bindgen]
 pub struct Orchestrator {
     orchestrator: CoreOrchestrator,
