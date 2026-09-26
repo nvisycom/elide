@@ -16,9 +16,10 @@ use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
 
 use super::exif_handler::EXIF_HINT;
+use crate::ImageBuffer;
+use crate::exif::ExifPolicy;
 use crate::modality::{Image, ImageData, ImageLocation};
 use crate::primitive::{BoundingBox, Dimensions, Point};
-use crate::{ExifPolicy, ImageBuffer};
 
 /// The `#exif` sub-part id: the image's own bytes, re-read as `Metadata`.
 const EXIF_PART_ID: &str = "#exif";
@@ -240,9 +241,10 @@ mod tests {
 
     use super::super::exif_handler::ExifLoader;
     use super::*;
+    use crate::exif::ExifPolicy;
     use crate::modality::ImageReplacement;
     use crate::primitive::Color;
-    use crate::{ExifPolicy, ImageBuffer, test_util};
+    use crate::{ImageBuffer, test_util};
 
     const JPEG: &str = "elide.image.jpeg";
     const PNG: &str = "elide.image.png";

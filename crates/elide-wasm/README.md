@@ -6,20 +6,32 @@ WebAssembly bindings that run the Elide detect-and-redact pipeline in a browser.
 
 ## Overview
 
-A thin WebAssembly boundary over the Elide facade. It exposes the pipeline as a
-set of opaque handles a caller composes from JavaScript — a recognizer built
-from a config, folded into an analyzer, paired with an anonymizer — and one
-`redact` call that runs them over a piece of text and returns the redacted text
-plus the entities that were found. It carries no detection logic of its own; the
-whole pipeline is the same one the native toolkit runs.
+A thin WebAssembly boundary over the Elide facade, exposed to JavaScript as a
+fluent builder that mirrors the toolkit's own `Orchestrator`. A caller composes
+a per-modality detect side — an `Analyzer` folding recognizers, enrichers, and
+reconcile/filter layers — with an optional redact side — an `Anonymizer` folding
+`Rule`s over `Operator`s — and adds each stage to an `Orchestrator` with `with`.
+`Orchestrator.redact` then runs the pipeline over a blob, dispatching by the
+format hint to the matching stage and returning the redacted bytes plus the
+entities found. It carries no detection logic of its own; the whole pipeline is
+the same one the native toolkit runs.
+
+Every modality the browser can hand over as bytes is covered: text and tabular
+(pattern and NER recognizers scan the decoded text or cells), image (its EXIF
+metadata is scrubbed, and with an OCR enricher its rendered text is read and
+matched regions blacked out), and audio (with an STT enricher its transcript is
+scanned and matched spans silenced). The models the browser supplies — NER, OCR,
+STT — arrive as async JavaScript callbacks; language detection is a built-in
+pure-Rust enricher.
 
 The pipeline is asynchronous, and in the browser its work is driven by the
 page's own event loop rather than a Rust async runtime, so nothing here spawns
 threads, opens sockets, or touches a filesystem. Only the parts of the toolkit
-that compile to WebAssembly are pulled in — pattern and dictionary detection,
-the redaction operators, the pseudonymizer, and the plain-text codec; the
-model-backed, native-codec, and network features (audio, PDF rendering, hosted
-language models) are deliberately left out of the browser build.
+that compile to WebAssembly are pulled in — detection and redaction, the
+plain-text, image, and WAV codecs, and the pure-Rust enrichers; the native
+codecs and engines (MP3, PDF, office formats, in-process OCR/STT/LLM models) are
+deliberately left out of the browser build, their models delegated to JavaScript
+instead.
 
 The rich Rust objects stay in wasm memory behind the handles, and only the
 config and the redaction result cross the boundary as data, typed through

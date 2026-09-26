@@ -4,6 +4,7 @@
 
 #[cfg(any(feature = "html", feature = "xml"))]
 mod markup;
+pub mod primitive;
 #[cfg(feature = "csv")]
 mod tabular;
 #[cfg(any(feature = "txt", feature = "json"))]
@@ -14,7 +15,7 @@ mod text;
 pub use self::markup::xml_format;
 #[cfg(feature = "html")]
 #[cfg_attr(docsrs, doc(cfg(feature = "html")))]
-pub use self::markup::{ScriptPolicy, html_format, html_format_with};
+pub use self::markup::{html_format, html_format_with};
 #[cfg(feature = "csv")]
 #[cfg_attr(docsrs, doc(cfg(feature = "csv")))]
 pub use self::tabular::{csv_format, csv_format_with};

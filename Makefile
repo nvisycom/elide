@@ -34,20 +34,24 @@ install-tools: ## Installs CLI tools required for development.
 	fi
 
 .PHONY: wasm-pkg
-wasm-pkg: ## Builds @nvisy/elide-wasm into packages/wasm/dist via wasm-pack.
+wasm-pkg: ## Builds @nvisy/elide into packages/wasm/dist via wasm-pack.
 	@$(call log,Adding wasm32 target...)
 	@rustup target add wasm32-unknown-unknown
 	@$(call log,Ensuring wasm-pack is installed...)
 	@command -v wasm-pack >/dev/null 2>&1 || \
 		cargo binstall wasm-pack --no-confirm || \
 		cargo install wasm-pack --locked
-	@$(call log,Building @nvisy/elide-wasm (release)...)
+	@$(call log,Building @nvisy/elide (release)...)
 	@# wasm-pack reads the wasm-bindgen version from Cargo.lock and fetches a
 	@# matching CLI itself; --no-pack skips its package.json so the hand-authored
 	@# packages/wasm/package.json (with exports + publishConfig) is authoritative.
 	@# --out-dir is relative to the crate manifest.
 	@wasm-pack build crates/elide-wasm --release --target bundler --no-pack \
 		--out-dir ../../packages/wasm/dist --out-name elide_wasm
+	@$(call log,Generating Label constants from the builtin catalog...)
+	@# Emits packages/wasm/label.{js,d.ts} from `cargo run --example labels`,
+	@# so the JS `Label` set stays in sync with the Rust label catalog.
+	@node scripts/gen-labels.mjs
 	@$(call log,Copying logo from the master asset...)
 	@mkdir -p packages/demo/public
 	@cp .github/assets/logo.svg packages/demo/public/logo.svg

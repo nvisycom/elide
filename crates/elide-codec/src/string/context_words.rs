@@ -3,9 +3,10 @@
 //! The words a recognizer's context boost matches on.
 
 /// Turn a structural *name* — an XML element or attribute name, a JSON object
-/// key — into context words for the value it labels, so a recognizer's context
-/// boost can fire on it (an `<ssn>` element or an `"ssn"` key vouches for its
-/// content the way a CSV header vouches for its cell).
+/// key — into context words for the value it labels.
+///
+/// So a recognizer's context boost can fire on it: an `<ssn>` element or an
+/// `"ssn"` key vouches for its content the way a CSV header vouches for its cell.
 pub trait ContextWords {
     /// Split into component words, borrowed from the name: a `camelCase` /
     /// `PascalCase` name breaks on each lower→upper transition, and `_` / `-`

@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@nvisy/elide-wasm": "*"
+    "@nvisy/elide": "*"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",

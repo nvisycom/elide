@@ -36,9 +36,7 @@ mod xml_handler;
 mod xml_loader;
 
 #[cfg(feature = "html")]
-pub use self::html_handler::{
-    ScriptPolicy, format as html_format, format_with as html_format_with,
-};
+pub use self::html_handler::{format as html_format, format_with as html_format_with};
 #[cfg(feature = "html")]
 pub(crate) use self::html_loader::HtmlLoader;
 #[cfg(feature = "xml")]

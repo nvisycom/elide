@@ -15,7 +15,7 @@ use elide_core::recognition::Scope;
 use elide_detection::Analyzer;
 use elide_engine::{Directives, Document, Orchestrator};
 use elide_format::FormatRegistry;
-use elide_image::ExifRecognizer;
+use elide_image::exif::ExifRecognizer;
 use elide_image::modality::Image;
 use elide_operator::operators::Erase;
 use elide_redaction::{Anonymizer, Rule};

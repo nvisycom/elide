@@ -1,17 +1,23 @@
-//! EXIF metadata read, strip, and field-level removal.
+//! EXIF metadata read, strip, and field-level removal, plus the
+//! [`ExifPolicy`] re-encode config and the [`ExifRecognizer`] that surfaces
+//! privacy-relevant fields as `Entity<Metadata>`.
 //!
 //! Backed by `little_exif`, the one permissive pure-Rust crate that both reads
 //! and edits EXIF for JPEG, PNG, and TIFF. Its parser can panic on malformed
-//! input, so
-//! every call into it is wrapped in a panic guard ([`guard`]): a panic becomes a
+//! input, so every call into it is wrapped in a panic guard: a panic becomes a
 //! fail-closed error, never an aborted process, since this runs on the
 //! redaction path where a crash mid-strip is unacceptable.
 //!
-//! The entry point is [`ImageBuffer`](crate::ImageBuffer), which opens the image
-//! once and drives these helpers with a format it already knows; nothing here
-//! sniffs magic bytes.
+//! The entry point is [`ImageBuffer`], which opens the image once and drives
+//! these helpers with a format it already knows; nothing here sniffs magic
+//! bytes.
+//!
+//! [`ExifPolicy`]: crate::exif::ExifPolicy
+//! [`ExifRecognizer`]: crate::exif::ExifRecognizer
+//! [`ImageBuffer`]: crate::ImageBuffer
 
 mod entity;
+mod policy;
 mod recognizer;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -21,8 +27,8 @@ use little_exif::exif_tag::ExifTag;
 use little_exif::filetype::FileExtension;
 use little_exif::metadata::Metadata as ExifMetadata;
 
+pub use self::policy::ExifPolicy;
 pub use self::recognizer::ExifRecognizer;
-use crate::policy::ExifPolicy;
 
 /// The privacy-relevant metadata read out of an image: the fields that can
 /// identify a person, place, device, or time.
