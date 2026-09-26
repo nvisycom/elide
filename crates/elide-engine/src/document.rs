@@ -63,9 +63,11 @@ mod sealed {
     pub trait Sealed {}
 }
 
-/// One or many [`Document`]s, so [`analyze`], [`re_analyze`], [`anonymize_with`],
-/// and [`anonymize`] accept a single `&mut Document` or a `&mut [Document]`
-/// interchangeably: a single document is a one-element slice.
+/// One or many [`Document`]s, accepted interchangeably by the pipeline methods.
+///
+/// So [`analyze`], [`re_analyze`], [`anonymize_with`], and [`anonymize`] take a
+/// single `&mut Document` or a `&mut [Document]` alike: a single document is a
+/// one-element slice.
 ///
 /// Sealed, implemented only for [`Document`] and `[Document]`.
 ///
@@ -114,12 +116,12 @@ impl<T: AsDocuments + ?Sized> AsDocuments for &mut T {
 }
 
 /// Decode raw bytes straight into a named [`Document`], an extension trait on
-/// [`FormatRegistry`], so the codec stays byte-and-format only (a document
-/// carries no filename) while the engine attaches the name it owns.
+/// [`FormatRegistry`].
 ///
-/// [`document`] infers the format from the name's own extension (a real filename
-/// like `report.docx`); [`document_with`] takes the format explicitly, for a name
-/// that carries none or a misleading one.
+/// The codec stays byte-and-format only (a document carries no filename) while
+/// the engine attaches the name it owns. [`document`] infers the format from the
+/// name's own extension (a real filename like `report.docx`); [`document_with`]
+/// takes the format explicitly, for a name that carries none or a misleading one.
 ///
 /// Sealed, implemented only for [`FormatRegistry`].
 ///

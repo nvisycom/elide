@@ -56,9 +56,10 @@ impl<A> SpliceState<A> {
 
 /// A `Clone`-to-share handle to a [`SpliceState`], so an
 /// [`ExtractStream`](super::ExtractStream) and a [`Recombine`](crate::Recombine)
-/// share (and both see) the redacted items. The lock is held only inside these
-/// methods — a `Recombine` reads the redacted items through
-/// [`with_items`](Self::with_items) rather than locking directly.
+/// share (and both see) the redacted items.
+///
+/// The lock is held only inside these methods — a `Recombine` reads the redacted
+/// items through [`with_items`](Self::with_items) rather than locking directly.
 pub struct SharedSplice<A>(Arc<Mutex<SpliceState<A>>>);
 
 impl<A> Clone for SharedSplice<A> {

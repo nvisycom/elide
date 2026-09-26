@@ -66,9 +66,10 @@ pub trait DocumentLoader: Send + Sync + 'static {
     async fn decode(&self, content: ContentData) -> Result<Document>;
 }
 
-/// A [`Loader`] wrapped so it produces a leaf [`Document`] (its one handler as a
-/// stream, with a trivial recombiner). The transitional bridge for a leaf
-/// format that has only a [`Loader`] and no sub-parts.
+/// A [`Loader`] wrapped so it produces a leaf [`Document`].
+///
+/// Its one handler becomes a stream, with a trivial recombiner: the bridge for a
+/// leaf format that has only a [`Loader`] and no sub-parts.
 pub struct LeafLoader<L>(pub L);
 
 #[async_trait::async_trait]

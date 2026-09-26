@@ -5,9 +5,6 @@
 mod buffer;
 #[cfg(feature = "codec")]
 pub mod codec;
-/// EXIF metadata: the [`ExifPolicy`](exif::ExifPolicy) re-encode config and the
-/// [`ExifRecognizer`](exif::ExifRecognizer) that surfaces privacy-relevant
-/// fields as `Entity<Metadata>`.
 #[cfg(feature = "exif")]
 #[cfg_attr(docsrs, doc(cfg(feature = "exif")))]
 pub mod exif;
