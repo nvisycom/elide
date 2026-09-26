@@ -38,8 +38,9 @@ const orchestrator = new Orchestrator().with(
 );
 
 const bytes = new TextEncoder().encode("Email me at dana.reed@example.com.");
-const { redacted, findings } = await orchestrator.redact(bytes, "txt");
-// -> "Email me at [EMAIL]."
+const { redacted, entities } = await orchestrator.redact(bytes, "txt");
+new TextDecoder().decode(redacted); // -> "Email me at [EMAIL]."
+entities; // -> the detected entities, each with a label and location
 ```
 
 An `Orchestrator` pairs a detect side (an `Analyzer`) with an optional redact
