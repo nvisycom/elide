@@ -1,25 +1,27 @@
 //! The pattern recognizer building block.
 
-use elide::recognition::context::Enhanced;
 use elide::recognition::pattern::PatternRecognizer;
-use tsify::Ts;
+use serde::Deserialize;
+use tsify::{Ts, Tsify};
 use wasm_bindgen::prelude::*;
 
-use crate::PatternRecognizerConfig;
+use super::RecognizerHandle;
 
-/// A compiled recognizer, ready to be folded into an analyzer.
+/// Which built-in recognizer sources a pattern recognizer draws on.
 ///
-/// Opaque: the wrapped recognizer is not `Clone`, so
-/// [`create_analyzer`](super::create_analyzer) consumes this handle. Reusing it
-/// afterwards throws a null-pointer error.
-#[wasm_bindgen]
-pub struct RecognizerHandle(Enhanced<PatternRecognizer>);
-
-impl RecognizerHandle {
-    /// The wrapped recognizer, consumed when folded into an analyzer.
-    pub(super) fn into_inner(self) -> Enhanced<PatternRecognizer> {
-        self.0
-    }
+/// `Tsify` generates the matching TypeScript `interface` (with camelCase
+/// fields), so the JS side passes a typed
+/// `{ builtinPatterns, builtinDictionaries }` object. With both `false`, the
+/// recognizer detects nothing. It crosses the boundary as a
+/// [`Ts<PatternRecognizerConfig>`], tsify's transparent wrapper that
+/// deserializes inside the factory without leaking a table slot.
+#[derive(Deserialize, Tsify)]
+#[serde(rename_all = "camelCase")]
+pub struct PatternRecognizerConfig {
+    /// Enable the shipped regex patterns (emails, phone numbers, cards, URLs).
+    pub builtin_patterns: bool,
+    /// Enable the shipped dictionaries.
+    pub builtin_dictionaries: bool,
 }
 
 /// Compile a pattern recognizer from the selected built-in sources.
@@ -43,5 +45,5 @@ pub fn create_pattern_recognizer(
     let recognizer = builder
         .build_context_enhanced()
         .map_err(|e| JsError::new(&e.to_string()))?;
-    Ok(RecognizerHandle(recognizer))
+    Ok(RecognizerHandle::pattern(recognizer))
 }
