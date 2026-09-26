@@ -6,8 +6,8 @@
 // pipeline handle from the selected sources, reuses it across redactions, and
 // frees it safely even when the sources change mid-redaction.
 
-import { Analyzer, Orchestrator, type Finding } from "@nvisy/elide";
-import { Recognizer } from "@nvisy/elide/recognizer";
+import { Orchestrator, type Finding } from "@nvisy/elide";
+import { Analyzer, Recognizer } from "@nvisy/elide/analyzer";
 import { Anonymizer, Label, Operator, Rule } from "@nvisy/elide/anonymizer";
 
 export type { Finding } from "@nvisy/elide";

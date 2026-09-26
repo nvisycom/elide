@@ -89,10 +89,31 @@ impl NerBackend for JsCallbackBackend {
                 format!("NER callback returned an unreadable value: {e}"),
             )
         })?;
+        // The callback's byte offsets are untrusted: a reversed range, an end
+        // past the text, or an offset mid-character would produce a nonsensical
+        // or panicking span downstream. Reject them fail-closed.
+        let text = request.text;
         let spans = spans
             .into_iter()
-            .map(|s| NerSpan::new(s.label, s.score, s.start..s.end))
-            .collect();
+            .map(|s| {
+                if s.start > s.end
+                    || s.end > text.len()
+                    || !text.is_char_boundary(s.start)
+                    || !text.is_char_boundary(s.end)
+                {
+                    return Err(Error::new(
+                        ErrorKind::MalformedInput,
+                        format!(
+                            "NER callback returned an invalid span [{}, {}) for text of {} bytes",
+                            s.start,
+                            s.end,
+                            text.len()
+                        ),
+                    ));
+                }
+                Ok(NerSpan::new(s.label, s.score, s.start..s.end))
+            })
+            .collect::<Result<Vec<_>>>()?;
         Ok(NerResponse::new(spans))
     }
 }

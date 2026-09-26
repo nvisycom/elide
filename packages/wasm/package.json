@@ -14,12 +14,8 @@
     "dist",
     "index.js",
     "index.d.ts",
-    "enricher.js",
-    "enricher.d.ts",
-    "recognizer.js",
-    "recognizer.d.ts",
-    "layer.js",
-    "layer.d.ts",
+    "analyzer.js",
+    "analyzer.d.ts",
     "anonymizer.js",
     "anonymizer.d.ts",
     "label.js",
@@ -33,17 +29,9 @@
       "types": "./index.d.ts",
       "default": "./index.js"
     },
-    "./enricher": {
-      "types": "./enricher.d.ts",
-      "default": "./enricher.js"
-    },
-    "./recognizer": {
-      "types": "./recognizer.d.ts",
-      "default": "./recognizer.js"
-    },
-    "./layer": {
-      "types": "./layer.d.ts",
-      "default": "./layer.js"
+    "./analyzer": {
+      "types": "./analyzer.d.ts",
+      "default": "./analyzer.js"
     },
     "./anonymizer": {
       "types": "./anonymizer.d.ts",

@@ -76,10 +76,26 @@ impl SttBackend for JsCallbackBackend {
                 format!("STT callback returned an unreadable value: {e}"),
             )
         })?;
+        // The callback's time offsets are untrusted: reject a reversed span
+        // fail-closed rather than let it be silently clamped to zero length.
         let segments = segments
             .into_iter()
-            .map(|s| TranscriptSegment::new(TimeSpan::from_millis(s.start_ms, s.end_ms), s.text))
-            .collect();
+            .map(|s| {
+                if s.start_ms > s.end_ms {
+                    return Err(Error::new(
+                        ErrorKind::MalformedInput,
+                        format!(
+                            "STT callback returned a reversed span [{} ms, {} ms)",
+                            s.start_ms, s.end_ms
+                        ),
+                    ));
+                }
+                Ok(TranscriptSegment::new(
+                    TimeSpan::from_millis(s.start_ms, s.end_ms),
+                    s.text,
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
         Ok(SttResponse::new(segments))
     }
 }

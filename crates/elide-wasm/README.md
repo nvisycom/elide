@@ -6,14 +6,15 @@ WebAssembly bindings that run the Elide detect-and-redact pipeline in a browser.
 
 ## Overview
 
-A thin WebAssembly boundary over the Elide facade. It exposes the pipeline as a
-set of opaque handles a caller composes from JavaScript — recognizers (built
-from a config or a JS callback) and enrichers folded per modality onto a
-`PipelineBuilder` — and one `redact` call that runs the resulting pipeline over
-a blob, dispatching by the format hint to the matching detect-and-redact stage
-and returning the redacted bytes plus the entities found. It carries no
-detection logic of its own; the whole pipeline is the same one the native
-toolkit runs.
+A thin WebAssembly boundary over the Elide facade, exposed to JavaScript as a
+fluent builder that mirrors the toolkit's own `Orchestrator`. A caller composes
+a per-modality detect side — an `Analyzer` folding recognizers, enrichers, and
+reconcile/filter layers — with an optional redact side — an `Anonymizer` folding
+`Rule`s over `Operator`s — and adds each stage to an `Orchestrator` with `with`.
+`Orchestrator.redact` then runs the pipeline over a blob, dispatching by the
+format hint to the matching stage and returning the redacted bytes plus the
+entities found. It carries no detection logic of its own; the whole pipeline is
+the same one the native toolkit runs.
 
 Every modality the browser can hand over as bytes is covered: text and tabular
 (pattern and NER recognizers scan the decoded text or cells), image (its EXIF
