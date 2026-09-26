@@ -1,7 +1,7 @@
 //! The OCR enricher building block: image text recognition in JavaScript.
 //!
 //! `elide-image` ships the OCR contract but no engine; the browser supplies one.
-//! [`create_ocr_enricher`] takes an async JS callback
+//! [`Enricher::ocr`](super::Enricher::ocr) takes an async JS callback
 //! `(image) => Promise<OcrBlock[]>` and wraps it in a [`OcrBackend`] behind an
 //! [`OcrEnricher`], so a text recognizer can scan the recognized image text and
 //! matched regions are redacted from the pixels.
@@ -16,8 +16,6 @@ use send_wrapper::SendWrapper;
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
-
-use super::ImageEnricherHandle;
 
 /// One recognized text block the JS callback returns, in image-pixel
 /// coordinates.
@@ -97,23 +95,12 @@ impl OcrBackend for JsCallbackBackend {
     }
 }
 
-/// Build an OCR enricher whose recognition is a JavaScript `callback`.
-///
-/// The callback is `(image: Uint8Array) => Promise<OcrBlock[]>`, where an
-/// `OcrBlock` is `{ text, x, y, width, height }` in image-pixel coordinates. It
-/// runs on the browser event loop; the enricher awaits it.
-///
-/// # Errors
-///
-/// Propagates a build error from the enricher configuration.
-#[wasm_bindgen(js_name = createOcrEnricher)]
-pub fn create_ocr_enricher(
+/// Build an OCR enricher whose recognition is the JavaScript `callback`.
+pub(super) fn build_ocr(
     callback: Function,
-) -> std::result::Result<ImageEnricherHandle, JsError> {
-    let enricher = OcrEnricher::builder()
+) -> std::result::Result<OcrEnricher, crate::error::ElideError> {
+    Ok(OcrEnricher::builder()
         .with_name("js-callback-ocr")
         .with_backend(JsCallbackBackend::new(callback))
-        .build()
-        .map_err(|e| JsError::new(&e.to_string()))?;
-    Ok(ImageEnricherHandle::new(enricher))
+        .build()?)
 }

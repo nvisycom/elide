@@ -6,25 +6,31 @@
 //! browser, across every modality the browser can hand over as bytes.
 //!
 //! The pipeline is exposed to JavaScript as a set of opaque handles composed by
-//! factory functions, mirroring the [`elide`] facade's own split between
+//! static factory methods, mirroring the [`elide`] facade's own split between
 //! detection and redaction. JavaScript builds recognizers (a
-//! [`RecognizerHandle`](recognizer::RecognizerHandle) from patterns or a NER
-//! callback), folds them into a modality on a [`PipelineBuilder`](pipeline::PipelineBuilder),
-//! and drives the resulting [`PipelineHandle`](pipeline::PipelineHandle) over a
-//! blob with [`redact`](pipeline::redact): the format hint picks the codec, the
-//! codec decodes the bytes into a modality, and the pipeline dispatches to the
-//! matching detect-and-redact stage. The rich Rust objects stay in wasm memory
-//! behind the handles; only config and the
+//! [`Recognizer`](recognizer::Recognizer) from patterns or a NER callback) and
+//! enrichers, folds them into an [`Analyzer`](analyzer::Analyzer) per modality,
+//! adds each stage to an [`Orchestrator`](orchestrator::Orchestrator), and drives it
+//! over a blob with [`redact`](orchestrator::Orchestrator::redact): the format hint picks the
+//! codec, the codec decodes the bytes into a modality, and the pipeline
+//! dispatches to the matching detect-and-redact stage. The rich Rust objects
+//! stay in wasm memory behind the handles; only config and the
 //! [`RedactionResult`](result::RedactionResult) cross the boundary as data.
 //!
 //! The whole pipeline is `async`, and on wasm its futures are driven by the
 //! browser's own event loop through [`wasm_bindgen_futures`] — there is no Tokio
 //! runtime.
 
+pub mod analyzer;
+pub mod anonymizer;
 pub mod enricher;
-pub mod pipeline;
+pub mod error;
+pub mod layer;
+pub mod operator;
+pub mod orchestrator;
 pub mod recognizer;
 pub mod result;
+pub mod rule;
 
 use wasm_bindgen::prelude::*;
 
@@ -33,4 +39,14 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen(start)]
 pub fn start() {
     console_error_panic_hook::set_once();
+}
+
+/// Every built-in label id, in catalog order (`email_address`, `phone_number`,
+/// …). The single source of truth for the generated `Label` constants in the
+/// `@nvisy/elide` package; see the `labels` example that emits them as JSON.
+pub fn builtin_label_ids() -> Vec<String> {
+    elide::entity::LabelCatalog::with_builtins()
+        .iter()
+        .map(|label| label.id().to_owned())
+        .collect()
 }

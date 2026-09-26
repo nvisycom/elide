@@ -1,28 +1,30 @@
 //! The detection building blocks: a recognizer, ready to fold into a modality's
-//! analyzer on the [`PipelineBuilder`](crate::pipeline::PipelineBuilder).
+//! analyzer.
 //!
-//! A recognizer is compiled once (patterns) or wired to a JS callback (NER) and
-//! handed to a modality's `with_*` method. Both shipped kinds recognize over any
-//! [`TextRecognizable`](elide::modality::TextRecognizable) modality, so one
-//! handle folds into either the text or the tabular stage.
+//! A recognizer is compiled once ([`Recognizer::pattern`]) or wired to a JS
+//! callback ([`Recognizer::ner`]) and handed to
+//! [`Analyzer::recognize`](crate::analyzer::Analyzer::recognize). Both shipped
+//! kinds recognize over any [`TextRecognizable`](elide::modality::TextRecognizable)
+//! modality, so one handle folds into any text-shaped stage.
 
 mod ner;
 mod pattern;
 
-use elide::modality::text::Text;
 use elide::modality::{Modality, TextRecognizable};
-use elide::recognition::Recognizer;
+use elide::recognition::Recognizer as RecognizerTrait;
 use elide::recognition::context::Enhanced;
 use elide::recognition::ner::NerRecognizer;
 use elide::recognition::pattern::PatternRecognizer;
+use js_sys::Function;
+use tsify::Ts;
 use wasm_bindgen::prelude::*;
 
-pub use self::ner::create_ner_recognizer;
-pub use self::pattern::create_pattern_recognizer;
+pub use self::pattern::PatternRecognizerConfig;
+use crate::error::ElideError;
 
 /// The shipped recognizer kinds, each generic over any text-recognizable
-/// modality; the enum lets one opaque handle serve both the text and tabular
-/// stages without erasing the modality too early.
+/// modality; the enum lets one opaque handle serve every text-shaped stage
+/// without erasing the modality too early.
 enum Kind {
     /// A context-enhanced pattern recognizer.
     Pattern(Enhanced<PatternRecognizer>),
@@ -32,26 +34,45 @@ enum Kind {
 
 /// A compiled recognizer, ready to be folded into a modality's analyzer.
 ///
-/// Opaque: the wrapped recognizer is not `Clone`, so a modality's `with_*`
-/// method consumes each handle it is given. Reusing one afterwards throws a
-/// null-pointer error.
+/// Built with [`Recognizer::pattern`] or [`Recognizer::ner`] and consumed by
+/// [`Analyzer::recognize`](crate::analyzer::Analyzer::recognize). Opaque: the
+/// wrapped recognizer is not `Clone`, so each handle is consumed when folded in.
 #[wasm_bindgen]
-pub struct RecognizerHandle(Kind);
+pub struct Recognizer(Kind);
 
-impl RecognizerHandle {
-    /// Wrap a context-enhanced pattern recognizer.
-    pub(crate) fn pattern(recognizer: Enhanced<PatternRecognizer>) -> Self {
-        Self(Kind::Pattern(recognizer))
+#[wasm_bindgen]
+impl Recognizer {
+    /// Compile a pattern recognizer from the selected built-in sources.
+    ///
+    /// # Errors
+    ///
+    /// Propagates a build error from an invalid shipped rule, which cannot happen
+    /// with the built-in set.
+    #[wasm_bindgen(js_name = pattern)]
+    pub fn pattern(config: Ts<PatternRecognizerConfig>) -> Result<Recognizer, ElideError> {
+        Ok(Self(Kind::Pattern(self::pattern::build_pattern(config)?)))
     }
 
-    /// Wrap a NER recognizer.
-    pub(crate) fn ner(recognizer: NerRecognizer) -> Self {
-        Self(Kind::Ner(recognizer))
+    /// Build a NER recognizer whose inference is a JavaScript `callback`.
+    ///
+    /// The callback is `(text: string, labels: string[]) => Promise<NerSpan[]>`,
+    /// called on each recognition pass, where a `NerSpan` is
+    /// `{ label, start, end, score }` with byte offsets into `text`. It runs on
+    /// the browser event loop; the recognizer awaits it.
+    ///
+    /// # Errors
+    ///
+    /// Propagates a build error from the recognizer configuration.
+    #[wasm_bindgen(js_name = ner)]
+    pub fn ner(callback: Function) -> Result<Recognizer, ElideError> {
+        Ok(Self(Kind::Ner(self::ner::build_ner(callback)?)))
     }
+}
 
+impl Recognizer {
     /// Box the recognizer as `Recognizer<M>` for the modality it folds into.
     /// Both kinds recognize over any [`TextRecognizable`] modality.
-    pub(crate) fn into_recognizer<M>(self) -> Box<dyn Recognizer<M>>
+    pub(crate) fn into_recognizer<M>(self) -> Box<dyn RecognizerTrait<M>>
     where
         M: Modality + TextRecognizable,
     {
@@ -59,10 +80,5 @@ impl RecognizerHandle {
             Kind::Pattern(r) => Box::new(r),
             Kind::Ner(r) => Box::new(r),
         }
-    }
-
-    /// Box the recognizer for the text stage.
-    pub(crate) fn into_text(self) -> Box<dyn Recognizer<Text>> {
-        self.into_recognizer()
     }
 }

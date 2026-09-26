@@ -48,6 +48,10 @@ wasm-pkg: ## Builds @nvisy/elide-wasm into packages/wasm/dist via wasm-pack.
 	@# --out-dir is relative to the crate manifest.
 	@wasm-pack build crates/elide-wasm --release --target bundler --no-pack \
 		--out-dir ../../packages/wasm/dist --out-name elide_wasm
+	@$(call log,Generating Label constants from the builtin catalog...)
+	@# Emits packages/wasm/label.{js,d.ts} from `cargo run --example labels`,
+	@# so the JS `Label` set stays in sync with the Rust label catalog.
+	@node scripts/gen-labels.mjs
 	@$(call log,Copying logo from the master asset...)
 	@mkdir -p packages/demo/public
 	@cp .github/assets/logo.svg packages/demo/public/logo.svg

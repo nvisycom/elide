@@ -3,7 +3,7 @@
 //!
 //! `elide-ner` ships no model; the backend is caller-provided. On wasm the
 //! natural backend is the browser itself — a remote inference endpoint, a
-//! transformers.js model, a WebGPU pipeline. [`create_ner_recognizer`] takes an
+//! transformers.js model, a WebGPU pipeline. [`Recognizer::ner`](super::Recognizer::ner) takes an
 //! async JS callback `(text, labels) => Promise<NerSpan[]>` and wraps it in a
 //! `JsCallbackBackend`, so Rust runs the NER recognizer (scoring, alignment,
 //! label filtering) around whatever inference the app supplies.
@@ -17,8 +17,6 @@ use send_wrapper::SendWrapper;
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
-
-use super::RecognizerHandle;
 
 /// One span the JS callback returns, deserialized from a plain object.
 #[derive(Deserialize)]
@@ -110,22 +108,12 @@ fn js_to_error(value: JsValue) -> Error {
     Error::new(ErrorKind::Processing, message)
 }
 
-/// Build a NER recognizer whose inference is a JavaScript `callback`.
-///
-/// The callback is `(text: string, labels: string[]) => Promise<NerSpan[]>`,
-/// called on each recognition pass, where a `NerSpan` is
-/// `{ label, start, end, score }` with byte offsets into `text`. It runs on the
-/// browser event loop; the recognizer awaits it.
-///
-/// # Errors
-///
-/// Propagates a build error from the recognizer configuration.
-#[wasm_bindgen(js_name = createNerRecognizer)]
-pub fn create_ner_recognizer(callback: Function) -> std::result::Result<RecognizerHandle, JsError> {
-    let recognizer: NerRecognizer = NerRecognizer::builder()
+/// Build a NER recognizer whose inference is the JavaScript `callback`.
+pub(super) fn build_ner(
+    callback: Function,
+) -> std::result::Result<NerRecognizer, crate::error::ElideError> {
+    Ok(NerRecognizer::builder()
         .with_name("js-callback-ner")
         .with_backend(JsCallbackBackend::new(callback))
-        .build()
-        .map_err(|e| JsError::new(&e.to_string()))?;
-    Ok(RecognizerHandle::ner(recognizer))
+        .build()?)
 }

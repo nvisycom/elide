@@ -1,5 +1,5 @@
 {
-  "name": "@nvisy/elide-wasm",
+  "name": "@nvisy/elide",
   "version": "0.1.0",
   "type": "module",
   "description": "In-browser PII detection and redaction, compiled to WebAssembly.",
@@ -10,13 +10,44 @@
   },
   "homepage": "https://github.com/nvisycom/elide",
   "keywords": ["pii", "redaction", "webassembly", "wasm", "privacy"],
-  "files": ["dist"],
-  "module": "./dist/elide_wasm.js",
-  "types": "./dist/elide_wasm.d.ts",
+  "files": [
+    "dist",
+    "index.js",
+    "index.d.ts",
+    "enricher.js",
+    "enricher.d.ts",
+    "recognizer.js",
+    "recognizer.d.ts",
+    "layer.js",
+    "layer.d.ts",
+    "anonymizer.js",
+    "anonymizer.d.ts",
+    "label.js",
+    "label.d.ts",
+    "_shared.d.ts"
+  ],
+  "module": "./index.js",
+  "types": "./index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/elide_wasm.d.ts",
-      "default": "./dist/elide_wasm.js"
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    },
+    "./enricher": {
+      "types": "./enricher.d.ts",
+      "default": "./enricher.js"
+    },
+    "./recognizer": {
+      "types": "./recognizer.d.ts",
+      "default": "./recognizer.js"
+    },
+    "./layer": {
+      "types": "./layer.d.ts",
+      "default": "./layer.js"
+    },
+    "./anonymizer": {
+      "types": "./anonymizer.d.ts",
+      "default": "./anonymizer.js"
     }
   },
   "sideEffects": ["./dist/elide_wasm.js", "./dist/snippets/*"],

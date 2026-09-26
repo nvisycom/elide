@@ -1,7 +1,7 @@
 //! The STT enricher building block: speech-to-text in JavaScript.
 //!
 //! `elide-audio` ships the STT contract but no engine; the browser supplies one.
-//! [`create_stt_enricher`] takes an async JS callback
+//! [`Enricher::stt`](super::Enricher::stt) takes an async JS callback
 //! `(audio) => Promise<Segment[]>` and wraps it in a [`SttBackend`] behind an
 //! [`SttEnricher`], so a text recognizer can scan the transcript and matched
 //! time spans are silenced.
@@ -16,8 +16,6 @@ use send_wrapper::SendWrapper;
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
-
-use super::AudioEnricherHandle;
 
 /// One transcript segment the JS callback returns.
 #[derive(Deserialize)]
@@ -86,23 +84,12 @@ impl SttBackend for JsCallbackBackend {
     }
 }
 
-/// Build an STT enricher whose transcription is a JavaScript `callback`.
-///
-/// The callback is `(audio: Uint8Array) => Promise<Segment[]>`, where a
-/// `Segment` is `{ text, startMs, endMs }`. It runs on the browser event loop;
-/// the enricher awaits it.
-///
-/// # Errors
-///
-/// Propagates a build error from the enricher configuration.
-#[wasm_bindgen(js_name = createSttEnricher)]
-pub fn create_stt_enricher(
+/// Build an STT enricher whose transcription is the JavaScript `callback`.
+pub(super) fn build_stt(
     callback: Function,
-) -> std::result::Result<AudioEnricherHandle, JsError> {
-    let enricher = SttEnricher::builder()
+) -> std::result::Result<SttEnricher, crate::error::ElideError> {
+    Ok(SttEnricher::builder()
         .with_name("js-callback-stt")
         .with_backend(JsCallbackBackend::new(callback))
-        .build()
-        .map_err(|e| JsError::new(&e.to_string()))?;
-    Ok(AudioEnricherHandle::new(enricher))
+        .build()?)
 }

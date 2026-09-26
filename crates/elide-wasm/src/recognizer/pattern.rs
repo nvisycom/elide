@@ -1,11 +1,11 @@
 //! The pattern recognizer building block.
 
+use elide::recognition::context::Enhanced;
 use elide::recognition::pattern::PatternRecognizer;
 use serde::Deserialize;
 use tsify::{Ts, Tsify};
-use wasm_bindgen::prelude::*;
 
-use super::RecognizerHandle;
+use crate::error::{ElideError, ElideErrorKind};
 
 /// Which built-in recognizer sources a pattern recognizer draws on.
 ///
@@ -24,17 +24,17 @@ pub struct PatternRecognizerConfig {
     pub builtin_dictionaries: bool,
 }
 
-/// Compile a pattern recognizer from the selected built-in sources.
-///
-/// # Errors
-///
-/// Propagates a build error from an invalid shipped rule, which cannot happen
-/// with the built-in set.
-#[wasm_bindgen(js_name = createPatternRecognizer)]
-pub fn create_pattern_recognizer(
+/// Compile a context-enhanced pattern recognizer from the selected built-in
+/// sources.
+pub(super) fn build_pattern(
     config: Ts<PatternRecognizerConfig>,
-) -> Result<RecognizerHandle, JsError> {
-    let config = config.to_rust().map_err(|e| JsError::new(&e.to_string()))?;
+) -> Result<Enhanced<PatternRecognizer>, ElideError> {
+    let config = config.to_rust().map_err(|e| {
+        ElideError::new(
+            ElideErrorKind::Configuration,
+            format!("invalid pattern recognizer config: {e}"),
+        )
+    })?;
     let mut builder = PatternRecognizer::builder();
     if config.builtin_patterns {
         builder = builder.with_builtin_patterns();
@@ -42,8 +42,5 @@ pub fn create_pattern_recognizer(
     if config.builtin_dictionaries {
         builder = builder.with_builtin_dictionaries();
     }
-    let recognizer = builder
-        .build_context_enhanced()
-        .map_err(|e| JsError::new(&e.to_string()))?;
-    Ok(RecognizerHandle::pattern(recognizer))
+    Ok(builder.build_context_enhanced()?)
 }

@@ -11,10 +11,11 @@ export function renderFindings(findings: Finding[]): void {
   const { findingsBody, findingsPanel, noFindings } = elements;
   findingsBody.replaceChildren();
   for (const f of findings) {
+    const span = f.range ? `${f.range.start}-${f.range.end}` : "—";
     const tr = document.createElement("tr");
     tr.innerHTML =
       `<td class="font-mono">${escapeHtml(f.label)}</td>` +
-      `<td>${f.start}-${f.end}</td>` +
+      `<td>${span}</td>` +
       `<td>${f.confidence.toFixed(2)}</td>`;
     findingsBody.appendChild(tr);
   }

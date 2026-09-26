@@ -45,6 +45,10 @@ pub struct ByteRange {
 #[serde(rename_all = "camelCase")]
 pub struct RedactionResult {
     /// The input re-encoded with every matched entity redacted, as raw bytes.
+    ///
+    /// `serde_bytes` makes this cross as a `Uint8Array` (serde's `serialize_bytes`,
+    /// which serde-wasm-bindgen renders as one) rather than a plain `number[]`.
+    #[serde(with = "serde_bytes")]
     #[tsify(type = "Uint8Array")]
     pub redacted: Vec<u8>,
     /// Every entity the pipeline detected, across modalities.
