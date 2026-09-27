@@ -4,7 +4,6 @@
 use elide_core::entity::audit::{AuditEvent, ModelEvent};
 use elide_core::entity::{Entity, EntityCoRef, LabelRef};
 use elide_core::primitive::Confidence;
-use elide_image::ImageBuffer;
 use elide_image::modality::{Image, ImageData, ImageLocation};
 use elide_image::primitive::UnitBoundingBox;
 
@@ -16,13 +15,9 @@ impl LlmModality for Image {
 
     fn lift(batch: Candidates<ImageCandidate>, data: &ImageData) -> Vec<Entity<Image>> {
         // The model reports boxes in normalised `0.0..=1.0` coordinates; scaling
-        // them to pixels needs the image's pixel size, read from the container
-        // header (the authoritative source, unlike a cached dimension that could
-        // drift) — a header probe, not a full decode. If the bytes will not read
-        // there is nothing to scale against, so no candidate can be placed.
-        let Ok(dims) = ImageBuffer::dimensions_of(&data.bytes) else {
-            return Vec::new();
-        };
+        // them to pixels needs the image's pixel size, an intrinsic fact of the
+        // decoded payload (no re-probe, no drift).
+        let dims = data.dimensions();
 
         let mut out = Vec::with_capacity(batch.entities.len());
         for d in batch.entities {
@@ -83,8 +78,8 @@ mod tests {
     #[test]
     fn lift_denormalises_boxes_using_the_decoded_dimensions() {
         // A box over the left half of a 100x80 image scales to pixels 0..50 x
-        // 0..80, proving the dimensions come from decoding the bytes.
-        let data = ImageData::new(test_util::png(100, 80));
+        // 0..80, from the payload's intrinsic dimensions.
+        let data = test_util::image_data(test_util::png(100, 80));
         let batch = Candidates {
             entities: vec![candidate(0.0, 0.0, 0.5, 1.0)],
         };
@@ -94,15 +89,5 @@ mod tests {
         assert_eq!(bbox.min.x, 0.0);
         assert_eq!(bbox.max.x, 50.0);
         assert_eq!(bbox.max.y, 80.0);
-    }
-
-    #[test]
-    fn lift_drops_everything_when_the_bytes_do_not_decode() {
-        // With no pixel size to scale against, no candidate can be placed.
-        let data = ImageData::new(b"not an image".to_vec());
-        let batch = Candidates {
-            entities: vec![candidate(0.0, 0.0, 0.5, 1.0)],
-        };
-        assert!(Image::lift(batch, &data).is_empty());
     }
 }

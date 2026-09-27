@@ -11,7 +11,7 @@
 //! [`Document`]: elide_codec::Document
 //! [`Stream`]: elide_codec::Stream
 //! [`ImageBuffer`]: crate::ImageBuffer
-//! [`ImageDocumentLoader`]: super::document::ImageDocumentLoader
+//! [`ImageDocumentLoader`]: super::image_loader::ImageDocumentLoader
 
 /// Stamp out the `format()` / `format_with()` constructors for one image format.
 macro_rules! impl_image_handler {
@@ -57,11 +57,11 @@ macro_rules! impl_image_handler {
 
         /// Build this format's [`Format`](elide_codec::Format) from a configured
         /// fallback policy: a [`Document`](elide_codec::Document) format whose
-        /// loader is the shared [`ImageDocumentLoader`](super::document::ImageDocumentLoader).
+        /// loader is the shared [`ImageDocumentLoader`](super::image_loader::ImageDocumentLoader).
         fn format_from(policy: crate::exif::ExifPolicy) -> ::elide_codec::Format {
             ::elide_codec::Format::with_document_loader(
                 FORMAT_ID.clone(),
-                super::document::ImageDocumentLoader::new(FORMAT_ID.clone(), policy),
+                super::image_loader::ImageDocumentLoader::new(FORMAT_ID.clone(), policy),
             )
             .with_extensions([$($ext),*])
             .with_content_types([$($mime),*])

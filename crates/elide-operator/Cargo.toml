@@ -26,7 +26,13 @@ default = []
 ## Derive `serde::{Serialize, Deserialize}` on the operator types.
 serde = ["dep:serde", "elide-core/serde", "bytes/serde"]
 ## Derive `schemars::JsonSchema` on the operator types.
-schema = ["dep:schemars", "serde", "elide-core/schema"]
+schema = [
+    "dep:schemars",
+    "serde",
+    "elide-core/schema",
+    "elide-image?/schema",
+    "elide-audio?/schema",
+]
 
 ## The `audio` modality operators (`Silence`, `Beep`).
 audio = ["dep:elide-audio"]
@@ -83,3 +89,9 @@ schemars = { workspace = true, features = [], optional = true }
 [dev-dependencies]
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["rt", "macros"] }
+# A real decoded image payload for the image-operator tests (implies the
+# decoders), so a test builds an `ImageData` the way ingestion does.
+elide-image = { workspace = true, features = ["test-util"] }
+# Likewise a real audio payload for the audio-operator tests (`wav` provides the
+# fixture encoder `test_util::blank_audio_data` uses).
+elide-audio = { workspace = true, features = ["test-util", "wav"] }

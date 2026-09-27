@@ -1,180 +1,20 @@
-//! The image codec on the parts model: a raster image is a [`Document`] of two
-//! parts — the pixel [`Stream`] and the `#exif` [`Blob`] (the image's own bytes,
-//! re-read as the `Metadata` modality) — recombined by laying the redacted
-//! pixels over the metadata-stripped container.
+//! [`ImageDocumentLoader`]: decode image bytes into a two-part [`Document`] —
+//! the pixel stream and the `#exif` metadata blob.
 
-use std::sync::{Arc, Mutex};
-
-use bytes::Bytes;
 use elide_codec::content::ContentData;
 use elide_codec::{
-    Document, DocumentLoader, DocumentPart, EncodedPart, ErasedStream, FormatId, LocalId,
-    Recombine, Stream,
+    Document, DocumentLoader, DocumentPart, ErasedStream, FormatId, LocalId, Stream,
 };
 use elide_core::Result;
-use elide_core::modality::{Chunk, DataReader, DataWriter};
-use elide_core::redaction::Redactions;
 
+use super::EXIF_PART_ID;
 use super::exif_handler::EXIF_HINT;
+use super::image_recombine::ImageRecombine;
+use super::image_state::ImageState;
+use super::image_stream::PixelStream;
 use crate::ImageBuffer;
 use crate::exif::ExifPolicy;
-use crate::modality::{Image, ImageData, ImageLocation};
-use crate::primitive::{BoundingBox, Dimensions, Point};
-
-/// The `#exif` sub-part id: the image's own bytes, re-read as `Metadata`.
-const EXIF_PART_ID: &str = "#exif";
-
-/// The pixel body part id: the decoded (redacted) image.
-const PIXEL_PART_ID: &str = "pixels";
-
-/// The decoded image, shared between the pixel [`PixelStream`] and the
-/// [`ImageRecombine`] so a redaction on the stream is visible when the
-/// recombiner re-encodes. `Clone` shares the one buffer (an `Arc` bump); the
-/// lock is held only inside these methods.
-#[derive(Clone)]
-struct ImageState(Arc<Mutex<ImageBuffer>>);
-
-impl ImageState {
-    /// Wrap a decoded image buffer.
-    fn new(buffer: ImageBuffer) -> Self {
-        Self(Arc::new(Mutex::new(buffer)))
-    }
-
-    /// The image's pixel dimensions.
-    fn dimensions(&self) -> Dimensions<u32> {
-        self.0.lock().unwrap().dimensions()
-    }
-
-    /// Encode the current pixels to bytes, applying `policy` to the metadata.
-    fn encode(&self, policy: ExifPolicy) -> Result<Bytes> {
-        self.0.lock().unwrap().encode(policy)
-    }
-
-    /// Encode the current pixels laid over the metadata-stripped `container`.
-    fn encode_over_metadata(&self, container: &[u8]) -> Result<Bytes> {
-        self.0.lock().unwrap().encode_over_metadata(container)
-    }
-
-    /// Crop the region `location` addresses and encode it, or `None` when the
-    /// region falls outside the image.
-    fn crop_encode(&self, location: &ImageLocation) -> Result<Option<ImageData>> {
-        let buffer = self.0.lock().unwrap();
-        let Some(region) = location.bounding_box.to_pixels(buffer.dimensions()) else {
-            return Ok(None);
-        };
-        buffer
-            .crop(region)
-            .map(|raster| raster.encode())
-            .transpose()
-    }
-
-    /// Redact every region in `redactions` that intersects the image, in place.
-    fn redact(&self, redactions: Redactions<Image>) {
-        let mut buffer = self.0.lock().unwrap();
-        let dims = buffer.dimensions();
-        for (location, replacement) in redactions.into_iter() {
-            if let Some(region) = location.bounding_box.to_pixels(dims) {
-                buffer.redact(region, &replacement);
-            }
-        }
-    }
-}
-
-/// The pixel stream part: reads the whole frame as one chunk, redacts regions in
-/// place on the shared [`ImageState`], and re-encodes just the pixels (its
-/// metadata is handled by the `#exif` blob and the recombiner).
-struct PixelStream {
-    state: ImageState,
-    format_id: FormatId,
-    policy: ExifPolicy,
-    yielded: bool,
-}
-
-#[async_trait::async_trait]
-impl Stream<Image> for PixelStream {
-    fn format(&self) -> FormatId {
-        self.format_id.clone()
-    }
-
-    fn encode(&self) -> Result<ContentData> {
-        Ok(ContentData::new(self.state.encode(self.policy)?))
-    }
-
-    async fn read_next(&mut self) -> Result<Option<Chunk<Image>>> {
-        if self.yielded {
-            return Ok(None);
-        }
-        let dims = self.state.dimensions();
-        let bbox = BoundingBox::from_origin(
-            Point::new(0.0, 0.0),
-            Dimensions::new(dims.width as f64, dims.height as f64),
-        );
-        let data = ImageData::new(self.state.encode(self.policy)?);
-        self.yielded = true;
-        Ok(Some(Chunk {
-            location: ImageLocation::new(bbox),
-            data,
-            hints: Vec::new(),
-        }))
-    }
-}
-
-#[async_trait::async_trait]
-impl DataReader<Image> for PixelStream {
-    async fn read_at(&self, location: &ImageLocation) -> Result<Option<ImageData>> {
-        self.state.crop_encode(location)
-    }
-}
-
-#[async_trait::async_trait]
-impl DataWriter<Image> for PixelStream {
-    async fn write_at(&mut self, redactions: Redactions<Image>) -> Result<()> {
-        self.state.redact(redactions);
-        Ok(())
-    }
-}
-
-/// The recombiner: fold the redacted pixels (from the shared buffer) and the
-/// `#exif` blob into one image.
-///
-/// The `#exif` blob is the image's own bytes at decode. When a metadata pipeline
-/// redacted it, its bytes differ from `original_exif`, so the redacted pixels are
-/// laid over that metadata-stripped container (`encode_over_metadata`). When the
-/// blob is untouched — its bytes still equal `original_exif` — no metadata
-/// pipeline ran, so the fallback [`ExifPolicy`] governs the metadata instead.
-struct ImageRecombine {
-    state: ImageState,
-    policy: ExifPolicy,
-    /// The `#exif` blob's bytes at decode, to detect whether it was redacted.
-    original_exif: Bytes,
-}
-
-impl Recombine for ImageRecombine {
-    fn assemble(&self, parts: &[EncodedPart]) -> Result<ContentData> {
-        // A metadata pipeline redacts the `#exif` blob in place, changing its
-        // bytes; only then does its container matter here.
-        let exif = parts.iter().find(|p| p.id.as_str() == EXIF_PART_ID);
-        let bytes = if exif.is_some_and(|p| p.bytes != self.original_exif) {
-            // A metadata pipeline stripped the `#exif` container; lay the redacted
-            // pixels over it. The pixel part's own encoding used the fallback
-            // policy, so it can't be reused: the pixels must be re-laid over this
-            // stripped container instead.
-            let container = &exif.expect("checked present").bytes;
-            self.state.encode_over_metadata(container)?
-        } else {
-            // Untouched metadata: the fallback policy governs it, which is exactly
-            // how `PixelStream::encode` already encoded the pixel body part. Reuse
-            // those bytes rather than encoding the image a second time.
-            parts
-                .iter()
-                .find(|p| p.id.as_str() == PIXEL_PART_ID)
-                .map(|p| p.bytes.clone())
-                .map(Ok)
-                .unwrap_or_else(|| self.state.encode(self.policy))?
-        };
-        Ok(ContentData::new(bytes))
-    }
-}
+use crate::modality::Image;
 
 /// A loader that decodes image bytes into a two-part [`Document`]: the pixel
 /// stream and the `#exif` metadata blob.
@@ -233,18 +73,18 @@ impl DocumentLoader for ImageDocumentLoader {
 // the module would not compile.
 #[cfg(all(test, feature = "test-util"))]
 mod tests {
+    use bytes::Bytes;
     use elide_codec::{DocumentLoader as _, LeafLoader};
-    use elide_core::modality::StreamDataReader as _;
     use elide_core::modality::metadata::{Metadata, MetadataLocation, MetadataReplacement};
+    use elide_core::modality::{DataReader as _, DataWriter as _, StreamDataReader as _};
     use elide_core::redaction::Redactions;
     use image::GenericImageView;
 
     use super::super::exif_handler::ExifLoader;
     use super::*;
-    use crate::exif::ExifPolicy;
-    use crate::modality::ImageReplacement;
-    use crate::primitive::Color;
-    use crate::{ImageBuffer, test_util};
+    use crate::modality::{ImageLocation, ImageReplacement};
+    use crate::primitive::{BoundingBox, Color, Dimensions, Point};
+    use crate::test_util;
 
     const JPEG: &str = "elide.image.jpeg";
     const PNG: &str = "elide.image.png";
@@ -326,7 +166,7 @@ mod tests {
         let stream = pixels(&mut doc);
         assert_eq!(stream.format().as_str(), PNG);
         let chunk = stream.read_next().await.unwrap().expect("one chunk");
-        let dims = ImageBuffer::open(&chunk.data.bytes).unwrap().dimensions();
+        let dims = chunk.data.dimensions();
         assert_eq!((dims.width, dims.height), (4, 4));
         // The stream yields exactly one full-frame chunk.
         assert!(stream.read_next().await.unwrap().is_none());
@@ -341,7 +181,7 @@ mod tests {
             .await
             .unwrap()
             .expect("crop");
-        let dims = ImageBuffer::open(&data.bytes).unwrap().dimensions();
+        let dims = data.dimensions();
         assert_eq!((dims.width, dims.height), (2, 2));
         // An off-image region reads nothing.
         assert!(

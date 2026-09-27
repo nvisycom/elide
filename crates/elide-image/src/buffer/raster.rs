@@ -5,7 +5,7 @@ use elide_core::{Error, ErrorKind, Result};
 use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView, Rgba, RgbaImage};
 
-use crate::modality::{ImageData, ImageFormat, ImageReplacement};
+use crate::modality::{ImageFormat, ImageReplacement};
 use crate::primitive::{BoundingBox, Color, Dimensions, Point};
 
 /// A decoded image plus the format it encodes to: the pixel-level working type.
@@ -13,7 +13,7 @@ use crate::primitive::{BoundingBox, Color, Dimensions, Point};
 /// Where [`ImageBuffer`](super::ImageBuffer) is an *opened source document*
 /// (this image plus its original container and metadata), a `RasterImage` is
 /// just the pixels — no source bytes, no metadata. Every pixel operation lives
-/// here: [`crop`], [`redact`], and encoding to an [`ImageData`]. A crop is
+/// here: [`crop`], [`redact`], and [`encode`] to container bytes. A crop is
 /// itself a `RasterImage` (a smaller image with no source of its own), so it
 /// encodes through the same [`encode`] path rather than a special case.
 ///
@@ -45,24 +45,24 @@ impl RasterImage {
         self.format
     }
 
-    /// Encode the current pixels to an [`ImageData`] in this image's format.
+    /// Encode the current pixels to container bytes in this image's format.
     ///
     /// # Errors
     ///
     /// [`ErrorKind::Processing`] if the encoder rejects the image.
-    pub fn encode(&self) -> Result<ImageData> {
+    pub fn encode(&self) -> Result<Bytes> {
         self.encode_as(self.format)
     }
 
-    /// Encode the current pixels to an [`ImageData`] in `format`, a transcode for
+    /// Encode the current pixels to container bytes in `format`, a transcode for
     /// a caller that needs a specific container regardless of the source format
     /// (a vision model that accepts only PNG/JPEG, given a TIFF).
     ///
     /// # Errors
     ///
     /// [`ErrorKind::Processing`] if the encoder rejects the image.
-    pub fn encode_as(&self, format: ImageFormat) -> Result<ImageData> {
-        Ok(ImageData::new(self.encode_bytes(format)?))
+    pub fn encode_as(&self, format: ImageFormat) -> Result<Bytes> {
+        self.encode_bytes(format)
     }
 
     /// The current pixels as raw container bytes in this image's format, for the

@@ -146,7 +146,7 @@ mod tests {
     #[cfg(feature = "image")]
     #[tokio::test]
     async fn image_keep_leaves_the_region_unchanged() {
-        use elide_image::modality::{Image, ImageData, ImageLocation, ImageReplacement};
+        use elide_image::modality::{Image, ImageLocation, ImageReplacement};
         use elide_image::primitive::{BoundingBox, Dimensions, Point};
 
         let bbox = BoundingBox::from_origin(Point::new(0.0, 0.0), Dimensions::new(2.0, 2.0));
@@ -159,7 +159,7 @@ mod tests {
         );
         let entity: Entity<Image> =
             Entity::new(LabelRef::new("FACE"), location, AuditLog::new(event));
-        let data = ImageData::new(vec![0u8; 4]);
+        let data = elide_image::test_util::blank_image_data();
 
         let out = Keep.anonymize(&entity, &data).await.unwrap();
         assert_eq!(out, ImageReplacement::Unchanged);

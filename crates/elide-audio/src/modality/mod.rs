@@ -60,16 +60,19 @@ impl TextRecognizable for Audio {
     }
 }
 
-#[cfg(test)]
+// These tests build a real [`AudioData`] via `test_util`, which the `test-util`
+// feature provides (with `wav` for the fixture encoder).
+#[cfg(all(test, feature = "test-util", feature = "wav"))]
 mod tests {
     use elide_core::recognition::Subject;
 
     use super::{TranscriptSegment, TranscriptWord, *};
     use crate::primitive::TimeSpan;
+    use crate::test_util;
 
     #[test]
     fn as_text_is_none_without_a_transcript() {
-        let subject = Subject::<Audio>::new(AudioData::new(bytes::Bytes::new()));
+        let subject = Subject::<Audio>::new(test_util::blank_audio_data());
         assert_eq!(Audio::as_text(subject.data(), subject.artifact()), None);
     }
 
@@ -81,8 +84,7 @@ mod tests {
                     TimeSpan::from_millis(1_100, 1_800),
                     "555-1234",
                 )]);
-        Subject::new(AudioData::new(bytes::Bytes::new()))
-            .with_artifact(Transcription::new(vec![segment]))
+        Subject::new(test_util::blank_audio_data()).with_artifact(Transcription::new(vec![segment]))
     }
 
     #[test]
@@ -106,7 +108,7 @@ mod tests {
 
     #[test]
     fn locate_without_transcript_is_none() {
-        let subject = Subject::<Audio>::new(AudioData::new(bytes::Bytes::new()));
+        let subject = Subject::<Audio>::new(test_util::blank_audio_data());
         // No transcript: the range can't be placed, so no location.
         assert!(Audio::locate(0..5, subject.data(), subject.artifact()).is_none());
     }

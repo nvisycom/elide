@@ -14,7 +14,6 @@ use elide_core::Result;
 use elide_core::modality::text::Text;
 #[cfg(feature = "usage")]
 use elide_core::primitive::TokenCounts;
-use elide_image::ImageBuffer;
 use elide_image::modality::{Image, ImageData, ImageFormat};
 use rig::ExtractionResponse;
 use rig::client::CompletionClient;
@@ -197,15 +196,13 @@ impl LlmBackend<Image> for RigBackend {
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the
-/// bytes are not a decodable image, or
 /// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) if the PNG
 /// re-encode fails.
 fn image_message(prompt: &str, data: &ImageData) -> Result<Message> {
-    let png = ImageBuffer::open(&data.bytes)?
-        .raster()
-        .encode_as(ImageFormat::Png)?;
-    let encoded = BASE64.encode(&png.bytes);
+    // The payload is already decoded; re-encode it to PNG (the media type the
+    // API takes) without re-opening the bytes.
+    let png = data.image().encode_as(ImageFormat::Png)?;
+    let encoded = BASE64.encode(&png);
     let content = vec![
         UserContent::text(prompt),
         UserContent::image_base64(encoded, Some(ImageMediaType::PNG), None),
