@@ -124,7 +124,7 @@ impl Enricher<Image> for OcrEnricher {
             request = request.with_correlation_id(id);
         }
         let response = self.backend.recognize(request).await?;
-        subject.set_artifact(Layout::new(response.blocks));
+        subject.set_artifact(Layout::new(response.regions));
         // The OCR model vouches for its own identity; OCR reports no token
         // counts today.
         #[cfg(feature = "usage")]
@@ -141,7 +141,7 @@ mod tests {
     use elide_core::recognition::Scope;
 
     use super::*;
-    use crate::modality::{ImageData, ImageLocation, LayoutBlock, LayoutWord};
+    use crate::modality::{ImageData, ImageLocation, LayoutRegion};
     use crate::ocr::OcrResponse;
     use crate::primitive::{BoundingBox, Dimensions, Point};
 
@@ -152,19 +152,20 @@ mod tests {
         ))
     }
 
-    /// A fixed one-block, two-word OCR result the enricher stamps as a `Layout`.
-    fn canned_block() -> LayoutBlock {
-        LayoutBlock::new(loc(0.0, 0.0, 100.0, 20.0), "hi Alice").with_words(vec![
-            LayoutWord::new(loc(0.0, 0.0, 30.0, 20.0), "hi"),
-            LayoutWord::new(loc(40.0, 0.0, 60.0, 20.0), "Alice"),
-        ])
+    /// A fixed two-region OCR result ("hi Alice") the enricher stamps as a
+    /// `Layout`.
+    fn canned_regions() -> Vec<LayoutRegion> {
+        vec![
+            LayoutRegion::new(loc(0.0, 0.0, 30.0, 20.0), "hi"),
+            LayoutRegion::new(loc(40.0, 0.0, 60.0, 20.0), "Alice"),
+        ]
     }
 
     #[tokio::test]
     async fn enrich_stamps_readable_ocr_text() {
         let enricher = OcrEnricher::builder()
             .with_name("ocr")
-            .with_backend(MockBackend::with(vec![canned_block()]))
+            .with_backend(MockBackend::with(canned_regions()))
             .build()
             .expect("builder succeeds");
         // The usage id carries the caller's name, not a fixed crate string,
@@ -218,7 +219,7 @@ mod tests {
         backend
             .expect_recognize()
             .times(1)
-            .returning(|_| Ok(OcrResponse::new(vec![canned_block()])));
+            .returning(|_| Ok(OcrResponse::new(canned_regions())));
 
         let enricher = OcrEnricher::builder()
             .with_name("ocr")

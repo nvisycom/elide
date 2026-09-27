@@ -50,52 +50,37 @@ export type NerCallback = (
   labels: string[],
 ) => NerSpan[] | Promise<NerSpan[]>;
 
-/** A pixel-space bounding box: its top-left corner and size, in pixels. */
-export interface OcrBox {
-  /** Left edge, in pixels. */
+/**
+ * One recognized text region an {@link OcrCallback} returns: the text and its
+ * box (top-left corner and size, in pixels), with an optional confidence.
+ *
+ * A region is the atom OCR engines emit — typically a word, but a coarser run
+ * (a whole line) works too. A recognizer scans the regions' text joined by
+ * spaces; a match redacts the boxes of the regions it covers.
+ */
+export interface OcrRegion {
+  /** The recognized text of the region. */
+  text: string;
+  /** Left edge of the box, in pixels. */
   x: number;
-  /** Top edge, in pixels. */
+  /** Top edge of the box, in pixels. */
   y: number;
   /** Box width, in pixels. */
   width: number;
   /** Box height, in pixels. */
   height: number;
-}
-
-/** One word within an {@link OcrBlock}, with its own box and confidence. */
-export interface OcrWord extends OcrBox {
-  /** The word text, as it appears in the block text. */
-  text: string;
   /** Recognition confidence in `[0, 1]`, when the engine reports it. */
   confidence?: number;
 }
 
 /**
- * One recognized text block an {@link OcrCallback} returns, in image-pixel
- * coordinates, optionally split into per-word boxes.
- *
- * A recognizer scans the block `text`; redaction covers the matched `words`'
- * boxes when present, and the block box otherwise. Emitting words (as browser
- * OCR engines do) redacts the matched word rather than the whole block.
- */
-export interface OcrBlock extends OcrBox {
-  /** The recognized text of the block. */
-  text: string;
-  /**
-   * The block's words, each with its own box. Omit (or leave empty) to report
-   * only the block; redaction then falls back to the block box.
-   */
-  words?: OcrWord[];
-}
-
-/**
  * The OCR inference callback {@link Enricher.ocr} wraps. It receives the encoded
- * image bytes and returns the recognized text blocks — a promise, or the array
+ * image bytes and returns the recognized text regions — a promise, or the array
  * directly.
  */
 export type OcrCallback = (
   image: Uint8Array,
-) => OcrBlock[] | Promise<OcrBlock[]>;
+) => OcrRegion[] | Promise<OcrRegion[]>;
 
 /** One transcript segment an {@link SttCallback} returns, with its time span. */
 export interface SttSegment {

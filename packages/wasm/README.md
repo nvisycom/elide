@@ -55,7 +55,7 @@ callbacks; language detection is built in:
 import { Analyzer, Recognizer, Enricher, Layer } from "@nvisy/elide/analyzer";
 
 const analyzer = Analyzer.image()
-  .enrich(Enricher.ocr(async (image) => runOcr(image))) // Promise<OcrBlock[]>
+  .enrich(Enricher.ocr(async (image) => runOcr(image))) // Promise<OcrRegion[]>
   .recognize(Recognizer.pattern({ builtinPatterns: true }))
   .layer(Layer.filter(0.5));
 ```

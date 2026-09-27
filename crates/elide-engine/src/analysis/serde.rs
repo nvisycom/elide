@@ -593,13 +593,16 @@ mod tests {
     #[cfg(all(feature = "schema", feature = "image"))]
     #[test]
     fn serialized_artifact_sets_validate_against_the_schema() {
-        use elide_image::modality::{Image, ImageLocation, Layout, LayoutBlock};
+        use elide_image::modality::{Image, ImageLocation, Layout, LayoutRegion};
         use elide_image::primitive::{BoundingBox, Dimensions, Point};
 
         let schema = serde_json::to_value(schemars::schema_for!(ArtifactSet)).unwrap();
 
         let bbox = BoundingBox::from_origin(Point::new(0.0, 0.0), Dimensions::new(100.0, 20.0));
-        let layout = Layout::new(vec![LayoutBlock::new(ImageLocation::new(bbox), "hi Alice")]);
+        let layout = Layout::new(vec![LayoutRegion::new(
+            ImageLocation::new(bbox),
+            "hi Alice",
+        )]);
         let with_part = ArtifactSet::new()
             .insert_body::<Image>(doc(), layout)
             .insert_part::<Image>(doc().child("blank"), Layout::default());
@@ -851,11 +854,14 @@ mod tests {
     #[cfg(feature = "image")]
     #[test]
     fn round_trips_an_artifact_set() {
-        use elide_image::modality::{Image, ImageLocation, Layout, LayoutBlock};
+        use elide_image::modality::{Image, ImageLocation, Layout, LayoutRegion};
         use elide_image::primitive::{BoundingBox, Dimensions, Point};
 
         let bbox = BoundingBox::from_origin(Point::new(0.0, 0.0), Dimensions::new(100.0, 20.0));
-        let layout = Layout::new(vec![LayoutBlock::new(ImageLocation::new(bbox), "hi Alice")]);
+        let layout = Layout::new(vec![LayoutRegion::new(
+            ImageLocation::new(bbox),
+            "hi Alice",
+        )]);
         // The sole document carries a real Layout; a nested part was enriched to
         // an *empty* Layout (an image with no text), both stored, both survive.
         let blank = doc().child("blank");

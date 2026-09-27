@@ -15,7 +15,7 @@
 
 use elide::codec::FormatRegistry;
 use elide::enrichment::ocr::MockBackend;
-use elide::modality::image::{Image, ImageLocation, LayoutBlock};
+use elide::modality::image::{Image, ImageLocation, LayoutRegion};
 use elide::modality::text::Text;
 use elide::primitive::{BoundingBox, Dimensions, Point};
 use elide::{Directives, PartId, RegistryDocumentExt, Result};
@@ -30,7 +30,7 @@ const SAMPLE_PNG: &[u8] = include_bytes!("../testdata/sample.png");
 /// An orchestrator that redacts inside images: OCR text carrying a detectable
 /// email, a pattern recognizer over it, an erase anonymizer.
 fn orchestrator(registry: FormatRegistry) -> Result<elide::Orchestrator> {
-    let block = LayoutBlock::new(
+    let region = LayoutRegion::new(
         ImageLocation::new(BoundingBox::from_origin(
             Point::new(0.0, 0.0),
             Dimensions::new(200.0, 20.0),
@@ -40,7 +40,7 @@ fn orchestrator(registry: FormatRegistry) -> Result<elide::Orchestrator> {
     Ok(TestOrchestrator::bare()
         .with_registry(registry)
         .with_image(
-            ocr_analyzer(MockBackend::with(vec![block]))?,
+            ocr_analyzer(MockBackend::with(vec![region]))?,
             erase_anonymizer(),
         )
         .build())

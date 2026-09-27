@@ -26,10 +26,9 @@ use crate::primitive::{BoundingBox, Dimensions};
 /// the pixels into a [`RasterImage`], and retains the source container so
 /// metadata is available without a second decode or any magic-byte sniffing
 /// elsewhere. Reuse the buffer to [`redact`](Self::redact) pixel regions and
-/// [`encode`](Self::encode) back out under an [`ExifPolicy`](crate::exif::ExifPolicy),
-/// all paying the decode cost a single time. With the `exif` feature it also
-/// surfaces the source's privacy-relevant EXIF fields as `Entity<Metadata>`
-/// values.
+/// [`encode`](Self::encode) back out under an EXIF policy, all paying the decode
+/// cost a single time. With the `exif` feature it also surfaces the source's
+/// privacy-relevant EXIF fields as `Entity<Metadata>` values.
 ///
 /// The pixel work is the [`RasterImage`]'s; this type adds the source container
 /// and metadata story on top. Cropping a buffer ([`crop`](Self::crop)) hands

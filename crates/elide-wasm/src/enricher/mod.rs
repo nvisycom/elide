@@ -88,8 +88,9 @@ impl Enricher {
 
     /// Build an OCR enricher whose recognition is a JavaScript `callback`.
     ///
-    /// The callback is `(image: Uint8Array) => Promise<OcrBlock[]>`, where an
-    /// `OcrBlock` is `{ text, x, y, width, height }` in image-pixel coordinates.
+    /// The callback is `(image: Uint8Array) => Promise<OcrRegion[]>`, where an
+    /// `OcrRegion` is `{ text, x, y, width, height, confidence? }` in image-pixel
+    /// coordinates.
     /// It runs on the browser event loop; the enricher awaits it. The resulting
     /// [`Enricher`] applies only to the image modality.
     ///
