@@ -159,7 +159,7 @@ mod tests {
         );
         let entity: Entity<Image> =
             Entity::new(LabelRef::new("FACE"), location, AuditLog::new(event));
-        let data = ImageData::new(vec![0u8; 4]);
+        let data = elide_image::test_util::blank_image_data();
 
         let out = Keep.anonymize(&entity, &data).await.unwrap();
         assert_eq!(out, ImageReplacement::Unchanged);

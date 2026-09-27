@@ -82,7 +82,10 @@ macro_rules! impl_audio_handler {
                 self.yielded = true;
                 Ok(Some(::elide_core::modality::Chunk {
                     location: crate::modality::AudioLocation::from_millis(0, total_ms),
-                    data: crate::modality::AudioData::new(self.clip.encode()?),
+                    data: crate::modality::AudioData::new(
+                        self.clip.encode()?,
+                        self.clip.format(),
+                    ),
                     hints: ::std::vec::Vec::new(),
                 }))
             }
@@ -100,6 +103,7 @@ macro_rules! impl_audio_handler {
                 // still resolves to the full audio for downstream extraction.
                 Ok(Some(crate::modality::AudioData::new(
                     self.clip.encode()?,
+                    self.clip.format(),
                 )))
             }
         }

@@ -80,12 +80,21 @@ pub trait OcrBackend: Send + Sync + 'static {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::modality::ImageFormat;
+    use crate::primitive::Dimensions;
 
     #[tokio::test]
     async fn mock_returns_empty() {
         let backend = MockBackend::new();
         let image = vec![0u8; 8];
-        let response = backend.recognize(OcrRequest::new(&image)).await.unwrap();
+        let request = OcrRequest {
+            image: &image,
+            format: ImageFormat::Png,
+            dimensions: Dimensions::new(1, 1),
+            language: None,
+            correlation_id: None,
+        };
+        let response = backend.recognize(request).await.unwrap();
         assert!(response.regions.is_empty());
     }
 }

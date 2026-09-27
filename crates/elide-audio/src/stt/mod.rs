@@ -65,12 +65,19 @@ pub trait SttBackend: Send + Sync + 'static {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::modality::AudioFormat;
 
     #[tokio::test]
     async fn mock_returns_empty() {
         let backend = MockBackend::new();
         let audio = vec![0u8; 8];
-        let response = backend.transcribe(SttRequest::new(&audio)).await.unwrap();
+        let request = SttRequest {
+            audio: &audio,
+            format: AudioFormat::Wav,
+            language: None,
+            correlation_id: None,
+        };
+        let response = backend.transcribe(request).await.unwrap();
         assert!(response.segments.is_empty());
     }
 }

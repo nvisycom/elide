@@ -208,6 +208,7 @@ async-trait = { workspace = true, features = [] }
 elide-core = { workspace = true, features = ["test-util"] }
 elide-office = { workspace = true, features = ["test-util"] }
 elide-image = { workspace = true, features = ["test-util"] }
+elide-audio = { workspace = true, features = ["test-util", "wav"] }
 
 # (De)serialization
 serde = { workspace = true, features = [] }

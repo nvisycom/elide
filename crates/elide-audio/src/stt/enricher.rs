@@ -119,10 +119,13 @@ impl Enricher<Audio> for SttEnricher {
         if subject.is_enriched() {
             return Ok(Enrichment::none());
         }
-        let mut request = SttRequest::new(&subject.data().bytes);
-        if let Some(id) = ctx.correlation_id() {
-            request = request.with_correlation_id(id);
-        }
+        let data = subject.data();
+        let request = SttRequest {
+            audio: &data.bytes,
+            format: data.format(),
+            language: None,
+            correlation_id: ctx.correlation_id(),
+        };
         let response = self.backend.transcribe(request).await?;
         subject.set_artifact(Transcription::new(response.segments));
         // The transcription model vouches for its own identity; STT reports no
@@ -134,16 +137,19 @@ impl Enricher<Audio> for SttEnricher {
     }
 }
 
-#[cfg(test)]
+// These tests build a real [`AudioData`] via `test_util`, which the `test-util`
+// feature provides (with `wav` for the fixture encoder).
+#[cfg(all(test, feature = "test-util", feature = "wav"))]
 mod tests {
     use elide_core::entity::audit::ModelEvent;
     use elide_core::modality::TextRecognizable;
     use elide_core::recognition::Scope;
 
     use super::*;
-    use crate::modality::{AudioData, TranscriptSegment, TranscriptWord};
+    use crate::modality::{TranscriptSegment, TranscriptWord};
     use crate::primitive::TimeSpan;
     use crate::stt::SttResponse;
+    use crate::test_util;
 
     /// A fixed two-word segment with timings the enricher stamps as a
     /// `Transcription`.
@@ -164,7 +170,7 @@ mod tests {
         // The usage id carries the caller's name, not a fixed crate string.
         assert_eq!(enricher.id().name, "stt");
 
-        let data = AudioData::new(b"audio".to_vec());
+        let data = test_util::blank_audio_data();
         let scope = Scope::new();
         let ctx = RecognizerContext::new(&scope);
         let mut subject = Subject::new(data);
@@ -225,7 +231,7 @@ mod tests {
             .with_backend(backend)
             .build()
             .expect("builder succeeds");
-        let data = AudioData::new(b"audio".to_vec());
+        let data = test_util::blank_audio_data();
         let scope = Scope::new();
         let ctx = RecognizerContext::new(&scope);
 
@@ -267,7 +273,7 @@ mod tests {
             .with_backend(backend)
             .build()
             .expect("builder succeeds");
-        let data = AudioData::new(b"audio".to_vec());
+        let data = test_util::blank_audio_data();
         let scope = Scope::new();
         let ctx = RecognizerContext::new(&scope);
 

@@ -11,6 +11,31 @@ use little_exif::filetype::FileExtension;
 use little_exif::metadata::Metadata as ExifMetadata;
 use little_exif::rational::uR64;
 
+use crate::ImageBuffer;
+use crate::modality::ImageData;
+
+/// Decode `bytes` into an [`ImageData`] the way ingestion does, for a test that
+/// needs the image modality's payload from raw container bytes.
+///
+/// # Panics
+///
+/// Panics if `bytes` is not a decodable image; a test wanting a placeholder
+/// payload should pass a real fixture (e.g. [`png`]).
+#[must_use]
+pub fn image_data(bytes: impl Into<Bytes>) -> ImageData {
+    let bytes = bytes.into();
+    let buffer = ImageBuffer::open(&bytes).expect("decodable image fixture");
+    ImageData::new(buffer.raster().clone(), bytes)
+}
+
+/// A tiny (1x1) decoded [`ImageData`], for a test that needs *some* valid image
+/// payload but does not care about its pixels (it exercises the OCR artifact or
+/// an empty-recognition path, not the image itself).
+#[must_use]
+pub fn blank_image_data() -> ImageData {
+    image_data(png(1, 1))
+}
+
 /// A plain solid-colour PNG of `width`x`height` pixels, no metadata.
 ///
 /// For a downstream test that needs a real, decodable image of a *known size*

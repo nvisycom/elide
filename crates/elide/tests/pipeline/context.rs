@@ -10,8 +10,8 @@
 
 use elide::entity::LabelRef;
 use elide::entity::audit::AuditKind;
-use elide::modality::audio::{Audio, AudioData, TranscriptSegment, TranscriptWord, Transcription};
-use elide::modality::image::{Image, ImageData, ImageLocation, Layout, LayoutRegion};
+use elide::modality::audio::{Audio, TranscriptSegment, TranscriptWord, Transcription};
+use elide::modality::image::{Image, ImageLocation, Layout, LayoutRegion};
 use elide::primitive::{BoundingBox, Confidence, ConfidenceThreshold, Dimensions, Point, TimeSpan};
 use elide::recognition::pattern::{PatternRecognizer, Regex, Variant};
 use elide::recognition::{Recognizer, RecognizerContext, Scope, Subject};
@@ -51,8 +51,8 @@ async fn image_context_boosts_and_keeps_the_native_region() {
     ];
     let scope = Scope::new();
     let ctx = RecognizerContext::<Image>::new(&scope);
-    let subject =
-        Subject::new(ImageData::new(bytes::Bytes::new())).with_artifact(Layout::new(regions));
+    let subject = Subject::new(elide_image::test_util::blank_image_data())
+        .with_artifact(Layout::new(regions));
     let entities = ssn_recognizer()
         .recognize(&subject, &ctx)
         .await
@@ -93,7 +93,7 @@ async fn audio_context_boosts_and_keeps_the_native_timespan() {
         ]);
     let scope = Scope::new();
     let ctx = RecognizerContext::<Audio>::new(&scope);
-    let subject = Subject::new(AudioData::new(bytes::Bytes::new()))
+    let subject = Subject::new(elide_audio::test_util::blank_audio_data())
         .with_artifact(Transcription::new(vec![segment]));
     let entities = ssn_recognizer()
         .recognize(&subject, &ctx)

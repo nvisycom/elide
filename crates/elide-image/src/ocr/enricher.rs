@@ -119,10 +119,14 @@ impl Enricher<Image> for OcrEnricher {
         if subject.is_enriched() {
             return Ok(Enrichment::none());
         }
-        let mut request = OcrRequest::new(&subject.data().bytes);
-        if let Some(id) = ctx.correlation_id() {
-            request = request.with_correlation_id(id);
-        }
+        let data = subject.data();
+        let request = OcrRequest {
+            image: data.source(),
+            format: data.format(),
+            dimensions: data.dimensions(),
+            language: None,
+            correlation_id: ctx.correlation_id(),
+        };
         let response = self.backend.recognize(request).await?;
         subject.set_artifact(Layout::new(response.regions));
         // The OCR model vouches for its own identity; OCR reports no token
@@ -134,16 +138,19 @@ impl Enricher<Image> for OcrEnricher {
     }
 }
 
-#[cfg(test)]
+// These tests build a real decoded [`ImageData`] via `test_util`, which the
+// `test-util` feature provides (it implies the decoders).
+#[cfg(all(test, feature = "test-util"))]
 mod tests {
     use elide_core::entity::audit::ModelEvent;
     use elide_core::modality::TextRecognizable;
     use elide_core::recognition::Scope;
 
     use super::*;
-    use crate::modality::{ImageData, ImageLocation, LayoutRegion};
+    use crate::modality::{ImageLocation, LayoutRegion};
     use crate::ocr::OcrResponse;
     use crate::primitive::{BoundingBox, Dimensions, Point};
+    use crate::test_util;
 
     fn loc(x: f64, y: f64, w: f64, h: f64) -> ImageLocation {
         ImageLocation::new(BoundingBox::from_origin(
@@ -172,7 +179,7 @@ mod tests {
         // so two OCR enrichers can be told apart in the usage report.
         assert_eq!(enricher.id().name, "ocr");
 
-        let data = ImageData::new(b"image".to_vec());
+        let data = test_util::blank_image_data();
         let scope = Scope::new();
         let ctx = RecognizerContext::new(&scope);
         let mut subject = Subject::new(data);
@@ -226,7 +233,7 @@ mod tests {
             .with_backend(backend)
             .build()
             .expect("builder succeeds");
-        let data = ImageData::new(b"image".to_vec());
+        let data = test_util::blank_image_data();
         let scope = Scope::new();
         let ctx = RecognizerContext::new(&scope);
 
@@ -267,7 +274,7 @@ mod tests {
             .with_backend(backend)
             .build()
             .expect("builder succeeds");
-        let data = ImageData::new(b"image".to_vec());
+        let data = test_util::blank_image_data();
         let scope = Scope::new();
         let ctx = RecognizerContext::new(&scope);
 

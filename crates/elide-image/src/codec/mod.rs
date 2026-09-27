@@ -6,19 +6,30 @@
 //! (the image's own bytes, re-read as the `Metadata` modality), recombined by
 //! laying the redacted pixels over the metadata-stripped container. The three
 //! formats differ only in their id and lookup keys (the `impl_image_handler!`
-//! macro); the shared decode-redact-recompose body is `document`'s
-//! `ImageDocumentLoader`.
+//! macro); the shared decode-redact-recompose body is `ImageDocumentLoader`,
+//! split across `image_loader` (decode into parts), `image_state` (the shared
+//! decoded buffer), `image_stream` (the pixel body part), and `image_recombine`
+//! (folding the redacted pixels over the `#exif` blob).
 
 mod macros;
 
-mod document;
 mod exif_handler;
+mod image_loader;
+mod image_recombine;
+mod image_state;
+mod image_stream;
 #[cfg(feature = "jpeg")]
 mod jpeg_handler;
 #[cfg(feature = "png")]
 mod png_handler;
 #[cfg(feature = "tiff")]
 mod tiff_handler;
+
+/// The `#exif` sub-part id: the image's own bytes, re-read as `Metadata`.
+const EXIF_PART_ID: &str = "#exif";
+
+/// The pixel body part id: the decoded (redacted) image.
+const PIXEL_PART_ID: &str = "pixels";
 
 pub use self::exif_handler::format as exif_format;
 #[cfg(feature = "jpeg")]

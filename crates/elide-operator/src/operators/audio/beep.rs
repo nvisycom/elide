@@ -93,7 +93,7 @@ impl Operator<Audio> for Beep {
 
 #[cfg(test)]
 mod tests {
-    use elide_audio::modality::{AudioData, AudioLocation};
+    use elide_audio::modality::AudioLocation;
     use elide_audio::primitive::TimeSpan;
     use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
     use elide_core::entity::{Entity, LabelRef};
@@ -115,7 +115,7 @@ mod tests {
     #[tokio::test]
     async fn default_is_a_1khz_sine() {
         let out = Beep::default()
-            .anonymize(&audio_entity(), &AudioData::new(Vec::<u8>::new()))
+            .anonymize(&audio_entity(), &elide_audio::test_util::blank_audio_data())
             .await
             .unwrap();
         assert_eq!(
@@ -133,7 +133,7 @@ mod tests {
         let out = Beep::new(440.0)
             .with_amplitude(0.25)
             .with_waveform(Waveform::Square)
-            .anonymize(&audio_entity(), &AudioData::new(Vec::<u8>::new()))
+            .anonymize(&audio_entity(), &elide_audio::test_util::blank_audio_data())
             .await
             .unwrap();
         assert_eq!(

@@ -128,13 +128,10 @@ impl elide_core::recognition::Recognizer<Image> for WholeFrame {
         use elide_core::entity::audit::{AuditEvent, ModelEvent};
         use elide_core::entity::{Entity, builtins};
         use elide_core::primitive::Confidence;
-        use elide_image::ImageBuffer;
         use elide_image::modality::ImageLocation;
         use elide_image::primitive::{BoundingBox, Dimensions, Point};
 
-        let dims = ImageBuffer::open(&subject.data().bytes)
-            .map(|b| b.dimensions())
-            .unwrap_or_default();
+        let dims = subject.data().dimensions();
         let bbox = BoundingBox::from_origin(
             Point::new(0.0, 0.0),
             Dimensions::new(f64::from(dims.width), f64::from(dims.height)),

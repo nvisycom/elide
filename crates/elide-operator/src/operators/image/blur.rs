@@ -81,7 +81,7 @@ mod tests {
             PatternEvent::default(),
         );
         let entity = Entity::new(LabelRef::new("FACE"), location, AuditLog::new(event));
-        let data = ImageData::new(vec![0u8; 4]);
+        let data = elide_image::test_util::blank_image_data();
         (entity, data)
     }
 
