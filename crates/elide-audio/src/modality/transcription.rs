@@ -147,6 +147,12 @@ impl TranscriptSegment {
     /// non-whitespace byte of the requested `range` uncovered, so a partial or
     /// sparse word list never under-silences the match.
     fn word_span(&self, range: Range<usize>) -> Option<TimeSpan> {
+        // The range comes from a recognizer's match over the flat transcript
+        // text and is untrusted: a sub-character range (byte 1 of a two-byte
+        // `é`) would panic the coverage slice below. Reject it and let the
+        // caller fall back to the whole segment span.
+        let covered_text = self.text.get(range.clone())?;
+
         let mut start_us: Option<u64> = None;
         let mut end_us: Option<u64> = None;
         let mut search_from = 0;
@@ -176,7 +182,7 @@ impl TranscriptSegment {
         // Use the word timing only when every non-whitespace byte of the range
         // is covered by an overlapping word; otherwise the caller falls back to
         // the whole segment span so the uncovered part is still silenced.
-        let fully_covered = self.text[range.clone()]
+        let fully_covered = covered_text
             .char_indices()
             .filter(|(_, ch)| !ch.is_whitespace())
             .all(|(offset, _)| {
@@ -365,6 +371,21 @@ mod tests {
             TranscriptSegment::new(TimeSpan::from_millis(500, 1_000), "world"),
         ]);
         assert_eq!(t.text(), "hello world");
+    }
+
+    #[test]
+    fn resolve_does_not_panic_on_a_sub_character_range() {
+        // A timed segment with a multibyte char: an untrusted range that splits
+        // the two-byte 'é' must not panic the coverage slice. It falls back to
+        // the whole segment span (fail-closed) rather than crashing.
+        let t = Transcription::new(vec![
+            TranscriptSegment::new(TimeSpan::from_millis(0, 500), "café")
+                .with_words(vec![word(0, 500, "café")]),
+        ]);
+        // Byte 4 is inside 'é' (bytes 3..5), not a char boundary.
+        let loc = t.resolve(0..4).expect("in bounds");
+        assert_eq!(loc.span.start_millis(), 0);
+        assert_eq!(loc.span.end_millis(), 500);
     }
 
     #[test]
