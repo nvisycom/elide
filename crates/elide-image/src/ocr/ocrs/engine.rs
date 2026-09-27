@@ -6,9 +6,9 @@
 //! within it, as produced by `scripts/install-ocrs.sh`), runs the detect ->
 //! find-lines -> recognize pipeline over an image, and adapts the recognizer's
 //! `ocrs`/`rten` output (`TextLine`, `Rect<i32>`) into the core layout types
-//! ([`LayoutBlock`]/[`LayoutWord`]/[`ImageLocation`]).
+//! ([`LayoutRegion`]/[`ImageLocation`]).
 //!
-//! [`Engine::recognize`] is the whole seam: bytes in, elide [`LayoutBlock`]s
+//! [`Engine::recognize`] is the whole seam: bytes in, elide [`LayoutRegion`]s
 //! out, no `ocrs` or `rten` type crossing it.
 
 use std::path::{Path, PathBuf};
@@ -17,7 +17,7 @@ use elide_core::{Error, ErrorKind, Result};
 use ocrs::{ImageSource, OcrEngine, OcrEngineParams, TextItem, TextLine};
 use rten_imageproc::Rect;
 
-use crate::modality::{ImageLocation, LayoutBlock, LayoutWord};
+use crate::modality::{ImageLocation, LayoutRegion};
 use crate::primitive::{BoundingBox, Dimensions, Point};
 
 /// Environment variable naming the directory that holds the two `ocrs` model
@@ -100,7 +100,7 @@ impl Engine {
     /// the image cannot be decoded, or
     /// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) if the
     /// recognition pipeline fails.
-    pub(super) fn recognize(&self, image: &[u8]) -> Result<Vec<LayoutBlock>> {
+    pub(super) fn recognize(&self, image: &[u8]) -> Result<Vec<LayoutRegion>> {
         // Decode to RGB8; ocrs takes raw interleaved pixels plus dimensions.
         let decoded = image::load_from_memory(image)
             .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("decode OCR image: {e}")))?
@@ -126,7 +126,7 @@ impl Engine {
         Ok(lines
             .into_iter()
             .flatten()
-            .filter_map(line_to_block)
+            .flat_map(line_to_regions)
             .collect())
     }
 }
@@ -141,19 +141,18 @@ fn load_model(path: &Path, role: &str) -> Result<rten::Model> {
     })
 }
 
-/// Convert one recognized `ocrs` text line into a [`LayoutBlock`] with per-word
-/// boxes. Returns `None` for an empty line (no text to redact).
-fn line_to_block(line: TextLine) -> Option<LayoutBlock> {
-    let text = line.to_string();
-    if text.is_empty() {
-        return None;
-    }
-    // ocrs does not expose a per-word confidence today, so words carry none.
-    let words: Vec<LayoutWord> = line
-        .words()
-        .map(|word| LayoutWord::new(rect_to_location(word.bounding_rect()), word.to_string()))
-        .collect();
-    Some(LayoutBlock::new(rect_to_location(line.bounding_rect()), text).with_words(words))
+/// Convert one recognized `ocrs` text line into its per-word [`LayoutRegion`]s,
+/// in reading order. Empty (whitespace-only) words are dropped, so a blank line
+/// yields nothing.
+fn line_to_regions(line: TextLine) -> Vec<LayoutRegion> {
+    // ocrs does not expose a per-word confidence today, so regions carry none.
+    line.words()
+        .filter_map(|word| {
+            let text = word.to_string();
+            (!text.is_empty())
+                .then(|| LayoutRegion::new(rect_to_location(word.bounding_rect()), text))
+        })
+        .collect()
 }
 
 /// Map an `ocrs` pixel-space bounding rectangle (integer pixels of the input
@@ -192,18 +191,17 @@ mod tests {
     }
 
     #[test]
-    fn maps_a_line_to_a_block_with_word_boxes() {
-        let block = line_to_block(line("Call Alice")).expect("non-empty line");
-        assert_eq!(block.text, "Call Alice");
-        // Two words, each with its own box.
-        assert_eq!(block.words.len(), 2);
-        assert_eq!(block.words[0].text, "Call");
-        assert_eq!(block.words[1].text, "Alice");
-        // The block box spans all ten glyph columns (0..10).
-        assert_eq!(block.region.bounding_box.min.x, 0.0);
-        assert_eq!(block.region.bounding_box.max.x, 10.0);
+    fn maps_a_line_to_per_word_regions() {
+        let regions = line_to_regions(line("Call Alice"));
+        // One region per word, each with its own box.
+        assert_eq!(regions.len(), 2);
+        assert_eq!(regions[0].text, "Call");
+        assert_eq!(regions[1].text, "Alice");
+        // "Call" spans columns 0..4.
+        assert_eq!(regions[0].region.bounding_box.min.x, 0.0);
+        assert_eq!(regions[0].region.bounding_box.max.x, 4.0);
         // "Alice" starts at column 5.
-        assert_eq!(block.words[1].region.bounding_box.min.x, 5.0);
+        assert_eq!(regions[1].region.bounding_box.min.x, 5.0);
     }
 
     #[test]

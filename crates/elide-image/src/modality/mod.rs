@@ -12,7 +12,7 @@ use elide_core::modality::{Modality, TextRecognizable};
 
 pub use self::data::ImageData;
 pub use self::format::ImageFormat;
-pub use self::layout::{Layout, LayoutBlock, LayoutWord};
+pub use self::layout::{Layout, LayoutRegion};
 pub use self::location::ImageLocation;
 pub use self::replacement::ImageReplacement;
 
@@ -77,11 +77,10 @@ mod tests {
         assert_eq!(Image::as_text(subject.data(), subject.artifact()), None);
     }
 
-    /// A subject whose artifact carries a one-block, one-word OCR result.
+    /// A subject whose artifact carries a one-region OCR result.
     fn ocr_subject() -> Subject<Image> {
-        let block = LayoutBlock::new(loc(0.0, 0.0, 100.0, 20.0), "Alice")
-            .with_words(vec![LayoutWord::new(loc(0.0, 0.0, 100.0, 20.0), "Alice")]);
-        Subject::new(ImageData::new(bytes::Bytes::new())).with_artifact(Layout::new(vec![block]))
+        let region = LayoutRegion::new(loc(0.0, 0.0, 100.0, 20.0), "Alice");
+        Subject::new(ImageData::new(bytes::Bytes::new())).with_artifact(Layout::new(vec![region]))
     }
 
     #[test]

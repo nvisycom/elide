@@ -28,19 +28,37 @@ crate-type = ["cdylib", "rlib"]
 elide = { path = "../elide", version = "0.1.0", default-features = false, features = [
     "engine",
     "pattern",
+    "ner",
+    "ocr",
+    "stt",
+    "lingua",
     "fake",
     "codec-text",
+    "codec-csv",
+    "codec-png",
+    "codec-jpeg",
+    "codec-tiff",
+    "codec-wav",
 ] }
 
 # Derive macros & error handling
 wasm-bindgen = { workspace = true, features = [] }
 wasm-bindgen-futures = { workspace = true, features = [] }
+js-sys = { workspace = true, features = [] }
 serde = { workspace = true, features = ["derive"] }
+serde_bytes = { workspace = true, features = [] }
+serde-wasm-bindgen = { workspace = true, features = [] }
+async-trait = { workspace = true, features = [] }
 tsify = { workspace = true, features = [] }
 console_error_panic_hook = { workspace = true, features = [] }
+# Bridges the JS-provided NER callback (a `!Send` `js_sys::Function`) into the
+# `Send + Sync` `NerBackend` the recognizer requires. Safe on wasm's single
+# thread; no `unsafe` in this crate.
+send_wrapper = { workspace = true, features = ["futures"] }
 
 [package.metadata.cargo-machete]
 # `wasm-bindgen-futures` is pulled in by the `#[wasm_bindgen]` codegen for the
-# async `redact_text` export, not referenced by name in source, so machete
-# cannot see the use.
-ignored = ["wasm-bindgen-futures"]
+# async `redact` export, and `serde_bytes` is used only through a
+# `#[serde(with = "serde_bytes")]` string attribute — neither is referenced by
+# name in source, so machete cannot see the use.
+ignored = ["wasm-bindgen-futures", "serde_bytes"]

@@ -9,14 +9,14 @@
 use elide::codec::FormatRegistry;
 use elide::enrichment::ocr::MockBackend;
 use elide::entity::Entity;
-use elide::modality::image::{Image, ImageLocation, LayoutBlock};
+use elide::modality::image::{Image, ImageLocation, LayoutRegion};
 use elide::primitive::{BoundingBox, Dimensions, Point};
 use elide::{Directives, Orchestrator, PartId, RegistryDocumentExt, Result};
 
 use crate::support::orchestrator::{TestOrchestrator, erase_anonymizer, ocr_analyzer};
 
 /// Any decodable PNG: the mock OCR backend ignores the pixels and returns its
-/// canned blocks, so the fixture only has to decode to an image.
+/// canned regions, so the fixture only has to decode to an image.
 const SAMPLE: &[u8] = include_bytes!("../testdata/sample.png");
 
 /// The fixture document's name, its depth-1 part key in the report.
@@ -52,13 +52,13 @@ fn image_entities(analyzed: &elide::AnalyzedDocument) -> Vec<Entity<Image>> {
 #[tokio::test]
 async fn re_analyze_reuses_the_prior_ocr_artifact() -> Result<()> {
     // OCR text carrying a detectable email.
-    let block = LayoutBlock::new(loc(), "write to alice@example.com today");
+    let region = LayoutRegion::new(loc(), "write to alice@example.com today");
 
     // First pass: a real OCR backend produces the Layout, the pattern
     // recognizer detects the email over it.
     let first = orchestrator(
         FormatRegistry::with_builtin(),
-        MockBackend::with(vec![block]),
+        MockBackend::with(vec![region]),
     )?;
     let mut document = FormatRegistry::with_builtin().document(DOC, SAMPLE).await?;
     let analyzed = first.analyze(&mut document, &Directives::new()).await?;
@@ -117,12 +117,12 @@ async fn an_empty_backend_without_a_seed_finds_nothing() -> Result<()> {
 /// reuses it against an empty OCR backend rather than re-OCR'ing.
 #[tokio::test]
 async fn artifacts_round_trip_through_deserialize_for_a_re_run() -> Result<()> {
-    let block = LayoutBlock::new(loc(), "write to alice@example.com today");
+    let region = LayoutRegion::new(loc(), "write to alice@example.com today");
 
     // First pass produces the OCR Layout; serialize the artifacts out.
     let first = orchestrator(
         FormatRegistry::with_builtin(),
-        MockBackend::with(vec![block]),
+        MockBackend::with(vec![region]),
     )?;
     let mut document = FormatRegistry::with_builtin().document(DOC, SAMPLE).await?;
     let analyzed = first.analyze(&mut document, &Directives::new()).await?;

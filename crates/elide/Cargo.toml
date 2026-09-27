@@ -135,15 +135,15 @@ codec-audio = ["codec-wav", "codec-mp3"]
 codec-document = ["codec-docx", "codec-pptx", "codec-pdf"]
 
 ## Per-format handlers.
-codec-txt = ["codec", "elide-format/txt"]
-codec-json = ["codec", "elide-format/json"]
-codec-html = ["codec", "elide-format/html"]
-codec-xml = ["codec", "elide-format/xml"]
-codec-csv = ["codec", "tabular", "elide-format/csv"]
+codec-txt = ["codec", "dep:elide-plain", "elide-plain/txt", "elide-format/txt"]
+codec-json = ["codec", "dep:elide-plain", "elide-plain/json", "elide-format/json"]
+codec-html = ["codec", "dep:elide-plain", "elide-plain/html", "elide-format/html"]
+codec-xml = ["codec", "dep:elide-plain", "elide-plain/xml", "elide-format/xml"]
+codec-csv = ["codec", "tabular", "dep:elide-plain", "elide-plain/csv", "elide-format/csv"]
 codec-xlsx = ["codec", "tabular", "dep:elide-office", "elide-format/xlsx", "metadata"]
-codec-png = ["codec", "image", "elide-format/png"]
-codec-jpeg = ["codec", "image", "elide-format/jpeg"]
-codec-tiff = ["codec", "image", "elide-format/tiff"]
+codec-png = ["codec", "image", "elide-image/codec", "elide-image/png", "elide-format/png"]
+codec-jpeg = ["codec", "image", "elide-image/codec", "elide-image/jpeg", "elide-format/jpeg"]
+codec-tiff = ["codec", "image", "elide-image/codec", "elide-image/tiff", "elide-format/tiff"]
 codec-wav = ["codec", "audio", "elide-format/wav"]
 codec-mp3 = ["codec", "audio", "elide-format/mp3"]
 codec-docx = ["codec", "dep:elide-office", "elide-format/docx", "metadata"]
@@ -191,6 +191,7 @@ elide-lingua = { workspace = true, features = [], optional = true }
 elide-llm = { workspace = true, features = [], optional = true }
 elide-audio = { workspace = true, features = [], optional = true }
 elide-image = { workspace = true, features = [], optional = true }
+elide-plain = { workspace = true, features = [], optional = true }
 elide-office = { workspace = true, features = [], optional = true }
 elide-pdf = { workspace = true, features = [], optional = true }
 elide-codec = { workspace = true, features = [], optional = true }

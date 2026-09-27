@@ -19,7 +19,9 @@ pub trait Recombine: Send + Sync {
 }
 
 /// The recombiner for a leaf format: a document of one part whose bytes are the
-/// document's bytes. A leaf format builds its [`Document`](super::Document) with
+/// document's bytes.
+///
+/// A leaf format builds its [`Document`](super::Document) with
 /// [`Document::leaf`](super::Document::leaf).
 pub struct LeafRecombine;
 

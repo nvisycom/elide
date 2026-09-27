@@ -15,8 +15,9 @@ use crate::content::ContentData;
 use crate::contract::FormatId;
 
 /// A modality-erased [`Stream<M>`], so a [`Document`](super::super::Document)'s
-/// stream parts of different modalities live in one `Vec`. Recovered by
-/// [`TypeId`] — the `Any` supertrait allows the downcast.
+/// stream parts of different modalities live in one `Vec`.
+///
+/// Recovered by [`TypeId`] — the `Any` supertrait allows the downcast.
 ///
 /// [`TypeId`]: std::any::TypeId
 pub struct ErasedStream {
@@ -32,10 +33,12 @@ trait ErasedStreamObj: Any + Send + Sync {
 }
 
 /// A typed stream wrapper (the erasure target), holding one modality's
-/// [`Stream<M>`]. It is the concrete, `Sized` handle a redaction pipeline drives:
-/// it forwards [`StreamDataReader`] / [`DataReader`] / [`DataWriter`] to the boxed
-/// stream, so a caller never has to name a trait object (which would trip the
-/// compiler's `Send` inference through an `async` boundary).
+/// [`Stream<M>`].
+///
+/// It is the concrete, `Sized` handle a redaction pipeline drives: it forwards
+/// [`StreamDataReader`] / [`DataReader`] / [`DataWriter`] to the boxed stream, so
+/// a caller never has to name a trait object (which would trip the compiler's
+/// `Send` inference through an `async` boundary).
 pub struct TypedStream<M: Modality> {
     stream: Box<dyn Stream<M>>,
 }

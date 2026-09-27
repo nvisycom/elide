@@ -1,12 +1,16 @@
 //! [`Layout`]: an image's recognized text laid out in space.
 //!
-//! What makes an image *recognizable*: a recognizer reads its
-//! [`text`] like any other string, finds a match at a byte
-//! range, and [`resolve`]s that range back to the
-//! [`ImageLocation`] of the words it covers, via the per-word bounding
-//! boxes the layout carries. Populated by an OCR pass today; the structure
-//! can grow to carry richer layout (headings, tables, reading order). The
-//! image counterpart of the audio `Transcription`.
+//! What makes an image *recognizable*: a recognizer reads its [`text`] like any
+//! other string, finds a match at a byte range, and [`resolve`]s that range back
+//! to the [`ImageLocation`] of the regions it covers, via the per-region
+//! bounding boxes the layout carries. Populated by an OCR pass today. The image
+//! counterpart of the audio `Transcription`.
+//!
+//! A layout is a flat, ordered list of [`LayoutRegion`]s — each a run of
+//! recognized text with its own box, the atom an OCR engine emits (a word, or a
+//! whole line the backend did not split). The flat [`text`] is those regions
+//! joined by a space, computed once, with each region's byte offset recorded so
+//! [`resolve`] maps a range back to boxes without re-scanning the text.
 //!
 //! [`text`]: Layout::text
 //! [`resolve`]: Layout::resolve
@@ -19,19 +23,18 @@ use elide_core::primitive::Confidence;
 use serde::{Deserialize, Serialize};
 
 use super::ImageLocation;
-use crate::primitive::BoundingBox;
 
-/// Separator inserted between blocks when building the flat layout text, so
-/// adjacent blocks don't run their words together.
-const BLOCK_SEPARATOR: &str = "\n";
+/// Separator inserted between regions when building the flat layout text, so
+/// adjacent regions don't run their text together.
+const REGION_SEPARATOR: &str = " ";
 
 /// An image's recognized text, laid out in space.
 ///
-/// An ordered set of [`LayoutBlock`]s (the recognized text regions). The flat
-/// [`text`], the blocks joined, is what a recognizer
-/// inspects; [`resolve`] maps a byte range of that text back
-/// to the [`ImageLocation`] it occupies, using the blocks' (and their
-/// words') bounding boxes. Empty when the backend recognized nothing.
+/// A flat, ordered list of [`LayoutRegion`]s (the recognized text runs in
+/// reading order). The flat [`text`], the regions joined by a space, is what a
+/// recognizer inspects; [`resolve`] maps a byte range of that text back to the
+/// [`ImageLocation`] it occupies, using the regions' boxes. Empty when the
+/// backend recognized nothing.
 ///
 /// [`text`]: Self::text
 /// [`resolve`]: Self::resolve
@@ -39,39 +42,27 @@ const BLOCK_SEPARATOR: &str = "\n";
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Layout {
-    /// Blocks in reading order.
-    blocks: Vec<LayoutBlock>,
-    /// The blocks' text joined by [`BLOCK_SEPARATOR`], cached so recognition
+    /// Regions in reading order.
+    regions: Vec<LayoutRegion>,
+    /// The regions' text joined by [`REGION_SEPARATOR`], cached so recognition
     /// and byte-range resolution share one flat string.
     text: String,
 }
 
-/// One recognized region of an image: its bounding box and text, optionally
-/// broken into per-word boxes.
+/// One recognized run of image text: its box, the text, and an optional
+/// confidence.
+///
+/// The atom an OCR backend emits — typically a word, but a backend may report a
+/// coarser run (a whole line) as one region; the layout treats them uniformly.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct LayoutBlock {
-    /// Bounding region of the block in image coordinates.
+pub struct LayoutRegion {
+    /// Bounding region of the text in image coordinates.
     pub region: ImageLocation,
-    /// Recognized text for this block.
+    /// The recognized text of this region.
     pub text: String,
-    /// Per-word boxes within the block, when the backend emitted them.
-    /// Empty otherwise; resolution then falls back to the block region.
-    #[cfg_attr(feature = "serde", serde(default))]
-    pub words: Vec<LayoutWord>,
-}
-
-/// One word within a [`LayoutBlock`], with its own bounding box.
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct LayoutWord {
-    /// Bounding region of the word in image coordinates.
-    pub region: ImageLocation,
-    /// The word text, as it appears in the block text.
-    pub text: String,
-    /// Per-word confidence, when reported.
+    /// Recognition confidence, when the backend reported one.
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "Option::is_none")
@@ -79,26 +70,8 @@ pub struct LayoutWord {
     pub confidence: Option<Confidence>,
 }
 
-impl LayoutBlock {
-    /// A block covering `region` with the given text and no per-word boxes.
-    pub fn new(region: ImageLocation, text: impl Into<String>) -> Self {
-        Self {
-            region,
-            text: text.into(),
-            words: Vec::new(),
-        }
-    }
-
-    /// Attach per-word boxes.
-    #[must_use]
-    pub fn with_words(mut self, words: Vec<LayoutWord>) -> Self {
-        self.words = words;
-        self
-    }
-}
-
-impl LayoutWord {
-    /// A word covering `region` with the given text and no confidence set.
+impl LayoutRegion {
+    /// A region covering `region` with the given text and no confidence set.
     pub fn new(region: ImageLocation, text: impl Into<String>) -> Self {
         Self {
             region,
@@ -107,7 +80,7 @@ impl LayoutWord {
         }
     }
 
-    /// Attach a per-word confidence.
+    /// Attach a recognition confidence.
     #[must_use]
     pub fn with_confidence(mut self, confidence: Confidence) -> Self {
         self.confidence = Some(confidence);
@@ -116,161 +89,102 @@ impl LayoutWord {
 }
 
 impl Layout {
-    /// Build a layout from blocks, computing the flat text.
+    /// Build a layout from regions, computing the flat text.
     #[must_use]
-    pub fn new(blocks: Vec<LayoutBlock>) -> Self {
-        let text = blocks
+    pub fn new(regions: Vec<LayoutRegion>) -> Self {
+        let text = regions
             .iter()
-            .map(|b| b.text.as_str())
+            .map(|r| r.text.as_str())
             .collect::<Vec<_>>()
-            .join(BLOCK_SEPARATOR);
-        Self { blocks, text }
+            .join(REGION_SEPARATOR);
+        Self { regions, text }
     }
 
-    /// The flat layout text a recognizer inspects: the blocks' text joined.
+    /// The flat layout text a recognizer inspects: the regions' text joined.
     #[must_use]
     pub fn text(&self) -> &str {
         &self.text
     }
 
-    /// Blocks in reading order.
+    /// Regions in reading order.
     #[must_use]
-    pub fn blocks(&self) -> &[LayoutBlock] {
-        &self.blocks
+    pub fn regions(&self) -> &[LayoutRegion] {
+        &self.regions
     }
 
-    /// Whether the layout has no blocks.
+    /// Whether the layout has no regions.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.blocks.is_empty()
+        self.regions.is_empty()
     }
 
-    /// Byte offset where each block's text begins within [`text`].
+    /// Byte offset where each region's text begins within [`text`].
+    ///
+    /// Mirrors how `text` is built: region `i` starts after the previous
+    /// regions plus one separator each.
     ///
     /// [`text`]: Self::text
-    fn block_offsets(&self) -> impl Iterator<Item = (usize, &LayoutBlock)> {
+    fn region_offsets(&self) -> impl Iterator<Item = (usize, &LayoutRegion)> {
         let mut offset = 0;
-        self.blocks.iter().map(move |block| {
+        self.regions.iter().map(move |region| {
             let start = offset;
-            offset += block.text.len() + BLOCK_SEPARATOR.len();
-            (start, block)
+            offset += region.text.len() + REGION_SEPARATOR.len();
+            (start, region)
         })
     }
 
-    /// Resolve a byte `range` of [`text`] to the [`ImageLocation`] of the
-    /// words it covers.
+    /// Resolve a byte `range` of [`text`] to the [`ImageLocation`] it covers:
+    /// the union of the boxes of every region the range overlaps.
     ///
-    /// Returns the union of the covered words' bounding boxes (the whole
-    /// block region when a block has no per-word boxes), keeping the shared
-    /// page. When a single word covers the range and carries a polygon, that
-    /// polygon is preserved. `None` when the range covers no block (out of
-    /// bounds, or an empty OCR).
+    /// A single covered region keeps its polygon; a union of several drops it,
+    /// as the enclosing box is axis-aligned. `None` when the range overlaps no
+    /// region (out of bounds, or an empty layout), so the caller drops the
+    /// match rather than emit a placeless entity.
     ///
     /// [`text`]: Self::text
     #[must_use]
     pub fn resolve(&self, range: Range<usize>) -> Option<ImageLocation> {
-        let mut acc = RegionUnion::default();
+        let mut union: Option<ImageLocation> = None;
+        let mut count = 0usize;
 
-        for (block_start, block) in self.block_offsets() {
-            let block_end = block_start + block.text.len();
-            // Skip blocks the range does not touch (half-open overlap).
-            if range.start >= block_end || range.end <= block_start {
+        for (region_start, region) in self.region_offsets() {
+            let region_end = region_start + region.text.len();
+            // Skip regions the range does not touch (half-open overlap).
+            if range.start >= region_end || range.end <= region_start {
                 continue;
             }
 
-            let local_start = range.start.saturating_sub(block_start);
-            let local_end = range.end.min(block_end).saturating_sub(block_start);
-
-            if block.words.is_empty() {
-                acc.add(&block.region);
-            } else {
-                acc.add_words(block, local_start..local_end);
-            }
+            union = Some(match union {
+                None => region.region.clone(),
+                Some(acc) => {
+                    let bbox = acc.bounding_box.union(&region.region.bounding_box);
+                    // Keep the first region's page; a later region on a
+                    // different page is a degenerate cross-page match.
+                    let mut merged = ImageLocation::new(bbox);
+                    if let Some(page) = acc.page {
+                        merged = merged.with_page(page);
+                    }
+                    merged
+                }
+            });
+            count += 1;
         }
 
-        acc.into_location()
+        let mut location = union?;
+        // A lone covered region passes its polygon through; a union cannot.
+        if count > 1 {
+            location.polygon = None;
+        }
+        Some(location)
     }
 }
 
 impl ModalityArtifact for Layout {}
 
-/// Accumulates the bounding boxes of covered regions into one location.
-#[derive(Default)]
-struct RegionUnion {
-    bbox: Option<BoundingBox<f64>>,
-    page: Option<u32>,
-    /// The single region added so far, kept so a lone covered word can pass
-    /// its polygon through. Cleared once more than one region is unioned.
-    sole: Option<ImageLocation>,
-    count: usize,
-}
-
-impl RegionUnion {
-    fn add(&mut self, location: &ImageLocation) {
-        self.bbox = Some(match self.bbox.take() {
-            Some(acc) => acc.union(&location.bounding_box),
-            None => location.bounding_box,
-        });
-        // First region sets the page; a later region on a different page is
-        // a degenerate cross-page match, we keep the first page.
-        if self.page.is_none() {
-            self.page = location.page;
-        }
-        self.sole = if self.count == 0 {
-            Some(location.clone())
-        } else {
-            None
-        };
-        self.count += 1;
-    }
-
-    /// Add the words of `block` whose byte extent overlaps the block-local
-    /// `range`, walking each word's position in the block text.
-    fn add_words(&mut self, block: &LayoutBlock, range: Range<usize>) {
-        let mut search_from = 0;
-        let mut matched = false;
-        for word in &block.words {
-            let Some(rel) = block.text[search_from..].find(word.text.as_str()) else {
-                continue;
-            };
-            let word_start = search_from + rel;
-            let word_end = word_start + word.text.len();
-            search_from = word_end;
-
-            if range.start >= word_end || range.end <= word_start {
-                continue;
-            }
-            self.add(&word.region);
-            matched = true;
-        }
-        // No word overlapped (e.g. a match inside inter-word whitespace):
-        // fall back to the block region so the match still has an extent.
-        if !matched {
-            self.add(&block.region);
-        }
-    }
-
-    fn into_location(self) -> Option<ImageLocation> {
-        let bbox = self.bbox?;
-        // A single covered region keeps its polygon; a union drops it (the
-        // enclosing box is axis-aligned).
-        let polygon = if self.count == 1 {
-            self.sole.and_then(|l| l.polygon)
-        } else {
-            None
-        };
-        Some(ImageLocation {
-            bounding_box: bbox,
-            polygon,
-            page: self.page,
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::primitive::{Dimensions, Point};
+    use crate::primitive::{BoundingBox, Dimensions, Point};
 
     fn loc(x: f64, y: f64, w: f64, h: f64) -> ImageLocation {
         ImageLocation::new(BoundingBox::from_origin(
@@ -279,66 +193,72 @@ mod tests {
         ))
     }
 
-    fn word(x: f64, y: f64, w: f64, h: f64, text: &str) -> LayoutWord {
-        LayoutWord::new(loc(x, y, w, h), text)
+    fn region(x: f64, y: f64, w: f64, h: f64, text: &str) -> LayoutRegion {
+        LayoutRegion::new(loc(x, y, w, h), text)
     }
 
-    /// "Call Alice" as one block of two boxed words.
-    fn two_word_block() -> LayoutBlock {
-        LayoutBlock::new(loc(0.0, 0.0, 100.0, 20.0), "Call Alice").with_words(vec![
-            word(0.0, 0.0, 40.0, 20.0, "Call"),
-            word(50.0, 0.0, 50.0, 20.0, "Alice"),
+    /// "Call Alice" as two boxed regions.
+    fn two_region_layout() -> Layout {
+        Layout::new(vec![
+            region(0.0, 0.0, 40.0, 20.0, "Call"),
+            region(50.0, 0.0, 50.0, 20.0, "Alice"),
         ])
     }
 
     #[test]
-    fn text_is_blocks_joined() {
-        let t = Layout::new(vec![
-            LayoutBlock::new(loc(0.0, 0.0, 10.0, 10.0), "hello"),
-            LayoutBlock::new(loc(0.0, 20.0, 10.0, 10.0), "world"),
+    fn text_is_regions_joined() {
+        let l = Layout::new(vec![
+            region(0.0, 0.0, 10.0, 10.0, "hello"),
+            region(0.0, 20.0, 10.0, 10.0, "world"),
         ]);
-        assert_eq!(t.text(), "hello\nworld");
+        assert_eq!(l.text(), "hello world");
     }
 
     #[test]
-    fn resolve_maps_a_word_range_to_its_box() {
-        let t = Layout::new(vec![two_word_block()]);
+    fn resolve_maps_a_region_range_to_its_box() {
+        let l = two_region_layout();
         // "Alice" is at bytes 5..10.
-        let region = t.resolve(5..10).expect("in bounds");
+        let region = l.resolve(5..10).expect("in bounds");
         let bb = region.bounding_box;
         assert_eq!((bb.min.x, bb.min.y), (50.0, 0.0));
         assert_eq!((bb.max.x, bb.max.y), (100.0, 20.0));
     }
 
     #[test]
-    fn resolve_unions_multiple_words() {
-        let t = Layout::new(vec![two_word_block()]);
-        // "Call Alice" -> bytes 0..10 -> union of both word boxes.
-        let region = t.resolve(0..10).expect("in bounds");
+    fn resolve_unions_multiple_regions() {
+        let l = two_region_layout();
+        // "Call Alice" -> bytes 0..10 -> union of both boxes.
+        let region = l.resolve(0..10).expect("in bounds");
         let bb = region.bounding_box;
         assert_eq!((bb.min.x, bb.min.y), (0.0, 0.0));
         assert_eq!((bb.max.x, bb.max.y), (100.0, 20.0));
     }
 
     #[test]
-    fn resolve_falls_back_to_block_region_without_words() {
-        let t = Layout::new(vec![LayoutBlock::new(
-            loc(5.0, 5.0, 30.0, 10.0),
-            "no word boxes",
-        )]);
-        let region = t.resolve(3..7).expect("in bounds");
-        assert_eq!(region.bounding_box.min.x, 5.0);
+    fn resolve_covers_every_region_the_range_touches() {
+        // A match spanning two regions covers both boxes — no part is left
+        // visible even when the regions have unequal widths.
+        let l = Layout::new(vec![
+            region(0.0, 0.0, 40.0, 20.0, "Alice"),
+            region(50.0, 0.0, 60.0, 20.0, "Smith"),
+        ]);
+        // "Alice Smith" -> bytes 0..11.
+        let region = l.resolve(0..11).expect("in bounds");
+        assert_eq!(
+            (region.bounding_box.min.x, region.bounding_box.max.x),
+            (0.0, 110.0)
+        );
     }
 
     #[test]
     fn resolve_out_of_bounds_is_none() {
-        let t = Layout::new(vec![two_word_block()]);
-        assert!(t.resolve(100..200).is_none());
+        let l = two_region_layout();
+        assert!(l.resolve(100..200).is_none());
     }
 
     #[test]
     fn resolve_on_empty_is_none() {
-        let t = Layout::default();
-        assert!(t.resolve(0..5).is_none());
+        let l = Layout::default();
+        assert!(l.resolve(0..5).is_none());
     }
 }

@@ -1,5 +1,5 @@
 {
-  "name": "@nvisy/elide-wasm",
+  "name": "@nvisy/elide",
   "version": "0.1.0",
   "type": "module",
   "description": "In-browser PII detection and redaction, compiled to WebAssembly.",
@@ -10,13 +10,32 @@
   },
   "homepage": "https://github.com/nvisycom/elide",
   "keywords": ["pii", "redaction", "webassembly", "wasm", "privacy"],
-  "files": ["dist"],
-  "module": "./dist/elide_wasm.js",
-  "types": "./dist/elide_wasm.d.ts",
+  "files": [
+    "dist",
+    "index.js",
+    "index.d.ts",
+    "analyzer.js",
+    "analyzer.d.ts",
+    "anonymizer.js",
+    "anonymizer.d.ts",
+    "label.js",
+    "label.d.ts",
+    "_shared.d.ts"
+  ],
+  "module": "./index.js",
+  "types": "./index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/elide_wasm.d.ts",
-      "default": "./dist/elide_wasm.js"
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    },
+    "./analyzer": {
+      "types": "./analyzer.d.ts",
+      "default": "./analyzer.js"
+    },
+    "./anonymizer": {
+      "types": "./anonymizer.d.ts",
+      "default": "./anonymizer.js"
     }
   },
   "sideEffects": ["./dist/elide_wasm.js", "./dist/snippets/*"],

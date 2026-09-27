@@ -13,9 +13,10 @@ use elide_codec::{Document, DocumentLoader};
 use elide_core::Result;
 
 use super::config::MarkupConfig;
-use super::html_handler::{FORMAT_ID, ScriptPolicy};
+use super::html_handler::FORMAT_ID;
 use super::markup_parser::build_items;
 use super::xml_handler::markup_document;
+use crate::primitive::ScriptPolicy;
 
 /// HTML block-level elements: their text children form one sibling-hint group,
 /// so prose split across inline wrappers (`Card <code>4111…</code> on file`)

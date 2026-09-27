@@ -6,7 +6,7 @@
 //! (Google Document AI, Azure, AWS Textract), local engines (Tesseract, PaddleOCR
 //! wrappers), and the in-process no-op test stub. Each backend turns a request
 //! (image bytes + optional hints) into a response of recognized
-//! [`LayoutBlock`](crate::modality::LayoutBlock)s, so its output drops straight
+//! [`LayoutRegion`](crate::modality::LayoutRegion)s, so its output drops straight
 //! onto the call's artifacts with no remapping. The [`OcrEnricher`] drives a
 //! backend per call and stamps the recognized [`Layout`](crate::modality::Layout)
 //! onto the image so a recognizer can read it. The pure-Rust `OcrsBackend` is
@@ -86,6 +86,6 @@ mod tests {
         let backend = MockBackend::new();
         let image = vec![0u8; 8];
         let response = backend.recognize(OcrRequest::new(&image)).await.unwrap();
-        assert!(response.blocks.is_empty());
+        assert!(response.regions.is_empty());
     }
 }

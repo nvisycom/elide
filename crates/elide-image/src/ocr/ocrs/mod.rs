@@ -3,7 +3,7 @@
 //! Built in two layers. The [`engine`] layer owns everything `ocrs` and `rten`:
 //! loading the two model files and running the recognition pipeline, exposing a
 //! single elide-shaped [`Engine::recognize`](engine::Engine::recognize) that
-//! takes image bytes and returns core [`LayoutBlock`]s. This backend layer holds
+//! takes image bytes and returns core [`LayoutRegion`]s. This backend layer holds
 //! only elide concerns: the [`OcrBackend`] trait impl, provenance, and the async
 //! offload of the CPU-bound engine call, no `ocrs`/`rten` type appears here.
 //!
@@ -12,7 +12,7 @@
 //! result.
 //!
 //! [`OcrBackend`]: super::OcrBackend
-//! [`LayoutBlock`]: crate::modality::LayoutBlock
+//! [`LayoutRegion`]: crate::modality::LayoutRegion
 
 mod engine;
 
@@ -124,12 +124,12 @@ impl OcrBackend for OcrsBackend {
             // nothing to do with the result then.
             let _ = tx.send(result);
         });
-        let blocks = rx.await.map_err(|_| {
+        let regions = rx.await.map_err(|_| {
             Error::new(
                 ErrorKind::Processing,
                 "OCR worker canceled before returning a result",
             )
         })??;
-        Ok(OcrResponse::new(blocks))
+        Ok(OcrResponse::new(regions))
     }
 }

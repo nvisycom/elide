@@ -5,8 +5,10 @@ use std::ops::Range;
 use elide_core::{Error, ErrorKind, Result};
 
 /// Apply a redaction to a string in place: replace a byte range with a
-/// replacement value. The text-shaped handlers use it to splice a redacted
-/// span back into a decoded value.
+/// replacement value.
+///
+/// The text-shaped handlers use it to splice a redacted span back into a decoded
+/// value.
 pub trait RedactRange {
     /// Replace `self[range]` with `value` in place.
     ///

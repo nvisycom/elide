@@ -137,18 +137,30 @@ impl TranscriptSegment {
     }
 
     /// Span covering this segment's words that overlap the segment-local byte
-    /// `range`, by walking each word's byte extent within the segment text.
+    /// `range`, by locating each word's byte extent within the segment text.
     ///
-    /// `None` when no word overlaps (the caller then falls back to the segment
-    /// span).
+    /// Each word is found forward from where the previous one ended, so a
+    /// repeated word resolves to its own occurrence. Words are optional and may
+    /// be sparse (a backend may time only the sensitive spans), so a word the
+    /// text does not contain is skipped rather than fatal. `None` — so the
+    /// caller falls back to the whole segment span — when the words leave any
+    /// non-whitespace byte of the requested `range` uncovered, so a partial or
+    /// sparse word list never under-silences the match.
     fn word_span(&self, range: Range<usize>) -> Option<TimeSpan> {
+        // The range comes from a recognizer's match over the flat transcript
+        // text and is untrusted: a sub-character range (byte 1 of a two-byte
+        // `é`) would panic the coverage slice below. Reject it and let the
+        // caller fall back to the whole segment span.
+        let covered_text = self.text.get(range.clone())?;
+
         let mut start_us: Option<u64> = None;
         let mut end_us: Option<u64> = None;
         let mut search_from = 0;
+        // Byte spans of the words that overlap `range`, to check the range is
+        // fully covered once every word is placed.
+        let mut covered: Vec<Range<usize>> = Vec::new();
 
         for word in &self.words {
-            // Locate the word in the segment text from where the last word
-            // ended, so repeated words resolve to successive occurrences.
             let Some(rel) = self.text[search_from..].find(word.text.as_str()) else {
                 continue;
             };
@@ -160,10 +172,25 @@ impl TranscriptSegment {
             if range.start >= word_end || range.end <= word_start {
                 continue;
             }
+            covered.push(word_start..word_end);
             start_us = Some(start_us.map_or(word.span.start_micros(), |s| {
                 s.min(word.span.start_micros())
             }));
             end_us = Some(end_us.map_or(word.span.end_micros(), |e| e.max(word.span.end_micros())));
+        }
+
+        // Use the word timing only when every non-whitespace byte of the range
+        // is covered by an overlapping word; otherwise the caller falls back to
+        // the whole segment span so the uncovered part is still silenced.
+        let fully_covered = covered_text
+            .char_indices()
+            .filter(|(_, ch)| !ch.is_whitespace())
+            .all(|(offset, _)| {
+                let byte = range.start + offset;
+                covered.iter().any(|span| span.contains(&byte))
+            });
+        if !fully_covered {
+            return None;
         }
 
         Some(TimeSpan::new(start_us?, end_us?))
@@ -347,6 +374,21 @@ mod tests {
     }
 
     #[test]
+    fn resolve_does_not_panic_on_a_sub_character_range() {
+        // A timed segment with a multibyte char: an untrusted range that splits
+        // the two-byte 'é' must not panic the coverage slice. It falls back to
+        // the whole segment span (fail-closed) rather than crashing.
+        let t = Transcription::new(vec![
+            TranscriptSegment::new(TimeSpan::from_millis(0, 500), "café")
+                .with_words(vec![word(0, 500, "café")]),
+        ]);
+        // Byte 4 is inside 'é' (bytes 3..5), not a char boundary.
+        let loc = t.resolve(0..4).expect("in bounds");
+        assert_eq!(loc.span.start_millis(), 0);
+        assert_eq!(loc.span.end_millis(), 500);
+    }
+
+    #[test]
     fn resolve_maps_a_word_range_to_its_timing() {
         let t = Transcription::new(vec![phone_segment()]);
         // "555-1234" is at bytes 14..22.
@@ -372,6 +414,33 @@ mod tests {
         )]);
         let loc = t.resolve(3..7).expect("in bounds");
         assert_eq!(loc.span.start_millis(), 200);
+        assert_eq!(loc.span.end_millis(), 900);
+    }
+
+    #[test]
+    fn resolve_falls_back_to_segment_span_when_words_partly_cover() {
+        // "Alice Smith" with only "Alice" timed: the words do not tile the
+        // segment, so a match spanning both falls back to the segment span —
+        // the untimed "Smith" is never left un-silenced.
+        let segment = TranscriptSegment::new(TimeSpan::from_millis(0, 1_000), "Alice Smith")
+            .with_words(vec![word(0, 400, "Alice")]);
+        let t = Transcription::new(vec![segment]);
+        // "Alice Smith" -> bytes 0..11 -> whole segment span.
+        let loc = t.resolve(0..11).expect("in bounds");
+        assert_eq!(loc.span.start_millis(), 0);
+        assert_eq!(loc.span.end_millis(), 1_000);
+    }
+
+    #[test]
+    fn resolve_uses_word_timing_when_words_tile_the_segment() {
+        // Every word of "Call Alice" is timed, so a match stays tight to the
+        // covered word's timing rather than the segment span.
+        let segment = TranscriptSegment::new(TimeSpan::from_millis(0, 1_000), "Call Alice")
+            .with_words(vec![word(0, 400, "Call"), word(400, 900, "Alice")]);
+        let t = Transcription::new(vec![segment]);
+        // "Alice" -> bytes 5..10.
+        let loc = t.resolve(5..10).expect("in bounds");
+        assert_eq!(loc.span.start_millis(), 400);
         assert_eq!(loc.span.end_millis(), 900);
     }
 

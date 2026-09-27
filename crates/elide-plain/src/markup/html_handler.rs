@@ -10,19 +10,10 @@
 use elide_codec::{Format, FormatId};
 
 use super::HtmlLoader;
+use crate::primitive::ScriptPolicy;
 
 /// Stable [`FormatId`] for the HTML codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.text.html");
-
-/// How the HTML loader handles a `<script>` or `<style>` element body.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ScriptPolicy {
-    /// Skip the element body entirely; it never enters the detection stream.
-    #[default]
-    Skip,
-    /// Treat the element body as plain text and scan it like a text node.
-    ScanText,
-}
 
 /// [`Format`] descriptor registered into `FormatRegistry`.
 ///
