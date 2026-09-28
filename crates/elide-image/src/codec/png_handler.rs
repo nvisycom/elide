@@ -6,6 +6,7 @@ use super::macros::impl_image_handler;
 
 impl_image_handler!(
     format_id = "elide.image.png",
+    image_format = crate::modality::ImageFormat::Png,
     extensions = ["png"],
     content_types = ["image/png"],
 );

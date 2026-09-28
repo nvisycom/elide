@@ -79,7 +79,10 @@ mod tests {
     fn lift_denormalises_boxes_using_the_decoded_dimensions() {
         // A box over the left half of a 100x80 image scales to pixels 0..50 x
         // 0..80, from the payload's intrinsic dimensions.
-        let data = test_util::image_data(test_util::png(100, 80));
+        let data = test_util::image_data(
+            test_util::png(100, 80),
+            elide_image::modality::ImageFormat::Png,
+        );
         let batch = Candidates {
             entities: vec![candidate(0.0, 0.0, 0.5, 1.0)],
         };

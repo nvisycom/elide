@@ -17,6 +17,7 @@
 macro_rules! impl_image_handler {
     (
         format_id = $format_id:literal,
+        image_format = $image_format:expr,
         extensions = [$($ext:literal),* $(,)?],
         content_types = [$($mime:literal),* $(,)?] $(,)?
     ) => {
@@ -61,7 +62,11 @@ macro_rules! impl_image_handler {
         fn format_from(policy: crate::exif::ExifPolicy) -> ::elide_codec::Format {
             ::elide_codec::Format::with_document_loader(
                 FORMAT_ID.clone(),
-                super::image_loader::ImageDocumentLoader::new(FORMAT_ID.clone(), policy),
+                super::image_loader::ImageDocumentLoader::new(
+                    FORMAT_ID.clone(),
+                    $image_format,
+                    policy,
+                ),
             )
             .with_extensions([$($ext),*])
             .with_content_types([$($mime),*])

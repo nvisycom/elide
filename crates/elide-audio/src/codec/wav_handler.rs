@@ -25,7 +25,8 @@ mod tests {
 
     #[tokio::test]
     async fn stream_reports_one_second() {
-        let clip = AudioBuffer::open(&test_util::wav_ramp(1)).expect("open");
+        let clip = AudioBuffer::open(&test_util::wav_ramp(1), crate::modality::AudioFormat::Wav)
+            .expect("open");
         let mut h = WavHandler::new(clip);
         let chunk = h.read_next().await.unwrap().expect("one chunk");
         assert_eq!(chunk.location.span.start_millis(), 0);

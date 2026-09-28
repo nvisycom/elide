@@ -135,20 +135,9 @@ macro_rules! impl_audio_handler {
                 &self,
                 content: ::elide_codec::content::ContentData,
             ) -> ::elide_core::Result<$handler> {
-                let clip = crate::AudioBuffer::open(content.as_bytes())?;
-                // `AudioBuffer::open` accepts any enabled format; this loader is
-                // registered for one, so reject bytes that opened as another
-                // (e.g. MP3 content routed to the WAV loader).
-                if clip.format() != $audio_format {
-                    return ::std::result::Result::Err(::elide_core::Error::new(
-                        ::elide_core::ErrorKind::MalformedInput,
-                        ::std::format!(
-                            "{} loader: content decoded as {:?}, not the expected format",
-                            $format_id,
-                            clip.format(),
-                        ),
-                    ));
-                }
+                // The registry routed to this loader for its one format; open the
+                // bytes as exactly that, no re-detection.
+                let clip = crate::AudioBuffer::open(content.as_bytes(), $audio_format)?;
                 Ok($handler::new(clip))
             }
         }

@@ -28,58 +28,73 @@ pub struct AudioBuffer {
 }
 
 impl AudioBuffer {
-    /// Open `bytes`: detect the format and retain the encoded clip.
+    /// Open `bytes` as the caller-resolved `format`, validating they decode as
+    /// it and retaining the encoded clip.
     ///
-    /// Detection is try-parse: each enabled format validates the bytes in
-    /// turn (WAV first, then MP3), and the first that accepts them wins. The
-    /// one place format is determined; nothing downstream sniffs the bytes.
+    /// The format is not detected here — the ingestion registry already resolved
+    /// it (from the extension, content type, or a magic-byte sniff) and routes
+    /// to the matching codec. This validates the bytes against that format.
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if the bytes are not a clip any enabled
-    /// format can read, or [`ErrorKind::CapabilityUnavailable`] if no audio
-    /// format is enabled in this build.
-    pub fn open(bytes: &[u8]) -> Result<Self> {
-        let source = Bytes::copy_from_slice(bytes);
-
-        #[cfg(feature = "wav")]
-        if crate::engine::wav::validate(&source).is_ok() {
-            return Ok(Self::wrap(source, AudioFormat::Wav));
-        }
-
-        #[cfg(feature = "mp3")]
-        if let Ok(channels) = crate::engine::mp3::probe_channels(&source) {
-            // LAME encodes only mono and stereo; a >2-channel clip would have
-            // to be downmixed, which would edit the unredacted audio, so it is
-            // rejected here rather than silently altered on encode.
-            if channels > 2 {
-                return Err(Error::new(
-                    ErrorKind::MalformedInput,
-                    format!("MP3 has {channels} channels; only mono and stereo are supported"),
-                ));
-            }
-            return Ok(Self::wrap(source, AudioFormat::Mp3));
-        }
-
-        #[cfg(feature = "_internal")]
-        {
-            Err(Error::new(
-                ErrorKind::MalformedInput,
-                "not a clip any enabled audio format can read",
-            ))
-        }
-        #[cfg(not(feature = "_internal"))]
-        {
-            let _ = source;
-            Err(Error::new(
+    /// [`ErrorKind::CapabilityUnavailable`] if this build has no codec for
+    /// `format`, or [`ErrorKind::MalformedInput`] if the bytes do not decode as
+    /// it.
+    pub fn open(bytes: &[u8], format: AudioFormat) -> Result<Self> {
+        if !format.can_decode() {
+            return Err(Error::new(
                 ErrorKind::CapabilityUnavailable,
-                "no audio format is enabled in this build",
-            ))
+                format!("no codec for {format:?} in this build"),
+            ));
+        }
+        let source = Bytes::copy_from_slice(bytes);
+        Self::validate(&source, format)?;
+        Ok(Self::wrap(source, format))
+    }
+
+    /// Validate that `source` decodes as `format`. Only ever called after
+    /// [`can_decode`](AudioFormat::can_decode) confirmed the codec, so the arm
+    /// for a format without its codec is unreachable.
+    fn validate(source: &Bytes, format: AudioFormat) -> Result<()> {
+        match format {
+            AudioFormat::Wav => {
+                #[cfg(feature = "wav")]
+                {
+                    crate::engine::wav::validate(source)
+                }
+                #[cfg(not(feature = "wav"))]
+                {
+                    let _ = source;
+                    unreachable!("a wav open requires the wav codec")
+                }
+            }
+            AudioFormat::Mp3 => {
+                #[cfg(feature = "mp3")]
+                {
+                    // LAME encodes only mono and stereo; a >2-channel clip would
+                    // have to be downmixed, editing the unredacted audio, so it
+                    // is rejected here rather than silently altered on encode.
+                    let channels = crate::engine::mp3::probe_channels(source)?;
+                    if channels > 2 {
+                        return Err(Error::new(
+                            ErrorKind::MalformedInput,
+                            format!(
+                                "MP3 has {channels} channels; only mono and stereo are supported"
+                            ),
+                        ));
+                    }
+                    Ok(())
+                }
+                #[cfg(not(feature = "mp3"))]
+                {
+                    let _ = source;
+                    unreachable!("an mp3 open requires the mp3 codec")
+                }
+            }
         }
     }
 
-    /// Wrap already-classified clip bytes with an empty redaction batch.
-    #[cfg(feature = "_internal")]
+    /// Wrap already-validated clip bytes with an empty redaction batch.
     fn wrap(source: Bytes, format: AudioFormat) -> Self {
         Self {
             source,
@@ -104,11 +119,29 @@ impl AudioBuffer {
     /// [`ErrorKind::MalformedInput`] if the duration cannot be determined from
     /// the container.
     pub fn duration_ms(&self) -> Result<u64> {
+        // `open` only ever wraps a format whose codec is built, so the arm for a
+        // format this build cannot decode is unreachable on a real buffer.
         match self.format {
-            #[cfg(feature = "wav")]
-            AudioFormat::Wav => crate::engine::duration::probe_duration_ms(&self.source, "wav"),
-            #[cfg(feature = "mp3")]
-            AudioFormat::Mp3 => crate::engine::mp3::duration_ms(&self.source),
+            AudioFormat::Wav => {
+                #[cfg(feature = "wav")]
+                {
+                    crate::engine::duration::probe_duration_ms(&self.source, "wav")
+                }
+                #[cfg(not(feature = "wav"))]
+                {
+                    unreachable!("a wav buffer requires the wav codec")
+                }
+            }
+            AudioFormat::Mp3 => {
+                #[cfg(feature = "mp3")]
+                {
+                    crate::engine::mp3::duration_ms(&self.source)
+                }
+                #[cfg(not(feature = "mp3"))]
+                {
+                    unreachable!("an mp3 buffer requires the mp3 codec")
+                }
+            }
         }
     }
 
@@ -143,11 +176,28 @@ impl AudioBuffer {
         if self.redactions.is_empty() {
             return Ok(self.source.clone());
         }
+        // As in `duration_ms`, a real buffer only ever holds a buildable format.
         match self.format {
-            #[cfg(feature = "wav")]
-            AudioFormat::Wav => crate::engine::wav::redact_all(&self.source, &self.redactions),
-            #[cfg(feature = "mp3")]
-            AudioFormat::Mp3 => crate::engine::mp3::redact_all(&self.source, &self.redactions),
+            AudioFormat::Wav => {
+                #[cfg(feature = "wav")]
+                {
+                    crate::engine::wav::redact_all(&self.source, &self.redactions)
+                }
+                #[cfg(not(feature = "wav"))]
+                {
+                    unreachable!("a wav buffer requires the wav codec")
+                }
+            }
+            AudioFormat::Mp3 => {
+                #[cfg(feature = "mp3")]
+                {
+                    crate::engine::mp3::redact_all(&self.source, &self.redactions)
+                }
+                #[cfg(not(feature = "mp3"))]
+                {
+                    unreachable!("an mp3 buffer requires the mp3 codec")
+                }
+            }
         }
     }
 }
@@ -182,27 +232,40 @@ mod tests {
 
     #[test]
     fn open_detects_wav_and_reports_duration() {
-        let clip = AudioBuffer::open(&ramp_wav()).expect("open");
+        let clip = AudioBuffer::open(&ramp_wav(), AudioFormat::Wav).expect("open");
         assert_eq!(clip.format(), AudioFormat::Wav);
         assert_eq!(clip.duration_ms().expect("duration"), 1_000);
     }
 
+    /// Bytes that do not decode as the given format are malformed input: the
+    /// codec is present, the bytes are just wrong.
     #[test]
-    fn open_rejects_garbage() {
-        let err = AudioBuffer::open(b"not audio at all").expect_err("garbage rejected");
+    fn open_rejects_bytes_that_do_not_decode() {
+        let err =
+            AudioBuffer::open(b"not audio at all", AudioFormat::Wav).expect_err("garbage rejected");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
+    }
+
+    /// A format this build has no codec for is a capability gap, not malformed
+    /// input — reported before any decode is attempted, so the caller can tell
+    /// "can't decode here" from "bad bytes".
+    #[test]
+    #[cfg(not(feature = "mp3"))]
+    fn open_reports_undecodable_format_as_unavailable() {
+        let err = AudioBuffer::open(b"", AudioFormat::Mp3).expect_err("no mp3 codec");
+        assert_eq!(err.kind(), ErrorKind::CapabilityUnavailable);
     }
 
     #[test]
     fn empty_batch_round_trips_source_bytes() {
         let bytes = ramp_wav();
-        let clip = AudioBuffer::open(&bytes).expect("open");
+        let clip = AudioBuffer::open(&bytes, AudioFormat::Wav).expect("open");
         assert_eq!(clip.encode().expect("encode"), bytes);
     }
 
     #[test]
     fn silence_zeroes_a_span_and_preserves_length() {
-        let mut clip = AudioBuffer::open(&ramp_wav()).expect("open");
+        let mut clip = AudioBuffer::open(&ramp_wav(), AudioFormat::Wav).expect("open");
         let mut batch: Redactions<Audio> = Redactions::new();
         batch.push(
             AudioLocation::from_millis(100, 200),
@@ -221,7 +284,7 @@ mod tests {
 
     #[test]
     fn remove_shortens_the_clip() {
-        let mut clip = AudioBuffer::open(&ramp_wav()).expect("open");
+        let mut clip = AudioBuffer::open(&ramp_wav(), AudioFormat::Wav).expect("open");
         clip.redact(TimeSpan::from_millis(0, 500), &AudioReplacement::Removed);
 
         let out = clip.encode().expect("encode");
@@ -251,14 +314,14 @@ mod mp3_tests {
 
     #[test]
     fn open_detects_mp3_and_reports_a_duration() {
-        let clip = AudioBuffer::open(&tone_mp3()).expect("open");
+        let clip = AudioBuffer::open(&tone_mp3(), AudioFormat::Mp3).expect("open");
         assert_eq!(clip.format(), AudioFormat::Mp3);
         assert!(clip.duration_ms().expect("duration") > 0);
     }
 
     #[test]
     fn silence_redaction_reencodes_to_valid_mp3() {
-        let mut clip = AudioBuffer::open(&tone_mp3()).expect("open");
+        let mut clip = AudioBuffer::open(&tone_mp3(), AudioFormat::Mp3).expect("open");
         let mut batch: Redactions<Audio> = Redactions::new();
         batch.push(
             AudioLocation::from_millis(100, 200),

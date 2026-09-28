@@ -69,7 +69,10 @@ fn image_prompt_renders_template() {
     .with_name("uploader-face")
     .with_label(builtins::PERSON_NAME.to_ref());
 
-    let data = elide_image::test_util::image_data(elide_image::test_util::png(4, 4));
+    let data = elide_image::test_util::image_data(
+        elide_image::test_util::png(4, 4),
+        elide_image::modality::ImageFormat::Png,
+    );
     let scope = Scope::new().with_tags(vec!["badge".to_owned()]);
     let annotations: Annotations<Image> = Annotations::new().with_inclusions(vec![inclusion]);
     let ctx = RecognizerContext::new(&scope).with_annotations(&annotations);

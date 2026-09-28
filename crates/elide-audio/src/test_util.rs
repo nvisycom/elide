@@ -7,22 +7,13 @@
 
 use bytes::Bytes;
 
-use crate::AudioBuffer;
-use crate::modality::AudioData;
+use crate::modality::{AudioData, AudioFormat};
 
-/// Open `bytes` into an [`AudioData`] the way ingestion does, for a test that
-/// needs the audio modality's payload from raw container bytes.
-///
-/// # Panics
-///
-/// Panics if `bytes` is not a recognizable audio container; a test wanting a
-/// placeholder payload should pass a real fixture (e.g. [`wav_ramp`]).
+/// Wrap fixture `bytes` of the given `format` into an [`AudioData`], for a test
+/// that needs the audio modality's payload — the way ingestion does, with the
+/// format already resolved.
 #[must_use]
-pub fn audio_data(bytes: impl Into<Bytes>) -> AudioData {
-    let bytes = bytes.into();
-    let format = AudioBuffer::open(&bytes)
-        .expect("recognizable audio fixture")
-        .format();
+pub fn audio_data(bytes: impl Into<Bytes>, format: AudioFormat) -> AudioData {
     AudioData::new(bytes, format)
 }
 
@@ -32,7 +23,7 @@ pub fn audio_data(bytes: impl Into<Bytes>) -> AudioData {
 #[cfg(feature = "wav")]
 #[must_use]
 pub fn blank_audio_data() -> AudioData {
-    audio_data(wav_ramp(1))
+    audio_data(wav_ramp(1), AudioFormat::Wav)
 }
 
 /// A `secs`-long 8 kHz mono 16-bit WAV ramp.

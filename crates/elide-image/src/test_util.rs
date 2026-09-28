@@ -12,19 +12,20 @@ use little_exif::metadata::Metadata as ExifMetadata;
 use little_exif::rational::uR64;
 
 use crate::ImageBuffer;
-use crate::modality::ImageData;
+use crate::modality::{ImageData, ImageFormat};
 
-/// Decode `bytes` into an [`ImageData`] the way ingestion does, for a test that
-/// needs the image modality's payload from raw container bytes.
+/// Decode `bytes` of the given `format` into an [`ImageData`] the way ingestion
+/// does, for a test that needs the image modality's payload from raw container
+/// bytes.
 ///
 /// # Panics
 ///
-/// Panics if `bytes` is not a decodable image; a test wanting a placeholder
-/// payload should pass a real fixture (e.g. [`png`]).
+/// Panics if `bytes` is not a decodable image of `format`; a test wanting a
+/// placeholder payload should pass a real fixture (e.g. [`png`]).
 #[must_use]
-pub fn image_data(bytes: impl Into<Bytes>) -> ImageData {
+pub fn image_data(bytes: impl Into<Bytes>, format: ImageFormat) -> ImageData {
     let bytes = bytes.into();
-    let buffer = ImageBuffer::open(&bytes).expect("decodable image fixture");
+    let buffer = ImageBuffer::open(&bytes, format).expect("decodable image fixture");
     ImageData::new(buffer.raster().clone(), bytes)
 }
 
@@ -33,7 +34,7 @@ pub fn image_data(bytes: impl Into<Bytes>) -> ImageData {
 /// an empty-recognition path, not the image itself).
 #[must_use]
 pub fn blank_image_data() -> ImageData {
-    image_data(png(1, 1))
+    image_data(png(1, 1), ImageFormat::Png)
 }
 
 /// A plain solid-colour PNG of `width`x`height` pixels, no metadata.

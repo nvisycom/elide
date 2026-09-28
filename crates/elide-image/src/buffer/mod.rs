@@ -22,10 +22,10 @@ use crate::primitive::{BoundingBox, Dimensions};
 
 /// An opened image source, the single entry point into the crate.
 ///
-/// [`open`](Self::open) ingests the bytes once: it detects the format, decodes
-/// the pixels into a [`RasterImage`], and retains the source container so
-/// metadata is available without a second decode or any magic-byte sniffing
-/// elsewhere. Reuse the buffer to [`redact`](Self::redact) pixel regions and
+/// [`open`](Self::open) ingests the bytes once, as the caller-resolved format:
+/// it decodes the pixels into a [`RasterImage`] and retains the source container
+/// so metadata is available without a second decode. Reuse the buffer to
+/// [`redact`](Self::redact) pixel regions and
 /// [`encode`](Self::encode) back out under an EXIF policy, all paying the decode
 /// cost a single time. With the `exif` feature it also surfaces the source's
 /// privacy-relevant EXIF fields as `Entity<Metadata>` values.
@@ -47,15 +47,18 @@ pub struct ImageBuffer {
 }
 
 impl ImageBuffer {
-    /// Open `bytes`: detect the format, decode the pixels, and keep the source.
+    /// Open `bytes` as the caller-resolved `format`: decode the pixels and keep
+    /// the source.
     ///
-    /// The one place format is determined; nothing downstream sniffs magic bytes.
+    /// The format is not detected here — the ingestion registry already resolved
+    /// it (from the extension, content type, or a magic-byte sniff) and routes
+    /// to the matching codec; this decodes the bytes as that format.
     ///
     /// # Coordinate space
     ///
     /// The pixels are decoded as stored, with the EXIF `Orientation` tag *not*
     /// applied, so a coordinate is a raw stored-pixel coordinate, not a
-    /// display-space one. This is deliberate: detection reads these same stored
+    /// display-space one. This is deliberate: recognition reads these same stored
     /// pixels, so a region it reports and a region [`redact`](Self::redact) paints
     /// share one coordinate system and always line up. A caller that holds
     /// display-space coordinates (e.g. from a viewer that honours `Orientation`)
@@ -64,13 +67,19 @@ impl ImageBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if the bytes are not a readable image, or
-    /// [`ErrorKind::CapabilityUnavailable`] if the format is not one this crate
-    /// supports.
-    pub fn open(bytes: &[u8]) -> Result<Self> {
-        let guessed = image::guess_format(bytes)
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("unknown image: {e}")))?;
-        let format = ImageFormat::from_image(guessed)?;
+    /// [`ErrorKind::CapabilityUnavailable`] if this build has no codec for
+    /// `format`, or [`ErrorKind::MalformedInput`] if the bytes do not decode as
+    /// it.
+    pub fn open(bytes: &[u8], format: ImageFormat) -> Result<Self> {
+        // The format is not detected here — the ingestion registry already
+        // resolved it and routed to the matching codec; this decodes the bytes
+        // as that format.
+        if !format.can_decode() {
+            return Err(Error::new(
+                ErrorKind::CapabilityUnavailable,
+                format!("no codec for {format:?} in this build"),
+            ));
+        }
         let inner = image::load_from_memory_with_format(bytes, format.to_image())
             .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("image decode: {e}")))?;
         Ok(Self {
@@ -310,7 +319,7 @@ mod tests {
 
     #[test]
     fn crop_wholly_outside_the_image_is_none() {
-        let buffer = ImageBuffer::open(&png(4, 4)).expect("open");
+        let buffer = ImageBuffer::open(&png(4, 4), ImageFormat::Png).expect("open");
         // A region past the right/bottom edges has no overlap with the image.
         assert!(
             buffer
@@ -336,7 +345,7 @@ mod tests {
         // The edge sum `x + width` must not overflow: a huge origin plus a huge
         // width has no overlap with the image and resolves to a clean `None`,
         // not a debug panic or a wrapped-around bogus region.
-        let buffer = ImageBuffer::open(&png(4, 4)).expect("open");
+        let buffer = ImageBuffer::open(&png(4, 4), ImageFormat::Png).expect("open");
         assert!(
             buffer
                 .crop(BoundingBox::from_origin(
@@ -363,7 +372,7 @@ mod tests {
 
     #[test]
     fn crop_partly_outside_is_clamped_to_the_overlap() {
-        let buffer = ImageBuffer::open(&png(4, 4)).expect("open");
+        let buffer = ImageBuffer::open(&png(4, 4), ImageFormat::Png).expect("open");
         // Starts inside, runs two pixels past each edge → a 2x2 overlap.
         let cropped = buffer
             .crop(BoundingBox::from_origin(
@@ -376,7 +385,7 @@ mod tests {
 
     #[test]
     fn redact_wholly_outside_is_a_clean_no_op() {
-        let mut buffer = ImageBuffer::open(&png(4, 4)).expect("open");
+        let mut buffer = ImageBuffer::open(&png(4, 4), ImageFormat::Png).expect("open");
         buffer.redact(
             BoundingBox::from_origin(Point::new(10, 10), Dimensions::new(4, 4)),
             &ImageReplacement::Block {
@@ -393,7 +402,7 @@ mod tests {
 
     #[test]
     fn redact_paints_only_the_in_bounds_intersection() {
-        let mut buffer = ImageBuffer::open(&png(4, 4)).expect("open");
+        let mut buffer = ImageBuffer::open(&png(4, 4), ImageFormat::Png).expect("open");
         // A 2x2 block starting at (3,3) reaches one pixel past each edge; only the
         // single in-bounds pixel (3,3) must turn black, and (0,0) stays red.
         buffer.redact(
@@ -436,7 +445,7 @@ mod tests {
         // pixel regardless of any orientation a viewer would apply. A 6x2 image
         // (portrait-when-rotated) blacked at stored (0,0) has (0,0) black and the
         // far corner untouched, proving no implicit rotation moved the target.
-        let mut buffer = ImageBuffer::open(&png(6, 2)).expect("open");
+        let mut buffer = ImageBuffer::open(&png(6, 2), ImageFormat::Png).expect("open");
         assert_eq!(
             buffer.dimensions(),
             Dimensions::new(6, 2),
@@ -478,7 +487,7 @@ mod tests {
             .expect("write exif");
 
         // Redact a pixel so the buffer is dirty (forces the re-encode path).
-        let mut buffer = ImageBuffer::open(&bytes).expect("open");
+        let mut buffer = ImageBuffer::open(&bytes, ImageFormat::Jpeg).expect("open");
         buffer.redact(
             BoundingBox::from_origin(Point::new(0, 0), Dimensions::new(2, 2)),
             &ImageReplacement::Block {
@@ -524,7 +533,7 @@ mod tests {
         );
 
         // No pixel redaction: the lossless strip path.
-        let buffer = ImageBuffer::open(&bytes).expect("open");
+        let buffer = ImageBuffer::open(&bytes, ImageFormat::Tiff).expect("open");
         let out = buffer.encode(ExifPolicy::StripSensitive).expect("encode");
 
         // Pixels intact, GPS gone.
@@ -556,7 +565,7 @@ mod tests {
         use little_exif::metadata::Metadata as ExifMetadata;
 
         let bytes = crate::test_util::tiff_with_gps();
-        let mut buffer = ImageBuffer::open(&bytes).expect("open");
+        let mut buffer = ImageBuffer::open(&bytes, ImageFormat::Tiff).expect("open");
         buffer.redact(
             BoundingBox::from_origin(Point::new(0, 0), Dimensions::new(2, 2)),
             &ImageReplacement::Block {
@@ -614,7 +623,7 @@ mod tests {
         exif.write_to_vec(&mut bytes, FileExtension::TIFF)
             .expect("write exif");
 
-        let mut buffer = ImageBuffer::open(&bytes).expect("open");
+        let mut buffer = ImageBuffer::open(&bytes, ImageFormat::Tiff).expect("open");
         buffer.redact(
             BoundingBox::from_origin(Point::new(0, 0), Dimensions::new(2, 2)),
             &ImageReplacement::Block {
