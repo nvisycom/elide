@@ -116,7 +116,11 @@ impl Loader for ExifLoader {
     type Stream = ExifHandler;
 
     async fn decode(&self, content: ContentData) -> Result<ExifHandler> {
-        ExifHandler::new(ImageBuffer::open(content.as_bytes())?)
+        let bytes = content.as_bytes();
+        // The `#exif` sub-part is the image's own container, so the format is
+        // sniffed from the bytes rather than routed by the registry.
+        let format = crate::modality::ImageFormat::detect(bytes)?;
+        ExifHandler::new(ImageBuffer::open(bytes, format)?)
     }
 }
 

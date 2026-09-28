@@ -14,26 +14,33 @@ use super::image_state::ImageState;
 use super::image_stream::PixelStream;
 use crate::ImageBuffer;
 use crate::exif::ExifPolicy;
-use crate::modality::Image;
+use crate::modality::{Image, ImageFormat};
 
 /// A loader that decodes image bytes into a two-part [`Document`]: the pixel
 /// stream and the `#exif` metadata blob.
 pub struct ImageDocumentLoader {
     format_id: FormatId,
+    format: ImageFormat,
     policy: ExifPolicy,
 }
 
 impl ImageDocumentLoader {
-    /// A loader for `format_id` with the fallback `policy`.
-    pub fn new(format_id: FormatId, policy: ExifPolicy) -> Self {
-        Self { format_id, policy }
+    /// A loader for `format_id` / `format` with the fallback `policy`.
+    pub fn new(format_id: FormatId, format: ImageFormat, policy: ExifPolicy) -> Self {
+        Self {
+            format_id,
+            format,
+            policy,
+        }
     }
 }
 
 #[async_trait::async_trait]
 impl DocumentLoader for ImageDocumentLoader {
     async fn decode(&self, content: ContentData) -> Result<Document> {
-        let buffer = ImageBuffer::open(content.as_bytes())?;
+        // The registry routed to this loader for its one format; decode the
+        // bytes as exactly that, no re-detection.
+        let buffer = ImageBuffer::open(content.as_bytes(), self.format)?;
         let exif_bytes = buffer.source_bytes();
         let original_exif = exif_bytes.clone();
         let state = ImageState::new(buffer);
@@ -98,7 +105,8 @@ mod tests {
 
     /// Decode `bytes` into an image [`Document`] under `format_id` and `policy`.
     async fn decode(format_id: &'static str, policy: ExifPolicy, bytes: Bytes) -> Document {
-        ImageDocumentLoader::new(FormatId::new(format_id), policy)
+        let format = ImageFormat::detect(&bytes).expect("fixture is a valid image");
+        ImageDocumentLoader::new(FormatId::new(format_id), format, policy)
             .decode(ContentData::new(bytes))
             .await
             .expect("decode")

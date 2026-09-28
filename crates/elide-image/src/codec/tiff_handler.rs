@@ -6,6 +6,7 @@ use super::macros::impl_image_handler;
 
 impl_image_handler!(
     format_id = "elide.image.tiff",
+    image_format = crate::modality::ImageFormat::Tiff,
     extensions = ["tif", "tiff"],
     content_types = ["image/tiff"],
 );

@@ -24,7 +24,8 @@ mod tests {
 
     #[tokio::test]
     async fn stream_reports_a_duration() {
-        let clip = AudioBuffer::open(&test_util::mp3_tone(1)).expect("open");
+        let clip = AudioBuffer::open(&test_util::mp3_tone(1), crate::modality::AudioFormat::Mp3)
+            .expect("open");
         let mut h = Mp3Handler::new(clip);
         let chunk = h.read_next().await.unwrap().expect("one chunk");
         assert_eq!(chunk.location.span.start_millis(), 0);
