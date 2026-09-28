@@ -44,6 +44,16 @@ impl ImageFormat {
         }
     }
 
+    /// The canonical IANA media type (MIME) for this format.
+    #[must_use]
+    pub fn mime_type(self) -> &'static str {
+        match self {
+            ImageFormat::Png => "image/png",
+            ImageFormat::Jpeg => "image/jpeg",
+            ImageFormat::Tiff => "image/tiff",
+        }
+    }
+
     /// Detect the format from the leading bytes' magic number.
     ///
     /// The ingestion registry resolves format from a hint (extension, content
@@ -106,5 +116,24 @@ impl ImageFormat {
             ImageFormat::Jpeg => FileExtension::JPEG,
             ImageFormat::Tiff => FileExtension::TIFF,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mime_type_maps_each_format() {
+        assert_eq!(ImageFormat::Png.mime_type(), "image/png");
+        assert_eq!(ImageFormat::Jpeg.mime_type(), "image/jpeg");
+        assert_eq!(ImageFormat::Tiff.mime_type(), "image/tiff");
+    }
+
+    #[test]
+    fn from_extension_round_trips_a_canonical_extension() {
+        assert_eq!(ImageFormat::from_extension("PNG"), Some(ImageFormat::Png));
+        assert_eq!(ImageFormat::from_extension("jpeg"), Some(ImageFormat::Jpeg));
+        assert_eq!(ImageFormat::from_extension("bmp"), None);
     }
 }

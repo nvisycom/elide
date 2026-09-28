@@ -38,6 +38,17 @@ impl AudioFormat {
         }
     }
 
+    /// The canonical IANA media type (MIME) for this format.
+    ///
+    /// WAV also appears as `audio/x-wav`; this returns the standard `audio/wav`.
+    #[must_use]
+    pub fn mime_type(self) -> &'static str {
+        match self {
+            AudioFormat::Wav => "audio/wav",
+            AudioFormat::Mp3 => "audio/mpeg",
+        }
+    }
+
     /// Whether this build has the codec to decode and re-encode this format.
     ///
     /// Naming a format always works; decoding needs its format feature. `open`
@@ -48,5 +59,23 @@ impl AudioFormat {
             AudioFormat::Wav => cfg!(feature = "wav"),
             AudioFormat::Mp3 => cfg!(feature = "mp3"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mime_type_maps_each_format() {
+        assert_eq!(AudioFormat::Wav.mime_type(), "audio/wav");
+        assert_eq!(AudioFormat::Mp3.mime_type(), "audio/mpeg");
+    }
+
+    #[test]
+    fn from_extension_round_trips_a_canonical_extension() {
+        assert_eq!(AudioFormat::from_extension("WAV"), Some(AudioFormat::Wav));
+        assert_eq!(AudioFormat::from_extension("mp3"), Some(AudioFormat::Mp3));
+        assert_eq!(AudioFormat::from_extension("flac"), None);
     }
 }
