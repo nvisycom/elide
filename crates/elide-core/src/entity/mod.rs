@@ -275,9 +275,9 @@ impl<M: Modality> Entity<M> {
     }
 }
 
-/// Test fixtures, behind the `test-util` feature.
-#[cfg(feature = "test-util")]
-#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
+/// Test fixtures, behind the `fixtures` feature.
+#[cfg(feature = "fixtures")]
+#[cfg_attr(docsrs, doc(cfg(feature = "fixtures")))]
 impl Entity<crate::modality::text::Text> {
     /// A text entity for `label` over the byte range `loc`, born from a pattern
     /// recognition at `Confidence::MAX`, the standard test fixture.

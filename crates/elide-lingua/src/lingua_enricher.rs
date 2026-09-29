@@ -13,7 +13,7 @@
 //! [`lingua`]: https://crates.io/crates/lingua
 
 use elide_core::Result;
-use elide_core::enrichment::{Enricher, Enrichment};
+use elide_core::enrichment::Enricher;
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::{ComponentId, LanguageTag};
 use elide_core::recognition::{RecognizerContext, Subject};
@@ -80,19 +80,15 @@ impl<M: TextRecognizable> Enricher<M> for LinguaEnricher {
         ComponentId::new("elide-lingua", env!("CARGO_PKG_VERSION"))
     }
 
-    async fn enrich(
-        &self,
-        subject: &mut Subject<M>,
-        ctx: &RecognizerContext<'_, M>,
-    ) -> Result<Enrichment> {
+    async fn enrich(&self, subject: &mut Subject<M>, ctx: &RecognizerContext<'_, M>) -> Result<()> {
         // A caller-asserted language is authoritative; skip detection.
         if ctx.has_asserted_language() {
-            return Ok(Enrichment::none());
+            return Ok(());
         }
         // No recognizable text at this chunk (an un-transcribed clip, an
         // un-OCR'd image): no language to detect.
         let Some(text) = M::as_text(subject.data(), subject.artifact()) else {
-            return Ok(Enrichment::none());
+            return Ok(());
         };
         // Detect into an owned list first so the immutable borrow of the payload
         // text ends before `detect_language` takes `&mut subject`.
@@ -100,8 +96,7 @@ impl<M: TextRecognizable> Enricher<M> for LinguaEnricher {
         for detection in detections {
             subject.detect_language(detection);
         }
-        // Language detection is pure-CPU: no model tokens to report.
-        Ok(Enrichment::none())
+        Ok(())
     }
 }
 

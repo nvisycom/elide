@@ -17,8 +17,8 @@ use elide::recognition::docprops::DocPropsRecognizer;
 use elide::redaction::operators::Erase;
 use elide::redaction::{Anonymizer, Rule};
 use elide::{Directives, Document, Orchestrator};
+use elide_office::opc::fixtures::read_part;
 use elide_office::opc::props;
-use elide_office::opc::test_util::read_part;
 
 use super::FIXTURE;
 

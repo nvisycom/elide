@@ -55,11 +55,10 @@ impl serde::Serialize for PathField<'_> {
 }
 
 impl serde::Serialize for Report {
-    /// Serialize to `{ parts: [ { id: [seg..], modality, entities } ] }` (plus
-    /// `usage` under that feature). Every part, a document's own content and
-    /// every nested container part, is one entry, keyed by its full path so no
-    /// two collide. Each carries its modality name so it can be parsed back into
-    /// the right `Vec<Entity<M>>`.
+    /// Serialize to `{ parts: [ { id: [seg..], modality, entities } ] }`. Every
+    /// part, a document's own content and every nested container part, is one
+    /// entry, keyed by its full path so no two collide. Each carries its modality
+    /// name so it can be parsed back into the right `Vec<Entity<M>>`.
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
 
@@ -92,16 +91,8 @@ impl serde::Serialize for Report {
         // reports serialize identically and the order follows the `PartId` tree.
         parts.sort_unstable_by(|a, b| a.0.segments().cmp(b.0.segments()));
 
-        // `usage` is the second field only under the `usage` feature.
-        #[cfg(feature = "usage")]
-        let field_count = 2;
-        #[cfg(not(feature = "usage"))]
-        let field_count = 1;
-
-        let mut state = serializer.serialize_struct("Report", field_count)?;
+        let mut state = serializer.serialize_struct("Report", 1)?;
         state.serialize_field("parts", &parts)?;
-        #[cfg(feature = "usage")]
-        state.serialize_field("usage", &self.usage)?;
         state.end()
     }
 }
@@ -474,9 +465,9 @@ impl<'de, L: Leaf> Visitor<'de> for SetSeed<'_, L> {
                         _leaf: PhantomData,
                     })?);
                 }
-                // `usage` (and any future field) is ignored: it is derived
-                // analysis output, not editable review state. `parts` is optional
-                //, a set with no parts is valid.
+                // Any field other than `parts` is ignored, so a wire form
+                // carrying extra derived output still deserializes. `parts` is
+                // optional: a set with no parts is valid.
                 _ => {
                     map.next_value::<serde::de::IgnoredAny>()?;
                 }
@@ -492,7 +483,9 @@ mod tests {
     use elide_core::modality::text::Text;
     use serde::de::DeserializeSeed;
 
-    use super::super::test_support::{doc, source_only_entity, text_entity};
+    #[cfg(feature = "schema")]
+    use super::super::test_support::source_only_entity;
+    use super::super::test_support::{doc, text_entity};
     use super::*;
     use crate::PartId;
 
@@ -617,31 +610,6 @@ mod tests {
                 panic!("serialized artifact set does not match its schema: {e}\n{json:#}");
             }
         }
-    }
-
-    #[cfg(feature = "usage")]
-    #[test]
-    fn serializes_usage_entries() {
-        use std::time::Duration;
-
-        use elide_core::primitive::{ComponentId, Usage};
-
-        let mut report = Report::new();
-        report.usage.extend([Usage::new(
-            ComponentId::new("elide-pattern", "1"),
-            Duration::from_millis(5),
-            3,
-        )]);
-
-        let value = serde_json::to_value(&report).unwrap();
-        let entries = value["usage"]["entries"].as_array().expect("usage array");
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0]["id"]["name"], "elide-pattern");
-        assert_eq!(entries[0]["duration"], 5);
-        assert_eq!(entries[0]["count"], 3);
-        // An empty report still carries an (empty) usage array.
-        let empty = serde_json::to_value(Report::new()).unwrap();
-        assert!(empty["usage"]["entries"].as_array().unwrap().is_empty());
     }
 
     #[test]

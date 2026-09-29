@@ -51,8 +51,8 @@ async fn image_context_boosts_and_keeps_the_native_region() {
     ];
     let scope = Scope::new();
     let ctx = RecognizerContext::<Image>::new(&scope);
-    let subject = Subject::new(elide_image::test_util::blank_image_data())
-        .with_artifact(Layout::new(regions));
+    let subject =
+        Subject::new(elide_image::fixtures::blank_image_data()).with_artifact(Layout::new(regions));
     let entities = ssn_recognizer()
         .recognize(&subject, &ctx)
         .await
@@ -93,7 +93,7 @@ async fn audio_context_boosts_and_keeps_the_native_timespan() {
         ]);
     let scope = Scope::new();
     let ctx = RecognizerContext::<Audio>::new(&scope);
-    let subject = Subject::new(elide_audio::test_util::blank_audio_data())
+    let subject = Subject::new(elide_audio::fixtures::blank_audio_data())
         .with_artifact(Transcription::new(vec![segment]));
     let entities = ssn_recognizer()
         .recognize(&subject, &ctx)

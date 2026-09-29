@@ -48,10 +48,10 @@ exif = ["dep:little_exif", "dep:async-trait", "elide-core/metadata"]
 ## least one format feature (`png`/`jpeg`/`tiff`) to register a pixel format.
 codec = ["dep:elide-codec", "dep:async-trait", "exif"]
 
-## Expose `test_util`: build small in-memory image fixtures (a JPEG carrying a
+## Expose `fixtures`: build small in-memory image fixtures (a JPEG carrying a
 ## GPS EXIF tag) and inspect them, so a downstream crate can exercise the EXIF
 ## path without depending on `image`/`little_exif` itself. Implies `exif`.
-test-util = ["exif", "jpeg", "png"]
+fixtures = ["exif", "jpeg", "png"]
 
 ## Derive `serde::{Serialize, Deserialize}` on the metadata model, so a caller
 ## can ship a metadata read across a boundary. Implies the same on elide-core's
@@ -65,7 +65,7 @@ schema = ["serde", "dep:schemars", "elide-core/schema"]
 
 ## OCR: the `OcrBackend` trait, the `OcrEnricher`, and the request/response
 ## types. The traits ship bare (no OCR engine); enable `ocrs` for the pure-Rust
-## engine or `test-utils` for the no-op backend.
+## engine or `mocks` for the no-op backend.
 ocr = ["dep:async-trait", "dep:derive_builder", "dep:uuid"]
 
 ## The `ocrs` engine backend: a pure-Rust OCR engine (ocrs + the RTen runtime,
@@ -80,13 +80,9 @@ ocrs = [
     "dep:futures",
 ]
 
-## Ship the no-op OCR `MockBackend` for tests, examples, and offline wiring.
-## Implies `ocr`.
-test-utils = ["ocr"]
-
-## Resource-usage accounting: surface the `ModelUsage` the OCR enricher attaches
-## to its `Enrichment`. Off by default.
-usage = ["elide-core/usage"]
+## Ship the no-op OCR `MockBackend` for tests, examples, and offline wiring
+## (distinct from `fixtures`, which builds decoded-image fixtures). Implies `ocr`.
+mocks = ["ocr"]
 
 [dependencies]
 # Internal crates

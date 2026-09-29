@@ -12,7 +12,7 @@ use elide_format::FormatRegistry;
 #[tokio::test]
 async fn sniffs_a_png_from_raw_bytes() {
     let reg = FormatRegistry::with_builtin();
-    let content = ContentData::new(elide_image::test_util::png(2, 2));
+    let content = ContentData::new(elide_image::fixtures::png(2, 2));
     let handle = reg.decode_content(content).await.expect("sniffed png");
     assert_eq!(handle.format_id().as_str(), "elide.image.png");
 }
@@ -27,7 +27,7 @@ async fn an_asserted_extension_beats_the_sniff() {
     use elide_core::ErrorKind;
 
     let reg = FormatRegistry::with_builtin();
-    let content = ContentData::new(elide_image::test_util::png(2, 2)).with_filename("note.txt");
+    let content = ContentData::new(elide_image::fixtures::png(2, 2)).with_filename("note.txt");
     let err = reg
         .decode_content(content)
         .await
@@ -52,7 +52,7 @@ async fn plain_text_does_not_sniff() {
 #[tokio::test]
 async fn an_unregistered_extension_suppresses_the_sniff() {
     let reg = FormatRegistry::with_builtin();
-    let content = ContentData::new(elide_image::test_util::png(2, 2)).with_filename("data.unknown");
+    let content = ContentData::new(elide_image::fixtures::png(2, 2)).with_filename("data.unknown");
     assert!(
         reg.decode_content(content).await.is_err(),
         "a present-but-unregistered extension must not fall through to a sniff"

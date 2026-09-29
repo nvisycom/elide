@@ -33,8 +33,6 @@ use elide_core::entity::CustomEntity;
 use elide_core::entity::Entity;
 use elide_core::entity::audit::{Attribution, AuditEvent, AuditKind, ManualIntent};
 use elide_core::modality::Modality;
-#[cfg(feature = "usage")]
-use elide_core::primitive::UsageReport;
 use uuid::Uuid;
 
 use super::group::EntityGroup;
@@ -108,10 +106,6 @@ pub struct Report {
     /// Every part's entry, keyed by its [`PartId`] path, a named document's own
     /// content is its depth-1 part, container parts nest below.
     pub(crate) parts: HashMap<PartId, PartReport>,
-    /// Per-recognizer / per-enricher resource usage across the whole
-    /// analysis (every part), in run order.
-    #[cfg(feature = "usage")]
-    pub(crate) usage: UsageReport,
 }
 
 impl Report {
@@ -123,8 +117,6 @@ impl Report {
     pub fn new() -> Self {
         Self {
             parts: HashMap::new(),
-            #[cfg(feature = "usage")]
-            usage: UsageReport::new(),
         }
     }
 
@@ -144,14 +136,6 @@ impl Report {
     #[must_use]
     pub fn deserializer() -> ReportDeserializer {
         ReportDeserializer::new()
-    }
-
-    /// The resource usage recorded across this analysis, one entry per
-    /// recognizer and enricher that ran, each self-identifying via its id.
-    #[cfg(feature = "usage")]
-    #[must_use]
-    pub fn usage(&self) -> &UsageReport {
-        &self.usage
     }
 
     /// Set the entities of the container part `id`, as modality `P`,

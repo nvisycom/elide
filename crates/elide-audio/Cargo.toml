@@ -49,10 +49,10 @@ serde = ["dep:serde", "elide-core/serde"]
 ## Implies `serde`.
 schema = ["serde", "dep:schemars", "elide-core/schema"]
 
-## Expose `test_util`: build small in-memory audio fixtures (a WAV ramp, an MP3
+## Expose `fixtures`: build small in-memory audio fixtures (a WAV ramp, an MP3
 ## tone), so a downstream crate can exercise an audio handler without depending
 ## on `hound`/`mp3lame-encoder` itself. Implies both formats.
-test-util = ["wav", "mp3"]
+fixtures = ["wav", "mp3"]
 
 ## Adapt the audio formats to the `elide-codec` `Handler`/`Loader` contracts:
 ## the per-format handlers + loaders + `*_format()` descriptors the format
@@ -62,16 +62,12 @@ codec = ["dep:elide-codec", "dep:async-trait"]
 
 ## Speech-to-text: the `SttBackend` trait, the `SttEnricher`, and the
 ## request/response types. The traits ship bare (no STT engine); enable
-## `test-utils` for the no-op backend.
+## `mocks` for the no-op backend.
 stt = ["dep:async-trait", "dep:derive_builder", "dep:uuid"]
 
 ## Ship the no-op STT `MockBackend` for tests, examples, and offline wiring
-## (distinct from `test-util`, which builds decoded-audio fixtures). Implies `stt`.
-test-utils = ["stt"]
-
-## Resource-usage accounting: surface the `ModelUsage` the STT enricher attaches
-## to its `Enrichment`. Off by default.
-usage = ["elide-core/usage"]
+## (distinct from `fixtures`, which builds decoded-audio fixtures). Implies `stt`.
+mocks = ["stt"]
 
 [dependencies]
 # Internal crates

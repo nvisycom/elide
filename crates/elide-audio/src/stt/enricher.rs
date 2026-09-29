@@ -17,13 +17,13 @@
 use std::sync::Arc;
 
 use derive_builder::Builder;
-use elide_core::enrichment::{Enricher, Enrichment};
+use elide_core::enrichment::Enricher;
 use elide_core::primitive::ComponentId;
 use elide_core::recognition::{RecognizerContext, Subject};
 use elide_core::{Error, Result};
 use hipstr::HipStr;
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(any(test, feature = "mocks"))]
 use super::MockBackend;
 use super::{SttBackend, SttRequest};
 use crate::modality::{Audio, Transcription};
@@ -47,9 +47,8 @@ use crate::modality::{Audio, Transcription};
     build_fn(error = "Error", name = "try_build", private)
 )]
 pub struct SttEnricher {
-    /// Caller-chosen name, surfaced as this enricher's usage id so a caller
-    /// running more than one transcription enricher can tell them apart. The
-    /// model it calls is reported separately, from the backend's provenance.
+    /// Caller-chosen name, surfaced as this enricher's id so a caller running
+    /// more than one transcription enricher can tell them apart.
     name: HipStr<'static>,
     /// Backend that transcribes the clip. Required. Set via [`with_backend`],
     /// which accepts any concrete [`SttBackend`] impl by value and wraps it in
@@ -90,8 +89,8 @@ impl SttEnricherBuilder {
     /// Wire the no-op [`MockBackend`] as this enricher's backend.
     ///
     /// [`MockBackend`]: super::MockBackend
-    #[cfg(any(test, feature = "test-utils"))]
-    #[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
+    #[cfg(any(test, feature = "mocks"))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "mocks")))]
     #[must_use]
     pub fn with_mock_backend(self) -> Self {
         self.with_backend(MockBackend::new())
@@ -113,11 +112,11 @@ impl Enricher<Audio> for SttEnricher {
         &self,
         subject: &mut Subject<Audio>,
         ctx: &RecognizerContext<'_, Audio>,
-    ) -> Result<Enrichment> {
+    ) -> Result<()> {
         // Already transcribed (a second enricher pass, or a restored artifact on
         // a re-run): leave it, so re-recognition never re-invokes the model.
         if subject.is_enriched() {
-            return Ok(Enrichment::none());
+            return Ok(());
         }
         let data = subject.data();
         let request = SttRequest {
@@ -128,28 +127,23 @@ impl Enricher<Audio> for SttEnricher {
         };
         let response = self.backend.transcribe(request).await?;
         subject.set_artifact(Transcription::new(response.segments));
-        // The transcription model vouches for its own identity; STT reports no
-        // token counts today.
-        #[cfg(feature = "usage")]
-        return Ok(Enrichment::with_model(self.backend.provenance().into()));
-        #[cfg(not(feature = "usage"))]
-        Ok(Enrichment::none())
+        Ok(())
     }
 }
 
-// These tests build a real [`AudioData`] via `test_util`, which the `test-util`
-// feature provides (with `wav` for the fixture encoder).
-#[cfg(all(test, feature = "test-util", feature = "wav"))]
+// These tests build a real [`AudioData`] via the `fixtures` module (with `wav`
+// for the fixture encoder).
+#[cfg(all(test, feature = "fixtures", feature = "wav"))]
 mod tests {
     use elide_core::entity::audit::ModelEvent;
     use elide_core::modality::TextRecognizable;
     use elide_core::recognition::Scope;
 
     use super::*;
+    use crate::fixtures;
     use crate::modality::{TranscriptSegment, TranscriptWord};
     use crate::primitive::TimeSpan;
     use crate::stt::SttResponse;
-    use crate::test_util;
 
     /// A fixed two-word segment with timings the enricher stamps as a
     /// `Transcription`.
@@ -167,23 +161,15 @@ mod tests {
             .with_backend(MockBackend::with(vec![canned_segment()]))
             .build()
             .expect("builder succeeds");
-        // The usage id carries the caller's name, not a fixed crate string.
+        // The enricher id carries the caller's name, not a fixed crate string.
         assert_eq!(enricher.id().name, "stt");
 
-        let data = test_util::blank_audio_data();
+        let data = fixtures::blank_audio_data();
         let scope = Scope::new();
         let ctx = RecognizerContext::new(&scope);
         let mut subject = Subject::new(data);
 
-        let _enrichment = enricher.enrich(&mut subject, &ctx).await.unwrap();
-
-        // The enrichment reports the transcription model that ran, taken from
-        // the backend's `provenance()`.
-        #[cfg(feature = "usage")]
-        {
-            let model = _enrichment.model_usage.expect("STT reports its model");
-            assert_eq!(model.model, "mock-stt");
-        }
+        enricher.enrich(&mut subject, &ctx).await.unwrap();
 
         // Recognizers read the transcript from the call's artifact.
         assert_eq!(
@@ -231,7 +217,7 @@ mod tests {
             .with_backend(backend)
             .build()
             .expect("builder succeeds");
-        let data = test_util::blank_audio_data();
+        let data = fixtures::blank_audio_data();
         let scope = Scope::new();
         let ctx = RecognizerContext::new(&scope);
 
@@ -273,7 +259,7 @@ mod tests {
             .with_backend(backend)
             .build()
             .expect("builder succeeds");
-        let data = test_util::blank_audio_data();
+        let data = fixtures::blank_audio_data();
         let scope = Scope::new();
         let ctx = RecognizerContext::new(&scope);
 

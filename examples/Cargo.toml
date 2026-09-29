@@ -29,17 +29,13 @@ path = "redact_docx.rs"
 [features]
 default = []
 
-## Print the per-recognizer / per-enricher resource usage a detection run
-## records. Off by default; forwards to `elide/usage`.
-usage = ["elide/usage"]
-
 [dependencies]
 # Internal crates
 elide = { workspace = true, features = [
     "engine",
     "codec-docx",
     "codec-png",
-    "test-utils",
+    "mocks",
 ] }
 
 # Async runtime & parallelism

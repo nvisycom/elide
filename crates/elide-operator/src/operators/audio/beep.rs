@@ -115,7 +115,7 @@ mod tests {
     #[tokio::test]
     async fn default_is_a_1khz_sine() {
         let out = Beep::default()
-            .anonymize(&audio_entity(), &elide_audio::test_util::blank_audio_data())
+            .anonymize(&audio_entity(), &elide_audio::fixtures::blank_audio_data())
             .await
             .unwrap();
         assert_eq!(
@@ -133,7 +133,7 @@ mod tests {
         let out = Beep::new(440.0)
             .with_amplitude(0.25)
             .with_waveform(Waveform::Square)
-            .anonymize(&audio_entity(), &elide_audio::test_util::blank_audio_data())
+            .anonymize(&audio_entity(), &elide_audio::fixtures::blank_audio_data())
             .await
             .unwrap();
         assert_eq!(

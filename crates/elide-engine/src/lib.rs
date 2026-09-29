@@ -458,12 +458,7 @@ impl Orchestrator {
             else {
                 continue; // not this pipeline's modality
             };
-            #[cfg(feature = "usage")]
-            let (entities, artifact, usage) = analyzed;
-            #[cfg(not(feature = "usage"))]
             let (entities, artifact) = analyzed;
-            #[cfg(feature = "usage")]
-            report.usage.extend(usage);
             let name = entities.modality_name();
             report.parts.insert(
                 id.clone(),

@@ -75,10 +75,10 @@ impl DocumentLoader for ImageDocumentLoader {
     }
 }
 
-// `test-util` provides the fixtures below and implies `exif`, `jpeg`, and `png`,
+// `fixtures` provides the sample data below and implies `exif`, `jpeg`, and `png`,
 // the decoders these tests exercise; without it (e.g. `--features codec` alone)
 // the module would not compile.
-#[cfg(all(test, feature = "test-util"))]
+#[cfg(all(test, feature = "fixtures"))]
 mod tests {
     use bytes::Bytes;
     use elide_codec::{DocumentLoader as _, LeafLoader};
@@ -89,9 +89,9 @@ mod tests {
 
     use super::super::exif_handler::ExifLoader;
     use super::*;
+    use crate::fixtures;
     use crate::modality::{ImageLocation, ImageReplacement};
     use crate::primitive::{BoundingBox, Color, Dimensions, Point};
-    use crate::test_util;
 
     const JPEG: &str = "elide.image.jpeg";
     const PNG: &str = "elide.image.png";
@@ -169,7 +169,7 @@ mod tests {
 
     #[tokio::test]
     async fn decode_stream_reports_full_frame() {
-        let mut doc = decode(PNG, ExifPolicy::default(), test_util::png(4, 4)).await;
+        let mut doc = decode(PNG, ExifPolicy::default(), fixtures::png(4, 4)).await;
         assert_eq!(doc.parts().len(), 2);
         let stream = pixels(&mut doc);
         assert_eq!(stream.format().as_str(), PNG);
@@ -182,7 +182,7 @@ mod tests {
 
     #[tokio::test]
     async fn read_at_crops_region() {
-        let mut doc = decode(PNG, ExifPolicy::default(), test_util::png(4, 4)).await;
+        let mut doc = decode(PNG, ExifPolicy::default(), fixtures::png(4, 4)).await;
         let stream = pixels(&mut doc);
         let data = stream
             .read_at(&bbox(1.0, 1.0, 2.0, 2.0))
@@ -203,7 +203,7 @@ mod tests {
 
     #[tokio::test]
     async fn redact_block_paints_region_and_reencodes() {
-        let mut doc = decode(PNG, ExifPolicy::default(), test_util::png(4, 4)).await;
+        let mut doc = decode(PNG, ExifPolicy::default(), fixtures::png(4, 4)).await;
         redact_top_left(&mut doc).await;
         let out = doc.encode().unwrap();
         let painted = image::load_from_memory(out.as_bytes()).unwrap();
@@ -218,7 +218,7 @@ mod tests {
     /// back and encoding, yields ONE image carrying both edits.
     #[tokio::test]
     async fn image_document_composes_pixel_redaction_and_exif_strip() {
-        let mut doc = decode(JPEG, ExifPolicy::default(), test_util::jpeg_with_gps()).await;
+        let mut doc = decode(JPEG, ExifPolicy::default(), fixtures::jpeg_with_gps()).await;
 
         redact_top_left(&mut doc).await;
         let stripped = strip_gps(exif_bytes(&doc)).await;
@@ -233,7 +233,7 @@ mod tests {
             redacted[0] < 60 && redacted[1] < 60 && redacted[2] < 60,
             "pixel redaction lost: {redacted:?}"
         );
-        assert!(!test_util::has_gps(out.as_bytes()), "GPS survived");
+        assert!(!fixtures::has_gps(out.as_bytes()), "GPS survived");
     }
 
     /// Without a metadata pipeline the fallback [`ExifPolicy`] governs the output.
@@ -241,24 +241,24 @@ mod tests {
     #[tokio::test]
     async fn fallback_policy_strips_or_keeps_exif() {
         // Default policy: EXIF is stripped.
-        let mut default = decode(PNG, ExifPolicy::default(), test_util::png_with_gps()).await;
+        let mut default = decode(PNG, ExifPolicy::default(), fixtures::png_with_gps()).await;
         assert!(
-            test_util::has_gps_png(&exif_bytes(&default)),
+            fixtures::has_gps_png(&exif_bytes(&default)),
             "fixture should carry GPS"
         );
         redact_top_left(&mut default).await;
         let out = default.encode().unwrap();
         assert!(
-            !test_util::has_gps_png(out.as_bytes()),
+            !fixtures::has_gps_png(out.as_bytes()),
             "default kept EXIF (should strip)"
         );
 
         // Retain policy: EXIF survives.
-        let mut retain = decode(PNG, ExifPolicy::Retain, test_util::png_with_gps()).await;
+        let mut retain = decode(PNG, ExifPolicy::Retain, fixtures::png_with_gps()).await;
         redact_top_left(&mut retain).await;
         let out = retain.encode().unwrap();
         assert!(
-            test_util::has_gps_png(out.as_bytes()),
+            fixtures::has_gps_png(out.as_bytes()),
             "Retain policy dropped EXIF (should keep)"
         );
     }
@@ -269,14 +269,14 @@ mod tests {
     #[tokio::test]
     async fn exif_redaction_overrides_the_fallback_policy() {
         // A Retain document (would preserve EXIF on the un-redacted path)...
-        let mut doc = decode(PNG, ExifPolicy::Retain, test_util::png_with_gps()).await;
+        let mut doc = decode(PNG, ExifPolicy::Retain, fixtures::png_with_gps()).await;
         // ...but redact the `#exif` blob to strip GPS.
         let stripped = strip_gps(exif_bytes(&doc)).await;
         doc.replace_part(&LocalId::new(EXIF_PART_ID), stripped)
             .unwrap();
         let out = doc.encode().unwrap();
         assert!(
-            !test_util::has_gps_png(out.as_bytes()),
+            !fixtures::has_gps_png(out.as_bytes()),
             "Retain policy leaked past the #exif strip"
         );
     }

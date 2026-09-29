@@ -57,15 +57,15 @@ impl TextRecognizable for Image {
     }
 }
 
-// These tests build a real decoded [`ImageData`] via `test_util`, which the
-// `test-util` feature provides (it implies the decoders).
-#[cfg(all(test, feature = "test-util"))]
+// These tests build a real decoded [`ImageData`] via `fixtures`, which the
+// `fixtures` feature provides (it implies the decoders).
+#[cfg(all(test, feature = "fixtures"))]
 mod tests {
     use elide_core::recognition::Subject;
 
     use super::*;
+    use crate::fixtures;
     use crate::primitive::{BoundingBox, Dimensions, Point};
-    use crate::test_util;
 
     fn loc(x: f64, y: f64, w: f64, h: f64) -> ImageLocation {
         ImageLocation::new(BoundingBox::from_origin(
@@ -76,14 +76,14 @@ mod tests {
 
     #[test]
     fn as_text_is_none_without_ocr() {
-        let subject = Subject::<Image>::new(test_util::blank_image_data());
+        let subject = Subject::<Image>::new(fixtures::blank_image_data());
         assert_eq!(Image::as_text(subject.data(), subject.artifact()), None);
     }
 
     /// A subject whose artifact carries a one-region OCR result.
     fn ocr_subject() -> Subject<Image> {
         let region = LayoutRegion::new(loc(0.0, 0.0, 100.0, 20.0), "Alice");
-        Subject::new(test_util::blank_image_data()).with_artifact(Layout::new(vec![region]))
+        Subject::new(fixtures::blank_image_data()).with_artifact(Layout::new(vec![region]))
     }
 
     #[test]
@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn locate_without_ocr_is_none() {
-        let subject = Subject::<Image>::new(test_util::blank_image_data());
+        let subject = Subject::<Image>::new(fixtures::blank_image_data());
         // No OCR layout: the range can't be placed, so no location.
         assert!(Image::locate(0..5, subject.data(), subject.artifact()).is_none());
     }

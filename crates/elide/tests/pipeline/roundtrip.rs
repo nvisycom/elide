@@ -5,7 +5,7 @@
 //! [`deserialize_report`]: elide::Orchestrator::deserialize_report
 //! [`anonymize_with`]: elide::Orchestrator::anonymize_with
 
-#![cfg(all(feature = "engine", feature = "test-utils", feature = "llm"))]
+#![cfg(all(feature = "engine", feature = "mocks", feature = "llm"))]
 
 use elide::codec::FormatRegistry;
 use elide::detection::Analyzer;

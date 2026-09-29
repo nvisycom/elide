@@ -44,7 +44,7 @@ mod tests {
 
     use super::*;
     use crate::codec::ooxml::{OoxmlAddress, OoxmlRecombine, decode_parts};
-    use crate::opc::test_util;
+    use crate::opc::fixtures;
 
     const BODY_PART: &str = "word/document.xml";
 
@@ -53,7 +53,7 @@ mod tests {
         let body = format!(
             r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>{body_text}</w:t></w:r></w:p></w:body></w:document>"#
         );
-        let package = test_util::pack_parts(&[
+        let package = fixtures::pack_parts(&[
             ("[Content_Types].xml", br#"<?xml version="1.0"?><Types/>"#),
             ("_rels/.rels", br#"<?xml version="1.0"?><Relationships/>"#),
             (BODY_PART, body.as_bytes()),
@@ -164,8 +164,7 @@ mod tests {
         // The rebuilt part has "Bob" replaced, "Alice" untouched.
         let out = recombine.assemble(&[]).unwrap();
         // The output is an OPC package; the body part contains the replacement.
-        let body_bytes =
-            test_util::read_part(out.as_bytes(), BODY_PART).expect("body part present");
+        let body_bytes = fixtures::read_part(out.as_bytes(), BODY_PART).expect("body part present");
         let body = String::from_utf8(body_bytes).expect("body part is UTF-8");
         assert!(body.contains("Alice [NAME]"), "body was: {body}");
         assert!(!body.contains("Alice Bob"));

@@ -14,15 +14,15 @@
 //! extension; PDF's extensionless-id parts are leaf images, not containers), so
 //! the trigger only exists behind a mock format.
 
-use elide_codec::test_util::{MOCK_EXT, MockPart, decode_mock, encode_mock, mock_format};
+use elide_codec::mocks::{MOCK_EXT, MockPart, decode_mock, encode_mock, mock_format};
 use elide_core::Result;
 use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
 use elide_core::entity::builtins::EMAIL_ADDRESS;
 use elide_core::entity::{Entity, LabelCatalog};
+use elide_core::mocks::MockOperator;
 use elide_core::modality::text::{Text, TextLocation};
 use elide_core::primitive::{ComponentId, Confidence};
 use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Scope, Subject};
-use elide_core::test_util::MockOperator;
 use elide_detection::Analyzer;
 use elide_engine::{Directives, Document, Orchestrator};
 use elide_format::FormatRegistry;

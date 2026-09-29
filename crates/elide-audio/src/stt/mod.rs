@@ -12,10 +12,10 @@
 //! drops straight onto the call's artifacts with no remapping. The
 //! [`SttEnricher`] drives a backend per call and stamps the recognized
 //! [`Transcription`](crate::modality::Transcription) onto the audio so a
-//! recognizer can read it. The no-op `MockBackend` is behind `test-utils`.
+//! recognizer can read it. The no-op `MockBackend` is behind `mocks`.
 
 mod enricher;
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(any(test, feature = "mocks"))]
 mod mock;
 mod request;
 mod response;
@@ -24,8 +24,8 @@ use elide_core::Result;
 use elide_core::entity::audit::ModelEvent;
 
 pub use self::enricher::{SttEnricher, SttEnricherBuilder};
-#[cfg(any(test, feature = "test-utils"))]
-#[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
+#[cfg(any(test, feature = "mocks"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "mocks")))]
 pub use self::mock::MockBackend;
 pub use self::request::SttRequest;
 pub use self::response::SttResponse;

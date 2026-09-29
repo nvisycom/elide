@@ -8,9 +8,9 @@ use elide::detection::filter::FilterLayer;
 use elide::detection::reconcile::{Merging, ReconcileLayer, Structural};
 use elide_core::entity::audit::{AuditEvent, AuditKind, AuditLog, PatternEvent};
 use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
+use elide_core::mocks::MockRecognizer;
 use elide_core::primitive::{Confidence, ConfidenceThreshold};
 use elide_core::recognition::Scope;
-use elide_core::test_util::MockRecognizer;
 
 use crate::support::{SourceRef, Text, TextData, TextLocation};
 
@@ -96,39 +96,6 @@ async fn analyze_fuses_resolves_filters() {
         AuditKind::Deduplication(ref d) if d.strategy == "max"
     ));
     assert_eq!(phone.audit.final_confidence(), Some(phone.confidence));
-}
-
-#[cfg(feature = "usage")]
-#[tokio::test]
-async fn analyze_records_per_recognizer_usage() {
-    // Two recognizers: A finds 2, B finds 1. Each should get one Usage entry
-    // carrying its id, its own found-count (measured before reduction), a
-    // duration, and, being pure-CPU doubles, no model detail.
-    let a = MockRecognizer::new(vec![
-        detected("pattern", "PHONE_NUMBER", (10, 22), 0.8),
-        detected("pattern", "WEAK", (40, 44), 0.1),
-    ]);
-    let b = MockRecognizer::new(vec![detected("ner", "PHONE_NUMBER", (10, 23), 0.95)]);
-
-    let analyzer = Analyzer::<Text>::new()
-        .with_recognizer(a)
-        .with_recognizer(b)
-        .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE));
-
-    let analysis = analyzer
-        .analyze(TextData::new(""), &scope_for(&["PHONE_NUMBER", "WEAK"]))
-        .await
-        .unwrap();
-
-    // One usage entry per recognizer, in registration order.
-    assert_eq!(analysis.usage.len(), 2);
-    for usage in &analysis.usage {
-        assert_eq!(usage.id.name, "mock-recognizer");
-        assert!(usage.model.is_none(), "a pure-CPU double reports no model");
-    }
-    // Counts reflect what each recognizer returned (pre-reduction): 2 and 1.
-    assert_eq!(analysis.usage[0].count, Some(2));
-    assert_eq!(analysis.usage[1].count, Some(1));
 }
 
 #[tokio::test]

@@ -1,4 +1,4 @@
-//! Small in-memory image fixtures, behind the `test-util` feature.
+//! Small in-memory image fixtures, behind the `fixtures` feature.
 //!
 //! A downstream crate testing metadata redaction needs a real image carrying
 //! real EXIF, and a way to check whether a tag survived a round-trip, without

@@ -4,7 +4,7 @@ mod data;
 mod location;
 mod replacement;
 mod source_ref;
-#[cfg(feature = "test-util")]
+#[cfg(feature = "fixtures")]
 mod test_doc;
 mod tokens;
 
@@ -14,8 +14,8 @@ pub use self::data::TextData;
 pub use self::location::{DecodedSpan, SourceSpan, TextCoord, TextLocation};
 pub use self::replacement::TextReplacement;
 pub use self::source_ref::SourceRef;
-#[cfg(feature = "test-util")]
-#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
+#[cfg(feature = "fixtures")]
+#[cfg_attr(docsrs, doc(cfg(feature = "fixtures")))]
 pub use self::test_doc::TextDoc;
 pub use self::tokens::{Token, Tokens};
 use super::Modality;

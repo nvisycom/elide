@@ -46,14 +46,12 @@ serde = ["dep:serde", "hipstr/serde", "jiff/serde", "uuid/serde"]
 ## the serde representation, and the derive reads serde attributes.
 schema = ["serde", "dep:schemars"]
 
-## Resource-usage accounting for a detection run: the [`Usage`] vocabulary
-## and the per-recognizer/enricher model-usage a [`Recognition`]/[`Enrichment`]
-## carries. Off by default; a consumer that does not read usage pays nothing.
-usage = []
-
-## Test doubles and fixtures (the in-memory `TextDoc`, entity builders),
-## colocated with the types they stand in for. For downstream `[dev-dependencies]`.
-test-util = []
+## In-memory test fixtures (the `TextDoc`, `Entity::fixture` builders),
+## colocated with the types they build. For downstream `[dev-dependencies]`.
+fixtures = []
+## Test doubles (`MockRecognizer`, `MockOperator`) for driving a pipeline
+## without a real recognizer or operator. For downstream `[dev-dependencies]`.
+mocks = []
 
 [dependencies]
 # (De)serialization

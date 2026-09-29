@@ -17,16 +17,12 @@ repository = { workspace = true }
 documentation = { workspace = true }
 
 [features]
-## No features on by default: the NER traits ship bare. Enable `test-utils`
+## No features on by default: the NER traits ship bare. Enable `mocks`
 ## for the no-op backend.
 default = []
 
 ## Ship the no-op `MockBackend` for tests, examples, and offline wiring.
-test-utils = []
-
-## Resource-usage accounting: surface the token counts a call spent on the
-## `NerResponse` and the `ModelUsage` the recognizer attaches. Off by default.
-usage = ["elide-core/usage"]
+mocks = []
 
 ## Derive `schemars::JsonSchema` on the public strategy enums
 ## (`AlignmentMode`, `AggregationStrategy`) and the re-exported core types.

@@ -17,13 +17,13 @@
 use std::sync::Arc;
 
 use derive_builder::Builder;
-use elide_core::enrichment::{Enricher, Enrichment};
+use elide_core::enrichment::Enricher;
 use elide_core::primitive::ComponentId;
 use elide_core::recognition::{RecognizerContext, Subject};
 use elide_core::{Error, Result};
 use hipstr::HipStr;
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(any(test, feature = "mocks"))]
 use super::MockBackend;
 use super::{OcrBackend, OcrRequest};
 use crate::modality::{Image, Layout};
@@ -47,9 +47,8 @@ use crate::modality::{Image, Layout};
     build_fn(error = "Error", name = "try_build", private)
 )]
 pub struct OcrEnricher {
-    /// Caller-chosen name, surfaced as this enricher's usage id so a caller
-    /// running more than one OCR enricher can tell them apart. The model it
-    /// calls is reported separately, from the backend's provenance.
+    /// Caller-chosen name, surfaced as this enricher's id so a caller running
+    /// more than one OCR enricher can tell them apart.
     name: HipStr<'static>,
     /// Backend that OCRs the image. Required. Set via [`with_backend`], which
     /// accepts any concrete [`OcrBackend`] impl by value and wraps it in `Arc`
@@ -90,8 +89,8 @@ impl OcrEnricherBuilder {
     /// Wire the no-op [`MockBackend`] as this enricher's backend.
     ///
     /// [`MockBackend`]: super::MockBackend
-    #[cfg(any(test, feature = "test-utils"))]
-    #[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
+    #[cfg(any(test, feature = "mocks"))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "mocks")))]
     #[must_use]
     pub fn with_mock_backend(self) -> Self {
         self.with_backend(MockBackend::new())
@@ -113,11 +112,11 @@ impl Enricher<Image> for OcrEnricher {
         &self,
         subject: &mut Subject<Image>,
         ctx: &RecognizerContext<'_, Image>,
-    ) -> Result<Enrichment> {
+    ) -> Result<()> {
         // Already OCR'd (a second enricher pass, or a restored artifact on a
         // re-run): leave it, so re-recognition never re-invokes the model.
         if subject.is_enriched() {
-            return Ok(Enrichment::none());
+            return Ok(());
         }
         let data = subject.data();
         let request = OcrRequest {
@@ -129,28 +128,23 @@ impl Enricher<Image> for OcrEnricher {
         };
         let response = self.backend.recognize(request).await?;
         subject.set_artifact(Layout::new(response.regions));
-        // The OCR model vouches for its own identity; OCR reports no token
-        // counts today.
-        #[cfg(feature = "usage")]
-        return Ok(Enrichment::with_model(self.backend.provenance().into()));
-        #[cfg(not(feature = "usage"))]
-        Ok(Enrichment::none())
+        Ok(())
     }
 }
 
-// These tests build a real decoded [`ImageData`] via `test_util`, which the
-// `test-util` feature provides (it implies the decoders).
-#[cfg(all(test, feature = "test-util"))]
+// These tests build a real decoded [`ImageData`] via `fixtures`, which the
+// `fixtures` feature provides (it implies the decoders).
+#[cfg(all(test, feature = "fixtures"))]
 mod tests {
     use elide_core::entity::audit::ModelEvent;
     use elide_core::modality::TextRecognizable;
     use elide_core::recognition::Scope;
 
     use super::*;
+    use crate::fixtures;
     use crate::modality::{ImageLocation, LayoutRegion};
     use crate::ocr::OcrResponse;
     use crate::primitive::{BoundingBox, Dimensions, Point};
-    use crate::test_util;
 
     fn loc(x: f64, y: f64, w: f64, h: f64) -> ImageLocation {
         ImageLocation::new(BoundingBox::from_origin(
@@ -175,11 +169,11 @@ mod tests {
             .with_backend(MockBackend::with(canned_regions()))
             .build()
             .expect("builder succeeds");
-        // The usage id carries the caller's name, not a fixed crate string,
-        // so two OCR enrichers can be told apart in the usage report.
+        // The enricher id carries the caller's name, not a fixed crate string,
+        // so two OCR enrichers can be told apart.
         assert_eq!(enricher.id().name, "ocr");
 
-        let data = test_util::blank_image_data();
+        let data = fixtures::blank_image_data();
         let scope = Scope::new();
         let ctx = RecognizerContext::new(&scope);
         let mut subject = Subject::new(data);
@@ -233,7 +227,7 @@ mod tests {
             .with_backend(backend)
             .build()
             .expect("builder succeeds");
-        let data = test_util::blank_image_data();
+        let data = fixtures::blank_image_data();
         let scope = Scope::new();
         let ctx = RecognizerContext::new(&scope);
 
@@ -274,7 +268,7 @@ mod tests {
             .with_backend(backend)
             .build()
             .expect("builder succeeds");
-        let data = test_util::blank_image_data();
+        let data = fixtures::blank_image_data();
         let scope = Scope::new();
         let ctx = RecognizerContext::new(&scope);
 
