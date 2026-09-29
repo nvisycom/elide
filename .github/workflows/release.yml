@@ -19,9 +19,11 @@ on:
         required: true
         type: string
 
+# Least privilege: only the publish job needs an OIDC token (trusted publishing)
+# and write access (the GitHub Release). validate/build stay read-only so the
+# third-party actions they run cannot reach an OIDC-capable token.
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 jobs:
   validate:
@@ -37,14 +39,21 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      # Pass event-controlled values (a tag name can contain shell metacharacters)
+      # through the environment rather than interpolating them into the script,
+      # so an untrusted tag cannot inject code before the format check runs.
       - name: Extract version
         id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ inputs.version }}"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            VERSION="$INPUT_VERSION"
             TAG="v${VERSION}"
           else
-            TAG="${{ github.ref_name }}"
+            TAG="$REF_NAME"
             VERSION="${TAG#v}"
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
@@ -52,26 +61,32 @@ jobs:
           echo "Releasing version: ${VERSION}"
 
       - name: Validate version format
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          if ! echo "${{ steps.version.outputs.version }}" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9-]+(\.[0-9]+)?)?$'; then
-            echo "Invalid version format: ${{ steps.version.outputs.version }}"
+          if ! echo "$VERSION" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9-]+(\.[0-9]+)?)?$'; then
+            echo "Invalid version format: $VERSION"
             exit 1
           fi
 
       - name: Check the package version matches the tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           PKG_VERSION=$(node -p "require('./packages/wasm/package.json').version")
-          if [ "$PKG_VERSION" != "${{ steps.version.outputs.version }}" ]; then
-            echo "packages/wasm/package.json is $PKG_VERSION but the tag asks for ${{ steps.version.outputs.version }}"
+          if [ "$PKG_VERSION" != "$VERSION" ]; then
+            echo "packages/wasm/package.json is $PKG_VERSION but the tag asks for $VERSION"
             echo "Bump the package version to match the tag before releasing."
             exit 1
           fi
 
       - name: Check the tag does not already exist (manual dispatch)
         if: github.event_name == 'workflow_dispatch'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
-          if git rev-parse "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
-            echo "Tag ${{ steps.version.outputs.tag }} already exists"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists"
             exit 1
           fi
 
@@ -113,11 +128,17 @@ jobs:
           test -f packages/wasm/dist/elide_wasm_bg.wasm
           test -f packages/wasm/dist/elide_wasm.js
 
+      # `make wasm-pkg` also regenerates the label bindings from the Rust catalog,
+      # so ship those exact files (not the committed copies, which may drift)
+      # alongside the wasm `dist/`.
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
         with:
           name: dist-${{ needs.validate.outputs.version }}
-          path: packages/wasm/dist/
+          path: |
+            packages/wasm/dist/
+            packages/wasm/label.js
+            packages/wasm/label.d.ts
           retention-days: 30
 
   publish:
@@ -125,6 +146,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [validate, build]
     environment: release
+    permissions:
+      contents: write # create the GitHub Release
+      id-token: write # npm trusted publishing (OIDC)
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -137,18 +161,24 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: "https://registry.npmjs.org"
 
+      # The artifact's paths are relative to packages/wasm (the least-common
+      # ancestor of dist/ + the label files), so restore it into that directory.
       - name: Download build artifacts
         uses: actions/download-artifact@v8
         with:
           name: dist-${{ needs.validate.outputs.version }}
-          path: packages/wasm/dist/
+          path: packages/wasm/
 
       # Trusted publishing (OIDC): authenticated by `id-token: write` against the
       # publisher registered on npmjs.com for this repo + workflow, so there is no
       # long-lived NPM_TOKEN. `--provenance` attaches the build attestation.
+      # A prerelease (version with a `-` suffix) publishes under the `next` dist
+      # tag so it never becomes the default `latest`.
       - name: Publish to NPM
         working-directory: packages/wasm
-        run: npm publish --provenance --access public
+        env:
+          NPM_TAG: ${{ contains(needs.validate.outputs.version, '-') && 'next' || 'latest' }}
+        run: npm publish --provenance --access public --tag "$NPM_TAG"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
@@ -156,6 +186,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ needs.validate.outputs.tag }}
+          # On workflow_dispatch the tag does not exist yet; pin it to the exact
+          # commit this run built and published, not the moving branch HEAD.
+          target_commitish: ${{ github.sha }}
           name: Release ${{ needs.validate.outputs.tag }}
           body: |
             ## Release ${{ needs.validate.outputs.version }}
