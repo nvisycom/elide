@@ -1,0 +1,201 @@
+name: Release
+
+env:
+  RUST_TOOLCHAIN: "1.95.0"
+  NODE_VERSION: "24"
+
+# Publishes the `@nvisy/elide` npm package (the WebAssembly build of the facade)
+# to the public registry. The package's `dist/` is produced by `make wasm-pkg`
+# (wasm-pack + the label generator), so the build job needs the Rust toolchain
+# and the wasm32 target, not just Node.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g., 0.1.0)"
+        required: true
+        type: string
+
+# Least privilege: only the publish job needs an OIDC token (trusted publishing)
+# and write access (the GitHub Release). validate/build stay read-only so the
+# third-party actions they run cannot reach an OIDC-capable token.
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      # Pass event-controlled values (a tag name can contain shell metacharacters)
+      # through the environment rather than interpolating them into the script,
+      # so an untrusted tag cannot inject code before the format check runs.
+      - name: Extract version
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            VERSION="$INPUT_VERSION"
+            TAG="v${VERSION}"
+          else
+            TAG="$REF_NAME"
+            VERSION="${TAG#v}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Releasing version: ${VERSION}"
+
+      - name: Validate version format
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if ! echo "$VERSION" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9-]+(\.[0-9]+)?)?$'; then
+            echo "Invalid version format: $VERSION"
+            exit 1
+          fi
+
+      - name: Check the package version matches the tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          PKG_VERSION=$(node -p "require('./packages/wasm/package.json').version")
+          if [ "$PKG_VERSION" != "$VERSION" ]; then
+            echo "packages/wasm/package.json is $PKG_VERSION but the tag asks for $VERSION"
+            echo "Bump the package version to match the tag before releasing."
+            exit 1
+          fi
+
+      - name: Check the tag does not already exist (manual dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists"
+            exit 1
+          fi
+
+  build:
+    name: Build Package
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      # Build the package's `dist/` through the Makefile (the single source of
+      # truth for the wasm-pack invocation and the label generator).
+      - name: Build @nvisy/elide (make wasm-pkg)
+        run: make wasm-pkg
+
+      - name: Verify build artifacts
+        run: |
+          ls -la packages/wasm/dist/
+          test -f packages/wasm/dist/elide_wasm_bg.wasm
+          test -f packages/wasm/dist/elide_wasm.js
+
+      # Pack here, in the tree that just built `dist/` and regenerated the label
+      # bindings, so the tarball is the exact bytes this run produced (npm applies
+      # the package's `files` allowlist). The publish job pushes this tarball
+      # verbatim — it never re-assembles the package from a separate checkout, so
+      # the published files cannot drift from what was built.
+      - name: Pack the tarball
+        working-directory: packages/wasm
+        run: npm pack
+
+      - name: Upload package tarball
+        uses: actions/upload-artifact@v7
+        with:
+          name: npm-package-${{ needs.validate.outputs.version }}
+          path: packages/wasm/*.tgz
+          retention-days: 30
+
+  publish:
+    name: Publish to NPM
+    runs-on: ubuntu-latest
+    needs: [validate, build]
+    environment: release
+    permissions:
+      contents: write # create the GitHub Release
+      id-token: write # npm trusted publishing (OIDC)
+    steps:
+      # No source checkout: the package is the tarball the build job sealed, so
+      # publish stays a pure "push these exact bytes to npm" step.
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Download package tarball
+        uses: actions/download-artifact@v8
+        with:
+          name: npm-package-${{ needs.validate.outputs.version }}
+
+      # Trusted publishing (OIDC): authenticated by `id-token: write` against the
+      # publisher registered on npmjs.com for this repo + workflow, so there is no
+      # long-lived NPM_TOKEN. `--provenance` attaches the build attestation.
+      # A prerelease (version with a `-` suffix) publishes under the `next` dist
+      # tag so it never becomes the default `latest`.
+      - name: Publish to NPM
+        env:
+          NPM_TAG: ${{ contains(needs.validate.outputs.version, '-') && 'next' || 'latest' }}
+        run: npm publish ./*.tgz --provenance --access public --tag "$NPM_TAG"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ needs.validate.outputs.tag }}
+          # On workflow_dispatch the tag does not exist yet; pin it to the exact
+          # commit this run built and published, not the moving branch HEAD.
+          target_commitish: ${{ github.sha }}
+          name: Release ${{ needs.validate.outputs.tag }}
+          body: |
+            ## Release ${{ needs.validate.outputs.version }}
+
+            ### Installation
+            ```bash
+            npm install @nvisy/elide@${{ needs.validate.outputs.version }}
+            ```
+
+            ### Documentation
+            - [README](https://github.com/nvisycom/elide/tree/main/packages/wasm#readme)
+            - [NPM Package](https://www.npmjs.com/package/@nvisy/elide)
+          draft: false
+          prerelease: ${{ contains(needs.validate.outputs.version, '-') }}

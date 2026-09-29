@@ -53,29 +53,22 @@ schema = [
 sniff = ["dep:infer"]
 
 ## The text-shaped leaf formats (handlers live in the `elide-plain` engine).
-text = ["txt", "json", "html", "xml"]
-
-## Individual text formats.
 txt = ["dep:elide-plain", "elide-plain/txt"]
 json = ["dep:elide-plain", "elide-plain/json"]
 xml = ["dep:elide-plain", "elide-plain/xml"]
 html = ["dep:elide-plain", "elide-plain/html"]
 
-## The audio formats (handlers live in the `elide-audio` engine).
-audio = ["wav", "mp3"]
-## WAV / MP3: the `elide-audio` engine reads and re-writes samples.
+## The audio formats: the `elide-audio` engine reads and re-writes samples.
 wav = ["dep:elide-audio", "elide-audio/codec", "elide-audio/wav"]
 mp3 = ["dep:elide-audio", "elide-audio/codec", "elide-audio/mp3"]
 
 ## The image formats (handlers live in the `elide-image` engine).
-image = ["png", "jpeg", "tiff"]
 png = ["dep:elide-image", "elide-image/codec", "elide-image/png"]
 jpeg = ["dep:elide-image", "elide-image/codec", "elide-image/jpeg"]
 tiff = ["dep:elide-image", "elide-image/codec", "elide-image/tiff"]
 
 ## The rich-document formats. docx/pptx adapt the `elide-office`-hosted OOXML
 ## engine; PDF adapts the `elide-pdf`-hosted document engine.
-document = ["docx", "pptx", "pdf"]
 docx = ["dep:elide-office", "internal_office"]
 pptx = ["dep:elide-office", "internal_office"]
 pdf = ["dep:elide-pdf"]
@@ -83,7 +76,6 @@ pdf-render = ["pdf", "elide-pdf/render", "elide-pdf/image"]
 
 ## The tabular formats: CSV's handler lives in the `elide-plain` engine; XLSX
 ## adapts the `elide-office`-hosted OOXML engine.
-tabular = ["csv", "xlsx"]
 csv = ["dep:elide-plain", "elide-plain/csv"]
 xlsx = ["dep:elide-office", "internal_office"]
 

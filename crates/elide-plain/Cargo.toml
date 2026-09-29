@@ -33,9 +33,6 @@ html = ["xml"]
 ## CSV cells are addressed as the `Tabular` modality.
 csv = ["elide-core/tabular", "dep:csv"]
 
-## The text-shaped leaf formats.
-text = ["txt", "json", "html", "xml"]
-
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }
