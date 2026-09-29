@@ -239,7 +239,7 @@ jobs:
       - name: Build facade core path (wasm32)
         run: >
           cargo build -p elide --no-default-features
-          --features engine,pattern,fake,codec-text
+          --features engine,pattern,operator-fake,codec-text
           --target wasm32-unknown-unknown
 
       - name: Setup Node

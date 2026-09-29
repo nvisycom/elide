@@ -76,7 +76,7 @@ voice-activity detection for `Recognizer<Audio>`) is an ordinary implementation
 of the same trait, and its findings would flow through the same reconciliation
 and redaction pipeline as any other. The generative (LLM/VLM) recognizer is a
 working instance of exactly this shape on the image side. What is not yet
-implemented is a *specialized* image or audio detector: today elide reaches those
+implemented is a *specialized* image or audio detector: today Elide reaches those
 modalities through that generative recognizer, or by lifting them to text with an
 OCR or speech-to-text enricher and running the text recognizers. Both paths are
 wired end to end; the OCR and speech-to-text backends themselves are supplied by
@@ -213,7 +213,7 @@ writing:
   carries a large community, a broad predefined-recognizer catalogue, DICOM
   support, and deep Azure/Spark integration. `elide`'s API is explicitly unstable.
 
-## 9. Where elide differs by design
+## 9. Where Elide differs by design
 
 Set against those gaps, `elide`'s deliberate differences are:
 

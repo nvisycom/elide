@@ -1,0 +1,172 @@
+name: Release
+
+env:
+  RUST_TOOLCHAIN: "1.95.0"
+  NODE_VERSION: "24"
+
+# Publishes the `@nvisy/elide` npm package (the WebAssembly build of the facade)
+# to the public registry. The package's `dist/` is produced by `make wasm-pkg`
+# (wasm-pack + the label generator), so the build job needs the Rust toolchain
+# and the wasm32 target, not just Node.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g., 0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  validate:
+    name: Validate Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Extract version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+            TAG="v${VERSION}"
+          else
+            TAG="${{ github.ref_name }}"
+            VERSION="${TAG#v}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Releasing version: ${VERSION}"
+
+      - name: Validate version format
+        run: |
+          if ! echo "${{ steps.version.outputs.version }}" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9-]+(\.[0-9]+)?)?$'; then
+            echo "Invalid version format: ${{ steps.version.outputs.version }}"
+            exit 1
+          fi
+
+      - name: Check the package version matches the tag
+        run: |
+          PKG_VERSION=$(node -p "require('./packages/wasm/package.json').version")
+          if [ "$PKG_VERSION" != "${{ steps.version.outputs.version }}" ]; then
+            echo "packages/wasm/package.json is $PKG_VERSION but the tag asks for ${{ steps.version.outputs.version }}"
+            echo "Bump the package version to match the tag before releasing."
+            exit 1
+          fi
+
+      - name: Check the tag does not already exist (manual dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if git rev-parse "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "Tag ${{ steps.version.outputs.tag }} already exists"
+            exit 1
+          fi
+
+  build:
+    name: Build Package
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      # Build the package's `dist/` through the Makefile (the single source of
+      # truth for the wasm-pack invocation and the label generator).
+      - name: Build @nvisy/elide (make wasm-pkg)
+        run: make wasm-pkg
+
+      - name: Verify build artifacts
+        run: |
+          ls -la packages/wasm/dist/
+          test -f packages/wasm/dist/elide_wasm_bg.wasm
+          test -f packages/wasm/dist/elide_wasm.js
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist-${{ needs.validate.outputs.version }}
+          path: packages/wasm/dist/
+          retention-days: 30
+
+  publish:
+    name: Publish to NPM
+    runs-on: ubuntu-latest
+    needs: [validate, build]
+    environment: release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: dist-${{ needs.validate.outputs.version }}
+          path: packages/wasm/dist/
+
+      # Trusted publishing (OIDC): authenticated by `id-token: write` against the
+      # publisher registered on npmjs.com for this repo + workflow, so there is no
+      # long-lived NPM_TOKEN. `--provenance` attaches the build attestation.
+      - name: Publish to NPM
+        working-directory: packages/wasm
+        run: npm publish --provenance --access public
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ needs.validate.outputs.tag }}
+          name: Release ${{ needs.validate.outputs.tag }}
+          body: |
+            ## Release ${{ needs.validate.outputs.version }}
+
+            ### Installation
+            ```bash
+            npm install @nvisy/elide@${{ needs.validate.outputs.version }}
+            ```
+
+            ### Documentation
+            - [README](https://github.com/nvisycom/elide/tree/main/packages/wasm#readme)
+            - [NPM Package](https://www.npmjs.com/package/@nvisy/elide)
+          draft: false
+          prerelease: ${{ contains(needs.validate.outputs.version, '-') }}

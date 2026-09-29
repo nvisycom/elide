@@ -24,6 +24,9 @@
   ],
   "module": "./index.js",
   "types": "./index.d.ts",
+  "scripts": {
+    "build": "make -C ../.. wasm-pkg"
+  },
   "exports": {
     ".": {
       "types": "./index.d.ts",

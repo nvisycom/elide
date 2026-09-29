@@ -32,7 +32,7 @@ elide = { path = "../elide", version = "0.1.0", default-features = false, featur
     "ocr",
     "stt",
     "lingua",
-    "fake",
+    "operator-fake",
     "codec-text",
     "codec-csv",
     "codec-png",

@@ -89,10 +89,6 @@ llm-rig = ["llm", "elide-llm/rig"]
 ## detect-pass prompts from `.j2` templates without depending on `elide-llm`
 ## directly.
 llm-jinja2 = ["llm", "elide-llm/jinja2"]
-## To select a concrete rig provider, enable its upstream feature directly
-## alongside `llm-rig`, e.g. `elide-llm/anthropic-claude` (each provider feature
-## implies `rig`). The facade adds no per-provider wrapper: it would only rename
-## the upstream feature, bundling no extra deps and guarding no invalid combo.
 
 ## Re-export the STT (speech-to-text) recognizer (from the audio crate).
 stt = ["dep:elide-audio", "elide-audio/stt", "audio"]
@@ -163,15 +159,15 @@ codec-pdf-render = ["codec-pdf", "elide-format/pdf-render"]
 mocks = ["elide-ner?/mocks", "elide-llm?/mocks", "elide-audio?/mocks", "elide-image?/mocks"]
 
 ## The one-way `Sha2Hash` operator (SHA-256 / SHA-512).
-sha2 = ["elide-operator/sha2"]
+operator-sha2 = ["elide-operator/sha2"]
 ## The keyed `HmacHash` operator (HMAC-SHA-256 / HMAC-SHA-512).
-hmac = ["elide-operator/hmac"]
+operator-hmac = ["elide-operator/hmac"]
 ## The reversible `AesEncrypt` operator (AES-256-GCM) and its `KeyProvider`.
-aes = ["elide-operator/aes"]
+operator-aes = ["elide-operator/aes"]
 ## The `GeneralizeDate` operator (reduce date/timestamp granularity).
-datetime = ["elide-operator/datetime"]
+operator-datetime = ["elide-operator/datetime"]
 ## The locale-aware `Fake` redaction operator based on the `fake` crate.
-fake = ["elide-operator/fake"]
+operator-fake = ["elide-operator/fake"]
 
 [dependencies]
 # Internal crates
