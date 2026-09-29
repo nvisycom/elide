@@ -128,17 +128,20 @@ jobs:
           test -f packages/wasm/dist/elide_wasm_bg.wasm
           test -f packages/wasm/dist/elide_wasm.js
 
-      # `make wasm-pkg` also regenerates the label bindings from the Rust catalog,
-      # so ship those exact files (not the committed copies, which may drift)
-      # alongside the wasm `dist/`.
-      - name: Upload build artifacts
+      # Pack here, in the tree that just built `dist/` and regenerated the label
+      # bindings, so the tarball is the exact bytes this run produced (npm applies
+      # the package's `files` allowlist). The publish job pushes this tarball
+      # verbatim — it never re-assembles the package from a separate checkout, so
+      # the published files cannot drift from what was built.
+      - name: Pack the tarball
+        working-directory: packages/wasm
+        run: npm pack
+
+      - name: Upload package tarball
         uses: actions/upload-artifact@v7
         with:
-          name: dist-${{ needs.validate.outputs.version }}
-          path: |
-            packages/wasm/dist/
-            packages/wasm/label.js
-            packages/wasm/label.d.ts
+          name: npm-package-${{ needs.validate.outputs.version }}
+          path: packages/wasm/*.tgz
           retention-days: 30
 
   publish:
@@ -150,24 +153,18 @@ jobs:
       contents: write # create the GitHub Release
       id-token: write # npm trusted publishing (OIDC)
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
+      # No source checkout: the package is the tarball the build job sealed, so
+      # publish stays a pure "push these exact bytes to npm" step.
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: "https://registry.npmjs.org"
 
-      # The artifact's paths are relative to packages/wasm (the least-common
-      # ancestor of dist/ + the label files), so restore it into that directory.
-      - name: Download build artifacts
+      - name: Download package tarball
         uses: actions/download-artifact@v8
         with:
-          name: dist-${{ needs.validate.outputs.version }}
-          path: packages/wasm/
+          name: npm-package-${{ needs.validate.outputs.version }}
 
       # Trusted publishing (OIDC): authenticated by `id-token: write` against the
       # publisher registered on npmjs.com for this repo + workflow, so there is no
@@ -175,10 +172,9 @@ jobs:
       # A prerelease (version with a `-` suffix) publishes under the `next` dist
       # tag so it never becomes the default `latest`.
       - name: Publish to NPM
-        working-directory: packages/wasm
         env:
           NPM_TAG: ${{ contains(needs.validate.outputs.version, '-') && 'next' || 'latest' }}
-        run: npm publish --provenance --access public --tag "$NPM_TAG"
+        run: npm publish ./*.tgz --provenance --access public --tag "$NPM_TAG"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
