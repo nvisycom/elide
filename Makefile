@@ -48,6 +48,11 @@ wasm-pkg: ## Builds @nvisy/elide into packages/wasm/dist via wasm-pack.
 	@# --out-dir is relative to the crate manifest.
 	@wasm-pack build crates/elide-wasm --release --target bundler --no-pack \
 		--out-dir ../../packages/wasm/dist --out-name elide_wasm
+	@# wasm-pack drops a `.gitignore` of `*` into the out-dir. npm honors nested
+	@# .gitignore files, so leaving it makes `npm publish` exclude all of dist/
+	@# (the wasm + bindings) despite the package's `files` allowlist. Remove it;
+	@# dist/ is already ignored by the repo-root .gitignore.
+	@rm -f packages/wasm/dist/.gitignore
 	@$(call log,Generating Label constants from the builtin catalog...)
 	@# Emits packages/wasm/label.{js,d.ts} from `cargo run --example labels`,
 	@# so the JS `Label` set stays in sync with the Rust label catalog.
