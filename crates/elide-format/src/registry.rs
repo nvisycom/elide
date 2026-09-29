@@ -361,7 +361,7 @@ impl FormatRegistryInner {
 #[cfg(all(test, feature = "txt"))]
 mod tests {
     use elide_codec::Format;
-    use elide_codec::test_util::MockLoader;
+    use elide_codec::mocks::MockLoader;
     use elide_plain::txt_format;
 
     use super::*;

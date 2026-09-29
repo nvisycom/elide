@@ -8,11 +8,11 @@ pub mod codec;
 #[cfg(feature = "exif")]
 #[cfg_attr(docsrs, doc(cfg(feature = "exif")))]
 pub mod exif;
+#[cfg(feature = "fixtures")]
+pub mod fixtures;
 pub mod modality;
 #[cfg(feature = "ocr")]
 pub mod ocr;
 pub mod primitive;
-#[cfg(feature = "test-util")]
-pub mod test_util;
 
 pub use self::buffer::{ImageBuffer, RasterImage};

@@ -15,13 +15,6 @@
 
 // The core recognition vocabulary, minus `Enricher`, enrichers are a
 // pre-recognition concern and live in the `enrichment` module.
-/// Resource-usage accounting for a detection run: the per-recognizer /
-/// per-enricher [`Usage`] and the model / token detail it carries. A
-/// document's aggregate is a [`UsageReport`], reachable via
-/// [`Report::usage`](crate::Report::usage).
-#[cfg(feature = "usage")]
-#[cfg_attr(docsrs, doc(cfg(feature = "usage")))]
-pub use elide_core::primitive::{ModelUsage, TokenCounts, Usage, UsageReport};
 #[doc(inline)]
 pub use elide_core::recognition::{
     LabelMap, Recognition, Recognizer, RecognizerContext, Scope, ScopeMetadata, Subject, annotation,

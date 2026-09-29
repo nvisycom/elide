@@ -81,16 +81,6 @@ async fn main() -> Result<()> {
     let count = entities.len();
     println!("\n--- original ---\n{SAMPLE}");
     println!("--- redacted ({count} entities) ---\n{redacted}");
-    // Resource usage recorded per recognizer/enricher during detection.
-    #[cfg(feature = "usage")]
-    for usage in &analysis.usage {
-        println!(
-            "usage: {} — {} ms, {} found",
-            usage.id,
-            usage.duration.as_millis(),
-            usage.count.unwrap_or(0)
-        );
-    }
 
     Ok(())
 }

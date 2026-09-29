@@ -4,7 +4,7 @@
 //!
 //! The PNG counterpart of [`jpeg_exif`](super::jpeg_exif): PNG stores EXIF in a
 //! separate `eXIf` chunk, so the metadata layers onto the encoded pixels. The
-//! fixture and its assertions come from `elide_image::test_util`, so this test
+//! fixture and its assertions come from `elide_image::fixtures`, so this test
 //! needs no image/EXIF crate of its own.
 
 use elide::codec::FormatRegistry;
@@ -17,7 +17,7 @@ use elide::recognition::exif::ExifRecognizer;
 use elide::redaction::operators::Erase;
 use elide::redaction::{Anonymizer, Rule};
 use elide::{Directives, Document, Orchestrator};
-use elide_image::test_util::{has_gps_png, is_valid_image, png_with_gps};
+use elide_image::fixtures::{has_gps_png, is_valid_image, png_with_gps};
 
 #[tokio::test]
 async fn png_gps_is_stripped_through_the_facade() {

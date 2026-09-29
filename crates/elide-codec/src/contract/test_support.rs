@@ -1,6 +1,6 @@
 //! Throwaway unit-test doubles shared across the `contract` unit tests: a
 //! minimal one-string [`Stream<Text>`] and a concatenating [`Recombine`]. These
-//! are crate-internal, not the cross-crate mock surface (see `crate::test_util`).
+//! are crate-internal, not the cross-crate mock surface (see `crate::mocks`).
 
 use elide_core::Result;
 use elide_core::modality::text::{Text, TextData, TextLocation};

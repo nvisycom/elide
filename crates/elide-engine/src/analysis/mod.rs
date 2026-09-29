@@ -30,7 +30,9 @@ mod serde;
 mod test_support {
     use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
     use elide_core::entity::{Entity, LabelRef};
-    use elide_core::modality::text::{SourceRef, Text, TextLocation};
+    #[cfg(feature = "schema")]
+    use elide_core::modality::text::SourceRef;
+    use elide_core::modality::text::{Text, TextLocation};
     use elide_core::primitive::Confidence;
 
     use crate::PartId;
@@ -47,6 +49,7 @@ mod test_support {
     /// the [`Source`](elide_core::modality::text::TextCoord::Source) wire arm.
     ///
     /// [`Source`]: elide_core::modality::text::TextCoord::Source
+    #[cfg(feature = "schema")]
     pub(crate) fn source_only_entity(label: &str) -> Entity<Text> {
         Entity::custom(
             LabelRef::new(label),

@@ -526,9 +526,9 @@ mod tests {
         use little_exif::filetype::FileExtension;
         use little_exif::metadata::Metadata as ExifMetadata;
 
-        let bytes = crate::test_util::tiff_with_gps();
+        let bytes = crate::fixtures::tiff_with_gps();
         assert!(
-            crate::test_util::has_gps_tiff(&bytes),
+            crate::fixtures::has_gps_tiff(&bytes),
             "fixture should carry GPS before the strip"
         );
 
@@ -564,7 +564,7 @@ mod tests {
         use little_exif::filetype::FileExtension;
         use little_exif::metadata::Metadata as ExifMetadata;
 
-        let bytes = crate::test_util::tiff_with_gps();
+        let bytes = crate::fixtures::tiff_with_gps();
         let mut buffer = ImageBuffer::open(&bytes, ImageFormat::Tiff).expect("open");
         buffer.redact(
             BoundingBox::from_origin(Point::new(0, 0), Dimensions::new(2, 2)),

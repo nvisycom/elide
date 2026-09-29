@@ -343,7 +343,7 @@ mod tests {
     }
 
     fn read_part(bytes: &[u8], name: &str) -> Vec<u8> {
-        crate::opc::test_util::read_part(bytes, name)
+        crate::opc::fixtures::read_part(bytes, name)
             .unwrap_or_else(|| panic!("part `{name}` present in package"))
     }
 }

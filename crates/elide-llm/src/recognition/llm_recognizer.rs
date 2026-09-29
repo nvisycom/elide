@@ -11,12 +11,10 @@ use std::sync::Arc;
 
 use derive_builder::Builder;
 use elide_core::primitive::ComponentId;
-#[cfg(feature = "usage")]
-use elide_core::primitive::ModelUsage;
 use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Subject};
 use elide_core::{Error, Result};
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(any(test, feature = "mocks"))]
 use crate::backend::MockBackend;
 use crate::backend::{LlmBackend, LlmRequest};
 use crate::modality::LlmModality;
@@ -99,8 +97,8 @@ impl<M: LlmModality> LlmRecognizerBuilder<M> {
     /// `with_backend(MockBackend)`.
     ///
     /// [`MockBackend`]: crate::backend::MockBackend
-    #[cfg(any(test, feature = "test-utils"))]
-    #[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
+    #[cfg(any(test, feature = "mocks"))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "mocks")))]
     #[must_use]
     pub fn with_mock_backend(self) -> Self
     where
@@ -155,15 +153,7 @@ impl<M: LlmModality> Recognizer<M> for LlmRecognizer<M> {
             .backend
             .extract(LlmRequest::new(&prompt, subject.data()))
             .await?;
-        // The backend names the model it called; token counts are whatever the
-        // response carries (empty when the backend cannot surface them).
-        #[cfg(feature = "usage")]
-        let model_usage =
-            ModelUsage::new(self.backend.model().to_owned()).with_tokens(response.tokens);
         let entities = M::lift(response.candidates, subject.data());
-        let recognition = Recognition::new(entities);
-        #[cfg(feature = "usage")]
-        let recognition = recognition.with_model_usage(model_usage);
-        Ok(recognition)
+        Ok(Recognition::new(entities))
     }
 }

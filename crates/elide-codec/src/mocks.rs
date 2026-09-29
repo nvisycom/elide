@@ -1,4 +1,4 @@
-//! A mock codec format, behind the `test-util` feature.
+//! A mock codec format, behind the `mocks` feature.
 //!
 //! For exercising registry, handler, and orchestration behavior without a real
 //! file format.

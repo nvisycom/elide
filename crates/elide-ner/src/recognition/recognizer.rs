@@ -25,15 +25,13 @@ use elide_core::entity::audit::{AuditEvent, ModelEvent};
 use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::ComponentId;
-#[cfg(feature = "usage")]
-use elide_core::primitive::ModelUsage;
 use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Subject};
 use elide_core::{Error, Result};
 use hipstr::HipStr;
 
 use super::aggregation::AggregationStrategy;
 use super::alignment::AlignmentMode;
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(any(test, feature = "mocks"))]
 use crate::backend::MockBackend;
 use crate::backend::{NerBackend, NerRequest, NerSpan};
 
@@ -182,8 +180,8 @@ impl NerRecognizerBuilder {
     /// `with_backend(MockBackend)`.
     ///
     /// [`MockBackend`]: crate::backend::MockBackend
-    #[cfg(any(test, feature = "test-utils"))]
-    #[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
+    #[cfg(any(test, feature = "mocks"))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "mocks")))]
     #[must_use]
     pub fn with_mock_backend(self) -> Self {
         self.with_backend(MockBackend)
@@ -225,11 +223,6 @@ impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
         };
         let response = self.backend.recognize(request).await?;
 
-        // The model that produced these spans vouches for its own identity
-        // (name + version) via `provenance()`, plus any tokens it reported.
-        #[cfg(feature = "usage")]
-        let model_usage = ModelUsage::from(self.backend.provenance()).with_tokens(response.tokens);
-
         // Spans already carry canonical labels (the backend did any
         // raw-to-canonical mapping; ignored labels are dropped by an
         // `IgnoreLabels` decorator). When a target set was requested, we
@@ -244,10 +237,7 @@ impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
             })
             .filter_map(|s| self.build_entity::<M>(s, s.label.clone(), subject))
             .collect();
-        let recognition = Recognition::new(entities);
-        #[cfg(feature = "usage")]
-        let recognition = recognition.with_model_usage(model_usage);
-        Ok(recognition)
+        Ok(Recognition::new(entities))
     }
 }
 

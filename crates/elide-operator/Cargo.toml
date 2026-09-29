@@ -91,7 +91,7 @@ schemars = { workspace = true, features = [], optional = true }
 tokio = { workspace = true, features = ["rt", "macros"] }
 # A real decoded image payload for the image-operator tests (implies the
 # decoders), so a test builds an `ImageData` the way ingestion does.
-elide-image = { workspace = true, features = ["test-util"] }
+elide-image = { workspace = true, features = ["fixtures"] }
 # Likewise a real audio payload for the audio-operator tests (`wav` provides the
-# fixture encoder `test_util::blank_audio_data` uses).
-elide-audio = { workspace = true, features = ["test-util", "wav"] }
+# fixture encoder `fixtures::blank_audio_data` uses).
+elide-audio = { workspace = true, features = ["fixtures", "wav"] }

@@ -7,11 +7,11 @@ mod buffer;
 pub mod codec;
 #[cfg(feature = "_internal")]
 mod engine;
+#[cfg(any(test, feature = "fixtures"))]
+pub mod fixtures;
 pub mod modality;
 pub mod primitive;
 #[cfg(feature = "stt")]
 pub mod stt;
-#[cfg(any(test, feature = "test-util"))]
-pub mod test_util;
 
 pub use self::buffer::AudioBuffer;

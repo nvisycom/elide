@@ -79,32 +79,14 @@ impl JsonSchema for Report {
             "discriminator": { "propertyName": "modality" },
         });
 
-        // `parts` is an array of part entries, each a discriminated group. `mut`
-        // is used only to splice in `usage` under that feature.
-        #[cfg_attr(not(feature = "usage"), allow(unused_mut))]
-        let mut schema = json_schema!({
+        // `parts` is an array of part entries, each a discriminated group.
+        json_schema!({
             "type": "object",
             "properties": {
                 "parts": { "type": "array", "items": group },
             },
             "required": ["parts"],
-        });
-
-        // `usage` is present only under the `usage` feature, mirror the
-        // conditional field in `Serialize`.
-        #[cfg(feature = "usage")]
-        {
-            let usage = generator.subschema_for::<elide_core::primitive::UsageReport>();
-            let props = schema
-                .ensure_object()
-                .entry("properties")
-                .or_insert_with(|| serde_json::Value::Object(Default::default()));
-            if let Some(props) = props.as_object_mut() {
-                props.insert("usage".into(), usage.to_value());
-            }
-        }
-
-        schema
+        })
     }
 }
 
@@ -157,8 +139,7 @@ impl JsonSchema for ArtifactSet {
             "discriminator": { "propertyName": "modality" },
         });
 
-        // `parts` is an array of part entries. No `usage` here, that rides on
-        // the report, not the enrichment.
+        // `parts` is an array of part entries.
         json_schema!({
             "type": "object",
             "properties": {

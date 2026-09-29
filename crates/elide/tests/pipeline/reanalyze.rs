@@ -4,7 +4,7 @@
 //! re-running against an orchestrator whose OCR backend is empty: detection
 //! survives only because the seeded artifact carried the OCR text through.
 
-#![cfg(all(feature = "engine", feature = "ocr", feature = "test-utils"))]
+#![cfg(all(feature = "engine", feature = "ocr", feature = "mocks"))]
 
 use elide::codec::FormatRegistry;
 use elide::enrichment::ocr::MockBackend;

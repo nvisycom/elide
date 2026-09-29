@@ -2,9 +2,9 @@
 
 [package]
 name = "elide"
-description = "Composable component library for Elide pipelines: recognizers, dedup layers, checks, redaction strategies"
-keywords = ["elide", "toolkit", "components", "pipeline"]
-categories = ["data-structures"]
+description = "Composable, multimodal toolkit for detecting and redacting sensitive data: recognizers, dedup layers, redaction operators, and codecs"
+keywords = ["elide", "pii", "detection", "redaction"]
+categories = ["text-processing"]
 
 version = { workspace = true }
 rust-version = { workspace = true }
@@ -26,10 +26,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 ## (e.g. `codec`, `serde`).
 default = ["pattern", "ner", "llm"]
 
-## Derive `serde::{Serialize, Deserialize}` on the re-exported core
-## domain types. Recognizer crates (`pattern`/`ner`/`llm`) need serde
-## structurally and pull it in regardless; `codec` forwards it when both
-## are enabled.
+## Derive `serde::{Serialize, Deserialize}` on the re-exported domain types.
+## Recognizer crates (`pattern`/`ner`/`llm`) need serde structurally and pull
+## it in regardless; each optional modality/codec crate (`audio`/`image`/`pdf`/
+## `office`/`codec`/`format`) is forwarded only when it is enabled.
 ## (`elide-engine` requires serde unconditionally, so the `engine` feature
 ## pulls it in on its own — no forward needed here.)
 serde = [
@@ -39,14 +39,17 @@ serde = [
     "elide-redaction/serde",
     "elide-audio?/serde",
     "elide-image?/serde",
+    "elide-pdf?/serde",
+    "elide-office?/serde",
     "elide-codec?/serde",
-    "elide-format?/serde"
+    "elide-format?/serde",
 ]
 
 ## Derive `schemars::JsonSchema` on the re-exported domain types, for
 ## emitting JSON Schemas of the serialized model. Implies serde. Forwards to
-## the engine crates; the optional ones (`codec`/`orchestration`/`ner`) only
-## when they're enabled.
+## the always-present engine crates; each optional crate (`audio`/`image`/`pdf`/
+## `codec`/`format`/`engine`/`ner`) is forwarded only when it is enabled.
+## (`elide-office` has no schema-relevant config types, so no forward there.)
 schema = [
     "serde",
     "elide-core/schema",
@@ -55,6 +58,7 @@ schema = [
     "elide-redaction/schema",
     "elide-audio?/schema",
     "elide-image?/schema",
+    "elide-pdf?/schema",
     "elide-codec?/schema",
     "elide-format?/schema",
     "elide-engine?/schema",
@@ -75,7 +79,7 @@ lingua-common = ["lingua", "elide-lingua/common"]
 lingua-all = ["lingua", "elide-lingua/all"]
 
 ## Re-export the LLM recognizer crate. Lean by default (the trait, recognizer,
-## prompts, and — with `test-utils` — the stub backend); add `llm-rig` or a provider
+## prompts, and — with `mocks` — the stub backend); add `llm-rig` or a provider
 ## feature for the rig-backed network backend.
 llm = ["dep:elide-llm"]
 ## The rig-backed `RigBackend` and its HTTP stack in the re-exported LLM
@@ -85,12 +89,10 @@ llm-rig = ["llm", "elide-llm/rig"]
 ## detect-pass prompts from `.j2` templates without depending on `elide-llm`
 ## directly.
 llm-jinja2 = ["llm", "elide-llm/jinja2"]
-## The OpenAI GPT provider for the rig LLM backend (implies `llm-rig`).
-llm-openai = ["llm", "elide-llm/openai-gpt"]
-## The Anthropic Claude provider for the rig LLM backend (implies `llm-rig`).
-llm-anthropic = ["llm", "elide-llm/anthropic-claude"]
-## The Google Gemini provider for the rig LLM backend (implies `llm-rig`).
-llm-gemini = ["llm", "elide-llm/google-gemini"]
+## To select a concrete rig provider, enable its upstream feature directly
+## alongside `llm-rig`, e.g. `elide-llm/anthropic-claude` (each provider feature
+## implies `rig`). The facade adds no per-provider wrapper: it would only rename
+## the upstream feature, bundling no extra deps and guarding no invalid combo.
 
 ## Re-export the STT (speech-to-text) recognizer (from the audio crate).
 stt = ["dep:elide-audio", "elide-audio/stt", "audio"]
@@ -99,10 +101,11 @@ ocr = ["dep:elide-image", "elide-image/ocr", "image"]
 
 ## The `audio` modality. Implied by the audio codec formats.
 audio = ["dep:elide-audio", "elide-operator/audio", "elide-engine?/audio"]
-## The `image` modality. Implied by the image codec formats. Pulls in the
-## `metadata` modality too: a raster image carries EXIF metadata as a redactable
-## sub-part.
-image = ["dep:elide-image", "elide-operator/image", "elide-engine?/image", "metadata"]
+## The `image` modality. Implied by the image codec formats. Enables the light
+## `exif` path (little_exif, no pixel codec) so `ExifPolicy` is nameable without
+## a decoder, and pulls in the `metadata` modality: a raster image carries EXIF
+## metadata as a redactable sub-part.
+image = ["dep:elide-image", "elide-image/exif", "elide-operator/image", "elide-engine?/image", "metadata"]
 ## The `metadata` modality: a document's out-of-band fields (EXIF, document
 ## properties) as redaction subjects.
 metadata = ["elide-core/metadata", "elide-operator/metadata", "elide-engine?/metadata"]
@@ -127,12 +130,17 @@ engine = ["dep:elide-engine", "codec", "serde"]
 ## `FormatRegistry::decode_content`).
 codec-sniff = ["codec", "elide-format/sniff"]
 
-## Per-modality format groups (each aggregates its per-format features).
+## Per-modality format groups (each aggregates formats that share a decoder
+## substrate). The image and audio groups also unlock their enricher recognizer
+## (`ocr`/`stt`): if you can decode the pixels or samples you almost certainly
+## want the enricher seam, and it is inert trait weight until a backend is added.
+## There is deliberately no `codec-document` umbrella: DOCX/PPTX (OOXML, via
+## `codec-ooxml`) and PDF share no engine, so an aggregate would only over-pull.
 codec-text = ["codec-txt", "codec-json", "codec-html", "codec-xml"]
 codec-tabular = ["codec-csv", "codec-xlsx"]
-codec-image = ["codec-png", "codec-jpeg", "codec-tiff"]
-codec-audio = ["codec-wav", "codec-mp3"]
-codec-document = ["codec-docx", "codec-pptx", "codec-pdf"]
+codec-image = ["codec-png", "codec-jpeg", "codec-tiff", "ocr"]
+codec-audio = ["codec-wav", "codec-mp3", "stt"]
+codec-ooxml = ["codec-docx", "codec-pptx"]
 
 ## Per-format handlers.
 codec-txt = ["codec", "dep:elide-plain", "elide-plain/txt", "elide-format/txt"]
@@ -152,22 +160,7 @@ codec-pdf = ["codec", "dep:elide-pdf", "elide-format/pdf"]
 codec-pdf-render = ["codec-pdf", "elide-format/pdf-render"]
 
 ## Ship the no-op mock backends in the re-exported recognizer crates.
-test-utils = ["elide-ner?/test-utils", "elide-llm?/test-utils", "elide-audio?/test-utils", "elide-image?/test-utils"]
-
-## Resource-usage accounting across the toolkit: the [`Usage`] vocabulary, the
-## per-recognizer / per-enricher model-usage recognitions and enrichments
-## carry, and the usage a [`Report`] records. Off by default; forwards to every
-## engine crate that populates usage (the optional ones only when enabled).
-usage = [
-    "elide-core/usage",
-    "elide-context/usage",
-    "elide-detection/usage",
-    "elide-engine?/usage",
-    "elide-llm?/usage",
-    "elide-ner?/usage",
-    "elide-image?/usage",
-    "elide-audio?/usage",
-]
+mocks = ["elide-ner?/mocks", "elide-llm?/mocks", "elide-audio?/mocks", "elide-image?/mocks"]
 
 ## The one-way `Sha2Hash` operator (SHA-256 / SHA-512).
 sha2 = ["elide-operator/sha2"]
@@ -205,10 +198,10 @@ async-trait = { workspace = true, features = [] }
 
 [dev-dependencies]
 # Internal crates
-elide-core = { workspace = true, features = ["test-util"] }
-elide-office = { workspace = true, features = ["test-util"] }
-elide-image = { workspace = true, features = ["test-util"] }
-elide-audio = { workspace = true, features = ["test-util", "wav"] }
+elide-core = { workspace = true, features = ["fixtures", "mocks"] }
+elide-office = { workspace = true, features = ["fixtures"] }
+elide-image = { workspace = true, features = ["fixtures"] }
+elide-audio = { workspace = true, features = ["fixtures", "wav"] }
 
 # (De)serialization
 serde = { workspace = true, features = [] }
@@ -235,42 +228,42 @@ required-features = ["engine", "codec-txt", "codec-docx"]
 # binary; PDF's born-digital and raster paths share `format_pdf`.
 [[test]]
 name = "format_ooxml"
-required-features = ["codec-docx", "codec-xlsx", "codec-pptx", "codec-xml", "test-utils", "engine", "serde"]
+required-features = ["codec-docx", "codec-xlsx", "codec-pptx", "codec-xml", "mocks", "engine", "serde"]
 
 [[test]]
 name = "format_pdf"
-required-features = ["codec-pdf-render", "test-utils", "engine", "serde"]
+required-features = ["codec-pdf-render", "mocks", "engine", "serde"]
 
 [[test]]
 name = "format_txt"
-required-features = ["codec-txt", "ner", "llm", "lingua-common", "test-utils", "engine", "serde"]
+required-features = ["codec-txt", "ner", "llm", "lingua-common", "mocks", "engine", "serde"]
 
 [[test]]
 name = "format_json"
-required-features = ["codec-json", "test-utils", "engine", "serde"]
+required-features = ["codec-json", "mocks", "engine", "serde"]
 
 [[test]]
 name = "format_html"
-required-features = ["codec-html", "test-utils", "engine", "serde"]
+required-features = ["codec-html", "mocks", "engine", "serde"]
 
 [[test]]
 name = "format_xml"
-required-features = ["codec-xml", "test-utils", "engine", "serde"]
+required-features = ["codec-xml", "mocks", "engine", "serde"]
 
 [[test]]
 name = "format_csv"
-required-features = ["codec-csv", "ner", "llm", "lingua-common", "test-utils", "engine", "serde"]
+required-features = ["codec-csv", "ner", "llm", "lingua-common", "mocks", "engine", "serde"]
 
 [[test]]
 name = "format_image"
-required-features = ["codec-png", "codec-jpeg", "codec-tiff", "ocr", "test-utils", "engine", "serde"]
+required-features = ["codec-png", "codec-jpeg", "codec-tiff", "ocr", "mocks", "engine", "serde"]
 
 [[test]]
 name = "format_audio"
-required-features = ["codec-wav", "codec-mp3", "stt", "test-utils", "engine", "serde"]
+required-features = ["codec-wav", "codec-mp3", "stt", "mocks", "engine", "serde"]
 
 # Format-independent facade integration: detection pipeline, audit trail,
 # cross-modal context enhancement, and the reviewable `select` seam.
 [[test]]
 name = "pipeline"
-required-features = ["codec-docx", "codec-png", "llm", "ocr", "stt", "test-utils", "engine", "serde"]
+required-features = ["codec-docx", "codec-png", "llm", "ocr", "stt", "mocks", "engine", "serde"]

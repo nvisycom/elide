@@ -8,7 +8,7 @@
 //! false pass. This module owns that decompression so a test never has to
 //! reconstruct the packaging itself.
 //!
-//! Gated behind the `test-util` feature: it is scaffolding for tests in
+//! Gated behind the `fixtures` feature: it is scaffolding for tests in
 //! this crate and its dependents, not part of the shipped surface.
 
 use std::io::{Cursor, Read, Write};

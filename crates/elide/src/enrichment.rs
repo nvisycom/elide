@@ -14,7 +14,7 @@
 #[doc(inline)]
 pub use elide_audio::stt;
 #[doc(inline)]
-pub use elide_core::enrichment::{Enricher, Enrichment};
+pub use elide_core::enrichment::Enricher;
 #[cfg(feature = "ocr")]
 #[cfg_attr(docsrs, doc(cfg(feature = "ocr")))]
 #[doc(inline)]

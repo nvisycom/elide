@@ -6,7 +6,7 @@
 //! the file's own IFD (not an embedded segment), so this exercises the
 //! EXIF-as-IFD transfer path where the metadata is transplanted onto the
 //! freshly-encoded container. The fixture and its assertions come from
-//! `elide_image::test_util`, so this test needs no image/EXIF crate of its own.
+//! `elide_image::fixtures`, so this test needs no image/EXIF crate of its own.
 
 use elide::codec::FormatRegistry;
 use elide::detection::Analyzer;
@@ -18,7 +18,7 @@ use elide::recognition::exif::ExifRecognizer;
 use elide::redaction::operators::Erase;
 use elide::redaction::{Anonymizer, Rule};
 use elide::{Directives, Document, Orchestrator};
-use elide_image::test_util::{has_gps_tiff, is_valid_image, tiff_with_gps};
+use elide_image::fixtures::{has_gps_tiff, is_valid_image, tiff_with_gps};
 
 #[tokio::test]
 async fn tiff_gps_is_stripped_through_the_facade() {

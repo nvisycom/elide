@@ -71,7 +71,7 @@ impl<M: Modality> PipelineOutcome<M> {
     /// if absent. The OOXML packaging lives in `elide-office`, so the read
     /// goes through its part reader rather than reconstructing the zip here.
     pub fn part(&self, name: &str) -> Option<Vec<u8>> {
-        elide_office::opc::test_util::read_part(&self.redacted, name)
+        elide_office::opc::fixtures::read_part(&self.redacted, name)
     }
 
     /// Every text-bearing part of the redacted package (OOXML container
@@ -83,7 +83,7 @@ impl<M: Modality> PipelineOutcome<M> {
     /// give a false pass. `elide-office` owns this, read the parts back
     /// out, then scan.
     pub fn text_parts(&self) -> Vec<(String, String)> {
-        elide_office::opc::test_util::text_parts(&self.redacted)
+        elide_office::opc::fixtures::text_parts(&self.redacted)
     }
 
     /// Assert that no value in `pii` survives in any text-bearing part of

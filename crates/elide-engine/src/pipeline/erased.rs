@@ -95,9 +95,6 @@ where
             let artifact = analysis
                 .artifact
                 .map(|a| Box::new(a) as Box<dyn ArtifactGroup>);
-            #[cfg(feature = "usage")]
-            return Ok(Some((entities, artifact, analysis.usage)));
-            #[cfg(not(feature = "usage"))]
             Ok(Some((entities, artifact)))
         })
     }

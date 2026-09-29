@@ -107,9 +107,9 @@ infer = { workspace = true, features = [], optional = true }
 
 [dev-dependencies]
 # Internal crates
-elide-audio = { workspace = true, features = ["test-util"] }
-elide-codec = { workspace = true, features = ["test-util"] }
-elide-image = { workspace = true, features = ["test-util"] }
+elide-audio = { workspace = true, features = ["fixtures"] }
+elide-codec = { workspace = true, features = ["mocks"] }
+elide-image = { workspace = true, features = ["fixtures"] }
 elide-plain = { workspace = true, features = ["txt"] }
 
 # Async runtime & parallelism

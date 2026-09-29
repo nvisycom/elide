@@ -10,10 +10,10 @@
 //! onto the call's artifacts with no remapping. The [`OcrEnricher`] drives a
 //! backend per call and stamps the recognized [`Layout`](crate::modality::Layout)
 //! onto the image so a recognizer can read it. The pure-Rust `OcrsBackend` is
-//! behind the `ocrs` feature; the no-op `MockBackend` behind `test-utils`.
+//! behind the `ocrs` feature; the no-op `MockBackend` behind `mocks`.
 
 mod enricher;
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(any(test, feature = "mocks"))]
 mod mock;
 #[cfg(feature = "ocrs")]
 mod ocrs;
@@ -24,8 +24,8 @@ use elide_core::Result;
 use elide_core::entity::audit::ModelEvent;
 
 pub use self::enricher::{OcrEnricher, OcrEnricherBuilder};
-#[cfg(any(test, feature = "test-utils"))]
-#[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
+#[cfg(any(test, feature = "mocks"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "mocks")))]
 pub use self::mock::MockBackend;
 #[cfg(feature = "ocrs")]
 #[cfg_attr(docsrs, doc(cfg(feature = "ocrs")))]

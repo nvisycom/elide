@@ -1,5 +1,5 @@
 //! [`TextDoc`], an in-memory [`Text`] read/write test double. Behind the
-//! `test-util` feature; colocated with the `Text` modality it stands in for.
+//! `fixtures` feature; colocated with the `Text` modality it stands in for.
 
 use super::{Text, TextData, TextLocation, TextReplacement};
 use crate::modality::{DataReader, DataWriter};

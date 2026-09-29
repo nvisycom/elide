@@ -69,30 +69,16 @@ where
         ctx: &RecognizerContext<'_, M>,
     ) -> Result<Recognition<M>> {
         let recognition = self.inner.recognize(subject, ctx).await?;
-        #[cfg(feature = "usage")]
-        let model_usage = recognition.model_usage;
         let mut entities = recognition.entities;
         if self.enhancer.is_empty() {
-            let recognition = Recognition::new(entities);
-            #[cfg(feature = "usage")]
-            let recognition = match model_usage {
-                Some(model_usage) => recognition.with_model_usage(model_usage),
-                None => recognition,
-            };
-            return Ok(recognition);
+            return Ok(Recognition::new(entities));
         }
 
         // No recognizable text at this chunk (an un-transcribed clip, an
         // un-OCR'd image): there is nothing for context to enhance against, so
         // return the wrapped recognizer's entities unchanged.
         let Some(text) = M::as_text(subject.data(), subject.artifact()) else {
-            let recognition = Recognition::new(entities);
-            #[cfg(feature = "usage")]
-            let recognition = match model_usage {
-                Some(model_usage) => recognition.with_model_usage(model_usage),
-                None => recognition,
-            };
-            return Ok(recognition);
+            return Ok(Recognition::new(entities));
         };
         // A hint pairs a location with its content (a header, a field name).
         // Read each hint's content through the modality's text view for keyword
@@ -150,12 +136,6 @@ where
                 refinement,
             ));
         }
-        let recognition = Recognition::new(entities);
-        #[cfg(feature = "usage")]
-        let recognition = match model_usage {
-            Some(model_usage) => recognition.with_model_usage(model_usage),
-            None => recognition,
-        };
-        Ok(recognition)
+        Ok(Recognition::new(entities))
     }
 }

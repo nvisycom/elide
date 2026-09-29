@@ -6,9 +6,9 @@ pub mod content;
 mod contract;
 #[cfg(feature = "extract")]
 pub mod extract;
+#[cfg(feature = "mocks")]
+pub mod mocks;
 pub mod string;
-#[cfg(feature = "test-util")]
-pub mod test_util;
 
 pub use self::contract::{
     Document, DocumentLoader, DocumentPart, EncodedPart, ErasedStream, Format, FormatId,

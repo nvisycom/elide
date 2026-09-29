@@ -10,12 +10,12 @@
 //! package.
 
 mod block;
+#[cfg(feature = "fixtures")]
+pub mod fixtures;
 mod offset;
 mod part;
 pub mod props;
 mod store;
-#[cfg(feature = "test-util")]
-pub mod test_util;
 mod xml_span;
 
 use std::collections::HashMap;

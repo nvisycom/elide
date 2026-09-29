@@ -21,11 +21,11 @@ mod tests {
     use elide_codec::{Loader as _, Stream as _};
 
     use super::*;
-    use crate::{AudioBuffer, test_util};
+    use crate::{AudioBuffer, fixtures};
 
     #[tokio::test]
     async fn stream_reports_one_second() {
-        let clip = AudioBuffer::open(&test_util::wav_ramp(1), crate::modality::AudioFormat::Wav)
+        let clip = AudioBuffer::open(&fixtures::wav_ramp(1), crate::modality::AudioFormat::Wav)
             .expect("open");
         let mut h = WavHandler::new(clip);
         let chunk = h.read_next().await.unwrap().expect("one chunk");
@@ -41,7 +41,7 @@ mod tests {
     #[tokio::test]
     async fn loader_rejects_content_of_another_format() {
         let err = WavLoader
-            .decode(ContentData::new(test_util::mp3_tone(1)))
+            .decode(ContentData::new(fixtures::mp3_tone(1)))
             .await
             .expect_err("mp3 content should not decode as wav");
         assert_eq!(err.kind(), elide_core::ErrorKind::MalformedInput);

@@ -24,8 +24,6 @@ use crate::entity::Entity;
 use crate::error::Result;
 use crate::modality::Modality;
 use crate::primitive::ComponentId;
-#[cfg(feature = "usage")]
-use crate::primitive::ModelUsage;
 
 /// Detection layer: inspects content and reports recognized entities.
 ///
@@ -56,8 +54,7 @@ where
     fn id(&self) -> ComponentId;
 
     /// Inspect the [`Subject`] in the given context and return the recognized
-    /// entities, in modality-local coordinates, together with any
-    /// model-usage detail the call incurred (see [`Recognition`]).
+    /// entities, in modality-local coordinates (see [`Recognition`]).
     async fn recognize(
         &self,
         subject: &Subject<M>,
@@ -116,35 +113,17 @@ where
 
 /// What a [`Recognizer`] returns from one call.
 ///
-/// The entities it found. Under the `usage` feature it also carries the
-/// `ModelUsage` the call cost, which a model-backed recognizer attaches with
-/// `with_model_usage`.
+/// The entities it found, in modality-local coordinates.
 #[derive(Debug, Clone)]
 pub struct Recognition<M: Modality> {
     /// The recognized entities, in modality-local coordinates.
     pub entities: Vec<Entity<M>>,
-    /// Model / token detail for a model-backed recognizer; `None` otherwise.
-    #[cfg(feature = "usage")]
-    pub model_usage: Option<ModelUsage>,
 }
 
 impl<M: Modality> Recognition<M> {
-    /// A recognition carrying `entities` (and, under the `usage` feature, no
-    /// model usage yet, attach it with `with_model_usage`).
+    /// A recognition carrying `entities`.
     pub fn new(entities: Vec<Entity<M>>) -> Self {
-        Self {
-            entities,
-            #[cfg(feature = "usage")]
-            model_usage: None,
-        }
-    }
-
-    /// Attach the [`ModelUsage`] this recognition cost (the model-backed path).
-    #[cfg(feature = "usage")]
-    #[must_use]
-    pub fn with_model_usage(mut self, model_usage: ModelUsage) -> Self {
-        self.model_usage = Some(model_usage);
-        self
+        Self { entities }
     }
 }
 

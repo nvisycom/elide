@@ -56,7 +56,6 @@ pub(crate) fn redact_raster(
     // The fill above set every covered pixel to `fill_rgb`; a mismatch here would
     // mean the fill and verify disagree on which pixels a detection selects,
     // which must never ship.
-    #[cfg(feature = "test-utils")]
     debug_assert!(
         verify_raster_coverage(&pages, detections, fill_rgb).is_ok(),
         "redact_raster left a covered pixel unfilled"
@@ -85,9 +84,7 @@ pub(crate) fn redact_raster(
 /// pixel buffer size does not match its dimensions, a detection names a page
 /// not present in `pages` or selects no glyph, or a covered pixel is not
 /// `fill_rgb` (naming the page and the offending pixel).
-#[cfg(feature = "test-utils")]
-#[cfg_attr(docsrs, doc(cfg(feature = "test-utils")))]
-pub fn verify_raster_coverage(
+pub(crate) fn verify_raster_coverage(
     pages: &[PageObservation],
     detections: &[Detection],
     fill_rgb: [u8; 3],
@@ -201,7 +198,6 @@ fn fill_rect(pixels: &mut [u8], width: u32, height: u32, rect: PixelRect, fill: 
 /// The page height is derived from the buffer length, so the same page-bounds
 /// clipping [`fill_rect`] applies holds, an out-of-bounds glyph box covers no
 /// pixels rather than reporting a false mismatch.
-#[cfg(feature = "test-utils")]
 fn unfilled_pixel(pixels: &[u8], width: u32, rect: PixelRect, fill: [u8; 3]) -> Option<(u32, u32)> {
     let height = if width == 0 {
         0
@@ -221,7 +217,7 @@ fn unfilled_pixel(pixels: &[u8], width: u32, rect: PixelRect, fill: [u8; 3]) -> 
     None
 }
 
-#[cfg(all(test, feature = "test-utils"))]
+#[cfg(test)]
 mod tests {
     use elide_core::ErrorKind;
 

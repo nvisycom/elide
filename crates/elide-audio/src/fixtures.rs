@@ -1,4 +1,4 @@
-//! Small in-memory audio fixtures, behind the `test-util` feature.
+//! Small in-memory audio fixtures, behind the `fixtures` feature.
 //!
 //! A downstream crate exercising an audio handler needs a real WAV or MP3 clip
 //! without re-implementing the encoders or taking a direct dependency on
