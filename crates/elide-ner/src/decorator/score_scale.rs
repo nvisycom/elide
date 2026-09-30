@@ -85,6 +85,15 @@ impl<B> ScoreScale<B> {
     pub fn inner(&self) -> &B {
         &self.inner
     }
+
+    /// Scale the confidence of every span whose label is in the configured set.
+    fn scale(&self, response: &mut NerResponse) {
+        for span in &mut response.spans {
+            if self.labels.contains(&span.label) {
+                span.confidence = span.confidence.saturating_mul(self.multiplier);
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -101,12 +110,18 @@ where
 
     async fn call(&self, request: NerRequest<'_>) -> Result<NerResponse> {
         let mut response = self.inner.call(request).await?;
-        for span in &mut response.spans {
-            if self.labels.contains(&span.label) {
-                span.confidence = span.confidence.saturating_mul(self.multiplier);
-            }
-        }
+        self.scale(&mut response);
         Ok(response)
+    }
+
+    async fn call_batch(&self, requests: Vec<NerRequest<'_>>) -> Result<Vec<NerResponse>> {
+        // Forward to the inner backend's batch path so its native batching (if
+        // any) is preserved, then scale each response's scores.
+        let mut responses = self.inner.call_batch(requests).await?;
+        for response in &mut responses {
+            self.scale(response);
+        }
+        Ok(responses)
     }
 }
 

@@ -84,4 +84,26 @@ pub trait Backend: Send + Sync {
     ///
     /// The underlying transport / provider / extraction error.
     async fn call(&self, request: Self::Request<'_>) -> Result<Self::Response>;
+
+    /// Call the model with a batch of `requests`, returning one response per
+    /// request in the same order.
+    ///
+    /// The default fans out sequentially over [`call`](Self::call); a backend
+    /// whose provider accepts several inputs in one round-trip (a hosted NER or
+    /// embedding endpoint, a vision API taking many images) overrides this to
+    /// send them together, trading the per-request latency for one request's.
+    /// The contract is unchanged either way: `responses[i]` is the response to
+    /// `requests[i]`, and the batch fails whole on the first error.
+    ///
+    /// # Errors
+    ///
+    /// The first underlying transport / provider / extraction error; a batched
+    /// backend surfaces a whole-batch failure the same way.
+    async fn call_batch(&self, requests: Vec<Self::Request<'_>>) -> Result<Vec<Self::Response>> {
+        let mut responses = Vec::with_capacity(requests.len());
+        for request in requests {
+            responses.push(self.call(request).await?);
+        }
+        Ok(responses)
+    }
 }
