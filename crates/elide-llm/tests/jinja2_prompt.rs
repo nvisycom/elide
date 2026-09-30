@@ -1,5 +1,5 @@
 //! End-to-end: load a [`Jinja2Prompt`] from a `.j2` template and render
-//! the prompt wording against a populated payload + [`RecognizerContext`].
+//! the prompt wording against a populated payload + [`Context`].
 //!
 //! Covers the minijinja code path (variable interpolation, `{% for %}`,
 //! `{% if %}`, the `| join` filter, hint snippet rendering for text, and
@@ -11,7 +11,7 @@
 use elide_core::entity::builtins;
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::recognition::annotation::{Annotations, Inclusion};
-use elide_core::recognition::{RecognizerContext, Scope, Subject};
+use elide_core::recognition::{Context, Scope, Subject};
 use elide_image::modality::{Image, ImageLocation};
 use elide_image::primitive::{BoundingBox, Dimensions, Point};
 use elide_llm::prompt::{Jinja2Prompt, Prompt};
@@ -34,7 +34,7 @@ fn text_prompt_renders_template() {
     let data = TextData::new(body);
     let scope = Scope::new().with_tags(vec!["medical".to_owned(), "gdpr-request".to_owned()]);
     let annotations: Annotations<Text> = Annotations::new().with_inclusions(vec![inclusion]);
-    let ctx = RecognizerContext::new(&scope).with_annotations(&annotations);
+    let ctx = Context::new(&scope).with_annotations(&annotations);
     let subject = Subject::new(data);
 
     let rendered = prompt.build(&subject, &ctx);
@@ -75,7 +75,7 @@ fn image_prompt_renders_template() {
     );
     let scope = Scope::new().with_tags(vec!["badge".to_owned()]);
     let annotations: Annotations<Image> = Annotations::new().with_inclusions(vec![inclusion]);
-    let ctx = RecognizerContext::new(&scope).with_annotations(&annotations);
+    let ctx = Context::new(&scope).with_annotations(&annotations);
     let subject = Subject::new(data);
 
     let rendered = prompt.build(&subject, &ctx);

@@ -9,14 +9,18 @@
 
 #![cfg(all(feature = "image", feature = "metadata"))]
 
-use elide_core::entity::LabelCatalog;
+use elide_core::Result;
+use elide_core::entity::audit::{AuditEvent, ModelEvent};
+use elide_core::entity::{Entity, LabelCatalog, builtins};
 use elide_core::modality::metadata::Metadata;
-use elide_core::recognition::Scope;
+use elide_core::primitive::{ComponentId, Confidence};
+use elide_core::recognition::{Context, Recognizer, Scope, Subject};
 use elide_detection::Analyzer;
 use elide_engine::{Directives, Document, Orchestrator};
 use elide_format::FormatRegistry;
 use elide_image::exif::ExifRecognizer;
-use elide_image::modality::Image;
+use elide_image::modality::{Image, ImageLocation};
+use elide_image::primitive::{BoundingBox, Dimensions, Point};
 use elide_operator::operators::Erase;
 use elide_redaction::{Anonymizer, Rule};
 use little_exif::exif_tag::ExifTag;
@@ -115,22 +119,16 @@ async fn jpeg_gps_is_detected_and_stripped_through_the_orchestrator() {
 struct WholeFrame;
 
 #[async_trait::async_trait]
-impl elide_core::recognition::Recognizer<Image> for WholeFrame {
-    fn id(&self) -> elide_core::primitive::ComponentId {
-        elide_core::primitive::ComponentId::new("whole-frame", "1.0.0")
+impl Recognizer<Image> for WholeFrame {
+    fn id(&self) -> ComponentId {
+        ComponentId::new("whole-frame", "1.0.0")
     }
 
     async fn recognize(
         &self,
-        subject: &elide_core::recognition::Subject<Image>,
-        _ctx: &elide_core::recognition::RecognizerContext<'_, Image>,
-    ) -> elide_core::Result<elide_core::recognition::Recognition<Image>> {
-        use elide_core::entity::audit::{AuditEvent, ModelEvent};
-        use elide_core::entity::{Entity, builtins};
-        use elide_core::primitive::Confidence;
-        use elide_image::modality::ImageLocation;
-        use elide_image::primitive::{BoundingBox, Dimensions, Point};
-
+        subject: &Subject<Image>,
+        _ctx: &Context<'_, Image>,
+    ) -> Result<Vec<Entity<Image>>> {
         let dims = subject.data().dimensions();
         let bbox = BoundingBox::from_origin(
             Point::new(0.0, 0.0),
@@ -149,9 +147,7 @@ impl elide_core::recognition::Recognizer<Image> for WholeFrame {
             .with_confidence(Confidence::MAX)
             .with_event(event)
             .build();
-        Ok(elide_core::recognition::Recognition::new(
-            entity.into_iter().collect(),
-        ))
+        Ok(entity.into_iter().collect())
     }
 }
 

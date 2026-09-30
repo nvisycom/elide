@@ -13,10 +13,10 @@ use hipstr::HipStr;
 use crate::matching::{KeywordMatcher, on_word_boundaries};
 use crate::rule::BoostRule;
 
-mod context;
+mod enhance_input;
 mod window;
 
-pub use self::context::Context;
+pub use self::enhance_input::EnhanceInput;
 use self::window::{slice_tokens_around, token_span, word_window};
 
 /// Source name stamped onto refinement events the enhancer records when
@@ -148,7 +148,7 @@ impl Enhancer {
     pub fn enhance<M: TextRecognizable>(
         &self,
         entities: &mut [Entity<M>],
-        ctx: &Context<'_>,
+        ctx: &EnhanceInput<'_>,
     ) -> Vec<Boost> {
         let mut boosts = Vec::new();
         if self.rules.is_empty() {
@@ -164,7 +164,7 @@ impl Enhancer {
         &self,
         entity_index: usize,
         entity: &mut Entity<M>,
-        ctx: &Context<'_>,
+        ctx: &EnhanceInput<'_>,
         boosts: &mut Vec<Boost>,
     ) {
         let Some(bucket) = self.rules.get(&entity.label) else {
@@ -188,7 +188,7 @@ impl Enhancer {
         entity_index: usize,
         entity: &mut Entity<M>,
         rule: &BoostRule,
-        ctx: &Context<'_>,
+        ctx: &EnhanceInput<'_>,
     ) -> Option<Boost> {
         // The in-text window path needs the entity's byte range into the
         // recognized text; the out-of-band hint path does not. An entity with
@@ -243,7 +243,7 @@ impl Enhancer {
         &self,
         range: &Range<usize>,
         rule: &BoostRule,
-        ctx: &Context<'_>,
+        ctx: &EnhanceInput<'_>,
     ) -> Option<Range<usize>> {
         // Prefer the token stream when the producer reached this entity. Fall
         // back to the word-segmented substring window whenever the token slice

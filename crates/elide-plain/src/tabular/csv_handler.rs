@@ -378,7 +378,7 @@ mod tests {
         assert_eq!(lifted.end_offset, Some(12));
         // Out-of-bounds range lifts to nothing.
         let oob = TabularLocation::new(0, 0).with_range(0, 99);
-        assert!(h.lift(&cell, oob).is_none());
+        assert!(h.lift(cell, oob).is_none());
     }
 
     #[tokio::test]

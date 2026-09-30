@@ -17,7 +17,7 @@
 // pre-recognition concern and live in the `enrichment` module.
 #[doc(inline)]
 pub use elide_core::recognition::{
-    LabelMap, Recognition, Recognizer, RecognizerContext, Scope, ScopeMetadata, Subject, annotation,
+    Context, LabelMap, Recognizer, Scope, ScopeMetadata, Subject, annotation,
 };
 
 /// Context-enhanced recognition: keyword-boosted confidence over another
@@ -52,7 +52,7 @@ pub use elide_core::recognition::{
 pub mod context {
     #[doc(inline)]
     pub use elide_context::{
-        Boost, BoostRule, Context, DEFAULT_BOOST, DEFAULT_PREFIX_WORDS, DEFAULT_SUFFIX_WORDS,
+        Boost, BoostRule, DEFAULT_BOOST, DEFAULT_PREFIX_WORDS, DEFAULT_SUFFIX_WORDS, EnhanceInput,
         Enhanced, Enhancer,
     };
 

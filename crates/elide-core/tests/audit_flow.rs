@@ -189,7 +189,7 @@ fn label_map_translates_raw_labels() {
 
 #[test]
 fn recognizer_context_scopes_by_language_and_country() {
-    use elide_core::recognition::{RecognizerContext, Scope, Subject};
+    use elide_core::recognition::{Context, Scope, Subject};
 
     let en_us = LanguageTag::parse("en-US").unwrap();
     let en = LanguageTag::parse("en").unwrap();
@@ -204,7 +204,7 @@ fn recognizer_context_scopes_by_language_and_country() {
     let scope = Scope::new()
         .with_language(en_us.clone())
         .with_country(CountryCode::from_alpha2("US").unwrap());
-    let ctx: RecognizerContext<'_, Text> = RecognizerContext::new(&scope);
+    let ctx: Context<'_, Text> = Context::new(&scope);
     // The language queries combine the scope's asserted languages with a
     // subject's detected ones; here the subject detected nothing.
     let subject = Subject::new(TextData::new(""));
@@ -233,7 +233,7 @@ fn recognizer_context_scopes_by_language_and_country() {
 
 #[test]
 fn a_detected_language_never_filters() {
-    use elide_core::recognition::{RecognizerContext, Scope, Subject};
+    use elide_core::recognition::{Context, Scope, Subject};
 
     let de = LanguageTag::parse("de").unwrap();
     let es = LanguageTag::parse("es").unwrap();
@@ -241,7 +241,7 @@ fn a_detected_language_never_filters() {
     // No asserted language; a detector reports Spanish with high confidence
     // onto the subject.
     let scope = Scope::new();
-    let ctx: RecognizerContext<'_, Text> = RecognizerContext::new(&scope);
+    let ctx: Context<'_, Text> = Context::new(&scope);
     let mut subject = Subject::new(TextData::new(""));
     subject.detect_language(LanguageClaim::detected(es, Confidence::clamped(0.9)));
 
@@ -269,7 +269,7 @@ fn recognizer_context_carries_annotations() {
     use elide_core::modality::text::TextLocation;
     use elide_core::primitive::Confidence;
     use elide_core::recognition::annotation::{Annotations, Exclusion, Inclusion};
-    use elide_core::recognition::{RecognizerContext, Scope};
+    use elide_core::recognition::{Context, Scope};
 
     let inclusion = Inclusion::new(TextLocation::new(0, 5))
         .with_name("uploaded selection")
@@ -280,7 +280,7 @@ fn recognizer_context_carries_annotations() {
     let annotations: Annotations<Text> = Annotations::new()
         .with_inclusions(vec![inclusion])
         .with_exclusions(vec![exclusion]);
-    let ctx = RecognizerContext::new(&scope).with_annotations(&annotations);
+    let ctx = Context::new(&scope).with_annotations(&annotations);
 
     assert_eq!(ctx.inclusions().len(), 1);
     assert_eq!(ctx.inclusions()[0].location, TextLocation::new(0, 5));

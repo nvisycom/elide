@@ -27,7 +27,7 @@ use elide_core::enrichment::Enricher;
 use elide_core::entity::Entity;
 use elide_core::modality::{Chunk, Modality, ModalityLocation, StreamDataReader};
 use elide_core::recognition::annotation::{Annotations, Exclusion};
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Scope, Subject};
+use elide_core::recognition::{Context, Recognizer, Scope, Subject};
 use futures::future;
 
 pub use self::analysis::Analysis;
@@ -137,7 +137,7 @@ impl<M: Modality> Analyzer<M> {
         annotations: &Annotations<M>,
         seed: Option<M::Artifact>,
     ) -> Result<Analysis<M>> {
-        let ctx = RecognizerContext::new(scope).with_annotations(annotations);
+        let ctx = Context::new(scope).with_annotations(annotations);
         if ctx.catalog().is_empty() {
             return Ok(Analysis::seeded(seed));
         }
@@ -248,7 +248,7 @@ impl<M: Modality> Analyzer<M> {
         S: StreamDataReader<M> + ?Sized,
     {
         debug_assert_eq!(sources.len(), seeds.len(), "one seed per source");
-        let ctx = RecognizerContext::new(scope).with_annotations(annotations);
+        let ctx = Context::new(scope).with_annotations(annotations);
 
         // An empty catalog requests no entity types: detect nothing, but carry
         // each source's seed through. Gate before any read/enrich/recognize.
@@ -280,13 +280,19 @@ impl<M: Modality> Analyzer<M> {
             enricher.enrich_batch(&mut subjects, &ctx).await?;
         }
 
-        // Recognize each subject and aggregate per source: lift its entities back
+        // Recognize the whole subject batch at once — every recognizer runs
+        // concurrently, each over all subjects, so a provider-backed recognizer
+        // (NER) coalesces its round-trips into one `call_batch`. `raw[i]` is
+        // subject `i`'s entities from every recognizer combined.
+        let raw = self.recognize_batch(&subjects, &ctx).await?;
+
+        // Reduce each subject and aggregate per source: lift its entities back
         // through its own chunk, and carry the source's one enrichment artifact.
         // Each source's analysis starts from its seed; `seeds` is retained
         // read-only for the single-artifact invariant.
         let mut analyses: Vec<Analysis<M>> = seeds.iter().cloned().map(Analysis::seeded).collect();
-        for (mut subject, (source, chunk)) in subjects.into_iter().zip(origins) {
-            let analysis = self.recognize_subject(&mut subject, &ctx).await?;
+        for ((subject, (source, chunk)), entities) in subjects.into_iter().zip(origins).zip(raw) {
+            let analysis = self.finish_subject(&subject, &ctx, entities);
             let lifted = analysis
                 .entities
                 .into_iter()
@@ -317,23 +323,55 @@ impl<M: Modality> Analyzer<M> {
     async fn analyze_subject(
         &self,
         subject: &mut Subject<M>,
-        ctx: &RecognizerContext<'_, M>,
+        ctx: &Context<'_, M>,
     ) -> Result<Analysis<M>> {
         for enricher in &self.enrichers {
             enricher.enrich(subject, ctx).await?;
         }
-        self.recognize_subject(subject, ctx).await
+        let mut raw = self
+            .recognize_batch(std::slice::from_ref(subject), ctx)
+            .await?;
+        let entities = raw.pop().unwrap_or_default();
+        Ok(self.finish_subject(subject, ctx, entities))
     }
 
-    /// Recognize over an already-enriched `subject`: run the recognizers, stamp
-    /// languages, reduce, restrict to the catalog, apply exclusions, and carry the
-    /// enrichment artifact out.
-    async fn recognize_subject(
+    /// Recognize the whole `subjects` batch: every recognizer runs concurrently,
+    /// each over all subjects, and the per-subject entities from every recognizer
+    /// are combined. Returns one entity list per subject, in order.
+    ///
+    /// Concurrency is over recognizers (joined in place, not spawned, since they
+    /// borrow the subjects and `ctx`); a provider-backed recognizer coalesces its
+    /// per-subject calls into one [`Recognizer::recognize_batch`]. The first error
+    /// is returned (fail-fast).
+    async fn recognize_batch(
         &self,
-        subject: &mut Subject<M>,
-        ctx: &RecognizerContext<'_, M>,
-    ) -> Result<Analysis<M>> {
-        let mut entities = self.recognize(subject, ctx).await?;
+        subjects: &[Subject<M>],
+        ctx: &Context<'_, M>,
+    ) -> Result<Vec<Vec<Entity<M>>>> {
+        let futures = self
+            .recognizers
+            .iter()
+            .map(|recognizer| recognizer.recognize_batch(subjects, ctx));
+        // Each recognizer returns one entity list per subject; transpose so
+        // `entities[s]` gathers every recognizer's entities for subject s.
+        let mut entities: Vec<Vec<Entity<M>>> = subjects.iter().map(|_| Vec::new()).collect();
+        for found in future::join_all(futures).await {
+            for (slot, found_for_subject) in entities.iter_mut().zip(found?) {
+                slot.extend(found_for_subject);
+            }
+        }
+        Ok(entities)
+    }
+
+    /// Turn an already-enriched, already-recognized `subject`'s raw `entities`
+    /// into its [`Analysis`]: stamp languages, reduce, restrict to the catalog,
+    /// apply exclusions, and carry the enrichment artifact out.
+    fn finish_subject(
+        &self,
+        subject: &Subject<M>,
+        ctx: &Context<'_, M>,
+        mut entities: Vec<Entity<M>>,
+    ) -> Analysis<M> {
         ctx.languages(subject).stamp(&mut entities);
         let reduced = self.reduce(entities);
         // Restrict the *output* to the requested catalog only after reconciliation,
@@ -343,29 +381,7 @@ impl<M: Modality> Analyzer<M> {
         let entities = Self::apply_exclusions(in_catalog, ctx.exclusions());
         // Carry the enrichment artifact out with the entities so it can be
         // persisted and restored for a re-run without re-enriching.
-        Ok(Analysis::new(entities).with_artifact(subject.artifact().cloned()))
-    }
-
-    /// Run every recognizer over `subject` concurrently and collect their
-    /// entities. The first error is returned (fail-fast).
-    ///
-    /// Recognizers borrow `data` and `ctx`, so they are joined in place rather
-    /// than spawned onto the runtime.
-    async fn recognize(
-        &self,
-        subject: &Subject<M>,
-        ctx: &RecognizerContext<'_, M>,
-    ) -> Result<Vec<Entity<M>>> {
-        let futures = self
-            .recognizers
-            .iter()
-            .map(|recognizer| recognizer.recognize(subject, ctx));
-        let mut entities = Vec::new();
-        for found in future::join_all(futures).await {
-            let recognition: Recognition<M> = found?;
-            entities.extend(recognition.entities);
-        }
-        Ok(entities)
+        Analysis::new(entities).with_artifact(subject.artifact().cloned())
     }
 
     /// Run every deduplication layer in order over `entities`, threading each
@@ -477,7 +493,7 @@ mod tests {
         async fn enrich(
             &self,
             _subject: &mut Subject<Text>,
-            _ctx: &RecognizerContext<'_, Text>,
+            _ctx: &Context<'_, Text>,
         ) -> Result<()> {
             Ok(())
         }
@@ -485,7 +501,7 @@ mod tests {
         async fn enrich_batch(
             &self,
             subjects: &mut [Subject<Text>],
-            _ctx: &RecognizerContext<'_, Text>,
+            _ctx: &Context<'_, Text>,
         ) -> Result<()> {
             self.batches.fetch_add(1, Ordering::Relaxed);
             self.subjects.fetch_add(subjects.len(), Ordering::Relaxed);

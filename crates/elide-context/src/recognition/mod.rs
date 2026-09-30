@@ -15,12 +15,13 @@
 //! [`Enhancer`]: crate::Enhancer
 
 use elide_core::Result;
+use elide_core::entity::Entity;
 use elide_core::entity::audit::{AuditEvent, Refinement};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::{ComponentId, LanguageTag};
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Subject};
+use elide_core::recognition::{Context, Recognizer, Subject};
 
-use crate::{Context, Enhancer};
+use crate::{EnhanceInput, Enhancer};
 
 /// Wraps a [`Recognizer`] with a keyword-boost [`Enhancer`] applied to its
 /// entities.
@@ -51,34 +52,24 @@ impl<R> Enhanced<R> {
     pub fn inner(&self) -> &R {
         &self.inner
     }
-}
 
-#[async_trait::async_trait]
-impl<M, R> Recognizer<M> for Enhanced<R>
-where
-    M: TextRecognizable,
-    R: Recognizer<M> + 'static,
-{
-    fn id(&self) -> ComponentId {
-        self.inner.id()
-    }
-
-    async fn recognize(
+    /// Enhance a subject's already-recognized `entities` with the configured
+    /// context (keyword boosts from the subject's text and hints).
+    fn enhance<M: TextRecognizable>(
         &self,
+        mut entities: Vec<Entity<M>>,
         subject: &Subject<M>,
-        ctx: &RecognizerContext<'_, M>,
-    ) -> Result<Recognition<M>> {
-        let recognition = self.inner.recognize(subject, ctx).await?;
-        let mut entities = recognition.entities;
+        ctx: &Context<'_, M>,
+    ) -> Vec<Entity<M>> {
         if self.enhancer.is_empty() {
-            return Ok(Recognition::new(entities));
+            return entities;
         }
 
         // No recognizable text at this chunk (an un-transcribed clip, an
         // un-OCR'd image): there is nothing for context to enhance against, so
         // return the wrapped recognizer's entities unchanged.
         let Some(text) = M::as_text(subject.data(), subject.artifact()) else {
-            return Ok(Recognition::new(entities));
+            return entities;
         };
         // A hint pairs a location with its content (a header, a field name).
         // Read each hint's content through the modality's text view for keyword
@@ -99,7 +90,7 @@ where
         // regardless of the surrounding language. Activating a language's
         // context is harmless when its keyword is absent.
         let languages: Vec<&LanguageTag> = ctx.languages(subject).asserted();
-        let mut context = Context::new(text)
+        let mut context = EnhanceInput::new(text)
             .with_hints(&hint_texts)
             .with_languages(&languages);
         // Forward the modality's producer-provided tokens (with lemmas) when it
@@ -113,10 +104,10 @@ where
         let boosts = self.enhancer.enhance(&mut entities, &context);
         for boost in boosts {
             let hint = boost.hint_index.map(|i| subject.hints[i].hint.clone());
-            // Where the boosting keyword sits: a hint carries its own
-            // location; an in-text match resolves its keyword range through
-            // the modality (a pixel box / time span), mirroring how the entity
-            // itself was located. `None` when it can't be placed.
+            // Where the boosting keyword sits: a hint carries its own location; an
+            // in-text match resolves its keyword range through the modality (a
+            // pixel box / time span), mirroring how the entity itself was located.
+            // `None` when it can't be placed.
             let location = match (&hint, boost.keyword_range) {
                 (Some(h), _) => Some(h.location.clone()),
                 (None, Some(range)) => M::locate(range, subject.data(), subject.artifact()),
@@ -136,6 +127,42 @@ where
                 refinement,
             ));
         }
-        Ok(Recognition::new(entities))
+        entities
+    }
+}
+
+#[async_trait::async_trait]
+impl<M, R> Recognizer<M> for Enhanced<R>
+where
+    M: TextRecognizable,
+    R: Recognizer<M> + 'static,
+{
+    fn id(&self) -> ComponentId {
+        self.inner.id()
+    }
+
+    async fn recognize(
+        &self,
+        subject: &Subject<M>,
+        ctx: &Context<'_, M>,
+    ) -> Result<Vec<Entity<M>>> {
+        let entities = self.inner.recognize(subject, ctx).await?;
+        Ok(self.enhance(entities, subject, ctx))
+    }
+
+    async fn recognize_batch(
+        &self,
+        subjects: &[Subject<M>],
+        ctx: &Context<'_, M>,
+    ) -> Result<Vec<Vec<Entity<M>>>> {
+        // Forward to the inner recognizer's batch path so its native batching (a
+        // provider-backed inner) is preserved, then enhance each subject's
+        // entities against its own context.
+        let batches = self.inner.recognize_batch(subjects, ctx).await?;
+        Ok(subjects
+            .iter()
+            .zip(batches)
+            .map(|(subject, entities)| self.enhance(entities, subject, ctx))
+            .collect())
     }
 }

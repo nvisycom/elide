@@ -17,7 +17,7 @@ use elide_core::Result;
 use elide_core::backend::Backend;
 use elide_core::enrichment::Enricher;
 use elide_core::primitive::ComponentId;
-use elide_core::recognition::{RecognizerContext, Subject};
+use elide_core::recognition::{Context, Subject};
 use hipstr::HipStr;
 
 #[cfg(any(test, feature = "mocks"))]
@@ -98,11 +98,7 @@ where
         ComponentId::new(self.name().to_owned(), env!("CARGO_PKG_VERSION"))
     }
 
-    async fn enrich(
-        &self,
-        subject: &mut Subject<Image>,
-        ctx: &RecognizerContext<'_, Image>,
-    ) -> Result<()> {
+    async fn enrich(&self, subject: &mut Subject<Image>, ctx: &Context<'_, Image>) -> Result<()> {
         // Already OCR'd (a second enricher pass, or a restored artifact on a
         // re-run): leave it, so re-recognition never re-invokes the model.
         if subject.is_enriched() {
@@ -117,7 +113,7 @@ where
     async fn enrich_batch(
         &self,
         subjects: &mut [Subject<Image>],
-        ctx: &RecognizerContext<'_, Image>,
+        ctx: &Context<'_, Image>,
     ) -> Result<()> {
         // One OCR request per not-yet-enriched subject, dispatched together; the
         // already-enriched ones (a re-run's restored layouts) are skipped so the
@@ -145,10 +141,7 @@ where
 }
 
 /// Build the per-call OCR request from a subject's decoded image.
-fn ocr_request<'a>(
-    subject: &'a Subject<Image>,
-    ctx: &RecognizerContext<'_, Image>,
-) -> OcrRequest<'a> {
+fn ocr_request<'a>(subject: &'a Subject<Image>, ctx: &Context<'_, Image>) -> OcrRequest<'a> {
     let data = subject.data();
     OcrRequest {
         image: data.source(),
@@ -202,7 +195,7 @@ mod tests {
 
         let data = fixtures::blank_image_data();
         let scope = Scope::new();
-        let ctx = RecognizerContext::new(&scope);
+        let ctx = Context::new(&scope);
         let mut subject = Subject::new(data);
 
         enricher.enrich(&mut subject, &ctx).await.unwrap();
@@ -254,7 +247,7 @@ mod tests {
         let enricher = OcrEnricher::new(backend);
         let data = fixtures::blank_image_data();
         let scope = Scope::new();
-        let ctx = RecognizerContext::new(&scope);
+        let ctx = Context::new(&scope);
 
         // First pass: empty artifact → the backend runs once.
         let mut subject = Subject::new(data.clone());
@@ -291,7 +284,7 @@ mod tests {
         let enricher = OcrEnricher::new(backend);
         let data = fixtures::blank_image_data();
         let scope = Scope::new();
-        let ctx = RecognizerContext::new(&scope);
+        let ctx = Context::new(&scope);
 
         // Seed an empty Layout, the recorded result of a prior pass that found
         // no text. The enricher must treat it as already-enriched and skip.
@@ -348,7 +341,7 @@ mod tests {
         let counters = backend.clone();
         let enricher = OcrEnricher::new(backend);
         let scope = Scope::new();
-        let ctx = RecognizerContext::new(&scope);
+        let ctx = Context::new(&scope);
         // One already-enriched subject (must be skipped) and two fresh ones.
         let mut subjects = vec![
             Subject::new(fixtures::blank_image_data()).with_artifact(Layout::default()),

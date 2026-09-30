@@ -85,7 +85,7 @@ impl<M: Modality> Eq for Hint<M> where M::Location: Eq {}
 /// boost it causes.
 ///
 /// This is a recognition-time value only; it never serializes (it lives on a
-/// [`Chunk`] and in a `RecognizerContext`, neither of which is a wire type), so
+/// [`Chunk`] and in a `Context`, neither of which is a wire type), so
 /// carrying [`Data`] here — unlike on the serialized [`Hint`] — puts no
 /// serialization bound on the modality's data type.
 ///

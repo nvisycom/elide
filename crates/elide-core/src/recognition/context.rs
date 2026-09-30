@@ -1,6 +1,9 @@
-//! [`RecognizerContext<M>`]: the per-payload view a [`Recognizer`] sees.
+//! [`Context<M>`]: the analysis-wide inputs an [`Enricher`] and [`Recognizer`]
+//! read alongside each [`Subject`].
 //!
+//! [`Enricher`]: crate::enrichment::Enricher
 //! [`Recognizer`]: super::Recognizer
+//! [`Subject`]: super::Subject
 
 use hipstr::HipStr;
 use uuid::Uuid;
@@ -11,24 +14,26 @@ use crate::primitive::CountryCode;
 use crate::recognition::annotation::{Annotations, Exclusion, Inclusion};
 use crate::recognition::{Languages, Scope, Subject};
 
-/// Analysis-wide context handed to a [`Recognizer`] alongside the [`Subject`].
+/// The analysis-wide inputs handed to an enricher or recognizer alongside the
+/// [`Subject`].
 ///
 /// Borrows the caller-asserted [`Scope`] (shared across every chunk of the
 /// analysis) and the per-modality region [`Annotations`]. Where the [`Subject`]
 /// carries the per-chunk working state (payload, enrichment, detected
-/// languages, hints), this carries what is fixed for the whole run: the target
-/// labels, jurisdictions, tags, inclusions, and exclusions.
+/// languages, hints), this carries what the caller fixed for the whole run: the
+/// target labels, jurisdictions, tags, inclusions, and exclusions. Both
+/// enrichers and recognizers read it — hence a neutral name, not one tied to
+/// either.
 ///
 /// Query the call's languages, jurisdictions, labels, inclusions, and
 /// exclusions through the methods here rather than reaching into the scope
 /// directly: the language methods fold the caller's assertions together with
 /// what a detector found on the [`Subject`].
 ///
-/// [`Recognizer`]: super::Recognizer
 /// [`Scope`]: super::Scope
 /// [`Annotations`]: super::annotation::Annotations
 #[derive(Debug)]
-pub struct RecognizerContext<'a, M: Modality> {
+pub struct Context<'a, M: Modality> {
     /// Caller-asserted, modality-free scope for the analysis (shared,
     /// immutable).
     scope: &'a Scope,
@@ -41,7 +46,7 @@ pub struct RecognizerContext<'a, M: Modality> {
     annotations: Option<&'a Annotations<M>>,
 }
 
-impl<'a, M: Modality> RecognizerContext<'a, M> {
+impl<'a, M: Modality> Context<'a, M> {
     /// Context over `scope` with no region annotations. Attach annotations with
     /// [`with_annotations`].
     ///

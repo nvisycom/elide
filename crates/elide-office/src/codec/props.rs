@@ -16,11 +16,11 @@ use bytes::Bytes;
 use elide_codec::content::ContentData;
 use elide_codec::{FormatId, Loader, Stream};
 use elide_core::Result;
-use elide_core::entity::{LabelRef, builtins};
+use elide_core::entity::{Entity, LabelRef, builtins};
 use elide_core::modality::metadata::{Metadata, MetadataData, MetadataLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::primitive::ComponentId;
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Subject};
+use elide_core::recognition::{Context, Recognizer, Subject};
 use elide_core::redaction::Redactions;
 
 use crate::opc::props;
@@ -61,14 +61,13 @@ impl Recognizer<Metadata> for DocPropsRecognizer {
     async fn recognize(
         &self,
         subject: &Subject<Metadata>,
-        _ctx: &RecognizerContext<'_, Metadata>,
-    ) -> Result<Recognition<Metadata>> {
+        _ctx: &Context<'_, Metadata>,
+    ) -> Result<Vec<Entity<Metadata>>> {
         let data = subject.data();
-        let entities = label_for(data.key())
+        Ok(label_for(data.key())
             .and_then(|label| Metadata::field_entity(data.key(), label, SOURCE))
             .into_iter()
-            .collect();
-        Ok(Recognition::new(entities))
+            .collect())
     }
 }
 

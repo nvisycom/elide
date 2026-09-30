@@ -10,8 +10,9 @@
 use std::sync::Arc;
 
 use elide_core::Result;
+use elide_core::entity::Entity;
 use elide_core::primitive::ComponentId;
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Subject};
+use elide_core::recognition::{Context, Recognizer, Subject};
 
 #[cfg(any(test, feature = "mocks"))]
 use crate::backend::MockBackend;
@@ -128,14 +129,16 @@ impl<B: LlmBackend> Recognizer<B::Modality> for LlmRecognizer<B> {
     async fn recognize(
         &self,
         subject: &Subject<B::Modality>,
-        ctx: &RecognizerContext<'_, B::Modality>,
-    ) -> Result<Recognition<B::Modality>> {
+        ctx: &Context<'_, B::Modality>,
+    ) -> Result<Vec<Entity<B::Modality>>> {
         let prompt = self.prompt.build(subject, ctx);
         let response = self
             .backend
             .call(LlmRequest::new(&prompt, subject.data()))
             .await?;
-        let entities = <B::Modality as LlmModality>::lift(response.candidates, subject.data());
-        Ok(Recognition::new(entities))
+        Ok(<B::Modality as LlmModality>::lift(
+            response.candidates,
+            subject.data(),
+        ))
     }
 }

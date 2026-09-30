@@ -16,11 +16,11 @@ use crate::primitive::LanguageClaim;
 ///
 /// This is the per-chunk half of a recognizer's input; the analysis-wide half
 /// (the caller's scope, target labels, jurisdictions, and region annotations) is
-/// the [`RecognizerContext`]. An enricher fills a subject in ([`&mut`]); a
+/// the [`Context`]. An enricher fills a subject in ([`&mut`]); a
 /// recognizer reads it. A fresh subject per chunk means working state never
 /// leaks between chunks.
 ///
-/// [`RecognizerContext`]: super::RecognizerContext
+/// [`Context`]: super::Context
 /// [`&mut`]: Self::set_artifact
 #[derive(Debug)]
 pub struct Subject<M: Modality> {
@@ -36,7 +36,7 @@ pub struct Subject<M: Modality> {
     artifact: Option<M::Artifact>,
     /// Languages a detector found for this chunk. The caller's *asserted*
     /// languages live on the scope; the two are combined by
-    /// [`RecognizerContext::languages`](super::RecognizerContext::languages).
+    /// [`Context::languages`](super::Context::languages).
     detected_languages: Vec<LanguageClaim>,
     /// Out-of-band located context hints (a CSV column header, a JSON object
     /// key), each paired with its content, for a context enhancer to match
@@ -112,7 +112,7 @@ impl<M: Modality> Subject<M> {
     /// The languages a detector found for this chunk, in detection order.
     ///
     /// The caller's asserted languages are *not* here; combine both through
-    /// [`RecognizerContext::languages`](super::RecognizerContext::languages).
+    /// [`Context::languages`](super::Context::languages).
     #[must_use]
     pub fn detected_languages(&self) -> &[LanguageClaim] {
         &self.detected_languages

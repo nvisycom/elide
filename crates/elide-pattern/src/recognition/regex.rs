@@ -6,7 +6,7 @@ use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
 use elide_core::{Error, ErrorKind, Result};
 use serde::Deserialize;
 
-use super::context::Context;
+use super::context::BoostKeywords;
 
 /// One regex strategy inside a [`Regex`] rule.
 ///
@@ -102,7 +102,7 @@ fn default_score() -> Confidence {
 ///
 /// [`labels`](Regex::labels) is an ordered list, most-specific first. At
 /// recognize time the rule emits the **first** candidate the request's
-/// [catalog](elide_core::recognition::RecognizerContext::catalog) declares, so
+/// [catalog](elide_core::recognition::Context::catalog) declares, so
 /// one pattern can serve consumers that opted into a fine-grained label and
 /// those that only enabled a coarser one. A rule that emits a single label
 /// carries a one-element list.
@@ -144,12 +144,12 @@ pub struct Regex {
     /// first candidate the request catalog declares. In TOML: `labels =
     /// ["specific", "general"]` (a single-candidate rule is `labels = ["x"]`).
     pub labels: Vec<LabelRef>,
-    /// Context keywords that lift confidence when one of them
-    /// appears near a match. Either a flat list applied
-    /// regardless of language, or a per-language map.
+    /// Keywords that lift confidence when one of them appears near a
+    /// match. Either a flat list applied regardless of language, or a
+    /// per-language map.
     #[builder(default)]
     #[serde(default)]
-    pub context: Context,
+    pub context: BoostKeywords,
     /// Regex variants. At least one is required to produce matches;
     /// the recognizer skips rules with an empty variant list.
     pub variants: Vec<Variant>,

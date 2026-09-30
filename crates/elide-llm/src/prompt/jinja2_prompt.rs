@@ -21,7 +21,7 @@ use std::path::Path;
 
 use elide_core::modality::Modality;
 use elide_core::modality::text::Text;
-use elide_core::recognition::{RecognizerContext, Subject};
+use elide_core::recognition::{Context, Subject};
 use elide_core::{Error, ErrorKind, Result};
 use elide_image::modality::Image;
 use minijinja::{Environment, context};
@@ -89,7 +89,7 @@ impl<M> Jinja2Prompt<M> {
 }
 
 impl Prompt<Text> for Jinja2Prompt<Text> {
-    fn build(&self, subject: &Subject<Text>, ctx: &RecognizerContext<'_, Text>) -> String {
+    fn build(&self, subject: &Subject<Text>, ctx: &Context<'_, Text>) -> String {
         let text = subject.data().text.as_str();
         let hints: Vec<_> = ctx
             .inclusions()
@@ -119,7 +119,7 @@ impl Prompt<Text> for Jinja2Prompt<Text> {
 }
 
 impl Prompt<Image> for Jinja2Prompt<Image> {
-    fn build(&self, _subject: &Subject<Image>, ctx: &RecognizerContext<'_, Image>) -> String {
+    fn build(&self, _subject: &Subject<Image>, ctx: &Context<'_, Image>) -> String {
         let hints: Vec<_> = ctx
             .inclusions()
             .iter()
@@ -168,7 +168,7 @@ fn snippet_around(text: &str, range: Range<usize>) -> &str {
 /// variable. Ids (not localized names) so a custom template keys on the
 /// stable identifier the model must return; the template author controls
 /// their own wording and localization.
-fn target_label_names<M: Modality>(ctx: &RecognizerContext<'_, M>) -> Vec<String> {
+fn target_label_names<M: Modality>(ctx: &Context<'_, M>) -> Vec<String> {
     ctx.target_labels()
         .iter()
         .map(|l| l.as_str().to_owned())

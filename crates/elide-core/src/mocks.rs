@@ -8,7 +8,7 @@ use crate::entity::Entity;
 use crate::modality::Modality;
 use crate::modality::text::{Text, TextData, TextReplacement};
 use crate::primitive::ComponentId;
-use crate::recognition::{Recognition, Recognizer, RecognizerContext, Subject};
+use crate::recognition::{Context, Recognizer, Subject};
 use crate::redaction::{LeakProfile, Operator, OperatorId};
 use crate::{Error, Result};
 
@@ -54,9 +54,9 @@ where
     async fn recognize(
         &self,
         _subject: &Subject<M>,
-        _ctx: &RecognizerContext<'_, M>,
-    ) -> Result<Recognition<M>> {
-        Ok(self.entities.clone().into())
+        _ctx: &Context<'_, M>,
+    ) -> Result<Vec<Entity<M>>> {
+        Ok(self.entities.clone())
     }
 }
 

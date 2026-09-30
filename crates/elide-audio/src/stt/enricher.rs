@@ -17,7 +17,7 @@ use elide_core::Result;
 use elide_core::backend::Backend;
 use elide_core::enrichment::Enricher;
 use elide_core::primitive::ComponentId;
-use elide_core::recognition::{RecognizerContext, Subject};
+use elide_core::recognition::{Context, Subject};
 use hipstr::HipStr;
 
 #[cfg(any(test, feature = "mocks"))]
@@ -98,11 +98,7 @@ where
         ComponentId::new(self.name().to_owned(), env!("CARGO_PKG_VERSION"))
     }
 
-    async fn enrich(
-        &self,
-        subject: &mut Subject<Audio>,
-        ctx: &RecognizerContext<'_, Audio>,
-    ) -> Result<()> {
+    async fn enrich(&self, subject: &mut Subject<Audio>, ctx: &Context<'_, Audio>) -> Result<()> {
         // Already transcribed (a second enricher pass, or a restored artifact on
         // a re-run): leave it, so re-recognition never re-invokes the model.
         if subject.is_enriched() {
@@ -117,7 +113,7 @@ where
     async fn enrich_batch(
         &self,
         subjects: &mut [Subject<Audio>],
-        ctx: &RecognizerContext<'_, Audio>,
+        ctx: &Context<'_, Audio>,
     ) -> Result<()> {
         // One STT request per not-yet-transcribed subject, dispatched together;
         // the already-enriched ones (a re-run's restored transcripts) are skipped
@@ -146,10 +142,7 @@ where
 }
 
 /// Build the per-call STT request from a subject's decoded audio.
-fn stt_request<'a>(
-    subject: &'a Subject<Audio>,
-    ctx: &RecognizerContext<'_, Audio>,
-) -> SttRequest<'a> {
+fn stt_request<'a>(subject: &'a Subject<Audio>, ctx: &Context<'_, Audio>) -> SttRequest<'a> {
     let data = subject.data();
     SttRequest {
         audio: &data.bytes,
@@ -195,7 +188,7 @@ mod tests {
 
         let data = fixtures::blank_audio_data();
         let scope = Scope::new();
-        let ctx = RecognizerContext::new(&scope);
+        let ctx = Context::new(&scope);
         let mut subject = Subject::new(data);
 
         enricher.enrich(&mut subject, &ctx).await.unwrap();
@@ -246,7 +239,7 @@ mod tests {
         let enricher = SttEnricher::new(backend);
         let data = fixtures::blank_audio_data();
         let scope = Scope::new();
-        let ctx = RecognizerContext::new(&scope);
+        let ctx = Context::new(&scope);
 
         // First pass: empty artifact → the backend runs once.
         let mut subject = Subject::new(data.clone());
@@ -284,7 +277,7 @@ mod tests {
         let enricher = SttEnricher::new(backend);
         let data = fixtures::blank_audio_data();
         let scope = Scope::new();
-        let ctx = RecognizerContext::new(&scope);
+        let ctx = Context::new(&scope);
 
         // Seed an empty Transcription, the recorded result of a prior pass that
         // found silence. The enricher must treat it as enriched and skip.

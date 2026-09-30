@@ -12,7 +12,7 @@ use super::KeywordMatcher;
 /// ASCII case-insensitive substring matcher.
 ///
 /// The default matcher. It runs whenever no token artifact was
-/// stamped on `RecognizerContext.artifacts`, or whenever the caller
+/// stamped on `Context.artifacts`, or whenever the caller
 /// explicitly picks raw matching.
 ///
 /// Fast, allocation-light, permissive: the keyword `"email"` fires

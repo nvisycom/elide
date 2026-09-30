@@ -15,7 +15,7 @@ mod languages;
 mod scope;
 mod subject;
 
-pub use self::context::RecognizerContext;
+pub use self::context::Context;
 pub use self::label::LabelMap;
 pub use self::languages::Languages;
 pub use self::scope::{Scope, ScopeMetadata};
@@ -40,7 +40,7 @@ use crate::primitive::ComponentId;
 ///
 /// Per call, a recognizer receives the [`Subject`] (the chunk's payload plus
 /// its enrichment, detected languages, and hints) and a
-/// [`RecognizerContext<M>`] (the analysis-wide languages, jurisdictions, label
+/// [`Context<M>`] (the analysis-wide languages, jurisdictions, label
 /// and annotation state), and returns the entities it found.
 ///
 /// [`Entity`]: crate::entity::Entity
@@ -54,12 +54,38 @@ where
     fn id(&self) -> ComponentId;
 
     /// Inspect the [`Subject`] in the given context and return the recognized
-    /// entities, in modality-local coordinates (see [`Recognition`]).
-    async fn recognize(
+    /// entities, in modality-local coordinates.
+    async fn recognize(&self, subject: &Subject<M>, ctx: &Context<'_, M>)
+    -> Result<Vec<Entity<M>>>;
+
+    /// Recognize over a batch of `subjects` under one shared context, returning
+    /// one entity list per subject in the same order.
+    ///
+    /// The default recognizes each in turn via [`recognize`](Self::recognize). A
+    /// recognizer backed by a provider that accepts several inputs in one
+    /// round-trip (a hosted NER or extraction endpoint) overrides this to build
+    /// one request per subject and issue a single
+    /// [`Backend::call_batch`](crate::backend::Backend::call_batch), turning N
+    /// provider round-trips into one. It stays behavior-preserving: each subject's
+    /// entities are what a single [`recognize`](Self::recognize) would return, and
+    /// a subject the recognizer has nothing to do for (no recognizable text)
+    /// yields an empty list.
+    ///
+    /// # Errors
+    ///
+    /// The first recognition error; a batched recognizer surfaces a whole-batch
+    /// failure the same way.
+    async fn recognize_batch(
         &self,
-        subject: &Subject<M>,
-        ctx: &RecognizerContext<'_, M>,
-    ) -> Result<Recognition<M>>;
+        subjects: &[Subject<M>],
+        ctx: &Context<'_, M>,
+    ) -> Result<Vec<Vec<Entity<M>>>> {
+        let mut per_subject = Vec::with_capacity(subjects.len());
+        for subject in subjects {
+            per_subject.push(self.recognize(subject, ctx).await?);
+        }
+        Ok(per_subject)
+    }
 }
 
 /// A boxed recognizer is a recognizer, so a caller can hold a
@@ -78,9 +104,17 @@ where
     async fn recognize(
         &self,
         subject: &Subject<M>,
-        ctx: &RecognizerContext<'_, M>,
-    ) -> Result<Recognition<M>> {
+        ctx: &Context<'_, M>,
+    ) -> Result<Vec<Entity<M>>> {
         (**self).recognize(subject, ctx).await
+    }
+
+    async fn recognize_batch(
+        &self,
+        subjects: &[Subject<M>],
+        ctx: &Context<'_, M>,
+    ) -> Result<Vec<Vec<Entity<M>>>> {
+        (**self).recognize_batch(subjects, ctx).await
     }
 }
 
@@ -105,37 +139,16 @@ where
     async fn recognize(
         &self,
         subject: &Subject<M>,
-        ctx: &RecognizerContext<'_, M>,
-    ) -> Result<Recognition<M>> {
+        ctx: &Context<'_, M>,
+    ) -> Result<Vec<Entity<M>>> {
         (**self).recognize(subject, ctx).await
     }
-}
 
-/// What a [`Recognizer`] returns from one call.
-///
-/// The entities it found, in modality-local coordinates.
-#[derive(Debug, Clone)]
-pub struct Recognition<M: Modality> {
-    /// The recognized entities, in modality-local coordinates.
-    pub entities: Vec<Entity<M>>,
-}
-
-impl<M: Modality> Recognition<M> {
-    /// A recognition carrying `entities`.
-    pub fn new(entities: Vec<Entity<M>>) -> Self {
-        Self { entities }
-    }
-}
-
-impl<M: Modality> From<Vec<Entity<M>>> for Recognition<M> {
-    /// Entities with no model usage, the pure-CPU recognizer case.
-    fn from(entities: Vec<Entity<M>>) -> Self {
-        Self::new(entities)
-    }
-}
-
-impl<M: Modality> Default for Recognition<M> {
-    fn default() -> Self {
-        Self::new(Vec::new())
+    async fn recognize_batch(
+        &self,
+        subjects: &[Subject<M>],
+        ctx: &Context<'_, M>,
+    ) -> Result<Vec<Vec<Entity<M>>>> {
+        (**self).recognize_batch(subjects, ctx).await
     }
 }

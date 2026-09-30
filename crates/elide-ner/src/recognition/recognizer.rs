@@ -24,7 +24,7 @@ use elide_core::entity::audit::{AuditEvent, ModelEvent};
 use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::ComponentId;
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Subject};
+use elide_core::recognition::{Context, Recognizer, Subject};
 use hipstr::HipStr;
 
 use super::aggregation::AggregationStrategy;
@@ -215,43 +215,88 @@ where
     async fn recognize(
         &self,
         subject: &Subject<M>,
-        ctx: &RecognizerContext<'_, M>,
-    ) -> Result<Recognition<M>> {
+        ctx: &Context<'_, M>,
+    ) -> Result<Vec<Entity<M>>> {
         // No recognizable text at this chunk (an un-transcribed clip, an
         // un-OCR'd image): skip the model call and recognize nothing.
-        let Some(text) = M::as_text(subject.data(), subject.artifact()) else {
-            return Ok(Recognition::default());
-        };
         let effective_labels = self.effective_labels(ctx.catalog());
-        let labels = if effective_labels.is_empty() {
-            None
-        } else {
-            Some(effective_labels.as_slice())
-        };
-        let request = NerRequest {
-            text,
-            labels,
-            language: ctx.languages(subject).primary(),
-            correlation_id: ctx.correlation_id(),
+        let Some(request) = ner_request(subject, ctx, &effective_labels) else {
+            return Ok(Vec::new());
         };
         let response = self.backend.call(request).await?;
+        Ok(self.spans_to_entities(&response.spans, &effective_labels, subject))
+    }
 
-        // Spans already carry canonical labels (the backend did any
-        // raw-to-canonical mapping; ignored labels are dropped by an
-        // `IgnoreLabels` decorator). When a target set was requested, we
-        // restrict to it. Each surviving span is placed in the medium; one
-        // whose range can't be located is dropped.
-        let entities = response
-            .spans
+    async fn recognize_batch(
+        &self,
+        subjects: &[Subject<M>],
+        ctx: &Context<'_, M>,
+    ) -> Result<Vec<Vec<Entity<M>>>> {
+        // One NER request per subject with recognizable text; no-text subjects are
+        // skipped and recognize nothing. `targets` keeps each request aligned with
+        // its subject index, so a response scatters back to the right subject.
+        let effective_labels = self.effective_labels(ctx.catalog());
+        let mut requests = Vec::new();
+        let mut targets = Vec::new();
+        for (index, subject) in subjects.iter().enumerate() {
+            if let Some(request) = ner_request(subject, ctx, &effective_labels) {
+                requests.push(request);
+                targets.push(index);
+            }
+        }
+
+        let mut per_subject: Vec<Vec<Entity<M>>> = subjects.iter().map(|_| Vec::new()).collect();
+        if requests.is_empty() {
+            return Ok(per_subject);
+        }
+        let responses = self.backend.call_batch(requests).await?;
+        for (&index, response) in targets.iter().zip(responses) {
+            per_subject[index] =
+                self.spans_to_entities(&response.spans, &effective_labels, &subjects[index]);
+        }
+        Ok(per_subject)
+    }
+}
+
+impl<B> NerRecognizer<B> {
+    /// Map a response's `spans` to entities located in `subject`.
+    ///
+    /// Spans already carry canonical labels (the backend did any raw-to-canonical
+    /// mapping; ignored labels are dropped by an `IgnoreLabels` decorator). When a
+    /// target set was requested, only those labels survive. Each surviving span is
+    /// placed in the medium; one whose range can't be located is dropped.
+    fn spans_to_entities<M: TextRecognizable>(
+        &self,
+        spans: &[NerSpan],
+        effective_labels: &[Label],
+        subject: &Subject<M>,
+    ) -> Vec<Entity<M>> {
+        spans
             .iter()
             .filter(|s| {
                 effective_labels.is_empty()
                     || effective_labels.iter().any(|l| l.to_ref() == s.label)
             })
             .filter_map(|s| self.build_entity::<M>(s, s.label.clone(), subject))
-            .collect();
-        Ok(Recognition::new(entities))
+            .collect()
     }
+}
+
+/// The per-call NER request for `subject`, or `None` when it carries no
+/// recognizable text (an un-transcribed clip, an un-OCR'd image).
+fn ner_request<'a, M: TextRecognizable>(
+    subject: &'a Subject<M>,
+    ctx: &'a Context<'_, M>,
+    effective_labels: &'a [Label],
+) -> Option<NerRequest<'a>> {
+    let text = M::as_text(subject.data(), subject.artifact())?;
+    let labels = (!effective_labels.is_empty()).then_some(effective_labels);
+    Some(NerRequest {
+        text,
+        labels,
+        language: ctx.languages(subject).primary(),
+        correlation_id: ctx.correlation_id(),
+    })
 }
 
 #[cfg(test)]
@@ -273,9 +318,9 @@ mod tests {
             ]);
         let data = TextData::new("Alice Smith".to_owned());
         let scope = Scope::new();
-        let ctx = RecognizerContext::<Text>::new(&scope);
+        let ctx = Context::<Text>::new(&scope);
         let subject = Subject::new(data);
-        let out = rec.recognize(&subject, &ctx).await.unwrap().entities;
+        let out = rec.recognize(&subject, &ctx).await.unwrap();
         assert!(out.is_empty());
     }
 
@@ -284,9 +329,9 @@ mod tests {
         let rec = NerRecognizer::mock().with_name("test");
         let data = TextData::new("Alice Smith".to_owned());
         let scope = Scope::new();
-        let ctx = RecognizerContext::<Text>::new(&scope);
+        let ctx = Context::<Text>::new(&scope);
         let subject = Subject::new(data);
-        let out = rec.recognize(&subject, &ctx).await.unwrap().entities;
+        let out = rec.recognize(&subject, &ctx).await.unwrap();
         assert!(out.is_empty());
     }
 
@@ -341,5 +386,68 @@ mod tests {
         let rec = recognizer_with(vec![builtins::PERSON_NAME.to_ref()]);
 
         assert!(rec.effective_labels(&catalog).is_empty());
+    }
+
+    /// A backend recording how it was called, to prove `recognize_batch`
+    /// coalesced N subjects into one `call_batch` rather than N single calls.
+    /// Counters are `Arc`-shared so the test can read them after the backend is
+    /// moved into the recognizer.
+    #[derive(Clone, Default)]
+    struct BatchCounting {
+        batch_calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        single_calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl Backend for BatchCounting {
+        type Request<'a> = NerRequest<'a>;
+        type Response = NerResponse;
+
+        fn provenance(&self) -> ModelEvent {
+            ModelEvent {
+                name: "batch-counting".into(),
+                ..ModelEvent::default()
+            }
+        }
+
+        async fn call(&self, _request: NerRequest<'_>) -> Result<NerResponse> {
+            self.single_calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(NerResponse::new(vec![NerSpan::new("EMAIL", 0.9, 0..1)]))
+        }
+
+        async fn call_batch(&self, requests: Vec<NerRequest<'_>>) -> Result<Vec<NerResponse>> {
+            self.batch_calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(requests
+                .iter()
+                .map(|_| NerResponse::new(vec![NerSpan::new("EMAIL", 0.9, 0..1)]))
+                .collect())
+        }
+    }
+
+    #[tokio::test]
+    async fn recognize_batch_coalesces_across_subjects() {
+        use std::sync::atomic::Ordering;
+
+        let backend = BatchCounting::default();
+        let counters = backend.clone();
+        let recognizer = NerRecognizer::new(backend);
+        let scope = Scope::new();
+        let ctx = Context::<Text>::new(&scope);
+        let subjects = [
+            Subject::new(TextData::new("a".to_owned())),
+            Subject::new(TextData::new("b".to_owned())),
+            Subject::new(TextData::new("c".to_owned())),
+        ];
+
+        let out = recognizer.recognize_batch(&subjects, &ctx).await.unwrap();
+
+        // One batched round-trip covered all three subjects; no single calls.
+        assert_eq!(counters.batch_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(counters.single_calls.load(Ordering::Relaxed), 0);
+        // One recognition per subject, each with the backend's one span.
+        assert_eq!(out.len(), 3);
+        assert!(out.iter().all(|entities| entities.len() == 1));
     }
 }

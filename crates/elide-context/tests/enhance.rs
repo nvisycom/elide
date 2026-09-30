@@ -8,7 +8,7 @@
 use std::ops::Range;
 
 use elide_context::matching::SubstringMatcher;
-use elide_context::{BoostRule, Context, Enhancer};
+use elide_context::{BoostRule, EnhanceInput, Enhancer};
 use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::{Text, TextLocation};
@@ -40,7 +40,7 @@ fn keyword_in_window_boosts_and_records_refinement() {
     let text = "social security 123-45-6789";
     let mut entities = vec![entity(&ssn, 16..27, 0.5)]; // "123-45-6789"
 
-    let boosts = enhancer.enhance(&mut entities, &Context::new(text));
+    let boosts = enhancer.enhance(&mut entities, &EnhanceInput::new(text));
 
     // 0.5 + 0.35 boost = 0.85.
     assert_eq!(entities[0].confidence, Confidence::new(0.85).unwrap());
@@ -64,7 +64,7 @@ fn no_keyword_leaves_entity_untouched() {
     let text = "the number is 123-45-6789";
     let mut entities = vec![entity(&ssn, 14..25, 0.5)];
 
-    let boosts = enhancer.enhance(&mut entities, &Context::new(text));
+    let boosts = enhancer.enhance(&mut entities, &EnhanceInput::new(text));
 
     assert_eq!(entities[0].confidence, Confidence::new(0.5).unwrap());
     assert!(boosts.is_empty()); // nothing fired
@@ -81,7 +81,7 @@ fn out_of_band_hint_boosts_via_hint_path() {
     let hints = ["ssn"];
     let mut entities = vec![entity(&ssn, 0..11, 0.5)];
 
-    let boosts = enhancer.enhance(&mut entities, &Context::new(text).with_hints(&hints));
+    let boosts = enhancer.enhance(&mut entities, &EnhanceInput::new(text).with_hints(&hints));
 
     assert_eq!(entities[0].confidence, Confidence::new(0.85).unwrap());
     // The boost fired from the first (and only) hint.

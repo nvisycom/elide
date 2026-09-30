@@ -368,11 +368,10 @@ impl Orchestrator {
     ///
     /// A stream part is redacted in place through the pipeline for its modality;
     /// a blob sub-part is decoded into its own child document, redacted the same
-    /// way, re-encoded, and folded back into its parent via
-    /// [`replace_part`](CodecDocument::replace_part). A document's own
-    /// [`encode`](CodecDocument::encode) then assembles the redacted parts
-    /// post-order, so a nested document re-encodes (carrying its *own* body
-    /// redaction) before the level above assembles it.
+    /// way, re-encoded, and folded back into its parent via its `replace_part`. A
+    /// document's own `encode` then assembles the redacted parts post-order, so a
+    /// nested document re-encodes (carrying its *own* body redaction) before the
+    /// level above assembles it.
     ///
     /// Returns the report, now applied: redaction stamps a redaction event into
     /// each entity's provenance, so the returned report's entities carry the full

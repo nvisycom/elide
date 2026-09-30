@@ -14,7 +14,7 @@ use elide::modality::audio::{Audio, TranscriptSegment, TranscriptWord, Transcrip
 use elide::modality::image::{Image, ImageLocation, Layout, LayoutRegion};
 use elide::primitive::{BoundingBox, Confidence, ConfidenceThreshold, Dimensions, Point, TimeSpan};
 use elide::recognition::pattern::{PatternRecognizer, Regex, Variant};
-use elide::recognition::{Recognizer, RecognizerContext, Scope, Subject};
+use elide::recognition::{Context, Recognizer, Scope, Subject};
 
 /// A pattern recognizer that matches a 9-digit run, boosted by the keyword
 /// "ssn" nearby, wrapped in the `Enhanced` context layer.
@@ -50,14 +50,10 @@ async fn image_context_boosts_and_keeps_the_native_region() {
         LayoutRegion::new(img_loc(45.0, 0.0, 155.0, 20.0), "123-45-6789"),
     ];
     let scope = Scope::new();
-    let ctx = RecognizerContext::<Image>::new(&scope);
+    let ctx = Context::<Image>::new(&scope);
     let subject =
         Subject::new(elide_image::fixtures::blank_image_data()).with_artifact(Layout::new(regions));
-    let entities = ssn_recognizer()
-        .recognize(&subject, &ctx)
-        .await
-        .unwrap()
-        .entities;
+    let entities = ssn_recognizer().recognize(&subject, &ctx).await.unwrap();
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
@@ -92,14 +88,10 @@ async fn audio_context_boosts_and_keeps_the_native_timespan() {
             TranscriptWord::new(TimeSpan::from_millis(400, 1500), "123-45-6789"),
         ]);
     let scope = Scope::new();
-    let ctx = RecognizerContext::<Audio>::new(&scope);
+    let ctx = Context::<Audio>::new(&scope);
     let subject = Subject::new(elide_audio::fixtures::blank_audio_data())
         .with_artifact(Transcription::new(vec![segment]));
-    let entities = ssn_recognizer()
-        .recognize(&subject, &ctx)
-        .await
-        .unwrap()
-        .entities;
+    let entities = ssn_recognizer().recognize(&subject, &ctx).await.unwrap();
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
