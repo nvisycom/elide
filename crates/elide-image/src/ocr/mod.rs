@@ -20,8 +20,7 @@ mod ocrs;
 mod request;
 mod response;
 
-use elide_core::Result;
-use elide_core::entity::audit::ModelEvent;
+use elide_core::backend::Backend;
 
 pub use self::enricher::{OcrEnricher, OcrEnricherBuilder};
 #[cfg(any(test, feature = "mocks"))]
@@ -33,48 +32,25 @@ pub use self::ocrs::{OCRS_MODELS_DIR_ENV, OcrsBackend};
 pub use self::request::OcrRequest;
 pub use self::response::OcrResponse;
 
-/// Per-call OCR backend.
+/// An OCR [`Backend`](elide_core::backend::Backend): `Backend<Request<'a> =
+/// OcrRequest<'a>, Response = OcrResponse>`.
 ///
-/// Implemented by everything that turns image bytes into recognized text
-/// blocks, hosted document-AI clients, local OCR engine wrappers, and the
-/// in-process no-op test stub. Each block carries its bounding region and,
-/// when the engine emits them, per-word boxes; the recognizer resolves a
-/// matched byte range back to the region it covers.
+/// A shorthand bound so the enricher holds any OCR backend generically.
+/// Everything that turns image bytes into recognized text regions implements it
+/// by implementing `Backend` with these associated types — hosted document-AI
+/// clients, local OCR engine wrappers, and the in-process no-op test stub.
 ///
-/// Confidence values **must** be normalised to `0.0..=1.0` before being
-/// placed on a word. Backends whose upstream API uses a different scale
-/// convert before returning.
-///
-/// Object-safe: enrichers hold `Arc<dyn OcrBackend>` and dispatch per call.
-#[async_trait::async_trait]
-pub trait OcrBackend: Send + Sync + 'static {
-    /// Backend identity (model / service name + provenance detail).
-    ///
-    /// Identifies the actual engine the backend wraps (e.g. `"noop-ocr"`),
-    /// stamped into the provenance of every entity detected over the OCR
-    /// text so the audit records which OCR pass produced it.
-    fn provenance(&self) -> ModelEvent;
+/// Confidence values **must** be normalised to `0.0..=1.0` before being placed
+/// on a word; backends whose upstream API uses a different scale convert before
+/// returning.
+pub trait OcrBackend:
+    for<'a> Backend<Request<'a> = OcrRequest<'a>, Response = OcrResponse>
+{
+}
 
-    /// Recognize text in `request` into ordered blocks.
-    ///
-    /// # Errors
-    ///
-    /// Returns the underlying transport / parse / inference error.
-    async fn recognize(&self, request: OcrRequest<'_>) -> Result<OcrResponse>;
-
-    /// Batched recognize. Defaults to a sequential fan-out;
-    /// backends with native batching should override.
-    ///
-    /// # Errors
-    ///
-    /// Returns the first error encountered.
-    async fn recognize_batch(&self, requests: &[OcrRequest<'_>]) -> Result<Vec<OcrResponse>> {
-        let mut out = Vec::with_capacity(requests.len());
-        for req in requests {
-            out.push(self.recognize(req.clone()).await?);
-        }
-        Ok(out)
-    }
+impl<B> OcrBackend for B where
+    B: for<'a> Backend<Request<'a> = OcrRequest<'a>, Response = OcrResponse>
+{
 }
 
 #[cfg(test)]
@@ -94,7 +70,7 @@ mod tests {
             language: None,
             correlation_id: None,
         };
-        let response = backend.recognize(request).await.unwrap();
+        let response = Backend::call(&backend, request).await.unwrap();
         assert!(response.regions.is_empty());
     }
 }

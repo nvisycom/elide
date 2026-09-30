@@ -21,6 +21,7 @@ members = [
     "./crates/elide-operator",
     "./crates/elide-redaction",
     "./crates/elide-engine",
+    "./crates/elide-metrics",
     "./crates/elide",
     "./crates/elide-wasm",
     "./examples",
@@ -62,6 +63,7 @@ elide-fake = { path = "./crates/elide-fake", version = "0.1.0" }
 elide-operator = { path = "./crates/elide-operator", version = "0.1.0" }
 elide-redaction = { path = "./crates/elide-redaction", version = "0.1.0" }
 elide-engine = { path = "./crates/elide-engine", version = "0.1.0" }
+elide-metrics = { path = "./crates/elide-metrics", version = "0.1.0" }
 elide = { path = "./crates/elide", version = "0.1.0" }
 
 # (De)serialization
@@ -120,6 +122,7 @@ criterion = { version = "0.8", features = [] }
 
 # Observability
 tracing = { version = "0.1", features = ["attributes"] }
+metrics = { version = "0.24", features = [] }
 
 # Text processing
 regex = { version = "1.0", features = [] }

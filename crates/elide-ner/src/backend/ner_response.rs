@@ -17,6 +17,7 @@
 
 use std::ops::Range;
 
+use elide_core::backend::BackendResponse;
 use elide_core::entity::LabelRef;
 use elide_core::primitive::Confidence;
 
@@ -38,6 +39,15 @@ impl NerResponse {
     #[must_use]
     pub fn new(spans: Vec<NerSpan>) -> Self {
         Self { spans }
+    }
+}
+
+impl BackendResponse for NerResponse {
+    // NER backends report no billing units (default: empty); usage carries the
+    // model identity from the backend's provenance and the span count below.
+
+    fn output_count(&self) -> Option<u64> {
+        Some(self.spans.len() as u64)
     }
 }
 

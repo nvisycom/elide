@@ -2,6 +2,7 @@
 //!
 //! [`LlmBackend`]: super::LlmBackend
 
+use elide_core::backend::BackendRequest;
 use elide_core::modality::Modality;
 
 /// One per-call LLM request handed to an [`LlmBackend<M>`], generic over
@@ -29,3 +30,5 @@ impl<'a, M: Modality> LlmRequest<'a, M> {
         Self { prompt, data }
     }
 }
+
+impl<M: crate::modality::LlmModality> BackendRequest for LlmRequest<'_, M> {}

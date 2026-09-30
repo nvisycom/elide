@@ -7,12 +7,12 @@
 //! backend to extract the candidate batch, then lifts each candidate into
 //! an entity via [`LlmModality::lift`].
 
+use std::marker::PhantomData;
 use std::sync::Arc;
 
-use derive_builder::Builder;
 use elide_core::primitive::ComponentId;
 use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Subject};
-use elide_core::{Error, Result};
+use elide_core::{Error, ErrorKind, Result};
 
 #[cfg(any(test, feature = "mocks"))]
 use crate::backend::MockBackend;
@@ -20,43 +20,33 @@ use crate::backend::{LlmBackend, LlmRequest};
 use crate::modality::LlmModality;
 use crate::prompt::{DefaultPrompt, Prompt};
 
-/// LLM-driven recognizer.
-#[derive(Clone, Builder)]
-#[builder(
-    name = "LlmRecognizerBuilder",
-    pattern = "owned",
-    setter(into, prefix = "with"),
-    build_fn(error = "Error", name = "try_build", private)
-)]
-pub struct LlmRecognizer<M: LlmModality> {
-    /// Recognizer name. Surfaced in the recognition event on every
-    /// emitted entity and used as the recognizer id.
+/// LLM-driven recognizer, generic over its modality `M` and [`LlmBackend`] `B`.
+///
+/// `B` defaults to `()` (no backend), so `LlmRecognizer::<M>::builder()` names
+/// only the modality; [`with_backend`](LlmRecognizerBuilder::with_backend) fixes
+/// the backend type.
+#[derive(Clone)]
+pub struct LlmRecognizer<M: LlmModality, B = ()> {
+    /// Recognizer name. Surfaced in the recognition event on every emitted
+    /// entity and used as the recognizer id.
     name: String,
-    /// Backend that sends the prompt to the model and returns the
-    /// structured candidate batch. Required. Set via [`with_backend`].
-    ///
-    /// [`with_backend`]: LlmRecognizerBuilder::with_backend
-    #[builder(setter(custom))]
-    backend: Arc<dyn LlmBackend<M>>,
-    /// Modality-specific prompt wording. Required. Set via
-    /// [`with_prompt`].
-    ///
-    /// [`with_prompt`]: LlmRecognizerBuilder::with_prompt
-    #[builder(setter(custom))]
+    /// Backend that sends the prompt to the model and returns the structured
+    /// candidate batch. May be a `Metered`
+    /// wrapper.
+    backend: B,
+    /// Modality-specific prompt wording.
     prompt: Arc<dyn Prompt<M>>,
 }
 
-impl<M: LlmModality> LlmRecognizer<M> {
-    /// Start the chainable builder. `name`, `backend`, and `prompt`
-    /// are required; calling [`build`] without them returns a
-    /// validation error.
-    ///
-    /// [`build`]: LlmRecognizerBuilder::build
+impl<M: LlmModality> LlmRecognizer<M, ()> {
+    /// Start the chainable builder. `name`, `backend`, and `prompt` are required.
     #[must_use]
-    pub fn builder() -> LlmRecognizerBuilder<M> {
+    pub fn builder() -> LlmRecognizerBuilder<M, ()> {
         LlmRecognizerBuilder::default()
     }
+}
 
+impl<M: LlmModality, B> LlmRecognizer<M, B> {
     /// Recognizer name.
     #[must_use]
     pub fn name(&self) -> &str {
@@ -65,7 +55,7 @@ impl<M: LlmModality> LlmRecognizer<M> {
 
     /// Borrow the configured backend.
     #[must_use]
-    pub fn backend(&self) -> &Arc<dyn LlmBackend<M>> {
+    pub fn backend(&self) -> &B {
         &self.backend
     }
 
@@ -80,36 +70,47 @@ impl<M: LlmModality> LlmRecognizer<M> {
     }
 }
 
-impl<M: LlmModality> LlmRecognizerBuilder<M> {
-    /// Set the [`LlmBackend`] that powers this recognizer. Accepts
-    /// any concrete impl by value and wraps it in `Arc`. Required:
-    /// `build` errors when this hasn't been called.
+/// Chainable builder for an [`LlmRecognizer`], generic over the backend `B` that
+/// [`with_backend`](Self::with_backend) sets.
+pub struct LlmRecognizerBuilder<M: LlmModality, B = ()> {
+    name: Option<String>,
+    backend: Option<B>,
+    prompt: Option<Arc<dyn Prompt<M>>>,
+    _modality: PhantomData<fn() -> M>,
+}
+
+impl<M: LlmModality> Default for LlmRecognizerBuilder<M, ()> {
+    fn default() -> Self {
+        Self {
+            name: None,
+            backend: None,
+            prompt: None,
+            _modality: PhantomData,
+        }
+    }
+}
+
+impl<M: LlmModality, B> LlmRecognizerBuilder<M, B> {
+    /// Set the recognizer name.
     #[must_use]
-    pub fn with_backend<B: LlmBackend<M>>(mut self, backend: B) -> Self {
-        self.backend = Some(Arc::new(backend));
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
         self
     }
 
-    /// Wire the no-op [`MockBackend`] as this recognizer's backend.
-    ///
-    /// Convenience for tests, examples, and offline wiring: the
-    /// recognizer is fully built but produces no entities. Equivalent to
-    /// `with_backend(MockBackend)`.
-    ///
-    /// [`MockBackend`]: crate::backend::MockBackend
-    #[cfg(any(test, feature = "mocks"))]
-    #[cfg_attr(docsrs, doc(cfg(feature = "mocks")))]
+    /// Set the [`LlmBackend`] that powers this recognizer, fixing the builder's
+    /// backend type. Required.
     #[must_use]
-    pub fn with_mock_backend(self) -> Self
-    where
-        MockBackend: LlmBackend<M>,
-    {
-        self.with_backend(MockBackend)
+    pub fn with_backend<B2: LlmBackend<M>>(self, backend: B2) -> LlmRecognizerBuilder<M, B2> {
+        LlmRecognizerBuilder {
+            name: self.name,
+            backend: Some(backend),
+            prompt: self.prompt,
+            _modality: PhantomData,
+        }
     }
 
-    /// Set the modality-specific [`Prompt`] wording. Accepts any concrete
-    /// impl by value and wraps it in `Arc`. Required: `build` errors when
-    /// this hasn't been called.
+    /// Set the modality-specific [`Prompt`] wording. Required.
     #[must_use]
     pub fn with_prompt<P: Prompt<M>>(mut self, prompt: P) -> Self {
         self.prompt = Some(Arc::new(prompt));
@@ -117,9 +118,6 @@ impl<M: LlmModality> LlmRecognizerBuilder<M> {
     }
 
     /// Use the built-in [`DefaultPrompt`] for this modality.
-    ///
-    /// Convenience for the common case: equivalent to
-    /// `with_prompt(DefaultPrompt)`.
     ///
     /// [`DefaultPrompt`]: crate::prompt::DefaultPrompt
     #[must_use]
@@ -129,16 +127,42 @@ impl<M: LlmModality> LlmRecognizerBuilder<M> {
     {
         self.with_prompt(DefaultPrompt)
     }
+}
 
-    /// Finish the builder. Errors when `name`, `backend`, or
-    /// `prompt` is unset.
-    pub fn build(self) -> Result<LlmRecognizer<M>> {
-        self.try_build()
+impl<M: LlmModality> LlmRecognizerBuilder<M, ()> {
+    /// Wire the no-op [`MockBackend`] as this recognizer's backend.
+    ///
+    /// [`MockBackend`]: crate::backend::MockBackend
+    #[cfg(any(test, feature = "mocks"))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "mocks")))]
+    #[must_use]
+    pub fn with_mock_backend(self) -> LlmRecognizerBuilder<M, MockBackend<M>>
+    where
+        MockBackend<M>: LlmBackend<M>,
+    {
+        self.with_backend(MockBackend::new())
+    }
+}
+
+impl<M: LlmModality, B: LlmBackend<M>> LlmRecognizerBuilder<M, B> {
+    /// Finish the builder. Errors when `name`, `backend`, or `prompt` is unset.
+    pub fn build(self) -> Result<LlmRecognizer<M, B>> {
+        Ok(LlmRecognizer {
+            name: self.name.ok_or_else(|| {
+                Error::new(ErrorKind::Configuration, "LlmRecognizer requires a name")
+            })?,
+            backend: self.backend.ok_or_else(|| {
+                Error::new(ErrorKind::Configuration, "LlmRecognizer requires a backend")
+            })?,
+            prompt: self.prompt.ok_or_else(|| {
+                Error::new(ErrorKind::Configuration, "LlmRecognizer requires a prompt")
+            })?,
+        })
     }
 }
 
 #[async_trait::async_trait]
-impl<M: LlmModality> Recognizer<M> for LlmRecognizer<M> {
+impl<M: LlmModality, B: LlmBackend<M>> Recognizer<M> for LlmRecognizer<M, B> {
     fn id(&self) -> ComponentId {
         self.recognizer_id()
     }
@@ -151,7 +175,7 @@ impl<M: LlmModality> Recognizer<M> for LlmRecognizer<M> {
         let prompt = self.prompt.build(subject, ctx);
         let response = self
             .backend
-            .extract(LlmRequest::new(&prompt, subject.data()))
+            .call(LlmRequest::new(&prompt, subject.data()))
             .await?;
         let entities = M::lift(response.candidates, subject.data());
         Ok(Recognition::new(entities))

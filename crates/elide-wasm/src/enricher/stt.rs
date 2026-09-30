@@ -6,7 +6,8 @@
 //! [`SttEnricher`], so a text recognizer can scan the transcript and matched
 //! time spans are silenced.
 
-use elide::enrichment::stt::{SttBackend, SttEnricher, SttRequest, SttResponse};
+use elide::backend::Backend;
+use elide::enrichment::stt::{SttEnricher, SttRequest, SttResponse};
 use elide::entity::audit::ModelEvent;
 use elide::modality::audio::TranscriptSegment;
 use elide::primitive::TimeSpan;
@@ -33,7 +34,7 @@ struct Segment {
 ///
 /// The callback is a `!Send` [`Function`]; [`SendWrapper`] makes it satisfy the
 /// `Send + Sync` bound the enricher requires — sound on single-threaded wasm.
-struct JsCallbackBackend {
+pub(super) struct JsCallbackBackend {
     callback: SendWrapper<Function>,
 }
 
@@ -57,7 +58,10 @@ impl JsCallbackBackend {
 }
 
 #[async_trait::async_trait]
-impl SttBackend for JsCallbackBackend {
+impl Backend for JsCallbackBackend {
+    type Request<'a> = SttRequest<'a>;
+    type Response = SttResponse;
+
     fn provenance(&self) -> ModelEvent {
         ModelEvent {
             name: "js-callback-stt".into(),
@@ -65,7 +69,7 @@ impl SttBackend for JsCallbackBackend {
         }
     }
 
-    async fn transcribe(&self, request: SttRequest<'_>) -> Result<SttResponse> {
+    async fn call(&self, request: SttRequest<'_>) -> Result<SttResponse> {
         let value = self
             .call_js(request.audio.to_vec())
             .await
@@ -103,7 +107,7 @@ impl SttBackend for JsCallbackBackend {
 /// Build an STT enricher whose transcription is the JavaScript `callback`.
 pub(super) fn build_stt(
     callback: Function,
-) -> std::result::Result<SttEnricher, crate::error::ElideError> {
+) -> std::result::Result<SttEnricher<JsCallbackBackend>, crate::error::ElideError> {
     Ok(SttEnricher::builder()
         .with_name("js-callback-stt")
         .with_backend(JsCallbackBackend::new(callback))

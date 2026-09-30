@@ -8,9 +8,10 @@
 //! `JsCallbackBackend`, so Rust runs the NER recognizer (scoring, alignment,
 //! label filtering) around whatever inference the app supplies.
 
+use elide::backend::Backend;
 use elide::entity::audit::ModelEvent;
 use elide::recognition::ner::NerRecognizer;
-use elide::recognition::ner::backend::{NerBackend, NerRequest, NerResponse, NerSpan};
+use elide::recognition::ner::backend::{NerRequest, NerResponse, NerSpan};
 use elide::{Error, ErrorKind, Result};
 use js_sys::{Array, Function, Promise};
 use send_wrapper::SendWrapper;
@@ -38,7 +39,7 @@ struct JsSpan {
 /// `Send + Sync` bound the recognizer requires. That is sound on wasm, which is
 /// single-threaded — the wrapper only panics if accessed from another thread,
 /// which never happens here.
-struct JsCallbackBackend {
+pub(super) struct JsCallbackBackend {
     callback: SendWrapper<Function>,
 }
 
@@ -64,7 +65,10 @@ impl JsCallbackBackend {
 }
 
 #[async_trait::async_trait]
-impl NerBackend for JsCallbackBackend {
+impl Backend for JsCallbackBackend {
+    type Request<'a> = NerRequest<'a>;
+    type Response = NerResponse;
+
     fn provenance(&self) -> ModelEvent {
         ModelEvent {
             name: "js-callback-ner".into(),
@@ -72,7 +76,7 @@ impl NerBackend for JsCallbackBackend {
         }
     }
 
-    async fn recognize(&self, request: NerRequest<'_>) -> Result<NerResponse> {
+    async fn call(&self, request: NerRequest<'_>) -> Result<NerResponse> {
         let labels = Array::new();
         if let Some(requested) = request.labels {
             for label in requested {
@@ -132,7 +136,7 @@ fn js_to_error(value: JsValue) -> Error {
 /// Build a NER recognizer whose inference is the JavaScript `callback`.
 pub(super) fn build_ner(
     callback: Function,
-) -> std::result::Result<NerRecognizer, crate::error::ElideError> {
+) -> std::result::Result<NerRecognizer<JsCallbackBackend>, crate::error::ElideError> {
     Ok(NerRecognizer::builder()
         .with_name("js-callback-ner")
         .with_backend(JsCallbackBackend::new(callback))

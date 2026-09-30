@@ -20,8 +20,7 @@ mod mock;
 mod request;
 mod response;
 
-use elide_core::Result;
-use elide_core::entity::audit::ModelEvent;
+use elide_core::backend::Backend;
 
 pub use self::enricher::{SttEnricher, SttEnricherBuilder};
 #[cfg(any(test, feature = "mocks"))]
@@ -30,36 +29,26 @@ pub use self::mock::MockBackend;
 pub use self::request::SttRequest;
 pub use self::response::SttResponse;
 
-/// Per-call speech-to-text backend.
+/// A speech-to-text [`Backend`](elide_core::backend::Backend): `Backend<Request<'a>
+/// = SttRequest<'a>, Response = SttResponse>`.
 ///
-/// Implemented by everything that turns `(audio, language?)` into
-/// transcribed segments, hosted provider clients (OpenAI Whisper,
-/// Deepgram, AssemblyAI), local model wrappers, and the in-process no-op
-/// test stub. One trait covers every flavour: providers that emit a single
-/// full-clip segment, providers that emit diarized multi-speaker segments,
-/// and providers that emit word-level timings.
+/// A shorthand bound so the enricher holds any STT backend generically.
+/// Everything that turns `(audio, language?)` into transcribed segments
+/// implements it by implementing `Backend` with these associated types — hosted
+/// provider clients (Whisper, Deepgram, AssemblyAI), local model wrappers, and
+/// the in-process no-op test stub.
 ///
-/// Confidence values **must** be normalised to `0.0..=1.0` before being
-/// placed on a segment or word. Backends whose upstream API uses a
-/// different scale convert before returning.
-///
-/// Object-safe: extractors hold `Arc<dyn SttBackend>` and dispatch per
-/// call.
-#[async_trait::async_trait]
-pub trait SttBackend: Send + Sync + 'static {
-    /// Backend identity (model / service name + provenance detail).
-    ///
-    /// Identifies the actual model the backend wraps (e.g. `"noop-stt"`),
-    /// stamped into the provenance of every entity detected over the
-    /// transcript so the audit records which STT pass produced it.
-    fn provenance(&self) -> ModelEvent;
+/// Confidence values **must** be normalised to `0.0..=1.0` before being placed
+/// on a segment or word; backends whose upstream API uses a different scale
+/// convert before returning.
+pub trait SttBackend:
+    for<'a> Backend<Request<'a> = SttRequest<'a>, Response = SttResponse>
+{
+}
 
-    /// Transcribe `request` into ordered segments.
-    ///
-    /// # Errors
-    ///
-    /// Returns the underlying transport / parse / inference error.
-    async fn transcribe(&self, request: SttRequest<'_>) -> Result<SttResponse>;
+impl<B> SttBackend for B where
+    B: for<'a> Backend<Request<'a> = SttRequest<'a>, Response = SttResponse>
+{
 }
 
 #[cfg(test)]
@@ -77,7 +66,7 @@ mod tests {
             language: None,
             correlation_id: None,
         };
-        let response = backend.transcribe(request).await.unwrap();
+        let response = Backend::call(&backend, request).await.unwrap();
         assert!(response.segments.is_empty());
     }
 }

@@ -8,9 +8,13 @@
 mod config;
 mod dispatch;
 
+use std::marker::PhantomData;
+
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use elide_core::Result;
+use elide_core::backend::Backend;
+use elide_core::entity::audit::ModelEvent;
 use elide_core::modality::text::Text;
 use elide_image::modality::{Image, ImageData, ImageFormat};
 use rig::client::CompletionClient;
@@ -23,7 +27,7 @@ use serde::{Deserialize, Serialize};
 pub use self::config::RigConfig;
 use self::dispatch::{RigModel, dispatch};
 use super::http::{HttpConfig, build_http_client};
-use super::{LlmBackend, LlmRequest, LlmResponse};
+use super::{LlmRequest, LlmResponse};
 use crate::error::Error;
 use crate::provider::Provider;
 
@@ -37,13 +41,14 @@ const TARGET: &str = "elide_llm::backend::rig";
 ///
 /// [`new`]: Self::new
 /// [`new_with_config`]: Self::new_with_config
-pub struct RigBackend {
+pub struct RigBackend<M> {
     model: RigModel,
     config: RigConfig,
     model_name: String,
+    _modality: PhantomData<fn() -> M>,
 }
 
-impl RigBackend {
+impl<M> RigBackend<M> {
     /// Build a backend for `provider` with the default [`RigConfig`].
     ///
     /// # Errors
@@ -97,6 +102,7 @@ impl RigBackend {
             model,
             config,
             model_name,
+            _modality: PhantomData,
         })
     }
 
@@ -127,29 +133,41 @@ impl RigBackend {
 }
 
 #[async_trait::async_trait]
-impl LlmBackend<Text> for RigBackend {
-    #[tracing::instrument(target = TARGET, skip_all, fields(model = %self.model_name))]
-    async fn extract(&self, request: LlmRequest<'_, Text>) -> Result<LlmResponse<Text>> {
-        let candidates = self.extract_batch(Message::user(request.prompt)).await?;
-        Ok(LlmResponse::new(candidates))
+impl Backend for RigBackend<Text> {
+    type Request<'a> = LlmRequest<'a, Text>;
+    type Response = LlmResponse<Text>;
+
+    fn provenance(&self) -> ModelEvent {
+        ModelEvent {
+            name: self.model_name.clone().into(),
+            ..ModelEvent::default()
+        }
     }
 
-    fn model(&self) -> &str {
-        &self.model_name
+    #[tracing::instrument(target = TARGET, skip_all, fields(model = %self.model_name))]
+    async fn call(&self, request: LlmRequest<'_, Text>) -> Result<LlmResponse<Text>> {
+        let candidates = self.extract_batch(Message::user(request.prompt)).await?;
+        Ok(LlmResponse::new(candidates))
     }
 }
 
 #[async_trait::async_trait]
-impl LlmBackend<Image> for RigBackend {
+impl Backend for RigBackend<Image> {
+    type Request<'a> = LlmRequest<'a, Image>;
+    type Response = LlmResponse<Image>;
+
+    fn provenance(&self) -> ModelEvent {
+        ModelEvent {
+            name: self.model_name.clone().into(),
+            ..ModelEvent::default()
+        }
+    }
+
     #[tracing::instrument(target = TARGET, skip_all, fields(model = %self.model_name))]
-    async fn extract(&self, request: LlmRequest<'_, Image>) -> Result<LlmResponse<Image>> {
+    async fn call(&self, request: LlmRequest<'_, Image>) -> Result<LlmResponse<Image>> {
         let message = image_message(request.prompt, request.data)?;
         let candidates = self.extract_batch(message).await?;
         Ok(LlmResponse::new(candidates))
-    }
-
-    fn model(&self) -> &str {
-        &self.model_name
     }
 }
 

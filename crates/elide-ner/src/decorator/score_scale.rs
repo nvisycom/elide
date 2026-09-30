@@ -16,6 +16,7 @@ use std::collections::HashSet;
 
 use async_trait::async_trait;
 use elide_core::Result;
+use elide_core::backend::Backend;
 use elide_core::entity::LabelRef;
 use elide_core::entity::audit::ModelEvent;
 
@@ -87,13 +88,16 @@ impl<B> ScoreScale<B> {
 }
 
 #[async_trait]
-impl<B: NerBackend> NerBackend for ScoreScale<B> {
+impl<B: NerBackend> Backend for ScoreScale<B> {
+    type Request<'a> = NerRequest<'a>;
+    type Response = NerResponse;
+
     fn provenance(&self) -> ModelEvent {
         self.inner.provenance()
     }
 
-    async fn recognize(&self, request: NerRequest<'_>) -> Result<NerResponse> {
-        let mut response = self.inner.recognize(request).await?;
+    async fn call(&self, request: NerRequest<'_>) -> Result<NerResponse> {
+        let mut response = self.inner.call(request).await?;
         for span in &mut response.spans {
             if self.labels.contains(&span.label) {
                 span.confidence = span.confidence.saturating_mul(self.multiplier);
@@ -114,7 +118,10 @@ mod tests {
     struct FixedBackend(Vec<NerSpan>);
 
     #[async_trait]
-    impl NerBackend for FixedBackend {
+    impl Backend for FixedBackend {
+        type Request<'a> = NerRequest<'a>;
+        type Response = NerResponse;
+
         fn provenance(&self) -> ModelEvent {
             ModelEvent {
                 name: "fixed".into(),
@@ -122,7 +129,7 @@ mod tests {
             }
         }
 
-        async fn recognize(&self, _request: NerRequest<'_>) -> Result<NerResponse> {
+        async fn call(&self, _request: NerRequest<'_>) -> Result<NerResponse> {
             Ok(NerResponse::new(self.0.clone()))
         }
     }
@@ -147,7 +154,7 @@ mod tests {
             .with_label(LabelRef::new("EMAIL"))
             .with_multiplier(1.2);
 
-        let out = scaled.recognize(request("x")).await.unwrap();
+        let out = scaled.call(request("x")).await.unwrap();
         assert!(
             (out.spans[0].confidence.get() - 0.6).abs() < 1e-6,
             "{:?}",
@@ -163,7 +170,7 @@ mod tests {
             .with_labels([LabelRef::new("EMAIL")])
             .with_multiplier(2.0);
 
-        let out = scaled.recognize(request("x")).await.unwrap();
+        let out = scaled.call(request("x")).await.unwrap();
         assert_eq!(out.spans[0].confidence, Confidence::MAX);
     }
 
@@ -172,7 +179,7 @@ mod tests {
         let inner = FixedBackend(vec![NerSpan::new("EMAIL", 0.42, 0..1)]);
         let scaled = ScoreScale::new(inner).with_label(LabelRef::new("EMAIL"));
 
-        let out = scaled.recognize(request("x")).await.unwrap();
+        let out = scaled.call(request("x")).await.unwrap();
         assert_eq!(out.spans[0].confidence, Confidence::clamped(0.42));
     }
 }

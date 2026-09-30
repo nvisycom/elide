@@ -2,6 +2,7 @@
 //!
 //! [`NerBackend`]: super::NerBackend
 
+use elide_core::backend::BackendRequest;
 use elide_core::entity::Label;
 use elide_core::primitive::LanguageTag;
 use uuid::Uuid;
@@ -30,3 +31,5 @@ pub struct NerRequest<'a> {
     /// Correlation UUID for tracing.
     pub correlation_id: Option<Uuid>,
 }
+
+impl BackendRequest for NerRequest<'_> {}

@@ -20,7 +20,7 @@ mod mock_backend;
 #[cfg(feature = "rig")]
 mod rig;
 
-use elide_core::Result;
+use elide_core::backend::Backend;
 
 pub use self::llm_request::LlmRequest;
 pub use self::llm_response::LlmResponse;
@@ -32,34 +32,21 @@ pub use self::mock_backend::MockBackend;
 pub use self::rig::{RigBackend, RigConfig};
 pub use crate::modality::LlmModality;
 
-/// Per-call LLM backend for modality `M`.
+/// An LLM [`Backend`](elide_core::backend::Backend) for modality `M`:
+/// `Backend<Request<'a> = LlmRequest<'a, M>, Response = LlmResponse<M>>`.
 ///
-/// Implemented by everything that turns a rendered prompt into the model's
-/// structured candidate batch: rig-backed providers (OpenAI, Anthropic,
-/// Gemini, Ollama) and the in-process no-op test stub.
-///
-/// Object-safe: recognizers hold `Arc<dyn LlmBackend<M>>` and dispatch per
-/// call. The candidate type is fixed by `M`, so there is no free generic
-/// on the call.
-#[async_trait::async_trait]
-pub trait LlmBackend<M: LlmModality>: Send + Sync + 'static {
-    /// Send `request` to the model and return its structured candidate
-    /// batch.
-    ///
-    /// The prompt wording is rendered by the recognizer's
-    /// [`Prompt`]; the backend folds in the source
-    /// payload (e.g. image bytes) to build the provider message, and
-    /// constrains the model to produce the candidate shape for `M`.
-    ///
-    /// # Errors
-    ///
-    /// Returns the underlying transport / provider / extraction error.
-    ///
-    /// [`Prompt`]: crate::prompt::Prompt
-    async fn extract(&self, request: LlmRequest<'_, M>) -> Result<LlmResponse<M>>;
+/// A shorthand bound so the recognizer holds any LLM backend for `M`
+/// generically. Everything that turns a rendered prompt into the model's
+/// structured candidate batch implements it by implementing `Backend` with these
+/// associated types — rig-backed providers (OpenAI, Anthropic, Gemini, Ollama)
+/// and the in-process no-op test stub. A backend declares which modalities it
+/// serves by which `Backend` impls it carries.
+pub trait LlmBackend<M: LlmModality>:
+    for<'a> Backend<Request<'a> = LlmRequest<'a, M>, Response = LlmResponse<M>>
+{
+}
 
-    /// Model name the backend is configured to call. Recognizers stamp
-    /// this into entity trail provenance so post-hoc analysis can
-    /// attribute scores to a specific model.
-    fn model(&self) -> &str;
+impl<M: LlmModality, B> LlmBackend<M> for B where
+    B: for<'a> Backend<Request<'a> = LlmRequest<'a, M>, Response = LlmResponse<M>>
+{
 }

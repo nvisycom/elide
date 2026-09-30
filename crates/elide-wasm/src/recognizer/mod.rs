@@ -29,7 +29,7 @@ enum Kind {
     /// A context-enhanced pattern recognizer.
     Pattern(Enhanced<PatternRecognizer>),
     /// A NER recognizer backed by a JS callback.
-    Ner(NerRecognizer),
+    Ner(NerRecognizer<self::ner::JsCallbackBackend>),
 }
 
 /// A compiled recognizer, ready to be folded into a modality's analyzer.

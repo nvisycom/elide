@@ -19,12 +19,13 @@ mod engine;
 use std::path::Path;
 use std::sync::Arc;
 
+use elide_core::backend::Backend;
 use elide_core::entity::audit::ModelEvent;
 use elide_core::{Error, ErrorKind, Result};
 
 use self::engine::Engine;
 pub use self::engine::OCRS_MODELS_DIR_ENV;
-use super::{OcrBackend, OcrRequest, OcrResponse};
+use super::{OcrRequest, OcrResponse};
 
 /// An [`OcrBackend`] backed by the pure-Rust `ocrs` engine.
 ///
@@ -88,7 +89,10 @@ impl OcrsBackend {
 }
 
 #[async_trait::async_trait]
-impl OcrBackend for OcrsBackend {
+impl Backend for OcrsBackend {
+    type Request<'a> = OcrRequest<'a>;
+    type Response = OcrResponse;
+
     fn provenance(&self) -> ModelEvent {
         ModelEvent {
             name: format!("ocrs {}", self.version).into(),
@@ -96,7 +100,7 @@ impl OcrBackend for OcrsBackend {
         }
     }
 
-    async fn recognize(&self, request: OcrRequest<'_>) -> Result<OcrResponse> {
+    async fn call(&self, request: OcrRequest<'_>) -> Result<OcrResponse> {
         // OCR inference is CPU-bound and has no await points; running it inline
         // would occupy the polling worker for the whole inference. Offload it to
         // a Rayon worker (runtime-neutral, no Tokio) and await the result over a

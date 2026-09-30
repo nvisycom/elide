@@ -1,0 +1,61 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "elide-metrics"
+description = "Global observability sinks for Elide backend usage: forward each call's usage to the metrics and tracing ecosystems"
+keywords = ["elide", "metrics", "tracing", "observability", "usage"]
+categories = ["development-tools::profiling"]
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+## No sink on by default: enable `tracing` or `metrics` for the one you route to.
+## The `Metered` wrapper, the `Usage` record, and the `UsageCollector` are always
+## available.
+default = []
+
+## Derive `serde::{Serialize, Deserialize}` on the usage record (`Usage`,
+## `ModelUsage`, `Outcome`), so a run's usage can be shipped across a boundary.
+serde = ["dep:serde", "elide-core/serde"]
+## Derive `schemars::JsonSchema` on the usage record. Implies `serde`.
+schema = ["serde", "dep:schemars", "elide-core/schema"]
+
+## The `TracingSink`: emit each backend call's usage as a `tracing` event, so it
+## lands in whatever subscriber the process runs alongside the backends' own
+## spans.
+tracing = ["dep:tracing"]
+
+## The `MetricsSink`: record each backend call's usage through the `metrics`
+## facade (call/duration/output/token metrics), for a Prometheus/StatsD recorder
+## the process installs.
+metrics = ["dep:metrics"]
+
+[dependencies]
+# Internal crates
+elide-core = { workspace = true, features = [] }
+
+# Primitive datatypes
+hipstr = { workspace = true, features = [] }
+
+# Async runtime & parallelism
+async-trait = { workspace = true, features = [] }
+
+# (De)serialization
+serde = { workspace = true, features = ["derive"], optional = true }
+schemars = { workspace = true, features = [], optional = true }
+
+# Observability
+tracing = { workspace = true, features = [], optional = true }
+metrics = { workspace = true, features = [], optional = true }

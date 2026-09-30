@@ -42,9 +42,9 @@ enum Kind {
     /// Language detection (built-in), applicable to every text-shaped modality.
     Language(LinguaEnricher),
     /// Image OCR (JS callback), applicable only to the image modality.
-    Ocr(OcrEnricher),
+    Ocr(OcrEnricher<self::ocr::JsCallbackBackend>),
     /// Audio STT (JS callback), applicable only to the audio modality.
-    Stt(SttEnricher),
+    Stt(SttEnricher<self::stt::JsCallbackBackend>),
 }
 
 impl Kind {

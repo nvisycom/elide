@@ -2,9 +2,10 @@
 //! default before a real backend is configured.
 
 use elide_core::Result;
+use elide_core::backend::Backend;
 use elide_core::entity::audit::ModelEvent;
 
-use super::{SttBackend, SttRequest, SttResponse};
+use super::{SttRequest, SttResponse};
 use crate::modality::TranscriptSegment;
 
 /// Mock STT backend: returns a fixed set of segments on every call.
@@ -38,7 +39,10 @@ impl MockBackend {
 }
 
 #[async_trait::async_trait]
-impl SttBackend for MockBackend {
+impl Backend for MockBackend {
+    type Request<'a> = SttRequest<'a>;
+    type Response = SttResponse;
+
     fn provenance(&self) -> ModelEvent {
         ModelEvent {
             name: "mock-stt".into(),
@@ -46,7 +50,7 @@ impl SttBackend for MockBackend {
         }
     }
 
-    async fn transcribe(&self, _request: SttRequest<'_>) -> Result<SttResponse> {
+    async fn call(&self, _request: SttRequest<'_>) -> Result<SttResponse> {
         Ok(SttResponse::new(self.segments.clone()))
     }
 }
