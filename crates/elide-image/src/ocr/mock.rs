@@ -1,10 +1,11 @@
-//! [`MockBackend`]: stand-in [`OcrBackend`] for tests, examples, and as a
+//! [`MockBackend`]: stand-in OCR backend for tests, examples, and as a
 //! default before a real backend is configured.
 
 use elide_core::Result;
+use elide_core::backend::Backend;
 use elide_core::entity::audit::ModelEvent;
 
-use super::{OcrBackend, OcrRequest, OcrResponse};
+use super::{OcrRequest, OcrResponse};
 use crate::modality::LayoutRegion;
 
 /// Mock OCR backend: returns a fixed set of regions on every call.
@@ -38,7 +39,10 @@ impl MockBackend {
 }
 
 #[async_trait::async_trait]
-impl OcrBackend for MockBackend {
+impl Backend for MockBackend {
+    type Request<'a> = OcrRequest<'a>;
+    type Response = OcrResponse;
+
     fn provenance(&self) -> ModelEvent {
         ModelEvent {
             name: "mock-ocr".into(),
@@ -46,7 +50,7 @@ impl OcrBackend for MockBackend {
         }
     }
 
-    async fn recognize(&self, _request: OcrRequest<'_>) -> Result<OcrResponse> {
+    async fn call(&self, _request: OcrRequest<'_>) -> Result<OcrResponse> {
         Ok(OcrResponse::new(self.regions.clone()))
     }
 }

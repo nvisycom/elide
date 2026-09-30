@@ -12,4 +12,4 @@ pub mod prompt;
 pub mod provider;
 mod recognition;
 
-pub use self::recognition::{LlmRecognizer, LlmRecognizerBuilder};
+pub use self::recognition::LlmRecognizer;

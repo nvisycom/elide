@@ -135,6 +135,9 @@ impl std::error::Error for Error {
 /// [`Provider`]: Self::Provider
 /// [`Transport`]: Self::Transport
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 pub enum ErrorKind {
     /// The content being processed is corrupt or unreadable: a malformed

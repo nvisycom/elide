@@ -2,110 +2,100 @@
 //! call so the text recognizers can read it.
 //!
 //! The OCR counterpart to language detection: it produces no entities, it
-//! *enriches*. On each call it OCRs the [`ImageData`] bytes through its
-//! [`OcrBackend`] and stamps the resulting [`Layout`] onto the call as
+//! *enriches*. On each call it OCRs the [`ImageData`] bytes through its OCR
+//! backend and stamps the resulting [`Layout`] onto the call as
 //! `Image`'s [`artifact`]. Recognizers running afterward read the OCR text and
 //! resolve each match back to the image region it covers (see [`Image`]'s
 //! [`TextRecognizable`] impl).
 //!
 //! [`ImageData`]: crate::modality::ImageData
 //! [`artifact`]: elide_core::recognition::Subject::artifact
-//! [`OcrBackend`]: super::OcrBackend
 //! [`Image`]: crate::modality::Image
 //! [`TextRecognizable`]: elide_core::modality::TextRecognizable
 
-use std::sync::Arc;
-
-use derive_builder::Builder;
+use elide_core::Result;
+use elide_core::backend::Backend;
 use elide_core::enrichment::Enricher;
 use elide_core::primitive::ComponentId;
 use elide_core::recognition::{RecognizerContext, Subject};
-use elide_core::{Error, Result};
 use hipstr::HipStr;
 
 #[cfg(any(test, feature = "mocks"))]
 use super::MockBackend;
-use super::{OcrBackend, OcrRequest};
+use super::{OcrRequest, OcrResponse};
 use crate::modality::{Image, Layout};
 
-/// An [`Enricher<Image>`] that OCRs the image.
+/// An [`Enricher<Image>`] that OCRs the image, generic over its OCR backend `B`
+/// — any [`Backend`] whose request is [`OcrRequest`] and whose response is
+/// [`OcrResponse`].
 ///
-/// Stamps the resulting [`Layout`] onto the call's artifact. Holds an
-/// `Arc<dyn OcrBackend>`; cloning shares the backend. Registered on
-/// an `Analyzer<Image>` ahead of its recognizers, the same way a language
-/// detector is registered on a text analyzer.
-///
-/// Built the same way as a NER or LLM recognizer,
-/// `OcrEnricher::builder().with_name(..).with_backend(..).build()`, so `name`
-/// and `backend` are required and construction is uniform across the
-/// model-backed components.
-#[derive(Clone, Builder)]
-#[builder(
-    name = "OcrEnricherBuilder",
-    pattern = "owned",
-    setter(into, prefix = "with"),
-    build_fn(error = "Error", name = "try_build", private)
-)]
-pub struct OcrEnricher {
-    /// Caller-chosen name, surfaced as this enricher's id so a caller running
-    /// more than one OCR enricher can tell them apart.
-    name: HipStr<'static>,
-    /// Backend that OCRs the image. Required. Set via [`with_backend`], which
-    /// accepts any concrete [`OcrBackend`] impl by value and wraps it in `Arc`
-    /// internally.
-    ///
-    /// [`with_backend`]: OcrEnricherBuilder::with_backend
-    #[builder(setter(custom))]
-    backend: Arc<dyn OcrBackend>,
+/// Stamps the resulting [`Layout`] onto the call's artifact. Registered on an
+/// `Analyzer<Image>` ahead of its recognizers, the same way a language detector
+/// is registered on a text analyzer. `B` may be a
+/// `Metered` wrapper.
+#[derive(Clone)]
+pub struct OcrEnricher<B = ()> {
+    /// Optional caller-chosen name, surfaced as this enricher's id so a caller
+    /// running more than one OCR enricher can tell them apart. `None` falls back
+    /// to the crate name at [`id`](Enricher::id) time.
+    name: Option<HipStr<'static>>,
+    /// Backend that OCRs the image.
+    backend: B,
 }
 
-impl OcrEnricher {
-    /// Start the chainable builder. `name` and `backend` are required;
-    /// calling [`build`] without them returns a validation error.
+impl<B> OcrEnricher<B>
+where
+    B: for<'a> Backend<Request<'a> = OcrRequest<'a>, Response = OcrResponse>,
+{
+    /// An OCR enricher over `backend`.
     ///
-    /// [`build`]: OcrEnricherBuilder::build
+    /// Unnamed by default (its id falls back to the crate name); set a name with
+    /// [`with_name`](Self::with_name) when running more than one so their ids
+    /// stay distinct.
     #[must_use]
-    pub fn builder() -> OcrEnricherBuilder {
-        OcrEnricherBuilder::default()
+    pub fn new(backend: B) -> Self {
+        Self {
+            name: None,
+            backend,
+        }
     }
 
-    /// This enricher's name.
+    /// Set the enricher name, surfaced as its id.
     #[must_use]
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-}
-
-impl OcrEnricherBuilder {
-    /// Set the [`OcrBackend`] that OCRs the image. Accepts any concrete impl
-    /// by value and wraps it in `Arc`. Required: `build` errors when this
-    /// hasn't been called.
-    #[must_use]
-    pub fn with_backend<B: OcrBackend>(mut self, backend: B) -> Self {
-        self.backend = Some(Arc::new(backend));
+    pub fn with_name(mut self, name: impl Into<HipStr<'static>>) -> Self {
+        self.name = Some(name.into());
         self
     }
+}
 
-    /// Wire the no-op [`MockBackend`] as this enricher's backend.
+#[cfg(any(test, feature = "mocks"))]
+impl OcrEnricher<MockBackend> {
+    /// An OCR enricher over the no-op [`MockBackend`].
     ///
     /// [`MockBackend`]: super::MockBackend
-    #[cfg(any(test, feature = "mocks"))]
     #[cfg_attr(docsrs, doc(cfg(feature = "mocks")))]
     #[must_use]
-    pub fn with_mock_backend(self) -> Self {
-        self.with_backend(MockBackend::new())
+    pub fn mock() -> Self {
+        Self::new(MockBackend::new())
     }
+}
 
-    /// Finish the builder. Errors when `name` or `backend` is unset.
-    pub fn build(self) -> Result<OcrEnricher> {
-        self.try_build()
+impl<B> OcrEnricher<B> {
+    /// This enricher's name — the one set with
+    /// [`with_name`](Self::with_name), or the crate name when unset.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        self.name.as_deref().unwrap_or(env!("CARGO_PKG_NAME"))
     }
 }
 
 #[async_trait::async_trait]
-impl Enricher<Image> for OcrEnricher {
+impl<B> Enricher<Image> for OcrEnricher<B>
+where
+    B: for<'a> Backend<Request<'a> = OcrRequest<'a>, Response = OcrResponse>,
+{
     fn id(&self) -> ComponentId {
-        ComponentId::new(self.name.clone(), env!("CARGO_PKG_VERSION"))
+        ComponentId::new(self.name().to_owned(), env!("CARGO_PKG_VERSION"))
     }
 
     async fn enrich(
@@ -126,7 +116,7 @@ impl Enricher<Image> for OcrEnricher {
             language: None,
             correlation_id: ctx.correlation_id(),
         };
-        let response = self.backend.recognize(request).await?;
+        let response = self.backend.call(request).await?;
         subject.set_artifact(Layout::new(response.regions));
         Ok(())
     }
@@ -136,6 +126,7 @@ impl Enricher<Image> for OcrEnricher {
 // `fixtures` feature provides (it implies the decoders).
 #[cfg(all(test, feature = "fixtures"))]
 mod tests {
+    use elide_core::backend::Backend;
     use elide_core::entity::audit::ModelEvent;
     use elide_core::modality::TextRecognizable;
     use elide_core::recognition::Scope;
@@ -164,14 +155,13 @@ mod tests {
 
     #[tokio::test]
     async fn enrich_stamps_readable_ocr_text() {
-        let enricher = OcrEnricher::builder()
-            .with_name("ocr")
-            .with_backend(MockBackend::with(canned_regions()))
-            .build()
-            .expect("builder succeeds");
-        // The enricher id carries the caller's name, not a fixed crate string,
-        // so two OCR enrichers can be told apart.
+        let enricher = OcrEnricher::new(MockBackend::with(canned_regions())).with_name("ocr");
+        // A set name flows through to the id; unnamed falls back to the crate.
         assert_eq!(enricher.id().name, "ocr");
+        assert_eq!(
+            OcrEnricher::new(MockBackend::new()).id().name,
+            env!("CARGO_PKG_NAME")
+        );
 
         let data = fixtures::blank_image_data();
         let scope = Scope::new();
@@ -193,15 +183,17 @@ mod tests {
     }
 
     mockall::mock! {
-        /// A spy OCR backend whose `recognize` calls are counted and verifiable,
-        /// for asserting the enricher's self-skip on a re-run.
+        /// A spy OCR backend whose `call`s are counted and verifiable, for
+        /// asserting the enricher's self-skip on a re-run.
         OcrSpy {}
 
         #[async_trait::async_trait]
-        impl OcrBackend for OcrSpy {
+        impl Backend for OcrSpy {
+            type Request<'a> = OcrRequest<'a>;
+            type Response = OcrResponse;
             fn provenance(&self) -> ModelEvent;
             #[mockall::concretize]
-            async fn recognize(&self, request: OcrRequest<'_>) -> Result<OcrResponse>;
+            async fn call(&self, request: OcrRequest<'_>) -> Result<OcrResponse>;
         }
     }
 
@@ -218,15 +210,11 @@ mod tests {
         // The self-skip, asserted as a call cardinality: recognize fires exactly
         // once across both enrich calls. mockall fails the test on drop if not.
         backend
-            .expect_recognize()
+            .expect_call()
             .times(1)
             .returning(|_| Ok(OcrResponse::new(canned_regions())));
 
-        let enricher = OcrEnricher::builder()
-            .with_name("ocr")
-            .with_backend(backend)
-            .build()
-            .expect("builder succeeds");
+        let enricher = OcrEnricher::new(backend);
         let data = fixtures::blank_image_data();
         let scope = Scope::new();
         let ctx = RecognizerContext::new(&scope);
@@ -261,13 +249,9 @@ mod tests {
             ..ModelEvent::default()
         });
         // The backend must never run: the seeded (empty) artifact is enrichment.
-        backend.expect_recognize().times(0);
+        backend.expect_call().times(0);
 
-        let enricher = OcrEnricher::builder()
-            .with_name("ocr")
-            .with_backend(backend)
-            .build()
-            .expect("builder succeeds");
+        let enricher = OcrEnricher::new(backend);
         let data = fixtures::blank_image_data();
         let scope = Scope::new();
         let ctx = RecognizerContext::new(&scope);

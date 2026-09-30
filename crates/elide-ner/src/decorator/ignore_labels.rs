@@ -1,4 +1,4 @@
-//! [`IgnoreLabels`]: a [`NerBackend`] decorator that drops spans whose
+//! [`IgnoreLabels`]: a NER backend decorator that drops spans whose
 //! label is in a configured set.
 //!
 //! Wraps any inner backend and removes every span whose label is ignored,
@@ -14,12 +14,13 @@ use std::collections::HashSet;
 
 use async_trait::async_trait;
 use elide_core::Result;
+use elide_core::backend::Backend;
 use elide_core::entity::LabelRef;
 use elide_core::entity::audit::ModelEvent;
 
-use crate::backend::{NerBackend, NerRequest, NerResponse};
+use crate::backend::{NerRequest, NerResponse};
 
-/// [`NerBackend`] that drops spans whose label is in a configured set.
+/// A NER backend that drops spans whose label is in a configured set.
 ///
 /// Delegates recognition to the wrapped backend, then removes every span
 /// whose label is ignored. Spans whose label is not in the set pass
@@ -64,13 +65,19 @@ impl<B> IgnoreLabels<B> {
 }
 
 #[async_trait]
-impl<B: NerBackend> NerBackend for IgnoreLabels<B> {
+impl<B> Backend for IgnoreLabels<B>
+where
+    B: for<'a> Backend<Request<'a> = NerRequest<'a>, Response = NerResponse>,
+{
+    type Request<'a> = NerRequest<'a>;
+    type Response = NerResponse;
+
     fn provenance(&self) -> ModelEvent {
         self.inner.provenance()
     }
 
-    async fn recognize(&self, request: NerRequest<'_>) -> Result<NerResponse> {
-        let mut response = self.inner.recognize(request).await?;
+    async fn call(&self, request: NerRequest<'_>) -> Result<NerResponse> {
+        let mut response = self.inner.call(request).await?;
         response
             .spans
             .retain(|span| !self.labels.contains(&span.label));
@@ -88,7 +95,10 @@ mod tests {
     struct FixedBackend(Vec<NerSpan>);
 
     #[async_trait]
-    impl NerBackend for FixedBackend {
+    impl Backend for FixedBackend {
+        type Request<'a> = NerRequest<'a>;
+        type Response = NerResponse;
+
         fn provenance(&self) -> ModelEvent {
             ModelEvent {
                 name: "fixed".into(),
@@ -96,7 +106,7 @@ mod tests {
             }
         }
 
-        async fn recognize(&self, _request: NerRequest<'_>) -> Result<NerResponse> {
+        async fn call(&self, _request: NerRequest<'_>) -> Result<NerResponse> {
             Ok(NerResponse::new(self.0.clone()))
         }
     }
@@ -115,7 +125,7 @@ mod tests {
             language: None,
             correlation_id: None,
         };
-        let out = filtered.recognize(request).await.unwrap();
+        let out = filtered.call(request).await.unwrap();
         assert_eq!(out.spans.len(), 1);
         assert_eq!(out.spans[0].label, LabelRef::new("EMAIL"));
         assert_eq!(out.spans[0].confidence, Confidence::clamped(0.9));

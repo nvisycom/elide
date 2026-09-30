@@ -66,7 +66,7 @@ schema = ["serde", "dep:schemars", "elide-core/schema"]
 ## OCR: the `OcrBackend` trait, the `OcrEnricher`, and the request/response
 ## types. The traits ship bare (no OCR engine); enable `ocrs` for the pure-Rust
 ## engine or `mocks` for the no-op backend.
-ocr = ["dep:async-trait", "dep:derive_builder", "dep:uuid"]
+ocr = ["dep:async-trait", "dep:uuid"]
 
 ## The `ocrs` engine backend: a pure-Rust OCR engine (ocrs + the RTen runtime,
 ## both MIT/Apache-2.0, no native library). Off by default; the detection and
@@ -97,8 +97,6 @@ schemars = { workspace = true, features = [], optional = true }
 bytes = { workspace = true, features = [] }
 hipstr = { workspace = true, features = [] }
 
-# Derive macros (the OCR enricher builder)
-derive_builder = { workspace = true, features = [], optional = true }
 uuid = { workspace = true, features = ["v7"], optional = true }
 
 # Async runtime & parallelism

@@ -5,12 +5,12 @@
 //! recognizer holds `Arc<dyn Prompt<M>>` and renders the user prompt with
 //! it. [`DefaultPrompt`] is the shipped impl covering both modalities;
 //! users wanting different wording implement [`Prompt<M>`] and pass it to
-//! [`LlmRecognizerBuilder::with_prompt`]. The response *shape* is fixed
-//! per modality (the candidate batch the backend extracts), not chosen by
-//! the prompt, so a prompt varies wording only.
+//! [`LlmRecognizer::new`]. The response *shape* is fixed per modality (the
+//! candidate batch the backend extracts), not chosen by the prompt, so a prompt
+//! varies wording only.
 //!
 //! [`LlmRecognizer`]: crate::LlmRecognizer
-//! [`LlmRecognizerBuilder::with_prompt`]: crate::recognition::LlmRecognizerBuilder::with_prompt
+//! [`LlmRecognizer::new`]: crate::LlmRecognizer::new
 
 use elide_core::entity::Label;
 use elide_core::modality::Modality;

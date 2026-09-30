@@ -1,17 +1,17 @@
-//! [`OcrsBackend`]: an [`OcrBackend`] backed by the pure-Rust `ocrs` engine.
+//! [`OcrsBackend`]: an OCR backend backed by the pure-Rust `ocrs` engine.
 //!
 //! Built in two layers. The [`engine`] layer owns everything `ocrs` and `rten`:
 //! loading the two model files and running the recognition pipeline, exposing a
 //! single elide-shaped [`Engine::recognize`](engine::Engine::recognize) that
 //! takes image bytes and returns core [`LayoutRegion`]s. This backend layer holds
-//! only elide concerns: the [`OcrBackend`] trait impl, provenance, and the async
-//! offload of the CPU-bound engine call, no `ocrs`/`rten` type appears here.
+//! only elide concerns: the [`Backend`](elide_core::backend::Backend) impl,
+//! provenance, and the async offload of the CPU-bound engine call, no
+//! `ocrs`/`rten` type appears here.
 //!
 //! Construct once (loading the models is not cheap) via
 //! [`OcrsBackend::from_env`] or [`OcrsBackend::from_models_dir`], and share the
 //! result.
 //!
-//! [`OcrBackend`]: super::OcrBackend
 //! [`LayoutRegion`]: crate::modality::LayoutRegion
 
 mod engine;
@@ -19,17 +19,19 @@ mod engine;
 use std::path::Path;
 use std::sync::Arc;
 
+use elide_core::backend::Backend;
 use elide_core::entity::audit::ModelEvent;
 use elide_core::{Error, ErrorKind, Result};
 
 use self::engine::Engine;
 pub use self::engine::OCRS_MODELS_DIR_ENV;
-use super::{OcrBackend, OcrRequest, OcrResponse};
+use super::{OcrRequest, OcrResponse};
 
-/// An [`OcrBackend`] backed by the pure-Rust `ocrs` engine.
+/// An OCR backend backed by the pure-Rust `ocrs` engine.
 ///
-/// Construct it once (loading the models is not cheap) and share it:
-/// `Arc<dyn OcrBackend>` clones are cheap and the engine is `Send + Sync`.
+/// Construct it once (loading the models is not cheap) and share it: it is
+/// [`Clone`] over a shared `Arc<Engine>`, so clones are cheap, and it is
+/// `Send + Sync`.
 #[derive(Clone)]
 pub struct OcrsBackend {
     engine: Arc<Engine>,
@@ -88,7 +90,10 @@ impl OcrsBackend {
 }
 
 #[async_trait::async_trait]
-impl OcrBackend for OcrsBackend {
+impl Backend for OcrsBackend {
+    type Request<'a> = OcrRequest<'a>;
+    type Response = OcrResponse;
+
     fn provenance(&self) -> ModelEvent {
         ModelEvent {
             name: format!("ocrs {}", self.version).into(),
@@ -96,7 +101,7 @@ impl OcrBackend for OcrsBackend {
         }
     }
 
-    async fn recognize(&self, request: OcrRequest<'_>) -> Result<OcrResponse> {
+    async fn call(&self, request: OcrRequest<'_>) -> Result<OcrResponse> {
         // OCR inference is CPU-bound and has no await points; running it inline
         // would occupy the polling worker for the whole inference. Offload it to
         // a Rayon worker (runtime-neutral, no Tokio) and await the result over a

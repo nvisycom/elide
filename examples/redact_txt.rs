@@ -31,6 +31,7 @@ use elide::codec::DocumentPart;
 use elide::prelude::operators::*;
 use elide::prelude::*;
 use elide::recognition::llm::LlmRecognizer;
+use elide::recognition::llm::backend::MockBackend;
 use elide::recognition::ner::NerRecognizer;
 use elide::recognition::pattern::PatternRecognizer;
 
@@ -94,21 +95,15 @@ fn build_analyzer() -> Result<Analyzer<Text>> {
         .build_context_enhanced()?;
 
     // Mock NER: wired like a real model, returns no entities offline.
-    let ner = NerRecognizer::builder()
+    let ner = NerRecognizer::mock()
         .with_name("ner-mock")
-        .with_mock_backend()
         .with_supported_labels(vec![
             builtins::PERSON_NAME.to_ref(),
             builtins::ADDRESS.to_ref(),
-        ])
-        .build()?;
+        ]);
 
     // Mock LLM: wired like a real model, returns no entities offline.
-    let llm = LlmRecognizer::<Text>::builder()
-        .with_name("llm-mock")
-        .with_mock_backend()
-        .with_default_prompt()
-        .build()?;
+    let llm = LlmRecognizer::<MockBackend<Text>>::mock().with_name("llm-mock");
 
     Ok(Analyzer::new()
         .with_recognizer(patterns)

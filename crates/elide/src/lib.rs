@@ -2,6 +2,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 
+pub mod backend;
 pub mod detection;
 pub mod enrichment;
 pub mod modality;

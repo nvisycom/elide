@@ -1,14 +1,11 @@
-//! [`NerRequest`]: one per-call NER request handed to a [`NerBackend`].
-//!
-//! [`NerBackend`]: super::NerBackend
+//! [`NerRequest`]: one per-call NER request handed to a NER backend.
 
+use elide_core::backend::BackendRequest;
 use elide_core::entity::Label;
 use elide_core::primitive::LanguageTag;
 use uuid::Uuid;
 
-/// One per-call NER request handed to a [`NerBackend`].
-///
-/// [`NerBackend`]: super::NerBackend
+/// One per-call NER request handed to a NER backend.
 #[derive(Debug, Clone)]
 pub struct NerRequest<'a> {
     /// Source text to scan. Byte offsets in returned spans refer
@@ -30,3 +27,5 @@ pub struct NerRequest<'a> {
     /// Correlation UUID for tracing.
     pub correlation_id: Option<Uuid>,
 }
+
+impl BackendRequest for NerRequest<'_> {}

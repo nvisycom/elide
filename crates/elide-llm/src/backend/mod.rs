@@ -1,12 +1,13 @@
-//! Backend layer: the [`LlmBackend<M>`] trait and its shipped impls.
+//! Backend layer: the LLM backend contract and its shipped impls.
 //!
-//! A backend turns a rendered prompt into the model's structured candidate
-//! batch. It is generic over the modality `M`: it extracts a
-//! [`Candidates<M::Item>`], the typed candidate batch the model is asked
-//! to produce. A backend declares which modalities it serves by which
-//! `LlmBackend<M>` impls it carries. Prompt wording lives in
-//! [`crate::prompt`]; localizing candidates into entities lives in the
-//! recognizer (via [`LlmModality::lift`]).
+//! An LLM backend for modality `M` is a [`Backend`] whose request is
+//! [`LlmRequest<'_, M>`](LlmRequest) and whose response is
+//! [`LlmResponse<M>`](LlmResponse). It turns a rendered prompt into the model's
+//! structured candidate batch — a [`Candidates<M::Item>`], the typed batch the
+//! model is asked to produce. A backend declares which modalities it serves by
+//! which `Backend` impls it carries. Prompt wording lives in [`crate::prompt`];
+//! localizing candidates into entities lives in the recognizer (via
+//! [`LlmModality::lift`]).
 //!
 //! [`Candidates<M::Item>`]: crate::candidates::Candidates
 //! [`LlmModality::lift`]: crate::backend::LlmModality::lift
@@ -20,7 +21,7 @@ mod mock_backend;
 #[cfg(feature = "rig")]
 mod rig;
 
-use elide_core::Result;
+use elide_core::backend::Backend;
 
 pub use self::llm_request::LlmRequest;
 pub use self::llm_response::LlmResponse;
@@ -32,34 +33,29 @@ pub use self::mock_backend::MockBackend;
 pub use self::rig::{RigBackend, RigConfig};
 pub use crate::modality::LlmModality;
 
-/// Per-call LLM backend for modality `M`.
+/// An LLM [`Backend`], with the modality it serves recovered as an associated
+/// type.
 ///
-/// Implemented by everything that turns a rendered prompt into the model's
-/// structured candidate batch: rig-backed providers (OpenAI, Anthropic,
-/// Gemini, Ollama) and the in-process no-op test stub.
-///
-/// Object-safe: recognizers hold `Arc<dyn LlmBackend<M>>` and dispatch per
-/// call. The candidate type is fixed by `M`, so there is no free generic
-/// on the call.
-#[async_trait::async_trait]
-pub trait LlmBackend<M: LlmModality>: Send + Sync + 'static {
-    /// Send `request` to the model and return its structured candidate
-    /// batch.
-    ///
-    /// The prompt wording is rendered by the recognizer's
-    /// [`Prompt`]; the backend folds in the source
-    /// payload (e.g. image bytes) to build the provider message, and
-    /// constrains the model to produce the candidate shape for `M`.
-    ///
-    /// # Errors
-    ///
-    /// Returns the underlying transport / provider / extraction error.
-    ///
-    /// [`Prompt`]: crate::prompt::Prompt
-    async fn extract(&self, request: LlmRequest<'_, M>) -> Result<LlmResponse<M>>;
+/// Auto-implemented for every [`Backend`] whose request is
+/// [`LlmRequest<'_, M>`](LlmRequest) and whose response is
+/// [`LlmResponse<M>`](LlmResponse): its [`Modality`](Self::Modality) is that `M`.
+/// This is what lets [`LlmRecognizer`](crate::LlmRecognizer) be generic over the
+/// single type `B` and still name the modality it recognizes (as `B::Modality`),
+/// instead of carrying a redundant second type parameter.
+pub trait LlmBackend:
+    for<'a> Backend<
+        Request<'a> = LlmRequest<'a, Self::Modality>,
+        Response = LlmResponse<Self::Modality>,
+    >
+{
+    /// The modality this backend extracts for.
+    type Modality: LlmModality;
+}
 
-    /// Model name the backend is configured to call. Recognizers stamp
-    /// this into entity trail provenance so post-hoc analysis can
-    /// attribute scores to a specific model.
-    fn model(&self) -> &str;
+impl<M, B> LlmBackend for B
+where
+    M: LlmModality,
+    B: for<'a> Backend<Request<'a> = LlmRequest<'a, M>, Response = LlmResponse<M>>,
+{
+    type Modality = M;
 }

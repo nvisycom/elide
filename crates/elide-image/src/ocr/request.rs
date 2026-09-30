@@ -1,22 +1,19 @@
-//! [`OcrRequest`]: one per-call OCR request handed to an [`OcrBackend`].
-//!
-//! [`OcrBackend`]: super::OcrBackend
+//! [`OcrRequest`]: one per-call OCR request handed to an OCR backend.
 
+use elide_core::backend::BackendRequest;
 use elide_core::primitive::LanguageTag;
 use uuid::Uuid;
 
 use crate::modality::ImageFormat;
 use crate::primitive::Dimensions;
 
-/// One per-call OCR request handed to an [`OcrBackend`].
+/// One per-call OCR request handed to an OCR backend.
 ///
 /// Bundles the image bytes with the format and pixel dimensions the caller
 /// knows from decoding the image, plus optional language and correlation hints.
 /// Borrowed (`OcrRequest<'a>`) so call sites that already own the underlying
 /// values hand them through without cloning. Constructed as a struct literal —
 /// the required fields are always known by the time OCR runs.
-///
-/// [`OcrBackend`]: super::OcrBackend
 #[derive(Debug, Clone)]
 pub struct OcrRequest<'a> {
     /// Raw image bytes (PNG, JPEG, TIFF, …). The backend honours whatever
@@ -37,3 +34,5 @@ pub struct OcrRequest<'a> {
     /// Per-call correlation id propagated to remote backends for tracing.
     pub correlation_id: Option<Uuid>,
 }
+
+impl BackendRequest for OcrRequest<'_> {}

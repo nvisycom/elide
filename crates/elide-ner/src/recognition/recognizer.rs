@@ -1,7 +1,7 @@
 //! [`NerRecognizer`]: unified NER recognizer that drives any
-//! [`NerBackend`] backend.
+//! NER backend.
 //!
-//! Holds an `Arc<dyn NerBackend>` plus the recognizer's advertised
+//! Holds its NER backend `B` plus the recognizer's advertised
 //! [`supported_labels`]. On each `recognize` call it asks the backend for
 //! spans (passing `Some(&labels)` when non-empty for zero-shot backends,
 //! `None` when empty for fixed-label backends), then emits entities from
@@ -18,74 +18,113 @@
 //! [`ScoreScale`]: crate::decorator::ScoreScale
 //! [`Recognizer<Text>`]: elide_core::recognition::Recognizer
 
-use std::sync::Arc;
-
-use derive_builder::Builder;
+use elide_core::Result;
+use elide_core::backend::Backend;
 use elide_core::entity::audit::{AuditEvent, ModelEvent};
 use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::ComponentId;
 use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Subject};
-use elide_core::{Error, Result};
 use hipstr::HipStr;
 
 use super::aggregation::AggregationStrategy;
 use super::alignment::AlignmentMode;
 #[cfg(any(test, feature = "mocks"))]
 use crate::backend::MockBackend;
-use crate::backend::{NerBackend, NerRequest, NerSpan};
+use crate::backend::{NerRequest, NerResponse, NerSpan};
 
-/// Trait-driven NER recognizer.
-#[derive(Clone, Builder)]
-#[builder(
-    name = "NerRecognizerBuilder",
-    pattern = "owned",
-    setter(into, prefix = "with"),
-    build_fn(error = "Error", name = "try_build", private)
-)]
-pub struct NerRecognizer {
-    /// Recognizer name. Surfaced in the recognition event on every
-    /// emitted entity, so cheap to clone and never changed after
-    /// construction.
-    name: HipStr<'static>,
-    /// Backend that turns `(text, kinds)` into raw spans. Required.
-    /// Set via [`with_backend`], which accepts any concrete
-    /// [`NerBackend`] impl by value and wraps it in `Arc` internally.
-    ///
-    /// [`with_backend`]: NerRecognizerBuilder::with_backend
-    #[builder(setter(custom))]
-    backend: Arc<dyn NerBackend>,
+/// Trait-driven NER recognizer, generic over its NER backend `B` — any
+/// [`Backend`](elide_core::backend::Backend) whose request is [`NerRequest`] and
+/// whose response is [`NerResponse`].
+#[derive(Clone)]
+pub struct NerRecognizer<B = ()> {
+    /// Optional recognizer name, surfaced in the recognition event on every
+    /// emitted entity. `None` falls back to the crate name at [`id`](Recognizer::id)
+    /// time; set one to tell several NER recognizers apart.
+    name: Option<HipStr<'static>>,
+    /// Backend that turns `(text, kinds)` into raw spans. May be a
+    /// `Metered` wrapper.
+    backend: B,
     /// Labels the recognizer advertises. When non-empty, the
     /// recognizer asks the backend for only this subset on every
     /// call (zero-shot path). When empty, the backend is asked for
     /// whatever it natively produces (fixed-label path).
-    #[builder(default)]
     supported_labels: Vec<LabelRef>,
     /// Aggregation policy for backends that emit token-level
     /// predictions. Advisory for backends that aggregate server-side.
-    #[builder(default)]
     aggregation: AggregationStrategy,
     /// Alignment policy for sub-word predictions. Same advisory
     /// status as `aggregation`.
-    #[builder(default)]
     alignment: AlignmentMode,
 }
 
-impl NerRecognizer {
-    /// Start the chainable builder. `name` and `backend` are
-    /// required; calling [`build`] without them returns a
-    /// validation error.
+impl<B> NerRecognizer<B>
+where
+    B: for<'a> Backend<Request<'a> = NerRequest<'a>, Response = NerResponse>,
+{
+    /// A NER recognizer over `backend`, with no advertised labels (fixed-label
+    /// path) and default aggregation/alignment.
     ///
-    /// [`build`]: NerRecognizerBuilder::build
+    /// Unnamed by default (its id falls back to the crate name); refine with the
+    /// `with_*` setters.
     #[must_use]
-    pub fn builder() -> NerRecognizerBuilder {
-        NerRecognizerBuilder::default()
+    pub fn new(backend: B) -> Self {
+        Self {
+            name: None,
+            backend,
+            supported_labels: Vec::new(),
+            aggregation: AggregationStrategy::default(),
+            alignment: AlignmentMode::default(),
+        }
     }
 
-    /// Recognizer name.
+    /// Set the recognizer name, surfaced as its id.
+    #[must_use]
+    pub fn with_name(mut self, name: impl Into<HipStr<'static>>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    /// Advertise the labels the recognizer requests (the zero-shot subset).
+    #[must_use]
+    pub fn with_supported_labels(mut self, labels: impl Into<Vec<LabelRef>>) -> Self {
+        self.supported_labels = labels.into();
+        self
+    }
+
+    /// Set the aggregation policy for token-level backends.
+    #[must_use]
+    pub fn with_aggregation(mut self, aggregation: AggregationStrategy) -> Self {
+        self.aggregation = aggregation;
+        self
+    }
+
+    /// Set the alignment policy for sub-word backends.
+    #[must_use]
+    pub fn with_alignment(mut self, alignment: AlignmentMode) -> Self {
+        self.alignment = alignment;
+        self
+    }
+}
+
+#[cfg(any(test, feature = "mocks"))]
+impl NerRecognizer<MockBackend> {
+    /// A NER recognizer over the no-op [`MockBackend`], which produces no spans.
+    ///
+    /// [`MockBackend`]: crate::backend::MockBackend
+    #[cfg_attr(docsrs, doc(cfg(feature = "mocks")))]
+    #[must_use]
+    pub fn mock() -> Self {
+        Self::new(MockBackend)
+    }
+}
+
+impl<B> NerRecognizer<B> {
+    /// Recognizer name — the one set with [`with_name`](Self::with_name), or the
+    /// crate name when unset.
     #[must_use]
     pub fn name(&self) -> &str {
-        &self.name
+        self.name.as_deref().unwrap_or(env!("CARGO_PKG_NAME"))
     }
 
     /// Labels this recognizer advertises.
@@ -146,7 +185,7 @@ impl NerRecognizer {
             span.confidence,
             location.clone(),
             ModelEvent {
-                name: self.name.clone(),
+                name: HipStr::from(self.name().to_owned()),
                 ..ModelEvent::default()
             },
         );
@@ -163,40 +202,14 @@ impl NerRecognizer {
     }
 }
 
-impl NerRecognizerBuilder {
-    /// Set the [`NerBackend`] that powers this recognizer. Accepts any
-    /// concrete impl by value and wraps it in `Arc`. Required: `build`
-    /// errors when this hasn't been called.
-    #[must_use]
-    pub fn with_backend<B: NerBackend>(mut self, backend: B) -> Self {
-        self.backend = Some(Arc::new(backend));
-        self
-    }
-
-    /// Wire the no-op [`MockBackend`] as this recognizer's backend.
-    ///
-    /// Convenience for tests, examples, and offline wiring: the
-    /// recognizer is fully built but produces no entities. Equivalent to
-    /// `with_backend(MockBackend)`.
-    ///
-    /// [`MockBackend`]: crate::backend::MockBackend
-    #[cfg(any(test, feature = "mocks"))]
-    #[cfg_attr(docsrs, doc(cfg(feature = "mocks")))]
-    #[must_use]
-    pub fn with_mock_backend(self) -> Self {
-        self.with_backend(MockBackend)
-    }
-
-    /// Finish the builder. Errors when `name` or `backend` is unset.
-    pub fn build(self) -> Result<NerRecognizer> {
-        self.try_build()
-    }
-}
-
 #[async_trait::async_trait]
-impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
+impl<M, B> Recognizer<M> for NerRecognizer<B>
+where
+    M: TextRecognizable,
+    B: for<'a> Backend<Request<'a> = NerRequest<'a>, Response = NerResponse>,
+{
     fn id(&self) -> ComponentId {
-        ComponentId::new(self.name.clone(), env!("CARGO_PKG_VERSION"))
+        ComponentId::new(self.name().to_owned(), env!("CARGO_PKG_VERSION"))
     }
 
     async fn recognize(
@@ -221,7 +234,7 @@ impl<M: TextRecognizable> Recognizer<M> for NerRecognizer {
             language: ctx.languages(subject).primary(),
             correlation_id: ctx.correlation_id(),
         };
-        let response = self.backend.recognize(request).await?;
+        let response = self.backend.call(request).await?;
 
         // Spans already carry canonical labels (the backend did any
         // raw-to-canonical mapping; ignored labels are dropped by an
@@ -252,15 +265,12 @@ mod tests {
 
     #[tokio::test]
     async fn mock_backend_yields_no_entities() {
-        let rec = NerRecognizer::builder()
+        let rec = NerRecognizer::mock()
             .with_name("test")
-            .with_mock_backend()
             .with_supported_labels(vec![
                 builtins::PERSON_NAME.to_ref(),
                 builtins::EMAIL_ADDRESS.to_ref(),
-            ])
-            .build()
-            .expect("builder succeeds");
+            ]);
         let data = TextData::new("Alice Smith".to_owned());
         let scope = Scope::new();
         let ctx = RecognizerContext::<Text>::new(&scope);
@@ -271,11 +281,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_supported_labels_passes_none_to_backend() {
-        let rec = NerRecognizer::builder()
-            .with_name("test")
-            .with_mock_backend()
-            .build()
-            .expect("builder succeeds");
+        let rec = NerRecognizer::mock().with_name("test");
         let data = TextData::new("Alice Smith".to_owned());
         let scope = Scope::new();
         let ctx = RecognizerContext::<Text>::new(&scope);
@@ -286,13 +292,10 @@ mod tests {
 
     /// A recognizer with the given `supported_labels`, for testing
     /// [`effective_labels`](NerRecognizer::effective_labels) directly.
-    fn recognizer_with(supported: Vec<LabelRef>) -> NerRecognizer {
-        NerRecognizer::builder()
+    fn recognizer_with(supported: Vec<LabelRef>) -> NerRecognizer<MockBackend> {
+        NerRecognizer::mock()
             .with_name("test")
-            .with_mock_backend()
             .with_supported_labels(supported)
-            .build()
-            .expect("builder succeeds")
     }
 
     #[test]

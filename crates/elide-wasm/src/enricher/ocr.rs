@@ -2,14 +2,15 @@
 //!
 //! `elide-image` ships the OCR contract but no engine; the browser supplies one.
 //! [`Enricher::ocr`](super::Enricher::ocr) takes an async JS callback
-//! `(image) => Promise<OcrRegion[]>` and wraps it in a [`OcrBackend`] behind an
+//! `(image) => Promise<OcrRegion[]>` and wraps it in an OCR backend behind an
 //! [`OcrEnricher`], so a text recognizer can scan the recognized image text and
 //! the matched regions are redacted from the pixels.
 //!
 //! The callback returns a flat list of positioned text regions — a word, or a
 //! coarser run — each with its own box, the shape browser OCR engines emit.
 
-use elide::enrichment::ocr::{OcrBackend, OcrEnricher, OcrRequest, OcrResponse};
+use elide::backend::Backend;
+use elide::enrichment::ocr::{OcrEnricher, OcrRequest, OcrResponse};
 use elide::entity::audit::ModelEvent;
 use elide::modality::image::{ImageLocation, LayoutRegion};
 use elide::primitive::{BoundingBox, Confidence, Dimensions, Point};
@@ -55,11 +56,11 @@ impl OcrRegion {
     }
 }
 
-/// An [`OcrBackend`] that defers recognition to a JavaScript callback.
+/// An OCR backend that defers recognition to a JavaScript callback.
 ///
 /// The callback is a `!Send` [`Function`]; [`SendWrapper`] makes it satisfy the
 /// `Send + Sync` bound the enricher requires — sound on single-threaded wasm.
-struct JsCallbackBackend {
+pub(super) struct JsCallbackBackend {
     callback: SendWrapper<Function>,
 }
 
@@ -83,7 +84,10 @@ impl JsCallbackBackend {
 }
 
 #[async_trait::async_trait]
-impl OcrBackend for JsCallbackBackend {
+impl Backend for JsCallbackBackend {
+    type Request<'a> = OcrRequest<'a>;
+    type Response = OcrResponse;
+
     fn provenance(&self) -> ModelEvent {
         ModelEvent {
             name: "js-callback-ocr".into(),
@@ -91,7 +95,7 @@ impl OcrBackend for JsCallbackBackend {
         }
     }
 
-    async fn recognize(&self, request: OcrRequest<'_>) -> Result<OcrResponse> {
+    async fn call(&self, request: OcrRequest<'_>) -> Result<OcrResponse> {
         let value = self
             .call_js(request.image.to_vec())
             .await
@@ -111,11 +115,6 @@ impl OcrBackend for JsCallbackBackend {
 }
 
 /// Build an OCR enricher whose recognition is the JavaScript `callback`.
-pub(super) fn build_ocr(
-    callback: Function,
-) -> std::result::Result<OcrEnricher, crate::error::ElideError> {
-    Ok(OcrEnricher::builder()
-        .with_name("js-callback-ocr")
-        .with_backend(JsCallbackBackend::new(callback))
-        .build()?)
+pub(super) fn build_ocr(callback: Function) -> OcrEnricher<JsCallbackBackend> {
+    OcrEnricher::new(JsCallbackBackend::new(callback)).with_name("js-callback-ocr")
 }

@@ -1,10 +1,11 @@
-//! [`MockBackend`]: stand-in [`NerBackend`] for tests, examples, and as a
+//! [`MockBackend`]: stand-in NER backend for tests, examples, and as a
 //! default before a real backend is configured.
 
 use elide_core::Result;
+use elide_core::backend::Backend;
 use elide_core::entity::audit::ModelEvent;
 
-use super::{NerBackend, NerRequest, NerResponse};
+use super::{NerRequest, NerResponse};
 
 /// Mock NER backend: every call returns an empty response.
 ///
@@ -15,7 +16,10 @@ use super::{NerBackend, NerRequest, NerResponse};
 pub struct MockBackend;
 
 #[async_trait::async_trait]
-impl NerBackend for MockBackend {
+impl Backend for MockBackend {
+    type Request<'a> = NerRequest<'a>;
+    type Response = NerResponse;
+
     fn provenance(&self) -> ModelEvent {
         ModelEvent {
             name: "mock-ner".into(),
@@ -23,7 +27,7 @@ impl NerBackend for MockBackend {
         }
     }
 
-    async fn recognize(&self, _request: NerRequest<'_>) -> Result<NerResponse> {
+    async fn call(&self, _request: NerRequest<'_>) -> Result<NerResponse> {
         Ok(NerResponse::default())
     }
 }

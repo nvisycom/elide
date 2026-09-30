@@ -1,22 +1,18 @@
-//! [`SttRequest`]: one per-call speech-to-text request handed to an
-//! [`SttBackend`].
-//!
-//! [`SttBackend`]: super::SttBackend
+//! [`SttRequest`]: one per-call speech-to-text request handed to an STT backend.
 
+use elide_core::backend::BackendRequest;
 use elide_core::primitive::LanguageTag;
 use uuid::Uuid;
 
 use crate::modality::AudioFormat;
 
-/// One per-call STT request handed to an [`SttBackend`].
+/// One per-call STT request handed to an STT backend.
 ///
 /// Bundles the audio bytes with the format the caller knows from ingestion,
 /// plus optional language and correlation hints. Borrowed (`SttRequest<'a>`) so
 /// call sites that already own the underlying values hand them through without
 /// cloning. Constructed as a struct literal — the format is always known by the
 /// time STT runs.
-///
-/// [`SttBackend`]: super::SttBackend
 #[derive(Debug, Clone)]
 pub struct SttRequest<'a> {
     /// Raw audio bytes (WAV, MP3, FLAC, …). The backend honours whatever
@@ -33,3 +29,5 @@ pub struct SttRequest<'a> {
     /// Per-call correlation id propagated to remote backends for tracing.
     pub correlation_id: Option<Uuid>,
 }
+
+impl BackendRequest for SttRequest<'_> {}

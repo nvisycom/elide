@@ -42,9 +42,9 @@ enum Kind {
     /// Language detection (built-in), applicable to every text-shaped modality.
     Language(LinguaEnricher),
     /// Image OCR (JS callback), applicable only to the image modality.
-    Ocr(OcrEnricher),
+    Ocr(OcrEnricher<self::ocr::JsCallbackBackend>),
     /// Audio STT (JS callback), applicable only to the audio modality.
-    Stt(SttEnricher),
+    Stt(SttEnricher<self::stt::JsCallbackBackend>),
 }
 
 impl Kind {
@@ -93,13 +93,9 @@ impl Enricher {
     /// coordinates.
     /// It runs on the browser event loop; the enricher awaits it. The resulting
     /// [`Enricher`] applies only to the image modality.
-    ///
-    /// # Errors
-    ///
-    /// Propagates a build error from the enricher configuration.
     #[wasm_bindgen(js_name = ocr)]
-    pub fn ocr(callback: Function) -> Result<Enricher, ElideError> {
-        Ok(Self(Kind::Ocr(self::ocr::build_ocr(callback)?)))
+    pub fn ocr(callback: Function) -> Enricher {
+        Self(Kind::Ocr(self::ocr::build_ocr(callback)))
     }
 
     /// Build an STT enricher whose transcription is a JavaScript `callback`.
@@ -108,13 +104,9 @@ impl Enricher {
     /// `Segment` is `{ text, startMs, endMs }`. It runs on the browser event
     /// loop; the enricher awaits it. The resulting [`Enricher`] applies only to
     /// the audio modality.
-    ///
-    /// # Errors
-    ///
-    /// Propagates a build error from the enricher configuration.
     #[wasm_bindgen(js_name = stt)]
-    pub fn stt(callback: Function) -> Result<Enricher, ElideError> {
-        Ok(Self(Kind::Stt(self::stt::build_stt(callback)?)))
+    pub fn stt(callback: Function) -> Enricher {
+        Self(Kind::Stt(self::stt::build_stt(callback)))
     }
 }
 

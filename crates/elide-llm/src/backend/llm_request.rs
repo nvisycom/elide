@@ -1,17 +1,15 @@
-//! [`LlmRequest`]: per-call input to an [`LlmBackend`].
-//!
-//! [`LlmBackend`]: super::LlmBackend
+//! [`LlmRequest`]: per-call input to an LLM backend.
 
+use elide_core::backend::BackendRequest;
 use elide_core::modality::Modality;
 
-/// One per-call LLM request handed to an [`LlmBackend<M>`], generic over
+/// One per-call LLM request handed to an LLM backend, generic over
 /// the modality.
 ///
 /// Carries the fully-rendered prompt wording (produced by the recognizer's
 /// [`Prompt`]) plus the source payload, so the backend can assemble the
 /// provider message, folding in the image bytes for a multimodal call.
 ///
-/// [`LlmBackend<M>`]: super::LlmBackend
 /// [`Prompt`]: crate::prompt::Prompt
 #[derive(Debug, Clone, Copy)]
 pub struct LlmRequest<'a, M: Modality> {
@@ -29,3 +27,5 @@ impl<'a, M: Modality> LlmRequest<'a, M> {
         Self { prompt, data }
     }
 }
+
+impl<M: crate::modality::LlmModality> BackendRequest for LlmRequest<'_, M> {}

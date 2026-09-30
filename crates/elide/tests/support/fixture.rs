@@ -196,13 +196,8 @@ impl Fixture {
 
         // The mock STT backend transcribes nothing, so recognition finds
         // nothing; the anonymizer would silence/erase any time spans it did.
-        let analyzer = Analyzer::new().with_enricher(
-            SttEnricher::builder()
-                .with_name("mock-stt")
-                .with_backend(MockBackend::new())
-                .build()
-                .expect("stt enricher builds"),
-        );
+        let analyzer = Analyzer::new()
+            .with_enricher(SttEnricher::new(MockBackend::new()).with_name("mock-stt"));
         let anonymizer = Anonymizer::new()
             .with(Rule::label(builtins::PHONE_NUMBER.to_ref(), Silence))
             .with(Rule::fallback(Erase));
@@ -260,13 +255,8 @@ impl Fixture {
 
         // The mock OCR backend recognizes nothing, so recognition finds
         // nothing; the anonymizer would clear any regions it did.
-        let analyzer = Analyzer::new().with_enricher(
-            OcrEnricher::builder()
-                .with_name("mock-ocr")
-                .with_backend(MockBackend::new())
-                .build()
-                .expect("ocr enricher builds"),
-        );
+        let analyzer = Analyzer::new()
+            .with_enricher(OcrEnricher::new(MockBackend::new()).with_name("mock-ocr"));
         let anonymizer = Anonymizer::new().with(Rule::fallback(Erase));
 
         // A built-in catalog so the analyzer runs the enricher (the mock OCR

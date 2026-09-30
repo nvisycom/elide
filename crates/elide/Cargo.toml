@@ -158,6 +158,17 @@ codec-pdf-render = ["codec-pdf", "elide-format/pdf-render"]
 ## Ship the no-op mock backends in the re-exported recognizer crates.
 mocks = ["elide-ner?/mocks", "elide-llm?/mocks", "elide-audio?/mocks", "elide-image?/mocks"]
 
+## Backend usage accounting: the `Metered` wrapper, the `Usage` record, and the
+## `UsageCollector`, re-exported from `elide-metrics`. Off by default — a pipeline
+## that does not meter its backends compiles none of it.
+usage = ["dep:elide-metrics"]
+## The `metrics`-facade usage sink (`MetricsSink`): route backend usage to a
+## Prometheus/StatsD recorder. Implies `usage`.
+metrics = ["usage", "elide-metrics/metrics"]
+## The `tracing` usage sink (`TracingSink`): emit backend usage as tracing events.
+## Implies `usage`.
+metrics-tracing = ["usage", "elide-metrics/tracing"]
+
 ## The one-way `Sha2Hash` operator (SHA-256 / SHA-512).
 operator-sha2 = ["elide-operator/sha2"]
 ## The keyed `HmacHash` operator (HMAC-SHA-256 / HMAC-SHA-512).
@@ -186,6 +197,7 @@ elide-pdf = { workspace = true, features = [], optional = true }
 elide-codec = { workspace = true, features = [], optional = true }
 elide-format = { workspace = true, features = [], optional = true }
 elide-engine = { workspace = true, features = [], optional = true }
+elide-metrics = { workspace = true, features = [], optional = true }
 elide-operator = { workspace = true, features = [] }
 elide-redaction = { workspace = true, features = [] }
 

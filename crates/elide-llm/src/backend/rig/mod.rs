@@ -1,20 +1,22 @@
-//! [`RigBackend`]: rig-backed [`LlmBackend`].
+//! [`RigBackend`]: rig-backed LLM backend.
 //!
 //! Wraps one of the four supported rig providers (OpenAI, Anthropic,
-//! Gemini, Ollama) behind the modality-agnostic [`LlmBackend`] surface.
-//!
-//! [`LlmBackend`]: crate::backend::LlmBackend
+//! Gemini, Ollama) behind the modality-agnostic LLM backend surface.
 
 mod config;
 mod dispatch;
 
+use std::marker::PhantomData;
+
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use elide_core::Result;
+use elide_core::backend::{Backend, TokenCounts};
+use elide_core::entity::audit::ModelEvent;
 use elide_core::modality::text::Text;
 use elide_image::modality::{Image, ImageData, ImageFormat};
 use rig::client::CompletionClient;
-use rig::completion::Message;
+use rig::completion::{Message, Usage};
 use rig::extractor::ExtractorBuilder;
 use rig::message::{ImageMediaType, UserContent};
 use schemars::JsonSchema;
@@ -23,7 +25,7 @@ use serde::{Deserialize, Serialize};
 pub use self::config::RigConfig;
 use self::dispatch::{RigModel, dispatch};
 use super::http::{HttpConfig, build_http_client};
-use super::{LlmBackend, LlmRequest, LlmResponse};
+use super::{LlmRequest, LlmResponse};
 use crate::error::Error;
 use crate::provider::Provider;
 
@@ -37,13 +39,14 @@ const TARGET: &str = "elide_llm::backend::rig";
 ///
 /// [`new`]: Self::new
 /// [`new_with_config`]: Self::new_with_config
-pub struct RigBackend {
+pub struct RigBackend<M> {
     model: RigModel,
     config: RigConfig,
     model_name: String,
+    _modality: PhantomData<fn() -> M>,
 }
 
-impl RigBackend {
+impl<M> RigBackend<M> {
     /// Build a backend for `provider` with the default [`RigConfig`].
     ///
     /// # Errors
@@ -97,6 +100,7 @@ impl RigBackend {
             model,
             config,
             model_name,
+            _modality: PhantomData,
         })
     }
 
@@ -104,8 +108,12 @@ impl RigBackend {
     /// [`Extractor`], built from this backend's provider model. The extractor
     /// constrains the model to `T`'s schema and parses the reply internally.
     ///
+    /// Returns the batch alongside the provider-reported [`TokenCounts`] for the
+    /// call (accumulated across rig's internal retries), so a `Metered` wrapper
+    /// can bill it.
+    ///
     /// [`Extractor`]: rig::extractor::Extractor
-    async fn extract_batch<T>(&self, message: Message) -> Result<T, Error>
+    async fn extract_batch<T>(&self, message: Message) -> Result<(T, TokenCounts), Error>
     where
         T: JsonSchema + for<'a> Deserialize<'a> + Serialize + Send + Sync + 'static,
     {
@@ -121,35 +129,64 @@ impl RigBackend {
             if let Some(p) = preamble.as_deref() {
                 builder = builder.preamble(p);
             }
-            Ok(builder.build().extract(message).await?)
+            let response = builder.build().extract_with_usage(message).await?;
+            Ok((response.data, token_counts(&response.usage)))
         })
     }
 }
 
-#[async_trait::async_trait]
-impl LlmBackend<Text> for RigBackend {
-    #[tracing::instrument(target = TARGET, skip_all, fields(model = %self.model_name))]
-    async fn extract(&self, request: LlmRequest<'_, Text>) -> Result<LlmResponse<Text>> {
-        let candidates = self.extract_batch(Message::user(request.prompt)).await?;
-        Ok(LlmResponse::new(candidates))
-    }
-
-    fn model(&self) -> &str {
-        &self.model_name
+/// Map rig's completion [`Usage`] onto our [`TokenCounts`].
+///
+/// Rig reports whole `u64` counts (zero when a provider omits a field); we carry
+/// each as `Some`, so an unreported meter still records as a definite zero rather
+/// than silently dropping. `cached_input_tokens` is part of, not additional to,
+/// the input count, matching [`TokenCounts::cached`].
+fn token_counts(usage: &Usage) -> TokenCounts {
+    TokenCounts {
+        input: Some(usage.input_tokens),
+        output: Some(usage.output_tokens),
+        total: Some(usage.total_tokens),
+        cached: Some(usage.cached_input_tokens),
+        reasoning: None,
     }
 }
 
 #[async_trait::async_trait]
-impl LlmBackend<Image> for RigBackend {
-    #[tracing::instrument(target = TARGET, skip_all, fields(model = %self.model_name))]
-    async fn extract(&self, request: LlmRequest<'_, Image>) -> Result<LlmResponse<Image>> {
-        let message = image_message(request.prompt, request.data)?;
-        let candidates = self.extract_batch(message).await?;
-        Ok(LlmResponse::new(candidates))
+impl Backend for RigBackend<Text> {
+    type Request<'a> = LlmRequest<'a, Text>;
+    type Response = LlmResponse<Text>;
+
+    fn provenance(&self) -> ModelEvent {
+        ModelEvent {
+            name: self.model_name.clone().into(),
+            ..ModelEvent::default()
+        }
     }
 
-    fn model(&self) -> &str {
-        &self.model_name
+    #[tracing::instrument(target = TARGET, skip_all, fields(model = %self.model_name))]
+    async fn call(&self, request: LlmRequest<'_, Text>) -> Result<LlmResponse<Text>> {
+        let (candidates, tokens) = self.extract_batch(Message::user(request.prompt)).await?;
+        Ok(LlmResponse::new(candidates).with_tokens(tokens))
+    }
+}
+
+#[async_trait::async_trait]
+impl Backend for RigBackend<Image> {
+    type Request<'a> = LlmRequest<'a, Image>;
+    type Response = LlmResponse<Image>;
+
+    fn provenance(&self) -> ModelEvent {
+        ModelEvent {
+            name: self.model_name.clone().into(),
+            ..ModelEvent::default()
+        }
+    }
+
+    #[tracing::instrument(target = TARGET, skip_all, fields(model = %self.model_name))]
+    async fn call(&self, request: LlmRequest<'_, Image>) -> Result<LlmResponse<Image>> {
+        let message = image_message(request.prompt, request.data)?;
+        let (candidates, tokens) = self.extract_batch(message).await?;
+        Ok(LlmResponse::new(candidates).with_tokens(tokens))
     }
 }
 
