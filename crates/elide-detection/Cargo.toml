@@ -46,3 +46,11 @@ tracing = { workspace = true, features = [] }
 
 # Templating & schema
 schemars = { workspace = true, features = [], optional = true }
+
+[dev-dependencies]
+# Internal crates
+elide-core = { workspace = true, features = ["mocks"] }
+
+# Async runtime & parallelism
+async-trait = { workspace = true, features = [] }
+tokio = { workspace = true, features = ["macros", "rt"] }
