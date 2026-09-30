@@ -12,17 +12,15 @@ use crate::exif::ExifPolicy;
 use crate::modality::{Image, ImageData, ImageLocation};
 use crate::primitive::{BoundingBox, Dimensions, Point};
 
-/// The pixel stream part: reads the whole frame as one chunk, redacts regions in
+/// The pixel stream part: yields the whole frame as one chunk, redacts regions in
 /// place on the shared [`ImageState`], and re-encodes just the pixels (its
 /// metadata is handled by the `#exif` blob and the recombiner).
 pub(super) struct PixelStream {
     pub(super) state: ImageState,
     pub(super) format_id: FormatId,
     pub(super) policy: ExifPolicy,
-    pub(super) yielded: bool,
 }
 
-#[async_trait::async_trait]
 impl Stream<Image> for PixelStream {
     fn format(&self) -> FormatId {
         self.format_id.clone()
@@ -32,22 +30,18 @@ impl Stream<Image> for PixelStream {
         Ok(ContentData::new(self.state.encode(self.policy)?))
     }
 
-    async fn read_next(&mut self) -> Result<Option<Chunk<Image>>> {
-        if self.yielded {
-            return Ok(None);
-        }
+    fn chunks(&self) -> Result<Vec<Chunk<Image>>> {
         let dims = self.state.dimensions();
         let bbox = BoundingBox::from_origin(
             Point::new(0.0, 0.0),
             Dimensions::new(dims.width as f64, dims.height as f64),
         );
         let data = self.state.image_data(self.policy)?;
-        self.yielded = true;
-        Ok(Some(Chunk {
+        Ok(vec![Chunk {
             location: ImageLocation::new(bbox),
             data,
             hints: Vec::new(),
-        }))
+        }])
     }
 }
 

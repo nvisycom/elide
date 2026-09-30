@@ -45,10 +45,8 @@ pub fn format() -> Format {
 pub(crate) struct TxtHandler {
     text: String,
     blocks: Vec<Range<usize>>,
-    cursor: usize,
 }
 
-#[async_trait::async_trait]
 impl Stream<Text> for TxtHandler {
     fn format(&self) -> FormatId {
         FORMAT_ID.clone()
@@ -58,16 +56,16 @@ impl Stream<Text> for TxtHandler {
         Ok(ContentData::from_text(self.text.clone()))
     }
 
-    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>> {
-        let Some(range) = self.blocks.get(self.cursor).cloned() else {
-            return Ok(None);
-        };
-        self.cursor += 1;
-        Ok(Some(Chunk {
-            location: TextLocation::new(range.start, range.end),
-            data: TextData::new(self.text[range].to_string()),
-            hints: Vec::new(),
-        }))
+    fn chunks(&self) -> Result<Vec<Chunk<Text>>> {
+        Ok(self
+            .blocks
+            .iter()
+            .map(|range| Chunk {
+                location: TextLocation::new(range.start, range.end),
+                data: TextData::new(self.text[range.clone()].to_string()),
+                hints: Vec::new(),
+            })
+            .collect())
     }
 
     fn lift(&self, chunk: &Chunk<Text>, local: TextLocation) -> Option<TextLocation> {
@@ -113,11 +111,7 @@ impl TxtHandler {
     /// Create a new handler over the document's raw text.
     pub fn new(text: String) -> Self {
         let blocks = paragraph_blocks(&text);
-        Self {
-            text,
-            blocks,
-            cursor: 0,
-        }
+        Self { text, blocks }
     }
 
     /// The document text. Test-only inspection helper.
@@ -196,19 +190,21 @@ mod tests {
         TxtHandler::new(text.to_string())
     }
 
-    async fn chunks(text: &str) -> Vec<(usize, usize, String)> {
-        let mut h = handler(text);
-        let mut out = Vec::new();
-        while let Some(c) = h.read_next().await.unwrap() {
-            let range = c.location.range().unwrap();
-            out.push((range.start, range.end, c.data.as_str().to_string()));
-        }
-        out
+    fn collect_chunks(text: &str) -> Vec<(usize, usize, String)> {
+        handler(text)
+            .chunks()
+            .unwrap()
+            .into_iter()
+            .map(|c| {
+                let range = c.location.range().unwrap();
+                (range.start, range.end, c.data.as_str().to_string())
+            })
+            .collect()
     }
 
-    #[tokio::test]
-    async fn one_chunk_per_paragraph_block() {
-        let cs = chunks("para1 line1\npara1 line2\n\npara2\n").await;
+    #[test]
+    fn one_chunk_per_paragraph_block() {
+        let cs = collect_chunks("para1 line1\npara1 line2\n\npara2\n");
         assert_eq!(
             cs,
             vec![
@@ -218,27 +214,27 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn a_multi_line_block_is_a_single_chunk() {
+    #[test]
+    fn a_multi_line_block_is_a_single_chunk() {
         // The PEM block spans three lines but is one chunk, so the multi-line
         // private-key pattern can match it.
         let src = "-----BEGIN KEY-----\nbody\n-----END KEY-----\n";
-        let cs = chunks(src).await;
+        let cs = collect_chunks(src);
         assert_eq!(cs.len(), 1);
         assert_eq!(cs[0].2, "-----BEGIN KEY-----\nbody\n-----END KEY-----");
     }
 
-    #[tokio::test]
-    async fn blank_and_whitespace_only_lines_are_skipped() {
-        let cs = chunks("\n\nleading blanks\nsecond\n   \n").await;
+    #[test]
+    fn blank_and_whitespace_only_lines_are_skipped() {
+        let cs = collect_chunks("\n\nleading blanks\nsecond\n   \n");
         assert_eq!(cs, vec![(2, 23, "leading blanks\nsecond".to_string())]);
     }
 
-    #[tokio::test]
-    async fn crlf_line_endings_are_not_carried_into_a_block() {
+    #[test]
+    fn crlf_line_endings_are_not_carried_into_a_block() {
         // A CRLF terminator is trimmed whole, no stray `\r` at the block end ,
         // while an internal CRLF between the block's lines is kept.
-        let cs = chunks("first\r\nsecond\r\n\r\nthird\r\n").await;
+        let cs = collect_chunks("first\r\nsecond\r\n\r\nthird\r\n");
         assert_eq!(
             cs,
             vec![
@@ -248,16 +244,16 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn no_trailing_newline() {
-        let cs = chunks("no newline").await;
+    #[test]
+    fn no_trailing_newline() {
+        let cs = collect_chunks("no newline");
         assert_eq!(cs, vec![(0, 10, "no newline".to_string())]);
     }
 
     #[tokio::test]
     async fn lift_is_identity_across_a_line_break() {
-        let mut h = handler("hello\nworld\n");
-        let chunk = h.read_next().await.unwrap().unwrap();
+        let h = handler("hello\nworld\n");
+        let chunk = h.chunks().unwrap().into_iter().next().unwrap();
         // A span crossing the internal line break lifts unchanged, this is
         // what makes a multi-line pattern redactable.
         let lifted = h.lift(&chunk, TextLocation::new(3, 8)).expect("in bounds");

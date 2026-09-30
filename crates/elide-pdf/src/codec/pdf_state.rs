@@ -17,7 +17,7 @@ use crate::redact::PageReplacement;
 /// The document's editable redaction state, behind the shared [`PdfState`] lock.
 #[derive(Debug, Default)]
 pub(super) struct PdfInner {
-    /// Extracted pages, in page order, with stream offsets for `read_next`.
+    /// Extracted pages, in page order, with stream offsets for `chunks`.
     pub(super) pages: Vec<PdfPage>,
     /// Recorded glyph-deletion detections (per-page character spans), applied at
     /// encode in [`RedactMode::GlyphDelete`].
@@ -79,6 +79,11 @@ impl PdfState {
     /// The page at `index` in page order, cloned.
     pub(super) fn page(&self, index: usize) -> Option<PdfPage> {
         self.0.lock().unwrap().pages.get(index).cloned()
+    }
+
+    /// The number of extracted pages.
+    pub(super) fn page_count(&self) -> usize {
+        self.0.lock().unwrap().pages.len()
     }
 
     /// The page whose stream range contains `offset`, and the offset within it.

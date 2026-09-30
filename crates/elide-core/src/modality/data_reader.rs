@@ -35,34 +35,36 @@ pub trait DataReader<M: Modality>: Send + Sync {
     async fn read_at(&self, location: &M::Location) -> Result<Option<M::Data>>;
 }
 
-/// Streams a source as [`Chunk`]s and lifts locations to source coordinates.
+/// Decodes a source into [`Chunk`]s and lifts locations to source coordinates.
 ///
-/// The sequential counterpart to [`DataReader`]: where `read_at` is
-/// random access (give it a location, get that slice back), a
-/// `StreamDataReader` walks the whole source front to back, yielding one
-/// decoded [`Chunk`] at a time via [`read_next`]. The analyzer drives it
-/// to feed recognizers chunk by chunk.
+/// The whole-source counterpart to [`DataReader`]: where `read_at` is random
+/// access (give it a location, get that slice back), [`chunks`] hands back every
+/// decoded [`Chunk`] the source holds, front to back, in one call. The analyzer
+/// feeds recognizers chunk by chunk from that.
 ///
-/// Recognizers see a chunk's decoded payload and emit entities whose
-/// locations address *that chunk's* coordinate system. [`lift`] maps such
-/// an entity back to a source-coordinate one, so everything downstream
-/// (deduplication, anonymization, writing) speaks the source's own
-/// coordinates. The default is the identity: a flat in-memory source
-/// whose single chunk *is* the source needs no remapping. Sources whose
-/// decoded chunks diverge from their bytes (escaped text, structured
-/// documents) override it.
+/// A source's chunks are already materialized when it is decoded, so [`chunks`]
+/// is a plain `&self` read of an in-memory collection, not a lazy cursor:
+/// borrowing it does not lock the source, so many sources' chunks can be gathered
+/// together (the batched analysis path relies on this).
 ///
-/// The source owns the streaming cursor: concurrent iteration of the
-/// same source is not supported (only one `&mut self`).
+/// Recognizers see a chunk's decoded payload and emit entities whose locations
+/// address *that chunk's* coordinate system. [`lift`] maps such an entity back to
+/// a source-coordinate one, so everything downstream (deduplication,
+/// anonymization, writing) speaks the source's own coordinates. The default is
+/// the identity: a flat in-memory source whose single chunk *is* the source needs
+/// no remapping. Sources whose decoded chunks diverge from their bytes (escaped
+/// text, structured documents) override it.
 ///
 /// [`Chunk`]: super::Chunk
-/// [`read_next`]: StreamDataReader::read_next
+/// [`chunks`]: StreamDataReader::chunks
 /// [`lift`]: StreamDataReader::lift
-#[async_trait::async_trait]
 pub trait StreamDataReader<M: Modality>: Send {
-    /// Advance the cursor and yield the next [`Chunk`], or `Ok(None)` at
-    /// end-of-stream. Propagates the source's decode error.
-    async fn read_next(&mut self) -> Result<Option<Chunk<M>>>;
+    /// Every decoded [`Chunk`] the source holds, front to back.
+    ///
+    /// # Errors
+    ///
+    /// Propagates the source's decode error.
+    fn chunks(&self) -> Result<Vec<Chunk<M>>>;
 
     /// Map `entity`, whose location addresses `chunk`'s decoded payload,
     /// to a source-coordinate entity.

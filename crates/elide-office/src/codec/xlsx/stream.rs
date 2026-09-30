@@ -18,10 +18,8 @@ use super::state::XlsxState;
 /// re-packs from it.
 pub(super) struct XlsxStream {
     pub(super) state: XlsxState,
-    pub(super) cursor: usize,
 }
 
-#[async_trait::async_trait]
 impl Stream<Tabular> for XlsxStream {
     fn format(&self) -> FormatId {
         FORMAT_ID.clone()
@@ -33,33 +31,35 @@ impl Stream<Tabular> for XlsxStream {
         Ok(ContentData::new(Bytes::new()))
     }
 
-    async fn read_next(&mut self) -> Result<Option<Chunk<Tabular>>> {
-        let Some(cell) = self.state.cell(self.cursor) else {
-            return Ok(None);
-        };
-        self.cursor += 1;
-        let mut location =
-            TabularLocation::new(cell.row, cell.column).with_sheet_name(cell.sheet.clone());
-        // Attach the column's header text as context, so a context-gated pattern
-        // (a payment card wants a nearby `card`/`payment` word) can reach its
-        // threshold on a value that carries no such cue on its own. A data cell
-        // takes its header from row 0 of the same sheet and column; a header cell
-        // is its own context and is not re-hinted with itself.
-        let mut hints = Vec::new();
-        if cell.row > 0
-            && let Some(header) = self.state.column_header(&cell.sheet, cell.column)
-        {
-            location = location.clone().with_column_name(header.clone());
-            let header_location = TabularLocation::new(0, cell.column)
-                .with_sheet_name(cell.sheet.clone())
-                .with_column_name(header.clone());
-            hints.push(ResolvedHint::new(header_location, TextData::new(header)));
-        }
-        Ok(Some(Chunk {
-            location,
-            data: TextData::new(cell.text),
-            hints,
-        }))
+    fn chunks(&self) -> Result<Vec<Chunk<Tabular>>> {
+        Ok((0..self.state.cell_count())
+            .filter_map(|i| self.state.cell(i))
+            .map(|cell| {
+                let mut location =
+                    TabularLocation::new(cell.row, cell.column).with_sheet_name(cell.sheet.clone());
+                // Attach the column's header text as context, so a context-gated
+                // pattern (a payment card wants a nearby `card`/`payment` word) can
+                // reach its threshold on a value that carries no such cue on its
+                // own. A data cell takes its header from row 0 of the same sheet
+                // and column; a header cell is its own context and is not re-hinted
+                // with itself.
+                let mut hints = Vec::new();
+                if cell.row > 0
+                    && let Some(header) = self.state.column_header(&cell.sheet, cell.column)
+                {
+                    location = location.clone().with_column_name(header.clone());
+                    let header_location = TabularLocation::new(0, cell.column)
+                        .with_sheet_name(cell.sheet.clone())
+                        .with_column_name(header.clone());
+                    hints.push(ResolvedHint::new(header_location, TextData::new(header)));
+                }
+                Chunk {
+                    location,
+                    data: TextData::new(cell.text),
+                    hints,
+                }
+            })
+            .collect())
     }
 
     fn lift(&self, chunk: &Chunk<Tabular>, local: TabularLocation) -> Option<TabularLocation> {

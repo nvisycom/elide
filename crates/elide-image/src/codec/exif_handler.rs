@@ -31,31 +31,25 @@ pub(crate) struct ExifHandler {
     /// The decoded image, holding the source container the EXIF lives in.
     buffer: ImageBuffer,
     /// Every privacy-relevant field, read once at decode and kept in document
-    /// order so [`read_at`](DataReader::read_at) can look one up without
-    /// re-parsing the image.
+    /// order: the chunks a caller sees and the set
+    /// [`read_at`](DataReader::read_at) looks one up in without re-parsing.
     fields: Vec<MetadataData>,
-    /// The fields yet to stream, drained by `read_next` (reversed for pop).
-    pending: Vec<MetadataData>,
     /// Keys picked for removal, applied on `encode`.
     removed: Vec<String>,
 }
 
 impl ExifHandler {
-    /// Wrap a decoded image, priming its fields for streaming.
+    /// Wrap a decoded image, reading its fields once.
     pub(crate) fn new(buffer: ImageBuffer) -> Result<Self> {
         let fields = buffer.metadata_fields()?;
-        let mut pending = fields.clone();
-        pending.reverse(); // popped, so reverse for first-field-first order
         Ok(Self {
             buffer,
             fields,
-            pending,
             removed: Vec::new(),
         })
     }
 }
 
-#[::async_trait::async_trait]
 impl Stream<Metadata> for ExifHandler {
     fn format(&self) -> FormatId {
         FORMAT_ID.clone()
@@ -74,12 +68,15 @@ impl Stream<Metadata> for ExifHandler {
         Ok(ContentData::new(self.buffer.strip_metadata_keys(&keys)?))
     }
 
-    async fn read_next(&mut self) -> Result<Option<Chunk<Metadata>>> {
-        let Some(field) = self.pending.pop() else {
-            return Ok(None);
-        };
-        let location = MetadataLocation::new(field.key.clone());
-        Ok(Some(Chunk::new(location, field)))
+    fn chunks(&self) -> Result<Vec<Chunk<Metadata>>> {
+        Ok(self
+            .fields
+            .iter()
+            .map(|field| {
+                let location = MetadataLocation::new(field.key.clone());
+                Chunk::new(location, field.clone())
+            })
+            .collect())
     }
 }
 

@@ -27,11 +27,11 @@ mod tests {
     async fn stream_reports_one_second() {
         let clip = AudioBuffer::open(&fixtures::wav_ramp(1), crate::modality::AudioFormat::Wav)
             .expect("open");
-        let mut h = WavHandler::new(clip);
-        let chunk = h.read_next().await.unwrap().expect("one chunk");
-        assert_eq!(chunk.location.span.start_millis(), 0);
-        assert_eq!(chunk.location.span.end_millis(), 1_000);
-        assert!(h.read_next().await.unwrap().is_none());
+        let h = WavHandler::new(clip);
+        let chunks = h.chunks().unwrap();
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].location.span.start_millis(), 0);
+        assert_eq!(chunks[0].location.span.end_millis(), 1_000);
     }
 
     /// The WAV loader rejects content that opens as another format: MP3 bytes

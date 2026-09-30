@@ -38,7 +38,7 @@ async fn extracted_text(pdf: &[u8]) -> Result<String> {
     };
     let stream = handle.downcast_mut::<Text>().expect("pdf is text");
     let mut text = String::new();
-    while let Some(chunk) = stream.read_next().await? {
+    for chunk in stream.chunks()? {
         text.push_str(chunk.data.as_str());
     }
     Ok(text)

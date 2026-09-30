@@ -40,4 +40,29 @@ where
     /// [`Subject`]: crate::recognition::Subject
     /// [`RecognizerContext`]: crate::recognition::RecognizerContext
     async fn enrich(&self, subject: &mut Subject<M>, ctx: &RecognizerContext<'_, M>) -> Result<()>;
+
+    /// Enrich a batch of `subjects` in place, under one shared context.
+    ///
+    /// The default enriches each in turn via [`enrich`](Self::enrich). An enricher
+    /// backed by a provider that accepts several inputs in one round-trip (OCR,
+    /// speech-to-text) overrides this to build one request per subject and issue a
+    /// single [`Backend::call_batch`](crate::backend::Backend::call_batch), turning
+    /// N provider round-trips into one. It stays behavior-preserving: each subject
+    /// ends enriched exactly as a sequence of [`enrich`](Self::enrich) calls would
+    /// leave it, and an already-enriched subject is skipped.
+    ///
+    /// # Errors
+    ///
+    /// The first enrichment error; a batched enricher surfaces a whole-batch
+    /// failure the same way, aborting the call before recognition.
+    async fn enrich_batch(
+        &self,
+        subjects: &mut [Subject<M>],
+        ctx: &RecognizerContext<'_, M>,
+    ) -> Result<()> {
+        for subject in subjects {
+            self.enrich(subject, ctx).await?;
+        }
+        Ok(())
+    }
 }

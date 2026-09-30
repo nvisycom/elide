@@ -53,7 +53,6 @@ impl PdfDocumentLoader {
         let mut parts = Vec::with_capacity(blobs.len() + 1);
         let stream: Box<dyn Stream<Text>> = Box::new(PdfStream {
             state: state.clone(),
-            cursor: 0,
         });
         parts.push(DocumentPart::Stream {
             id: LocalId::new(BODY_PART_ID),

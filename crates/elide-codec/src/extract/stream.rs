@@ -15,19 +15,17 @@ use crate::{FormatId, Stream};
 
 /// The [`Stream`](crate::Stream) machinery over a shared extracted item stream.
 ///
-/// It streams each item's `value` as a [`Chunk`], reads/redacts by decoded
+/// It yields each item's `value` as a [`Chunk`], reads/redacts by decoded
 /// offset, and lifts a chunk-local finding to source coordinates via the
 /// [`SourceAddresser`]. The decoded items live in a [`SharedSplice`] the
 /// format's [`Recombine`](crate::Recombine) also holds, so a redaction here is
-/// visible when the document re-serialises. `cursor` is per-stream (not shared):
-/// it is this reader's position, not document state.
+/// visible when the document re-serialises.
 ///
 /// [`Chunk`]: elide_core::modality::Chunk
 pub struct ExtractStream<A> {
     format_id: FormatId,
     state: SharedSplice<A>,
     addresser: Arc<dyn SourceAddresser<A>>,
-    cursor: usize,
 }
 
 impl<A: Send + Sync + 'static> ExtractStream<A> {
@@ -41,7 +39,6 @@ impl<A: Send + Sync + 'static> ExtractStream<A> {
             format_id,
             state,
             addresser,
-            cursor: 0,
         }
     }
 
@@ -126,7 +123,6 @@ fn unresolvable_source(source: &[SourceRef]) -> Error {
     Error::new(ErrorKind::MalformedInput, msg)
 }
 
-#[async_trait::async_trait]
 impl<A: Send + Sync + 'static> Stream<Text> for ExtractStream<A> {
     fn format(&self) -> FormatId {
         self.format_id.clone()
@@ -143,23 +139,20 @@ impl<A: Send + Sync + 'static> Stream<Text> for ExtractStream<A> {
         Ok(ContentData::new(bytes::Bytes::new()))
     }
 
-    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>> {
+    fn chunks(&self) -> Result<Vec<Chunk<Text>>> {
         let state = self.state.lock();
-        if self.cursor >= state.items.len() {
-            return Ok(None);
-        }
-        let i = self.cursor;
-        let start = state.item_starts[i];
-        let end = state.item_starts[i + 1];
-        let item = &state.items[i];
-        let data = TextData::new(item.value.clone());
-        let hints = item.hints.clone();
-        self.cursor += 1;
-        Ok(Some(Chunk {
-            location: TextLocation::new(start, end),
-            data,
-            hints,
-        }))
+        Ok((0..state.items.len())
+            .map(|i| {
+                let start = state.item_starts[i];
+                let end = state.item_starts[i + 1];
+                let item = &state.items[i];
+                Chunk {
+                    location: TextLocation::new(start, end),
+                    data: TextData::new(item.value.clone()),
+                    hints: item.hints.clone(),
+                }
+            })
+            .collect())
     }
 
     fn lift(&self, chunk: &Chunk<Text>, local: TextLocation) -> Option<TextLocation> {

@@ -10,9 +10,9 @@ use crate::analysis::{ArtifactGroup, EntityGroup};
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// What a matched in-place analysis produced: the boxed entities and the boxed
-/// enrichment artifact (`Some` iff enriched); the whole result is `None` when
-/// the pipeline's modality did not match the stream. The result of
-/// [`ErasedPipeline::analyze_stream`].
+/// enrichment artifact (`Some` iff enriched). The batch path
+/// ([`ErasedPipeline::analyze_streams`]) returns one per handle, already known to
+/// match its modality.
 ///
-/// [`ErasedPipeline::analyze_stream`]: super::erased::ErasedPipeline::analyze_stream
-pub(crate) type InPlaceAnalysis = Option<(Box<dyn EntityGroup>, Option<Box<dyn ArtifactGroup>>)>;
+/// [`ErasedPipeline::analyze_streams`]: super::erased::ErasedPipeline::analyze_streams
+pub(crate) type PartAnalysis = (Box<dyn EntityGroup>, Option<Box<dyn ArtifactGroup>>);

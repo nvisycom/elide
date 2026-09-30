@@ -8,8 +8,8 @@
 //! - [`ExtractedItem<A>`]: one addressable unit (its `value` plus an
 //!   address `A`), parser-agnostic.
 //! - [`ExtractStream`]: the [`Stream`] machinery over a shared item stream:
-//!   cumulative offsets, `read_next`, random read, batch redact, and `lift`. It
-//!   never inspects the address, only streams and edits `value`.
+//!   cumulative offsets, `chunks`, random read, batch redact, and `lift`. It
+//!   never inspects the address, only yields and edits `value`.
 //! - [`SpliceState<A>`] / [`SharedSplice<A>`]: the decoded item stream, shared
 //!   behind a `Clone`-to-share handle between the [`ExtractStream`] (which
 //!   redacts it in place) and the format's [`Recombine`](crate::Recombine) (which

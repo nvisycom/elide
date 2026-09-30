@@ -381,96 +381,123 @@ impl Orchestrator {
         artifacts: &'a mut ArtifactSet,
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
+            // Split this level's parts in one pass: stream handles (kept as `&mut`
+            // to analyze in a batch below) and blob work (owned clones, so no
+            // borrow is held across the recursion). A part id is assigned to each
+            // in document order.
+            let mut streams: Vec<(PartId, &mut ErasedStream)> = Vec::new();
+            let mut blobs: Vec<(PartId, Bytes, String)> = Vec::new();
             let mut body_seen = false;
             for part in document.parts_mut() {
                 match part {
                     DocumentPart::Stream { id, handle } => {
-                        let part_id = body_part_id(prefix, id, &mut body_seen);
-                        self.analyze_stream_into(
-                            handle,
-                            part_id,
-                            prior,
-                            scope,
-                            annotations,
-                            report,
-                            artifacts,
-                        )
-                        .await?;
+                        streams.push((body_part_id(prefix, id, &mut body_seen), handle));
                     }
                     DocumentPart::Blob { id, bytes, hint } => {
-                        let part_id = prefix.child(id.clone());
-                        // Past the depth bound a nested document is a hard error,
-                        // never a silent drop.
-                        if depth + 1 > MAX_CONTAINER_DEPTH {
-                            return Err(Error::new(
-                                ErrorKind::MalformedInput,
-                                format!(
-                                    "container nesting exceeds the depth limit of \
-                                     {MAX_CONTAINER_DEPTH} at part `{part_id}`"
-                                ),
-                            ));
-                        }
-                        let Ok(mut child) = self.registry.decode(bytes.clone(), hint).await else {
-                            continue; // no codec for this blob, opaque, left as-is
-                        };
-                        self.analyze_parts(
-                            &mut child,
-                            &part_id,
-                            depth + 1,
-                            prior,
-                            scope,
-                            annotations,
-                            report,
-                            artifacts,
-                        )
-                        .await?;
+                        blobs.push((prefix.child(id.clone()), bytes.clone(), hint.clone()));
                     }
                 }
+            }
+
+            // Stream parts of the same modality are analyzed together, so an
+            // OCR/STT enricher issues one batched provider round-trip across all of
+            // them. Each pipeline claims the handles it matches; the rest fall to
+            // the next, and any left over have no covering pipeline (pass-through).
+            self.analyze_stream_batch(streams, prior, scope, annotations, report, artifacts)
+                .await?;
+
+            // Blobs are nested containers: recurse into each. Independent of the
+            // streams above and of each other, so order does not matter.
+            for (part_id, bytes, hint) in blobs {
+                // Past the depth bound a nested document is a hard error, never a
+                // silent drop.
+                if depth + 1 > MAX_CONTAINER_DEPTH {
+                    return Err(Error::new(
+                        ErrorKind::MalformedInput,
+                        format!(
+                            "container nesting exceeds the depth limit of \
+                             {MAX_CONTAINER_DEPTH} at part `{part_id}`"
+                        ),
+                    ));
+                }
+                let Ok(mut child) = self.registry.decode(bytes, &hint).await else {
+                    continue; // no codec for this blob, opaque, left as-is
+                };
+                self.analyze_parts(
+                    &mut child,
+                    &part_id,
+                    depth + 1,
+                    prior,
+                    scope,
+                    annotations,
+                    report,
+                    artifacts,
+                )
+                .await?;
             }
             Ok(())
         })
     }
 
-    /// Analyze one stream part in place, offering it to each pipeline until one
-    /// matches its modality, seeded with its prior enrichment. The findings and
-    /// any enrichment artifact are stored under `id`. A stream whose modality no
-    /// pipeline covers stores nothing (an intentional pass-through).
-    #[allow(clippy::too_many_arguments)]
-    async fn analyze_stream_into(
+    /// Analyze a level's stream parts, batching same-modality handles into one
+    /// provider round-trip and scattering each result back under its part id.
+    ///
+    /// Each pipeline claims the handles whose modality it covers
+    /// ([`ErasedPipeline::matches`]), analyzes them together
+    /// ([`analyze_streams`]), and the findings and any enrichment artifact are
+    /// stored under each part's id. Handles no pipeline covers store nothing (an
+    /// intentional pass-through).
+    ///
+    /// [`analyze_streams`]: ErasedPipeline::analyze_streams
+    async fn analyze_stream_batch(
         &self,
-        handle: &mut ErasedStream,
-        id: PartId,
+        mut streams: Vec<(PartId, &mut ErasedStream)>,
         prior: &ArtifactSet,
         scope: &Scope,
         annotations: &AnnotationSet,
         report: &mut Report,
         artifacts: &mut ArtifactSet,
     ) -> Result<()> {
-        let empty: Box<dyn ArtifactGroup> = Box::new(NoArtifact);
-        let seed = prior
-            .parts
-            .get(&id)
-            .map_or(empty.as_ref(), |e| e.artifact.as_ref());
+        let no_artifact: Box<dyn ArtifactGroup> = Box::new(NoArtifact);
         for (modality, pipeline) in &self.pipelines {
-            let Some(analyzed) = pipeline
-                .analyze_stream(handle, scope, annotations, seed)
-                .await?
-            else {
-                continue; // not this pipeline's modality
-            };
-            let (entities, artifact) = analyzed;
-            let name = entities.modality_name();
-            report.parts.insert(
-                id.clone(),
-                PartReport {
-                    modality: *modality,
-                    entities,
-                },
-            );
-            if let Some(artifact) = artifact {
-                artifacts.set_part(id.clone(), *modality, name, artifact);
+            // Claim this pipeline's parts, leaving the rest for the next pipeline.
+            let (mine, rest): (Vec<_>, Vec<_>) = streams
+                .into_iter()
+                .partition(|(_, handle)| pipeline.matches(handle));
+            streams = rest;
+            if mine.is_empty() {
+                continue;
             }
-            break;
+            let (ids, mut handles): (Vec<PartId>, Vec<&mut ErasedStream>) =
+                mine.into_iter().unzip();
+            // Each part's seed: its restored artifact from `prior`, else the
+            // first-pass `NoArtifact`.
+            let seeds: Vec<&dyn ArtifactGroup> = ids
+                .iter()
+                .map(|id| {
+                    prior
+                        .parts
+                        .get(id)
+                        .map_or(no_artifact.as_ref(), |e| e.artifact.as_ref())
+                })
+                .collect();
+            let analyses = pipeline
+                .analyze_streams(&mut handles, scope, annotations, &seeds)
+                .await?;
+            // Scatter: each analysis back to its part id, in the batch's order.
+            for (id, (entities, artifact)) in ids.into_iter().zip(analyses) {
+                let name = entities.modality_name();
+                report.parts.insert(
+                    id.clone(),
+                    PartReport {
+                        modality: *modality,
+                        entities,
+                    },
+                );
+                if let Some(artifact) = artifact {
+                    artifacts.set_part(id, *modality, name, artifact);
+                }
+            }
         }
         Ok(())
     }

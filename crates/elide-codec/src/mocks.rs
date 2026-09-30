@@ -105,16 +105,14 @@ fn unhex(s: &str) -> Bytes {
 /// The stream part id of a mock document's body.
 pub const MOCK_BODY_ID: &str = "body";
 
-/// The body [`Stream`] of a mock document: an editable text line, streamed as one
+/// The body [`Stream`] of a mock document: an editable text line, yielded as one
 /// chunk and redacted by byte range. Its [`encode`](Stream::encode) yields the
 /// body alone; [`MockRecombine`] re-attaches the blob parts.
 #[derive(Debug)]
 pub struct MockStream {
     body: String,
-    yielded: bool,
 }
 
-#[async_trait::async_trait]
 impl Stream<Text> for MockStream {
     fn format(&self) -> FormatId {
         MOCK_FORMAT_ID.clone()
@@ -125,16 +123,12 @@ impl Stream<Text> for MockStream {
         Ok(ContentData::from_text(self.body.clone()))
     }
 
-    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>> {
-        if self.yielded {
-            return Ok(None);
-        }
-        self.yielded = true;
-        Ok(Some(Chunk {
+    fn chunks(&self) -> Result<Vec<Chunk<Text>>> {
+        Ok(vec![Chunk {
             location: TextLocation::new(0, self.body.len()),
             data: TextData::new(self.body.clone()),
             hints: Vec::new(),
-        }))
+        }])
     }
 }
 
@@ -218,10 +212,7 @@ impl DocumentLoader for MockLoader {
             id: LocalId::new(MOCK_BODY_ID),
             handle: ErasedStream::new(
                 MOCK_FORMAT_ID.clone(),
-                Box::new(MockStream {
-                    body,
-                    yielded: false,
-                }) as Box<dyn Stream<Text>>,
+                Box::new(MockStream { body }) as Box<dyn Stream<Text>>,
             ),
         });
         for p in parts {

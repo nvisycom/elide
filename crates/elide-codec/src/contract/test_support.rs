@@ -15,7 +15,6 @@ use crate::content::ContentData;
 /// chunking).
 pub(crate) struct StrStream(pub String);
 
-#[async_trait::async_trait]
 impl Stream<Text> for StrStream {
     fn format(&self) -> FormatId {
         FormatId::new("elide.test.str")
@@ -25,8 +24,8 @@ impl Stream<Text> for StrStream {
         Ok(ContentData::from_text(self.0.clone()))
     }
 
-    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>> {
-        Ok(None)
+    fn chunks(&self) -> Result<Vec<Chunk<Text>>> {
+        Ok(Vec::new())
     }
 }
 

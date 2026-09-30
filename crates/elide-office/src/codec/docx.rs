@@ -40,6 +40,7 @@ mod tests {
     use elide_codec::content::ContentData;
     use elide_codec::extract::ExtractStream;
     use elide_codec::{Recombine, Stream};
+    use elide_core::modality::Chunk;
     use elide_core::modality::text::{SourceRef, Text, TextLocation};
 
     use super::*;
@@ -66,17 +67,14 @@ mod tests {
         decode_parts::<DocxCodec>(content).unwrap()
     }
 
-    /// Read chunks until the one whose decoded text equals `value`.
-    async fn chunk_for(
-        stream: &mut ExtractStream<OoxmlAddress>,
-        value: &str,
-    ) -> elide_core::modality::Chunk<Text> {
-        loop {
-            let chunk = stream.read_next().await.unwrap().unwrap();
-            if chunk.data.as_str() == value {
-                break chunk;
-            }
-        }
+    /// The first chunk whose decoded text equals `value`.
+    fn chunk_for(stream: &ExtractStream<OoxmlAddress>, value: &str) -> Chunk<Text> {
+        stream
+            .chunks()
+            .unwrap()
+            .into_iter()
+            .find(|chunk| chunk.data.as_str() == value)
+            .expect("chunk")
     }
 
     #[tokio::test]
@@ -85,8 +83,8 @@ mod tests {
         // over the whole decoded text must point back at the raw bytes including
         // the `&amp;`, one contiguous raw range, entity bytes and all.
         let raw = r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Alice &amp; Bob</w:t></w:r></w:p></w:body></w:document>"#;
-        let (mut stream, _recombine) = decode(docx_with_body("Alice &amp; Bob"));
-        let chunk = chunk_for(&mut stream, "Alice & Bob").await;
+        let (stream, _recombine) = decode(docx_with_body("Alice &amp; Bob"));
+        let chunk = chunk_for(&stream, "Alice & Bob");
 
         // Decoded "Alice & Bob" is 11 bytes; lift the whole value.
         let lifted = stream
@@ -108,8 +106,8 @@ mod tests {
         // Redacting only the decoded `&` (offset 6..7) must point at all 5 raw
         // bytes of `&amp;`, never an empty or partial range.
         let raw = r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Alice &amp; Bob</w:t></w:r></w:p></w:body></w:document>"#;
-        let (mut stream, _recombine) = decode(docx_with_body("Alice &amp; Bob"));
-        let chunk = chunk_for(&mut stream, "Alice & Bob").await;
+        let (stream, _recombine) = decode(docx_with_body("Alice &amp; Bob"));
+        let chunk = chunk_for(&stream, "Alice & Bob");
 
         let lifted = stream
             .lift(&chunk, TextLocation::new(6, 7))
@@ -124,8 +122,8 @@ mod tests {
     #[tokio::test]
     async fn source_span_of_a_finding_before_the_entity_is_one_run() {
         let raw = r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>Alice &amp; Bob</w:t></w:r></w:p></w:body></w:document>"#;
-        let (mut stream, _recombine) = decode(docx_with_body("Alice &amp; Bob"));
-        let chunk = chunk_for(&mut stream, "Alice & Bob").await;
+        let (stream, _recombine) = decode(docx_with_body("Alice &amp; Bob"));
+        let chunk = chunk_for(&stream, "Alice & Bob");
 
         // Decoded "Alice" is 0..5, wholly before the entity → a single raw run.
         let lifted = stream

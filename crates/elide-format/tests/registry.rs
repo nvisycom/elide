@@ -117,13 +117,12 @@ async fn registry_decodes_and_redacts_csv() {
     };
     let stream = handle.downcast_mut::<Tabular>().expect("tabular stream");
 
-    // Stream to the email cell, then redact it.
-    let mut email_chunk = None;
-    while let Some(chunk) = stream.read_next().await.expect("read") {
-        if chunk.location.row_index == 1 && chunk.location.column_index == 1 {
-            email_chunk = Some(chunk);
-        }
-    }
+    // Find the email cell, then redact it.
+    let email_chunk = stream
+        .chunks()
+        .expect("read")
+        .into_iter()
+        .find(|chunk| chunk.location.row_index == 1 && chunk.location.column_index == 1);
     assert!(email_chunk.is_some(), "found the email cell");
 
     let mut batch: Redactions<Tabular> = Redactions::new();

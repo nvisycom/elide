@@ -45,20 +45,15 @@ macro_rules! impl_audio_handler {
         #[derive(Debug)]
         pub(crate) struct $handler {
             clip: crate::AudioBuffer,
-            yielded: bool,
         }
 
         impl $handler {
-            /// Wrap an opened clip; the streaming cursor starts unyielded.
+            /// Wrap an opened clip.
             pub(crate) fn new(clip: crate::AudioBuffer) -> Self {
-                Self {
-                    clip,
-                    yielded: false,
-                }
+                Self { clip }
             }
         }
 
-        #[::async_trait::async_trait]
         impl ::elide_codec::Stream<crate::modality::Audio> for $handler {
             fn format(&self) -> ::elide_codec::FormatId {
                 FORMAT_ID.clone()
@@ -68,26 +63,20 @@ macro_rules! impl_audio_handler {
                 Ok(::elide_codec::content::ContentData::new(self.clip.encode()?))
             }
 
-            async fn read_next(
-                &mut self,
+            fn chunks(
+                &self,
             ) -> ::elide_core::Result<
-                ::std::option::Option<
-                    ::elide_core::modality::Chunk<crate::modality::Audio>,
-                >,
+                ::std::vec::Vec<::elide_core::modality::Chunk<crate::modality::Audio>>,
             > {
-                if self.yielded {
-                    return Ok(None);
-                }
                 let total_ms = self.clip.duration_ms()?;
-                self.yielded = true;
-                Ok(Some(::elide_core::modality::Chunk {
+                Ok(::std::vec![::elide_core::modality::Chunk {
                     location: crate::modality::AudioLocation::from_millis(0, total_ms),
                     data: crate::modality::AudioData::new(
                         self.clip.encode()?,
                         self.clip.format(),
                     ),
                     hints: ::std::vec::Vec::new(),
-                }))
+                }])
             }
         }
 

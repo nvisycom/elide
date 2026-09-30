@@ -1,4 +1,4 @@
-//! The PDF body [`Stream<Text>`]: streams each page's text as a chunk and records
+//! The PDF body [`Stream<Text>`]: yields each page's text as a chunk and records
 //! per-page redactions onto the shared [`PdfState`].
 
 use bytes::Bytes;
@@ -12,16 +12,13 @@ use elide_core::redaction::Redactions;
 use super::FORMAT_ID;
 use super::pdf_state::PdfState;
 
-/// The body [`Stream<Text>`] of a PDF: streams each page's text as a chunk and
+/// The body [`Stream<Text>`] of a PDF: yields each page's text as a chunk and
 /// records per-page redactions onto the shared [`PdfState`], which the
 /// [`PdfRecombine`](super::pdf_recombine::PdfRecombine) applies on encode.
 pub(super) struct PdfStream {
     pub(super) state: PdfState,
-    /// Read cursor over the pages.
-    pub(super) cursor: usize,
 }
 
-#[async_trait::async_trait]
 impl Stream<Text> for PdfStream {
     fn format(&self) -> FormatId {
         FORMAT_ID.clone()
@@ -33,18 +30,16 @@ impl Stream<Text> for PdfStream {
         Ok(ContentData::new(Bytes::new()))
     }
 
-    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>> {
-        let Some(page) = self.state.page(self.cursor) else {
-            return Ok(None);
-        };
-        let chunk = Chunk {
-            location: TextLocation::new(page.start, page.start + page.text.len())
-                .with_page(Some(page.number)),
-            data: TextData::new(page.text.clone()),
-            hints: Vec::new(),
-        };
-        self.cursor += 1;
-        Ok(Some(chunk))
+    fn chunks(&self) -> Result<Vec<Chunk<Text>>> {
+        Ok((0..self.state.page_count())
+            .filter_map(|i| self.state.page(i))
+            .map(|page| Chunk {
+                location: TextLocation::new(page.start, page.start + page.text.len())
+                    .with_page(Some(page.number)),
+                data: TextData::new(page.text.clone()),
+                hints: Vec::new(),
+            })
+            .collect())
     }
 
     fn lift(&self, chunk: &Chunk<Text>, local: TextLocation) -> Option<TextLocation> {

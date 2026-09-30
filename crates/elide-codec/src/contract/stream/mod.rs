@@ -30,22 +30,22 @@ use crate::content::ContentData;
 /// (`read_at`) and batch redaction (`write_at`) come from those shared traits,
 /// so a codec-backed stream plugs straight into anything that bounds on them
 /// (the toolkit's anonymizer). On top of that base it adds the codec surface:
-/// identify and serialise ([`format`], [`encode`]), stream chunks
-/// ([`read_next`]), and lift a chunk-local finding back to source coordinates
+/// identify and serialise ([`format`], [`encode`]), hand back its decoded chunks
+/// ([`chunks`]), and lift a chunk-local finding back to source coordinates
 /// ([`lift`]).
 ///
-/// The stream owns its cursor; concurrent iteration of the same stream is not
-/// supported (only one `&mut self`). The one async method (`read_next`) is
-/// boxed via `#[async_trait]`, so a stream stores behind `Box<dyn Stream<M>>`.
+/// A stream's chunks are materialized when it is decoded, so [`chunks`] is a
+/// plain `&self` read; only redaction ([`write_at`]) mutates. A stream stores
+/// behind `Box<dyn Stream<M>>`.
 ///
 /// [`DataReader`]: elide_core::modality::DataReader
 /// [`DataWriter`]: elide_core::modality::DataWriter
+/// [`write_at`]: elide_core::modality::DataWriter::write_at
 /// [`DocumentPart::Stream`]: super::DocumentPart::Stream
 /// [`format`]: Stream::format
 /// [`encode`]: Stream::encode
-/// [`read_next`]: Stream::read_next
+/// [`chunks`]: Stream::chunks
 /// [`lift`]: Stream::lift
-#[async_trait::async_trait]
 pub trait Stream<M: Modality>: DataReader<M> + DataWriter<M> + Send + Sync + 'static {
     /// Stable id of the format this stream represents (e.g. `"elide.text.txt"`).
     /// Cheap to clone.
@@ -63,9 +63,12 @@ pub trait Stream<M: Modality>: DataReader<M> + DataWriter<M> + Send + Sync + 'st
     /// [`Recombine`]: super::Recombine
     fn encode(&self) -> Result<ContentData>;
 
-    /// Advance the cursor and yield the next chunk, or `None` at
-    /// end-of-stream.
-    async fn read_next(&mut self) -> Result<Option<Chunk<M>>>;
+    /// Every decoded chunk this stream holds, front to back.
+    ///
+    /// # Errors
+    ///
+    /// Returns the source's decode error.
+    fn chunks(&self) -> Result<Vec<Chunk<M>>>;
 
     /// Promote a `local` location, expressed in `chunk`'s own coordinate
     /// system, to a source-global [`M::Location`].

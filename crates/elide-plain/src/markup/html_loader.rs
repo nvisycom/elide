@@ -128,13 +128,13 @@ mod tests {
         doc.encode().unwrap().decode().unwrap()
     }
 
-    async fn values(doc: &mut Document) -> Vec<String> {
-        let body = body(doc);
-        let mut out = Vec::new();
-        while let Some(chunk) = body.read_next().await.unwrap() {
-            out.push(chunk.data.as_str().to_owned());
-        }
-        out
+    fn values(doc: &mut Document) -> Vec<String> {
+        body(doc)
+            .chunks()
+            .unwrap()
+            .into_iter()
+            .map(|chunk| chunk.data.as_str().to_owned())
+            .collect()
     }
 
     #[tokio::test]
@@ -148,7 +148,7 @@ mod tests {
     async fn stream_yields_text_attribute_and_comment() {
         let raw = r#"<html><body><!-- secret 1 --><img alt="hello" title="alt"></body></html>"#;
         let mut doc = load(raw).await;
-        let vs = values(&mut doc).await;
+        let vs = values(&mut doc);
         assert!(vs.iter().any(|v| v == " secret 1 "), "comment: {vs:?}");
         assert!(vs.iter().any(|v| v == "hello"), "alt: {vs:?}");
         assert!(vs.iter().any(|v| v == "alt"), "title: {vs:?}");
@@ -158,12 +158,12 @@ mod tests {
     async fn attribute_redact_round_trips() {
         let raw = r#"<html><body><img alt="alice@example.com"></body></html>"#;
         let mut doc = load(raw).await;
-        let chunk = loop {
-            let c = body(&mut doc).read_next().await.unwrap().unwrap();
-            if c.data.as_str() == "alice@example.com" {
-                break c;
-            }
-        };
+        let chunk = body(&mut doc)
+            .chunks()
+            .unwrap()
+            .into_iter()
+            .find(|c| c.data.as_str() == "alice@example.com")
+            .expect("chunk");
         let mut rs = Redactions::new();
         rs.push(chunk.location, TextReplacement::substituted("[email]"));
         body(&mut doc).write_at(rs).await.unwrap();
@@ -180,7 +180,7 @@ mod tests {
 
         // Default: script bodies are skipped.
         let mut default = load(raw).await;
-        let vs = values(&mut default).await;
+        let vs = values(&mut default);
         assert!(
             !vs.iter().any(|v| v.contains("alice@example.com")),
             "default leaked script body: {vs:?}"
@@ -192,7 +192,7 @@ mod tests {
             ..HtmlLoader::default()
         };
         let mut scan = load_with(raw, loader).await;
-        let vs = values(&mut scan).await;
+        let vs = values(&mut scan);
         assert!(
             vs.iter().any(|v| v.contains("alice@example.com")),
             "scan missed script body: {vs:?}"
@@ -204,12 +204,11 @@ mod tests {
         // A <td> (in the real BLOCK_ELEMENTS) groups its split text for hints.
         let raw = "<table><tr><td>Card <code>4111 1111 1111 1111</code> on file</td></tr></table>";
         let mut doc = load(raw).await;
-        let mut any_hint = false;
-        while let Some(chunk) = body(&mut doc).read_next().await.unwrap() {
-            if !chunk.hints.is_empty() {
-                any_hint = true;
-            }
-        }
+        let any_hint = body(&mut doc)
+            .chunks()
+            .unwrap()
+            .iter()
+            .any(|chunk| !chunk.hints.is_empty());
         assert!(any_hint, "expected sibling hints under the <td> block");
     }
 }

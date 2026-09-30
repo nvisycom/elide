@@ -108,16 +108,54 @@ where
         if subject.is_enriched() {
             return Ok(());
         }
-        let data = subject.data();
-        let request = SttRequest {
-            audio: &data.bytes,
-            format: data.format(),
-            language: None,
-            correlation_id: ctx.correlation_id(),
-        };
+        let request = stt_request(subject, ctx);
         let response = self.backend.call(request).await?;
         subject.set_artifact(Transcription::new(response.segments));
         Ok(())
+    }
+
+    async fn enrich_batch(
+        &self,
+        subjects: &mut [Subject<Audio>],
+        ctx: &RecognizerContext<'_, Audio>,
+    ) -> Result<()> {
+        // One STT request per not-yet-transcribed subject, dispatched together;
+        // the already-enriched ones (a re-run's restored transcripts) are skipped
+        // so the model is never re-invoked. `targets` keeps the subject index
+        // aligned with each request, so a response scatters back to the right
+        // subject.
+        let targets: Vec<usize> = subjects
+            .iter()
+            .enumerate()
+            .filter(|(_, subject)| !subject.is_enriched())
+            .map(|(index, _)| index)
+            .collect();
+        if targets.is_empty() {
+            return Ok(());
+        }
+        let requests = targets
+            .iter()
+            .map(|&index| stt_request(&subjects[index], ctx))
+            .collect();
+        let responses = self.backend.call_batch(requests).await?;
+        for (&index, response) in targets.iter().zip(responses) {
+            subjects[index].set_artifact(Transcription::new(response.segments));
+        }
+        Ok(())
+    }
+}
+
+/// Build the per-call STT request from a subject's decoded audio.
+fn stt_request<'a>(
+    subject: &'a Subject<Audio>,
+    ctx: &RecognizerContext<'_, Audio>,
+) -> SttRequest<'a> {
+    let data = subject.data();
+    SttRequest {
+        audio: &data.bytes,
+        format: data.format(),
+        language: None,
+        correlation_id: ctx.correlation_id(),
     }
 }
 
