@@ -38,7 +38,8 @@ let sink: Arc<dyn UsageSink> = Arc::new(Tee::new(collector.clone(), TracingSink:
 
 let backend = Metered::new(my_backend, sink);
 // ... run the analysis with `backend`, then read this run's cost:
-let cost = collector.total_tokens();
+let units = collector.total_units();
+let tokens = units.tokens();
 ```
 
 The `model` and `version` labels are a bounded set — the models a deployment

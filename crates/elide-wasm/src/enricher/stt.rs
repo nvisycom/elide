@@ -2,7 +2,7 @@
 //!
 //! `elide-audio` ships the STT contract but no engine; the browser supplies one.
 //! [`Enricher::stt`](super::Enricher::stt) takes an async JS callback
-//! `(audio) => Promise<Segment[]>` and wraps it in a [`SttBackend`] behind an
+//! `(audio) => Promise<Segment[]>` and wraps it in an STT backend behind an
 //! [`SttEnricher`], so a text recognizer can scan the transcript and matched
 //! time spans are silenced.
 
@@ -30,7 +30,7 @@ struct Segment {
     end_ms: u64,
 }
 
-/// A [`SttBackend`] that defers transcription to a JavaScript callback.
+/// An STT backend that defers transcription to a JavaScript callback.
 ///
 /// The callback is a `!Send` [`Function`]; [`SendWrapper`] makes it satisfy the
 /// `Send + Sync` bound the enricher requires — sound on single-threaded wasm.
@@ -105,11 +105,6 @@ impl Backend for JsCallbackBackend {
 }
 
 /// Build an STT enricher whose transcription is the JavaScript `callback`.
-pub(super) fn build_stt(
-    callback: Function,
-) -> std::result::Result<SttEnricher<JsCallbackBackend>, crate::error::ElideError> {
-    Ok(SttEnricher::builder()
-        .with_name("js-callback-stt")
-        .with_backend(JsCallbackBackend::new(callback))
-        .build()?)
+pub(super) fn build_stt(callback: Function) -> SttEnricher<JsCallbackBackend> {
+    SttEnricher::new(JsCallbackBackend::new(callback)).with_name("js-callback-stt")
 }

@@ -1,4 +1,4 @@
-//! [`MockBackend`]: a no-op [`LlmBackend`] for tests, examples, and as a
+//! [`MockBackend`]: a no-op LLM backend for tests, examples, and as a
 //! default before a real provider is configured.
 
 use std::marker::PhantomData;

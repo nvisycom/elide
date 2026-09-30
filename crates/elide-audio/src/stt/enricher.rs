@@ -3,30 +3,31 @@
 //!
 //! The speech-to-text counterpart to language detection: it produces no
 //! entities, it *enriches*. On each call it transcribes the [`AudioData`]
-//! bytes through its [`SttBackend`] and stamps the resulting [`Transcription`]
+//! bytes through its STT backend and stamps the resulting [`Transcription`]
 //! onto the call as `Audio`'s [`artifact`]. Recognizers running afterward read
 //! the transcript text and resolve each match back to the audio time it was
 //! spoken in (see [`Audio`]'s [`TextRecognizable`] impl).
 //!
 //! [`AudioData`]: crate::modality::AudioData
 //! [`artifact`]: elide_core::recognition::Subject::artifact
-//! [`SttBackend`]: super::SttBackend
 //! [`Audio`]: crate::modality::Audio
 //! [`TextRecognizable`]: elide_core::modality::TextRecognizable
 
+use elide_core::Result;
+use elide_core::backend::Backend;
 use elide_core::enrichment::Enricher;
 use elide_core::primitive::ComponentId;
 use elide_core::recognition::{RecognizerContext, Subject};
-use elide_core::{Error, ErrorKind, Result};
 use hipstr::HipStr;
 
 #[cfg(any(test, feature = "mocks"))]
 use super::MockBackend;
-use super::{SttBackend, SttRequest};
+use super::{SttRequest, SttResponse};
 use crate::modality::{Audio, Transcription};
 
-/// An [`Enricher<Audio>`] that transcribes the clip, generic over its
-/// [`SttBackend`] `B`.
+/// An [`Enricher<Audio>`] that transcribes the clip, generic over its STT
+/// backend `B` — any [`Backend`] whose request is [`SttRequest`] and whose
+/// response is [`SttResponse`].
 ///
 /// Stamps the resulting [`Transcription`] onto the call's artifact. Registered on
 /// an `Analyzer<Audio>` ahead of its recognizers, the same way a language
@@ -34,94 +35,67 @@ use crate::modality::{Audio, Transcription};
 /// `Metered` wrapper.
 #[derive(Clone)]
 pub struct SttEnricher<B = ()> {
-    /// Caller-chosen name, surfaced as this enricher's id so a caller running
-    /// more than one transcription enricher can tell them apart.
-    name: HipStr<'static>,
+    /// Optional caller-chosen name, surfaced as this enricher's id so a caller
+    /// running more than one transcription enricher can tell them apart. `None`
+    /// falls back to the crate name at [`id`](Enricher::id) time.
+    name: Option<HipStr<'static>>,
     /// Backend that transcribes the clip.
     backend: B,
 }
 
-impl SttEnricher<()> {
-    /// Start the chainable builder. `name` and `backend` are required.
+impl<B> SttEnricher<B>
+where
+    B: for<'a> Backend<Request<'a> = SttRequest<'a>, Response = SttResponse>,
+{
+    /// A transcription enricher over `backend`.
+    ///
+    /// Unnamed by default (its id falls back to the crate name); set a name with
+    /// [`with_name`](Self::with_name) when running more than one so their ids
+    /// stay distinct.
     #[must_use]
-    pub fn builder() -> SttEnricherBuilder<()> {
-        SttEnricherBuilder::default()
-    }
-}
-
-impl<B> SttEnricher<B> {
-    /// This enricher's name.
-    #[must_use]
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-}
-
-/// Chainable builder for an [`SttEnricher`], generic over the backend `B` that
-/// [`with_backend`](Self::with_backend) sets.
-pub struct SttEnricherBuilder<B = ()> {
-    name: Option<HipStr<'static>>,
-    backend: Option<B>,
-}
-
-impl Default for SttEnricherBuilder<()> {
-    fn default() -> Self {
+    pub fn new(backend: B) -> Self {
         Self {
             name: None,
-            backend: None,
+            backend,
         }
     }
-}
 
-impl<B> SttEnricherBuilder<B> {
-    /// Set the enricher name.
+    /// Set the enricher name, surfaced as its id.
     #[must_use]
     pub fn with_name(mut self, name: impl Into<HipStr<'static>>) -> Self {
         self.name = Some(name.into());
         self
     }
-
-    /// Set the [`SttBackend`] that transcribes the clip, fixing the builder's
-    /// backend type. Required.
-    #[must_use]
-    pub fn with_backend<B2: SttBackend>(self, backend: B2) -> SttEnricherBuilder<B2> {
-        SttEnricherBuilder {
-            name: self.name,
-            backend: Some(backend),
-        }
-    }
 }
 
-impl SttEnricherBuilder<()> {
-    /// Wire the no-op [`MockBackend`] as this enricher's backend.
+#[cfg(any(test, feature = "mocks"))]
+impl SttEnricher<MockBackend> {
+    /// A transcription enricher over the no-op [`MockBackend`].
     ///
     /// [`MockBackend`]: super::MockBackend
-    #[cfg(any(test, feature = "mocks"))]
     #[cfg_attr(docsrs, doc(cfg(feature = "mocks")))]
     #[must_use]
-    pub fn with_mock_backend(self) -> SttEnricherBuilder<MockBackend> {
-        self.with_backend(MockBackend::new())
+    pub fn mock() -> Self {
+        Self::new(MockBackend::new())
     }
 }
 
-impl<B: SttBackend> SttEnricherBuilder<B> {
-    /// Finish the builder. Errors when `name` or `backend` is unset.
-    pub fn build(self) -> Result<SttEnricher<B>> {
-        Ok(SttEnricher {
-            name: self.name.ok_or_else(|| {
-                Error::new(ErrorKind::Configuration, "SttEnricher requires a name")
-            })?,
-            backend: self.backend.ok_or_else(|| {
-                Error::new(ErrorKind::Configuration, "SttEnricher requires a backend")
-            })?,
-        })
+impl<B> SttEnricher<B> {
+    /// This enricher's name — the one set with
+    /// [`with_name`](Self::with_name), or the crate name when unset.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        self.name.as_deref().unwrap_or(env!("CARGO_PKG_NAME"))
     }
 }
 
 #[async_trait::async_trait]
-impl<B: SttBackend> Enricher<Audio> for SttEnricher<B> {
+impl<B> Enricher<Audio> for SttEnricher<B>
+where
+    B: for<'a> Backend<Request<'a> = SttRequest<'a>, Response = SttResponse>,
+{
     fn id(&self) -> ComponentId {
-        ComponentId::new(self.name.clone(), env!("CARGO_PKG_VERSION"))
+        ComponentId::new(self.name().to_owned(), env!("CARGO_PKG_VERSION"))
     }
 
     async fn enrich(
@@ -173,13 +147,13 @@ mod tests {
 
     #[tokio::test]
     async fn enrich_stamps_a_readable_transcript() {
-        let enricher = SttEnricher::builder()
-            .with_name("stt")
-            .with_backend(MockBackend::with(vec![canned_segment()]))
-            .build()
-            .expect("builder succeeds");
-        // The enricher id carries the caller's name, not a fixed crate string.
+        let enricher = SttEnricher::new(MockBackend::with(vec![canned_segment()])).with_name("stt");
+        // A set name flows through to the id; unnamed falls back to the crate.
         assert_eq!(enricher.id().name, "stt");
+        assert_eq!(
+            SttEnricher::new(MockBackend::new()).id().name,
+            env!("CARGO_PKG_NAME")
+        );
 
         let data = fixtures::blank_audio_data();
         let scope = Scope::new();
@@ -231,11 +205,7 @@ mod tests {
             .times(1)
             .returning(|_| Ok(SttResponse::new(vec![canned_segment()])));
 
-        let enricher = SttEnricher::builder()
-            .with_name("stt")
-            .with_backend(backend)
-            .build()
-            .expect("builder succeeds");
+        let enricher = SttEnricher::new(backend);
         let data = fixtures::blank_audio_data();
         let scope = Scope::new();
         let ctx = RecognizerContext::new(&scope);
@@ -273,11 +243,7 @@ mod tests {
         // The backend must never run: the seeded (empty) artifact is enrichment.
         backend.expect_call().times(0);
 
-        let enricher = SttEnricher::builder()
-            .with_name("stt")
-            .with_backend(backend)
-            .build()
-            .expect("builder succeeds");
+        let enricher = SttEnricher::new(backend);
         let data = fixtures::blank_audio_data();
         let scope = Scope::new();
         let ctx = RecognizerContext::new(&scope);

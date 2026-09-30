@@ -1,4 +1,4 @@
-//! [`MockBackend`]: stand-in [`OcrBackend`] for tests, examples, and as a
+//! [`MockBackend`]: stand-in OCR backend for tests, examples, and as a
 //! default before a real backend is configured.
 
 use elide_core::Result;

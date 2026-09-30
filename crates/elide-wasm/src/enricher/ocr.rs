@@ -2,7 +2,7 @@
 //!
 //! `elide-image` ships the OCR contract but no engine; the browser supplies one.
 //! [`Enricher::ocr`](super::Enricher::ocr) takes an async JS callback
-//! `(image) => Promise<OcrRegion[]>` and wraps it in a [`OcrBackend`] behind an
+//! `(image) => Promise<OcrRegion[]>` and wraps it in an OCR backend behind an
 //! [`OcrEnricher`], so a text recognizer can scan the recognized image text and
 //! the matched regions are redacted from the pixels.
 //!
@@ -56,7 +56,7 @@ impl OcrRegion {
     }
 }
 
-/// An [`OcrBackend`] that defers recognition to a JavaScript callback.
+/// An OCR backend that defers recognition to a JavaScript callback.
 ///
 /// The callback is a `!Send` [`Function`]; [`SendWrapper`] makes it satisfy the
 /// `Send + Sync` bound the enricher requires — sound on single-threaded wasm.
@@ -115,11 +115,6 @@ impl Backend for JsCallbackBackend {
 }
 
 /// Build an OCR enricher whose recognition is the JavaScript `callback`.
-pub(super) fn build_ocr(
-    callback: Function,
-) -> std::result::Result<OcrEnricher<JsCallbackBackend>, crate::error::ElideError> {
-    Ok(OcrEnricher::builder()
-        .with_name("js-callback-ocr")
-        .with_backend(JsCallbackBackend::new(callback))
-        .build()?)
+pub(super) fn build_ocr(callback: Function) -> OcrEnricher<JsCallbackBackend> {
+    OcrEnricher::new(JsCallbackBackend::new(callback)).with_name("js-callback-ocr")
 }

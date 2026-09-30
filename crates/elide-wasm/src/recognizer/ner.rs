@@ -33,7 +33,7 @@ struct JsSpan {
     score: f32,
 }
 
-/// A [`NerBackend`] that defers inference to a JavaScript callback.
+/// A NER backend that defers inference to a JavaScript callback.
 ///
 /// The callback is a `!Send` [`Function`]; [`SendWrapper`] makes it satisfy the
 /// `Send + Sync` bound the recognizer requires. That is sound on wasm, which is
@@ -134,11 +134,6 @@ fn js_to_error(value: JsValue) -> Error {
 }
 
 /// Build a NER recognizer whose inference is the JavaScript `callback`.
-pub(super) fn build_ner(
-    callback: Function,
-) -> std::result::Result<NerRecognizer<JsCallbackBackend>, crate::error::ElideError> {
-    Ok(NerRecognizer::builder()
-        .with_name("js-callback-ner")
-        .with_backend(JsCallbackBackend::new(callback))
-        .build()?)
+pub(super) fn build_ner(callback: Function) -> NerRecognizer<JsCallbackBackend> {
+    NerRecognizer::new(JsCallbackBackend::new(callback)).with_name("js-callback-ner")
 }

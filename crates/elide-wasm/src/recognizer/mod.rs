@@ -59,13 +59,9 @@ impl Recognizer {
     /// called on each recognition pass, where a `NerSpan` is
     /// `{ label, start, end, score }` with byte offsets into `text`. It runs on
     /// the browser event loop; the recognizer awaits it.
-    ///
-    /// # Errors
-    ///
-    /// Propagates a build error from the recognizer configuration.
     #[wasm_bindgen(js_name = ner)]
-    pub fn ner(callback: Function) -> Result<Recognizer, ElideError> {
-        Ok(Self(Kind::Ner(self::ner::build_ner(callback)?)))
+    pub fn ner(callback: Function) -> Recognizer {
+        Self(Kind::Ner(self::ner::build_ner(callback)))
     }
 }
 

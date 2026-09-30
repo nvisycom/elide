@@ -2,15 +2,21 @@
 //!
 //! Enriches the call with a [`Layout`](crate::modality::Layout).
 //!
-//! The [`OcrBackend`] trait covers every OCR engine, hosted document-AI APIs
-//! (Google Document AI, Azure, AWS Textract), local engines (Tesseract, PaddleOCR
-//! wrappers), and the in-process no-op test stub. Each backend turns a request
-//! (image bytes + optional hints) into a response of recognized
-//! [`LayoutRegion`](crate::modality::LayoutRegion)s, so its output drops straight
-//! onto the call's artifacts with no remapping. The [`OcrEnricher`] drives a
-//! backend per call and stamps the recognized [`Layout`](crate::modality::Layout)
-//! onto the image so a recognizer can read it. The pure-Rust `OcrsBackend` is
-//! behind the `ocrs` feature; the no-op `MockBackend` behind `mocks`.
+//! An OCR backend is a [`Backend`](elide_core::backend::Backend) whose request is
+//! [`OcrRequest`] and whose response is [`OcrResponse`]. It covers every OCR
+//! engine: hosted document-AI APIs (Google Document AI, Azure, AWS Textract),
+//! local engines (Tesseract, PaddleOCR wrappers), and the in-process no-op test
+//! stub. Each turns a request (image bytes + optional hints) into a response of
+//! recognized [`LayoutRegion`](crate::modality::LayoutRegion)s, so its output
+//! drops straight onto the call's artifacts with no remapping. The
+//! [`OcrEnricher`] drives a backend per call and stamps the recognized
+//! [`Layout`](crate::modality::Layout) onto the image so a recognizer can read it.
+//! The pure-Rust `OcrsBackend` is behind the `ocrs` feature; the no-op
+//! `MockBackend` behind `mocks`.
+//!
+//! Confidence values **must** be normalised to `0.0..=1.0` before being placed on
+//! a word; a backend whose upstream API uses a different scale converts before
+//! returning.
 
 mod enricher;
 #[cfg(any(test, feature = "mocks"))]
@@ -20,9 +26,7 @@ mod ocrs;
 mod request;
 mod response;
 
-use elide_core::backend::Backend;
-
-pub use self::enricher::{OcrEnricher, OcrEnricherBuilder};
+pub use self::enricher::OcrEnricher;
 #[cfg(any(test, feature = "mocks"))]
 #[cfg_attr(docsrs, doc(cfg(feature = "mocks")))]
 pub use self::mock::MockBackend;
@@ -32,29 +36,10 @@ pub use self::ocrs::{OCRS_MODELS_DIR_ENV, OcrsBackend};
 pub use self::request::OcrRequest;
 pub use self::response::OcrResponse;
 
-/// An OCR [`Backend`](elide_core::backend::Backend): `Backend<Request<'a> =
-/// OcrRequest<'a>, Response = OcrResponse>`.
-///
-/// A shorthand bound so the enricher holds any OCR backend generically.
-/// Everything that turns image bytes into recognized text regions implements it
-/// by implementing `Backend` with these associated types — hosted document-AI
-/// clients, local OCR engine wrappers, and the in-process no-op test stub.
-///
-/// Confidence values **must** be normalised to `0.0..=1.0` before being placed
-/// on a word; backends whose upstream API uses a different scale convert before
-/// returning.
-pub trait OcrBackend:
-    for<'a> Backend<Request<'a> = OcrRequest<'a>, Response = OcrResponse>
-{
-}
-
-impl<B> OcrBackend for B where
-    B: for<'a> Backend<Request<'a> = OcrRequest<'a>, Response = OcrResponse>
-{
-}
-
 #[cfg(test)]
 mod tests {
+    use elide_core::backend::Backend;
+
     use super::*;
     use crate::modality::ImageFormat;
     use crate::primitive::Dimensions;

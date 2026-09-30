@@ -67,7 +67,6 @@ serde = { workspace = true, features = [] }
 serde_json = { workspace = true, features = [], optional = true }
 
 # Derive macros & error handling
-derive_builder = { workspace = true, features = [] }
 thiserror = { workspace = true, features = [], optional = true }
 
 # Primitive datatypes

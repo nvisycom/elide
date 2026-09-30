@@ -1,4 +1,4 @@
-//! [`ScoreScale`]: a [`NerBackend`] decorator that scales the score of
+//! [`ScoreScale`]: a NER backend decorator that scales the score of
 //! selected labels.
 //!
 //! Wraps any inner backend and multiplies the confidence of every emitted
@@ -20,13 +20,13 @@ use elide_core::backend::Backend;
 use elide_core::entity::LabelRef;
 use elide_core::entity::audit::ModelEvent;
 
-use crate::backend::{NerBackend, NerRequest, NerResponse};
+use crate::backend::{NerRequest, NerResponse};
 
 /// Default multiplier: identity. A bare `ScoreScale` leaves scores
 /// untouched until a multiplier is set.
 const DEFAULT_MULTIPLIER: f32 = 1.0;
 
-/// [`NerBackend`] that scales the confidence of spans whose label is in
+/// A NER backend that scales the confidence of spans whose label is in
 /// a configured set.
 ///
 /// Delegates recognition to the wrapped backend, then multiplies the
@@ -88,7 +88,10 @@ impl<B> ScoreScale<B> {
 }
 
 #[async_trait]
-impl<B: NerBackend> Backend for ScoreScale<B> {
+impl<B> Backend for ScoreScale<B>
+where
+    B: for<'a> Backend<Request<'a> = NerRequest<'a>, Response = NerResponse>,
+{
     type Request<'a> = NerRequest<'a>;
     type Response = NerResponse;
 

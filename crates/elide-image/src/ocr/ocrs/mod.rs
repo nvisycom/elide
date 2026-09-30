@@ -1,17 +1,17 @@
-//! [`OcrsBackend`]: an [`OcrBackend`] backed by the pure-Rust `ocrs` engine.
+//! [`OcrsBackend`]: an OCR backend backed by the pure-Rust `ocrs` engine.
 //!
 //! Built in two layers. The [`engine`] layer owns everything `ocrs` and `rten`:
 //! loading the two model files and running the recognition pipeline, exposing a
 //! single elide-shaped [`Engine::recognize`](engine::Engine::recognize) that
 //! takes image bytes and returns core [`LayoutRegion`]s. This backend layer holds
-//! only elide concerns: the [`OcrBackend`] trait impl, provenance, and the async
-//! offload of the CPU-bound engine call, no `ocrs`/`rten` type appears here.
+//! only elide concerns: the [`Backend`](elide_core::backend::Backend) impl,
+//! provenance, and the async offload of the CPU-bound engine call, no
+//! `ocrs`/`rten` type appears here.
 //!
 //! Construct once (loading the models is not cheap) via
 //! [`OcrsBackend::from_env`] or [`OcrsBackend::from_models_dir`], and share the
 //! result.
 //!
-//! [`OcrBackend`]: super::OcrBackend
 //! [`LayoutRegion`]: crate::modality::LayoutRegion
 
 mod engine;
@@ -27,10 +27,11 @@ use self::engine::Engine;
 pub use self::engine::OCRS_MODELS_DIR_ENV;
 use super::{OcrRequest, OcrResponse};
 
-/// An [`OcrBackend`] backed by the pure-Rust `ocrs` engine.
+/// An OCR backend backed by the pure-Rust `ocrs` engine.
 ///
-/// Construct it once (loading the models is not cheap) and share it:
-/// `Arc<dyn OcrBackend>` clones are cheap and the engine is `Send + Sync`.
+/// Construct it once (loading the models is not cheap) and share it: it is
+/// [`Clone`] over a shared `Arc<Engine>`, so clones are cheap, and it is
+/// `Send + Sync`.
 #[derive(Clone)]
 pub struct OcrsBackend {
     engine: Arc<Engine>,

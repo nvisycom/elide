@@ -1,13 +1,11 @@
-//! [`LlmResponse`]: per-call output from an [`LlmBackend`].
-//!
-//! [`LlmBackend`]: super::LlmBackend
+//! [`LlmResponse`]: per-call output from an LLM backend.
 
 use elide_core::backend::{BackendResponse, Meter, TokenCounts, Units};
 
 use crate::candidates::Candidates;
 use crate::modality::LlmModality;
 
-/// One per-call LLM response from an [`LlmBackend<M>`], generic over the
+/// One per-call LLM response from an LLM backend, generic over the
 /// modality.
 ///
 /// Wraps the structured candidate batch the backend extracted, plus the tokens
@@ -15,8 +13,6 @@ use crate::modality::LlmModality;
 /// candidate into the source and builds the final entities; the tokens are read
 /// by a `Metered` wrapper, never by the
 /// recognizer.
-///
-/// [`LlmBackend<M>`]: super::LlmBackend
 #[derive(Debug, Clone)]
 pub struct LlmResponse<M: LlmModality> {
     /// The structured candidate batch the model produced.

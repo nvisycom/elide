@@ -1,18 +1,15 @@
-//! [`OcrResponse`]: what an [`OcrBackend`] returns.
-//!
-//! [`OcrBackend`]: super::OcrBackend
+//! [`OcrResponse`]: what an OCR backend returns.
 
 use elide_core::backend::{BackendResponse, Meter, Units};
 
 use crate::modality::LayoutRegion;
 
-/// One per-call OCR response from an [`OcrBackend`].
+/// One per-call OCR response from an OCR backend.
 ///
 /// Wraps the [`LayoutRegion`]s the backend recognized in reading order. These
 /// are the core OCR type, so an enricher folds them into a [`Layout`] and onto
 /// the call's artifacts without any remapping.
 ///
-/// [`OcrBackend`]: super::OcrBackend
 /// [`Layout`]: crate::modality::Layout
 #[derive(Debug, Clone, Default)]
 pub struct OcrResponse {

@@ -1,4 +1,4 @@
-//! [`NerResponse`] and [`NerSpan`]: what a [`NerBackend`] returns.
+//! [`NerResponse`] and [`NerSpan`]: what a NER backend returns.
 //!
 //! A backend emits [`NerSpan`]s already carrying a canonical
 //! [`LabelRef`]: a zero-shot model is *given* the catalog labels and
@@ -11,7 +11,6 @@
 //! recognizer clamps to [`Confidence`] and may demote configured
 //! low-score labels.
 //!
-//! [`NerBackend`]: super::NerBackend
 //! [`Confidence`]: elide_core::primitive::Confidence
 //! [`LabelMap`]: elide_core::recognition::LabelMap
 
@@ -21,13 +20,11 @@ use elide_core::backend::BackendResponse;
 use elide_core::entity::LabelRef;
 use elide_core::primitive::Confidence;
 
-/// One per-call NER response from a [`NerBackend`].
+/// One per-call NER response from a NER backend.
 ///
 /// Wraps the spans the backend produced. Each span already carries a
 /// canonical [`LabelRef`]; the recognizer applies its ignore-set before
 /// emitting entities.
-///
-/// [`NerBackend`]: super::NerBackend
 #[derive(Debug, Clone, Default)]
 pub struct NerResponse {
     /// Spans predicted for the request's text, in backend order.

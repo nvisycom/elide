@@ -58,10 +58,7 @@ pub fn build_analyzer<M: TextRecognizable>() -> Result<Analyzer<M>> {
     #[cfg(feature = "ner")]
     let analyzer = {
         use elide::recognition::ner::NerRecognizer;
-        let ner = NerRecognizer::builder()
-            .with_name("mock-ner")
-            .with_mock_backend()
-            .build()?;
+        let ner = NerRecognizer::mock().with_name("mock-ner");
         analyzer.with_recognizer(ner)
     };
 
@@ -86,11 +83,7 @@ pub fn build_analyzer<M: TextRecognizable>() -> Result<Analyzer<M>> {
 #[cfg(feature = "llm")]
 pub fn default_text_analyzer() -> Result<Analyzer<Text>> {
     use elide::recognition::llm::LlmRecognizer;
-    let llm = LlmRecognizer::builder()
-        .with_name("mock-llm")
-        .with_mock_backend()
-        .with_default_prompt()
-        .build()?;
+    let llm = LlmRecognizer::mock().with_name("mock-llm");
     Ok(build_analyzer::<Text>()?.with_recognizer(llm))
 }
 
@@ -132,13 +125,7 @@ where
 #[cfg(all(feature = "image", feature = "llm"))]
 pub fn image_analyzer() -> Result<Analyzer<Image>> {
     use elide::recognition::llm::LlmRecognizer;
-    Ok(Analyzer::new().with_recognizer(
-        LlmRecognizer::<Image>::builder()
-            .with_name("mock-image")
-            .with_mock_backend()
-            .with_default_prompt()
-            .build()?,
-    ))
+    Ok(Analyzer::new().with_recognizer(LlmRecognizer::<Image, _>::mock().with_name("mock-image")))
 }
 
 /// An image [`Analyzer`] that enriches with OCR from `backend` (a mock returning
@@ -148,12 +135,7 @@ pub fn image_analyzer() -> Result<Analyzer<Image>> {
 pub fn ocr_analyzer(backend: elide::enrichment::ocr::MockBackend) -> Result<Analyzer<Image>> {
     use elide::enrichment::ocr::OcrEnricher;
     Ok(Analyzer::new()
-        .with_enricher(
-            OcrEnricher::builder()
-                .with_name("mock-ocr")
-                .with_backend(backend)
-                .build()?,
-        )
+        .with_enricher(OcrEnricher::new(backend).with_name("mock-ocr"))
         .with_recognizer(
             PatternRecognizer::builder()
                 .with_builtin_patterns()

@@ -63,7 +63,7 @@ codec = ["dep:elide-codec", "dep:async-trait"]
 ## Speech-to-text: the `SttBackend` trait, the `SttEnricher`, and the
 ## request/response types. The traits ship bare (no STT engine); enable
 ## `mocks` for the no-op backend.
-stt = ["dep:async-trait", "dep:derive_builder", "dep:uuid"]
+stt = ["dep:async-trait", "dep:uuid"]
 
 ## Ship the no-op STT `MockBackend` for tests, examples, and offline wiring
 ## (distinct from `fixtures`, which builds decoded-audio fixtures). Implies `stt`.
@@ -78,8 +78,6 @@ elide-codec = { workspace = true, features = [], optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 schemars = { workspace = true, features = [], optional = true }
 
-# Derive macros (the STT enricher builder)
-derive_builder = { workspace = true, features = [], optional = true }
 uuid = { workspace = true, features = ["v7"], optional = true }
 
 # Primitive datatypes

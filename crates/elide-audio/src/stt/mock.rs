@@ -1,4 +1,4 @@
-//! [`MockBackend`]: stand-in [`SttBackend`] for tests, examples, and as a
+//! [`MockBackend`]: stand-in STT backend for tests, examples, and as a
 //! default before a real backend is configured.
 
 use elide_core::Result;

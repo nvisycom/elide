@@ -1,4 +1,4 @@
-//! [`IgnoreLabels`]: a [`NerBackend`] decorator that drops spans whose
+//! [`IgnoreLabels`]: a NER backend decorator that drops spans whose
 //! label is in a configured set.
 //!
 //! Wraps any inner backend and removes every span whose label is ignored,
@@ -18,9 +18,9 @@ use elide_core::backend::Backend;
 use elide_core::entity::LabelRef;
 use elide_core::entity::audit::ModelEvent;
 
-use crate::backend::{NerBackend, NerRequest, NerResponse};
+use crate::backend::{NerRequest, NerResponse};
 
-/// [`NerBackend`] that drops spans whose label is in a configured set.
+/// A NER backend that drops spans whose label is in a configured set.
 ///
 /// Delegates recognition to the wrapped backend, then removes every span
 /// whose label is ignored. Spans whose label is not in the set pass
@@ -65,7 +65,10 @@ impl<B> IgnoreLabels<B> {
 }
 
 #[async_trait]
-impl<B: NerBackend> Backend for IgnoreLabels<B> {
+impl<B> Backend for IgnoreLabels<B>
+where
+    B: for<'a> Backend<Request<'a> = NerRequest<'a>, Response = NerResponse>,
+{
     type Request<'a> = NerRequest<'a>;
     type Response = NerResponse;
 

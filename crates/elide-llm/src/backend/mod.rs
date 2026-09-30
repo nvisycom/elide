@@ -1,12 +1,13 @@
-//! Backend layer: the [`LlmBackend<M>`] trait and its shipped impls.
+//! Backend layer: the LLM backend contract and its shipped impls.
 //!
-//! A backend turns a rendered prompt into the model's structured candidate
-//! batch. It is generic over the modality `M`: it extracts a
-//! [`Candidates<M::Item>`], the typed candidate batch the model is asked
-//! to produce. A backend declares which modalities it serves by which
-//! `LlmBackend<M>` impls it carries. Prompt wording lives in
-//! [`crate::prompt`]; localizing candidates into entities lives in the
-//! recognizer (via [`LlmModality::lift`]).
+//! An LLM backend for modality `M` is a [`Backend`](elide_core::backend::Backend)
+//! whose request is [`LlmRequest<'_, M>`](LlmRequest) and whose response is
+//! [`LlmResponse<M>`](LlmResponse). It turns a rendered prompt into the model's
+//! structured candidate batch — a [`Candidates<M::Item>`], the typed batch the
+//! model is asked to produce. A backend declares which modalities it serves by
+//! which `Backend` impls it carries. Prompt wording lives in [`crate::prompt`];
+//! localizing candidates into entities lives in the recognizer (via
+//! [`LlmModality::lift`]).
 //!
 //! [`Candidates<M::Item>`]: crate::candidates::Candidates
 //! [`LlmModality::lift`]: crate::backend::LlmModality::lift
@@ -20,8 +21,6 @@ mod mock_backend;
 #[cfg(feature = "rig")]
 mod rig;
 
-use elide_core::backend::Backend;
-
 pub use self::llm_request::LlmRequest;
 pub use self::llm_response::LlmResponse;
 #[cfg(any(test, feature = "mocks"))]
@@ -31,22 +30,3 @@ pub use self::mock_backend::MockBackend;
 #[cfg_attr(docsrs, doc(cfg(feature = "rig")))]
 pub use self::rig::{RigBackend, RigConfig};
 pub use crate::modality::LlmModality;
-
-/// An LLM [`Backend`](elide_core::backend::Backend) for modality `M`:
-/// `Backend<Request<'a> = LlmRequest<'a, M>, Response = LlmResponse<M>>`.
-///
-/// A shorthand bound so the recognizer holds any LLM backend for `M`
-/// generically. Everything that turns a rendered prompt into the model's
-/// structured candidate batch implements it by implementing `Backend` with these
-/// associated types — rig-backed providers (OpenAI, Anthropic, Gemini, Ollama)
-/// and the in-process no-op test stub. A backend declares which modalities it
-/// serves by which `Backend` impls it carries.
-pub trait LlmBackend<M: LlmModality>:
-    for<'a> Backend<Request<'a> = LlmRequest<'a, M>, Response = LlmResponse<M>>
-{
-}
-
-impl<M: LlmModality, B> LlmBackend<M> for B where
-    B: for<'a> Backend<Request<'a> = LlmRequest<'a, M>, Response = LlmResponse<M>>
-{
-}
