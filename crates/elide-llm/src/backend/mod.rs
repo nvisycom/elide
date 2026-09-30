@@ -1,7 +1,7 @@
 //! Backend layer: the LLM backend contract and its shipped impls.
 //!
-//! An LLM backend for modality `M` is a [`Backend`](elide_core::backend::Backend)
-//! whose request is [`LlmRequest<'_, M>`](LlmRequest) and whose response is
+//! An LLM backend for modality `M` is a [`Backend`] whose request is
+//! [`LlmRequest<'_, M>`](LlmRequest) and whose response is
 //! [`LlmResponse<M>`](LlmResponse). It turns a rendered prompt into the model's
 //! structured candidate batch — a [`Candidates<M::Item>`], the typed batch the
 //! model is asked to produce. A backend declares which modalities it serves by
@@ -21,6 +21,8 @@ mod mock_backend;
 #[cfg(feature = "rig")]
 mod rig;
 
+use elide_core::backend::Backend;
+
 pub use self::llm_request::LlmRequest;
 pub use self::llm_response::LlmResponse;
 #[cfg(any(test, feature = "mocks"))]
@@ -30,3 +32,30 @@ pub use self::mock_backend::MockBackend;
 #[cfg_attr(docsrs, doc(cfg(feature = "rig")))]
 pub use self::rig::{RigBackend, RigConfig};
 pub use crate::modality::LlmModality;
+
+/// An LLM [`Backend`], with the modality it serves recovered as an associated
+/// type.
+///
+/// Auto-implemented for every [`Backend`] whose request is
+/// [`LlmRequest<'_, M>`](LlmRequest) and whose response is
+/// [`LlmResponse<M>`](LlmResponse): its [`Modality`](Self::Modality) is that `M`.
+/// This is what lets [`LlmRecognizer`](crate::LlmRecognizer) be generic over the
+/// single type `B` and still name the modality it recognizes (as `B::Modality`),
+/// instead of carrying a redundant second type parameter.
+pub trait LlmBackend:
+    for<'a> Backend<
+        Request<'a> = LlmRequest<'a, Self::Modality>,
+        Response = LlmResponse<Self::Modality>,
+    >
+{
+    /// The modality this backend extracts for.
+    type Modality: LlmModality;
+}
+
+impl<M, B> LlmBackend for B
+where
+    M: LlmModality,
+    B: for<'a> Backend<Request<'a> = LlmRequest<'a, M>, Response = LlmResponse<M>>,
+{
+    type Modality = M;
+}

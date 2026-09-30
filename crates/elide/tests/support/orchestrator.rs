@@ -83,7 +83,8 @@ pub fn build_analyzer<M: TextRecognizable>() -> Result<Analyzer<M>> {
 #[cfg(feature = "llm")]
 pub fn default_text_analyzer() -> Result<Analyzer<Text>> {
     use elide::recognition::llm::LlmRecognizer;
-    let llm = LlmRecognizer::mock().with_name("mock-llm");
+    use elide::recognition::llm::backend::MockBackend;
+    let llm = LlmRecognizer::<MockBackend<Text>>::mock().with_name("mock-llm");
     Ok(build_analyzer::<Text>()?.with_recognizer(llm))
 }
 
@@ -125,7 +126,9 @@ where
 #[cfg(all(feature = "image", feature = "llm"))]
 pub fn image_analyzer() -> Result<Analyzer<Image>> {
     use elide::recognition::llm::LlmRecognizer;
-    Ok(Analyzer::new().with_recognizer(LlmRecognizer::<Image, _>::mock().with_name("mock-image")))
+    use elide::recognition::llm::backend::MockBackend;
+    let llm = LlmRecognizer::<MockBackend<Image>>::mock().with_name("mock-image");
+    Ok(Analyzer::new().with_recognizer(llm))
 }
 
 /// An image [`Analyzer`] that enriches with OCR from `backend` (a mock returning

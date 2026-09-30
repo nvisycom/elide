@@ -1,10 +1,9 @@
 //! Recognizer layer: the LLM-driven [`LlmRecognizer`].
 //!
-//! `LlmRecognizer<M>` composes a modality-agnostic LLM backend with a
-//! modality-specific [`Prompt<M>`] (see [`crate::prompt`]); the recognizer
-//! holds an `Arc<dyn Prompt<M>>` and dispatches through it.
-//!
-//! [`Prompt<M>`]: crate::prompt::Prompt
+//! `LlmRecognizer<B>` composes an [`LlmBackend`](crate::backend::LlmBackend) `B`
+//! with a [`Prompt`](crate::prompt::Prompt) for the modality `B` serves (see
+//! [`crate::prompt`]); the recognizer holds an `Arc<dyn Prompt<B::Modality>>` and
+//! dispatches through it.
 
 mod llm_recognizer;
 
