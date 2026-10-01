@@ -18,13 +18,13 @@
 //! [`ScoreScale`]: crate::decorator::ScoreScale
 //! [`Recognizer<Text>`]: elide_core::recognition::Recognizer
 
-use elide_core::Result;
 use elide_core::backend::Backend;
 use elide_core::entity::audit::{AuditEvent, ModelEvent};
 use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::ComponentId;
 use elide_core::recognition::{Context, Recognizer, Subject};
+use elide_core::{Error, ErrorKind, Result};
 use hipstr::HipStr;
 
 use super::aggregation::AggregationStrategy;
@@ -115,7 +115,7 @@ impl NerRecognizer<MockBackend> {
     #[cfg_attr(docsrs, doc(cfg(feature = "mocks")))]
     #[must_use]
     pub fn mock() -> Self {
-        Self::new(MockBackend)
+        Self::new(MockBackend::new())
     }
 }
 
@@ -249,7 +249,20 @@ where
         if requests.is_empty() {
             return Ok(per_subject);
         }
+        // One entity list per subject is this method's contract; the backend
+        // must answer one response per request to honor it. A short batch would
+        // otherwise let the zip silently leave the tail subjects unrecognized.
         let responses = self.backend.call_batch(requests).await?;
+        if responses.len() != targets.len() {
+            return Err(Error::new(
+                ErrorKind::Provider,
+                format!(
+                    "NER backend returned {} responses for {} requests",
+                    responses.len(),
+                    targets.len()
+                ),
+            ));
+        }
         for (&index, response) in targets.iter().zip(responses) {
             per_subject[index] =
                 self.spans_to_entities(&response.spans, &effective_labels, &subjects[index]);
@@ -449,5 +462,25 @@ mod tests {
         // One recognition per subject, each with the backend's one span.
         assert_eq!(out.len(), 3);
         assert!(out.iter().all(|entities| entities.len() == 1));
+    }
+
+    /// A backend that shorts the batch must error, not silently leave the tail
+    /// subjects unrecognized: those subjects would keep an empty entity list and
+    /// their PII would go undetected with no error.
+    #[tokio::test]
+    async fn recognize_batch_rejects_a_short_response() {
+        let recognizer = NerRecognizer::new(MockBackend::new().with_dropped_responses(1));
+        let scope = Scope::new();
+        let ctx = Context::<Text>::new(&scope);
+        let subjects = [
+            Subject::new(TextData::new("a".to_owned())),
+            Subject::new(TextData::new("b".to_owned())),
+        ];
+
+        let err = recognizer
+            .recognize_batch(&subjects, &ctx)
+            .await
+            .expect_err("a short batch response is a contract violation");
+        assert_eq!(err.kind(), ErrorKind::Provider);
     }
 }

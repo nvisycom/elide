@@ -22,12 +22,12 @@ mod analysis;
 
 use std::sync::Arc;
 
-use elide_core::Result;
 use elide_core::enrichment::Enricher;
 use elide_core::entity::Entity;
 use elide_core::modality::{Chunk, Modality, ModalityLocation, StreamDataReader};
 use elide_core::recognition::annotation::{Annotations, Exclusion};
 use elide_core::recognition::{Context, Recognizer, Scope, Subject};
+use elide_core::{Error, ErrorKind, Result};
 use futures::future;
 
 pub use self::analysis::Analysis;
@@ -207,6 +207,12 @@ impl<M: Modality> Analyzer<M> {
     /// Analyze several streamed sources together, coalescing enrichment into one
     /// batched provider round-trip, and return one [`Analysis`] per source in
     /// order. Each source is paired with its prior enrichment `seeds` entry.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) when
+    /// `sources` and `seeds` differ in length; otherwise the first enrichment or
+    /// recognition error.
     pub async fn analyze_streams<S>(
         &self,
         sources: &mut [&mut S],
@@ -234,9 +240,11 @@ impl<M: Modality> Analyzer<M> {
     /// lifted back through its own chunks and aggregated, and its single enrichment
     /// artifact (image/audio produce one; text none) is carried out.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Debug-asserts `sources` and `seeds` have equal length.
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) when
+    /// `sources` and `seeds` differ in length (the caller must supply one seed
+    /// per source); otherwise the first enrichment or recognition error.
     async fn analyze_sources<S>(
         &self,
         sources: &mut [&mut S],
@@ -247,7 +255,16 @@ impl<M: Modality> Analyzer<M> {
     where
         S: StreamDataReader<M> + ?Sized,
     {
-        debug_assert_eq!(sources.len(), seeds.len(), "one seed per source");
+        if sources.len() != seeds.len() {
+            return Err(Error::new(
+                ErrorKind::MalformedInput,
+                format!(
+                    "analyze_streams: {} sources but {} seeds; expected one seed per source",
+                    sources.len(),
+                    seeds.len()
+                ),
+            ));
+        }
         let ctx = Context::new(scope).with_annotations(annotations);
 
         // An empty catalog requests no entity types: detect nothing, but carry
@@ -600,5 +617,30 @@ mod tests {
             .collect();
         assert!(ranges.contains(&(0..3)));
         assert!(ranges.contains(&(3..6)));
+    }
+
+    /// A seeds vector that does not match the sources one-for-one is malformed
+    /// caller input: it must error rather than silently pair the wrong seeds or
+    /// leave the extra sources unread (and their PII unreported).
+    #[tokio::test]
+    async fn analyze_streams_rejects_a_seed_count_mismatch() {
+        let analyzer = Analyzer::<Text>::new()
+            .with_recognizer(MockRecognizer::new(vec![detected("EMAIL", (0, 3))]));
+
+        let mut a = VecTextSource::single("aaa");
+        let mut b = VecTextSource::single("bbb");
+        let mut sources: Vec<&mut VecTextSource> = vec![&mut a, &mut b];
+
+        // Two sources, one seed.
+        let err = analyzer
+            .analyze_streams(
+                &mut sources,
+                &scope_for(&["EMAIL"]),
+                &Default::default(),
+                vec![None],
+            )
+            .await
+            .expect_err("mismatched seed count is malformed input");
+        assert_eq!(err.kind(), ErrorKind::MalformedInput);
     }
 }

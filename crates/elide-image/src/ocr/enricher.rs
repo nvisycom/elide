@@ -13,11 +13,11 @@
 //! [`Image`]: crate::modality::Image
 //! [`TextRecognizable`]: elide_core::modality::TextRecognizable
 
-use elide_core::Result;
 use elide_core::backend::Backend;
 use elide_core::enrichment::Enricher;
 use elide_core::primitive::ComponentId;
 use elide_core::recognition::{Context, Subject};
+use elide_core::{Error, ErrorKind, Result};
 use hipstr::HipStr;
 
 #[cfg(any(test, feature = "mocks"))]
@@ -132,7 +132,20 @@ where
             .iter()
             .map(|&index| ocr_request(&subjects[index], ctx))
             .collect();
+        // Enriching every targeted subject is this method's contract; the backend
+        // must answer one response per request to honor it. A short batch would
+        // otherwise let the zip silently leave the tail subjects un-transcribed.
         let responses = self.backend.call_batch(requests).await?;
+        if responses.len() != targets.len() {
+            return Err(Error::new(
+                ErrorKind::Provider,
+                format!(
+                    "OCR backend returned {} responses for {} requests",
+                    responses.len(),
+                    targets.len()
+                ),
+            ));
+        }
         for (&index, response) in targets.iter().zip(responses) {
             subjects[index].set_artifact(Layout::new(response.regions));
         }
@@ -368,5 +381,24 @@ mod tests {
             Image::as_text(subjects[2].data(), subjects[2].artifact()),
             Some("hi Alice")
         );
+    }
+
+    /// A backend that shorts the batch must error, not silently leave the tail
+    /// subjects un-OCR'd (and, downstream, their pictured PII undetected).
+    #[tokio::test]
+    async fn enrich_batch_rejects_a_short_response() {
+        let enricher = OcrEnricher::new(MockBackend::new().with_dropped_responses(1));
+        let scope = Scope::new();
+        let ctx = Context::new(&scope);
+        let mut subjects = [
+            Subject::new(fixtures::blank_image_data()),
+            Subject::new(fixtures::blank_image_data()),
+        ];
+
+        let err = enricher
+            .enrich_batch(&mut subjects, &ctx)
+            .await
+            .expect_err("a short batch response is a contract violation");
+        assert_eq!(err.kind(), ErrorKind::Provider);
     }
 }

@@ -157,7 +157,8 @@ where
     ) -> Result<Vec<Vec<Entity<M>>>> {
         // Forward to the inner recognizer's batch path so its native batching (a
         // provider-backed inner) is preserved, then enhance each subject's
-        // entities against its own context.
+        // entities against its own context. `recognize_batch` yields one list per
+        // subject in order, so the zip pairs each subject with its own entities.
         let batches = self.inner.recognize_batch(subjects, ctx).await?;
         Ok(subjects
             .iter()
