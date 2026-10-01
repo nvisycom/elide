@@ -68,28 +68,17 @@ pub(crate) struct CsvData {
     pub trailing_newline: bool,
 }
 
-/// Streaming cursor over cells, row-major.
-#[derive(Debug, Default)]
-struct Cursor {
-    row: u32,
-    col: u32,
-}
-
 /// Handler for parsed CSV content. Each cell is independently addressable
 /// via a [`TabularLocation`].
 #[derive(Debug)]
 pub(crate) struct CsvHandler {
     data: CsvData,
-    cursor: Cursor,
 }
 
 impl CsvHandler {
-    /// Wrap parsed CSV data; the streaming cursor starts at the top-left.
+    /// Wrap parsed CSV data.
     pub(crate) fn new(data: CsvData) -> Self {
-        Self {
-            data,
-            cursor: Cursor::default(),
-        }
+        Self { data }
     }
 
     /// Total number of addressable rows, header included.
@@ -219,7 +208,6 @@ impl CsvHandler {
     }
 }
 
-#[async_trait::async_trait]
 impl Stream<Tabular> for CsvHandler {
     fn format(&self) -> FormatId {
         FORMAT_ID.clone()
@@ -229,44 +217,35 @@ impl Stream<Tabular> for CsvHandler {
         Ok(ContentData::new(bytes::Bytes::from(self.serialize()?)))
     }
 
-    async fn read_next(&mut self) -> Result<Option<Chunk<Tabular>>> {
-        loop {
-            if self.cursor.row >= self.total_rows() {
-                return Ok(None);
+    fn chunks(&self) -> Result<Vec<Chunk<Tabular>>> {
+        let mut chunks = Vec::new();
+        for row in 0..self.total_rows() {
+            for col in 0..self.row_len(row).unwrap_or(0) as u32 {
+                let cell = self
+                    .cell_at(row, col)
+                    .expect("bounds checked above")
+                    .to_owned();
+                let mut location = TabularLocation::new(row, col);
+                let mut hints = Vec::new();
+                if let Some(name) = self.column_name(col) {
+                    location = location.with_column_name(name.to_owned());
+                    // The header label lives in the header cell at row 0, same
+                    // column, a real tabular location the boost can point at.
+                    let header_location =
+                        TabularLocation::new(0, col).with_column_name(name.to_owned());
+                    hints.push(ResolvedHint::new(
+                        header_location,
+                        TextData::new(name.to_owned()),
+                    ));
+                }
+                chunks.push(Chunk {
+                    location,
+                    data: TextData::new(cell),
+                    hints,
+                });
             }
-            let row = self.cursor.row;
-            let col = self.cursor.col;
-            if col as usize >= self.row_len(row).unwrap_or(0) {
-                // End of this row: advance and retry (skips empty rows).
-                self.cursor.row += 1;
-                self.cursor.col = 0;
-                continue;
-            }
-            self.cursor.col += 1;
-
-            let cell = self
-                .cell_at(row, col)
-                .expect("bounds checked above")
-                .to_owned();
-            let mut location = TabularLocation::new(row, col);
-            let mut hints = Vec::new();
-            if let Some(name) = self.column_name(col) {
-                location = location.with_column_name(name.to_owned());
-                // The header label lives in the header cell at row 0, same
-                // column, a real tabular location the boost can point at.
-                let header_location =
-                    TabularLocation::new(0, col).with_column_name(name.to_owned());
-                hints.push(ResolvedHint::new(
-                    header_location,
-                    TextData::new(name.to_owned()),
-                ));
-            }
-            return Ok(Some(Chunk {
-                location,
-                data: TextData::new(cell),
-                hints,
-            }));
         }
+        Ok(chunks)
     }
 
     fn lift(&self, chunk: &Chunk<Tabular>, local: TabularLocation) -> Option<TabularLocation> {
@@ -357,9 +336,9 @@ mod tests {
 
     #[tokio::test]
     async fn streams_cells_row_major_with_headers() {
-        let mut h = load("name,email\nAlice,a@x.test\n").await;
+        let h = load("name,email\nAlice,a@x.test\n").await;
         let mut seen = Vec::new();
-        while let Some(chunk) = h.read_next().await.unwrap() {
+        for chunk in h.chunks().unwrap() {
             seen.push((
                 chunk.location.row_index,
                 chunk.location.column_index,
@@ -387,19 +366,19 @@ mod tests {
 
     #[tokio::test]
     async fn lift_maps_offsets_into_the_cell() {
-        let mut h = load("name\nAlice Carter\n").await;
-        let _hdr = h.read_next().await.unwrap().unwrap();
-        let cell = h.read_next().await.unwrap().unwrap();
+        let h = load("name\nAlice Carter\n").await;
+        let chunks = h.chunks().unwrap();
+        let cell = &chunks[1];
         // Chunk-local: row/col are placeholders, offsets carry the range.
         let local = TabularLocation::new(0, 0).with_range(6, 12);
-        let lifted = h.lift(&cell, local).expect("in bounds");
+        let lifted = h.lift(cell, local).expect("in bounds");
         assert_eq!(lifted.row_index, 1);
         assert_eq!(lifted.column_index, 0);
         assert_eq!(lifted.start_offset, Some(6));
         assert_eq!(lifted.end_offset, Some(12));
         // Out-of-bounds range lifts to nothing.
         let oob = TabularLocation::new(0, 0).with_range(0, 99);
-        assert!(h.lift(&cell, oob).is_none());
+        assert!(h.lift(cell, oob).is_none());
     }
 
     #[tokio::test]
@@ -467,13 +446,13 @@ mod tests {
     #[tokio::test]
     async fn no_headers_addresses_rows_from_zero() {
         // Headerless data: row 0 is the first data row, not a header.
-        let mut handler = CsvHandler::new(CsvData {
+        let handler = CsvHandler::new(CsvData {
             headers: None,
             rows: vec![vec!["a".into(), "b".into()], vec!["c".into(), "d".into()]],
             delimiter: b',',
             trailing_newline: true,
         });
-        let first = handler.read_next().await.unwrap().unwrap();
+        let first = handler.chunks().unwrap().into_iter().next().unwrap();
         assert_eq!(first.location.row_index, 0);
         assert_eq!(first.data.as_str(), "a");
         // No header row, so a cell carries no column name.
@@ -489,7 +468,7 @@ mod tests {
             .decode(ContentData::from_text("a@x.test,b\nc,d\n"))
             .await
             .unwrap();
-        let first = handler.read_next().await.unwrap().unwrap();
+        let first = handler.chunks().unwrap().into_iter().next().unwrap();
         assert_eq!(first.location.row_index, 0);
         assert!(first.location.column_name.is_none());
         // Dropping row 0 removes it (a header would be protected).

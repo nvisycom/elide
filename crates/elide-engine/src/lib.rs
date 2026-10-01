@@ -7,41 +7,27 @@ mod directives;
 mod document;
 mod part_id;
 mod pipeline;
+mod traversal;
 
 use std::any::TypeId;
 use std::collections::HashMap;
 
-use bytes::Bytes;
-use elide_codec::{Document as CodecDocument, DocumentPart, ErasedStream, LocalId, TypedStream};
+use elide_codec::TypedStream;
 use elide_core::entity::Entity;
-use elide_core::modality::{DataReader, DataWriter, Modality, NoArtifact, StreamDataReader};
+use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::recognition::Scope;
 use elide_core::{Error, ErrorKind, Result};
 use elide_detection::Analyzer;
 use elide_format::FormatRegistry;
 use elide_redaction::Anonymizer;
 
+use self::analysis::ModalityRegistry;
 pub use self::analysis::{AnalyzedDocument, ArtifactSet, Report, ReportDeserializer};
-// `EntityGroup` / `ArtifactGroup` are the crate-internal erased storage the
-// report and artifact set hold; the public construction bounds are expressed in
-// terms of `serde::Serialize`, which the blanket impls satisfy, so neither trait
-// is named in any public signature and both stay `pub(crate)`.
-use self::analysis::{ArtifactGroup, ModalityRegistry, PartReport};
-use self::directives::AnnotationSet;
 pub use self::directives::Directives;
 pub use self::document::{AsDocuments, Document, RegistryDocumentExt};
 pub use self::part_id::PartId;
-use self::pipeline::{BoxFuture, ErasedPipeline, ModalityPipeline};
-
-/// How deep the orchestrator descends into nested containers before erroring.
-///
-/// A container part that is itself a container is recursed into so its own parts
-/// are redacted; a document is at most a handful of levels deep in practice (a
-/// bundle → a DOCX → an embedded spreadsheet → its media is depth 4). The bound
-/// exists only to stop an adversarial or self-referential archive, a zip that
-/// contains itself, from recursing without end; exceeding it is a hard error,
-/// not a silent stop, so nothing nested is left un-redacted.
-const MAX_CONTAINER_DEPTH: usize = 8;
+use self::pipeline::{ErasedPipeline, ModalityPipeline};
+use self::traversal::{Analyze, Redact, Walk};
 
 /// Drives analyze + redact across a set of documents.
 ///
@@ -222,6 +208,27 @@ impl Orchestrator {
         self.groups.register::<M>();
     }
 
+    /// The registered pipelines, keyed by modality [`TypeId`], for the part-walk
+    /// phases to classify and drive stream parts.
+    pub(crate) fn pipelines(&self) -> impl Iterator<Item = (&TypeId, &Box<dyn ErasedPipeline>)> {
+        self.pipelines.iter()
+    }
+
+    /// The pipeline for `modality`, or `None` when none is registered for it.
+    pub(crate) fn pipeline_for(&self, modality: TypeId) -> Option<&dyn ErasedPipeline> {
+        self.pipelines.get(&modality).map(Box::as_ref)
+    }
+
+    /// The orchestrator's default scope, used by the redaction phase.
+    pub(crate) fn scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    /// The format registry used to decode container blob parts, for the part-walk.
+    pub(crate) fn registry(&self) -> &FormatRegistry {
+        &self.registry
+    }
+
     /// Detect the entities of a set of documents without redacting: each
     /// [`Document`]'s own content *and* every container part whose modality has
     /// a registered pipeline. A single document is a one-element slice; a scan
@@ -332,147 +339,25 @@ impl Orchestrator {
         }
 
         // Each document is a tree of parts keyed under its own name, so two
-        // documents sharing a local part id stay distinct paths. Its stream
-        // parts are analyzed in place; its blob sub-parts decode into their own
-        // child documents and recurse.
+        // documents sharing a local part id stay distinct paths. The analysis
+        // phase batches each level's same-modality stream parts and scatters the
+        // findings; blob sub-parts decode into their own child documents and
+        // recurse.
+        let mut visitor = Analyze {
+            prior,
+            scope,
+            annotations,
+            report: &mut report,
+            artifacts: &mut artifacts,
+        };
         for document in documents.iter_mut() {
             let prefix = PartId::leaf(document.name.clone());
-            self.analyze_parts(
-                &mut document.document,
-                &prefix,
-                0,
-                prior,
-                scope,
-                annotations,
-                &mut report,
-                &mut artifacts,
-            )
-            .await?;
+            Walk::new(self, &mut visitor)
+                .parts(&mut document.document, &prefix, 0)
+                .await?;
         }
 
         Ok(AnalyzedDocument { report, artifacts })
-    }
-
-    /// Analyze one decoded [`CodecDocument`]'s parts, keyed under `prefix`
-    /// (the document's tree path). Its *body* — the first
-    /// [`Stream`](DocumentPart::Stream) part — is the document's own content,
-    /// keyed at `prefix` itself (a leaf document's whole content, a container's
-    /// body text); every other part keys at `prefix.child(id)`. Each stream is
-    /// offered to every pipeline until one matches its modality, then analyzed in
-    /// place; a part whose modality no pipeline covers passes through untouched.
-    /// Each [`Blob`](DocumentPart::Blob) sub-part is decoded through the registry
-    /// into its own child document and recursed into (depth `+ 1`); a blob no
-    /// codec can decode is opaque, left as-is.
-    ///
-    /// Recurses so an arbitrarily nested tree (an image in a DOCX embedded in a
-    /// bundle) is reached in full. Past [`MAX_CONTAINER_DEPTH`] a nested document
-    /// is a hard error, never a silent stop, so nothing nested is left
-    /// un-redacted.
-    #[allow(clippy::too_many_arguments)]
-    fn analyze_parts<'a>(
-        &'a self,
-        document: &'a mut CodecDocument,
-        prefix: &'a PartId,
-        depth: usize,
-        prior: &'a ArtifactSet,
-        scope: &'a Scope,
-        annotations: &'a AnnotationSet,
-        report: &'a mut Report,
-        artifacts: &'a mut ArtifactSet,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            let mut body_seen = false;
-            for part in document.parts_mut() {
-                match part {
-                    DocumentPart::Stream { id, handle } => {
-                        let part_id = body_part_id(prefix, id, &mut body_seen);
-                        self.analyze_stream_into(
-                            handle,
-                            part_id,
-                            prior,
-                            scope,
-                            annotations,
-                            report,
-                            artifacts,
-                        )
-                        .await?;
-                    }
-                    DocumentPart::Blob { id, bytes, hint } => {
-                        let part_id = prefix.child(id.clone());
-                        // Past the depth bound a nested document is a hard error,
-                        // never a silent drop.
-                        if depth + 1 > MAX_CONTAINER_DEPTH {
-                            return Err(Error::new(
-                                ErrorKind::MalformedInput,
-                                format!(
-                                    "container nesting exceeds the depth limit of \
-                                     {MAX_CONTAINER_DEPTH} at part `{part_id}`"
-                                ),
-                            ));
-                        }
-                        let Ok(mut child) = self.registry.decode(bytes.clone(), hint).await else {
-                            continue; // no codec for this blob, opaque, left as-is
-                        };
-                        self.analyze_parts(
-                            &mut child,
-                            &part_id,
-                            depth + 1,
-                            prior,
-                            scope,
-                            annotations,
-                            report,
-                            artifacts,
-                        )
-                        .await?;
-                    }
-                }
-            }
-            Ok(())
-        })
-    }
-
-    /// Analyze one stream part in place, offering it to each pipeline until one
-    /// matches its modality, seeded with its prior enrichment. The findings and
-    /// any enrichment artifact are stored under `id`. A stream whose modality no
-    /// pipeline covers stores nothing (an intentional pass-through).
-    #[allow(clippy::too_many_arguments)]
-    async fn analyze_stream_into(
-        &self,
-        handle: &mut ErasedStream,
-        id: PartId,
-        prior: &ArtifactSet,
-        scope: &Scope,
-        annotations: &AnnotationSet,
-        report: &mut Report,
-        artifacts: &mut ArtifactSet,
-    ) -> Result<()> {
-        let empty: Box<dyn ArtifactGroup> = Box::new(NoArtifact);
-        let seed = prior
-            .parts
-            .get(&id)
-            .map_or(empty.as_ref(), |e| e.artifact.as_ref());
-        for (modality, pipeline) in &self.pipelines {
-            let Some(analyzed) = pipeline
-                .analyze_stream(handle, scope, annotations, seed)
-                .await?
-            else {
-                continue; // not this pipeline's modality
-            };
-            let (entities, artifact) = analyzed;
-            let name = entities.modality_name();
-            report.parts.insert(
-                id.clone(),
-                PartReport {
-                    modality: *modality,
-                    entities,
-                },
-            );
-            if let Some(artifact) = artifact {
-                artifacts.set_part(id.clone(), *modality, name, artifact);
-            }
-            break;
-        }
-        Ok(())
     }
 
     /// Apply a (possibly edited) [`Report`] back onto the same `documents`:
@@ -483,11 +368,10 @@ impl Orchestrator {
     ///
     /// A stream part is redacted in place through the pipeline for its modality;
     /// a blob sub-part is decoded into its own child document, redacted the same
-    /// way, re-encoded, and folded back into its parent via
-    /// [`replace_part`](CodecDocument::replace_part). A document's own
-    /// [`encode`](CodecDocument::encode) then assembles the redacted parts
-    /// post-order, so a nested document re-encodes (carrying its *own* body
-    /// redaction) before the level above assembles it.
+    /// way, re-encoded, and folded back into its parent via its `replace_part`. A
+    /// document's own `encode` then assembles the redacted parts post-order, so a
+    /// nested document re-encodes (carrying its *own* body redaction) before the
+    /// level above assembles it.
     ///
     /// Returns the report, now applied: redaction stamps a redaction event into
     /// each entity's provenance, so the returned report's entities carry the full
@@ -505,103 +389,16 @@ impl Orchestrator {
         // happens on `report`'s own groups, which are returned as the audit
         // trail. Each document redacts its stream parts in place and folds its
         // blob sub-parts bottom-up through the recursion.
+        let mut visitor = Redact {
+            report: &mut report,
+        };
         for document in documents.iter_mut() {
             let prefix = PartId::leaf(document.name.clone());
-            self.apply_parts(&mut document.document, &prefix, &mut report, 0)
+            Walk::new(self, &mut visitor)
+                .parts(&mut document.document, &prefix, 0)
                 .await?;
         }
         Ok(report)
-    }
-
-    /// Apply the report to one decoded [`CodecDocument`]'s parts, keyed under
-    /// `prefix`. Each [`Stream`](DocumentPart::Stream) part with a report entry
-    /// is redacted in place through the pipeline for its modality. Each
-    /// [`Blob`](DocumentPart::Blob) sub-part is decoded into its own child
-    /// document, that child recursed into (applying any report parts beneath it),
-    /// re-encoded, and folded back via
-    /// [`replace_part`](CodecDocument::replace_part) — post-order, so a nested
-    /// document re-encodes (carrying its own body redaction) before its parent
-    /// assembles it.
-    ///
-    /// A blob that no codec can decode, or has no redacted descendant, is left
-    /// as-is (its original bytes fold through unchanged): a child is re-encoded
-    /// and folded back only when applying actually changed something beneath it,
-    /// so an untouched embedding is never re-serialized (which would, e.g.,
-    /// re-encode an unredacted image and drop its metadata under the codec's
-    /// policy).
-    ///
-    /// Returns whether any redaction landed in this subtree, so a parent folds a
-    /// blob back only when its child changed.
-    ///
-    /// Descends at most [`MAX_CONTAINER_DEPTH`] levels: `anonymize_with` accepts a
-    /// hand-built or deserialized report with no prior `analyze` on the same
-    /// documents, so a self-nesting container (a zip quine) could otherwise
-    /// recurse without bound. Exceeding the limit is a hard error, matching
-    /// [`analyze_parts`](Self::analyze_parts), never a silent stop.
-    fn apply_parts<'a>(
-        &'a self,
-        document: &'a mut CodecDocument,
-        prefix: &'a PartId,
-        report: &'a mut Report,
-        depth: usize,
-    ) -> BoxFuture<'a, Result<bool>> {
-        Box::pin(async move {
-            // Blob sub-parts fold back after the walk: `replace_part` needs a
-            // fresh `&mut document`, which the `parts_mut` borrow holds for the
-            // loop, so stage each blob's redacted bytes and apply them after.
-            let mut folded: Vec<(LocalId, Bytes)> = Vec::new();
-            let mut changed = false;
-            let mut body_seen = false;
-            for part in document.parts_mut() {
-                match part {
-                    DocumentPart::Stream { id, handle } => {
-                        let part_id = body_part_id(prefix, id, &mut body_seen);
-                        let Some(entry) = report.parts.get_mut(&part_id) else {
-                            continue; // no findings for this stream
-                        };
-                        let Some(pipeline) = self.pipelines.get(&entry.modality) else {
-                            continue; // pipeline for this modality is gone
-                        };
-                        pipeline
-                            .apply_stream(handle, entry.entities.as_mut(), &self.scope)
-                            .await?;
-                        changed = true;
-                    }
-                    DocumentPart::Blob { id, bytes, hint } => {
-                        let part_id = prefix.child(id.clone());
-                        // Past the depth bound a nested document is a hard error,
-                        // never an unbounded recursion; check before decoding so
-                        // nothing deeper runs.
-                        if depth + 1 > MAX_CONTAINER_DEPTH {
-                            return Err(Error::new(
-                                ErrorKind::MalformedInput,
-                                format!(
-                                    "container nesting exceeds the depth limit of \
-                                     {MAX_CONTAINER_DEPTH} at part `{part_id}`"
-                                ),
-                            ));
-                        }
-                        let Ok(mut child) = self.registry.decode(bytes.clone(), hint).await else {
-                            continue; // no codec for this blob, opaque, left as-is
-                        };
-                        // Recurse first (post-order): the child re-encodes its own
-                        // redacted streams, then folds back into this document, but
-                        // only when the recursion actually changed it.
-                        if self
-                            .apply_parts(&mut child, &part_id, report, depth + 1)
-                            .await?
-                        {
-                            folded.push((id.clone(), child.encode()?.into_bytes()));
-                        }
-                    }
-                }
-            }
-            changed |= !folded.is_empty();
-            for (id, bytes) in folded {
-                document.replace_part(&id, bytes)?;
-            }
-            Ok(changed)
-        })
     }
 
     /// Convenience: [`analyze`] then [`anonymize_with`] with no editing
@@ -696,19 +493,5 @@ impl Orchestrator {
         D: serde::Deserializer<'de>,
     {
         self.groups.deserialize_artifacts(deserializer)
-    }
-}
-
-/// The [`PartId`] under which a document part is keyed. The document's *body* —
-/// its first [`Stream`](DocumentPart::Stream) part — is the document's own
-/// content, keyed at `prefix` itself (depth 1 for a top-level document); every
-/// other part keys at `prefix.child(id)`. `body_seen` tracks whether the body
-/// has been claimed, so the first stream wins it and later parts nest beneath.
-fn body_part_id(prefix: &PartId, id: &LocalId, body_seen: &mut bool) -> PartId {
-    if *body_seen {
-        prefix.child(id.clone())
-    } else {
-        *body_seen = true;
-        prefix.clone()
     }
 }

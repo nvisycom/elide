@@ -13,11 +13,11 @@
 //! [`Image`]: crate::modality::Image
 //! [`TextRecognizable`]: elide_core::modality::TextRecognizable
 
-use elide_core::Result;
 use elide_core::backend::Backend;
 use elide_core::enrichment::Enricher;
 use elide_core::primitive::ComponentId;
-use elide_core::recognition::{RecognizerContext, Subject};
+use elide_core::recognition::{Context, Subject};
+use elide_core::{Error, ErrorKind, Result};
 use hipstr::HipStr;
 
 #[cfg(any(test, feature = "mocks"))]
@@ -98,27 +98,70 @@ where
         ComponentId::new(self.name().to_owned(), env!("CARGO_PKG_VERSION"))
     }
 
-    async fn enrich(
-        &self,
-        subject: &mut Subject<Image>,
-        ctx: &RecognizerContext<'_, Image>,
-    ) -> Result<()> {
+    async fn enrich(&self, subject: &mut Subject<Image>, ctx: &Context<'_, Image>) -> Result<()> {
         // Already OCR'd (a second enricher pass, or a restored artifact on a
         // re-run): leave it, so re-recognition never re-invokes the model.
         if subject.is_enriched() {
             return Ok(());
         }
-        let data = subject.data();
-        let request = OcrRequest {
-            image: data.source(),
-            format: data.format(),
-            dimensions: data.dimensions(),
-            language: None,
-            correlation_id: ctx.correlation_id(),
-        };
+        let request = ocr_request(subject, ctx);
         let response = self.backend.call(request).await?;
         subject.set_artifact(Layout::new(response.regions));
         Ok(())
+    }
+
+    async fn enrich_batch(
+        &self,
+        subjects: &mut [Subject<Image>],
+        ctx: &Context<'_, Image>,
+    ) -> Result<()> {
+        // One OCR request per not-yet-enriched subject, dispatched together; the
+        // already-enriched ones (a re-run's restored layouts) are skipped so the
+        // model is never re-invoked. `targets` keeps the subject index aligned
+        // with each request, so a response scatters back to the right subject.
+        let targets: Vec<usize> = subjects
+            .iter()
+            .enumerate()
+            .filter(|(_, subject)| !subject.is_enriched())
+            .map(|(index, _)| index)
+            .collect();
+        if targets.is_empty() {
+            return Ok(());
+        }
+        let requests = targets
+            .iter()
+            .map(|&index| ocr_request(&subjects[index], ctx))
+            .collect();
+        // Enriching every targeted subject is this method's contract; the backend
+        // must answer one response per request to honor it. A short batch would
+        // otherwise let the zip silently leave the tail subjects un-transcribed.
+        let responses = self.backend.call_batch(requests).await?;
+        if responses.len() != targets.len() {
+            return Err(Error::new(
+                ErrorKind::Provider,
+                format!(
+                    "OCR backend returned {} responses for {} requests",
+                    responses.len(),
+                    targets.len()
+                ),
+            ));
+        }
+        for (&index, response) in targets.iter().zip(responses) {
+            subjects[index].set_artifact(Layout::new(response.regions));
+        }
+        Ok(())
+    }
+}
+
+/// Build the per-call OCR request from a subject's decoded image.
+fn ocr_request<'a>(subject: &'a Subject<Image>, ctx: &Context<'_, Image>) -> OcrRequest<'a> {
+    let data = subject.data();
+    OcrRequest {
+        image: data.source(),
+        format: data.format(),
+        dimensions: data.dimensions(),
+        language: None,
+        correlation_id: ctx.correlation_id(),
     }
 }
 
@@ -165,7 +208,7 @@ mod tests {
 
         let data = fixtures::blank_image_data();
         let scope = Scope::new();
-        let ctx = RecognizerContext::new(&scope);
+        let ctx = Context::new(&scope);
         let mut subject = Subject::new(data);
 
         enricher.enrich(&mut subject, &ctx).await.unwrap();
@@ -217,7 +260,7 @@ mod tests {
         let enricher = OcrEnricher::new(backend);
         let data = fixtures::blank_image_data();
         let scope = Scope::new();
-        let ctx = RecognizerContext::new(&scope);
+        let ctx = Context::new(&scope);
 
         // First pass: empty artifact → the backend runs once.
         let mut subject = Subject::new(data.clone());
@@ -254,7 +297,7 @@ mod tests {
         let enricher = OcrEnricher::new(backend);
         let data = fixtures::blank_image_data();
         let scope = Scope::new();
-        let ctx = RecognizerContext::new(&scope);
+        let ctx = Context::new(&scope);
 
         // Seed an empty Layout, the recorded result of a prior pass that found
         // no text. The enricher must treat it as already-enriched and skip.
@@ -263,5 +306,99 @@ mod tests {
         // A present-but-empty artifact reads as `Some("")`, not `None`: the image
         // *was* OCR'd (to no text), which is distinct from never-OCR'd.
         assert_eq!(Image::as_text(subject.data(), subject.artifact()), Some(""));
+    }
+
+    /// A backend recording how it was called, to prove `enrich_batch` coalesced
+    /// N images into one `call_batch` rather than N single calls. Counters are
+    /// `Arc`-shared so the test can read them after the backend is moved into the
+    /// enricher.
+    #[derive(Clone, Default)]
+    struct BatchCounting {
+        batch_calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        single_calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl Backend for BatchCounting {
+        type Request<'a> = OcrRequest<'a>;
+        type Response = OcrResponse;
+
+        fn provenance(&self) -> ModelEvent {
+            ModelEvent {
+                name: "batch-counting".into(),
+                ..ModelEvent::default()
+            }
+        }
+
+        async fn call(&self, _request: OcrRequest<'_>) -> Result<OcrResponse> {
+            self.single_calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(OcrResponse::new(canned_regions()))
+        }
+
+        async fn call_batch(&self, requests: Vec<OcrRequest<'_>>) -> Result<Vec<OcrResponse>> {
+            self.batch_calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(requests
+                .iter()
+                .map(|_| OcrResponse::new(canned_regions()))
+                .collect())
+        }
+    }
+
+    #[tokio::test]
+    async fn enrich_batch_coalesces_and_stamps_each() {
+        use std::sync::atomic::Ordering;
+
+        let backend = BatchCounting::default();
+        let counters = backend.clone();
+        let enricher = OcrEnricher::new(backend);
+        let scope = Scope::new();
+        let ctx = Context::new(&scope);
+        // One already-enriched subject (must be skipped) and two fresh ones.
+        let mut subjects = vec![
+            Subject::new(fixtures::blank_image_data()).with_artifact(Layout::default()),
+            Subject::new(fixtures::blank_image_data()),
+            Subject::new(fixtures::blank_image_data()),
+        ];
+
+        enricher.enrich_batch(&mut subjects, &ctx).await.unwrap();
+
+        // One batched round-trip covered both fresh subjects; no single calls.
+        assert_eq!(counters.batch_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(counters.single_calls.load(Ordering::Relaxed), 0);
+        // The pre-enriched subject kept its empty layout; the two fresh ones got
+        // the OCR text stamped, each scattered back to the right subject.
+        assert_eq!(
+            Image::as_text(subjects[0].data(), subjects[0].artifact()),
+            Some("")
+        );
+        assert_eq!(
+            Image::as_text(subjects[1].data(), subjects[1].artifact()),
+            Some("hi Alice")
+        );
+        assert_eq!(
+            Image::as_text(subjects[2].data(), subjects[2].artifact()),
+            Some("hi Alice")
+        );
+    }
+
+    /// A backend that shorts the batch must error, not silently leave the tail
+    /// subjects un-OCR'd (and, downstream, their pictured PII undetected).
+    #[tokio::test]
+    async fn enrich_batch_rejects_a_short_response() {
+        let enricher = OcrEnricher::new(MockBackend::new().with_dropped_responses(1));
+        let scope = Scope::new();
+        let ctx = Context::new(&scope);
+        let mut subjects = [
+            Subject::new(fixtures::blank_image_data()),
+            Subject::new(fixtures::blank_image_data()),
+        ];
+
+        let err = enricher
+            .enrich_batch(&mut subjects, &ctx)
+            .await
+            .expect_err("a short batch response is a contract violation");
+        assert_eq!(err.kind(), ErrorKind::Provider);
     }
 }

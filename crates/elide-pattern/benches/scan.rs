@@ -9,7 +9,7 @@ use std::hint::black_box;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use elide_core::modality::text::{Text, TextData};
-use elide_core::recognition::{Recognizer, RecognizerContext, Scope, Subject};
+use elide_core::recognition::{Context, Recognizer, Scope, Subject};
 use elide_pattern::PatternRecognizer;
 use tokio::runtime::{Builder, Runtime};
 
@@ -36,7 +36,7 @@ fn bench_scan(c: &mut Criterion) {
     let data = TextData::new(text.clone());
     let subject = Subject::new(data);
     let scope = Scope::new();
-    let ctx = RecognizerContext::new(&scope);
+    let ctx = Context::new(&scope);
 
     let bare = PatternRecognizer::builder()
         .with_builtin_patterns()

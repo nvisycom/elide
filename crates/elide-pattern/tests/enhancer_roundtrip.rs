@@ -10,8 +10,8 @@ use elide_core::entity::audit::AuditKind;
 use elide_core::entity::builtins;
 use elide_core::modality::text::{Text, TextData};
 use elide_core::primitive::Confidence;
-use elide_core::recognition::{Recognizer, RecognizerContext, Scope, Subject};
-use elide_pattern::{Context, PatternRecognizer, Regex, Sourced, Variant};
+use elide_core::recognition::{Context, Recognizer, Scope, Subject};
+use elide_pattern::{BoostKeywords, PatternRecognizer, Regex, Sourced, Variant};
 
 #[tokio::test]
 async fn enhancer_boosts_matches_near_keyword_only() {
@@ -35,13 +35,12 @@ async fn enhancer_boosts_matches_near_keyword_only() {
     let text = "First SSN: 123-45-6789. Unrelated number 987-65-4329 elsewhere.";
     let data = TextData::new(text.to_owned());
     let scope = Scope::new();
-    let ctx = RecognizerContext::<Text>::new(&scope);
+    let ctx = Context::<Text>::new(&scope);
     let subject = Subject::new(data);
     let entities = recognizer
         .recognize(&subject, &ctx)
         .await
-        .expect("recognize")
-        .entities;
+        .expect("recognize");
     assert_eq!(entities.len(), 2, "two SSN matches expected");
 
     // First match has `SSN:` within the default 5-word prefix/suffix
@@ -112,13 +111,12 @@ async fn bare_recognizer_works_without_enhancement() {
     let text = "SSN: 123-45-6789.";
     let data = TextData::new(text.to_owned());
     let scope = Scope::new();
-    let ctx = RecognizerContext::<Text>::new(&scope);
+    let ctx = Context::<Text>::new(&scope);
     let subject = Subject::new(data);
     let entities = recognizer
         .recognize(&subject, &ctx)
         .await
-        .expect("recognize")
-        .entities;
+        .expect("recognize");
 
     assert_eq!(entities.len(), 1, "one SSN match expected");
     let entity = &entities[0];
@@ -143,7 +141,7 @@ async fn context_boost_override_applies_the_custom_lift() {
         .expect("ssn variant builds")
         .with_score(Confidence::clamped(0.6));
     // `boost = 0.1` on the context table, weaker than the default 0.35.
-    let context = Context::Global(Sourced {
+    let context = BoostKeywords::Global(Sourced {
         keywords: vec!["ssn".to_owned()],
         boost: Some(0.1),
         ..Sourced::default()
@@ -164,13 +162,12 @@ async fn context_boost_override_applies_the_custom_lift() {
     let text = "SSN: 123-45-6789.";
     let data = TextData::new(text.to_owned());
     let scope = Scope::new();
-    let ctx = RecognizerContext::<Text>::new(&scope);
+    let ctx = Context::<Text>::new(&scope);
     let subject = Subject::new(data);
     let entities = recognizer
         .recognize(&subject, &ctx)
         .await
-        .expect("recognize")
-        .entities;
+        .expect("recognize");
 
     assert_eq!(entities.len(), 1, "one SSN match expected");
     // 0.6 base + 0.1 override = 0.7 (not 0.6 + 0.35 = 0.95).

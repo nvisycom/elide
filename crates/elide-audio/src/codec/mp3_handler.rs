@@ -26,13 +26,13 @@ mod tests {
     async fn stream_reports_a_duration() {
         let clip = AudioBuffer::open(&fixtures::mp3_tone(1), crate::modality::AudioFormat::Mp3)
             .expect("open");
-        let mut h = Mp3Handler::new(clip);
-        let chunk = h.read_next().await.unwrap().expect("one chunk");
-        assert_eq!(chunk.location.span.start_millis(), 0);
+        let h = Mp3Handler::new(clip);
+        let chunks = h.chunks().unwrap();
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].location.span.start_millis(), 0);
         assert!(
-            chunk.location.span.end_millis() > 0,
+            chunks[0].location.span.end_millis() > 0,
             "duration should be positive"
         );
-        assert!(h.read_next().await.unwrap().is_none());
     }
 }

@@ -69,6 +69,11 @@ impl XlsxState {
         self.0.lock().unwrap().cells.get(index).cloned()
     }
 
+    /// The number of extracted cells.
+    pub(super) fn cell_count(&self) -> usize {
+        self.0.lock().unwrap().cells.len()
+    }
+
     /// The header text for `column` on `sheet`: the text of the cell at row 0 of
     /// that column, if any. Provides column context to the recognizer.
     pub(super) fn column_header(&self, sheet: &str, column: u32) -> Option<String> {

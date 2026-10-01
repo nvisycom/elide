@@ -67,4 +67,34 @@ impl<B: Backend> Backend for Metered<B> {
         }
         result
     }
+
+    async fn call_batch(&self, requests: Vec<Self::Request<'_>>) -> Result<Vec<Self::Response>> {
+        use elide_core::backend::BackendResponse;
+
+        let provenance = self.inner.provenance();
+        let start = Instant::now();
+        let result = self.inner.call_batch(requests).await;
+        let elapsed = start.elapsed();
+        // One usage entry per response, each carrying its own units and output
+        // count, so per-model totals stay correct across a batch. The batch is one
+        // round-trip, so every entry shares its wall-clock: latency then counts the
+        // batch as one sample per result, which is what each result waited. A
+        // whole-batch failure records a single failed entry with the batch's
+        // latency and error kind.
+        match &result {
+            Ok(responses) => {
+                for response in responses {
+                    let model = ModelUsage::from(provenance.clone()).with_units(response.units());
+                    self.sink
+                        .record(Usage::success(elapsed, model, response.output_count()));
+                }
+            }
+            Err(error) => {
+                let model = ModelUsage::from(provenance);
+                self.sink
+                    .record(Usage::failure(elapsed, model, error.kind()));
+            }
+        }
+        result
+    }
 }

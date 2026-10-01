@@ -1237,10 +1237,12 @@ dependencies = [
 name = "elide-detection"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "elide-core",
  "futures",
  "schemars",
  "serde",
+ "tokio",
  "tracing",
 ]
 

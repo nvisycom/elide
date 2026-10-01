@@ -19,6 +19,8 @@ use crate::modality::LayoutRegion;
 #[derive(Debug, Default, Clone)]
 pub struct MockBackend {
     regions: Vec<LayoutRegion>,
+    /// How many trailing responses `call_batch` omits; `0` honors the contract.
+    dropped: usize,
 }
 
 impl MockBackend {
@@ -34,7 +36,18 @@ impl MockBackend {
     /// [`Layout`]: crate::modality::Layout
     #[must_use]
     pub fn with(regions: Vec<LayoutRegion>) -> Self {
-        Self { regions }
+        Self {
+            regions,
+            dropped: 0,
+        }
+    }
+
+    /// Make `call_batch` return `n` fewer responses than requests, violating the
+    /// one-response-per-request contract, to exercise the enricher's count guard.
+    #[must_use]
+    pub fn with_dropped_responses(mut self, n: usize) -> Self {
+        self.dropped = n;
+        self
     }
 }
 
@@ -52,5 +65,12 @@ impl Backend for MockBackend {
 
     async fn call(&self, _request: OcrRequest<'_>) -> Result<OcrResponse> {
         Ok(OcrResponse::new(self.regions.clone()))
+    }
+
+    async fn call_batch(&self, requests: Vec<OcrRequest<'_>>) -> Result<Vec<OcrResponse>> {
+        let kept = requests.len().saturating_sub(self.dropped);
+        Ok((0..kept)
+            .map(|_| OcrResponse::new(self.regions.clone()))
+            .collect())
     }
 }

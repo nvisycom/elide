@@ -4,7 +4,7 @@
 //! [`Slot::Passthrough`] (whitespace + structural punctuation, kept
 //! verbatim) or [`Slot::Leaf`] (a key, string value, or scalar). Leaves
 //! carry both the original source bytes (`serialized`) and the unescaped
-//! UTF-8 value the recognizer sees (`value`). [`Stream::read_next`]
+//! UTF-8 value the recognizer sees (`value`). [`Stream::chunks`]
 //! yields leaves in document order; `write_at` splices each redaction into
 //! the leaf's `serialized` bytes at the mapped source span (keeping `value`
 //! in sync); [`Stream::encode`] concatenates every slot.
@@ -358,10 +358,8 @@ fn is_json_number(s: &str) -> bool {
 #[derive(Debug)]
 pub(crate) struct JsonHandler {
     slots: Vec<Slot>,
-    cursor: usize,
 }
 
-#[async_trait::async_trait]
 impl Stream<Text> for JsonHandler {
     fn format(&self) -> FormatId {
         FORMAT_ID.clone()
@@ -378,24 +376,24 @@ impl Stream<Text> for JsonHandler {
         Ok(ContentData::from_text(out))
     }
 
-    async fn read_next(&mut self) -> Result<Option<Chunk<Text>>> {
-        while self.cursor < self.slots.len() {
-            // The chunk's location addresses the decoded stream, its span
-            // matches `data` (the decoded value), so a recognizer's offsets into
-            // `data` map straight through. `lift` carries the raw span in
-            // `.source` for a source-relative consumer.
-            let start = self.decoded_offset_of(self.cursor);
-            let slot = &self.slots[self.cursor];
-            self.cursor += 1;
-            if let Slot::Leaf(leaf) = slot {
-                return Ok(Some(Chunk {
+    fn chunks(&self) -> Result<Vec<Chunk<Text>>> {
+        // A chunk's location addresses the decoded stream, its span matches
+        // `data` (the decoded value), so a recognizer's offsets into `data` map
+        // straight through. `lift` carries the raw span in `.source` for a
+        // source-relative consumer. Only leaf slots yield a chunk.
+        Ok((0..self.slots.len())
+            .filter_map(|idx| {
+                let Slot::Leaf(leaf) = &self.slots[idx] else {
+                    return None;
+                };
+                let start = self.decoded_offset_of(idx);
+                Some(Chunk {
                     location: TextLocation::new(start, start + leaf.value.len()),
                     data: TextData::new(leaf.value.clone()),
                     hints: leaf.hints.clone(),
-                }));
-            }
-        }
-        Ok(None)
+                })
+            })
+            .collect())
     }
 
     fn lift(&self, chunk: &Chunk<Text>, local: TextLocation) -> Option<TextLocation> {
@@ -460,7 +458,6 @@ impl DataWriter<Text> for JsonHandler {
             };
             leaf.splice(edit.value, &value)?;
         }
-        self.cursor = 0;
         Ok(())
     }
 }
@@ -470,7 +467,7 @@ impl JsonHandler {
     /// loader; preserves the source formatting verbatim.
     pub(super) fn from_source_string(source: String) -> Self {
         let slots = parse_slots(&source).unwrap_or_else(|_| vec![Slot::Passthrough(source)]);
-        Self { slots, cursor: 0 }
+        Self { slots }
     }
 
     /// The decoded-stream byte offset where the slot at `idx` starts.
@@ -737,6 +734,15 @@ mod tests {
         JsonHandler::from_source_string(src.to_string())
     }
 
+    /// The first chunk whose decoded value equals `value`.
+    fn find_chunk(h: &JsonHandler, value: &str) -> Chunk<Text> {
+        h.chunks()
+            .unwrap()
+            .into_iter()
+            .find(|c| c.data.as_str() == value)
+            .expect("chunk")
+    }
+
     #[test]
     fn is_json_literal_follows_the_json_number_grammar() {
         // Valid: keywords, integers, a lone zero, signed, fraction, exponent.
@@ -760,20 +766,21 @@ mod tests {
 
     #[tokio::test]
     async fn stream_yields_keys_and_values_in_order() -> Result<()> {
-        let mut h = handler(r#"{"name":"Alice","age":30}"#);
-        let mut chunks = Vec::new();
-        while let Some(c) = h.read_next().await? {
-            chunks.push(c.data.as_str().to_owned());
-        }
+        let h = handler(r#"{"name":"Alice","age":30}"#);
+        let chunks: Vec<String> = h
+            .chunks()?
+            .into_iter()
+            .map(|c| c.data.as_str().to_owned())
+            .collect();
         assert_eq!(chunks, vec!["name", "Alice", "age", "30"]);
         Ok(())
     }
 
     #[tokio::test]
     async fn duplicate_values_get_distinct_offsets() -> Result<()> {
-        let mut h = handler(r#"{"a":"same","b":"same"}"#);
+        let h = handler(r#"{"a":"same","b":"same"}"#);
         let mut offsets = Vec::new();
-        while let Some(c) = h.read_next().await? {
+        for c in h.chunks()? {
             if c.data.as_str() == "same" {
                 offsets.push(c.location.range().unwrap().start);
             }
@@ -785,9 +792,9 @@ mod tests {
 
     #[tokio::test]
     async fn read_returns_string() -> Result<()> {
-        let mut h = handler(r#"{"name":"Alice"}"#);
+        let h = handler(r#"{"name":"Alice"}"#);
         let mut found = false;
-        while let Some(chunk) = h.read_next().await? {
+        for chunk in h.chunks()? {
             if h.read_at(&chunk.location)
                 .await?
                 .map(|d| d.as_str().to_owned())
@@ -817,12 +824,7 @@ mod tests {
     #[tokio::test]
     async fn redact_whole_string_value() -> Result<()> {
         let mut h = handler(r#"{"name":"Alice"}"#);
-        let chunk = loop {
-            let c = h.read_next().await?.expect("expected chunk");
-            if c.data.as_str() == "Alice" {
-                break c;
-            }
-        };
+        let chunk = find_chunk(&h, "Alice");
         let mut rs = Redactions::new();
         rs.push(chunk.location.clone(), TextReplacement::substituted("Bob"));
         h.write_at(rs).await?;
@@ -834,12 +836,7 @@ mod tests {
     async fn redact_partial_leaf_in_compact_source() -> Result<()> {
         let src = r#"{"email":"alice@example.com"}"#;
         let mut h = handler(src);
-        let chunk = loop {
-            let c = h.read_next().await?.expect("chunk");
-            if c.data.as_str() == "alice@example.com" {
-                break c;
-            }
-        };
+        let chunk = find_chunk(&h, "alice@example.com");
         // Decoded-stream offsets: the chunk's decoded start plus the value-local
         // range of "alice" (offset 0 in the value here).
         let value = chunk.data.as_str();
@@ -863,12 +860,7 @@ mod tests {
         // decoded stream splices back over the source bytes past the `\"` escape.
         let src = r#"{"msg":"foo\"bar"}"#;
         let mut h = handler(src);
-        let chunk = loop {
-            let c = h.read_next().await?.expect("chunk");
-            if c.data.as_str() == r#"foo"bar"# {
-                break c;
-            }
-        };
+        let chunk = find_chunk(&h, r#"foo"bar"#);
         let value = chunk.data.as_str();
         let at = value.find("bar").unwrap();
         let mut rs = Redactions::new();
@@ -892,11 +884,12 @@ mod tests {
         let e_acute = "\\u00e9";
         let grin = "\\uD83D\\uDE00";
         let src = format!("{{\"a\":\"caf{e_acute}\",\"b\":\"{grin}\"}}");
-        let mut h = handler(&src);
-        let mut values = Vec::new();
-        while let Some(c) = h.read_next().await? {
-            values.push(c.data.as_str().to_owned());
-        }
+        let h = handler(&src);
+        let values: Vec<String> = h
+            .chunks()?
+            .into_iter()
+            .map(|c| c.data.as_str().to_owned())
+            .collect();
         assert!(values.contains(&"caf\u{e9}".to_owned()), "got {values:?}");
         assert!(values.contains(&"\u{1F600}".to_owned()), "got {values:?}");
         // No redaction: the escapes are spliced back verbatim, never decoded.
@@ -908,12 +901,7 @@ mod tests {
     async fn redact_a_span_after_a_u_escape() -> Result<()> {
         let src = format!("{{\"msg\":\"caf{} bar\"}}", "\\u00e9");
         let mut h = handler(&src);
-        let chunk = loop {
-            let c = h.read_next().await?.expect("chunk");
-            if c.data.as_str() == "caf\u{e9} bar" {
-                break c;
-            }
-        };
+        let chunk = find_chunk(&h, "caf\u{e9} bar");
         // Decoded-stream offsets: in the value `café bar`, `caf` is bytes 0..3,
         // `é` is 3..5 (2 UTF-8 bytes), the space is 5, so `bar` starts at value
         // byte 6. The decoded location addresses it directly; write_at maps back
@@ -1251,12 +1239,7 @@ mod tests {
         // closing quote / brace is rejected with a named error, not a late
         // generic splice failure.
         let mut h = handler(r#"{"a":"b"}"#);
-        let chunk = loop {
-            let c = h.read_next().await?.expect("chunk");
-            if c.data.as_str() == "b" {
-                break c;
-            }
-        };
+        let chunk = find_chunk(&h, "b");
         let start = chunk.location.range().unwrap().start;
         let mut rs = Redactions::new();
         rs.push(
@@ -1275,12 +1258,7 @@ mod tests {
         // left byte-identical.
         let src = format!("{{\"a\":\"caf{}\"}}", "\\u00e9");
         let mut h = handler(&src);
-        let chunk = loop {
-            let c = h.read_next().await?.expect("chunk");
-            if c.data.as_str() == "caf\u{e9}" {
-                break c;
-            }
-        };
+        let chunk = find_chunk(&h, "caf\u{e9}");
         let start = chunk.location.range().unwrap().start;
         let mut rs = Redactions::new();
         rs.push(
@@ -1299,12 +1277,7 @@ mod tests {
         // A reversed range (start > end) must be rejected before the value-local
         // `end - slot_offset` can underflow-panic in a checked build.
         let mut h = handler(r#"{"a":"bcd"}"#);
-        let chunk = loop {
-            let c = h.read_next().await?.expect("chunk");
-            if c.data.as_str() == "bcd" {
-                break c;
-            }
-        };
+        let chunk = find_chunk(&h, "bcd");
         let start = chunk.location.range().unwrap().start;
         let mut rs = Redactions::new();
         rs.push(
@@ -1335,12 +1308,7 @@ mod tests {
     #[tokio::test]
     async fn redact_key() -> Result<()> {
         let mut h = handler(r#"{"email":"a@b.c"}"#);
-        let chunk = loop {
-            let c = h.read_next().await?.expect("chunk");
-            if c.data.as_str() == "email" {
-                break c;
-            }
-        };
+        let chunk = find_chunk(&h, "email");
         let mut rs = Redactions::new();
         rs.push(
             chunk.location.clone(),
@@ -1354,12 +1322,7 @@ mod tests {
     #[tokio::test]
     async fn redact_scalar() -> Result<()> {
         let mut h = handler(r#"{"n":42}"#);
-        let chunk = loop {
-            let c = h.read_next().await?.expect("chunk");
-            if c.data.as_str() == "42" {
-                break c;
-            }
-        };
+        let chunk = find_chunk(&h, "42");
         let mut rs = Redactions::new();
         rs.push(chunk.location.clone(), TextReplacement::substituted("0"));
         h.write_at(rs).await?;
@@ -1372,12 +1335,7 @@ mod tests {
         // Masking a number with a non-literal string would make bare `XXX`
         // invalid JSON, so the leaf is promoted to a quoted string value.
         let mut h = handler(r#"{"n":42}"#);
-        let chunk = loop {
-            let c = h.read_next().await?.expect("chunk");
-            if c.data.as_str() == "42" {
-                break c;
-            }
-        };
+        let chunk = find_chunk(&h, "42");
         let mut rs = Redactions::new();
         rs.push(chunk.location.clone(), TextReplacement::substituted("XXX"));
         h.write_at(rs).await?;
@@ -1393,7 +1351,7 @@ mod tests {
         let src = r#"{"a":"first","b":"second","c":"third"}"#;
         let mut h = handler(src);
         let mut locs = Vec::new();
-        while let Some(c) = h.read_next().await? {
+        for c in h.chunks()? {
             let v = c.data.as_str();
             if v == "first" || v == "second" || v == "third" {
                 locs.push(c.location);
@@ -1414,13 +1372,8 @@ mod tests {
         // No escapes: decoded and source coincide, so `range` and `.source`
         // agree, but `.source` is still populated with the raw span.
         let src = r#"{"email":"alice@example.com"}"#;
-        let mut h = handler(src);
-        let chunk = loop {
-            let c = h.read_next().await?.expect("chunk");
-            if c.data.as_str() == "alice@example.com" {
-                break c;
-            }
-        };
+        let h = handler(src);
+        let chunk = find_chunk(&h, "alice@example.com");
         let value_start = "alice@example.com".find("alice").unwrap();
         let value_end = value_start + "alice".len();
         let lifted = h
@@ -1447,13 +1400,8 @@ mod tests {
         // decoded `range` and the raw `.source` diverge, this is the case the
         // whole fix exists for.
         let src = r#"{"msg":"foo\"bar"}"#;
-        let mut h = handler(src);
-        let chunk = loop {
-            let c = h.read_next().await?.expect("chunk");
-            if c.data.as_str() == r#"foo"bar"# {
-                break c;
-            }
-        };
+        let h = handler(src);
+        let chunk = find_chunk(&h, r#"foo"bar"#);
         let value = chunk.data.as_str();
         let value_start = value.find("bar").unwrap();
         let value_end = value_start + "bar".len();
@@ -1478,12 +1426,7 @@ mod tests {
     async fn lift_redact_roundtrip() -> Result<()> {
         let src = r#"{"msg":"foo\"bar"}"#;
         let mut h = handler(src);
-        let chunk = loop {
-            let c = h.read_next().await?.expect("chunk");
-            if c.data.as_str() == r#"foo"bar"# {
-                break c;
-            }
-        };
+        let chunk = find_chunk(&h, r#"foo"bar"#);
         let value = chunk.data.as_str();
         let value_start = value.find("bar").unwrap();
         let value_end = value_start + "bar".len();

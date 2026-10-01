@@ -62,6 +62,13 @@ impl<B> IgnoreLabels<B> {
     pub fn inner(&self) -> &B {
         &self.inner
     }
+
+    /// Drop every span whose label is in the ignore set.
+    fn filter(&self, response: &mut NerResponse) {
+        response
+            .spans
+            .retain(|span| !self.labels.contains(&span.label));
+    }
 }
 
 #[async_trait]
@@ -78,10 +85,18 @@ where
 
     async fn call(&self, request: NerRequest<'_>) -> Result<NerResponse> {
         let mut response = self.inner.call(request).await?;
-        response
-            .spans
-            .retain(|span| !self.labels.contains(&span.label));
+        self.filter(&mut response);
         Ok(response)
+    }
+
+    async fn call_batch(&self, requests: Vec<NerRequest<'_>>) -> Result<Vec<NerResponse>> {
+        // Forward to the inner backend's batch path so its native batching (if
+        // any) is preserved, then apply the label filter to each response.
+        let mut responses = self.inner.call_batch(requests).await?;
+        for response in &mut responses {
+            self.filter(response);
+        }
+        Ok(responses)
     }
 }
 
@@ -129,5 +144,69 @@ mod tests {
         assert_eq!(out.spans.len(), 1);
         assert_eq!(out.spans[0].label, LabelRef::new("EMAIL"));
         assert_eq!(out.spans[0].confidence, Confidence::clamped(0.9));
+    }
+
+    /// A backend that records how it was called, so a test can prove the
+    /// decorator forwarded the batch rather than fanning out per request.
+    #[derive(Default)]
+    struct CountingBackend {
+        batch_calls: std::sync::atomic::AtomicUsize,
+        single_calls: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait]
+    impl Backend for CountingBackend {
+        type Request<'a> = NerRequest<'a>;
+        type Response = NerResponse;
+
+        fn provenance(&self) -> ModelEvent {
+            ModelEvent {
+                name: "counting".into(),
+                ..ModelEvent::default()
+            }
+        }
+
+        async fn call(&self, _request: NerRequest<'_>) -> Result<NerResponse> {
+            self.single_calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(NerResponse::new(vec![NerSpan::new("MISC", 0.9, 0..1)]))
+        }
+
+        async fn call_batch(&self, requests: Vec<NerRequest<'_>>) -> Result<Vec<NerResponse>> {
+            self.batch_calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(requests
+                .iter()
+                .map(|_| NerResponse::new(vec![NerSpan::new("MISC", 0.9, 0..1)]))
+                .collect())
+        }
+    }
+
+    fn request() -> NerRequest<'static> {
+        NerRequest {
+            text: "x",
+            labels: None,
+            language: None,
+            correlation_id: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn call_batch_forwards_to_inner_and_filters_each() {
+        use std::sync::atomic::Ordering;
+
+        let filtered =
+            IgnoreLabels::new(CountingBackend::default()).with_label(LabelRef::new("MISC"));
+        let out = filtered
+            .call_batch(vec![request(), request()])
+            .await
+            .unwrap();
+
+        // The decorator used the inner's batch path once, not two single calls.
+        assert_eq!(filtered.inner().batch_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(filtered.inner().single_calls.load(Ordering::Relaxed), 0);
+        // And filtered every response: MISC is dropped, so each is empty.
+        assert_eq!(out.len(), 2);
+        assert!(out.iter().all(|r| r.spans.is_empty()));
     }
 }

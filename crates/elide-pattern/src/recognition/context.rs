@@ -1,4 +1,4 @@
-//! [`Context`]: per-rule keyword set used by the post-recognition
+//! [`BoostKeywords`]: per-rule keyword set used by the post-recognition
 //! [`Enhanced`] layer.
 //!
 //! Two shapes:
@@ -6,13 +6,13 @@
 //! - [`Global`], one flat keyword list applied regardless of the
 //!   per-call language hint.
 //! - [`PerLanguage`], keyword lists keyed by [`LanguageTag`]; the
-//!   enhancer picks the entry matching `RecognizerContext.language`.
+//!   enhancer picks the entry matching `BoostKeywords.language`.
 //!   When no language hint is set, the union of every per-language
 //!   keyword fires (matches the crate's "missing language = any"
 //!   theme used by [`Regex::languages`] / [`Dictionary::languages`]).
 //!
-//! [`Global`]: Context::Global
-//! [`PerLanguage`]: Context::PerLanguage
+//! [`Global`]: BoostKeywords::Global
+//! [`PerLanguage`]: BoostKeywords::PerLanguage
 //! [`Enhanced`]: elide_context::Enhanced
 //! [`Regex::languages`]: super::Regex::languages
 //! [`Dictionary::languages`]: super::Dictionary::languages
@@ -33,13 +33,13 @@ use serde::Deserialize;
 /// [`PerLanguage`]: Self::PerLanguage
 #[derive(Debug, Clone, PartialEq, Deserialize, From)]
 #[serde(untagged)]
-pub enum Context {
+pub enum BoostKeywords {
     /// Keywords applied regardless of the per-call language hint: inline
     /// literals, terms drawn from named dictionaries, or both. In TOML a
     /// `[context]` table with `keywords` and/or `dictionaries`.
     Global(Sourced),
     /// Per-language keyword lists. The enhancer picks the entry
-    /// matching `RecognizerContext.language`, or unions every list
+    /// matching `BoostKeywords.language`, or unions every list
     /// when no hint is set.
     PerLanguage(HashMap<LanguageTag, Vec<String>>),
 }
@@ -95,7 +95,7 @@ pub enum Matching {
     Substring,
 }
 
-impl Context {
+impl BoostKeywords {
     /// Return `true` when this context contributes no keywords at all,
     /// no inline keywords **and** no dictionary sources.
     #[must_use]
@@ -166,13 +166,13 @@ impl Context {
     }
 }
 
-impl Default for Context {
+impl Default for BoostKeywords {
     fn default() -> Self {
         Self::Global(Sourced::default())
     }
 }
 
-impl From<Vec<String>> for Context {
+impl From<Vec<String>> for BoostKeywords {
     /// A bare keyword list becomes a language-agnostic [`Global`] context with
     /// no dictionary sources, the ergonomic path for building a context from
     /// keywords in code.
@@ -186,7 +186,7 @@ impl From<Vec<String>> for Context {
     }
 }
 
-/// Iterator returned by [`Context::iter`].
+/// Iterator returned by [`BoostKeywords::iter`].
 pub enum ContextIter<'a> {
     Global(Option<&'a [String]>),
     PerLanguage(Iter<'a, LanguageTag, Vec<String>>),
@@ -207,8 +207,8 @@ impl<'a> Iterator for ContextIter<'a> {
 mod tests {
     use super::*;
 
-    fn global(keywords: &[&str], dictionaries: &[&str]) -> Context {
-        Context::Global(Sourced {
+    fn global(keywords: &[&str], dictionaries: &[&str]) -> BoostKeywords {
+        BoostKeywords::Global(Sourced {
             keywords: keywords.iter().map(|s| (*s).to_owned()).collect(),
             dictionaries: dictionaries.iter().map(|s| (*s).to_owned()).collect(),
             ..Sourced::default()
@@ -225,7 +225,7 @@ mod tests {
         );
         let mut map = HashMap::new();
         map.insert(LanguageTag::parse("en").unwrap(), vec!["card".to_owned()]);
-        assert!(Context::PerLanguage(map).dictionaries().is_empty());
+        assert!(BoostKeywords::PerLanguage(map).dictionaries().is_empty());
     }
 
     #[test]
@@ -252,7 +252,7 @@ mod tests {
         let mut map = HashMap::new();
         map.insert(LanguageTag::parse("en").unwrap(), vec!["card".into()]);
         map.insert(LanguageTag::parse("es").unwrap(), vec!["tarjeta".into()]);
-        let ctx = Context::PerLanguage(map);
+        let ctx = BoostKeywords::PerLanguage(map);
         let collected: Vec<_> = ctx
             .iter()
             .map(|(lang, kws)| (lang.unwrap().to_string(), kws.to_vec()))
@@ -262,7 +262,7 @@ mod tests {
 
     #[test]
     fn default_is_empty_global() {
-        let ctx = Context::default();
+        let ctx = BoostKeywords::default();
         assert!(ctx.is_empty());
     }
 }

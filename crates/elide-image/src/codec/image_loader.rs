@@ -49,7 +49,6 @@ impl DocumentLoader for ImageDocumentLoader {
             state: state.clone(),
             format_id: self.format_id.clone(),
             policy: self.policy,
-            yielded: false,
         };
         let pixel_stream: Box<dyn Stream<Image>> = Box::new(pixels);
 
@@ -173,11 +172,11 @@ mod tests {
         assert_eq!(doc.parts().len(), 2);
         let stream = pixels(&mut doc);
         assert_eq!(stream.format().as_str(), PNG);
-        let chunk = stream.read_next().await.unwrap().expect("one chunk");
-        let dims = chunk.data.dimensions();
-        assert_eq!((dims.width, dims.height), (4, 4));
+        let chunks = stream.chunks().unwrap();
         // The stream yields exactly one full-frame chunk.
-        assert!(stream.read_next().await.unwrap().is_none());
+        assert_eq!(chunks.len(), 1);
+        let dims = chunks[0].data.dimensions();
+        assert_eq!((dims.width, dims.height), (4, 4));
     }
 
     #[tokio::test]

@@ -210,17 +210,17 @@ mod tests {
         Doc::new(raw, MarkupConfig::xml())
     }
 
-    /// Read chunks from the body until one whose text satisfies `pred`.
-    async fn chunk_where(
+    /// The first body chunk whose text satisfies `pred`.
+    fn chunk_where(
         doc: &mut Doc,
         pred: impl Fn(&str) -> bool,
     ) -> elide_core::modality::Chunk<Text> {
-        loop {
-            let c = doc.stream.read_next().await.unwrap().unwrap();
-            if pred(c.data.as_str()) {
-                return c;
-            }
-        }
+        doc.stream
+            .chunks()
+            .unwrap()
+            .into_iter()
+            .find(|c| pred(c.data.as_str()))
+            .expect("chunk")
     }
 
     #[tokio::test]
@@ -250,7 +250,7 @@ mod tests {
         // byte offset, so `source` must point at the raw bytes, not the stream.
         let raw = "<root><name>Alice Carter</name></root>";
         let mut doc = load(raw);
-        let chunk = chunk_where(&mut doc, |t| t == "Alice Carter").await;
+        let chunk = chunk_where(&mut doc, |t| t == "Alice Carter");
         // Redact "Carter", value-local [6, 12).
         let lifted = doc
             .stream
@@ -325,7 +325,7 @@ mod tests {
     async fn redact_text_node() {
         let raw = "<root><name>Alice</name></root>";
         let mut doc = load(raw);
-        let chunk = chunk_where(&mut doc, |t| t == "Alice").await;
+        let chunk = chunk_where(&mut doc, |t| t == "Alice");
         let mut rs = Redactions::new();
         rs.push(chunk.location, TextReplacement::substituted("[NAME]"));
         doc.stream.write_at(rs).await.unwrap();
@@ -336,7 +336,7 @@ mod tests {
     async fn redact_attribute_value() {
         let raw = r#"<user email="alice@example.com">Bob</user>"#;
         let mut doc = load(raw);
-        let chunk = chunk_where(&mut doc, |t| t == "alice@example.com").await;
+        let chunk = chunk_where(&mut doc, |t| t == "alice@example.com");
         let mut rs = Redactions::new();
         rs.push(chunk.location, TextReplacement::substituted("[EMAIL]"));
         doc.stream.write_at(rs).await.unwrap();
@@ -347,7 +347,7 @@ mod tests {
     async fn redact_cdata_body() {
         let raw = "<doc><![CDATA[alice@example.com]]></doc>";
         let mut doc = load(raw);
-        let chunk = chunk_where(&mut doc, |t| t == "alice@example.com").await;
+        let chunk = chunk_where(&mut doc, |t| t == "alice@example.com");
         let mut rs = Redactions::new();
         rs.push(chunk.location, TextReplacement::substituted("[EMAIL]"));
         doc.stream.write_at(rs).await.unwrap();
@@ -358,7 +358,7 @@ mod tests {
     async fn redact_partial_text() {
         let raw = "<p>contact alice@example.com today</p>";
         let mut doc = load(raw);
-        let chunk = chunk_where(&mut doc, |t| t.contains("alice@example.com")).await;
+        let chunk = chunk_where(&mut doc, |t| t.contains("alice@example.com"));
         let at = chunk.data.as_str().find("alice@example.com").unwrap();
         let loc = TextLocation::new(
             chunk.location.range().unwrap().start + at,
@@ -385,7 +385,7 @@ mod tests {
         // splice offsets stay correct across the skipped region.
         let raw = r#"<p><script>var a="keep@x.com";</script>mail alice@example.com</p>"#;
         let mut doc = Doc::new(raw, MarkupConfig::lenient(TEST_BLOCKS, &["script"]));
-        let chunk = chunk_where(&mut doc, |t| t.contains("alice@example.com")).await;
+        let chunk = chunk_where(&mut doc, |t| t.contains("alice@example.com"));
         let at = chunk.data.as_str().find("alice@example.com").unwrap();
         let loc = TextLocation::new(
             chunk.location.range().unwrap().start + at,

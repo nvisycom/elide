@@ -3,9 +3,9 @@
 use crate::error::Result;
 use crate::modality::Modality;
 use crate::primitive::ComponentId;
-use crate::recognition::{RecognizerContext, Subject};
+use crate::recognition::{Context, Subject};
 
-/// Enriches a [`RecognizerContext`] before recognizers run over it.
+/// Enriches a [`Context`] before recognizers run over it.
 ///
 /// An enricher produces no entities. It fills in per-call context that
 /// recognizers consume: detecting the payload's language and asserting it
@@ -29,7 +29,7 @@ where
     /// Inspect the [`Subject`] and enrich it in place: an enricher writes its
     /// context (asserted languages, a produced artifact, shared NLP tokens) onto
     /// the subject and produces no return value. The analysis-wide
-    /// [`RecognizerContext`] is read-only (a detector may consult the caller's
+    /// [`Context`] is read-only (a detector may consult the caller's
     /// asserted languages or correlation id).
     ///
     /// # Errors
@@ -38,6 +38,27 @@ where
     /// unreachable). A failed enricher aborts the call before recognition.
     ///
     /// [`Subject`]: crate::recognition::Subject
-    /// [`RecognizerContext`]: crate::recognition::RecognizerContext
-    async fn enrich(&self, subject: &mut Subject<M>, ctx: &RecognizerContext<'_, M>) -> Result<()>;
+    /// [`Context`]: crate::recognition::Context
+    async fn enrich(&self, subject: &mut Subject<M>, ctx: &Context<'_, M>) -> Result<()>;
+
+    /// Enrich a batch of `subjects` in place, under one shared context.
+    ///
+    /// The default enriches each in turn via [`enrich`](Self::enrich). An enricher
+    /// backed by a provider that accepts several inputs in one round-trip (OCR,
+    /// speech-to-text) overrides this to build one request per subject and issue a
+    /// single [`Backend::call_batch`](crate::backend::Backend::call_batch), turning
+    /// N provider round-trips into one. It stays behavior-preserving: each subject
+    /// ends enriched exactly as a sequence of [`enrich`](Self::enrich) calls would
+    /// leave it, and an already-enriched subject is skipped.
+    ///
+    /// # Errors
+    ///
+    /// The first enrichment error; a batched enricher surfaces a whole-batch
+    /// failure the same way, aborting the call before recognition.
+    async fn enrich_batch(&self, subjects: &mut [Subject<M>], ctx: &Context<'_, M>) -> Result<()> {
+        for subject in subjects {
+            self.enrich(subject, ctx).await?;
+        }
+        Ok(())
+    }
 }

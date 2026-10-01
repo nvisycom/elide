@@ -42,7 +42,6 @@ impl DocumentLoader for XlsxDocumentLoader {
         let mut parts = Vec::with_capacity(text_parts.len() + doc_props.len() + 1);
         let stream: Box<dyn Stream<Tabular>> = Box::new(XlsxStream {
             state: state.clone(),
-            cursor: 0,
         });
         parts.push(DocumentPart::Stream {
             id: LocalId::new(BODY_PART_ID),
@@ -113,24 +112,26 @@ mod tests {
     }
 
     /// Every cell the body stream yields, as `(sheet, row, column, text)`.
-    async fn cells_of(doc: &mut Document) -> Vec<(Option<String>, u32, u32, String)> {
-        let stream = body(doc);
-        let mut seen = Vec::new();
-        while let Some(chunk) = stream.read_next().await.unwrap() {
-            seen.push((
-                chunk.location.sheet_name.as_deref().map(str::to_owned),
-                chunk.location.row_index,
-                chunk.location.column_index,
-                chunk.data.as_str().to_owned(),
-            ));
-        }
-        seen
+    fn cells_of(doc: &mut Document) -> Vec<(Option<String>, u32, u32, String)> {
+        body(doc)
+            .chunks()
+            .unwrap()
+            .into_iter()
+            .map(|chunk| {
+                (
+                    chunk.location.sheet_name.as_deref().map(str::to_owned),
+                    chunk.location.row_index,
+                    chunk.location.column_index,
+                    chunk.data.as_str().to_owned(),
+                )
+            })
+            .collect()
     }
 
     #[tokio::test]
     async fn streams_cells_with_sheet_scoped_locations() {
         let mut doc = decode(SAMPLE).await;
-        let seen = cells_of(&mut doc).await;
+        let seen = cells_of(&mut doc);
         assert!(seen.contains(&(
             Some("Customers".to_owned()),
             1,
@@ -151,15 +152,12 @@ mod tests {
         // A data cell must stream with its header column's text, so a
         // context-gated pattern can match a value that carries no cue itself.
         let mut doc = decode(REAL).await;
-        let stream = body(&mut doc);
-        let mut card = None;
-        while let Some(chunk) = stream.read_next().await.unwrap() {
-            if chunk.data.as_str() == "4111 1111 1111 1111" {
-                card = Some(chunk);
-                break;
-            }
-        }
-        let card = card.expect("the card cell is streamed");
+        let card = body(&mut doc)
+            .chunks()
+            .unwrap()
+            .into_iter()
+            .find(|chunk| chunk.data.as_str() == "4111 1111 1111 1111")
+            .expect("the card cell is streamed");
         // The header of the card's column is `card`, attached as the column name
         // and surfaced as a hint the recognizer can boost on.
         assert_eq!(card.location.column_name.as_deref(), Some("card"));
@@ -169,8 +167,7 @@ mod tests {
         );
         // A header cell is not re-hinted with itself.
         let mut doc = decode(REAL).await;
-        let stream = body(&mut doc);
-        while let Some(chunk) = stream.read_next().await.unwrap() {
+        for chunk in body(&mut doc).chunks().unwrap() {
             if chunk.location.row_index == 0 {
                 assert!(chunk.hints.is_empty(), "header cell has no self-hint");
                 assert!(chunk.location.column_name.is_none());
@@ -210,7 +207,7 @@ mod tests {
             .decode(ContentData::new(out.to_bytes()))
             .await
             .unwrap();
-        let seen = cells_of(&mut reopened).await;
+        let seen = cells_of(&mut reopened);
         assert!(seen.contains(&(Some("Customers".to_owned()), 1, 0, "[EMAIL]".to_owned())));
         assert!(seen.contains(&(
             Some("Notes".to_owned()),
@@ -254,7 +251,7 @@ mod tests {
             .decode(ContentData::new(out.to_bytes()))
             .await
             .unwrap();
-        let seen = cells_of(&mut reopened).await;
+        let seen = cells_of(&mut reopened);
         assert!(seen.contains(&(
             Some("Customers".to_owned()),
             1,

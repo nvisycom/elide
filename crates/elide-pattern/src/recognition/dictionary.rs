@@ -6,7 +6,7 @@ use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
 use elide_core::{Error, ErrorKind, Result};
 use serde::Deserialize;
 
-use super::context::Context;
+use super::context::BoostKeywords;
 use super::term::Term;
 
 /// Confidence policy for a [`Dictionary`]'s matches.
@@ -131,12 +131,12 @@ pub struct Dictionary {
     #[builder(default)]
     #[serde(default, rename = "score")]
     pub scoring: Scoring,
-    /// Context keywords that lift confidence when one of them
-    /// appears near a match. Either a flat list applied
-    /// regardless of language, or a per-language map.
+    /// Keywords that lift confidence when one of them appears near a
+    /// match. Either a flat list applied regardless of language, or a
+    /// per-language map.
     #[builder(default)]
     #[serde(default)]
-    pub context: Context,
+    pub context: BoostKeywords,
     /// BCP-47 language tags the dictionary applies to. Empty means
     /// "any language"; otherwise the recognizer skips the
     /// dictionary when the per-call language hint is not in the
@@ -241,7 +241,7 @@ struct DictionaryMetadata {
     #[serde(default)]
     score: Option<Scoring>,
     #[serde(default)]
-    context: Option<Context>,
+    context: Option<BoostKeywords>,
     #[serde(default)]
     word_boundary: Option<bool>,
     #[serde(default)]

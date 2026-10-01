@@ -9,7 +9,7 @@ use elide_core::entity::audit::AuditEvent;
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::{ComponentId, Confidence, LanguageTag};
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Subject};
+use elide_core::recognition::{Context, Recognizer, Subject};
 use elide_core::{Error, ErrorKind, Result};
 // The external `regex` crate is aliased throughout because `Regex` is already
 // this crate's rule type (`super::regex::Regex`, imported below).
@@ -538,13 +538,13 @@ impl PatternRecognizerBuilder {
     /// Build the wrapping [`Enhancer`] from per-pattern and
     /// per-dictionary context keywords.
     ///
-    /// Per-rule [`Context`] produces one [`BoostRule`] per
+    /// Per-rule [`BoostKeywords`] produce one [`BoostRule`] per
     /// language scope (global rules carry
     /// `language = None`; per-language rules carry the language
     /// tag). The enhancer keys these by label and filters them
     /// against the per-call language hint at apply time.
     ///
-    /// [`Context`]: super::Context
+    /// [`BoostKeywords`]: super::BoostKeywords
     fn build_enhancer(&self) -> Enhancer {
         // Inline keyword context (Global / PerLanguage lists, and any inline
         // keywords a `Sourced` context carries).
@@ -675,12 +675,12 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
     async fn recognize(
         &self,
         subject: &Subject<M>,
-        ctx: &RecognizerContext<'_, M>,
-    ) -> Result<Recognition<M>> {
+        ctx: &Context<'_, M>,
+    ) -> Result<Vec<Entity<M>>> {
         // No recognizable text at this chunk (an un-transcribed clip, an
         // un-OCR'd image): nothing to match.
         let Some(text) = M::as_text(subject.data(), subject.artifact()) else {
-            return Ok(Recognition::default());
+            return Ok(Vec::new());
         };
         let mut entities: Vec<Entity<M>> = Vec::new();
 
@@ -755,7 +755,6 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
             }
         }
 
-        // Pattern matching is pure-CPU: no model usage to report.
-        Ok(entities.into())
+        Ok(entities)
     }
 }

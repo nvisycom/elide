@@ -16,7 +16,7 @@ use elide_core::Result;
 use elide_core::enrichment::Enricher;
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::{ComponentId, LanguageTag};
-use elide_core::recognition::{RecognizerContext, Subject};
+use elide_core::recognition::{Context, Subject};
 
 use crate::lingua_detector::LinguaDetector;
 
@@ -80,7 +80,7 @@ impl<M: TextRecognizable> Enricher<M> for LinguaEnricher {
         ComponentId::new("elide-lingua", env!("CARGO_PKG_VERSION"))
     }
 
-    async fn enrich(&self, subject: &mut Subject<M>, ctx: &RecognizerContext<'_, M>) -> Result<()> {
+    async fn enrich(&self, subject: &mut Subject<M>, ctx: &Context<'_, M>) -> Result<()> {
         // A caller-asserted language is authoritative; skip detection.
         if ctx.has_asserted_language() {
             return Ok(());
@@ -112,7 +112,7 @@ mod tests {
     async fn detects_english_onto_input() {
         let data = TextData::new("The quick brown fox jumps over the lazy dog.");
         let scope = Scope::new();
-        let ctx = RecognizerContext::<Text>::new(&scope);
+        let ctx = Context::<Text>::new(&scope);
         let mut subject = Subject::new(data);
         LinguaEnricher::unrestricted()
             .enrich(&mut subject, &ctx)
@@ -130,7 +130,7 @@ mod tests {
         // pipeline to its detected language.
         let data = TextData::new("The quick brown fox jumps over the lazy dog.");
         let scope = Scope::new();
-        let ctx = RecognizerContext::<Tabular>::new(&scope);
+        let ctx = Context::<Tabular>::new(&scope);
         let mut subject = Subject::new(data);
         LinguaEnricher::unrestricted()
             .enrich(&mut subject, &ctx)
@@ -147,7 +147,7 @@ mod tests {
         let de: LanguageTag = "de".parse().unwrap();
         let data = TextData::new("The quick brown fox");
         let scope = Scope::new().with_language(de);
-        let ctx = RecognizerContext::<Text>::new(&scope);
+        let ctx = Context::<Text>::new(&scope);
         let mut subject = Subject::new(data);
         LinguaEnricher::unrestricted()
             .enrich(&mut subject, &ctx)

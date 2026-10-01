@@ -386,6 +386,7 @@ mod tests {
 
     use elide_codec::Stream;
     use elide_codec::extract::{ExtractStream, SharedSplice};
+    use elide_core::modality::Chunk;
 
     use super::*;
     use crate::markup::xml_handler::{FORMAT_ID, MarkupAddresser, XmlSpan};
@@ -402,12 +403,17 @@ mod tests {
         handler_with(raw, MarkupConfig::xml())
     }
 
-    async fn values(h: &mut ExtractStream<XmlSpan>) -> Vec<String> {
-        let mut out = Vec::new();
-        while let Some(chunk) = h.read_next().await.unwrap() {
-            out.push(chunk.data.as_str().to_owned());
-        }
-        out
+    fn values(h: &ExtractStream<XmlSpan>) -> Vec<String> {
+        h.chunks()
+            .unwrap()
+            .into_iter()
+            .map(|chunk| chunk.data.as_str().to_owned())
+            .collect()
+    }
+
+    /// The first chunk a stream yields.
+    fn first_chunk(h: &ExtractStream<XmlSpan>) -> Chunk<Text> {
+        h.chunks().unwrap().into_iter().next().expect("one chunk")
     }
 
     #[tokio::test]
@@ -416,8 +422,8 @@ mod tests {
         // context keyword (`card`) can boost the value inside, the markup
         // counterpart of a JSON key or CSV header vouching for its value.
         let raw = "<paymentCard>4111 1111 1111 1111</paymentCard>";
-        let mut h = xml(raw);
-        let chunk = h.read_next().await.unwrap().expect("one text chunk");
+        let h = xml(raw);
+        let chunk = first_chunk(&h);
         assert_eq!(chunk.data.as_str(), "4111 1111 1111 1111");
         assert!(
             chunk
@@ -440,8 +446,8 @@ mod tests {
         // pins that the name's source span resolves (the hint text and location
         // both come from slicing the source at the name).
         let raw = r#"<r paymentCard="4111 1111 1111 1111"/>"#;
-        let mut h = xml(raw);
-        let chunk = h.read_next().await.unwrap().expect("one attribute chunk");
+        let h = xml(raw);
+        let chunk = first_chunk(&h);
         assert_eq!(chunk.data.as_str(), "4111 1111 1111 1111");
         let hint = chunk.hints.first().expect("attribute-name hint present");
         // The name is split into context words for word-boundary matching.
@@ -462,8 +468,8 @@ mod tests {
         // A namespace prefix (`c:ssn`) is stripped so the hint keys on the local
         // name, matching how the element path uses the local name.
         let raw = r#"<r c:ssn="123-45-6789"/>"#;
-        let mut h = xml(raw);
-        let chunk = h.read_next().await.unwrap().expect("one attribute chunk");
+        let h = xml(raw);
+        let chunk = first_chunk(&h);
         let hint = chunk.hints.first().expect("attribute-name hint present");
         assert_eq!(hint.data.as_str(), "ssn");
     }
@@ -474,8 +480,8 @@ mod tests {
         // it back so the streamed text is exact (not shifted into garbage) and a
         // recognizer can match it.
         let raw = "\u{feff}<?xml version=\"1.0\"?><r>alice@example.com</r>";
-        let mut h = xml(raw);
-        let vs = values(&mut h).await;
+        let h = xml(raw);
+        let vs = values(&h);
         assert!(
             vs.iter().any(|v| v == "alice@example.com"),
             "BOM shifted the extracted text: {vs:?}"
@@ -488,8 +494,8 @@ mod tests {
         // element text, an attribute value, a comment body, and a CDATA payload.
         let raw =
             r#"<root id="A1"><name>Alice</name><!-- c --><data><![CDATA[secret]]></data></root>"#;
-        let mut h = xml(raw);
-        let vs = values(&mut h).await;
+        let h = xml(raw);
+        let vs = values(&h);
         assert!(vs.iter().any(|v| v == "Alice"), "text: {vs:?}");
         assert!(vs.iter().any(|v| v == " c "), "comment: {vs:?}");
         assert!(vs.iter().any(|v| v == "secret"), "cdata: {vs:?}");
@@ -519,8 +525,8 @@ mod tests {
             r#"<p>ok</p><script>x<script>alice@example.com</script>y</script><p>after</p>"#,
         ];
         for raw in cases {
-            let mut h = handler_with(raw, MarkupConfig::lenient(TEST_BLOCKS, &["script"]));
-            let vs = values(&mut h).await;
+            let h = handler_with(raw, MarkupConfig::lenient(TEST_BLOCKS, &["script"]));
+            let vs = values(&h);
             assert!(
                 !vs.iter().any(|v| v.contains("alice@example.com")),
                 "skipped body leaked for {raw:?}: {vs:?}"
@@ -543,9 +549,9 @@ mod tests {
         // that follows, which can change context-gated detection. The stray
         // end tag must be ignored so the following number keeps its hint.
         let raw = "<paymentCard>4111 <b>1111</b></div> 1111 1111</paymentCard>";
-        let mut h = handler_with(raw, MarkupConfig::lenient(TEST_BLOCKS, &[]));
+        let h = handler_with(raw, MarkupConfig::lenient(TEST_BLOCKS, &[]));
         let mut hinted = false;
-        while let Some(chunk) = h.read_next().await.unwrap() {
+        for chunk in h.chunks().unwrap() {
             // The text after the stray `</div>` must still carry the
             // `payment Card` element-name hint.
             if chunk.data.as_str().contains("1111 1111")

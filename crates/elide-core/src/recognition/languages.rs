@@ -9,7 +9,7 @@ use crate::primitive::{LanguageClaim, LanguageTag};
 /// together.
 ///
 /// A borrowed view built by
-/// [`RecognizerContext::languages`](super::RecognizerContext::languages); it
+/// [`Context::languages`](super::Context::languages); it
 /// owns nothing, just the two slices, and folds them for the queries a
 /// recognizer runs — which language is primary, whether a language-scoped rule
 /// applies, attributing an entity to the language of its span.

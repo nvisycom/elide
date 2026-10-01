@@ -31,7 +31,7 @@ pub struct Document {
     /// slice.
     pub name: String,
     /// The document's decoded parts. Stream parts are redacted in place; blob
-    /// sub-parts fold back on [`encode`](CodecDocument::encode).
+    /// sub-parts fold back on its `encode`.
     pub document: CodecDocument,
 }
 

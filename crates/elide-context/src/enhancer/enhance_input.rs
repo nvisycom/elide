@@ -1,4 +1,4 @@
-//! [`Context`]: per-call inputs bundled for [`Enhancer::enhance`].
+//! [`EnhanceInput`]: per-call inputs bundled for [`Enhancer::enhance`].
 //!
 //! [`Enhancer::enhance`]: super::Enhancer::enhance
 
@@ -13,7 +13,7 @@ use elide_core::primitive::LanguageTag;
 ///
 /// [`Enhancer::enhance`]: super::Enhancer::enhance
 #[derive(Clone, Copy)]
-pub struct Context<'a> {
+pub struct EnhanceInput<'a> {
     /// Full text the entities' byte offsets index into.
     pub text: &'a str,
     /// Optional token artifact produced by an upstream NLP
@@ -37,7 +37,7 @@ pub struct Context<'a> {
     pub hints: &'a [&'a str],
 }
 
-impl<'a> Context<'a> {
+impl<'a> EnhanceInput<'a> {
     /// Construct a context with just the source text; every
     /// other field defaults to empty.
     pub fn new(text: &'a str) -> Self {

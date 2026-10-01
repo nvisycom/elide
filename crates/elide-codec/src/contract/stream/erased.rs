@@ -70,10 +70,9 @@ impl<M: Modality> DataWriter<M> for TypedStream<M> {
     }
 }
 
-#[async_trait::async_trait]
 impl<M: Modality> StreamDataReader<M> for TypedStream<M> {
-    async fn read_next(&mut self) -> Result<Option<Chunk<M>>> {
-        Stream::read_next(&mut *self.stream).await
+    fn chunks(&self) -> Result<Vec<Chunk<M>>> {
+        Stream::chunks(&*self.stream)
     }
 
     fn lift(&self, chunk: &Chunk<M>, mut entity: Entity<M>) -> Option<Entity<M>> {

@@ -11,7 +11,7 @@
 //! [`Image`]: elide_image::modality::Image
 
 use elide_core::modality::text::Text;
-use elide_core::recognition::{RecognizerContext, Subject};
+use elide_core::recognition::{Context, Subject};
 use elide_image::modality::Image;
 
 use super::Prompt;
@@ -29,7 +29,7 @@ use super::text_prompt::TextPromptBuilder;
 pub struct DefaultPrompt;
 
 impl Prompt<Text> for DefaultPrompt {
-    fn build(&self, subject: &Subject<Text>, ctx: &RecognizerContext<'_, Text>) -> String {
+    fn build(&self, subject: &Subject<Text>, ctx: &Context<'_, Text>) -> String {
         let target_labels = ctx.target_label_defs();
         TextPromptBuilder::new(
             subject.data().text.as_str(),
@@ -43,7 +43,7 @@ impl Prompt<Text> for DefaultPrompt {
 }
 
 impl Prompt<Image> for DefaultPrompt {
-    fn build(&self, subject: &Subject<Image>, ctx: &RecognizerContext<'_, Image>) -> String {
+    fn build(&self, subject: &Subject<Image>, ctx: &Context<'_, Image>) -> String {
         let target_labels = ctx.target_label_defs();
         ImagePromptBuilder::new(
             ctx.inclusions(),

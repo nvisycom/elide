@@ -13,37 +13,44 @@ use elide_core::recognition::Scope;
 use elide_core::{Error, ErrorKind, Result};
 
 use super::ModalityPipeline;
-use super::outcome::{BoxFuture, InPlaceAnalysis};
+use super::outcome::{BoxFuture, PartAnalysis};
 use crate::analysis::{ArtifactGroup, EntityGroup};
 use crate::directives::AnnotationSet;
 
 /// A type-erased pipeline the orchestrator stores per modality.
 ///
-/// Every document stream part is an [`ErasedStream`] offered to each pipeline
-/// until one matches by modality, so the orchestrator never needs to name the
-/// modality statically. The analyze phase is seeded with the group's prior
-/// enrichment artifact, `NoArtifact` on a first pass, a restored artifact on a
-/// re-run, so the same path serves both. The phases:
-/// - [`analyze_stream`] borrows a stream in place; on a modality match it
-///   detects and returns the boxed entities and artifact, else `None`.
+/// Every document stream part is an [`ErasedStream`] the orchestrator buckets by
+/// modality ([`matches`]) so it never names the modality statically. The analyze
+/// phase is seeded with the group's prior enrichment artifact, `NoArtifact` on a
+/// first pass, a restored artifact on a re-run, so the same path serves both. The
+/// phases:
+/// - [`analyze_streams`] analyzes the matched parts together, coalescing
+///   enrichment into one provider round-trip, and returns one result per handle.
 /// - [`apply_stream`] re-drives a matched stream with its (possibly edited)
 ///   boxed entities, redacting it in place; the document re-encodes itself.
 ///
-/// [`analyze_stream`]: ErasedPipeline::analyze_stream
+/// [`matches`]: ErasedPipeline::matches
+/// [`analyze_streams`]: ErasedPipeline::analyze_streams
 /// [`apply_stream`]: ErasedPipeline::apply_stream
 pub(crate) trait ErasedPipeline: Send + Sync {
-    /// Analyze a stream part in place, seeded with the group's prior enrichment
-    /// `artifact`, `NoArtifact` on a first pass, so it enriches from scratch; a
-    /// restored artifact on a re-run, so it re-recognizes without re-enriching.
-    /// On a modality match it detects and returns the boxed entities and
-    /// artifact; `None` when the stream's modality is not this pipeline's.
-    fn analyze_stream<'a>(
+    /// Whether `handle` carries this pipeline's modality — a non-mutating probe
+    /// the orchestrator uses to bucket parts by modality before dispatching a
+    /// batch, without a destructive try-each-pipeline downcast.
+    fn matches(&self, handle: &ErasedStream) -> bool;
+
+    /// Analyze several stream parts of this pipeline's modality together,
+    /// coalescing enrichment into one batched provider round-trip, and return one
+    /// [`PartAnalysis`] per handle in order. Each handle is paired with its prior
+    /// enrichment `seed` (`NoArtifact` on a first pass). Every handle must already
+    /// match this pipeline's modality (the orchestrator groups them with
+    /// [`matches`](Self::matches) first); a non-matching handle is a caller error.
+    fn analyze_streams<'a>(
         &'a self,
-        handle: &'a mut ErasedStream,
+        handles: &'a mut [&'a mut ErasedStream],
         scope: &'a Scope,
         annotations: &'a AnnotationSet,
-        artifact: &'a dyn ArtifactGroup,
-    ) -> BoxFuture<'a, Result<InPlaceAnalysis>>;
+        seeds: &'a [&'a dyn ArtifactGroup],
+    ) -> BoxFuture<'a, Result<Vec<PartAnalysis>>>;
 
     /// Redact a matched stream part in place with its (possibly edited) boxed
     /// entities; the document re-encodes the stream itself on `encode`.
@@ -70,32 +77,52 @@ where
     M::Artifact: ArtifactGroup,
     TypedStream<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
 {
-    fn analyze_stream<'a>(
+    fn matches(&self, handle: &ErasedStream) -> bool {
+        handle.is::<M>()
+    }
+
+    fn analyze_streams<'a>(
         &'a self,
-        handle: &'a mut ErasedStream,
+        handles: &'a mut [&'a mut ErasedStream],
         scope: &'a Scope,
         annotations: &'a AnnotationSet,
-        artifact: &'a dyn ArtifactGroup,
-    ) -> BoxFuture<'a, Result<InPlaceAnalysis>> {
+        seeds: &'a [&'a dyn ArtifactGroup],
+    ) -> BoxFuture<'a, Result<Vec<PartAnalysis>>> {
         Box::pin(async move {
-            let Some(stream) = handle.downcast_mut::<M>() else {
-                return Ok(None); // not this pipeline's modality
-            };
             let regions = annotations.get::<M>();
-            // A prior artifact for this modality restores as `Some` (even when
-            // empty, that is a valid enrichment result); a `NoArtifact`
-            // first-pass seed or a mismatched-modality seed downcasts to `None`,
-            // so the group enriches from scratch.
-            let seed = artifact.as_any().downcast_ref::<M::Artifact>().cloned();
-            let analysis = self
+            // The orchestrator grouped these handles by `matches`, so every one
+            // downcasts; a `None` here would mean a caller mixed modalities.
+            let mut streams = Vec::with_capacity(handles.len());
+            for handle in handles.iter_mut() {
+                let stream = handle.downcast_mut::<M>().ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::MalformedInput,
+                        format!("batched part is not {} despite matching", M::NAME),
+                    )
+                })?;
+                streams.push(stream);
+            }
+            // Each seed downcasts as in `analyze_stream`: a matching prior artifact
+            // restores, anything else (first-pass `NoArtifact`, other modality) is
+            // `None` so the group enriches from scratch.
+            let seeds = seeds
+                .iter()
+                .map(|seed| seed.as_any().downcast_ref::<M::Artifact>().cloned())
+                .collect();
+            let analyses = self
                 .analyzer
-                .analyze_stream_in(stream, scope, &regions, seed)
+                .analyze_streams(&mut streams, scope, &regions, seeds)
                 .await?;
-            let entities = Box::new(analysis.entities) as Box<dyn EntityGroup>;
-            let artifact = analysis
-                .artifact
-                .map(|a| Box::new(a) as Box<dyn ArtifactGroup>);
-            Ok(Some((entities, artifact)))
+            Ok(analyses
+                .into_iter()
+                .map(|analysis| {
+                    let entities = Box::new(analysis.entities) as Box<dyn EntityGroup>;
+                    let artifact = analysis
+                        .artifact
+                        .map(|a| Box::new(a) as Box<dyn ArtifactGroup>);
+                    (entities, artifact)
+                })
+                .collect())
         })
     }
 

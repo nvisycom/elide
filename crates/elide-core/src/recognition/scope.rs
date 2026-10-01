@@ -12,7 +12,7 @@ use crate::primitive::{CountryCode, LanguageClaim, LanguageTag};
 /// Caller-asserted scope shared across every payload of one analysis.
 ///
 /// Built once with the `with_*` chain and passed by reference to the
-/// analyzer, which borrows it into a fresh [`RecognizerContext`] per
+/// analyzer, which borrows it into a fresh [`Context`] per
 /// payload. It holds only what the *caller* asserts about the analysis as a
 /// whole, languages, jurisdictions, document labels, the target catalog, a
 /// correlation id, none of which depends on the medium, so one [`Scope`]
@@ -23,7 +23,7 @@ use crate::primitive::{CountryCode, LanguageClaim, LanguageTag};
 /// of that modality. The per-payload working state (NLP artifacts, detected
 /// languages) lives on the context, not here.
 ///
-/// [`RecognizerContext`]: super::RecognizerContext
+/// [`Context`]: super::Context
 /// [`Annotations`]: super::annotation::Annotations
 /// Free-form, caller-asserted request context: the *document* it is about and
 /// the *request* driving it.
@@ -209,7 +209,7 @@ impl Scope {
 
     /// Set the [`LabelCatalog`] of entity types to detect, the request.
     ///
-    /// Threaded onto every [`RecognizerContext`]; a zero-shot NER model
+    /// Threaded onto every [`Context`]; a zero-shot NER model
     /// requests exactly these labels, an LLM prompt lists them as the types to
     /// find, and every detection is culled to this set. An empty catalog
     /// requests nothing, so the analyzer detects nothing,
@@ -217,7 +217,7 @@ impl Scope {
     /// type" set. (A recognizer with its own `supported_labels` still selects a
     /// subset of a non-empty catalog.)
     ///
-    /// [`RecognizerContext`]: super::RecognizerContext
+    /// [`Context`]: super::Context
     #[must_use]
     pub fn with_catalog(mut self, catalog: LabelCatalog) -> Self {
         self.catalog = catalog;

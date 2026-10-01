@@ -16,11 +16,11 @@ use bytes::Bytes;
 use elide_codec::content::ContentData;
 use elide_codec::{FormatId, Loader, Stream};
 use elide_core::Result;
-use elide_core::entity::{LabelRef, builtins};
+use elide_core::entity::{Entity, LabelRef, builtins};
 use elide_core::modality::metadata::{Metadata, MetadataData, MetadataLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::primitive::ComponentId;
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Subject};
+use elide_core::recognition::{Context, Recognizer, Subject};
 use elide_core::redaction::Redactions;
 
 use crate::opc::props;
@@ -61,14 +61,13 @@ impl Recognizer<Metadata> for DocPropsRecognizer {
     async fn recognize(
         &self,
         subject: &Subject<Metadata>,
-        _ctx: &RecognizerContext<'_, Metadata>,
-    ) -> Result<Recognition<Metadata>> {
+        _ctx: &Context<'_, Metadata>,
+    ) -> Result<Vec<Entity<Metadata>>> {
         let data = subject.data();
-        let entities = label_for(data.key())
+        Ok(label_for(data.key())
             .and_then(|label| Metadata::field_entity(data.key(), label, SOURCE))
             .into_iter()
-            .collect();
-        Ok(Recognition::new(entities))
+            .collect())
     }
 }
 
@@ -101,35 +100,29 @@ pub(crate) fn read_doc_props(
 pub(crate) struct DocPropsHandler {
     /// The property part's XML bytes.
     xml: Bytes,
-    /// Every field, parsed once at decode and kept in document order so
-    /// [`read_at`](DataReader::read_at) can look one up without re-parsing the
-    /// XML.
+    /// Every field, parsed once at decode and kept in document order: the chunks
+    /// a caller sees and the set [`read_at`](DataReader::read_at) looks one up in
+    /// without re-parsing the XML.
     fields: Vec<MetadataData>,
-    /// The fields yet to stream, drained by `read_next` (reversed for pop).
-    pending: Vec<MetadataData>,
     /// Field keys (local names) picked for removal, applied on `encode`.
     removed: Vec<String>,
 }
 
 impl DocPropsHandler {
-    /// Wrap a property part's XML, priming its fields for streaming.
+    /// Wrap a property part's XML, reading its fields once.
     pub(crate) fn new(xml: Bytes) -> Self {
         let fields: Vec<MetadataData> = props::fields(&xml)
             .into_iter()
             .map(|(key, value)| MetadataData::new(key, value))
             .collect();
-        let mut pending = fields.clone();
-        pending.reverse(); // popped, so reverse for first-field-first order
         Self {
             xml,
             fields,
-            pending,
             removed: Vec::new(),
         }
     }
 }
 
-#[::async_trait::async_trait]
 impl Stream<Metadata> for DocPropsHandler {
     fn format(&self) -> FormatId {
         FORMAT_ID.clone()
@@ -140,12 +133,15 @@ impl Stream<Metadata> for DocPropsHandler {
         Ok(ContentData::new(props::strip(&self.xml, &keys)))
     }
 
-    async fn read_next(&mut self) -> Result<Option<Chunk<Metadata>>> {
-        let Some(field) = self.pending.pop() else {
-            return Ok(None);
-        };
-        let location = MetadataLocation::new(field.key.clone());
-        Ok(Some(Chunk::new(location, field)))
+    fn chunks(&self) -> Result<Vec<Chunk<Metadata>>> {
+        Ok(self
+            .fields
+            .iter()
+            .map(|field| {
+                let location = MetadataLocation::new(field.key.clone());
+                Chunk::new(location, field.clone())
+            })
+            .collect())
     }
 }
 

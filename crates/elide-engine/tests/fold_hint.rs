@@ -22,7 +22,7 @@ use elide_core::entity::{Entity, LabelCatalog};
 use elide_core::mocks::MockOperator;
 use elide_core::modality::text::{Text, TextLocation};
 use elide_core::primitive::{ComponentId, Confidence};
-use elide_core::recognition::{Recognition, Recognizer, RecognizerContext, Scope, Subject};
+use elide_core::recognition::{Context, Recognizer, Scope, Subject};
 use elide_detection::Analyzer;
 use elide_engine::{Directives, Document, Orchestrator};
 use elide_format::FormatRegistry;
@@ -46,8 +46,8 @@ impl Recognizer<Text> for PiiRecognizer {
     async fn recognize(
         &self,
         subject: &Subject<Text>,
-        _ctx: &RecognizerContext<'_, Text>,
-    ) -> Result<Recognition<Text>> {
+        _ctx: &Context<'_, Text>,
+    ) -> Result<Vec<Entity<Text>>> {
         let text = subject.data().as_str();
         let mut entities = Vec::new();
         let mut from = 0;
@@ -68,7 +68,7 @@ impl Recognizer<Text> for PiiRecognizer {
             ));
             from = end;
         }
-        Ok(Recognition::new(entities))
+        Ok(entities)
     }
 }
 

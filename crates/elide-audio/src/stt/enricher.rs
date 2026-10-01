@@ -13,11 +13,11 @@
 //! [`Audio`]: crate::modality::Audio
 //! [`TextRecognizable`]: elide_core::modality::TextRecognizable
 
-use elide_core::Result;
 use elide_core::backend::Backend;
 use elide_core::enrichment::Enricher;
 use elide_core::primitive::ComponentId;
-use elide_core::recognition::{RecognizerContext, Subject};
+use elide_core::recognition::{Context, Subject};
+use elide_core::{Error, ErrorKind, Result};
 use hipstr::HipStr;
 
 #[cfg(any(test, feature = "mocks"))]
@@ -98,26 +98,70 @@ where
         ComponentId::new(self.name().to_owned(), env!("CARGO_PKG_VERSION"))
     }
 
-    async fn enrich(
-        &self,
-        subject: &mut Subject<Audio>,
-        ctx: &RecognizerContext<'_, Audio>,
-    ) -> Result<()> {
+    async fn enrich(&self, subject: &mut Subject<Audio>, ctx: &Context<'_, Audio>) -> Result<()> {
         // Already transcribed (a second enricher pass, or a restored artifact on
         // a re-run): leave it, so re-recognition never re-invokes the model.
         if subject.is_enriched() {
             return Ok(());
         }
-        let data = subject.data();
-        let request = SttRequest {
-            audio: &data.bytes,
-            format: data.format(),
-            language: None,
-            correlation_id: ctx.correlation_id(),
-        };
+        let request = stt_request(subject, ctx);
         let response = self.backend.call(request).await?;
         subject.set_artifact(Transcription::new(response.segments));
         Ok(())
+    }
+
+    async fn enrich_batch(
+        &self,
+        subjects: &mut [Subject<Audio>],
+        ctx: &Context<'_, Audio>,
+    ) -> Result<()> {
+        // One STT request per not-yet-transcribed subject, dispatched together;
+        // the already-enriched ones (a re-run's restored transcripts) are skipped
+        // so the model is never re-invoked. `targets` keeps the subject index
+        // aligned with each request, so a response scatters back to the right
+        // subject.
+        let targets: Vec<usize> = subjects
+            .iter()
+            .enumerate()
+            .filter(|(_, subject)| !subject.is_enriched())
+            .map(|(index, _)| index)
+            .collect();
+        if targets.is_empty() {
+            return Ok(());
+        }
+        let requests = targets
+            .iter()
+            .map(|&index| stt_request(&subjects[index], ctx))
+            .collect();
+        // Enriching every targeted subject is this method's contract; the backend
+        // must answer one response per request to honor it. A short batch would
+        // otherwise let the zip silently leave the tail subjects un-transcribed.
+        let responses = self.backend.call_batch(requests).await?;
+        if responses.len() != targets.len() {
+            return Err(Error::new(
+                ErrorKind::Provider,
+                format!(
+                    "STT backend returned {} responses for {} requests",
+                    responses.len(),
+                    targets.len()
+                ),
+            ));
+        }
+        for (&index, response) in targets.iter().zip(responses) {
+            subjects[index].set_artifact(Transcription::new(response.segments));
+        }
+        Ok(())
+    }
+}
+
+/// Build the per-call STT request from a subject's decoded audio.
+fn stt_request<'a>(subject: &'a Subject<Audio>, ctx: &Context<'_, Audio>) -> SttRequest<'a> {
+    let data = subject.data();
+    SttRequest {
+        audio: &data.bytes,
+        format: data.format(),
+        language: None,
+        correlation_id: ctx.correlation_id(),
     }
 }
 
@@ -157,7 +201,7 @@ mod tests {
 
         let data = fixtures::blank_audio_data();
         let scope = Scope::new();
-        let ctx = RecognizerContext::new(&scope);
+        let ctx = Context::new(&scope);
         let mut subject = Subject::new(data);
 
         enricher.enrich(&mut subject, &ctx).await.unwrap();
@@ -208,7 +252,7 @@ mod tests {
         let enricher = SttEnricher::new(backend);
         let data = fixtures::blank_audio_data();
         let scope = Scope::new();
-        let ctx = RecognizerContext::new(&scope);
+        let ctx = Context::new(&scope);
 
         // First pass: empty artifact → the backend runs once.
         let mut subject = Subject::new(data.clone());
@@ -246,7 +290,7 @@ mod tests {
         let enricher = SttEnricher::new(backend);
         let data = fixtures::blank_audio_data();
         let scope = Scope::new();
-        let ctx = RecognizerContext::new(&scope);
+        let ctx = Context::new(&scope);
 
         // Seed an empty Transcription, the recorded result of a prior pass that
         // found silence. The enricher must treat it as enriched and skip.
@@ -255,5 +299,24 @@ mod tests {
         // A present-but-empty artifact reads as `Some("")`, not `None`: the clip
         // *was* enriched (to silence), which is distinct from never-transcribed.
         assert_eq!(Audio::as_text(subject.data(), subject.artifact()), Some(""));
+    }
+
+    /// A backend that shorts the batch must error, not silently leave the tail
+    /// subjects un-transcribed (and, downstream, their spoken PII undetected).
+    #[tokio::test]
+    async fn enrich_batch_rejects_a_short_response() {
+        let enricher = SttEnricher::new(MockBackend::new().with_dropped_responses(1));
+        let scope = Scope::new();
+        let ctx = Context::new(&scope);
+        let mut subjects = [
+            Subject::new(fixtures::blank_audio_data()),
+            Subject::new(fixtures::blank_audio_data()),
+        ];
+
+        let err = enricher
+            .enrich_batch(&mut subjects, &ctx)
+            .await
+            .expect_err("a short batch response is a contract violation");
+        assert_eq!(err.kind(), ErrorKind::Provider);
     }
 }
