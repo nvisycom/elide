@@ -370,10 +370,25 @@ impl<M: Modality> Analyzer<M> {
             .iter()
             .map(|recognizer| recognizer.recognize_batch(subjects, ctx));
         // Each recognizer returns one entity list per subject; transpose so
-        // `entities[s]` gathers every recognizer's entities for subject s.
+        // `entities[s]` gathers every recognizer's entities for subject s. The
+        // recognizers are arbitrary (registered via `with_recognizer`), so this
+        // aggregation boundary enforces their one-list-per-subject contract: a
+        // mismatched count would otherwise let the zip silently under- or
+        // over-attribute entities.
         let mut entities: Vec<Vec<Entity<M>>> = subjects.iter().map(|_| Vec::new()).collect();
         for found in future::join_all(futures).await {
-            for (slot, found_for_subject) in entities.iter_mut().zip(found?) {
+            let found = found?;
+            if found.len() != subjects.len() {
+                return Err(Error::new(
+                    ErrorKind::Recognition,
+                    format!(
+                        "recognizer returned {} entity lists for {} subjects",
+                        found.len(),
+                        subjects.len()
+                    ),
+                ));
+            }
+            for (slot, found_for_subject) in entities.iter_mut().zip(found) {
                 slot.extend(found_for_subject);
             }
         }
@@ -642,5 +657,55 @@ mod tests {
             .await
             .expect_err("mismatched seed count is malformed input");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
+    }
+
+    /// A recognizer whose `recognize_batch` returns the wrong number of entity
+    /// lists, violating the one-list-per-subject contract.
+    struct Miscounting;
+
+    #[async_trait::async_trait]
+    impl Recognizer<Text> for Miscounting {
+        fn id(&self) -> ComponentId {
+            ComponentId::new("miscounting", "1")
+        }
+
+        async fn recognize(
+            &self,
+            _subject: &Subject<Text>,
+            _ctx: &Context<'_, Text>,
+        ) -> Result<Vec<Entity<Text>>> {
+            Ok(Vec::new())
+        }
+
+        async fn recognize_batch(
+            &self,
+            _subjects: &[Subject<Text>],
+            _ctx: &Context<'_, Text>,
+        ) -> Result<Vec<Vec<Entity<Text>>>> {
+            // One short, regardless of subject count.
+            Ok(Vec::new())
+        }
+    }
+
+    /// A registered recognizer that returns the wrong number of entity lists must
+    /// error at the aggregation boundary, not let the transpose silently leave
+    /// subjects under-attributed.
+    #[tokio::test]
+    async fn recognize_batch_rejects_a_recognizer_count_mismatch() {
+        let analyzer = Analyzer::<Text>::new().with_recognizer(Miscounting);
+
+        let mut a = VecTextSource::single("aaa");
+        let mut sources: Vec<&mut VecTextSource> = vec![&mut a];
+
+        let err = analyzer
+            .analyze_streams(
+                &mut sources,
+                &scope_for(&["EMAIL"]),
+                &Default::default(),
+                vec![None],
+            )
+            .await
+            .expect_err("a recognizer returning the wrong count is a contract violation");
+        assert_eq!(err.kind(), ErrorKind::Recognition);
     }
 }
