@@ -22,6 +22,7 @@ use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 use elide_core::primitive::ComponentId;
 use elide_core::recognition::{Context, Recognizer, Subject};
+use futures::future;
 
 pub use self::confidence::ConfidenceDecider;
 
@@ -97,17 +98,39 @@ impl<M: Modality, D: Decider<M>> Recognizer<M> for EscalatingRecognizer<M, D> {
         ctx: &Context<'_, M>,
     ) -> Result<Vec<Vec<Entity<M>>>> {
         // The baseline batches across all subjects at once (preserving a
-        // provider-backed baseline's own coalescing); the escalated recognizer
-        // then runs per escalated subject. A filtered, non-contiguous subset of
-        // `subjects` can't be handed to `recognize_batch` as one slice (`Subject`
-        // is deliberately not `Clone`), so escalation calls `recognize` per
-        // subject — which is what the escalated recognizer's own default batch
-        // does anyway.
+        // provider-backed baseline's own coalescing). The decision needs the
+        // baseline's result, so it runs first; escalation then happens over the
+        // subjects the decider picks.
         let mut per_subject = self.baseline.recognize_batch(subjects, ctx).await?;
-        for (subject, entities) in subjects.iter().zip(per_subject.iter_mut()) {
-            if self.decider.escalate(subject, entities) {
-                entities.extend(self.escalated.recognize(subject, ctx).await?);
+
+        let escalated: Vec<usize> = (0..subjects.len())
+            .filter(|&i| self.decider.escalate(&subjects[i], &per_subject[i]))
+            .collect();
+        if escalated.is_empty() {
+            return Ok(per_subject);
+        }
+
+        // When every subject escalates, hand the whole slice to the escalated
+        // recognizer's own `recognize_batch` — a provider-backed one coalesces it
+        // into one round-trip. A filtered, non-contiguous subset can't form a
+        // slice (`Subject` is deliberately not `Clone`), so run those per subject
+        // but concurrently, not awaited in sequence.
+        if escalated.len() == subjects.len() {
+            let found = self.escalated.recognize_batch(subjects, ctx).await?;
+            for (entities, extra) in per_subject.iter_mut().zip(found) {
+                entities.extend(extra);
             }
+            return Ok(per_subject);
+        }
+
+        let found = future::join_all(
+            escalated
+                .iter()
+                .map(|&i| self.escalated.recognize(&subjects[i], ctx)),
+        )
+        .await;
+        for (&i, result) in escalated.iter().zip(found) {
+            per_subject[i].extend(result?);
         }
         Ok(per_subject)
     }
@@ -251,9 +274,9 @@ mod tests {
     #[tokio::test]
     async fn batch_escalates_per_subject() {
         let calls = Arc::new(AtomicUsize::new(0));
-        // Fallback is confident for every subject; override escalation by using a
-        // threshold that nothing clears, so every subject escalates — then assert
-        // one escalated call per subject.
+        // Threshold MAX: nothing the baseline finds clears it, so every subject
+        // escalates. The whole slice goes to the escalated recognizer's
+        // `recognize_batch`, whose default loops `recognize` once per subject.
         let baseline = MockRecognizer::new(vec![entity("EMAIL", 0.9)]);
         let escalated = Spy {
             entities: vec![entity("PERSON", 0.9)],
@@ -278,5 +301,57 @@ mod tests {
             out.iter().all(|e| e.len() == 2),
             "baseline + escalated each"
         );
+    }
+
+    /// Only some subjects escalate: the escalated recognizer runs for exactly
+    /// those (concurrently), each result scattered to its own position, and the
+    /// non-escalated subjects keep only their baseline entities.
+    #[tokio::test]
+    async fn batch_escalates_only_weak_subjects() {
+        // A baseline that flags a weak entity only for subject "b", and nothing
+        // for "a"/"c". With the default threshold, "a"/"c" (empty) escalate and
+        // "b" (weak) escalates too — so vary it: make the baseline strong, so
+        // only the empty subjects escalate.
+        struct PerSubject;
+        #[async_trait::async_trait]
+        impl Recognizer<Text> for PerSubject {
+            fn id(&self) -> ComponentId {
+                ComponentId::new("per-subject", "1")
+            }
+
+            async fn recognize(
+                &self,
+                subject: &Subject<Text>,
+                _ctx: &Context<'_, Text>,
+            ) -> Result<Vec<Entity<Text>>> {
+                // Only "b" gets a confident baseline hit; "a"/"c" get nothing.
+                if subject.data().as_str() == "b" {
+                    Ok(vec![entity("EMAIL", 0.9)])
+                } else {
+                    Ok(vec![])
+                }
+            }
+        }
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let escalated = Spy {
+            entities: vec![entity("PERSON", 0.9)],
+            calls: calls.clone(),
+        };
+        let recognizer =
+            EscalatingRecognizer::new(PerSubject, escalated, ConfidenceDecider::default());
+
+        let scope = Scope::new();
+        let subjects = [subject("a"), subject("b"), subject("c")];
+        let out = recognizer
+            .recognize_batch(&subjects, &ctx(&scope))
+            .await
+            .unwrap();
+
+        // "a" and "c" escalated (empty baseline), "b" did not (confident).
+        assert_eq!(calls.load(Ordering::Relaxed), 2, "only the weak subjects");
+        assert_eq!(out[0].len(), 1, "a: escalated only");
+        assert_eq!(out[1].len(), 1, "b: baseline only, no escalation");
+        assert_eq!(out[2].len(), 1, "c: escalated only");
     }
 }
