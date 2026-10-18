@@ -110,7 +110,13 @@ impl<C: PartClassifier> Package<C> {
             let entry = zip.by_index(i).map_err(|e| {
                 Error::new(ErrorKind::MalformedInput, format!("bad zip entry: {e}"))
             })?;
-            let path = PartPath::from(entry.name());
+            let name = entry.name().map_err(|e| {
+                Error::new(
+                    ErrorKind::MalformedInput,
+                    format!("bad zip entry name: {e}"),
+                )
+            })?;
+            let path = PartPath::from(name.as_ref());
             let role = classifier.role(&path);
             // Cap this part at the smaller of the per-part limit and what remains
             // of the package budget. Reserve only up to that cap (the entry's
