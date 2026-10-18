@@ -52,8 +52,9 @@ impl Bucket {
 /// refills `refill` of them every `interval`, so a full bucket lets a burst
 /// through at once and a drained one paces callers out at the steady fill rate.
 /// Each call takes one token, waiting when the bucket is empty;
-/// [`call_batch`](Backend::call_batch) also takes one — a batch is a single
-/// provider round-trip.
+/// [`call_batch`](Backend::call_batch) takes one *per request* — a provider
+/// meters a batch against its quota per item, and the default `call_batch` is one
+/// `call` per item anyway.
 ///
 /// This caps requests *over time* — a provider's requests-per-interval quota —
 /// which is different from bounding *simultaneous* calls. For that, wrap with
@@ -138,8 +139,14 @@ impl<B: Backend> Backend for RateLimited<B> {
     }
 
     async fn call_batch(&self, requests: Vec<Self::Request<'_>>) -> Result<Vec<Self::Response>> {
-        // One token for the whole batch: it is a single provider round-trip.
-        self.acquire().await;
+        // One token per request: a batch consumes a provider's per-interval quota
+        // per item, whether the inner backend sends it as one batched request or
+        // the default `call_batch` loops `call` per item. (This differs from
+        // `ConcurrencyLimited`, where a batch is a single connection — there the
+        // limit is open connections, here it is quota load.)
+        for _ in &requests {
+            self.acquire().await;
+        }
         self.inner.call_batch(requests).await
     }
 }
@@ -261,6 +268,45 @@ mod tests {
             backend.inner().calls.load(Ordering::SeqCst),
             6,
             "the refilled token admitted the waiting call"
+        );
+    }
+
+    /// A batch charges one token per request, not one per batch: a 3-request
+    /// batch against a 2-token bucket blocks until a third token refills.
+    #[tokio::test(start_paused = true)]
+    async fn a_batch_charges_one_token_per_request() {
+        let backend = Arc::new(RateLimited::new(
+            Counting {
+                calls: AtomicUsize::new(0),
+            },
+            1,
+            Duration::from_secs(1),
+            2,
+        ));
+
+        // The bucket holds 2 tokens; a batch of 3 needs a third.
+        let task = {
+            let backend = backend.clone();
+            tokio::spawn(async move {
+                let requests = vec![Req(PhantomData), Req(PhantomData), Req(PhantomData)];
+                backend.call_batch(requests).await.unwrap()
+            })
+        };
+        tokio::task::yield_now().await;
+        assert_eq!(
+            backend.inner().calls.load(Ordering::SeqCst),
+            0,
+            "the batch is still waiting on its third token — no request reached the backend"
+        );
+
+        // One second refills the third token; the batch runs.
+        tokio::time::advance(Duration::from_secs(1)).await;
+        let responses = task.await.unwrap();
+        assert_eq!(responses.len(), 3);
+        assert_eq!(
+            backend.inner().calls.load(Ordering::SeqCst),
+            3,
+            "all three requests reached the backend once the tokens were charged"
         );
     }
 }
