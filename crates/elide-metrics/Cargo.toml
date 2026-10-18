@@ -51,6 +51,7 @@ hipstr = { workspace = true, features = [] }
 
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
+tokio = { workspace = true, features = ["sync"] }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }
@@ -59,3 +60,7 @@ schemars = { workspace = true, features = [], optional = true }
 # Observability
 tracing = { workspace = true, features = [], optional = true }
 metrics = { workspace = true, features = [], optional = true }
+
+[dev-dependencies]
+# Async runtime & parallelism
+tokio = { workspace = true, features = ["macros", "rt", "time"] }

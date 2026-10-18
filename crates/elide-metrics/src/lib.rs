@@ -6,7 +6,9 @@ pub mod backend;
 pub mod sink;
 
 #[doc(inline)]
-pub use self::backend::{Metered, ModelUsage, Outcome, Usage, UsageCollector, UsageSink};
+pub use self::backend::{
+    Metered, ModelUsage, Outcome, RateLimited, Usage, UsageCollector, UsageSink,
+};
 #[cfg(feature = "metrics")]
 #[doc(inline)]
 pub use self::sink::MetricsSink;

@@ -35,9 +35,12 @@ pub use elide_metrics::Tee;
 #[cfg_attr(docsrs, doc(cfg(feature = "metrics-tracing")))]
 #[doc(inline)]
 pub use elide_metrics::TracingSink;
-/// The usage machinery: the [`Metered`] wrapper, the [`Usage`] record, and the
-/// in-memory [`UsageCollector`].
+/// The backend decorators and usage machinery: the [`Metered`] wrapper, the
+/// [`RateLimited`] wrapper that caps a backend's concurrent calls, the [`Usage`]
+/// record, and the in-memory [`UsageCollector`].
 #[cfg(feature = "usage")]
 #[cfg_attr(docsrs, doc(cfg(feature = "usage")))]
 #[doc(inline)]
-pub use elide_metrics::{Metered, ModelUsage, Outcome, Usage, UsageCollector, UsageSink};
+pub use elide_metrics::{
+    Metered, ModelUsage, Outcome, RateLimited, Usage, UsageCollector, UsageSink,
+};

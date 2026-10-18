@@ -1381,6 +1381,7 @@ dependencies = [
  "metrics",
  "schemars",
  "serde",
+ "tokio",
  "tracing",
 ]
 
