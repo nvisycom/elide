@@ -1,6 +1,6 @@
 //! [`TracingSink`]: forward backend usage to `tracing`.
 
-use crate::backend::{Usage, UsageSink};
+use crate::metrics::{Usage, UsageSink};
 
 /// Emits each backend call's [`Usage`] as a `tracing` event on the
 /// `elide::usage` target, so it lands in whatever subscriber the process runs

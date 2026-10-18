@@ -1,9 +1,9 @@
 # https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [package]
-name = "elide-metrics"
-description = "Global observability sinks for Elide backend usage: forward each call's usage to the metrics and tracing ecosystems"
-keywords = ["elide", "metrics", "tracing", "observability", "usage"]
+name = "elide-backend"
+description = "Backend decorators for Elide: usage metering, observability sinks, and concurrency rate-limiting over the model-call contract"
+keywords = ["elide", "backend", "metrics", "rate-limit", "usage"]
 categories = ["development-tools::profiling"]
 
 version = { workspace = true }
@@ -21,10 +21,17 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-## No sink on by default: enable `tracing` or `metrics` for the one you route to.
-## The `Metered` wrapper, the `Usage` record, and the `UsageCollector` are always
-## available.
+## The `metrics` module (`Metered`, the `Usage` record, the `UsageCollector`) is
+## always available — it pulls no extra dependency. Off by default are the things
+## that do: `ratelimit` (the `ConcurrencyLimited` and `RateLimited` decorators,
+## which need an async runtime) and the observability sinks (`tracing`,
+## `recorder`).
 default = []
+
+## The `ratelimit` module: `ConcurrencyLimited` (a semaphore caps simultaneous
+## calls) and `RateLimited` (a token bucket caps calls per interval). Pulls the
+## Tokio sync and time primitives.
+ratelimit = ["dep:tokio"]
 
 ## Derive `serde::{Serialize, Deserialize}` on the usage record (`Usage`,
 ## `ModelUsage`, `Outcome`), so a run's usage can be shipped across a boundary.
@@ -38,9 +45,9 @@ schema = ["serde", "dep:schemars", "elide-core/schema"]
 tracing = ["dep:tracing"]
 
 ## The `MetricsSink`: record each backend call's usage through the `metrics`
-## facade (call/duration/output/token metrics), for a Prometheus/StatsD recorder
-## the process installs.
-metrics = ["dep:metrics"]
+## facade (call/duration/output/token metrics), to whatever recorder
+## (Prometheus, StatsD, …) the process installs.
+recorder = ["dep:metrics"]
 
 [dependencies]
 # Internal crates
@@ -51,6 +58,7 @@ hipstr = { workspace = true, features = [] }
 
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
+tokio = { workspace = true, features = ["sync", "time"], optional = true }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }
@@ -59,3 +67,7 @@ schemars = { workspace = true, features = [], optional = true }
 # Observability
 tracing = { workspace = true, features = [], optional = true }
 metrics = { workspace = true, features = [], optional = true }
+
+[dev-dependencies]
+# Async runtime & parallelism
+tokio = { workspace = true, features = ["macros", "rt", "time", "test-util"] }

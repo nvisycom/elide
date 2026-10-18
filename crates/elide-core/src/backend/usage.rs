@@ -4,7 +4,7 @@
 //! These are the only usage types the contract itself carries, because
 //! [`BackendResponse::units`](super::BackendResponse::units) returns them. The
 //! rest of the usage machinery — the `Metered` wrapper, the `Usage` record, the
-//! collector and the sinks — lives in the `elide-metrics` crate and is pulled in
+//! collector and the sinks — lives in the `elide-backend` crate and is pulled in
 //! only when a caller wants usage accounting.
 
 #[cfg(feature = "serde")]

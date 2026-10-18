@@ -21,7 +21,7 @@ members = [
     "./crates/elide-operator",
     "./crates/elide-redaction",
     "./crates/elide-engine",
-    "./crates/elide-metrics",
+    "./crates/elide-backend",
     "./crates/elide",
     "./crates/elide-wasm",
     "./examples",
@@ -63,7 +63,7 @@ elide-fake = { path = "./crates/elide-fake", version = "0.1.0" }
 elide-operator = { path = "./crates/elide-operator", version = "0.1.0" }
 elide-redaction = { path = "./crates/elide-redaction", version = "0.1.0" }
 elide-engine = { path = "./crates/elide-engine", version = "0.1.0" }
-elide-metrics = { path = "./crates/elide-metrics", version = "0.1.0" }
+elide-backend = { path = "./crates/elide-backend", version = "0.1.0" }
 elide = { path = "./crates/elide", version = "0.1.0" }
 
 # (De)serialization

@@ -3,7 +3,7 @@
 //! A model-backed component — LLM/VLM extraction, NER, speech-to-text, OCR —
 //! is a [`Backend`]: it takes a [`BackendRequest`], calls a model, and returns
 //! a [`BackendResponse`] that reports the [`TokenCounts`] it spent and how much
-//! it produced. One contract, so the `Metered` wrapper in the `elide-metrics`
+//! it produced. One contract, so the `Metered` wrapper in the `elide-backend`
 //! crate can meter any of them without per-backend code.
 //!
 //! Request and response are associated types: [`Request`](Backend::Request) is
@@ -13,7 +13,7 @@
 //!
 //! Only [`TokenCounts`] lives here — the one usage type the contract returns. The
 //! `Metered` wrapper, the `Usage` record, the collector and the sinks live in
-//! `elide-metrics`, pulled in only when a caller wants usage accounting; the
+//! `elide-backend`, pulled in only when a caller wants usage accounting; the
 //! recognizers, enrichers, and reports that consume a backend never carry usage.
 
 mod usage;
@@ -32,7 +32,7 @@ pub trait BackendRequest: Send + Sync {}
 ///
 /// The response is the provider's reply, so it is the natural owner of the cost.
 /// Model *identity* comes from the backend's
-/// [`provenance`](Backend::provenance); the `Metered` wrapper in `elide-metrics`
+/// [`provenance`](Backend::provenance); the `Metered` wrapper in `elide-backend`
 /// combines the two. A response whose provider reports no cost returns
 /// [`Units::default`] (all `None`).
 pub trait BackendResponse: Send + Sync {
@@ -61,7 +61,7 @@ pub trait BackendResponse: Send + Sync {
 /// names its [`Request`](Self::Request) and [`Response`](Self::Response) via
 /// associated types and identifies the model it calls through
 /// [`provenance`](Self::provenance). Because the contract is uniform, the `Metered`
-/// wrapper in `elide-metrics` meters any backend generically.
+/// wrapper in `elide-backend` meters any backend generically.
 ///
 /// Not object-safe (the GAT `Request`): a consumer is generic over `B: Backend`
 /// rather than holding a `dyn Backend`. This is what lets a request borrow its

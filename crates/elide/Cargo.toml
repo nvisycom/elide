@@ -43,7 +43,7 @@ serde = [
     "elide-office?/serde",
     "elide-codec?/serde",
     "elide-format?/serde",
-    "elide-metrics?/serde",
+    "elide-backend?/serde",
 ]
 
 ## Derive `schemars::JsonSchema` on the re-exported domain types, for
@@ -64,7 +64,7 @@ schema = [
     "elide-format?/schema",
     "elide-engine?/schema",
     "elide-ner?/schema",
-    "elide-metrics?/schema",
+    "elide-backend?/schema",
 ]
 
 ## Re-export the pattern recognizer crate.
@@ -161,15 +161,18 @@ codec-pdf-render = ["codec-pdf", "elide-format/pdf-render"]
 mocks = ["elide-ner?/mocks", "elide-llm?/mocks", "elide-audio?/mocks", "elide-image?/mocks"]
 
 ## Backend usage accounting: the `Metered` wrapper, the `Usage` record, and the
-## `UsageCollector`, re-exported from `elide-metrics`. Off by default — a pipeline
+## `UsageCollector`, re-exported from `elide-backend`. Off by default — a pipeline
 ## that does not meter its backends compiles none of it.
-usage = ["dep:elide-metrics"]
+metrics = ["dep:elide-backend"]
+## The `ratelimit` backend decorators: `ConcurrencyLimited` caps simultaneous
+## calls, `RateLimited` caps calls per interval.
+ratelimit = ["dep:elide-backend", "elide-backend/ratelimit"]
 ## The `metrics`-facade usage sink (`MetricsSink`): route backend usage to a
-## Prometheus/StatsD recorder. Implies `usage`.
-metrics = ["usage", "elide-metrics/metrics"]
+## Prometheus/StatsD recorder. Implies `metrics`.
+metrics-recorder = ["metrics", "elide-backend/recorder"]
 ## The `tracing` usage sink (`TracingSink`): emit backend usage as tracing events.
-## Implies `usage`.
-metrics-tracing = ["usage", "elide-metrics/tracing"]
+## Implies `metrics`.
+metrics-tracing = ["metrics", "elide-backend/tracing"]
 
 ## The one-way `Sha2Hash` operator (SHA-256 / SHA-512).
 operator-sha2 = ["elide-operator/sha2"]
@@ -199,7 +202,7 @@ elide-pdf = { workspace = true, features = [], optional = true }
 elide-codec = { workspace = true, features = [], optional = true }
 elide-format = { workspace = true, features = [], optional = true }
 elide-engine = { workspace = true, features = [], optional = true }
-elide-metrics = { workspace = true, features = [], optional = true }
+elide-backend = { workspace = true, features = [], optional = true }
 elide-operator = { workspace = true, features = [] }
 elide-redaction = { workspace = true, features = [] }
 

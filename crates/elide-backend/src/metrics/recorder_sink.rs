@@ -2,7 +2,7 @@
 
 use metrics::{Unit, counter, describe_counter, describe_histogram, histogram};
 
-use crate::backend::{Usage, UsageSink};
+use crate::metrics::{Usage, UsageSink};
 
 /// Backend calls made (labelled by outcome), for rate and error rate.
 const CALLS: &str = "elide.backend.calls";
@@ -33,8 +33,8 @@ const CHARACTERS: &str = "elide.backend.characters";
 /// For a process-wide aggregate view — total tokens, latency percentiles — via a
 /// recorder the process installs (Prometheus, StatsD, …). This is *global* by
 /// design; for per-run cost (a single request's total), use a per-run
-/// [`UsageCollector`](crate::backend::UsageCollector) instead, or a
-/// [`Tee`](crate::sink::Tee) that feeds both.
+/// [`UsageCollector`](crate::metrics::UsageCollector) instead, or a
+/// [`Tee`](crate::metrics::Tee) that feeds both.
 ///
 /// Metric names are dotted and unit-free; the recorder's exporter maps them to
 /// its own convention (Prometheus turns `.` into `_`), and the units are declared

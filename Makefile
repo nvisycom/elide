@@ -81,6 +81,12 @@ lint: ## Runs clippy and format check.
 	@cargo clippy --workspace -- -D warnings
 	@$(call log,Lint passed.)
 
+.PHONY: doc
+doc: ## Builds the API docs with all features (docsrs cfg, no deps).
+	@$(call log,Building docs...)
+	@RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc --all-features --no-deps
+	@$(call log,Docs built.)
+
 .PHONY: ci
 ci: lint ## Runs all CI checks locally.
 	@cargo check --workspace
