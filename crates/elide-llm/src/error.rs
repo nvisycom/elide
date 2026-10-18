@@ -11,8 +11,8 @@
 //! [`ErrorKind`]: elide_core::ErrorKind
 
 use elide_core::{Error as CoreError, ErrorKind};
-use rig::completion::{CompletionError, PromptError, StructuredOutputError};
-use rig::extractor::ExtractionError;
+use rig::completion::{PromptError, StructuredOutputError};
+use rig::error::{ErrorKind as RigErrorKind, ProviderError};
 use rig::http_client::Error as HttpClientError;
 
 /// Internal LLM error, tagged by the [`ErrorKind`] it maps to.
@@ -28,32 +28,53 @@ pub(crate) enum Error {
     #[error("provider: {0}")]
     Provider(Box<dyn std::error::Error + Send + Sync>),
 
-    /// A malformed, empty, or unparseable model reply.
+    /// The provider's reply decoded but is not a usable answer.
     #[error("response: {0}")]
     Response(Box<dyn std::error::Error + Send + Sync>),
 
-    /// A request-construction / configuration problem.
+    /// Request construction failed (a bad URL or unsupported option).
     #[error("request: {0}")]
     Request(Box<dyn std::error::Error + Send + Sync>),
 }
 
-impl From<CompletionError> for Error {
-    fn from(err: CompletionError) -> Self {
-        match err {
-            CompletionError::HttpError(_) | CompletionError::RequestError(_) => {
-                Self::Transport(Box::new(err))
-            }
-            CompletionError::ProviderError(_) => Self::Provider(Box::new(err)),
-            CompletionError::ResponseError(_) | CompletionError::JsonError(_) => {
-                Self::Response(Box::new(err))
-            }
-            CompletionError::UrlError(_) => Self::Request(Box::new(err)),
-            // `CompletionError` is `#[non_exhaustive]`, so a `rig` upgrade can
-            // add a variant the compiler won't flag here. The warn is the cue
-            // to classify it above.
+impl From<ProviderError> for Error {
+    fn from(err: ProviderError) -> Self {
+        match &err {
+            // No reply reached us: a reset, timeout, or unreadable response.
+            ProviderError::Http(_) => Self::Transport(Box::new(err)),
+            // The provider answered with a failure (an error status/envelope,
+            // rejected credentials, an expired cache handle).
+            ProviderError::Provider(_)
+            | ProviderError::ProviderResponse(_)
+            | ProviderError::InvalidAuthentication(_)
+            | ProviderError::CacheExpired { .. } => Self::Provider(Box::new(err)),
+            // A reply arrived but is not a usable answer to the request.
+            ProviderError::Response(_)
+            | ProviderError::Json(_)
+            | ProviderError::Truncated
+            | ProviderError::MismatchedDimensions { .. } => Self::Response(Box::new(err)),
+            // A failure a relay delivered as its report carries the original
+            // kind; classify by that so a relayed transport failure keeps its
+            // transport (retryable) classification rather than flattening to a
+            // response error.
+            ProviderError::Relayed(report) => match report.kind {
+                RigErrorKind::Http | RigErrorKind::Timeout => Self::Transport(Box::new(err)),
+                RigErrorKind::Provider | RigErrorKind::ProviderResponse => {
+                    Self::Provider(Box::new(err))
+                }
+                RigErrorKind::Url | RigErrorKind::Request => Self::Request(Box::new(err)),
+                _ => Self::Response(Box::new(err)),
+            },
+            // Caller-side: a request we could not build.
+            ProviderError::Url(_)
+            | ProviderError::Request(_)
+            | ProviderError::UnsupportedOption(_) => Self::Request(Box::new(err)),
+            // `ProviderError` is `#[non_exhaustive]`, so a `rig` upgrade can add
+            // a variant the compiler won't flag here. The warn is the cue to
+            // classify it above.
             _ => {
-                tracing::warn!(error = %err, "unmapped rig CompletionError variant");
-                Self::Request(Box::new(err))
+                tracing::warn!(error = %err, "unmapped rig ProviderError variant");
+                Self::Response(Box::new(err))
             }
         }
     }
@@ -62,9 +83,9 @@ impl From<CompletionError> for Error {
 impl From<PromptError> for Error {
     fn from(err: PromptError) -> Self {
         match err {
-            PromptError::CompletionError(e) => Self::from(e),
-            // Tool / turn-limit / cancellation failures occur while the
-            // recognizer drives the model.
+            PromptError::Provider(e) => Self::from(e),
+            // Memory / turn-limit / cancellation / tool failures occur while the
+            // extractor drives the model; none is a provider reply.
             other => Self::Response(Box::new(other)),
         }
     }
@@ -73,17 +94,8 @@ impl From<PromptError> for Error {
 impl From<StructuredOutputError> for Error {
     fn from(err: StructuredOutputError) -> Self {
         match err {
-            StructuredOutputError::PromptError(e) => Self::from(*e),
-            other => Self::Response(Box::new(other)),
-        }
-    }
-}
-
-impl From<ExtractionError> for Error {
-    fn from(err: ExtractionError) -> Self {
-        match err {
-            ExtractionError::CompletionError(e) => Self::from(e),
-            // No data / deserialization failure: no usable structured reply.
+            StructuredOutputError::Prompt(e) => Self::from(e),
+            // No usable structured reply: an undeserializable or empty output.
             other => Self::Response(Box::new(other)),
         }
     }

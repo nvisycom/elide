@@ -54,7 +54,10 @@ pub fn part_names(package: &[u8]) -> Vec<String> {
         Err(_) => return Vec::new(),
     };
     (0..zip.len())
-        .filter_map(|i| zip.by_index(i).ok().map(|e| e.name().to_owned()))
+        .filter_map(|i| {
+            let entry = zip.by_index(i).ok()?;
+            Some(entry.name().ok()?.into_owned())
+        })
         .collect()
 }
 
@@ -75,7 +78,10 @@ pub fn text_parts(package: &[u8]) -> Vec<(String, String)> {
     (0..zip.len())
         .filter_map(|i| {
             let mut entry = zip.by_index(i).expect("zip entry index in range");
-            let name = entry.name().to_owned();
+            let name = entry
+                .name()
+                .expect("zip entry name is valid UTF-8")
+                .into_owned();
             if !(name.ends_with(".xml") || name.ends_with(".rels")) {
                 return None;
             }

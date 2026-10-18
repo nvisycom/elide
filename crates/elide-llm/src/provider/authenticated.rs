@@ -2,27 +2,20 @@
 
 use std::fmt;
 
+#[cfg(feature = "anthropic-claude")]
+use rig::providers::anthropic::{Anthropic, AnthropicConfig};
+#[cfg(feature = "google-gemini")]
+use rig::providers::gemini::{Gemini, GeminiConfig};
+#[cfg(feature = "openai-gpt")]
+use rig::providers::openai::{OpenAI, OpenAIConfig};
 #[cfg(any(
     feature = "openai-gpt",
     feature = "anthropic-claude",
     feature = "google-gemini"
 ))]
-use reqwest_middleware::ClientWithMiddleware;
-#[cfg(feature = "anthropic-claude")]
-use rig::providers::anthropic;
-#[cfg(feature = "google-gemini")]
-use rig::providers::gemini;
-#[cfg(feature = "openai-gpt")]
-use rig::providers::openai;
+use rig_reqwest::ReqwestMiddlewareClient;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
-#[cfg(any(
-    feature = "openai-gpt",
-    feature = "anthropic-claude",
-    feature = "google-gemini"
-))]
-use crate::error::Error;
 
 /// Provider that requires an API key (OpenAI, Anthropic, Gemini).
 ///
@@ -50,51 +43,36 @@ impl fmt::Debug for AuthenticatedProvider {
 }
 
 impl AuthenticatedProvider {
-    /// Build an OpenAI rig-core client.
+    /// Build an OpenAI client sending through `http`.
     #[cfg(feature = "openai-gpt")]
     #[cfg_attr(docsrs, doc(cfg(feature = "openai-gpt")))]
-    pub(crate) fn openai_client(
-        &self,
-        http: ClientWithMiddleware,
-    ) -> Result<openai::Client<ClientWithMiddleware>, Error> {
-        let mut b = openai::Client::builder()
-            .api_key(&self.api_key)
-            .http_client(http);
+    pub(crate) fn openai_client(&self, http: ReqwestMiddlewareClient) -> OpenAI {
+        let mut config = OpenAIConfig::new(&self.api_key);
         if let Some(url) = &self.base_url {
-            b = b.base_url(url);
+            config = config.with_base_url(url);
         }
-        b.build().map_err(|e| Error::Request(Box::new(e)))
+        config.connect(http)
     }
 
-    /// Build a Gemini rig-core client.
+    /// Build a Gemini client sending through `http`.
     #[cfg(feature = "google-gemini")]
     #[cfg_attr(docsrs, doc(cfg(feature = "google-gemini")))]
-    pub(crate) fn gemini_client(
-        &self,
-        http: ClientWithMiddleware,
-    ) -> Result<gemini::Client<ClientWithMiddleware>, Error> {
-        let mut b = gemini::Client::builder()
-            .api_key(&self.api_key)
-            .http_client(http);
+    pub(crate) fn gemini_client(&self, http: ReqwestMiddlewareClient) -> Gemini {
+        let mut config = GeminiConfig::new(&self.api_key);
         if let Some(url) = &self.base_url {
-            b = b.base_url(url);
+            config = config.with_base_url(url);
         }
-        b.build().map_err(|e| Error::Request(Box::new(e)))
+        config.connect(http)
     }
 
-    /// Build an Anthropic rig-core client.
+    /// Build an Anthropic client sending through `http`.
     #[cfg(feature = "anthropic-claude")]
     #[cfg_attr(docsrs, doc(cfg(feature = "anthropic-claude")))]
-    pub(crate) fn anthropic_client(
-        &self,
-        http: ClientWithMiddleware,
-    ) -> Result<anthropic::Client<ClientWithMiddleware>, Error> {
-        let mut b = anthropic::Client::builder()
-            .api_key(&self.api_key)
-            .http_client(http);
+    pub(crate) fn anthropic_client(&self, http: ReqwestMiddlewareClient) -> Anthropic {
+        let mut config = AnthropicConfig::new(&self.api_key);
         if let Some(url) = &self.base_url {
-            b = b.base_url(url);
+            config = config.with_base_url(url);
         }
-        b.build().map_err(|e| Error::Request(Box::new(e)))
+        config.connect(http)
     }
 }

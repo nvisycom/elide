@@ -1,12 +1,9 @@
 //! LLM providers that do not require an API key.
 
-use reqwest_middleware::ClientWithMiddleware;
-use rig::client::Nothing;
-use rig::providers::ollama;
+use rig::providers::ollama::{Ollama, OllamaConfig};
+use rig_reqwest::ReqwestMiddlewareClient;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
-use crate::error::Error;
 
 /// Provider that does not require an API key (Ollama).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -19,15 +16,12 @@ pub struct UnauthenticatedProvider {
 }
 
 impl UnauthenticatedProvider {
-    /// Build an Ollama rig-core client.
-    pub(crate) fn ollama_client(
-        &self,
-        http: ClientWithMiddleware,
-    ) -> Result<ollama::Client<ClientWithMiddleware>, Error> {
-        let mut b = ollama::Client::builder().api_key(Nothing).http_client(http);
+    /// Build an Ollama client sending through `http`.
+    pub(crate) fn ollama_client(&self, http: ReqwestMiddlewareClient) -> Ollama {
+        let mut config = OllamaConfig::new();
         if let Some(url) = &self.base_url {
-            b = b.base_url(url);
+            config = config.with_base_url(url);
         }
-        b.build().map_err(|e| Error::Request(Box::new(e)))
+        config.connect(http)
     }
 }

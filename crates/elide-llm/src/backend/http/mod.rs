@@ -1,37 +1,38 @@
 //! HTTP client factory for the rig backend (reqwest + retry + tracing
 //! middleware).
 //!
-//! [`build_http_client`] builds a [`ClientWithMiddleware`] from an
+//! [`build_http_client`] builds a rig [`ReqwestMiddlewareClient`] from an
 //! [`HttpConfig`] with exponential-backoff retry and OpenTelemetry tracing
 //! layers pre-installed; the [`RigBackend`] hands the returned client to its
-//! rig provider client at construction.
+//! rig provider at construction via `with_http`.
 //!
-//! [`ClientWithMiddleware`]: reqwest_middleware::ClientWithMiddleware
+//! [`ReqwestMiddlewareClient`]: rig_reqwest::ReqwestMiddlewareClient
 //! [`RigBackend`]: super::RigBackend
 
 mod config;
 mod middleware;
 
 use elide_core::{Error, ErrorKind, Result};
+use reqwest_middleware::ClientBuilder;
 use reqwest_middleware::reqwest::Client;
-use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
+use rig_reqwest::ReqwestMiddlewareClient;
 
 pub use self::config::HttpConfig;
 use self::middleware::{backoff_policy, retry_layer, tracing_layer};
 
 const TARGET: &str = "elide_llm::http";
 
-/// Build a [`ClientWithMiddleware`] from the given configuration.
+/// Build a rig [`ReqwestMiddlewareClient`] from the given configuration.
 ///
 /// The returned client has exponential-backoff retry and OpenTelemetry
 /// tracing middleware pre-installed; the rig backend wires it into the
-/// provider's rig client.
+/// provider via `with_http`.
 ///
 /// # Errors
 ///
 /// Returns an error if the underlying `reqwest::Client` cannot be
 /// built (e.g. TLS backend initialisation failure).
-pub fn build_http_client(config: &HttpConfig) -> Result<ClientWithMiddleware> {
+pub fn build_http_client(config: &HttpConfig) -> Result<ReqwestMiddlewareClient> {
     tracing::debug!(
         target: TARGET,
         max_retries = config.max_retries,
@@ -55,8 +56,10 @@ pub fn build_http_client(config: &HttpConfig) -> Result<ClientWithMiddleware> {
             )
         })?;
 
-    Ok(ClientBuilder::new(client)
+    let middleware = ClientBuilder::new(client)
         .with(tracing_layer())
         .with(retry_layer(policy))
-        .build())
+        .build();
+
+    Ok(ReqwestMiddlewareClient::from(middleware))
 }
