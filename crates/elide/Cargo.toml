@@ -43,6 +43,7 @@ serde = [
     "elide-office?/serde",
     "elide-codec?/serde",
     "elide-format?/serde",
+    "elide-metrics?/serde",
 ]
 
 ## Derive `schemars::JsonSchema` on the re-exported domain types, for
@@ -63,6 +64,7 @@ schema = [
     "elide-format?/schema",
     "elide-engine?/schema",
     "elide-ner?/schema",
+    "elide-metrics?/schema",
 ]
 
 ## Re-export the pattern recognizer crate.
