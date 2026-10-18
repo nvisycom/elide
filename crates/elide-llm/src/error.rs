@@ -12,7 +12,7 @@
 
 use elide_core::{Error as CoreError, ErrorKind};
 use rig::completion::{PromptError, StructuredOutputError};
-use rig::error::ProviderError;
+use rig::error::{ErrorKind as RigErrorKind, ProviderError};
 use rig::http_client::Error as HttpClientError;
 
 /// Internal LLM error, tagged by the [`ErrorKind`] it maps to.
@@ -52,8 +52,19 @@ impl From<ProviderError> for Error {
             ProviderError::Response(_)
             | ProviderError::Json(_)
             | ProviderError::Truncated
-            | ProviderError::MismatchedDimensions { .. }
-            | ProviderError::Relayed(_) => Self::Response(Box::new(err)),
+            | ProviderError::MismatchedDimensions { .. } => Self::Response(Box::new(err)),
+            // A failure a relay delivered as its report carries the original
+            // kind; classify by that so a relayed transport failure keeps its
+            // transport (retryable) classification rather than flattening to a
+            // response error.
+            ProviderError::Relayed(report) => match report.kind {
+                RigErrorKind::Http | RigErrorKind::Timeout => Self::Transport(Box::new(err)),
+                RigErrorKind::Provider | RigErrorKind::ProviderResponse => {
+                    Self::Provider(Box::new(err))
+                }
+                RigErrorKind::Url | RigErrorKind::Request => Self::Request(Box::new(err)),
+                _ => Self::Response(Box::new(err)),
+            },
             // Caller-side: a request we could not build.
             ProviderError::Url(_)
             | ProviderError::Request(_)
