@@ -39,6 +39,7 @@ elide-core = { workspace = true, features = [] }
 serde = { workspace = true, features = ["derive"], optional = true }
 
 # Async runtime & parallelism
+async-trait = { workspace = true, features = [] }
 futures = { workspace = true, features = [] }
 
 # Observability
