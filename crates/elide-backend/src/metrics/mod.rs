@@ -4,7 +4,7 @@
 //!
 //! Always compiled — the types pull no extra dependency. The sinks that forward
 //! to an external system are feature-gated by the system they target:
-//! [`TracingSink`] (feature `tracing`) and [`MetricsSink`] (feature `recorder`).
+//! `TracingSink` (feature `tracing`) and `MetricsSink` (feature `recorder`).
 
 mod metered;
 #[cfg(feature = "recorder")]

@@ -17,11 +17,15 @@ The `metrics` module is always available (it pulls no extra dependency). A
 the tokens it spent, how much it produced, and whether it failed) to a
 `UsageSink`.
 
-The `ratelimit` module (feature `ratelimit`) adds `RateLimited<B>`: a semaphore
-caps how many of a backend's calls run at once, at the one place every call to
-that provider passes through — so a burst from any number of fan-out sites waits
-instead of tripping a provider's rate limit, rather than bounding concurrency at
-each call site. It composes with `Metered`.
+The `ratelimit` module (feature `ratelimit`) bounds how a provider is called,
+at the one place every call to it passes through, rather than at each fan-out
+site above. `ConcurrencyLimited<B>` caps *simultaneous* calls with a semaphore —
+how many run at the provider at once — so a burst waits instead of opening N
+connections at once. `RateLimited<B>` caps calls *over time* with a token
+bucket: the bucket refills at a steady rate and absorbs a burst up to its
+capacity, matching a provider's requests-per-interval quota. The two are
+different limits and compose — wrap a backend in both to bound its open
+connections and its request rate — and both compose with `Metered`.
 
 For per-run cost, `UsageCollector` is the in-memory sink: build one per request,
 thread it into that run's metered backends, and read its total at the end. It is

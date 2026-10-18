@@ -1,31 +1,37 @@
-//! [`RateLimited`]: a [`Backend`] decorator that caps concurrent calls.
+//! [`ConcurrencyLimited`]: a [`Backend`] decorator that caps *simultaneous*
+//! calls.
 
 use elide_core::Result;
 use elide_core::backend::Backend;
 use elide_core::entity::audit::ModelEvent;
 use tokio::sync::Semaphore;
 
-/// Wraps a [`Backend`] and admits at most a fixed number of its calls at once,
+/// Wraps a [`Backend`] and admits at most a fixed number of its calls *at once*,
 /// leaving the request and response untouched.
 ///
 /// Concurrency against a provider is bounded here, at the one place every call
 /// to that provider passes through, rather than at each fan-out site above it (an
 /// analyzer running recognizers in parallel, an escalation decorator running
 /// subjects in parallel). A caller may spawn any number of concurrent calls; the
-/// permit count decides how many actually reach the provider at a time, so a
-/// burst waits instead of hitting a rate limit. [`call_batch`](Backend::call_batch)
+/// permit count decides how many run at the provider at a time, so a burst waits
+/// instead of all hitting the provider at once. [`call_batch`](Backend::call_batch)
 /// takes a single permit — a batch is one round-trip.
 ///
-/// Because it is itself a `Backend` (same request/response, same provenance), it
-/// drops in anywhere the inner backend goes, and composes with
-/// [`Metered`](crate::metrics::Metered): wrap the inner with whichever ordering the caller
-/// wants to meter (metering the waited call, or the call plus its wait).
-pub struct RateLimited<B> {
+/// This caps *simultaneity*, not requests over time: it bounds open connections,
+/// not a requests-per-interval quota. For the latter, wrap with [`RateLimited`]
+/// — the two compose. Because it is itself a `Backend` (same request/response,
+/// same provenance), it drops in anywhere the inner backend goes, and composes
+/// with [`Metered`](crate::metrics::Metered): wrap the inner with whichever
+/// ordering the caller wants to meter (metering the waited call, or the call plus
+/// its wait).
+///
+/// [`RateLimited`]: crate::ratelimit::RateLimited
+pub struct ConcurrencyLimited<B> {
     inner: B,
     permits: Semaphore,
 }
 
-impl<B> RateLimited<B> {
+impl<B> ConcurrencyLimited<B> {
     /// Admit at most `max_concurrent` of `inner`'s calls at once.
     ///
     /// # Panics
@@ -48,7 +54,7 @@ impl<B> RateLimited<B> {
 }
 
 #[async_trait::async_trait]
-impl<B: Backend> Backend for RateLimited<B> {
+impl<B: Backend> Backend for ConcurrencyLimited<B> {
     type Request<'a> = B::Request<'a>;
     type Response = B::Response;
 
@@ -128,7 +134,7 @@ mod tests {
     /// The limiter is transparent: a call returns the inner backend's response.
     #[tokio::test]
     async fn passes_the_call_through() {
-        let backend = RateLimited::new(
+        let backend = ConcurrencyLimited::new(
             Tracking {
                 in_flight: AtomicUsize::new(0),
                 peak: AtomicUsize::new(0),
@@ -142,7 +148,7 @@ mod tests {
     /// Ten concurrent calls against a limit of 3 never run more than 3 at once.
     #[tokio::test]
     async fn caps_concurrent_calls() {
-        let backend = Arc::new(RateLimited::new(
+        let backend = Arc::new(ConcurrencyLimited::new(
             Tracking {
                 in_flight: AtomicUsize::new(0),
                 peak: AtomicUsize::new(0),

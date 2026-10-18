@@ -23,12 +23,14 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 ## The `metrics` module (`Metered`, the `Usage` record, the `UsageCollector`) is
 ## always available — it pulls no extra dependency. Off by default are the things
-## that do: `ratelimit` (the `RateLimited` decorator, which needs an async
-## runtime) and the observability sinks (`tracing`, `recorder`).
+## that do: `ratelimit` (the `ConcurrencyLimited` and `RateLimited` decorators,
+## which need an async runtime) and the observability sinks (`tracing`,
+## `recorder`).
 default = []
 
-## The `RateLimited` decorator: cap a backend's concurrent calls with a
-## semaphore. Pulls the Tokio sync primitives.
+## The `ratelimit` module: `ConcurrencyLimited` (a semaphore caps simultaneous
+## calls) and `RateLimited` (a token bucket caps calls per interval). Pulls the
+## Tokio sync and time primitives.
 ratelimit = ["dep:tokio"]
 
 ## Derive `serde::{Serialize, Deserialize}` on the usage record (`Usage`,
@@ -56,7 +58,7 @@ hipstr = { workspace = true, features = [] }
 
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
-tokio = { workspace = true, features = ["sync"], optional = true }
+tokio = { workspace = true, features = ["sync", "time"], optional = true }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }
@@ -68,4 +70,4 @@ metrics = { workspace = true, features = [], optional = true }
 
 [dev-dependencies]
 # Async runtime & parallelism
-tokio = { workspace = true, features = ["macros", "rt", "time"] }
+tokio = { workspace = true, features = ["macros", "rt", "time", "test-util"] }

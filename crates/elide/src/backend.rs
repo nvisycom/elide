@@ -10,8 +10,9 @@
 //! The [`metrics`] module (feature `metrics`) reports each call's usage — a
 //! `Metered` wrapper routes it to a per-run collector, or onward to a
 //! process-wide system (features `metrics-recorder`, `metrics-tracing`). The
-//! [`ratelimit`] module (feature `ratelimit`) caps a backend's concurrent calls.
-//! Both re-exported from [`elide_backend`].
+//! [`ratelimit`] module (feature `ratelimit`) bounds how a provider is called —
+//! `ConcurrencyLimited` caps simultaneous calls, `RateLimited` caps calls per
+//! interval. Both re-exported from [`elide_backend`].
 
 #[cfg(feature = "metrics")]
 #[cfg_attr(docsrs, doc(cfg(feature = "metrics")))]
