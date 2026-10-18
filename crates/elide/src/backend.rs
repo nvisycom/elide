@@ -1,5 +1,4 @@
-//! Backends: the model-call contract, and (under the `usage` feature) its usage
-//! accounting.
+//! Backends: the model-call contract and its decorators.
 //!
 //! Every hosted model in the toolkit — LLM/VLM, NER, speech-to-text, OCR — is a
 //! [`Backend`]: request in, model call, response out. A recognizer or enricher
@@ -7,40 +6,22 @@
 //! [`BackendResponse`], and the [`Units`] / [`Meter`] / [`TokenCounts`] a response
 //! reports) is always available.
 //!
-//! With the `usage` feature, a [`Metered`] wrapper reports each call's [`Usage`]
-//! to a [`UsageSink`] without the recognizer knowing. Collect it per run with a
-//! [`UsageCollector`] (one per request, read its total at the end — correct under
-//! concurrency), or route it to a process-wide system with [`MetricsSink`]
-//! (feature `metrics`) or [`TracingSink`] (feature `metrics-tracing`).
+//! The decorators wrap a `Backend`, leaving its request and response untouched.
+//! The [`metrics`] module (feature `metrics`) reports each call's usage — a
+//! `Metered` wrapper routes it to a per-run collector, or onward to a
+//! process-wide system (features `metrics-recorder`, `metrics-tracing`). The
+//! [`ratelimit`] module (feature `ratelimit`) caps a backend's concurrent calls.
+//! Both re-exported from [`elide_backend`].
 
-#[doc(inline)]
-pub use elide_core::backend::{
-    Backend, BackendRequest, BackendResponse, Meter, TokenCounts, Units,
-};
-/// The `metrics`-facade [`UsageSink`] (Prometheus / StatsD): call, duration,
-/// output, and token metrics per model.
 #[cfg(feature = "metrics")]
 #[cfg_attr(docsrs, doc(cfg(feature = "metrics")))]
 #[doc(inline)]
-pub use elide_metrics::MetricsSink;
-/// Fan a run's usage out to two sinks at once (e.g. a per-run [`UsageCollector`]
-/// and a global sink).
-#[cfg(feature = "usage")]
-#[cfg_attr(docsrs, doc(cfg(feature = "usage")))]
+pub use elide_backend::metrics;
+#[cfg(feature = "ratelimit")]
+#[cfg_attr(docsrs, doc(cfg(feature = "ratelimit")))]
 #[doc(inline)]
-pub use elide_metrics::Tee;
-/// The `tracing` [`UsageSink`]: one event per backend call on the `elide::usage`
-/// target.
-#[cfg(feature = "metrics-tracing")]
-#[cfg_attr(docsrs, doc(cfg(feature = "metrics-tracing")))]
+pub use elide_backend::ratelimit;
 #[doc(inline)]
-pub use elide_metrics::TracingSink;
-/// The backend decorators and usage machinery: the [`Metered`] wrapper, the
-/// [`RateLimited`] wrapper that caps a backend's concurrent calls, the [`Usage`]
-/// record, and the in-memory [`UsageCollector`].
-#[cfg(feature = "usage")]
-#[cfg_attr(docsrs, doc(cfg(feature = "usage")))]
-#[doc(inline)]
-pub use elide_metrics::{
-    Metered, ModelUsage, Outcome, RateLimited, Usage, UsageCollector, UsageSink,
+pub use elide_core::backend::{
+    Backend, BackendRequest, BackendResponse, Meter, TokenCounts, Units,
 };

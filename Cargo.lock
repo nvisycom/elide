@@ -1154,6 +1154,7 @@ dependencies = [
  "bytes",
  "criterion",
  "elide-audio",
+ "elide-backend",
  "elide-codec",
  "elide-context",
  "elide-core",
@@ -1163,7 +1164,6 @@ dependencies = [
  "elide-image",
  "elide-lingua",
  "elide-llm",
- "elide-metrics",
  "elide-ner",
  "elide-office",
  "elide-operator",
@@ -1194,6 +1194,20 @@ dependencies = [
  "symphonia",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "elide-backend"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "elide-core",
+ "hipstr",
+ "metrics",
+ "schemars",
+ "serde",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1369,20 +1383,6 @@ dependencies = [
  "thiserror",
  "tracing",
  "unicode-normalization",
-]
-
-[[package]]
-name = "elide-metrics"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "elide-core",
- "hipstr",
- "metrics",
- "schemars",
- "serde",
- "tokio",
- "tracing",
 ]
 
 [[package]]

@@ -1,4 +1,4 @@
-//! The usage record a [`Metered`](crate::Metered) backend call reports, and the
+//! The usage record a [`Metered`](crate::metrics::Metered) backend call reports, and the
 //! sink it reports to.
 
 use std::sync::{Arc, Mutex};
@@ -149,7 +149,7 @@ impl Usage {
     }
 }
 
-/// Where a [`Metered`](crate::Metered) backend reports each call's [`Usage`].
+/// Where a [`Metered`](crate::metrics::Metered) backend reports each call's [`Usage`].
 ///
 /// The seam: a caller supplies one and hands it to the wrappers at construction.
 /// [`UsageCollector`] is the batteries-included in-memory implementation; a caller
@@ -173,13 +173,13 @@ impl UsageSink for Arc<dyn UsageSink> {
 /// `Vec` a caller reads back after a run.
 ///
 /// Cheap to [`Clone`] (it shares one buffer): build one, clone it into each
-/// [`Metered`](crate::Metered) wrapper, run the pipeline, then read the entries.
+/// [`Metered`](crate::metrics::Metered) wrapper, run the pipeline, then read the entries.
 /// Correct under concurrency because each run owns its collector, so a webserver
 /// attributes cost to the right request with no shared state.
 ///
 /// ```
 /// # use std::sync::Arc;
-/// # use elide_metrics::{UsageCollector, UsageSink, Usage, ModelUsage};
+/// # use elide_backend::metrics::{UsageCollector, UsageSink, Usage, ModelUsage};
 /// # use std::time::Duration;
 /// let collector = UsageCollector::new();
 /// let sink: Arc<dyn UsageSink> = Arc::new(collector.clone());

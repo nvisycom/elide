@@ -18,7 +18,7 @@ use tokio::sync::Semaphore;
 ///
 /// Because it is itself a `Backend` (same request/response, same provenance), it
 /// drops in anywhere the inner backend goes, and composes with
-/// [`Metered`](crate::Metered): wrap the inner with whichever ordering the caller
+/// [`Metered`](crate::metrics::Metered): wrap the inner with whichever ordering the caller
 /// wants to meter (metering the waited call, or the call plus its wait).
 pub struct RateLimited<B> {
     inner: B,
