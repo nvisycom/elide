@@ -18,7 +18,7 @@ use rig::completion::{Message, Usage};
 use rig::extractor::ExtractorBuilder;
 use rig::message::{ImageMediaType, UserContent};
 use rig::operation::Completion;
-use rig::{DynModel, TypedPromptResponse};
+use rig::{AgentBuilder, DynModel, TypedPromptResponse};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -112,12 +112,14 @@ impl<M> RigBackend<M> {
     where
         T: JsonSchema + for<'a> Deserialize<'a> + Serialize + Send + Sync + 'static,
     {
-        // `ExtractorBuilder` has no `temperature` setter, so pass it through
-        // `additional_params`; rig merges these into the provider request.
-        let params = serde_json::json!({ "temperature": self.config.temperature });
-        let mut builder = ExtractorBuilder::<T>::new(self.model.clone())
-            .max_tokens(self.config.max_tokens)
-            .additional_params(params);
+        // Set temperature on the agent builder so it rides rig's typed request
+        // field, which each provider places in its own request shape (Gemini's
+        // `generationConfig`, OpenAI's/Anthropic's top level). Passing it through
+        // `additional_params` would put it at the request's top level, where
+        // Gemini ignores it.
+        let agent = AgentBuilder::new(self.model.clone()).temperature(self.config.temperature);
+        let mut builder =
+            ExtractorBuilder::<T>::from_agent_builder(agent).max_tokens(self.config.max_tokens);
         if let Some(p) = self.config.preamble.as_deref() {
             builder = builder.append_preamble(p);
         }

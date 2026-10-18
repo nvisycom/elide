@@ -1366,7 +1366,6 @@ dependencies = [
  "rig-reqwest",
  "schemars",
  "serde",
- "serde_json",
  "thiserror",
  "tracing",
  "unicode-normalization",
