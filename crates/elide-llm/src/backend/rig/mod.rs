@@ -71,9 +71,12 @@ impl<M> RigBackend<M> {
             ..HttpConfig::default()
         })?;
 
-        // Each provider's `.completion(model)` yields a `Model<Wire>`; erase it
-        // to one `DynModel<Completion>` so the backend holds a single field
-        // regardless of provider.
+        // Each provider's completion method yields a `Model<Wire>`; erase it to
+        // one `DynModel<Completion>` so the backend holds a single field
+        // regardless of provider. Ollama uses `native_completion` (`/api/chat`),
+        // not `completion` (which rig 0.44 routes to the OpenAI-compatible
+        // `/v1/chat/completions`), so a daemon exposing only its native endpoint
+        // keeps working.
         let model: DynModel<Completion> = match &provider {
             #[cfg(feature = "openai-gpt")]
             Provider::OpenAi(p) => p.openai_client(http).completion(p.model.as_str()).into(),
@@ -81,7 +84,10 @@ impl<M> RigBackend<M> {
             Provider::Anthropic(p) => p.anthropic_client(http).completion(p.model.as_str()).into(),
             #[cfg(feature = "google-gemini")]
             Provider::Gemini(p) => p.gemini_client(http).completion(p.model.as_str()).into(),
-            Provider::Ollama(p) => p.ollama_client(http).completion(p.model.as_str()).into(),
+            Provider::Ollama(p) => p
+                .ollama_client(http)
+                .native_completion(p.model.as_str())
+                .into(),
         };
 
         let model_name = provider.model().to_owned();
