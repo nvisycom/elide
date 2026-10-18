@@ -4,7 +4,6 @@
 //! Gemini, Ollama) behind the modality-agnostic LLM backend surface.
 
 mod config;
-mod dispatch;
 
 use std::marker::PhantomData;
 
@@ -15,15 +14,15 @@ use elide_core::backend::{Backend, TokenCounts};
 use elide_core::entity::audit::ModelEvent;
 use elide_core::modality::text::Text;
 use elide_image::modality::{Image, ImageData, ImageFormat};
-use rig::client::CompletionClient;
 use rig::completion::{Message, Usage};
 use rig::extractor::ExtractorBuilder;
 use rig::message::{ImageMediaType, UserContent};
+use rig::operation::Completion;
+use rig::{DynModel, TypedPromptResponse};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub use self::config::RigConfig;
-use self::dispatch::{RigModel, dispatch};
 use super::http::{HttpConfig, build_http_client};
 use super::{LlmRequest, LlmResponse};
 use crate::error::Error;
@@ -34,13 +33,13 @@ const TARGET: &str = "elide_llm::backend::rig";
 /// Rig-backed LLM backend.
 ///
 /// Construct with [`new`] (default config) or [`new_with_config`]. Owns the
-/// provider-specific rig agent (created at construction) and the
-/// [`RigConfig`] driving sampling.
+/// provider's completion model (type-erased to [`DynModel`] at construction, so
+/// one field serves every provider) and the [`RigConfig`] driving sampling.
 ///
 /// [`new`]: Self::new
 /// [`new_with_config`]: Self::new_with_config
 pub struct RigBackend<M> {
-    model: RigModel,
+    model: DynModel<Completion>,
     config: RigConfig,
     model_name: String,
     _modality: PhantomData<fn() -> M>,
@@ -60,7 +59,7 @@ impl<M> RigBackend<M> {
     /// Build a backend for `provider` with an explicit [`RigConfig`].
     ///
     /// The config is consumed here: it shapes the HTTP retry policy and the
-    /// rig agent's sampling and preamble, all fixed at construction.
+    /// extractor's sampling and preamble, all fixed at construction.
     ///
     /// # Errors
     ///
@@ -72,27 +71,17 @@ impl<M> RigBackend<M> {
             ..HttpConfig::default()
         })?;
 
-        let model = match &provider {
+        // Each provider's `.completion(model)` yields a `Model<Wire>`; erase it
+        // to one `DynModel<Completion>` so the backend holds a single field
+        // regardless of provider.
+        let model: DynModel<Completion> = match &provider {
             #[cfg(feature = "openai-gpt")]
-            Provider::OpenAi(p) => {
-                let client = p.openai_client(http)?;
-                let model = client.completions_api().completion_model(p.model.as_str());
-                RigModel::OpenAi(model)
-            }
+            Provider::OpenAi(p) => p.openai_client(http).completion(p.model.as_str()).into(),
             #[cfg(feature = "anthropic-claude")]
-            Provider::Anthropic(p) => {
-                let client = p.anthropic_client(http)?;
-                RigModel::Anthropic(client.completion_model(p.model.as_str()))
-            }
+            Provider::Anthropic(p) => p.anthropic_client(http).completion(p.model.as_str()).into(),
             #[cfg(feature = "google-gemini")]
-            Provider::Gemini(p) => {
-                let client = p.gemini_client(http)?;
-                RigModel::Gemini(client.completion_model(p.model.as_str()))
-            }
-            Provider::Ollama(p) => {
-                let client = p.ollama_client(http)?;
-                RigModel::Ollama(client.completion_model(p.model.as_str()))
-            }
+            Provider::Gemini(p) => p.gemini_client(http).completion(p.model.as_str()).into(),
+            Provider::Ollama(p) => p.ollama_client(http).completion(p.model.as_str()).into(),
         };
 
         let model_name = provider.model().to_owned();
@@ -117,37 +106,34 @@ impl<M> RigBackend<M> {
     where
         T: JsonSchema + for<'a> Deserialize<'a> + Serialize + Send + Sync + 'static,
     {
-        let preamble = self.config.preamble.clone();
-        let max_tokens = self.config.max_tokens;
         // `ExtractorBuilder` has no `temperature` setter, so pass it through
-        // `additional_params`, rig merges these into the provider request.
+        // `additional_params`; rig merges these into the provider request.
         let params = serde_json::json!({ "temperature": self.config.temperature });
-        dispatch!(&self.model, |model| {
-            let mut builder = ExtractorBuilder::<T>::new(model.clone())
-                .max_tokens(max_tokens)
-                .additional_params(params);
-            if let Some(p) = preamble.as_deref() {
-                builder = builder.preamble(p);
-            }
-            let response = builder.build().extract_with_usage(message).await?;
-            Ok((response.data, token_counts(&response.usage)))
-        })
+        let mut builder = ExtractorBuilder::<T>::new(self.model.clone())
+            .max_tokens(self.config.max_tokens)
+            .additional_params(params);
+        if let Some(p) = self.config.preamble.as_deref() {
+            builder = builder.append_preamble(p);
+        }
+        let response: TypedPromptResponse<T> = builder.build().extract(message).await?;
+        Ok((response.output, token_counts(&response.usage)))
     }
 }
 
 /// Map rig's completion [`Usage`] onto our [`TokenCounts`].
 ///
-/// Rig reports whole `u64` counts (zero when a provider omits a field); we carry
-/// each as `Some`, so an unreported meter still records as a definite zero rather
-/// than silently dropping. `cached_input_tokens` is part of, not additional to,
+/// Both sides carry each count as `Option<u64>`, with the same meaning: `None`
+/// is "the provider did not report this", distinct from `Some(0)`. So the fields
+/// pass straight through — a `None` stays `None` rather than becoming a false,
+/// billable-looking zero. `cached_input_tokens` is part of, not additional to,
 /// the input count, matching [`TokenCounts::cached`].
 fn token_counts(usage: &Usage) -> TokenCounts {
     TokenCounts {
-        input: Some(usage.input_tokens),
-        output: Some(usage.output_tokens),
-        total: Some(usage.total_tokens),
-        cached: Some(usage.cached_input_tokens),
-        reasoning: None,
+        input: usage.input_tokens,
+        output: usage.output_tokens,
+        total: usage.total_tokens,
+        cached: usage.cached_input_tokens,
+        reasoning: usage.reasoning_tokens,
     }
 }
 

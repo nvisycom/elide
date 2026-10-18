@@ -27,6 +27,7 @@ default = []
 ## `LlmBackend` trait, the recognizer, candidates, prompts.
 rig = [
     "dep:rig",
+    "dep:rig-reqwest",
     "dep:base64",
     "dep:reqwest-middleware",
     "dep:reqwest-retry",
@@ -82,7 +83,8 @@ tracing = { workspace = true, features = [] }
 unicode-normalization = { workspace = true, features = [] }
 
 # AI & LLM frameworks
-rig = { workspace = true, features = ["derive", "reqwest-middleware"], optional = true }
+rig = { workspace = true, features = ["derive"], optional = true }
+rig-reqwest = { workspace = true, features = ["reqwest-middleware-rustls"], optional = true }
 base64 = { workspace = true, features = [], optional = true }
 
 # Templating & schema
