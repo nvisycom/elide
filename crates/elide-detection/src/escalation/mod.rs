@@ -1,15 +1,17 @@
 //! [`EscalatingRecognizer`]: run a cheap recognizer always, a costly one only
 //! when it is worth it.
 //!
-//! A [`Recognizer`] that wraps two: a `fallback` that runs on every subject, and
-//! an `expensive` one (a hosted LLM/VLM, say) that runs only when a [`Decider`]
-//! judges — from the subject and what the fallback found — that the extra cost is
+//! A [`Recognizer`] that wraps two: a `baseline` that runs on every subject, and
+//! an `escalated` one (a hosted LLM/VLM, say) that runs only when a [`Decider`]
+//! judges — from the subject and what the baseline found — that the extra cost is
 //! warranted. The two results are concatenated; the downstream reconcile layer
 //! fuses any overlap, so the decorator owns no dedup policy of its own.
 //!
-//! The fallback **always** runs, so a miscalibrated decider costs at worst the
-//! expensive recognizer's *additional* findings — never the baseline detection.
-//! That fail-safe is the point: escalation adds coverage, it does not gate it.
+//! The baseline **always** runs, so on the success path a miscalibrated decider
+//! costs at worst the escalated recognizer's *additional* findings, never the
+//! baseline detection. An error from either recognizer propagates and fails the
+//! whole call — no partial result is returned. That fail-safe is the point:
+//! escalation adds coverage, it does not gate it.
 
 mod confidence;
 
@@ -23,45 +25,46 @@ use elide_core::recognition::{Context, Recognizer, Subject};
 
 pub use self::confidence::ConfidenceDecider;
 
-/// Decides whether a subject warrants the expensive recognizer, given what the
-/// cheap fallback already found.
+/// Decides whether a subject warrants the escalated recognizer, given what the
+/// cheap baseline already found.
 ///
-/// Called once per subject, after the fallback has run. Returning `false` keeps
-/// only the fallback's entities; `true` also runs the expensive recognizer.
+/// Called once per subject, after the baseline has run. Returning `false` keeps
+/// only the baseline's entities; `true` also runs the escalated recognizer.
 pub trait Decider<M: Modality>: Send + Sync {
-    /// Whether to escalate this subject to the expensive recognizer.
+    /// Whether this subject warrants the escalated recognizer.
     ///
-    /// `fallback` is what the cheap recognizer found for `subject` — typically the
+    /// `baseline` is what the cheap recognizer found for `subject` — typically the
     /// signal a decider reasons over (e.g. escalate when it is sparse or weak).
-    fn escalate(&self, subject: &Subject<M>, fallback: &[Entity<M>]) -> bool;
+    fn escalate(&self, subject: &Subject<M>, baseline: &[Entity<M>]) -> bool;
 }
 
-/// A [`Recognizer`] that runs a cheap `fallback` always and a costly `expensive`
+/// A [`Recognizer`] that runs a cheap `baseline` always and a costly `escalated`
 /// one only when a [`Decider`] says the subject warrants it.
 ///
-/// Both wrapped recognizers recognize the same modality `M`. The fallback's
-/// entities are always returned; when the decider escalates, the expensive
-/// recognizer's entities are appended. Overlap between the two is left to the
-/// reconcile layer, matching the pipeline's "keep the redundant set, reconcile
-/// later" model.
+/// Both wrapped recognizers recognize the same modality `M`. When recognition
+/// succeeds, the baseline's entities are always returned; when the decider
+/// escalates, the escalated recognizer's entities are appended. An error from
+/// either recognizer propagates without returning partial results. Overlap
+/// between the two is left to the reconcile layer, matching the pipeline's "keep
+/// the redundant set, reconcile later" model.
 pub struct EscalatingRecognizer<M: Modality, D> {
-    fallback: Arc<dyn Recognizer<M>>,
-    expensive: Arc<dyn Recognizer<M>>,
+    baseline: Arc<dyn Recognizer<M>>,
+    escalated: Arc<dyn Recognizer<M>>,
     decider: D,
 }
 
 impl<M: Modality, D: Decider<M>> EscalatingRecognizer<M, D> {
-    /// Wrap `fallback` (always run) and `expensive` (run on escalation), with
+    /// Wrap `baseline` (always run) and `escalated` (run on escalation), with
     /// `decider` choosing per subject.
     #[must_use]
-    pub fn new(
-        fallback: Arc<dyn Recognizer<M>>,
-        expensive: Arc<dyn Recognizer<M>>,
-        decider: D,
-    ) -> Self {
+    pub fn new<B, E>(baseline: B, escalated: E, decider: D) -> Self
+    where
+        B: Recognizer<M> + 'static,
+        E: Recognizer<M> + 'static,
+    {
         Self {
-            fallback,
-            expensive,
+            baseline: Arc::new(baseline),
+            escalated: Arc::new(escalated),
             decider,
         }
     }
@@ -69,11 +72,11 @@ impl<M: Modality, D: Decider<M>> EscalatingRecognizer<M, D> {
 
 #[async_trait::async_trait]
 impl<M: Modality, D: Decider<M>> Recognizer<M> for EscalatingRecognizer<M, D> {
-    /// The fallback's id. Each emitted entity already carries its own
-    /// originating recognizer in its audit trail (the fallback's or the
-    /// expensive one's), so this is only the decorator's own fallback identity.
+    /// The baseline's id. Each emitted entity already carries its own
+    /// originating recognizer in its audit trail (the baseline's or the
+    /// escalated one's), so this is only the decorator's own baseline identity.
     fn id(&self) -> ComponentId {
-        self.fallback.id()
+        self.baseline.id()
     }
 
     async fn recognize(
@@ -81,9 +84,9 @@ impl<M: Modality, D: Decider<M>> Recognizer<M> for EscalatingRecognizer<M, D> {
         subject: &Subject<M>,
         ctx: &Context<'_, M>,
     ) -> Result<Vec<Entity<M>>> {
-        let mut entities = self.fallback.recognize(subject, ctx).await?;
+        let mut entities = self.baseline.recognize(subject, ctx).await?;
         if self.decider.escalate(subject, &entities) {
-            entities.extend(self.expensive.recognize(subject, ctx).await?);
+            entities.extend(self.escalated.recognize(subject, ctx).await?);
         }
         Ok(entities)
     }
@@ -93,17 +96,17 @@ impl<M: Modality, D: Decider<M>> Recognizer<M> for EscalatingRecognizer<M, D> {
         subjects: &[Subject<M>],
         ctx: &Context<'_, M>,
     ) -> Result<Vec<Vec<Entity<M>>>> {
-        // The fallback batches across all subjects at once (preserving a
-        // provider-backed fallback's own coalescing); the expensive recognizer
+        // The baseline batches across all subjects at once (preserving a
+        // provider-backed baseline's own coalescing); the escalated recognizer
         // then runs per escalated subject. A filtered, non-contiguous subset of
         // `subjects` can't be handed to `recognize_batch` as one slice (`Subject`
         // is deliberately not `Clone`), so escalation calls `recognize` per
-        // subject — which is what the expensive recognizer's own default batch
+        // subject — which is what the escalated recognizer's own default batch
         // does anyway.
-        let mut per_subject = self.fallback.recognize_batch(subjects, ctx).await?;
+        let mut per_subject = self.baseline.recognize_batch(subjects, ctx).await?;
         for (subject, entities) in subjects.iter().zip(per_subject.iter_mut()) {
             if self.decider.escalate(subject, entities) {
-                entities.extend(self.expensive.recognize(subject, ctx).await?);
+                entities.extend(self.escalated.recognize(subject, ctx).await?);
             }
         }
         Ok(per_subject)
@@ -131,7 +134,7 @@ mod tests {
         let location = TextLocation::new(0, 1);
         let confidence = Confidence::new(confidence).unwrap();
         let event = AuditEvent::pattern(
-            "fallback",
+            "baseline",
             confidence,
             location.clone(),
             PatternEvent {
@@ -143,7 +146,7 @@ mod tests {
     }
 
     /// A recognizer that replays canned entities and counts how often it ran, so
-    /// a test can assert whether escalation reached the expensive recognizer.
+    /// a test can assert whether escalation reached the escalated recognizer.
     struct Spy {
         entities: Vec<Entity<Text>>,
         calls: Arc<AtomicUsize>,
@@ -173,21 +176,18 @@ mod tests {
         Context::new(scope)
     }
 
-    /// A confident fallback detection does not escalate: the expensive
-    /// recognizer never runs, and only the fallback's entities are returned.
+    /// A confident baseline detection does not escalate: the escalated
+    /// recognizer never runs, and only the baseline's entities are returned.
     #[tokio::test]
-    async fn a_confident_fallback_does_not_escalate() {
+    async fn a_confident_baseline_does_not_escalate() {
         let calls = Arc::new(AtomicUsize::new(0));
-        let fallback = MockRecognizer::new(vec![entity("EMAIL", 0.9)]);
-        let expensive = Spy {
+        let baseline = MockRecognizer::new(vec![entity("EMAIL", 0.9)]);
+        let escalated = Spy {
             entities: vec![entity("PERSON", 0.9)],
             calls: calls.clone(),
         };
-        let recognizer = EscalatingRecognizer::new(
-            Arc::new(fallback),
-            Arc::new(expensive),
-            ConfidenceDecider::default(),
-        );
+        let recognizer =
+            EscalatingRecognizer::new(baseline, escalated, ConfidenceDecider::default());
 
         let scope = Scope::new();
         let out = recognizer
@@ -195,25 +195,22 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(calls.load(Ordering::Relaxed), 0, "expensive must not run");
-        assert_eq!(out.len(), 1, "only the fallback's entity");
+        assert_eq!(calls.load(Ordering::Relaxed), 0, "escalated must not run");
+        assert_eq!(out.len(), 1, "only the baseline's entity");
     }
 
-    /// A weak fallback detection escalates: the expensive recognizer runs and its
-    /// entities are appended to the fallback's.
+    /// A weak baseline detection escalates: the escalated recognizer runs and its
+    /// entities are appended to the baseline's.
     #[tokio::test]
-    async fn a_weak_fallback_escalates_and_merges() {
+    async fn a_weak_baseline_escalates_and_merges() {
         let calls = Arc::new(AtomicUsize::new(0));
-        let fallback = MockRecognizer::new(vec![entity("EMAIL", 0.2)]);
-        let expensive = Spy {
+        let baseline = MockRecognizer::new(vec![entity("EMAIL", 0.2)]);
+        let escalated = Spy {
             entities: vec![entity("PERSON", 0.9)],
             calls: calls.clone(),
         };
-        let recognizer = EscalatingRecognizer::new(
-            Arc::new(fallback),
-            Arc::new(expensive),
-            ConfidenceDecider::default(),
-        );
+        let recognizer =
+            EscalatingRecognizer::new(baseline, escalated, ConfidenceDecider::default());
 
         let scope = Scope::new();
         let out = recognizer
@@ -221,25 +218,22 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(calls.load(Ordering::Relaxed), 1, "expensive runs once");
-        assert_eq!(out.len(), 2, "fallback + expensive, concatenated");
+        assert_eq!(calls.load(Ordering::Relaxed), 1, "escalated runs once");
+        assert_eq!(out.len(), 2, "baseline + escalated, concatenated");
     }
 
-    /// An empty fallback escalates: a chunk the cheap pass found nothing in still
-    /// gets the expensive look.
+    /// An empty baseline escalates: a chunk the cheap pass found nothing in still
+    /// gets the escalated look.
     #[tokio::test]
-    async fn an_empty_fallback_escalates() {
+    async fn an_empty_baseline_escalates() {
         let calls = Arc::new(AtomicUsize::new(0));
-        let fallback = MockRecognizer::new(vec![]);
-        let expensive = Spy {
+        let baseline = MockRecognizer::new(vec![]);
+        let escalated = Spy {
             entities: vec![entity("PERSON", 0.9)],
             calls: calls.clone(),
         };
-        let recognizer = EscalatingRecognizer::new(
-            Arc::new(fallback),
-            Arc::new(expensive),
-            ConfidenceDecider::default(),
-        );
+        let recognizer =
+            EscalatingRecognizer::new(baseline, escalated, ConfidenceDecider::default());
 
         let scope = Scope::new();
         let out = recognizer
@@ -247,27 +241,27 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(calls.load(Ordering::Relaxed), 1, "expensive runs on empty");
-        assert_eq!(out.len(), 1, "the expensive entity");
+        assert_eq!(calls.load(Ordering::Relaxed), 1, "escalated runs on empty");
+        assert_eq!(out.len(), 1, "the escalated entity");
     }
 
-    /// The batch path escalates per subject: the expensive recognizer runs only
-    /// for the subjects whose fallback result is weak, each result scattered back
+    /// The batch path escalates per subject: the escalated recognizer runs only
+    /// for the subjects whose baseline result is weak, each result scattered back
     /// to its own position.
     #[tokio::test]
     async fn batch_escalates_per_subject() {
         let calls = Arc::new(AtomicUsize::new(0));
         // Fallback is confident for every subject; override escalation by using a
         // threshold that nothing clears, so every subject escalates — then assert
-        // one expensive call per subject.
-        let fallback = MockRecognizer::new(vec![entity("EMAIL", 0.9)]);
-        let expensive = Spy {
+        // one escalated call per subject.
+        let baseline = MockRecognizer::new(vec![entity("EMAIL", 0.9)]);
+        let escalated = Spy {
             entities: vec![entity("PERSON", 0.9)],
             calls: calls.clone(),
         };
         let recognizer = EscalatingRecognizer::new(
-            Arc::new(fallback),
-            Arc::new(expensive),
+            baseline,
+            escalated,
             ConfidenceDecider::new(elide_core::primitive::ConfidenceThreshold::MAX),
         );
 
@@ -278,11 +272,11 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(calls.load(Ordering::Relaxed), 3, "one expensive call each");
+        assert_eq!(calls.load(Ordering::Relaxed), 3, "one escalated call each");
         assert_eq!(out.len(), 3);
         assert!(
             out.iter().all(|e| e.len() == 2),
-            "fallback + expensive each"
+            "baseline + escalated each"
         );
     }
 }
