@@ -158,7 +158,7 @@ pdfium-render = { version = "0.9", features = [] }
 
 # OCR (pure-Rust; models loaded at runtime, no native lib)
 ocrs = { version = "0.13", features = [] }
-rten = { version = "0.26", features = [] }
+rten = { version = "0.27", features = [] }
 rten-imageproc = { version = "0.26", features = [] }
 
 # Audio processing
