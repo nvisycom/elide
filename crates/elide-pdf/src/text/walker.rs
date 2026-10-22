@@ -437,6 +437,7 @@ pub(crate) fn text_block_for_page(
             rects: &mut rects,
             fonts: &mut fonts,
         },
+        pen: None,
         active: BTreeSet::new(),
         page,
         max_page_bytes,
@@ -493,8 +494,6 @@ struct Inherited<'a> {
     font: Option<InheritedFont<'a>>,
     /// The caller's text state, CTM composed with the form's `/Matrix`.
     state: TextState,
-    /// Where the caller's last glyph left the pen, for the gap check.
-    pen: Option<(f64, f64)>,
 }
 
 /// The caller's selected font, inherited by a `Do`-invoked Form XObject so text
@@ -582,18 +581,17 @@ fn walk_stream(
     let mut width_current: &WidthSource = inherited_font.map_or(NO_WIDTHS, |f| f.widths);
     let mut metrics_current = inherited_font.map_or_else(GlyphMetrics::default, |f| f.metrics);
 
-    // The text geometry: the matrix cursor (reset at `BT`), the parametric text
-    // state and its `q`/`Q` save stack, and where the last glyph left the pen
-    // (kept across show-ops so a gap between two `Tj`s is seen). A Form XObject
-    // inherits the caller's text state (its CTM already carries the form's
-    // `/Matrix`) and pen, so text inside the form is positioned in the page's
-    // coordinate space and a gap across the `Do` boundary is still seen.
+    // The text geometry: the matrix cursor (reset at `BT`) and the parametric
+    // text state with its `q`/`Q` save stack. The pen (where the last glyph left
+    // off) is shared across this stream and every Form XObject it draws — one
+    // cell threaded through the recursion — so a word gap is judged consistently
+    // across a `Do` boundary in either direction. A form inherits the caller's
+    // text state (its CTM already carries the form's `/Matrix`).
     let mut cursor = Cursor::new();
     let mut state = inherited
         .as_ref()
         .map_or_else(TextState::default, |inh| inh.state);
     let mut gs_stack: Vec<TextState> = Vec::new();
-    let mut pen: Option<(f64, f64)> = inherited.as_ref().and_then(|inh| inh.pen);
 
     for (op_idx, op) in content.operations.iter().enumerate() {
         match op.operator.as_str() {
@@ -686,7 +684,7 @@ fn walk_stream(
                             next_char: ctx.accum.next_char,
                             rects: ctx.accum.rects,
                             cursor: &mut cursor,
-                            pen: &mut pen,
+                            pen: &mut ctx.pen,
                             state,
                             widths: width_current,
                             metrics: metrics_current,
@@ -716,9 +714,10 @@ fn walk_stream(
             "Do" => {
                 if let Some(Object::Name(name)) = op.operands.first() {
                     // Pass the current graphics state down: the form inherits the
-                    // selected font, the text state (its CTM, onto which
-                    // `walk_xobject` composes the form's `/Matrix`), and the pen
-                    // (so a gap across the `Do` boundary is seen).
+                    // selected font and the text state (its CTM, onto which
+                    // `walk_xobject` composes the form's `/Matrix`). The pen cell
+                    // is shared, so the form's text updates it and a gap right
+                    // after the `Do` is judged against where the form left off.
                     let inherited = Inherited {
                         font: current.map(|encoding| InheritedFont {
                             slot: font_slot_current,
@@ -727,7 +726,6 @@ fn walk_stream(
                             metrics: metrics_current,
                         }),
                         state,
-                        pen,
                     };
                     walk_xobject(doc, name, scope, depth, inherited, ctx)?;
                 }
@@ -941,12 +939,16 @@ struct TextAccum<'a> {
 }
 
 /// The mutable state threaded through a page's content walk, unchanged as it
-/// recurses into Form XObjects: the accumulating text/glyph/font output, the
-/// XObjects currently on the recursion stack (cycle guard), the 1-based page
-/// number for diagnostics, the per-stream decompression-bomb bound, and the
-/// remaining total-walk budget.
+/// recurses into Form XObjects: the accumulating text/glyph/font output, the pen
+/// position shared across the page and every form it draws (so a word gap is
+/// judged consistently across a `Do` boundary), the XObjects currently on the
+/// recursion stack (cycle guard), the 1-based page number for diagnostics, the
+/// per-stream decompression-bomb bound, and the remaining total-walk budget.
 struct Walk<'a> {
     accum: TextAccum<'a>,
+    /// Where the last shown glyph left the pen, in device space, shared across
+    /// every stream of the page (`None` before the first glyph).
+    pen: Option<(f64, f64)>,
     active: BTreeSet<ObjectId>,
     page: u32,
     /// Maximum decompressed size of any single content stream (page or XObject),
@@ -1407,5 +1409,107 @@ mod tests {
             "inherited widths give a real box: {:?}",
             rects[0]
         );
+    }
+
+    /// The pen is shared across the `Do` boundary in both directions: a page
+    /// draws a word, invokes a form that draws a word further along, then draws a
+    /// third word further still. A gap must be seen entering the form AND leaving
+    /// it — all three words stay space-separated, none run together.
+    #[test]
+    fn pen_is_shared_across_the_form_boundary() {
+        let mut doc = Document::with_version("1.5");
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+        });
+        let font_res = dictionary! { "Font" => dictionary! { "F1" => font_id } };
+
+        // The form draws "Beta" at x=140 (a wide gap after the page's "Alpha").
+        let form_ops = Content {
+            operations: vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec!["F1".into(), 12.into()]),
+                Operation::new(
+                    "Tm",
+                    vec![
+                        1.into(),
+                        0.into(),
+                        0.into(),
+                        1.into(),
+                        140.into(),
+                        150.into(),
+                    ],
+                ),
+                Operation::new("Tj", vec![Object::string_literal("Beta")]),
+                Operation::new("ET", vec![]),
+            ],
+        };
+        let form_id = doc.add_object(lopdf::Stream::new(
+            dictionary! { "Type" => "XObject", "Subtype" => "Form", "Resources" => font_res.clone() },
+            form_ops.encode().unwrap(),
+        ));
+
+        // The page: "Alpha" at x=10, Do the form, then "Gamma" at x=300 (a wide
+        // gap after the form's "Beta" ended around x≈160).
+        let page_content = Content {
+            operations: vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec!["F1".into(), 12.into()]),
+                Operation::new(
+                    "Tm",
+                    vec![
+                        1.into(),
+                        0.into(),
+                        0.into(),
+                        1.into(),
+                        10.into(),
+                        150.into(),
+                    ],
+                ),
+                Operation::new("Tj", vec![Object::string_literal("Alpha")]),
+                Operation::new("ET", vec![]),
+                Operation::new("Do", vec!["Fm".into()]),
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec!["F1".into(), 12.into()]),
+                Operation::new(
+                    "Tm",
+                    vec![
+                        1.into(),
+                        0.into(),
+                        0.into(),
+                        1.into(),
+                        300.into(),
+                        150.into(),
+                    ],
+                ),
+                Operation::new("Tj", vec![Object::string_literal("Gamma")]),
+                Operation::new("ET", vec![]),
+            ],
+        };
+        let content_id = doc.add_object(lopdf::Stream::new(
+            dictionary! {},
+            page_content.encode().unwrap(),
+        ));
+        let resources = doc.add_object(dictionary! {
+            "Font" => dictionary! { "F1" => font_id },
+            "XObject" => dictionary! { "Fm" => form_id },
+        });
+        let pages_id = doc.new_object_id();
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page", "Parent" => pages_id, "Contents" => content_id,
+            "Resources" => resources,
+            "MediaBox" => vec![0.into(), 0.into(), 400.into(), 200.into()],
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1,
+            }),
+        );
+        doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+
+        let block = text_block_for_page(&doc, 1, page_id, 10_000_000).unwrap();
+        // A gap entering the form (Alpha→Beta) and leaving it (Beta→Gamma) are
+        // both seen: the three words are space-separated.
+        assert_eq!(block.text, "Alpha Beta Gamma");
     }
 }

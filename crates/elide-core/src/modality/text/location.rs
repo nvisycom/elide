@@ -239,6 +239,12 @@ fn rect_order(a: &UnitBoundingBox, b: &UnitBoundingBox) -> Ordering {
 
 impl ModalityLocation for TextLocation {
     fn overlap(&self, other: &Self) -> Overlap {
+        // A span is page-local, so two spans only share a coordinate space when
+        // they are on the same rendered page (both unpaged, or equal page). Spans
+        // on different pages are disjoint even with identical byte ranges.
+        if self.effective_page() != other.effective_page() {
+            return Overlap::Disjoint;
+        }
         // Range geometry is defined on the decoded span. A source-only selection
         // has no span and never range-dedups, so any pair involving one is
         // Disjoint.
@@ -454,6 +460,21 @@ mod tests {
         let long_early = TextLocation::new(0, 9);
         assert_eq!(long_early.position_cmp(&short_late), Ordering::Less);
         assert_eq!(long_early.span_cmp(&short_late), Ordering::Greater);
+    }
+
+    #[test]
+    fn same_span_on_different_pages_is_disjoint() {
+        // Spans are page-local, so identical byte ranges on different rendered
+        // pages must not overlap (nor union) — else reconcile would wrongly merge
+        // an entity on page 2 with an unrelated one at the same offset on page 3.
+        let full = UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0);
+        let p2 = TextLocation::new(181, 202).with_rects(2, [full]);
+        let p3 = TextLocation::new(181, 202).with_rects(3, [full]);
+        assert_eq!(p2.overlap(&p3), Overlap::Disjoint);
+        assert_eq!(p2.union(&p3), None);
+        // Same page, same span: still overlaps as before.
+        let p2b = TextLocation::new(181, 202).with_rects(2, [full]);
+        assert_eq!(p2.overlap(&p2b), Overlap::Contains);
     }
 
     #[test]
