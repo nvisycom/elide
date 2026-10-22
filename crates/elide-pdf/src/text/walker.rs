@@ -197,11 +197,19 @@ impl TextRun<'_> {
         for glyph in decode_glyphs(enc, bytes)? {
             let origin = self.cursor.device_origin(self.state.ctm);
             // The gap threshold is a fraction of the font size *in device units*,
-            // measured along the writing direction — so it holds under rotation /
-            // shear, not just upright text. The axis scale carries one text unit
-            // to the page; guard a degenerate transform so it stays positive.
-            let (axis, scale) = self.cursor.writing_axis(self.state.ctm);
-            let em = (self.state.font_size * self.state.h_scale * scale).max(f64::MIN_POSITIVE);
+            // measured along the glyph-advance direction — so it holds under
+            // rotation / shear, not just upright text. The axis scale carries one
+            // text unit to the page; its sign follows `font_size · h_scale`, which
+            // is negative for mirrored text (negative `Tz`), so the advance runs
+            // *backwards* along the matrix's x-basis: flip the axis then, and take
+            // the magnitude for `em`. Guard a degenerate transform so `em` stays
+            // positive.
+            let (mut axis, scale) = self.cursor.writing_axis(self.state.ctm);
+            let signed = self.state.font_size * self.state.h_scale;
+            if signed < 0.0 {
+                axis = (-axis.0, -axis.1);
+            }
+            let em = (signed.abs() * scale).max(f64::MIN_POSITIVE);
             // A gap from where the previous glyph's advance left the pen is a word
             // space; before the first glyph there is nothing to compare against.
             if let Some(pen) = *self.pen
@@ -479,14 +487,27 @@ pub(crate) fn text_block_for_page(
 /// positioned in the page's coordinate space and a word gap across the boundary
 /// is still judged.
 struct Inherited<'a> {
-    /// The caller's selected font as (table slot, resolved encoding), or `None`
-    /// when the caller had selected no font. The encoding is `&Some` decodable /
-    /// `&Some(None)` selected-but-undecodable.
-    font: Option<(u16, &'a Option<Encoding<'a>>)>,
+    /// The caller's selected font, or `None` when it had selected none. Carries
+    /// everything a form needs to draw text before its own `Tf`: the table slot,
+    /// the resolved encoding, and the advance/metric tables that position glyphs.
+    font: Option<InheritedFont<'a>>,
     /// The caller's text state, CTM composed with the form's `/Matrix`.
     state: TextState,
     /// Where the caller's last glyph left the pen, for the gap check.
     pen: Option<(f64, f64)>,
+}
+
+/// The caller's selected font, inherited by a `Do`-invoked Form XObject so text
+/// it draws before its own `Tf` is decoded *and positioned* with that font.
+struct InheritedFont<'a> {
+    /// The font-table slot (routes a deleted glyph to the right `/ToUnicode`).
+    slot: u16,
+    /// The resolved encoding (`&Some` decodable, `&Some(None)` undecodable).
+    encoding: &'a Option<Encoding<'a>>,
+    /// The font's advance widths, so glyph advances (and spacing) are right.
+    widths: &'a WidthSource,
+    /// The font's vertical metrics, so glyph box heights are right.
+    metrics: GlyphMetrics,
 }
 
 /// `inherited` is the caller's graphics state at the `Do` that invoked this
@@ -548,20 +569,18 @@ fn walk_stream(
     // this scope's resources.
     const UNRESOLVED: &Option<Encoding> = &None;
     const NO_WIDTHS: &WidthSource = &WidthSource::Unknown;
-    // A Form XObject inherits the caller's font, so text it draws before its own
-    // `Tf` uses that font; at page level there is nothing to inherit.
+    // A Form XObject inherits the caller's selected font — its encoding, advance
+    // widths, and metrics — so text it draws before its own `Tf` is decoded and
+    // positioned with that font. At page level there is nothing to inherit. A
+    // local `Tf` later replaces all of these.
+    let inherited_font = inherited.as_ref().and_then(|inh| inh.font.as_ref());
     let (mut current, mut font_slot_current): (Option<&Option<Encoding>>, u16) =
-        match inherited.as_ref().and_then(|inh| inh.font) {
-            Some((slot, enc)) => (Some(enc), slot),
+        match inherited_font {
+            Some(f) => (Some(f.encoding), f.slot),
             None => (None, 0),
         };
-    // The selected font's width table, selected together with the encoding on
-    // `Tf`. An inherited font keeps `Unknown` until the form's own `Tf`: widths
-    // are best-effort and only affect spacing.
-    let mut width_current: &WidthSource = NO_WIDTHS;
-    // The selected font's vertical metrics, likewise selected on `Tf`; the
-    // default em box stands in before any `Tf` (metrics only size the glyph box).
-    let mut metrics_current = GlyphMetrics::default();
+    let mut width_current: &WidthSource = inherited_font.map_or(NO_WIDTHS, |f| f.widths);
+    let mut metrics_current = inherited_font.map_or_else(GlyphMetrics::default, |f| f.metrics);
 
     // The text geometry: the matrix cursor (reset at `BT`), the parametric text
     // state and its `q`/`Q` save stack, and where the last glyph left the pen
@@ -701,7 +720,12 @@ fn walk_stream(
                     // `walk_xobject` composes the form's `/Matrix`), and the pen
                     // (so a gap across the `Do` boundary is seen).
                     let inherited = Inherited {
-                        font: current.map(|enc| (font_slot_current, enc)),
+                        font: current.map(|encoding| InheritedFont {
+                            slot: font_slot_current,
+                            encoding,
+                            widths: width_current,
+                            metrics: metrics_current,
+                        }),
                         state,
                         pen,
                     };
@@ -1260,6 +1284,127 @@ mod tests {
         assert!(
             (rects[0].x - 0.2).abs() < 1e-6,
             "inherited translate: {:?}",
+            rects[0]
+        );
+    }
+
+    /// Mirrored text (negative horizontal scale) advances the pen *backwards*
+    /// along the matrix x-basis. A forward positional gap in that direction still
+    /// reads as a word space, while a small intra-word `TJ` kern does not — the
+    /// gap is judged along the glyph-advance direction, with a positive threshold.
+    #[test]
+    fn mirrored_text_spacing_follows_the_advance_direction() {
+        // `Tz -100` mirrors horizontally; draw at x=90 so the mirrored advance
+        // runs leftwards across the 100-wide page.
+        let text = extract_text(vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            Operation::new("Tz", vec![(-100).into()]),
+            Operation::new(
+                "Tm",
+                vec![
+                    1.into(),
+                    0.into(),
+                    0.into(),
+                    1.into(),
+                    90.into(),
+                    100.into(),
+                ],
+            ),
+            Operation::new(
+                "TJ",
+                vec![Object::Array(vec![
+                    Object::string_literal("To"),
+                    (-40).into(), // small intra-word kern: not a space
+                    Object::string_literal("ok"),
+                    (-400).into(), // wide word gap: a space
+                    Object::string_literal("here"),
+                ])],
+            ),
+            Operation::new("ET", vec![]),
+        ]);
+        assert_eq!(text, "Took here");
+    }
+
+    /// A Form XObject that draws text *before its own `Tf`* uses the inherited
+    /// font's advance widths, so the glyph box has a real width (not the
+    /// zero-advance fallback of an uninherited font).
+    #[test]
+    fn form_xobject_inherits_font_widths() {
+        let mut doc = Document::with_version("1.5");
+        // A font with explicit widths (500/1000 for every byte) and a descriptor.
+        let descriptor = doc.add_object(dictionary! {
+            "Type" => "FontDescriptor", "FontName" => "Helvetica",
+            "Ascent" => 718, "Descent" => -207,
+        });
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+            "FirstChar" => 0, "LastChar" => 255,
+            "Widths" => vec![Object::Integer(500); 256],
+            "FontDescriptor" => descriptor,
+        });
+        let font_res = dictionary! { "Font" => dictionary! { "F1" => font_id } };
+
+        // The form draws text with no `Tf` of its own — it relies on the font the
+        // caller selected before the `Do`.
+        let form_ops = Content {
+            operations: vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Td", vec![10.into(), 100.into()]),
+                Operation::new("Tj", vec![Object::string_literal("Hi")]),
+                Operation::new("ET", vec![]),
+            ],
+        };
+        let form_id = doc.add_object(lopdf::Stream::new(
+            dictionary! { "Type" => "XObject", "Subtype" => "Form", "Resources" => font_res.clone() },
+            form_ops.encode().unwrap(),
+        ));
+
+        // The page selects F1 at size 20, then invokes the form.
+        let page_content = Content {
+            operations: vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec!["F1".into(), 20.into()]),
+                Operation::new("ET", vec![]),
+                Operation::new("Do", vec!["Fm".into()]),
+            ],
+        };
+        let content_id = doc.add_object(lopdf::Stream::new(
+            dictionary! {},
+            page_content.encode().unwrap(),
+        ));
+        let resources = doc.add_object(dictionary! {
+            "Font" => dictionary! { "F1" => font_id },
+            "XObject" => dictionary! { "Fm" => form_id },
+        });
+        let pages_id = doc.new_object_id();
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page", "Parent" => pages_id, "Contents" => content_id,
+            "Resources" => resources,
+            "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1,
+            }),
+        );
+        doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+
+        let block = text_block_for_page(&doc, 1, page_id, 10_000_000).unwrap();
+        assert_eq!(block.text, "Hi");
+        let geometry = super::super::PageGeometry {
+            page: block.page,
+            rects: block.rects.clone(),
+            frame: block.frame,
+        };
+        let rects = geometry.rects_for(0..block.text.chars().count());
+        assert_eq!(rects.len(), 1, "one line: {rects:?}");
+        // Width > 0 proves the inherited font's widths advanced the pen; with no
+        // inherited widths the advance would be zero and the box degenerate.
+        assert!(
+            rects[0].width > 0.0,
+            "inherited widths give a real box: {:?}",
             rects[0]
         );
     }
