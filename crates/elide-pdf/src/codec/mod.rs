@@ -28,6 +28,8 @@ mod pdf_recombine;
 mod pdf_state;
 mod pdf_stream;
 
+use std::sync::Arc;
+
 use elide_codec::{Format, FormatId};
 
 use self::pdf_loader::PdfDocumentLoader;
@@ -85,8 +87,10 @@ pub(crate) struct PdfPage {
     pub(crate) start: usize,
     /// The page's rendered glyph geometry, for resolving a detected character
     /// span to page-normalized highlight rectangles. `None` when geometry was
-    /// not gathered (a page the walk could not read).
-    pub(crate) geometry: Option<PageGeometry>,
+    /// not gathered (a page the walk could not read). Shared through an [`Arc`]
+    /// so a lookup per detected entity is a cheap refcount bump, not a deep clone
+    /// of the page's whole glyph list.
+    pub(crate) geometry: Option<Arc<PageGeometry>>,
 }
 
 /// How the document's recorded redactions are applied on encode.

@@ -3,6 +3,7 @@
 //! the sub-part ids.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use elide_codec::content::ContentData;
@@ -112,8 +113,8 @@ impl DocumentLoader for PdfDocumentLoader {
         // blobs, and (in `Auto`) `issues` name the textless pages to render. A
         // second `extract()` would re-walk every page and re-copy the embedded
         // image bytes for nothing, so move each field out of this one result.
-        let extraction = pdf.extract();
-        let pages = pages_from_blocks(extraction.blocks, pdf.page_geometry());
+        let (extraction, geometry) = pdf.extract();
+        let pages = pages_from_blocks(extraction.blocks, geometry);
 
         // Surface each redactable embedded image XObject as an image blob for the
         // image pipeline (only with an image codec able to redact them). Only
@@ -203,8 +204,10 @@ fn pages_from_blocks(
     blocks: impl IntoIterator<Item = Block>,
     geometry: Vec<PageGeometry>,
 ) -> Vec<PdfPage> {
-    let mut by_page: BTreeMap<u32, PageGeometry> =
-        geometry.into_iter().map(|g| (g.page, g)).collect();
+    let mut by_page: BTreeMap<u32, Arc<PageGeometry>> = geometry
+        .into_iter()
+        .map(|g| (g.page, Arc::new(g)))
+        .collect();
     let mut pages = Vec::new();
     let mut offset = 0usize;
     for block in blocks {
@@ -409,7 +412,7 @@ mod tests {
         // Encode applies it: the output's image bytes differ from the original.
         let original = jpeg([255, 255, 255]);
         let encoded = doc.encode().unwrap();
-        let after = Pdf::open(encoded.as_bytes()).unwrap().extract();
+        let after = Pdf::open(encoded.as_bytes()).unwrap().extract().0;
         assert_eq!(after.embeddings.len(), 1);
         assert_ne!(
             after.embeddings[0].bytes.as_ref(),

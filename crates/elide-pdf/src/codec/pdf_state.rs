@@ -87,9 +87,12 @@ impl PdfState {
         self.0.lock().unwrap().pages.len()
     }
 
-    /// The rendered glyph geometry of the page numbered `number`, cloned, for
-    /// resolving a detected span to page-normalized highlight rectangles.
-    pub(super) fn geometry_for(&self, number: u32) -> Option<PageGeometry> {
+    /// The rendered glyph geometry of the page numbered `number`, for resolving a
+    /// detected span to page-normalized highlight rectangles. Returns a cheap
+    /// [`Arc`] clone (a refcount bump), not a deep copy of the page's glyph list,
+    /// so a lookup per detected entity stays O(1) and the lock is held only for
+    /// the lookup.
+    pub(super) fn geometry_for(&self, number: u32) -> Option<Arc<PageGeometry>> {
         self.0
             .lock()
             .unwrap()

@@ -32,10 +32,20 @@ pub(super) enum WidthSource {
         widths: Vec<f64>,
         missing: f64,
     },
-    /// A composite (Type0) font: `w[cid]`, falling back to the default `dw`. For
-    /// an `Identity-H`/`Identity-V` encoding the character code equals the CID, so
-    /// the caller keys directly by the decoded code.
-    Composite { dw: f64, w: BTreeMap<u32, f64> },
+    /// A composite (Type0) font: a per-CID width `w`, then a covering `range`,
+    /// then the default `dw`. For an `Identity-H`/`Identity-V` encoding the
+    /// character code equals the CID, so the caller keys directly by the decoded
+    /// code.
+    ///
+    /// Ranges are kept compact rather than expanded into `w`: a `/W` entry of the
+    /// form `c_first c_last w` may name an enormous CID span (it is document-
+    /// supplied, untrusted), so expanding it per CID would let a hostile font
+    /// exhaust memory. Lookups search the (few) ranges instead.
+    Composite {
+        dw: f64,
+        w: BTreeMap<u32, f64>,
+        ranges: Vec<CidRange>,
+    },
     /// No usable width table: the caller treats positional moves as word
     /// boundaries instead of computing an exact advance.
     Unknown,
@@ -76,7 +86,19 @@ impl WidthSource {
                     .copied();
                 Some(within.unwrap_or(*missing))
             }
-            WidthSource::Composite { dw, w } => Some(w.get(&code).copied().unwrap_or(*dw)),
+            WidthSource::Composite { dw, w, ranges } => {
+                // Explicit per-CID width first, then a covering range, then the
+                // default. Ranges are few (one `/W` range entry each), so a linear
+                // scan is cheap and avoids expanding them per CID.
+                if let Some(width) = w.get(&code) {
+                    return Some(*width);
+                }
+                let in_range = ranges
+                    .iter()
+                    .find(|r| code >= r.first && code <= r.last)
+                    .map(|r| r.width);
+                Some(in_range.unwrap_or(*dw))
+            }
             WidthSource::Unknown => None,
         }
     }
@@ -130,11 +152,21 @@ impl WidthSource {
             .unwrap_or(DEFAULT_WIDTH);
 
         let mut w = BTreeMap::new();
+        let mut ranges = Vec::new();
         if let Some(entries) = cid_font.get(b"W").ok().and_then(|o| resolve_array(doc, o)) {
-            parse_w_array(entries, &mut w);
+            parse_w_array(entries, &mut w, &mut ranges);
         }
-        WidthSource::Composite { dw, w }
+        WidthSource::Composite { dw, w, ranges }
     }
+}
+
+/// One `c_first c_last w` entry of a `/W` array, kept as a range rather than
+/// expanded per CID.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct CidRange {
+    first: u32,
+    last: u32,
+    width: f64,
 }
 
 /// A font's vertical glyph extent, in text-space em fractions (glyph-space
@@ -221,20 +253,23 @@ fn font_descriptor<'a>(doc: &'a Document, font: &'a Dictionary) -> Option<&'a Di
         .and_then(|o| resolve_dict(doc, o))
 }
 
-/// Parse a Type0 `/W` array into a CID→width map.
+/// Parse a Type0 `/W` array into explicit per-CID widths plus compact ranges.
 ///
 /// The array mixes two forms (ISO 32000-1 §9.7.4.3): `c [w1 w2 …]` assigns
-/// consecutive CIDs starting at `c`, and `c_first c_last w` assigns one width to
-/// every CID in the inclusive range. A malformed tail is ignored — widths are
-/// best-effort.
-fn parse_w_array(entries: &[Object], out: &mut BTreeMap<u32, f64>) {
+/// consecutive CIDs starting at `c` (expanded into `out`, bounded by the list
+/// length the document actually wrote), and `c_first c_last w` assigns one width
+/// to every CID in the inclusive range (kept as a [`CidRange`] rather than
+/// expanded — the span is untrusted and may be enormous). A malformed tail is
+/// ignored; widths are best-effort.
+fn parse_w_array(entries: &[Object], out: &mut BTreeMap<u32, f64>, ranges: &mut Vec<CidRange>) {
     let mut i = 0;
     while i < entries.len() {
         let Some(start) = entries.get(i).and_then(|o| o.as_i64().ok()) else {
             break;
         };
         match entries.get(i + 1) {
-            // `c [w1 w2 …]`: consecutive CIDs from `start`.
+            // `c [w1 w2 …]`: consecutive CIDs from `start`. Safe to expand — the
+            // count is the length of the array the document itself supplied.
             Some(Object::Array(list)) => {
                 for (offset, width) in list.iter().enumerate() {
                     if let Ok(cid) = u32::try_from(start + offset as i64) {
@@ -243,7 +278,8 @@ fn parse_w_array(entries: &[Object], out: &mut BTreeMap<u32, f64>) {
                 }
                 i += 2;
             }
-            // `c_first c_last w`: one width across the inclusive CID range.
+            // `c_first c_last w`: one width across the inclusive CID range. Kept
+            // compact, never expanded, so a huge `last` cannot exhaust memory.
             Some(end_obj) => {
                 let Some(end) = end_obj.as_i64().ok() else {
                     break;
@@ -251,10 +287,10 @@ fn parse_w_array(entries: &[Object], out: &mut BTreeMap<u32, f64>) {
                 let Some(width) = entries.get(i + 2).map(object_as_f64) else {
                     break;
                 };
-                for cid in start..=end {
-                    if let Ok(cid) = u32::try_from(cid) {
-                        out.insert(cid, width);
-                    }
+                if let (Ok(first), Ok(last)) = (u32::try_from(start), u32::try_from(end))
+                    && first <= last
+                {
+                    ranges.push(CidRange { first, last, width });
                 }
                 i += 3;
             }
@@ -291,5 +327,59 @@ fn resolve_dict<'a>(doc: &'a Document, object: &'a Object) -> Option<&'a Diction
         Object::Dictionary(dict) => Some(dict),
         Object::Reference(id) => doc.get_dictionary(*id).ok(),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn int(n: i64) -> Object {
+        Object::Integer(n)
+    }
+
+    /// The `c [w …]` form expands per CID; the `c_first c_last w` form is kept as
+    /// a compact range and resolved at lookup — both answer `advance` correctly.
+    #[test]
+    fn w_array_resolves_individual_and_range_forms() {
+        // `[ 10 [ 100 200 ] 500 1000 750 ]`: CIDs 10,11 explicit; 500..=1000 ranged.
+        let entries = vec![
+            int(10),
+            Object::Array(vec![int(100), int(200)]),
+            int(500),
+            int(1000),
+            int(750),
+        ];
+        let mut w = BTreeMap::new();
+        let mut ranges = Vec::new();
+        parse_w_array(&entries, &mut w, &mut ranges);
+        let src = WidthSource::Composite {
+            dw: 1000.0,
+            w,
+            ranges,
+        };
+        assert_eq!(src.advance(10), Some(100.0));
+        assert_eq!(src.advance(11), Some(200.0));
+        assert_eq!(src.advance(700), Some(750.0), "inside the range");
+        assert_eq!(src.advance(1000), Some(750.0), "range is inclusive");
+        assert_eq!(src.advance(42), Some(1000.0), "falls back to DW");
+    }
+
+    /// A hostile `/W` range spanning the whole CID space is stored compactly, not
+    /// expanded — parsing is instant and uses no per-CID memory.
+    #[test]
+    fn a_huge_w_range_is_not_expanded() {
+        let entries = vec![int(0), int(u32::MAX as i64), int(500)];
+        let mut w = BTreeMap::new();
+        let mut ranges = Vec::new();
+        parse_w_array(&entries, &mut w, &mut ranges);
+        assert!(w.is_empty(), "no per-CID expansion");
+        assert_eq!(ranges.len(), 1, "one compact range");
+        let src = WidthSource::Composite {
+            dw: 1000.0,
+            w,
+            ranges,
+        };
+        assert_eq!(src.advance(3_000_000_000), Some(500.0));
     }
 }

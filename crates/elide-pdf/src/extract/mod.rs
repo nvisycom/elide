@@ -55,19 +55,26 @@ impl Block {
 }
 
 impl Extraction {
-    /// Extract the text and embedded images of the document in `store`, with any
-    /// per-page [`issues`](Extraction::issues) for pages that yielded no text.
+    /// Extract the document in `store`, returning the [`Extraction`] and each
+    /// readable page's rendered glyph [`geometry`](crate::text::PageGeometry) from
+    /// one content walk, so the codec maps a detected span to page rectangles
+    /// without walking every page twice. A page the walk cannot read contributes
+    /// no geometry (and is flagged as an issue), but the readable pages' geometry
+    /// is retained.
     ///
     /// A [`Block`] is addressed by its 1-based [`page`](Block::page) and its
     /// [`text`](Block::text), not a byte span, because PDF text lives in
     /// content-stream operators. An [`Embedding`] is addressed by its image
     /// object [`id`](Embedding::id).
-    pub(crate) fn from_store(store: &Store) -> Self {
+    pub(crate) fn from_store_with_geometry(
+        store: &Store,
+    ) -> (Self, Vec<crate::text::PageGeometry>) {
         let doc = store.doc();
         let pages_map = doc.get_pages();
         let mut blocks = Vec::new();
         let mut embeddings = Vec::new();
         let mut issues = Vec::new();
+        let mut geometry = Vec::new();
         // An image XObject shared across pages is surfaced once, addressed by the
         // first (lowest-numbered) page it appears on.
         let mut seen_images = HashSet::new();
@@ -80,10 +87,18 @@ impl Extraction {
             // unreadable, rather than failing the whole extraction, the redactor
             // (which must not silently skip) fails closed on the same page.
             match text_block_for_page(doc, page, page_id, store.max_page_bytes().get()) {
-                Ok(block) if !block.text.trim().is_empty() => blocks.push(Block {
-                    page,
-                    text: HipStr::from(block.text),
-                }),
+                Ok(block) if !block.text.trim().is_empty() => {
+                    // Retain the page's glyph geometry from this one walk.
+                    geometry.push(crate::text::PageGeometry {
+                        page,
+                        rects: block.rects,
+                        frame: block.frame,
+                    });
+                    blocks.push(Block {
+                        page,
+                        text: HipStr::from(block.text),
+                    });
+                }
                 Ok(_) => issues.push(Issue {
                     page,
                     kind: IssueKind::NeedsOcr,
@@ -123,10 +138,13 @@ impl Extraction {
             }
         }
 
-        Self {
-            blocks,
-            embeddings,
-            issues,
-        }
+        (
+            Self {
+                blocks,
+                embeddings,
+                issues,
+            },
+            geometry,
+        )
     }
 }

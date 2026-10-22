@@ -162,6 +162,23 @@ impl Cursor {
         let m = self.tm.then(ctm);
         (m.a * tx + m.c * ty + m.e, m.b * tx + m.d * ty + m.f)
     }
+
+    /// The writing-direction unit vector in device space and its scale: the
+    /// x-basis of the text-to-device transform (`tm·ctm`), normalized, plus its
+    /// pre-normalized length (how much one text-space unit scales on the page).
+    /// This is the direction a glyph advance moves the pen, so comparing device
+    /// deltas along it handles rotated/sheared text, not just upright. A
+    /// degenerate basis falls back to the x-axis so a caller never divides by
+    /// zero.
+    pub(super) fn writing_axis(&self, ctm: Matrix) -> ((f64, f64), f64) {
+        let m = self.tm.then(ctm);
+        let len = (m.a * m.a + m.b * m.b).sqrt();
+        if len <= f64::MIN_POSITIVE {
+            ((1.0, 0.0), 0.0)
+        } else {
+            ((m.a / len, m.b / len), len)
+        }
+    }
 }
 
 /// An axis-aligned box in device (page) space, as the glyph quad projects to.
@@ -275,19 +292,33 @@ impl SpaceRule {
     /// horizontal gap at or above this reads as a word space.
     const GAP_EM: f64 = 0.2;
 
-    /// Whether a space belongs before a glyph that starts at device x `next_x` on
-    /// baseline `next_y`, given the previous glyph's advance ended the pen at
-    /// `pen_x` on baseline `pen_y`, with scaled font size `em` in device units.
+    /// Whether a space belongs before a glyph, from the device-space move from
+    /// the previous glyph's pen (`pen`) to this glyph's origin (`next`), the
+    /// writing-direction unit vector `axis` (device space), and the scaled font
+    /// size `em` in device units.
     ///
-    /// A baseline move is always a boundary. Otherwise a forward gap of at least
-    /// [`GAP_EM`](Self::GAP_EM) of `em` is a space; a backward or tiny move
-    /// (kerning, overlap) is not.
-    pub(super) fn needs_space(pen_x: f64, pen_y: f64, next_x: f64, next_y: f64, em: f64) -> bool {
-        // A changed baseline is a new line: a word boundary regardless of x.
-        if (next_y - pen_y).abs() > em * Self::GAP_EM {
+    /// The move is split into its component *along* the writing direction
+    /// (forward advance) and *perpendicular* to it (a baseline change). A
+    /// perpendicular shift beyond [`GAP_EM`](Self::GAP_EM) of `em` is a new line
+    /// (a word boundary); otherwise a forward advance of at least that threshold
+    /// is a word space. Projecting onto the axis — rather than comparing raw x/y
+    /// — makes this correct for rotated and vertical text, not just upright.
+    pub(super) fn needs_space(
+        pen: (f64, f64),
+        next: (f64, f64),
+        axis: (f64, f64),
+        em: f64,
+    ) -> bool {
+        let dx = next.0 - pen.0;
+        let dy = next.1 - pen.1;
+        // Component along the writing direction, and perpendicular to it.
+        let along = dx * axis.0 + dy * axis.1;
+        let perp = dx * -axis.1 + dy * axis.0;
+        let threshold = em * Self::GAP_EM;
+        if perp.abs() > threshold {
             return true;
         }
-        next_x - pen_x >= em * Self::GAP_EM
+        along >= threshold
     }
 }
 

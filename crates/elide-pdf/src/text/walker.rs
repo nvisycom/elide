@@ -194,17 +194,18 @@ impl TextRun<'_> {
     /// so a following glyph moved there by a `Td`/`TJ` positional jump still reads
     /// as a word break while glyphs packed at the same origin do not.
     fn show_string(&mut self, enc: &Encoding, bytes: &[u8], address: Address) -> Result<()> {
-        // The gap threshold is a fraction of the font size in device units; the
-        // CTM's horizontal scale carries text space to the page. Guard a
-        // degenerate (zero/near-zero) scale so the threshold stays positive.
-        let em = (self.state.font_size * self.state.h_scale * self.state.ctm.a.abs())
-            .max(f64::MIN_POSITIVE);
         for glyph in decode_glyphs(enc, bytes)? {
-            let (gx, gy) = self.cursor.device_origin(self.state.ctm);
+            let origin = self.cursor.device_origin(self.state.ctm);
+            // The gap threshold is a fraction of the font size *in device units*,
+            // measured along the writing direction — so it holds under rotation /
+            // shear, not just upright text. The axis scale carries one text unit
+            // to the page; guard a degenerate transform so it stays positive.
+            let (axis, scale) = self.cursor.writing_axis(self.state.ctm);
+            let em = (self.state.font_size * self.state.h_scale * scale).max(f64::MIN_POSITIVE);
             // A gap from where the previous glyph's advance left the pen is a word
             // space; before the first glyph there is nothing to compare against.
-            if let Some((px, py)) = *self.pen
-                && SpaceRule::needs_space(px, py, gx, gy, em)
+            if let Some(pen) = *self.pen
+                && SpaceRule::needs_space(pen, origin, axis, em)
             {
                 self.push_gap();
             }
@@ -472,18 +473,35 @@ pub(crate) fn text_block_for_page(
 /// holds the XObjects currently on the recursion stack (cycle guard); `depth`
 /// bounds nesting. Text under an undecodable font fails closed, as at page level.
 ///
-/// `inherited` is the caller's selected font at the `Do` that invoked this
-/// stream: a Form XObject inherits the graphics-state font, so text it draws
-/// before its own `Tf` is drawn with the caller's font. It is the font-table
-/// slot plus the resolved encoding (`&Some` decodable, `&Some(None)` selected
-/// but undecodable, `&None`/`None` no font selected). `None` at page level.
+/// The caller's graphics state passed into a `Do`-invoked Form XObject: the
+/// font it had selected, its parametric text state (with the form's `/Matrix`
+/// already composed onto the CTM), and the pen position, so the form's text is
+/// positioned in the page's coordinate space and a word gap across the boundary
+/// is still judged.
+struct Inherited<'a> {
+    /// The caller's selected font as (table slot, resolved encoding), or `None`
+    /// when the caller had selected no font. The encoding is `&Some` decodable /
+    /// `&Some(None)` selected-but-undecodable.
+    font: Option<(u16, &'a Option<Encoding<'a>>)>,
+    /// The caller's text state, CTM composed with the form's `/Matrix`.
+    state: TextState,
+    /// Where the caller's last glyph left the pen, for the gap check.
+    pen: Option<(f64, f64)>,
+}
+
+/// `inherited` is the caller's graphics state at the `Do` that invoked this
+/// stream: a Form XObject inherits the graphics state, so text it draws before
+/// its own operators uses the caller's font *and* transform. It carries the
+/// font-table slot + resolved encoding and the caller's [`TextState`] (whose CTM
+/// already has the form's `/Matrix` composed in). `None` at page level, where
+/// the state starts fresh.
 fn walk_stream(
     doc: &Document,
     content: &Content,
     stream: StreamTarget,
     scope: &Scope<'_>,
     depth: u8,
-    inherited: Option<(u16, &Option<Encoding>)>,
+    inherited: Option<Inherited<'_>>,
     ctx: &mut Walk<'_>,
 ) -> Result<()> {
     // Resolve this scope's fonts to encodings, width tables, and a `FontEntry`
@@ -532,10 +550,11 @@ fn walk_stream(
     const NO_WIDTHS: &WidthSource = &WidthSource::Unknown;
     // A Form XObject inherits the caller's font, so text it draws before its own
     // `Tf` uses that font; at page level there is nothing to inherit.
-    let (mut current, mut font_slot_current): (Option<&Option<Encoding>>, u16) = match inherited {
-        Some((slot, enc)) => (Some(enc), slot),
-        None => (None, 0),
-    };
+    let (mut current, mut font_slot_current): (Option<&Option<Encoding>>, u16) =
+        match inherited.as_ref().and_then(|inh| inh.font) {
+            Some((slot, enc)) => (Some(enc), slot),
+            None => (None, 0),
+        };
     // The selected font's width table, selected together with the encoding on
     // `Tf`. An inherited font keeps `Unknown` until the form's own `Tf`: widths
     // are best-effort and only affect spacing.
@@ -546,11 +565,16 @@ fn walk_stream(
 
     // The text geometry: the matrix cursor (reset at `BT`), the parametric text
     // state and its `q`/`Q` save stack, and where the last glyph left the pen
-    // (kept across show-ops so a gap between two `Tj`s is seen).
+    // (kept across show-ops so a gap between two `Tj`s is seen). A Form XObject
+    // inherits the caller's text state (its CTM already carries the form's
+    // `/Matrix`) and pen, so text inside the form is positioned in the page's
+    // coordinate space and a gap across the `Do` boundary is still seen.
     let mut cursor = Cursor::new();
-    let mut state = TextState::default();
+    let mut state = inherited
+        .as_ref()
+        .map_or_else(TextState::default, |inh| inh.state);
     let mut gs_stack: Vec<TextState> = Vec::new();
-    let mut pen: Option<(f64, f64)> = None;
+    let mut pen: Option<(f64, f64)> = inherited.as_ref().and_then(|inh| inh.pen);
 
     for (op_idx, op) in content.operations.iter().enumerate() {
         match op.operator.as_str() {
@@ -672,9 +696,15 @@ fn walk_stream(
             // redactable too.
             "Do" => {
                 if let Some(Object::Name(name)) = op.operands.first() {
-                    // Pass the currently selected font down: the form inherits it
-                    // and may draw text before selecting its own.
-                    let inherited = current.map(|enc| (font_slot_current, enc));
+                    // Pass the current graphics state down: the form inherits the
+                    // selected font, the text state (its CTM, onto which
+                    // `walk_xobject` composes the form's `/Matrix`), and the pen
+                    // (so a gap across the `Do` boundary is seen).
+                    let inherited = Inherited {
+                        font: current.map(|enc| (font_slot_current, enc)),
+                        state,
+                        pen,
+                    };
                     walk_xobject(doc, name, scope, depth, inherited, ctx)?;
                 }
             }
@@ -690,12 +720,12 @@ fn walk_stream(
 /// re-entrant or too-deep reference (cycle/limit guard). A form's own
 /// `/Resources` become the scope for its content; when it has none the parent
 /// scope stands in, as the spec allows.
-fn walk_xobject(
-    doc: &Document,
+fn walk_xobject<'a>(
+    doc: &'a Document,
     name: &[u8],
-    scope: &Scope<'_>,
+    scope: &Scope<'a>,
     depth: u8,
-    inherited: Option<(u16, &Option<Encoding>)>,
+    inherited: Inherited<'a>,
     ctx: &mut Walk<'_>,
 ) -> Result<()> {
     if depth == 0 {
@@ -773,6 +803,22 @@ fn walk_xobject(
     };
     ctx.walks_remaining = remaining;
 
+    // A Form XObject may carry its own `/Matrix`, applied to its content on top
+    // of the caller's CTM (ISO 32000-1 §8.10.1). Compose it so text the form
+    // draws lands in the page's coordinate space; absent/malformed `/Matrix` is
+    // the identity (no transform).
+    let form_matrix = stream_obj
+        .dict
+        .get(b"Matrix")
+        .ok()
+        .and_then(|o| o.as_array().ok())
+        .and_then(|a| read_matrix(a, 0))
+        .unwrap_or(Matrix::IDENTITY);
+    // Compose the form's `/Matrix` onto the inherited CTM, so text the form draws
+    // lands in the page's coordinate space.
+    let mut inherited = inherited;
+    inherited.state.ctm = form_matrix.then(inherited.state.ctm);
+
     ctx.active.insert(xobject_id);
     let result = walk_stream(
         doc,
@@ -780,7 +826,7 @@ fn walk_xobject(
         StreamTarget::XObject(xobject_id),
         &inner_scope,
         depth - 1,
-        inherited,
+        Some(inherited),
         ctx,
     );
     ctx.active.remove(&xobject_id);
@@ -1136,5 +1182,85 @@ mod tests {
             Operation::new("ET", vec![]),
         ]);
         assert_eq!(text, "Took here");
+    }
+
+    /// Text drawn inside a `Do`-invoked Form XObject is extracted, and its glyph
+    /// geometry uses the inherited transform (the form's `/Matrix` composed onto
+    /// the page CTM) — so a translated form lands its text where the matrix puts
+    /// it, not at the content's local origin.
+    #[test]
+    fn form_xobject_text_inherits_the_transform() {
+        let mut doc = Document::with_version("1.5");
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+        });
+        let font_res = dictionary! { "Font" => dictionary! { "F1" => font_id } };
+
+        // The form's content: draw "Hi" at the form's own origin.
+        let form_ops = Content {
+            operations: vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec!["F1".into(), 10.into()]),
+                Operation::new("Td", vec![0.into(), 0.into()]),
+                Operation::new("Tj", vec![Object::string_literal("Hi")]),
+                Operation::new("ET", vec![]),
+            ],
+        };
+        // The form carries a /Matrix translating it to (20, 180) on the page.
+        let form_id = doc.add_object(lopdf::Stream::new(
+            dictionary! {
+                "Type" => "XObject",
+                "Subtype" => "Form",
+                "Matrix" => vec![1.into(), 0.into(), 0.into(), 1.into(), 20.into(), 180.into()],
+                "Resources" => font_res.clone(),
+            },
+            form_ops.encode().unwrap(),
+        ));
+
+        // The page just invokes the form.
+        let page_content = Content {
+            operations: vec![Operation::new("Do", vec!["Fm".into()])],
+        };
+        let content_id = doc.add_object(lopdf::Stream::new(
+            dictionary! {},
+            page_content.encode().unwrap(),
+        ));
+        let resources = doc.add_object(dictionary! {
+            "XObject" => dictionary! { "Fm" => form_id },
+        });
+        let pages_id = doc.new_object_id();
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+            "Resources" => resources,
+            "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1,
+            }),
+        );
+        doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+
+        let block = text_block_for_page(&doc, 1, page_id, 10_000_000).unwrap();
+        // The form's text is extracted (inheritance did not drop it).
+        assert_eq!(block.text, "Hi");
+        // And it is positioned by the inherited transform: the glyph box sits
+        // near the form's translated origin x = 20/100 = 0.2, not the content's
+        // local x = 0.
+        let geometry = super::super::PageGeometry {
+            page: block.page,
+            rects: block.rects.clone(),
+            frame: block.frame,
+        };
+        let rects = geometry.rects_for(0..block.text.chars().count());
+        assert_eq!(rects.len(), 1, "one line: {rects:?}");
+        assert!(
+            (rects[0].x - 0.2).abs() < 1e-6,
+            "inherited translate: {:?}",
+            rects[0]
+        );
     }
 }
