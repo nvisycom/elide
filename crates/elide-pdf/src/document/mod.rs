@@ -78,6 +78,28 @@ impl Pdf {
         Extraction::from_store(&self.0)
     }
 
+    /// Per-page rendered glyph geometry, for mapping a detected character span to
+    /// its page-normalized rectangles. Walks each page with the same engine as
+    /// [`extract`](Self::extract), keeping only the geometry (a page the walk
+    /// cannot read contributes none — geometry is best-effort and never fails the
+    /// decode).
+    ///
+    /// [`extract`]: Self::extract
+    pub(crate) fn page_geometry(&self) -> Vec<crate::text::PageGeometry> {
+        crate::text::text_blocks(&self.0)
+            .map(|blocks| {
+                blocks
+                    .into_iter()
+                    .map(|b| crate::text::PageGeometry {
+                        page: b.page,
+                        rects: b.rects,
+                        frame: b.frame,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Redact `detections` by deleting the glyphs that drew them, then sanitise
     /// the document, returning the new bytes.
     ///

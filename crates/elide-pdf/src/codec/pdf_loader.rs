@@ -2,6 +2,8 @@
 //! redactable image / scanned-page blobs), plus the helpers that build and parse
 //! the sub-part ids.
 
+use std::collections::BTreeMap;
+
 use bytes::Bytes;
 use elide_codec::content::ContentData;
 use elide_codec::{Document, DocumentLoader, DocumentPart, ErasedStream, LocalId, Stream};
@@ -20,6 +22,7 @@ use crate::extract::{EmbeddingKind, ImageId};
 use crate::primitive::RasterMode;
 #[cfg(feature = "render")]
 use crate::render::PageObservation;
+use crate::text::PageGeometry;
 
 /// A [`DocumentLoader`] that decodes a PDF into a [`Document`]: the page-text
 /// body [`Stream`] plus, on the glyph-deletion path, a
@@ -80,10 +83,13 @@ impl DocumentLoader for PdfDocumentLoader {
         #[cfg(feature = "render")]
         if self.raster.render_dpi().is_some() {
             let observations = observe_pages(&document)?;
+            // The raster path flattens every page to an image, so per-entity
+            // highlight geometry on the text location is not surfaced here.
             let pages = pages_from_blocks(
                 observations
                     .iter()
                     .map(|o| Block::new(o.page, o.text.clone())),
+                Vec::new(),
             );
             let state = PdfState::new(PdfInner {
                 pages,
@@ -107,7 +113,7 @@ impl DocumentLoader for PdfDocumentLoader {
         // second `extract()` would re-walk every page and re-copy the embedded
         // image bytes for nothing, so move each field out of this one result.
         let extraction = pdf.extract();
-        let pages = pages_from_blocks(extraction.blocks);
+        let pages = pages_from_blocks(extraction.blocks, pdf.page_geometry());
 
         // Surface each redactable embedded image XObject as an image blob for the
         // image pipeline (only with an image codec able to redact them). Only
@@ -187,12 +193,18 @@ fn scanned_pages(
 }
 
 /// Assemble [`PdfPage`]s from the engine's per-page text [`Block`]s, assigning
-/// each its start offset in the concatenated text stream.
+/// each its start offset in the concatenated text stream and attaching its
+/// rendered glyph geometry (matched by page number).
 ///
 /// Pages are separated by [`PAGE_SEPARATOR`] in the stream coordinate space: the
 /// cumulative offset advances by each page's length *plus* the separator width,
 /// so no detected span can straddle two pages (which encode would then drop).
-fn pages_from_blocks(blocks: impl IntoIterator<Item = Block>) -> Vec<PdfPage> {
+fn pages_from_blocks(
+    blocks: impl IntoIterator<Item = Block>,
+    geometry: Vec<PageGeometry>,
+) -> Vec<PdfPage> {
+    let mut by_page: BTreeMap<u32, PageGeometry> =
+        geometry.into_iter().map(|g| (g.page, g)).collect();
     let mut pages = Vec::new();
     let mut offset = 0usize;
     for block in blocks {
@@ -202,6 +214,7 @@ fn pages_from_blocks(blocks: impl IntoIterator<Item = Block>) -> Vec<PdfPage> {
             number: block.page,
             text,
             start: offset,
+            geometry: by_page.remove(&block.page),
         });
         offset += len + PAGE_SEPARATOR.len();
     }

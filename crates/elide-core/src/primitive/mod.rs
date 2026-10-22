@@ -4,6 +4,8 @@
 //!   configured cutoff), range-checked over `0.0..=1.0`;
 //! - [`LanguageTag`], a validated BCP 47 language tag;
 //! - [`CountryCode`], an ISO 3166-1 country;
+//! - [`UnitBoundingBox`], a `0.0..=1.0` normalized box locating an entity on a
+//!   rendered medium (a PDF page, an image) independently of its pixel size;
 //!
 //! Each wraps a well-validated representation so an invalid value cannot
 //! be constructed and downstream code never has to re-check.
@@ -15,8 +17,10 @@ mod component;
 mod confidence;
 mod language;
 mod region;
+mod unit_bounding_box;
 
 pub use self::component::ComponentId;
 pub use self::confidence::{Confidence, ConfidenceThreshold};
 pub use self::language::{LanguageClaim, LanguageSource, LanguageTag, LocalizedText};
 pub use self::region::CountryCode;
+pub use self::unit_bounding_box::UnitBoundingBox;

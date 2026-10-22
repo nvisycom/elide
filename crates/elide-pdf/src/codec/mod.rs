@@ -20,6 +20,7 @@
 //! [`pdf_format`] decodes on the glyph-deletion path; with the `render` feature
 //! [`pdf_format_with`] takes an explicit [`RasterMode`].
 //!
+//! [`RasterMode`]: crate::primitive::RasterMode
 //! [`RasterMode::Always`]: crate::primitive::RasterMode::Always
 
 mod pdf_loader;
@@ -36,6 +37,7 @@ use crate::primitive::RasterMode;
 use crate::redact::Detection;
 #[cfg(feature = "render")]
 use crate::render::PageObservation;
+use crate::text::PageGeometry;
 
 /// Stable [`FormatId`] for the PDF codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.document.pdf");
@@ -81,6 +83,10 @@ pub(crate) struct PdfPage {
     pub(crate) text: String,
     /// Start offset of this page in the concatenated stream.
     pub(crate) start: usize,
+    /// The page's rendered glyph geometry, for resolving a detected character
+    /// span to page-normalized highlight rectangles. `None` when geometry was
+    /// not gathered (a page the walk could not read).
+    pub(crate) geometry: Option<PageGeometry>,
 }
 
 /// How the document's recorded redactions are applied on encode.

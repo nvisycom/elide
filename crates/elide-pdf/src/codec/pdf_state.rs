@@ -13,6 +13,7 @@ use crate::redact::Detection;
 use crate::redact::ImageReplacement;
 #[cfg(feature = "render")]
 use crate::redact::PageReplacement;
+use crate::text::PageGeometry;
 
 /// The document's editable redaction state, behind the shared [`PdfState`] lock.
 #[derive(Debug, Default)]
@@ -84,6 +85,18 @@ impl PdfState {
     /// The number of extracted pages.
     pub(super) fn page_count(&self) -> usize {
         self.0.lock().unwrap().pages.len()
+    }
+
+    /// The rendered glyph geometry of the page numbered `number`, cloned, for
+    /// resolving a detected span to page-normalized highlight rectangles.
+    pub(super) fn geometry_for(&self, number: u32) -> Option<PageGeometry> {
+        self.0
+            .lock()
+            .unwrap()
+            .pages
+            .iter()
+            .find(|p| p.number == number)
+            .and_then(|p| p.geometry.clone())
     }
 
     /// The page whose stream range contains `offset`, and the offset within it.

@@ -17,6 +17,10 @@ pub(super) struct Glyph {
     pub(super) byte_start: usize,
     /// End of the glyph's code (exclusive).
     pub(super) byte_end: usize,
+    /// The glyph's raw character code (the bytes consumed, big-endian). For a
+    /// composite font under an `Identity` encoding this is the CID, so it keys the
+    /// font's `/W` width table; for a simple font it is the single byte.
+    pub(super) code: u32,
     /// The text this glyph decodes to (usually one char; a ligature is several).
     pub(super) text: String,
 }
@@ -70,6 +74,7 @@ pub(super) fn decode_glyphs(encoding: &Encoding, bytes: &[u8]) -> Result<Vec<Gly
                 glyphs.push(Glyph {
                     byte_start: i,
                     byte_end: i + consumed,
+                    code,
                     text,
                 });
                 i += consumed;
@@ -92,6 +97,7 @@ pub(super) fn decode_glyphs(encoding: &Encoding, bytes: &[u8]) -> Result<Vec<Gly
                 Ok(Glyph {
                     byte_start: i,
                     byte_end: i + 1,
+                    code: u32::from(b),
                     text,
                 })
             })

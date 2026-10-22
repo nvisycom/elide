@@ -9,18 +9,24 @@ use serde::{Deserialize, Serialize};
 
 use super::SourceRef;
 use crate::modality::{ModalityLocation, Overlap};
+use crate::primitive::UnitBoundingBox;
 
 /// Where an entity sits in text: a [coordinate](TextCoord) (a decoded byte range,
-/// or a source-only reference) plus an optional page number.
+/// or a source-only reference), plus — when a rendering codec produced it — where
+/// it sits on the rendered page.
 ///
 /// The coordinate is either a [`Decoded`](TextCoord::Decoded) byte range in the
 /// pipeline's text stream, or a [`Source`](TextCoord::Source)-only reference for
 /// content with no decoded range (a reviewer selecting rendered text). The page
 /// is orthogonal to the coordinate kind, so it sits alongside rather than inside.
 ///
-/// Ordering and overlap consider only the coordinate; the page is carried for
-/// codecs that page their text but does not affect comparison.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// [`rects`](Self::rects) is the entity's placement on the rendered page, one
+/// normalized box per line it wraps across. A rendering codec (PDF) fills it so a
+/// viewer can paint a highlight without re-deriving geometry from the text; a
+/// plain-text source leaves it `None`. It is display geometry, not a coordinate —
+/// ordering and overlap consider only [`coord`](Self::coord), and neither the
+/// page nor the rects affect comparison beyond exact equality.
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TextLocation {
@@ -32,6 +38,14 @@ pub struct TextLocation {
         serde(default, skip_serializing_if = "Option::is_none")
     )]
     pub page: Option<u32>,
+    /// Where the entity sits on the rendered page, as page-normalized
+    /// `0.0..=1.0` boxes (top-left origin), one per line its span wraps across.
+    /// Filled by a rendering codec (PDF); `None` for text with no rendered form.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub rects: Option<Vec<UnitBoundingBox>>,
 }
 
 /// The coordinate of a [`TextLocation`]: a decoded byte range, or a source-only
@@ -177,6 +191,7 @@ impl TextLocation {
         Self {
             coord: TextCoord::Decoded(DecodedSpan::new(start..end)),
             page: None,
+            rects: None,
         }
     }
 
@@ -186,6 +201,7 @@ impl TextLocation {
         Self {
             coord: TextCoord::Source(SourceSpan::new(source)),
             page: None,
+            rects: None,
         }
     }
 
@@ -193,6 +209,15 @@ impl TextLocation {
     #[must_use]
     pub fn with_page(mut self, page: Option<u32>) -> Self {
         self.page = page;
+        self
+    }
+
+    /// Set the rendered-page geometry (one normalized box per wrapped line),
+    /// consuming and returning `self`. A rendering codec fills it; most text has
+    /// none.
+    #[must_use]
+    pub fn with_rects(mut self, rects: Option<Vec<UnitBoundingBox>>) -> Self {
+        self.rects = rects;
         self
     }
 
@@ -287,6 +312,13 @@ impl ModalityLocation for TextLocation {
             (TextCoord::Decoded(a), TextCoord::Decoded(b)) => Some(Self {
                 coord: TextCoord::Decoded(a.union(b)),
                 page: self.page,
+                // The fused entity spans both detections, so it carries both
+                // sides' rendered boxes. Concatenate what each had (either may be
+                // `None`); the result is `None` only when neither did.
+                rects: match (&self.rects, &other.rects) {
+                    (None, None) => None,
+                    (a, b) => Some(a.iter().chain(b.iter()).flatten().copied().collect()),
+                },
             }),
             _ => None,
         }

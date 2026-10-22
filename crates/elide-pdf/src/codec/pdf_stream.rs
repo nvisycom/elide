@@ -51,9 +51,31 @@ impl Stream<Text> for PdfStream {
         if start > end || end > chunk_range.end {
             return None;
         }
+
+        // Resolve the entity's rendered rectangles from this page's glyph
+        // geometry. The location range is byte offsets, but glyph geometry is
+        // keyed by character offset, so convert against the page text (which the
+        // chunk carries) before looking the span up. Geometry is best-effort: a
+        // page without it, or a span covering only synthetic gaps, yields none.
+        let page_text = chunk.data.as_str();
+        let rects = chunk
+            .location
+            .page
+            .and_then(|number| self.state.geometry_for(number))
+            .and_then(|geometry| {
+                let char_start = page_text.get(..local_range.start)?.chars().count();
+                let char_end = page_text.get(..local_range.end)?.chars().count();
+                let boxes = geometry.rects_for(char_start..char_end);
+                (!boxes.is_empty()).then_some(boxes)
+            });
+
         // PDF text has no flat source byte coordinate (glyph runs in content
         // streams), so no source range is carried.
-        Some(TextLocation::new(start, end).with_page(chunk.location.page))
+        Some(
+            TextLocation::new(start, end)
+                .with_page(chunk.location.page)
+                .with_rects(rects),
+        )
     }
 }
 
