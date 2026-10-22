@@ -14,7 +14,7 @@ use elide_core::modality::text::Text;
 use super::pdf_recombine::PdfRecombine;
 use super::pdf_state::{PdfInner, PdfState};
 use super::pdf_stream::PdfStream;
-use super::{BODY_PART_ID, FORMAT_ID, PAGE_SEPARATOR, PdfPage, RedactMode};
+use super::{BODY_PART_ID, FORMAT_ID, PdfPage, RedactMode};
 use crate::document::Pdf;
 use crate::extract::Block;
 #[cfg(feature = "image")]
@@ -193,13 +193,12 @@ fn scanned_pages(
         .collect())
 }
 
-/// Assemble [`PdfPage`]s from the engine's per-page text [`Block`]s, assigning
-/// each its start offset in the concatenated text stream and attaching its
-/// rendered glyph geometry (matched by page number).
+/// Assemble [`PdfPage`]s from the engine's per-page text [`Block`]s, attaching
+/// each page's rendered glyph geometry (matched by page number).
 ///
-/// Pages are separated by [`PAGE_SEPARATOR`] in the stream coordinate space: the
-/// cumulative offset advances by each page's length *plus* the separator width,
-/// so no detected span can straddle two pages (which encode would then drop).
+/// Each page is addressed in its own page-local byte space (a located entity
+/// carries the page number), so there is no cross-page offset and a detected
+/// span cannot straddle two pages.
 fn pages_from_blocks(
     blocks: impl IntoIterator<Item = Block>,
     geometry: Vec<PageGeometry>,
@@ -209,17 +208,12 @@ fn pages_from_blocks(
         .map(|g| (g.page, Arc::new(g)))
         .collect();
     let mut pages = Vec::new();
-    let mut offset = 0usize;
     for block in blocks {
-        let text = block.text.to_string();
-        let len = text.len();
         pages.push(PdfPage {
             number: block.page,
-            text,
-            start: offset,
+            text: block.text.to_string(),
             geometry: by_page.remove(&block.page),
         });
-        offset += len + PAGE_SEPARATOR.len();
     }
     pages
 }

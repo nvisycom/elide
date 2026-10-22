@@ -47,10 +47,6 @@ pub const FORMAT_ID: FormatId = FormatId::new("elide.document.pdf");
 /// The body stream's part id; excluded from the blob-part fold on assemble.
 const BODY_PART_ID: &str = "body";
 
-/// The gap inserted between consecutive pages in the concatenated stream so a
-/// detection cannot span a page boundary.
-const PAGE_SEPARATOR: &str = "\n";
-
 /// [`Format`] descriptor registered into `FormatRegistry`.
 ///
 /// Decodes on the glyph-deletion redaction path. To flatten pages to images
@@ -76,15 +72,14 @@ pub fn pdf_format_with(raster: RasterMode) -> Format {
         .with_content_types(["application/pdf"])
 }
 
-/// One page's text and where it sits in the concatenated text stream.
+/// One page's text and its rendered glyph geometry. Each page is addressed in
+/// its own page-local byte space; there is no document-wide offset.
 #[derive(Debug, Clone)]
 pub(crate) struct PdfPage {
     /// 1-based page number.
     pub(crate) number: u32,
     /// The page's current (possibly redacted) text.
     pub(crate) text: String,
-    /// Start offset of this page in the concatenated stream.
-    pub(crate) start: usize,
     /// The page's rendered glyph geometry, for resolving a detected character
     /// span to page-normalized highlight rectangles. `None` when geometry was
     /// not gathered (a page the walk could not read). Shared through an [`Arc`]
