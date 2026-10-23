@@ -51,7 +51,7 @@ mod test_support {
     pub(crate) fn source_only_entity(label: &str) -> Entity<Text> {
         Entity::custom(
             LabelRef::new(label),
-            TextLocation::marked_source([SourceRef::new(0..4)]),
+            TextLocation::marked_source(SourceRef::new(0..4)),
         )
         .build()
     }

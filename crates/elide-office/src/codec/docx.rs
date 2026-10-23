@@ -152,7 +152,7 @@ mod tests {
         // reviewer has no decoded-stream range, only this raw span, so the
         // location is genuinely source-only (no faked `range`).
         let bob = raw.find("Bob").unwrap();
-        let location = TextLocation::marked_source([SourceRef::in_part(bob..bob + 3, BODY_PART)]);
+        let location = TextLocation::marked_source(SourceRef::in_part(bob..bob + 3, BODY_PART));
         assert!(location.is_marked());
 
         let mut redactions = Redactions::new();

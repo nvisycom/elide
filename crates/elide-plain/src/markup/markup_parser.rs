@@ -181,7 +181,7 @@ impl<'a> MarkupParser<'a> {
                 // The attribute name is a raw *source* span, not a decoded one, so
                 // it is a source-only location; a consumer must resolve it against
                 // the source bytes, never the extracted value.
-                let location = TextLocation::marked_source([SourceRef::new(name)]);
+                let location = TextLocation::marked_source(SourceRef::new(name));
                 self.hint_item(idx, location, local.context_words());
             }
         }
@@ -272,7 +272,7 @@ impl<'a> MarkupParser<'a> {
         self.stack.last().map(|frame| {
             // The start-tag span is a raw *source* range, so the hint is a
             // source-only location, resolved against the source, not the value.
-            let location = TextLocation::marked_source([SourceRef::new(frame.tag_span.clone())]);
+            let location = TextLocation::marked_source(SourceRef::new(frame.tag_span.clone()));
             ResolvedHint::new(location, TextData::new(frame.hint.clone()))
         })
     }

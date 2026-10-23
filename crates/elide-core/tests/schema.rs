@@ -125,8 +125,8 @@ fn text_location_rejects_empty_and_round_trips() {
         TextLocation::inline(0..5),
         TextLocation::source(0..5, [SourceRef::new(2..4)]),
         TextLocation::rendered(0..5, 3, [full]),
-        TextLocation::marked_source([SourceRef::new(3..12)]),
-        TextLocation::marked_rendered(2, [full]),
+        TextLocation::marked_source(SourceRef::new(3..12)),
+        TextLocation::marked_rendered(2, full),
     ] {
         let json = serde_json::to_string(&good).expect("serializes");
         let back: TextLocation = serde_json::from_str(&json).expect("round-trips");

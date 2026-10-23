@@ -180,54 +180,54 @@ impl TextLocation {
         }
     }
 
-    /// A reviewer's mark with no decoded span, anchored at raw source bytes.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `refs` is empty: a mark must name a location, and a mark with
-    /// no anchor is unrepresentable, so an empty anchor is a caller bug (like an
-    /// out-of-bounds index). This is an in-process precondition — untrusted wire
-    /// input is rejected earlier, by [`TextLocation`]'s `Deserialize`, so it
-    /// never reaches here.
-    pub fn marked_source(refs: impl IntoIterator<Item = SourceRef>) -> Self {
-        let refs = normalize_refs(refs).expect("a marked location must have a non-empty anchor");
-        TextLocation::Marked(Marked::Source { refs })
+    /// A reviewer's mark with no decoded span, anchored at a single raw source
+    /// reference. Taking one `SourceRef` (not a collection) keeps the anchor
+    /// non-empty by construction — an empty mark is unspellable at the call site,
+    /// not guarded at runtime. For a mark drawn from several refs (one entity
+    /// aggregating non-adjacent raw runs), use [`marked_sources`](Self::marked_sources).
+    pub fn marked_source(source: SourceRef) -> Self {
+        TextLocation::Marked(Marked::Source { refs: vec![source] })
     }
 
-    /// A reviewer's mark with no decoded span, anchored at a rendered-page region.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `rects` is empty, for the same reason as
-    /// [`marked_source`](Self::marked_source).
-    pub fn marked_rendered(page: u32, rects: impl IntoIterator<Item = UnitBoundingBox>) -> Self {
-        let rects: Vec<_> = rects.into_iter().collect();
-        assert!(
-            !rects.is_empty(),
-            "a marked location must have a non-empty anchor"
-        );
-        TextLocation::Marked(Marked::Rendered { page, rects })
+    /// A reviewer's mark anchored at several raw source references (normalized),
+    /// for an entity aggregating non-adjacent raw runs. Returns `None` when `refs`
+    /// is empty — a mark must name a location, so the caller handles the empty
+    /// case rather than producing one that redacts nothing.
+    pub fn marked_sources(refs: impl IntoIterator<Item = SourceRef>) -> Option<Self> {
+        normalize_refs(refs).map(|refs| TextLocation::Marked(Marked::Source { refs }))
     }
 
-    /// Replace this location's raw-byte anchor with `refs` (normalized), keeping
-    /// the span. A detected location with empty `refs` drops to inline; a marked
-    /// location requires `refs` non-empty.
+    /// A reviewer's mark with no decoded span, anchored at a single rendered-page
+    /// region. One `rect` (not a collection) keeps the anchor non-empty by
+    /// construction.
+    pub fn marked_rendered(page: u32, rect: UnitBoundingBox) -> Self {
+        TextLocation::Marked(Marked::Rendered {
+            page,
+            rects: vec![rect],
+        })
+    }
+
+    /// Attach (or replace) a detected span's raw-byte anchor with `refs`
+    /// (normalized), keeping the span. Empty `refs` leaves the span its own
+    /// source (inline). A reviewer mark has no span to re-anchor and is returned
+    /// unchanged.
     #[must_use]
     pub fn with_source(self, refs: impl IntoIterator<Item = SourceRef>) -> Self {
         match self.range() {
             Some(span) => Self::source(span.clone(), refs),
-            None => Self::marked_source(refs),
+            None => self,
         }
     }
 
-    /// Replace this location's rendered anchor with one page's `rects`, keeping the
-    /// span. A detected location with empty `rects` drops to inline; a marked
-    /// location requires `rects` non-empty.
+    /// Attach (or replace) a detected span's rendered anchor with one page's
+    /// `rects`, keeping the span. Empty `rects` leaves the span its own source
+    /// (inline). A reviewer mark has no span to re-anchor and is returned
+    /// unchanged.
     #[must_use]
     pub fn with_rects(self, page: u32, rects: impl IntoIterator<Item = UnitBoundingBox>) -> Self {
         match self.range() {
             Some(span) => Self::rendered(span.clone(), page, rects),
-            None => Self::marked_rendered(page, rects),
+            None => self,
         }
     }
 
@@ -609,7 +609,7 @@ mod tests {
 
     #[test]
     fn marked_has_no_range_and_does_not_overlap() {
-        let mark = TextLocation::marked_source([r(3, 12)]);
+        let mark = TextLocation::marked_source(r(3, 12));
         assert!(mark.is_marked());
         assert_eq!(mark.range(), None);
         assert_eq!(mark.len(), None);
@@ -625,7 +625,7 @@ mod tests {
     #[test]
     fn marked_sorts_after_detected_and_hashes_distinctly() {
         let detected = TextLocation::inline(100..110);
-        let mark = TextLocation::marked_source([r(0, 5)]);
+        let mark = TextLocation::marked_source(r(0, 5));
         assert_eq!(detected.position_cmp(&mark), Ordering::Less);
         assert_eq!(mark.position_cmp(&detected), Ordering::Greater);
         assert_ne!(TextLocation::inline(0..5).hash(), mark.hash());
@@ -665,8 +665,8 @@ mod tests {
             TextLocation::inline(0..5),
             TextLocation::source(0..5, [r(2, 4)]),
             TextLocation::rendered(0..5, 3, [UnitBoundingBox::new(0.1, 0.2, 0.3, 0.05)]),
-            TextLocation::marked_source([r(3, 12)]),
-            TextLocation::marked_rendered(2, [UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0)]),
+            TextLocation::marked_source(r(3, 12)),
+            TextLocation::marked_rendered(2, UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0)),
         ];
         for case in cases {
             let json = serde_json::to_string(&case).expect("serializes");
@@ -680,7 +680,7 @@ mod tests {
     fn marked_source_round_trips_without_span() {
         // A marked `source` has no span and must deserialize as Marked, not as a
         // span-less Detected::Source (the untagged disambiguation).
-        let mark = TextLocation::marked_source([r(3, 12)]);
+        let mark = TextLocation::marked_source(r(3, 12));
         let json = serde_json::to_string(&mark).expect("serializes");
         assert!(
             !json.contains("span"),
