@@ -1,0 +1,8 @@
+# ISO 4217 currency codes (USD, EUR, PLN, …). Language-agnostic: a
+# three-letter currency code is the same string in every language, so
+# unlike the long-form currency names (en/finance/currencies) this
+# dictionary is world-scoped and fires on documents in any language.
+
+name = "currency-codes"
+labels = ["currency"]
+score = 0.4

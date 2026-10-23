@@ -37,6 +37,7 @@ mod iban;
 mod ip;
 mod luhn;
 mod phone;
+mod swift;
 mod verhoeff;
 
 pub mod au;
@@ -69,6 +70,7 @@ pub use self::iban::iban;
 pub use self::ip::{ipv4, ipv6};
 pub use self::luhn::luhn;
 pub use self::phone::phone;
+pub use self::swift::swift;
 
 /// Per-call hints supplied to validators alongside the matched
 /// string.
@@ -184,6 +186,7 @@ impl ValidatorRegistry {
         Self::empty()
             .with_simple("luhn", luhn)
             .with_simple("iban", iban)
+            .with_simple("swift", swift)
             .with("phone", phone)
             .with_simple("date", date)
             .with_simple("ipv4", ipv4)
@@ -215,6 +218,7 @@ impl ValidatorRegistry {
             .with_simple("pl.pesel", pl::pesel)
             .with_simple("pl.nip", pl::nip)
             .with_simple("pl.regon", pl::regon)
+            .with_simple("pl.nrb", pl::nrb)
             .with_simple("au.abn", au::abn)
             .with_simple("au.acn", au::acn)
             .with_simple("au.medicare", au::medicare)

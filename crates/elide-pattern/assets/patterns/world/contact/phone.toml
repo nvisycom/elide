@@ -1,6 +1,11 @@
-# International phone number: optional +country code, then 2-4
-# digit area/prefix groups separated by spaces, dots, or hyphens.
-# Loose by design; the `phone` validator confirms parseability.
+# International phone number: optional +country code, optional
+# parenthesised area code, then two to four digit groups of 2-4 digits
+# separated by spaces, dots, or hyphens. This covers the common European
+# renderings the earlier fixed-trailing-quad pattern missed, e.g. the
+# Polish 3-2-2 landline `535 60 60` and the 3-3-3 `800 302 302`. Loose by
+# design: the `phone` validator (libphonenumber) confirms the digits parse
+# as a real number for the asserted region or as E.164, so same-shaped card
+# numbers, IBANs and IDs are rejected there rather than in the regex.
 
 name = "phone"
 labels = ["phone_number"]
@@ -12,6 +17,6 @@ de = ["telefon", "anruf", "mobil", "handy", "tel", "fax", "kontakt"]
 fr = ["téléphone", "telephone", "appel", "mobile", "portable", "tel", "fax", "contact"]
 
 [[variants]]
-regex = "(?:\\+\\d{1,3}[\\s.\\-]?)?\\(?\\d{2,4}\\)?[\\s.\\-]?\\d{3,4}[\\s.\\-]?\\d{4}\\b"
+regex = "(?:\\+\\d{1,3}[\\s.\\-]?)?\\(?\\d{2,4}\\)?(?:[\\s.\\-]?\\d{2,4}){2,4}\\b"
 score = 0.4
 validator = "phone"

@@ -13,11 +13,10 @@
 use crate::{__shipped_dictionary as shipped_dictionary, Dictionary};
 
 shipped_dictionary!(
-    /// Fiat currency names and ISO 4217 codes (USD, US Dollar,
-    /// EUR, Euro, …). Long-form names are English; ISO codes
-    /// happen to match in non-English text too but the dictionary
-    /// is scoped to `en` so the long-form bulk doesn't fire on
-    /// French / German documents.
+    /// Long-form English fiat currency names (US Dollar, Euro,
+    /// Polish Zloty, …). English-scoped, so the prose names don't
+    /// fire on French / German documents. The language-agnostic
+    /// ISO 4217 codes live in `world::currency_codes`.
     fn currencies
         from "../../../assets/dictionaries/en/finance/currencies.toml"
         with csv "../../../assets/dictionaries/en/finance/currencies.csv"

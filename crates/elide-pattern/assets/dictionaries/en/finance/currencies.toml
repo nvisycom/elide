@@ -1,3 +1,9 @@
+# Long-form English currency names (US Dollar, Euro, Polish Zloty, …).
+# English-scoped: the names are English prose and would not appear on a
+# French or German document. The language-agnostic ISO 4217 codes live in
+# world/finance/currency_codes so they still fire under a non-English
+# asserted language.
+
 name = "currencies"
 labels = ["currency"]
 languages = ["en"]
