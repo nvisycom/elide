@@ -71,20 +71,45 @@ impl Term {
             .collect()
     }
 
-    /// Parse a list of terms from CSV.
+    /// Parse a list of terms from headerless CSV.
     ///
     /// Every non-empty cell becomes a term tagged with its 0-based
     /// source-column index. The dictionary's [`Scoring::PerColumn`]
     /// uses that index to resolve a per-column confidence.
+    ///
+    /// Treats the first row as data; for a CSV whose first row is a
+    /// column header, use [`from_csv_with_headers`] so those header
+    /// cells are not indexed as terms.
     ///
     /// # Errors
     ///
     /// Returns a validation error when the CSV is malformed.
     ///
     /// [`Scoring::PerColumn`]: crate::Scoring::PerColumn
+    /// [`from_csv_with_headers`]: Self::from_csv_with_headers
     pub fn from_csv(raw: &str) -> Result<Vec<Self>> {
+        Self::from_csv_with_headers(raw, false)
+    }
+
+    /// Parse a list of terms from CSV, optionally skipping a header row.
+    ///
+    /// When `has_headers` is `true` the first record is consumed as a
+    /// column header and not emitted as a term, so a user-supplied CSV
+    /// like `code,full_name,alias\n…` does not index the words `code`,
+    /// `full_name`, `alias`. When `false` this is identical to
+    /// [`from_csv`]. Column indices are unchanged either way, so a
+    /// [`Scoring::PerColumn`] vector lines up with the data columns in
+    /// both modes.
+    ///
+    /// # Errors
+    ///
+    /// Returns a validation error when the CSV is malformed.
+    ///
+    /// [`from_csv`]: Self::from_csv
+    /// [`Scoring::PerColumn`]: crate::Scoring::PerColumn
+    pub fn from_csv_with_headers(raw: &str, has_headers: bool) -> Result<Vec<Self>> {
         let mut reader = csv::ReaderBuilder::new()
-            .has_headers(false)
+            .has_headers(has_headers)
             .flexible(true)
             .from_reader(raw.as_bytes());
         let mut entries = Vec::new();
@@ -100,5 +125,51 @@ impl Term {
             }
         }
         Ok(entries)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_csv_indexes_every_cell_including_the_first_row() {
+        // Default (headerless): the first row is data.
+        let terms = Term::from_csv("code,alias\nWIDGET,wdg\n").unwrap();
+        let words: Vec<&str> = terms.iter().map(|t| t.term.as_str()).collect();
+        assert!(words.contains(&"code"));
+        assert!(words.contains(&"WIDGET"));
+    }
+
+    #[test]
+    fn from_csv_with_headers_skips_the_header_row() {
+        // The header cells `code`/`alias` must not become terms.
+        let terms = Term::from_csv_with_headers("code,alias\nWIDGET,wdg\n", true).unwrap();
+        let words: Vec<&str> = terms.iter().map(|t| t.term.as_str()).collect();
+        assert!(
+            !words.contains(&"code"),
+            "header cell leaked as a term: {words:?}"
+        );
+        assert!(!words.contains(&"alias"));
+        assert!(words.contains(&"WIDGET"));
+        assert!(words.contains(&"wdg"));
+    }
+
+    #[test]
+    fn column_indices_align_with_data_columns_under_a_header() {
+        // A PerColumn score vector lines up with the data columns, not the
+        // header: `WIDGET` is column 0, `wdg` is column 1.
+        let terms = Term::from_csv_with_headers("code,alias\nWIDGET,wdg\n", true).unwrap();
+        let widget = terms.iter().find(|t| t.term == "WIDGET").unwrap();
+        let wdg = terms.iter().find(|t| t.term == "wdg").unwrap();
+        assert_eq!(widget.column, Some(0));
+        assert_eq!(wdg.column, Some(1));
+    }
+
+    #[test]
+    fn from_csv_matches_from_csv_with_headers_false() {
+        let a = Term::from_csv("x,y\n1,2\n").unwrap();
+        let b = Term::from_csv_with_headers("x,y\n1,2\n", false).unwrap();
+        assert_eq!(a, b);
     }
 }
