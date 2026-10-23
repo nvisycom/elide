@@ -112,7 +112,7 @@ impl Prompt<Text> for Jinja2Prompt<Text> {
         self.render(context! {
             text => text,
             hints => hints,
-            tags => ctx.tags().to_vec(),
+            tags => tag_names(ctx),
             target_labels => target_label_names(ctx),
         })
     }
@@ -139,7 +139,7 @@ impl Prompt<Image> for Jinja2Prompt<Image> {
             .collect();
         self.render(context! {
             hints => hints,
-            tags => ctx.tags().to_vec(),
+            tags => tag_names(ctx),
             target_labels => target_label_names(ctx),
         })
     }
@@ -173,6 +173,13 @@ fn target_label_names<M: Modality>(ctx: &Context<'_, M>) -> Vec<String> {
         .iter()
         .map(|l| l.as_str().to_owned())
         .collect()
+}
+
+/// The context's tags as owned strings, the shape a template value takes
+/// (minijinja builds a `Value` from `String`, not from the `HipStr` the context
+/// stores them in).
+fn tag_names<M: Modality>(ctx: &Context<'_, M>) -> Vec<String> {
+    ctx.tags().iter().map(|t| t.as_str().to_owned()).collect()
 }
 
 fn floor_char_boundary(s: &str, mut pos: usize) -> usize {
