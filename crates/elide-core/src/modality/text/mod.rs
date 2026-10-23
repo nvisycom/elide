@@ -11,7 +11,7 @@ mod tokens;
 use std::ops::Range;
 
 pub use self::data::TextData;
-pub use self::location::{TextAnchor, TextLocation};
+pub use self::location::{Detected, Marked, TextLocation};
 pub use self::replacement::TextReplacement;
 pub use self::source_ref::SourceRef;
 #[cfg(feature = "fixtures")]
@@ -46,7 +46,7 @@ impl TextRecognizable for Text {
         _data: &TextData,
         _artifact: Option<&Tokens>,
     ) -> Option<TextLocation> {
-        Some(TextLocation::new(range.start, range.end))
+        Some(TextLocation::inline(range))
     }
 
     fn as_tokens(artifact: Option<&Tokens>) -> Option<&[Token]> {
@@ -63,9 +63,9 @@ mod tests {
     fn sort_by_position_orders_in_place() {
         let mut batch: Redactions<Text> = Redactions::new();
         // Pushed out of order.
-        batch.push(TextLocation::new(20, 25), TextReplacement::Removed);
-        batch.push(TextLocation::new(0, 5), TextReplacement::Removed);
-        batch.push(TextLocation::new(10, 15), TextReplacement::Removed);
+        batch.push(TextLocation::inline(20..25), TextReplacement::Removed);
+        batch.push(TextLocation::inline(0..5), TextReplacement::Removed);
+        batch.push(TextLocation::inline(10..15), TextReplacement::Removed);
 
         batch.sort_by_position();
 

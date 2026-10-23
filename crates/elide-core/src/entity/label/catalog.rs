@@ -210,7 +210,7 @@ mod tests {
         use crate::primitive::Confidence;
 
         fn entity(label: &str) -> Entity<Text> {
-            let loc = TextLocation::new(0, 1);
+            let loc = TextLocation::inline(0..1);
             let conf = Confidence::new(0.9).unwrap();
             let event = AuditEvent::pattern("t", conf, loc.clone(), PatternEvent::default());
             Entity::new(LabelRef::new(label), loc, AuditLog::new(event))
@@ -234,7 +234,7 @@ mod tests {
         use crate::primitive::Confidence;
 
         fn entity(label: &str) -> Entity<Text> {
-            let loc = TextLocation::new(0, 1);
+            let loc = TextLocation::inline(0..1);
             let conf = Confidence::new(0.9).unwrap();
             let event = AuditEvent::pattern("t", conf, loc.clone(), PatternEvent::default());
             Entity::new(LabelRef::new(label), loc, AuditLog::new(event))

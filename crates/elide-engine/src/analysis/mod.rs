@@ -39,7 +39,7 @@ mod test_support {
 
     /// A minimal [`Text`] entity carrying `label`, for building reports under test.
     pub(crate) fn text_entity(label: &str) -> Entity<Text> {
-        let loc = TextLocation::new(0, 4);
+        let loc = TextLocation::inline(0..4);
         let event = AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
         Entity::new(LabelRef::new(label), loc, AuditLog::new(event))
     }
@@ -51,7 +51,7 @@ mod test_support {
     pub(crate) fn source_only_entity(label: &str) -> Entity<Text> {
         Entity::custom(
             LabelRef::new(label),
-            TextLocation::from_source([SourceRef::new(0..4)]),
+            TextLocation::marked_source([SourceRef::new(0..4)]),
         )
         .build()
     }

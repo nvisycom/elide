@@ -17,7 +17,7 @@ use elide_core::primitive::Confidence;
 /// Build a single text entity found at `range` in the recognized text.
 fn entity(label: &LabelRef, range: Range<usize>, score: f32) -> Entity<Text> {
     let confidence = Confidence::new(score).unwrap();
-    let location = TextLocation::new(range.start, range.end);
+    let location = TextLocation::inline(range.clone());
     let event = AuditEvent::pattern(
         "test",
         confidence,

@@ -418,7 +418,7 @@ mod tests {
         use elide_core::modality::text::TextLocation;
         use elide_core::primitive::Confidence;
 
-        let location = TextLocation::new(0, 3);
+        let location = TextLocation::inline(0..3);
         let event = AuditEvent::pattern(
             "t",
             Confidence::MAX,

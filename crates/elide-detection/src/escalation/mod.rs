@@ -154,7 +154,7 @@ mod tests {
     /// `[0, 1)`.
     fn entity(label: &str, confidence: f32) -> Entity<Text> {
         let label = LabelRef::new(label.to_owned());
-        let location = TextLocation::new(0, 1);
+        let location = TextLocation::inline(0..1);
         let confidence = Confidence::new(confidence).unwrap();
         let event = AuditEvent::pattern(
             "baseline",

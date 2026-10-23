@@ -101,7 +101,7 @@ mod tests {
     #[test]
     fn annotation_set_routes_by_modality_and_defaults_empty() {
         let text_annos =
-            Annotations::<Text>::new().with_exclusion(Exclusion::new(TextLocation::new(0, 5)));
+            Annotations::<Text>::new().with_exclusion(Exclusion::new(TextLocation::inline(0..5)));
         let set = AnnotationSet::default().with(text_annos);
 
         // The Text regions come back...
@@ -121,7 +121,8 @@ mod tests {
     fn later_with_replaces_same_modality() {
         let set = AnnotationSet::default()
             .with(
-                Annotations::<Text>::new().with_exclusion(Exclusion::new(TextLocation::new(0, 5))),
+                Annotations::<Text>::new()
+                    .with_exclusion(Exclusion::new(TextLocation::inline(0..5))),
             )
             .with(Annotations::<Text>::new()); // replaces
         assert!(set.get::<Text>().exclusions.is_empty(), "second with wins");

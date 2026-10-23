@@ -140,7 +140,7 @@ mod tests {
     use crate::operators::{Clamp, Erase, Keep};
 
     fn entity() -> Entity<Text> {
-        let location = TextLocation::new(0, 3);
+        let location = TextLocation::inline(0..3);
         let event = AuditEvent::pattern(
             "t",
             Confidence::MAX,

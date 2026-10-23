@@ -18,7 +18,7 @@ use crate::support::{SourceRef, Text, TextData, TextLocation};
 /// would.
 fn detected(recognizer: &str, label: &str, loc: (usize, usize), conf: f32) -> Entity<Text> {
     let label = LabelRef::new(label.to_owned());
-    let location = TextLocation::new(loc.0, loc.1);
+    let location = TextLocation::inline(loc.0..loc.1);
     let confidence = Confidence::new(conf).unwrap();
     let event = AuditEvent::pattern(
         recognizer.to_owned(),
@@ -86,7 +86,7 @@ async fn analyze_fuses_resolves_filters() {
     // Fusion kept the higher-confidence, larger span and recorded both
     // recognitions plus a deduplication event.
     assert_eq!(phone.confidence, Confidence::new(0.95).unwrap());
-    assert_eq!(phone.location, TextLocation::new(10, 23));
+    assert_eq!(phone.location, TextLocation::inline(10..23));
     assert_eq!(phone.audit.recognizers().count(), 2);
     // The trail: 2 recognition events + 1 deduplication event.
     assert_eq!(phone.audit.events().len(), 3);
@@ -134,7 +134,7 @@ async fn fusion_keeps_both_operands_source_refs() {
     let phone = entities.pop().unwrap();
     // Both source refs survive the fusion, in canonical (part-then-range) order.
     assert_eq!(
-        phone.location.source(),
+        phone.location.source_refs(),
         &[
             SourceRef::in_part(200..212, "word/document.xml"),
             SourceRef::in_part(300..313, "word/header1.xml"),

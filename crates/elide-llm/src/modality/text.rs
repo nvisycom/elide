@@ -24,7 +24,7 @@ impl LlmModality for Text {
             let Some(confidence) = Confidence::new(raw.clamp(0.0, 1.0) as f32) else {
                 continue;
             };
-            let location = TextLocation::new(l.start_offset, l.end_offset);
+            let location = TextLocation::inline(l.start_offset..l.end_offset);
             let event = AuditEvent::model(
                 "llm-ner",
                 confidence,

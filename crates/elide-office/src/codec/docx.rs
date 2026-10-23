@@ -88,13 +88,13 @@ mod tests {
 
         // Decoded "Alice & Bob" is 11 bytes; lift the whole value.
         let lifted = stream
-            .lift(&chunk, TextLocation::new(0, 11))
+            .lift(&chunk, TextLocation::inline(0..11))
             .expect("in bounds");
 
         let head = raw.find("Alice").unwrap();
         let tail_end = raw.find("</w:t>").unwrap();
         assert_eq!(
-            lifted.source(),
+            lifted.source_refs(),
             &[SourceRef::in_part(head..tail_end, BODY_PART)][..]
         );
         // The single range spans the entity: `&amp;` is inside it, not a hole.
@@ -110,11 +110,11 @@ mod tests {
         let chunk = chunk_for(&stream, "Alice & Bob");
 
         let lifted = stream
-            .lift(&chunk, TextLocation::new(6, 7))
+            .lift(&chunk, TextLocation::inline(6..7))
             .expect("in bounds");
         let amp = raw.find("&amp;").unwrap();
         assert_eq!(
-            lifted.source(),
+            lifted.source_refs(),
             &[SourceRef::in_part(amp..amp + "&amp;".len(), BODY_PART)][..]
         );
     }
@@ -127,11 +127,11 @@ mod tests {
 
         // Decoded "Alice" is 0..5, wholly before the entity → a single raw run.
         let lifted = stream
-            .lift(&chunk, TextLocation::new(0, 5))
+            .lift(&chunk, TextLocation::inline(0..5))
             .expect("in bounds");
         let head = raw.find("Alice").unwrap();
         assert_eq!(
-            lifted.source(),
+            lifted.source_refs(),
             &[SourceRef::in_part(head..head + 5, BODY_PART)][..]
         );
     }
@@ -152,8 +152,8 @@ mod tests {
         // reviewer has no decoded-stream range, only this raw span, so the
         // location is genuinely source-only (no faked `range`).
         let bob = raw.find("Bob").unwrap();
-        let location = TextLocation::from_source([SourceRef::in_part(bob..bob + 3, BODY_PART)]);
-        assert!(location.is_source_only());
+        let location = TextLocation::marked_source([SourceRef::in_part(bob..bob + 3, BODY_PART)]);
+        assert!(location.is_marked());
 
         let mut redactions = Redactions::new();
         redactions.push(location, TextReplacement::substituted("[NAME]"));

@@ -174,7 +174,7 @@ impl<'a> SlotParser<'a> {
             // The key span is a raw *source* range, so the hint is a source-only
             // location, resolved against the source, not the value it labels.
             let key_hint = ResolvedHint::new(
-                TextLocation::from_source([SourceRef::new(key_start..self.pos)]),
+                TextLocation::marked_source([SourceRef::new(key_start..self.pos)]),
                 TextData::new(key.value.context_words()),
             );
             self.push_leaf(key);

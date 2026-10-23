@@ -172,7 +172,7 @@ mod tests {
     fn entity_over(label: LabelRef, source: &str) -> Entity<Text> {
         Entity::<Text>::builder()
             .with_label(label)
-            .with_location(TextLocation::new(0, source.len()))
+            .with_location(TextLocation::inline(0..source.len()))
             .with_confidence(Confidence::clamped(1.0))
             .build()
             .expect("text entity has label + location + confidence")
@@ -181,7 +181,7 @@ mod tests {
     fn coref_entity(label: LabelRef, source: &str, coref_id: &str) -> Entity<Text> {
         Entity::<Text>::builder()
             .with_label(label)
-            .with_location(TextLocation::new(0, source.len()))
+            .with_location(TextLocation::inline(0..source.len()))
             .with_confidence(Confidence::clamped(1.0))
             .with_coref(EntityCoRef::new(coref_id))
             .build()
@@ -225,7 +225,7 @@ mod tests {
         let source = TextData::new("名前");
         let entity = Entity::<Text>::builder()
             .with_label(person_name())
-            .with_location(TextLocation::new(0, source.as_str().len()))
+            .with_location(TextLocation::inline(0..source.as_str().len()))
             .with_confidence(Confidence::clamped(1.0))
             .with_language("ja".parse().unwrap())
             .build()

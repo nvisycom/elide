@@ -27,7 +27,7 @@ fn text_prompt_renders_template() {
     let alice_start = body.find("Alice Carter").expect("alice substring");
     let alice_end = alice_start + "Alice Carter".len();
 
-    let inclusion = Inclusion::<Text>::new(TextLocation::new(alice_start, alice_end))
+    let inclusion = Inclusion::<Text>::new(TextLocation::inline(alice_start..alice_end))
         .with_name("uploader-alice")
         .with_label(builtins::PERSON_NAME.to_ref());
 

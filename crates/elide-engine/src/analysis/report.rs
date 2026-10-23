@@ -303,7 +303,7 @@ impl Report {
     /// # use elide_core::modality::text::{Text, TextLocation};
     /// # let mut report = elide_engine::Report::new();
     /// report.include_custom::<Text>(
-    ///     Entity::custom(LabelRef::new("US_SSN"), TextLocation::new(0, 9))
+    ///     Entity::custom(LabelRef::new("US_SSN"), TextLocation::inline(0..9))
     ///         .by("reviewer-7")
     ///         .because(Attribution::freeform("gdpr-art-17")),
     /// );
@@ -685,7 +685,7 @@ mod tests {
         let mut report = Report::new().insert_part::<Text>(doc(), Vec::new());
         assert!(
             report.include_custom::<Text>(
-                Entity::custom("US_SSN", TextLocation::new(0, 9))
+                Entity::custom("US_SSN", TextLocation::inline(0..9))
                     .by("reviewer-7")
                     .because(Attribution::freeform("gdpr-art-17")),
             ),
@@ -721,13 +721,13 @@ mod tests {
             .insert_part::<Text>(PartId::new("a.txt"), Vec::new())
             .insert_part::<Text>(PartId::new("b.txt"), Vec::new());
         assert!(
-            !multi.include_custom::<Text>(Entity::custom("US_SSN", TextLocation::new(0, 9))),
+            !multi.include_custom::<Text>(Entity::custom("US_SSN", TextLocation::inline(0..9))),
             "no sole document to add to",
         );
         // But include_custom_at addresses a specific part.
         assert!(multi.include_custom_at::<Text>(
             &PartId::new("a.txt"),
-            Entity::custom("US_SSN", TextLocation::new(0, 9)),
+            Entity::custom("US_SSN", TextLocation::inline(0..9)),
         ));
         assert_eq!(
             multi
@@ -739,7 +739,7 @@ mod tests {
         // An unknown part adds nothing.
         assert!(!multi.include_custom_at::<Text>(
             &PartId::new("missing"),
-            Entity::custom("US_SSN", TextLocation::new(0, 9)),
+            Entity::custom("US_SSN", TextLocation::inline(0..9)),
         ));
     }
 

@@ -26,12 +26,29 @@ fn entity_text_schema() {
     }
 }
 
-/// A plain location type generates a clean object schema.
+/// The location schema is a closed set of tagged shapes, not a bag of optional
+/// fields: a `oneOf`/`anyOf` whose arms each require their own discriminant, so a
+/// location naming nothing (`{}`) matches none of them. (This is the invariant
+/// the whole enum redesign exists to express to downstream SDK consumers.)
 #[test]
 fn text_location_schema() {
     let schema = schema_for!(TextLocation);
     let json = serde_json::to_value(&schema).unwrap();
-    assert!(json.to_string().contains("start"));
+    let text = json.to_string();
+    // The span range still appears (the detected arms carry it)...
+    assert!(
+        text.contains("start"),
+        "schema must describe the span range"
+    );
+    // ...and the shape is a union of closed variants, keyed by `kind`.
+    assert!(
+        text.contains("oneOf") || text.contains("anyOf"),
+        "location schema must be a union of variant shapes, got: {text}"
+    );
+    assert!(
+        text.contains("kind"),
+        "variant arms must carry a `kind` tag"
+    );
 }
 
 /// The audit `AuditEvent<M>` (rich enum with external-string and bound cases)

@@ -22,7 +22,7 @@ use crate::primitive::{Confidence, LanguageTag};
 /// # use elide_core::modality::text::{Text, TextLocation};
 /// # use elide_core::primitive::Confidence;
 /// # use elide_core::entity::audit::{AuditEvent, PatternEvent};
-/// let location = TextLocation::new(0, 11);
+/// let location = TextLocation::inline(0..11);
 /// let confidence = Confidence::clamped(0.8);
 /// let entity: Entity<Text> = EntityBuilder::new()
 ///     .with_label(LabelRef::new("US_SSN"))
@@ -184,7 +184,7 @@ mod tests {
         // audit event is required (the include path stamps a Manual one).
         let entity: Entity<Text> = EntityBuilder::new()
             .with_label(LabelRef::new("US_SSN"))
-            .with_location(TextLocation::new(0, 9))
+            .with_location(TextLocation::inline(0..9))
             .build()
             .expect("label and location set");
         assert_eq!(entity.confidence, Confidence::MAX);
@@ -197,7 +197,7 @@ mod tests {
         // comes from the last event, not a blanket MAX, so reconciliation (which
         // compares Entity::confidence) sees the true value.
         let audited = Confidence::new(0.4).expect("valid confidence");
-        let loc = TextLocation::new(0, 9);
+        let loc = TextLocation::inline(0..9);
         let entity: Entity<Text> = EntityBuilder::new()
             .with_label(LabelRef::new("US_SSN"))
             .with_location(loc.clone())
@@ -212,7 +212,7 @@ mod tests {
         // with_confidence wins over the audit's last event.
         let explicit = Confidence::new(0.9).expect("valid confidence");
         let audited = Confidence::new(0.4).expect("valid confidence");
-        let loc = TextLocation::new(0, 9);
+        let loc = TextLocation::inline(0..9);
         let entity: Entity<Text> = EntityBuilder::new()
             .with_label(LabelRef::new("US_SSN"))
             .with_location(loc.clone())
