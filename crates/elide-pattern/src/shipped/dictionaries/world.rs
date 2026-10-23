@@ -14,9 +14,19 @@ shipped_dictionary!(
         from "../../../assets/dictionaries/world/finance/cryptocurrencies.toml"
         with csv "../../../assets/dictionaries/world/finance/cryptocurrencies.csv"
 );
+shipped_dictionary!(
+    /// ISO 4217 fiat currency codes (USD, EUR, PLN, …). The
+    /// language-agnostic counterpart to the English long-form
+    /// currency names in `en::currencies`, so a currency code is
+    /// still detected on a document whose asserted language is not
+    /// English.
+    fn currency_codes
+        from "../../../assets/dictionaries/world/finance/currency_codes.toml"
+        with csv "../../../assets/dictionaries/world/finance/currency_codes.csv"
+);
 
 /// Every world-scoped built-in dictionary.
 #[must_use]
 pub fn all() -> Vec<Dictionary> {
-    vec![cryptocurrencies()]
+    vec![cryptocurrencies(), currency_codes()]
 }

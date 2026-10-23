@@ -8,37 +8,38 @@
 
 mod fixtures;
 
+use elide_core::assert_label_present;
 use elide_core::entity::builtins;
-use fixtures::{assert_label_present, assert_match, scan};
+use fixtures::scan;
 
 #[tokio::test]
 async fn builtin_identity() {
     let (text, entities) = scan(include_str!("../testdata/inputs/au/identity.txt")).await;
-    assert_match(&text, &entities, builtins::TAX_ID.to_ref(), "123 456 782");
+    assert_match!(&text, &entities, builtins::TAX_ID.to_ref(), "123 456 782");
 }
 
 #[tokio::test]
 async fn builtin_finance() {
     let (text, entities) = scan(include_str!("../testdata/inputs/au/finance.txt")).await;
-    assert_match(
+    assert_match!(
         &text,
         &entities,
         builtins::COMPANY_ID.to_ref(),
         "51 824 753 556",
     );
-    assert_match(
+    assert_match!(
         &text,
         &entities,
         builtins::COMPANY_ID.to_ref(),
         "123 456 780",
     );
-    assert_label_present(&entities, builtins::COMPANY_ID.to_ref());
+    assert_label_present!(entities, builtins::COMPANY_ID.to_ref());
 }
 
 #[tokio::test]
 async fn builtin_health() {
     let (text, entities) = scan(include_str!("../testdata/inputs/au/health.txt")).await;
-    assert_match(
+    assert_match!(
         &text,
         &entities,
         builtins::INSURANCE_ID.to_ref(),

@@ -4,8 +4,9 @@
 
 use elide::Result;
 use elide::entity::builtins;
+use elide_core::assert_label_absent;
 
-use crate::support::asserts::{assert_content_preserved, assert_label_absent};
+use crate::support::asserts::assert_content_preserved;
 use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {

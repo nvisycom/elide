@@ -8,33 +8,34 @@
 
 mod fixtures;
 
+use elide_core::assert_label_present;
 use elide_core::entity::builtins;
-use fixtures::{assert_label_present, assert_match, scan};
+use fixtures::scan;
 
 #[tokio::test]
 async fn builtin_identity() {
     let (text, entities) = scan(include_str!("../testdata/inputs/de/identity.txt")).await;
-    assert_match(
+    assert_match!(
         &text,
         &entities,
         builtins::GOVERNMENT_ID.to_ref(),
         "L01X00T44",
     );
-    assert_match(
+    assert_match!(
         &text,
         &entities,
         builtins::PASSPORT_NUMBER.to_ref(),
         "C0J9H58P3",
     );
-    assert_match(&text, &entities, builtins::TAX_ID.to_ref(), "65929970489");
-    assert_match(&text, &entities, builtins::TAX_ID.to_ref(), "DE129273398");
-    assert_match(
+    assert_match!(&text, &entities, builtins::TAX_ID.to_ref(), "65929970489");
+    assert_match!(&text, &entities, builtins::TAX_ID.to_ref(), "DE129273398");
+    assert_match!(
         &text,
         &entities,
         builtins::DRIVERS_LICENSE.to_ref(),
         "B072RRE2I52",
     );
-    assert_match(
+    assert_match!(
         &text,
         &entities,
         builtins::NATIONAL_INSURANCE_NUMBER.to_ref(),
@@ -45,9 +46,9 @@ async fn builtin_identity() {
 #[tokio::test]
 async fn builtin_health() {
     let (text, entities) = scan(include_str!("../testdata/inputs/de/health.txt")).await;
-    assert_match(&text, &entities, builtins::MEDICAL_ID.to_ref(), "381789045");
-    assert_match(&text, &entities, builtins::MEDICAL_ID.to_ref(), "123456601");
-    assert_match(
+    assert_match!(&text, &entities, builtins::MEDICAL_ID.to_ref(), "381789045");
+    assert_match!(&text, &entities, builtins::MEDICAL_ID.to_ref(), "123456601");
+    assert_match!(
         &text,
         &entities,
         builtins::INSURANCE_ID.to_ref(),
@@ -58,7 +59,7 @@ async fn builtin_health() {
 #[tokio::test]
 async fn builtin_vehicle() {
     let (text, entities) = scan(include_str!("../testdata/inputs/de/vehicle.txt")).await;
-    assert_match(
+    assert_match!(
         &text,
         &entities,
         builtins::LICENSE_PLATE.to_ref(),
@@ -69,7 +70,7 @@ async fn builtin_vehicle() {
 #[tokio::test]
 async fn builtin_contact() {
     let (text, entities) = scan(include_str!("../testdata/inputs/de/contact.txt")).await;
-    assert_match(&text, &entities, builtins::POSTAL_CODE.to_ref(), "10117");
+    assert_match!(&text, &entities, builtins::POSTAL_CODE.to_ref(), "10117");
     // English-language nationality dictionary stays silent on a
     // German document, assert it didn't fire.
     assert!(
@@ -79,13 +80,13 @@ async fn builtin_contact() {
         "english-language NATIONALITY dictionary should not match on a DE fixture",
     );
     // Sanity: at least one PLZ entity surfaced.
-    assert_label_present(&entities, builtins::POSTAL_CODE.to_ref());
+    assert_label_present!(entities, builtins::POSTAL_CODE.to_ref());
 }
 
 #[tokio::test]
 async fn builtin_finance() {
     let (text, entities) = scan(include_str!("../testdata/inputs/de/finance.txt")).await;
-    assert_match(
+    assert_match!(
         &text,
         &entities,
         builtins::COMPANY_ID.to_ref(),

@@ -1,0 +1,28 @@
+# Polish NRB (Numer Rachunku Bankowego): the 26-digit domestic bank
+# account number — a Polish IBAN with the `PL` prefix dropped, as banks
+# print it on statements (`43 1020 1169 0000 8102 0829 3534`). Two check
+# digits + 24-digit BBAN, validated by the same ISO 13616 mod-97 check the
+# IBAN carries. Labelled `iban` so account-number policies cover both the
+# prefixed and domestic renderings. The `iban` pattern already matches the
+# `PL…`-prefixed form, so this one targets the prefixless NRB only.
+
+name = "pl-nrb"
+labels = ["iban"]
+countries = ["PL"]
+languages = ["pl"]
+
+[context]
+keywords = [
+  "rachunek",
+  "numer rachunku",
+  "nr rachunku",
+  "konto",
+  "nr konta",
+  "iban",
+]
+
+[[variants]]
+# 26 digits, conventionally grouped 2 + 6×4 with spaces or hyphens.
+regex = '\b\d{2}(?:[\s-]?\d{4}){6}\b'
+score = 0.5
+validator = "pl.nrb"

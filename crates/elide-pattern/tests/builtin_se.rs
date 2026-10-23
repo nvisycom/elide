@@ -3,13 +3,14 @@
 
 mod fixtures;
 
+use elide_core::assert_label_present;
 use elide_core::entity::builtins;
-use fixtures::{assert_label_present, assert_match, scan};
+use fixtures::scan;
 
 #[tokio::test]
 async fn builtin_identity() {
     let (text, entities) = scan(include_str!("../testdata/inputs/se/identity.txt")).await;
-    assert_match(
+    assert_match!(
         &text,
         &entities,
         builtins::GOVERNMENT_ID.to_ref(),
@@ -20,7 +21,7 @@ async fn builtin_identity() {
 #[tokio::test]
 async fn builtin_finance() {
     let (text, entities) = scan(include_str!("../testdata/inputs/se/finance.txt")).await;
-    assert_match(
+    assert_match!(
         &text,
         &entities,
         builtins::COMPANY_ID.to_ref(),
@@ -31,6 +32,6 @@ async fn builtin_finance() {
 #[tokio::test]
 async fn builtin_contact() {
     let (text, entities) = scan(include_str!("../testdata/inputs/se/contact.txt")).await;
-    assert_match(&text, &entities, builtins::POSTAL_CODE.to_ref(), "111 60");
-    assert_label_present(&entities, builtins::POSTAL_CODE.to_ref());
+    assert_match!(&text, &entities, builtins::POSTAL_CODE.to_ref(), "111 60");
+    assert_label_present!(entities, builtins::POSTAL_CODE.to_ref());
 }

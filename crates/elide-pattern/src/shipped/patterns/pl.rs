@@ -24,9 +24,14 @@ shipped_pattern!(
     /// 1973-present).
     fn kod_pocztowy from "../../../assets/patterns/pl/contact/kod_pocztowy.toml"
 );
+shipped_pattern!(
+    /// NRB, 26-digit domestic bank account number (a Polish IBAN
+    /// without the `PL` prefix), ISO 13616 mod-97 checksum.
+    fn nrb from "../../../assets/patterns/pl/finance/nrb.toml"
+);
 
 /// Every PL-scoped built-in pattern.
 #[must_use]
 pub fn all() -> Vec<Regex> {
-    vec![pesel(), nip(), regon(), kod_pocztowy()]
+    vec![pesel(), nip(), regon(), kod_pocztowy(), nrb()]
 }

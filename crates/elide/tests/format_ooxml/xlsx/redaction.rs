@@ -4,10 +4,10 @@
 
 use elide::Result;
 use elide::entity::builtins;
+use elide_core::assert_label_present;
 
 use super::FIXTURE;
 use crate::format_ooxml::SHARED_PII;
-use crate::support::asserts::assert_label_present;
 
 #[tokio::test]
 async fn xlsx_detects_and_redacts_every_part() -> Result<()> {
