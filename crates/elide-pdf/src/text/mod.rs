@@ -19,12 +19,14 @@
 mod address;
 mod block;
 mod cmap;
+mod geometry;
 mod glyphs;
 mod offset;
 mod walker;
+mod widths;
 
 pub use self::address::{Address, StreamTarget};
-pub(crate) use self::block::{FontEntry, TextBlock};
+pub(crate) use self::block::{FontEntry, PageGeometry, TextBlock};
 pub(crate) use self::cmap::scrub;
 pub use self::offset::{GlyphBytes, OffsetMap, OffsetRun};
 pub(crate) use self::walker::{text_block_for_page, text_blocks};

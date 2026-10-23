@@ -419,7 +419,6 @@ impl Stream<Text> for JsonHandler {
 
         Some(
             TextLocation::new(decoded_start, decoded_end)
-                .with_page(chunk.location.page)
                 .with_source([SourceRef::new(source_start..source_end)]),
         )
     }

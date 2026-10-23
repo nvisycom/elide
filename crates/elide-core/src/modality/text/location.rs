@@ -1,5 +1,5 @@
-//! [`TextLocation`]: where an entity sits in text, a decoded byte range or a
-//! source-only reference.
+//! [`TextLocation`]: where an entity sits in text — a decoded span, plus the
+//! anchors that say where that text physically lives.
 
 use std::cmp::Ordering;
 use std::ops::Range;
@@ -9,379 +9,389 @@ use serde::{Deserialize, Serialize};
 
 use super::SourceRef;
 use crate::modality::{ModalityLocation, Overlap};
+use crate::primitive::UnitBoundingBox;
 
-/// Where an entity sits in text: a [coordinate](TextCoord) (a decoded byte range,
-/// or a source-only reference) plus an optional page number.
+/// Where an entity sits in text.
 ///
-/// The coordinate is either a [`Decoded`](TextCoord::Decoded) byte range in the
-/// pipeline's text stream, or a [`Source`](TextCoord::Source)-only reference for
-/// content with no decoded range (a reviewer selecting rendered text). The page
-/// is orthogonal to the coordinate kind, so it sits alongside rather than inside.
+/// Two orthogonal facts:
 ///
-/// Ordering and overlap consider only the coordinate; the page is carried for
-/// codecs that page their text but does not affect comparison.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// - [`span`](Self::span): the byte range of the match in the decoded detection
+///   text. Present for every entity a recognizer found over text; `None` only
+///   for a selection with no decoded text (a reviewer marking the rendered
+///   medium). This is the coordinate detection, reconciliation, and redaction
+///   work in.
+/// - [`anchors`](Self::anchors): where that text *physically* lives, so a
+///   consumer can edit the original bytes or paint a highlight — zero or more
+///   [`TextAnchor`]s. **Empty means the span is its own location** (plain text,
+///   CSV: the decoded text *is* the source). A codec whose decoded text differs
+///   from its raw bytes (OOXML, JSON escapes) attaches [`Bytes`](TextAnchor::Bytes)
+///   anchors; a rendering codec (PDF) attaches [`Rendered`](TextAnchor::Rendered)
+///   anchors, one per line the span wraps across.
+///
+/// Ordering, overlap, and union are defined on the `span`; the anchors ride
+/// along (concatenated on union) but do not change comparison beyond equality.
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TextLocation {
-    /// The coordinate: a decoded range, or a source-only reference.
-    pub coord: TextCoord,
-    /// 1-based page number, when known. Orthogonal to the coordinate kind.
+    /// The match's byte range in the decoded text, or `None` for a selection
+    /// with no decoded text (a reviewer marking the rendered medium).
+    #[cfg_attr(feature = "schema", schemars(with = "Option<Range<usize>>"))]
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "Option::is_none")
     )]
-    pub page: Option<u32>,
-}
-
-/// The coordinate of a [`TextLocation`]: a decoded byte range, or a source-only
-/// reference.
-///
-/// The distinction is whether a decoded range exists at all. A recognizer over
-/// decoded text produces a [`Decoded`](Self::Decoded) span (with the raw source
-/// it decodes from, when the codec's decoded text differs from the source). A
-/// reviewer marking rendered text has no decoded range, only where the selection
-/// sits in the raw bytes, a [`Source`](Self::Source).
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(tag = "kind", rename_all = "snake_case"))]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub enum TextCoord {
-    /// A decoded byte range in the pipeline's text stream, with the raw
-    /// [`SourceRef`]s it came from when the codec's decoded text differs from the
-    /// source (empty for plain text / CSV, where decoded == source).
-    Decoded(DecodedSpan),
-    /// Source-only: no decoded range (a reviewer selecting rendered text), only
-    /// where it sits in the raw bytes. Non-empty by construction.
-    Source(SourceSpan),
-}
-
-/// A decoded byte range and the raw source it decodes from.
-///
-/// The `range` is a half-open `[start, end)` span in the decoded text stream.
-/// `source` carries the exact raw byte range(s) that span came from for codecs
-/// whose decoded text differs from the source (XML/HTML/DOCX entity decoding,
-/// JSON escapes); it is empty when the source equals the decoded text.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct DecodedSpan {
-    /// Byte range within the (decoded) text content.
-    #[cfg_attr(feature = "schema", schemars(with = "Range<usize>"))]
-    pub range: Range<usize>,
-    /// The exact raw source ranges this decoded span came from. Empty when the
-    /// source equals the decoded text.
-    ///
-    /// Usually one range; a reconciled span that fused several source runs (or a
-    /// span crossing an escape) carries several, kept distinct rather than merged
-    /// across gaps. Sorted, deduplicated.
+    pub span: Option<Range<usize>>,
+    /// Where the text physically lives. Empty when the span is its own source
+    /// (plain text); otherwise raw-byte and/or rendered-page anchors.
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "Vec::is_empty")
     )]
-    pub source: Vec<SourceRef>,
+    pub anchors: Vec<TextAnchor>,
 }
 
-impl DecodedSpan {
-    /// A decoded span over `range`, with no source refs.
-    pub fn new(range: Range<usize>) -> Self {
-        Self {
-            range,
-            source: Vec::new(),
-        }
-    }
-
-    /// Attach the exact raw source references, normalizing them (sorted,
-    /// deduplicated).
-    #[must_use]
-    pub fn with_source(mut self, source: impl IntoIterator<Item = SourceRef>) -> Self {
-        self.source = source.into_iter().collect();
-        SourceRef::normalize(&mut self.source);
-        self
-    }
-
-    /// Byte length of the decoded range.
-    #[must_use]
-    pub const fn len(&self) -> usize {
-        self.range.end.saturating_sub(self.range.start)
-    }
-
-    /// Whether the decoded range is empty (zero length).
-    #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    /// How this decoded span sits against `other`, by range. Total and
-    /// unconditional: decoded geometry never sees a missing range.
-    fn overlap(&self, other: &Self) -> Overlap {
-        let (a, b) = (&self.range, &other.range);
-        if a.start >= b.end || b.start >= a.end {
-            return Overlap::Disjoint;
-        }
-        if a.start <= b.start && b.end <= a.end {
-            return Overlap::Contains;
-        }
-        if b.start <= a.start && a.end <= b.end {
-            return Overlap::ContainedBy;
-        }
-        let inter = a.end.min(b.end) - a.start.max(b.start);
-        let union = a.end.max(b.end) - a.start.min(b.start);
-        Overlap::Crossing {
-            iou: inter as f32 / union as f32,
-        }
-    }
-
-    /// The smallest decoded span covering both, with their source refs
-    /// concatenated and normalized (kept distinct, merged runs and escape-split
-    /// spans are genuinely non-contiguous in the raw bytes).
-    fn union(&self, other: &Self) -> Self {
-        let mut source = self.source.clone();
-        source.extend_from_slice(&other.source);
-        SourceRef::normalize(&mut source);
-        Self {
-            range: self.range.start.min(other.range.start)..self.range.end.max(other.range.end),
-            source,
-        }
-    }
-}
-
-/// A source-only coordinate: raw byte range(s) with no decoded span.
-///
-/// The counterpart to [`DecodedSpan`] for content the pipeline never decoded (a
-/// reviewer selecting rendered text). A named struct rather than a bare `Vec`
-/// variant so the coordinate serializes as a map, which an internally tagged
-/// enum can inject its `kind` tag into.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// Where a span's text physically lives: raw source bytes, or a rendered-page
+/// region. A location may carry several (a span wrapping two lines of a PDF, or
+/// drawn from several raw runs of an OOXML part).
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "kind", rename_all = "snake_case"))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SourceSpan {
-    /// The raw byte range(s) the selection sits in. Sorted, deduplicated,
-    /// non-empty by construction.
-    pub source: Vec<SourceRef>,
+pub enum TextAnchor {
+    /// Raw source bytes the span decoded from (accounting for escapes like
+    /// `&amp;`), optionally within a named container part (a DOCX member). The
+    /// bytes a redaction edits.
+    Bytes(SourceRef),
+    /// A region on a rendered page: a 1-based page number and a page-normalized
+    /// box. What a viewer paints to highlight the entity.
+    Rendered {
+        /// 1-based page number.
+        page: u32,
+        /// The region in page-normalized `0.0..=1.0` coordinates (top-left).
+        rect: UnitBoundingBox,
+    },
 }
 
-impl SourceSpan {
-    /// A source-only span over `source`, normalizing the refs (sorted,
-    /// deduplicated).
-    pub fn new(source: impl IntoIterator<Item = SourceRef>) -> Self {
-        let mut source: Vec<SourceRef> = source.into_iter().collect();
-        SourceRef::normalize(&mut source);
-        Self { source }
+impl TextAnchor {
+    /// The raw-byte reference, if this is a [`Bytes`](Self::Bytes) anchor.
+    fn as_bytes(&self) -> Option<&SourceRef> {
+        match self {
+            TextAnchor::Bytes(source) => Some(source),
+            TextAnchor::Rendered { .. } => None,
+        }
+    }
+
+    /// The page number, if this is a [`Rendered`](Self::Rendered) anchor.
+    fn page(&self) -> Option<u32> {
+        match self {
+            TextAnchor::Rendered { page, .. } => Some(*page),
+            TextAnchor::Bytes(_) => None,
+        }
     }
 }
 
 impl TextLocation {
-    /// A decoded location covering `start..end`, page unset and no source refs.
+    /// A location over the decoded span `start..end`, with no anchors (the span
+    /// is its own source — plain text). Attach anchors with
+    /// [`with_source`](Self::with_source) / [`with_rects`](Self::with_rects).
     pub fn new(start: usize, end: usize) -> Self {
         Self {
-            coord: TextCoord::Decoded(DecodedSpan::new(start..end)),
-            page: None,
+            span: Some(start..end),
+            anchors: Vec::new(),
         }
     }
 
-    /// A source-only location, for content with no decoded range (a reviewer
-    /// selecting rendered text). Normalizes the refs (sorted, deduplicated).
+    /// A location with no decoded span, anchored only at raw source bytes (a
+    /// reviewer marking the medium). Normalizes the refs (sorted, deduplicated).
     pub fn from_source(source: impl IntoIterator<Item = SourceRef>) -> Self {
         Self {
-            coord: TextCoord::Source(SourceSpan::new(source)),
-            page: None,
+            span: None,
+            anchors: bytes_anchors(source),
         }
     }
 
-    /// Set the 1-based page number, consuming and returning `self`.
-    #[must_use]
-    pub fn with_page(mut self, page: Option<u32>) -> Self {
-        self.page = page;
-        self
-    }
-
-    /// Attach the exact raw source references to a *decoded* location,
-    /// normalizing them. A no-op on a source-only location (its refs are its
-    /// whole coordinate, set at construction).
+    /// Replace the raw-byte anchors with `source` (normalized), keeping the span
+    /// and any rendered anchors. The raw bytes the decoded span came from.
     #[must_use]
     pub fn with_source(mut self, source: impl IntoIterator<Item = SourceRef>) -> Self {
-        if let TextCoord::Decoded(span) = &mut self.coord {
-            span.source = source.into_iter().collect();
-            SourceRef::normalize(&mut span.source);
-        }
+        self.anchors.retain(|a| !matches!(a, TextAnchor::Bytes(_)));
+        self.anchors.extend(bytes_anchors(source));
+        self.anchors.sort_unstable_by(anchor_order);
         self
     }
 
-    /// The decoded byte range, or `None` for a source-only location.
+    /// Replace the rendered-page anchors with one per `(page, rect)` in `rects`,
+    /// keeping the span and any byte anchors. `None` clears them.
+    #[must_use]
+    pub fn with_rects(
+        mut self,
+        page: u32,
+        rects: impl IntoIterator<Item = UnitBoundingBox>,
+    ) -> Self {
+        self.anchors
+            .retain(|a| !matches!(a, TextAnchor::Rendered { .. }));
+        self.anchors.extend(
+            rects
+                .into_iter()
+                .map(|rect| TextAnchor::Rendered { page, rect }),
+        );
+        self.anchors.sort_unstable_by(anchor_order);
+        self
+    }
+
+    /// The decoded byte range, or `None` for a selection with no decoded text.
     #[must_use]
     pub fn range(&self) -> Option<&Range<usize>> {
-        match &self.coord {
-            TextCoord::Decoded(span) => Some(&span.range),
-            TextCoord::Source(_) => None,
-        }
+        self.span.as_ref()
     }
 
-    /// The raw source references: a decoded span's (possibly empty), or the
-    /// source-only refs.
+    /// The raw-byte source references this span decoded from (possibly empty).
     #[must_use]
-    pub fn source(&self) -> &[SourceRef] {
-        match &self.coord {
-            TextCoord::Decoded(span) => &span.source,
-            TextCoord::Source(span) => &span.source,
-        }
+    pub fn source(&self) -> Vec<SourceRef> {
+        self.anchors
+            .iter()
+            .filter_map(TextAnchor::as_bytes)
+            .cloned()
+            .collect()
     }
 
-    /// The 1-based page number, when known.
+    /// The rendered-page rectangles for the span, one per line it wraps across
+    /// (empty when the text has no rendered form).
     #[must_use]
-    pub const fn page(&self) -> Option<u32> {
-        self.page
+    pub fn rects(&self) -> Vec<UnitBoundingBox> {
+        self.anchors
+            .iter()
+            .filter_map(|a| match a {
+                TextAnchor::Rendered { rect, .. } => Some(*rect),
+                TextAnchor::Bytes(_) => None,
+            })
+            .collect()
     }
 
-    /// Whether this is a source-only location (no decoded range).
+    /// The 1-based page the span is rendered on (the lowest, for a span that
+    /// wraps a page break), or `None` when it has no rendered anchor.
+    #[must_use]
+    pub fn page(&self) -> Option<u32> {
+        self.anchors.iter().filter_map(TextAnchor::page).min()
+    }
+
+    /// The effective page for ordering/hashing: the rendered page, or 0 when the
+    /// location has no rendered anchor (so unpaged text sorts before page 1).
+    fn effective_page(&self) -> u32 {
+        self.page().unwrap_or(0)
+    }
+
+    /// Whether this is a source-only selection (no decoded span).
     #[must_use]
     pub const fn is_source_only(&self) -> bool {
-        matches!(self.coord, TextCoord::Source(_))
+        self.span.is_none()
     }
 
-    /// The decoded span, if this is a decoded location.
-    #[must_use]
-    pub fn decoded(&self) -> Option<&DecodedSpan> {
-        match &self.coord {
-            TextCoord::Decoded(span) => Some(span),
-            TextCoord::Source(_) => None,
-        }
-    }
-
-    /// Byte length of the decoded range, or `None` for a source-only location
-    /// (which has no length).
+    /// Byte length of the decoded span, or `None` when there is none.
     #[must_use]
     pub fn len(&self) -> Option<usize> {
-        self.decoded().map(DecodedSpan::len)
+        self.span.as_ref().map(|s| s.end.saturating_sub(s.start))
     }
 
-    /// Whether the decoded range is empty. A source-only location is not empty in
-    /// this sense (it has no range), so this returns `false` for it.
+    /// Whether the decoded span is empty (zero length). A source-only location
+    /// has no span, so this is `false` for it.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.decoded().is_some_and(DecodedSpan::is_empty)
+        self.len() == Some(0)
     }
+}
+
+/// Build normalized [`Bytes`](TextAnchor::Bytes) anchors from source refs.
+fn bytes_anchors(source: impl IntoIterator<Item = SourceRef>) -> Vec<TextAnchor> {
+    let mut refs: Vec<SourceRef> = source.into_iter().collect();
+    SourceRef::normalize(&mut refs);
+    refs.into_iter().map(TextAnchor::Bytes).collect()
+}
+
+/// Canonical order of anchors within a location, so equal locations compare and
+/// hash identically: all byte anchors (by their `SourceRef` order) before all
+/// rendered anchors (by page then rect).
+fn anchor_order(a: &TextAnchor, b: &TextAnchor) -> Ordering {
+    match (a, b) {
+        (TextAnchor::Bytes(x), TextAnchor::Bytes(y)) => x.cmp(y),
+        (TextAnchor::Bytes(_), TextAnchor::Rendered { .. }) => Ordering::Less,
+        (TextAnchor::Rendered { .. }, TextAnchor::Bytes(_)) => Ordering::Greater,
+        (TextAnchor::Rendered { page: p, rect: r }, TextAnchor::Rendered { page: q, rect: s }) => {
+            p.cmp(q).then_with(|| rect_order(r, s))
+        }
+    }
+}
+
+/// A total order on normalized boxes (their fields are floats, so ordered by
+/// bit patterns — only used to canonicalize anchor order, never geometrically).
+fn rect_order(a: &UnitBoundingBox, b: &UnitBoundingBox) -> Ordering {
+    let key = |r: &UnitBoundingBox| {
+        [
+            r.x.to_bits(),
+            r.y.to_bits(),
+            r.width.to_bits(),
+            r.height.to_bits(),
+        ]
+    };
+    key(a).cmp(&key(b))
 }
 
 impl ModalityLocation for TextLocation {
     fn overlap(&self, other: &Self) -> Overlap {
-        // Range geometry is defined on decoded coordinates. A source-only
-        // location has no decoded range and is injected after detection's
-        // reconcile pass, so it never range-dedups: any pair involving one is
-        // Disjoint, not comparable in a shared coordinate space.
-        match (&self.coord, &other.coord) {
-            (TextCoord::Decoded(a), TextCoord::Decoded(b)) => a.overlap(b),
-            _ => Overlap::Disjoint,
+        // A span is page-local, so two spans only share a coordinate space when
+        // they are on the same rendered page (both unpaged, or equal page). Spans
+        // on different pages are disjoint even with identical byte ranges.
+        if self.effective_page() != other.effective_page() {
+            return Overlap::Disjoint;
         }
+        // Range geometry is defined on the decoded span. A source-only selection
+        // has no span and never range-dedups, so any pair involving one is
+        // Disjoint.
+        let (Some(a), Some(b)) = (&self.span, &other.span) else {
+            return Overlap::Disjoint;
+        };
+        span_overlap(a, b)
     }
 
     fn union(&self, other: &Self) -> Option<Self> {
-        // A single byte range can't span two pages; require agreement.
-        if self.page != other.page {
+        // A single span can't straddle two pages; require page agreement (both
+        // unpaged, or both on the same rendered page).
+        if self.effective_page() != other.effective_page() {
             return None;
         }
-        // Fusion only ever unions decoded detections. A source-only coordinate
-        // is not fused (no range to enclose), so a pair involving one has no
-        // union.
-        match (&self.coord, &other.coord) {
-            (TextCoord::Decoded(a), TextCoord::Decoded(b)) => Some(Self {
-                coord: TextCoord::Decoded(a.union(b)),
-                page: self.page,
-            }),
-            _ => None,
-        }
+        // Fusion unions decoded spans only; a source-only selection has no span
+        // to enclose, so a pair involving one has no union.
+        let (Some(a), Some(b)) = (&self.span, &other.span) else {
+            return None;
+        };
+        // The fused entity spans both detections, so it carries both sides'
+        // anchors (raw runs and rendered lines), canonicalized and deduped.
+        let mut anchors = self.anchors.clone();
+        anchors.extend(other.anchors.iter().cloned());
+        anchors.sort_unstable_by(anchor_order);
+        anchors.dedup();
+        Some(Self {
+            span: Some(a.start.min(b.start)..a.end.max(b.end)),
+            anchors,
+        })
     }
 
     fn span_cmp(&self, other: &Self) -> Ordering {
-        // Extent: a decoded span's length; a source-only location has no extent
-        // and sorts as zero-length.
-        let a = self.len().unwrap_or(0);
-        let b = other.len().unwrap_or(0);
-        a.cmp(&b)
+        // Extent: the decoded span's length; a source-only selection has none and
+        // sorts as zero-length.
+        self.len().unwrap_or(0).cmp(&other.len().unwrap_or(0))
     }
 
     fn position_cmp(&self, other: &Self) -> Ordering {
-        // Reading order: page first (unpaged sorts as page 0), then the
-        // coordinate. Decoded coordinates order by start then end; a source-only
-        // coordinate has no decoded position, so all decoded sort before all
-        // source-only, and two source-only order by their first source ref.
-        self.page
-            .unwrap_or(0)
-            .cmp(&other.page.unwrap_or(0))
-            .then_with(|| self.coord.cmp(&other.coord))
+        // Reading order: rendered page first (unpaged = page 0), then the span.
+        // A span-bearing location sorts before a source-only one (which has no
+        // position); two source-only sort by their anchors.
+        self.effective_page()
+            .cmp(&other.effective_page())
+            .then_with(|| span_cmp_for_order(&self.span, &other.span))
+            .then_with(|| self.anchors.cmp_by(&other.anchors))
     }
 
     fn hash(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
-        match self.page {
-            Some(page) => {
+        // Effective page, then the span, then the anchors — the tamper-evidence
+        // fold. (The box floats in rendered anchors are folded by bit pattern.)
+        bytes.extend_from_slice(&self.effective_page().to_le_bytes());
+        match &self.span {
+            Some(span) => {
                 bytes.push(1);
-                bytes.extend_from_slice(&page.to_le_bytes());
+                bytes.extend_from_slice(&(span.start as u64).to_le_bytes());
+                bytes.extend_from_slice(&(span.end as u64).to_le_bytes());
             }
             None => bytes.push(0),
         }
-        match &self.coord {
-            TextCoord::Decoded(span) => {
-                bytes.push(0); // coordinate tag: decoded
-                bytes.extend_from_slice(&(span.range.start as u64).to_le_bytes());
-                bytes.extend_from_slice(&(span.range.end as u64).to_le_bytes());
-                hash_source(&mut bytes, &span.source);
-            }
-            TextCoord::Source(span) => {
-                bytes.push(1); // coordinate tag: source-only
-                hash_source(&mut bytes, &span.source);
-            }
-        }
+        hash_anchors(&mut bytes, &self.anchors);
         bytes
     }
 }
 
-/// Reading order over coordinates: all [`Decoded`](TextCoord::Decoded) sort
-/// before all [`Source`](TextCoord::Source) (a source-only coordinate has no
-/// decoded position); decoded coordinates order by range start then end, then by
-/// source refs so the order agrees with `Eq`; two source-only coordinates order
-/// by their source refs ([`SourceRef`] is itself [`Ord`], so the lists compare
-/// element-wise).
-impl Ord for TextCoord {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match (self, other) {
-            (TextCoord::Decoded(x), TextCoord::Decoded(y)) => x
-                .range
-                .start
-                .cmp(&y.range.start)
-                .then(x.range.end.cmp(&y.range.end))
-                // Tiebreak on source so a total order agrees with `Eq` (two
-                // decoded spans with the same range but different source refs are
-                // distinct); reading order is unaffected, ranges being equal.
-                .then_with(|| x.source.cmp(&y.source)),
-            (TextCoord::Decoded(_), TextCoord::Source(_)) => Ordering::Less,
-            (TextCoord::Source(_), TextCoord::Decoded(_)) => Ordering::Greater,
-            (TextCoord::Source(x), TextCoord::Source(y)) => x.cmp(y),
-        }
+/// Reading-order comparison of two optional spans: a present span sorts before
+/// an absent one (a source-only selection has no position); two present spans by
+/// start then end; two absent are equal (the anchors break the tie).
+fn span_cmp_for_order(a: &Option<Range<usize>>, b: &Option<Range<usize>>) -> Ordering {
+    match (a, b) {
+        (Some(x), Some(y)) => x.start.cmp(&y.start).then(x.end.cmp(&y.end)),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
     }
 }
 
-impl PartialOrd for TextCoord {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
+/// How two spans relate, by range IoU.
+fn span_overlap(a: &Range<usize>, b: &Range<usize>) -> Overlap {
+    if a.start >= b.end || b.start >= a.end {
+        return Overlap::Disjoint;
+    }
+    if a.start <= b.start && b.end <= a.end {
+        return Overlap::Contains;
+    }
+    if b.start <= a.start && a.end <= b.end {
+        return Overlap::ContainedBy;
+    }
+    let inter = a.end.min(b.end) - a.start.max(b.start);
+    let union = a.end.max(b.end) - a.start.min(b.start);
+    Overlap::Crossing {
+        iou: inter as f32 / union as f32,
     }
 }
 
-/// Fold a normalized source-ref list into the tamper-evidence hash: the count,
-/// then each ref's range and optional part.
-fn hash_source(bytes: &mut Vec<u8>, source: &[SourceRef]) {
-    bytes.extend_from_slice(&(source.len() as u64).to_le_bytes());
-    for src in source {
-        bytes.extend_from_slice(&(src.range.start as u64).to_le_bytes());
-        bytes.extend_from_slice(&(src.range.end as u64).to_le_bytes());
-        match &src.part {
-            Some(part) => {
-                bytes.push(1);
-                bytes.extend_from_slice(&(part.len() as u64).to_le_bytes());
-                bytes.extend_from_slice(part.as_bytes());
+/// Fold the anchor list into the tamper-evidence hash: the count, then each
+/// anchor by kind (byte refs by range+part, rendered by page+rect bits).
+fn hash_anchors(bytes: &mut Vec<u8>, anchors: &[TextAnchor]) {
+    bytes.extend_from_slice(&(anchors.len() as u64).to_le_bytes());
+    for anchor in anchors {
+        match anchor {
+            TextAnchor::Bytes(source) => {
+                bytes.push(0);
+                bytes.extend_from_slice(&(source.range.start as u64).to_le_bytes());
+                bytes.extend_from_slice(&(source.range.end as u64).to_le_bytes());
+                match &source.part {
+                    Some(part) => {
+                        bytes.push(1);
+                        bytes.extend_from_slice(&(part.len() as u64).to_le_bytes());
+                        bytes.extend_from_slice(part.as_bytes());
+                    }
+                    None => bytes.push(0),
+                }
             }
-            None => bytes.push(0),
+            TextAnchor::Rendered { page, rect } => {
+                bytes.push(1);
+                bytes.extend_from_slice(&page.to_le_bytes());
+                for bits in [
+                    rect.x.to_bits(),
+                    rect.y.to_bits(),
+                    rect.width.to_bits(),
+                    rect.height.to_bits(),
+                ] {
+                    bytes.extend_from_slice(&bits.to_le_bytes());
+                }
+            }
         }
+    }
+}
+
+/// Element-wise comparison of two anchor lists for a total order, so
+/// `position_cmp` agrees with `Eq` (two locations with the same page and span
+/// but different anchors are distinct and must not compare Equal).
+trait AnchorsOrd {
+    fn cmp_by(&self, other: &Self) -> Ordering;
+}
+
+impl AnchorsOrd for Vec<TextAnchor> {
+    fn cmp_by(&self, other: &Self) -> Ordering {
+        for (a, b) in self.iter().zip(other.iter()) {
+            let ord = anchor_order(a, b);
+            if ord != Ordering::Equal {
+                return ord;
+            }
+        }
+        self.len().cmp(&other.len())
     }
 }
 
@@ -391,21 +401,26 @@ mod tests {
 
     use super::*;
 
+    fn span(start: usize, end: usize) -> SourceRef {
+        SourceRef::new(start..end)
+    }
+
     #[test]
     fn position_cmp_orders_by_start_then_end() {
         let a = TextLocation::new(0, 5);
         let b = TextLocation::new(3, 8);
         let c = TextLocation::new(3, 4);
         assert_eq!(a.position_cmp(&b), Ordering::Less);
-        // Same start: shorter end sorts first.
         assert_eq!(c.position_cmp(&b), Ordering::Less);
         assert_eq!(b.position_cmp(&a), Ordering::Greater);
     }
 
     #[test]
     fn position_cmp_orders_pages_before_offsets() {
-        let early_page = TextLocation::new(100, 110).with_page(Some(1));
-        let late_page = TextLocation::new(0, 5).with_page(Some(2));
+        let early_page =
+            TextLocation::new(100, 110).with_rects(1, [UnitBoundingBox::new(0.0, 0.0, 0.1, 0.1)]);
+        let late_page =
+            TextLocation::new(0, 5).with_rects(2, [UnitBoundingBox::new(0.0, 0.0, 0.1, 0.1)]);
         // Page 1 sorts before page 2 even with a larger offset.
         assert_eq!(early_page.position_cmp(&late_page), Ordering::Less);
     }
@@ -413,14 +428,10 @@ mod tests {
     #[test]
     fn overlap_classifies_the_relationship() {
         let a = TextLocation::new(0, 10);
-        // Disjoint.
         assert_eq!(a.overlap(&TextLocation::new(10, 20)), Overlap::Disjoint);
-        // Nesting, both directions.
         assert_eq!(a.overlap(&TextLocation::new(2, 8)), Overlap::Contains);
         assert_eq!(TextLocation::new(2, 8).overlap(&a), Overlap::ContainedBy);
-        // Identical extent reads as containment.
         assert_eq!(a.overlap(&a), Overlap::Contains);
-        // Crossing, with an IoU measure.
         let Overlap::Crossing { iou } = a.overlap(&TextLocation::new(5, 15)) else {
             panic!("expected crossing");
         };
@@ -433,15 +444,13 @@ mod tests {
         let b = TextLocation::new(3, 12);
         let u = a.union(&b).expect("same page");
         assert_eq!(u.range(), Some(&(0..12)));
-        // Reflexive.
         assert_eq!(a.union(&a), Some(a.clone()));
     }
 
     #[test]
     fn union_requires_same_page() {
-        let a = TextLocation::new(0, 5).with_page(Some(1));
-        let b = TextLocation::new(3, 12).with_page(Some(2));
-        // A single byte range can't span two pages.
+        let a = TextLocation::new(0, 5).with_rects(1, [UnitBoundingBox::new(0.0, 0.0, 0.1, 0.1)]);
+        let b = TextLocation::new(3, 12).with_rects(2, [UnitBoundingBox::new(0.0, 0.0, 0.1, 0.1)]);
         assert_eq!(a.union(&b), None);
     }
 
@@ -449,21 +458,29 @@ mod tests {
     fn span_cmp_is_extent_not_position() {
         let short_late = TextLocation::new(10, 12);
         let long_early = TextLocation::new(0, 9);
-        // Positionally the early one is first...
         assert_eq!(long_early.position_cmp(&short_late), Ordering::Less);
-        // ...but by extent it is the larger span.
         assert_eq!(long_early.span_cmp(&short_late), Ordering::Greater);
     }
 
-    fn span(start: usize, end: usize) -> SourceRef {
-        SourceRef::new(start..end)
+    #[test]
+    fn same_span_on_different_pages_is_disjoint() {
+        // Spans are page-local, so identical byte ranges on different rendered
+        // pages must not overlap (nor union) — else reconcile would wrongly merge
+        // an entity on page 2 with an unrelated one at the same offset on page 3.
+        let full = UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0);
+        let p2 = TextLocation::new(181, 202).with_rects(2, [full]);
+        let p3 = TextLocation::new(181, 202).with_rects(3, [full]);
+        assert_eq!(p2.overlap(&p3), Overlap::Disjoint);
+        assert_eq!(p2.union(&p3), None);
+        // Same page, same span: still overlaps as before.
+        let p2b = TextLocation::new(181, 202).with_rects(2, [full]);
+        assert_eq!(p2.overlap(&p2b), Overlap::Contains);
     }
 
     #[test]
     fn with_source_normalizes_sorted_and_deduped() {
         let loc = TextLocation::new(0, 10).with_source([span(5, 8), span(1, 3), span(5, 8)]);
-        // Sorted by start, exact duplicate dropped.
-        assert_eq!(loc.source(), &[span(1, 3), span(5, 8)]);
+        assert_eq!(loc.source(), vec![span(1, 3), span(5, 8)]);
     }
 
     #[test]
@@ -471,16 +488,13 @@ mod tests {
         let a = TextLocation::new(0, 5).with_source([span(10, 12)]);
         let b = TextLocation::new(3, 9).with_source([span(2, 4), span(10, 12)]);
         let u = a.union(&b).expect("same page");
-        // Non-contiguous source ranges kept distinct; the shared one deduped.
-        assert_eq!(u.source(), &[span(2, 4), span(10, 12)]);
+        assert_eq!(u.source(), vec![span(2, 4), span(10, 12)]);
     }
 
     #[test]
     fn hash_covers_the_source_ranges() {
         let bare = TextLocation::new(0, 5);
         let with = TextLocation::new(0, 5).with_source([span(2, 4)]);
-        // Same decoded span, different source pointer -> different hash, so
-        // tampering with the source is detectable.
         assert_ne!(bare.hash(), with.hash());
     }
 
@@ -488,7 +502,6 @@ mod tests {
     fn hash_is_stable_regardless_of_source_order() {
         let a = TextLocation::new(0, 5).with_source([span(2, 4), span(10, 12)]);
         let b = TextLocation::new(0, 5).with_source([span(10, 12), span(2, 4)]);
-        // Normalized, so accumulation order does not change the hash.
         assert_eq!(a.hash(), b.hash());
     }
 
@@ -498,11 +511,9 @@ mod tests {
         assert!(src.is_source_only());
         assert_eq!(src.range(), None);
         assert_eq!(src.len(), None);
-        assert_eq!(src.source(), &[span(3, 12)]);
-        // A source-only location never range-dedups: Disjoint against anything.
+        assert_eq!(src.source(), vec![span(3, 12)]);
         assert_eq!(src.overlap(&TextLocation::new(3, 12)), Overlap::Disjoint);
         assert_eq!(src.overlap(&src), Overlap::Disjoint);
-        // And has no union with a decoded location.
         assert_eq!(src.union(&TextLocation::new(3, 12)), None);
     }
 
@@ -510,41 +521,53 @@ mod tests {
     fn source_only_sorts_after_decoded_and_hashes_distinctly() {
         let decoded = TextLocation::new(100, 110);
         let src = TextLocation::from_source([span(0, 5)]);
-        // All decoded sort before all source-only, regardless of offset.
         assert_eq!(decoded.position_cmp(&src), Ordering::Less);
         assert_eq!(src.position_cmp(&decoded), Ordering::Greater);
-        // A decoded and a source-only location with the "same" bytes hash
-        // differently (distinct coordinate kinds).
         assert_ne!(TextLocation::new(0, 5).hash(), src.hash());
     }
 
     #[test]
-    fn coord_ord_agrees_with_eq() {
-        // Two decoded coordinates with the same range but different source refs
-        // are distinct under Eq, so Ord must not call them Equal, else a
-        // BTreeSet/binary_search would drop one.
+    fn ordering_agrees_with_eq_on_anchors() {
+        // Same span, different byte anchors: distinct under Eq, so position_cmp
+        // must not call them Equal (a BTreeSet/binary_search would drop one).
         let a = TextLocation::new(0, 5).with_source([span(1, 2)]);
         let b = TextLocation::new(0, 5).with_source([span(9, 10)]);
         assert_ne!(a, b);
-        assert_ne!(a.coord.cmp(&b.coord), Ordering::Equal);
-        // Reading order is unaffected: same range, so they still tie on position.
-        assert_eq!(a.position_cmp(&b), b.position_cmp(&a).reverse());
+        assert_ne!(a.position_cmp(&b), Ordering::Equal);
+    }
+
+    #[test]
+    fn rendered_anchors_expose_page_and_rects() {
+        let r1 = UnitBoundingBox::new(0.1, 0.2, 0.3, 0.05);
+        let r2 = UnitBoundingBox::new(0.1, 0.3, 0.2, 0.05);
+        let loc = TextLocation::new(0, 20).with_rects(2, [r1, r2]);
+        assert_eq!(loc.page(), Some(2));
+        assert_eq!(loc.rects(), vec![r1, r2]);
+        // Byte and rendered anchors coexist on one location.
+        let both = loc.with_source([span(100, 120)]);
+        assert_eq!(both.page(), Some(2));
+        assert_eq!(both.rects(), vec![r1, r2]);
+        assert_eq!(both.source(), vec![span(100, 120)]);
     }
 
     #[cfg(feature = "serde")]
     #[test]
-    fn source_only_serializes_and_round_trips() {
-        // A source-only coordinate is a struct-shaped variant, so the internally
-        // tagged enum can carry it (a bare Vec newtype variant cannot).
+    fn serializes_and_round_trips() {
         let src = TextLocation::from_source([span(3, 12)]);
-        let json = serde_json::to_string(&src).expect("source-only serializes");
+        let json = serde_json::to_string(&src).expect("serializes");
         let back: TextLocation = serde_json::from_str(&json).expect("round-trips");
         assert_eq!(back, src);
         assert!(back.is_source_only());
-        // The decoded variant round-trips too.
+
         let decoded = TextLocation::new(0, 5).with_source([span(2, 4)]);
-        let json = serde_json::to_string(&decoded).expect("decoded serializes");
+        let json = serde_json::to_string(&decoded).expect("serializes");
         let back: TextLocation = serde_json::from_str(&json).expect("round-trips");
         assert_eq!(back, decoded);
+
+        let rendered =
+            TextLocation::new(0, 5).with_rects(3, [UnitBoundingBox::new(0.1, 0.2, 0.3, 0.05)]);
+        let json = serde_json::to_string(&rendered).expect("serializes");
+        let back: TextLocation = serde_json::from_str(&json).expect("round-trips");
+        assert_eq!(back, rendered);
     }
 }

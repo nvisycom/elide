@@ -7,6 +7,7 @@ use elide_codec::{FormatId, Stream};
 use elide_core::Result;
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
+use elide_core::primitive::UnitBoundingBox;
 use elide_core::redaction::Redactions;
 
 use super::FORMAT_ID;
@@ -31,11 +32,15 @@ impl Stream<Text> for PdfStream {
     }
 
     fn chunks(&self) -> Result<Vec<Chunk<Text>>> {
+        // One chunk per page, each addressed in its *own* page-local byte space
+        // (`0..len`). A whole-page rendered anchor carries which page the chunk
+        // is on (so `lift` and redaction know it) without a document-wide offset;
+        // detection runs per chunk, so a span can never straddle a page boundary.
         Ok((0..self.state.page_count())
             .filter_map(|i| self.state.page(i))
             .map(|page| Chunk {
-                location: TextLocation::new(page.start, page.start + page.text.len())
-                    .with_page(Some(page.number)),
+                location: TextLocation::new(0, page.text.len())
+                    .with_rects(page.number, [UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0)]),
                 data: TextData::new(page.text.clone()),
                 hints: Vec::new(),
             })
@@ -43,17 +48,37 @@ impl Stream<Text> for PdfStream {
     }
 
     fn lift(&self, chunk: &Chunk<Text>, local: TextLocation) -> Option<TextLocation> {
+        // The chunk is already page-local, so the recognizer's range is the
+        // page-local range; just validate it against the page's own bounds.
         let chunk_range = chunk.location.range()?;
         let local_range = local.range()?;
-        let base = chunk_range.start;
-        let start = base + local_range.start;
-        let end = base + local_range.end;
-        if start > end || end > chunk_range.end {
+        if local_range.start > local_range.end || local_range.end > chunk_range.end {
             return None;
         }
+        let number = chunk.location.page()?;
+
+        // Resolve the entity's rendered rectangles from this page's glyph
+        // geometry. The range is byte offsets, but glyph geometry is keyed by
+        // character offset, so convert against the page text (which the chunk
+        // carries) before looking the span up. Geometry is best-effort: a span
+        // covering only synthetic gaps yields no boxes, so fall back to a
+        // whole-page anchor — the entity is still located on its page.
+        let page_text = chunk.data.as_str();
+        let rects = self
+            .state
+            .geometry_for(number)
+            .and_then(|geometry| {
+                let char_start = page_text.get(..local_range.start)?.chars().count();
+                let char_end = page_text.get(..local_range.end)?.chars().count();
+                let boxes = geometry.rects_for(char_start..char_end);
+                (!boxes.is_empty()).then_some(boxes)
+            })
+            .unwrap_or_else(|| vec![UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0)]);
+
         // PDF text has no flat source byte coordinate (glyph runs in content
-        // streams), so no source range is carried.
-        Some(TextLocation::new(start, end).with_page(chunk.location.page))
+        // streams), so no byte anchor is carried — only the page-local span and
+        // the rendered rectangles.
+        Some(TextLocation::new(local_range.start, local_range.end).with_rects(number, rects))
     }
 }
 
@@ -63,13 +88,14 @@ impl DataReader<Text> for PdfStream {
         let Some(range) = location.range() else {
             return Ok(None); // source-only location has no decoded range to read
         };
-        let Some((page, local)) = self.state.page_at(range.start) else {
+        // The range is page-local, addressed by the location's page number.
+        let Some(number) = location.page() else {
             return Ok(None);
         };
-        let Some(local_end) = range.end.checked_sub(page.start) else {
+        let Some(page) = self.state.page_by_number(number) else {
             return Ok(None);
         };
-        Ok(page.text.get(local..local_end).map(TextData::new))
+        Ok(page.text.get(range.clone()).map(TextData::new))
     }
 }
 
@@ -77,12 +103,13 @@ impl DataReader<Text> for PdfStream {
 impl DataWriter<Text> for PdfStream {
     async fn write_at(&mut self, redactions: Redactions<Text>) -> Result<()> {
         for (location, _replacement) in redactions.into_iter() {
-            // PDF text is addressed by decoded range only; a source-only location
-            // has none, so it is skipped.
-            let Some(range) = location.range() else {
+            // PDF text is addressed by a page-local decoded range plus its page;
+            // a source-only location (no range) or a location with no page is
+            // skipped.
+            let (Some(range), Some(page)) = (location.range(), location.page()) else {
                 continue;
             };
-            self.state.record(range);
+            self.state.record(page, range);
         }
         Ok(())
     }

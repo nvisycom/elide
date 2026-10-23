@@ -80,7 +80,7 @@ impl Stream<Text> for TxtHandler {
         if start > end || end > chunk_range.end {
             return None;
         }
-        Some(TextLocation::new(start, end).with_page(chunk.location.page))
+        Some(TextLocation::new(start, end))
     }
 }
 

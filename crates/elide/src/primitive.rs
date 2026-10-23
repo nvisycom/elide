@@ -12,8 +12,11 @@
 pub use elide_audio::primitive::TimeSpan;
 #[doc(inline)]
 pub use elide_core::primitive::*;
-/// The image geometry ([`Point`], [`BoundingBox`], …) and the [`Color`] a
-/// redaction paints.
+/// The image geometry ([`Point`], [`BoundingBox`], …), the [`Color`] a
+/// redaction paints, and the pixel-space bridge for the normalized
+/// [`UnitBoundingBox`].
 #[cfg(feature = "image")]
 #[doc(inline)]
-pub use elide_image::primitive::{BoundingBox, Color, Dimensions, Point, Polygon, UnitBoundingBox};
+pub use elide_image::primitive::{
+    BoundingBox, Color, Dimensions, Point, Polygon, UnitBoundingBoxExt,
+};

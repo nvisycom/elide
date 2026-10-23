@@ -13,6 +13,7 @@ use crate::redact::Detection;
 use crate::redact::ImageReplacement;
 #[cfg(feature = "render")]
 use crate::redact::PageReplacement;
+use crate::text::PageGeometry;
 
 /// The document's editable redaction state, behind the shared [`PdfState`] lock.
 #[derive(Debug, Default)]
@@ -27,32 +28,21 @@ pub(super) struct PdfInner {
 }
 
 impl PdfInner {
-    /// Record a redaction at decoded stream `range` as a per-page character-span
-    /// [`Detection`], routed to the glyph-delete or raster accumulator per
-    /// `mode`. A range that falls on no page, or off a char boundary, is skipped
-    /// (PDF text is addressed by decoded range only; a source-only location has
-    /// none).
-    fn record(&mut self, range: &std::ops::Range<usize>) {
-        let Some((page_idx, local, local_end)) =
-            self.pages.iter().enumerate().find_map(|(idx, page)| {
-                if range.start < page.start || range.start >= page.start + page.text.len() {
-                    return None;
-                }
-                let local = range.start - page.start;
-                let local_end = range.end.checked_sub(page.start)?;
-                Some((idx, local, local_end))
-            })
-        else {
+    /// Record a redaction at page-local byte `range` on the page numbered
+    /// `number`, as a per-page character-span [`Detection`] routed to the
+    /// glyph-delete or raster accumulator per `mode`. A range on no such page, or
+    /// off a char boundary, is skipped.
+    fn record(&mut self, number: u32, range: &std::ops::Range<usize>) {
+        let Some(page) = self.pages.iter().find(|p| p.number == number) else {
             return;
         };
-        let page = &self.pages[page_idx];
-        if page.text.get(local..local_end).is_none() {
-            return; // range not on a char boundary
+        if page.text.get(range.clone()).is_none() {
+            return; // range out of bounds or not on a char boundary
         }
-        // Both paths address glyphs by the same character span into the page
-        // text, so the span is measured once as character offsets.
-        let start = page.text[..local].chars().count();
-        let end = page.text[..local_end].chars().count();
+        // Both paths address glyphs by a character span into the page text, so
+        // the byte range is measured as character offsets.
+        let start = page.text[..range.start].chars().count();
+        let end = page.text[..range.end].chars().count();
         let detection = Detection::new(page.number, start, end);
         match &mut self.mode {
             #[cfg(feature = "render")]
@@ -86,19 +76,36 @@ impl PdfState {
         self.0.lock().unwrap().pages.len()
     }
 
-    /// The page whose stream range contains `offset`, and the offset within it.
-    pub(super) fn page_at(&self, offset: usize) -> Option<(PdfPage, usize)> {
-        let inner = self.0.lock().unwrap();
-        inner
+    /// The rendered glyph geometry of the page numbered `number`, for resolving a
+    /// detected span to page-normalized highlight rectangles. Returns a cheap
+    /// [`Arc`] clone (a refcount bump), not a deep copy of the page's glyph list,
+    /// so a lookup per detected entity stays O(1) and the lock is held only for
+    /// the lookup.
+    pub(super) fn geometry_for(&self, number: u32) -> Option<Arc<PageGeometry>> {
+        self.0
+            .lock()
+            .unwrap()
             .pages
             .iter()
-            .find(|p| offset >= p.start && offset < p.start + p.text.len())
-            .map(|p| (p.clone(), offset - p.start))
+            .find(|p| p.number == number)
+            .and_then(|p| p.geometry.clone())
     }
 
-    /// Record a redaction at decoded stream `range` (see [`PdfInner::record`]).
-    pub(super) fn record(&self, range: &std::ops::Range<usize>) {
-        self.0.lock().unwrap().record(range);
+    /// The page numbered `number`, cloned, for reading its text back.
+    pub(super) fn page_by_number(&self, number: u32) -> Option<PdfPage> {
+        self.0
+            .lock()
+            .unwrap()
+            .pages
+            .iter()
+            .find(|p| p.number == number)
+            .cloned()
+    }
+
+    /// Record a redaction at page-local `range` on page `number` (see
+    /// [`PdfInner::record`]).
+    pub(super) fn record(&self, number: u32, range: &std::ops::Range<usize>) {
+        self.0.lock().unwrap().record(number, range);
     }
 
     /// Apply the recorded redactions to `document` per the [`RedactMode`], folding

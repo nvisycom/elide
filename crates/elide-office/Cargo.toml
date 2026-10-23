@@ -2,8 +2,8 @@
 
 [package]
 name = "elide-office"
-description = "Office Open XML (DOCX today; XLSX/PPTX planned) text extraction and byte-faithful redaction: bytes in, bytes out"
-keywords = ["ooxml", "docx", "office", "redaction", "extraction"]
+description = "Office Open XML (DOCX, XLSX, PPTX) text extraction and byte-faithful redaction: bytes in, bytes out"
+keywords = ["ooxml", "docx", "xlsx", "pptx", "redaction"]
 categories = ["parsing", "text-processing"]
 
 version = { workspace = true }

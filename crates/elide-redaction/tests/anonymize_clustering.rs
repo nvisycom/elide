@@ -92,10 +92,11 @@ async fn non_coalescible_overlap_stays_separate() {
     let mut doc = TextDoc::new("0123456789");
     // Same range, different page: overlaps() is true (page is ignored) but
     // union() is None, so clustering must keep them apart.
+    let full = elide_core::primitive::UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0);
     let mut a = Entity::fixture("A", (0, 5));
-    a.location.page = Some(1);
+    a.location = a.location.clone().with_rects(1, [full]);
     let mut b = Entity::fixture("B", (0, 5));
-    b.location.page = Some(2);
+    b.location = b.location.clone().with_rects(2, [full]);
     let mut entities = vec![a, b];
 
     Anonymizer::new()

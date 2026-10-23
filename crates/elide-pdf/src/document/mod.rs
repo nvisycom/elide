@@ -67,15 +67,17 @@ impl Pdf {
 
     /// Extract the document's text and embedded images, with a per-page
     /// [`issue`](crate::extract::Extraction::issues) for any page that yielded no
-    /// text (scanned, needs OCR) or could not be decoded.
+    /// text (scanned, needs OCR) or could not be decoded, and each readable page's
+    /// rendered glyph [`geometry`](crate::text::PageGeometry) from the *same*
+    /// content walk (so per-entity page rectangles cost no second walk).
     ///
     /// This is the text surface a caller runs detection over: a
     /// [`Block`](crate::extract::Block)'s character offsets into its text are what
     /// [`redact_text`](Pdf::redact_text) expects in its [`Detection`]s, since both
-    /// use the same content walk.
-    #[must_use]
-    pub fn extract(&self) -> Extraction {
-        Extraction::from_store(&self.0)
+    /// use the same content walk. The geometry maps a detected character span back
+    /// to the page rectangles it covers.
+    pub(crate) fn extract(&self) -> (Extraction, Vec<crate::text::PageGeometry>) {
+        Extraction::from_store_with_geometry(&self.0)
     }
 
     /// Redact `detections` by deleting the glyphs that drew them, then sanitise

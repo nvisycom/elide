@@ -6,7 +6,7 @@
 //! ([`TextCandidate`] / [`ImageCandidate`]); the recognizer localizes each
 //! candidate into the source and builds the final entity.
 
-use elide_image::primitive::UnitBoundingBox;
+use elide_core::primitive::UnitBoundingBox;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -88,10 +88,9 @@ pub struct ImageCandidate {
 /// native output of vision models that ground boxes (Gemini emits
 /// `[ymin, xmin, ymax, xmax]`) and the document-OCR convention (Google
 /// Document AI, Azure, AWS Textract all report corner vertices), so the
-/// model is asked for the shape it already produces. Mirrors
-/// [`UnitBoundingBox`] but carries the `JsonSchema` derive the
-/// structured-output schema needs (core's [`UnitBoundingBox`] does not
-/// depend on `schemars`).
+/// model is asked for the shape it already produces. A corner-based DTO
+/// distinct from [`UnitBoundingBox`]'s origin-plus-size shape; [`From`]
+/// converts to the box the rest of the pipeline uses.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct UnitBox {
     /// Left edge x in `0.0..=1.0` (fraction of image width).

@@ -13,7 +13,7 @@ use super::Coordinate;
 /// origin, it constructs a [`BoundingBox`](super::BoundingBox). It also converts
 /// between normalized `0.0..=1.0` coordinates (what vision models typically emit)
 /// and absolute pixels; see
-/// [`UnitBoundingBox::denormalize`](super::UnitBoundingBox::denormalize).
+/// [`UnitBoundingBoxExt::denormalize`](super::UnitBoundingBoxExt::denormalize).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Dimensions<C: Coordinate> {

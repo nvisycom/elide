@@ -3,9 +3,10 @@
 //! - [`FormatId`]: stable string identifier (e.g. `"elide.text.txt"`).
 //!   Open namespace, no central enum.
 //! - [`Format`]: descriptor the `FormatRegistry` indexes by id /
-//!   extension / content type. Bundles a [`FormatId`], the modality name
-//!   it produces, lookup keys, and an erased loader that decodes bytes
-//!   into a typed handle.
+//!   extension / content type. Bundles a [`FormatId`], its lookup keys
+//!   (extensions and content types), and a loader that decodes bytes into
+//!   a [`Document`] — an ordered set of parts, each of its own modality,
+//!   since one format may produce several (a container spans modalities).
 
 use std::borrow::Cow;
 use std::fmt;

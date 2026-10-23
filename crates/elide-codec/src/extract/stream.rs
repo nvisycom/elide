@@ -78,11 +78,12 @@ impl<A: Send + Sync + 'static> ExtractStream<A> {
     /// missed decoded `range` stays `Ok(None)`: the pipeline's own coordinate,
     /// tolerated as a no-op.
     fn resolve(&self, state: &SpliceState<A>, location: &TextLocation) -> Result<Option<ItemEdit>> {
-        if !location.source().is_empty() {
+        let source = location.source();
+        if !source.is_empty() {
             let edit = self
                 .addresser
-                .locate_source(&state.items, location.source())
-                .ok_or_else(|| unresolvable_source(location.source()))?;
+                .locate_source(&state.items, &source)
+                .ok_or_else(|| unresolvable_source(&source))?;
             return Ok(Some(edit));
         }
         // No source refs and no decoded range: a source-only location with an
@@ -179,11 +180,7 @@ impl<A: Send + Sync + 'static> Stream<Text> for ExtractStream<A> {
                     .source_span(&state.items[i], local_range.start..local_range.end)
             })
             .unwrap_or_default();
-        Some(
-            TextLocation::new(start, end)
-                .with_page(chunk.location.page)
-                .with_source(source),
-        )
+        Some(TextLocation::new(start, end).with_source(source))
     }
 }
 

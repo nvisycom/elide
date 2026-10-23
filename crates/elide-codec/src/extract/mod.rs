@@ -51,7 +51,7 @@ pub use self::stream::ExtractStream;
 /// streams and edits `value`, so each format chooses the addressing scheme its
 /// re-pack needs (source byte spans for in-place patching, `(part, span,
 /// OffsetMap)` for an OOXML block, …).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExtractedItem<A> {
     /// The location of this item in the document.
     pub address: A,

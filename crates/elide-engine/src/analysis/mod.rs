@@ -46,9 +46,7 @@ mod test_support {
 
     /// A custom [`Text`] entity located only by source, the reviewer-add shape:
     /// no decoded range, just where the selection sits in the raw bytes. Exercises
-    /// the [`Source`](elide_core::modality::text::TextCoord::Source) wire arm.
-    ///
-    /// [`Source`]: elide_core::modality::text::TextCoord::Source
+    /// the source-only (`span: None`) wire arm.
     #[cfg(feature = "schema")]
     pub(crate) fn source_only_entity(label: &str) -> Entity<Text> {
         Entity::custom(

@@ -20,12 +20,15 @@
 //! [`pdf_format`] decodes on the glyph-deletion path; with the `render` feature
 //! [`pdf_format_with`] takes an explicit [`RasterMode`].
 //!
+//! [`RasterMode`]: crate::primitive::RasterMode
 //! [`RasterMode::Always`]: crate::primitive::RasterMode::Always
 
 mod pdf_loader;
 mod pdf_recombine;
 mod pdf_state;
 mod pdf_stream;
+
+use std::sync::Arc;
 
 use elide_codec::{Format, FormatId};
 
@@ -36,16 +39,13 @@ use crate::primitive::RasterMode;
 use crate::redact::Detection;
 #[cfg(feature = "render")]
 use crate::render::PageObservation;
+use crate::text::PageGeometry;
 
 /// Stable [`FormatId`] for the PDF codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.document.pdf");
 
 /// The body stream's part id; excluded from the blob-part fold on assemble.
 const BODY_PART_ID: &str = "body";
-
-/// The gap inserted between consecutive pages in the concatenated stream so a
-/// detection cannot span a page boundary.
-const PAGE_SEPARATOR: &str = "\n";
 
 /// [`Format`] descriptor registered into `FormatRegistry`.
 ///
@@ -72,15 +72,20 @@ pub fn pdf_format_with(raster: RasterMode) -> Format {
         .with_content_types(["application/pdf"])
 }
 
-/// One page's text and where it sits in the concatenated text stream.
+/// One page's text and its rendered glyph geometry. Each page is addressed in
+/// its own page-local byte space; there is no document-wide offset.
 #[derive(Debug, Clone)]
 pub(crate) struct PdfPage {
     /// 1-based page number.
     pub(crate) number: u32,
     /// The page's current (possibly redacted) text.
     pub(crate) text: String,
-    /// Start offset of this page in the concatenated stream.
-    pub(crate) start: usize,
+    /// The page's rendered glyph geometry, for resolving a detected character
+    /// span to page-normalized highlight rectangles. `None` when geometry was
+    /// not gathered (a page the walk could not read). Shared through an [`Arc`]
+    /// so a lookup per detected entity is a cheap refcount bump, not a deep clone
+    /// of the page's whole glyph list.
+    pub(crate) geometry: Option<Arc<PageGeometry>>,
 }
 
 /// How the document's recorded redactions are applied on encode.
