@@ -32,7 +32,7 @@ use crate::primitive::UnitBoundingBox;
 /// Ordering, overlap, and union are defined on the decoded span (a [`Marked`]
 /// location has none, so it never range-dedups); the physical anchor rides along.
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 #[cfg_attr(feature = "serde", serde(untagged))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum TextLocation {
@@ -40,6 +40,50 @@ pub enum TextLocation {
     Detected(Detected),
     /// A reviewer placed this with no decoded text; the anchor is the location.
     Marked(Marked),
+}
+
+/// Validating `Deserialize`: a location is read through the derived shape, then
+/// checked. The derive alone would accept an empty collection straight off the
+/// wire — a mark, or a source/rendered detection, that names nothing — but the
+/// constructors keep every `Source` anchor non-empty and every `Rendered`
+/// non-empty. Enforce the same invariant here so untrusted input cannot smuggle
+/// in the degenerate state the enum exists to forbid, and normalize the refs so
+/// a deserialized location hashes and compares like a constructed one.
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for TextLocation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Repr {
+            Detected(Detected),
+            Marked(Marked),
+        }
+
+        const EMPTY: &str = "a source anchor needs a ref and a rendered anchor needs a rect";
+        let mut loc = match Repr::deserialize(deserializer)? {
+            Repr::Detected(d) => TextLocation::Detected(d),
+            Repr::Marked(m) => TextLocation::Marked(m),
+        };
+        match &mut loc {
+            TextLocation::Detected(Detected::Inline { .. }) => {}
+            TextLocation::Detected(Detected::Source { refs, .. })
+            | TextLocation::Marked(Marked::Source { refs }) => {
+                if refs.is_empty() {
+                    return Err(D::Error::custom(EMPTY));
+                }
+                SourceRef::normalize(refs);
+            }
+            TextLocation::Detected(Detected::Rendered { rects, .. })
+            | TextLocation::Marked(Marked::Rendered { rects, .. }) => {
+                if rects.is_empty() {
+                    return Err(D::Error::custom(EMPTY));
+                }
+            }
+        }
+        Ok(loc)
+    }
 }
 
 /// A location the pipeline detected over decoded text: always a byte span, plus
@@ -136,32 +180,29 @@ impl TextLocation {
     ///
     /// # Panics
     ///
-    /// Panics in debug builds when `refs` is empty — a mark must name a location.
-    /// In release, an empty `refs` yields a zero-length inline span (a mark that
-    /// names nothing is not representable).
+    /// Panics when `refs` is empty: a mark must name a location, and a mark with
+    /// no anchor is unrepresentable, so an empty anchor is a caller bug (like an
+    /// out-of-bounds index). This is an in-process precondition — untrusted wire
+    /// input is rejected earlier, by [`TextLocation`]'s `Deserialize`, so it
+    /// never reaches here.
     pub fn marked_source(refs: impl IntoIterator<Item = SourceRef>) -> Self {
-        match normalize_refs(refs) {
-            Some(refs) => TextLocation::Marked(Marked::Source { refs }),
-            None => {
-                debug_assert!(false, "a marked location must have a non-empty anchor");
-                TextLocation::inline(0..0)
-            }
-        }
+        let refs = normalize_refs(refs).expect("a marked location must have a non-empty anchor");
+        TextLocation::Marked(Marked::Source { refs })
     }
 
     /// A reviewer's mark with no decoded span, anchored at a rendered-page region.
     ///
     /// # Panics
     ///
-    /// Panics in debug builds when `rects` is empty — a mark must name a location.
+    /// Panics when `rects` is empty, for the same reason as
+    /// [`marked_source`](Self::marked_source).
     pub fn marked_rendered(page: u32, rects: impl IntoIterator<Item = UnitBoundingBox>) -> Self {
         let rects: Vec<_> = rects.into_iter().collect();
-        if rects.is_empty() {
-            debug_assert!(false, "a marked location must have a non-empty anchor");
-            TextLocation::inline(0..0)
-        } else {
-            TextLocation::Marked(Marked::Rendered { page, rects })
-        }
+        assert!(
+            !rects.is_empty(),
+            "a marked location must have a non-empty anchor"
+        );
+        TextLocation::Marked(Marked::Rendered { page, rects })
     }
 
     /// Replace this location's raw-byte anchor with `refs` (normalized), keeping
