@@ -106,6 +106,7 @@ pub enum Detected {
         #[cfg_attr(feature = "schema", schemars(with = "Range<usize>"))]
         span: Range<usize>,
         /// The raw-byte references, normalized (sorted, deduplicated). Non-empty.
+        #[cfg_attr(feature = "schema", schemars(length(min = 1)))]
         refs: Vec<SourceRef>,
     },
     /// PDF: the span has no flat byte coordinate, only a rendered-page region.
@@ -118,6 +119,7 @@ pub enum Detected {
         page: u32,
         /// The regions in page-normalized `0.0..=1.0` coordinates (top-left), one
         /// per line the span wraps across. Non-empty.
+        #[cfg_attr(feature = "schema", schemars(length(min = 1)))]
         rects: Vec<UnitBoundingBox>,
     },
 }
@@ -133,6 +135,7 @@ pub enum Marked {
     /// Anchored at raw source bytes (a specific container part). `refs` non-empty.
     Source {
         /// The raw-byte references, normalized. Non-empty.
+        #[cfg_attr(feature = "schema", schemars(length(min = 1)))]
         refs: Vec<SourceRef>,
     },
     /// Anchored at a rendered-page region. `rects` non-empty.
@@ -140,6 +143,7 @@ pub enum Marked {
         /// 1-based page number.
         page: u32,
         /// The regions in page-normalized coordinates. Non-empty.
+        #[cfg_attr(feature = "schema", schemars(length(min = 1)))]
         rects: Vec<UnitBoundingBox>,
     },
 }

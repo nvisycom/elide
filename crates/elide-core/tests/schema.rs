@@ -63,6 +63,7 @@ fn text_location_schema() {
             .unwrap_or_else(|| vec![resolved])
     };
     let mut leaves = 0;
+    let mut anchor_arrays = 0;
     for arm in arms {
         for leaf in leaf_arms(arm) {
             leaves += 1;
@@ -74,10 +75,25 @@ fn text_location_schema() {
                 required.iter().any(|f| f == "kind"),
                 "variant arm must require `kind`: {leaf}"
             );
+            // An anchor array (`refs`/`rects`) must carry `minItems: 1` — the
+            // non-empty invariant expressed in the schema, not just at deserialize,
+            // so a generated SDK validator rejects an empty anchor too.
+            for field in ["refs", "rects"] {
+                if let Some(array) = leaf.get("properties").and_then(|p| p.get(field)) {
+                    anchor_arrays += 1;
+                    assert_eq!(
+                        array.get("minItems").and_then(|m| m.as_u64()),
+                        Some(1),
+                        "`{field}` must require minItems: 1: {leaf}"
+                    );
+                }
+            }
         }
     }
     // Inline, Source, Rendered (detected) + Source, Rendered (marked) = 5.
     assert_eq!(leaves, 5, "five concrete variant shapes");
+    // Source + Rendered on each of Detected and Marked = 4 anchor arrays.
+    assert_eq!(anchor_arrays, 4, "four non-empty anchor arrays");
 }
 
 /// The authoritative runtime contract behind the schema: the serde impl rejects
