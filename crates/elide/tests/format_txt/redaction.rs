@@ -6,9 +6,10 @@
 use elide::Result;
 use elide::entity::audit::AuditKind;
 use elide::entity::builtins;
+use elide_core::assert_label_present;
 
 use crate::support::asserts::{
-    assert_content_preserved, assert_label_present, assert_pii_removed, assert_tokens_present,
+    assert_content_preserved, assert_pii_removed, assert_tokens_present,
 };
 use crate::support::fixture::Fixture;
 

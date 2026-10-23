@@ -1,59 +1,15 @@
-//! Assertion helpers shared by the codec e2e tests: entity presence by
-//! label/value, and redacted-output checks (originals gone, tokens in).
+//! Assertion helpers shared by the codec e2e tests: redacted-output checks
+//! (originals gone, tokens in, structure preserved).
 //!
 //! These are `macro_rules!` macros rather than functions so a failure is
-//! reported at the *test* call site (like `assert_eq!`). Their syntax leans on
-//! the macro form: the value checks take **comma-separated needles** (no
-//! `&[…]`) and borrow the haystack internally (no leading `&`), and the label
-//! checks take **one or more labels** in a single call, replacing the
-//! `for label in [
-//! …] { … }` loops. They are re-exported (`pub(crate) use`) so a test still
-//! brings them in with `use crate::support::asserts::assert_label_present;`.
-
-/// Assert that some detected entity carries each given label. Accepts one or
-/// more labels; fails with the full label list on the first that is missing.
-///
-/// ```ignore
-/// assert_label_present!(entities, EMAIL);
-/// assert_label_present!(entities, EMAIL, PHONE, IBAN);
-/// ```
-#[macro_export]
-macro_rules! assert_label_present {
-    ($entities:expr, $($label:expr),+ $(,)?) => {{
-        let entities = &$entities;
-        $(
-            let label = $label;
-            let found = entities.iter().any(|e| e.label == label);
-            assert!(
-                found,
-                "expected an entity labeled {:?}; found {:?}",
-                label,
-                entities.iter().map(|e| e.label.clone()).collect::<Vec<_>>(),
-            );
-        )+
-    }};
-}
-
-/// Assert that no detected entity carries any of the given labels, the
-/// negative of [`assert_label_present!`], for precision cases where a weak or
-/// context-free value must not be flagged at all. Accepts one or more labels.
-#[macro_export]
-macro_rules! assert_label_absent {
-    ($entities:expr, $($label:expr),+ $(,)?) => {{
-        let entities = &$entities;
-        $(
-            let label = $label;
-            let found: Vec<_> = entities.iter().filter(|e| e.label == label).collect();
-            assert!(
-                found.is_empty(),
-                "expected no entity labeled {:?}, but found {} ({:?})",
-                label,
-                found.len(),
-                found.iter().map(|e| e.label.clone()).collect::<Vec<_>>(),
-            );
-        )+
-    }};
-}
+//! reported at the *test* call site (like `assert_eq!`). The value checks take
+//! **comma-separated needles** (no `&[…]`) and borrow the haystack internally
+//! (no leading `&`). They are re-exported (`pub(crate) use`) so a test still
+//! brings them in with `use crate::support::asserts::assert_pii_removed;`.
+//!
+//! The entity-label assertions (`assert_label_present!` / `assert_label_absent!`)
+//! live in `elide_core` (behind its `fixtures` feature); tests import those
+//! directly with `use elide_core::assert_label_present;`.
 
 /// Assert that none of the given originals survives in the redacted output.
 ///
@@ -105,10 +61,9 @@ macro_rules! assert_content_preserved {
     }};
 }
 
-// Re-export so `use crate::support::asserts::assert_label_present;` resolves
-// the macro by its module path, keeping every existing import line working.
+// Re-export so `use crate::support::asserts::assert_pii_removed;` resolves the
+// macro by its module path. The entity-label macros live in `elide_core`;
+// tests import those directly from there.
 pub(crate) use assert_content_preserved;
-pub(crate) use assert_label_absent;
-pub(crate) use assert_label_present;
 pub(crate) use assert_pii_removed;
 pub(crate) use assert_tokens_present;

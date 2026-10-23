@@ -3,17 +3,18 @@
 
 mod fixtures;
 
+use elide_core::assert_label_present;
 use elide_core::entity::builtins;
-use fixtures::{assert_label_present, assert_match, scan};
+use fixtures::scan;
 
 #[tokio::test]
 async fn builtin_identity() {
     let (text, entities) = scan(include_str!("../testdata/inputs/fi/identity.txt")).await;
-    assert_match(
+    assert_match!(
         &text,
         &entities,
         builtins::GOVERNMENT_ID.to_ref(),
         "010170-123F",
     );
-    assert_label_present(&entities, builtins::GOVERNMENT_ID.to_ref());
+    assert_label_present!(entities, builtins::GOVERNMENT_ID.to_ref());
 }

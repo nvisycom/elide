@@ -13,9 +13,12 @@
 /// `CC BBBB BBBB AAAA AAAA AAAA AAAA` grouping are stripped before
 /// validation.
 pub fn nrb(value: &str) -> bool {
+    // Strip Unicode whitespace, not just ASCII: the pattern's `\s` matches
+    // `White_Space`, so a PDF-extracted NRB can carry a U+00A0 non-breaking
+    // space between digit groups that `is_ascii_whitespace` would leave in.
     let cleaned: Vec<char> = value
         .chars()
-        .filter(|c| !c.is_ascii_whitespace() && *c != '-')
+        .filter(|c| !c.is_whitespace() && *c != '-')
         .collect();
     if cleaned.len() != 26 || !cleaned.iter().all(|c| c.is_ascii_digit()) {
         return false;
@@ -54,6 +57,15 @@ mod tests {
     fn accepts_with_separators() {
         assert!(nrb("43 1020 1169 0000 8102 0829 3534"));
         assert!(nrb("43-1020-1169-0000-8102-0829-3534"));
+    }
+
+    #[test]
+    fn accepts_non_breaking_space_separators() {
+        // PDF text extraction often emits U+00A0 between groups; the pattern's
+        // `\s` matches it, so the validator must strip it too.
+        assert!(nrb(
+            "43\u{00a0}1020\u{00a0}1169\u{00a0}0000\u{00a0}8102\u{00a0}0829\u{00a0}3534"
+        ));
     }
 
     #[test]

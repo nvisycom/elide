@@ -3,9 +3,9 @@
 
 use elide::Result;
 use elide::entity::builtins;
+use elide_core::assert_label_present;
 
 use super::{FIXTURE, PII};
-use crate::support::asserts::assert_label_present;
 
 #[tokio::test]
 async fn pptx_detects_and_redacts_slide_text() -> Result<()> {

@@ -52,6 +52,9 @@ iban_validate = { workspace = true, features = [] }
 phonenumber = { workspace = true, features = [] }
 
 [dev-dependencies]
+# Internal crates
+elide-core = { workspace = true, features = ["serde", "fixtures"] }
+
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["macros", "rt"] }
 

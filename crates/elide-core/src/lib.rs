@@ -2,6 +2,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 
+#[cfg(feature = "fixtures")]
+mod asserts;
 pub mod backend;
 pub mod enrichment;
 pub mod entity;

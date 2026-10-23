@@ -6,8 +6,9 @@
 
 use elide::Result;
 use elide::entity::builtins;
+use elide_core::assert_label_present;
 
-use crate::support::asserts::{assert_label_present, assert_pii_removed};
+use crate::support::asserts::assert_pii_removed;
 use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {

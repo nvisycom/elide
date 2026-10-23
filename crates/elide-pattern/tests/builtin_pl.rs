@@ -8,13 +8,14 @@
 
 mod fixtures;
 
+use elide_core::assert_label_present;
 use elide_core::entity::builtins;
-use fixtures::{assert_label_present, assert_match, scan};
+use fixtures::scan;
 
 #[tokio::test]
 async fn builtin_identity() {
     let (text, entities) = scan(include_str!("../testdata/inputs/pl/identity.txt")).await;
-    assert_match(
+    assert_match!(
         &text,
         &entities,
         builtins::GOVERNMENT_ID.to_ref(),
@@ -25,14 +26,14 @@ async fn builtin_identity() {
 #[tokio::test]
 async fn builtin_finance() {
     let (text, entities) = scan(include_str!("../testdata/inputs/pl/finance.txt")).await;
-    assert_match(&text, &entities, builtins::TAX_ID.to_ref(), "106-000-00-62");
-    assert_match(&text, &entities, builtins::COMPANY_ID.to_ref(), "123456785");
+    assert_match!(&text, &entities, builtins::TAX_ID.to_ref(), "106-000-00-62");
+    assert_match!(&text, &entities, builtins::COMPANY_ID.to_ref(), "123456785");
 }
 
 #[tokio::test]
 async fn builtin_contact() {
     let (text, entities) = scan(include_str!("../testdata/inputs/pl/contact.txt")).await;
-    assert_match(&text, &entities, builtins::POSTAL_CODE.to_ref(), "00-001");
+    assert_match!(&text, &entities, builtins::POSTAL_CODE.to_ref(), "00-001");
     // English-language nationality dictionary stays silent on a
     // Polish document, assert it didn't fire.
     assert!(
@@ -41,5 +42,5 @@ async fn builtin_contact() {
             .any(|e| e.label == builtins::NATIONALITY.to_ref()),
         "english-language NATIONALITY dictionary should not match on a PL fixture",
     );
-    assert_label_present(&entities, builtins::POSTAL_CODE.to_ref());
+    assert_label_present!(entities, builtins::POSTAL_CODE.to_ref());
 }

@@ -3,11 +3,11 @@
 
 use elide::Result;
 use elide::entity::builtins;
+use elide_core::assert_label_present;
 
 use super::{BODY_PART, FIXTURE, HEADER_PART, RELS_PART};
 use crate::format_ooxml::SHARED_PII;
-use crate::support::asserts::{assert_label_present, assert_pii_removed, assert_tokens_present};
-
+use crate::support::asserts::{assert_pii_removed, assert_tokens_present};
 #[tokio::test]
 async fn docx_detects_and_redacts() -> Result<()> {
     let outcome = FIXTURE.run().await?;
