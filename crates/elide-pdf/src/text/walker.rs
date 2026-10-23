@@ -496,6 +496,17 @@ struct Inherited<'a> {
     state: TextState,
 }
 
+/// A graphics-state snapshot pushed by `q` and restored by `Q`: the parametric
+/// text state plus the selected font (encoding, table slot, and advance/metric
+/// tables), since the font is part of the graphics state.
+struct SavedState<'a> {
+    state: TextState,
+    current: Option<&'a Option<Encoding<'a>>>,
+    font_slot: u16,
+    widths: &'a WidthSource,
+    metrics: GlyphMetrics,
+}
+
 /// The caller's selected font, inherited by a `Do`-invoked Form XObject so text
 /// it draws before its own `Tf` is decoded *and positioned* with that font.
 struct InheritedFont<'a> {
@@ -591,17 +602,31 @@ fn walk_stream(
     let mut state = inherited
         .as_ref()
         .map_or_else(TextState::default, |inh| inh.state);
-    let mut gs_stack: Vec<TextState> = Vec::new();
+    // The `q`/`Q` graphics-state stack. The selected font is part of the
+    // graphics state (ISO 32000-1 §8.4), so a save/restore carries it — the
+    // encoding, font slot, and the advance/metric tables — alongside the
+    // parametric `TextState`. The text matrix is *not* graphics state (it resets
+    // at `BT`), so it is not saved.
+    let mut gs_stack: Vec<SavedState<'_>> = Vec::new();
 
     for (op_idx, op) in content.operations.iter().enumerate() {
         match op.operator.as_str() {
-            // Graphics-state save/restore: the text parameters and CTM nest; the
-            // text matrix is not graphics state (it resets at `BT`), so it is not
-            // saved. A `Q` with an empty stack is a malformed balance we ignore.
-            "q" => gs_stack.push(state),
+            // Graphics-state save/restore. A `Q` with an empty stack is a
+            // malformed balance we ignore.
+            "q" => gs_stack.push(SavedState {
+                state,
+                current,
+                font_slot: font_slot_current,
+                widths: width_current,
+                metrics: metrics_current,
+            }),
             "Q" => {
                 if let Some(saved) = gs_stack.pop() {
-                    state = saved;
+                    state = saved.state;
+                    current = saved.current;
+                    font_slot_current = saved.font_slot;
+                    width_current = saved.widths;
+                    metrics_current = saved.metrics;
                 }
             }
             "cm" => {
@@ -1511,5 +1536,83 @@ mod tests {
         // A gap entering the form (Alpha→Beta) and leaving it (Beta→Gamma) are
         // both seen: the three words are space-separated.
         assert_eq!(block.text, "Alpha Beta Gamma");
+    }
+
+    /// `q`/`Q` save and restore the *font*, not just the text state: selecting a
+    /// font, saving, selecting a second font, restoring, then showing text must
+    /// use the first font's widths (the font is part of the graphics state).
+    #[test]
+    fn q_restore_brings_back_the_selected_font() {
+        let mut doc = Document::with_version("1.5");
+        let descriptor = doc.add_object(dictionary! {
+            "Type" => "FontDescriptor", "FontName" => "F",
+            "Ascent" => 700, "Descent" => -200,
+        });
+        // F1 is wide (900/1000 per glyph), F2 is narrow (100/1000).
+        let wide = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Wide",
+            "FirstChar" => 0, "LastChar" => 255,
+            "Widths" => vec![Object::Integer(900); 256],
+            "FontDescriptor" => descriptor,
+        });
+        let narrow = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Narrow",
+            "FirstChar" => 0, "LastChar" => 255,
+            "Widths" => vec![Object::Integer(100); 256],
+            "FontDescriptor" => descriptor,
+        });
+
+        // Select F1 (wide), q, select F2 (narrow), Q, then draw "AB".
+        let page_content = Content {
+            operations: vec![
+                Operation::new("BT", vec![]),
+                Operation::new(
+                    "Tm",
+                    vec![1.into(), 0.into(), 0.into(), 1.into(), 0.into(), 150.into()],
+                ),
+                Operation::new("Tf", vec!["F1".into(), 10.into()]),
+                Operation::new("q", vec![]),
+                Operation::new("Tf", vec!["F2".into(), 10.into()]),
+                Operation::new("Q", vec![]),
+                Operation::new("Tj", vec![Object::string_literal("AB")]),
+                Operation::new("ET", vec![]),
+            ],
+        };
+        let content_id = doc.add_object(lopdf::Stream::new(
+            dictionary! {},
+            page_content.encode().unwrap(),
+        ));
+        let resources = doc.add_object(dictionary! {
+            "Font" => dictionary! { "F1" => wide, "F2" => narrow },
+        });
+        let pages_id = doc.new_object_id();
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page", "Parent" => pages_id, "Contents" => content_id,
+            "Resources" => resources,
+            "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1,
+            }),
+        );
+        doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+
+        let block = text_block_for_page(&doc, 1, page_id, 10_000_000).unwrap();
+        let geometry = super::super::PageGeometry {
+            page: block.page,
+            rects: block.rects.clone(),
+            frame: block.frame,
+        };
+        let rects = geometry.rects_for(0..block.text.chars().count());
+        assert_eq!(rects.len(), 1, "one line: {rects:?}");
+        // "AB" at F1's 900/1000 × 10pt × 2 glyphs = 18pt wide, /100-pt page =
+        // 0.18. With the bug (font left as F2, 100/1000) it would be ~0.02.
+        assert!(
+            rects[0].width > 0.1,
+            "Q restored the wide font (width {} should be ~0.18, not ~0.02)",
+            rects[0].width
+        );
     }
 }
