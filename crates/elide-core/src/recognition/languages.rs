@@ -96,12 +96,19 @@ impl<'a> Languages<'a> {
         matches_any(self.asserted.iter(), allowed)
     }
 
-    /// Stamp each entity's [`language`] from the call's detected-language spans:
-    /// match the entity's [`recognized_range`] against the [`LanguageClaim`] whose
-    /// span covers it.
+    /// Stamp each entity's [`language`] by matching its [`recognized_range`]
+    /// against the [`LanguageClaim`] whose span covers it.
     ///
-    /// A span-less claim (whole-payload scope) applies to any range, so a
-    /// monolingual document attributes every entity to its single language.
+    /// When the call carries any *spanned* claim (per-region detection ran, as it
+    /// does whenever more than one language is in play), attribution is by
+    /// coverage: an entity gets the language of the best-ranked claim whose span
+    /// contains its range, and is left unset when no span covers it — a
+    /// linguistically-empty entity, such as a bare account number between two
+    /// asserted languages, has no language to attribute rather than defaulting to
+    /// whichever was asserted first. A span-less claim (whole-payload scope) is
+    /// used only when there are *no* spanned claims at all — the monolingual
+    /// case, where every entity is that one language.
+    ///
     /// Entities with no `recognized_range` (a natively-located VLM box) are left
     /// untouched, as is the whole set when no language is known.
     ///
@@ -112,20 +119,97 @@ impl<'a> Languages<'a> {
         if ranked.is_empty() {
             return;
         }
+        // A span-less claim (whole-document scope) is only ever an asserted one;
+        // detections always carry a span. When the caller asserted two or more
+        // languages, detection ran to tell them apart, so a span-less asserted
+        // claim must not act as a catch-all fallback — otherwise every entity
+        // would collapse onto the first-ranked language. Attribution is then
+        // strictly by coverage: an entity no detected span covers is left unset (a
+        // bare account number between two languages has no language of its own).
+        // With zero or one asserted language the span-less claim is the correct
+        // monolingual fallback.
+        let coverage_only = self.asserted.len() >= 2;
         for entity in entities.iter_mut() {
             let Some(range) = entity.recognized_range.clone() else {
                 continue;
             };
-            let resolved = ranked.iter().find(|claim| {
-                claim
-                    .span
-                    .as_ref()
-                    .is_none_or(|span| range.start >= span.start && range.end <= span.end)
+            let resolved = ranked.iter().find(|claim| match claim.span.as_ref() {
+                Some(span) => range.start >= span.start && range.end <= span.end,
+                None => !coverage_only,
             });
-            if let Some(claim) = resolved {
-                entity.language = Some(claim.language.clone());
-            }
+            entity.language = resolved.map(|claim| claim.language.clone());
         }
+    }
+}
+
+#[cfg(all(test, feature = "fixtures"))]
+mod tests {
+    use std::ops::Range;
+
+    use super::*;
+    use crate::modality::text::Text;
+    use crate::primitive::{Confidence, LanguageClaim, LanguageTag};
+
+    fn tag(s: &str) -> LanguageTag {
+        s.parse().unwrap()
+    }
+
+    fn entity(label: &str, range: Range<usize>) -> Entity<Text> {
+        let mut e = Entity::<Text>::fixture(label, (range.start, range.end));
+        e.recognized_range = Some(range);
+        e
+    }
+
+    fn lang_of(e: &Entity<Text>) -> Option<String> {
+        e.language.as_ref().map(|l| l.primary_subtag().to_owned())
+    }
+
+    #[test]
+    fn single_asserted_language_stamps_every_entity() {
+        // One asserted language is monolingual: no detection, span-less claim is
+        // the whole-document fallback, so even a language-less digit run gets it.
+        let asserted = [LanguageClaim::asserted(tag("en"))];
+        let view = Languages::new(&asserted, &[]);
+        let mut entities = vec![entity("x", 0..5), entity("y", 10..14)];
+        view.stamp(&mut entities);
+        assert_eq!(lang_of(&entities[0]).as_deref(), Some("en"));
+        assert_eq!(lang_of(&entities[1]).as_deref(), Some("en"));
+    }
+
+    #[test]
+    fn multiple_asserted_attribute_by_detected_span_not_first() {
+        // Two asserted languages: detection ran and tagged regions. Each entity
+        // takes the language of the span that covers it, not the first asserted.
+        let asserted = [
+            LanguageClaim::asserted(tag("pl")),
+            LanguageClaim::asserted(tag("en")),
+        ];
+        let detected = [
+            LanguageClaim::detected(tag("pl"), Confidence::new(0.9).unwrap()).with_span(0..20),
+            LanguageClaim::detected(tag("en"), Confidence::new(0.9).unwrap()).with_span(20..40),
+        ];
+        let view = Languages::new(&asserted, &detected);
+        let mut entities = vec![entity("in_pl", 2..8), entity("in_en", 25..30)];
+        view.stamp(&mut entities);
+        assert_eq!(lang_of(&entities[0]).as_deref(), Some("pl"));
+        assert_eq!(lang_of(&entities[1]).as_deref(), Some("en"));
+    }
+
+    #[test]
+    fn multiple_asserted_leave_uncovered_entity_unset() {
+        // A language-less entity (no detected span covers it) between two asserted
+        // languages is left unset rather than defaulting to the first asserted.
+        let asserted = [
+            LanguageClaim::asserted(tag("pl")),
+            LanguageClaim::asserted(tag("en")),
+        ];
+        let detected =
+            [LanguageClaim::detected(tag("en"), Confidence::new(0.9).unwrap()).with_span(0..10)];
+        let view = Languages::new(&asserted, &detected);
+        let mut entities = vec![entity("covered", 2..8), entity("bare_digits", 50..66)];
+        view.stamp(&mut entities);
+        assert_eq!(lang_of(&entities[0]).as_deref(), Some("en"));
+        assert_eq!(lang_of(&entities[1]), None);
     }
 }
 

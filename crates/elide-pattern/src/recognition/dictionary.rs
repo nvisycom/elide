@@ -206,6 +206,35 @@ impl Dictionary {
     /// [`with_terms`]: DictionaryBuilder::with_terms
     /// [`build`]: DictionaryBuilder::build
     pub fn metadata_from_toml(raw: &str) -> Result<DictionaryBuilder> {
+        Ok(Self::parse_metadata(raw)?.0)
+    }
+
+    /// Build a dictionary from a sidecar metadata TOML paired with a CSV term
+    /// source, honoring the metadata's `has_headers` flag.
+    ///
+    /// This is the composed form of [`metadata_from_toml`] +
+    /// [`Term::from_csv_with_headers`] + [`with_terms`]: when the sidecar sets
+    /// `has_headers = true`, the CSV's first row is skipped so its column
+    /// headers are not indexed as terms. The returned builder still needs
+    /// [`build`] (so a caller can layer on further overrides first).
+    ///
+    /// # Errors
+    ///
+    /// Returns a validation error when either source is malformed.
+    ///
+    /// [`metadata_from_toml`]: Self::metadata_from_toml
+    /// [`Term::from_csv_with_headers`]: crate::Term::from_csv_with_headers
+    /// [`with_terms`]: DictionaryBuilder::with_terms
+    /// [`build`]: DictionaryBuilder::build
+    pub fn metadata_with_csv(metadata_toml: &str, csv: &str) -> Result<DictionaryBuilder> {
+        let (builder, has_headers) = Self::parse_metadata(metadata_toml)?;
+        let terms = Term::from_csv_with_headers(csv, has_headers)?;
+        Ok(builder.with_terms(terms))
+    }
+
+    /// Parse the sidecar metadata into a seeded builder and its `has_headers`
+    /// flag (which is a term-loading concern, not a `Dictionary` field).
+    fn parse_metadata(raw: &str) -> Result<(DictionaryBuilder, bool)> {
         let metadata: DictionaryMetadata = toml::from_str(raw).map_err(|e| {
             Error::new(
                 ErrorKind::Configuration,
@@ -230,7 +259,7 @@ impl Dictionary {
         if let Some(countries) = metadata.countries {
             builder = builder.with_countries(countries);
         }
-        Ok(builder)
+        Ok((builder, metadata.has_headers))
     }
 }
 
@@ -248,4 +277,53 @@ struct DictionaryMetadata {
     languages: Option<Vec<LanguageTag>>,
     #[serde(default)]
     countries: Option<Vec<CountryCode>>,
+    /// Whether a paired CSV term source carries a header row to skip.
+    /// Defaults to `false` so headerless built-in sources are unaffected;
+    /// honored by [`Dictionary::metadata_with_csv`].
+    #[serde(default)]
+    has_headers: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const META_HEADERS: &str = r#"
+name = "widgets"
+labels = ["PRODUCT"]
+has_headers = true
+"#;
+
+    const META_NO_HEADERS: &str = r#"
+name = "widgets"
+labels = ["PRODUCT"]
+"#;
+
+    const CSV: &str = "code,alias\nWIDGET,wdg\n";
+
+    #[test]
+    fn metadata_with_csv_skips_header_when_declared() {
+        let dict = Dictionary::metadata_with_csv(META_HEADERS, CSV)
+            .unwrap()
+            .build()
+            .unwrap();
+        let words: Vec<&str> = dict.terms.iter().map(|t| t.term.as_str()).collect();
+        assert!(!words.contains(&"code"), "header leaked as term: {words:?}");
+        assert!(!words.contains(&"alias"));
+        assert!(words.contains(&"WIDGET"));
+        assert!(words.contains(&"wdg"));
+    }
+
+    #[test]
+    fn metadata_with_csv_keeps_first_row_by_default() {
+        let dict = Dictionary::metadata_with_csv(META_NO_HEADERS, CSV)
+            .unwrap()
+            .build()
+            .unwrap();
+        let words: Vec<&str> = dict.terms.iter().map(|t| t.term.as_str()).collect();
+        // No header flag: the first row is data, as for the shipped headerless
+        // dictionaries.
+        assert!(words.contains(&"code"));
+        assert!(words.contains(&"WIDGET"));
+    }
 }
