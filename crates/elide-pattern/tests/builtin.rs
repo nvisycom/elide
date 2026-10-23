@@ -133,15 +133,23 @@ async fn builtin_personal() {
     assert_label_present!(entities, builtins::LANGUAGE.to_ref());
 }
 
-/// A phone-shaped digit run that is actually a suffix of a longer identifier
-/// (a spaced IBAN or a payment card) must not surface as a phone number. The
-/// loose phone regex has no left word boundary, so a match can start inside
-/// such a token; the `phone` validator (libphonenumber) is what rejects the
-/// run as not a real number for the asserted region. Asserting the country is
-/// the adversarial case — it enables national-format acceptance — so these
-/// scan with a country set.
+/// A phone-shaped digit run that is actually part of a longer token must not
+/// surface as a phone number. The bare digit-led form of the phone regex
+/// carries a `\b`, so it has to start a token; the `+country` and `(area)`
+/// forms begin with a non-word character and so stay matchable even when glued
+/// to a preceding token. The `phone` validator (libphonenumber) rejects the
+/// rest. The country is asserted because that is the adversarial case — it
+/// enables national-format acceptance.
 #[tokio::test]
-async fn phone_does_not_match_identifier_suffixes() {
+async fn phone_does_not_match_inside_longer_tokens() {
+    // Mid-token start: `212 555 0100` is a valid US number shape, but here it
+    // begins immediately after letters, so it is part of `X212…`, not a phone.
+    // The digit-led `\b` is what rejects this (the validator would accept it).
+    let (_, entities) = scan_in_country("ref X212 555 0100 end", "US").await;
+    assert_label_absent!(entities, builtins::PHONE_NUMBER.to_ref());
+    let (_, entities) = scan_in_country("ABC212 555 0100", "US").await;
+    assert_label_absent!(entities, builtins::PHONE_NUMBER.to_ref());
+
     // Spaced IBAN: a run like `61 1090 1014 0000 0712` can be matched by the
     // phone regex, but is not a valid phone number.
     let (_, entities) = scan_in_country("PL61 1090 1014 0000 0712 1981 2874", "PL").await;
@@ -154,4 +162,13 @@ async fn phone_does_not_match_identifier_suffixes() {
     // Prefixed IBAN.
     let (_, entities) = scan_in_country("GB29 NWBK 6016 1331 9268 19", "GB").await;
     assert_label_absent!(entities, builtins::PHONE_NUMBER.to_ref());
+
+    // A genuine number with surrounding words is still detected.
+    let (_, entities) = scan_in_country("call +1 212 555 0100 today", "US").await;
+    assert_label_present!(entities, builtins::PHONE_NUMBER.to_ref());
+
+    // A `+country` number glued to a preceding token (no separator) still
+    // matches — the boundary requirement is only on the bare digit-led form.
+    let (_, entities) = scan_in_country("a@b.com+1 (628) 555-0175", "US").await;
+    assert_label_present!(entities, builtins::PHONE_NUMBER.to_ref());
 }
