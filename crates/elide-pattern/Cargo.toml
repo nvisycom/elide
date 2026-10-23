@@ -50,6 +50,7 @@ aho-corasick = { workspace = true, features = [] }
 bs58 = { workspace = true, features = ["check"] }
 iban_validate = { workspace = true, features = [] }
 phonenumber = { workspace = true, features = [] }
+jiff = { workspace = true, features = [] }
 
 [dev-dependencies]
 # Internal crates
