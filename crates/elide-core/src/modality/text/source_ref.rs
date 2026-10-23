@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 /// A reference back to the original source: a byte range, and, for a container
 /// whose body spans several files, which part that range indexes.
 ///
-/// [`TextLocation`]'s `range` indexes the *decoded* text stream a codec hands
+/// [`TextLocation`]'s `span` indexes the *decoded* text stream a codec hands
 /// the pipeline (entities resolved, container parts concatenated). A `SourceRef`
-/// is the *exact raw* byte range the decoded range came from, accounting for XML
+/// is the *exact raw* byte range the decoded span came from, accounting for XML
 /// escapes where `&amp;` (5 raw bytes) decodes to `&` (1). `part` names the
 /// container file the range is in (`word/header1.xml`) for a multi-file body
 /// like DOCX, and is `None` for a single-file source (XML, HTML). It lets a
