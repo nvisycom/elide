@@ -125,7 +125,7 @@ impl Stream<Text> for MockStream {
 
     fn chunks(&self) -> Result<Vec<Chunk<Text>>> {
         Ok(vec![Chunk {
-            location: TextLocation::new(0, self.body.len()),
+            location: TextLocation::inline(0..self.body.len()),
             data: TextData::new(self.body.clone()),
             hints: Vec::new(),
         }])

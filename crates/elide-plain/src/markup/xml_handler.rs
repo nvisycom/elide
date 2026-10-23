@@ -254,12 +254,12 @@ mod tests {
         // Redact "Carter", value-local [6, 12).
         let lifted = doc
             .stream
-            .lift(&chunk, TextLocation::new(6, 12))
+            .lift(&chunk, TextLocation::inline(6..12))
             .expect("in bounds");
         // "Carter" sits at raw bytes 18..24 in the document.
         let want = "<root><name>Alice Carter".find("Carter").unwrap();
         assert_eq!(
-            lifted.source(),
+            lifted.source_refs(),
             &[SourceRef::new(want..want + "Carter".len())][..]
         );
         assert_eq!(&raw[want..want + 6], "Carter");
@@ -272,7 +272,7 @@ mod tests {
         let raw = "<root><name>Alice</name></root>";
         let mut doc = load(raw);
         let at = raw.find("Alice").unwrap();
-        let location = TextLocation::from_source([SourceRef::new(at..at + "Alice".len())]);
+        let location = TextLocation::marked_source(SourceRef::new(at..at + "Alice".len()));
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("[NAME]"));
         doc.stream.write_at(rs).await.unwrap();
@@ -288,10 +288,10 @@ mod tests {
         let raw = "<root><name>Alice</name></root>";
         let mut doc = load(raw);
         let at = raw.find("Alice").unwrap();
-        let location = TextLocation::from_source([SourceRef::in_part(
+        let location = TextLocation::marked_source(SourceRef::in_part(
             at..at + "Alice".len(),
             "some/part.xml",
-        )]);
+        ));
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("[NAME]"));
         let err = doc
@@ -310,7 +310,7 @@ mod tests {
         let raw = "<root><name>Alice</name></root>";
         let mut doc = load(raw);
         let past = raw.len() + 4;
-        let location = TextLocation::from_source([SourceRef::new(past..past + 3)]);
+        let location = TextLocation::marked_source(SourceRef::new(past..past + 3));
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("[NAME]"));
         let err = doc
@@ -360,9 +360,9 @@ mod tests {
         let mut doc = load(raw);
         let chunk = chunk_where(&mut doc, |t| t.contains("alice@example.com"));
         let at = chunk.data.as_str().find("alice@example.com").unwrap();
-        let loc = TextLocation::new(
-            chunk.location.range().unwrap().start + at,
-            chunk.location.range().unwrap().start + at + "alice@example.com".len(),
+        let loc = TextLocation::inline(
+            chunk.location.range().unwrap().start + at
+                ..chunk.location.range().unwrap().start + at + "alice@example.com".len(),
         );
         let mut rs = Redactions::new();
         rs.push(loc, TextReplacement::substituted("[EMAIL]"));
@@ -387,9 +387,9 @@ mod tests {
         let mut doc = Doc::new(raw, MarkupConfig::lenient(TEST_BLOCKS, &["script"]));
         let chunk = chunk_where(&mut doc, |t| t.contains("alice@example.com"));
         let at = chunk.data.as_str().find("alice@example.com").unwrap();
-        let loc = TextLocation::new(
-            chunk.location.range().unwrap().start + at,
-            chunk.location.range().unwrap().start + at + "alice@example.com".len(),
+        let loc = TextLocation::inline(
+            chunk.location.range().unwrap().start + at
+                ..chunk.location.range().unwrap().start + at + "alice@example.com".len(),
         );
         let mut rs = Redactions::new();
         rs.push(loc, TextReplacement::substituted("[EMAIL]"));

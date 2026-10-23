@@ -184,7 +184,7 @@ mod tests {
     use crate::vault::InMemoryVault;
 
     fn entity(label: &str, coref: Option<&str>) -> Entity<Text> {
-        let location = TextLocation::new(0, 1);
+        let location = TextLocation::inline(0..1);
         let event = AuditEvent::pattern(
             "t",
             Confidence::MAX,

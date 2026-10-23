@@ -39,8 +39,11 @@ impl Stream<Text> for PdfStream {
         Ok((0..self.state.page_count())
             .filter_map(|i| self.state.page(i))
             .map(|page| Chunk {
-                location: TextLocation::new(0, page.text.len())
-                    .with_rects(page.number, [UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0)]),
+                location: TextLocation::rendered(
+                    0..page.text.len(),
+                    page.number,
+                    [UnitBoundingBox::new(0.0, 0.0, 1.0, 1.0)],
+                ),
                 data: TextData::new(page.text.clone()),
                 hints: Vec::new(),
             })
@@ -78,7 +81,7 @@ impl Stream<Text> for PdfStream {
         // PDF text has no flat source byte coordinate (glyph runs in content
         // streams), so no byte anchor is carried — only the page-local span and
         // the rendered rectangles.
-        Some(TextLocation::new(local_range.start, local_range.end).with_rects(number, rects))
+        Some(TextLocation::rendered(local_range.clone(), number, rects))
     }
 }
 

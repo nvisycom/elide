@@ -136,7 +136,7 @@ mod tests {
     use super::*;
 
     fn entity(label: &str, start: usize, end: usize, conf: f32) -> Entity<Text> {
-        let loc = TextLocation::new(start, end);
+        let loc = TextLocation::inline(start..end);
         let confidence = Confidence::new(conf).unwrap();
         let event = AuditEvent::pattern("t", confidence, loc.clone(), PatternEvent::default());
         Entity::new(LabelRef::new(label), loc, AuditLog::new(event))

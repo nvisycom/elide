@@ -54,7 +54,7 @@ impl Recognizer<Text> for PiiRecognizer {
         while let Some(rel) = text[from..].find(PII) {
             let start = from + rel;
             let end = start + PII.len();
-            let loc = TextLocation::new(start, end);
+            let loc = TextLocation::inline(start..end);
             let event = AuditEvent::pattern(
                 "mock-pii",
                 Confidence::MAX,

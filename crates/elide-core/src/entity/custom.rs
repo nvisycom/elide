@@ -23,7 +23,7 @@ use crate::primitive::Confidence;
 /// # use elide_core::entity::{Entity, LabelRef};
 /// # use elide_core::entity::audit::Attribution;
 /// # use elide_core::modality::text::{Text, TextLocation};
-/// let custom: Entity<Text> = Entity::custom(LabelRef::new("US_SSN"), TextLocation::new(0, 9))
+/// let custom: Entity<Text> = Entity::custom(LabelRef::new("US_SSN"), TextLocation::inline(0..9))
 ///     .by("reviewer-7")
 ///     .because(Attribution::freeform("gdpr-art-17"))
 ///     .build();

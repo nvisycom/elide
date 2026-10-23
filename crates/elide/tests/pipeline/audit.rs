@@ -12,7 +12,7 @@ fn redacted_entity(label: &str) -> Entity<Text> {
     use elide::entity::audit::{Redaction, RuleMatch};
     use elide::redaction::{LeakProfile, OperatorId};
 
-    let location = TextLocation::new(0, 5);
+    let location = TextLocation::inline(0..5);
     let conf = Confidence::new(0.9).unwrap();
     let mut audit = AuditLog::new(AuditEvent::pattern(
         "t",

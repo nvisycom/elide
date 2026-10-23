@@ -158,7 +158,7 @@ impl<M: Modality> Entity<M> {
     /// # use elide_core::entity::{Entity, LabelRef};
     /// # use elide_core::modality::text::{Text, TextLocation};
     /// let custom: Entity<Text> =
-    ///     Entity::custom(LabelRef::new("US_SSN"), TextLocation::new(0, 9)).build();
+    ///     Entity::custom(LabelRef::new("US_SSN"), TextLocation::inline(0..9)).build();
     /// ```
     ///
     /// [`id`]: Entity::id
@@ -291,7 +291,7 @@ impl Entity<crate::modality::text::Text> {
         use crate::entity::audit::PatternEvent;
         use crate::modality::text::TextLocation;
 
-        let location = TextLocation::new(loc.0, loc.1);
+        let location = TextLocation::inline(loc.0..loc.1);
         let event = AuditEvent::pattern(
             "test",
             confidence,
@@ -313,7 +313,7 @@ mod tests {
     use crate::modality::text::{Text, TextLocation};
 
     fn text_entity() -> Entity<Text> {
-        let loc = TextLocation::new(0, 5);
+        let loc = TextLocation::inline(0..5);
         let conf = Confidence::MAX;
         let birth = AuditEvent::pattern("t", conf, loc.clone(), PatternEvent::default());
         Entity::new(LabelRef::new("NAME"), loc, AuditLog::new(birth))
@@ -321,7 +321,7 @@ mod tests {
 
     #[test]
     fn custom_builds_a_manual_entity_at_max_confidence() {
-        let loc = TextLocation::new(3, 12);
+        let loc = TextLocation::inline(3..12);
         let entity = Entity::<Text>::custom("US_SSN", loc.clone()).build();
 
         assert_eq!(entity.label, LabelRef::new("US_SSN"));
@@ -346,7 +346,7 @@ mod tests {
 
     #[test]
     fn custom_carries_actor_and_attribution_on_one_event() {
-        let loc = TextLocation::new(3, 12);
+        let loc = TextLocation::inline(3..12);
         let entity = Entity::<Text>::custom("US_SSN", loc)
             .by("reviewer-7")
             .because(Attribution::freeform("gdpr-art-17"))

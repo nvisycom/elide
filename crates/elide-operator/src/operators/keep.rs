@@ -124,7 +124,7 @@ mod tests {
     use super::Keep;
 
     fn text_entity() -> Entity<Text> {
-        let location = TextLocation::new(0, 5);
+        let location = TextLocation::inline(0..5);
         let event = AuditEvent::pattern(
             "t",
             Confidence::MAX,

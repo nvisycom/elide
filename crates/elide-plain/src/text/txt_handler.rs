@@ -61,7 +61,7 @@ impl Stream<Text> for TxtHandler {
             .blocks
             .iter()
             .map(|range| Chunk {
-                location: TextLocation::new(range.start, range.end),
+                location: TextLocation::inline(range.clone()),
                 data: TextData::new(self.text[range.clone()].to_string()),
                 hints: Vec::new(),
             })
@@ -80,7 +80,7 @@ impl Stream<Text> for TxtHandler {
         if start > end || end > chunk_range.end {
             return None;
         }
-        Some(TextLocation::new(start, end))
+        Some(TextLocation::inline(start..end))
     }
 }
 
@@ -256,7 +256,9 @@ mod tests {
         let chunk = h.chunks().unwrap().into_iter().next().unwrap();
         // A span crossing the internal line break lifts unchanged, this is
         // what makes a multi-line pattern redactable.
-        let lifted = h.lift(&chunk, TextLocation::new(3, 8)).expect("in bounds");
+        let lifted = h
+            .lift(&chunk, TextLocation::inline(3..8))
+            .expect("in bounds");
         let lifted_range = lifted.range().unwrap();
         assert_eq!(lifted_range.start, 3);
         assert_eq!(lifted_range.end, 8);
@@ -265,7 +267,7 @@ mod tests {
     #[tokio::test]
     async fn read_returns_a_cross_line_span() -> Result<()> {
         let h = handler("hello\nworld\n");
-        let loc = TextLocation::new(3, 8);
+        let loc = TextLocation::inline(3..8);
         assert_eq!(h.read_at(&loc).await?.unwrap().as_str(), "lo\nwo");
         Ok(())
     }
@@ -278,7 +280,7 @@ mod tests {
         let end = src.find("-----END KEY-----").unwrap() + "-----END KEY-----".len();
         let mut rs = Redactions::new();
         rs.push(
-            TextLocation::new(begin, end),
+            TextLocation::inline(begin..end),
             TextReplacement::substituted("[KEY]"),
         );
         h.write_at(rs).await?;
@@ -291,10 +293,13 @@ mod tests {
         let mut h = handler("alpha\nbravo\ncharlie\n");
         let mut rs = Redactions::new();
         rs.push(
-            TextLocation::new(12, 19),
+            TextLocation::inline(12..19),
             TextReplacement::substituted("[C]"),
         );
-        rs.push(TextLocation::new(0, 5), TextReplacement::substituted("[A]"));
+        rs.push(
+            TextLocation::inline(0..5),
+            TextReplacement::substituted("[A]"),
+        );
         h.write_at(rs).await?;
         assert_eq!(h.text(), "[A]\nbravo\n[C]\n");
         Ok(())
@@ -305,7 +310,7 @@ mod tests {
         let mut h = handler("one line");
         let mut rs = Redactions::new();
         rs.push(
-            TextLocation::new(999, 1000),
+            TextLocation::inline(999..1000),
             TextReplacement::substituted("nope"),
         );
         h.write_at(rs).await?;
@@ -356,7 +361,7 @@ mod tests {
         let mut batch = Redactions::new();
         // "contact " = 8 bytes; the email is 18 → 8..26.
         batch.push(
-            TextLocation::new(8, 26),
+            TextLocation::inline(8..26),
             TextReplacement::substituted("[EMAIL]"),
         );
         DataWriter::write_at(stream, batch).await?;

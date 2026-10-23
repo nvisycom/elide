@@ -486,7 +486,7 @@ mod tests {
         /// A single-chunk source whose one chunk is `text` at `[0, len)`.
         fn single(text: &str) -> Self {
             let len = text.len();
-            let chunk = Chunk::new(TextLocation::new(0, len), TextData::new(text.to_owned()));
+            let chunk = Chunk::new(TextLocation::inline(0..len), TextData::new(text.to_owned()));
             Self(vec![chunk])
         }
     }
@@ -501,7 +501,7 @@ mod tests {
             // text); rebase it onto the chunk's start, as a real text stream does.
             let start = chunk.location.range().map(|r| r.start).unwrap_or(0);
             let local = entity.location.range()?.clone();
-            entity.location = TextLocation::new(start + local.start, start + local.end);
+            entity.location = TextLocation::inline(start + local.start..start + local.end);
             Some(entity)
         }
     }
@@ -543,7 +543,7 @@ mod tests {
 
     fn detected(label: &str, loc: (usize, usize)) -> Entity<Text> {
         let label = LabelRef::new(label.to_owned());
-        let location = TextLocation::new(loc.0, loc.1);
+        let location = TextLocation::inline(loc.0..loc.1);
         let confidence = Confidence::new(0.9).unwrap();
         let event = AuditEvent::pattern(
             "mock",
@@ -574,8 +574,8 @@ mod tests {
         let mut a = VecTextSource::single("aaa");
         let mut b = VecTextSource::single("bbb");
         let mut c = VecTextSource(vec![
-            Chunk::new(TextLocation::new(0, 3), TextData::new("ccc".to_owned())),
-            Chunk::new(TextLocation::new(3, 6), TextData::new("ddd".to_owned())),
+            Chunk::new(TextLocation::inline(0..3), TextData::new("ccc".to_owned())),
+            Chunk::new(TextLocation::inline(3..6), TextData::new("ddd".to_owned())),
         ]);
         let mut sources: Vec<&mut VecTextSource> = vec![&mut a, &mut b, &mut c];
 
@@ -606,8 +606,8 @@ mod tests {
 
         let mut a = VecTextSource::single("aaa");
         let mut c = VecTextSource(vec![
-            Chunk::new(TextLocation::new(0, 3), TextData::new("ccc".to_owned())),
-            Chunk::new(TextLocation::new(3, 6), TextData::new("ddd".to_owned())),
+            Chunk::new(TextLocation::inline(0..3), TextData::new("ccc".to_owned())),
+            Chunk::new(TextLocation::inline(3..6), TextData::new("ddd".to_owned())),
         ]);
         let mut sources: Vec<&mut VecTextSource> = vec![&mut a, &mut c];
 

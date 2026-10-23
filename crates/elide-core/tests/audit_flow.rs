@@ -44,11 +44,11 @@ fn two_recognizers_fuse_into_one() {
     let pattern_conf = Confidence::new(0.8).unwrap();
     let pattern = recognized(
         &phone,
-        TextLocation::new(10, 22),
+        TextLocation::inline(10..22),
         AuditEvent::pattern(
             "us-phone-pattern",
             pattern_conf,
-            TextLocation::new(10, 22),
+            TextLocation::inline(10..22),
             PatternEvent {
                 name: "phone".into(),
                 regex: Some("\\d{3}-\\d{3}-\\d{4}".into()),
@@ -62,11 +62,11 @@ fn two_recognizers_fuse_into_one() {
     let ner_conf = Confidence::new(0.95).unwrap();
     let ner = recognized(
         &phone,
-        TextLocation::new(10, 23),
+        TextLocation::inline(10..23),
         AuditEvent::model(
             "ner-model",
             ner_conf,
-            TextLocation::new(10, 23),
+            TextLocation::inline(10..23),
             ModelEvent {
                 name: "ner-model".into(),
                 version: Some("2024.1".into()),
@@ -271,11 +271,11 @@ fn recognizer_context_carries_annotations() {
     use elide_core::recognition::annotation::{Annotations, Exclusion, Inclusion};
     use elide_core::recognition::{Context, Scope};
 
-    let inclusion = Inclusion::new(TextLocation::new(0, 5))
+    let inclusion = Inclusion::new(TextLocation::inline(0..5))
         .with_name("uploaded selection")
         .with_label(LabelRef::new("PERSON"))
         .with_confidence(Confidence::new(0.9).unwrap());
-    let exclusion = Exclusion::new(TextLocation::new(10, 20));
+    let exclusion = Exclusion::new(TextLocation::inline(10..20));
     let scope = Scope::new();
     let annotations: Annotations<Text> = Annotations::new()
         .with_inclusions(vec![inclusion])
@@ -283,7 +283,7 @@ fn recognizer_context_carries_annotations() {
     let ctx = Context::new(&scope).with_annotations(&annotations);
 
     assert_eq!(ctx.inclusions().len(), 1);
-    assert_eq!(ctx.inclusions()[0].location, TextLocation::new(0, 5));
+    assert_eq!(ctx.inclusions()[0].location, TextLocation::inline(0..5));
     assert_eq!(
         ctx.inclusions()[0].name.as_deref(),
         Some("uploaded selection")
@@ -295,7 +295,7 @@ fn recognizer_context_carries_annotations() {
     );
 
     assert_eq!(ctx.exclusions().len(), 1);
-    assert_eq!(ctx.exclusions()[0].location, TextLocation::new(10, 20));
+    assert_eq!(ctx.exclusions()[0].location, TextLocation::inline(10..20));
 }
 
 #[test]

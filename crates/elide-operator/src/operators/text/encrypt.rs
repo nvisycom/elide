@@ -227,7 +227,7 @@ mod tests {
     use super::*;
 
     fn entity() -> Entity<Text> {
-        let location = TextLocation::new(0, 5);
+        let location = TextLocation::inline(0..5);
         let event = AuditEvent::pattern(
             "t",
             Confidence::MAX,
@@ -310,13 +310,13 @@ mod tests {
         let op = AesEncrypt::new(Arc::new(PerLabel));
 
         let card = {
-            let loc = TextLocation::new(0, 5);
+            let loc = TextLocation::inline(0..5);
             let event =
                 AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
             Entity::<Text>::new(LabelRef::new("payment_card"), loc, AuditLog::new(event))
         };
         let ssn = {
-            let loc = TextLocation::new(0, 5);
+            let loc = TextLocation::inline(0..5);
             let event =
                 AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
             Entity::<Text>::new(LabelRef::new("ssn"), loc, AuditLog::new(event))

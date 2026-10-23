@@ -85,7 +85,7 @@ async fn decode_redact_reencode_round_trip() {
     let mut batch = Redactions::new();
     // "contact " is 8 bytes; "alice@example.test" is 18 → 8..26.
     batch.push(
-        TextLocation::new(8, 26),
+        TextLocation::inline(8..26),
         TextReplacement::substituted("[EMAIL]"),
     );
     stream.write_at(batch).await.expect("redacted");

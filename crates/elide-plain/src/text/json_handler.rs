@@ -388,7 +388,7 @@ impl Stream<Text> for JsonHandler {
                 };
                 let start = self.decoded_offset_of(idx);
                 Some(Chunk {
-                    location: TextLocation::new(start, start + leaf.value.len()),
+                    location: TextLocation::inline(start..start + leaf.value.len()),
                     data: TextData::new(leaf.value.clone()),
                     hints: leaf.hints.clone(),
                 })
@@ -417,10 +417,10 @@ impl Stream<Text> for JsonHandler {
         let source_start = leaf.value_to_source(source_slot_start, local_range.start)?;
         let source_end = leaf.value_to_source(source_slot_start, local_range.end)?;
 
-        Some(
-            TextLocation::new(decoded_start, decoded_end)
-                .with_source([SourceRef::new(source_start..source_end)]),
-        )
+        Some(TextLocation::source(
+            decoded_start..decoded_end,
+            [SourceRef::new(source_start..source_end)],
+        ))
     }
 }
 
@@ -534,7 +534,7 @@ impl JsonHandler {
     /// it and report success while ignoring the rest, leaving the caller's later
     /// coordinates unredacted under a green audit.
     fn resolve(&self, location: &TextLocation) -> Result<Option<LeafEdit>> {
-        match location.source().split_first() {
+        match location.source_refs().split_first() {
             Some((first, rest)) => self.resolve_source(first, rest),
             None => self.resolve_range(location),
         }
@@ -842,9 +842,9 @@ mod tests {
         let at = value.find("alice").unwrap();
         let mut rs = Redactions::new();
         rs.push(
-            TextLocation::new(
-                chunk.location.range().unwrap().start + at,
-                chunk.location.range().unwrap().start + at + "alice".len(),
+            TextLocation::inline(
+                chunk.location.range().unwrap().start + at
+                    ..chunk.location.range().unwrap().start + at + "alice".len(),
             ),
             TextReplacement::substituted("[USER]"),
         );
@@ -864,9 +864,9 @@ mod tests {
         let at = value.find("bar").unwrap();
         let mut rs = Redactions::new();
         rs.push(
-            TextLocation::new(
-                chunk.location.range().unwrap().start + at,
-                chunk.location.range().unwrap().start + at + "bar".len(),
+            TextLocation::inline(
+                chunk.location.range().unwrap().start + at
+                    ..chunk.location.range().unwrap().start + at + "bar".len(),
             ),
             TextReplacement::substituted("XXX"),
         );
@@ -909,9 +909,9 @@ mod tests {
         let at = value.find("bar").unwrap();
         let mut rs = Redactions::new();
         rs.push(
-            TextLocation::new(
-                chunk.location.range().unwrap().start + at,
-                chunk.location.range().unwrap().start + at + "bar".len(),
+            TextLocation::inline(
+                chunk.location.range().unwrap().start + at
+                    ..chunk.location.range().unwrap().start + at + "bar".len(),
             ),
             TextReplacement::substituted("XXX"),
         );
@@ -933,7 +933,7 @@ mod tests {
         let src = format!("{{\"msg\":\"caf{} bar\"}}", "\\u00e9");
         let mut h = handler(&src);
         let raw_at = src.find("bar").unwrap();
-        let location = TextLocation::from_source([SourceRef::new(raw_at..raw_at + "bar".len())]);
+        let location = TextLocation::marked_source(SourceRef::new(raw_at..raw_at + "bar".len()));
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("XXX"));
         h.write_at(rs).await?;
@@ -952,7 +952,7 @@ mod tests {
         let mut h = handler(src);
         let open = src.find(r#""bcd""#).unwrap();
         let close = open + r#""bcd""#.len();
-        let location = TextLocation::from_source([SourceRef::new(open..close)]);
+        let location = TextLocation::marked_source(SourceRef::new(open..close));
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("X"));
         h.write_at(rs).await?;
@@ -1014,7 +1014,7 @@ mod tests {
         let mut h = handler(src);
         let at = src.find("bcd").unwrap();
         let location =
-            TextLocation::from_source([SourceRef::in_part(at..at + 3, "some/part.json")]);
+            TextLocation::marked_source(SourceRef::in_part(at..at + 3, "some/part.json"));
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("X"));
         let err = h
@@ -1033,7 +1033,7 @@ mod tests {
         // explicit source that resolves to no leaf must error, not silently
         // drop the edit.
         let mut h = handler(r#"{"a":"b"}"#);
-        let location = TextLocation::from_source([SourceRef::new(0..1)]);
+        let location = TextLocation::marked_source(SourceRef::new(0..1));
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("X"));
         let err = h
@@ -1053,7 +1053,7 @@ mod tests {
         let src = r#"{"a":"b"}"#;
         let mut h = handler(src);
         let past = src.len() + 4;
-        let location = TextLocation::from_source([SourceRef::new(past..past + 2)]);
+        let location = TextLocation::marked_source(SourceRef::new(past..past + 2));
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("X"));
         let err = h
@@ -1077,7 +1077,8 @@ mod tests {
         // Two non-adjacent single-byte refs (`b` and `d`) within the one value;
         // their bounding value range is the whole `bcd`.
         let location =
-            TextLocation::from_source([SourceRef::new(b..b + 1), SourceRef::new(b + 2..b + 3)]);
+            TextLocation::marked_sources([SourceRef::new(b..b + 1), SourceRef::new(b + 2..b + 3)])
+                .unwrap();
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("X"));
         h.write_at(rs).await?;
@@ -1097,8 +1098,11 @@ mod tests {
         let mut h = handler(src);
         let b = src.find("bcd").unwrap();
         let past = src.len() + 4;
-        let location =
-            TextLocation::from_source([SourceRef::new(b..b + 1), SourceRef::new(past..past + 2)]);
+        let location = TextLocation::marked_sources([
+            SourceRef::new(b..b + 1),
+            SourceRef::new(past..past + 2),
+        ])
+        .unwrap();
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("X"));
         let err = h
@@ -1123,7 +1127,8 @@ mod tests {
         let b = src.find("bcd").unwrap();
         let f = src.find("fgh").unwrap();
         let location =
-            TextLocation::from_source([SourceRef::new(b..b + 1), SourceRef::new(f..f + 1)]);
+            TextLocation::marked_sources([SourceRef::new(b..b + 1), SourceRef::new(f..f + 1)])
+                .unwrap();
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("X"));
         let err = h
@@ -1145,7 +1150,7 @@ mod tests {
         let src = r#"{"a":"bcd"}"#;
         let mut h = handler(src);
         let open = src.find(r#""bcd""#).unwrap();
-        let location = TextLocation::from_source([SourceRef::new(open..open + 1)]);
+        let location = TextLocation::marked_source(SourceRef::new(open..open + 1));
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("X"));
         let err = h
@@ -1166,7 +1171,7 @@ mod tests {
         let src = r#"{"a":"bcd"}"#;
         let mut h = handler(src);
         let close = src.find(r#""bcd""#).unwrap() + r#""bcd""#.len() - 1;
-        let location = TextLocation::from_source([SourceRef::new(close..close + 1)]);
+        let location = TextLocation::marked_source(SourceRef::new(close..close + 1));
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("X"));
         let err = h
@@ -1188,7 +1193,7 @@ mod tests {
         let src = r#"{"a":"bcd"}"#;
         let mut h = handler(src);
         let c = src.find("bcd").unwrap() + 1;
-        let location = TextLocation::from_source([SourceRef::new(c..c)]);
+        let location = TextLocation::marked_source(SourceRef::new(c..c));
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("X"));
         let err = h
@@ -1209,7 +1214,7 @@ mod tests {
         let src = r#"{"a":12345}"#;
         let mut h = handler(src);
         let mid = src.find("12345").unwrap() + 2;
-        let location = TextLocation::from_source([SourceRef::new(mid..mid)]);
+        let location = TextLocation::marked_source(SourceRef::new(mid..mid));
         let mut rs = Redactions::new();
         rs.push(location, TextReplacement::substituted("X"));
         let err = h
@@ -1226,7 +1231,10 @@ mod tests {
         // Offset 0 is the opening `{`, structural, not an addressable value.
         let mut h = handler(r#"{"a":"b"}"#);
         let mut rs = Redactions::new();
-        rs.push(TextLocation::new(0, 1), TextReplacement::substituted("X"));
+        rs.push(
+            TextLocation::inline(0..1),
+            TextReplacement::substituted("X"),
+        );
         let err = h.write_at(rs).await.expect_err("must reject");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
         Ok(())
@@ -1242,7 +1250,7 @@ mod tests {
         let start = chunk.location.range().unwrap().start;
         let mut rs = Redactions::new();
         rs.push(
-            TextLocation::new(start, start + 5),
+            TextLocation::inline(start..start + 5),
             TextReplacement::substituted("X"),
         );
         let err = h.write_at(rs).await.expect_err("must reject");
@@ -1261,7 +1269,7 @@ mod tests {
         let start = chunk.location.range().unwrap().start;
         let mut rs = Redactions::new();
         rs.push(
-            TextLocation::new(start + 3, start + 4),
+            TextLocation::inline(start + 3..start + 4),
             TextReplacement::substituted("X"),
         );
         let err = h.write_at(rs).await.expect_err("must reject");
@@ -1280,7 +1288,7 @@ mod tests {
         let start = chunk.location.range().unwrap().start;
         let mut rs = Redactions::new();
         rs.push(
-            TextLocation::new(start + 2, start),
+            TextLocation::inline(start + 2..start),
             TextReplacement::substituted("X"),
         );
         let err = h.write_at(rs).await.expect_err("must reject");
@@ -1296,7 +1304,7 @@ mod tests {
         let decoded_len: usize = h.slots.iter().map(Slot::decoded_len).sum();
         let mut rs = Redactions::new();
         rs.push(
-            TextLocation::new(decoded_len, decoded_len + 1),
+            TextLocation::inline(decoded_len..decoded_len + 1),
             TextReplacement::substituted("X"),
         );
         let err = h.write_at(rs).await.expect_err("must reject");
@@ -1376,7 +1384,7 @@ mod tests {
         let value_start = "alice@example.com".find("alice").unwrap();
         let value_end = value_start + "alice".len();
         let lifted = h
-            .lift(&chunk, TextLocation::new(value_start, value_end))
+            .lift(&chunk, TextLocation::inline(value_start..value_end))
             .expect("range is in bounds");
         // Primary range: decoded-stream offset (chunk start + value-local).
         let lifted_range = lifted.range().unwrap();
@@ -1386,7 +1394,7 @@ mod tests {
         // Source: the raw byte span of "alice" in the document.
         let raw = src.find("alice").unwrap();
         assert_eq!(
-            lifted.source(),
+            lifted.source_refs(),
             &[SourceRef::new(raw..raw + "alice".len())][..]
         );
         Ok(())
@@ -1405,7 +1413,7 @@ mod tests {
         let value_start = value.find("bar").unwrap();
         let value_end = value_start + "bar".len();
         let lifted = h
-            .lift(&chunk, TextLocation::new(value_start, value_end))
+            .lift(&chunk, TextLocation::inline(value_start..value_end))
             .expect("range is in bounds");
         // Decoded range: `bar` at value offset 4 (`foo"` = 4 decoded bytes).
         let lifted_range = lifted.range().unwrap();
@@ -1415,7 +1423,7 @@ mod tests {
         // Raw source span: `bar` sits after the 2-byte `\"` escape.
         let raw = src.find("bar").unwrap();
         assert_eq!(
-            lifted.source(),
+            lifted.source_refs(),
             &[SourceRef::new(raw..raw + "bar".len())][..]
         );
         Ok(())
@@ -1430,7 +1438,7 @@ mod tests {
         let value_start = value.find("bar").unwrap();
         let value_end = value_start + "bar".len();
         let source_loc = h
-            .lift(&chunk, TextLocation::new(value_start, value_end))
+            .lift(&chunk, TextLocation::inline(value_start..value_end))
             .expect("range is in bounds");
         let mut rs = Redactions::new();
         rs.push(source_loc, TextReplacement::substituted("XXX"));
