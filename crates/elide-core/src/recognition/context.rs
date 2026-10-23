@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::entity::{Label, LabelCatalog, LabelRef};
 use crate::modality::Modality;
-use crate::primitive::CountryCode;
+use crate::primitive::{CountryCode, LanguageTag};
 use crate::recognition::annotation::{Annotations, Exclusion, Inclusion};
 use crate::recognition::{Languages, Scope, Subject};
 
@@ -159,6 +159,22 @@ impl<'a, M: Modality> Context<'a, M> {
     #[must_use]
     pub fn has_asserted_language(&self) -> bool {
         !self.scope.languages.is_empty()
+    }
+
+    /// The caller-asserted language tags, in the order given.
+    ///
+    /// A detection enricher reads these to decide and scope its work: one
+    /// asserted language is monolingual, so detection can be skipped and every
+    /// entity attributed to it; two or more means the document is mixed, so
+    /// detection still runs — restricted to this set — to attribute each entity
+    /// to the asserted language its own text is in.
+    #[must_use]
+    pub fn asserted_languages(&self) -> Vec<LanguageTag> {
+        self.scope
+            .languages
+            .iter()
+            .map(|claim| claim.language.clone())
+            .collect()
     }
 
     /// The call's languages — the caller-asserted ones (scope) and the ones a

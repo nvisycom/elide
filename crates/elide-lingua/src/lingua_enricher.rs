@@ -54,12 +54,19 @@ impl LinguaEnricher {
         }
     }
 
-    fn detector(&self) -> LinguaDetector {
-        if self.candidates.is_empty() {
+    /// A detector scoped to `asserted` when the caller asserted languages (so a
+    /// mixed document is classified only among the languages it declared), else
+    /// to this enricher's configured candidates, else to every language.
+    fn detector_for(&self, asserted: &[LanguageTag]) -> LinguaDetector {
+        let scope = if asserted.is_empty() {
+            self.candidates.as_slice()
+        } else {
+            asserted
+        };
+        if scope.is_empty() {
             LinguaDetector::for_all_languages()
         } else {
-            LinguaDetector::for_languages(&self.candidates)
-                .unwrap_or_else(LinguaDetector::for_all_languages)
+            LinguaDetector::for_languages(scope).unwrap_or_else(LinguaDetector::for_all_languages)
         }
     }
 }
@@ -81,8 +88,13 @@ impl<M: TextRecognizable> Enricher<M> for LinguaEnricher {
     }
 
     async fn enrich(&self, subject: &mut Subject<M>, ctx: &Context<'_, M>) -> Result<()> {
-        // A caller-asserted language is authoritative; skip detection.
-        if ctx.has_asserted_language() {
+        // One asserted language is authoritative and monolingual: skip detection
+        // and let every entity be attributed to it. Two or more means a mixed
+        // document, so detection still runs, but restricted to the asserted set,
+        // so each entity is attributed to the asserted language its own text is
+        // in rather than to whichever was asserted first.
+        let asserted = ctx.asserted_languages();
+        if asserted.len() == 1 {
             return Ok(());
         }
         // No recognizable text at this chunk (an un-transcribed clip, an
@@ -92,7 +104,7 @@ impl<M: TextRecognizable> Enricher<M> for LinguaEnricher {
         };
         // Detect into an owned list first so the immutable borrow of the payload
         // text ends before `detect_language` takes `&mut subject`.
-        let detections = self.detector().detect(text)?;
+        let detections = self.detector_for(&asserted).detect(text)?;
         for detection in detections {
             subject.detect_language(detection);
         }
@@ -143,7 +155,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn asserted_language_skips_detection() {
+    async fn single_asserted_language_skips_detection() {
         let de: LanguageTag = "de".parse().unwrap();
         let data = TextData::new("The quick brown fox");
         let scope = Scope::new().with_language(de);
@@ -154,10 +166,42 @@ mod tests {
             .await
             .unwrap();
         // Only the asserted German remains; English was never detected.
+        assert!(subject.detected_languages().is_empty());
         assert_eq!(ctx.languages(&subject).ranked().len(), 1);
         assert_eq!(
             ctx.languages(&subject).primary().unwrap().primary_subtag(),
             "de"
+        );
+    }
+
+    #[tokio::test]
+    async fn multiple_asserted_languages_detect_within_the_asserted_set() {
+        // Two asserted languages means a mixed document: detection still runs, so
+        // each region can be attributed, but restricted to the asserted set. The
+        // text is English, and English is one of the two asserted, so a spanned
+        // `en` detection is added alongside the asserted claims.
+        let scope = Scope::new()
+            .with_language("pl".parse::<LanguageTag>().unwrap())
+            .with_language("en".parse::<LanguageTag>().unwrap());
+        let data = TextData::new("The quick brown fox jumps over the lazy dog.");
+        let ctx = Context::<Text>::new(&scope);
+        let mut subject = Subject::new(data);
+        LinguaEnricher::unrestricted()
+            .enrich(&mut subject, &ctx)
+            .await
+            .unwrap();
+        let detected = subject.detected_languages();
+        assert!(!detected.is_empty(), "detection runs for multiple asserted");
+        assert!(
+            detected.iter().all(|c| {
+                let t = c.language.primary_subtag();
+                t == "pl" || t == "en"
+            }),
+            "detection is restricted to the asserted set",
+        );
+        assert!(
+            detected.iter().all(|c| c.span.is_some()),
+            "detections carry spans for per-region attribution",
         );
     }
 }
