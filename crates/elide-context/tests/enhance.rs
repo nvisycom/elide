@@ -174,3 +174,36 @@ fn anchors_chain_to_a_fixpoint() {
         entities[0].confidence
     );
 }
+
+#[test]
+fn term_scoped_anchor_applies_only_to_listed_terms() {
+    // A number-anchor restricted to the currency-codes terms lifts "USD" (in the
+    // set) but not "Polygon" (a currency-labeled crypto name not in the set),
+    // even though both carry the `currency` label.
+    let currency = LabelRef::new("currency");
+    let amount = LabelRef::new("monetary_amount");
+    let rule = BoostRule::new(currency.clone(), Vec::<String>::new())
+        .with_anchor(amount.clone(), Confidence::new(0.1).unwrap())
+        .with_self_terms(["USD", "EUR"]);
+    let enhancer = Enhancer::new([rule], SubstringMatcher);
+
+    // "USD" is a listed code → lifted by the nearby amount.
+    let text = "5000 USD ok";
+    let mut e = vec![entity(&amount, 0..4, 0.1), entity(&currency, 5..8, 0.3)];
+    enhancer.enhance(&mut e, &EnhanceInput::new(text));
+    assert!(
+        e[1].confidence.get() > 0.3,
+        "listed code lifted: {:?}",
+        e[1].confidence
+    );
+
+    // "Polygon" is not in the set → not lifted, despite the same label + a number.
+    let text = "2 Polygon xx";
+    let mut e = vec![entity(&amount, 0..1, 0.1), entity(&currency, 2..9, 0.3)];
+    enhancer.enhance(&mut e, &EnhanceInput::new(text));
+    assert_eq!(
+        e[1].confidence,
+        Confidence::new(0.3).unwrap(),
+        "unlisted term not lifted"
+    );
+}

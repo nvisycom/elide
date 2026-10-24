@@ -52,6 +52,13 @@ pub struct Anchor {
     pub label: LabelRef,
     /// The least confidence the neighbour must carry to anchor a boost.
     pub min_confidence: Confidence,
+    /// When set, restrict the boost to entities whose own matched text is one of
+    /// these: a dict-sourced anchor applies only to that dictionary's terms, so
+    /// a `currency` entity from the currency-codes dictionary is number-anchored
+    /// while one from another currency dictionary (an ambiguous crypto name) is
+    /// not, even though both carry the same `currency` label. Empty/`None`
+    /// applies to every entity of the rule's label.
+    pub self_terms: Option<HashSet<HipStr<'static>>>,
 }
 
 /// Per-label boost rule the [`Enhancer`] applies at runtime.
@@ -141,7 +148,21 @@ impl BoostRule {
         self.anchor = Some(Anchor {
             label,
             min_confidence,
+            self_terms: None,
         });
+        self
+    }
+
+    /// Restrict an [anchored](Self::with_anchor) rule to entities whose own
+    /// matched text is one of `terms`. A no-op without a prior anchor.
+    #[must_use]
+    pub fn with_self_terms(
+        mut self,
+        terms: impl IntoIterator<Item = impl Into<HipStr<'static>>>,
+    ) -> Self {
+        if let Some(anchor) = self.anchor.as_mut() {
+            anchor.self_terms = Some(terms.into_iter().map(Into::into).collect());
+        }
         self
     }
 

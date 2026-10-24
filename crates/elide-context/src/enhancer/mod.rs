@@ -36,6 +36,16 @@ const EVENT_SOURCE_ANCHOR: &str = "context-anchor";
 /// against an unforeseen cycle.
 const MAX_ANCHOR_ROUNDS: usize = 8;
 
+/// A per-round snapshot of one located entity the anchor pass reads as a
+/// potential neighbour. `index` is the entity's position in the full `entities`
+/// slice (not in the filtered snapshot), so self-exclusion is exact.
+struct Located {
+    index: usize,
+    label: LabelRef,
+    span: Range<usize>,
+    confidence: Confidence,
+}
+
 /// Post-recognition keyword-boost pass over recognized entities.
 ///
 /// Holds a label-keyed [`BoostRule`] map plus the keyword-matching
@@ -97,16 +107,18 @@ impl Enhancer {
         for rule in rules {
             let bucket = buckets.entry(rule.label.clone()).or_default();
             // Merge only rules that agree on every knob `merge` does not itself
-            // reconcile, language scope, match mode, window radii, and boost.
-            // `merge` keeps the existing rule's window/boost, so two rules with
-            // different lifts for the same label must stay distinct or one
-            // would silently adopt the other's confidence boost.
+            // reconcile: language scope, match mode, window radii, boost, and
+            // anchor. `merge` keeps the existing rule's window/boost/anchor, so
+            // two rules with different lifts or different anchors for the same
+            // label must stay distinct or one would silently adopt (or drop)
+            // the other's.
             if let Some(existing) = bucket.iter_mut().find(|r| {
                 r.language == rule.language
                     && r.word_boundary == rule.word_boundary
                     && r.prefix_words == rule.prefix_words
                     && r.suffix_words == rule.suffix_words
                     && r.boost == rule.boost
+                    && r.anchor == rule.anchor
             }) {
                 existing.merge(rule);
             } else {
@@ -221,12 +233,20 @@ impl Enhancer {
         // Rounds are bounded by the number of anchor rules (each pair fires at
         // most once); the cap is a safety net against an unforeseen cycle.
         for _ in 0..MAX_ANCHOR_ROUNDS {
-            let located: Vec<(LabelRef, Range<usize>, Confidence)> = entities
+            // A snapshot of each located entity, carrying its original index in
+            // `entities` — `Located` drops rangeless entities, so its positions
+            // do not line up with `entities`, and self-exclusion must compare
+            // indices from the same collection.
+            let located: Vec<Located> = entities
                 .iter()
-                .filter_map(|e| {
-                    e.recognized_range
-                        .clone()
-                        .map(|r| (e.label.clone(), r, e.confidence))
+                .enumerate()
+                .filter_map(|(index, e)| {
+                    e.recognized_range.clone().map(|span| Located {
+                        index,
+                        label: e.label.clone(),
+                        span,
+                        confidence: e.confidence,
+                    })
                 })
                 .collect();
 
@@ -248,16 +268,29 @@ impl Enhancer {
                     if applied.contains(&(entity_index, anchor.label.clone())) {
                         continue;
                     }
+                    // A term-scoped anchor applies only to entities whose own
+                    // matched text is in its set (a dict-sourced anchor restricts
+                    // to that dictionary's terms, so a `currency` from the
+                    // currency-codes dict is number-anchored while an ambiguous
+                    // crypto name sharing the label is not).
+                    if let Some(terms) = &anchor.self_terms
+                        && !ctx
+                            .text
+                            .get(range.clone())
+                            .is_some_and(|t| terms.contains(t))
+                    {
+                        continue;
+                    }
                     let window = self.window_bounds(&range, rule, ctx);
                     // A qualifying neighbour: the anchor label, confident enough,
-                    // in-window, and a different located entity (`i != entity_index`
-                    // keeps a currency from anchoring itself).
-                    let anchored = located.iter().enumerate().any(|(i, (label, span, conf))| {
-                        i != entity_index
-                            && *label == anchor.label
-                            && *conf >= anchor.min_confidence
-                            && span.start >= window.start
-                            && span.end <= window.end
+                    // in-window, and a different entity (the index check keeps a
+                    // currency from anchoring itself).
+                    let anchored = located.iter().any(|n| {
+                        n.index != entity_index
+                            && n.label == anchor.label
+                            && n.confidence >= anchor.min_confidence
+                            && n.span.start >= window.start
+                            && n.span.end <= window.end
                     });
                     if !anchored {
                         continue;

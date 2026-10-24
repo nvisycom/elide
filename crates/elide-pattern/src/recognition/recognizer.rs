@@ -600,13 +600,21 @@ impl PatternRecognizerBuilder {
         // floor is the acceptance threshold, so an ambiguous token that never
         // cleared its own gate does not anchor; a lower explicit floor lets a
         // weak neighbour (a sub-threshold number) seed the chain.
+        // A dict-sourced anchor is scoped to its own terms, so a shared label
+        // (e.g. `currency` from both the currency-codes and the ambiguous-crypto
+        // dictionaries) does not let one dictionary's anchor fire on the other's
+        // entities; a pattern-sourced anchor carries no term list.
         let default_floor = Confidence::clamped(ConfidenceThreshold::BASELINE.get());
         let anchored = self
             .patterns
             .iter()
-            .map(|p| (&p.labels, &p.context))
-            .chain(self.dictionaries.iter().map(|d| (&d.labels, &d.context)));
-        for (labels, context) in anchored {
+            .map(|p| (&p.labels, &p.context, None))
+            .chain(
+                self.dictionaries
+                    .iter()
+                    .map(|d| (&d.labels, &d.context, Some(&d.terms))),
+            );
+        for (labels, context, terms) in anchored {
             let Some(anchor) = context.anchor() else {
                 continue;
             };
@@ -618,6 +626,9 @@ impl PatternRecognizerBuilder {
             for label in labels {
                 let mut rule = BoostRule::new(label.clone(), std::iter::empty::<String>())
                     .with_anchor(anchor_label.clone(), min_confidence);
+                if let Some(terms) = terms {
+                    rule = rule.with_self_terms(terms.iter().map(|t| t.term.clone()));
+                }
                 if let Some(boost) = boost {
                     rule = rule.with_boost(Confidence::clamped(boost));
                 }
