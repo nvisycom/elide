@@ -324,14 +324,24 @@ fn page_frame(doc: &Document, page_id: ObjectId) -> PageFrame {
 
 /// Resolve a 4-number rectangle attribute (`MediaBox`/`CropBox`) on a page,
 /// walking up `/Parent` for an inherited value. `None` if absent or malformed.
+///
+/// The attribute value, and each of its four elements, may be an indirect
+/// reference (`/MediaBox 3 0 R`, with `3 0 obj [ 0 0 612 792 ]`) — a valid and
+/// common encoding — so both are dereferenced before being read as numbers.
 fn inherited_rect(doc: &Document, page_id: ObjectId, key: &[u8]) -> Option<[f64; 4]> {
     let mut id = page_id;
     for _ in 0..MAX_PARENT_WALK {
         let dict = doc.get_dictionary(id).ok()?;
-        if let Ok(array) = dict.get(key).and_then(|o| o.as_array())
+        if let Ok(value) = dict.get(key)
+            && let Ok((_, resolved)) = doc.dereference(value)
+            && let Ok(array) = resolved.as_array()
             && array.len() == 4
         {
-            let v = |i: usize| object_as_f64(&array[i]);
+            let v = |i: usize| {
+                doc.dereference(&array[i])
+                    .map(|(_, o)| object_as_f64(o))
+                    .unwrap_or_else(|_| object_as_f64(&array[i]))
+            };
             return Some([v(0), v(1), v(2), v(3)]);
         }
         id = dict.get(b"Parent").ok()?.as_reference().ok()?;
@@ -1613,6 +1623,63 @@ mod tests {
             rects[0].width > 0.1,
             "Q restored the wide font (width {} should be ~0.18, not ~0.02)",
             rects[0].width
+        );
+    }
+
+    #[test]
+    fn inherited_rect_reads_a_direct_array() {
+        let mut doc = Document::with_version("1.7");
+        let page = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+        });
+        assert_eq!(
+            inherited_rect(&doc, page, b"MediaBox"),
+            Some([0.0, 0.0, 612.0, 792.0]),
+        );
+    }
+
+    #[test]
+    fn inherited_rect_dereferences_an_indirect_box() {
+        // `/MediaBox 3 0 R` with `3 0 obj [ 0 0 612 792 ]` — a valid, common
+        // encoding that the direct `.as_array()` could not read, so the page
+        // frame fell back to a unit square and geometry stayed in raw points.
+        let mut doc = Document::with_version("1.7");
+        let box_id = doc.add_object(Object::Array(vec![
+            0.into(),
+            0.into(),
+            612.into(),
+            792.into(),
+        ]));
+        let page = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "MediaBox" => Object::Reference(box_id),
+        });
+        assert_eq!(
+            inherited_rect(&doc, page, b"MediaBox"),
+            Some([0.0, 0.0, 612.0, 792.0]),
+            "an indirect MediaBox must dereference to its array",
+        );
+    }
+
+    #[test]
+    fn inherited_rect_walks_up_to_an_inherited_box() {
+        let mut doc = Document::with_version("1.7");
+        let pages = doc.new_object_id();
+        let page = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages,
+        });
+        doc.objects.insert(
+            pages,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+            }),
+        );
+        assert_eq!(
+            inherited_rect(&doc, page, b"MediaBox"),
+            Some([0.0, 0.0, 595.0, 842.0]),
         );
     }
 }
