@@ -1,0 +1,10 @@
+# ISO 639-1 two-letter language codes (en, es, zh, …). A two-letter code is
+# inherently ambiguous — several collide with common English words (`is`, `it`,
+# `no`, `or`, `as`, `am`, `be`) — so the base score sits below the acceptance
+# threshold: a bare code is never flagged on its own. The long-form names carry
+# detection in `language_names`.
+
+name = "language-codes"
+labels = ["language"]
+languages = ["en"]
+score = 0.2

@@ -25,6 +25,13 @@ async fn weak_values_without_context_stay_undetected() -> Result<()> {
     // shape must never be flagged.
     assert_label_absent!(outcome.entities, builtins::BANK_ACCOUNT.to_ref());
 
+    // Crypto and currency terms that double as ordinary words (ADA, Polygon,
+    // Cosmos, PHP, CAD) carry no crypto/currency keyword here, so no currency
+    // entity may be flagged. (Long-form language *names* are treated as
+    // unambiguous and are covered elsewhere; only the sub-threshold currency
+    // codes and crypto tickers are context-gated.)
+    assert_label_absent!(outcome.entities, builtins::CURRENCY.to_ref());
+
     // The values survive verbatim, proof they were neither detected nor redacted.
     assert_content_preserved!(
         outcome.redacted_text(),

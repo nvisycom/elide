@@ -22,11 +22,20 @@ shipped_dictionary!(
         with csv "../../../assets/dictionaries/en/finance/currencies.csv"
 );
 shipped_dictionary!(
-    /// English names of human languages plus ISO 639-1 codes
-    /// (English, en, French, fr, …).
-    fn languages
-        from "../../../assets/dictionaries/en/personal/languages.toml"
-        with csv "../../../assets/dictionaries/en/personal/languages.csv"
+    /// Long-form English names of human languages (English, Spanish,
+    /// Mandarin, …), at the normal score. The short ISO 639-1 codes
+    /// live in [`language_codes`].
+    fn language_names
+        from "../../../assets/dictionaries/en/personal/language_names.toml"
+        with csv "../../../assets/dictionaries/en/personal/language_names.csv"
+);
+shipped_dictionary!(
+    /// ISO 639-1 two-letter language codes (en, es, zh, …). Inherently
+    /// ambiguous (several are common words), so scored below threshold
+    /// and never flagged on their own.
+    fn language_codes
+        from "../../../assets/dictionaries/en/personal/language_codes.toml"
+        with csv "../../../assets/dictionaries/en/personal/language_codes.csv"
 );
 shipped_dictionary!(
     /// English demonyms and nationality terms (American, French,
@@ -46,5 +55,11 @@ shipped_dictionary!(
 /// Every English-scoped built-in dictionary.
 #[must_use]
 pub fn all() -> Vec<Dictionary> {
-    vec![currencies(), languages(), nationalities(), religions()]
+    vec![
+        currencies(),
+        language_names(),
+        language_codes(),
+        nationalities(),
+        religions(),
+    ]
 }

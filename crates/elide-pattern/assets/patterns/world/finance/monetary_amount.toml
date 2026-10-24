@@ -13,7 +13,7 @@ name = "monetary-amount"
 labels = ["monetary_amount"]
 
 [context]
-dictionaries = ["currencies", "currency-codes", "cryptocurrencies"]
+dictionaries = ["currencies", "currency-codes", "cryptocurrencies", "cryptocurrencies-ambiguous"]
 
 [[variants]]
 # Grouped thousands with an optional decimal (`1,234`, `1,234.56`).
