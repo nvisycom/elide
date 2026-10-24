@@ -1,8 +1,21 @@
 # ISO 4217 currency codes (USD, EUR, PLN, …). Language-agnostic: a
-# three-letter currency code is the same string in every language, so
-# unlike the long-form currency names (en/finance/currencies) this
-# dictionary is world-scoped and fires on documents in any language.
+# three-letter currency code is the same string in every language, so unlike
+# the long-form currency names (en/finance/currencies) this dictionary is
+# world-scoped and fires on documents in any language.
+#
+# Every three-letter code is ambiguous — a short all-caps token collides with
+# acronyms and emphasized words (`CAD`, `PHP`, `TRY`), and even `USD`/`EUR` are
+# weak evidence on their own. So the base score sits below the acceptance
+# threshold and the code is lifted only when a monetary amount sits beside it
+# (`5000 USD`): it anchors on a `monetary_amount` at a low floor, enough for the
+# weak number candidate that exists before either side is confirmed to seed the
+# pair. A bare code with no adjacent amount (`built in PHP`) stays below the line
+# — a semantic call (is this `PHP` money or the language?) left to the model
+# layer, which reconciles it against a confident NER classification.
 
 name = "currency-codes"
 labels = ["currency"]
-score = 0.4
+score = 0.3
+
+[context]
+anchor = { label = "monetary_amount", min_confidence = 0.1 }

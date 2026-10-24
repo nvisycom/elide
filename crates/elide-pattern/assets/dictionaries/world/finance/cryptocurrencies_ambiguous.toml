@@ -1,0 +1,33 @@
+# Cryptocurrency terms that collide with ordinary words — both common-word
+# *names* (`Ripple`, `Avalanche`, `Polygon`, `Stellar`, `Cosmos`, `Solana`,
+# matched case-sensitively, so they fire on the capitalized word at a sentence
+# start or in a title) and short tickers/acronyms (`ADA` — also the Americans
+# with Disabilities Act / American Diabetes Association — `SOL`, `DOT`, `TON`,
+# `UNI`, `ATOM`, `LINK`). The coined, distinctive names and tickers (Bitcoin,
+# BTC, ETH, DOGE, Cardano, Monero, …) live in `cryptocurrencies`; the split is
+# by collision risk, not name-vs-ticker.
+# A bare match here is more likely noise than a coin, so the base score sits
+# below the acceptance threshold: a term surfaces as a currency only when a
+# crypto context keyword nearby boosts it over the line (the enhancer boosts a
+# dictionary's own matches from its own `[context]`). `ADA 500 in my crypto
+# wallet` fires; `Diabetes (ADA)` does not.
+
+name = "cryptocurrencies-ambiguous"
+labels = ["currency"]
+score = 0.3
+
+[context]
+keywords = [
+  "crypto",
+  "cryptocurrency",
+  "cryptocurrencies",
+  "blockchain",
+  "wallet",
+  "token",
+  "coin",
+  "altcoin",
+  "defi",
+  "on-chain",
+  "stake",
+  "staking",
+]

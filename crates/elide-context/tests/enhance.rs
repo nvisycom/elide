@@ -91,3 +91,119 @@ fn out_of_band_hint_boosts_via_hint_path() {
     // the hint, resolved by the caller.
     assert!(boosts[0].keyword_range.is_none());
 }
+
+#[test]
+fn anchor_boosts_when_a_qualifying_neighbour_is_in_window() {
+    // A `monetary_amount` is lifted when a `currency` entity at/above the floor
+    // sits in its window — the entity-proximity signal, not a keyword.
+    let currency = LabelRef::new("currency");
+    let amount = LabelRef::new("monetary_amount");
+    let rule = BoostRule::new(amount.clone(), Vec::<String>::new())
+        .with_anchor(currency.clone(), Confidence::new(0.35).unwrap());
+    let enhancer = Enhancer::new([rule], SubstringMatcher);
+
+    //          0         1
+    //          012345678901
+    let text = "5000 USD ok";
+    let mut entities = vec![
+        entity(&amount, 0..4, 0.1),   // "5000"
+        entity(&currency, 5..8, 0.5), // "USD", already confident
+    ];
+    enhancer.enhance(&mut entities, &EnhanceInput::new(text));
+    // The amount was lifted by the currency anchor; the currency is untouched.
+    assert!(
+        entities[0].confidence.get() > 0.1,
+        "amount lifted: {:?}",
+        entities[0].confidence
+    );
+    assert_eq!(entities[1].confidence, Confidence::new(0.5).unwrap());
+}
+
+#[test]
+fn anchor_does_not_boost_below_the_confidence_floor() {
+    // A weak, sub-floor currency (an ambiguous token that never cleared its own
+    // gate) does not anchor a monetary amount.
+    let currency = LabelRef::new("currency");
+    let amount = LabelRef::new("monetary_amount");
+    let rule = BoostRule::new(amount.clone(), Vec::<String>::new())
+        .with_anchor(currency.clone(), Confidence::new(0.35).unwrap());
+    let enhancer = Enhancer::new([rule], SubstringMatcher);
+
+    let text = "2010 ADA xx";
+    let mut entities = vec![
+        entity(&amount, 0..4, 0.1),   // "2010"
+        entity(&currency, 5..8, 0.3), // "ADA", below the 0.35 floor
+    ];
+    enhancer.enhance(&mut entities, &EnhanceInput::new(text));
+    assert_eq!(
+        entities[0].confidence,
+        Confidence::new(0.1).unwrap(),
+        "amount not lifted"
+    );
+}
+
+#[test]
+fn anchors_chain_to_a_fixpoint() {
+    // Mutual anchors with asymmetric floors: a weak number seeds a currency
+    // (low floor), which then lifts the number (threshold floor). Both end up
+    // boosted after the fixpoint.
+    let currency = LabelRef::new("currency");
+    let amount = LabelRef::new("monetary_amount");
+    let amount_rule = BoostRule::new(amount.clone(), Vec::<String>::new())
+        .with_anchor(currency.clone(), Confidence::new(0.35).unwrap());
+    let currency_rule = BoostRule::new(currency.clone(), Vec::<String>::new())
+        .with_anchor(amount.clone(), Confidence::new(0.1).unwrap());
+    let enhancer = Enhancer::new([amount_rule, currency_rule], SubstringMatcher);
+
+    let text = "5000 USD ok";
+    let mut entities = vec![
+        entity(&amount, 0..4, 0.1),   // weak number
+        entity(&currency, 5..8, 0.3), // weak code, below amount's floor initially
+    ];
+    enhancer.enhance(&mut entities, &EnhanceInput::new(text));
+    // Round 1: number (0.1 ≥ 0.1) lifts currency → 0.65. Round 2: currency
+    // (0.65 ≥ 0.35) lifts number. Both above their starting confidence.
+    assert!(
+        entities[1].confidence.get() > 0.3,
+        "currency lifted: {:?}",
+        entities[1].confidence
+    );
+    assert!(
+        entities[0].confidence.get() > 0.1,
+        "amount lifted: {:?}",
+        entities[0].confidence
+    );
+}
+
+#[test]
+fn term_scoped_anchor_applies_only_to_listed_terms() {
+    // A number-anchor restricted to the currency-codes terms lifts "USD" (in the
+    // set) but not "Polygon" (a currency-labeled crypto name not in the set),
+    // even though both carry the `currency` label.
+    let currency = LabelRef::new("currency");
+    let amount = LabelRef::new("monetary_amount");
+    let rule = BoostRule::new(currency.clone(), Vec::<String>::new())
+        .with_anchor(amount.clone(), Confidence::new(0.1).unwrap())
+        .with_self_terms(["USD", "EUR"]);
+    let enhancer = Enhancer::new([rule], SubstringMatcher);
+
+    // "USD" is a listed code → lifted by the nearby amount.
+    let text = "5000 USD ok";
+    let mut e = vec![entity(&amount, 0..4, 0.1), entity(&currency, 5..8, 0.3)];
+    enhancer.enhance(&mut e, &EnhanceInput::new(text));
+    assert!(
+        e[1].confidence.get() > 0.3,
+        "listed code lifted: {:?}",
+        e[1].confidence
+    );
+
+    // "Polygon" is not in the set → not lifted, despite the same label + a number.
+    let text = "2 Polygon xx";
+    let mut e = vec![entity(&amount, 0..1, 0.1), entity(&currency, 2..9, 0.3)];
+    enhancer.enhance(&mut e, &EnhanceInput::new(text));
+    assert_eq!(
+        e[1].confidence,
+        Confidence::new(0.3).unwrap(),
+        "unlisted term not lifted"
+    );
+}

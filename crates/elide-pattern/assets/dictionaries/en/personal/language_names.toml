@@ -1,0 +1,11 @@
+# Long-form English names of human languages (English, Spanish, Mandarin,
+# Thai, …). These are distinctive enough to detect on their own, so they carry
+# the normal dictionary score. A few (Thai, Mandarin, Malay, Lao) double as
+# ordinary words and may over-match in non-language prose; that is the accepted
+# cost of treating full names as unambiguous. The matching short ISO 639-1
+# codes live in `language_codes`.
+
+name = "language-names"
+labels = ["language"]
+languages = ["en"]
+score = 0.4

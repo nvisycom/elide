@@ -8,7 +8,7 @@ use elide_context::{BoostRule, Enhanced, Enhancer};
 use elide_core::entity::audit::AuditEvent;
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
-use elide_core::primitive::{ComponentId, Confidence, LanguageTag};
+use elide_core::primitive::{ComponentId, Confidence, ConfidenceThreshold, LanguageTag};
 use elide_core::recognition::{Context, Recognizer, Subject};
 use elide_core::{Error, ErrorKind, Result};
 // The external `regex` crate is aliased throughout because `Regex` is already
@@ -586,6 +586,49 @@ impl PatternRecognizerBuilder {
             for label in &pattern.labels {
                 let mut rule = BoostRule::new(label.clone(), terms.iter().cloned())
                     .with_word_boundary(word_boundary);
+                if let Some(boost) = boost {
+                    rule = rule.with_boost(Confidence::clamped(boost));
+                }
+                boost_rules.push(rule);
+            }
+        }
+
+        // Entity-anchor context: a pattern or dictionary whose `[context]`
+        // declares an `anchor` boosts its match when an entity of the anchor's
+        // label sits in the window — e.g. a `monetary_amount` beside an accepted
+        // `currency`, or a `currency` beside a monetary candidate. The default
+        // floor is the acceptance threshold, so an ambiguous token that never
+        // cleared its own gate does not anchor; a lower explicit floor lets a
+        // weak neighbour (a sub-threshold number) seed the chain.
+        // A dict-sourced anchor is scoped to its own terms, so a shared label
+        // (e.g. `currency` from both the currency-codes and the ambiguous-crypto
+        // dictionaries) does not let one dictionary's anchor fire on the other's
+        // entities; a pattern-sourced anchor carries no term list.
+        let default_floor = Confidence::clamped(ConfidenceThreshold::BASELINE.get());
+        let anchored = self
+            .patterns
+            .iter()
+            .map(|p| (&p.labels, &p.context, None))
+            .chain(
+                self.dictionaries
+                    .iter()
+                    .map(|d| (&d.labels, &d.context, Some(&d.terms))),
+            );
+        for (labels, context, terms) in anchored {
+            let Some(anchor) = context.anchor() else {
+                continue;
+            };
+            let anchor_label = LabelRef::new(anchor.label.clone());
+            let min_confidence = anchor
+                .min_confidence
+                .map_or(default_floor, Confidence::clamped);
+            let boost = context.boost();
+            for label in labels {
+                let mut rule = BoostRule::new(label.clone(), std::iter::empty::<String>())
+                    .with_anchor(anchor_label.clone(), min_confidence);
+                if let Some(terms) = terms {
+                    rule = rule.with_self_terms(terms.iter().map(|t| t.term.clone()));
+                }
                 if let Some(boost) = boost {
                     rule = rule.with_boost(Confidence::clamped(boost));
                 }

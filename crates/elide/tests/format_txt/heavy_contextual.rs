@@ -34,6 +34,15 @@ async fn context_lifts_weak_values_over_threshold() -> Result<()> {
         builtins::IBAN.to_ref(),
     );
 
+    // Ambiguous dictionary terms (crypto ticker ADA, currency code PHP,
+    // language Thai) surface because a crypto/currency/language keyword sits
+    // nearby — the paired negatives are in weak_without_context.txt.
+    assert_label_present!(
+        outcome.entities,
+        builtins::CURRENCY.to_ref(),
+        builtins::LANGUAGE.to_ref(),
+    );
+
     // Every vouched-for value is gone.
     assert_pii_removed!(
         outcome.redacted_text(),
