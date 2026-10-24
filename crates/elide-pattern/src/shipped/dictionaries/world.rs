@@ -29,8 +29,8 @@ shipped_dictionary!(
     /// language-agnostic counterpart to the English long-form
     /// currency names in `en::currencies`, so a currency code is still
     /// detected on a document whose asserted language is not English.
-    /// Every three-letter code is ambiguous, so this dictionary is
-    /// scored below threshold and gated on a currency context keyword.
+    /// Every three-letter code is ambiguous, so it is scored below
+    /// threshold and surfaces only when a monetary amount anchors it.
     fn currency_codes
         from "../../../assets/dictionaries/world/finance/currency_codes.toml"
         with csv "../../../assets/dictionaries/world/finance/currency_codes.csv"

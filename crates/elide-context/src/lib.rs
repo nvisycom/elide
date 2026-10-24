@@ -9,4 +9,6 @@ mod rule;
 
 pub use self::enhancer::{Boost, EnhanceInput, Enhancer};
 pub use self::recognition::Enhanced;
-pub use self::rule::{BoostRule, DEFAULT_BOOST, DEFAULT_PREFIX_WORDS, DEFAULT_SUFFIX_WORDS};
+pub use self::rule::{
+    Anchor, BoostRule, DEFAULT_BOOST, DEFAULT_PREFIX_WORDS, DEFAULT_SUFFIX_WORDS,
+};

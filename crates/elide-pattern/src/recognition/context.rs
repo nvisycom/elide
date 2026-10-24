@@ -81,6 +81,28 @@ pub struct Sourced {
     /// author only sets this when the default is wrong for that pattern.
     #[serde(default)]
     pub boost: Option<f32>,
+    /// Boost this rule's match when an entity of the named label sits in the
+    /// window — a stronger signal than a keyword for a value whose meaning
+    /// depends on an adjacent entity (a number that is a monetary amount only
+    /// beside a currency). In TOML:
+    /// `anchor = { label = "currency" }`, or with an explicit floor
+    /// `anchor = { label = "monetary_amount", min_confidence = 0.1 }`.
+    #[serde(default)]
+    pub anchor: Option<Anchor>,
+}
+
+/// A context [`anchor`](Sourced::anchor): the neighbour entity's `label` and the
+/// least confidence it must carry. `min_confidence` defaults to the acceptance
+/// threshold, so a bare `{ label = "currency" }` requires a confirmed neighbour.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Anchor {
+    /// The neighbour entity's label.
+    pub label: String,
+    /// The confidence floor the neighbour must clear; `None` means the
+    /// acceptance threshold (set by the enhancer builder).
+    #[serde(default)]
+    pub min_confidence: Option<f32>,
 }
 
 /// How a context keyword matches the surrounding text.
@@ -161,6 +183,16 @@ impl BoostKeywords {
     pub fn boost(&self) -> Option<f32> {
         match self {
             Self::Global(s) => s.boost,
+            Self::PerLanguage(_) => None,
+        }
+    }
+
+    /// The anchor this context declares, if any: boost the match when an entity
+    /// of the anchor's label sits in the window.
+    #[must_use]
+    pub fn anchor(&self) -> Option<&Anchor> {
+        match self {
+            Self::Global(s) => s.anchor.as_ref(),
             Self::PerLanguage(_) => None,
         }
     }
