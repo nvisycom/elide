@@ -17,6 +17,6 @@ mod term;
 
 pub use self::context::{BoostKeywords, Matching, Sourced};
 pub use self::dictionary::{Dictionary, DictionaryBuilder, Scoring};
-pub use self::recognizer::{PatternRecognizer, PatternRecognizerBuilder};
+pub use self::recognizer::{PatternRecognizer, PatternRecognizerBuilder, RegexBudget};
 pub use self::regex::{Regex, RegexBuilder, Variant};
 pub use self::term::Term;

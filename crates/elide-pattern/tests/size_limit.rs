@@ -1,12 +1,14 @@
 //! Build-time resource limits on `PatternRecognizerBuilder`:
-//! - `with_size_limit` bounds the compiled automaton size of both individual
-//!   variant regexes and the shared `RegexSet` union, the one DoS defense a
-//!   caller cannot replicate by capping regex *sources*.
+//! - `with_union_budget` bounds the shared `RegexSet` union, and
+//!   `with_variant_budget` bounds each individual variant regex — two separate
+//!   budgets, because a tight per-variant cap and the (necessarily larger)
+//!   builtin union cannot share one. These are the DoS defenses a caller cannot
+//!   replicate by capping regex *sources*.
 //! - `with_term_count_limit` / `with_term_bytes_limit` bound the shared
 //!   Aho-Corasick dictionary automaton (aggregate across all dictionaries).
 
 use elide_core::entity::builtins;
-use elide_pattern::{Dictionary, PatternRecognizer, Regex, Term, Variant};
+use elide_pattern::{Dictionary, PatternRecognizer, Regex, RegexBudget, Term, Variant};
 
 /// A rule whose variants union into a large automaton. Each source is small,
 /// but bounded-repetition alternations expand the compiled NFA/DFA, so the
@@ -28,16 +30,16 @@ fn heavy_rule() -> Regex {
 }
 
 #[test]
-fn tight_size_limit_rejects_oversized_set() {
+fn tight_union_budget_rejects_oversized_set() {
     let result = PatternRecognizer::builder()
         .with_pattern(heavy_rule())
-        // 1 KiB is far below what the heavy rule's compiled automaton needs.
-        .with_size_limit(1024)
+        // 1 KiB is far below what the heavy rule's compiled union needs.
+        .with_union_budget(RegexBudget::nfa(1024))
         .build();
 
     // `PatternRecognizer` isn't `Debug`, so match rather than `expect_err`.
     let Err(err) = result else {
-        panic!("a 1 KiB automaton budget must reject the heavy rule");
+        panic!("a 1 KiB union budget must reject the heavy rule");
     };
 
     // The failure is surfaced as a validation error mentioning the compile.
@@ -49,18 +51,49 @@ fn tight_size_limit_rejects_oversized_set() {
 }
 
 #[test]
-fn generous_size_limit_compiles() {
+fn generous_union_budget_compiles() {
     // The same rule compiles fine under a generous budget.
     PatternRecognizer::builder()
         .with_pattern(heavy_rule())
-        .with_size_limit(50 * 1024 * 1024)
+        .with_union_budget(RegexBudget::nfa(50 * 1024 * 1024))
         .build()
         .expect("50 MiB budget compiles the heavy rule");
 }
 
 #[test]
-fn unset_limit_is_unchanged() {
-    // No limit set → the `regex` crate default applies → the heavy rule
+fn tight_variant_budget_rejects_a_single_large_variant_without_breaking_the_union() {
+    // One variant whose compiled NFA is large on its own.
+    let big = format!("(?:{})", vec!["[a-z]{200}"; 64].join("|"));
+    let rule = Regex::builder()
+        .with_name("big")
+        .with_labels(vec![builtins::GOVERNMENT_ID.to_ref()])
+        .with_variants(vec![Variant::new(&big).expect("valid regex")])
+        .build()
+        .expect("rule builds");
+
+    // A tight per-variant budget rejects the pathological single variant.
+    let tight = PatternRecognizer::builder()
+        .with_pattern(rule)
+        .with_variant_budget(RegexBudget::nfa(4096))
+        .build();
+    assert!(
+        tight.is_err(),
+        "a tiny per-variant budget must reject the large variant"
+    );
+
+    // The same per-variant budget leaves the shipped builtins buildable: each
+    // builtin variant is small, and their large *union* is bounded separately.
+    PatternRecognizer::builder()
+        .with_builtin_patterns()
+        .with_builtin_dictionaries()
+        .with_variant_budget(RegexBudget::nfa(1 << 20))
+        .build()
+        .expect("builtins' per-variant NFAs fit a 1 MiB per-variant budget");
+}
+
+#[test]
+fn unset_budgets_are_unchanged() {
+    // No budget set → the `regex` crate default applies → the heavy rule
     // (well under the ~10 MB default) compiles exactly as before.
     PatternRecognizer::builder()
         .with_pattern(heavy_rule())

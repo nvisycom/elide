@@ -8,6 +8,6 @@ pub mod validators;
 
 pub use self::recognition::{
     BoostKeywords, Dictionary, DictionaryBuilder, Matching, PatternRecognizer,
-    PatternRecognizerBuilder, Regex, RegexBuilder, Scoring, Sourced, Term, Variant,
+    PatternRecognizerBuilder, Regex, RegexBudget, RegexBuilder, Scoring, Sourced, Term, Variant,
 };
 pub use self::shipped::{dictionaries, patterns};
