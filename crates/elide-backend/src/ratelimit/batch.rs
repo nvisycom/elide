@@ -18,11 +18,13 @@ use elide_core::entity::audit::ModelEvent;
 /// order, so the caller sees exactly the responses a single large batch would
 /// have returned.
 ///
-/// Windows are issued **sequentially**: this reshapes a batch to fit the
-/// provider's size limit, it does not add parallelism. To run windows (or any
-/// calls) concurrently, or to cap that concurrency, compose with
-/// [`ConcurrencyLimited`](crate::ratelimit::ConcurrencyLimited); to bound the
-/// request rate, compose with [`RateLimited`](crate::ratelimit::RateLimited).
+/// Windows are issued **sequentially**: `call_batch` awaits each window before
+/// it builds the next, so this reshapes a batch to fit the provider's size
+/// limit without adding parallelism. Composing it with
+/// [`ConcurrencyLimited`](crate::ratelimit::ConcurrencyLimited) therefore does
+/// not run one batch's windows concurrently — it bounds concurrency across
+/// *separate* calls; compose with
+/// [`RateLimited`](crate::ratelimit::RateLimited) to bound the request rate.
 /// Because it is itself a `Backend` (same request/response, same provenance), it
 /// drops in anywhere the inner backend goes.
 ///
@@ -68,22 +70,22 @@ impl<B: Backend> Backend for BatchChunked<B> {
         self.inner.call(request).await
     }
 
-    async fn call_batch(
-        &self,
-        mut requests: Vec<Self::Request<'_>>,
-    ) -> Result<Vec<Self::Response>> {
+    async fn call_batch(&self, requests: Vec<Self::Request<'_>>) -> Result<Vec<Self::Response>> {
         // A batch within the limit is one round-trip, unchanged.
         if requests.len() <= self.max_batch_size {
             return self.inner.call_batch(requests).await;
         }
 
         let mut responses = Vec::with_capacity(requests.len());
-        // Drain in order so the concatenated responses stay request-aligned.
-        // `Request<'_>` is not necessarily cheap to clone, so move out of the
-        // owned `requests` by draining a prefix each round rather than cloning.
-        while !requests.is_empty() {
-            let take = self.max_batch_size.min(requests.len());
-            let window: Vec<Self::Request<'_>> = requests.drain(..take).collect();
+        // Consume the owned requests through one iterator, taking the next window
+        // off its front each round: in order, so the concatenated responses stay
+        // request-aligned, and without the quadratic tail-shift a repeated
+        // `Vec::drain` would cause on a batch split into many windows.
+        let mut requests = requests.into_iter();
+        while let Some(first) = requests.next() {
+            let mut window = Vec::with_capacity(self.max_batch_size);
+            window.push(first);
+            window.extend(requests.by_ref().take(self.max_batch_size - 1));
             responses.extend(self.inner.call_batch(window).await?);
         }
         Ok(responses)
