@@ -56,8 +56,9 @@ pub struct Anchor {
     /// these: a dict-sourced anchor applies only to that dictionary's terms, so
     /// a `currency` entity from the currency-codes dictionary is number-anchored
     /// while one from another currency dictionary (an ambiguous crypto name) is
-    /// not, even though both carry the same `currency` label. Empty/`None`
-    /// applies to every entity of the rule's label.
+    /// not, even though both carry the same `currency` label. `None` applies to
+    /// every entity of the rule's label; `Some` with an empty set matches no
+    /// entity, so the rule never fires.
     pub self_terms: Option<HashSet<HipStr<'static>>>,
 }
 

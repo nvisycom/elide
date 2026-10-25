@@ -207,3 +207,38 @@ fn term_scoped_anchor_applies_only_to_listed_terms() {
         "unlisted term not lifted"
     );
 }
+
+#[test]
+fn anchor_self_exclusion_survives_a_rangeless_preceding_entity() {
+    // Regression for the filtered-snapshot index fix: a rangeless entity before
+    // the real ones shifts the filtered snapshot's positions relative to the
+    // full `entities` slice. Self-exclusion must compare original indices, or
+    // the genuine currency neighbour would be mistaken for the amount itself and
+    // skipped, leaving the amount un-boosted.
+    let currency = LabelRef::new("currency");
+    let amount = LabelRef::new("monetary_amount");
+    let rule = BoostRule::new(amount.clone(), Vec::<String>::new())
+        .with_anchor(currency.clone(), Confidence::new(0.35).unwrap());
+    let enhancer = Enhancer::new([rule], SubstringMatcher);
+
+    //          0         1
+    //          0123456789012
+    let text = "ref 5000 USD";
+    // A rangeless entity first (e.g. a natively-located box), then the amount and
+    // the currency. Its presence used to misalign the self-exclusion index.
+    let mut rangeless = entity(&LabelRef::new("other"), 0..3, 0.5);
+    rangeless.recognized_range = None;
+    let mut entities = vec![
+        rangeless,
+        entity(&amount, 4..8, 0.1),    // "5000"
+        entity(&currency, 9..12, 0.5), // "USD"
+    ];
+    enhancer.enhance(&mut entities, &EnhanceInput::new(text));
+    // The amount is lifted by the currency neighbour despite the leading
+    // rangeless entity.
+    assert!(
+        entities[1].confidence.get() > 0.1,
+        "amount lifted past the rangeless entity: {:?}",
+        entities[1].confidence
+    );
+}
