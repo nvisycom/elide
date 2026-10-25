@@ -12,3 +12,9 @@ The lot was tagged 000555000555 during the warehouse audit.
 These are ordinary bare numbers in ordinary sentences. No "account",
 "checking", "bank", or other supporting keyword appears anywhere near them,
 so the weak bank-account shape must not be flagged on a single one.
+
+Dictionary terms that double as ordinary words are the same precision floor.
+The Standards of Medical Care in Diabetes (ADA) were revised. Draw a Polygon
+in geometry and study the Cosmos in astronomy. The UI was built in PHP and the
+schematic opened in CAD. Each is just an ordinary word here, with no
+supporting keyword nearby, so none may be flagged.

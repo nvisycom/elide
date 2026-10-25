@@ -14,6 +14,11 @@ Mail it to postal code 90210 for the west-coast branch.
 The API key ctx_9f8e7d6c5b4a2b1c0d9e is scoped to the sandbox only.
 Wire it via IBAN GB29 NWBK 6016 1331 9268 19 to settle the invoice.
 
+He is staking 500 ADA in his crypto wallet on-chain. The invoice total came
+to 200 PHP for the currency conversion. She speaks fluent Thai as her native
+language.
+
 None of these keywords ("payment card", "account", "social security",
-"passport", "driver license", "postal code", "API key", "IBAN") should
-themselves be redacted — only the value each one vouches for.
+"passport", "driver license", "postal code", "API key", "IBAN", "crypto",
+"wallet", "currency", "language") should themselves be redacted — only the
+value each one vouches for.

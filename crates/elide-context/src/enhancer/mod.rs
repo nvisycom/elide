@@ -1,7 +1,7 @@
 //! [`Enhancer`]: post-recognition keyword-boost pass for any
 //! [`Entity<Text>`] regardless of which recognizer produced it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use elide_core::entity::{Entity, LabelRef};
@@ -26,6 +26,25 @@ const EVENT_SOURCE_WINDOW: &str = "context";
 /// Source name stamped onto refinement events the enhancer records when
 /// an out-of-band hint fires.
 const EVENT_SOURCE_HINT: &str = "context-hint";
+
+/// Source name stamped onto refinement events the enhancer records when a
+/// neighbouring anchor entity (not a keyword) lifts the match.
+const EVENT_SOURCE_ANCHOR: &str = "context-anchor";
+
+/// Cap on anchor fixpoint rounds. Each `(entity, anchor-label)` pair fires at
+/// most once, so chains converge in a couple of rounds; this only guards
+/// against an unforeseen cycle.
+const MAX_ANCHOR_ROUNDS: usize = 8;
+
+/// A per-round snapshot of one located entity the anchor pass reads as a
+/// potential neighbour. `index` is the entity's position in the full `entities`
+/// slice (not in the filtered snapshot), so self-exclusion is exact.
+struct Located {
+    index: usize,
+    label: LabelRef,
+    span: Range<usize>,
+    confidence: Confidence,
+}
 
 /// Post-recognition keyword-boost pass over recognized entities.
 ///
@@ -88,16 +107,18 @@ impl Enhancer {
         for rule in rules {
             let bucket = buckets.entry(rule.label.clone()).or_default();
             // Merge only rules that agree on every knob `merge` does not itself
-            // reconcile, language scope, match mode, window radii, and boost.
-            // `merge` keeps the existing rule's window/boost, so two rules with
-            // different lifts for the same label must stay distinct or one
-            // would silently adopt the other's confidence boost.
+            // reconcile: language scope, match mode, window radii, boost, and
+            // anchor. `merge` keeps the existing rule's window/boost/anchor, so
+            // two rules with different lifts or different anchors for the same
+            // label must stay distinct or one would silently adopt (or drop)
+            // the other's.
             if let Some(existing) = bucket.iter_mut().find(|r| {
                 r.language == rule.language
                     && r.word_boundary == rule.word_boundary
                     && r.prefix_words == rule.prefix_words
                     && r.suffix_words == rule.suffix_words
                     && r.boost == rule.boost
+                    && r.anchor == rule.anchor
             }) {
                 existing.merge(rule);
             } else {
@@ -154,9 +175,15 @@ impl Enhancer {
         if self.rules.is_empty() {
             return boosts;
         }
+        // Phase 1: keyword boosts. A currency entity picks up its own context
+        // boost here, so by phase 2 its confidence reflects whether its gate
+        // was satisfied.
         for (entity_index, entity) in entities.iter_mut().enumerate() {
             self.enhance_one(entity_index, entity, ctx, &mut boosts);
         }
+        // Phase 2: anchor boosts, which read neighbouring entities, so they run
+        // only after phase 1 has settled every entity's confidence.
+        self.apply_anchors(entities, ctx, &mut boosts);
         boosts
     }
 
@@ -174,11 +201,120 @@ impl Enhancer {
             if !rule.applies_to_language(ctx.languages) {
                 continue;
             }
+            // Keyword path only; anchor rules run in phase 2. A rule with no
+            // keywords (anchor-only) contributes nothing here.
             if rule.keywords.is_empty() {
                 continue;
             }
             if let Some(boost) = self.apply_rule(entity_index, entity, rule, ctx) {
                 boosts.push(boost);
+            }
+        }
+    }
+
+    /// Phase 2: boost each entity with an anchor rule when a qualifying
+    /// neighbour entity sits in its window.
+    ///
+    /// Anchors can chain — a currency lifted by a nearby monetary candidate then
+    /// becomes the anchor that lifts that same amount — so this runs to a
+    /// fixpoint: each round re-snapshots the entities' confidences and applies
+    /// every anchor rule, stopping when a round changes nothing. A per-entity
+    /// per-anchor-label `already boosted` guard keeps one neighbour from lifting
+    /// the same entity twice across rounds, which also bounds the loop.
+    fn apply_anchors<M: TextRecognizable>(
+        &self,
+        entities: &mut [Entity<M>],
+        ctx: &EnhanceInput<'_>,
+        boosts: &mut Vec<Boost>,
+    ) {
+        // `(entity_index, anchor_label)` pairs already boosted, so a chain never
+        // lifts the same entity from the same anchor label more than once.
+        let mut applied: HashSet<(usize, LabelRef)> = HashSet::new();
+        // Rounds are bounded by the number of anchor rules (each pair fires at
+        // most once); the cap is a safety net against an unforeseen cycle.
+        for _ in 0..MAX_ANCHOR_ROUNDS {
+            // A snapshot of each located entity, carrying its original index in
+            // `entities` — `Located` drops rangeless entities, so its positions
+            // do not line up with `entities`, and self-exclusion must compare
+            // indices from the same collection.
+            let located: Vec<Located> = entities
+                .iter()
+                .enumerate()
+                .filter_map(|(index, e)| {
+                    e.recognized_range.clone().map(|span| Located {
+                        index,
+                        label: e.label.clone(),
+                        span,
+                        confidence: e.confidence,
+                    })
+                })
+                .collect();
+
+            let mut changed = false;
+            for (entity_index, entity) in entities.iter_mut().enumerate() {
+                let Some(bucket) = self.rules.get(&entity.label) else {
+                    continue;
+                };
+                let Some(range) = entity.recognized_range.clone() else {
+                    continue;
+                };
+                for rule in bucket {
+                    let Some(anchor) = &rule.anchor else {
+                        continue;
+                    };
+                    if !rule.applies_to_language(ctx.languages) {
+                        continue;
+                    }
+                    if applied.contains(&(entity_index, anchor.label.clone())) {
+                        continue;
+                    }
+                    // A term-scoped anchor applies only to entities whose own
+                    // matched text is in its set (a dict-sourced anchor restricts
+                    // to that dictionary's terms, so a `currency` from the
+                    // currency-codes dict is number-anchored while an ambiguous
+                    // crypto name sharing the label is not).
+                    if let Some(terms) = &anchor.self_terms
+                        && !ctx
+                            .text
+                            .get(range.clone())
+                            .is_some_and(|t| terms.contains(t))
+                    {
+                        continue;
+                    }
+                    let window = self.window_bounds(&range, rule, ctx);
+                    // A qualifying neighbour: the anchor label, confident enough,
+                    // in-window, and a different entity (the index check keeps a
+                    // currency from anchoring itself).
+                    let anchored = located.iter().any(|n| {
+                        n.index != entity_index
+                            && n.label == anchor.label
+                            && n.confidence >= anchor.min_confidence
+                            && n.span.start >= window.start
+                            && n.span.end <= window.end
+                    });
+                    if !anchored {
+                        continue;
+                    }
+                    let before = entity.confidence;
+                    let after = before.saturating_add(rule.boost.get());
+                    if after == before {
+                        continue;
+                    }
+                    entity.confidence = after;
+                    applied.insert((entity_index, anchor.label.clone()));
+                    changed = true;
+                    boosts.push(Boost {
+                        entity_index,
+                        source: EVENT_SOURCE_ANCHOR,
+                        confidence: after,
+                        keyword: anchor.label.as_str().into(),
+                        hint_index: None,
+                        keyword_range: None,
+                    });
+                }
+            }
+            if !changed {
+                break;
             }
         }
     }
@@ -239,6 +375,34 @@ impl Enhancer {
     /// Match the rule's keywords in the word/token window around `range`,
     /// returning the matched keyword's *stream* byte range (rebased into the
     /// recognized text) when one fires.
+    /// The stream-byte range of the word window around `range`, using the same
+    /// token-or-text windowing [`window_match`](Self::window_match) does. Used
+    /// by the anchor path to test whether a neighbour entity falls in-window.
+    fn window_bounds(
+        &self,
+        range: &Range<usize>,
+        rule: &BoostRule,
+        ctx: &EnhanceInput<'_>,
+    ) -> Range<usize> {
+        let token_slice = ctx
+            .tokens
+            .map(|toks| {
+                slice_tokens_around(toks, range.clone(), rule.prefix_words, rule.suffix_words)
+            })
+            .unwrap_or(&[]);
+        let (snippet, offset) = if token_slice.is_empty() {
+            word_window(
+                ctx.text,
+                range.clone(),
+                rule.prefix_words,
+                rule.suffix_words,
+            )
+        } else {
+            token_span(ctx.text, token_slice, range.clone())
+        };
+        offset..offset + snippet.len()
+    }
+
     fn window_match(
         &self,
         range: &Range<usize>,

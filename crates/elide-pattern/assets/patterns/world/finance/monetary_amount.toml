@@ -3,17 +3,20 @@
 # integer beside a currency (`5000 USD`).
 #
 # Weak on its own: a bare number is rarely a monetary amount without evidence.
-# Its `[context]` sources keywords from the currency dictionaries — every
-# currency name/code (`USD`, `Euro`, `Bitcoin`, …) becomes a boost keyword — so
-# a number next to a currency is lifted over the threshold. The amount is the
-# number only; a currency term is its own `currency` entity, so a policy can
-# redact the value while keeping (or also redacting) the currency independently.
+# It is lifted over the threshold by an `anchor` on the `currency` entity — a
+# number is money when an *accepted* currency sits beside it (`5000 USD`,
+# `500 BTC`, `0.5 ADA` in crypto context). Anchoring on the currency entity
+# rather than on currency keywords means an ambiguous currency token that never
+# cleared its own context gate (a bare `ADA` in `ADA 2010 standards`) does not
+# lift the number. The amount is the number only; the currency is its own
+# `currency` entity, so a policy can redact the value while keeping (or also
+# redacting) the currency independently.
 
 name = "monetary-amount"
 labels = ["monetary_amount"]
 
 [context]
-dictionaries = ["currencies", "currency-codes", "cryptocurrencies"]
+anchor = { label = "currency" }
 
 [[variants]]
 # Grouped thousands with an optional decimal (`1,234`, `1,234.56`).

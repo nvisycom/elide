@@ -36,7 +36,37 @@ pub const DEFAULT_SUFFIX_WORDS: usize = 5;
 /// Default additive boost applied when a keyword fires.
 pub const DEFAULT_BOOST: f32 = 0.35;
 
+/// An entity-proximity condition: boost the rule's entity when an entity of
+/// [`label`](Anchor::label) at or above [`min_confidence`](Anchor::min_confidence)
+/// sits within the rule's window.
+///
+/// Where a keyword answers "is a currency *word* nearby", an anchor answers "is
+/// a currency *entity* nearby" — the stronger signal for a value whose meaning
+/// depends on an adjacent entity, such as a number that is a monetary amount
+/// only beside an accepted currency. The confidence floor keeps a weak,
+/// unconfirmed neighbour (an ambiguous currency token that never cleared its own
+/// context gate) from acting as an anchor.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Anchor {
+    /// The neighbouring entity's label (e.g. `currency`).
+    pub label: LabelRef,
+    /// The least confidence the neighbour must carry to anchor a boost.
+    pub min_confidence: Confidence,
+    /// When set, restrict the boost to entities whose own matched text is one of
+    /// these: a dict-sourced anchor applies only to that dictionary's terms, so
+    /// a `currency` entity from the currency-codes dictionary is number-anchored
+    /// while one from another currency dictionary (an ambiguous crypto name) is
+    /// not, even though both carry the same `currency` label. `None` applies to
+    /// every entity of the rule's label; `Some` with an empty set matches no
+    /// entity, so the rule never fires.
+    pub self_terms: Option<HashSet<HipStr<'static>>>,
+}
+
 /// Per-label boost rule the [`Enhancer`] applies at runtime.
+///
+/// A rule boosts its entity from either (or both) of two signals: a *keyword*
+/// in the surrounding word window, or an *[`anchor`](BoostRule::anchor)* — a
+/// qualifying entity of another label in that window.
 ///
 /// [`Enhancer`]: super::Enhancer
 #[derive(Debug, Clone, PartialEq)]
@@ -75,6 +105,11 @@ pub struct BoostRule {
     /// `aud` inside `audit`; set `false` for permissive substring matching
     /// (a keyword firing inside a longer word, e.g. `ssn` in `yourSSN`).
     pub word_boundary: bool,
+    /// Optional entity-proximity condition. When set, a qualifying neighbour
+    /// entity in the window boosts this rule's entity, in addition to any
+    /// keyword match. A rule may carry an anchor with no keywords (boost purely
+    /// on a neighbour) or both.
+    pub anchor: Option<Anchor>,
 }
 
 impl BoostRule {
@@ -102,7 +137,34 @@ impl BoostRule {
             suffix_words: DEFAULT_SUFFIX_WORDS,
             boost: Confidence::clamped(DEFAULT_BOOST),
             word_boundary: true,
+            anchor: None,
         }
+    }
+
+    /// Boost this rule's entity when an entity of `label` at or above
+    /// `min_confidence` sits within the window. Use with no keywords for a
+    /// purely entity-anchored rule (e.g. a monetary amount beside a currency).
+    #[must_use]
+    pub fn with_anchor(mut self, label: LabelRef, min_confidence: Confidence) -> Self {
+        self.anchor = Some(Anchor {
+            label,
+            min_confidence,
+            self_terms: None,
+        });
+        self
+    }
+
+    /// Restrict an [anchored](Self::with_anchor) rule to entities whose own
+    /// matched text is one of `terms`. A no-op without a prior anchor.
+    #[must_use]
+    pub fn with_self_terms(
+        mut self,
+        terms: impl IntoIterator<Item = impl Into<HipStr<'static>>>,
+    ) -> Self {
+        if let Some(anchor) = self.anchor.as_mut() {
+            anchor.self_terms = Some(terms.into_iter().map(Into::into).collect());
+        }
+        self
     }
 
     /// Set the window radii (words before / after the match) the keywords are
@@ -190,5 +252,9 @@ impl BoostRule {
             .filter(|kw| !existing.contains(kw.as_str()))
             .collect();
         self.keywords.extend(additions);
+        // Keep an anchor from either side; `self`'s wins when both carry one.
+        if self.anchor.is_none() {
+            self.anchor = other.anchor;
+        }
     }
 }

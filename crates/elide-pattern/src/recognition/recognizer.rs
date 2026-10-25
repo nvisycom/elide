@@ -8,7 +8,7 @@ use elide_context::{BoostRule, Enhanced, Enhancer};
 use elide_core::entity::audit::AuditEvent;
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
-use elide_core::primitive::{ComponentId, Confidence, LanguageTag};
+use elide_core::primitive::{ComponentId, Confidence, ConfidenceThreshold, LanguageTag};
 use elide_core::recognition::{Context, Recognizer, Subject};
 use elide_core::{Error, ErrorKind, Result};
 // The external `regex` crate is aliased throughout because `Regex` is already
@@ -113,6 +113,36 @@ struct ContextKeywords<'a> {
     boost: Option<f32>,
 }
 
+/// Byte budgets for compiling a regex, mirroring the `regex` crate's two knobs.
+///
+/// Applied in two places, independently: once per *individual* variant
+/// ([`with_variant_budget`]) and once for the shared `RegexSet` *union*
+/// ([`with_union_budget`]). A field left `None` leaves the crate default in
+/// place.
+///
+/// [`with_variant_budget`]: PatternRecognizerBuilder::with_variant_budget
+/// [`with_union_budget`]: PatternRecognizerBuilder::with_union_budget
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RegexBudget {
+    /// Compiled-automaton (NFA) byte budget — bounds *compile-time* size.
+    pub nfa_size: Option<usize>,
+    /// Lazy-DFA cache byte budget — bounds *match-time* memory (the DFA is
+    /// built on demand while scanning).
+    pub dfa_size: Option<usize>,
+}
+
+impl RegexBudget {
+    /// A budget capping the compiled-automaton (NFA) size to `bytes`, leaving
+    /// the DFA cache at the crate default. The common case.
+    #[must_use]
+    pub fn nfa(bytes: usize) -> Self {
+        Self {
+            nfa_size: Some(bytes),
+            dfa_size: None,
+        }
+    }
+}
+
 /// Accumulator of rules + validator registry for [`PatternRecognizer`].
 ///
 /// Patterns and dictionaries are stored as authored, compilation
@@ -124,13 +154,16 @@ pub struct PatternRecognizerBuilder {
     patterns: Vec<Regex>,
     dictionaries: Vec<Dictionary>,
     validators: Option<ValidatorRegistry>,
-    /// Compiled-automaton byte budget applied to every variant regex and
-    /// to the shared [`RegexSet`]. `None` leaves the `regex` crate default
-    /// (~10 MB) in place.
-    size_limit: Option<usize>,
-    /// Lazy-DFA cache byte budget applied likewise. `None` leaves the
-    /// `regex` crate default in place.
-    dfa_size_limit: Option<usize>,
+    /// Byte budget for each *individual* variant regex. This is the knob to
+    /// bound a caller-supplied rule: a legitimate single regex compiles well
+    /// under 1 MiB, so a tight cap here rejects a pathological source at build
+    /// without touching the (necessarily larger) union below.
+    variant_budget: RegexBudget,
+    /// Byte budget for the shared [`RegexSet`] union (every registered variant
+    /// compiled together). The shipped builtins union past several MB, so keep
+    /// this generous — a single budget cannot bound both a tight per-variant cap
+    /// and the large union.
+    union_budget: RegexBudget,
     /// Cap on the total number of dictionary terms across every registered
     /// dictionary (the Aho-Corasick automaton is shared). `None` is
     /// unbounded.
@@ -199,32 +232,38 @@ impl PatternRecognizerBuilder {
         self
     }
 
-    /// Cap the compiled-automaton size, in bytes, of every variant regex
-    /// **and** of the shared [`RegexSet`] union.
+    /// Set the [`RegexBudget`] for each *individual* variant regex.
     ///
-    /// A caller can bound each regex *source* it supplies, but many
-    /// individually-small sources still union into one large `RegexSet`
-    /// whose compiled size can only be bounded here. [`build`] fails with a
-    /// validation error when a regex or the union exceeds the limit.
+    /// This is the knob to bound a caller-supplied rule: a legitimate single
+    /// regex compiles well under 1 MiB, so a tight cap here rejects a
+    /// pathological source at [`build`] without touching the (larger) union
+    /// budget. A single budget cannot bound both, which is why the per-variant
+    /// and [union](Self::with_union_budget) budgets are separate. [`build`]
+    /// fails with a validation error when any one variant exceeds its budget.
     ///
-    /// Unset by default, the `regex` crate's own default budget (~10 MB)
-    /// applies, so behavior is unchanged unless a limit is set.
+    /// Any field left `None` leaves the `regex` crate's own default in place.
     ///
     /// [`build`]: Self::build
     #[must_use]
-    pub fn with_size_limit(mut self, bytes: usize) -> Self {
-        self.size_limit = Some(bytes);
+    pub fn with_variant_budget(mut self, budget: RegexBudget) -> Self {
+        self.variant_budget = budget;
         self
     }
 
-    /// Cap the lazy-DFA cache size, in bytes, of every variant regex and the
-    /// shared [`RegexSet`]. This bounds match-time memory (the DFA is built
-    /// on demand while scanning) rather than compile-time automaton size.
+    /// Set the [`RegexBudget`] for the shared [`RegexSet`] union (every
+    /// registered variant compiled together).
     ///
-    /// Unset by default, the `regex` crate's own default applies.
+    /// Many individually-small regexes still union into one large `RegexSet`
+    /// whose compiled size can only be bounded here; the shipped builtins
+    /// routinely union past several MB, so keep this generous. [`build`] fails
+    /// with a validation error when the union exceeds its budget.
+    ///
+    /// Any field left `None` leaves the `regex` crate's own default in place.
+    ///
+    /// [`build`]: Self::build
     #[must_use]
-    pub fn with_dfa_size_limit(mut self, bytes: usize) -> Self {
-        self.dfa_size_limit = Some(bytes);
+    pub fn with_union_budget(mut self, budget: RegexBudget) -> Self {
+        self.union_budget = budget;
         self
     }
 
@@ -395,10 +434,10 @@ impl PatternRecognizerBuilder {
             None
         } else {
             let mut builder = RegexSetBuilder::new(&regex_sources);
-            if let Some(bytes) = self.size_limit {
+            if let Some(bytes) = self.union_budget.nfa_size {
                 builder.size_limit(bytes);
             }
-            if let Some(bytes) = self.dfa_size_limit {
+            if let Some(bytes) = self.union_budget.dfa_size {
                 builder.dfa_size_limit(bytes);
             }
             Some(builder.build().map_err(|e| {
@@ -411,19 +450,18 @@ impl PatternRecognizerBuilder {
         Ok((compiled, regex_set))
     }
 
-    /// Compile one regex source, honoring the builder's optional
-    /// [`size_limit`]/[`dfa_size_limit`]. Unset limits leave the `regex`
-    /// crate defaults untouched, so an unconfigured builder compiles exactly
-    /// as before.
-    ///
-    /// [`size_limit`]: Self::with_size_limit
-    /// [`dfa_size_limit`]: Self::with_dfa_size_limit
+    /// Compile one regex source under the per-[`variant`](Self::with_variant_budget)
+    /// budget. Unset budget fields leave the `regex` crate defaults untouched,
+    /// so an unconfigured builder compiles exactly as before.
     fn compile_regex(&self, source: &str) -> StdResult<CompiledRegex, CompiledRegexError> {
+        // A single variant is bounded by the per-variant budget, kept separate
+        // from the (necessarily larger) shared-`RegexSet` union budget so a
+        // tight per-rule cap does not break the builtin union.
         let mut builder = RegexBuilder::new(source);
-        if let Some(bytes) = self.size_limit {
+        if let Some(bytes) = self.variant_budget.nfa_size {
             builder.size_limit(bytes);
         }
-        if let Some(bytes) = self.dfa_size_limit {
+        if let Some(bytes) = self.variant_budget.dfa_size {
             builder.dfa_size_limit(bytes);
         }
         builder.build()
@@ -586,6 +624,49 @@ impl PatternRecognizerBuilder {
             for label in &pattern.labels {
                 let mut rule = BoostRule::new(label.clone(), terms.iter().cloned())
                     .with_word_boundary(word_boundary);
+                if let Some(boost) = boost {
+                    rule = rule.with_boost(Confidence::clamped(boost));
+                }
+                boost_rules.push(rule);
+            }
+        }
+
+        // Entity-anchor context: a pattern or dictionary whose `[context]`
+        // declares an `anchor` boosts its match when an entity of the anchor's
+        // label sits in the window — e.g. a `monetary_amount` beside an accepted
+        // `currency`, or a `currency` beside a monetary candidate. The default
+        // floor is the acceptance threshold, so an ambiguous token that never
+        // cleared its own gate does not anchor; a lower explicit floor lets a
+        // weak neighbour (a sub-threshold number) seed the chain.
+        // A dict-sourced anchor is scoped to its own terms, so a shared label
+        // (e.g. `currency` from both the currency-codes and the ambiguous-crypto
+        // dictionaries) does not let one dictionary's anchor fire on the other's
+        // entities; a pattern-sourced anchor carries no term list.
+        let default_floor = Confidence::clamped(ConfidenceThreshold::BASELINE.get());
+        let anchored = self
+            .patterns
+            .iter()
+            .map(|p| (&p.labels, &p.context, None))
+            .chain(
+                self.dictionaries
+                    .iter()
+                    .map(|d| (&d.labels, &d.context, Some(&d.terms))),
+            );
+        for (labels, context, terms) in anchored {
+            let Some(anchor) = context.anchor() else {
+                continue;
+            };
+            let anchor_label = LabelRef::new(anchor.label.clone());
+            let min_confidence = anchor
+                .min_confidence
+                .map_or(default_floor, Confidence::clamped);
+            let boost = context.boost();
+            for label in labels {
+                let mut rule = BoostRule::new(label.clone(), std::iter::empty::<String>())
+                    .with_anchor(anchor_label.clone(), min_confidence);
+                if let Some(terms) = terms {
+                    rule = rule.with_self_terms(terms.iter().map(|t| t.term.clone()));
+                }
                 if let Some(boost) = boost {
                     rule = rule.with_boost(Confidence::clamped(boost));
                 }

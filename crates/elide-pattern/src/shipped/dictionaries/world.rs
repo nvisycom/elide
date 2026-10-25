@@ -8,18 +8,29 @@
 use crate::{__shipped_dictionary as shipped_dictionary, Dictionary};
 
 shipped_dictionary!(
-    /// Cryptocurrency names and ticker symbols (BTC, Bitcoin, ETH,
-    /// Ethereum, …).
+    /// Cryptocurrency full names and distinctive tickers (Bitcoin,
+    /// BTC, Ethereum, DOGE, …) that rarely collide with ordinary
+    /// text. Collision-prone terms live in
+    /// [`cryptocurrencies_ambiguous`].
     fn cryptocurrencies
         from "../../../assets/dictionaries/world/finance/cryptocurrencies.toml"
         with csv "../../../assets/dictionaries/world/finance/cryptocurrencies.csv"
 );
 shipped_dictionary!(
+    /// Cryptocurrency terms that collide with ordinary words (ADA,
+    /// SOL, DOT, TON, …). Scored below threshold and gated on a crypto
+    /// context keyword, so `Diabetes (ADA)` does not surface.
+    fn cryptocurrencies_ambiguous
+        from "../../../assets/dictionaries/world/finance/cryptocurrencies_ambiguous.toml"
+        with csv "../../../assets/dictionaries/world/finance/cryptocurrencies_ambiguous.csv"
+);
+shipped_dictionary!(
     /// ISO 4217 fiat currency codes (USD, EUR, PLN, …). The
     /// language-agnostic counterpart to the English long-form
-    /// currency names in `en::currencies`, so a currency code is
-    /// still detected on a document whose asserted language is not
-    /// English.
+    /// currency names in `en::currencies`, so a currency code is still
+    /// detected on a document whose asserted language is not English.
+    /// Every three-letter code is ambiguous, so it is scored below
+    /// threshold and surfaces only when a monetary amount anchors it.
     fn currency_codes
         from "../../../assets/dictionaries/world/finance/currency_codes.toml"
         with csv "../../../assets/dictionaries/world/finance/currency_codes.csv"
@@ -28,5 +39,9 @@ shipped_dictionary!(
 /// Every world-scoped built-in dictionary.
 #[must_use]
 pub fn all() -> Vec<Dictionary> {
-    vec![cryptocurrencies(), currency_codes()]
+    vec![
+        cryptocurrencies(),
+        cryptocurrencies_ambiguous(),
+        currency_codes(),
+    ]
 }
