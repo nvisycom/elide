@@ -36,9 +36,11 @@ pub use self::chunking::{CharWindows, Chunking, Window, WordWindows};
 /// a whole window can still be split and missed; size the strategy's windows
 /// toward the backend's limit if that matters.
 ///
-/// A subject the strategy leaves in a single whole window is recognized in one
-/// call, unchanged. Because it is itself a `Recognizer<Text>`, it drops in
-/// anywhere a text recognizer goes and composes with the other decorators.
+/// A subject the strategy leaves in a single window (the text fits) is
+/// recognized in one call on the original subject, unchanged — hints and
+/// enrichment artifact intact. Because it is itself a `Recognizer<Text>`, it
+/// drops in anywhere a text recognizer goes and composes with the other
+/// decorators.
 pub struct ChunkedRecognizer<R, C = WordWindows> {
     inner: R,
     chunking: C,
@@ -160,13 +162,16 @@ impl<R: Recognizer<Text>, C: Chunking> Recognizer<Text> for ChunkedRecognizer<R,
     ) -> Result<Vec<Entity<Text>>> {
         let text = subject.data().as_str();
         let windows = self.chunking.windows(text);
-        // A single window covering the whole text is the within-limit case: run
-        // the inner recognizer directly on the original subject, avoiding the
-        // per-window copy and the (no-op) rebase. (It also keeps the subject's
-        // hints, which a reconstructed window subject would drop.)
-        if let [only] = windows.as_slice()
-            && only.span() == (0..text.len())
-        {
+        // A single window means the strategy did not split: the text fits. Run
+        // the inner recognizer directly on the *original* subject, which is the
+        // within-limit case the type promises is "recognized in one call,
+        // unchanged" — it avoids the per-window copy and the (no-op) rebase, and
+        // keeps the subject's hints and enrichment artifact, which a
+        // reconstructed window subject would drop. Any content outside the one
+        // window is inter-word whitespace the window omits (e.g. a trailing
+        // newline), never a recognizable region, so delegating the whole subject
+        // can only find the same entities or more — never fewer.
+        if let [_only] = windows.as_slice() {
             return self.inner.recognize(subject, ctx).await;
         }
         self.recognize_windowed(subject, &windows, ctx).await
@@ -278,6 +283,30 @@ mod tests {
         // Both occurrences, one scan of the whole text.
         assert_eq!(out.len(), 2);
         assert_eq!(recognizer.inner().seen.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn trailing_whitespace_still_takes_the_single_scan_path() {
+        // A trailing newline means the single word window (first word start to
+        // last word end) does not span the whole text. The fast path must still
+        // fire — a single window means no split — delegating the *original*
+        // subject so its hints and artifact survive, rather than rebuilding a
+        // window subject from a slice.
+        let recognizer = ChunkedRecognizer::with_chunking(
+            FindsSubstring::new("Jane", 0.9),
+            WordWindows::new(8, 2),
+        );
+        let scope = Scope::new();
+        let ctx = Context::new(&scope);
+        let out = recognizer
+            .recognize(&subject("Jane paid Jane\n"), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(out.len(), 2);
+        // One scan, and it saw the original text verbatim (the trailing newline
+        // proves the original subject was delegated, not a reslice).
+        let seen = recognizer.inner().seen.lock().unwrap();
+        assert_eq!(seen.as_slice(), ["Jane paid Jane\n"]);
     }
 
     #[tokio::test]
