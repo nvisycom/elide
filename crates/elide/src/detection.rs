@@ -3,9 +3,10 @@
 //! The [`Analyzer`] runs the enrichers and recognizers, then reconciles
 //! their findings through the [`Layer`] stages, [`calibrate`],
 //! [`reconcile`], [`filter`], each reshaping or pruning the working entity
-//! set. The [`escalation`] module composes recognizers — a cheap one that always
-//! runs and a costly one a decider escalates to only when warranted.
-//! Re-exported from [`elide_detection`].
+//! set. Re-exported from [`elide_detection`].
+//!
+//! Decorators that *wrap* a recognizer (escalation, resilience, chunking) are a
+//! recognition concern and live in [`crate::recognition`], not here.
 //!
 //! [`Analyzer`]: crate::detection::Analyzer
 //! [`Layer`]: elide_detection::Layer
@@ -14,4 +15,4 @@
 //! [`filter`]: elide_detection::filter
 
 #[doc(inline)]
-pub use elide_detection::{Analyzer, Layer, LayerOutput, calibrate, escalation, filter, reconcile};
+pub use elide_detection::{Analyzer, Layer, LayerOutput, calibrate, filter, reconcile};

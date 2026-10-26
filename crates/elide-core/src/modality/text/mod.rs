@@ -20,12 +20,43 @@ pub use self::test_doc::TextDoc;
 pub use self::tokens::{Token, Tokens};
 use super::Modality;
 use super::text_recognizable::TextRecognizable;
+use crate::entity::Entity;
 
 /// Text modality: data is [`TextData`], locations are
 /// [`TextLocation`] byte ranges, replacements are [`TextReplacement`].
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Text;
+
+impl Entity<Text> {
+    /// Translate this entity's text coordinates forward by `delta` bytes: both
+    /// its [`location`](Entity::location) span and its
+    /// [`recognized_range`](Entity::recognized_range). Returns `None` when the
+    /// location has no span to move (a reviewer mark).
+    ///
+    /// This rebases a finding made over a *sub-window* of a larger text onto the
+    /// window's start in the full text. The window is a byte-slice of that text,
+    /// so the window-local and full-text coordinate spaces differ only by this
+    /// offset, and **both** fields move: `location` is the geometric coordinate,
+    /// and `recognized_range` keys back into the recognized text — which here is
+    /// that same full text — so it must name the same space the rest of the
+    /// subject's spans and language claims are in.
+    ///
+    /// This is unlike a chunk-to-source lift, which moves only `location`: there
+    /// the recognized text (an OCR layout, a transcript) is a genuinely different
+    /// coordinate space from the source document, so `recognized_range` stays put
+    /// as the artifact key. The [`audit`](Entity::audit) trail is likewise left
+    /// untouched — it records the recognizer's own window-local view, which is
+    /// genuinely where the match was reported.
+    #[must_use]
+    pub fn offset(mut self, delta: usize) -> Option<Self> {
+        self.location = self.location.offset(delta)?;
+        if let Some(range) = &mut self.recognized_range {
+            *range = range.start + delta..range.end + delta;
+        }
+        Some(self)
+    }
+}
 
 impl Modality for Text {
     type Artifact = Tokens;
@@ -57,7 +88,36 @@ impl TextRecognizable for Text {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::entity::{EntityBuilder, LabelRef};
     use crate::redaction::Redactions;
+
+    fn text_entity(location: TextLocation) -> Entity<Text> {
+        EntityBuilder::new()
+            .with_label(LabelRef::new("US_SSN"))
+            .with_location(location)
+            .build()
+            .expect("label and location provided")
+    }
+
+    #[test]
+    fn entity_offset_shifts_location_and_recognized_range_together() {
+        let entity = EntityBuilder::new()
+            .with_label(LabelRef::new("US_SSN"))
+            .with_location(TextLocation::inline(2..5))
+            .with_recognized_range(2..5)
+            .build()
+            .expect("label and location provided");
+        let moved = entity.offset(100).expect("inline location has a span");
+        assert_eq!(moved.location.range(), Some(&(102..105)));
+        assert_eq!(moved.recognized_range, Some(102..105));
+    }
+
+    #[test]
+    fn entity_offset_of_a_marked_location_is_none() {
+        // A reviewer mark has no span, so there is nothing to rebase.
+        let entity = text_entity(TextLocation::marked_source(SourceRef::new(0..5)));
+        assert!(entity.offset(10).is_none());
+    }
 
     #[test]
     fn sort_by_position_orders_in_place() {
