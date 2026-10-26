@@ -1,4 +1,4 @@
-//! [`Resilient`]: a [`Recognizer`] decorator that turns its inner's errors into
+//! [`ResilientRecognizer`]: a [`Recognizer`] decorator that turns its inner's errors into
 //! empty results instead of failing the whole analysis.
 
 use elide_core::Result;
@@ -14,7 +14,7 @@ use elide_core::recognition::{Context, Recognizer, Subject};
 /// error, which is the safe default: for a redaction tool, a recognizer that
 /// errors has *not* vouched that its subjects are clean, and silently dropping it
 /// could leave the entities it would have caught un-redacted. Wrap a recognizer
-/// in `Resilient` only where that trade is made deliberately — a flaky,
+/// in `ResilientRecognizer` only where that trade is made deliberately — a flaky,
 /// best-effort, or optional recognizer whose failure should degrade coverage
 /// rather than stop the pipeline. Recognizers left unwrapped stay fail-fast.
 ///
@@ -28,11 +28,11 @@ use elide_core::recognition::{Context, Recognizer, Subject};
 /// anywhere the inner recognizer goes and composes with the other decorators
 /// (e.g. wrap an [`EscalatingRecognizer`](crate::escalation::EscalatingRecognizer)
 /// to make its whole escalation best-effort).
-pub struct Resilient<R> {
+pub struct ResilientRecognizer<R> {
     inner: R,
 }
 
-impl<R> Resilient<R> {
+impl<R> ResilientRecognizer<R> {
     /// Make `inner`'s failures non-fatal: logged and turned into empty results.
     #[must_use]
     pub fn new(inner: R) -> Self {
@@ -46,7 +46,7 @@ impl<R> Resilient<R> {
 }
 
 #[async_trait::async_trait]
-impl<M: Modality, R: Recognizer<M>> Recognizer<M> for Resilient<R> {
+impl<M: Modality, R: Recognizer<M>> Recognizer<M> for ResilientRecognizer<R> {
     fn id(&self) -> ComponentId {
         self.inner.id()
     }
@@ -124,7 +124,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_failing_recognize_yields_no_entities() {
-        let recognizer = Resilient::new(AlwaysFails);
+        let recognizer = ResilientRecognizer::new(AlwaysFails);
         let scope = Scope::new();
         let ctx = Context::new(&scope);
         let out = recognizer
@@ -136,7 +136,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_failing_batch_yields_one_empty_list_per_subject() {
-        let recognizer = Resilient::new(AlwaysFails);
+        let recognizer = ResilientRecognizer::new(AlwaysFails);
         let scope = Scope::new();
         let ctx = Context::new(&scope);
         let subjects = [subject("a"), subject("b"), subject("c")];

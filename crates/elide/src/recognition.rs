@@ -81,25 +81,32 @@ pub mod context {
 /// Each is itself a [`Recognizer`], so they drop in anywhere one goes and
 /// compose with each other and with [`context::Enhanced`]:
 ///
-/// - [`Resilient`] turns the inner recognizer's errors into empty results
+/// - [`ResilientRecognizer`] turns the inner recognizer's errors into empty results
 ///   (logged), so one failing recognizer degrades coverage instead of aborting
 ///   the analysis — the opposite of the engine's fail-fast default, opted into
 ///   per recognizer.
 /// - [`ChunkedRecognizer`] windows an over-long text with a [`Chunking`]
-///   strategy ([`WordWindows`] by default) so a length-limited recognizer sees
-///   all of it, rebasing the per-window findings back onto the full text.
+///   strategy so a length-limited recognizer sees all of it, rebasing the
+///   per-window findings back onto the full text. [`WordWindows`] is the
+///   default strategy; [`CharWindows`] bounds by character count (a tighter
+///   proxy for a token limit — [`CharWindows::for_gliner`] is the conservative
+///   512-token setting).
 ///
 /// Re-exported from [`elide_detection`].
 ///
 /// [`Recognizer`]: elide_core::recognition::Recognizer
-/// [`Resilient`]: elide_detection::Resilient
+/// [`ResilientRecognizer`]: elide_detection::ResilientRecognizer
 /// [`ChunkedRecognizer`]: elide_detection::ChunkedRecognizer
 /// [`Chunking`]: elide_detection::Chunking
 /// [`WordWindows`]: elide_detection::WordWindows
+/// [`CharWindows`]: elide_detection::CharWindows
+/// [`CharWindows::for_gliner`]: elide_detection::CharWindows::for_gliner
 /// [`context::Enhanced`]: crate::recognition::context::Enhanced
 pub mod decorator {
     #[doc(inline)]
-    pub use elide_detection::{ChunkedRecognizer, Chunking, Resilient, Window, WordWindows};
+    pub use elide_detection::{
+        CharWindows, ChunkedRecognizer, Chunking, ResilientRecognizer, Window, WordWindows,
+    };
 }
 
 /// Escalating recognition: run a cheap recognizer always, a costly one only when

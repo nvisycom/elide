@@ -7,12 +7,12 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use elide_core::Result;
-use elide_core::entity::Entity;
+use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::{Text, TextData};
 use elide_core::primitive::ComponentId;
 use elide_core::recognition::{Context, Recognizer, Subject};
 
-pub use self::chunking::{Chunking, Window, WordWindows};
+pub use self::chunking::{CharWindows, Chunking, Window, WordWindows};
 
 /// Wraps a text [`Recognizer`] whose backend caps input length: a [`Chunking`]
 /// strategy splits an over-long subject into overlapping windows, each is
@@ -29,11 +29,12 @@ pub use self::chunking::{Chunking, Window, WordWindows};
 /// The windows overlap, so a window edge can cut an entity in two but the entity
 /// still appears whole in a neighbour. The flip side is that the overlap region
 /// is scanned twice, so an entity there is found in both windows; this collapses
-/// the exact `(start, end)` duplicates (keeping the higher confidence) and
-/// leaves any remaining overlap — partial, nested, crossing — to the downstream
-/// reconcile layer, which already fuses it. An entity longer than a whole window
-/// can still be split and missed; size the strategy's windows toward the
-/// backend's limit if that matters.
+/// the exact `(span, label)` duplicates (the same finding seen twice, keeping
+/// the higher confidence) and leaves everything else — partial, nested and
+/// crossing overlaps, and two different labels on one span — to the downstream
+/// reconcile layer, which already fuses and arbitrates it. An entity longer than
+/// a whole window can still be split and missed; size the strategy's windows
+/// toward the backend's limit if that matters.
 ///
 /// A subject the strategy leaves in a single whole window is recognized in one
 /// call, unchanged. Because it is itself a `Recognizer<Text>`, it drops in
@@ -102,12 +103,20 @@ impl<R: Recognizer<Text>, C: Chunking> ChunkedRecognizer<R, C> {
     }
 }
 
-/// Collapse entities sharing an identical `(start, end)` span, keeping the
-/// highest-confidence one of each group. Entities with no span (none, in
-/// practice, since the inner scans plain text) are kept as-is. Partial, nested
-/// and crossing overlaps are left for the reconcile layer.
+/// Collapse entities that are the *same finding* seen twice — identical
+/// `(span, label)` — keeping the highest-confidence one of each group.
+///
+/// Keying on the label as well as the span is deliberate: an exact overlap
+/// duplicate (the same text scanned by two windows) carries the same label, so
+/// this removes it; but two *different* labels reported on one span (a span a
+/// recognizer calls both `PERSON` and `ORG`) is a genuine cross-label conflict,
+/// which the reconcile layer's cross-label pass exists to arbitrate — dropping
+/// the lower-confidence label here would pre-empt it and silently lose a
+/// candidate. Entities with no span (none, in practice, since the inner scans
+/// plain text) are kept as-is. Partial, nested and crossing overlaps are also
+/// left for the reconcile layer.
 fn dedupe_exact(entities: Vec<Entity<Text>>) -> Vec<Entity<Text>> {
-    let mut best: HashMap<Range<usize>, usize> = HashMap::new();
+    let mut best: HashMap<(Range<usize>, LabelRef), usize> = HashMap::new();
     let mut kept: Vec<Option<Entity<Text>>> = Vec::with_capacity(entities.len());
 
     for entity in entities {
@@ -115,7 +124,8 @@ fn dedupe_exact(entities: Vec<Entity<Text>>) -> Vec<Entity<Text>> {
             kept.push(Some(entity));
             continue;
         };
-        match best.get(&span) {
+        let key = (span, entity.label.clone());
+        match best.get(&key) {
             Some(&idx)
                 if kept[idx]
                     .as_ref()
@@ -125,11 +135,11 @@ fn dedupe_exact(entities: Vec<Entity<Text>>) -> Vec<Entity<Text>> {
             }
             Some(&idx) => {
                 kept[idx] = None;
-                best.insert(span, kept.len());
+                best.insert(key, kept.len());
                 kept.push(Some(entity));
             }
             None => {
-                best.insert(span, kept.len());
+                best.insert(key, kept.len());
                 kept.push(Some(entity));
             }
         }
@@ -174,24 +184,37 @@ mod tests {
     use super::*;
 
     /// A recognizer that reports a match at a fixed substring, wherever it occurs
-    /// in the text it is given, at a configured confidence. It records the texts
-    /// it was asked to scan, so a test can assert how the input was windowed.
+    /// in the text it is given, under each of its `labels`, at a configured
+    /// confidence. It records the texts it was asked to scan, so a test can
+    /// assert how the input was windowed.
     struct FindsSubstring {
         needle: &'static str,
+        labels: &'static [&'static str],
         confidence: f32,
         seen: std::sync::Mutex<Vec<String>>,
     }
 
     impl FindsSubstring {
+        /// Reports one entity (label `THING`) per match.
         fn new(needle: &'static str, confidence: f32) -> Self {
+            Self::labelled(needle, &["THING"], confidence)
+        }
+
+        /// Reports one entity per label per match, all on the same span.
+        fn labelled(
+            needle: &'static str,
+            labels: &'static [&'static str],
+            confidence: f32,
+        ) -> Self {
             Self {
                 needle,
+                labels,
                 confidence,
                 seen: std::sync::Mutex::new(Vec::new()),
             }
         }
 
-        fn entity_at(&self, span: Range<usize>) -> Entity<Text> {
+        fn entity_at(&self, label: &str, span: Range<usize>) -> Entity<Text> {
             let location = TextLocation::inline(span.clone());
             let confidence = Confidence::new(self.confidence).unwrap();
             let event = AuditEvent::model(
@@ -201,7 +224,7 @@ mod tests {
                 ModelEvent::default(),
             );
             EntityBuilder::new()
-                .with_label(LabelRef::new("THING"))
+                .with_label(LabelRef::new(label))
                 .with_location(location)
                 .with_confidence(confidence)
                 .with_recognized_range(span)
@@ -226,7 +249,11 @@ mod tests {
             self.seen.lock().unwrap().push(text.to_owned());
             let found = text
                 .match_indices(self.needle)
-                .map(|(start, m)| self.entity_at(start..start + m.len()))
+                .flat_map(|(start, m)| {
+                    self.labels
+                        .iter()
+                        .map(move |label| self.entity_at(label, start..start + m.len()))
+                })
                 .collect();
             Ok(found)
         }
@@ -291,5 +318,33 @@ mod tests {
         let needle_at = text.find("NEEDLE").unwrap();
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].location.range(), Some(&(needle_at..needle_at + 6)));
+    }
+
+    #[tokio::test]
+    async fn two_labels_on_one_span_both_survive_the_windowed_path() {
+        // A recognizer reporting the same span under two labels is a cross-label
+        // conflict for the reconcile layer, not an overlap duplicate. The
+        // windowed dedup keys on (span, label), so both labels survive even when
+        // the span sits in a window overlap (so each window reports both).
+        let text = "a b c NEEDLE d e f g h i";
+        let recognizer = ChunkedRecognizer::with_chunking(
+            FindsSubstring::labelled("NEEDLE", &["PERSON", "ORG"], 0.8),
+            WordWindows::new(4, 2),
+        );
+        let scope = Scope::new();
+        let ctx = Context::new(&scope);
+        let out = recognizer.recognize(&subject(text), &ctx).await.unwrap();
+
+        let needle_at = text.find("NEEDLE").unwrap();
+        // Exactly the two distinct labels, each once (overlap duplicates of each
+        // label collapsed), both at the rebased span.
+        assert_eq!(out.len(), 2);
+        assert!(
+            out.iter()
+                .all(|e| e.location.range() == Some(&(needle_at..needle_at + 6)))
+        );
+        let mut labels: Vec<&str> = out.iter().map(|e| e.label.as_str()).collect();
+        labels.sort_unstable();
+        assert_eq!(labels, ["ORG", "PERSON"]);
     }
 }
