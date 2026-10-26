@@ -496,13 +496,11 @@ mod tests {
             Ok(self.0.clone())
         }
 
-        fn lift(&self, chunk: &Chunk<Text>, mut entity: Entity<Text>) -> Option<Entity<Text>> {
+        fn lift(&self, chunk: &Chunk<Text>, entity: Entity<Text>) -> Option<Entity<Text>> {
             // A recognizer's finding is chunk-local (offset into the chunk's
             // text); rebase it onto the chunk's start, as a real text stream does.
             let start = chunk.location.range().map(|r| r.start).unwrap_or(0);
-            let local = entity.location.range()?.clone();
-            entity.location = TextLocation::inline(start + local.start..start + local.end);
-            Some(entity)
+            entity.offset(start)
         }
     }
 

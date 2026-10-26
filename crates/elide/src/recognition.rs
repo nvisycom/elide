@@ -75,6 +75,58 @@ pub mod context {
     }
 }
 
+/// Recognizer decorators: wrap a [`Recognizer`] to change *how* it runs without
+/// changing *what* it detects.
+///
+/// Each is itself a [`Recognizer`], so they drop in anywhere one goes and
+/// compose with each other and with [`context::Enhanced`]:
+///
+/// - [`ResilientRecognizer`] turns the inner recognizer's errors into empty results
+///   (logged), so one failing recognizer degrades coverage instead of aborting
+///   the analysis — the opposite of the engine's fail-fast default, opted into
+///   per recognizer.
+/// - [`ChunkedRecognizer`] windows an over-long text with a [`Chunking`]
+///   strategy so a length-limited recognizer sees all of it, rebasing the
+///   per-window findings back onto the full text. [`WordWindows`] is the
+///   default strategy; [`CharWindows`] bounds by character count (a tighter
+///   proxy for a token limit — [`CharWindows::for_gliner`] is the conservative
+///   512-token setting).
+///
+/// Re-exported from [`elide_detection`].
+///
+/// [`Recognizer`]: elide_core::recognition::Recognizer
+/// [`ResilientRecognizer`]: elide_detection::ResilientRecognizer
+/// [`ChunkedRecognizer`]: elide_detection::ChunkedRecognizer
+/// [`Chunking`]: elide_detection::Chunking
+/// [`WordWindows`]: elide_detection::WordWindows
+/// [`CharWindows`]: elide_detection::CharWindows
+/// [`CharWindows::for_gliner`]: elide_detection::CharWindows::for_gliner
+/// [`context::Enhanced`]: crate::recognition::context::Enhanced
+pub mod decorator {
+    #[doc(inline)]
+    pub use elide_detection::{
+        CharWindows, ChunkedRecognizer, Chunking, ResilientRecognizer, Window, WordWindows,
+    };
+}
+
+/// Escalating recognition: run a cheap recognizer always, a costly one only when
+/// a [`Decider`] judges it warranted.
+///
+/// [`EscalatingRecognizer`] wraps a baseline recognizer (always run) and an
+/// escalated one (a hosted LLM/VLM, say), running the latter only on the
+/// subjects a [`Decider`] — e.g. [`ConfidenceDecider`] — picks from what the
+/// baseline found. It is itself a [`Recognizer`]. Re-exported from
+/// [`elide_detection`].
+///
+/// [`Recognizer`]: elide_core::recognition::Recognizer
+/// [`EscalatingRecognizer`]: elide_detection::escalation::EscalatingRecognizer
+/// [`Decider`]: elide_detection::escalation::Decider
+/// [`ConfidenceDecider`]: elide_detection::escalation::ConfidenceDecider
+pub mod escalation {
+    #[doc(inline)]
+    pub use elide_detection::escalation::*;
+}
+
 /// LLM-mediated recognition: prompt a language or vision model over
 /// text and images.
 #[cfg(feature = "llm")]

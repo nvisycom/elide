@@ -299,6 +299,22 @@ impl TextLocation {
     pub fn is_empty(&self) -> bool {
         self.len() == Some(0)
     }
+
+    /// Translate the decoded span forward by `delta` bytes, keeping the physical
+    /// anchor, or `None` for a reviewer mark (which has no span to move).
+    ///
+    /// This is the coordinate lift when the enclosing text's bytes *are* the
+    /// local text shifted by a fixed offset — a recognizer's finding over a
+    /// sub-window rebased onto the window's start in the full text. It moves only
+    /// the decoded `span`; the raw-byte `refs` and rendered `rects` are physical
+    /// anchors that a decoded-offset shift does not relocate, so the caller uses
+    /// this only where the local finding is [`Inline`](Detected::Inline) (its
+    /// span is its own source), and the rebuilt location stays inline.
+    #[must_use]
+    pub fn offset(&self, delta: usize) -> Option<Self> {
+        let span = self.range()?;
+        Some(TextLocation::inline(span.start + delta..span.end + delta))
+    }
 }
 
 /// Collect source refs into canonical order (sorted, deduplicated), or `None`
@@ -648,6 +664,21 @@ mod tests {
         let loc = TextLocation::rendered(0..20, 2, [r1, r2]);
         assert_eq!(loc.page(), Some(2));
         assert_eq!(loc.rects(), &[r1, r2]);
+    }
+
+    #[test]
+    fn offset_translates_the_span_and_is_inline() {
+        let loc = TextLocation::inline(3..8);
+        let moved = loc.offset(100).expect("inline has a span");
+        assert_eq!(moved.range(), Some(&(103..108)));
+        assert!(!moved.is_marked());
+    }
+
+    #[test]
+    fn offset_of_a_mark_is_none() {
+        // A reviewer mark has no decoded span, so there is nothing to translate.
+        let mark = TextLocation::marked_source(r(3, 12));
+        assert_eq!(mark.offset(10), None);
     }
 
     #[test]
