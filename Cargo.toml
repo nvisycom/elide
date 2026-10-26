@@ -173,7 +173,7 @@ rig-reqwest = { version = "0.44", default-features = false }
 # Templating & schema
 minijinja = { version = "3.0", features = [] }
 schemars = { version = "1.0", features = ["uuid1", "bytes1"] }
-jsonschema = { version = "0.58.4", default-features = false }
+jsonschema = { version = "0.60.0", default-features = false }
 
 # HTTP client & middlewares
 reqwest-middleware = { version = "0.5", features = ["json", "multipart"] }
