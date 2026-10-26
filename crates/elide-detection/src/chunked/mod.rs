@@ -41,6 +41,15 @@ pub use self::chunking::{CharWindows, Chunking, Window, WordWindows};
 /// enrichment artifact intact. Because it is itself a `Recognizer<Text>`, it
 /// drops in anywhere a text recognizer goes and composes with the other
 /// decorators.
+///
+/// Compose it *closest to* the length-limited recognizer: wrap the bare
+/// recognizer (NER, pattern) and layer context enhancement outside, as
+/// `Enhanced::new(ChunkedRecognizer::new(ner), …)`. The bare recognizers read
+/// only the chunk text, so windowing is lossless for them, and the outer
+/// `Enhanced` sees the whole subject with its hints and tokens. Wrapping the
+/// other way (`ChunkedRecognizer<Enhanced<_>>`) enhances inside each window:
+/// hints still apply (they are carried per window), but lemma-aware matching
+/// degrades to surface text, since a window carries no re-tokenized artifact.
 pub struct ChunkedRecognizer<R, C = WordWindows> {
     inner: R,
     chunking: C,
@@ -83,9 +92,24 @@ impl<R: Recognizer<Text>, C: Chunking> ChunkedRecognizer<R, C> {
         // One subject per window over a real slice of the original text, so byte
         // offsets within a window are the full text's offsets minus the window
         // start — the exact delta `Entity::offset` adds back.
+        //
+        // The subject's hints are chunk-global context (a column header, an
+        // object key — content matched against the whole chunk, not indexed by a
+        // body-text offset), so each window carries all of them unchanged; a
+        // context recognizer like `Enhanced` wrapped *inside* the chunker then
+        // still sees them. The enrichment artifact is left unset: its coordinates
+        // (producer tokens) are body-text-local and would be wrong in a window
+        // slice, and re-tokenizing a window is an enricher's job, not a chunker's
+        // — a context recognizer degrades to surface-text matching inside a
+        // window. The intended composition keeps that moot: wrap the
+        // length-limited recognizer and enhance *outside* the chunker, so
+        // `Enhanced` sees the whole subject with its artifact intact.
         let subjects: Vec<Subject<Text>> = windows
             .iter()
-            .map(|w| Subject::new(TextData::new(text[w.span()].to_owned())))
+            .map(|w| {
+                Subject::new(TextData::new(text[w.span()].to_owned()))
+                    .with_hints(subject.hints.clone())
+            })
             .collect();
         let per_window = self.inner.recognize_batch(&subjects, ctx).await?;
 
@@ -182,6 +206,7 @@ impl<R: Recognizer<Text>, C: Chunking> Recognizer<Text> for ChunkedRecognizer<R,
 mod tests {
     use elide_core::entity::audit::{AuditEvent, ModelEvent};
     use elide_core::entity::{Entity, EntityBuilder, LabelRef};
+    use elide_core::modality::ResolvedHint;
     use elide_core::modality::text::TextLocation;
     use elide_core::primitive::Confidence;
     use elide_core::recognition::{Scope, Subject};
@@ -375,5 +400,56 @@ mod tests {
         let mut labels: Vec<&str> = out.iter().map(|e| e.label.as_str()).collect();
         labels.sort_unstable();
         assert_eq!(labels, ["ORG", "PERSON"]);
+    }
+
+    /// Records how many hints each window subject carried, to assert chunk-global
+    /// context survives the split.
+    struct RecordsHints {
+        per_window_hint_count: std::sync::Mutex<Vec<usize>>,
+    }
+
+    #[async_trait::async_trait]
+    impl Recognizer<Text> for RecordsHints {
+        fn id(&self) -> ComponentId {
+            ComponentId::new("records-hints", "0")
+        }
+
+        async fn recognize(
+            &self,
+            subject: &Subject<Text>,
+            _ctx: &Context<'_, Text>,
+        ) -> Result<Vec<Entity<Text>>> {
+            self.per_window_hint_count
+                .lock()
+                .unwrap()
+                .push(subject.hints.len());
+            Ok(Vec::new())
+        }
+    }
+
+    #[tokio::test]
+    async fn hints_are_carried_into_every_window() {
+        // A subject's hints are chunk-global context; a split must not drop them,
+        // or a context recognizer wrapped inside the chunker loses its boosts.
+        let text = "w0 w1 w2 w3 w4 w5 w6 w7 w8 w9"; // 10 words -> 3 windows at (4,1)
+        let hint = ResolvedHint::new(
+            TextLocation::inline(0..2),
+            TextData::new("header".to_owned()),
+        );
+        let subject = Subject::new(TextData::new(text.to_owned())).with_hints(vec![hint]);
+        let recognizer = ChunkedRecognizer::with_chunking(
+            RecordsHints {
+                per_window_hint_count: std::sync::Mutex::new(Vec::new()),
+            },
+            WordWindows::new(4, 1),
+        );
+        let scope = Scope::new();
+        let ctx = Context::new(&scope);
+        recognizer.recognize(&subject, &ctx).await.unwrap();
+
+        // It really windowed, and every window carried the one hint.
+        let counts = recognizer.inner().per_window_hint_count.lock().unwrap();
+        assert!(counts.len() > 1, "the text was split into several windows");
+        assert!(counts.iter().all(|&n| n == 1), "each window kept the hint");
     }
 }
