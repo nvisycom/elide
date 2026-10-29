@@ -155,12 +155,12 @@ where
 }
 
 /// Build the per-call STT request from a subject's decoded audio.
-fn stt_request<'a>(subject: &'a Subject<Audio>, ctx: &Context<'_, Audio>) -> SttRequest<'a> {
+fn stt_request<'a>(subject: &'a Subject<Audio>, ctx: &'a Context<'_, Audio>) -> SttRequest<'a> {
     let data = subject.data();
     SttRequest {
         audio: &data.bytes,
         format: data.format(),
-        language: None,
+        language: ctx.languages(subject).primary(),
         correlation_id: ctx.correlation_id(),
     }
 }

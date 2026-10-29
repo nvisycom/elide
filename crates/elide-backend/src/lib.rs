@@ -2,7 +2,10 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 
+pub mod limit;
 pub mod metrics;
-#[cfg(feature = "ratelimit")]
-#[cfg_attr(docsrs, doc(cfg(feature = "ratelimit")))]
-pub mod ratelimit;
+pub mod routing;
+
+mod ext;
+
+pub use self::ext::BackendExt;

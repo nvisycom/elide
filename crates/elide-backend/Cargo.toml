@@ -2,8 +2,8 @@
 
 [package]
 name = "elide-backend"
-description = "Backend decorators for Elide: usage metering, observability sinks, and concurrency rate-limiting over the model-call contract"
-keywords = ["elide", "backend", "metrics", "rate-limit", "usage"]
+description = "Backend decorators for Elide: usage metering, observability sinks, rate-limiting, routing, and failover over the model-call contract"
+keywords = ["elide", "backend", "metrics", "rate-limit", "routing"]
 categories = ["development-tools::profiling"]
 
 version = { workspace = true }
@@ -21,11 +21,12 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-## The `metrics` module (`Metered`, the `Usage` record, the `UsageCollector`) is
-## always available — it pulls no extra dependency. Off by default are the things
-## that do: `ratelimit` (the `ConcurrencyLimited` and `RateLimited` decorators,
-## which need an async runtime) and the observability sinks (`tracing`,
-## `recorder`).
+## The `metrics` module (`Metered`, the `Usage` record, the `UsageCollector`) and
+## the `routing` module (`LanguageRouted`, `FallbackRouted`) are always available —
+## they pull no extra dependency. Off by default are the things that do:
+## `ratelimit` (the `ConcurrencyLimited` and `RateLimited` decorators in
+## `limit`, which need an async runtime; `BatchChunked` there needs none and is
+## always available) and the observability sinks (`tracing`, `recorder`).
 default = []
 
 ## The `ratelimit` module: `ConcurrencyLimited` (a semaphore caps simultaneous

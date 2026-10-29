@@ -33,6 +33,7 @@ use elide::prelude::*;
 use elide::recognition::llm::LlmRecognizer;
 use elide::recognition::llm::backend::MockBackend;
 use elide::recognition::ner::NerRecognizer;
+use elide::recognition::ner::backend::{MockBackend as MockNerBackend, NerBackendExt};
 use elide::recognition::pattern::PatternRecognizer;
 
 /// Sample document baked into the binary so the example is self-contained.
@@ -94,13 +95,11 @@ fn build_analyzer() -> Result<Analyzer<Text>> {
         .with_builtin_dictionaries()
         .build_context_enhanced()?;
 
-    // Mock NER: wired like a real model, returns no entities offline.
-    let ner = NerRecognizer::mock()
-        .with_name("ner-mock")
-        .with_supported_labels(vec![
-            builtins::PERSON_NAME.to_ref(),
-            builtins::ADDRESS.to_ref(),
-        ]);
+    // Mock NER: wired like a real model, limited to the labels it supports;
+    // returns no entities offline.
+    let backend = MockNerBackend::new()
+        .label_scoped([builtins::PERSON_NAME.to_ref(), builtins::ADDRESS.to_ref()]);
+    let ner = NerRecognizer::new(backend).with_name("ner-mock");
 
     // Mock LLM: wired like a real model, returns no entities offline.
     let llm = LlmRecognizer::<MockBackend<Text>>::mock().with_name("llm-mock");

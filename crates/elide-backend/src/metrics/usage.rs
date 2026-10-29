@@ -112,7 +112,7 @@ pub struct Usage {
     #[cfg_attr(feature = "serde", serde(with = "duration_millis"))]
     #[cfg_attr(feature = "schema", schemars(with = "u64"))]
     pub duration: Duration,
-    /// The model and unit cost the call incurred. On a failure the units are
+    /// The model and the units the call was billed for. On a failure the units are
     /// whatever the (absent) response reported, i.e. none.
     pub model: ModelUsage,
     /// What the call produced (entities, segments, regions, candidates), when the
@@ -175,16 +175,15 @@ impl UsageSink for Arc<dyn UsageSink> {
 /// Cheap to [`Clone`] (it shares one buffer): build one, clone it into each
 /// [`Metered`](crate::metrics::Metered) wrapper, run the pipeline, then read the entries.
 /// Correct under concurrency because each run owns its collector, so a webserver
-/// attributes cost to the right request with no shared state.
+/// attributes usage to the right request with no shared state.
 ///
 /// ```
-/// # use std::sync::Arc;
 /// # use elide_backend::metrics::{UsageCollector, UsageSink, Usage, ModelUsage};
 /// # use std::time::Duration;
 /// let collector = UsageCollector::new();
-/// let sink: Arc<dyn UsageSink> = Arc::new(collector.clone());
-/// # sink.record(Usage::success(Duration::from_millis(5), ModelUsage::new("gpt-4o"), Some(3)));
-/// // ... hand `sink` to `Metered::new(backend, sink)`, run the analysis ...
+/// # collector.record(Usage::success(Duration::from_millis(5), ModelUsage::new("gpt-4o"), Some(3)));
+/// // ... meter the run's backends with `backend.metered(collector.clone())`,
+/// // run the analysis ...
 /// for usage in collector.entries() {
 ///     println!("{} took {:?}", usage.model.model, usage.duration);
 /// }

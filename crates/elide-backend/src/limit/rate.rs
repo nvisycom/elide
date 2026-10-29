@@ -45,12 +45,94 @@ impl Bucket {
     }
 }
 
+/// A request rate: a number of calls per interval, with a burst.
+///
+/// The burst is how many calls an idle limiter lets through at once, before
+/// pacing the rest out at the rate. It defaults to the rate's count, so an idle
+/// `Rate::per_minute(600)` admits 600 calls immediately, then one every 100 ms.
+/// [`with_burst`](Self::with_burst) changes it: `with_burst(1)` paces every
+/// call evenly, for a provider that rejects bursts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rate {
+    count: u32,
+    interval: Duration,
+    burst: u32,
+}
+
+impl Rate {
+    /// `count` calls per `interval`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `count` or `interval` is zero: neither describes a rate that
+    /// ever admits a call.
+    #[must_use]
+    pub fn new(count: u32, interval: Duration) -> Self {
+        assert!(count > 0, "rate count must be non-zero");
+        assert!(!interval.is_zero(), "rate interval must be non-zero");
+        Self {
+            count,
+            interval,
+            burst: count,
+        }
+    }
+
+    /// `count` calls per second.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `count` is zero.
+    #[must_use]
+    pub fn per_second(count: u32) -> Self {
+        Self::new(count, Duration::from_secs(1))
+    }
+
+    /// `count` calls per minute.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `count` is zero.
+    #[must_use]
+    pub fn per_minute(count: u32) -> Self {
+        Self::new(count, Duration::from_secs(60))
+    }
+
+    /// Let up to `burst` calls through at once after an idle period, in place of
+    /// the default (the rate's count). `1` paces every call evenly.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `burst` is zero: a limiter that holds no call never admits one.
+    #[must_use]
+    pub fn with_burst(mut self, burst: u32) -> Self {
+        assert!(burst > 0, "rate burst must be non-zero");
+        self.burst = burst;
+        self
+    }
+
+    /// Calls admitted per [`interval`](Self::interval).
+    pub fn count(&self) -> u32 {
+        self.count
+    }
+
+    /// The interval the [`count`](Self::count) is measured over.
+    pub fn interval(&self) -> Duration {
+        self.interval
+    }
+
+    /// Calls admitted at once after an idle period.
+    pub fn burst(&self) -> u32 {
+        self.burst
+    }
+}
+
 /// Wraps a [`Backend`] and admits at most a fixed number of its calls per
 /// interval, leaving the request and response untouched.
 ///
-/// A token bucket meters the rate: the bucket holds up to `capacity` tokens and
-/// refills `refill` of them every `interval`, so a full bucket lets a burst
-/// through at once and a drained one paces callers out at the steady fill rate.
+/// A token bucket meters the [`Rate`]: the bucket holds up to the burst in
+/// tokens and refills the count of them every interval, so a full bucket lets a
+/// burst through at once and a drained one paces callers out at the steady fill
+/// rate.
 /// Each call takes one token, waiting when the bucket is empty;
 /// [`call_batch`](Backend::call_batch) takes one *per request* — a provider
 /// meters a batch against its quota per item, and the default `call_batch` is one
@@ -63,31 +145,18 @@ impl Bucket {
 /// same provenance), it drops in anywhere the inner backend goes, and composes
 /// with [`Metered`](crate::metrics::Metered).
 ///
-/// [`ConcurrencyLimited`]: crate::ratelimit::ConcurrencyLimited
+/// [`ConcurrencyLimited`]: crate::limit::ConcurrencyLimited
 pub struct RateLimited<B> {
     inner: B,
     bucket: Mutex<Bucket>,
 }
 
 impl<B> RateLimited<B> {
-    /// Admit at most `refill` of `inner`'s calls per `interval`, allowing a burst
-    /// of up to `burst` calls when the bucket is full.
-    ///
-    /// `burst` is the bucket capacity: set it to `refill` for a smooth rate with
-    /// no extra burst, or higher to let an idle period bank tokens for a spike.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `refill` or `burst` is zero, or if `interval` is zero — none of
-    /// those describe a limiter that ever admits a call at a finite rate.
+    /// Admit `inner`'s calls at `rate`.
     #[must_use]
-    pub fn new(inner: B, refill: u32, interval: Duration, burst: u32) -> Self {
-        assert!(refill > 0, "refill must be non-zero");
-        assert!(burst > 0, "burst must be non-zero");
-        assert!(!interval.is_zero(), "interval must be non-zero");
-
-        let capacity = f64::from(burst);
-        let fill_per_sec = f64::from(refill) / interval.as_secs_f64();
+    pub fn new(inner: B, rate: Rate) -> Self {
+        let capacity = f64::from(rate.burst);
+        let fill_per_sec = f64::from(rate.count) / rate.interval.as_secs_f64();
         Self {
             inner,
             bucket: Mutex::new(Bucket {
@@ -199,9 +268,7 @@ mod tests {
             Counting {
                 calls: AtomicUsize::new(0),
             },
-            10,
-            Duration::from_secs(1),
-            10,
+            Rate::per_second(10).with_burst(10),
         );
         let response = backend.call(Req(PhantomData)).await.unwrap();
         assert_eq!(response, Resp(1), "one call reached the inner backend");
@@ -215,9 +282,7 @@ mod tests {
                 calls: AtomicUsize::new(0),
             },
             // One token per second, but a bucket of 5 — so 5 go through at once.
-            1,
-            Duration::from_secs(1),
-            5,
+            Rate::per_second(1).with_burst(5),
         );
 
         for _ in 0..5 {
@@ -239,9 +304,7 @@ mod tests {
             Counting {
                 calls: AtomicUsize::new(0),
             },
-            1,
-            Duration::from_secs(1),
-            5,
+            Rate::per_second(1).with_burst(5),
         ));
 
         // Drain the 5-token bucket.
@@ -279,9 +342,7 @@ mod tests {
             Counting {
                 calls: AtomicUsize::new(0),
             },
-            1,
-            Duration::from_secs(1),
-            2,
+            Rate::per_second(1).with_burst(2),
         ));
 
         // The bucket holds 2 tokens; a batch of 3 needs a third.

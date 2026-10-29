@@ -1,13 +1,12 @@
-//! [`IgnoreLabels`]: a NER backend decorator that drops spans whose
-//! label is in a configured set.
+//! [`LabelExcluded`]: a NER backend decorator that drops spans whose label is
+//! in a configured set.
 //!
-//! Wraps any inner backend and removes every span whose label is ignored,
-//! for filtering out labels a model emits but the caller doesn't care
-//! about (`O` from BIO tagging, `MISC` from generic schemas, …):
+//! Wraps any inner backend and removes every span whose label is excluded, for
+//! filtering out labels a model emits but the caller doesn't care about (`O`
+//! from BIO tagging, `MISC` from generic schemas, …):
 //!
 //! ```ignore
-//! let backend = IgnoreLabels::new(inner)
-//!     .with_label(LabelRef::new("MISC"));
+//! let backend = LabelExcluded::new(inner, [LabelRef::new("MISC")]);
 //! ```
 
 use std::collections::HashSet;
@@ -23,39 +22,27 @@ use crate::backend::{NerRequest, NerResponse};
 /// A NER backend that drops spans whose label is in a configured set.
 ///
 /// Delegates recognition to the wrapped backend, then removes every span
-/// whose label is ignored. Spans whose label is not in the set pass
-/// through unchanged.
+/// whose label is excluded. Spans whose label is not in the set pass
+/// through unchanged. The counterpart of [`LabelScoped`](super::LabelScoped),
+/// which keeps only the labels in its set.
 #[derive(Debug, Clone)]
-pub struct IgnoreLabels<B> {
+pub struct LabelExcluded<B> {
     inner: B,
     labels: HashSet<LabelRef>,
 }
 
-impl<B> IgnoreLabels<B> {
-    /// Wrap `inner`. No labels are ignored until configured via
-    /// [`with_label`] / [`with_labels`].
-    ///
-    /// [`with_label`]: Self::with_label
-    /// [`with_labels`]: Self::with_labels
-    pub fn new(inner: B) -> Self {
+impl<B> LabelExcluded<B> {
+    /// Drop `inner`'s spans labelled with any of `labels`.
+    pub fn new(inner: B, labels: impl IntoIterator<Item = LabelRef>) -> Self {
         Self {
             inner,
-            labels: HashSet::new(),
+            labels: labels.into_iter().collect(),
         }
     }
 
-    /// Add one label to the ignore set.
-    #[must_use]
-    pub fn with_label(mut self, label: LabelRef) -> Self {
-        self.labels.insert(label);
-        self
-    }
-
-    /// Add several labels to the ignore set.
-    #[must_use]
-    pub fn with_labels(mut self, labels: impl IntoIterator<Item = LabelRef>) -> Self {
-        self.labels.extend(labels);
-        self
+    /// The excluded labels.
+    pub fn labels(&self) -> &HashSet<LabelRef> {
+        &self.labels
     }
 
     /// Borrow the wrapped backend.
@@ -63,7 +50,7 @@ impl<B> IgnoreLabels<B> {
         &self.inner
     }
 
-    /// Drop every span whose label is in the ignore set.
+    /// Drop every span whose label is excluded.
     fn filter(&self, response: &mut NerResponse) {
         response
             .spans
@@ -72,7 +59,7 @@ impl<B> IgnoreLabels<B> {
 }
 
 #[async_trait]
-impl<B> Backend for IgnoreLabels<B>
+impl<B> Backend for LabelExcluded<B>
 where
     B: for<'a> Backend<Request<'a> = NerRequest<'a>, Response = NerResponse>,
 {
@@ -127,12 +114,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn drops_ignored_labels_keeps_the_rest() {
+    async fn drops_excluded_labels_keeps_the_rest() {
         let inner = FixedBackend(vec![
             NerSpan::new("MISC", 0.9, 0..1),
             NerSpan::new("EMAIL", 0.9, 1..2),
         ]);
-        let filtered = IgnoreLabels::new(inner).with_label(LabelRef::new("MISC"));
+        let filtered = LabelExcluded::new(inner, [LabelRef::new("MISC")]);
 
         let request = NerRequest {
             text: "x",
@@ -195,8 +182,7 @@ mod tests {
     async fn call_batch_forwards_to_inner_and_filters_each() {
         use std::sync::atomic::Ordering;
 
-        let filtered =
-            IgnoreLabels::new(CountingBackend::default()).with_label(LabelRef::new("MISC"));
+        let filtered = LabelExcluded::new(CountingBackend::default(), [LabelRef::new("MISC")]);
         let out = filtered
             .call_batch(vec![request(), request()])
             .await

@@ -154,13 +154,13 @@ where
 }
 
 /// Build the per-call OCR request from a subject's decoded image.
-fn ocr_request<'a>(subject: &'a Subject<Image>, ctx: &Context<'_, Image>) -> OcrRequest<'a> {
+fn ocr_request<'a>(subject: &'a Subject<Image>, ctx: &'a Context<'_, Image>) -> OcrRequest<'a> {
     let data = subject.data();
     OcrRequest {
         image: data.source(),
         format: data.format(),
         dimensions: data.dimensions(),
-        language: None,
+        language: ctx.languages(subject).primary(),
         correlation_id: ctx.correlation_id(),
     }
 }

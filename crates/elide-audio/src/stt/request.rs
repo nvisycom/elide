@@ -30,4 +30,8 @@ pub struct SttRequest<'a> {
     pub correlation_id: Option<Uuid>,
 }
 
-impl BackendRequest for SttRequest<'_> {}
+impl BackendRequest for SttRequest<'_> {
+    fn language(&self) -> Option<&LanguageTag> {
+        self.language
+    }
+}

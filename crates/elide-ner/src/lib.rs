@@ -3,7 +3,6 @@
 #![doc = include_str!("../README.md")]
 
 pub mod backend;
-pub mod decorator;
 mod recognition;
 
 pub use self::recognition::{AggregationStrategy, AlignmentMode, NerRecognizer};

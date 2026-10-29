@@ -25,7 +25,7 @@ use tokio::sync::Semaphore;
 /// ordering the caller wants to meter (metering the waited call, or the call plus
 /// its wait).
 ///
-/// [`RateLimited`]: crate::ratelimit::RateLimited
+/// [`RateLimited`]: crate::limit::RateLimited
 pub struct ConcurrencyLimited<B> {
     inner: B,
     permits: Semaphore,

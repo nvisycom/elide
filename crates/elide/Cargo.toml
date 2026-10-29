@@ -164,9 +164,13 @@ mocks = ["elide-ner?/mocks", "elide-llm?/mocks", "elide-audio?/mocks", "elide-im
 ## `UsageCollector`, re-exported from `elide-backend`. Off by default — a pipeline
 ## that does not meter its backends compiles none of it.
 metrics = ["dep:elide-backend"]
-## The `ratelimit` backend decorators: `ConcurrencyLimited` caps simultaneous
-## calls, `RateLimited` caps calls per interval.
+## The rate-limiting backend decorators in `backend::limit`: `ConcurrencyLimited`
+## caps simultaneous calls, `RateLimited` caps calls per interval.
 ratelimit = ["dep:elide-backend", "elide-backend/ratelimit"]
+## The `routing` backend decorators: `LanguageRouted` dispatches each request to
+## a backend registered for its language, and `FallbackRouted` routes a failed
+## call to a fallback backend.
+routing = ["dep:elide-backend"]
 ## The `metrics`-facade usage sink (`MetricsSink`): route backend usage to a
 ## Prometheus/StatsD recorder. Implies `metrics`.
 metrics-recorder = ["metrics", "elide-backend/recorder"]

@@ -1,14 +1,17 @@
 name: Pages
 
-# Builds the elide-wasm browser demo and publishes it to GitHub Pages. The demo
-# is fully static (HTML + JS + wasm) and runs the redaction pipeline entirely in
-# the visitor's browser.
+# Builds the book and the elide-wasm browser demo and publishes them to GitHub
+# Pages as one site: the book at the root, the demo under `demo/`. Both are
+# fully static; the demo runs the redaction pipeline entirely in the visitor's
+# browser. The book's examples are compiled and run as doctests by the Build
+# workflow.
 
 on:
   push:
     branches:
       - "main"
     paths:
+      - "book/**"
       - "packages/**"
       - "package.json"
       - "package-lock.json"
@@ -28,12 +31,13 @@ on:
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
-# The demo is served from `https://<owner>.github.io/<repo>/`, so Vite must build
-# with a matching base path.
+# The demo is served from `https://<owner>.github.io/<repo>/demo/`, so Vite must
+# build with a matching base path.
 env:
   CARGO_TERM_COLOR: always
   RUST_TOOLCHAIN: "1.95.0"
-  BASE_PATH: "/${{ github.event.repository.name }}/"
+  MDBOOK_VERSION: "0.5.4"
+  BASE_PATH: "/${{ github.event.repository.name }}/demo/"
 
 # Allow one concurrent deployment; a newer push supersedes an in-flight one.
 concurrency:
@@ -42,7 +46,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build demo
+    name: Build
     runs-on: ubuntu-latest
     # The build only reads the repo and uploads an artifact; it needs no
     # deployment credentials. Only the deploy job below holds those.
@@ -72,13 +76,25 @@ jobs:
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@main
 
+      - name: Install mdBook
+        uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook@${{ env.MDBOOK_VERSION }}
+
+      - name: Build the book
+        run: mdbook build book
+
       - name: Build demo
         run: make wasm-demo
+
+      # The book is the site root; the demo nests under it.
+      - name: Assemble the site
+        run: cp -r packages/demo/dist book/book/demo
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
         with:
-          path: packages/demo/dist
+          path: book/book
 
   deploy:
     name: Deploy

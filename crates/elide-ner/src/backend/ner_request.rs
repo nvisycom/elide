@@ -28,4 +28,8 @@ pub struct NerRequest<'a> {
     pub correlation_id: Option<Uuid>,
 }
 
-impl BackendRequest for NerRequest<'_> {}
+impl BackendRequest for NerRequest<'_> {
+    fn language(&self) -> Option<&LanguageTag> {
+        self.language
+    }
+}

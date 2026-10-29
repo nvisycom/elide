@@ -21,10 +21,10 @@ use elide_core::entity::audit::ModelEvent;
 /// Windows are issued **sequentially**: `call_batch` awaits each window before
 /// it builds the next, so this reshapes a batch to fit the provider's size
 /// limit without adding parallelism. Composing it with
-/// [`ConcurrencyLimited`](crate::ratelimit::ConcurrencyLimited) therefore does
+/// [`ConcurrencyLimited`](crate::limit::ConcurrencyLimited) therefore does
 /// not run one batch's windows concurrently — it bounds concurrency across
 /// *separate* calls; compose with
-/// [`RateLimited`](crate::ratelimit::RateLimited) to bound the request rate.
+/// [`RateLimited`](crate::limit::RateLimited) to bound the request rate.
 /// Because it is itself a `Backend` (same request/response, same provenance), it
 /// drops in anywhere the inner backend goes.
 ///

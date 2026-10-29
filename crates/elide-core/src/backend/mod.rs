@@ -21,11 +21,25 @@ mod usage;
 pub use self::usage::{Meter, TokenCounts, Units};
 use crate::Result;
 use crate::entity::audit::ModelEvent;
+use crate::primitive::LanguageTag;
 
-/// A request handed to a [`Backend`]. A marker: it names the input half of a
-/// backend's call contract, so the associated type is self-documenting and a
-/// backend cannot be built over an unrelated type.
-pub trait BackendRequest: Send + Sync {}
+/// A request handed to a [`Backend`].
+///
+/// Names the input half of a backend's call contract, so the associated type is
+/// self-documenting and a backend cannot be built over an unrelated type, and
+/// exposes what a decorator may need to read off any request without
+/// per-backend code.
+pub trait BackendRequest: Send + Sync {
+    /// The language of the request's content, if known: the call's primary
+    /// language, asserted by the caller or detected.
+    ///
+    /// Read by language-aware decorators such as `LanguageRouted` in
+    /// `elide-backend`. The default is `None`, for a request that carries no
+    /// language; a request that does overrides it.
+    fn language(&self) -> Option<&LanguageTag> {
+        None
+    }
+}
 
 /// A response returned by a [`Backend`], reporting the billing units its call
 /// spent.

@@ -32,7 +32,7 @@ const CHARACTERS: &str = "elide.backend.characters";
 ///
 /// For a process-wide aggregate view — total tokens, latency percentiles — via a
 /// recorder the process installs (Prometheus, StatsD, …). This is *global* by
-/// design; for per-run cost (a single request's total), use a per-run
+/// design; for per-run usage (a single request's total), use a per-run
 /// [`UsageCollector`](crate::metrics::UsageCollector) instead, or a
 /// [`Tee`](crate::metrics::Tee) that feeds both.
 ///
