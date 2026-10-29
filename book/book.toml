@@ -1,0 +1,23 @@
+[book]
+title = "The Elide Book"
+authors = ["Oleh Martsokha"]
+description = "A guide to detecting and redacting sensitive data with Elide, the multimodal Rust toolkit."
+language = "en"
+
+[rust]
+edition = "2024"
+
+[output.html]
+site-url = "/elide/"
+git-repository-url = "https://github.com/nvisycom/elide"
+edit-url-template = "https://github.com/nvisycom/elide/edit/main/book/{path}"
+default-theme = "light"
+preferred-dark-theme = "navy"
+# The chapters are short, so the sidebar lists chapters only, not the
+# current page's headings.
+sidebar-header-nav = false
+
+# The playground has no elide, so examples cannot run there. They are
+# compiled, and run where they need no network, by `cargo test` instead.
+[output.html.playground]
+runnable = false

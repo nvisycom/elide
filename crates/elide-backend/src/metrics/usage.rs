@@ -178,13 +178,12 @@ impl UsageSink for Arc<dyn UsageSink> {
 /// attributes cost to the right request with no shared state.
 ///
 /// ```
-/// # use std::sync::Arc;
 /// # use elide_backend::metrics::{UsageCollector, UsageSink, Usage, ModelUsage};
 /// # use std::time::Duration;
 /// let collector = UsageCollector::new();
-/// let sink: Arc<dyn UsageSink> = Arc::new(collector.clone());
-/// # sink.record(Usage::success(Duration::from_millis(5), ModelUsage::new("gpt-4o"), Some(3)));
-/// // ... hand `sink` to `Metered::new(backend, sink)`, run the analysis ...
+/// # collector.record(Usage::success(Duration::from_millis(5), ModelUsage::new("gpt-4o"), Some(3)));
+/// // ... meter the run's backends with `backend.metered(collector.clone())`,
+/// // run the analysis ...
 /// for usage in collector.entries() {
 ///     println!("{} took {:?}", usage.model.model, usage.duration);
 /// }

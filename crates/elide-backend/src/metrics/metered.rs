@@ -1,11 +1,11 @@
 //! [`Metered`]: a [`Backend`] decorator that reports each call's usage.
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use elide_core::Result;
-use elide_core::backend::Backend;
+use elide_core::backend::{Backend, BackendResponse};
 use elide_core::entity::audit::ModelEvent;
+use elide_core::{Error, Result};
 
 use super::usage::{ModelUsage, Usage, UsageSink};
 
@@ -18,6 +18,9 @@ use super::usage::{ModelUsage, Usage, UsageSink};
 /// the failure path — reads the response's own units and output count, folds in
 /// the model identity from [`provenance`](Backend::provenance), and records the
 /// result. This is the one place cost is known, so no other layer carries usage.
+///
+/// Meter a provider's backend, not a router in front of several: a router's
+/// provenance names only one of the models it chooses between.
 pub struct Metered<B> {
     inner: B,
     sink: Arc<dyn UsageSink>,
@@ -25,13 +28,35 @@ pub struct Metered<B> {
 
 impl<B> Metered<B> {
     /// Meter `inner`, reporting each call to `sink`.
-    pub fn new(inner: B, sink: Arc<dyn UsageSink>) -> Self {
-        Self { inner, sink }
+    ///
+    /// Pass a [`UsageCollector`](super::UsageCollector) clone to read a run's
+    /// total back, or an `Arc<dyn UsageSink>` to share one type-erased sink.
+    pub fn new(inner: B, sink: impl UsageSink + 'static) -> Self {
+        Self {
+            inner,
+            sink: Arc::new(sink),
+        }
     }
 
     /// The wrapped backend.
     pub fn inner(&self) -> &B {
         &self.inner
+    }
+}
+
+impl<B: Backend> Metered<B> {
+    /// Record a successful call's `response`, which took `elapsed`.
+    fn record_success(&self, elapsed: Duration, response: &B::Response) {
+        let model = ModelUsage::from(self.inner.provenance()).with_units(response.units());
+        self.sink
+            .record(Usage::success(elapsed, model, response.output_count()));
+    }
+
+    /// Record a failed call, which took `elapsed`.
+    fn record_failure(&self, elapsed: Duration, error: &Error) {
+        let model = ModelUsage::from(self.inner.provenance());
+        self.sink
+            .record(Usage::failure(elapsed, model, error.kind()));
     }
 }
 
@@ -45,55 +70,35 @@ impl<B: Backend> Backend for Metered<B> {
     }
 
     async fn call(&self, request: Self::Request<'_>) -> Result<Self::Response> {
-        use elide_core::backend::BackendResponse;
-
         let start = Instant::now();
         let result = self.inner.call(request).await;
         let elapsed = start.elapsed();
         // Record on both paths: a failed call's latency and error kind are signal
-        // that would otherwise be lost. Model identity comes from provenance;
-        // units and output count from the response, when there is one.
+        // that would otherwise be lost.
         match &result {
-            Ok(response) => {
-                let model = ModelUsage::from(self.inner.provenance()).with_units(response.units());
-                self.sink
-                    .record(Usage::success(elapsed, model, response.output_count()));
-            }
-            Err(error) => {
-                let model = ModelUsage::from(self.inner.provenance());
-                self.sink
-                    .record(Usage::failure(elapsed, model, error.kind()));
-            }
+            Ok(response) => self.record_success(elapsed, response),
+            Err(error) => self.record_failure(elapsed, error),
         }
         result
     }
 
     async fn call_batch(&self, requests: Vec<Self::Request<'_>>) -> Result<Vec<Self::Response>> {
-        use elide_core::backend::BackendResponse;
-
-        let provenance = self.inner.provenance();
         let start = Instant::now();
         let result = self.inner.call_batch(requests).await;
         let elapsed = start.elapsed();
         // One usage entry per response, each carrying its own units and output
         // count, so per-model totals stay correct across a batch. The batch is one
-        // round-trip, so every entry shares its wall-clock: latency then counts the
-        // batch as one sample per result, which is what each result waited. A
+        // round-trip, so every entry shares its wall-clock: latency then counts
+        // the batch as one sample per result, which is what each result waited. A
         // whole-batch failure records a single failed entry with the batch's
         // latency and error kind.
         match &result {
             Ok(responses) => {
                 for response in responses {
-                    let model = ModelUsage::from(provenance.clone()).with_units(response.units());
-                    self.sink
-                        .record(Usage::success(elapsed, model, response.output_count()));
+                    self.record_success(elapsed, response);
                 }
             }
-            Err(error) => {
-                let model = ModelUsage::from(provenance);
-                self.sink
-                    .record(Usage::failure(elapsed, model, error.kind()));
-            }
+            Err(error) => self.record_failure(elapsed, error),
         }
         result
     }

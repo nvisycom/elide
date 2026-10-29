@@ -23,6 +23,9 @@ encryption.key
 coverage/
 *.lcov
 
+# The book, built by `mdbook build book`
+/book/book/
+
 # Node / npm workspaces
 node_modules/
 .vite/

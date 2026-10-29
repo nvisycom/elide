@@ -88,7 +88,7 @@ impl Confidence {
     /// Multiply the score by `factor`, saturating at the `[0, 1]` bounds.
     ///
     /// `0.9 * 1.2` yields `1.0`, not an out-of-range value. Used by
-    /// score-scaling steps such as the `ScoreScale` backend decorator.
+    /// score-scaling steps such as the `ScoreScaled` backend decorator.
     pub fn saturating_mul(self, factor: f32) -> Self {
         Self::clamped(self.0 * factor)
     }

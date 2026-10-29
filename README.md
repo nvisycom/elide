@@ -13,7 +13,7 @@ with a full audit trail for every entity.
 [![Security](https://img.shields.io/github/actions/workflow/status/nvisycom/elide/security.yml?branch=main&label=security&style=flat-square)](https://github.com/nvisycom/elide/actions/workflows/security.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](LICENSE)
 
-[**nvisy.com**](https://nvisy.com) · [**docs.nvisy.com**](https://docs.nvisy.com) · [**live demo**](https://nvisycom.github.io/elide/)
+[**nvisy.com**](https://nvisy.com) · [**book**](https://nvisycom.github.io/elide/) · [**docs.nvisy.com**](https://docs.nvisy.com) · [**live demo**](https://nvisycom.github.io/elide/demo/)
 
 </div>
 
@@ -53,12 +53,16 @@ you need.
 
 ## Try it
 
-A [live demo](https://nvisycom.github.io/elide/) runs the pattern-and-dictionary
+A [live demo](https://nvisycom.github.io/elide/demo/) runs the pattern-and-dictionary
 detection and redaction pipeline compiled to WebAssembly, entirely in your
 browser: paste text, redact it, and nothing you type leaves the page. The source
 is [`crates/elide-wasm`](crates/elide-wasm); build it locally with `make wasm-demo`.
 
 ## Documentation
+
+[The Elide Book](https://nvisycom.github.io/elide/) is the guide: installation,
+a first redaction, and a chapter for each part of the toolkit. Build it locally
+with `mdbook build book`.
 
 [`docs/`](docs/) develops the conceptual architecture, one document per stage
 of a document's path through the toolkit.

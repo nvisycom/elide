@@ -35,4 +35,8 @@ pub struct OcrRequest<'a> {
     pub correlation_id: Option<Uuid>,
 }
 
-impl BackendRequest for OcrRequest<'_> {}
+impl BackendRequest for OcrRequest<'_> {
+    fn language(&self) -> Option<&LanguageTag> {
+        self.language
+    }
+}

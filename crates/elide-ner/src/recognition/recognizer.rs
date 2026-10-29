@@ -1,21 +1,21 @@
 //! [`NerRecognizer`]: unified NER recognizer that drives any
 //! NER backend.
 //!
-//! Holds its NER backend `B` plus the recognizer's advertised
-//! [`supported_labels`]. On each `recognize` call it asks the backend for
-//! spans (passing `Some(&labels)` when non-empty for zero-shot backends,
-//! `None` when empty for fixed-label backends), then emits entities from
-//! the canonical spans the backend returns. Filtering ignored labels or
-//! scaling scores is the job of backend decorators
-//! ([`IgnoreLabels`], [`ScoreScale`]), not the recognizer.
+//! Holds its NER backend `B`. On each `recognize` call it asks the backend for
+//! spans of the call's catalog labels (`None` when the catalog is empty, leaving
+//! the backend to emit what it natively produces), then emits entities from the
+//! canonical spans the backend returns. Which labels a model supports, which it
+//! ignores, and how its scores scale are properties of the model, so they are
+//! backend decorators ([`LabelScoped`], [`LabelExcluded`], [`ScoreScaled`]),
+//! not recognizer settings.
 //!
 //! Implements [`Recognizer<Text>`] so it composes with the
 //! rest of the platform through the same trait every other text
 //! recognizer uses.
 //!
-//! [`supported_labels`]: NerRecognizer::supported_labels
-//! [`IgnoreLabels`]: crate::decorator::IgnoreLabels
-//! [`ScoreScale`]: crate::decorator::ScoreScale
+//! [`LabelScoped`]: crate::backend::LabelScoped
+//! [`LabelExcluded`]: crate::backend::LabelExcluded
+//! [`ScoreScaled`]: crate::backend::ScoreScaled
 //! [`Recognizer<Text>`]: elide_core::recognition::Recognizer
 
 use elide_core::backend::Backend;
@@ -45,11 +45,6 @@ pub struct NerRecognizer<B = ()> {
     /// Backend that turns `(text, kinds)` into raw spans. May be a
     /// `Metered` wrapper.
     backend: B,
-    /// Labels the recognizer advertises. When non-empty, the
-    /// recognizer asks the backend for only this subset on every
-    /// call (zero-shot path). When empty, the backend is asked for
-    /// whatever it natively produces (fixed-label path).
-    supported_labels: Vec<LabelRef>,
     /// Aggregation policy for backends that emit token-level
     /// predictions. Advisory for backends that aggregate server-side.
     aggregation: AggregationStrategy,
@@ -62,8 +57,7 @@ impl<B> NerRecognizer<B>
 where
     B: for<'a> Backend<Request<'a> = NerRequest<'a>, Response = NerResponse>,
 {
-    /// A NER recognizer over `backend`, with no advertised labels (fixed-label
-    /// path) and default aggregation/alignment.
+    /// A NER recognizer over `backend`, with default aggregation/alignment.
     ///
     /// Unnamed by default (its id falls back to the crate name); refine with the
     /// `with_*` setters.
@@ -72,7 +66,6 @@ where
         Self {
             name: None,
             backend,
-            supported_labels: Vec::new(),
             aggregation: AggregationStrategy::default(),
             alignment: AlignmentMode::default(),
         }
@@ -82,13 +75,6 @@ where
     #[must_use]
     pub fn with_name(mut self, name: impl Into<HipStr<'static>>) -> Self {
         self.name = Some(name.into());
-        self
-    }
-
-    /// Advertise the labels the recognizer requests (the zero-shot subset).
-    #[must_use]
-    pub fn with_supported_labels(mut self, labels: impl Into<Vec<LabelRef>>) -> Self {
-        self.supported_labels = labels.into();
         self
     }
 
@@ -125,33 +111,6 @@ impl<B> NerRecognizer<B> {
     #[must_use]
     pub fn name(&self) -> &str {
         self.name.as_deref().unwrap_or(env!("CARGO_PKG_NAME"))
-    }
-
-    /// Labels this recognizer advertises.
-    #[must_use]
-    pub fn supported_labels(&self) -> &[LabelRef] {
-        &self.supported_labels
-    }
-
-    /// The target labels for a call, resolved against `catalog`, as full
-    /// [`Label`]s (localized name + optional description) so a zero-shot backend
-    /// gets the localized text in the analysis language.
-    ///
-    /// With no configured [`supported_labels`](Self::supported_labels) the whole
-    /// catalog is the target. Otherwise the recognizer's own set overrides,
-    /// each entry resolved against the catalog; a supported label *absent* from
-    /// the catalog is dropped, there is no localized definition to send, and
-    /// fabricating one from its id would mislead the backend. An empty result
-    /// leaves the backend to emit whatever it natively produces.
-    fn effective_labels(&self, catalog: &LabelCatalog) -> Vec<Label> {
-        if self.supported_labels.is_empty() {
-            catalog.iter().cloned().collect()
-        } else {
-            self.supported_labels
-                .iter()
-                .filter_map(|r| catalog.get(r).cloned())
-                .collect()
-        }
     }
 
     /// Aggregation policy for token-level backends.
@@ -219,7 +178,7 @@ where
     ) -> Result<Vec<Entity<M>>> {
         // No recognizable text at this chunk (an un-transcribed clip, an
         // un-OCR'd image): skip the model call and recognize nothing.
-        let effective_labels = self.effective_labels(ctx.catalog());
+        let effective_labels = target_labels(ctx.catalog());
         let Some(request) = ner_request(subject, ctx, &effective_labels) else {
             return Ok(Vec::new());
         };
@@ -235,7 +194,7 @@ where
         // One NER request per subject with recognizable text; no-text subjects are
         // skipped and recognize nothing. `targets` keeps each request aligned with
         // its subject index, so a response scatters back to the right subject.
-        let effective_labels = self.effective_labels(ctx.catalog());
+        let effective_labels = target_labels(ctx.catalog());
         let mut requests = Vec::new();
         let mut targets = Vec::new();
         for (index, subject) in subjects.iter().enumerate() {
@@ -275,7 +234,7 @@ impl<B> NerRecognizer<B> {
     /// Map a response's `spans` to entities located in `subject`.
     ///
     /// Spans already carry canonical labels (the backend did any raw-to-canonical
-    /// mapping; ignored labels are dropped by an `IgnoreLabels` decorator). When a
+    /// mapping; excluded labels are dropped by a `LabelExcluded` decorator). When a
     /// target set was requested, only those labels survive. Each surviving span is
     /// placed in the medium; one whose range can't be located is dropped.
     fn spans_to_entities<M: TextRecognizable>(
@@ -293,6 +252,14 @@ impl<B> NerRecognizer<B> {
             .filter_map(|s| self.build_entity::<M>(s, s.label.clone(), subject))
             .collect()
     }
+}
+
+/// The target labels for a call: every label in `catalog`, as full [`Label`]s
+/// (localized name + optional description) so a zero-shot backend gets the
+/// localized text in the analysis language. An empty catalog leaves the backend
+/// to emit whatever it natively produces.
+fn target_labels(catalog: &LabelCatalog) -> Vec<Label> {
+    catalog.iter().cloned().collect()
 }
 
 /// The per-call NER request for `subject`, or `None` when it carries no
@@ -314,7 +281,7 @@ fn ner_request<'a, M: TextRecognizable>(
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::{LabelCatalog, LabelLocale, builtins};
+    use elide_core::entity::{LabelCatalog, LabelLocale};
     use elide_core::modality::text::{Text, TextData};
     use elide_core::primitive::LanguageTag;
     use elide_core::recognition::Scope;
@@ -323,82 +290,35 @@ mod tests {
 
     #[tokio::test]
     async fn mock_backend_yields_no_entities() {
-        let rec = NerRecognizer::mock()
-            .with_name("test")
-            .with_supported_labels(vec![
-                builtins::PERSON_NAME.to_ref(),
-                builtins::EMAIL_ADDRESS.to_ref(),
-            ]);
-        let data = TextData::new("Alice Smith".to_owned());
-        let scope = Scope::new();
-        let ctx = Context::<Text>::new(&scope);
-        let subject = Subject::new(data);
-        let out = rec.recognize(&subject, &ctx).await.unwrap();
-        assert!(out.is_empty());
-    }
-
-    #[tokio::test]
-    async fn empty_supported_labels_passes_none_to_backend() {
         let rec = NerRecognizer::mock().with_name("test");
         let data = TextData::new("Alice Smith".to_owned());
-        let scope = Scope::new();
+        let scope = Scope::new().with_catalog(LabelCatalog::with_builtins());
         let ctx = Context::<Text>::new(&scope);
         let subject = Subject::new(data);
         let out = rec.recognize(&subject, &ctx).await.unwrap();
         assert!(out.is_empty());
-    }
-
-    /// A recognizer with the given `supported_labels`, for testing
-    /// [`effective_labels`](NerRecognizer::effective_labels) directly.
-    fn recognizer_with(supported: Vec<LabelRef>) -> NerRecognizer<MockBackend> {
-        NerRecognizer::mock()
-            .with_name("test")
-            .with_supported_labels(supported)
     }
 
     #[test]
-    fn no_supported_labels_targets_the_whole_catalog() {
-        // With no configured set, every catalog label is a target, as a full
-        // `Label`, so a zero-shot backend gets the localized name *and* the
-        // description.
+    fn targets_the_whole_catalog_as_full_labels() {
+        // Every catalog label is a target, as a full `Label`, so a zero-shot
+        // backend gets the localized name *and* the description.
         let mut catalog = LabelCatalog::new();
         catalog.insert(Label::new("email", "email address").with_localization(
             LanguageTag::english(),
             LabelLocale::described("email address", "an email address"),
         ));
-        let rec = recognizer_with(vec![]);
 
         let en = LanguageTag::english();
-        let labels = rec.effective_labels(&catalog);
+        let labels = target_labels(&catalog);
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].name(&en), "email address");
         assert!(labels[0].description(&en).is_some());
     }
 
     #[test]
-    fn supported_labels_select_a_subset_of_the_catalog() {
-        // The catalog carries both; the recognizer's own set restricts to just
-        // person_name, resolved to its catalog definition.
-        let mut catalog = LabelCatalog::new();
-        catalog.insert(Label::new("email", "email address"));
-        catalog.insert((*builtins::PERSON_NAME).clone());
-        let rec = recognizer_with(vec![builtins::PERSON_NAME.to_ref()]);
-
-        let en = LanguageTag::english();
-        let labels = rec.effective_labels(&catalog);
-        let names: Vec<&str> = labels.iter().map(|l| l.name(&en)).collect();
-        assert_eq!(names, vec![builtins::PERSON_NAME.name(&en)]);
-    }
-
-    #[test]
-    fn supported_label_absent_from_catalog_is_dropped() {
-        // person_name is not in the catalog, so there is no localized
-        // definition to send, it is dropped, not fabricated from its id.
-        let mut catalog = LabelCatalog::new();
-        catalog.insert(Label::new("email", "email address"));
-        let rec = recognizer_with(vec![builtins::PERSON_NAME.to_ref()]);
-
-        assert!(rec.effective_labels(&catalog).is_empty());
+    fn an_empty_catalog_has_no_target_labels() {
+        assert!(target_labels(&LabelCatalog::new()).is_empty());
     }
 
     /// A backend recording how it was called, to prove `recognize_batch`
