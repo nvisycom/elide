@@ -63,7 +63,7 @@ A batch fails over whole, since a batch fails whole.
 A failover is silent to the analysis, so watch for it in usage. Meter the
 primary and the fallback, not the router: each call is then charged to the
 model that served it, and the primary's failed calls are recorded even when
-the fallback recovered from them. See [Usage and cost](usage.md).
+the fallback recovered from them. See [Usage](usage.md).
 
 ```rust
 use elide::backend::BackendExt;

@@ -17,7 +17,7 @@ use super::usage::{ModelUsage, Usage, UsageSink};
 /// it never learns it is metered. It times the call — on both the success and
 /// the failure path — reads the response's own units and output count, folds in
 /// the model identity from [`provenance`](Backend::provenance), and records the
-/// result. This is the one place cost is known, so no other layer carries usage.
+/// result. This is the one place usage is known, so no other layer carries it.
 ///
 /// Meter a provider's backend, not a router in front of several: a router's
 /// provenance names only one of the models it chooses between.

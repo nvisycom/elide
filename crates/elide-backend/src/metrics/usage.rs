@@ -112,7 +112,7 @@ pub struct Usage {
     #[cfg_attr(feature = "serde", serde(with = "duration_millis"))]
     #[cfg_attr(feature = "schema", schemars(with = "u64"))]
     pub duration: Duration,
-    /// The model and unit cost the call incurred. On a failure the units are
+    /// The model and the units the call was billed for. On a failure the units are
     /// whatever the (absent) response reported, i.e. none.
     pub model: ModelUsage,
     /// What the call produced (entities, segments, regions, candidates), when the
@@ -175,7 +175,7 @@ impl UsageSink for Arc<dyn UsageSink> {
 /// Cheap to [`Clone`] (it shares one buffer): build one, clone it into each
 /// [`Metered`](crate::metrics::Metered) wrapper, run the pipeline, then read the entries.
 /// Correct under concurrency because each run owns its collector, so a webserver
-/// attributes cost to the right request with no shared state.
+/// attributes usage to the right request with no shared state.
 ///
 /// ```
 /// # use elide_backend::metrics::{UsageCollector, UsageSink, Usage, ModelUsage};

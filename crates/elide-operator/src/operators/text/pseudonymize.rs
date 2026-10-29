@@ -44,11 +44,13 @@ use crate::vault::Vault;
 /// # Recoverability
 ///
 /// [`LeakProfile::Recoverable`]: the vault keeps the mapping that produced
-/// each surrogate, keyed by the original value (or, for a coreferent entity,
-/// its cluster id), so its holder can link a surrogate to the value it
-/// replaced; without it the surrogate is just an opaque token. This is a link,
-/// not a decryption: the operator is not reversible, and the vault stores no
-/// original text for a cluster-keyed entry.
+/// each surrogate, keyed by the original value or, for a coreferent entity,
+/// its cluster id; without it the surrogate is just an opaque token. A
+/// value-keyed entry links its surrogate to the value it replaced directly. A
+/// cluster-keyed entry stores no original text, so linking its surrogate back
+/// also needs the entities (with their coreference clusters) from the
+/// detection call. This is a link, not a decryption: the operator is not
+/// reversible.
 ///
 /// [`Vault`]: crate::vault::Vault
 /// [`Generator`]: crate::generator::Generator

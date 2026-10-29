@@ -1,4 +1,4 @@
-# Usage and cost
+# Usage
 
 Hosted models are billed by the token, the page, or the second of audio.
 `Metered` (feature `metrics`) records every call a backend makes: the model,
@@ -57,4 +57,4 @@ let backend = backend.metered(Tee::new(usage.clone(), TracingSink::new()));
 
 Metrics are labelled by model, version, and outcome only. Those are a small
 set, fixed by configuration; per-request identifiers would make the number
-of series explode, which is why per-run cost belongs to a collector instead.
+of series explode, which is why per-run usage belongs to a collector instead.

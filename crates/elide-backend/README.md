@@ -58,10 +58,10 @@ let backend = multilingual
     .concurrency_limited(8);
 ```
 
-For per-run cost, `UsageCollector` is the in-memory sink: build one per request,
+For per-run usage, `UsageCollector` is the in-memory sink: build one per request,
 thread it into that run's metered backends, and read its total at the end. It is
 correct under concurrency because each run owns its collector, so a webserver
-attributes cost to the right request with no shared state.
+attributes usage to the right request with no shared state.
 
 For *global* observability, two `UsageSink`s forward each call's usage to the
 process-wide ecosystems a deployment already runs. `TracingSink` (feature
@@ -80,7 +80,7 @@ use elide_backend::metrics::{Tee, TracingSink, UsageCollector};
 // subscriber at once.
 let collector = UsageCollector::new();
 let backend = my_backend.metered(Tee::new(collector.clone(), TracingSink::new()));
-// ... run the analysis with `backend`, then read this run's cost:
+// ... run the analysis with `backend`, then read this run's usage:
 let units = collector.total_units();
 let tokens = units.tokens();
 ```
@@ -88,7 +88,7 @@ let tokens = units.tokens();
 The `model` and `version` labels are a bounded set — the models a deployment
 configures — so they are safe as metric labels; per-request identifiers are
 deliberately not labelled, as they would explode metric cardinality. That is why
-per-run cost lives in an owned `UsageCollector`, not in a global label.
+per-run usage lives in an owned `UsageCollector`, not in a global label.
 
 ## Documentation
 

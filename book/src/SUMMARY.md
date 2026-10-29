@@ -38,7 +38,7 @@
 # Model backends
 
 - [Backends](backends.md)
-- [Usage and cost](usage.md)
+- [Usage](usage.md)
 - [Rate limits](rate-limits.md)
 - [Language routing](routing.md)
 - [Failover](failover.md)

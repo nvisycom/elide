@@ -42,5 +42,4 @@ Two ways to spend less on it:
 - Run it only when cheaper recognizers are unsure, with an
   `EscalatingRecognizer`; see
   [Recognizer decorators](recognizer-decorators.md#escalation).
-- Measure what it costs per run with `Metered`; see
-  [Usage and cost](usage.md).
+- Measure its usage per run with `Metered`; see [Usage](usage.md).

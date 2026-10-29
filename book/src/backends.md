@@ -55,7 +55,7 @@ Each decorator is also a type with a `new` constructor, such as
 
 | Decorator | Method | Feature | Does |
 |---|---|---|---|
-| `Metered` | `metered` | `metrics` | Records each call's model, duration, and tokens; see [Usage and cost](usage.md) |
+| `Metered` | `metered` | `metrics` | Records each call's model, duration, and tokens; see [Usage](usage.md) |
 | `BatchChunked` | `batch_chunked` | any backend feature | Splits batches larger than the provider accepts; see [Rate limits](rate-limits.md) |
 | `ConcurrencyLimited` | `concurrency_limited` | `ratelimit` | Caps calls in flight at once |
 | `RateLimited` | `rate_limited` | `ratelimit` | Caps calls per interval |
