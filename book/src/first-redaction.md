@@ -58,21 +58,22 @@ async fn main() -> Result<()> {
 
     let registry = FormatRegistry::with_builtin();
     let mut document = registry.decode(input, "txt").await?;
-#
-#   let analyzer = Analyzer::<Text>::new()
-#       .with_recognizer(
-#           PatternRecognizer::builder()
-#               .with_builtin_patterns()
-#               .with_builtin_dictionaries()
-#               .build_context_enhanced()?,
-#       )
-#       .with_layer(ReconcileLayer::same_label(Merging::max()))
-#       .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE));
-#   let anonymizer = Anonymizer::<Text>::new()
-#       .with(Rule::label(builtins::EMAIL_ADDRESS.to_ref(), Replace::new("[EMAIL]")))
-#       .with(Rule::label(builtins::PHONE_NUMBER.to_ref(), Replace::new("[PHONE]")))
-#       .with(Rule::label(builtins::PAYMENT_CARD.to_ref(), Mask::stars().with_keep_suffix(4)))
-#       .with(Rule::fallback(Erase));
+
+    let analyzer = Analyzer::<Text>::new()
+        .with_recognizer(
+            PatternRecognizer::builder()
+                .with_builtin_patterns()
+                .with_builtin_dictionaries()
+                .build_context_enhanced()?,
+        )
+        .with_layer(ReconcileLayer::same_label(Merging::max()))
+        .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE));
+
+    let anonymizer = Anonymizer::<Text>::new()
+        .with(Rule::label(builtins::EMAIL_ADDRESS.to_ref(), Replace::new("[EMAIL]")))
+        .with(Rule::label(builtins::PHONE_NUMBER.to_ref(), Replace::new("[PHONE]")))
+        .with(Rule::label(builtins::PAYMENT_CARD.to_ref(), Mask::stars().with_keep_suffix(4)))
+        .with(Rule::fallback(Erase));
 
     let scope = Scope::new()
         .with_language(LanguageTag::parse("en")?)

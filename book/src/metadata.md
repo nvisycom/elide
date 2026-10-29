@@ -31,5 +31,6 @@ and timestamps in DOCX, PPTX, and XLSX properties.
 Images are scrubbed on encode even without a metadata pipeline: the image
 codecs apply their `ExifPolicy`, which by default drops every tag not needed
 to display the image. See [Formats](formats.md#configuring-a-format). A
-metadata pipeline adds what the policy cannot: an audit trail of exactly
-which fields were found and removed.
+metadata pipeline adds what the policy cannot: an audit trail for each
+privacy-relevant field it recognized and removed. The policy may remove
+other, unrecognized fields too, and those are not on the trail.

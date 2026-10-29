@@ -2,8 +2,11 @@
 
 Elide compiles to WebAssembly and ships on npm as
 [`@nvisy/elide`](https://www.npmjs.com/package/@nvisy/elide). It runs
-entirely in the page: no text, image, or audio leaves the browser. Try it in
-the [live demo](https://nvisycom.github.io/elide/demo/).
+entirely in the page: Elide itself sends no text, image, or audio anywhere.
+The models you plug in are your callbacks, so whether input leaves the
+browser is up to them: a callback that calls a remote endpoint sends it
+there. Try it in the [live demo](https://nvisycom.github.io/elide/demo/),
+which uses no remote models.
 
 ```sh
 npm install @nvisy/elide

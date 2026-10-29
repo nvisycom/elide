@@ -1,8 +1,10 @@
 # Recognizer decorators
 
-A decorator wraps a recognizer to change how it runs, not what it finds. It
-is a recognizer itself, so decorators compose with each other and go
-anywhere a recognizer does. They live in `elide::recognition::decorator` and
+A decorator wraps a recognizer and is a recognizer itself, so decorators
+compose with each other and go anywhere a recognizer does. Each changes how
+the wrapped recognizer runs, and with it what comes out: which errors fail
+the call, which findings are kept, and how confident they are, as each
+section below says. They live in `elide::recognition::decorator` and
 `elide::recognition::escalation`.
 
 ## Resilience

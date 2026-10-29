@@ -4,7 +4,7 @@ Elide is a toolkit for finding and removing sensitive data (PII, PHI, secrets)
 from text, images, audio, and tabular data, written in Rust. You assemble a
 pipeline from its pieces: *recognizers* that find entities, *layers* that
 reconcile what they found, and *operators* that hide each one. Elide then
-rewrites the original file, changing only what was redacted.
+rewrites the original file in its own format.
 
 ```rust
 use elide::modality::text::TextData;
@@ -40,8 +40,8 @@ assert_eq!(analysis.entities[0].label, builtins::EMAIL_ADDRESS.to_ref());
   beep audio; drop rows and columns. Encryption and pseudonymization can be
   reversed by whoever holds the key.
 - **Format codecs**: read and rewrite TXT, CSV, JSON, XML, HTML, PDF, DOCX,
-  PPTX, XLSX, PNG, JPEG, TIFF, WAV, and MP3, leaving every byte that was not
-  redacted intact.
+  PPTX, XLSX, PNG, JPEG, TIFF, WAV, and MP3. Text and document formats change
+  only where redacted; see [Formats](formats.md) for images and audio.
 - **A full audit trail**: every entity records how it was found, scored, and
   hidden, and the trail verifies.
 

@@ -5,8 +5,8 @@ A redaction moves a file through a *codec*, an *analyzer*, and an
 
 ```text
              ┌───────┐ decode ┌──────────┐
-  bytes ───▶ │ Codec │ ─────▶ │ Document │ parts: text, images, audio, metadata
-             └───────┘        └──────────┘
+  bytes ───▶ │ Codec │ ─────▶ │ Document │ parts: text, tables, images, audio,
+             └───────┘        └──────────┘        metadata
                  ▲                 │ stream (per part)
           encode │                 ▼
                  │      ┌──────────────────────────────────┐

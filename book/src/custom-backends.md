@@ -8,8 +8,9 @@ enricher it serves.
 ## A NER service
 
 A NER request carries the text, the labels to look for (with descriptions,
-for zero-shot models), and the language. The response holds spans: byte
-ranges into that text, with a label and a score.
+for zero-shot models; `None` for a model's built-in set), and the language.
+The response holds spans: byte ranges into that text, with a label and a
+score.
 
 ```rust
 use elide::backend::Backend;
@@ -33,8 +34,8 @@ impl Backend for NerService {
     }
 
     async fn call(&self, request: NerRequest<'_>) -> Result<NerResponse> {
-        let labels = request.labels.unwrap_or_default();
-        let predictions = self.client.predict(request.text, labels).await?;
+        // `None` asks for the model's built-in label set; `Some` for those labels.
+        let predictions = self.client.predict(request.text, request.labels).await?;
 
         Ok(NerResponse::new(
             predictions
@@ -51,7 +52,7 @@ let ner = NerRecognizer::new(NerService { client: NerClient::default() });
 # struct NerClient;
 # struct Prediction { label: String, score: f32, start: usize, end: usize }
 # impl NerClient {
-#     async fn predict(&self, _text: &str, _labels: &[elide::entity::Label]) -> Result<Vec<Prediction>> {
+#     async fn predict(&self, _text: &str, _labels: Option<&[elide::entity::Label]>) -> Result<Vec<Prediction>> {
 #         Ok(Vec::new())
 #     }
 # }

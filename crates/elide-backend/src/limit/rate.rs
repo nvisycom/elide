@@ -45,12 +45,13 @@ impl Bucket {
     }
 }
 
-/// A request rate: a number of calls per interval, with an optional burst.
+/// A request rate: a number of calls per interval, with a burst.
 ///
-/// The burst is how many calls an idle limiter lets through at once; it
-/// defaults to the rate's count, a smooth rate with no extra burst. Raise it
-/// with [`with_burst`](Self::with_burst) to let an idle period bank calls for a
-/// spike.
+/// The burst is how many calls an idle limiter lets through at once, before
+/// pacing the rest out at the rate. It defaults to the rate's count, so an idle
+/// `Rate::per_minute(600)` admits 600 calls immediately, then one every 100 ms.
+/// [`with_burst`](Self::with_burst) changes it: `with_burst(1)` paces every
+/// call evenly, for a provider that rejects bursts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rate {
     count: u32,
@@ -96,7 +97,8 @@ impl Rate {
         Self::new(count, Duration::from_secs(60))
     }
 
-    /// Let up to `burst` calls through at once after an idle period.
+    /// Let up to `burst` calls through at once after an idle period, in place of
+    /// the default (the rate's count). `1` paces every call evenly.
     ///
     /// # Panics
     ///

@@ -45,9 +45,13 @@ let scope = Scope::new()
   enricher such as `lingua` can detect it.
 - **Countries** turn on national formats: identity numbers, bank accounts,
   phone numbers.
-- **The catalog** is the set of labels in play, with their descriptions.
-  Recognizers emit only labels the catalog declares, and zero-shot models
-  read the descriptions to know what to look for.
+- **The catalog** is the set of labels in play, with their descriptions. An
+  analysis returns only entities whose label the catalog declares, and a
+  scope without a catalog finds nothing. Recognizers may still propose
+  labels outside it, so a strong out-of-catalog finding can win
+  reconciliation over a weak one nested inside it, before it is removed; a
+  recognizer called directly, without an analyzer, is not filtered.
+  Zero-shot models read the descriptions to know what to look for.
 - **Tags, purpose, and audience** describe the call itself, for recognizers
   and rules that want them.
 

@@ -43,9 +43,12 @@ use crate::vault::Vault;
 ///
 /// # Recoverability
 ///
-/// [`LeakProfile::Recoverable`]: the mapping from surrogate back to the
-/// original lives in the vault. Whoever holds the vault can reverse it;
-/// without it the surrogate is just an opaque token.
+/// [`LeakProfile::Recoverable`]: the vault keeps the mapping that produced
+/// each surrogate, keyed by the original value (or, for a coreferent entity,
+/// its cluster id), so its holder can link a surrogate to the value it
+/// replaced; without it the surrogate is just an opaque token. This is a link,
+/// not a decryption: the operator is not reversible, and the vault stores no
+/// original text for a cluster-keyed entry.
 ///
 /// [`Vault`]: crate::vault::Vault
 /// [`Generator`]: crate::generator::Generator

@@ -15,10 +15,10 @@
 use std::collections::HashSet;
 
 use async_trait::async_trait;
-use elide_core::Result;
 use elide_core::backend::Backend;
 use elide_core::entity::audit::ModelEvent;
 use elide_core::entity::{Label, LabelRef};
+use elide_core::{Error, ErrorKind, Result};
 
 use crate::backend::{NerRequest, NerResponse};
 
@@ -134,10 +134,22 @@ where
             return Ok(responses);
         }
 
-        for (position, mut response) in positions
-            .into_iter()
-            .zip(self.inner.call_batch(forwarded).await?)
-        {
+        // The inner backend owes one response per forwarded request. A short
+        // batch would leave the tail at its empty default, indistinguishable from
+        // "no entities", so it is an error, as it would be without this decorator.
+        let forwarded_len = forwarded.len();
+        let inner_responses = self.inner.call_batch(forwarded).await?;
+        if inner_responses.len() != forwarded_len {
+            return Err(Error::new(
+                ErrorKind::Provider,
+                format!(
+                    "NER backend returned {} responses for {} requests",
+                    inner_responses.len(),
+                    forwarded_len
+                ),
+            ));
+        }
+        for (position, mut response) in positions.into_iter().zip(inner_responses) {
             self.filter(&mut response);
             responses[position] = response;
         }
@@ -294,5 +306,42 @@ mod tests {
         assert_eq!(counts, vec![1, 0, 1]);
         // The unsupported request never reached the model.
         assert_eq!(backend.inner().asked.lock().unwrap().len(), 2);
+    }
+
+    /// A backend that answers every batch with one response too few.
+    struct ShortBatch;
+
+    #[async_trait]
+    impl Backend for ShortBatch {
+        type Request<'a> = NerRequest<'a>;
+        type Response = NerResponse;
+
+        fn provenance(&self) -> ModelEvent {
+            ModelEvent::default()
+        }
+
+        async fn call(&self, _request: NerRequest<'_>) -> Result<NerResponse> {
+            Ok(NerResponse::default())
+        }
+
+        async fn call_batch(&self, requests: Vec<NerRequest<'_>>) -> Result<Vec<NerResponse>> {
+            Ok(requests
+                .iter()
+                .skip(1)
+                .map(|_| NerResponse::default())
+                .collect())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_short_inner_batch_is_an_error() {
+        let backend = LabelScoped::new(ShortBatch, [builtins::PERSON_NAME.to_ref()]);
+        let all = catalog_labels();
+
+        let error = backend
+            .call_batch(vec![request(Some(&all)), request(Some(&all))])
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Provider);
     }
 }

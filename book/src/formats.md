@@ -1,8 +1,18 @@
 # Formats
 
 A codec reads a file into a `Document` that recognizers and operators can
-address, and writes the redactions back into the original format. Only the
-redacted content changes; every other byte of the file stays as it was.
+address, and writes the redactions back into the original format. What else
+changes depends on the format:
+
+- **Text, markup, and office documents** change only in the redacted
+  content; the rest of their content is kept as it was, though a container
+  such as DOCX is written back as a new package.
+- **Images** have their pixels redacted and re-encoded (for JPEG, a lossy
+  re-compression), and their EXIF metadata reduced by the format's
+  `ExifPolicy` (by default, to the tags needed to display the image).
+- **Audio** is decoded and re-encoded with the redacted intervals replaced:
+  WAV at its original sample format, MP3 at a bitrate derived from the
+  original, which, MP3 being lossy, re-compresses the whole clip.
 
 | Format | Feature | Redacted |
 |---|---|---|
@@ -41,9 +51,11 @@ assert_eq!(document.parts().len(), 1);
 and with `codec-sniff`, it recognizes binary formats by their first bytes
 when there is neither.
 
-A document is a list of *parts*. A leaf format such as TXT, CSV, or PNG has
-one, a stream in one modality. A container such as DOCX or PDF has several,
-in different modalities; see [Containers](containers.md).
+A document is a list of *parts*. A text or tabular format such as TXT or CSV
+has one, a stream in one modality. An image has two: its pixels, and its
+EXIF metadata as a `Metadata` part, which the `ExifPolicy` applies to on
+encode (see [Metadata](metadata.md)). A container such as DOCX or PDF has
+several, in different modalities; see [Containers](containers.md).
 
 ## Configuring a format
 

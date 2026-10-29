@@ -30,7 +30,8 @@ with each other and with `Metered`.
 
 The `routing` module picks *which* backend serves a request.
 `LanguageRouted<B>` dispatches each request to a backend registered for its
-caller-asserted language (exact tag first, then primary language subtag), and
+language, the call's primary language whether caller-asserted or detected
+(exact tag first, then primary language subtag), and
 falls back to a default backend for unhinted or unrouted languages. A mixed
 batch is split by route and the responses reassembled in request order. Every
 request exposes its language through `BackendRequest::language` (NER, STT, and

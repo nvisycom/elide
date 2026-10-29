@@ -50,8 +50,9 @@ still exposes:
 - **Irrecoverable**: nothing survives. `Erase`, `Replace`, `Blackbox`.
 - **Partial**: some survives by design. `Mask` with a kept suffix,
   `Truncate`, `GeneralizeDate`.
-- **Recoverable**: whoever holds the key or the vault can restore the
-  original. `AesEncrypt`, `Pseudonymize`.
+- **Recoverable**: the output stays linked to the original. `AesEncrypt`
+  decrypts with its key; `Pseudonymize`'s vault keeps the mapping from each
+  original (or coreference cluster) to its surrogate.
 
 Check profiles before you ship a policy: for example, reject a recoverable
 operator on a label your policy says must be destroyed.

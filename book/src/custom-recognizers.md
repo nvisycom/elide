@@ -38,7 +38,7 @@ impl Recognizer<Text> for TicketRecognizer {
                 (digits > 0).then(|| start..start + 4 + digits)
             })
             .filter_map(|span| {
-                let location = TextLocation::inline(span);
+                let location = TextLocation::inline(span.clone());
                 let event = AuditEvent::pattern(
                     "ticket-recognizer",
                     confidence,
@@ -48,6 +48,7 @@ impl Recognizer<Text> for TicketRecognizer {
                 Entity::builder()
                     .with_label(builtins::INTERNAL_ID.to_ref())
                     .with_location(location)
+                    .with_recognized_range(span)
                     .with_event(event)
                     .build()
             })
@@ -68,7 +69,9 @@ let analyzer = Analyzer::<Text>::new().with_recognizer(TicketRecognizer);
 
 The recognition event is the first entry of the entity's audit trail: it
 records which recognizer found the entity, where, and how sure it was. The
-entity's confidence comes from it.
+entity's confidence comes from it. The recognized range is where the match
+sits in the text the recognizer read; `Enhanced` looks for context keywords
+around it, so set it on every text match.
 
 The `Context` carries the call's scope: check `ctx.languages(subject)` or the
 countries before running a rule that only applies to some of them.

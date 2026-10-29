@@ -2,7 +2,10 @@
 
 Some redactions must be undone later by someone entitled to: a support
 agent who needs the customer's real email, a researcher re-identifying a
-record with approval. Elide has two ways to keep that possible.
+record with approval. Encryption keeps that possible: Elide decrypts what
+it encrypted, for whoever holds the key. Pseudonymization keeps text
+coherent rather than reversible, but leaves a link to the originals in its
+vault.
 
 ## Pseudonymization
 
@@ -25,9 +28,14 @@ let anonymizer = Anonymizer::<Text>::new()
     ));
 ```
 
-The vault maps surrogates to originals. Whoever holds it can reverse the
-substitution. Share one vault across documents to keep surrogates consistent
-between them, and implement `Vault` to keep it somewhere durable.
+The vault maps each original value, or each coreference cluster, to its
+surrogate. It exists for consistency, not for reversal: Elide has no
+deanonymizer for pseudonyms, and a cluster's entry does not even hold the
+original text. It still links surrogates to the values they replaced, so
+guard it like the data itself, which is why `Pseudonymize` declares itself
+recoverable. Share one vault across documents to keep surrogates consistent
+between them, and implement `Vault` to keep it somewhere durable. To restore
+originals later, encrypt instead.
 
 ## Encryption
 

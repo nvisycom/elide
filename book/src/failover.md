@@ -24,8 +24,9 @@ let ner = NerRecognizer::new(backend);
 
 The two can be different backend types, as long as they take the same
 request and return the same response. To fall back more than once, chain
-them: `a.fallback_routed(b.fallback_routed(c))`. The analysis fails only
-when every backend has failed.
+them: `a.fallback_routed(b.fallback_routed(c))`. On an error that fails
+over, the analysis fails only when every backend has failed; any other error
+fails it at once.
 
 ## Which errors fail over
 
