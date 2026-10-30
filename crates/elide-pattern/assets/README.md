@@ -39,19 +39,7 @@ assets/
     en/                    English-language terms
       finance/             currencies (USD, US Dollar, EUR, …)
       personal/            languages, nationalities, religions
-
-  gazetteers/
-    legal_forms/           company suffixes per country (us, uk, de, fr, it, pl)
-                           + stop_words.txt (lead-in words: The, From, Der, …)
 ```
-
-A legal-form gazetteer lists a country's suffixes as `distinctive` (GmbH, LLC,
-S.p.A.) or `ambiguous` (also an ordinary abbreviation: AG, SA, LP), plus
-`context` keywords. `src/shipped/patterns/legal_forms.rs` merges every gazetteer
-into one `organization_name` pattern: the name in front of the suffix is the
-match, a lead-in word before it is skipped, and ambiguous suffixes score below
-the default threshold so they need a context keyword. Adding a country is a new
-TOML file plus one line in `GAZETTEERS`.
 
 Each pattern is a TOML file (`<name>.toml`). Each dictionary pairs a TOML
 metadata sidecar with a term source: `.csv` for multi-column lists (term + alias
@@ -82,7 +70,7 @@ A pattern variant can declare `validator = "<name>"` to drop matches that fail a
 post-match structural check. Built-in names (resolved via
 `ValidatorRegistry::builtin`):
 
-- Universal: `luhn`, `iban`, `phone`, `date`, `crypto.btc`, `legal_form`
+- Universal: `luhn`, `iban`, `phone`, `date`, `crypto.btc`
 - US: `us.ssn`, `us.aba_routing`, `us.npi`, `us.dea_number`, `us.postal_code`
 - UK: `uk.nhs`, `uk.nino`, `uk.driving_licence`, `uk.vehicle_registration`
 

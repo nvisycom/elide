@@ -23,13 +23,6 @@ the Luhn check, an IBAN its checksum. Country-specific patterns run only when
 the [scope](analyzers.md#the-scope) names that country, and language-specific
 ones only for that language.
 
-Company names are found by their legal form: "Müller Bau GmbH", "Acme, Inc.",
-"Rossi S.p.A.", and "Kowalski sp. z o.o." are each an `organization_name`,
-for US, UK, German, French, Italian, and Polish forms in any language. A
-leading "The" or "From" is left out of the name. Short forms that are also
-ordinary abbreviations, such as `AG` or `SA`, score below the default
-threshold unless a word like "company" or "Gesellschaft" is nearby.
-
 ## Context
 
 `build_context_enhanced` wraps the recognizer so that keywords near a match

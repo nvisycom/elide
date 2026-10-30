@@ -19,7 +19,6 @@ pub mod fi;
 pub mod r#in;
 pub mod it;
 pub mod kr;
-pub mod legal_forms;
 pub mod ng;
 pub mod pl;
 pub mod se;
@@ -72,7 +71,6 @@ pub fn all() -> Vec<Regex> {
     out.extend(tr::all());
     out.extend(ng::all());
     out.extend(th::all());
-    out.extend(legal_forms::all());
     out
 }
 
