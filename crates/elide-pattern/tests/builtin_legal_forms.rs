@@ -92,10 +92,26 @@ async fn the_longest_suffix_wins() {
 }
 
 #[tokio::test]
-async fn a_name_ends_at_its_first_suffix() {
+async fn a_connective_after_a_suffix_starts_a_new_name() {
     assert_eq!(
         names("Acme GmbH and Beta GmbH signed").await,
         ["Acme GmbH", "Beta GmbH"]
+    );
+    assert_eq!(
+        names("Bank of America Corp. and Beta GmbH signed").await,
+        ["Bank of America Corp.", "Beta GmbH"]
+    );
+}
+
+#[tokio::test]
+async fn a_suffix_word_inside_a_name_stays_part_of_it() {
+    assert_eq!(
+        names("Served on Arkansas Corporation Services, Inc. today").await,
+        ["Arkansas Corporation Services, Inc."]
+    );
+    assert_eq!(
+        names("Acme Corporation Services, Inc. and Beta GmbH").await,
+        ["Acme Corporation Services, Inc.", "Beta GmbH"]
     );
 }
 

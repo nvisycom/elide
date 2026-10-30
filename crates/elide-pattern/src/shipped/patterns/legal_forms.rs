@@ -11,9 +11,11 @@
 //!   reported, from `stop_words.txt`;
 //! - capitalized words, initials, or numbers on one line, which may be joined
 //!   by a connective ("Bank of America", "Procter & Gamble", "Van der Berg").
-//!   The run is lazy, so a name ends at its first suffix and "Acme GmbH and
-//!   Beta GmbH" is two names. It is not capped: a cap repeats the Unicode word
-//!   classes once per word and multiplies the compiled size;
+//!   The match crossing the fewest connectives wins, then the longest run of
+//!   words after the last one: "Acme GmbH and Beta GmbH" is two names, while
+//!   a suffix word inside a name stays part of it ("Arkansas Corporation
+//!   Services, Inc."). Neither repetition is capped: a cap repeats the Unicode
+//!   word classes once per word and multiplies the compiled size;
 //! - an optional comma, then the suffix, then the end of the token.
 //!
 //! The `legal_form` validator drops a match whose name starts with a lead-in
@@ -115,7 +117,8 @@ fn variant(suffixes: &[String], score: f32) -> Variant {
         .collect::<Vec<_>>()
         .join("|");
     let regex = format!(
-        r"\b(?:(?i:{lead_in}){SPACE}+)?(?P<entity>{NAME_WORD}(?:{SPACE}+(?:{CONNECTIVE}{SPACE}+)?{NAME_WORD})*?,?{SPACE}+(?:{suffixes}))(?:$|[^\p{{L}}\p{{N}}_])",
+        r"\b(?:(?i:{lead_in}){SPACE}+)?(?P<entity>(?:{words}{SPACE}+{CONNECTIVE}{SPACE}+)*?{words},?{SPACE}+(?:{suffixes}))(?:$|[^\p{{L}}\p{{N}}_])",
+        words = format!("{NAME_WORD}(?:{SPACE}+{NAME_WORD})*"),
         suffixes = alternation(suffixes),
     );
     Variant::new(regex)
