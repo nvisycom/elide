@@ -1,4 +1,4 @@
-//! Window-slicing helpers shared by [`Enhancer::apply_rule`].
+//! Window-slicing helpers for finding a keyword near a match.
 //!
 //! Two coordinate systems matter here:
 //!
@@ -14,8 +14,7 @@
 //! [`token_span`] reduces a non-empty token slice back to its
 //! spanning substring for matchers that operate on raw text.
 //!
-//! [`Enhancer::apply_rule`]: super::Enhancer
-//! [`KeywordMatcher`]: crate::context::matching::KeywordMatcher
+//! [`KeywordMatcher`]: super::matching::KeywordMatcher
 
 use std::ops::Range;
 

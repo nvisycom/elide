@@ -3,12 +3,13 @@
 #![doc = include_str!("../README.md")]
 
 pub mod context;
-mod recognition;
+mod recognizer;
+mod rule;
 mod shipped;
 pub mod validators;
 
-pub use self::recognition::{
-    BoostKeywords, Dictionary, DictionaryBuilder, Matching, PatternRecognizer,
-    PatternRecognizerBuilder, Regex, RegexBudget, RegexBuilder, Scoring, Sourced, Term, Variant,
+pub use self::recognizer::{PatternRecognizer, PatternRecognizerBuilder, RegexBudget};
+pub use self::rule::{
+    Dictionary, DictionaryBuilder, Pattern, PatternBuilder, Scoring, Term, Variant,
 };
 pub use self::shipped::{dictionaries, patterns};

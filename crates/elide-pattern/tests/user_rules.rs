@@ -1,7 +1,7 @@
 //! End-to-end: load user-supplied patterns from the on-disk wire
 //! shape (`testdata/patterns/*.toml`,
 //! `testdata/dictionaries/*.{toml,csv}`) through
-//! [`Regex::from_toml`], [`Dictionary::metadata_from_toml`], and
+//! [`Pattern::from_toml`], [`Dictionary::metadata_from_toml`], and
 //! [`Term::from_csv`], mix them with shipped patterns, and
 //! confirm a real internal-handoff document yields the custom
 //! entities.
@@ -9,14 +9,14 @@
 use elide_core::entity::builtins;
 use elide_core::modality::text::{Text, TextData};
 use elide_core::recognition::{Context, Recognizer, Scope, Subject};
-use elide_pattern::{Dictionary, PatternRecognizer, Regex, Term};
+use elide_pattern::{Dictionary, Pattern, PatternRecognizer, Term};
 
 #[tokio::test]
 async fn user_toml_rules_load_and_detect() {
-    let employee_id = Regex::from_toml(include_str!("../testdata/patterns/employee_id.toml"))
+    let employee_id = Pattern::from_toml(include_str!("../testdata/patterns/employee_id.toml"))
         .expect("employee_id.toml parses");
     let product_code_pattern =
-        Regex::from_toml(include_str!("../testdata/patterns/product_codes.toml"))
+        Pattern::from_toml(include_str!("../testdata/patterns/product_codes.toml"))
             .expect("product_codes.toml parses");
 
     let terms = Term::from_csv(include_str!("../testdata/dictionaries/product_codes.csv"))

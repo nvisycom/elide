@@ -10,7 +10,7 @@
 name = "credit-card"
 labels = ["payment_card"]
 
-[context]
+[context.languages]
 en = ["card", "credit", "debit", "payment", "visa", "mastercard", "amex"]
 es = ["tarjeta", "crédito", "credito", "débito", "debito", "pago", "visa", "mastercard", "amex"]
 de = ["karte", "kredit", "kreditkarte", "debit", "zahlung", "visa", "mastercard", "amex"]

@@ -37,10 +37,10 @@ A rule names its labels, from most to least specific, and one or more
 variants, each a regex with a score:
 
 ```rust
-use elide::recognition::pattern::{PatternRecognizer, Regex};
+use elide::recognition::pattern::{PatternRecognizer, Pattern};
 
 # fn main() -> elide::Result<()> {
-let employee_id = Regex::from_toml(r#"
+let employee_id = Pattern::from_toml(r#"
     name = "employee-id"
     labels = ["internal_id"]
 
@@ -57,7 +57,7 @@ let patterns = PatternRecognizer::builder()
 # }
 ```
 
-Rules are TOML so they can live in configuration; `Regex::builder()` builds
+Rules are TOML so they can live in configuration; `Pattern::builder()` builds
 one in code. A rule can also carry context keywords, a validator, and the
 languages and countries it applies to.
 

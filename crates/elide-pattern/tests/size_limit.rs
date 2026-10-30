@@ -8,12 +8,12 @@
 //!   Aho-Corasick dictionary automaton (aggregate across all dictionaries).
 
 use elide_core::entity::builtins;
-use elide_pattern::{Dictionary, PatternRecognizer, Regex, RegexBudget, Term, Variant};
+use elide_pattern::{Dictionary, Pattern, PatternRecognizer, RegexBudget, Term, Variant};
 
 /// A rule whose variants union into a large automaton. Each source is small,
 /// but bounded-repetition alternations expand the compiled NFA/DFA, so the
 /// combined `RegexSet` blows a tight byte budget.
-fn heavy_rule() -> Regex {
+fn heavy_rule() -> Pattern {
     let variants: Vec<Variant> = (0..8)
         .map(|i| {
             // `[a-z]{200}` × several, distinct per variant so they don't dedup.
@@ -21,7 +21,7 @@ fn heavy_rule() -> Regex {
             Variant::new(&src).expect("variant source is a valid regex")
         })
         .collect();
-    Regex::builder()
+    Pattern::builder()
         .with_name("heavy")
         .with_labels(vec![builtins::GOVERNMENT_ID.to_ref()])
         .with_variants(variants)
@@ -64,7 +64,7 @@ fn generous_union_budget_compiles() {
 fn tight_variant_budget_rejects_a_single_large_variant_without_breaking_the_union() {
     // One variant whose compiled NFA is large on its own.
     let big = format!("(?:{})", vec!["[a-z]{200}"; 64].join("|"));
-    let rule = Regex::builder()
+    let rule = Pattern::builder()
         .with_name("big")
         .with_labels(vec![builtins::GOVERNMENT_ID.to_ref()])
         .with_variants(vec![Variant::new(&big).expect("valid regex")])

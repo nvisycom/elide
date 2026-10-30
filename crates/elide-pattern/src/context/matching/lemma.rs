@@ -13,7 +13,7 @@ use super::{KeywordMatcher, SubstringMatcher};
 /// case-insensitive equality.
 ///
 /// Falls back to [`SubstringMatcher`] semantics when `tokens` is
-/// empty (no shared NLP artifact was produced) so the enhancer
+/// empty (no shared NLP artifact was produced) so context matching
 /// runs uniformly regardless of whether the upstream pass emitted
 /// tokens.
 ///

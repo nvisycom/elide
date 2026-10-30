@@ -3,7 +3,7 @@
 //! Algorithm sourced from the Department of Provincial
 //! Administration spec (not from the Presidio bundle).
 
-use crate::{__shipped_pattern as shipped_pattern, Regex};
+use crate::{__shipped_pattern as shipped_pattern, Pattern};
 
 shipped_pattern!(
     /// National ID (เลขประจำตัวประชาชน), 13-digit ID with
@@ -18,6 +18,6 @@ shipped_pattern!(
 
 /// Every TH-scoped built-in pattern.
 #[must_use]
-pub fn all() -> Vec<Regex> {
+pub fn all() -> Vec<Pattern> {
     vec![national_id(), postal_code()]
 }

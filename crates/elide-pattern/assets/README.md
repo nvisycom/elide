@@ -47,8 +47,8 @@ columns with per-column scores), `.txt` for one-per-line lists.
 
 ## Scoring conventions
 
-Scores are baseline confidence; the context enhancer (`elide_pattern::context`) lifts
-them when configured keywords appear nearby. The toolkit's default confidence
+Scores are baseline confidence; a rule's `[context]` (`elide_pattern::context`)
+lifts them when its keywords appear nearby. The toolkit's default confidence
 threshold is `0.35`; anything below needs context boost or an out-of-band hint
 (CSV column header, JSON object key, HTML parent text) to clear it.
 

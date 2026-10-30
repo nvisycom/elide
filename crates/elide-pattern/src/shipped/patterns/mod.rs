@@ -1,14 +1,14 @@
-//! Built-in [`Regex`] rules, embedded at compile time.
+//! Built-in [`Pattern`] rules, embedded at compile time.
 //!
 //! Accessors are grouped by region, `world::*` for universal
 //! patterns, `<country>::*` (e.g. `us::*`, `uk::*`) for
-//! country-specific ones. Each returns a fresh [`Regex`] parsed
+//! country-specific ones. Each returns a fresh [`Pattern`] parsed
 //! from a TOML definition under
 //! `assets/patterns/<region>/<domain>/`. The parse happens on
 //! every call, rules are cheap to construct since
 //! [`PatternRecognizer::build`] does the heavy compilation.
 //!
-//! [`Regex`]: crate::Regex
+//! [`Pattern`]: crate::Pattern
 //! [`PatternRecognizer::build`]: crate::PatternRecognizer
 
 pub mod au;
@@ -29,7 +29,7 @@ pub mod uk;
 pub mod us;
 pub mod world;
 
-use crate::Regex;
+use crate::Pattern;
 
 /// Helper used by every per-region sub-module to define a shipped
 /// pattern accessor.
@@ -43,8 +43,8 @@ macro_rules! __shipped_pattern {
     ($(#[$meta:meta])* fn $name:ident from $path:literal) => {
         $(#[$meta])*
         #[must_use]
-        pub fn $name() -> $crate::Regex {
-            $crate::Regex::from_toml(include_str!($path))
+        pub fn $name() -> $crate::Pattern {
+            $crate::Pattern::from_toml(include_str!($path))
                 .expect(concat!("shipped pattern `", $path, "` is well-formed"))
         }
     };
@@ -53,7 +53,7 @@ macro_rules! __shipped_pattern {
 /// Every built-in pattern shipped by this crate, regardless of
 /// region.
 #[must_use]
-pub fn all() -> Vec<Regex> {
+pub fn all() -> Vec<Pattern> {
     let mut out = world::all();
     out.extend(us::all());
     out.extend(uk::all());

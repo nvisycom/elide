@@ -2,7 +2,7 @@
 //!
 //! See `assets/PRESIDIO.md` for third-party attribution.
 
-use crate::{__shipped_pattern as shipped_pattern, Regex};
+use crate::{__shipped_pattern as shipped_pattern, Pattern};
 
 shipped_pattern!(
     /// TCKN, 11-digit T.C. Kimlik No with two-step weighted
@@ -22,6 +22,6 @@ shipped_pattern!(
 
 /// Every TR-scoped built-in pattern.
 #[must_use]
-pub fn all() -> Vec<Regex> {
+pub fn all() -> Vec<Pattern> {
     vec![tckn(), license_plate(), posta_kodu()]
 }

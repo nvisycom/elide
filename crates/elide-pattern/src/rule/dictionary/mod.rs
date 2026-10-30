@@ -1,13 +1,17 @@
 //! [`Dictionary`]: literal-term detection rule.
 
+mod compiled;
+mod term;
+
 use derive_builder::Builder;
 use elide_core::entity::LabelRef;
 use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
 use elide_core::{Error, ErrorKind, Result};
 use serde::Deserialize;
 
-use super::context::BoostKeywords;
-use super::term::Term;
+pub(crate) use self::compiled::CompiledDictionary;
+pub use self::term::Term;
+use crate::context::RuleContext;
 
 /// Confidence policy for a [`Dictionary`]'s matches.
 ///
@@ -85,7 +89,7 @@ impl Default for Scoring {
 /// Literal-term detection rule.
 ///
 /// Scans for a fixed list of literals using a shared Aho-Corasick
-/// automaton. Unlike [`Regex`], a dictionary has no regex engine,
+/// automaton. Unlike [`Pattern`], a dictionary has no regex engine,
 /// no validator, and a [`Scoring`] policy shared across its terms.
 ///
 /// # Examples
@@ -106,7 +110,7 @@ impl Default for Scoring {
 ///     .expect("nationalities dictionary builds");
 /// ```
 ///
-/// [`Regex`]: crate::Regex
+/// [`Pattern`]: crate::Pattern
 #[derive(Debug, Clone, PartialEq, Builder, Deserialize)]
 #[builder(
     name = "DictionaryBuilder",
@@ -136,7 +140,7 @@ pub struct Dictionary {
     /// per-language map.
     #[builder(default)]
     #[serde(default)]
-    pub context: BoostKeywords,
+    pub context: RuleContext,
     /// BCP-47 language tags the dictionary applies to. Empty means
     /// "any language"; otherwise the recognizer skips the
     /// dictionary when the per-call language hint is not in the
@@ -270,7 +274,7 @@ struct DictionaryMetadata {
     #[serde(default)]
     score: Option<Scoring>,
     #[serde(default)]
-    context: Option<BoostKeywords>,
+    context: Option<RuleContext>,
     #[serde(default)]
     word_boundary: Option<bool>,
     #[serde(default)]

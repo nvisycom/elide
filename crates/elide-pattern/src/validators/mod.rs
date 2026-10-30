@@ -1,6 +1,6 @@
 //! Post-match validators for regex-detected entity values.
 //!
-//! A [`Variant`] inside a [`Regex`] rule may name a validator
+//! A [`Variant`] inside a [`Pattern`] rule may name a validator
 //! (e.g. `validator: Some("luhn")`); the recognizer resolves the
 //! name against a [`ValidatorRegistry`] at build time and drops
 //! matches that fail the resolved check. Use validators to weed
@@ -29,7 +29,7 @@
 //! full set.
 //!
 //! [`Variant`]: crate::Variant
-//! [`Regex`]: crate::Regex
+//! [`Pattern`]: crate::Pattern
 
 mod btc;
 mod date;

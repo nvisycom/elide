@@ -1,14 +1,18 @@
-//! [`Regex`] rule and its [`Variant`]s.
+//! [`Pattern`] rule and its [`Variant`]s.
+
+mod compiled;
 
 use derive_builder::Builder;
 use elide_core::entity::LabelRef;
 use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
 use elide_core::{Error, ErrorKind, Result};
+use regex::Regex;
 use serde::Deserialize;
 
-use super::context::BoostKeywords;
+pub(crate) use self::compiled::CompiledPattern;
+use crate::context::RuleContext;
 
-/// One regex strategy inside a [`Regex`] rule.
+/// One regex strategy inside a [`Pattern`] rule.
 ///
 /// A variant pairs a regex source with the confidence stamped on
 /// every match it produces and, optionally, a validator name
@@ -39,7 +43,7 @@ pub struct Variant {
     /// [`PatternRecognizer::build`]. An [`ENTITY_GROUP`] capture group, when
     /// present, narrows each match to that group (see [Spans](Self#spans)).
     ///
-    /// [`PatternRecognizer::build`]: super::PatternRecognizer
+    /// [`PatternRecognizer::build`]: crate::PatternRecognizer
     /// [`ENTITY_GROUP`]: Self::ENTITY_GROUP
     pub regex: String,
     /// Confidence stamped on every match, before any
@@ -73,7 +77,7 @@ impl Variant {
     /// [`with_validator`]: Self::with_validator
     pub fn new(regex: impl Into<String>) -> Result<Self> {
         let regex = regex.into();
-        if let Err(e) = ::regex::Regex::new(&regex) {
+        if let Err(e) = Regex::new(&regex) {
             return Err(Error::new(
                 ErrorKind::Configuration,
                 format!("invalid regex: {e}"),
@@ -100,7 +104,7 @@ impl Variant {
     /// surface as a build-time error.
     ///
     /// [`ValidatorRegistry`]: crate::validators::ValidatorRegistry
-    /// [`PatternRecognizer`]: super::PatternRecognizer
+    /// [`PatternRecognizer`]: crate::PatternRecognizer
     #[must_use]
     pub fn with_validator(mut self, name: impl Into<String>) -> Self {
         self.validator = Some(name.into());
@@ -112,18 +116,18 @@ fn default_score() -> Confidence {
     Confidence::MAX
 }
 
-/// Regex detection rule: one or more candidate labels, optional keyword
+/// Pattern detection rule: one or more candidate labels, optional keyword
 /// boosts, and one or more [`Variant`]s.
 ///
 /// A rule groups several regex strategies under a shared entity-type
 /// candidate list plus a shared context-keyword list. Every variant emits
-/// the same [label](Regex::labels); context keywords are harvested by
+/// the same [label](Pattern::labels); context keywords are harvested by
 /// [`PatternRecognizer`] into a wrapping boost layer and are never read by the
 /// rule itself.
 ///
 /// # Candidate labels
 ///
-/// [`labels`](Regex::labels) is an ordered list, most-specific first. At
+/// [`labels`](Pattern::labels) is an ordered list, most-specific first. At
 /// recognize time the rule emits the **first** candidate the request's
 /// [catalog](elide_core::recognition::Context::catalog) declares, so
 /// one pattern can serve consumers that opted into a fine-grained label and
@@ -135,14 +139,14 @@ fn default_score() -> Confidence {
 /// ```
 /// use elide_core::entity::builtins;
 /// use elide_core::primitive::Confidence;
-/// use elide_pattern::{Regex, Variant};
+/// use elide_pattern::{Pattern, Variant};
 ///
 /// let variant = Variant::new(r"\b\d{3}-\d{2}-\d{4}\b")
 ///     .expect("ssn variant builds")
 ///     .with_score(Confidence::clamped(0.9))
 ///     .with_validator("ssn");
 ///
-/// let ssn = Regex::builder()
+/// let ssn = Pattern::builder()
 ///     .with_name("ssn")
 ///     .with_labels(vec![builtins::GOVERNMENT_ID.to_ref()])
 ///     .with_context(vec!["ssn".to_owned(), "social security".to_owned()])
@@ -151,15 +155,15 @@ fn default_score() -> Confidence {
 ///     .expect("ssn rule builds");
 /// ```
 ///
-/// [`PatternRecognizer`]: super::PatternRecognizer
+/// [`PatternRecognizer`]: crate::PatternRecognizer
 #[derive(Debug, Clone, PartialEq, Builder, Deserialize)]
 #[builder(
-    name = "RegexBuilder",
+    name = "PatternBuilder",
     pattern = "owned",
     setter(into, strip_option, prefix = "with"),
     build_fn(error = "Error")
 )]
-pub struct Regex {
+pub struct Pattern {
     /// Human-readable identifier surfaced in trail provenance (e.g.
     /// `"ssn"`, `"credit_card"`).
     pub name: String,
@@ -172,8 +176,8 @@ pub struct Regex {
     /// per-language map.
     #[builder(default)]
     #[serde(default)]
-    pub context: BoostKeywords,
-    /// Regex variants. At least one is required to produce matches;
+    pub context: RuleContext,
+    /// Pattern variants. At least one is required to produce matches;
     /// the recognizer skips rules with an empty variant list.
     pub variants: Vec<Variant>,
     /// BCP-47 language tags the rule applies to. Empty means "any
@@ -192,13 +196,13 @@ pub struct Regex {
     pub countries: Vec<CountryCode>,
 }
 
-impl Regex {
+impl Pattern {
     /// Start a chainable builder.
     ///
     /// Required fields: `name`, `labels`, `variants`.
     #[must_use]
-    pub fn builder() -> RegexBuilder {
-        RegexBuilder::default()
+    pub fn builder() -> PatternBuilder {
+        PatternBuilder::default()
     }
 
     /// Parse a rule from a TOML source.

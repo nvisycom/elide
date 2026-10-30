@@ -5,15 +5,15 @@ use elide_core::entity::{LabelRef, builtins};
 use elide_core::modality::text::{Text, TextData};
 use elide_core::recognition::{Context, Recognizer, Scope, Subject};
 use elide_pattern::validators::ValidatorRegistry;
-use elide_pattern::{PatternRecognizer, Regex, Variant};
+use elide_pattern::{Pattern, PatternRecognizer, Variant};
 
 /// One `internal_id` rule with a single variant over `regex`.
-fn rule(regex: &str) -> Regex {
+fn rule(regex: &str) -> Pattern {
     rule_with(Variant::new(regex).expect("regex compiles"))
 }
 
-fn rule_with(variant: Variant) -> Regex {
-    Regex::builder()
+fn rule_with(variant: Variant) -> Pattern {
+    Pattern::builder()
         .with_name("test")
         .with_labels(vec![builtins::INTERNAL_ID.to_ref()])
         .with_variants(vec![variant])
@@ -36,7 +36,7 @@ async fn found(recognizer: &PatternRecognizer, text: &str, label: LabelRef) -> V
         .collect()
 }
 
-async fn found_by(regex: Regex, text: &str) -> Vec<String> {
+async fn found_by(regex: Pattern, text: &str) -> Vec<String> {
     let recognizer = PatternRecognizer::builder()
         .with_pattern(regex)
         .build()

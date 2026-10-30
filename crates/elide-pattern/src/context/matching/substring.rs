@@ -35,7 +35,7 @@ impl KeywordMatcher for SubstringMatcher {
             .iter()
             .flat_map(|kw| {
                 let needle = kw.as_str().to_ascii_lowercase();
-                // Every occurrence, so the enhancer's boundary filter can skip
+                // Every occurrence, so the boundary filter can skip
                 // a substring hit and still reach a later boundary-valid one.
                 lowered
                     .match_indices(&needle)
@@ -44,7 +44,7 @@ impl KeywordMatcher for SubstringMatcher {
             })
             .collect();
         // Report in text-scan order (by position), not grouped by keyword, so
-        // the enhancer resolves the earliest matching keyword's location.
+        // the recognizer resolves the earliest matching keyword's location.
         matches.sort_by_key(|range| range.start);
         matches
     }
@@ -78,7 +78,7 @@ mod tests {
     fn is_permissive() {
         let m = SubstringMatcher;
         // "Email" inside "MyEmailAddress" is bytes 2..7, the raw matcher
-        // reports it; the enhancer's boundary policy decides whether it counts.
+        // reports it; the boundary policy decides whether it counts.
         assert_eq!(
             m.matches("MyEmailAddress", &[], &kws(&["email"])),
             vec![2..7]
@@ -89,7 +89,7 @@ mod tests {
     fn reports_every_occurrence_of_a_keyword() {
         let m = SubstringMatcher;
         // "card" inside "cardholder" (0..4) and standalone (11..15): both are
-        // reported so the enhancer can skip the first and keep the second.
+        // reported so the boundary filter can skip the first and keep the second.
         assert_eq!(
             m.matches("cardholder card", &[], &kws(&["card"])),
             vec![0..4, 11..15]
@@ -100,7 +100,7 @@ mod tests {
     fn reports_hits_across_all_keywords() {
         let m = SubstringMatcher;
         // "karte" (inside "Kreditkarte") and the whole "kreditkarte" both
-        // surface; the enhancer's boundary filter later keeps only the latter.
+        // surface; the boundary filter later keeps only the latter.
         assert_eq!(
             m.matches("die Kreditkarte hier", &[], &kws(&["karte", "kreditkarte"])),
             // Sorted by position: "kreditkarte" (4..15) precedes "karte" (10..15).

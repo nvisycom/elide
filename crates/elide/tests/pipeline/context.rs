@@ -13,7 +13,7 @@ use elide::entity::audit::AuditKind;
 use elide::modality::audio::{Audio, TranscriptSegment, TranscriptWord, Transcription};
 use elide::modality::image::{Image, ImageLocation, Layout, LayoutRegion};
 use elide::primitive::{BoundingBox, Confidence, ConfidenceThreshold, Dimensions, Point, TimeSpan};
-use elide::recognition::pattern::{PatternRecognizer, Regex, Variant};
+use elide::recognition::pattern::{Pattern, PatternRecognizer, Variant};
 use elide::recognition::{Context, Recognizer, Scope, Subject};
 
 /// A pattern recognizer that matches a 9-digit run, boosted by the keyword
@@ -22,7 +22,7 @@ fn ssn_recognizer() -> impl Recognizer<Image> + Recognizer<Audio> {
     let variant = Variant::new(r"\b\d{3}-\d{2}-\d{4}\b")
         .expect("variant builds")
         .with_score(Confidence::clamped(0.5));
-    let regex = Regex::builder()
+    let regex = Pattern::builder()
         .with_name("ssn")
         .with_labels(vec![LabelRef::new("US_SSN")])
         .with_context(vec!["ssn".to_owned()])

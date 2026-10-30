@@ -5,7 +5,7 @@
 name = "date_of_birth"
 labels = ["date_of_birth"]
 
-[context]
+[context.languages]
 en = ["birth", "born", "dob", "birthday", "date of birth"]
 es = ["nacimiento", "nacido", "nacida", "fecha de nacimiento", "cumpleaños", "cumpleanos"]
 de = ["geburt", "geboren", "geburtsdatum", "geburtstag"]

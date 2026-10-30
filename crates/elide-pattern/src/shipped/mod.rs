@@ -1,4 +1,4 @@
-//! Built-in [`Regex`] rules and [`Dictionary`]s shipped with this
+//! Built-in [`Pattern`] rules and [`Dictionary`]s shipped with this
 //! crate.
 //!
 //! Each accessor parses an asset embedded via [`include_str!`] and
@@ -7,7 +7,7 @@
 //! self-contained TOML. Call [`patterns::all`] / [`dictionaries::all`]
 //! to load the full set, or pick individual accessors.
 //!
-//! [`Regex`]: crate::Regex
+//! [`Pattern`]: crate::Pattern
 //! [`Dictionary`]: crate::Dictionary
 
 pub mod dictionaries;

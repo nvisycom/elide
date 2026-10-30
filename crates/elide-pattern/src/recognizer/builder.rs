@@ -1,118 +1,20 @@
-//! [`PatternRecognizer`] and its builder.
+//! [`PatternRecognizerBuilder`]: collects rules and compiles them into a
+//! [`PatternRecognizer`].
 
 use std::result::Result as StdResult;
 use std::sync::Arc;
 
 use aho_corasick::{AhoCorasick, MatchKind};
-use elide_core::entity::audit::AuditEvent;
-use elide_core::entity::{Entity, LabelCatalog, LabelRef};
-use elide_core::modality::TextRecognizable;
-use elide_core::primitive::{ComponentId, Confidence, ConfidenceThreshold, LanguageTag};
-use elide_core::recognition::{Context, Recognizer, Subject};
+use elide_core::entity::LabelCatalog;
 use elide_core::{Error, ErrorKind, Result};
-// The external `regex` crate is aliased throughout because `Regex` is already
-// this crate's rule type (`super::regex::Regex`, imported below).
-use regex::{
-    Error as CompiledRegexError, Regex as CompiledRegex, RegexBuilder, RegexSet, RegexSetBuilder,
-};
+use regex::{Error as RegexError, Regex, RegexBuilder, RegexSet, RegexSetBuilder};
 
-use super::compiled::{CompiledDictionary, CompiledPattern, RawMatch, has_word_boundaries};
-use super::context::Matching;
-use super::dictionary::Dictionary;
-use super::regex::{Regex, Variant};
+use super::PatternRecognizer;
 use crate::context::matching::{KeywordMatcher, SubstringMatcher};
-use crate::context::{BoostRule, Enhancer};
+use crate::context::{CompiledContext, RuleContext};
+use crate::rule::{CompiledDictionary, CompiledPattern, Dictionary, Pattern, Variant};
 use crate::shipped;
-use crate::validators::{ValidationContext, ValidatorRegistry};
-
-/// Runtime text recognizer composed of a regex pool and an
-/// Aho-Corasick automaton.
-///
-/// Every registered [`Regex`] variant goes into one
-/// [`::regex::RegexSet`] for a single one-pass scan across every
-/// regex; every [`Dictionary`] term goes into one
-/// [`::aho_corasick::AhoCorasick`] automaton for a single one-pass
-/// scan across every literal. Both passes share one walk over the
-/// input and emit entities in modality-local byte coordinates.
-///
-/// The matches then go through the rules' context: an [`Enhancer`] built
-/// from every rule's `[context]` table lifts the confidence of a match
-/// whose neighbourhood holds one of its keywords or anchor entities.
-///
-/// Construct via [`PatternRecognizer::builder`].
-///
-/// # Examples
-///
-/// ```
-/// use elide_pattern::PatternRecognizer;
-///
-/// let recognizer = PatternRecognizer::builder()
-///     .with_builtin_patterns()
-///     .with_builtin_dictionaries()
-///     .build()
-///     .expect("built-in recognizer builds");
-/// ```
-///
-/// [`Regex`]: super::Regex
-/// [`Dictionary`]: super::Dictionary
-/// [`Enhancer`]: crate::context::Enhancer
-pub struct PatternRecognizer {
-    patterns: Vec<CompiledPattern>,
-    regex_set: Option<RegexSet>,
-    dictionaries: Vec<CompiledDictionary>,
-    aho: Option<AhoCorasick>,
-    enhancer: Enhancer,
-}
-
-impl PatternRecognizer {
-    /// Start a chainable builder.
-    ///
-    /// A recognizer built with no patterns and no dictionaries is
-    /// valid, it emits zero entities on every call.
-    #[must_use]
-    pub fn builder() -> PatternRecognizerBuilder {
-        PatternRecognizerBuilder::default()
-    }
-
-    fn dictionary_owning_term(&self, term_id: usize) -> Option<&CompiledDictionary> {
-        self.dictionaries
-            .iter()
-            .find(|d| term_id >= d.term_start && term_id < d.term_end)
-    }
-}
-
-/// The label a rule emits under `catalog`: the most-specific candidate the
-/// catalog declares, else the most-specific candidate overall.
-///
-/// A rule always emits *something* so the reconcile layers see every match and
-/// can use a strong-but-out-of-catalog detection (a checksum-validated IBAN) to
-/// subsume a weak in-catalog one nested inside it (a loose `drivers_license`
-/// prefix). Restricting the output to the catalog is a downstream filter run
-/// *after* reconciliation, so suppression evidence is not discarded before it
-/// can be used. An empty catalog narrows nothing, so the most-specific
-/// candidate wins.
-fn resolve_label<'a>(candidates: &'a [LabelRef], catalog: &LabelCatalog) -> Option<&'a LabelRef> {
-    candidates
-        .iter()
-        .find(|l| catalog.contains(l))
-        .or_else(|| candidates.first())
-}
-
-/// One `(label, language)` context slice harvested from a pattern or
-/// dictionary, ready to become a [`BoostRule`].
-struct ContextKeywords<'a> {
-    /// The label the keywords boost.
-    label: &'a LabelRef,
-    /// Language scope; `None` is language-agnostic.
-    language: Option<&'a LanguageTag>,
-    /// The keyword literals to search for near a match.
-    keywords: &'a [String],
-    /// Whole-word vs substring matching for these keywords.
-    matching: Matching,
-    /// Additive boost override from the `[context]` table, or `None` to use
-    /// the enhancer default.
-    boost: Option<f32>,
-}
+use crate::validators::ValidatorRegistry;
 
 /// Byte budgets for compiling a regex, mirroring the `regex` crate's two knobs.
 ///
@@ -152,7 +54,7 @@ impl RegexBudget {
 /// [`build`]: Self::build
 #[derive(Debug, Clone, Default)]
 pub struct PatternRecognizerBuilder {
-    patterns: Vec<Regex>,
+    patterns: Vec<Pattern>,
     dictionaries: Vec<Dictionary>,
     validators: Option<ValidatorRegistry>,
     /// Byte budget for each *individual* variant regex. This is the knob to
@@ -198,7 +100,7 @@ impl PatternRecognizerBuilder {
     /// Register one pattern; patterns accumulate in registration
     /// order.
     #[must_use]
-    pub fn with_pattern(mut self, pattern: Regex) -> Self {
+    pub fn with_pattern(mut self, pattern: Pattern) -> Self {
         self.patterns.push(pattern);
         self
     }
@@ -340,7 +242,7 @@ impl PatternRecognizerBuilder {
 
     /// Borrow the accumulated patterns.
     #[must_use]
-    pub fn patterns(&self) -> &[Regex] {
+    pub fn patterns(&self) -> &[Pattern] {
         &self.patterns
     }
 
@@ -350,8 +252,7 @@ impl PatternRecognizerBuilder {
         &self.dictionaries
     }
 
-    /// Compile every rule into the pooled scanners and gather every rule's
-    /// `[context]` into the recognizer's [`Enhancer`].
+    /// Compile every rule, and its `[context]`, into the pooled scanners.
     ///
     /// # Errors
     ///
@@ -360,23 +261,37 @@ impl PatternRecognizerBuilder {
     /// validator name, when a dictionary's `scoring` is invalid
     /// or under-declared for some term's source column, or when
     /// the shared automata cannot be constructed.
-    ///
-    /// [`Enhancer`]: crate::context::Enhancer
     pub fn build(self) -> Result<PatternRecognizer> {
         let validators = self
             .validators
             .clone()
             .unwrap_or_else(ValidatorRegistry::builtin);
-        let (compiled_patterns, regex_set) = self.compile_patterns(&validators)?;
-        let (compiled_dicts, aho) = self.compile_dictionaries()?;
+        let mut contexts = Vec::new();
+        let (compiled_patterns, regex_set) = self.compile_patterns(&validators, &mut contexts)?;
+        let (compiled_dicts, aho) = self.compile_dictionaries(&mut contexts)?;
 
         Ok(PatternRecognizer {
             patterns: compiled_patterns,
             regex_set,
             dictionaries: compiled_dicts,
             aho,
-            enhancer: self.build_enhancer(),
+            contexts,
+            keyword_matcher: self
+                .keyword_matcher
+                .unwrap_or_else(|| Arc::new(SubstringMatcher)),
         })
+    }
+
+    /// Compile `declared` into `contexts`, returning its index there, or
+    /// `None` when it declares nothing.
+    fn compile_context(
+        &self,
+        declared: &RuleContext,
+        contexts: &mut Vec<CompiledContext>,
+    ) -> Option<usize> {
+        let context = CompiledContext::compile(declared, &self.dictionaries)?;
+        contexts.push(context);
+        Some(contexts.len() - 1)
     }
 
     /// Compile every `(pattern, variant)` pair into a
@@ -385,12 +300,14 @@ impl PatternRecognizerBuilder {
     fn compile_patterns(
         &self,
         validators: &ValidatorRegistry,
+        contexts: &mut Vec<CompiledContext>,
     ) -> Result<(Vec<CompiledPattern>, Option<RegexSet>)> {
         let variant_total: usize = self.patterns.iter().map(|p| p.variants.len()).sum();
         let mut compiled = Vec::with_capacity(variant_total);
         let mut regex_sources = Vec::with_capacity(variant_total);
 
         for pattern in &self.patterns {
+            let context = self.compile_context(&pattern.context, contexts);
             for variant in &pattern.variants {
                 let regex = self.compile_regex(&variant.regex).map_err(|e| {
                     Error::new(
@@ -412,7 +329,7 @@ impl PatternRecognizerBuilder {
                     .position(|name| name == Some(Variant::ENTITY_GROUP));
                 regex_sources.push(variant.regex.clone());
                 compiled.push(CompiledPattern {
-                    pattern_name: pattern.name.clone(),
+                    name: pattern.name.clone(),
                     labels: pattern.labels.clone(),
                     regex,
                     span_group,
@@ -420,6 +337,7 @@ impl PatternRecognizerBuilder {
                     validator,
                     languages: pattern.languages.clone(),
                     countries: pattern.countries.clone(),
+                    context,
                 });
             }
         }
@@ -447,7 +365,7 @@ impl PatternRecognizerBuilder {
     /// Compile one regex source under the per-[`variant`](Self::with_variant_budget)
     /// budget. Unset budget fields leave the `regex` crate defaults untouched,
     /// so an unconfigured builder compiles exactly as before.
-    fn compile_regex(&self, source: &str) -> StdResult<CompiledRegex, CompiledRegexError> {
+    fn compile_regex(&self, source: &str) -> StdResult<Regex, RegexError> {
         // A single variant is bounded by the per-variant budget, kept separate
         // from the (necessarily larger) shared-`RegexSet` union budget so a
         // tight per-rule cap does not break the builtin union.
@@ -466,7 +384,10 @@ impl PatternRecognizerBuilder {
     /// automaton, plus per-term confidences resolved from the
     /// dictionary's `scoring` policy (with per-term overrides
     /// taking precedence).
-    fn compile_dictionaries(&self) -> Result<(Vec<CompiledDictionary>, Option<AhoCorasick>)> {
+    fn compile_dictionaries(
+        &self,
+        contexts: &mut Vec<CompiledContext>,
+    ) -> Result<(Vec<CompiledDictionary>, Option<AhoCorasick>)> {
         let mut compiled = Vec::with_capacity(self.dictionaries.len());
         let mut all_terms: Vec<String> = Vec::new();
 
@@ -515,6 +436,7 @@ impl PatternRecognizerBuilder {
                 languages: dict.languages.clone(),
                 countries: dict.countries.clone(),
                 word_boundary: dict.word_boundary,
+                context: self.compile_context(&dict.context, contexts),
             });
         }
 
@@ -565,275 +487,5 @@ impl PatternRecognizerBuilder {
             )
         };
         Ok((compiled, aho))
-    }
-
-    /// Build the wrapping [`Enhancer`] from per-pattern and
-    /// per-dictionary context keywords.
-    ///
-    /// Per-rule [`BoostKeywords`] produce one [`BoostRule`] per
-    /// language scope (global rules carry
-    /// `language = None`; per-language rules carry the language
-    /// tag). The enhancer keys these by label and filters them
-    /// against the per-call language hint at apply time.
-    ///
-    /// [`BoostKeywords`]: super::BoostKeywords
-    fn build_enhancer(&self) -> Enhancer {
-        // Inline keyword context (Global / PerLanguage lists, and any inline
-        // keywords a `Sourced` context carries).
-        let mut boost_rules: Vec<BoostRule> = self
-            .context_keywords()
-            .map(|ck| {
-                let mut rule = BoostRule::new(ck.label.clone(), ck.keywords.iter().cloned())
-                    .with_word_boundary(ck.matching == Matching::Word);
-                if let Some(boost) = ck.boost {
-                    rule = rule.with_boost(Confidence::clamped(boost));
-                }
-                match ck.language {
-                    Some(lang) => rule.with_language(lang.clone()),
-                    None => rule,
-                }
-            })
-            .collect();
-
-        // Dictionary-sourced context: a pattern whose `[context]` names
-        // dictionaries borrows their terms as boost keywords for its own
-        // labels, e.g. a `monetary_amount` pattern lifts a number beside any
-        // currency name from the `currencies` dictionary.
-        for pattern in self.patterns.iter() {
-            let names = pattern.context.dictionaries();
-            if names.is_empty() {
-                continue;
-            }
-            let terms: Vec<String> = self
-                .dictionaries
-                .iter()
-                .filter(|d| names.contains(&d.name))
-                .flat_map(|d| d.terms.iter().map(|t| t.term.clone()))
-                .collect();
-            if terms.is_empty() {
-                continue;
-            }
-            let word_boundary = pattern.context.matching() == Matching::Word;
-            let boost = pattern.context.boost();
-            for label in &pattern.labels {
-                let mut rule = BoostRule::new(label.clone(), terms.iter().cloned())
-                    .with_word_boundary(word_boundary);
-                if let Some(boost) = boost {
-                    rule = rule.with_boost(Confidence::clamped(boost));
-                }
-                boost_rules.push(rule);
-            }
-        }
-
-        // Entity-anchor context: a pattern or dictionary whose `[context]`
-        // declares an `anchor` boosts its match when an entity of the anchor's
-        // label sits in the window — e.g. a `monetary_amount` beside an accepted
-        // `currency`, or a `currency` beside a monetary candidate. The default
-        // floor is the acceptance threshold, so an ambiguous token that never
-        // cleared its own gate does not anchor; a lower explicit floor lets a
-        // weak neighbour (a sub-threshold number) seed the chain.
-        // A dict-sourced anchor is scoped to its own terms, so a shared label
-        // (e.g. `currency` from both the currency-codes and the ambiguous-crypto
-        // dictionaries) does not let one dictionary's anchor fire on the other's
-        // entities; a pattern-sourced anchor carries no term list.
-        let default_floor = Confidence::clamped(ConfidenceThreshold::BASELINE.get());
-        let anchored = self
-            .patterns
-            .iter()
-            .map(|p| (&p.labels, &p.context, None))
-            .chain(
-                self.dictionaries
-                    .iter()
-                    .map(|d| (&d.labels, &d.context, Some(&d.terms))),
-            );
-        for (labels, context, terms) in anchored {
-            let Some(anchor) = context.anchor() else {
-                continue;
-            };
-            let anchor_label = LabelRef::new(anchor.label.clone());
-            let min_confidence = anchor
-                .min_confidence
-                .map_or(default_floor, Confidence::clamped);
-            let boost = context.boost();
-            for label in labels {
-                let mut rule = BoostRule::new(label.clone(), std::iter::empty::<String>())
-                    .with_anchor(anchor_label.clone(), min_confidence);
-                if let Some(terms) = terms {
-                    rule = rule.with_self_terms(terms.iter().map(|t| t.term.clone()));
-                }
-                if let Some(boost) = boost {
-                    rule = rule.with_boost(Confidence::clamped(boost));
-                }
-                boost_rules.push(rule);
-            }
-        }
-
-        let matcher = self
-            .keyword_matcher
-            .clone()
-            .unwrap_or_else(|| Arc::new(SubstringMatcher));
-        Enhancer::with_shared_matcher(boost_rules, matcher)
-    }
-
-    /// Yield one [`ContextKeywords`] for every `(label, language)` context a
-    /// pattern or dictionary declares.
-    ///
-    /// A rule with several candidate labels contributes its keywords under
-    /// *each* candidate, so whichever label the request catalog resolves the
-    /// match to still gets its neighbourhood boost.
-    fn context_keywords(&self) -> impl Iterator<Item = ContextKeywords<'_>> {
-        let pattern_keywords = self
-            .patterns
-            .iter()
-            .filter(|p| !p.context.is_empty())
-            .flat_map(|p| {
-                let matching = p.context.matching();
-                let boost = p.context.boost();
-                p.context.iter().flat_map(move |(language, keywords)| {
-                    p.labels.iter().map(move |label| ContextKeywords {
-                        label,
-                        language,
-                        keywords,
-                        matching,
-                        boost,
-                    })
-                })
-            });
-        let dict_keywords = self
-            .dictionaries
-            .iter()
-            .filter(|d| !d.context.is_empty())
-            .flat_map(|d| {
-                let matching = d.context.matching();
-                let boost = d.context.boost();
-                d.context.iter().flat_map(move |(language, keywords)| {
-                    d.labels.iter().map(move |label| ContextKeywords {
-                        label,
-                        language,
-                        keywords,
-                        matching,
-                        boost,
-                    })
-                })
-            });
-        pattern_keywords.chain(dict_keywords)
-    }
-}
-
-impl PatternRecognizer {
-    /// Place a match at `range` of the recognized text into a located
-    /// [`Entity`], keeping the range as the entity's `recognized_range`.
-    /// Drops the match (`None`) when its range can't be placed in the medium
-    /// (an OCR/transcript range no enrichment covers).
-    fn build_entity<M: TextRecognizable>(
-        &self,
-        raw: RawMatch,
-        subject: &Subject<M>,
-    ) -> Option<Entity<M>> {
-        let location = M::locate(raw.range.clone(), subject.data(), subject.artifact())?;
-        let event = AuditEvent::pattern("pattern", raw.confidence, location.clone(), raw.pattern);
-        Some(
-            Entity::builder()
-                .with_label(raw.label)
-                .with_location(location)
-                .with_confidence(raw.confidence)
-                .with_recognized_range(raw.range)
-                .with_event(event)
-                .build()
-                .expect("required fields provided"),
-        )
-    }
-}
-
-#[async_trait::async_trait]
-impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
-    fn id(&self) -> ComponentId {
-        ComponentId::new("elide-pattern", env!("CARGO_PKG_VERSION"))
-    }
-
-    async fn recognize(
-        &self,
-        subject: &Subject<M>,
-        ctx: &Context<'_, M>,
-    ) -> Result<Vec<Entity<M>>> {
-        // No recognizable text at this chunk (an un-transcribed clip, an
-        // un-OCR'd image): nothing to match.
-        let Some(text) = M::as_text(subject.data(), subject.artifact()) else {
-            return Ok(Vec::new());
-        };
-        let mut entities: Vec<Entity<M>> = Vec::new();
-
-        if let Some(set) = self.regex_set.as_ref() {
-            for pattern_id in set.matches(text).into_iter() {
-                let pat = &self.patterns[pattern_id];
-                // Locale filtering keys on *asserted* languages and countries
-                // only. A detected language never filters: detection is
-                // unreliable on short, word-poor input (a single data cell like
-                // `12345678Z` has no language, yet resolves to an arbitrary one)
-                // and would wrongly suppress a valid locale-scoped match. When
-                // the caller asserts a language or country, that assertion is
-                // authoritative and gates the locale patterns.
-                if !ctx.languages(subject).asserted_apply_to(&pat.languages) {
-                    continue;
-                }
-                if !ctx.applies_to_country(&pat.countries) {
-                    continue;
-                }
-                // The label this rule emits under the request catalog. `None`
-                // when the caller enabled none of its candidates, so the rule
-                // contributes nothing this call.
-                let Some(label) = resolve_label(&pat.labels, ctx.catalog()) else {
-                    continue;
-                };
-                let validation_ctx = ValidationContext {
-                    countries: ctx.scope().countries.clone(),
-                    language: ctx.languages(subject).primary().cloned(),
-                };
-                for m in pat.spans(text) {
-                    if let Some(validator) = pat.validator.as_ref()
-                        && !validator.validate(m.as_str(), &validation_ctx)
-                    {
-                        continue;
-                    }
-                    if let Some(entity) =
-                        self.build_entity::<M>(pat.raw_match(label.clone(), m.range()), subject)
-                    {
-                        entities.push(entity);
-                    }
-                }
-            }
-        }
-
-        if let Some(aho) = self.aho.as_ref() {
-            for mat in aho.find_iter(text) {
-                let term_id = mat.pattern().as_usize();
-                let Some(dict) = self.dictionary_owning_term(term_id) else {
-                    continue;
-                };
-                // Asserted-language + country locale filter (see the pattern
-                // loop above); a detected language never suppresses a match.
-                if !ctx.languages(subject).asserted_apply_to(&dict.languages) {
-                    continue;
-                }
-                if !ctx.applies_to_country(&dict.countries) {
-                    continue;
-                }
-                let Some(label) = resolve_label(&dict.labels, ctx.catalog()) else {
-                    continue;
-                };
-                let range = mat.range();
-                if dict.word_boundary && !has_word_boundaries(text, range.clone()) {
-                    continue;
-                }
-                let score = dict.term_scores[term_id - dict.term_start];
-                if let Some(entity) =
-                    self.build_entity::<M>(dict.raw_match(label.clone(), score, range), subject)
-                {
-                    entities.push(entity);
-                }
-            }
-        }
-
-        Ok(self.enhancer.apply(entities, subject, ctx))
     }
 }
