@@ -30,6 +30,10 @@ async fn finds_an_institution_around_its_head() {
             "the Department of Health and Human Services",
             "Department of Health and Human Services",
         ),
+        (
+            "the Department of Office Services said",
+            "Department of Office Services",
+        ),
     ] {
         assert_eq!(names(institution(), text).await, [name], "in {text:?}");
     }

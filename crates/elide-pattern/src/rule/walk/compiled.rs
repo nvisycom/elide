@@ -45,11 +45,10 @@ pub(super) struct Anchors {
     /// connective or comma ends a backward walk ("Acme GmbH and Beta GmbH").
     endings: HashSet<String>,
     /// Single-word anchors, by [`scan::anchor_key`]: one reached by a forward
-    /// walk across a connective starts another name ("Mr. and Mrs. Smith").
+    /// walk may start another name.
     words: HashSet<String>,
-    /// The distinctive ones among `words`: these start another name anywhere.
-    /// An ambiguous anchor is also an initial or a name word ("John M.
-    /// Smith", "Don Draper").
+    /// The distinctive ones among `words`, which are not also initials or name
+    /// words the way ambiguous ones are (`M.`, `Don`).
     distinctive: HashSet<String>,
 }
 
@@ -98,16 +97,14 @@ impl Anchors {
         self.endings.contains(&scan::anchor_key(word))
     }
 
-    /// Whether `word` starts another name when a forward walk meets it,
-    /// `linked` when a connective comes right before it.
-    pub(super) fn starts_name(&self, word: &str, linked: bool) -> bool {
-        let key = scan::anchor_key(word);
-        let anchors = if linked {
-            &self.words
-        } else {
-            &self.distinctive
-        };
-        anchors.contains(&key)
+    /// Whether `word` is a single-word anchor.
+    pub(super) fn is_anchor(&self, word: &str) -> bool {
+        self.words.contains(&scan::anchor_key(word))
+    }
+
+    /// Whether `word` is a distinctive single-word anchor.
+    pub(super) fn is_distinctive(&self, word: &str) -> bool {
+        self.distinctive.contains(&scan::anchor_key(word))
     }
 }
 

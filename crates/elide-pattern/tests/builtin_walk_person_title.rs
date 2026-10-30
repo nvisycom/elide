@@ -40,6 +40,7 @@ async fn an_initial_or_an_ambiguous_title_inside_a_name_does_not_end_it() {
     for (text, name) in [
         ("Dr. John M. Smith said", "John M. Smith"),
         ("Dr. Don Draper said", "Don Draper"),
+        ("Dr. Juan de Don Vega said", "Juan de Don Vega"),
     ] {
         assert_eq!(names(person_title(), text).await, [name], "in {text:?}");
     }

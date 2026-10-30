@@ -20,6 +20,9 @@ impl CompiledWalk {
         // Each word, and whether it is a connective a name cannot end on.
         let mut name: Vec<(Range<usize>, bool)> = Vec::new();
         let mut lowercase_run = 0;
+        // The last word stands between two names rather than inside one: `&`
+        // or a party connector, not a particle ("Juan de Don Vega").
+        let mut separated = false;
 
         for _ in 0..self.max_words {
             let Some(step) = scan::step_forward(text, pos) else {
@@ -27,9 +30,10 @@ impl CompiledWalk {
             };
             pos = step.end;
             let word = &text[step.clone()];
-            // "Mr. and Mrs. Smith": another anchor starts another name.
-            let linked = name.last().is_some_and(|(_, connective)| *connective);
-            if self.anchors.starts_name(word, linked) {
+            // Another anchor starts another name ("Mr. and Mrs. Smith"). An
+            // ambiguous one is also a name word ("Dr. Don Draper"), so it does
+            // only after a separator ("Dr. John Smith & Judge Jane Doe").
+            if self.anchors.is_distinctive(word) || (separated && self.anchors.is_anchor(word)) {
                 break;
             }
             // "…of Finance." ends the sentence: the word is part of the name,
@@ -39,7 +43,10 @@ impl CompiledWalk {
             let word = &text[range.clone()];
             let connective = match scan::kind(word) {
                 None | Some(Kind::Amount) => break,
-                Some(Kind::Ampersand) => true,
+                Some(Kind::Ampersand) => {
+                    separated = true;
+                    true
+                }
                 Some(Kind::Lower) => {
                     let lower = word.to_lowercase();
                     let connector = words.connectors.contains(&lower);
@@ -52,10 +59,12 @@ impl CompiledWalk {
                             break;
                         }
                     }
+                    separated = words.party_connectors.contains(&lower);
                     connector
                 }
                 Some(Kind::Capital | Kind::Number) => {
                     lowercase_run = 0;
+                    separated = false;
                     false
                 }
             };
