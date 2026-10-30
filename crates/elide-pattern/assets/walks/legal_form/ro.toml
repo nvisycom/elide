@@ -1,0 +1,7 @@
+# Organization names in `ro`: the keywords that raise a name's
+# confidence, and the words that shape a name. Converted from
+# stella/anonymize; see ../../STELLA.md.
+
+
+[words]
+lowercase = "open"

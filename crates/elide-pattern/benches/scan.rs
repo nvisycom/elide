@@ -40,6 +40,7 @@ fn bench_scan(c: &mut Criterion) {
     let recognizer = PatternRecognizer::builder()
         .with_builtin_patterns()
         .with_builtin_dictionaries()
+        .with_builtin_walks()
         .build()
         .expect("build recognizer");
 

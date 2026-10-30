@@ -122,6 +122,7 @@ fn build_text_analyzer() -> Result<Analyzer<Text>> {
     let patterns = PatternRecognizer::builder()
         .with_builtin_patterns()
         .with_builtin_dictionaries()
+        .with_builtin_walks()
         .build()?;
 
     // Mock NER: wired like a real model, limited to the labels it supports;

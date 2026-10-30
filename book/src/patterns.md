@@ -11,6 +11,7 @@ use elide::recognition::pattern::PatternRecognizer;
 let patterns = PatternRecognizer::builder()
     .with_builtin_patterns()
     .with_builtin_dictionaries()
+    .with_builtin_walks()
     .build()?;
 # Ok(())
 # }
@@ -22,6 +23,30 @@ for many countries. Validators reject look-alikes: a card number must pass
 the Luhn check, an IBAN its checksum. Country-specific patterns run only when
 the [scope](analyzers.md#the-scope) names that country, and language-specific
 ones only for that language.
+
+## Names
+
+The built-in walks find names next to a word that marks them:
+
+- **Companies** by their legal form: "Müller Bau GmbH", "Bank of America,
+  N.A.", "Kowalski Budownictwo sp. z o.o.". The recognizer reads back from
+  the legal form while the words read as a name, and stops at a sentence
+  end, a line break, an amount, or an earlier company ("Acme GmbH and Beta
+  GmbH" is two names). Contract wording in front of a name ("by and
+  between", "the Seller") is left out.
+- **Institutions** around a head word: "U.S. Department of Justice",
+  "Supreme Court of Canada". Generic phrases such as "Audit Committee" or
+  "Board of Directors" are not institutions.
+- **People** after a title: "Dr. Hans Müller", "Mme Claire Dubois". The
+  title stays visible; only the name is reported.
+
+Markers that are also ordinary words, such as `AG`, `Office`, or `Judge`,
+need a word like "company" nearby.
+
+Languages that write names partly in lowercase, such as Czech's "Základní
+škola Brno, s.r.o.", need the document's language: named in the
+[scope](analyzers.md#the-scope), or found by a language-detection enricher.
+Without one, a lowercase word after the first capitalized one ends the name.
 
 ## Context
 

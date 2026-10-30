@@ -1,0 +1,36 @@
+# Organization names in `it`: the keywords that raise a name's
+# confidence, and the words that shape a name. Converted from
+# stella/anonymize; see ../../STELLA.md.
+
+keywords = [
+  "società", "azienda", "impresa", "sede", "partita iva", "capitale sociale"
+]
+
+[words]
+lowercase = "open"
+connectors = [
+  "da"
+]
+party_connectors = [
+  "e"
+]
+verbs = [
+  "è", "sono", "era", "erano", "possiede", "concede", "vende", "compra", "ha",
+  "firma", "firmato", "paga", "deve", "ratifica", "stipula"
+]
+roles = [
+  "venditore", "venditrice", "compratore", "compratrice", "acquirente",
+  "locatore", "locatrice", "conduttore", "conduttrice", "locatario",
+  "locataria", "datore", "lavoratore", "lavoratrice", "dipendente", "cliente",
+  "fornitore", "fornitrice", "mandante", "mandataria", "mandatario",
+  "concedente", "concessionario", "concessionaria", "committente",
+  "appaltatore", "appaltatrice", "subappaltatore", "garante", "fideiussore",
+  "mutuante", "mutuatario", "creditore", "debitore", "cedente", "cessionario",
+  "cessionaria", "licenziante", "licenziataria", "licenziatario", "parte",
+  "parti", "amministrazione", "aggiudicatrice", "sezione", "oggetto",
+  "procedura", "informazioni", "altre", "denominazione", "indirizzi",
+  "indirizzo", "punti", "responsabile", "stazione", "appaltante"
+]
+structural = [
+  "allegato", "appendice", "articolo", "clausola", "paragrafo", "sezione"
+]

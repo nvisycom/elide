@@ -1,0 +1,1371 @@
+# Legal forms a company name ends in, by the country that defines them,
+# from stella/anonymize's `legal-forms.json` (Latin-script forms only)
+# plus its core suffix list, each also in capitals. A form is not tied to
+# a language: "Siemens AG" appears in English text too. See
+# ../../STELLA.md.
+#
+# `ambiguous` forms are also ordinary words or abbreviations (`AG`,
+# `Trust`, `Co.`): a name ending in one scores below the default threshold
+# and needs a context keyword nearby.
+
+[AD]
+distinctive = [
+  "EMPRESA INDIVIDUAL", "Empresa Individual", "SLU", "SOCIETAT ANÒNIMA",
+  "Societat Anònima", "SOCIETAT COL·LECTIVA", "Societat Col·lectiva",
+  "SOCIETAT EN COMANDITA", "Societat en Comandita", "SOCIETAT LIMITADA",
+  "Societat Limitada", "SOCIETAT LIMITADA UNIPERSONAL",
+  "Societat Limitada Unipersonal", "SOCIETAT REGULAR COL·LECTIVA",
+  "Societat Regular Col·lectiva", "SRC"
+]
+ambiguous = [
+  "ASSOCIACIÓ", "Associació", "FUNDACIÓ", "Fundació", "SA", "SC", "SL"
+]
+
+[AE]
+distinctive = [
+  "CIVIL COMPANY", "Civil Company", "DWC-LLC", "FREE ZONE COMPANY",
+  "Free Zone Company", "FREE ZONE ESTABLISHMENT", "Free Zone Establishment",
+  "FZ-CO", "FZ-LLC", "FZC", "FZCO", "FZE", "JOINT VENTURE", "Joint Venture",
+  "LIMITED LIABILITY COMPANY", "Limited Liability Company", "LLC", "LLP",
+  "LTD", "Ltd", "PJSC", "PRIVATE SHAREHOLDING COMPANY",
+  "Private Shareholding Company", "PSC", "PUBLIC JOINT STOCK COMPANY",
+  "Public Joint Stock Company", "REPRESENTATIVE OFFICE",
+  "Representative Office", "SOLE ESTABLISHMENT", "Sole Establishment"
+]
+ambiguous = [
+  "BRANCH", "Branch", "GP"
+]
+
+[AL]
+distinctive = [
+  "PERSON FIZIK", "Person fizik", "SH.A.", "Sh.a.", "SH.P.K.", "Sh.p.k.",
+  "SHA", "SHOQËRI AKSIONARE", "Shoqëri aksionare", "SHOQËRI KOLEKTIVE",
+  "Shoqëri kolektive", "SHOQËRI KOMANDITE", "Shoqëri komandite",
+  "SHOQËRI ME PËRGJEGJËSI TË KUFIZUAR", "Shoqëri me përgjegjësi të kufizuar",
+  "SHPK"
+]
+ambiguous = [
+  "DEGË", "Degë", "FONDACION", "Fondacion", "KOOPERATIVË", "Kooperativë",
+  "SHOQATË", "Shoqatë"
+]
+
+[AM]
+distinctive = [
+  "CJSC", "LLC", "OJSC"
+]
+
+[AR]
+distinctive = [
+  "ASOCIACIÓN CIVIL", "Asociación Civil", "S.A.S.", "S.C.A.", "S.R.L.",
+  "SOCIEDAD ANÓNIMA", "Sociedad Anónima", "SOCIEDAD COLECTIVA",
+  "Sociedad Colectiva", "SOCIEDAD DE RESPONSABILIDAD LIMITADA",
+  "Sociedad de Responsabilidad Limitada", "SOCIEDAD EN COMANDITA POR ACCIONES",
+  "Sociedad en Comandita por Acciones", "SOCIEDAD EN COMANDITA SIMPLE",
+  "Sociedad en Comandita Simple", "SOCIEDAD POR ACCIONES SIMPLIFICADA",
+  "Sociedad por Acciones Simplificada", "SRL", "UNIÓN TRANSITORIA DE EMPRESAS",
+  "Unión Transitoria de Empresas"
+]
+ambiguous = [
+  "COOPERATIVA", "Cooperativa", "FIDEICOMISO", "Fideicomiso", "FUNDACIÓN",
+  "Fundación", "S.A.", "S.C.", "SAS"
+]
+
+[AT]
+distinctive = [
+  "AKTIENGESELLSCHAFT", "Aktiengesellschaft", "E.GEN.", "e.Gen.", "e.U.",
+  "EINGETRAGENES EINZELUNTERNEHMEN", "eingetragenes Einzelunternehmen",
+  "GEN.M.B.H.", "Gen.m.b.H.", "GENOSSENSCHAFT MIT BESCHRÄNKTER HAFTUNG",
+  "Genossenschaft mit beschränkter Haftung", "GESBR", "GesbR",
+  "GESELLSCHAFT BÜRGERLICHEN RECHTS", "Gesellschaft bürgerlichen Rechts",
+  "GESELLSCHAFT MIT BESCHRÄNKTER HAFTUNG",
+  "Gesellschaft mit beschränkter Haftung", "GMBH", "GmbH", "GMBH & CO KG",
+  "GmbH & Co KG", "GMBH & CO OG", "GmbH & Co OG", "KOMMANDITGESELLSCHAFT",
+  "Kommanditgesellschaft", "OFFENE GESELLSCHAFT", "Offene Gesellschaft",
+  "PARTG", "PartG", "PARTNERSCHAFTSGESELLSCHAFT", "Partnerschaftsgesellschaft",
+  "PRIVATSTIFTUNG", "Privatstiftung", "SCE"
+]
+ambiguous = [
+  "AG", "E.U.", "EINZELUNTERNEHMEN", "Einzelunternehmen", "GENOSSENSCHAFT",
+  "Genossenschaft", "KG", "OG", "SE", "VEREIN", "Verein"
+]
+
+[AU]
+distinctive = [
+  "INCORPORATED ASSOCIATION", "Incorporated Association",
+  "INDIGENOUS CORPORATION", "Indigenous Corporation", "LIMITED", "Limited",
+  "LTD", "Ltd", "LTD.", "Ltd.", "NO LIABILITY", "No Liability",
+  "PROPRIETARY LIMITED", "Proprietary Limited", "PTY LTD", "Pty Ltd",
+  "PTY LTD.", "Pty Ltd.", "PTY. LTD.", "Pty. Ltd.", "PUBLIC COMPANY",
+  "Public Company", "SOLE TRADER", "Sole Trader"
+]
+ambiguous = [
+  "CO-OPERATIVE", "Co-operative", "NL", "PARTNERSHIP", "Partnership", "TRUST",
+  "Trust"
+]
+
+[AZ]
+distinctive = [
+  "ASC", "AÇIQ SƏHMDAR CƏMIYYƏTI", "Açıq Səhmdar Cəmiyyəti", "FƏRDI SAHIBKAR",
+  "Fərdi sahibkar", "İCTIMAI BIRLIK", "İctimai Birlik", "KOMMANDIT ORTAQLIQ",
+  "Kommandit Ortaqlıq", "MMC", "MƏHDUD MƏSULIYYƏTLI CƏMIYYƏT",
+  "Məhdud Məsuliyyətli Cəmiyyət", "QAPALI SƏHMDAR CƏMIYYƏTI",
+  "Qapalı Səhmdar Cəmiyyəti", "QSC", "SƏHMDAR CƏMIYYƏTI", "Səhmdar Cəmiyyəti",
+  "TAM ORTAQLIQ", "Tam Ortaqlıq"
+]
+ambiguous = [
+  "FOND", "Fond", "KOOPERATIV", "Kooperativ", "SC"
+]
+
+[BA]
+distinctive = [
+  "a.d.", "AKCIONARSKO DRUŠTVO", "Akcionarsko društvo", "d.d.", "D.N.O.",
+  "d.n.o.", "D.O.O.", "d.o.o.", "DIONIČKO DRUŠTVO", "Dioničko društvo",
+  "DRUŠTVO SA NEOGRANIČENOM SOLIDARNOM ODGOVORNOŠĆU",
+  "Društvo sa neograničenom solidarnom odgovornošću",
+  "DRUŠTVO SA OGRANIČENOM ODGOVORNOŠĆU", "Društvo sa ograničenom odgovornošću",
+  "k.d.", "KOMANDITNO DRUŠTVO", "Komanditno društvo"
+]
+ambiguous = [
+  "A.D.", "D.D.", "FONDACIJA", "Fondacija", "K.D.", "UDRUŽENJE", "Udruženje",
+  "ZADRUGA", "Zadruga"
+]
+
+[BB]
+distinctive = [
+  "COMPANY LIMITED BY GUARANTEE", "Company Limited by Guarantee",
+  "COMPANY LIMITED BY SHARES", "Company Limited by Shares", "CORP.", "Corp.",
+  "CORPORATION", "Corporation", "EXEMPT INSURANCE COMPANY",
+  "Exempt Insurance Company", "EXTERNAL COMPANY", "External Company", "INC.",
+  "Inc.", "INCORPORATED", "Incorporated", "INTERNATIONAL BUSINESS COMPANY",
+  "International Business Company", "LIMITED", "Limited", "LTD", "Ltd",
+  "QUALIFYING INSURANCE COMPANY", "Qualifying Insurance Company",
+  "SOLE PROPRIETORSHIP", "Sole Proprietorship"
+]
+ambiguous = [
+  "PARTNERSHIP", "Partnership", "SOCIETY", "Society"
+]
+
+[BE]
+distinctive = [
+  "AISBL", "ASBL", "ASSOCIATION SANS BUT LUCRATIF",
+  "Association Sans But Lucratif", "BESLOTEN VENNOOTSCHAP",
+  "Besloten Vennootschap", "BVBA", "COMM. V", "Comm. V",
+  "COMMANDITAIRE VENNOOTSCHAP", "Commanditaire Vennootschap",
+  "COMMANDITAIRE VENNOOTSCHAP OP AANDELEN",
+  "Commanditaire Vennootschap op Aandelen", "COMMV", "CommV", "COMMVA",
+  "CommVA", "COÖPERATIEVE VENNOOTSCHAP", "Coöperatieve Vennootschap", "CVBA",
+  "CVOA", "EBVBA", "ESV", "GCV", "GIE", "IVZW", "NAAMLOZE VENNOOTSCHAP",
+  "Naamloze Vennootschap", "SCE", "SCOMM", "SComm", "SCRI", "SCRL", "SCS",
+  "SOCIÉTÉ ANONYME", "Société Anonyme", "SOCIÉTÉ COOPÉRATIVE",
+  "Société Coopérative", "SOCIÉTÉ EN COMMANDITE SIMPLE",
+  "Société en Commandite Simple", "SOCIÉTÉ EN NOM COLLECTIF",
+  "Société en Nom Collectif", "SOCIÉTÉ À RESPONSABILITÉ LIMITÉE",
+  "Société à Responsabilité Limitée", "SRL", "V.O.F.",
+  "VENNOOTSCHAP ONDER FIRMA", "Vennootschap onder Firma",
+  "VERENIGING ZONDER WINSTOOGMERK", "Vereniging Zonder Winstoogmerk", "VZW"
+]
+ambiguous = [
+  "BV", "FONDATION", "Fondation", "NV", "SA", "SC", "SE", "SNC", "STICHTING",
+  "Stichting"
+]
+
+[BG]
+distinctive = [
+  "EOOD", "KDA", "OOD", "SCE"
+]
+ambiguous = [
+  "AD", "ET", "KD", "SD", "SE"
+]
+
+[BH]
+distinctive = [
+  "B.S.C.", "B.S.C. (C)", "B.S.C. (c)", "BSC", "W.L.L.", "WLL"
+]
+
+[BR]
+distinctive = [
+  "EIRELI", "EMPRESA DE PEQUENO PORTE", "Empresa de Pequeno Porte",
+  "EMPRESA INDIVIDUAL DE RESPONSABILIDADE LIMITADA",
+  "Empresa Individual de Responsabilidade Limitada", "LTDA", "Ltda", "LTDA.",
+  "Ltda.", "MICROEMPREENDEDOR INDIVIDUAL", "Microempreendedor Individual",
+  "S/A", "SLU", "SOCIEDADE ANÔNIMA", "Sociedade Anônima",
+  "SOCIEDADE COOPERATIVA", "Sociedade Cooperativa",
+  "SOCIEDADE EM COMANDITA POR AÇÕES", "Sociedade em Comandita por Ações",
+  "SOCIEDADE EM COMANDITA SIMPLES", "Sociedade em Comandita Simples",
+  "SOCIEDADE EM NOME COLETIVO", "Sociedade em Nome Coletivo",
+  "SOCIEDADE LIMITADA", "Sociedade Limitada", "SOCIEDADE LIMITADA UNIPESSOAL",
+  "Sociedade Limitada Unipessoal", "SOCIEDADE SIMPLES", "Sociedade Simples"
+]
+ambiguous = [
+  "ASSOCIAÇÃO", "Associação", "EPP", "FUNDAÇÃO", "Fundação", "ME", "MEI",
+  "MICROEMPRESA", "Microempresa", "S.A.", "SS"
+]
+
+[CA]
+distinctive = [
+  "CORP.", "Corp.", "CORPORATION", "Corporation", "CROWN CORPORATION",
+  "Crown Corporation", "FEDERAL CORPORATION", "Federal Corporation", "INC.",
+  "Inc.", "INCORPORATED", "Incorporated", "LIMITED", "Limited",
+  "LIMITED LIABILITY PARTNERSHIP", "Limited Liability Partnership",
+  "LIMITED PARTNERSHIP", "Limited Partnership", "LIMITÉE", "Limitée", "LLP",
+  "LTD.", "Ltd.", "LTÉE", "Ltée", "LTÉE.", "Ltée.",
+  "NOT-FOR-PROFIT CORPORATION", "Not-for-Profit Corporation",
+  "PROFESSIONAL CORPORATION", "Professional Corporation",
+  "PROVINCIAL CORPORATION", "Provincial Corporation", "S.E.N.C.",
+  "SOCIÉTÉ EN COMMANDITE", "Société en commandite", "SOCIÉTÉ EN NOM COLLECTIF",
+  "Société en nom collectif", "SOLE PROPRIETORSHIP", "Sole Proprietorship"
+]
+ambiguous = [
+  "CO.", "Co.", "COOPERATIVE", "Cooperative", "LP"
+]
+
+[CH]
+distinctive = [
+  "AKTIENGESELLSCHAFT", "Aktiengesellschaft", "ENTREPRISE INDIVIDUELLE",
+  "Entreprise individuelle", "GESELLSCHAFT MIT BESCHRÄNKTER HAFTUNG",
+  "Gesellschaft mit beschränkter Haftung", "GMBH", "GmbH", "KLG", "KlG",
+  "KOLLEKTIVGESELLSCHAFT", "Kollektivgesellschaft", "KOMMANDITGESELLSCHAFT",
+  "Kommanditgesellschaft", "SCE", "SOCIÉTÉ ANONYME", "Société anonyme",
+  "SOCIÉTÉ EN COMMANDITE", "Société en commandite", "SOCIÉTÉ EN NOM COLLECTIF",
+  "Société en nom collectif", "SOCIÉTÉ À RESPONSABILITÉ LIMITÉE",
+  "Société à responsabilité limitée", "SÀRL", "Sàrl"
+]
+ambiguous = [
+  "AG", "ASSOCIATION", "Association", "COOPÉRATIVE", "Coopérative",
+  "EINZELUNTERNEHMEN", "Einzelunternehmen", "FONDATION", "Fondation",
+  "GENOSSENSCHAFT", "Genossenschaft", "KG", "SA", "SC", "SE", "SNC",
+  "STIFTUNG", "Stiftung", "VEREIN", "Verein"
+]
+
+[CL]
+distinctive = [
+  "ASOCIACIÓN GREMIAL", "Asociación Gremial", "CORPORACIÓN", "Corporación",
+  "EIRL", "EMPRESA INDIVIDUAL DE RESPONSABILIDAD LIMITADA",
+  "Empresa Individual de Responsabilidad Limitada", "LTDA.", "Ltda.", "S.C.M.",
+  "S.G.R.", "S.P.A.", "S.p.A.", "SOCIEDAD ANÓNIMA", "Sociedad Anónima",
+  "SOCIEDAD COLECTIVA", "Sociedad Colectiva", "SOCIEDAD CONTRACTUAL MINERA",
+  "Sociedad Contractual Minera", "SOCIEDAD DE RESPONSABILIDAD LIMITADA",
+  "Sociedad de Responsabilidad Limitada", "SOCIEDAD EN COMANDITA",
+  "Sociedad en Comandita", "SOCIEDAD EN COMANDITA POR ACCIONES",
+  "Sociedad en Comandita por Acciones", "SOCIEDAD POR ACCIONES",
+  "Sociedad por Acciones", "SPA", "SpA", "SRL"
+]
+ambiguous = [
+  "COOPERATIVA", "Cooperativa", "FUNDACIÓN", "Fundación", "S.A."
+]
+
+[CO]
+distinctive = [
+  "EMPRESA UNIPERSONAL", "Empresa Unipersonal", "ENTIDAD SIN ÁNIMO DE LUCRO",
+  "Entidad Sin Ánimo de Lucro", "ESALES", "ESALes", "LTDA.", "Ltda.",
+  "S. EN C.", "S. en C.", "S. EN C.A.", "S. en C.A.", "S.A.S.",
+  "SOCIEDAD ANÓNIMA", "Sociedad Anónima", "SOCIEDAD COLECTIVA",
+  "Sociedad Colectiva", "SOCIEDAD DE RESPONSABILIDAD LIMITADA",
+  "Sociedad de Responsabilidad Limitada", "SOCIEDAD EN COMANDITA",
+  "Sociedad en Comandita", "SOCIEDAD EN COMANDITA POR ACCIONES",
+  "Sociedad en Comandita por Acciones", "SOCIEDAD LIMITADA",
+  "Sociedad Limitada", "SOCIEDAD POR ACCIONES SIMPLIFICADA",
+  "Sociedad por Acciones Simplificada"
+]
+ambiguous = [
+  "ASOCIACIÓN", "Asociación", "COOPERATIVA", "Cooperativa", "E.U.",
+  "FUNDACIÓN", "Fundación", "S.A.", "S.C.", "SAS", "SUCURSAL", "Sucursal"
+]
+
+[CR]
+distinctive = [
+  "EMPRESA INDIVIDUAL", "Empresa Individual", "LTDA.", "Ltda.", "S. EN C.",
+  "S. en C.", "S. EN N.C.", "S. en N.C.", "S.R.L.", "SOCIEDAD ANÓNIMA",
+  "Sociedad Anónima", "SOCIEDAD DE RESPONSABILIDAD LIMITADA",
+  "Sociedad de Responsabilidad Limitada", "SOCIEDAD EN COMANDITA",
+  "Sociedad en Comandita", "SOCIEDAD EN NOMBRE COLECTIVO",
+  "Sociedad en Nombre Colectivo"
+]
+ambiguous = [
+  "ASOCIACIÓN", "Asociación", "COOPERATIVA", "Cooperativa", "FUNDACIÓN",
+  "Fundación", "S.A."
+]
+
+[CY]
+distinctive = [
+  "CO-OPERATIVE SOCIETY", "Co-operative Society", "EUROPEAN COMPANY",
+  "European Company", "LIMITED", "Limited", "LTD", "Ltd",
+  "NON-PROFIT ORGANISATION", "Non-Profit Organisation", "PLC", "plc",
+  "PUBLIC LIMITED COMPANY", "Public Limited Company", "SCE",
+  "SOLE PROPRIETORSHIP", "Sole Proprietorship"
+]
+ambiguous = [
+  "PARTNERSHIP", "Partnership", "SE"
+]
+
+[CZ]
+distinctive = [
+  "A. S.", "a. s.", "a.s.", "AKCIOVOU SPOLEČNOSTÍ", "akciovou společností",
+  "AKCIOVÁ SPOLEČNOST", "akciová společnost", "AKCIOVÉ SPOLEČNOSTI",
+  "akciové společnosti", "ASOCIACI", "asociaci", "ASOCIACÍ", "asociací",
+  "BYTOVÉ DRUŽSTVO", "bytové družstvo", "DRUŽSTVA", "družstva", "DRUŽSTVEM",
+  "družstvem", "DRUŽSTVO", "družstvo", "DRUŽSTVU", "družstvu", "ESÚS",
+  "EVROPSKÁ DRUŽSTEVNÍ SPOLEČNOST", "evropská družstevní společnost",
+  "EVROPSKÁ SPOLEČNOST", "evropská společnost", "FAKULTNÍ NEMOCNICI",
+  "fakultní nemocnici", "FAKULTNÍ NEMOCNICÍ", "fakultní nemocnicí", "FEDERACI",
+  "federaci", "FEDERACÍ", "federací", "K. S.", "k. s.", "k.s.",
+  "KOMANDITNÍ SPOLEČNOST", "komanditní společnost", "KOMANDITNÍ SPOLEČNOSTI",
+  "komanditní společnosti", "KOMANDITNÍ SPOLEČNOSTÍ", "komanditní společností",
+  "n.p.", "NADACE", "nadace", "NADACI", "nadaci", "NADACÍ", "nadací",
+  "NADAČNÍ FOND", "nadační fond", "NADAČNÍHO FONDU", "nadačního fondu",
+  "NADAČNÍM FONDEM", "nadačním fondem", "NADAČNÍMU FONDU", "nadačnímu fondu",
+  "NEMOCNICI", "nemocnici", "NEMOCNICÍ", "nemocnicí", "NÁRODNÍ PODNIK",
+  "národní podnik", "O. P. S.", "o. p. s.", "O.P.S.", "o.p.s.",
+  "OBECNĚ PROSPĚŠNOU SPOLEČNOSTÍ", "obecně prospěšnou společností",
+  "OBECNĚ PROSPĚŠNÁ SPOLEČNOST", "obecně prospěšná společnost",
+  "OBECNĚ PROSPĚŠNÉ SPOLEČNOSTI", "obecně prospěšné společnosti",
+  "ODBOROVÁ ORGANIZACE", "odborová organizace", "PŘÍSPĚVKOVOU ORGANIZACÍ",
+  "příspěvkovou organizací", "PŘÍSPĚVKOVÁ ORGANIZACE",
+  "příspěvková organizace", "PŘÍSPĚVKOVÉ ORGANIZACE", "příspěvkové organizace",
+  "PŘÍSPĚVKOVÉ ORGANIZACI", "příspěvkové organizaci",
+  "PŘÍSPĚVKOVÉM ORGANIZACI", "příspěvkovém organizaci", "S. P.", "s. p.",
+  "S. R. O.", "s. r. o.", "s.p.", "S.R.O.", "s.r.o.", "SCE",
+  "SOCIÁLNÍ DRUŽSTVO", "sociální družstvo", "SPOL. S R.O.", "spol. s r.o.",
+  "SPOLEK", "spolek", "SPOLEČNOST S RUČENÍM OMEZENÝM",
+  "společnost s ručením omezeným", "SPOLEČNOSTI S RUČENÍM OMEZENÝM",
+  "společnosti s ručením omezeným", "SPOLEČNOSTÍ S RUČENÍM OMEZENÝM",
+  "společností s ručením omezeným", "STÁTNÍ PODNIK", "státní podnik",
+  "STÁTNÍ PŘÍSPĚVKOVOU ORGANIZACÍ", "státní příspěvkovou organizací",
+  "STÁTNÍ PŘÍSPĚVKOVÁ ORGANIZACE", "státní příspěvková organizace",
+  "STÁTNÍ PŘÍSPĚVKOVÉ ORGANIZACE", "státní příspěvkové organizace",
+  "STÁTNÍ PŘÍSPĚVKOVÉ ORGANIZACI", "státní příspěvkové organizaci",
+  "STÁTNÍHO PODNIKU", "státního podniku", "STÁTNÍM PODNIKEM",
+  "státním podnikem", "STÁTNÍMU PODNIKU", "státnímu podniku", "SVĚŘENSKÝ FOND",
+  "svěřenský fond", "UNIVERZITOU", "univerzitou", "UNIVERZITY", "univerzity",
+  "UNIVERZITĚ", "univerzitě", "V. O. S.", "v. o. s.", "V.O.S.", "v.o.s.",
+  "V.V.I.", "v.v.i.", "VEŘEJNOU OBCHODNÍ SPOLEČNOSTÍ",
+  "veřejnou obchodní společností", "VEŘEJNÁ OBCHODNÍ SPOLEČNOST",
+  "veřejná obchodní společnost", "VEŘEJNÁ VÝZKUMNÁ INSTITUCE",
+  "veřejná výzkumná instituce", "VEŘEJNÉ OBCHODNÍ SPOLEČNOSTI",
+  "veřejné obchodní společnosti", "Z. S.", "z. s.", "Z. Ú.", "z. ú.", "z.s.",
+  "z.ú.", "ZAPSANÉHO SPOLKU", "zapsaného spolku", "ZAPSANÉHO ÚSTAVU",
+  "zapsaného ústavu", "ZAPSANÉMU SPOLKU", "zapsanému spolku",
+  "ZAPSANÉMU ÚSTAVU", "zapsanému ústavu", "ZAPSANÝ SPOLEK", "zapsaný spolek",
+  "ZAPSANÝ ÚSTAV", "zapsaný ústav", "ZAPSANÝM SPOLKEM", "zapsaným spolkem",
+  "ZAPSANÝM ÚSTAVEM", "zapsaným ústavem"
+]
+ambiguous = [
+  "A.S.", "K.S.", "N.P.", "S.P.", "SE", "Z.S.", "Z.Ú."
+]
+
+[DE]
+distinctive = [
+  "AG & CO. KG", "AG & Co. KG", "AG & CO. OHG", "AG & Co. OHG",
+  "AKTIENGESELLSCHAFT", "Aktiengesellschaft",
+  "ANSTALT DES ÖFFENTLICHEN RECHTS", "Anstalt des öffentlichen Rechts", "AÖR",
+  "AöR", "e.K.", "e.V.", "eG", "EINGETRAGENE GENOSSENSCHAFT",
+  "eingetragene Genossenschaft", "EINGETRAGENE KAUFFRAU",
+  "eingetragene Kauffrau", "EINGETRAGENER KAUFMANN", "eingetragener Kaufmann",
+  "EINGETRAGENER VEREIN", "eingetragener Verein", "GBR", "GbR",
+  "GEMEINNÜTZIGE GESELLSCHAFT MIT BESCHRÄNKTER HAFTUNG",
+  "gemeinnützige Gesellschaft mit beschränkter Haftung",
+  "GESELLSCHAFT BÜRGERLICHEN RECHTS", "Gesellschaft bürgerlichen Rechts",
+  "GESELLSCHAFT MIT BESCHRÄNKTER HAFTUNG",
+  "Gesellschaft mit beschränkter Haftung", "GGMBH", "gGmbH", "GMBH", "GmbH",
+  "GMBH & CO. KG", "GmbH & Co. KG", "GMBH & CO. OHG", "GmbH & Co. OHG", "KDÖR",
+  "KdöR", "KGAA", "KGaA", "KOMMANDITGESELLSCHAFT", "Kommanditgesellschaft",
+  "KOMMANDITGESELLSCHAFT AUF AKTIEN", "Kommanditgesellschaft auf Aktien",
+  "KÖRPERSCHAFT DES ÖFFENTLICHEN RECHTS",
+  "Körperschaft des öffentlichen Rechts", "MBH", "mbH",
+  "OFFENE HANDELSGESELLSCHAFT", "Offene Handelsgesellschaft", "OHG", "PARTG",
+  "PartG", "PARTG MBB", "PartG mbB", "PARTNERSCHAFTSGESELLSCHAFT",
+  "Partnerschaftsgesellschaft",
+  "PARTNERSCHAFTSGESELLSCHAFT MIT BESCHRÄNKTER BERUFSHAFTUNG",
+  "Partnerschaftsgesellschaft mit beschränkter Berufshaftung", "SCE",
+  "UG & CO. KG", "UG & Co. KG", "UG (HAFTUNGSBESCHRÄNKT)",
+  "UG (haftungsbeschränkt)", "UG (HAFTUNGSBESCHRÄNKT) & CO. KG",
+  "UG (haftungsbeschränkt) & Co. KG", "UNTERNEHMERGESELLSCHAFT",
+  "Unternehmergesellschaft"
+]
+ambiguous = [
+  "AG", "E.K.", "E.V.", "EG", "EINZELUNTERNEHMEN", "Einzelunternehmen", "KG",
+  "SE", "STIFTUNG", "Stiftung", "UG"
+]
+
+[DK]
+distinctive = [
+  "A/S", "AKTIESELSKAB", "Aktieselskab", "AMBA", "AmbA",
+  "ANDELSSELSKAB MED BEGRÆNSET ANSVAR", "Andelsselskab med begrænset ansvar",
+  "ANPARTSSELSKAB", "Anpartsselskab", "APS", "ApS", "ENKELTMANDSVIRKSOMHED",
+  "Enkeltmandsvirksomhed", "ERHVERVSDRIVENDE FOND", "Erhvervsdrivende fond",
+  "F.M.B.A.", "FORENING MED BEGRÆNSET ANSVAR", "Forening med begrænset ansvar",
+  "G/S", "I/S", "INTERESSENTSKAB", "Interessentskab", "IVS",
+  "IVÆRKSÆTTERSELSKAB", "Iværksætterselskab", "K/S", "KOMMANDITSELSKAB",
+  "Kommanditselskab", "P/S", "PARTNERSELSKAB", "Partnerselskab", "S.M.B.A.",
+  "SCE", "SELSKAB MED BEGRÆNSET ANSVAR", "Selskab med begrænset ansvar"
+]
+ambiguous = [
+  "FOND", "Fond", "SE"
+]
+
+[DO]
+distinctive = [
+  "ASOCIACIÓN SIN FINES DE LUCRO", "Asociación sin Fines de Lucro", "EIRL",
+  "EMPRESA INDIVIDUAL DE RESPONSABILIDAD LIMITADA",
+  "Empresa Individual de Responsabilidad Limitada", "S.A.D.", "S.A.S.",
+  "S.R.L.", "SOCIEDAD ANÓNIMA", "Sociedad Anónima",
+  "SOCIEDAD ANÓNIMA DE SUSCRIPCIÓN PÚBLICA",
+  "Sociedad Anónima de Suscripción Pública",
+  "SOCIEDAD DE RESPONSABILIDAD LIMITADA",
+  "Sociedad de Responsabilidad Limitada", "SOCIEDAD EN COMANDITA POR ACCIONES",
+  "Sociedad en Comandita por Acciones", "SOCIEDAD EN COMANDITA SIMPLE",
+  "Sociedad en Comandita Simple", "SOCIEDAD EN NOMBRE COLECTIVO",
+  "Sociedad en Nombre Colectivo", "SOCIEDAD POR ACCIONES SIMPLIFICADA",
+  "Sociedad por Acciones Simplificada", "SRL"
+]
+ambiguous = [
+  "COOPERATIVA", "Cooperativa", "FUNDACIÓN", "Fundación", "S.A."
+]
+
+[EE]
+distinctive = [
+  "AKTSIASELTS", "Aktsiaselts", "FIE", "FÜÜSILISEST ISIKUST ETTEVÕTJA",
+  "Füüsilisest isikust ettevõtja", "MITTETULUNDUSÜHING", "Mittetulundusühing",
+  "MTÜ", "OSAÜHING", "Osaühing", "SCE", "TULUNDUSÜHISTU", "Tulundusühistu",
+  "TÄISÜHING", "Täisühing", "USALDUSÜHING", "Usaldusühing"
+]
+ambiguous = [
+  "AS", "OÜ", "SA", "SE", "SIHTASUTUS", "Sihtasutus", "TÜ", "UÜ"
+]
+
+[EG]
+distinctive = [
+  "LLC", "S.A.E.", "SAE"
+]
+
+[ES]
+distinctive = [
+  "COMUNIDAD DE BIENES", "Comunidad de Bienes", "EMPRESARIO INDIVIDUAL",
+  "Empresario Individual", "S. COOP.", "S. Coop.", "S.A.U.", "S.COM.",
+  "S.Com.", "S.L.L.", "S.L.N.E.", "S.L.U.", "S.R.C.", "SCE",
+  "SOCIEDAD ANÓNIMA", "Sociedad Anónima", "SOCIEDAD ANÓNIMA UNIPERSONAL",
+  "Sociedad Anónima Unipersonal", "SOCIEDAD CIVIL", "Sociedad Civil",
+  "SOCIEDAD COLECTIVA", "Sociedad Colectiva", "SOCIEDAD COMANDITARIA",
+  "Sociedad Comanditaria", "SOCIEDAD COMANDITARIA POR ACCIONES",
+  "Sociedad Comanditaria por Acciones", "SOCIEDAD COOPERATIVA",
+  "Sociedad Cooperativa", "SOCIEDAD LIMITADA", "Sociedad Limitada",
+  "SOCIEDAD LIMITADA LABORAL", "Sociedad Limitada Laboral",
+  "SOCIEDAD LIMITADA NUEVA EMPRESA", "Sociedad Limitada Nueva Empresa",
+  "SOCIEDAD LIMITADA UNIPERSONAL", "Sociedad Limitada Unipersonal"
+]
+ambiguous = [
+  "ASOCIACIÓN", "Asociación", "AUTÓNOMO", "Autónomo", "FUNDACIÓN", "Fundación",
+  "S.A.", "S.C.", "S.L.", "SC", "SE"
+]
+
+[FI]
+distinctive = [
+  "Ab", "ABP", "Abp", "AKTIEBOLAG", "Aktiebolag", "AVOIN YHTIÖ", "Avoin yhtiö",
+  "Ay", "JULKINEN OSAKEYHTIÖ", "Julkinen osakeyhtiö", "Kb",
+  "KOMMANDIITTIYHTIÖ", "Kommandiittiyhtiö", "KOMMANDITBOLAG", "Kommanditbolag",
+  "Ky", "OSAKEYHTIÖ", "Osakeyhtiö", "Oy", "OYJ", "Oyj", "PUBLIKT AKTIEBOLAG",
+  "Publikt aktiebolag", "REKISTERÖITY YHDISTYS", "Rekisteröity yhdistys",
+  "SCE", "YKSITYINEN ELINKEINONHARJOITTAJA",
+  "Yksityinen elinkeinonharjoittaja", "Öb", "ÖPPET BOLAG", "Öppet bolag"
+]
+ambiguous = [
+  "AB", "AY", "KB", "KY", "OSUUSKUNTA", "Osuuskunta", "OY", "SE", "SÄÄTIÖ",
+  "Säätiö", "TOIMINIMI", "Toiminimi", "YHDISTYS", "Yhdistys", "ÖB"
+]
+
+[FR]
+distinctive = [
+  "ENTREPRISE INDIVIDUELLE", "Entreprise individuelle",
+  "ENTREPRISE UNIPERSONNELLE À RESPONSABILITÉ LIMITÉE",
+  "Entreprise unipersonnelle à responsabilité limitée", "EURL", "GEIE", "GIE",
+  "GROUPEMENT D'INTÉRÊT ÉCONOMIQUE", "Groupement d'intérêt économique", "SARL",
+  "SASU", "SCE", "SCOP", "SCP", "SCPI", "SCS", "SEL", "SELAFA", "SELARL",
+  "SELAS", "SELCA", "SEM", "SEP", "SICAV", "SOCIÉTÉ ANONYME",
+  "Société anonyme", "SOCIÉTÉ CIVILE IMMOBILIÈRE",
+  "Société civile immobilière", "SOCIÉTÉ CIVILE PROFESSIONNELLE",
+  "Société civile professionnelle", "SOCIÉTÉ COOPÉRATIVE ET PARTICIPATIVE",
+  "Société coopérative et participative", "SOCIÉTÉ D'EXERCICE LIBÉRAL",
+  "Société d'exercice libéral", "SOCIÉTÉ D'ÉCONOMIE MIXTE",
+  "Société d'économie mixte", "SOCIÉTÉ EN COMMANDITE PAR ACTIONS",
+  "Société en commandite par actions", "SOCIÉTÉ EN COMMANDITE SIMPLE",
+  "Société en commandite simple", "SOCIÉTÉ EN NOM COLLECTIF",
+  "Société en nom collectif", "SOCIÉTÉ EN PARTICIPATION",
+  "Société en participation", "SOCIÉTÉ PAR ACTIONS SIMPLIFIÉE",
+  "Société par actions simplifiée",
+  "SOCIÉTÉ PAR ACTIONS SIMPLIFIÉE UNIPERSONNELLE",
+  "Société par actions simplifiée unipersonnelle",
+  "SOCIÉTÉ À RESPONSABILITÉ LIMITÉE", "Société à responsabilité limitée"
+]
+ambiguous = [
+  "ASSOCIATION", "Association", "AUTO-ENTREPRENEUR", "Auto-entrepreneur",
+  "FONDATION", "Fondation", "MICRO-ENTREPRISE", "Micro-entreprise", "SA",
+  "SAS", "SCA", "SCI", "SE", "SNC"
+]
+
+[GB]
+distinctive = [
+  "CHARITABLE INCORPORATED ORGANISATION",
+  "Charitable Incorporated Organisation", "CIC", "CIO", "CO-OPERATIVE SOCIETY",
+  "Co-operative Society", "COMMUNITY BENEFIT SOCIETY",
+  "Community Benefit Society", "COMMUNITY INTEREST COMPANY",
+  "Community Interest Company", "INDUSTRIAL AND PROVIDENT SOCIETY",
+  "Industrial and Provident Society", "LIMITED", "Limited",
+  "LIMITED LIABILITY PARTNERSHIP", "Limited Liability Partnership",
+  "LIMITED PARTNERSHIP", "Limited Partnership", "LLP", "LTD", "Ltd", "PLC",
+  "plc", "PUBLIC LIMITED COMPANY", "Public Limited Company",
+  "REGISTERED SOCIETY", "Registered Society", "ROYAL CHARTER COMPANY",
+  "Royal Charter Company", "SCOTTISH CHARITABLE INCORPORATED ORGANISATION",
+  "Scottish Charitable Incorporated Organisation",
+  "SCOTTISH LIMITED PARTNERSHIP", "Scottish Limited Partnership",
+  "SOLE TRADER", "Sole Trader", "UNLIMITED COMPANY", "Unlimited Company"
+]
+ambiguous = [
+  "LP", "PARTNERSHIP", "Partnership", "SE"
+]
+
+[GE]
+distinctive = [
+  "JSC", "LLC", "LTD", "SHPS", "Shps"
+]
+
+[GH]
+distinctive = [
+  "CO-OPERATIVE SOCIETY", "Co-operative Society",
+  "COMPANY LIMITED BY GUARANTEE", "Company Limited by Guarantee",
+  "EXTERNAL COMPANY", "External Company", "LIMITED", "Limited", "LTD", "Ltd",
+  "PLC", "PRIVATE COMPANY LIMITED BY SHARES",
+  "Private Company Limited by Shares", "PUBLIC LIMITED COMPANY",
+  "Public Limited Company", "SOLE PROPRIETORSHIP", "Sole Proprietorship",
+  "UNLIMITED COMPANY", "Unlimited Company"
+]
+ambiguous = [
+  "PARTNERSHIP", "Partnership"
+]
+
+[GR]
+distinctive = [
+  "E.P.E.", "I.K.E.", "SCE"
+]
+ambiguous = [
+  "A.E.", "E.E.", "O.E.", "SE"
+]
+
+[HK]
+distinctive = [
+  "COMPANY LIMITED BY GUARANTEE", "Company Limited by Guarantee", "LIMITED",
+  "Limited", "LIMITED PARTNERSHIP", "Limited Partnership", "LTD", "Ltd",
+  "PRIVATE COMPANY LIMITED BY SHARES", "Private Company Limited by Shares",
+  "PUBLIC COMPANY LIMITED BY SHARES", "Public Company Limited by Shares",
+  "REGISTERED NON-HONG KONG COMPANY", "Registered Non-Hong Kong Company",
+  "SOLE PROPRIETORSHIP", "Sole Proprietorship", "UNLIMITED COMPANY",
+  "Unlimited Company"
+]
+ambiguous = [
+  "PARTNERSHIP", "Partnership"
+]
+
+[HR]
+distinctive = [
+  "d.d.", "D.O.O.", "d.o.o.", "DIONIČKO DRUŠTVO", "Dioničko društvo",
+  "DRUŠTVO S OGRANIČENOM ODGOVORNOŠĆU", "Društvo s ograničenom odgovornošću",
+  "J.D.O.O.", "j.d.o.o.", "J.T.D.", "j.t.d.", "JAVNO TRGOVAČKO DRUŠTVO",
+  "Javno trgovačko društvo", "JEDNOSTAVNO DRUŠTVO S OGRANIČENOM ODGOVORNOŠĆU",
+  "Jednostavno društvo s ograničenom odgovornošću", "k.d.",
+  "KOMANDITNO DRUŠTVO", "Komanditno društvo", "SCE"
+]
+ambiguous = [
+  "D.D.", "K.D.", "OBRT", "Obrt", "SE", "UDRUGA", "Udruga", "USTANOVA",
+  "Ustanova", "ZADRUGA", "Zadruga", "ZAKLADA", "Zaklada"
+]
+
+[HU]
+distinctive = [
+  "BETÉTI TÁRSASÁG", "Betéti Társaság", "Bt.", "EGYÉNI CÉG", "Egyéni cég",
+  "EGYÉNI VÁLLALKOZÓ", "Egyéni vállalkozó", "KFT.", "Kft.", "KKT.", "Kkt.",
+  "KORLÁTOLT FELELŐSSÉGŰ TÁRSASÁG", "Korlátolt Felelősségű Társaság",
+  "KÖZKERESETI TÁRSASÁG", "Közkereseti Társaság",
+  "NYILVÁNOSAN MŰKÖDŐ RÉSZVÉNYTÁRSASÁG", "Nyilvánosan Működő Részvénytársaság",
+  "NYRT.", "Nyrt.", "SCE", "SZÖV.", "Szöv.", "ZRT.", "Zrt.",
+  "ZÁRTKÖRŰEN MŰKÖDŐ RÉSZVÉNYTÁRSASÁG", "Zártkörűen Működő Részvénytársaság"
+]
+ambiguous = [
+  "ALAPÍTVÁNY", "Alapítvány", "BT.", "EGYESÜLET", "Egyesület", "SE",
+  "SZÖVETKEZET", "Szövetkezet"
+]
+
+[ID]
+distinctive = [
+  "COMMANDITAIRE VENNOOTSCHAP", "Commanditaire Vennootschap", "Fa",
+  "PENANAMAN MODAL ASING", "Penanaman Modal Asing", "PERSEKUTUAN FIRMA",
+  "Persekutuan Firma", "PERSEKUTUAN KOMANDITER", "Persekutuan Komanditer",
+  "PERSEKUTUAN PERDATA", "Persekutuan Perdata", "PERSEROAN TERBATAS",
+  "Perseroan Terbatas", "PERSEROAN TERBUKA", "Perseroan Terbuka",
+  "PERUSAHAAN PERSEROAN", "Perusahaan Perseroan", "PERUSAHAAN UMUM",
+  "Perusahaan Umum", "PMA", "PT TBK", "PT Tbk", "TBK", "Tbk", "USAHA DAGANG",
+  "Usaha Dagang"
+]
+ambiguous = [
+  "CV", "FA", "FIRMA", "Firma", "KOPERASI", "Koperasi", "PT", "UD", "YAYASAN",
+  "Yayasan"
+]
+
+[IE]
+distinctive = [
+  "CLG", "CO-OPERATIVE SOCIETY", "Co-operative Society",
+  "COMPANY LIMITED BY GUARANTEE", "Company Limited by Guarantee", "CPT", "cpt",
+  "CUIDEACHTA PHOIBLÍ THEORANTA", "cuideachta phoiblí theoranta", "DAC",
+  "DESIGNATED ACTIVITY COMPANY", "Designated Activity Company",
+  "FRIENDLY SOCIETY", "Friendly Society", "INDUSTRIAL AND PROVIDENT SOCIETY",
+  "Industrial and Provident Society", "LIMITED", "Limited",
+  "LIMITED LIABILITY PARTNERSHIP", "Limited Liability Partnership", "LLP",
+  "LTD", "Ltd", "PLC", "plc", "PUBLIC LIMITED COMPANY",
+  "Public Limited Company", "SOLE TRADER", "Sole Trader", "TEO", "Teo", "TEO.",
+  "Teo.", "TEORANTA", "Teoranta", "ULC", "UNLIMITED COMPANY",
+  "Unlimited Company"
+]
+ambiguous = [
+  "PARTNERSHIP", "Partnership", "SE"
+]
+
+[IL]
+distinctive = [
+  "COMPANY LIMITED BY GUARANTEE", "Company Limited by Guarantee",
+  "COOPERATIVE SOCIETY", "Cooperative Society", "LTD", "Ltd", "LTD.", "Ltd.",
+  "PUBLIC BENEFIT COMPANY", "Public Benefit Company", "REGISTERED AMUTA",
+  "Registered Amuta"
+]
+
+[IN]
+distinctive = [
+  "CO-OPERATIVE SOCIETY", "Co-operative Society", "GOVERNMENT COMPANY",
+  "Government Company", "HINDU UNDIVIDED FAMILY", "Hindu Undivided Family",
+  "LIMITED", "Limited", "LIMITED LIABILITY PARTNERSHIP",
+  "Limited Liability Partnership", "LLP", "LTD.", "Ltd.", "NIDHI COMPANY",
+  "Nidhi Company", "ONE PERSON COMPANY", "One Person Company", "OPC",
+  "PARTNERSHIP FIRM", "Partnership Firm", "PRIVATE LIMITED", "Private Limited",
+  "PRIVATE LIMITED COMPANY", "Private Limited Company", "PRODUCER COMPANY",
+  "Producer Company", "PUBLIC LIMITED COMPANY", "Public Limited Company",
+  "PVT LTD", "Pvt Ltd", "PVT. LTD.", "Pvt. Ltd.", "SECTION 8 COMPANY",
+  "Section 8 Company", "SOLE PROPRIETORSHIP", "Sole Proprietorship"
+]
+ambiguous = [
+  "TRUST", "Trust"
+]
+
+[IS]
+distinctive = [
+  "bs.", "EHF.", "ehf.", "EINKAHLUTAFÉLAG", "Einkahlutafélag",
+  "EINSTAKLINGSFYRIRTÆKI", "Einstaklingsfyrirtæki", "hf.", "HLUTAFÉLAG",
+  "Hlutafélag", "OHF.", "ohf.", "OPINBERT HLUTAFÉLAG", "Opinbert hlutafélag",
+  "SAMEIGNARFÉLAG", "Sameignarfélag", "SAMLAGSHLUTAFÉLAG", "Samlagshlutafélag",
+  "SAMVINNUFÉLAG", "Samvinnufélag", "SES.", "ses.", "sf.",
+  "SJÁLFSEIGNARSTOFNUN", "Sjálfseignarstofnun", "SLHF.", "slhf.", "SVF.",
+  "svf."
+]
+ambiguous = [
+  "BS.", "FÉLAG", "Félag", "HF.", "SF."
+]
+
+[IT]
+distinctive = [
+  "DITTA INDIVIDUALE", "Ditta individuale", "IMPRESA INDIVIDUALE",
+  "Impresa individuale", "S.A.P.A.", "S.a.p.a.", "S.A.S.", "S.a.s.",
+  "S.C.A.R.L.", "S.c.a.r.l.", "S.C.R.L.", "S.c.r.l.", "S.N.C.", "S.n.c.",
+  "S.P.A.", "S.p.A.", "S.R.L.", "S.r.l.", "S.R.L.S.", "S.r.l.s.", "SCE",
+  "SOCIETÀ A RESPONSABILITÀ LIMITATA", "Società a responsabilità limitata",
+  "SOCIETÀ A RESPONSABILITÀ LIMITATA SEMPLIFICATA",
+  "Società a responsabilità limitata semplificata", "SOCIETÀ COOPERATIVA",
+  "Società cooperativa", "SOCIETÀ COOPERATIVA A RESPONSABILITÀ LIMITATA",
+  "Società cooperativa a responsabilità limitata",
+  "SOCIETÀ IN ACCOMANDITA PER AZIONI", "Società in accomandita per azioni",
+  "SOCIETÀ IN ACCOMANDITA SEMPLICE", "Società in accomandita semplice",
+  "SOCIETÀ IN NOME COLLETTIVO", "Società in nome collettivo",
+  "SOCIETÀ PER AZIONI", "Società per azioni", "SOCIETÀ SEMPLICE",
+  "Società semplice", "SPA", "SpA", "SRL", "Srl"
+]
+ambiguous = [
+  "ASSOCIAZIONE", "Associazione", "CONSORZIO", "Consorzio", "FONDAZIONE",
+  "Fondazione", "S.S.", "SE"
+]
+
+[JM]
+distinctive = [
+  "COMPANY LIMITED BY GUARANTEE", "Company Limited by Guarantee",
+  "COMPANY LIMITED BY SHARES", "Company Limited by Shares", "INC.", "Inc.",
+  "INCORPORATED", "Incorporated", "LIMITED", "Limited", "LTD", "Ltd",
+  "NON-PROFIT ORGANISATION", "Non-Profit Organisation", "SOLE PROPRIETORSHIP",
+  "Sole Proprietorship", "UNLIMITED COMPANY", "Unlimited Company"
+]
+ambiguous = [
+  "CO-OPERATIVE", "Co-operative", "PARTNERSHIP", "Partnership", "SOCIETY",
+  "Society"
+]
+
+[JP]
+distinctive = [
+  "GODO KAISHA", "Godo Kaisha", "GOMEI KAISHA", "Gomei Kaisha", "GOSHI KAISHA",
+  "Goshi Kaisha", "KABUSHIKI KAISHA", "Kabushiki Kaisha", "YUGEN KAISHA",
+  "Yugen Kaisha"
+]
+ambiguous = [
+  "G.K.", "K.K.", "N.K.", "Y.K."
+]
+
+[KE]
+distinctive = [
+  "CO-OPERATIVE SOCIETY", "Co-operative Society",
+  "COMPANY LIMITED BY GUARANTEE", "Company Limited by Guarantee",
+  "GENERAL PARTNERSHIP", "General Partnership", "LIMITED", "Limited",
+  "LIMITED LIABILITY PARTNERSHIP", "Limited Liability Partnership", "LLP",
+  "LTD", "Ltd", "PLC", "Plc", "PRIVATE COMPANY LIMITED BY SHARES",
+  "Private Company Limited by Shares", "PUBLIC LIMITED COMPANY",
+  "Public Limited Company", "SOLE PROPRIETORSHIP", "Sole Proprietorship",
+  "UNLIMITED COMPANY", "Unlimited Company"
+]
+ambiguous = [
+  "SOCIETY", "Society", "TRUST", "Trust"
+]
+
+[KR]
+distinctive = [
+  "CHUSIK HOESA", "Chusik Hoesa", "HAPJA HOESA", "Hapja Hoesa",
+  "HAPMYEONG HOESA", "Hapmyeong Hoesa", "YUHAN CHAEGIM HOESA",
+  "Yuhan Chaegim Hoesa", "YUHAN HOESA", "Yuhan Hoesa"
+]
+
+[KW]
+distinctive = [
+  "K.S.C.", "K.S.C.C.", "K.S.C.P.", "KSC", "KSCC", "KSCP", "W.L.L.", "WLL"
+]
+
+[KZ]
+distinctive = [
+  "TOO"
+]
+ambiguous = [
+  "AO"
+]
+
+[LI]
+distinctive = [
+  "AKTIENGESELLSCHAFT", "Aktiengesellschaft",
+  "GESELLSCHAFT MIT BESCHRÄNKTER HAFTUNG",
+  "Gesellschaft mit beschränkter Haftung", "GMBH", "GmbH",
+  "KOLLEKTIVGESELLSCHAFT", "Kollektivgesellschaft", "KOMMANDITGESELLSCHAFT",
+  "Kommanditgesellschaft", "TREUHANDSCHAFT", "Treuhandschaft",
+  "TREUUNTERNEHMEN", "Treuunternehmen"
+]
+ambiguous = [
+  "AG", "ANSTALT", "Anstalt", "EINZELUNTERNEHMEN", "Einzelunternehmen",
+  "GENOSSENSCHAFT", "Genossenschaft", "SE", "STIFTUNG", "Stiftung", "TRUST",
+  "Trust", "VEREIN", "Verein"
+]
+
+[LT]
+distinctive = [
+  "AKCINĖ BENDROVĖ", "Akcinė bendrovė", "INDIVIDUALI ĮMONĖ",
+  "Individuali įmonė", "KOMANDITINĖ ŪKINĖ BENDRIJA",
+  "Komanditinė ūkinė bendrija", "KOOPERATINĖ BENDROVĖ", "Kooperatinė bendrovė",
+  "KŪB", "LABDAROS IR PARAMOS FONDAS", "Labdaros ir paramos fondas",
+  "MAŽOJI BENDRIJA", "Mažoji bendrija", "SCE", "TIKROJI ŪKINĖ BENDRIJA",
+  "Tikroji ūkinė bendrija", "TŪB", "UAB", "UŽDAROJI AKCINĖ BENDROVĖ",
+  "Uždaroji akcinė bendrovė", "VIEŠOJI ĮSTAIGA", "Viešoji įstaiga", "VŠĮ",
+  "VšĮ"
+]
+ambiguous = [
+  "AB", "ASOCIACIJA", "Asociacija", "IĮ", "MB", "SE"
+]
+
+[LU]
+distinctive = [
+  "ASBL", "ASSOCIATION SANS BUT LUCRATIF", "Association Sans But Lucratif",
+  "FONDS D'INVESTISSEMENT SPÉCIALISÉ", "Fonds d'Investissement Spécialisé",
+  "GIE", "GROUPEMENT D'INTÉRÊT ÉCONOMIQUE", "Groupement d'Intérêt Économique",
+  "S.C.A.", "S.C.S.", "S.C.SP.", "S.C.Sp.", "S.E.C.S.", "S.e.C.S.", "S.À R.L.",
+  "S.à r.l.", "SCE", "SCSP", "SCSp", "SICAR", "SIF", "SOCIÉTÉ ANONYME",
+  "Société Anonyme", "SOCIÉTÉ COOPÉRATIVE", "Société Coopérative",
+  "SOCIÉTÉ EN COMMANDITE PAR ACTIONS", "Société en Commandite par Actions",
+  "SOCIÉTÉ EN COMMANDITE SIMPLE", "Société en Commandite Simple",
+  "SOCIÉTÉ EN NOM COLLECTIF", "Société en Nom Collectif",
+  "SOCIÉTÉ À RESPONSABILITÉ LIMITÉE", "Société à Responsabilité Limitée"
+]
+ambiguous = [
+  "FONDATION", "Fondation", "S.A.", "S.C.", "SE"
+]
+
+[LV]
+distinctive = [
+  "AKCIJU SABIEDRĪBA", "Akciju sabiedrība", "INDIVIDUĀLAIS KOMERSANTS",
+  "Individuālais komersants", "KOMANDĪTSABIEDRĪBA", "Komandītsabiedrība",
+  "KOOPERATĪVĀ SABIEDRĪBA", "Kooperatīvā sabiedrība", "NODIBINĀJUMS",
+  "Nodibinājums", "PILNSABIEDRĪBA", "Pilnsabiedrība",
+  "SABIEDRĪBA AR IEROBEŽOTU ATBILDĪBU", "Sabiedrība ar ierobežotu atbildību",
+  "SCE", "SIA", "ZEMNIEKU SAIMNIECĪBA", "Zemnieku saimniecība"
+]
+ambiguous = [
+  "AS", "BIEDRĪBA", "Biedrība", "IK", "KS", "PS", "SE", "ZS"
+]
+
+[MA]
+distinctive = [
+  "GROUPEMENT D'INTÉRÊT ÉCONOMIQUE", "Groupement d'Intérêt Économique", "SARL",
+  "SARL AU", "SCS", "SOCIÉTÉ ANONYME", "Société Anonyme",
+  "SOCIÉTÉ EN COMMANDITE PAR ACTIONS", "Société en Commandite par Actions",
+  "SOCIÉTÉ EN COMMANDITE SIMPLE", "Société en Commandite Simple",
+  "SOCIÉTÉ EN NOM COLLECTIF", "Société en Nom Collectif",
+  "SOCIÉTÉ PAR ACTIONS SIMPLIFIÉE", "Société par Actions Simplifiée",
+  "SOCIÉTÉ À RESPONSABILITÉ LIMITÉE", "Société à Responsabilité Limitée",
+  "SOCIÉTÉ À RESPONSABILITÉ LIMITÉE À ASSOCIÉ UNIQUE",
+  "Société à Responsabilité Limitée à Associé Unique"
+]
+ambiguous = [
+  "ASSOCIATION", "Association", "AUTO-ENTREPRENEUR", "Auto-entrepreneur",
+  "COOPÉRATIVE", "Coopérative", "SA", "SAS", "SCA", "SNC"
+]
+
+[MC]
+distinctive = [
+  "ENTREPRISE INDIVIDUELLE", "Entreprise individuelle", "S.A.M.", "SAM",
+  "SARL", "SCS", "SOCIÉTÉ ANONYME MONÉGASQUE", "Société Anonyme Monégasque",
+  "SOCIÉTÉ CIVILE PARTICULIÈRE", "Société Civile Particulière",
+  "SOCIÉTÉ EN COMMANDITE PAR ACTIONS", "Société en Commandite par Actions",
+  "SOCIÉTÉ EN COMMANDITE SIMPLE", "Société en Commandite Simple",
+  "SOCIÉTÉ EN NOM COLLECTIF", "Société en Nom Collectif",
+  "SOCIÉTÉ À RESPONSABILITÉ LIMITÉE", "Société à Responsabilité Limitée"
+]
+ambiguous = [
+  "SCA", "SNC"
+]
+
+[MD]
+distinctive = [
+  "SOCIETATE CU RĂSPUNDERE LIMITATĂ", "Societate cu răspundere limitată",
+  "SOCIETATE PE ACȚIUNI", "Societate pe acțiuni", "SOCIETATE ÎN COMANDITĂ",
+  "Societate în comandită", "SOCIETATE ÎN NUME COLECTIV",
+  "Societate în nume colectiv", "SRL", "ÎNTREPRINDERE DE STAT",
+  "Întreprindere de stat", "ÎNTREPRINDERE INDIVIDUALĂ",
+  "Întreprindere individuală", "ÎNTREPRINDERE MIXTĂ", "Întreprindere mixtă"
+]
+ambiguous = [
+  "ASOCIAȚIE", "Asociație", "COOPERATIVĂ", "Cooperativă", "FUNDAȚIE",
+  "Fundație", "SA", "SC", "Î.I.", "Î.M.", "Î.S."
+]
+
+[ME]
+distinctive = [
+  "a.d.", "AKCIONARSKO DRUŠTVO", "Akcionarsko društvo", "D.O.O.", "d.o.o.",
+  "DRUŠTVO SA OGRANIČENOM ODGOVORNOŠĆU", "Društvo sa ograničenom odgovornošću",
+  "k.d.", "KOMANDITNO DRUŠTVO", "Komanditno društvo", "NEVLADINA ORGANIZACIJA",
+  "Nevladina organizacija", "o.d.", "ORTAČKO DRUŠTVO", "Ortačko društvo"
+]
+ambiguous = [
+  "A.D.", "FONDACIJA", "Fondacija", "K.D.", "O.D.", "PREDUZETNIK",
+  "Preduzetnik", "SE", "ZADRUGA", "Zadruga"
+]
+
+[MK]
+distinctive = [
+  "DOO", "DOOEL", "JTD"
+]
+ambiguous = [
+  "AD", "KD"
+]
+
+[MT]
+distinctive = [
+  "CO-OPERATIVE SOCIETY", "Co-operative Society", "GENERAL PARTNERSHIP",
+  "General Partnership", "LIMITED", "Limited", "LIMITED PARTNERSHIP",
+  "Limited Partnership", "LTD", "Ltd", "PLC", "plc", "PUBLIC LIMITED COMPANY",
+  "Public Limited Company", "SCE", "VOLUNTARY ORGANISATION",
+  "Voluntary Organisation"
+]
+ambiguous = [
+  "FOUNDATION", "Foundation", "SE"
+]
+
+[MX]
+distinctive = [
+  "ASOCIACIÓN CIVIL", "Asociación Civil", "S. DE R.L.", "S. de R.L.",
+  "S. DE R.L. DE C.V.", "S. de R.L. de C.V.", "S. EN C.", "S. en C.",
+  "S. EN N.C.", "S. en N.C.", "S.A. DE C.V.", "S.A. de C.V.", "S.A.B. DE C.V.",
+  "S.A.B. de C.V.", "S.A.P.I.", "S.A.P.I. DE C.V.", "S.A.P.I. de C.V.",
+  "S.A.S.", "S.C.L.", "SC DE RL DE CV", "SC de RL de CV",
+  "SOCIEDAD ANÓNIMA BURSÁTIL DE CAPITAL VARIABLE",
+  "Sociedad Anónima Bursátil de Capital Variable",
+  "SOCIEDAD ANÓNIMA DE CAPITAL VARIABLE",
+  "Sociedad Anónima de Capital Variable",
+  "SOCIEDAD ANÓNIMA PROMOTORA DE INVERSIÓN",
+  "Sociedad Anónima Promotora de Inversión",
+  "SOCIEDAD ANÓNIMA PROMOTORA DE INVERSIÓN DE CAPITAL VARIABLE",
+  "Sociedad Anónima Promotora de Inversión de Capital Variable",
+  "SOCIEDAD CIVIL", "Sociedad Civil", "SOCIEDAD COOPERATIVA",
+  "Sociedad Cooperativa", "SOCIEDAD COOPERATIVA LIMITADA",
+  "Sociedad Cooperativa Limitada", "SOCIEDAD DE RESPONSABILIDAD LIMITADA",
+  "Sociedad de Responsabilidad Limitada",
+  "SOCIEDAD DE RESPONSABILIDAD LIMITADA DE CAPITAL VARIABLE",
+  "Sociedad de Responsabilidad Limitada de Capital Variable",
+  "SOCIEDAD EN COMANDITA", "Sociedad en Comandita",
+  "SOCIEDAD EN NOMBRE COLECTIVO", "Sociedad en Nombre Colectivo",
+  "SOCIEDAD POR ACCIONES SIMPLIFICADA", "Sociedad por Acciones Simplificada"
+]
+ambiguous = [
+  "A.C.", "S.C."
+]
+
+[MY]
+distinctive = [
+  "BERHAD", "Berhad", "BHD", "Bhd", "BHD.", "Bhd.", "COOPERATIVE SOCIETY",
+  "Cooperative Society", "LIMITED LIABILITY PARTNERSHIP",
+  "Limited Liability Partnership", "LLP", "PERKONGSIAN LIABILITI TERHAD",
+  "Perkongsian Liabiliti Terhad", "PLT", "SDN BHD", "Sdn Bhd", "SDN. BHD.",
+  "Sdn. Bhd.", "SENDIRIAN BERHAD", "Sendirian Berhad", "SOLE PROPRIETORSHIP",
+  "Sole Proprietorship"
+]
+ambiguous = [
+  "ENTERPRISE", "Enterprise", "PARTNERSHIP", "Partnership"
+]
+
+[NG]
+distinctive = [
+  "CO-OPERATIVE SOCIETY", "Co-operative Society",
+  "COMPANY LIMITED BY GUARANTEE", "Company Limited by Guarantee",
+  "FREE TRADE ZONE ENTERPRISE", "Free Trade Zone Enterprise",
+  "INCORPORATED TRUSTEES", "Incorporated Trustees", "LIMITED", "Limited",
+  "LIMITED LIABILITY PARTNERSHIP", "Limited Liability Partnership", "LLP",
+  "LTD", "Ltd", "LTD.", "Ltd.", "PLC", "Plc",
+  "PRIVATE COMPANY LIMITED BY SHARES", "Private Company Limited by Shares",
+  "PUBLIC COMPANY LIMITED BY SHARES", "Public Company Limited by Shares",
+  "PUBLIC LIMITED COMPANY", "Public Limited Company", "SOLE PROPRIETORSHIP",
+  "Sole Proprietorship", "UNLIMITED COMPANY", "Unlimited Company"
+]
+ambiguous = [
+  "PARTNERSHIP", "Partnership"
+]
+
+[NL]
+distinctive = [
+  "BESLOTEN VENNOOTSCHAP", "Besloten Vennootschap",
+  "COMMANDITAIRE VENNOOTSCHAP", "Commanditaire Vennootschap",
+  "NAAMLOZE VENNOOTSCHAP", "Naamloze Vennootschap",
+  "ONDERLINGE WAARBORGMAATSCHAPPIJ", "Onderlinge Waarborgmaatschappij", "SCE",
+  "V.O.F.", "VENNOOTSCHAP ONDER FIRMA", "Vennootschap onder Firma"
+]
+ambiguous = [
+  "B.V.", "BV", "COÖPERATIE", "Coöperatie", "CV", "EENMANSZAAK", "Eenmanszaak",
+  "MAATSCHAP", "Maatschap", "N.V.", "NV", "SE", "STICHTING", "Stichting",
+  "VERENIGING", "Vereniging"
+]
+
+[NO]
+distinctive = [
+  "AKSJESELSKAP", "Aksjeselskap", "ALLMENNAKSJESELSKAP", "Allmennaksjeselskap",
+  "ANS", "ANSVARLIG SELSKAP", "Ansvarlig selskap", "ASA", "BORETTSLAG",
+  "Borettslag", "ENK", "ENKELTPERSONFORETAK", "Enkeltpersonforetak",
+  "KOMMANDITTSELSKAP", "Kommandittselskap",
+  "NORSKREGISTRERT UTENLANDSK FORETAK", "Norskregistrert utenlandsk foretak",
+  "NUF", "SAMVIRKEFORETAK", "Samvirkeforetak", "SCE",
+  "SELSKAP MED DELT ANSVAR", "Selskap med delt ansvar", "STATSFORETAK",
+  "Statsforetak"
+]
+ambiguous = [
+  "AS", "BA", "DA", "FORENING", "Forening", "KS", "SA", "SE", "SF",
+  "STIFTELSE", "Stiftelse"
+]
+
+[NZ]
+distinctive = [
+  "CHARITABLE TRUST", "Charitable Trust", "CO-OPERATIVE COMPANY",
+  "Co-operative Company", "GENERAL PARTNERSHIP", "General Partnership",
+  "INCORPORATED SOCIETY", "Incorporated Society", "LAQC", "LIMITED", "Limited",
+  "LIMITED PARTNERSHIP", "Limited Partnership", "LTC", "LTD", "Ltd",
+  "SOLE TRADER", "Sole Trader"
+]
+ambiguous = [
+  "TRUST", "Trust"
+]
+
+[OM]
+distinctive = [
+  "LLC", "S.A.O.C.", "S.A.O.G.", "SAOC", "SAOG"
+]
+
+[PA]
+distinctive = [
+  "EMPRESA INDIVIDUAL", "Empresa Individual", "FUNDACIÓN DE INTERÉS PRIVADO",
+  "Fundación de Interés Privado", "S. DE R.L.", "S. de R.L.", "S. EN C.",
+  "S. en C.", "S.R.L.", "SOCIEDAD ANÓNIMA", "Sociedad Anónima",
+  "SOCIEDAD CIVIL", "Sociedad Civil", "SOCIEDAD COLECTIVA",
+  "Sociedad Colectiva", "SOCIEDAD DE RESPONSABILIDAD LIMITADA",
+  "Sociedad de Responsabilidad Limitada", "SOCIEDAD EN COMANDITA",
+  "Sociedad en Comandita"
+]
+ambiguous = [
+  "COOPERATIVA", "Cooperativa", "S.A.", "S.C."
+]
+
+[PE]
+distinctive = [
+  "E.I.R.L.", "EMPRESA INDIVIDUAL DE RESPONSABILIDAD LIMITADA",
+  "Empresa Individual de Responsabilidad Limitada", "S.A.A.", "S.A.C.",
+  "S.C.R.L.", "S.R.L.", "SOCIEDAD ANÓNIMA", "Sociedad Anónima",
+  "SOCIEDAD ANÓNIMA ABIERTA", "Sociedad Anónima Abierta",
+  "SOCIEDAD ANÓNIMA CERRADA", "Sociedad Anónima Cerrada",
+  "SOCIEDAD CIVIL DE RESPONSABILIDAD LIMITADA",
+  "Sociedad Civil de Responsabilidad Limitada", "SOCIEDAD COLECTIVA",
+  "Sociedad Colectiva", "SOCIEDAD COMERCIAL DE RESPONSABILIDAD LIMITADA",
+  "Sociedad Comercial de Responsabilidad Limitada", "SOCIEDAD EN COMANDITA",
+  "Sociedad en Comandita"
+]
+ambiguous = [
+  "ASOCIACIÓN", "Asociación", "COMITÉ", "Comité", "COOPERATIVA", "Cooperativa",
+  "FUNDACIÓN", "Fundación", "S.A."
+]
+
+[PH]
+distinctive = [
+  "CORP.", "Corp.", "CORPORATION", "Corporation", "GENERAL PARTNERSHIP",
+  "General Partnership", "INC.", "Inc.", "INCORPORATED", "Incorporated",
+  "LIMITED PARTNERSHIP", "Limited Partnership", "LLC", "LTD.", "Ltd.",
+  "NON-PROFIT ORGANIZATION", "Non-Profit Organization",
+  "NON-STOCK CORPORATION", "Non-Stock Corporation", "ONE PERSON CORPORATION",
+  "One Person Corporation", "OPC", "PROFESSIONAL PARTNERSHIP",
+  "Professional Partnership", "SOLE PROPRIETORSHIP", "Sole Proprietorship"
+]
+ambiguous = [
+  "CO.", "Co.", "COOPERATIVE", "Cooperative", "FOUNDATION", "Foundation",
+  "PARTNERSHIP", "Partnership"
+]
+
+[PL]
+distinctive = [
+  "JEDNOOSOBOWA DZIAŁALNOŚĆ GOSPODARCZA",
+  "Jednoosobowa działalność gospodarcza", "P.S.A.", "PROSTA SPÓŁKA AKCYJNA",
+  "Prosta spółka akcyjna", "PRZEDSIĘBIORCA JEDNOOSOBOWY",
+  "Przedsiębiorca jednoosobowy", "S.K.A.", "SCE", "SP. J.", "Sp. j.", "SP. K.",
+  "Sp. k.", "SP. P.", "Sp. p.", "SP. Z O.O.", "Sp. z o.o.",
+  "SP. Z O.O. SP. K.", "Sp. z o.o. Sp. k.", "SPÓŁKA AKCYJNA", "Spółka Akcyjna",
+  "SPÓŁKA CYWILNA", "Spółka cywilna", "SPÓŁKA JAWNA", "Spółka jawna",
+  "SPÓŁKA KOMANDYTOWA", "Spółka komandytowa", "SPÓŁKA KOMANDYTOWO-AKCYJNA",
+  "Spółka komandytowo-akcyjna", "SPÓŁKA PARTNERSKA", "Spółka partnerska",
+  "SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ",
+  "Spółka z ograniczoną odpowiedzialnością"
+]
+ambiguous = [
+  "FUNDACJA", "Fundacja", "S.A.", "SE", "SPÓŁDZIELNIA", "Spółdzielnia",
+  "STOWARZYSZENIE", "Stowarzyszenie"
+]
+
+[PR]
+distinctive = [
+  "CORP.", "Corp.", "CORPORATION", "Corporation", "INC.", "Inc.",
+  "INCORPORATED", "Incorporated", "LIMITED LIABILITY COMPANY",
+  "Limited Liability Company", "LIMITED LIABILITY PARTNERSHIP",
+  "Limited Liability Partnership", "LIMITED PARTNERSHIP",
+  "Limited Partnership", "LLC", "LLP", "NON-PROFIT CORPORATION",
+  "Non-Profit Corporation", "PROFESSIONAL CORPORATION",
+  "Professional Corporation", "SOLE PROPRIETORSHIP", "Sole Proprietorship"
+]
+ambiguous = [
+  "COOPERATIVE", "Cooperative", "LP", "PARTNERSHIP", "Partnership"
+]
+
+[PT]
+distinctive = [
+  "ACE", "AEIE", "COOPERATIVA DE RESPONSABILIDADE LIMITADA",
+  "Cooperativa de Responsabilidade Limitada", "CRL", "EMPRESA INDIVIDUAL",
+  "Empresa Individual", "EMPRESÁRIO EM NOME INDIVIDUAL",
+  "Empresário em Nome Individual",
+  "ESTABELECIMENTO INDIVIDUAL DE RESPONSABILIDADE LIMITADA",
+  "Estabelecimento Individual de Responsabilidade Limitada", "LDA.", "Lda.",
+  "S.A.R.L.", "SCE", "SGPS", "SOCIEDADE ANÓNIMA", "Sociedade Anónima",
+  "SOCIEDADE EM COMANDITA", "Sociedade em Comandita",
+  "SOCIEDADE EM COMANDITA POR ACÇÕES", "Sociedade em Comandita por Acções",
+  "SOCIEDADE EM NOME COLECTIVO", "Sociedade em Nome Colectivo",
+  "SOCIEDADE POR QUOTAS", "Sociedade por Quotas",
+  "SOCIEDADE POR QUOTAS UNIPESSOAL", "Sociedade por Quotas Unipessoal",
+  "UNIPESSOAL LDA.", "Unipessoal Lda."
+]
+ambiguous = [
+  "ASSOCIAÇÃO", "Associação", "COOPERATIVA", "Cooperativa", "FUNDAÇÃO",
+  "Fundação", "S.A.", "SC", "SE"
+]
+
+[QA]
+distinctive = [
+  "LLC", "Q.P.S.C.", "Q.S.C.", "QPSC", "QSC", "W.L.L.", "WLL"
+]
+
+[RO]
+distinctive = [
+  "ONG", "PERSOANĂ FIZICĂ AUTORIZATĂ", "Persoană fizică autorizată", "PFA",
+  "REGIE AUTONOMĂ", "Regie autonomă", "SCE", "SCS",
+  "SOCIETATE CU RĂSPUNDERE LIMITATĂ", "Societate cu răspundere limitată",
+  "SOCIETATE PE ACȚIUNI", "Societate pe acțiuni",
+  "SOCIETATE ÎN COMANDITĂ PE ACȚIUNI", "Societate în comandită pe acțiuni",
+  "SOCIETATE ÎN COMANDITĂ SIMPLĂ", "Societate în comandită simplă",
+  "SOCIETATE ÎN NUME COLECTIV", "Societate în nume colectiv", "SRL",
+  "ÎNTREPRINDERE FAMILIALĂ", "Întreprindere familială",
+  "ÎNTREPRINDERE INDIVIDUALĂ", "Întreprindere individuală"
+]
+ambiguous = [
+  "ASOCIAȚIE", "Asociație", "COOPERATIVĂ", "Cooperativă", "FUNDAȚIE",
+  "Fundație", "IF", "II", "RA", "SA", "SCA", "SE", "SNC"
+]
+
+[RS]
+distinctive = [
+  "a.d.", "AKCIONARSKO DRUŠTVO", "Akcionarsko društvo", "D.O.O.", "d.o.o.",
+  "DRUŠTVO SA OGRANIČENOM ODGOVORNOŠĆU", "Društvo sa ograničenom odgovornošću",
+  "k.d.", "KOMANDITNO DRUŠTVO", "Komanditno društvo", "o.d.",
+  "ORTAČKO DRUŠTVO", "Ortačko društvo"
+]
+ambiguous = [
+  "A.D.", "FONDACIJA", "Fondacija", "K.D.", "O.D.", "PREDUZETNIK",
+  "Preduzetnik", "SE", "UDRUŽENJE", "Udruženje", "ZADRUGA", "Zadruga",
+  "ZADUŽBINA", "Zadužbina"
+]
+
+[SA]
+distinctive = [
+  "LLC"
+]
+
+[SE]
+distinctive = [
+  "AKTIEBOLAG", "Aktiebolag", "BOSTADSRÄTTSFÖRENING", "Bostadsrättsförening",
+  "BRF", "EKONOMISK FÖRENING", "Ekonomisk förening", "ENSKILD FIRMA",
+  "Enskild firma", "HANDELSBOLAG", "Handelsbolag", "IDEELL FÖRENING",
+  "Ideell förening", "KOMMANDITBOLAG", "Kommanditbolag", "SCE"
+]
+ambiguous = [
+  "AB", "EF", "HB", "KB", "KOOPERATIV", "Kooperativ", "SE", "STIFTELSE",
+  "Stiftelse"
+]
+
+[SG]
+distinctive = [
+  "CO-OPERATIVE SOCIETY", "Co-operative Society",
+  "LIMITED LIABILITY PARTNERSHIP", "Limited Liability Partnership",
+  "LIMITED PARTNERSHIP", "Limited Partnership", "LLP", "LTD", "Ltd", "LTD.",
+  "Ltd.", "PRIVATE LIMITED", "Private Limited", "PTE LTD", "Pte Ltd",
+  "PTE. LTD.", "Pte. Ltd.", "PUBLIC COMPANY LIMITED BY GUARANTEE",
+  "Public Company Limited by Guarantee", "PUBLIC COMPANY LIMITED BY SHARES",
+  "Public Company Limited by Shares", "SOLE PROPRIETORSHIP",
+  "Sole Proprietorship", "VARIABLE CAPITAL COMPANY",
+  "Variable Capital Company", "VCC"
+]
+ambiguous = [
+  "LP", "PARTNERSHIP", "Partnership", "SOCIETY", "Society"
+]
+
+[SI]
+distinctive = [
+  "d.d.", "D.N.O.", "d.n.o.", "D.O.O.", "d.o.o.", "DELNIŠKA DRUŽBA",
+  "Delniška družba", "DRUŽBA Z NEOMEJENO ODGOVORNOSTJO",
+  "Družba z neomejeno odgovornostjo", "DRUŽBA Z OMEJENO ODGOVORNOSTJO",
+  "Družba z omejeno odgovornostjo", "k.d.", "K.D.D.", "k.d.d.",
+  "KOMANDITNA DELNIŠKA DRUŽBA", "Komanditna delniška družba",
+  "KOMANDITNA DRUŽBA", "Komanditna družba", "s.p.", "SAMOSTOJNI PODJETNIK",
+  "Samostojni podjetnik", "SCE"
+]
+ambiguous = [
+  "D.D.", "DRUŠTVO", "Društvo", "K.D.", "S.P.", "SE", "USTANOVA", "Ustanova",
+  "ZADRUGA", "Zadruga", "ZAVOD", "Zavod"
+]
+
+[SK]
+distinctive = [
+  "a.s.", "AKC. SPOL.", "akc. spol.", "AKCIOVEJ SPOLOČNOSTI",
+  "akciovej spoločnosti", "AKCIOVOU SPOLOČNOSŤOU", "akciovou spoločnosťou",
+  "AKCIOVÁ SPOLOČNOSŤ", "akciová spoločnosť", "DRUŽSTVA", "družstva",
+  "DRUŽSTVO", "družstvo", "DRUŽSTVOM", "družstvom", "EURÓPSKA SPOLOČNOSŤ",
+  "európska spoločnosť", "EURÓPSKE DRUŽSTVO", "európske družstvo", "J.S.A.",
+  "j.s.a.", "JEDNODUCHÁ SPOLOČNOSŤ NA AKCIE", "jednoduchá spoločnosť na akcie",
+  "k.s.", "KOM. SPOL.", "kom. spol.", "KOMANDITNÁ SPOLOČNOSŤ",
+  "komanditná spoločnosť", "n.o.", "NADÁCIA", "nadácia", "NADÁCIE", "nadácie",
+  "NADÁCIOU", "nadáciou", "NEZISKOVÁ ORGANIZÁCIA", "nezisková organizácia",
+  "o.z.", "OBČIANSKE ZDRUŽENIE", "občianske združenie",
+  "PRÍSPEVKOVEJ ORGANIZÁCIE", "príspevkovej organizácie",
+  "PRÍSPEVKOVOU ORGANIZÁCIOU", "príspevkovou organizáciou", "S.R.O.", "s.r.o.",
+  "SCE", "SPOL. S R.O.", "spol. s r.o.", "SPOLOČNOSŤ S RUČENÍM OBMEDZENÝM",
+  "spoločnosť s ručením obmedzeným", "V.O.S.", "v.o.s.", "V.V.I.", "v.v.i.",
+  "VER. OBCH. SPOL.", "ver. obch. spol.", "VEREJNÁ OBCHODNÁ SPOLOČNOSŤ",
+  "verejná obchodná spoločnosť", "š.p.", "ŠTÁTNEHO PODNIKU",
+  "štátneho podniku", "ŠTÁTNY PODNIK", "štátny podnik", "ŠTÁTNYM PODNIKOM",
+  "štátnym podnikom"
+]
+ambiguous = [
+  "A.S.", "K.S.", "N.O.", "O.Z.", "SE", "Š.P."
+]
+
+[SM]
+distinctive = [
+  "IMPRESA INDIVIDUALE", "Impresa Individuale", "S.A.S.", "S.a.s.", "S.N.C.",
+  "S.n.c.", "S.P.A.", "S.p.A.", "S.R.L.", "S.r.l.",
+  "SOCIETÀ A RESPONSABILITÀ LIMITATA", "Società a Responsabilità Limitata",
+  "SOCIETÀ COOPERATIVA", "Società Cooperativa",
+  "SOCIETÀ IN ACCOMANDITA SEMPLICE", "Società in Accomandita Semplice",
+  "SOCIETÀ IN NOME COLLETTIVO", "Società in Nome Collettivo",
+  "SOCIETÀ PER AZIONI", "Società per Azioni", "SPA", "SpA", "SRL", "Srl"
+]
+ambiguous = [
+  "ASSOCIAZIONE", "Associazione", "FONDAZIONE", "Fondazione"
+]
+
+[TH]
+distinctive = [
+  "CO., LTD.", "Co., Ltd.", "LTD.", "Ltd.", "PCL", "PLC.", "Plc."
+]
+
+[TN]
+distinctive = [
+  "ENTREPRISE INDIVIDUELLE", "Entreprise individuelle", "GIE",
+  "GROUPEMENT D'INTÉRÊT ÉCONOMIQUE", "Groupement d'Intérêt Économique", "SARL",
+  "SCS", "SOCIÉTÉ ANONYME", "Société Anonyme",
+  "SOCIÉTÉ EN COMMANDITE PAR ACTIONS", "Société en Commandite par Actions",
+  "SOCIÉTÉ EN COMMANDITE SIMPLE", "Société en Commandite Simple",
+  "SOCIÉTÉ EN NOM COLLECTIF", "Société en Nom Collectif",
+  "SOCIÉTÉ UNIPERSONNELLE À RESPONSABILITÉ LIMITÉE",
+  "Société Unipersonnelle à Responsabilité Limitée",
+  "SOCIÉTÉ À RESPONSABILITÉ LIMITÉE", "Société à Responsabilité Limitée",
+  "SUARL"
+]
+ambiguous = [
+  "ASSOCIATION", "Association", "COOPÉRATIVE", "Coopérative", "SA", "SCA",
+  "SNC"
+]
+
+[TR]
+distinctive = [
+  "ANONIM ŞIRKET", "Anonim Şirket", "ANONIM ŞIRKETI", "Anonim Şirketi",
+  "KOLL. ŞTI.", "Koll. Şti.", "KOLLEKTIF ŞIRKET", "Kollektif Şirket",
+  "KOLLEKTIF ŞIRKETI", "Kollektif Şirketi", "KOM. ŞTI.", "Kom. Şti.",
+  "KOMANDIT ŞIRKET", "Komandit Şirket", "KOMANDIT ŞIRKETI", "Komandit Şirketi",
+  "KOOP.", "Koop.", "KOOPERATIF ŞIRKETI", "Kooperatif Şirketi",
+  "LIMITED ŞIRKET", "Limited Şirket", "LIMITED ŞIRKETI", "Limited Şirketi",
+  "LTD. ŞTI.", "Ltd. Şti.", "ŞAHIS ŞIRKETI", "Şahıs Şirketi"
+]
+ambiguous = [
+  "A.Ş.", "DERNEK", "Dernek", "KOOPERATIF", "Kooperatif", "SE", "VAKIF",
+  "Vakıf"
+]
+
+[TT]
+distinctive = [
+  "CO-OPERATIVE SOCIETY", "Co-operative Society",
+  "COMPANY LIMITED BY GUARANTEE", "Company Limited by Guarantee",
+  "COMPANY LIMITED BY SHARES", "Company Limited by Shares", "EXTERNAL COMPANY",
+  "External Company", "INC.", "Inc.", "INCORPORATED", "Incorporated",
+  "LIMITED", "Limited", "LTD", "Ltd", "NON-PROFIT ORGANISATION",
+  "Non-Profit Organisation", "SOLE PROPRIETORSHIP", "Sole Proprietorship",
+  "UNLIMITED COMPANY", "Unlimited Company"
+]
+ambiguous = [
+  "PARTNERSHIP", "Partnership", "UNLIMITED", "Unlimited"
+]
+
+[US]
+distinctive = [
+  "B CORP", "B Corp", "BENEFIT CORPORATION", "Benefit Corporation",
+  "BUSINESS TRUST", "Business Trust", "CLOSE CORPORATION", "Close Corporation",
+  "CORP", "Corp", "CORP.", "Corp.", "CORPORATION", "Corporation",
+  "GENERAL PARTNERSHIP", "General Partnership", "INC", "Inc", "INC.", "Inc.",
+  "INCORPORATED", "Incorporated", "JOINT VENTURE", "Joint Venture", "L.L.C.",
+  "L.L.P.", "LIMITED", "Limited", "LIMITED LIABILITY COMPANY",
+  "Limited Liability Company", "LIMITED LIABILITY LIMITED PARTNERSHIP",
+  "Limited Liability Limited Partnership", "LIMITED LIABILITY PARTNERSHIP",
+  "Limited Liability Partnership", "LIMITED PARTNERSHIP",
+  "Limited Partnership", "LLC", "LLLP", "LLP", "LTD.", "Ltd.",
+  "NONPROFIT CORPORATION", "Nonprofit Corporation", "PLLC",
+  "PROFESSIONAL ASSOCIATION", "Professional Association",
+  "PROFESSIONAL CORPORATION", "Professional Corporation",
+  "PROFESSIONAL LIMITED LIABILITY COMPANY",
+  "Professional Limited Liability Company", "S CORPORATION", "S Corporation",
+  "SERIES LLC", "Series LLC", "SOLE PROPRIETORSHIP", "Sole Proprietorship",
+  "STATUTORY TRUST", "Statutory Trust"
+]
+ambiguous = [
+  "CO.", "Co.", "GP", "L.C.", "L.P.", "LC", "LP", "N.A.", "NA", "PA", "PC"
+]
+
+[UY]
+distinctive = [
+  "ASOCIACIÓN CIVIL", "Asociación Civil", "S. EN C.", "S. en C.", "S.A.S.",
+  "S.R.L.", "SOCIEDAD ANÓNIMA", "Sociedad Anónima", "SOCIEDAD COLECTIVA",
+  "Sociedad Colectiva", "SOCIEDAD DE RESPONSABILIDAD LIMITADA",
+  "Sociedad de Responsabilidad Limitada", "SOCIEDAD EN COMANDITA",
+  "Sociedad en Comandita", "SOCIEDAD POR ACCIONES SIMPLIFICADA",
+  "Sociedad por Acciones Simplificada"
+]
+ambiguous = [
+  "COOPERATIVA", "Cooperativa", "FUNDACIÓN", "Fundación", "S.A.", "SAS"
+]
+
+[UZ]
+distinctive = [
+  "MCHJ", "MChJ", "OOO", "QMJ", "QO'SHMA KORXONA", "Qo'shma korxona",
+  "XUSUSIY KORXONA", "Xususiy korxona"
+]
+ambiguous = [
+  "AJ", "AO", "KOOPERATIV", "Kooperativ", "XK"
+]
+
+[VE]
+distinctive = [
+  "ASOCIACIÓN CIVIL", "Asociación Civil", "COMPAÑÍA ANÓNIMA",
+  "Compañía Anónima", "FIRMA PERSONAL", "Firma Personal", "S.R.L.",
+  "SOCIEDAD ANÓNIMA", "Sociedad Anónima",
+  "SOCIEDAD DE RESPONSABILIDAD LIMITADA",
+  "Sociedad de Responsabilidad Limitada", "SOCIEDAD EN COMANDITA POR ACCIONES",
+  "Sociedad en Comandita por Acciones", "SOCIEDAD EN COMANDITA SIMPLE",
+  "Sociedad en Comandita Simple", "SOCIEDAD EN NOMBRE COLECTIVO",
+  "Sociedad en Nombre Colectivo"
+]
+ambiguous = [
+  "C.A.", "COOPERATIVA", "Cooperativa", "FUNDACIÓN", "Fundación", "S.A."
+]
+
+[VN]
+distinctive = [
+  "CÔNG TY CP", "Công ty CP", "CÔNG TY CỔ PHẦN", "Công ty Cổ phần",
+  "CÔNG TY HỢP DANH", "Công ty Hợp danh", "CÔNG TY TNHH", "Công ty TNHH",
+  "CÔNG TY TNHH HAI THÀNH VIÊN TRỞ LÊN", "Công ty TNHH Hai Thành Viên Trở Lên",
+  "CÔNG TY TNHH MTV", "Công ty TNHH MTV", "CÔNG TY TNHH MỘT THÀNH VIÊN",
+  "Công ty TNHH Một Thành Viên", "CÔNG TY TRÁCH NHIỆM HỮU HẠN",
+  "Công ty trách nhiệm hữu hạn", "CÔNG TY TRÁCH NHIỆM HỮU HẠN MỘT THÀNH VIÊN",
+  "Công ty trách nhiệm hữu hạn một thành viên", "DOANH NGHIỆP TƯ NHÂN",
+  "Doanh nghiệp tư nhân", "HỘ KINH DOANH", "Hộ kinh doanh", "HỢP TÁC XÃ",
+  "Hợp tác xã", "TNHH", "TNHH MTV"
+]
+ambiguous = [
+  "CP"
+]
+
+[XK]
+distinctive = [
+  "NDËRMARRJE INDIVIDUALE", "Ndërmarrje individuale", "OJQ", "SH.A.", "Sh.a.",
+  "SH.P.K.", "Sh.p.k.", "SHA", "SHOQËRI AKSIONARE", "Shoqëri aksionare",
+  "SHOQËRI KOLEKTIVE", "Shoqëri kolektive", "SHOQËRI KOMANDITE",
+  "Shoqëri komandite", "SHOQËRI ME PËRGJEGJËSI TË KUFIZUAR",
+  "Shoqëri me përgjegjësi të kufizuar", "SHPK"
+]
+ambiguous = [
+  "KOOPERATIVË", "Kooperativë"
+]
+
+[ZA]
+distinctive = [
+  "(PTY) LTD", "(Pty) Ltd", "CLOSE CORPORATION", "Close Corporation",
+  "EXTERNAL COMPANY", "External Company", "INC.", "Inc.", "INCORPORATED",
+  "Incorporated", "LIMITED", "Limited", "LTD", "Ltd", "NON-PROFIT COMPANY",
+  "Non-Profit Company", "NPC", "PERSONAL LIABILITY COMPANY",
+  "Personal Liability Company", "PRIVATE COMPANY", "Private Company",
+  "PROPRIETARY LIMITED", "Proprietary Limited", "PTY LTD", "Pty Ltd",
+  "PUBLIC COMPANY", "Public Company", "SOC LTD", "SOC Ltd",
+  "SOLE PROPRIETORSHIP", "Sole Proprietorship", "STATE-OWNED COMPANY",
+  "State-Owned Company"
+]
+ambiguous = [
+  "CC", "CO-OPERATIVE", "Co-operative", "PARTNERSHIP", "Partnership", "RF",
+  "TRUST", "Trust"
+]

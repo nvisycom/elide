@@ -1,0 +1,30 @@
+# Institutions in `en`: the words that shape an institution's name.
+# Converted from stella/anonymize; see ../../STELLA.md.
+
+[words]
+lowercase = "closed"
+connectors = [
+  "and", "for", "of", "the", "to"
+]
+clauses = [
+  "by and among", "by and between", "is between", "is with", "by", "among",
+  "amongst", "between"
+]
+verbs = [
+  "is", "are", "was", "were", "owns", "grants", "sells", "sold", "buys",
+  "bought", "has", "holds", "agrees", "pays", "paid", "owes", "signs",
+  "signed", "leases", "rents", "entered", "made", "executed", "retained",
+  "hired", "engaged", "appointed", "reporting", "named", "sued"
+]
+generic = [
+  "a", "administrative", "advisory", "an", "audit", "chairman", "compensation",
+  "director", "directors", "employee", "employment", "executive", "general",
+  "governing", "head", "human", "legal", "management", "manager", "managers",
+  "member", "members", "ministers", "nominating", "nomination", "our",
+  "period", "pursuant", "remuneration", "resources", "subject", "such",
+  "supervisory", "that", "these", "those", "this", "trustee", "trustees",
+  "whereas"
+]
+generic_before = [
+  "company", "finance", "financial", "st", "trade"
+]

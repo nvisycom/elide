@@ -18,6 +18,7 @@ let analyzer = Analyzer::<Text>::new()
         PatternRecognizer::builder()
             .with_builtin_patterns()
             .with_builtin_dictionaries()
+            .with_builtin_walks()
             .build()?,
     )
     .with_layer(ReconcileLayer::same_label(Merging::max()))
@@ -64,6 +65,7 @@ async fn main() -> Result<()> {
             PatternRecognizer::builder()
                 .with_builtin_patterns()
                 .with_builtin_dictionaries()
+                .with_builtin_walks()
                 .build()?,
         )
         .with_layer(ReconcileLayer::same_label(Merging::max()))

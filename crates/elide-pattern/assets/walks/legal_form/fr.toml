@@ -1,0 +1,41 @@
+# Organization names in `fr`: the keywords that raise a name's
+# confidence, and the words that shape a name. Converted from
+# stella/anonymize; see ../../STELLA.md.
+
+keywords = [
+  "société", "entreprise", "siège", "siret", "siren", "rcs", "capital social",
+  "gérant"
+]
+
+[words]
+lowercase = "open"
+connectors = [
+  "de", "des", "du", "le", "la"
+]
+party_connectors = [
+  "et"
+]
+verbs = [
+  "est", "sont", "était", "étaient", "sera", "seront", "possède", "possèdent",
+  "détient", "détiennent", "vend", "vendent", "achète", "achètent", "signe",
+  "signent", "paie", "paient", "accorde", "accordent", "loue", "louent",
+  "s'engage", "s’engage", "s'engagent", "s’engagent", "conclut", "concluent",
+  "doit", "doivent"
+]
+roles = [
+  "acheteur", "acheteuse", "acquéreur", "acquéreuse", "acquereur", "associé",
+  "associée", "associés", "bailleur", "bailleresse", "cédant", "cédante",
+  "cedant", "cessionnaire", "client", "cliente", "co-contractant",
+  "cocontractant", "concédant", "concédante", "concedant", "concessionnaire",
+  "consommateur", "consommatrice", "donneur d'ordre", "emprunteur",
+  "emprunteuse", "employeur", "employeuse", "employée", "employé",
+  "entreprise", "fournisseur", "fournisseuse", "garant", "garante",
+  "locataire", "loueur", "loueuse", "mandant", "mandante", "mandataire",
+  "partie", "parties", "preneur", "preneuse", "prestataire", "preteur",
+  "prêteur", "prêteuse", "promettant", "salarié", "salariée", "société",
+  "sous-traitant", "souscripteur", "souscriptrice", "vendeur", "vendeuse",
+  "venderesse"
+]
+structural = [
+  "annexe", "article", "clause", "paragraphe", "partie", "section"
+]

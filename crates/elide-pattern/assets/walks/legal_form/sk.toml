@@ -1,0 +1,37 @@
+# Organization names in `sk`: the keywords that raise a name's
+# confidence, and the words that shape a name. Converted from
+# stella/anonymize; see ../../STELLA.md.
+
+
+[words]
+lowercase = "open"
+party_connectors = [
+  "a"
+]
+verbs = [
+  "je", "sú", "bol", "bola", "boli", "bude", "nie je", "uzatvára", "uzatvoril",
+  "uzatvorila", "uzaviera", "uzavrel", "uzavrela", "podpisuje", "podpísal",
+  "podpísala", "vlastní", "vlastníkom", "vlastníkmi", "predáva", "predal",
+  "predala", "kupuje", "kúpil", "kúpila", "platí", "hradí", "zaväzuje", "dlží",
+  "prenajíma", "najíma"
+]
+roles = [
+  "predávajúci", "predávajúceho", "predávajúcemu", "predávajúcim", "kupujúci",
+  "kupujúceho", "kupujúcemu", "kupujúcim", "prenajímateľ", "prenajímateľa",
+  "prenajímateľovi", "prenajímateľom", "nájomca", "nájomcu", "nájomcovi",
+  "nájomcom", "objednávateľ", "objednávateľa", "objednávateľovi",
+  "objednávateľom", "zhotoviteľ", "zhotoviteľa", "zhotoviteľovi",
+  "zhotoviteľom", "dodávateľ", "dodávateľa", "dodávateľovi", "dodávateľom",
+  "odberateľ", "odberateľa", "odberateľovi", "odberateľom", "zamestnávateľ",
+  "zamestnávateľa", "zamestnávateľovi", "zamestnávateľom", "zamestnanec",
+  "zamestnanca", "zamestnancovi", "zamestnancom", "dlžník", "dlžníka",
+  "dlžníkovi", "dlžníkom", "veriteľ", "veriteľa", "veriteľovi", "veriteľom",
+  "poskytovateľ", "poskytovateľa", "poskytovateľovi", "poskytovateľom",
+  "prijímateľ", "prijímateľa", "prijímateľovi", "prijímateľom", "usporiadateľ",
+  "usporiadateľa", "ubytovateľ", "ubytovateľa", "ubytovaný", "ubytovaného",
+  "zmluvná", "zmluvné", "strana", "strany", "stranou", "stranám", "cena",
+  "spoločnosť"
+]
+structural = [
+  "bod", "hlava", "oddiel", "odsek", "pododdiel", "sekcia", "časť", "článok"
+]

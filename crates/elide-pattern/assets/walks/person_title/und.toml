@@ -1,0 +1,18 @@
+# Words that shape a person's name in any language: the particles inside a
+# surname (`van der Berg`, `bin Rashid`), and institution heads that do not
+# name a person on their own (`Justice Department`). Converted from
+# stella/anonymize; see ../../STELLA.md.
+
+[words]
+lowercase = "closed"
+connectors = [
+  "van", "von", "der", "den", "de", "del", "della", "di", "da", "du", "des",
+  "la", "le", "zu", "ter", "ten", "dos", "das", "do", "bin", "bint", "ibn",
+  "al", "el"
+]
+generic = [
+  "agency", "association", "authority", "board", "chambers", "commission",
+  "committee", "council", "court", "department", "directorate", "foundation",
+  "hospital", "institute", "ministry", "office", "registry", "society",
+  "solicitors", "tribunal", "university"
+]

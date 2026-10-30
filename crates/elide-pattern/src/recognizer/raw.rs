@@ -51,7 +51,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn has_word_boundaries_handles_edges_and_unicode() {
+    fn is_whole_token_handles_edges_and_unicode() {
         // Match touches both edges of the input → boundaries OK.
         assert!(is_whole_token("hello", 0..5));
         // Match preceded by a word char → not a boundary.

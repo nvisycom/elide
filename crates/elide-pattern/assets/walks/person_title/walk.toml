@@ -1,0 +1,11 @@
+# A person's name after a title: "Dr. Hans Müller", "Mme Claire Dubois",
+# "Ing. Jan Novák". The title stays visible; only the name is reported.
+#
+# The rule only. `titles.toml` holds the titles; `und.toml` holds the words
+# that shape a name in any language.
+
+name = "person-title"
+labels = ["person_name"]
+direction = "forward"
+include_anchor = false
+max_words = 6

@@ -10,6 +10,7 @@ pub mod validators;
 
 pub use self::recognizer::{PatternRecognizer, PatternRecognizerBuilder, RegexBudget};
 pub use self::rule::{
-    Dictionary, DictionaryBuilder, Pattern, PatternBuilder, Scoring, Term, Variant,
+    Dictionary, DictionaryBuilder, Direction, Lowercase, Pattern, PatternBuilder, Scoring, Term,
+    Variant, Walk, WalkBuilder, Words,
 };
-pub use self::shipped::{dictionaries, patterns};
+pub use self::shipped::{dictionaries, patterns, walks};

@@ -140,6 +140,7 @@ async fn split_pipeline_halves_detect_and_redact() -> Result<()> {
     let patterns = PatternRecognizer::builder()
         .with_builtin_patterns()
         .with_builtin_dictionaries()
+        .with_builtin_walks()
         .build()?;
     let text_redact = Anonymizer::new().with(Rule::fallback(Replace::default()));
 

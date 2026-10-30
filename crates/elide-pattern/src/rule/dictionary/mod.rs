@@ -135,9 +135,8 @@ pub struct Dictionary {
     #[builder(default)]
     #[serde(default, rename = "score")]
     pub scoring: Scoring,
-    /// Keywords that lift confidence when one of them appears near a
-    /// match. Either a flat list applied regardless of language, or a
-    /// per-language map.
+    /// Evidence near a match that raises its confidence: keywords, in any
+    /// language or per language, and an anchor label.
     #[builder(default)]
     #[serde(default)]
     pub context: RuleContext,

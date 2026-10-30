@@ -1,0 +1,10 @@
+# Institutions named around a head word: "U.S. Department of Justice",
+# "Supreme Court of Canada", "Harvard University".
+#
+# The rule only. `heads.toml` holds the head words; `<lang>.toml` holds each
+# language's words that shape a name, including the generic words that do not
+# name an institution on their own ("Audit Committee", "Board of Directors").
+
+name = "organization-institution"
+labels = ["organization_name"]
+direction = "both"

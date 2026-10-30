@@ -31,6 +31,7 @@ const orchestrator = new Orchestrator().with(
   Analyzer.text().recognize(Recognizer.pattern({
     builtinPatterns: true,
     builtinDictionaries: true,
+    builtinWalks: true,
   })),
   Anonymizer.text()
     .rule(Rule.label(Label.EmailAddress, Operator.replace("[EMAIL]")))

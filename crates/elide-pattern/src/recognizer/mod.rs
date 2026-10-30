@@ -22,7 +22,7 @@ pub use self::builder::{PatternRecognizerBuilder, RegexBudget};
 pub(crate) use self::raw::{RawMatch, is_whole_token};
 use crate::context::matching::KeywordMatcher;
 use crate::context::{self, CompiledContext, Surroundings};
-use crate::rule::{CompiledDictionary, CompiledPattern};
+use crate::rule::{CompiledDictionary, CompiledPattern, CompiledWalk};
 use crate::validators::ValidationContext;
 
 /// Runtime text recognizer composed of a regex pool and an
@@ -60,6 +60,7 @@ pub struct PatternRecognizer {
     regex_set: Option<RegexSet>,
     dictionaries: Vec<CompiledDictionary>,
     aho: Option<AhoCorasick>,
+    walks: Vec<CompiledWalk>,
     /// Every rule's compiled context, indexed by the rule's `context`.
     contexts: Vec<CompiledContext>,
     keyword_matcher: Arc<dyn KeywordMatcher>,
@@ -243,6 +244,30 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
                 }
                 let score = dict.term_scores[term_id - dict.term_start];
                 matches.push(dict.raw_match(label.clone(), score, range));
+            }
+        }
+
+        // A walk's languages pick which lowercase words a name may contain: the
+        // asserted ones, else the most likely detected one. Unlike context,
+        // which ignores detection, a misdetected language here only changes
+        // which lowercase words a name may hold.
+        let languages = ctx.languages(subject);
+        let walk_languages: Vec<&LanguageTag> = if languages.any_asserted() {
+            languages.asserted()
+        } else {
+            languages.primary().into_iter().collect()
+        };
+        for walk in &self.walks {
+            if !ctx.languages(subject).asserted_apply_to(&walk.languages)
+                || !ctx.applies_to_country(&walk.countries)
+            {
+                continue;
+            }
+            let Some(label) = resolve_label(&walk.labels, ctx.catalog()) else {
+                continue;
+            };
+            for (range, score) in walk.find(text, &walk_languages) {
+                matches.push(walk.raw_match(label.clone(), range, score));
             }
         }
 

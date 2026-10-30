@@ -1,0 +1,25 @@
+# Organization names in `pt-BR`: the keywords that raise a name's
+# confidence, and the words that shape a name. Converted from
+# stella/anonymize; see ../../STELLA.md.
+
+
+[words]
+lowercase = "open"
+party_connectors = [
+  "e"
+]
+roles = [
+  "vendedor", "vendedora", "comprador", "compradora", "locador", "locadora",
+  "locatário", "locatario", "locatária", "locataria", "arrendador",
+  "arrendadora", "arrendatário", "arrendatario", "arrendatária",
+  "arrendataria", "empregador", "empregadora", "empregado", "empregada",
+  "contratante", "contratada", "contratado", "prestador", "prestadora",
+  "tomador", "tomadora", "cliente", "fornecedor", "fornecedora", "mutuante",
+  "mutuário", "mutuario", "mutuária", "mutuaria", "credor", "credora",
+  "devedor", "devedora", "fiador", "fiadora", "outorgante", "outorgado",
+  "outorgada", "cessionário", "cessionario", "cessionária", "cessionaria",
+  "cedente", "parte", "partes", "coronel"
+]
+structural = [
+  "anexo", "artigo", "cláusula", "parágrafo", "seção"
+]

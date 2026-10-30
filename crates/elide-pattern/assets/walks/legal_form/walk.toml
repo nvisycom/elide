@@ -1,0 +1,9 @@
+# Company names ending in a legal form: "Müller Bau GmbH", "Bank of America,
+# N.A.", "Kowalski Budownictwo sp. z o.o.".
+#
+# The rule only. `forms.toml` holds the legal forms a name ends in, by
+# country; `<lang>.toml` holds each language's context keywords and the words
+# that shape a name.
+
+name = "organization-legal-form"
+labels = ["organization_name"]

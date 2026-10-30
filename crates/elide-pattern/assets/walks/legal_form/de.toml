@@ -1,0 +1,39 @@
+# Organization names in `de`: the keywords that raise a name's
+# confidence, and the words that shape a name. Converted from
+# stella/anonymize; see ../../STELLA.md.
+
+keywords = [
+  "gesellschaft", "firma", "unternehmen", "konzern", "vorstand",
+  "aufsichtsrat", "geschäftsführer", "handelsregister", "hrb", "sitz"
+]
+
+[words]
+lowercase = "open"
+connectors = [
+  "von", "und"
+]
+party_connectors = [
+  "und"
+]
+clauses = [
+  "ist mit", "mit", "zwischen"
+]
+verbs = [
+  "ist", "sind", "war", "waren", "besitzt", "gewährt", "verkauft", "kauft",
+  "hat", "unterzeichnet", "zahlt"
+]
+roles = [
+  "verkäufer", "verkaeufer", "käufer", "kaeufer", "vermieter", "mieter",
+  "arbeitgeber", "arbeitnehmer", "auftraggeber", "auftragnehmer",
+  "darlehensgeber", "darlehensnehmer", "lizenzgeber", "lizenznehmer",
+  "verleiher", "entleiher", "vertragspartei", "vertragsparteien", "schuldner",
+  "gläubiger", "glaeubiger", "bonus", "gesellschaft"
+]
+nouns = [
+  "vertrag", "vertrages", "vereinbarung", "vereinbarungen", "lizenz", "anlage",
+  "anhang"
+]
+structural = [
+  "absatz", "abschnitt", "abteilung", "anlage", "anhang", "artikel", "kapitel",
+  "klausel", "punkt", "sektion", "unterabschnitt", "unterpunkt"
+]

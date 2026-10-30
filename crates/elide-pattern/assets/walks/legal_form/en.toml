@@ -1,0 +1,51 @@
+# Organization names in `en`: the keywords that raise a name's
+# confidence, and the words that shape a name. Converted from
+# stella/anonymize; see ../../STELLA.md.
+
+keywords = [
+  "company", "companies house", "corporation", "incorporated", "firm",
+  "subsidiary", "headquartered", "registered"
+]
+
+[words]
+lowercase = "closed"
+connectors = [
+  "of", "the", "and", "for", "de", "del", "della", "delle", "dei", "degli",
+  "di", "da", "du", "des", "la", "le", "les", "el", "los", "las", "y", "e",
+  "et", "von", "van", "der", "den", "die", "das", "dem", "zur", "zum", "für",
+  "und", "op", "aan", "het"
+]
+party_connectors = [
+  "and"
+]
+clauses = [
+  "by and among", "by and between", "is between", "is with", "by", "among",
+  "amongst", "between"
+]
+verbs = [
+  "is", "are", "was", "were", "owns", "grants", "sells", "sold", "buys",
+  "bought", "has", "holds", "agrees", "pays", "paid", "owes", "signs",
+  "signed", "leases", "rents", "entered", "made", "executed", "retained",
+  "hired", "engaged", "appointed", "reporting", "named", "sued"
+]
+roles = [
+  "buyer", "seller", "vendor", "purchaser", "lender", "borrower", "employer",
+  "employee", "contractor", "subcontractor", "client", "customer", "landlord",
+  "tenant", "licensor", "licensee", "lessor", "lessee", "party", "parties",
+  "guarantor", "assignor", "assignee", "disclosing", "receiving", "bonus",
+  "committee", "company", "companies", "fax", "supplier"
+]
+nouns = [
+  "agreement", "agreements", "contract", "contracts", "license", "licence",
+  "lease", "memorandum", "notice", "exhibit", "schedule", "addendum",
+  "amendment", "appendix", "attachment"
+]
+structural = [
+  "annex", "appendix", "article", "attachment", "clause", "exhibit",
+  "paragraph", "part", "schedule", "section"
+]
+firm_nouns = [
+  "Company", "Co", "Bank", "Brothers", "Bros", "Sons", "Group", "Holdings",
+  "Trust", "Partners", "Associates", "Corporation", "Industries",
+  "Enterprises", "Solutions", "Systems", "Services", "Foundation", "Institute"
+]

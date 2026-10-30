@@ -1,0 +1,40 @@
+# Organization names in `cs`: the keywords that raise a name's
+# confidence, and the words that shape a name. Converted from
+# stella/anonymize; see ../../STELLA.md.
+
+keywords = [
+  "společnost", "firma", "obchodní rejstřík", "ičo", "sídlo"
+]
+
+[words]
+lowercase = "open"
+party_connectors = [
+  "a"
+]
+clauses = [
+  "je s", "mezi", "s"
+]
+verbs = [
+  "je", "jsou", "byl", "byla", "byly", "bude", "není", "vlastní", "vlastníkem",
+  "prodává", "prodal", "prodala", "koupil", "koupila", "kupuje", "platí",
+  "hradí", "podepsal", "podepsala", "podepisuje", "uzavírá", "uzavřel",
+  "uzavřela", "zavazuje", "dluží"
+]
+roles = [
+  "prodávající", "prodávajícího", "prodávajícím", "kupující", "kupujícího",
+  "kupujícím", "nájemce", "nájemci", "pronajímatel", "pronajímatele",
+  "pronajímateli", "objednatel", "objednatele", "poskytovatel",
+  "poskytovatele", "zhotovitel", "zhotovitele", "zaměstnavatel",
+  "zaměstnavatele", "zaměstnanec", "zaměstnance", "dlužník", "dlužníka",
+  "věřitel", "věřitele", "dodavatel", "dodavatele", "odběratel", "odběratele",
+  "plátce", "příjemce", "uchazeč", "uchazeče", "zadavatel", "zadavatele",
+  "smluvní", "strana", "strany", "cena", "společnost"
+]
+nouns = [
+  "smlouva", "smlouvy", "smlouvu", "smlouvou", "dohoda", "dohody", "dohodu",
+  "dohodou", "licence", "licenci", "příloha", "přílohy", "přílohu", "dodatek",
+  "dodatku", "článek", "oznámení", "podmínky", "předmět", "ustanovení"
+]
+structural = [
+  "bod", "paragraf", "podbod", "ustanovení", "článek"
+]

@@ -121,9 +121,8 @@ fn default_score() -> Confidence {
 ///
 /// A rule groups several regex strategies under a shared entity-type
 /// candidate list plus a shared context-keyword list. Every variant emits
-/// the same [label](Pattern::labels); context keywords are harvested by
-/// [`PatternRecognizer`] into a wrapping boost layer and are never read by the
-/// rule itself.
+/// the same [label](Pattern::labels) and shares the rule's
+/// [`context`](Pattern::context).
 ///
 /// # Candidate labels
 ///
@@ -171,9 +170,8 @@ pub struct Pattern {
     /// first candidate the request catalog declares. In TOML: `labels =
     /// ["specific", "general"]` (a single-candidate rule is `labels = ["x"]`).
     pub labels: Vec<LabelRef>,
-    /// Keywords that lift confidence when one of them appears near a
-    /// match. Either a flat list applied regardless of language, or a
-    /// per-language map.
+    /// Evidence near a match that raises its confidence: keywords, in any
+    /// language or per language, and an anchor label.
     #[builder(default)]
     #[serde(default)]
     pub context: RuleContext,
@@ -213,6 +211,6 @@ impl Pattern {
     /// missing required fields.
     pub fn from_toml(raw: &str) -> Result<Self> {
         toml::from_str(raw)
-            .map_err(|e| Error::new(ErrorKind::Configuration, format!("regex rule TOML: {e}")))
+            .map_err(|e| Error::new(ErrorKind::Configuration, format!("pattern rule TOML: {e}")))
     }
 }

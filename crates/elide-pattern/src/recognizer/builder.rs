@@ -12,7 +12,9 @@ use regex::{Error as RegexError, Regex, RegexBuilder, RegexSet, RegexSetBuilder}
 use super::PatternRecognizer;
 use crate::context::matching::{KeywordMatcher, SubstringMatcher};
 use crate::context::{CompiledContext, RuleContext};
-use crate::rule::{CompiledDictionary, CompiledPattern, Dictionary, Pattern, Variant};
+use crate::rule::{
+    CompiledDictionary, CompiledPattern, CompiledWalk, Dictionary, Pattern, Variant, Walk,
+};
 use crate::shipped;
 use crate::validators::ValidatorRegistry;
 
@@ -48,7 +50,7 @@ impl RegexBudget {
 
 /// Accumulator of rules + validator registry for [`PatternRecognizer`].
 ///
-/// Patterns and dictionaries are stored as authored, compilation
+/// Patterns, dictionaries, and walks are stored as authored, compilation
 /// into the pooled scanners happens in [`build`].
 ///
 /// [`build`]: Self::build
@@ -56,6 +58,7 @@ impl RegexBudget {
 pub struct PatternRecognizerBuilder {
     patterns: Vec<Pattern>,
     dictionaries: Vec<Dictionary>,
+    walks: Vec<Walk>,
     validators: Option<ValidatorRegistry>,
     /// Byte budget for each *individual* variant regex. This is the knob to
     /// bound a caller-supplied rule: a legitimate single regex compiles well
@@ -85,16 +88,17 @@ impl PatternRecognizerBuilder {
         Self::default()
     }
 
-    /// Pre-seed with the shipped built-in patterns and
-    /// dictionaries.
+    /// Pre-seed with the shipped built-in patterns, dictionaries, and
+    /// walks.
     ///
-    /// Shorthand for
-    /// `Self::new().with_builtin_patterns().with_builtin_dictionaries()`.
+    /// Shorthand for `Self::new().with_builtin_patterns()
+    /// .with_builtin_dictionaries().with_builtin_walks()`.
     #[must_use]
     pub fn builtin() -> Self {
         Self::new()
             .with_builtin_patterns()
             .with_builtin_dictionaries()
+            .with_builtin_walks()
     }
 
     /// Register one pattern; patterns accumulate in registration
@@ -113,10 +117,26 @@ impl PatternRecognizerBuilder {
         self
     }
 
+    /// Register one walk; walks accumulate in registration order.
+    #[must_use]
+    pub fn with_walk(mut self, walk: Walk) -> Self {
+        self.walks.push(walk);
+        self
+    }
+
     /// Register every shipped built-in pattern.
     #[must_use]
     pub fn with_builtin_patterns(mut self) -> Self {
         self.patterns.extend(shipped::patterns::all());
+        self
+    }
+
+    /// Register every shipped built-in walk: company names ending in a legal
+    /// form, institutions around a head word, and a person's name after a
+    /// title.
+    #[must_use]
+    pub fn with_builtin_walks(mut self) -> Self {
+        self.walks.extend(shipped::walks::all());
         self
     }
 
@@ -227,17 +247,19 @@ impl PatternRecognizerBuilder {
             .retain(|p| p.labels.iter().any(|l| catalog.contains(l)));
         self.dictionaries
             .retain(|d| d.labels.iter().any(|l| catalog.contains(l)));
+        self.walks
+            .retain(|w| w.labels.iter().any(|l| catalog.contains(l)));
         self
     }
 
-    /// Return `true` when no patterns and no dictionaries are
+    /// Return `true` when no patterns, dictionaries, or walks are
     /// registered.
     ///
     /// The engine uses this to skip the per-request recognizer
     /// entirely after a catalog filter dropped every rule.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.patterns.is_empty() && self.dictionaries.is_empty()
+        self.patterns.is_empty() && self.dictionaries.is_empty() && self.walks.is_empty()
     }
 
     /// Borrow the accumulated patterns.
@@ -252,6 +274,12 @@ impl PatternRecognizerBuilder {
         &self.dictionaries
     }
 
+    /// Borrow the accumulated walks.
+    #[must_use]
+    pub fn walks(&self) -> &[Walk] {
+        &self.walks
+    }
+
     /// Compile every rule, and its `[context]`, into the pooled scanners.
     ///
     /// # Errors
@@ -260,7 +288,7 @@ impl PatternRecognizerBuilder {
     /// fails to compile, when a variant references an unknown
     /// validator name, when a dictionary's `scoring` is invalid
     /// or under-declared for some term's source column, or when
-    /// the shared automata cannot be constructed.
+    /// a walk's or the shared automata cannot be constructed.
     pub fn build(self) -> Result<PatternRecognizer> {
         let validators = self
             .validators
@@ -269,12 +297,20 @@ impl PatternRecognizerBuilder {
         let mut contexts = Vec::new();
         let (compiled_patterns, regex_set) = self.compile_patterns(&validators, &mut contexts)?;
         let (compiled_dicts, aho) = self.compile_dictionaries(&mut contexts)?;
+        let walks = self
+            .walks
+            .iter()
+            .map(|walk| {
+                CompiledWalk::compile(walk, self.compile_context(&walk.context, &mut contexts))
+            })
+            .collect::<Result<_>>()?;
 
         Ok(PatternRecognizer {
             patterns: compiled_patterns,
             regex_set,
             dictionaries: compiled_dicts,
             aho,
+            walks,
             contexts,
             keyword_matcher: self
                 .keyword_matcher
