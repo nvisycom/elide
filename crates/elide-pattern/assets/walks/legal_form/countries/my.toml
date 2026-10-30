@@ -1,0 +1,14 @@
+# Malaysia (MY)
+
+[markers]
+distinctive = [
+  "BERHAD", "Berhad", "BHD", "Bhd", "BHD.", "Bhd.", "COOPERATIVE SOCIETY",
+  "Cooperative Society", "LIMITED LIABILITY PARTNERSHIP",
+  "Limited Liability Partnership", "LLP", "PERKONGSIAN LIABILITI TERHAD",
+  "Perkongsian Liabiliti Terhad", "PLT", "SDN BHD", "Sdn Bhd", "SDN. BHD.",
+  "Sdn. Bhd.", "SENDIRIAN BERHAD", "Sendirian Berhad", "SOLE PROPRIETORSHIP",
+  "Sole Proprietorship"
+]
+ambiguous = [
+  "ENTERPRISE", "Enterprise", "PARTNERSHIP", "Partnership"
+]

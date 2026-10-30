@@ -1,0 +1,15 @@
+# Australia (AU)
+
+[markers]
+distinctive = [
+  "INCORPORATED ASSOCIATION", "Incorporated Association",
+  "INDIGENOUS CORPORATION", "Indigenous Corporation", "LIMITED", "Limited",
+  "LTD", "Ltd", "LTD.", "Ltd.", "NO LIABILITY", "No Liability",
+  "PROPRIETARY LIMITED", "Proprietary Limited", "PTY LTD", "Pty Ltd",
+  "PTY LTD.", "Pty Ltd.", "PTY. LTD.", "Pty. Ltd.", "PUBLIC COMPANY",
+  "Public Company", "SOLE TRADER", "Sole Trader"
+]
+ambiguous = [
+  "CO-OPERATIVE", "Co-operative", "NL", "PARTNERSHIP", "Partnership", "TRUST",
+  "Trust"
+]

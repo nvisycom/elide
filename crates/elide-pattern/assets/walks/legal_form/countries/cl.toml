@@ -1,0 +1,18 @@
+# Chile (CL)
+
+[markers]
+distinctive = [
+  "ASOCIACIÓN GREMIAL", "Asociación Gremial", "CORPORACIÓN", "Corporación",
+  "EIRL", "EMPRESA INDIVIDUAL DE RESPONSABILIDAD LIMITADA",
+  "Empresa Individual de Responsabilidad Limitada", "LTDA.", "Ltda.", "S.C.M.",
+  "S.G.R.", "S.P.A.", "S.p.A.", "SOCIEDAD ANÓNIMA", "Sociedad Anónima",
+  "SOCIEDAD COLECTIVA", "Sociedad Colectiva", "SOCIEDAD CONTRACTUAL MINERA",
+  "Sociedad Contractual Minera", "SOCIEDAD DE RESPONSABILIDAD LIMITADA",
+  "Sociedad de Responsabilidad Limitada", "SOCIEDAD EN COMANDITA",
+  "Sociedad en Comandita", "SOCIEDAD EN COMANDITA POR ACCIONES",
+  "Sociedad en Comandita por Acciones", "SOCIEDAD POR ACCIONES",
+  "Sociedad por Acciones", "SPA", "SpA", "SRL"
+]
+ambiguous = [
+  "COOPERATIVA", "Cooperativa", "FUNDACIÓN", "Fundación", "S.A."
+]

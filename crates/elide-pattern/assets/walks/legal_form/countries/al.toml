@@ -1,0 +1,14 @@
+# Albania (AL)
+
+[markers]
+distinctive = [
+  "PERSON FIZIK", "Person fizik", "SH.A.", "Sh.a.", "SH.P.K.", "Sh.p.k.",
+  "SHA", "SHOQËRI AKSIONARE", "Shoqëri aksionare", "SHOQËRI KOLEKTIVE",
+  "Shoqëri kolektive", "SHOQËRI KOMANDITE", "Shoqëri komandite",
+  "SHOQËRI ME PËRGJEGJËSI TË KUFIZUAR", "Shoqëri me përgjegjësi të kufizuar",
+  "SHPK"
+]
+ambiguous = [
+  "DEGË", "Degë", "FONDACION", "Fondacion", "KOOPERATIVË", "Kooperativë",
+  "SHOQATË", "Shoqatë"
+]

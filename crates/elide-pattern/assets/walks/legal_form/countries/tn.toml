@@ -1,0 +1,19 @@
+# Tunisia (TN)
+
+[markers]
+distinctive = [
+  "ENTREPRISE INDIVIDUELLE", "Entreprise individuelle", "GIE",
+  "GROUPEMENT D'INTÉRÊT ÉCONOMIQUE", "Groupement d'Intérêt Économique", "SARL",
+  "SCS", "SOCIÉTÉ ANONYME", "Société Anonyme",
+  "SOCIÉTÉ EN COMMANDITE PAR ACTIONS", "Société en Commandite par Actions",
+  "SOCIÉTÉ EN COMMANDITE SIMPLE", "Société en Commandite Simple",
+  "SOCIÉTÉ EN NOM COLLECTIF", "Société en Nom Collectif",
+  "SOCIÉTÉ UNIPERSONNELLE À RESPONSABILITÉ LIMITÉE",
+  "Société Unipersonnelle à Responsabilité Limitée",
+  "SOCIÉTÉ À RESPONSABILITÉ LIMITÉE", "Société à Responsabilité Limitée",
+  "SUARL"
+]
+ambiguous = [
+  "ASSOCIATION", "Association", "COOPÉRATIVE", "Coopérative", "SA", "SCA",
+  "SNC"
+]

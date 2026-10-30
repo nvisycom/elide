@@ -1,0 +1,35 @@
+# Germany (DE)
+
+[markers]
+distinctive = [
+  "AG & CO. KG", "AG & Co. KG", "AG & CO. OHG", "AG & Co. OHG",
+  "AKTIENGESELLSCHAFT", "Aktiengesellschaft",
+  "ANSTALT DES ÖFFENTLICHEN RECHTS", "Anstalt des öffentlichen Rechts", "AÖR",
+  "AöR", "e.K.", "e.V.", "eG", "EINGETRAGENE GENOSSENSCHAFT",
+  "eingetragene Genossenschaft", "EINGETRAGENE KAUFFRAU",
+  "eingetragene Kauffrau", "EINGETRAGENER KAUFMANN", "eingetragener Kaufmann",
+  "EINGETRAGENER VEREIN", "eingetragener Verein", "GBR", "GbR",
+  "GEMEINNÜTZIGE GESELLSCHAFT MIT BESCHRÄNKTER HAFTUNG",
+  "gemeinnützige Gesellschaft mit beschränkter Haftung",
+  "GESELLSCHAFT BÜRGERLICHEN RECHTS", "Gesellschaft bürgerlichen Rechts",
+  "GESELLSCHAFT MIT BESCHRÄNKTER HAFTUNG",
+  "Gesellschaft mit beschränkter Haftung", "GGMBH", "gGmbH", "GMBH", "GmbH",
+  "GMBH & CO. KG", "GmbH & Co. KG", "GMBH & CO. OHG", "GmbH & Co. OHG", "KDÖR",
+  "KdöR", "KGAA", "KGaA", "KOMMANDITGESELLSCHAFT", "Kommanditgesellschaft",
+  "KOMMANDITGESELLSCHAFT AUF AKTIEN", "Kommanditgesellschaft auf Aktien",
+  "KÖRPERSCHAFT DES ÖFFENTLICHEN RECHTS",
+  "Körperschaft des öffentlichen Rechts", "MBH", "mbH",
+  "OFFENE HANDELSGESELLSCHAFT", "Offene Handelsgesellschaft", "OHG", "PARTG",
+  "PartG", "PARTG MBB", "PartG mbB", "PARTNERSCHAFTSGESELLSCHAFT",
+  "Partnerschaftsgesellschaft",
+  "PARTNERSCHAFTSGESELLSCHAFT MIT BESCHRÄNKTER BERUFSHAFTUNG",
+  "Partnerschaftsgesellschaft mit beschränkter Berufshaftung", "SCE",
+  "UG & CO. KG", "UG & Co. KG", "UG (HAFTUNGSBESCHRÄNKT)",
+  "UG (haftungsbeschränkt)", "UG (HAFTUNGSBESCHRÄNKT) & CO. KG",
+  "UG (haftungsbeschränkt) & Co. KG", "UNTERNEHMERGESELLSCHAFT",
+  "Unternehmergesellschaft"
+]
+ambiguous = [
+  "AG", "E.K.", "E.V.", "EG", "EINZELUNTERNEHMEN", "Einzelunternehmen", "KG",
+  "SE", "STIFTUNG", "Stiftung", "UG"
+]

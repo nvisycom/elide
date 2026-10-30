@@ -1,0 +1,25 @@
+# Belgium (BE)
+
+[markers]
+distinctive = [
+  "AISBL", "ASBL", "ASSOCIATION SANS BUT LUCRATIF",
+  "Association Sans But Lucratif", "BESLOTEN VENNOOTSCHAP",
+  "Besloten Vennootschap", "BVBA", "COMM. V", "Comm. V",
+  "COMMANDITAIRE VENNOOTSCHAP", "Commanditaire Vennootschap",
+  "COMMANDITAIRE VENNOOTSCHAP OP AANDELEN",
+  "Commanditaire Vennootschap op Aandelen", "COMMV", "CommV", "COMMVA",
+  "CommVA", "COÖPERATIEVE VENNOOTSCHAP", "Coöperatieve Vennootschap", "CVBA",
+  "CVOA", "EBVBA", "ESV", "GCV", "GIE", "IVZW", "NAAMLOZE VENNOOTSCHAP",
+  "Naamloze Vennootschap", "SCE", "SCOMM", "SComm", "SCRI", "SCRL", "SCS",
+  "SOCIÉTÉ ANONYME", "Société Anonyme", "SOCIÉTÉ COOPÉRATIVE",
+  "Société Coopérative", "SOCIÉTÉ EN COMMANDITE SIMPLE",
+  "Société en Commandite Simple", "SOCIÉTÉ EN NOM COLLECTIF",
+  "Société en Nom Collectif", "SOCIÉTÉ À RESPONSABILITÉ LIMITÉE",
+  "Société à Responsabilité Limitée", "SRL", "V.O.F.",
+  "VENNOOTSCHAP ONDER FIRMA", "Vennootschap onder Firma",
+  "VERENIGING ZONDER WINSTOOGMERK", "Vereniging Zonder Winstoogmerk", "VZW"
+]
+ambiguous = [
+  "BV", "FONDATION", "Fondation", "NV", "SA", "SC", "SE", "SNC", "STICHTING",
+  "Stichting"
+]

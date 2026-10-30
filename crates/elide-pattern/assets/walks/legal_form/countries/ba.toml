@@ -1,0 +1,15 @@
+# Bosnia and Herzegovina (BA)
+
+[markers]
+distinctive = [
+  "a.d.", "AKCIONARSKO DRUŠTVO", "Akcionarsko društvo", "d.d.", "D.N.O.",
+  "d.n.o.", "D.O.O.", "d.o.o.", "DIONIČKO DRUŠTVO", "Dioničko društvo",
+  "DRUŠTVO SA NEOGRANIČENOM SOLIDARNOM ODGOVORNOŠĆU",
+  "Društvo sa neograničenom solidarnom odgovornošću",
+  "DRUŠTVO SA OGRANIČENOM ODGOVORNOŠĆU", "Društvo sa ograničenom odgovornošću",
+  "k.d.", "KOMANDITNO DRUŠTVO", "Komanditno društvo"
+]
+ambiguous = [
+  "A.D.", "D.D.", "FONDACIJA", "Fondacija", "K.D.", "UDRUŽENJE", "Udruženje",
+  "ZADRUGA", "Zadruga"
+]

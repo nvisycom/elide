@@ -1,4 +1,4 @@
-//! Reading text word by word around an anchor.
+//! Reading text word by word around a marker.
 
 use std::ops::Range;
 
@@ -30,9 +30,9 @@ pub(super) enum Kind {
 /// The word before `pos`, skipping the spaces and at most one comma between.
 ///
 /// `None` when a line break or punctuation other than a comma comes first, or
-/// the text starts there. At the anchor (`at_anchor`), a short jurisdiction
-/// marker such as `(UK)` between the name and its anchor is skipped.
-pub(super) fn step_back(text: &str, pos: usize, at_anchor: bool) -> Option<Step> {
+/// the text starts there. At the marker (`at_marker`), a short jurisdiction
+/// marker such as `(UK)` between the name and its marker is skipped.
+pub(super) fn step_back(text: &str, pos: usize, at_marker: bool) -> Option<Step> {
     let mut end = pos;
     let mut comma = false;
     loop {
@@ -46,7 +46,7 @@ pub(super) fn step_back(text: &str, pos: usize, at_anchor: bool) -> Option<Step>
                 comma = true;
                 end = i;
             }
-            ')' if at_anchor && !comma && end == pos_after_spaces(text, pos) => {
+            ')' if at_marker && !comma && end == pos_after_spaces(text, pos) => {
                 end = jurisdiction_start(text, i)?;
             }
             c if c.is_whitespace() => end = i,
@@ -74,7 +74,7 @@ pub(super) fn step_back(text: &str, pos: usize, at_anchor: bool) -> Option<Step>
 }
 
 /// The word after `pos`, past the spaces between. `None` when a line break,
-/// punctuation, or the end of the text comes first: a name after its anchor
+/// punctuation, or the end of the text comes first: a name after its marker
 /// never continues past a comma ("Dr. Hans Müller, CEO").
 pub(super) fn step_forward(text: &str, pos: usize) -> Option<Range<usize>> {
     let rest = &text[pos..];
@@ -137,7 +137,7 @@ pub(super) fn ends_sentence(word: &str) -> bool {
     lower >= 2 || (upper >= 2 && lower == 0)
 }
 
-/// Whether an anchor may start at `at`: after the start of the text, a space,
+/// Whether a marker may start at `at`: after the start of the text, a space,
 /// or punctuation, but not inside a word or a dotted abbreviation (`S.C.` in
 /// `U.S.C.`).
 pub(super) fn opens(text: &str, at: usize) -> bool {
@@ -149,7 +149,7 @@ pub(super) fn opens(text: &str, at: usize) -> bool {
     }
 }
 
-/// Whether an anchor may end at `at`: before the end of the text or anything
+/// Whether a marker may end at `at`: before the end of the text or anything
 /// but a letter or digit, so `AG` does not end inside `AGREEMENT`.
 pub(super) fn closes(text: &str, at: usize) -> bool {
     text[at..]
@@ -180,9 +180,9 @@ pub(super) fn middle_initial_before(text: &str, at: usize) -> bool {
     }
 }
 
-/// The key an anchor is compared by: without dots or spaces, lowercased, so
+/// The key a marker is compared by: without dots or spaces, lowercased, so
 /// `S.p.A.` and `SPA` compare equal.
-pub(super) fn anchor_key(word: &str) -> String {
+pub(super) fn marker_key(word: &str) -> String {
     word.chars()
         .filter(|c| !matches!(c, '.' | ' '))
         .flat_map(char::to_lowercase)
@@ -273,7 +273,7 @@ mod tests {
     }
 
     #[test]
-    fn skips_a_jurisdiction_marker_at_the_anchor() {
+    fn skips_a_jurisdiction_marker_at_the_marker() {
         let text = "Flom (UK) LLP";
         let step = step_back(text, 10, true).unwrap();
         assert_eq!(&text[step.range], "Flom");
@@ -307,7 +307,7 @@ mod tests {
     }
 
     #[test]
-    fn anchor_boundaries() {
+    fn marker_boundaries() {
         assert!(opens("Acme AG", 5));
         assert!(!opens("PAG", 1));
         assert!(!opens("18 U.S.C.", 5));

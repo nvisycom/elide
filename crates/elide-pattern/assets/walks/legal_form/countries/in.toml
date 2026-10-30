@@ -1,0 +1,18 @@
+# India (IN)
+
+[markers]
+distinctive = [
+  "CO-OPERATIVE SOCIETY", "Co-operative Society", "GOVERNMENT COMPANY",
+  "Government Company", "HINDU UNDIVIDED FAMILY", "Hindu Undivided Family",
+  "LIMITED", "Limited", "LIMITED LIABILITY PARTNERSHIP",
+  "Limited Liability Partnership", "LLP", "LTD.", "Ltd.", "NIDHI COMPANY",
+  "Nidhi Company", "ONE PERSON COMPANY", "One Person Company", "OPC",
+  "PARTNERSHIP FIRM", "Partnership Firm", "PRIVATE LIMITED", "Private Limited",
+  "PRIVATE LIMITED COMPANY", "Private Limited Company", "PRODUCER COMPANY",
+  "Producer Company", "PUBLIC LIMITED COMPANY", "Public Limited Company",
+  "PVT LTD", "Pvt Ltd", "PVT. LTD.", "Pvt. Ltd.", "SECTION 8 COMPANY",
+  "Section 8 Company", "SOLE PROPRIETORSHIP", "Sole Proprietorship"
+]
+ambiguous = [
+  "TRUST", "Trust"
+]

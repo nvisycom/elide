@@ -40,23 +40,25 @@ assets/
       finance/             currencies (USD, US Dollar, EUR, …)
       personal/            languages, nationalities, religions
 
-  walks/
+  walks/                   one folder per walk, each laid out the same way:
+    <walk>/
+      walk.toml            the rule: name, label, direction, and the words
+                           that shape a name in any language
+      countries/<cc>.toml  the markers a country defines, when its markers
+                           belong to countries (legal forms)
+      languages/<lang>.toml
+                           a language's markers, context keywords, and the
+                           words that shape a name: connectors, lead-in
+                           clauses, verbs, roles
     legal_form/            company names ending in a legal form
-      walk.toml            the rule: name, label, direction
-      forms.toml           legal forms by country, distinctive and ambiguous
-      <lang>.toml          a language's context keywords, and the words that
-                           shape a name: connectors, lead-in clauses, verbs,
-                           roles
     institution/           institutions around a head word
-      walk.toml, heads.toml, en.toml
     person_title/          a person's name after a title
-      walk.toml, titles.toml, und.toml (any language)
 ```
 
 Each pattern is a TOML file (`<name>.toml`). Each dictionary pairs a TOML
 metadata sidecar with a term source: `.csv` for multi-column lists (term + alias
 columns with per-column scores), `.txt` for one-per-line lists. A walk is a TOML
-rule plus the anchors a name sits next to and the per-language words that shape
+rule plus the markers a name sits next to and the per-language words that shape
 a name.
 
 ## Scoring conventions
@@ -112,5 +114,5 @@ Many patterns + validators are ports of upstream Microsoft Presidio recognizers.
 See [`PRESIDIO.md`](PRESIDIO.md) for the MIT-license attribution and the
 upstream class references that each adapted TOML's leading comment links to.
 
-The walks' anchors and word lists are converted from stella/anonymize; see
+The walks' markers and word lists are converted from stella/anonymize; see
 [`STELLA.md`](STELLA.md) for the Apache-2.0 attribution.

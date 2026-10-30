@@ -4,6 +4,7 @@ mod back;
 mod compiled;
 mod forward;
 mod lexicon;
+mod lowercase;
 mod scan;
 
 use std::collections::HashMap;
@@ -18,37 +19,38 @@ pub(crate) use self::compiled::CompiledWalk;
 use super::Term;
 use crate::context::RuleContext;
 
-/// A rule that finds a name next to one of its anchors: a company name ending
+/// A rule that finds a name next to one of its markers: a company name ending
 /// in a legal form ("Müller Bau GmbH"), an institution around its head word
 /// ("U.S. Department of Justice"), a person after a title ("Dr. Hans Müller").
 ///
-/// The recognizer finds every anchor, then walks word by word from it in the
+/// The recognizer finds every marker, then walks word by word from it in the
 /// walk's [`Direction`] while the words read as part of a name: capitalized
 /// words, initials, numbers, and the connectives a name may contain ("of",
 /// "&", "von").
 ///
-/// - **Back** from the anchor, the walk stops at a line break, a sentence end,
+/// - **Back** from the marker, the walk stops at a line break, a sentence end,
 ///   a quote, an amount, or an earlier name ("Acme GmbH and Beta GmbH" is two
 ///   names), then trims the per-language [`Words`] that introduce a name from
 ///   the front: a contract phrase ("by and between"), a verb ("is made by"),
 ///   or a party role ("Seller").
-/// - **Forward** from the anchor, the walk stops at punctuation, a sentence
-///   end, or another anchor ("Mr. and Mrs. Smith"), then drops trailing
+/// - **Forward** from the marker, the walk stops at punctuation, a sentence
+///   end, or another marker ("Mr. and Mrs. Smith"), then drops trailing
 ///   connectives.
 ///
-/// A name needs a capitalized word besides the anchor that is not one of its
+/// A name needs a capitalized word besides the marker that is not one of its
 /// [`generic`](Words::generic) words: "Audit Committee" is not an institution.
 ///
 /// # Examples
 ///
 /// ```
 /// use elide_core::entity::builtins;
-/// use elide_pattern::{Term, Walk};
+/// use elide_pattern::{Direction, Term, Walk};
 ///
 /// let firms = Walk::builder()
 ///     .with_name("firm")
 ///     .with_labels(vec![builtins::ORGANIZATION_NAME.to_ref()])
-///     .with_anchors(vec![Term::new("GmbH"), Term::new("LLC")])
+///     .with_markers(vec![Term::new("GmbH"), Term::new("LLC")])
+///     .with_direction(Direction::Backward)
 ///     .build()
 ///     .expect("walk builds");
 /// ```
@@ -69,21 +71,19 @@ pub struct Walk {
     /// The words a name ends in. A term's own `score` overrides the walk's.
     #[builder(default)]
     #[serde(default)]
-    pub anchors: Vec<Term>,
-    /// Score of a name whose anchor names none.
+    pub markers: Vec<Term>,
+    /// Score of a name whose marker names none.
     #[builder(default = "default_score()")]
     #[serde(default = "default_score")]
     pub score: Confidence,
-    /// Which side of the anchor the name lies on.
-    #[builder(default)]
-    #[serde(default)]
+    /// Which side of the marker the name lies on.
     pub direction: Direction,
-    /// Whether the anchor is part of the reported name: a legal form is
+    /// Whether the marker is part of the reported name: a legal form is
     /// ("Acme GmbH"), a title is not ("Dr." stays visible before "Hans
     /// Müller"). A [`Direction::Both`] walk always includes it.
     #[builder(default = "true")]
-    #[serde(default = "default_include_anchor")]
-    pub include_anchor: bool,
+    #[serde(default = "default_include_marker")]
+    pub include_marker: bool,
     /// The words that shape a name, per language. In TOML, a `[words.de]`
     /// table per language; `[words.und]` applies in every language.
     #[builder(default)]
@@ -152,21 +152,20 @@ pub struct Words {
     /// Committee" and "Board of Directors" are not institutions.
     #[serde(default)]
     pub generic: Vec<String>,
-    /// Words that do not make a name specific before its anchor, though they
+    /// Words that do not make a name specific before its marker, though they
     /// do after it: "Finance Ministry" is generic, "Ministry of Finance" is
     /// not.
     #[serde(default)]
     pub generic_before: Vec<String>,
 }
 
-/// Which side of its anchor a walk finds a name on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+/// Which side of its marker a walk finds a name on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Direction {
-    /// Before the anchor: a name ending in a legal form ("Acme GmbH").
-    #[default]
+    /// Before the marker: a name ending in a legal form ("Acme GmbH").
     Backward,
-    /// After the anchor: a name after a title ("Dr. Hans Müller").
+    /// After the marker: a name after a title ("Dr. Hans Müller").
     Forward,
     /// Both sides: an institution around its head word ("U.S. Department of
     /// Justice").
@@ -194,7 +193,7 @@ fn default_max_words() -> usize {
     20
 }
 
-fn default_include_anchor() -> bool {
+fn default_include_marker() -> bool {
     true
 }
 
@@ -229,7 +228,8 @@ mod tests {
             r#"
             name = "firm"
             labels = ["organization_name"]
-            anchors = [{ term = "GmbH" }, { term = "AG", score = 0.3 }]
+            markers = [{ term = "GmbH" }, { term = "AG", score = 0.3 }]
+            direction = "backward"
 
             [context.languages]
             de = ["gesellschaft"]
@@ -240,7 +240,7 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert_eq!(walk.anchors.len(), 2);
+        assert_eq!(walk.markers.len(), 2);
         assert_eq!(walk.score, default_score());
         let german = &walk.words[&"de".parse::<LanguageTag>().unwrap()];
         assert_eq!(german.lowercase, Lowercase::Open);
@@ -248,13 +248,13 @@ mod tests {
     }
 
     #[test]
-    fn a_walk_in_both_directions_keeps_its_anchor() {
+    fn a_walk_in_both_directions_keeps_its_marker() {
         let walk = Walk::from_toml(
             r#"
             name = "institution"
             labels = ["organization_name"]
             direction = "both"
-            include_anchor = false
+            include_marker = false
             "#,
         )
         .unwrap();

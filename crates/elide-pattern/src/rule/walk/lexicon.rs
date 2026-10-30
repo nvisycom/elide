@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use elide_core::primitive::LanguageTag;
 
+use super::lowercase::Bridge;
 use super::{Lowercase, Words};
 
 /// The tag of language-neutral words, which apply in every language.
@@ -29,23 +30,6 @@ pub(super) struct Lexicon {
     pub(super) firm_nouns: HashSet<String>,
     pub(super) generic: HashSet<String>,
     pub(super) generic_before: HashSet<String>,
-}
-
-/// Which lowercase words a name may contain on one call.
-pub(super) enum Bridge<'a> {
-    /// Any lowercase word.
-    Open,
-    /// Only these.
-    Closed(Cow<'a, HashSet<String>>),
-}
-
-impl Bridge<'_> {
-    pub(super) fn allows(&self, word: &str) -> bool {
-        match self {
-            Self::Open => true,
-            Self::Closed(words) => words.contains(word),
-        }
-    }
 }
 
 impl Lexicon {

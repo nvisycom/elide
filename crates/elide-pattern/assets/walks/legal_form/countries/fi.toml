@@ -1,0 +1,16 @@
+# Finland (FI)
+
+[markers]
+distinctive = [
+  "Ab", "ABP", "Abp", "AKTIEBOLAG", "Aktiebolag", "AVOIN YHTIÖ", "Avoin yhtiö",
+  "Ay", "JULKINEN OSAKEYHTIÖ", "Julkinen osakeyhtiö", "Kb",
+  "KOMMANDIITTIYHTIÖ", "Kommandiittiyhtiö", "KOMMANDITBOLAG", "Kommanditbolag",
+  "Ky", "OSAKEYHTIÖ", "Osakeyhtiö", "Oy", "OYJ", "Oyj", "PUBLIKT AKTIEBOLAG",
+  "Publikt aktiebolag", "REKISTERÖITY YHDISTYS", "Rekisteröity yhdistys",
+  "SCE", "YKSITYINEN ELINKEINONHARJOITTAJA",
+  "Yksityinen elinkeinonharjoittaja", "Öb", "ÖPPET BOLAG", "Öppet bolag"
+]
+ambiguous = [
+  "AB", "AY", "KB", "KY", "OSUUSKUNTA", "Osuuskunta", "OY", "SE", "SÄÄTIÖ",
+  "Säätiö", "TOIMINIMI", "Toiminimi", "YHDISTYS", "Yhdistys", "ÖB"
+]

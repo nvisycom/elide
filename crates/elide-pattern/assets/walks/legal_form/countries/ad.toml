@@ -1,0 +1,14 @@
+# Andorra (AD)
+
+[markers]
+distinctive = [
+  "EMPRESA INDIVIDUAL", "Empresa Individual", "SLU", "SOCIETAT ANÒNIMA",
+  "Societat Anònima", "SOCIETAT COL·LECTIVA", "Societat Col·lectiva",
+  "SOCIETAT EN COMANDITA", "Societat en Comandita", "SOCIETAT LIMITADA",
+  "Societat Limitada", "SOCIETAT LIMITADA UNIPERSONAL",
+  "Societat Limitada Unipersonal", "SOCIETAT REGULAR COL·LECTIVA",
+  "Societat Regular Col·lectiva", "SRC"
+]
+ambiguous = [
+  "ASSOCIACIÓ", "Associació", "FUNDACIÓ", "Fundació", "SA", "SC", "SL"
+]

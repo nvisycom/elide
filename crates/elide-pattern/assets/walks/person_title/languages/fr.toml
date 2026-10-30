@@ -1,0 +1,9 @@
+[markers]
+distinctive = [
+  "Dr", "DR.", "Dr.", "MADAME", "Madame", "MADEMOISELLE", "Mademoiselle",
+  "MAÎTRE", "Maître", "MLLE", "Mlle", "MLLE.", "Mlle.", "Mme", "MME.", "Mme.",
+  "MONSIEUR", "Monsieur", "PROF", "Prof", "PROF.", "Prof."
+]
+ambiguous = [
+  "M.", "Me", "Pr", "PR.", "Pr."
+]

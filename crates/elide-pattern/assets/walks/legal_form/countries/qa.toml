@@ -1,0 +1,6 @@
+# Qatar (QA)
+
+[markers]
+distinctive = [
+  "LLC", "Q.P.S.C.", "Q.S.C.", "QPSC", "QSC", "W.L.L.", "WLL"
+]

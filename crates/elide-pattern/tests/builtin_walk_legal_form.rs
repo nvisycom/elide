@@ -242,7 +242,7 @@ async fn a_name_does_not_cross_a_line_sentence_or_quote() {
 }
 
 #[tokio::test]
-async fn needs_a_capitalized_name_and_a_whole_anchor() {
+async fn needs_a_capitalized_name_and_a_whole_marker() {
     for text in [
         "See 18 U.S.C. Section 1833(b) for civil immunity.",
         "THIRD PARTIES shall not benefit hereunder.",
@@ -275,4 +275,15 @@ async fn an_ambiguous_form_needs_context() {
 
     let hits = found("Siemens GmbH filed.", &[]).await;
     assert!(ConfidenceThreshold::BASELINE.passes(hits[0].1));
+}
+
+#[tokio::test]
+async fn a_weaker_longer_name_keeps_the_stronger_one_inside_it() {
+    let hits = found("Acme GmbH AG filed.", &[]).await;
+    assert!(
+        hits.iter().any(
+            |(name, score)| name == "Acme GmbH" && ConfidenceThreshold::BASELINE.passes(*score)
+        ),
+        "{hits:?}"
+    );
 }

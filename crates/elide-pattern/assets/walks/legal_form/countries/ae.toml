@@ -1,0 +1,16 @@
+# United Arab Emirates (AE)
+
+[markers]
+distinctive = [
+  "CIVIL COMPANY", "Civil Company", "DWC-LLC", "FREE ZONE COMPANY",
+  "Free Zone Company", "FREE ZONE ESTABLISHMENT", "Free Zone Establishment",
+  "FZ-CO", "FZ-LLC", "FZC", "FZCO", "FZE", "JOINT VENTURE", "Joint Venture",
+  "LIMITED LIABILITY COMPANY", "Limited Liability Company", "LLC", "LLP",
+  "LTD", "Ltd", "PJSC", "PRIVATE SHAREHOLDING COMPANY",
+  "Private Shareholding Company", "PSC", "PUBLIC JOINT STOCK COMPANY",
+  "Public Joint Stock Company", "REPRESENTATIVE OFFICE",
+  "Representative Office", "SOLE ESTABLISHMENT", "Sole Establishment"
+]
+ambiguous = [
+  "BRANCH", "Branch", "GP"
+]

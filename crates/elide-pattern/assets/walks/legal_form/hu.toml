@@ -1,7 +1,0 @@
-# Organization names in `hu`: the keywords that raise a name's
-# confidence, and the words that shape a name. Converted from
-# stella/anonymize; see ../../STELLA.md.
-
-
-[words]
-lowercase = "open"

@@ -1,0 +1,14 @@
+# Serbia (RS)
+
+[markers]
+distinctive = [
+  "a.d.", "AKCIONARSKO DRUŠTVO", "Akcionarsko društvo", "D.O.O.", "d.o.o.",
+  "DRUŠTVO SA OGRANIČENOM ODGOVORNOŠĆU", "Društvo sa ograničenom odgovornošću",
+  "k.d.", "KOMANDITNO DRUŠTVO", "Komanditno društvo", "o.d.",
+  "ORTAČKO DRUŠTVO", "Ortačko društvo"
+]
+ambiguous = [
+  "A.D.", "FONDACIJA", "Fondacija", "K.D.", "O.D.", "PREDUZETNIK",
+  "Preduzetnik", "SE", "UDRUŽENJE", "Udruženje", "ZADRUGA", "Zadruga",
+  "ZADUŽBINA", "Zadužbina"
+]

@@ -1,0 +1,18 @@
+# South Africa (ZA)
+
+[markers]
+distinctive = [
+  "(PTY) LTD", "(Pty) Ltd", "CLOSE CORPORATION", "Close Corporation",
+  "EXTERNAL COMPANY", "External Company", "INC.", "Inc.", "INCORPORATED",
+  "Incorporated", "LIMITED", "Limited", "LTD", "Ltd", "NON-PROFIT COMPANY",
+  "Non-Profit Company", "NPC", "PERSONAL LIABILITY COMPANY",
+  "Personal Liability Company", "PRIVATE COMPANY", "Private Company",
+  "PROPRIETARY LIMITED", "Proprietary Limited", "PTY LTD", "Pty Ltd",
+  "PUBLIC COMPANY", "Public Company", "SOC LTD", "SOC Ltd",
+  "SOLE PROPRIETORSHIP", "Sole Proprietorship", "STATE-OWNED COMPANY",
+  "State-Owned Company"
+]
+ambiguous = [
+  "CC", "CO-OPERATIVE", "Co-operative", "PARTNERSHIP", "Partnership", "RF",
+  "TRUST", "Trust"
+]

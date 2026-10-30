@@ -1,0 +1,9 @@
+# Israel (IL)
+
+[markers]
+distinctive = [
+  "COMPANY LIMITED BY GUARANTEE", "Company Limited by Guarantee",
+  "COOPERATIVE SOCIETY", "Cooperative Society", "LTD", "Ltd", "LTD.", "Ltd.",
+  "PUBLIC BENEFIT COMPANY", "Public Benefit Company", "REGISTERED AMUTA",
+  "Registered Amuta"
+]

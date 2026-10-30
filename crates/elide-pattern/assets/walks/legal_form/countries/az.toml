@@ -1,0 +1,14 @@
+# Azerbaijan (AZ)
+
+[markers]
+distinctive = [
+  "ASC", "AÇIQ SƏHMDAR CƏMIYYƏTI", "Açıq Səhmdar Cəmiyyəti", "FƏRDI SAHIBKAR",
+  "Fərdi sahibkar", "İCTIMAI BIRLIK", "İctimai Birlik", "KOMMANDIT ORTAQLIQ",
+  "Kommandit Ortaqlıq", "MMC", "MƏHDUD MƏSULIYYƏTLI CƏMIYYƏT",
+  "Məhdud Məsuliyyətli Cəmiyyət", "QAPALI SƏHMDAR CƏMIYYƏTI",
+  "Qapalı Səhmdar Cəmiyyəti", "QSC", "SƏHMDAR CƏMIYYƏTI", "Səhmdar Cəmiyyəti",
+  "TAM ORTAQLIQ", "Tam Ortaqlıq"
+]
+ambiguous = [
+  "FOND", "Fond", "KOOPERATIV", "Kooperativ", "SC"
+]

@@ -1,0 +1,6 @@
+# Thailand (TH)
+
+[markers]
+distinctive = [
+  "CO., LTD.", "Co., Ltd.", "LTD.", "Ltd.", "PCL", "PLC.", "Plc."
+]

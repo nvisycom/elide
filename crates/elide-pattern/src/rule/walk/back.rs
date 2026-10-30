@@ -1,28 +1,28 @@
-//! The walk back from an anchor, and the prose trimmed from the front of the
+//! The walk back from a marker, and the prose trimmed from the front of the
 //! name it finds.
 
 use std::ops::Range;
 
-use super::compiled::{CompiledWalk, MAX_LOWERCASE_RUN};
-use super::lexicon::Bridge;
+use super::compiled::CompiledWalk;
+use super::lowercase::{Bridge, LowercaseRun};
 use super::scan::{self, Kind, Step};
 
 impl CompiledWalk {
-    /// The start of the name ending at `anchor`, its lead-in prose trimmed, or
-    /// `None` when no name precedes the anchor or it numbers a document part.
-    pub(super) fn before(&self, text: &str, anchor: usize, bridge: &Bridge<'_>) -> Option<usize> {
-        let start = self.walk_back(text, anchor, bridge)?;
-        self.trim_front(text, start, anchor)
+    /// The start of the name ending at `marker`, its lead-in prose trimmed, or
+    /// `None` when no name precedes the marker or it numbers a document part.
+    pub(super) fn before(&self, text: &str, marker: usize, bridge: &Bridge<'_>) -> Option<usize> {
+        let start = self.walk_back(text, marker, bridge)?;
+        self.trim_front(text, start, marker)
     }
 
     /// The leftmost capitalized word or number of the name ending at
-    /// `anchor`, or `None` when none precedes it.
-    fn walk_back(&self, text: &str, anchor: usize, bridge: &Bridge<'_>) -> Option<usize> {
+    /// `marker`, or `None` when none precedes it.
+    fn walk_back(&self, text: &str, marker: usize, bridge: &Bridge<'_>) -> Option<usize> {
         let words = &self.lexicon;
-        let mut pos = anchor;
+        let mut pos = marker;
         let mut start = None;
         let mut capital = false;
-        let mut lowercase_run = 0;
+        let mut lowercase = LowercaseRun::new(words, bridge);
         // A connective or comma lies between the next word and the name.
         let mut linked = false;
 
@@ -43,12 +43,12 @@ impl CompiledWalk {
                 None | Some(Kind::Amount) => break,
                 Some(Kind::Capital) => {
                     // "Acme GmbH and Beta GmbH": an earlier name ends here.
-                    if (linked || comma) && self.anchors.ends_name(word) {
+                    if (linked || comma) && self.markers.ends_name(word) {
                         break;
                     }
                     capital = true;
                     start = Some(range.start);
-                    lowercase_run = 0;
+                    lowercase.reset();
                     linked = false;
                 }
                 Some(Kind::Number) => {
@@ -57,20 +57,19 @@ impl CompiledWalk {
                 }
                 Some(Kind::Ampersand) => linked = true,
                 Some(Kind::Lower) => {
+                    // Lowercase words right before the marker need no bridge:
+                    // they belong to the form's own name ("Société générale
+                    // SA"). Past a capitalized word, they do.
                     let lower = word.to_lowercase();
-                    let party = words.party_connectors.contains(&lower);
-                    if capital && party {
-                        if self.joins_parties(text, range.start, pos..anchor) {
+                    if words.party_connectors.contains(&lower) {
+                        if capital && self.joins_parties(text, range.start, pos..marker) {
                             break;
                         }
-                    } else if capital && !bridge.allows(&lower) {
+                    } else if capital && !lowercase.allows(&lower) {
                         break;
                     }
-                    if !party && !words.connectors.contains(&lower) {
-                        lowercase_run += 1;
-                        if lowercase_run > MAX_LOWERCASE_RUN {
-                            break;
-                        }
+                    if !lowercase.pass(&lower) {
+                        break;
                     }
                     linked = true;
                 }
@@ -100,25 +99,25 @@ impl CompiledWalk {
     }
 
     /// Trim the prose a walk passed from the front of the name at
-    /// `start..anchor`: a clause phrase, a sentence verb, a leading role. `None`
+    /// `start..marker`: a clause phrase, a sentence verb, a leading role. `None`
     /// when no name is left, or the name numbers a document part.
-    fn trim_front(&self, text: &str, mut start: usize, anchor: usize) -> Option<usize> {
+    fn trim_front(&self, text: &str, mut start: usize, marker: usize) -> Option<usize> {
         let words = &self.lexicon;
-        let span = &text[start..anchor];
+        let span = &text[start..marker];
         let mut cut: Option<usize> = None;
         for clause in &words.clauses {
             if let Some(end) = last_phrase_end(span, clause) {
                 cut = cut.max(Some(end));
             }
         }
-        for range in scan::words(text, start..anchor) {
+        for range in scan::words(text, start..marker) {
             let word = &text[range.clone()];
             if word.starts_with(char::is_lowercase) && words.verbs.contains(&word.to_lowercase()) {
                 cut = cut.max(Some(range.end - start));
             }
         }
         if let Some(cut) = cut {
-            start = scan::words(text, start + cut..anchor)
+            start = scan::words(text, start + cut..marker)
                 .find(|w| {
                     let word = &text[w.clone()];
                     scan::kind(word) == Some(Kind::Capital) && !words.introduces(word)
@@ -128,7 +127,7 @@ impl CompiledWalk {
 
         // A leading role ("Seller Acme GmbH") goes, unless the name would be
         // left without a capitalized word ("Société générale SA").
-        let ranges: Vec<Range<usize>> = scan::words(text, start..anchor).collect();
+        let ranges: Vec<Range<usize>> = scan::words(text, start..marker).collect();
         let lowered: Vec<String> = ranges
             .iter()
             .map(|w| text[w.clone()].to_lowercase())
@@ -149,7 +148,7 @@ impl CompiledWalk {
             start = ranges[skip].start;
         }
 
-        let rest: Vec<&str> = scan::words(text, start..anchor).map(|w| &text[w]).collect();
+        let rest: Vec<&str> = scan::words(text, start..marker).map(|w| &text[w]).collect();
         if let [first, marker, ..] = rest.as_slice()
             && words.structural.contains(&first.to_lowercase())
             && is_marker(marker)

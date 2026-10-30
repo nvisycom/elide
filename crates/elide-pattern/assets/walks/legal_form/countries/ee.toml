@@ -1,0 +1,12 @@
+# Estonia (EE)
+
+[markers]
+distinctive = [
+  "AKTSIASELTS", "Aktsiaselts", "FIE", "FÜÜSILISEST ISIKUST ETTEVÕTJA",
+  "Füüsilisest isikust ettevõtja", "MITTETULUNDUSÜHING", "Mittetulundusühing",
+  "MTÜ", "OSAÜHING", "Osaühing", "SCE", "TULUNDUSÜHISTU", "Tulundusühistu",
+  "TÄISÜHING", "Täisühing", "USALDUSÜHING", "Usaldusühing"
+]
+ambiguous = [
+  "AS", "OÜ", "SA", "SE", "SIHTASUTUS", "Sihtasutus", "TÜ", "UÜ"
+]

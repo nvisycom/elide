@@ -1,0 +1,10 @@
+# Uzbekistan (UZ)
+
+[markers]
+distinctive = [
+  "MCHJ", "MChJ", "OOO", "QMJ", "QO'SHMA KORXONA", "Qo'shma korxona",
+  "XUSUSIY KORXONA", "Xususiy korxona"
+]
+ambiguous = [
+  "AJ", "AO", "KOOPERATIV", "Kooperativ", "XK"
+]

@@ -1,11 +1,26 @@
 # A person's name after a title: "Dr. Hans Müller", "Mme Claire Dubois",
 # "Ing. Jan Novák". The title stays visible; only the name is reported.
 #
-# The rule only. `titles.toml` holds the titles; `und.toml` holds the words
-# that shape a name in any language.
+# Converted from stella/anonymize; see ../../STELLA.md.
+#
+# `languages/<lang>.toml` holds the titles each language uses, each also in
+# capitals; a title several languages share (`Dr.`) is in each of them. Every
+# title applies whatever the language of the text. `ambiguous` titles are also
+# ordinary words (`Judge`, `Me`, `Don`): a name after one needs a context
+# keyword nearby.
 
 name = "person-title"
 labels = ["person_name"]
 direction = "forward"
-include_anchor = false
+include_marker = false
 max_words = 6
+
+# The particles inside a surname, in any language: "van der Berg", "bin
+# Rashid". A name keeps them whatever language the text is in.
+[words.und]
+lowercase = "closed"
+connectors = [
+  "van", "von", "der", "den", "de", "del", "della", "di", "da", "du", "des",
+  "la", "le", "zu", "ter", "ten", "dos", "das", "do", "bin", "bint", "ibn",
+  "al", "el"
+]

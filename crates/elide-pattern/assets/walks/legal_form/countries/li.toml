@@ -1,0 +1,16 @@
+# Liechtenstein (LI)
+
+[markers]
+distinctive = [
+  "AKTIENGESELLSCHAFT", "Aktiengesellschaft",
+  "GESELLSCHAFT MIT BESCHRÄNKTER HAFTUNG",
+  "Gesellschaft mit beschränkter Haftung", "GMBH", "GmbH",
+  "KOLLEKTIVGESELLSCHAFT", "Kollektivgesellschaft", "KOMMANDITGESELLSCHAFT",
+  "Kommanditgesellschaft", "TREUHANDSCHAFT", "Treuhandschaft",
+  "TREUUNTERNEHMEN", "Treuunternehmen"
+]
+ambiguous = [
+  "AG", "ANSTALT", "Anstalt", "EINZELUNTERNEHMEN", "Einzelunternehmen",
+  "GENOSSENSCHAFT", "Genossenschaft", "SE", "STIFTUNG", "Stiftung", "TRUST",
+  "Trust", "VEREIN", "Verein"
+]

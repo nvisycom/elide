@@ -1,0 +1,26 @@
+# Slovakia (SK)
+
+[markers]
+distinctive = [
+  "a.s.", "AKC. SPOL.", "akc. spol.", "AKCIOVEJ SPOLOČNOSTI",
+  "akciovej spoločnosti", "AKCIOVOU SPOLOČNOSŤOU", "akciovou spoločnosťou",
+  "AKCIOVÁ SPOLOČNOSŤ", "akciová spoločnosť", "DRUŽSTVA", "družstva",
+  "DRUŽSTVO", "družstvo", "DRUŽSTVOM", "družstvom", "EURÓPSKA SPOLOČNOSŤ",
+  "európska spoločnosť", "EURÓPSKE DRUŽSTVO", "európske družstvo", "J.S.A.",
+  "j.s.a.", "JEDNODUCHÁ SPOLOČNOSŤ NA AKCIE", "jednoduchá spoločnosť na akcie",
+  "k.s.", "KOM. SPOL.", "kom. spol.", "KOMANDITNÁ SPOLOČNOSŤ",
+  "komanditná spoločnosť", "n.o.", "NADÁCIA", "nadácia", "NADÁCIE", "nadácie",
+  "NADÁCIOU", "nadáciou", "NEZISKOVÁ ORGANIZÁCIA", "nezisková organizácia",
+  "o.z.", "OBČIANSKE ZDRUŽENIE", "občianske združenie",
+  "PRÍSPEVKOVEJ ORGANIZÁCIE", "príspevkovej organizácie",
+  "PRÍSPEVKOVOU ORGANIZÁCIOU", "príspevkovou organizáciou", "S.R.O.", "s.r.o.",
+  "SCE", "SPOL. S R.O.", "spol. s r.o.", "SPOLOČNOSŤ S RUČENÍM OBMEDZENÝM",
+  "spoločnosť s ručením obmedzeným", "V.O.S.", "v.o.s.", "V.V.I.", "v.v.i.",
+  "VER. OBCH. SPOL.", "ver. obch. spol.", "VEREJNÁ OBCHODNÁ SPOLOČNOSŤ",
+  "verejná obchodná spoločnosť", "š.p.", "ŠTÁTNEHO PODNIKU",
+  "štátneho podniku", "ŠTÁTNY PODNIK", "štátny podnik", "ŠTÁTNYM PODNIKOM",
+  "štátnym podnikom"
+]
+ambiguous = [
+  "A.S.", "K.S.", "N.O.", "O.Z.", "SE", "Š.P."
+]

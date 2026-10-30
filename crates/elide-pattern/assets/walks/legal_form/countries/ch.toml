@@ -1,0 +1,19 @@
+# Switzerland (CH)
+
+[markers]
+distinctive = [
+  "AKTIENGESELLSCHAFT", "Aktiengesellschaft", "ENTREPRISE INDIVIDUELLE",
+  "Entreprise individuelle", "GESELLSCHAFT MIT BESCHRÄNKTER HAFTUNG",
+  "Gesellschaft mit beschränkter Haftung", "GMBH", "GmbH", "KLG", "KlG",
+  "KOLLEKTIVGESELLSCHAFT", "Kollektivgesellschaft", "KOMMANDITGESELLSCHAFT",
+  "Kommanditgesellschaft", "SCE", "SOCIÉTÉ ANONYME", "Société anonyme",
+  "SOCIÉTÉ EN COMMANDITE", "Société en commandite", "SOCIÉTÉ EN NOM COLLECTIF",
+  "Société en nom collectif", "SOCIÉTÉ À RESPONSABILITÉ LIMITÉE",
+  "Société à responsabilité limitée", "SÀRL", "Sàrl"
+]
+ambiguous = [
+  "AG", "ASSOCIATION", "Association", "COOPÉRATIVE", "Coopérative",
+  "EINZELUNTERNEHMEN", "Einzelunternehmen", "FONDATION", "Fondation",
+  "GENOSSENSCHAFT", "Genossenschaft", "KG", "SA", "SC", "SE", "SNC",
+  "STIFTUNG", "Stiftung", "VEREIN", "Verein"
+]

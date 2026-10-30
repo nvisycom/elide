@@ -1,0 +1,41 @@
+[markers]
+distinctive = [
+  "AGENCY", "ASSOCIATION", "AUTHORITY", "Agency", "Association", "Authority",
+  "BOARD", "Board", "CHAMBERS", "COMMISSION", "COMMITTEE", "COUNCIL", "COURT",
+  "Chambers", "Commission", "Committee", "Council", "Court", "DEPARTMENT",
+  "DIRECTORATE", "Department", "Directorate", "FOUNDATION", "Foundation",
+  "HOSPITAL", "Hospital", "INSTITUTE", "Institute", "MINISTRY", "Ministry",
+  "REGISTRY", "Registry", "SOCIETY", "SOLICITORS", "Society", "Solicitors",
+  "TRIBUNAL", "Tribunal", "UNIVERSITY", "University"
+]
+ambiguous = [
+  "OFFICE", "Office"
+]
+
+[words]
+lowercase = "closed"
+connectors = [
+  "and", "for", "of", "the", "to"
+]
+clauses = [
+  "by and among", "by and between", "is between", "is with", "by", "among",
+  "amongst", "between"
+]
+verbs = [
+  "is", "are", "was", "were", "owns", "grants", "sells", "sold", "buys",
+  "bought", "has", "holds", "agrees", "pays", "paid", "owes", "signs",
+  "signed", "leases", "rents", "entered", "made", "executed", "retained",
+  "hired", "engaged", "appointed", "reporting", "named", "sued"
+]
+generic = [
+  "a", "administrative", "advisory", "an", "audit", "chairman", "compensation",
+  "director", "directors", "employee", "employment", "executive", "general",
+  "governing", "head", "human", "legal", "management", "manager", "managers",
+  "member", "members", "ministers", "nominating", "nomination", "our",
+  "period", "pursuant", "remuneration", "resources", "subject", "such",
+  "supervisory", "that", "these", "those", "this", "trustee", "trustees",
+  "whereas"
+]
+generic_before = [
+  "company", "finance", "financial", "st", "trade"
+]

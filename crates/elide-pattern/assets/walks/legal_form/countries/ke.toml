@@ -1,0 +1,16 @@
+# Kenya (KE)
+
+[markers]
+distinctive = [
+  "CO-OPERATIVE SOCIETY", "Co-operative Society",
+  "COMPANY LIMITED BY GUARANTEE", "Company Limited by Guarantee",
+  "GENERAL PARTNERSHIP", "General Partnership", "LIMITED", "Limited",
+  "LIMITED LIABILITY PARTNERSHIP", "Limited Liability Partnership", "LLP",
+  "LTD", "Ltd", "PLC", "Plc", "PRIVATE COMPANY LIMITED BY SHARES",
+  "Private Company Limited by Shares", "PUBLIC LIMITED COMPANY",
+  "Public Limited Company", "SOLE PROPRIETORSHIP", "Sole Proprietorship",
+  "UNLIMITED COMPANY", "Unlimited Company"
+]
+ambiguous = [
+  "SOCIETY", "Society", "TRUST", "Trust"
+]

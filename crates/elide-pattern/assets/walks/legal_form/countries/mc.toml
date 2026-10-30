@@ -1,0 +1,15 @@
+# Monaco (MC)
+
+[markers]
+distinctive = [
+  "ENTREPRISE INDIVIDUELLE", "Entreprise individuelle", "S.A.M.", "SAM",
+  "SARL", "SCS", "SOCIÉTÉ ANONYME MONÉGASQUE", "Société Anonyme Monégasque",
+  "SOCIÉTÉ CIVILE PARTICULIÈRE", "Société Civile Particulière",
+  "SOCIÉTÉ EN COMMANDITE PAR ACTIONS", "Société en Commandite par Actions",
+  "SOCIÉTÉ EN COMMANDITE SIMPLE", "Société en Commandite Simple",
+  "SOCIÉTÉ EN NOM COLLECTIF", "Société en Nom Collectif",
+  "SOCIÉTÉ À RESPONSABILITÉ LIMITÉE", "Société à Responsabilité Limitée"
+]
+ambiguous = [
+  "SCA", "SNC"
+]

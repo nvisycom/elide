@@ -1,9 +1,13 @@
 # Institutions named around a head word: "U.S. Department of Justice",
 # "Supreme Court of Canada", "Harvard University".
 #
-# The rule only. `heads.toml` holds the head words; `<lang>.toml` holds each
-# language's words that shape a name, including the generic words that do not
-# name an institution on their own ("Audit Committee", "Board of Directors").
+# Converted from stella/anonymize; see ../../STELLA.md.
+#
+# `languages/<lang>.toml` holds each language's head words, each also in
+# capitals, and the words that shape a name, including the generic words that
+# do not name an institution on their own ("Audit Committee", "Board of
+# Directors"). `ambiguous` heads also name everyday things (`Office`): a name
+# around one needs a context keyword nearby.
 
 name = "organization-institution"
 labels = ["organization_name"]

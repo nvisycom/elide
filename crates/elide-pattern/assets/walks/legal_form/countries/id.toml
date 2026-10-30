@@ -1,0 +1,17 @@
+# Indonesia (ID)
+
+[markers]
+distinctive = [
+  "COMMANDITAIRE VENNOOTSCHAP", "Commanditaire Vennootschap", "Fa",
+  "PENANAMAN MODAL ASING", "Penanaman Modal Asing", "PERSEKUTUAN FIRMA",
+  "Persekutuan Firma", "PERSEKUTUAN KOMANDITER", "Persekutuan Komanditer",
+  "PERSEKUTUAN PERDATA", "Persekutuan Perdata", "PERSEROAN TERBATAS",
+  "Perseroan Terbatas", "PERSEROAN TERBUKA", "Perseroan Terbuka",
+  "PERUSAHAAN PERSEROAN", "Perusahaan Perseroan", "PERUSAHAAN UMUM",
+  "Perusahaan Umum", "PMA", "PT TBK", "PT Tbk", "TBK", "Tbk", "USAHA DAGANG",
+  "Usaha Dagang"
+]
+ambiguous = [
+  "CV", "FA", "FIRMA", "Firma", "KOPERASI", "Koperasi", "PT", "UD", "YAYASAN",
+  "Yayasan"
+]

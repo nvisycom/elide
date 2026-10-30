@@ -1,0 +1,14 @@
+# Jamaica (JM)
+
+[markers]
+distinctive = [
+  "COMPANY LIMITED BY GUARANTEE", "Company Limited by Guarantee",
+  "COMPANY LIMITED BY SHARES", "Company Limited by Shares", "INC.", "Inc.",
+  "INCORPORATED", "Incorporated", "LIMITED", "Limited", "LTD", "Ltd",
+  "NON-PROFIT ORGANISATION", "Non-Profit Organisation", "SOLE PROPRIETORSHIP",
+  "Sole Proprietorship", "UNLIMITED COMPANY", "Unlimited Company"
+]
+ambiguous = [
+  "CO-OPERATIVE", "Co-operative", "PARTNERSHIP", "Partnership", "SOCIETY",
+  "Society"
+]

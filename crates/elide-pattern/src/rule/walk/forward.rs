@@ -1,25 +1,31 @@
-//! The walk forward from an anchor.
+//! The walk forward from a marker.
 
 use std::ops::Range;
 
-use super::compiled::{CompiledWalk, MAX_LOWERCASE_RUN};
-use super::lexicon::Bridge;
+use super::compiled::CompiledWalk;
+use super::lowercase::{Bridge, LowercaseRun};
 use super::scan::{self, Kind};
 
 impl CompiledWalk {
-    /// The name after the anchor ending at `anchor`, from its first word to
+    /// The name after the marker ending at `marker`, from its first word to
     /// its last, or `None` when no word follows.
+    ///
+    /// Unlike a backward walk, it stops at the first word that cannot be part
+    /// of the name, a verb included: what follows a name is the rest of the
+    /// sentence, with no lead-in to trim.
     pub(super) fn after(
         &self,
         text: &str,
-        anchor: usize,
+        marker: usize,
         bridge: &Bridge<'_>,
     ) -> Option<Range<usize>> {
         let words = &self.lexicon;
-        let mut pos = anchor;
-        // Each word, and whether it is a connective a name cannot end on.
-        let mut name: Vec<(Range<usize>, bool)> = Vec::new();
-        let mut lowercase_run = 0;
+        let mut pos = marker;
+        let mut start = None;
+        // The end of the last word a name can end on: not a connective
+        // ("Department of the" is "Department").
+        let mut end = None;
+        let mut lowercase = LowercaseRun::new(words, bridge);
         // The last word stands between two names rather than inside one: `&`
         // or a party connector, not a particle ("Juan de Don Vega").
         let mut separated = false;
@@ -30,10 +36,10 @@ impl CompiledWalk {
             };
             pos = step.end;
             let word = &text[step.clone()];
-            // Another anchor starts another name ("Mr. and Mrs. Smith"). An
+            // Another marker starts another name ("Mr. and Mrs. Smith"). An
             // ambiguous one is also a name word ("Dr. Don Draper"), so it does
             // only after a separator ("Dr. John Smith & Judge Jane Doe").
-            if self.anchors.is_distinctive(word) || (separated && self.anchors.is_anchor(word)) {
+            if self.markers.is_distinctive(word) || (separated && self.markers.is_marker(word)) {
                 break;
             }
             // "…of Finance." ends the sentence: the word is part of the name,
@@ -41,43 +47,33 @@ impl CompiledWalk {
             let ends = scan::ends_sentence(word);
             let range = if ends { step.start..step.end - 1 } else { step };
             let word = &text[range.clone()];
-            let connective = match scan::kind(word) {
+            match scan::kind(word) {
                 None | Some(Kind::Amount) => break,
-                Some(Kind::Ampersand) => {
-                    separated = true;
-                    true
-                }
+                Some(Kind::Ampersand) => separated = true,
                 Some(Kind::Lower) => {
                     let lower = word.to_lowercase();
-                    let connector = words.connectors.contains(&lower);
-                    if words.verbs.contains(&lower) || (!connector && !bridge.allows(&lower)) {
+                    if words.verbs.contains(&lower)
+                        || !lowercase.allows(&lower)
+                        || !lowercase.pass(&lower)
+                    {
                         break;
                     }
-                    if !connector {
-                        lowercase_run += 1;
-                        if lowercase_run > MAX_LOWERCASE_RUN {
-                            break;
-                        }
+                    if !words.connectors.contains(&lower) {
+                        end = Some(range.end);
                     }
                     separated = words.party_connectors.contains(&lower);
-                    connector
                 }
                 Some(Kind::Capital | Kind::Number) => {
-                    lowercase_run = 0;
+                    lowercase.reset();
+                    end = Some(range.end);
                     separated = false;
-                    false
                 }
-            };
-            name.push((range, connective));
+            }
+            start.get_or_insert(range.start);
             if ends {
                 break;
             }
         }
-        // "Department of the" is "Department": a name ends on a word, not a
-        // connective.
-        while name.last().is_some_and(|(_, connective)| *connective) {
-            name.pop();
-        }
-        Some(name.first()?.0.start..name.last()?.0.end)
+        Some(start?..end?)
     }
 }

@@ -1,0 +1,25 @@
+# United States (US)
+
+[markers]
+distinctive = [
+  "B CORP", "B Corp", "BENEFIT CORPORATION", "Benefit Corporation",
+  "BUSINESS TRUST", "Business Trust", "CLOSE CORPORATION", "Close Corporation",
+  "CORP", "Corp", "CORP.", "Corp.", "CORPORATION", "Corporation",
+  "GENERAL PARTNERSHIP", "General Partnership", "INC", "Inc", "INC.", "Inc.",
+  "INCORPORATED", "Incorporated", "JOINT VENTURE", "Joint Venture", "L.L.C.",
+  "L.L.P.", "LIMITED", "Limited", "LIMITED LIABILITY COMPANY",
+  "Limited Liability Company", "LIMITED LIABILITY LIMITED PARTNERSHIP",
+  "Limited Liability Limited Partnership", "LIMITED LIABILITY PARTNERSHIP",
+  "Limited Liability Partnership", "LIMITED PARTNERSHIP",
+  "Limited Partnership", "LLC", "LLLP", "LLP", "LTD.", "Ltd.",
+  "NONPROFIT CORPORATION", "Nonprofit Corporation", "PLLC",
+  "PROFESSIONAL ASSOCIATION", "Professional Association",
+  "PROFESSIONAL CORPORATION", "Professional Corporation",
+  "PROFESSIONAL LIMITED LIABILITY COMPANY",
+  "Professional Limited Liability Company", "S CORPORATION", "S Corporation",
+  "SERIES LLC", "Series LLC", "SOLE PROPRIETORSHIP", "Sole Proprietorship",
+  "STATUTORY TRUST", "Statutory Trust"
+]
+ambiguous = [
+  "CO.", "Co.", "GP", "L.C.", "L.P.", "LC", "LP", "N.A.", "NA", "PA", "PC"
+]

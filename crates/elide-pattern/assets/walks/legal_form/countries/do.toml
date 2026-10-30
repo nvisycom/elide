@@ -1,0 +1,20 @@
+# Dominican Republic (DO)
+
+[markers]
+distinctive = [
+  "ASOCIACIÓN SIN FINES DE LUCRO", "Asociación sin Fines de Lucro", "EIRL",
+  "EMPRESA INDIVIDUAL DE RESPONSABILIDAD LIMITADA",
+  "Empresa Individual de Responsabilidad Limitada", "S.A.D.", "S.A.S.",
+  "S.R.L.", "SOCIEDAD ANÓNIMA", "Sociedad Anónima",
+  "SOCIEDAD ANÓNIMA DE SUSCRIPCIÓN PÚBLICA",
+  "Sociedad Anónima de Suscripción Pública",
+  "SOCIEDAD DE RESPONSABILIDAD LIMITADA",
+  "Sociedad de Responsabilidad Limitada", "SOCIEDAD EN COMANDITA POR ACCIONES",
+  "Sociedad en Comandita por Acciones", "SOCIEDAD EN COMANDITA SIMPLE",
+  "Sociedad en Comandita Simple", "SOCIEDAD EN NOMBRE COLECTIVO",
+  "Sociedad en Nombre Colectivo", "SOCIEDAD POR ACCIONES SIMPLIFICADA",
+  "Sociedad por Acciones Simplificada", "SRL"
+]
+ambiguous = [
+  "COOPERATIVA", "Cooperativa", "FUNDACIÓN", "Fundación", "S.A."
+]

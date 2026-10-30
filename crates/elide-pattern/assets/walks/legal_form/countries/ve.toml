@@ -1,0 +1,16 @@
+# Venezuela (VE)
+
+[markers]
+distinctive = [
+  "ASOCIACIÓN CIVIL", "Asociación Civil", "COMPAÑÍA ANÓNIMA",
+  "Compañía Anónima", "FIRMA PERSONAL", "Firma Personal", "S.R.L.",
+  "SOCIEDAD ANÓNIMA", "Sociedad Anónima",
+  "SOCIEDAD DE RESPONSABILIDAD LIMITADA",
+  "Sociedad de Responsabilidad Limitada", "SOCIEDAD EN COMANDITA POR ACCIONES",
+  "Sociedad en Comandita por Acciones", "SOCIEDAD EN COMANDITA SIMPLE",
+  "Sociedad en Comandita Simple", "SOCIEDAD EN NOMBRE COLECTIVO",
+  "Sociedad en Nombre Colectivo"
+]
+ambiguous = [
+  "C.A.", "COOPERATIVA", "Cooperativa", "FUNDACIÓN", "Fundación", "S.A."
+]

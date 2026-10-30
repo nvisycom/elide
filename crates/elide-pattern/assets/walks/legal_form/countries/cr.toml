@@ -1,0 +1,15 @@
+# Costa Rica (CR)
+
+[markers]
+distinctive = [
+  "EMPRESA INDIVIDUAL", "Empresa Individual", "LTDA.", "Ltda.", "S. EN C.",
+  "S. en C.", "S. EN N.C.", "S. en N.C.", "S.R.L.", "SOCIEDAD ANÓNIMA",
+  "Sociedad Anónima", "SOCIEDAD DE RESPONSABILIDAD LIMITADA",
+  "Sociedad de Responsabilidad Limitada", "SOCIEDAD EN COMANDITA",
+  "Sociedad en Comandita", "SOCIEDAD EN NOMBRE COLECTIVO",
+  "Sociedad en Nombre Colectivo"
+]
+ambiguous = [
+  "ASOCIACIÓN", "Asociación", "COOPERATIVA", "Cooperativa", "FUNDACIÓN",
+  "Fundación", "S.A."
+]

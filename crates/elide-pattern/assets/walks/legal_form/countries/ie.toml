@@ -1,0 +1,19 @@
+# Ireland (IE)
+
+[markers]
+distinctive = [
+  "CLG", "CO-OPERATIVE SOCIETY", "Co-operative Society",
+  "COMPANY LIMITED BY GUARANTEE", "Company Limited by Guarantee", "CPT", "cpt",
+  "CUIDEACHTA PHOIBLÍ THEORANTA", "cuideachta phoiblí theoranta", "DAC",
+  "DESIGNATED ACTIVITY COMPANY", "Designated Activity Company",
+  "FRIENDLY SOCIETY", "Friendly Society", "INDUSTRIAL AND PROVIDENT SOCIETY",
+  "Industrial and Provident Society", "LIMITED", "Limited",
+  "LIMITED LIABILITY PARTNERSHIP", "Limited Liability Partnership", "LLP",
+  "LTD", "Ltd", "PLC", "plc", "PUBLIC LIMITED COMPANY",
+  "Public Limited Company", "SOLE TRADER", "Sole Trader", "TEO", "Teo", "TEO.",
+  "Teo.", "TEORANTA", "Teoranta", "ULC", "UNLIMITED COMPANY",
+  "Unlimited Company"
+]
+ambiguous = [
+  "PARTNERSHIP", "Partnership", "SE"
+]

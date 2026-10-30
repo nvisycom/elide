@@ -1,0 +1,18 @@
+# Romania (RO)
+
+[markers]
+distinctive = [
+  "ONG", "PERSOANĂ FIZICĂ AUTORIZATĂ", "Persoană fizică autorizată", "PFA",
+  "REGIE AUTONOMĂ", "Regie autonomă", "SCE", "SCS",
+  "SOCIETATE CU RĂSPUNDERE LIMITATĂ", "Societate cu răspundere limitată",
+  "SOCIETATE PE ACȚIUNI", "Societate pe acțiuni",
+  "SOCIETATE ÎN COMANDITĂ PE ACȚIUNI", "Societate în comandită pe acțiuni",
+  "SOCIETATE ÎN COMANDITĂ SIMPLĂ", "Societate în comandită simplă",
+  "SOCIETATE ÎN NUME COLECTIV", "Societate în nume colectiv", "SRL",
+  "ÎNTREPRINDERE FAMILIALĂ", "Întreprindere familială",
+  "ÎNTREPRINDERE INDIVIDUALĂ", "Întreprindere individuală"
+]
+ambiguous = [
+  "ASOCIAȚIE", "Asociație", "COOPERATIVĂ", "Cooperativă", "FUNDAȚIE",
+  "Fundație", "IF", "II", "RA", "SA", "SCA", "SE", "SNC"
+]

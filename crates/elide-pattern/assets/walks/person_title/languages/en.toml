@@ -1,0 +1,17 @@
+[markers]
+distinctive = [
+  "Dr", "DR.", "Dr.", "MESSRS", "Messrs", "Mr", "MR.", "Mr.", "Mrs", "MRS.",
+  "Mrs.", "Ms", "MS.", "Ms.", "PROF", "Prof", "PROF.", "Prof.", "Sir"
+]
+ambiguous = [
+  "DAME", "Dame", "JUDGE", "Judge", "JUSTICE", "Justice", "LADY", "Lady",
+  "LORD", "Lord", "MISS", "Miss", "PRESIDENT", "President"
+]
+
+[words]
+generic = [
+  "agency", "association", "authority", "board", "chambers", "commission",
+  "committee", "council", "court", "department", "directorate", "foundation",
+  "hospital", "institute", "ministry", "office", "registry", "society",
+  "solicitors", "tribunal", "university"
+]

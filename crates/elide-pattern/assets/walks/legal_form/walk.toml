@@ -1,9 +1,18 @@
 # Company names ending in a legal form: "Müller Bau GmbH", "Bank of America,
 # N.A.", "Kowalski Budownictwo sp. z o.o.".
 #
-# The rule only. `forms.toml` holds the legal forms a name ends in, by
-# country; `<lang>.toml` holds each language's context keywords and the words
-# that shape a name.
+# Converted from stella/anonymize; see ../../STELLA.md.
+#
+# `countries/<country>.toml` holds the legal forms a country defines, each
+# also in capitals; `languages/<lang>.toml` holds each language's context
+# keywords and the words that shape a name.
+#
+# A form is not tied to its country or a language: "Siemens AG" appears in
+# English text too, so every country's forms apply everywhere. `ambiguous`
+# forms are also ordinary words or abbreviations (`AG`, `Trust`, `Co.`): a
+# name ending in one scores below the default threshold and needs a context
+# keyword nearby.
 
 name = "organization-legal-form"
 labels = ["organization_name"]
+direction = "backward"

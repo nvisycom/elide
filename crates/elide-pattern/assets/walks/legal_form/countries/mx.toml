@@ -1,0 +1,30 @@
+# Mexico (MX)
+
+[markers]
+distinctive = [
+  "ASOCIACIÓN CIVIL", "Asociación Civil", "S. DE R.L.", "S. de R.L.",
+  "S. DE R.L. DE C.V.", "S. de R.L. de C.V.", "S. EN C.", "S. en C.",
+  "S. EN N.C.", "S. en N.C.", "S.A. DE C.V.", "S.A. de C.V.", "S.A.B. DE C.V.",
+  "S.A.B. de C.V.", "S.A.P.I.", "S.A.P.I. DE C.V.", "S.A.P.I. de C.V.",
+  "S.A.S.", "S.C.L.", "SC DE RL DE CV", "SC de RL de CV",
+  "SOCIEDAD ANÓNIMA BURSÁTIL DE CAPITAL VARIABLE",
+  "Sociedad Anónima Bursátil de Capital Variable",
+  "SOCIEDAD ANÓNIMA DE CAPITAL VARIABLE",
+  "Sociedad Anónima de Capital Variable",
+  "SOCIEDAD ANÓNIMA PROMOTORA DE INVERSIÓN",
+  "Sociedad Anónima Promotora de Inversión",
+  "SOCIEDAD ANÓNIMA PROMOTORA DE INVERSIÓN DE CAPITAL VARIABLE",
+  "Sociedad Anónima Promotora de Inversión de Capital Variable",
+  "SOCIEDAD CIVIL", "Sociedad Civil", "SOCIEDAD COOPERATIVA",
+  "Sociedad Cooperativa", "SOCIEDAD COOPERATIVA LIMITADA",
+  "Sociedad Cooperativa Limitada", "SOCIEDAD DE RESPONSABILIDAD LIMITADA",
+  "Sociedad de Responsabilidad Limitada",
+  "SOCIEDAD DE RESPONSABILIDAD LIMITADA DE CAPITAL VARIABLE",
+  "Sociedad de Responsabilidad Limitada de Capital Variable",
+  "SOCIEDAD EN COMANDITA", "Sociedad en Comandita",
+  "SOCIEDAD EN NOMBRE COLECTIVO", "Sociedad en Nombre Colectivo",
+  "SOCIEDAD POR ACCIONES SIMPLIFICADA", "Sociedad por Acciones Simplificada"
+]
+ambiguous = [
+  "A.C.", "S.C."
+]

@@ -2,7 +2,7 @@
 //!
 //! Each holds the rule as authored (TOML or a builder) and its compiled form:
 //! a [`Pattern`] with its [`Variant`]s, a [`Dictionary`] of [`Term`]s, and a
-//! [`Walk`] from an anchor back to the start of a name.
+//! [`Walk`] from a marker back to the start of a name.
 //!
 //! [`PatternRecognizer`]: crate::PatternRecognizer
 

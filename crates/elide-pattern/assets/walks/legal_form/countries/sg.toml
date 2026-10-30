@@ -1,0 +1,17 @@
+# Singapore (SG)
+
+[markers]
+distinctive = [
+  "CO-OPERATIVE SOCIETY", "Co-operative Society",
+  "LIMITED LIABILITY PARTNERSHIP", "Limited Liability Partnership",
+  "LIMITED PARTNERSHIP", "Limited Partnership", "LLP", "LTD", "Ltd", "LTD.",
+  "Ltd.", "PRIVATE LIMITED", "Private Limited", "PTE LTD", "Pte Ltd",
+  "PTE. LTD.", "Pte. Ltd.", "PUBLIC COMPANY LIMITED BY GUARANTEE",
+  "Public Company Limited by Guarantee", "PUBLIC COMPANY LIMITED BY SHARES",
+  "Public Company Limited by Shares", "SOLE PROPRIETORSHIP",
+  "Sole Proprietorship", "VARIABLE CAPITAL COMPANY",
+  "Variable Capital Company", "VCC"
+]
+ambiguous = [
+  "LP", "PARTNERSHIP", "Partnership", "SOCIETY", "Society"
+]
