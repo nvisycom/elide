@@ -3,6 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
+use std::sync::Arc;
 
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::TextRecognizable;
@@ -10,9 +11,10 @@ use elide_core::modality::text::Token;
 use elide_core::primitive::Confidence;
 use hipstr::HipStr;
 
-use crate::matching::{KeywordMatcher, on_word_boundaries};
-use crate::rule::BoostRule;
+use super::matching::{KeywordMatcher, on_word_boundaries};
+use super::rule::BoostRule;
 
+mod apply;
 mod enhance_input;
 mod window;
 
@@ -62,8 +64,8 @@ struct Located {
 /// the enhancer: [`SubstringMatcher`] when no upstream NLP engine
 /// produces tokens, [`LemmaMatcher`] when one does.
 ///
-/// [`SubstringMatcher`]: crate::matching::SubstringMatcher
-/// [`LemmaMatcher`]: crate::matching::LemmaMatcher
+/// [`SubstringMatcher`]: crate::context::matching::SubstringMatcher
+/// [`LemmaMatcher`]: crate::context::matching::LemmaMatcher
 pub struct Enhancer {
     /// Rules bucketed by label. Within one bucket, each entry is
     /// a distinct `(language)` scope; rules sharing the same
@@ -72,7 +74,7 @@ pub struct Enhancer {
     /// bucket once by label, then walks the small inner vec
     /// filtering on the per-call language hint.
     rules: HashMap<LabelRef, Vec<BoostRule>>,
-    matcher: Box<dyn KeywordMatcher>,
+    matcher: Arc<dyn KeywordMatcher>,
 }
 
 impl Enhancer {
@@ -83,15 +85,15 @@ impl Enhancer {
     /// label's bucket.
     ///
     /// `matcher` is any concrete [`KeywordMatcher`] taken by value;
-    /// it is boxed internally, so callers don't wrap it themselves.
+    /// it is wrapped in an [`Arc`] internally, so callers don't wrap it.
     pub fn new<M: KeywordMatcher + 'static>(
         rules: impl IntoIterator<Item = BoostRule>,
         matcher: M,
     ) -> Self {
-        Self::with_boxed_matcher(rules, Box::new(matcher))
+        Self::with_shared_matcher(rules, Arc::new(matcher))
     }
 
-    /// Construct from a rule iterator and an already-boxed matcher.
+    /// Construct from a rule iterator and a shared matcher.
     ///
     /// Use this when the matcher is selected at runtime (e.g. a
     /// substring vs. lemma strategy chosen by whether an NLP engine
@@ -99,9 +101,9 @@ impl Enhancer {
     /// [`new`] is the by-value convenience that wraps for you.
     ///
     /// [`new`]: Self::new
-    pub fn with_boxed_matcher(
+    pub fn with_shared_matcher(
         rules: impl IntoIterator<Item = BoostRule>,
-        matcher: Box<dyn KeywordMatcher>,
+        matcher: Arc<dyn KeywordMatcher>,
     ) -> Self {
         let mut buckets: HashMap<LabelRef, Vec<BoostRule>> = HashMap::new();
         for rule in rules {

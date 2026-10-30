@@ -1,7 +1,7 @@
-//! Context-enhanced pattern recognition over image and audio.
+//! Pattern recognition with context over image and audio.
 //!
 //! The pattern recognizer reads its text from the OCR `Layout` / STT
-//! `Transcription` artifact, finds a match, and the `Enhanced` adapter boosts
+//! `Transcription` artifact, finds a match, and its context boosts
 //! its confidence from a context keyword in that same text, all before the
 //! match is lifted to a native location. Proves enhancement works for image
 //! and audio (whose location is a region / time span, not a byte range) and
@@ -17,7 +17,7 @@ use elide::recognition::pattern::{PatternRecognizer, Regex, Variant};
 use elide::recognition::{Context, Recognizer, Scope, Subject};
 
 /// A pattern recognizer that matches a 9-digit run, boosted by the keyword
-/// "ssn" nearby, wrapped in the `Enhanced` context layer.
+/// "ssn" nearby.
 fn ssn_recognizer() -> impl Recognizer<Image> + Recognizer<Audio> {
     let variant = Variant::new(r"\b\d{3}-\d{2}-\d{4}\b")
         .expect("variant builds")
@@ -31,7 +31,7 @@ fn ssn_recognizer() -> impl Recognizer<Image> + Recognizer<Audio> {
         .expect("rule builds");
     PatternRecognizer::builder()
         .with_pattern(regex)
-        .build_context_enhanced()
+        .build()
         .expect("recognizer builds")
 }
 

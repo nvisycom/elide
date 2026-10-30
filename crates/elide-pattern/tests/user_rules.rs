@@ -37,7 +37,7 @@ async fn user_toml_rules_load_and_detect() {
         .with_pattern(product_code_pattern)
         .with_dictionary(product_code_dict)
         .with_builtin_patterns()
-        .build_context_enhanced()
+        .build()
         .expect("recognizer builds");
 
     let text = include_str!("../testdata/inputs/internal.txt");

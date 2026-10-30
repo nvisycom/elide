@@ -33,8 +33,8 @@ and this project adheres to
 ### Crates
 
 - **elide-core:** Domain types, traits, and errors for the toolkit
-- **elide-context:** Post-recognition keyword-boost enhancer for entities
-- **elide-pattern:** Pattern and dictionary recognizers for PII/PHI detection
+- **elide-pattern:** Pattern and dictionary recognizers for PII/PHI detection,
+  with keyword-boost context enhancement
 - **elide-ner:** NER traits and language detection
 - **elide-llm:** LLM-mediated entity recognizer (text NER + image VLM)
 - **elide-stt:** Speech-to-text backends and transcription types

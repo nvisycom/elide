@@ -1,10 +1,9 @@
 //! [`PatternRecognizer`] and its builder.
 
 use std::result::Result as StdResult;
+use std::sync::Arc;
 
 use aho_corasick::{AhoCorasick, MatchKind};
-use elide_context::matching::SubstringMatcher;
-use elide_context::{BoostRule, Enhanced, Enhancer};
 use elide_core::entity::audit::AuditEvent;
 use elide_core::entity::{Entity, LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
@@ -21,6 +20,8 @@ use super::compiled::{CompiledDictionary, CompiledPattern, RawMatch, has_word_bo
 use super::context::Matching;
 use super::dictionary::Dictionary;
 use super::regex::{Regex, Variant};
+use crate::context::matching::{KeywordMatcher, SubstringMatcher};
+use crate::context::{BoostRule, Enhancer};
 use crate::shipped;
 use crate::validators::{ValidationContext, ValidatorRegistry};
 
@@ -34,11 +35,11 @@ use crate::validators::{ValidationContext, ValidatorRegistry};
 /// scan across every literal. Both passes share one walk over the
 /// input and emit entities in modality-local byte coordinates.
 ///
-/// Construct via [`PatternRecognizer::builder`]. [`build`]
-/// returns the bare recognizer; [`build_context_enhanced`] wraps
-/// it in a [`Enhanced`] layer that lifts confidence on
-/// matches whose neighbourhood contains a per-label context
-/// keyword.
+/// The matches then go through the rules' context: an [`Enhancer`] built
+/// from every rule's `[context]` table lifts the confidence of a match
+/// whose neighbourhood holds one of its keywords or anchor entities.
+///
+/// Construct via [`PatternRecognizer::builder`].
 ///
 /// # Examples
 ///
@@ -54,13 +55,13 @@ use crate::validators::{ValidationContext, ValidatorRegistry};
 ///
 /// [`Regex`]: super::Regex
 /// [`Dictionary`]: super::Dictionary
-/// [`build`]: PatternRecognizerBuilder::build
-/// [`build_context_enhanced`]: PatternRecognizerBuilder::build_context_enhanced
+/// [`Enhancer`]: crate::context::Enhancer
 pub struct PatternRecognizer {
     patterns: Vec<CompiledPattern>,
     regex_set: Option<RegexSet>,
     dictionaries: Vec<CompiledDictionary>,
     aho: Option<AhoCorasick>,
+    enhancer: Enhancer,
 }
 
 impl PatternRecognizer {
@@ -171,6 +172,8 @@ pub struct PatternRecognizerBuilder {
     /// Cap on the total bytes of all dictionary terms across every
     /// dictionary. `None` is unbounded.
     term_bytes_limit: Option<usize>,
+    /// How context keywords are matched; `None` is [`SubstringMatcher`].
+    keyword_matcher: Option<Arc<dyn KeywordMatcher>>,
 }
 
 impl PatternRecognizerBuilder {
@@ -297,6 +300,18 @@ impl PatternRecognizerBuilder {
         self
     }
 
+    /// Set how context keywords are matched near a match.
+    ///
+    /// Defaults to [`SubstringMatcher`]. A [`LemmaMatcher`] also matches a
+    /// keyword's other word forms when an enricher tokenized the text.
+    ///
+    /// [`LemmaMatcher`]: crate::context::matching::LemmaMatcher
+    #[must_use]
+    pub fn with_keyword_matcher(mut self, matcher: impl KeywordMatcher + 'static) -> Self {
+        self.keyword_matcher = Some(Arc::new(matcher));
+        self
+    }
+
     /// Drop every pattern and dictionary none of whose candidate labels are
     /// declared in `catalog`.
     ///
@@ -335,14 +350,8 @@ impl PatternRecognizerBuilder {
         &self.dictionaries
     }
 
-    /// Compile every rule into the pooled scanners and return the
-    /// bare recognizer.
-    ///
-    /// Per-rule `context` keywords are ignored on the emission
-    /// path; the recognizer emits raw confidence as authored by
-    /// each rule. Wrap the result with [`build_context_enhanced`]
-    /// (or compose with [`Enhanced`] manually) to lift
-    /// confidence on matches near a declared keyword.
+    /// Compile every rule into the pooled scanners and gather every rule's
+    /// `[context]` into the recognizer's [`Enhancer`].
     ///
     /// # Errors
     ///
@@ -352,7 +361,7 @@ impl PatternRecognizerBuilder {
     /// or under-declared for some term's source column, or when
     /// the shared automata cannot be constructed.
     ///
-    /// [`build_context_enhanced`]: Self::build_context_enhanced
+    /// [`Enhancer`]: crate::context::Enhancer
     pub fn build(self) -> Result<PatternRecognizer> {
         let validators = self
             .validators
@@ -366,27 +375,8 @@ impl PatternRecognizerBuilder {
             regex_set,
             dictionaries: compiled_dicts,
             aho,
+            enhancer: self.build_enhancer(),
         })
-    }
-
-    /// Compile every rule and wrap the recognizer in an [`Enhanced`] layer
-    /// that runs keyword-boost context enhancement.
-    ///
-    /// Context keywords from every pattern and dictionary are harvested into
-    /// per-label [`BoostRule`]s that lift confidence on matches whose
-    /// neighbourhood contains a declared keyword. Because enhancement runs on
-    /// the stream-positioned drafts before they are lifted, this works for
-    /// every modality (text, tabular, image, audio).
-    ///
-    /// # Errors
-    ///
-    /// See [`build`].
-    ///
-    /// [`build`]: Self::build
-    pub fn build_context_enhanced(self) -> Result<Enhanced<PatternRecognizer>> {
-        let enhancer = self.build_enhancer();
-        let recognizer = self.build()?;
-        Ok(Enhanced::new(recognizer, enhancer))
     }
 
     /// Compile every `(pattern, variant)` pair into a
@@ -678,7 +668,11 @@ impl PatternRecognizerBuilder {
             }
         }
 
-        Enhancer::new(boost_rules, SubstringMatcher)
+        let matcher = self
+            .keyword_matcher
+            .clone()
+            .unwrap_or_else(|| Arc::new(SubstringMatcher));
+        Enhancer::with_shared_matcher(boost_rules, matcher)
     }
 
     /// Yield one [`ContextKeywords`] for every `(label, language)` context a
@@ -840,6 +834,6 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
             }
         }
 
-        Ok(entities)
+        Ok(self.enhancer.apply(entities, subject, ctx))
     }
 }

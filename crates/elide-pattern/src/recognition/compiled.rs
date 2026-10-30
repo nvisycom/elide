@@ -6,14 +6,13 @@
 //! into a shared [`AhoCorasick`] automaton, then stores the
 //! per-rule emission metadata next to those scanners. This module
 //! holds the per-rule metadata structs ([`CompiledPattern`],
-//! [`CompiledDictionary`]) and their `draft` constructors, the bits that
-//! turn a regex / Aho-Corasick hit into an [`EntityDraft`] (stream-positioned;
-//! the `Enhanced` adapter lifts it to an entity).
+//! [`CompiledDictionary`]) and their `raw_match` constructors, the bits that
+//! turn a regex / Aho-Corasick hit into a [`RawMatch`] the recognizer places
+//! as an entity.
 //!
 //! [`Regex`]: super::Regex
 //! [`Dictionary`]: super::Dictionary
 //! [`AhoCorasick`]: aho_corasick::AhoCorasick
-//! [`EntityDraft`]: elide_context::EntityDraft
 //! [`PatternRecognizerBuilder::build`]: super::PatternRecognizerBuilder::build
 
 use std::ops::Range;
@@ -45,9 +44,8 @@ pub(super) struct RawMatch {
 /// the dispatch loop has everything it needs without a second
 /// indirection.
 ///
-/// `context` is intentionally not stored on compiled state, the
-/// recognizer's wrapping `Enhanced` layer harvests keywords from the source
-/// patterns at build time.
+/// `context` is not stored on compiled state: the builder gathers it from
+/// the source patterns into the recognizer's `Enhancer` at build time.
 pub(super) struct CompiledPattern {
     /// Pattern name (e.g. `"ssn"`). Surfaced in trail provenance.
     pub pattern_name: String,

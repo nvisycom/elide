@@ -3,16 +3,17 @@
 //!
 //! The enhancer is modality-agnostic and report-only, it mutates the
 //! entity's confidence and returns the boosts; recording the located
-//! refinement event is the `Enhanced` adapter's job, exercised separately.
+//! refinement event is `Enhancer::apply`'s job, exercised through the
+//! recognizer.
 
 use std::ops::Range;
 
-use elide_context::matching::SubstringMatcher;
-use elide_context::{BoostRule, EnhanceInput, Enhancer};
 use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::{Text, TextLocation};
 use elide_core::primitive::Confidence;
+use elide_pattern::context::matching::SubstringMatcher;
+use elide_pattern::context::{BoostRule, EnhanceInput, Enhancer};
 
 /// Build a single text entity found at `range` in the recognized text.
 fn entity(label: &LabelRef, range: Range<usize>, score: f32) -> Entity<Text> {

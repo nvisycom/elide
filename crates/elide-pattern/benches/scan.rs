@@ -1,9 +1,8 @@
 //! Detection hot-path benchmark: the built-in pattern recognizer scanning
 //! PII-dense text. The recognizer is built once; only `recognize` is timed.
 //!
-//! Two recognizers are compared, the bare pattern scan and the context-enhanced
-//! one, so a regression can be attributed to the scan itself or to the boosting
-//! layer. Throughput is reported in bytes scanned.
+//! The timing covers the scan and the context boosting that follows it.
+//! Throughput is reported in bytes scanned.
 
 use std::hint::black_box;
 
@@ -38,29 +37,18 @@ fn bench_scan(c: &mut Criterion) {
     let scope = Scope::new();
     let ctx = Context::new(&scope);
 
-    let bare = PatternRecognizer::builder()
+    let recognizer = PatternRecognizer::builder()
         .with_builtin_patterns()
         .with_builtin_dictionaries()
         .build()
         .expect("build recognizer");
-    let enhanced = PatternRecognizer::builder()
-        .with_builtin_patterns()
-        .with_builtin_dictionaries()
-        .build_context_enhanced()
-        .expect("build context-enhanced recognizer");
 
     let mut group = c.benchmark_group("scan");
     group.throughput(Throughput::Bytes(text.len() as u64));
     group.bench_function("patterns", |b| {
         b.iter(|| {
-            rt.block_on(bare.recognize(black_box(&subject), &ctx))
-                .expect("recognize")
-        });
-    });
-    group.bench_function("context_enhanced", |b| {
-        b.iter(|| {
             rt.block_on(Recognizer::<Text>::recognize(
-                &enhanced,
+                &recognizer,
                 black_box(&subject),
                 &ctx,
             ))

@@ -39,7 +39,7 @@ pub fn build_analyzer<M: TextRecognizable>() -> Result<Analyzer<M>> {
     let patterns = PatternRecognizer::builder()
         .with_builtin_patterns()
         .with_builtin_dictionaries()
-        .build_context_enhanced()?;
+        .build()?;
 
     let analyzer = Analyzer::new();
 

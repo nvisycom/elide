@@ -1,73 +1,35 @@
-//! [`Enhanced`]: a [`Recognizer`] decorator that keyword-boosts another
-//! recognizer's entities.
-//!
-//! A recognizer emits located [`Entity`]s, each carrying the
-//! [`recognized_range`] it was found at in the recognized text. [`Enhanced`]
-//! runs the inner recognizer, then runs the keyword-boost [`Enhancer`] over
-//! those entities, lifting confidence where a context keyword fires in the
-//! word window around each entity's range (or in an out-of-band hint), and
-//! records a refinement event per boost. Because it reads only the
-//! modality-free fields, the same `Enhanced<R>` serves every modality.
-//!
-//! [`Recognizer`]: elide_core::recognition::Recognizer
-//! [`Entity`]: elide_core::entity::Entity
-//! [`recognized_range`]: elide_core::entity::Entity::recognized_range
-//! [`Enhancer`]: crate::Enhancer
+//! [`Enhancer::apply`]: the keyword-boost pass over one recognized subject.
 
-use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::entity::audit::{AuditEvent, Refinement};
 use elide_core::modality::TextRecognizable;
-use elide_core::primitive::{ComponentId, LanguageTag};
-use elide_core::recognition::{Context, Recognizer, Subject};
+use elide_core::primitive::LanguageTag;
+use elide_core::recognition::{Context, Subject};
 
-use crate::{EnhanceInput, Enhancer};
+use super::{EnhanceInput, Enhancer};
 
-/// Wraps a [`Recognizer`] with a keyword-boost [`Enhancer`] applied to its
-/// entities.
-///
-/// This is where context enhancement happens: the inner recognizer produces
-/// located entities (each with its [`recognized_range`]), the enhancer lifts
-/// confidence where a keyword fires near an entity, and a refinement event is
-/// recorded per boost. An [`Enhancer`] with no rules is the no-op case.
-///
-/// [`Recognizer`]: elide_core::recognition::Recognizer
-/// [`recognized_range`]: elide_core::entity::Entity::recognized_range
-/// [`Enhancer`]: crate::Enhancer
-pub struct Enhanced<R> {
-    inner: R,
-    enhancer: Enhancer,
-}
-
-impl<R> Enhanced<R> {
-    /// Wrap `inner` with a keyword-boost `enhancer`.
+impl Enhancer {
+    /// Boost `entities` recognized in `subject` and record a refinement
+    /// event on each one a keyword or anchor lifts.
     ///
-    /// An [`Enhancer`] with no rules is the "no enhancement" case: the inner
-    /// recognizer's entities pass through unchanged.
-    pub fn new(inner: R, enhancer: Enhancer) -> Self {
-        Self { inner, enhancer }
-    }
-
-    /// Borrow the wrapped recognizer.
-    pub fn inner(&self) -> &R {
-        &self.inner
-    }
-
-    /// Enhance a subject's already-recognized `entities` with the configured
-    /// context (keyword boosts from the subject's text and hints).
-    fn enhance<M: TextRecognizable>(
+    /// This is [`enhance`](Self::enhance) over a whole subject: it reads the
+    /// subject's text, hints, and tokens and the call's asserted languages,
+    /// and places each boosting keyword back in the medium. Entities pass
+    /// through unchanged when there are no rules or the subject has no text.
+    #[must_use]
+    pub fn apply<M: TextRecognizable>(
         &self,
         mut entities: Vec<Entity<M>>,
         subject: &Subject<M>,
         ctx: &Context<'_, M>,
     ) -> Vec<Entity<M>> {
-        if self.enhancer.is_empty() {
+        if self.is_empty() {
             return entities;
         }
 
         // No recognizable text at this chunk (an un-transcribed clip, an
         // un-OCR'd image): there is nothing for context to enhance against, so
-        // return the wrapped recognizer's entities unchanged.
+        // return the entities unchanged.
         let Some(text) = M::as_text(subject.data(), subject.artifact()) else {
             return entities;
         };
@@ -101,7 +63,7 @@ impl<R> Enhanced<R> {
             context = context.with_tokens(tokens);
         }
 
-        let boosts = self.enhancer.enhance(&mut entities, &context);
+        let boosts = self.enhance(&mut entities, &context);
         for boost in boosts {
             let hint = boost.hint_index.map(|i| subject.hints[i].hint.clone());
             // Where the boosting keyword sits: a hint carries its own location; an
@@ -128,42 +90,5 @@ impl<R> Enhanced<R> {
             ));
         }
         entities
-    }
-}
-
-#[async_trait::async_trait]
-impl<M, R> Recognizer<M> for Enhanced<R>
-where
-    M: TextRecognizable,
-    R: Recognizer<M> + 'static,
-{
-    fn id(&self) -> ComponentId {
-        self.inner.id()
-    }
-
-    async fn recognize(
-        &self,
-        subject: &Subject<M>,
-        ctx: &Context<'_, M>,
-    ) -> Result<Vec<Entity<M>>> {
-        let entities = self.inner.recognize(subject, ctx).await?;
-        Ok(self.enhance(entities, subject, ctx))
-    }
-
-    async fn recognize_batch(
-        &self,
-        subjects: &[Subject<M>],
-        ctx: &Context<'_, M>,
-    ) -> Result<Vec<Vec<Entity<M>>>> {
-        // Forward to the inner recognizer's batch path so its native batching (a
-        // provider-backed inner) is preserved, then enhance each subject's
-        // entities against its own context. `recognize_batch` yields one list per
-        // subject in order, so the zip pairs each subject with its own entities.
-        let batches = self.inner.recognize_batch(subjects, ctx).await?;
-        Ok(subjects
-            .iter()
-            .zip(batches)
-            .map(|(subject, entities)| self.enhance(entities, subject, ctx))
-            .collect())
     }
 }

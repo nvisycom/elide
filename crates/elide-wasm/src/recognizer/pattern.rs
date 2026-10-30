@@ -1,6 +1,5 @@
 //! The pattern recognizer building block.
 
-use elide::recognition::context::Enhanced;
 use elide::recognition::pattern::PatternRecognizer;
 use serde::Deserialize;
 use tsify::{Ts, Tsify};
@@ -24,11 +23,10 @@ pub struct PatternRecognizerConfig {
     pub builtin_dictionaries: bool,
 }
 
-/// Compile a context-enhanced pattern recognizer from the selected built-in
-/// sources.
+/// Compile a pattern recognizer from the selected built-in sources.
 pub(super) fn build_pattern(
     config: Ts<PatternRecognizerConfig>,
-) -> Result<Enhanced<PatternRecognizer>, ElideError> {
+) -> Result<PatternRecognizer, ElideError> {
     let config = config.to_rust().map_err(|e| {
         ElideError::new(
             ElideErrorKind::Configuration,
@@ -42,5 +40,5 @@ pub(super) fn build_pattern(
     if config.builtin_dictionaries {
         builder = builder.with_builtin_dictionaries();
     }
-    Ok(builder.build_context_enhanced()?)
+    Ok(builder.build()?)
 }

@@ -4,9 +4,8 @@
 //! [`Dictionary`]), their building blocks ([`Term`]), and the
 //! runtime [`PatternRecognizer`] that compiles them into pooled
 //! scanners. Per-rule and per-dictionary `context` keyword lists
-//! are harvested by [`PatternRecognizerBuilder::build_context_enhanced`]
-//! into a wrapping `Enhanced` layer that lifts confidence
-//! on matches near a declared keyword.
+//! are gathered into the recognizer's context `Enhancer`, which lifts
+//! confidence on matches near a declared keyword.
 
 mod compiled;
 mod context;

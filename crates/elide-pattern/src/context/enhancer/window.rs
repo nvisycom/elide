@@ -15,7 +15,7 @@
 //! spanning substring for matchers that operate on raw text.
 //!
 //! [`Enhancer::apply_rule`]: super::Enhancer
-//! [`KeywordMatcher`]: crate::matching::KeywordMatcher
+//! [`KeywordMatcher`]: crate::context::matching::KeywordMatcher
 
 use std::ops::Range;
 

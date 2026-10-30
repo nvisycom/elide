@@ -8,11 +8,12 @@
 //!   engine stamped on `Context.artifacts`. It recognizes
 //!   morphological variants substring matching misses.
 //!
-//! [`Enhancer`]: crate::Enhancer
+//! [`Enhancer`]: crate::context::Enhancer
 
 mod lemma;
 mod substring;
 
+use std::fmt::Debug;
 use std::ops::Range;
 
 use elide_core::modality::text::Token;
@@ -60,8 +61,8 @@ pub(crate) fn on_word_boundaries(text: &str, m: &Range<usize>) -> bool {
 /// Keeping the boundary decision in one place (the enhancer) also means
 /// each matcher stays a pure "where does this keyword occur" strategy.
 ///
-/// [`Enhancer`]: crate::Enhancer
-pub trait KeywordMatcher: Send + Sync {
+/// [`Enhancer`]: crate::context::Enhancer
+pub trait KeywordMatcher: Debug + Send + Sync {
     /// The window-relative byte ranges of every keyword occurrence, in
     /// scan order. Empty when none fire. The enhancer offsets a chosen
     /// range into stream coordinates to resolve a location.

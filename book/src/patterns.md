@@ -11,7 +11,7 @@ use elide::recognition::pattern::PatternRecognizer;
 let patterns = PatternRecognizer::builder()
     .with_builtin_patterns()
     .with_builtin_dictionaries()
-    .build_context_enhanced()?;
+    .build()?;
 # Ok(())
 # }
 ```
@@ -25,9 +25,11 @@ ones only for that language.
 
 ## Context
 
-`build_context_enhanced` wraps the recognizer so that keywords near a match
-raise its confidence: a nine-digit number is more likely an identity number
-next to "SSN" than on its own. Use `build` for the recognizer without it.
+A rule can name context keywords, and a keyword near a match raises its
+confidence: a nine-digit number is more likely an identity number next to
+"SSN" than on its own. Keywords match as plain text by default;
+`with_keyword_matcher(LemmaMatcher)` on the builder also matches their other
+word forms when the text was tokenized.
 
 ## Your own patterns
 

@@ -93,7 +93,7 @@ fn build_analyzer() -> Result<Analyzer<Text>> {
     let patterns = PatternRecognizer::builder()
         .with_builtin_patterns()
         .with_builtin_dictionaries()
-        .build_context_enhanced()?;
+        .build()?;
 
     // Mock NER: wired like a real model, limited to the labels it supports;
     // returns no entities offline.

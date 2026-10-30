@@ -27,8 +27,10 @@ ignored = ["iban_validate"]
 
 [dependencies]
 # Internal crates
-elide-context = { workspace = true, features = [] }
 elide-core = { workspace = true, features = ["serde"] }
+
+# Primitive datatypes
+hipstr = { workspace = true, features = [] }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
@@ -45,6 +47,7 @@ async-trait = { workspace = true, features = [] }
 # Text processing
 regex = { workspace = true, features = [] }
 aho-corasick = { workspace = true, features = [] }
+unicode-segmentation = { workspace = true, features = [] }
 
 # Checksums & validators
 bs58 = { workspace = true, features = ["check"] }

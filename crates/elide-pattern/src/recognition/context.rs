@@ -1,5 +1,5 @@
-//! [`BoostKeywords`]: per-rule keyword set used by the post-recognition
-//! [`Enhanced`] layer.
+//! [`BoostKeywords`]: per-rule keyword set the recognizer's context
+//! [`Enhancer`] matches near each match.
 //!
 //! Two shapes:
 //!
@@ -13,7 +13,7 @@
 //!
 //! [`Global`]: BoostKeywords::Global
 //! [`PerLanguage`]: BoostKeywords::PerLanguage
-//! [`Enhanced`]: elide_context::Enhanced
+//! [`Enhancer`]: crate::context::Enhancer
 //! [`Regex::languages`]: super::Regex::languages
 //! [`Dictionary::languages`]: super::Dictionary::languages
 

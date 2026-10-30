@@ -1156,7 +1156,6 @@ dependencies = [
  "elide-audio",
  "elide-backend",
  "elide-codec",
- "elide-context",
  "elide-core",
  "elide-detection",
  "elide-engine",
@@ -1221,16 +1220,6 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "tokio",
-]
-
-[[package]]
-name = "elide-context"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "elide-core",
- "hipstr",
- "unicode-segmentation",
 ]
 
 [[package]]
@@ -1449,8 +1438,8 @@ dependencies = [
  "csv",
  "derive_builder",
  "derive_more",
- "elide-context",
  "elide-core",
+ "hipstr",
  "iban_validate",
  "jiff",
  "phonenumber",
@@ -1458,6 +1447,7 @@ dependencies = [
  "serde",
  "tokio",
  "toml",
+ "unicode-segmentation",
 ]
 
 [[package]]

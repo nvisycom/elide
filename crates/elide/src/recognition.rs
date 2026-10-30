@@ -20,66 +20,11 @@ pub use elide_core::recognition::{
     Context, LabelMap, Recognizer, Scope, ScopeMetadata, Subject, annotation,
 };
 
-/// Context-enhanced recognition: keyword-boosted confidence over another
-/// recognizer.
-///
-/// [`Enhanced`] wraps a [`Recognizer`] and runs an [`Enhancer`] (built
-/// from [`BoostRule`]s) over its entities, lifting confidence where a
-/// context keyword fires near an entity. This is the home of the type
-/// `PatternRecognizer::build_context_enhanced` returns. Re-exported from
-/// [`elide_context`].
-///
-/// The return type of `build_context_enhanced` is now nameable through
-/// the facade, so a caller can store or return it:
-///
-/// ```
-/// # #[cfg(feature = "pattern")] {
-/// use elide::recognition::context::Enhanced;
-/// use elide::recognition::pattern::PatternRecognizer;
-///
-/// fn build() -> Enhanced<PatternRecognizer> {
-///     PatternRecognizer::builder()
-///         .build_context_enhanced()
-///         .expect("recognizer builds")
-/// }
-/// # }
-/// ```
-///
-/// [`Recognizer`]: elide_core::recognition::Recognizer
-/// [`Enhanced`]: elide_context::Enhanced
-/// [`Enhancer`]: elide_context::Enhancer
-/// [`BoostRule`]: elide_context::BoostRule
-pub mod context {
-    #[doc(inline)]
-    pub use elide_context::{
-        Boost, BoostRule, DEFAULT_BOOST, DEFAULT_PREFIX_WORDS, DEFAULT_SUFFIX_WORDS, EnhanceInput,
-        Enhanced, Enhancer,
-    };
-
-    /// Keyword matching for the [`Enhancer`]: the [`KeywordMatcher`] contract
-    /// and its shipped implementations.
-    ///
-    /// `Enhancer::new` takes any [`KeywordMatcher`]; pass a
-    /// [`SubstringMatcher`] (case-insensitive substring hits) or a
-    /// [`LemmaMatcher`] (lemma-aware, matched over [`Token`]s). Re-exported
-    /// from [`elide_context::matching`].
-    ///
-    /// [`Enhancer`]: elide_context::Enhancer
-    /// [`Token`]: elide_core::modality::text::Token
-    /// [`KeywordMatcher`]: elide_context::matching::KeywordMatcher
-    /// [`SubstringMatcher`]: elide_context::matching::SubstringMatcher
-    /// [`LemmaMatcher`]: elide_context::matching::LemmaMatcher
-    pub mod matching {
-        #[doc(inline)]
-        pub use elide_context::matching::{KeywordMatcher, LemmaMatcher, SubstringMatcher};
-    }
-}
-
 /// Recognizer decorators: wrap a [`Recognizer`] to change *how* it runs without
 /// changing *what* it detects.
 ///
 /// Each is itself a [`Recognizer`], so they drop in anywhere one goes and
-/// compose with each other and with [`context::Enhanced`]:
+/// compose with each other:
 ///
 /// - [`ResilientRecognizer`] turns the inner recognizer's errors into empty results
 ///   (logged), so one failing recognizer degrades coverage instead of aborting
@@ -101,7 +46,6 @@ pub mod context {
 /// [`WordWindows`]: elide_detection::WordWindows
 /// [`CharWindows`]: elide_detection::CharWindows
 /// [`CharWindows::for_gliner`]: elide_detection::CharWindows::for_gliner
-/// [`context::Enhanced`]: crate::recognition::context::Enhanced
 pub mod decorator {
     #[doc(inline)]
     pub use elide_detection::{
