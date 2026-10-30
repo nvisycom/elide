@@ -3,13 +3,13 @@
 # Unambiguous suffixes.
 distinctive = [
   "Incorporated", "INCORPORATED", "Inc.", "INC.", "Inc", "INC", "Corporation",
-  "CORPORATION", "Corp.", "CORP.", "L.L.C.", "LLC", "L.L.P.", "LLP",
+  "CORPORATION", "Corp.", "CORP.", "Corp", "L.L.C.", "LLC", "L.L.P.", "LLP",
   "P.L.L.C.", "PLLC", "LLLP", "P.C.",
 ]
 
 # Short or generic: a capitalized word before them is not enough on its own.
 ambiguous = [
-  "& Company", "& Co.", "Company", "COMPANY", "Co.", "CO.", "Corp", "L.P.",
+  "& Company", "& Co.", "Company", "COMPANY", "Co.", "CO.", "L.P.",
   "LP", "PC",
 ]
 

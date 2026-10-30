@@ -9,10 +9,9 @@ use elide_core::recognition::{Context, Recognizer, Scope, Subject};
 use elide_pattern::PatternRecognizer;
 use elide_pattern::patterns::legal_forms;
 
-/// Every `organization_name` the legal-form pattern finds in `text`, with its
-/// confidence. A match inside another is dropped, as same-label reconciliation
-/// would merge it into the longer one.
-async fn organizations(text: &str) -> Vec<(String, Confidence)> {
+/// Every `organization_name` the legal-form pattern finds in `text`: its span
+/// and confidence, in the order found.
+async fn matches(text: &str) -> Vec<(Range<usize>, Confidence)> {
     let recognizer = PatternRecognizer::builder()
         .with_pattern(legal_forms::organization())
         .build()
@@ -20,7 +19,7 @@ async fn organizations(text: &str) -> Vec<(String, Confidence)> {
     let scope = Scope::new();
     let ctx = Context::<Text>::new(&scope);
     let subject = Subject::new(TextData::new(text.to_owned()));
-    let found: Vec<(Range<usize>, Confidence)> = recognizer
+    recognizer
         .recognize(&subject, &ctx)
         .await
         .expect("recognize")
@@ -32,7 +31,13 @@ async fn organizations(text: &str) -> Vec<(String, Confidence)> {
                 e.confidence,
             )
         })
-        .collect();
+        .collect()
+}
+
+/// The names found in `text`, with confidence. A match inside another is
+/// dropped, as same-label reconciliation would merge it into the longer one.
+async fn organizations(text: &str) -> Vec<(String, Confidence)> {
+    let found = matches(text).await;
     let mut outermost: Vec<(String, Confidence)> = found
         .iter()
         .filter(|(range, _)| {
@@ -84,6 +89,22 @@ async fn the_longest_suffix_wins() {
         names("Goldman Sachs & Co. advised").await,
         ["Goldman Sachs & Co."]
     );
+}
+
+#[tokio::test]
+async fn a_name_ends_at_its_first_suffix() {
+    assert_eq!(
+        names("Acme GmbH and Beta GmbH signed").await,
+        ["Acme GmbH", "Beta GmbH"]
+    );
+}
+
+#[tokio::test]
+async fn a_dotted_suffix_is_one_match() {
+    let text = "Bank of America Corp. said";
+    let found = matches(text).await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(&text[found[0].0.clone()], "Bank of America Corp.");
 }
 
 #[tokio::test]

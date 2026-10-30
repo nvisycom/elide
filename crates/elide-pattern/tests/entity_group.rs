@@ -121,4 +121,10 @@ async fn ipv6_matches_whole_tokens_only() {
             .contains(&"::ffff:192.0.2.1".to_owned())
     );
     assert_eq!(ip("loopback ::1").await, ["::1"]);
+    // A separator one match ended on still starts the next.
+    assert_eq!(ip("::1,::2").await, ["::1", "::2"]);
+    assert_eq!(
+        ip("2001:db8::1,2001:db8::2").await,
+        ["2001:db8::1", "2001:db8::2"]
+    );
 }

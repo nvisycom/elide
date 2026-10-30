@@ -11,8 +11,9 @@
 //!   reported, from `stop_words.txt`;
 //! - capitalized words, initials, or numbers on one line, which may be joined
 //!   by a connective ("Bank of America", "Procter & Gamble", "Van der Berg").
-//!   The run is not capped: a cap repeats the Unicode word classes once per
-//!   word and multiplies the compiled size;
+//!   The run is lazy, so a name ends at its first suffix and "Acme GmbH and
+//!   Beta GmbH" is two names. It is not capped: a cap repeats the Unicode word
+//!   classes once per word and multiplies the compiled size;
 //! - an optional comma, then the suffix, then the end of the token.
 //!
 //! The `legal_form` validator drops a match whose name starts with a lead-in
@@ -114,7 +115,7 @@ fn variant(suffixes: &[String], score: f32) -> Variant {
         .collect::<Vec<_>>()
         .join("|");
     let regex = format!(
-        r"\b(?:(?i:{lead_in}){SPACE}+)?(?P<entity>{NAME_WORD}(?:{SPACE}+(?:{CONNECTIVE}{SPACE}+)?{NAME_WORD})*,?{SPACE}+(?:{suffixes}))(?:$|[^\p{{L}}\p{{N}}_])",
+        r"\b(?:(?i:{lead_in}){SPACE}+)?(?P<entity>{NAME_WORD}(?:{SPACE}+(?:{CONNECTIVE}{SPACE}+)?{NAME_WORD})*?,?{SPACE}+(?:{suffixes}))(?:$|[^\p{{L}}\p{{N}}_])",
         suffixes = alternation(suffixes),
     );
     Variant::new(regex)
