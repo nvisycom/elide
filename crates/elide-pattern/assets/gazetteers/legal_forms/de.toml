@@ -1,0 +1,20 @@
+# German company and association forms.
+
+# Unambiguous suffixes.
+distinctive = [
+  "GmbH & Co. KGaA", "GmbH & Co. KG", "AG & Co. KGaA", "AG & Co. KG",
+  "UG (haftungsbeschränkt)", "PartG mbB", "gGmbH", "GmbH", "GMBH", "mbH",
+  "KGaA", "OHG", "PartG", "e.Kfm.", "e.Kfr.", "e.K.", "e.V.", "eG",
+]
+
+# Two letters: also abbreviations in other languages (AG: Attorney General).
+ambiguous = [
+  "AG", "KG", "SE", "UG",
+]
+
+# Words that make a company name nearby more likely; they lift ambiguous matches.
+context = [
+  "gesellschaft", "firma", "unternehmen", "konzern", "vorstand",
+  "aufsichtsrat", "geschäftsführer", "handelsregister", "hrb", "sitz",
+  "company",
+]

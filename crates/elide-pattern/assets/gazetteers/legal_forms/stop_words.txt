@@ -1,0 +1,76 @@
+# Words that can start a sentence or phrase right before a company name but are
+# not part of it ("The Acme GmbH", "From Rossi S.p.A."). The regex consumes one
+# of these ahead of the name without reporting it, and the `legal_form`
+# validator rejects a match whose name starts with one ("The AG said").
+# Matched case-insensitively.
+
+# English
+a
+an
+and
+at
+by
+for
+from
+in
+of
+on
+or
+our
+the
+their
+this
+that
+to
+with
+# German
+am
+an
+bei
+das
+dem
+den
+der
+des
+die
+ein
+eine
+für
+mit
+und
+von
+zu
+# French
+au
+aux
+avec
+chez
+de
+du
+et
+la
+le
+les
+par
+pour
+un
+une
+# Italian
+al
+con
+del
+della
+di
+e
+gli
+il
+lo
+per
+tra
+# Polish
+dla
+i
+od
+przez
+w
+z

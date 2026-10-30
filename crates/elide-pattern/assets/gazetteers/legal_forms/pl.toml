@@ -1,0 +1,16 @@
+# Polish company forms.
+
+# Unambiguous suffixes.
+distinctive = [
+  "spółka z ograniczoną odpowiedzialnością",
+  "Spółka z ograniczoną odpowiedzialnością", "spółka akcyjna",
+  "Spółka Akcyjna", "spółka jawna", "spółka komandytowa", "sp. z o.o. sp.k.",
+  "sp. z o.o.", "Sp. z o.o.", "SP. Z O.O.", "sp.z o.o.", "Sp.z o.o.", "S.K.A.",
+  "P.S.A.", "sp.j.", "Sp.j.", "sp.k.", "Sp.k.", "sp.p.",
+]
+
+# Words that make a company name nearby more likely; they lift ambiguous matches.
+context = [
+  "spółka", "firma", "przedsiębiorstwo", "siedziba", "krs", "nip", "regon",
+  "company",
+]

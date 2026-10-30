@@ -1,0 +1,13 @@
+# United Kingdom company suffixes.
+
+# Unambiguous suffixes.
+distinctive = [
+  "Limited", "LIMITED", "Ltd.", "LTD.", "Ltd", "LTD", "P.L.C.", "PLC", "plc",
+  "LLP", "CIC",
+]
+
+# Words that make a company name nearby more likely; they lift ambiguous matches.
+context = [
+  "company", "companies house", "registered", "incorporated", "firm",
+  "subsidiary",
+]

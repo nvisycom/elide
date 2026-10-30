@@ -39,7 +39,19 @@ assets/
     en/                    English-language terms
       finance/             currencies (USD, US Dollar, EUR, …)
       personal/            languages, nationalities, religions
+
+  gazetteers/
+    legal_forms/           company suffixes per country (us, uk, de, fr, it, pl)
+                           + stop_words.txt (lead-in words: The, From, Der, …)
 ```
+
+A legal-form gazetteer lists a country's suffixes as `distinctive` (GmbH, LLC,
+S.p.A.) or `ambiguous` (also an ordinary abbreviation: AG, SA, LP), plus
+`context` keywords. `src/shipped/patterns/legal_forms.rs` merges every gazetteer
+into one `organization_name` pattern: the name in front of the suffix is the
+match, a lead-in word before it is skipped, and ambiguous suffixes score below
+the default threshold so they need a context keyword. Adding a country is a new
+TOML file plus one line in `GAZETTEERS`.
 
 Each pattern is a TOML file (`<name>.toml`). Each dictionary pairs a TOML
 metadata sidecar with a term source: `.csv` for multi-column lists (term + alias
@@ -70,11 +82,27 @@ A pattern variant can declare `validator = "<name>"` to drop matches that fail a
 post-match structural check. Built-in names (resolved via
 `ValidatorRegistry::builtin`):
 
-- Universal: `luhn`, `iban`, `phone`, `date`, `crypto.btc`
+- Universal: `luhn`, `iban`, `phone`, `date`, `crypto.btc`, `legal_form`
 - US: `us.ssn`, `us.aba_routing`, `us.npi`, `us.dea_number`, `us.postal_code`
 - UK: `uk.nhs`, `uk.nino`, `uk.driving_licence`, `uk.vehicle_registration`
 
 Each lives in `src/validators/` under the matching submodule.
+
+## Spans
+
+A match's span is the whole match, unless the regex defines a capture group
+named `entity`: then only that group is reported, and the rest of the match is
+context that must be present but is not part of the entity. This stands in for
+lookaround, which the `regex` crate does not support:
+
+```toml
+# Require a token boundary after the address without including it.
+regex = '\b(?P<entity>(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{1,4})(?:$|[^0-9A-Za-z:.])'
+```
+
+A validator sees only the group's text. Context outside the group is consumed,
+so the next match starts after it. `world/network/ipv6.toml` uses this for both
+a leading and a trailing boundary.
 
 ## Attribution
 

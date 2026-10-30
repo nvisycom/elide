@@ -1,0 +1,20 @@
+# United States business-entity suffixes.
+
+# Unambiguous suffixes.
+distinctive = [
+  "Incorporated", "INCORPORATED", "Inc.", "INC.", "Inc", "INC", "Corporation",
+  "CORPORATION", "Corp.", "CORP.", "L.L.C.", "LLC", "L.L.P.", "LLP",
+  "P.L.L.C.", "PLLC", "LLLP", "P.C.",
+]
+
+# Short or generic: a capitalized word before them is not enough on its own.
+ambiguous = [
+  "& Company", "& Co.", "Company", "COMPANY", "Co.", "CO.", "Corp", "L.P.",
+  "LP", "PC",
+]
+
+# Words that make a company name nearby more likely; they lift ambiguous matches.
+context = [
+  "company", "corporation", "incorporated", "firm", "llc", "subsidiary",
+  "headquartered",
+]

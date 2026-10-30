@@ -8,7 +8,7 @@
 //! can't.
 //!
 //! [`ValidatorRegistry::builtin`] ships universal validators
-//! ([`luhn`], [`iban`], [`phone`], [`date`], [`btc`]) plus
+//! ([`luhn`], [`iban`], [`phone`], [`date`], [`btc`], [`legal_form`]) plus
 //! jurisdiction-scoped sets re-exported from [`us`] (`"us.ssn"`,
 //! `"us.aba_routing"`, `"us.npi"`, `"us.dea_number"`,
 //! `"us.postal_code"`), [`uk`]
@@ -35,6 +35,7 @@ mod btc;
 mod date;
 mod iban;
 mod ip;
+pub(crate) mod legal_form;
 mod luhn;
 mod phone;
 mod swift;
@@ -68,6 +69,7 @@ pub use self::btc::btc;
 pub use self::date::date;
 pub use self::iban::iban;
 pub use self::ip::{ipv4, ipv6};
+pub use self::legal_form::legal_form;
 pub use self::luhn::luhn;
 pub use self::phone::phone;
 pub use self::swift::swift;
@@ -140,7 +142,7 @@ impl ValidatorRegistry {
     /// validators.
     ///
     /// Universal keys: `"luhn"`, `"iban"`, `"phone"`, `"date"`,
-    /// `"crypto.btc"`.
+    /// `"crypto.btc"`, `"legal_form"`.
     ///
     /// US-scoped: `"us.ssn"`, `"us.aba_routing"`, `"us.npi"`,
     /// `"us.dea_number"`, `"us.postal_code"`.
@@ -192,6 +194,7 @@ impl ValidatorRegistry {
             .with_simple("ipv4", ipv4)
             .with_simple("ipv6", ipv6)
             .with_simple("crypto.btc", btc)
+            .with_simple("legal_form", legal_form)
             .with_simple("us.ssn", us::ssn)
             .with_simple("us.aba_routing", us::aba_routing)
             .with_simple("us.npi", us::npi)
