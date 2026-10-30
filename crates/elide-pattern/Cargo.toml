@@ -39,7 +39,6 @@ csv = { workspace = true, features = [] }
 
 # Derive macros & error handling
 derive_builder = { workspace = true, features = [] }
-derive_more = { workspace = true, features = ["from"] }
 
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
