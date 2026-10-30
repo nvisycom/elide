@@ -76,6 +76,8 @@ async fn keeps_the_inner_words_of_a_firm_name() {
             "Everything Is Better Between Friends LLC operates here.",
             "Everything Is Better Between Friends LLC",
         ),
+        ("McDonald's Corp. said", "McDonald's Corp."),
+        ("Joe's Crab Shack LLC opened", "Joe's Crab Shack LLC"),
     ] {
         assert_eq!(names(text).await, [name], "in {text:?}");
     }

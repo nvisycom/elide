@@ -166,8 +166,8 @@ fn last_phrase_end(span: &str, phrase: &str) -> Option<usize> {
         .filter(|(i, _)| {
             let before = span[..*i].chars().next_back();
             let after = span[i + phrase.len()..].chars().next();
-            before.is_none_or(|c| !c.is_alphanumeric())
-                && after.is_none_or(|c| !c.is_alphanumeric())
+            before.is_none_or(|c| !scan::is_word_char(c))
+                && after.is_none_or(|c| !scan::is_word_char(c))
         })
         .map(|(i, _)| i + phrase.len())
         .last()

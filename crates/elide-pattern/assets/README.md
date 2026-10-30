@@ -99,7 +99,7 @@ lookaround, which the `regex` crate does not support:
 
 ```toml
 # Require a token boundary after the address without including it.
-regex = '\b(?P<entity>(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{1,4})(?:$|[^0-9A-Za-z:.])'
+regex = '\b(?P<entity>(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{1,4})(?:$|[^0-9A-Za-z:.%/_-])'
 ```
 
 A validator sees only the group's text. Context outside the group is consumed,

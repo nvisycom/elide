@@ -1,6 +1,8 @@
 //! [`PatternRecognizerBuilder`]: collects rules and compiles them into a
 //! [`PatternRecognizer`].
 
+use std::collections::HashSet;
+use std::mem;
 use std::result::Result as StdResult;
 use std::sync::Arc;
 
@@ -58,6 +60,11 @@ impl RegexBudget {
 pub struct PatternRecognizerBuilder {
     patterns: Vec<Pattern>,
     dictionaries: Vec<Dictionary>,
+    /// Dictionaries [`filter_by_catalog`] dropped that a kept rule's context
+    /// still draws keywords from. They feed context only, never recognition.
+    ///
+    /// [`filter_by_catalog`]: Self::filter_by_catalog
+    context_sources: Vec<Dictionary>,
     walks: Vec<Walk>,
     validators: Option<ValidatorRegistry>,
     /// Byte budget for each *individual* variant regex. This is the knob to
@@ -234,21 +241,41 @@ impl PatternRecognizerBuilder {
         self
     }
 
-    /// Drop every pattern and dictionary none of whose candidate labels are
-    /// declared in `catalog`.
+    /// Drop every pattern, dictionary, and walk none of whose candidate
+    /// labels are declared in `catalog`.
     ///
     /// The engine uses this to build a per-request recognizer from a
     /// workspace-wide template, rules that could emit no label any policy
     /// declared never run. A rule is kept when *any* of its candidates is in
-    /// the catalog; at recognize time it emits the first one that is.
+    /// the catalog; at recognize time it emits the first one that is. A
+    /// dropped dictionary that a kept rule's `[context]` names still supplies
+    /// that rule's keywords, without recognizing anything itself.
     #[must_use]
     pub fn filter_by_catalog(mut self, catalog: &LabelCatalog) -> Self {
         self.patterns
             .retain(|p| p.labels.iter().any(|l| catalog.contains(l)));
-        self.dictionaries
-            .retain(|d| d.labels.iter().any(|l| catalog.contains(l)));
         self.walks
             .retain(|w| w.labels.iter().any(|l| catalog.contains(l)));
+        let (kept, dropped): (Vec<_>, Vec<_>) = mem::take(&mut self.dictionaries)
+            .into_iter()
+            .partition(|d| d.labels.iter().any(|l| catalog.contains(l)));
+        self.dictionaries = kept;
+
+        let contexts = self
+            .patterns
+            .iter()
+            .map(|p| &p.context)
+            .chain(self.dictionaries.iter().map(|d| &d.context))
+            .chain(self.walks.iter().map(|w| &w.context));
+        let referenced: HashSet<&str> = contexts
+            .flat_map(|c| c.dictionaries.iter().map(String::as_str))
+            .collect();
+        let sources: Vec<Dictionary> = mem::take(&mut self.context_sources)
+            .into_iter()
+            .chain(dropped)
+            .filter(|d| referenced.contains(d.name.as_str()))
+            .collect();
+        self.context_sources = sources;
         self
     }
 
@@ -325,7 +352,8 @@ impl PatternRecognizerBuilder {
         declared: &RuleContext,
         contexts: &mut Vec<CompiledContext>,
     ) -> Option<usize> {
-        let context = CompiledContext::compile(declared, &self.dictionaries)?;
+        let sources = self.dictionaries.iter().chain(&self.context_sources);
+        let context = CompiledContext::compile(declared, sources)?;
         contexts.push(context);
         Some(contexts.len() - 1)
     }

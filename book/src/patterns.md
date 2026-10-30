@@ -52,9 +52,10 @@ Without one, a lowercase word after the first capitalized one ends the name.
 
 A rule can name context keywords, and a keyword near a match raises its
 confidence: a nine-digit number is more likely an identity number next to
-"SSN" than on its own. Keywords match as plain text by default;
+"SSN" than on its own. Keywords match whole words by default; `match =
+"substring"` in a rule's `[context]` also matches them inside longer words.
 `with_keyword_matcher(LemmaMatcher)` on the builder also matches their other
-word forms when the text was tokenized.
+word forms when the text was tokenized, under the same word-boundary rule.
 
 ## Your own patterns
 

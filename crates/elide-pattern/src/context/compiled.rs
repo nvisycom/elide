@@ -39,9 +39,12 @@ pub(super) struct CompiledAnchor {
 impl CompiledContext {
     /// Compile `declared`, drawing dictionary-sourced keywords from
     /// `dictionaries`. `None` when it declares no keywords and no anchor.
-    pub(crate) fn compile(declared: &RuleContext, dictionaries: &[Dictionary]) -> Option<Self> {
+    pub(crate) fn compile<'a>(
+        declared: &RuleContext,
+        dictionaries: impl IntoIterator<Item = &'a Dictionary>,
+    ) -> Option<Self> {
         let sourced = dictionaries
-            .iter()
+            .into_iter()
             .filter(|d| declared.dictionaries.contains(&d.name))
             .flat_map(|d| d.terms.iter().map(|t| t.term.clone()));
         let global: Vec<String> = declared.keywords.iter().cloned().chain(sourced).collect();

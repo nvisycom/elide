@@ -6,12 +6,12 @@
 //! [`Refinement`]: elide_core::entity::audit::AuditKind::Refinement
 
 use elide_core::entity::audit::AuditKind;
-use elide_core::entity::builtins;
+use elide_core::entity::{LabelCatalog, builtins};
 use elide_core::modality::text::{Text, TextData};
 use elide_core::primitive::Confidence;
 use elide_core::recognition::{Context, Recognizer, Scope, Subject};
 use elide_pattern::context::RuleContext;
-use elide_pattern::{Pattern, PatternRecognizer, Variant};
+use elide_pattern::{Dictionary, Pattern, PatternRecognizer, Term, Variant};
 
 #[tokio::test]
 async fn keywords_boost_matches_near_them_only() {
@@ -183,4 +183,52 @@ async fn keywords_lift_only_their_own_rules_matches() {
     };
     assert!(confidence("123-45-6789") > 0.4);
     assert!((confidence("AB123456") - 0.4).abs() < f32::EPSILON);
+}
+
+/// A dictionary the catalog filter drops still supplies the keywords of a kept
+/// rule that names it in `[context]`, and recognizes nothing itself.
+#[tokio::test]
+async fn catalog_filter_keeps_context_dictionaries() {
+    let keywords = Dictionary::builder()
+        .with_name("ssn_words")
+        .with_labels(vec![builtins::PERSON_NAME.to_ref()])
+        .with_terms(vec![Term::new("ssn")])
+        .build()
+        .expect("dictionary builds");
+    let variant = Variant::new(r"\b\d{3}-\d{2}-\d{4}\b")
+        .expect("ssn variant builds")
+        .with_score(Confidence::clamped(0.6));
+    let context = RuleContext {
+        dictionaries: vec!["ssn_words".to_owned()],
+        ..RuleContext::default()
+    };
+    let pattern = Pattern::builder()
+        .with_name("ssn")
+        .with_labels(vec![builtins::GOVERNMENT_ID.to_ref()])
+        .with_context(context)
+        .with_variants(vec![variant])
+        .build()
+        .expect("ssn pattern builds");
+
+    let mut catalog = LabelCatalog::new();
+    catalog.insert(builtins::GOVERNMENT_ID.clone());
+    let recognizer = PatternRecognizer::builder()
+        .with_pattern(pattern)
+        .with_dictionary(keywords)
+        .filter_by_catalog(&catalog)
+        .build()
+        .expect("recognizer builds");
+
+    let data = TextData::new("SSN: 123-45-6789".to_owned());
+    let scope = Scope::new();
+    let ctx = Context::<Text>::new(&scope);
+    let entities = recognizer
+        .recognize(&Subject::new(data), &ctx)
+        .await
+        .expect("recognize");
+    assert_eq!(entities.len(), 1, "the dropped dictionary emits nothing");
+    assert!(
+        entities[0].confidence.get() > 0.6,
+        "the dictionary's term still boosts the pattern",
+    );
 }

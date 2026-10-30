@@ -36,6 +36,16 @@ async fn a_title_starts_the_next_name() {
 }
 
 #[tokio::test]
+async fn an_initial_or_an_ambiguous_title_inside_a_name_does_not_end_it() {
+    for (text, name) in [
+        ("Dr. John M. Smith said", "John M. Smith"),
+        ("Dr. Don Draper said", "Don Draper"),
+    ] {
+        assert_eq!(names(person_title(), text).await, [name], "in {text:?}");
+    }
+}
+
+#[tokio::test]
 async fn a_title_before_a_generic_word_is_not_a_person() {
     for text in [
         "the Justice Department said",

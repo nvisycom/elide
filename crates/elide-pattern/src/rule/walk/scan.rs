@@ -200,7 +200,7 @@ pub(super) fn word_key(word: &str) -> String {
     word.to_lowercase()
 }
 
-fn is_word_char(c: char) -> bool {
+pub(super) fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || matches!(c, '&' | '\'' | '’' | '-' | '.' | '/') || is_combining(c)
 }
 

@@ -44,8 +44,9 @@ pub(super) struct Anchors {
     /// Abbreviated anchors, by [`scan::anchor_key`]: one reached across a
     /// connective or comma ends a backward walk ("Acme GmbH and Beta GmbH").
     endings: HashSet<String>,
-    /// Single-word anchors, by [`scan::anchor_key`]: one reached by a forward
-    /// walk starts another name ("Mr. and Mrs. Smith").
+    /// Distinctive single-word anchors, by [`scan::anchor_key`]: one reached by
+    /// a forward walk starts another name ("Mr. and Mrs. Smith"). An ambiguous
+    /// anchor is also an initial or a name word ("John M. Smith", "Don").
     words: HashSet<String>,
 }
 
@@ -68,8 +69,7 @@ impl Anchors {
         let single_words = || {
             walk.anchors
                 .iter()
-                .map(|t| t.term.as_str())
-                .filter(|term| !term.contains(char::is_whitespace))
+                .filter(|t| !t.term.contains(char::is_whitespace))
         };
         Ok(Self {
             automaton,
@@ -79,10 +79,13 @@ impl Anchors {
                 .map(|t| t.score.unwrap_or(walk.score))
                 .collect(),
             endings: single_words()
-                .filter(|term| is_abbreviation(term))
-                .map(scan::anchor_key)
+                .filter(|t| is_abbreviation(&t.term))
+                .map(|t| scan::anchor_key(&t.term))
                 .collect(),
-            words: single_words().map(scan::anchor_key).collect(),
+            words: single_words()
+                .filter(|t| t.score.is_none_or(|score| score >= walk.score))
+                .map(|t| scan::anchor_key(&t.term))
+                .collect(),
         })
     }
 
