@@ -1,11 +1,17 @@
 # IPv6 address.
 #
 # IPv6 has many compression forms (`::`, embedded IPv4, mixed splits) that a
-# single strict regex either truncates or over-matches — Rust's `regex` crate
-# has no look-around to disambiguate them. Instead a permissive regex captures
-# a maximal address-shaped token and the `ipv6` validator confirms it with the
-# standard library's parser (the reference implementation), the same
-# permissive-match-then-validate approach the checksum patterns use.
+# single strict regex either truncates or over-matches. Instead a permissive
+# regex captures a maximal address-shaped token and the `ipv6` validator
+# confirms it with the standard library's parser (the reference
+# implementation), the same permissive-match-then-validate approach the
+# checksum patterns use.
+#
+# Each variant reports its `entity` group and requires what follows it to end
+# the token: end of input, or a character that cannot continue an address. A
+# `.` may follow only when it ends the token too (a sentence-final period), not
+# when more of the token comes after it. Without that check the regex would
+# match the valid prefix of a malformed token: `2001:db8::1` in `2001:db8::1g`.
 
 name = "ipv6"
 labels = ["ip_address"]
@@ -13,12 +19,14 @@ labels = ["ip_address"]
 [[variants]]
 # Addresses with leading hex groups: `(hex:){2,7}` then an optional trailing
 # hextet or embedded IPv4 quad, with optional `%zone` and `/prefix`.
-regex = '\b(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f.]{0,4}(?:%[0-9A-Za-z]+)?(?:/\d{1,3})?'
+regex = '\b(?P<entity>(?:[0-9A-Fa-f]{0,4}:){2,7}(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9A-Fa-f]{1,4})?(?:%[0-9A-Za-z]+)?(?:/\d{1,3})?)(?:$|[^0-9A-Za-z:.%/_-]|\.(?:$|[^0-9A-Za-z]))'
 score = 0.6
 validator = "ipv6"
 
 [[variants]]
-# Addresses that start with `::` (`::1`, `::ffff:192.0.2.1`, `::`).
-regex = '::(?:[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4})*(?:\.\d{1,3}){0,3})?(?:%[0-9A-Za-z]+)?(?:/\d{1,3})?'
+# Addresses that start with `::` (`::1`, `::ffff:192.0.2.1`, `::`). The `::`
+# must start the token too, so this does not re-match the tail of a longer
+# address (`::1` inside `2001:db8::1`).
+regex = '(?:^|[^0-9A-Za-z:.%/_-])(?P<entity>::(?:[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4})*(?:\.\d{1,3}){0,3})?(?:%[0-9A-Za-z]+)?(?:/\d{1,3})?)(?:$|[^0-9A-Za-z:.%/_-]|\.(?:$|[^0-9A-Za-z]))'
 score = 0.6
 validator = "ipv6"

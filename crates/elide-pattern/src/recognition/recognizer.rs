@@ -20,7 +20,7 @@ use regex::{
 use super::compiled::{CompiledDictionary, CompiledPattern, RawMatch, has_word_boundaries};
 use super::context::Matching;
 use super::dictionary::Dictionary;
-use super::regex::Regex;
+use super::regex::{Regex, Variant};
 use crate::shipped;
 use crate::validators::{ValidationContext, ValidatorRegistry};
 
@@ -417,11 +417,15 @@ impl PatternRecognizerBuilder {
                         )
                     })?),
                 };
+                let span_group = regex
+                    .capture_names()
+                    .position(|name| name == Some(Variant::ENTITY_GROUP));
                 regex_sources.push(variant.regex.clone());
                 compiled.push(CompiledPattern {
                     pattern_name: pattern.name.clone(),
                     labels: pattern.labels.clone(),
                     regex,
+                    span_group,
                     score: variant.score,
                     validator,
                     languages: pattern.languages.clone(),
@@ -791,7 +795,7 @@ impl<M: TextRecognizable> Recognizer<M> for PatternRecognizer {
                     countries: ctx.scope().countries.clone(),
                     language: ctx.languages(subject).primary().cloned(),
                 };
-                for m in pat.regex.find_iter(text) {
+                for m in pat.spans(text) {
                     if let Some(validator) = pat.validator.as_ref()
                         && !validator.validate(m.as_str(), &validation_ctx)
                     {

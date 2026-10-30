@@ -15,13 +15,32 @@ use super::context::BoostKeywords;
 /// resolved against the [`ValidatorRegistry`] at recognizer-build
 /// time so structurally-suspect matches can be dropped.
 ///
+/// # Spans
+///
+/// A match's span is the whole match, unless the regex defines a capture group
+/// named [`ENTITY_GROUP`] (`entity`): then that group is the span, and the rest
+/// of the match is context that must be present but is not part of the entity.
+/// This stands in for lookaround, which the `regex` crate does not support:
+///
+/// ```toml
+/// # A trailing boundary: `2001:db8::1` matches, the prefix of `2001:db8::1g` does not.
+/// regex = '(?P<entity>[0-9A-Fa-f:]+)(?:$|[^0-9A-Za-z:])'
+/// ```
+///
+/// Context outside the group is consumed, so the next match starts after it.
+/// A match whose `entity` group did not participate, or matched nothing, is
+/// skipped, and a validator sees only the group's text.
+///
 /// [`ValidatorRegistry`]: crate::validators::ValidatorRegistry
+/// [`ENTITY_GROUP`]: Self::ENTITY_GROUP
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Variant {
     /// Regex source. Compiled to a [`::regex::Regex`] by
-    /// [`PatternRecognizer::build`].
+    /// [`PatternRecognizer::build`]. An [`ENTITY_GROUP`] capture group, when
+    /// present, narrows each match to that group (see [Spans](Self#spans)).
     ///
     /// [`PatternRecognizer::build`]: super::PatternRecognizer
+    /// [`ENTITY_GROUP`]: Self::ENTITY_GROUP
     pub regex: String,
     /// Confidence stamped on every match, before any
     /// post-recognition keyword boost.
@@ -36,6 +55,10 @@ pub struct Variant {
 }
 
 impl Variant {
+    /// The capture-group name that marks a match's entity span: a regex with a
+    /// `(?P<entity>…)` group reports that group instead of the whole match.
+    pub const ENTITY_GROUP: &'static str = "entity";
+
     /// Construct a variant from a regex source.
     ///
     /// `score` defaults to [`Confidence::MAX`] and `validator` to

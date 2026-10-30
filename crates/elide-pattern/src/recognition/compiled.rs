@@ -22,7 +22,7 @@ use std::sync::Arc;
 use elide_core::entity::LabelRef;
 use elide_core::entity::audit::PatternEvent;
 use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
-use regex::Regex;
+use regex::{Match, Regex};
 
 use crate::validators::Validator;
 
@@ -55,6 +55,11 @@ pub(super) struct CompiledPattern {
     /// against the request catalog before emitting.
     pub labels: Vec<LabelRef>,
     pub regex: Regex,
+    /// Index of the regex's [`ENTITY_GROUP`] capture group, when it defines
+    /// one: that group, not the whole match, is the entity's span.
+    ///
+    /// [`ENTITY_GROUP`]: super::Variant::ENTITY_GROUP
+    pub span_group: Option<usize>,
     pub score: Confidence,
     pub validator: Option<Arc<dyn Validator>>,
     /// Languages the parent pattern applies to.
@@ -66,6 +71,29 @@ pub(super) struct CompiledPattern {
 }
 
 impl CompiledPattern {
+    /// Each match's entity span in `text`: the [`span_group`] when the regex
+    /// defines one, otherwise the whole match. A match whose group did not
+    /// participate, or matched nothing, yields no span.
+    ///
+    /// [`span_group`]: Self::span_group
+    pub(super) fn spans<'t>(&'t self, text: &'t str) -> impl Iterator<Item = Match<'t>> + 't {
+        let (whole, grouped) = match self.span_group {
+            None => (Some(self.regex.find_iter(text)), None),
+            Some(group) => {
+                let spans = self
+                    .regex
+                    .captures_iter(text)
+                    .filter_map(move |caps| caps.get(group))
+                    .filter(|m| !m.is_empty());
+                (None, Some(spans))
+            }
+        };
+        whole
+            .into_iter()
+            .flatten()
+            .chain(grouped.into_iter().flatten())
+    }
+
     /// A [`RawMatch`] for a regex hit at `range` under the resolved `label`
     /// (the first candidate the request catalog declared), for the recognizer
     /// to place.
