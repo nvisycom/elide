@@ -28,7 +28,8 @@ impl CompiledWalk {
             pos = step.end;
             let word = &text[step.clone()];
             // "Mr. and Mrs. Smith": another anchor starts another name.
-            if self.anchors.is_anchor(word) {
+            let linked = name.last().is_some_and(|(_, connective)| *connective);
+            if self.anchors.starts_name(word, linked) {
                 break;
             }
             // "…of Finance." ends the sentence: the word is part of the name,

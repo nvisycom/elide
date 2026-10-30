@@ -44,10 +44,13 @@ pub(super) struct Anchors {
     /// Abbreviated anchors, by [`scan::anchor_key`]: one reached across a
     /// connective or comma ends a backward walk ("Acme GmbH and Beta GmbH").
     endings: HashSet<String>,
-    /// Distinctive single-word anchors, by [`scan::anchor_key`]: one reached by
-    /// a forward walk starts another name ("Mr. and Mrs. Smith"). An ambiguous
-    /// anchor is also an initial or a name word ("John M. Smith", "Don").
+    /// Single-word anchors, by [`scan::anchor_key`]: one reached by a forward
+    /// walk across a connective starts another name ("Mr. and Mrs. Smith").
     words: HashSet<String>,
+    /// The distinctive ones among `words`: these start another name anywhere.
+    /// An ambiguous anchor is also an initial or a name word ("John M.
+    /// Smith", "Don Draper").
+    distinctive: HashSet<String>,
 }
 
 impl Anchors {
@@ -82,7 +85,8 @@ impl Anchors {
                 .filter(|t| is_abbreviation(&t.term))
                 .map(|t| scan::anchor_key(&t.term))
                 .collect(),
-            words: single_words()
+            words: single_words().map(|t| scan::anchor_key(&t.term)).collect(),
+            distinctive: single_words()
                 .filter(|t| t.score.is_none_or(|score| score >= walk.score))
                 .map(|t| scan::anchor_key(&t.term))
                 .collect(),
@@ -94,9 +98,16 @@ impl Anchors {
         self.endings.contains(&scan::anchor_key(word))
     }
 
-    /// Whether `word` is an anchor itself.
-    pub(super) fn is_anchor(&self, word: &str) -> bool {
-        self.words.contains(&scan::anchor_key(word))
+    /// Whether `word` starts another name when a forward walk meets it,
+    /// `linked` when a connective comes right before it.
+    pub(super) fn starts_name(&self, word: &str, linked: bool) -> bool {
+        let key = scan::anchor_key(word);
+        let anchors = if linked {
+            &self.words
+        } else {
+            &self.distinctive
+        };
+        anchors.contains(&key)
     }
 }
 
