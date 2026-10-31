@@ -50,7 +50,6 @@ pub struct RenderedPage {
 ///
 /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if PDFium
 /// cannot load or render the document (or the native library is unavailable).
-#[cfg(feature = "image")]
 pub(crate) fn render_pages(
     store: &Store,
     numbers: BTreeSet<u32>,

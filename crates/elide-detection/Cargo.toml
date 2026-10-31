@@ -31,6 +31,10 @@ serde = ["dep:serde", "elide-core/serde"]
 ## crate's serializable config.
 schema = ["serde", "dep:schemars", "elide-core/schema"]
 
+## The `FieldRecognizer`: one entity per metadata field its codec labels, the
+## same way for every format. Enables elide-core's `metadata` modality.
+metadata = ["elide-core/metadata"]
+
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }

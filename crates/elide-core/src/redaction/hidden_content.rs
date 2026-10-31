@@ -137,6 +137,9 @@ pub enum HiddenContent {
     /// Content from an earlier revision of the file that is no longer part of
     /// the document.
     PriorRevision,
+    /// Content the document carries but never displays: a markup template, an
+    /// element marked hidden.
+    Undisplayed,
     /// An interactive form field and its value.
     FormField,
     /// Navigation outside the page: bookmarks, article threads.
@@ -149,6 +152,10 @@ pub enum HiddenContent {
     Layer,
     /// An embedded file no codec can read, so it cannot be redacted.
     Unreadable,
+    /// Embedded content surfaced for detection that no pipeline is configured
+    /// to scan, such as a document's metadata redacted with no metadata
+    /// pipeline, so it cannot be redacted.
+    Unscanned,
 }
 
 impl HiddenContent {
@@ -171,11 +178,11 @@ impl HiddenContent {
             | Self::ApplicationData
             | Self::Signature
             | Self::Credential => HiddenContentKind::Fingerprint,
-            Self::PriorRevision => HiddenContentKind::Remnant,
+            Self::PriorRevision | Self::Undisplayed => HiddenContentKind::Remnant,
             Self::FormField | Self::Outline | Self::AlternativeText | Self::Layer => {
                 HiddenContentKind::Unextracted
             }
-            Self::Unreadable => HiddenContentKind::EmbeddedObject,
+            Self::Unreadable | Self::Unscanned => HiddenContentKind::EmbeddedObject,
         }
     }
 }
@@ -200,12 +207,14 @@ pub enum HiddenContentKind {
     ActiveContent,
     /// Traces that identify the author, their machine, or the file's history.
     Fingerprint,
-    /// Leftover content that is no longer part of the document.
+    /// Content the file carries that is not part of what a reader sees:
+    /// leftovers of earlier revisions, content never displayed.
     Remnant,
     /// Content a reader can reach that no extraction reads, so detection
     /// cannot redact it.
     Unextracted,
-    /// Embedded files no codec can read.
+    /// Embedded content that cannot be redacted: no codec reads it, or no
+    /// pipeline scans it.
     EmbeddedObject,
 }
 

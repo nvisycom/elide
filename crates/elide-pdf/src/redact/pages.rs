@@ -7,9 +7,6 @@
 //! draw that one image over the whole page, so nothing of the original page
 //! content survives underneath, while every other page of the document is left
 //! untouched (a born-digital page keeps its selectable, glyph-redacted text).
-//!
-//! Behind the `image` feature (like [`redact_images`](crate::document::Pdf::redact_images)),
-//! which pulls the `image` crate to build the XObject.
 
 use elide_core::{Error, ErrorKind, Result};
 use lopdf::{Object, dictionary};
@@ -21,7 +18,6 @@ use crate::document::{Store, save};
 ///
 /// The `image` bytes are a self-contained encoded image (PNG or JPEG) of the
 /// redacted page.
-#[cfg_attr(docsrs, doc(cfg(feature = "image")))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageReplacement {
     /// 1-based page number to reflatten.

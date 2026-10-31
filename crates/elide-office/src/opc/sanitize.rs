@@ -8,13 +8,15 @@
 //! - **Metadata**: the document properties are stripped unless the policy
 //!   redacts them; custom XML is not surfaced for detection, so it is stripped
 //!   under [`Redact`](Disposition::Redact) too.
-//! - **Collaboration** (comments, their authors, a workbook's revision log) is
-//!   stripped unless the policy redacts it, and a format's tracked revisions and
-//!   comment anchors are resolved in its stories by the format's element edits.
+//! - **Collaboration** (comments and their authors) is stripped unless the
+//!   policy redacts it, and a format's tracked revisions and comment anchors
+//!   are resolved in its stories by the format's element edits. A workbook's
+//!   revision log is never extracted, so it is stripped under
+//!   [`Redact`](Disposition::Redact) too.
 //! - **Always removed**: the thumbnail, active content (macros, ActiveX, web
 //!   extensions), links to external data, printer settings, signatures, and
-//!   application-private data; and every external relationship but a
-//!   hyperlink.
+//!   application-private data; every external relationship but a hyperlink;
+//!   and, in every kept part, alternative text and tooltips.
 //! - **Refused**: a part the table does not recognize, or one it recognizes but
 //!   cannot redact.
 //!
@@ -33,17 +35,19 @@ use elide_core::{Error, ErrorKind, Result};
 
 use crate::opc::PartClassifier;
 use crate::opc::archive::{self, Entry};
+use crate::opc::attributes::{ALTERNATIVE_TEXT, TOOLTIPS};
 use crate::opc::content_types::{self, CONTENT_TYPES_PART};
 use crate::opc::index::{Index, text};
 use crate::opc::kind::PartKind;
 use crate::opc::part::PartPath;
+use crate::opc::props::UnsurfacedProperties;
 use crate::opc::references::References;
 use crate::opc::relationships::{self, HYPERLINK};
-use crate::opc::xml_edit::{self, Rules};
+use crate::opc::xml_edit::{self, Edit};
 
 /// A list of element edits, each naming the hidden content it removes through
-/// [`Rules::content`].
-pub(crate) type Edits<'a> = Vec<&'a dyn Rules>;
+/// [`Edit::content`].
+pub(crate) type Edits<'a> = Vec<&'a dyn Edit>;
 
 /// A format's part of the sanitizing: the element edits it applies to the
 /// parts that stay. A sanitizer is a [`PartClassifier`] too, so checking an
@@ -85,7 +89,17 @@ pub(crate) fn sanitize(
         }
     }
 
-    let edits = |path: &PartPath| sanitizer.edits(kinds[path], policy);
+    let edits = |path: &PartPath| {
+        let kind = kinds[path];
+        let mut edits = sanitizer.edits(kind, policy);
+        edits.push(&ALTERNATIVE_TEXT);
+        edits.push(&TOOLTIPS);
+        // A redacted property part keeps only the fields detection sees.
+        if kind == PartKind::Properties && policy.metadata == Disposition::Redact {
+            edits.push(&UnsurfacedProperties);
+        }
+        edits
+    };
     let bytes = repack(document, &index, gone, &edits, &mut stripped)?;
     Ok((bytes, stripped))
 }
@@ -217,7 +231,9 @@ fn removal(
         PartKind::Comments | PartKind::CommentAuthors if strips_collaboration => {
             Some(HiddenContent::Comment)
         }
-        PartKind::Revisions if strips_collaboration => Some(HiddenContent::TrackedChange),
+        // A workbook's revision log is never extracted, so it is stripped
+        // whatever the policy.
+        PartKind::Revisions => Some(HiddenContent::TrackedChange),
         PartKind::Hidden(content) => Some(content),
         PartKind::Unsupported => return Err(refused(path, "is not supported for redaction")),
         PartKind::Unknown => {
@@ -239,10 +255,10 @@ fn edit_part(
     stripped: &mut StrippedContent,
 ) -> Result<Option<String>> {
     let mut current: Option<String> = None;
-    for rules in edits {
+    for edit in edits {
         let source = current.as_deref().map_or_else(|| text(path, bytes), Ok)?;
-        if let Some(edited) = xml_edit::edit(source, rules)? {
-            if let Some(content) = rules.content() {
+        if let Some(edited) = edit.apply(source)? {
+            if let Some(content) = edit.content() {
                 stripped.record(content, Some(local_id(path)), edited.count);
             }
             current = Some(edited.text);

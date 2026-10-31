@@ -4,10 +4,11 @@
 //! Every OOXML package exposes its property parts (`docProps/core.xml`,
 //! `docProps/app.xml`) as nested sub-parts, the same way it exposes an embedded
 //! image. This handler decodes such a part as the [`Metadata`] modality: it
-//! streams each privacy-relevant property field (author, last editor, timestamps,
-//! company, manager) as a chunk for the recognizer, records the fields picked for
-//! removal via [`write_at`], and re-encodes the property XML with exactly those
-//! fields cleared. The owning package handler then folds the edited part back in.
+//! streams each property field as a chunk, labelled with what it is (an
+//! author, a timestamp, a company) so the format-neutral field recognizer
+//! (`elide-detection`'s `FieldRecognizer`) can turn it into an entity, records the fields picked for removal via [`write_at`],
+//! and re-encodes the property XML with exactly those fields cleared. The owning
+//! package handler then folds the edited part back in.
 //!
 //! [`Metadata`]: elide_core::modality::metadata::Metadata
 //! [`write_at`]: elide_core::modality::DataWriter::write_at
@@ -16,60 +17,11 @@ use bytes::Bytes;
 use elide_codec::content::ContentData;
 use elide_codec::{FormatId, Loader, Stream};
 use elide_core::Result;
-use elide_core::entity::{Entity, LabelRef, builtins};
 use elide_core::modality::metadata::{Metadata, MetadataData, MetadataLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
-use elide_core::primitive::ComponentId;
-use elide_core::recognition::{Context, Recognizer, Subject};
 use elide_core::redaction::Redactions;
 
 use crate::opc::props;
-
-/// The reader id recorded on each field's detection audit event.
-const SOURCE: &str = "docprops";
-
-/// The label an OOXML document-property field (by local name) carries, or `None` when it is
-/// not one this codec treats as privacy-relevant. Shared by the recognizer and
-/// any direct read.
-fn label_for(key: &str) -> Option<LabelRef> {
-    let label = match key {
-        "creator" | "lastModifiedBy" | "Manager" => &builtins::PERSON_NAME,
-        "created" | "modified" => &builtins::DATE_TIME,
-        "Company" => &builtins::ORGANIZATION_NAME,
-        // title/subject/description/keywords/category are document-content
-        // fields, not identity data, so they are left to a content recognizer.
-        _ => return None,
-    };
-    Some(LabelRef::from(&**label))
-}
-
-/// Recognizes a privacy-relevant OOXML document-property field.
-///
-/// A metadata chunk is one property; this classifies it by local name through
-/// the shared label table and, for an author/editor/company/timestamp, emits a
-/// single [`Entity`](elide_core::entity::Entity). An unrecognized field (a
-/// revision count, an app version) yields nothing.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct DocPropsRecognizer;
-
-#[::async_trait::async_trait]
-impl Recognizer<Metadata> for DocPropsRecognizer {
-    fn id(&self) -> ComponentId {
-        ComponentId::new(SOURCE, env!("CARGO_PKG_VERSION"))
-    }
-
-    async fn recognize(
-        &self,
-        subject: &Subject<Metadata>,
-        _ctx: &Context<'_, Metadata>,
-    ) -> Result<Vec<Entity<Metadata>>> {
-        let data = subject.data();
-        Ok(label_for(data.key())
-            .and_then(|label| Metadata::field_entity(data.key(), label, SOURCE))
-            .into_iter()
-            .collect())
-    }
-}
 
 /// Stable [`FormatId`](elide_codec::FormatId) for an OOXML property sub-part.
 pub const FORMAT_ID: elide_codec::FormatId = elide_codec::FormatId::new("elide.office.docprops");
@@ -113,7 +65,14 @@ impl DocPropsHandler {
     pub(crate) fn new(xml: Bytes) -> Self {
         let fields: Vec<MetadataData> = props::fields(&xml)
             .into_iter()
-            .map(|(key, value)| MetadataData::new(key, value))
+            .map(|(key, value)| {
+                let label = props::label(&key);
+                let field = MetadataData::new(key, value);
+                match label {
+                    Some(label) => field.with_label(label),
+                    None => field,
+                }
+            })
             .collect();
         Self {
             xml,
@@ -187,4 +146,36 @@ pub fn format() -> elide_codec::Format {
     elide_codec::Format::new(FORMAT_ID.clone(), DocPropsLoader)
         .with_extensions([PROPS_HINT])
         .with_content_types(["application/x-elide-docprops"])
+}
+
+#[cfg(test)]
+mod tests {
+    use elide_core::entity::{LabelRef, builtins};
+
+    use super::*;
+
+    #[test]
+    fn each_field_carries_what_its_schema_says_it_is() {
+        let xml = Bytes::from_static(
+            br#"<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>Jane Roe</dc:creator><dc:title>Quarterly plan</dc:title><cp:keywords>acquisition</cp:keywords></cp:coreProperties>"#,
+        );
+        let handler = DocPropsHandler::new(xml);
+        let label = |key: &str| {
+            handler
+                .fields
+                .iter()
+                .find(|field| field.key() == key)
+                .map(|field| field.label().cloned())
+        };
+        assert_eq!(
+            label("creator"),
+            Some(Some(LabelRef::from(&*builtins::PERSON_NAME)))
+        );
+        assert_eq!(
+            label("title"),
+            Some(Some(LabelRef::from(&*builtins::COMMUNICATIONS_CONTENT)))
+        );
+        // A field the schema does not label is not surfaced at all.
+        assert_eq!(label("keywords"), None);
+    }
 }

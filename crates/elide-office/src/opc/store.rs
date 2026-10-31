@@ -6,10 +6,13 @@ use bytes::Bytes;
 use elide_core::{Error, ErrorKind, Result};
 use hipstr::HipStr;
 
+use crate::opc::attributes::TextAttribute;
 use crate::opc::block::{Block, IssueKind, Replacement};
 use crate::opc::kind::PartKind;
 use crate::opc::part::{PartPath, PartRole};
-use crate::opc::xml_span::{Span, relationship_spans, text_spans};
+use crate::opc::xml_span::{
+    Span, attribute_spans, cell_markup_spans, relationship_spans, text_spans,
+};
 
 /// One package part: its path, its role, and its bytes, retained for extraction
 /// and a byte-faithful re-pack.
@@ -19,17 +22,35 @@ pub(crate) struct StoredPart {
     kind: PartKind,
     role: PartRole,
     bytes: Bytes,
+    /// For an XML part, the text attributes redacted in it; `None` for a part
+    /// that is not XML.
+    attributes: Option<&'static [TextAttribute]>,
 }
 
 impl StoredPart {
-    /// The part at `path` of `kind`, tagged with `role`, holding `bytes`.
-    pub(crate) fn new(path: PartPath, kind: PartKind, role: PartRole, bytes: Bytes) -> Self {
+    /// The part at `path` of `kind`, tagged with `role`, holding `bytes`; an XML
+    /// part carries the text `attributes` redacted in it.
+    pub(crate) fn new(
+        path: PartPath,
+        kind: PartKind,
+        role: PartRole,
+        bytes: Bytes,
+        attributes: Option<&'static [TextAttribute]>,
+    ) -> Self {
         Self {
             path,
             kind,
             role,
             bytes,
+            attributes,
         }
+    }
+
+    /// Whether the part's text is read into blocks and spliced: every XML part
+    /// but a property part, which is redacted whole, and a relationships part.
+    pub(crate) fn is_text(&self) -> bool {
+        self.attributes.is_some() && self.role != PartRole::Property
+            || self.role == PartRole::RelationshipTargets
     }
 
     /// What the part is.
@@ -45,6 +66,11 @@ impl StoredPart {
     /// The part's role.
     pub(crate) fn role(&self) -> PartRole {
         self.role
+    }
+
+    /// The part's bytes as UTF-8 text, or `None` when they are not.
+    pub(crate) fn text(&self) -> Option<&str> {
+        self.as_text().ok()
     }
 
     /// The part's raw bytes (a cheap ref-counted share).
@@ -84,16 +110,23 @@ impl StoredPart {
         Ok(blocks)
     }
 
-    /// The redactable spans of `raw`, chosen by this part's role: the
+    /// The redactable spans of `raw`, in source order: by this part's role, the
     /// text/comment/CDATA spans of an [`ElementText`](PartRole::ElementText)
-    /// part, or the external hyperlink `Target` values of a
-    /// [`RelationshipTargets`](PartRole::RelationshipTargets) part. Errs on
-    /// malformed XML.
+    /// part, the text outside the cells of a [`Cells`](PartRole::Cells) part, or
+    /// the external hyperlink `Target` values of a
+    /// [`RelationshipTargets`](PartRole::RelationshipTargets) part; and the
+    /// values of its text attributes. Errs on malformed XML.
     fn spans(&self, raw: &str) -> std::result::Result<Vec<Span>, ()> {
-        match self.role {
-            PartRole::RelationshipTargets => relationship_spans(raw),
-            _ => text_spans(raw),
-        }
+        let mut spans = match self.role {
+            PartRole::RelationshipTargets => return relationship_spans(raw),
+            PartRole::ElementText => text_spans(raw)?,
+            PartRole::Cells => cell_markup_spans(raw)?,
+            PartRole::Structure => Vec::new(),
+            PartRole::Property | PartRole::Binary(_) => return Ok(Vec::new()),
+        };
+        spans.extend(attribute_spans(raw, self.attributes.unwrap_or_default())?);
+        spans.sort_by_key(|span| span.range.start);
+        Ok(spans)
     }
 
     /// Splice `replacements` into this part's XML, leaving every byte outside a
@@ -186,6 +219,7 @@ mod tests {
             PartKind::Main,
             PartRole::ElementText,
             Bytes::from(xml),
+            Some(&[]),
         )
     }
 
@@ -196,6 +230,7 @@ mod tests {
             PartKind::Relationships,
             PartRole::RelationshipTargets,
             xml.into(),
+            Some(&[]),
         )
     }
 

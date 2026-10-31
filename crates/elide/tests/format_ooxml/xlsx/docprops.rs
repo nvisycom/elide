@@ -5,7 +5,7 @@
 //! Proves the OOXML `#docprops` sub-part model works for the tabular family too:
 //! the `sample.xlsx` fixture carries populated `dcterms:created`/`modified`, and
 //! under a hidden-content policy that redacts metadata the `Metadata` pipeline's
-//! `DocPropsRecognizer` surfaces them, and `Erase` clears them; the workbook
+//! `FieldRecognizer` flags them, and `Erase` clears them; the workbook
 //! re-encode folds the edited property part back in.
 
 use elide::codec::FormatRegistry;
@@ -14,7 +14,7 @@ use elide::entity::LabelCatalog;
 use elide::modality::metadata::Metadata;
 use elide::modality::tabular::Tabular;
 use elide::recognition::Scope;
-use elide::recognition::docprops::DocPropsRecognizer;
+use elide::recognition::metadata::FieldRecognizer;
 use elide::redaction::operators::Erase;
 use elide::redaction::{Anonymizer, Disposition, HiddenContentPolicy, Rule};
 use elide::{Directives, Document, Orchestrator};
@@ -49,9 +49,9 @@ async fn xlsx_core_property_timestamps_are_stripped_through_the_facade() {
             Analyzer::new(),
             Anonymizer::new().with(Rule::fallback(Erase)),
         )
-        // docProps: the DocPropsRecognizer surfaces the timestamp fields.
+        // docProps: the field recognizer flags the labelled timestamp fields.
         .with_modality::<Metadata>(
-            Analyzer::new().with_recognizer(DocPropsRecognizer),
+            Analyzer::new().with_recognizer(FieldRecognizer),
             Anonymizer::new().with(Rule::fallback(Erase)),
         );
 

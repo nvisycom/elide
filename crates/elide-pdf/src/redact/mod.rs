@@ -6,7 +6,7 @@
 //! corrupts subset/CID fonts), keeping a real selectable text layer with the
 //! detected spans gone. The structures that would retain copies of the text
 //! (annotations, `/Info`, `/Metadata`) were already removed at decode by
-//! [`sanitize`](crate::sanitize). `redact_images` (feature `image`)
+//! [`sanitize`](crate::sanitize). `redact_images`
 //! replaces an embedded image XObject with a redacted image.
 //!
 //! The text location comes from the [`text`](crate::text) engine: a detected
@@ -15,7 +15,6 @@
 //! delete, in whichever content stream drew them.
 
 mod detection;
-#[cfg(feature = "image")]
 mod images;
 #[cfg(feature = "render")]
 mod pages;
@@ -27,9 +26,7 @@ use lopdf::content::Content;
 use lopdf::{Object, ObjectId};
 
 pub use self::detection::Detection;
-#[cfg(feature = "image")]
 pub use self::images::ImageReplacement;
-#[cfg(feature = "image")]
 pub(crate) use self::images::redact_images;
 #[cfg(feature = "render")]
 pub use self::pages::PageReplacement;

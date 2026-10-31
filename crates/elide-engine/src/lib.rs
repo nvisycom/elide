@@ -21,8 +21,8 @@ use elide_detection::Analyzer;
 use elide_format::FormatRegistry;
 use elide_redaction::Anonymizer;
 
-use self::analysis::ModalityRegistry;
-pub use self::analysis::{AnalyzedDocument, ArtifactSet, Report, ReportDeserializer};
+pub use self::analysis::{AnalyzedDocument, ArtifactSet, Report, ReportDeserializer, StrippedItem};
+use self::analysis::{ModalityRegistry, StrippedRecord};
 pub use self::directives::Directives;
 pub use self::document::{AsDocuments, Document, RegistryDocumentExt};
 pub use self::part_id::PartId;
@@ -349,6 +349,7 @@ impl Orchestrator {
             annotations,
             report: &mut report,
             artifacts: &mut artifacts,
+            stripped: StrippedRecord::default(),
         };
         for document in documents.iter_mut() {
             let prefix = PartId::leaf(document.name.clone());
@@ -356,6 +357,8 @@ impl Orchestrator {
                 .parts(&mut document.document, &prefix, 0)
                 .await?;
         }
+        let stripped = visitor.stripped;
+        report.set_stripped(stripped);
 
         Ok(AnalyzedDocument { report, artifacts })
     }
@@ -389,8 +392,11 @@ impl Orchestrator {
         // happens on `report`'s own groups, which are returned as the audit
         // trail. Each document redacts its stream parts in place and folds its
         // blob sub-parts bottom-up through the recursion.
+        // The applied report's stripped section is what this walk saw, whatever
+        // the report passed in carried.
         let mut visitor = Redact {
             report: &mut report,
+            stripped: StrippedRecord::default(),
         };
         for document in documents.iter_mut() {
             let prefix = PartId::leaf(document.name.clone());
@@ -398,6 +404,8 @@ impl Orchestrator {
                 .parts(&mut document.document, &prefix, 0)
                 .await?;
         }
+        let stripped = visitor.stripped;
+        report.set_stripped(stripped);
         Ok(report)
     }
 

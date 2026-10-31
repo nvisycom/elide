@@ -132,10 +132,10 @@ pub mod plain {
 /// takes configuration.
 ///
 /// Pass a constructor to [`FormatRegistry::with_replaced_format`] to swap the
-/// registered handler for a specific format. The matching [`DocPropsRecognizer`]
-/// lives under [`recognition::docprops`](crate::recognition::docprops).
+/// registered handler for a specific format. Each `docProps` field it surfaces
+/// is labelled, so [`recognition::metadata::FieldRecognizer`] flags it.
 ///
-/// [`DocPropsRecognizer`]: crate::recognition::docprops::DocPropsRecognizer
+/// [`recognition::metadata::FieldRecognizer`]: crate::recognition::metadata::FieldRecognizer
 /// [`FormatRegistry::with_replaced_format`]: elide_format::FormatRegistry::with_replaced_format
 #[cfg(any(feature = "codec-docx", feature = "codec-pptx", feature = "codec-xlsx"))]
 #[cfg_attr(

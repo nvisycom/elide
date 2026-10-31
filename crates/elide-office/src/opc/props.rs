@@ -1,45 +1,91 @@
-//! Reading and clearing a DOCX document-property part (`docProps/core.xml`,
-//! `docProps/app.xml`).
+//! Reading, labelling, and clearing an OOXML document-property part
+//! (`docProps/core.xml`, `docProps/app.xml`, `docProps/custom.xml`).
 //!
-//! These parts hold named fields that carry personal data — the author and last
-//! editor, the create/modify timestamps, the company and manager — as XML
-//! elements. This reads the privacy-relevant ones out of a part's bytes and
-//! clears them back out, matching by element **local name** so it works whether
-//! the property uses the `cp:`/`dc:`/`ap:` prefix or the default namespace, and
+//! These parts hold named fields that carry personal data (the author and last
+//! editor, the timestamps, the company and manager, the title and description)
+//! as XML elements. This says what each field is, reads the labelled ones out
+//! of a part's bytes, clears them back out, and strips the rest when metadata
+//! is redacted, matching by element **local name** so it works whether the
+//! property uses the `cp:`/`dc:`/`ap:` prefix or the default namespace, and
 //! tolerating a leading byte-order mark.
 
 use bytes::Bytes;
+use elide_core::entity::{LabelRef, builtins};
+use elide_core::redaction::HiddenContent;
 use quick_xml::Reader;
 use quick_xml::escape::unescape;
 use quick_xml::events::{BytesText, Event};
 use quick_xml::writer::Writer;
 
-/// The privacy-relevant property fields, by XML local name. A field not in this
-/// set (a revision count, an app version, a language tag) is left untouched.
-///
-/// Spans both core and extended properties: matching by local name means one
-/// list serves `core.xml` (`creator`, `lastModifiedBy`, `created`, …) and
-/// `app.xml` (`Company`, `Manager`).
-const SENSITIVE: &[&str] = &[
-    // core.xml
-    "creator",
-    "lastModifiedBy",
-    "title",
-    "subject",
-    "description",
-    "keywords",
-    "category",
-    "created",
-    "modified",
-    // app.xml
-    "Company",
-    "Manager",
+use crate::opc::xml_edit::{Action, Attribute, Name, Rules};
+
+/// The OOXML namespaces whose elements are property fields: core properties,
+/// the Dublin Core and DC terms elements core properties use, extended (app)
+/// properties, and custom properties.
+const PROPERTY_NAMESPACES: [&str; 5] = [
+    "http://schemas.openxmlformats.org/package/2006/metadata/core-properties",
+    "http://purl.org/dc/elements/1.1/",
+    "http://purl.org/dc/terms/",
+    "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties",
+    "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties",
 ];
 
-/// Whether `local_name` is a privacy-relevant property field.
+/// The root elements of the property parts, which hold the fields rather than
+/// being one.
+const PROPERTY_ROOTS: [&str; 2] = ["coreProperties", "Properties"];
+
+/// What a property field (by XML local name) is, or `None` when the schema does
+/// not fix it.
+///
+/// One table serves `core.xml` and `app.xml`: matching by local name means it
+/// holds whatever prefix a part binds. A field this table labels is surfaced
+/// for detection; under a redacted metadata disposition every other field is
+/// stripped, since nothing could detect what it holds.
+#[must_use]
+pub fn label(local_name: &str) -> Option<LabelRef> {
+    let label = match local_name {
+        "creator" | "lastModifiedBy" | "Manager" => &builtins::PERSON_NAME,
+        "created" | "modified" => &builtins::DATE_TIME,
+        "Company" => &builtins::ORGANIZATION_NAME,
+        "title" | "subject" | "description" => &builtins::COMMUNICATIONS_CONTENT,
+        _ => return None,
+    };
+    Some(LabelRef::from(&**label))
+}
+
+/// Whether `local_name` is a property field surfaced for detection: one the
+/// schema [labels](label).
 #[must_use]
 pub fn is_sensitive(local_name: &str) -> bool {
-    SENSITIVE.contains(&local_name)
+    label(local_name).is_some()
+}
+
+/// Element rules that strip every property field no [`label`] covers from a
+/// property part, keeping the part's root and its labelled fields. Applied
+/// under a redacted metadata disposition, so what stays is exactly what
+/// detection sees.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct UnsurfacedProperties;
+
+impl Rules for UnsurfacedProperties {
+    fn content(&self) -> Option<HiddenContent> {
+        Some(HiddenContent::Properties)
+    }
+
+    fn element(&self, name: Name<'_>, _attributes: &[Attribute<'_>]) -> Action {
+        let property = PROPERTY_NAMESPACES
+            .iter()
+            .any(|namespace| name.in_namespace(namespace));
+        if property && !PROPERTY_ROOTS.contains(&name.local) && !is_sensitive(name.local) {
+            Action::Remove
+        } else {
+            Action::Keep
+        }
+    }
+
+    fn removes_attribute(&self, _element: Name<'_>, _attribute: &Attribute<'_>) -> bool {
+        false
+    }
 }
 
 /// The privacy-relevant fields a property part carries, as `(local_name, value)`
@@ -220,6 +266,7 @@ fn resolve_ref(r: &quick_xml::events::BytesRef<'_>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::opc::xml_edit::edit;
 
     const CORE: &[u8] = br#"<?xml version="1.0" encoding="utf-8"?>
 <coreProperties xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns="http://schemas.openxmlformats.org/package/2006/metadata/core-properties">
@@ -236,6 +283,31 @@ mod tests {
         assert!(got.contains(&("lastModifiedBy".to_owned(), "Alan Turing".to_owned())));
         // Empty title and non-sensitive revision are not surfaced.
         assert!(!got.iter().any(|(k, _)| k == "title" || k == "revision"));
+    }
+
+    #[test]
+    fn redacting_keeps_only_the_labelled_fields() {
+        let core = r#"<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>Jane Roe</dc:creator><dc:title>Plan</dc:title><cp:keywords>acquisition</cp:keywords><cp:revision>7</cp:revision></cp:coreProperties>"#;
+        let edited = edit(core, &UnsurfacedProperties).unwrap().unwrap();
+        assert_eq!(edited.count, 2);
+        assert!(edited.text.contains("Jane Roe") && edited.text.contains("Plan"));
+        assert!(!edited.text.contains("acquisition") && !edited.text.contains("revision"));
+
+        let app = r#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Template>C:\Users\jroe\Normal.dotm</Template><Company>Acme</Company><HyperlinkBase>https://intranet</HyperlinkBase><TitlesOfParts><vt:vector size="1" baseType="lpstr"><vt:lpstr>Secret sheet</vt:lpstr></vt:vector></TitlesOfParts></Properties>"#;
+        let edited = edit(app, &UnsurfacedProperties).unwrap().unwrap();
+        assert_eq!(edited.count, 3);
+        assert!(edited.text.contains("Acme"));
+        for leaked in ["jroe", "intranet", "Secret sheet"] {
+            assert!(!edited.text.contains(leaked), "{leaked} survived");
+        }
+
+        let custom = r#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2" name="Client"><vt:lpwstr>Jane Roe</vt:lpwstr></property></Properties>"#;
+        let edited = edit(custom, &UnsurfacedProperties).unwrap().unwrap();
+        assert_eq!(edited.count, 1);
+        assert!(!edited.text.contains("Jane Roe"));
+
+        let reduced = r#"<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>Jane Roe</dc:creator></cp:coreProperties>"#;
+        assert!(edit(reduced, &UnsurfacedProperties).unwrap().is_none());
     }
 
     #[test]

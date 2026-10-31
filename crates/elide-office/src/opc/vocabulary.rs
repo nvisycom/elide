@@ -96,6 +96,10 @@ const VOCABULARIES: &[&str] = &[
     "http://schemas.microsoft.com/office/powerpoint/2012/main",
     "http://schemas.microsoft.com/office/powerpoint/2017/10/main",
     "http://schemas.microsoft.com/office/powerpoint/2018/8/main",
+    // A modern comment's anchor: the slide, shape, or text range it is on, by
+    // id only.
+    "http://schemas.microsoft.com/office/powerpoint/2013/main/command",
+    "http://schemas.microsoft.com/office/drawing/2013/main/command",
     // Excel extensions.
     "http://schemas.microsoft.com/office/excel/2006/main",
     "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main",
@@ -109,6 +113,9 @@ const VOCABULARIES: &[&str] = &[
     "http://schemas.microsoft.com/office/spreadsheetml/2016/revision10",
     "http://schemas.microsoft.com/office/spreadsheetml/2015/02/main",
     "http://schemas.microsoft.com/office/spreadsheetml/2018/calcfeatures",
+    // Threaded comments and the people who wrote them: the comment text is
+    // element text, the people's names text attributes.
+    "http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments",
     // DrawingML and chart extensions.
     "http://schemas.microsoft.com/office/drawing/2007/8/2/chart",
     "http://schemas.microsoft.com/office/drawing/2008/diagram",

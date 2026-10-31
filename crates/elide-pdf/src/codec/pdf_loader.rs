@@ -20,9 +20,7 @@ use super::pdf_stream::PdfStream;
 use super::{BODY_PART_ID, FORMAT_ID, PdfPage, RedactMode};
 use crate::attachment::AttachmentId;
 use crate::document::Pdf;
-use crate::extract::Block;
-#[cfg(feature = "image")]
-use crate::extract::{EmbeddingKind, ImageId};
+use crate::extract::{Block, EmbeddingKind, ImageId};
 #[cfg(feature = "render")]
 use crate::primitive::RasterMode;
 #[cfg(feature = "render")]
@@ -32,7 +30,7 @@ use crate::text::PageGeometry;
 /// A [`DocumentLoader`] that decodes a PDF into a [`Document`]: the page-text
 /// body [`Stream`] plus, on the glyph-deletion path, a
 /// [`Blob`](DocumentPart::Blob) per redactable embedded image and (feature
-/// `render` + `image`) per textless scanned page.
+/// `render`) per textless scanned page.
 #[derive(Debug, Default)]
 pub(crate) struct PdfDocumentLoader {
     /// Whether redaction flattens pages to images (raster) instead of the
@@ -130,25 +128,23 @@ impl DocumentLoader for PdfDocumentLoader {
         let (extraction, geometry) = pdf.extract();
         let pages = pages_from_blocks(extraction.blocks, geometry);
 
-        // Surface each redactable embedded image XObject as an image blob for the
-        // image pipeline (only with an image codec able to redact them). Only
-        // images whose bytes are a decodable file are surfaced (see
-        // `embedding_hint`).
-        #[cfg(feature = "image")]
-        let mut blobs: Vec<DocumentPart> = extraction
-            .embeddings
-            .into_iter()
-            .filter_map(|embedding| {
-                let hint = embedding_hint(embedding.kind)?;
-                Some(DocumentPart::Blob {
-                    id: LocalId::new(image_part_id(embedding.id)),
-                    bytes: embedding.bytes,
-                    hint: hint.to_string(),
-                })
-            })
-            .collect();
-        #[cfg(not(feature = "image"))]
-        let mut blobs: Vec<DocumentPart> = Vec::new();
+        // Surface each embedded image XObject as an image blob for the image
+        // pipeline. Only images the pipeline can read remain (the sanitizer
+        // removed the rest, see `surfaced_image`); one no codec can read is
+        // removed on encode.
+        let mut blobs = Vec::new();
+        for embedding in extraction.embeddings {
+            let Some((bytes, hint)) =
+                surfaced_image(&pdf, embedding.id, embedding.kind, embedding.bytes)?
+            else {
+                continue;
+            };
+            blobs.push(DocumentPart::Blob {
+                id: LocalId::new(image_part_id(embedding.id)),
+                bytes,
+                hint: hint.to_owned(),
+            });
+        }
 
         // Each attached file is content of its own format, decoded and redacted
         // through the registry like any embedding.
@@ -252,13 +248,11 @@ fn observe_pages(document: &[u8]) -> Result<Vec<PageObservation>> {
 }
 
 /// The local part-id string for an image XObject: `"img-{number}-{generation}"`.
-#[cfg(feature = "image")]
 pub(super) fn image_part_id(id: ImageId) -> String {
     format!("img-{}-{}", id.number, id.generation)
 }
 
 /// Parse an image part-id string back into an [`ImageId`].
-#[cfg(feature = "image")]
 pub(super) fn parse_image_part_id(s: &str) -> Option<ImageId> {
     let rest = s.strip_prefix("img-")?;
     let (number, generation) = rest.split_once('-')?;
@@ -302,37 +296,35 @@ pub(super) fn parse_page_part_id(s: &str) -> Option<u32> {
     s.strip_prefix("page-")?.parse().ok()
 }
 
-/// A filename-extension hint for an embedded image whose *raw stream bytes* are
-/// a self-contained image file the orchestrator can decode, or `None` when they
-/// are not.
+/// An embedded image as the image pipeline reads it, with its file-extension
+/// hint: a JPEG or JPEG 2000 file as it is stored, raw samples decoded to a
+/// PNG. `None` for an image of another kind, which the sanitizer removed at
+/// decode.
 ///
-/// An [`Embedding`](crate::extract::Embedding)'s bytes are the raw XObject
-/// stream. For a JPEG (`DCTDecode`) or JPEG 2000 (`JPXDecode`) image those bytes
-/// *are* a standalone `.jpg`/`.jp2` file that decodes directly. For the other
-/// kinds, raw/`FlateDecode` samples, CCITT fax, JBIG2, the bytes are filter-
-/// specific pixel data that only means anything alongside the XObject's
-/// dictionary, so they are **not** a decodable file. Surfacing those with a
-/// bogus extension would have the pipeline fail to decode and silently skip
-/// them; returning `None` keeps them out of the container entirely, so their
-/// non-redaction is an explicit (currently unsupported) case rather than a
-/// silent miss.
-#[cfg(feature = "image")]
-fn embedding_hint(kind: EmbeddingKind) -> Option<&'static str> {
-    match kind {
-        EmbeddingKind::Jpeg => Some("jpg"),
-        EmbeddingKind::Jpeg2000 => Some("jp2"),
-        // Raw/Flate/CCITT/JBIG2: the stream bytes are not a self-contained
-        // image file. Not surfaced (redacting these is not yet supported).
-        EmbeddingKind::CcittFax | EmbeddingKind::Jbig2 | EmbeddingKind::Raw => None,
-    }
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if raw
+/// samples the sanitizer kept cannot be decoded.
+fn surfaced_image(
+    pdf: &Pdf,
+    id: ImageId,
+    kind: EmbeddingKind,
+    bytes: Bytes,
+) -> Result<Option<(Bytes, &'static str)>> {
+    Ok(match kind {
+        EmbeddingKind::Jpeg => Some((bytes, "jpg")),
+        EmbeddingKind::Jpeg2000 => Some((bytes, "jp2")),
+        EmbeddingKind::Raw => Some((Bytes::from(pdf.image_png(id)?), "png")),
+        EmbeddingKind::CcittFax | EmbeddingKind::Jbig2 => None,
+    })
 }
 
-#[cfg(all(test, feature = "image"))]
+#[cfg(test)]
 mod tests {
     use bytes::Bytes;
     use elide_codec::content::ContentData;
     use elide_codec::{DocumentLoader as _, DocumentPart, LocalId};
-    use elide_core::redaction::HiddenContentPolicy;
+    use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
     use lopdf::content::{Content, Operation};
     use lopdf::{Dictionary, Document, Object, Stream, dictionary};
 
@@ -342,7 +334,7 @@ mod tests {
 
     /// A loader on the glyph-deletion path, so decode surfaces embedded images
     /// without rendering. These tests exercise embedded-image surfacing and
-    /// replacement (the `image` feature); the synthetic PDF has no text layer, so
+    /// replacement; the synthetic PDF has no text layer, so
     /// the default `Auto` mode would render the page as scanned and pull in PDFium
     /// for nothing. `Never` keeps the decode pure-Rust.
     fn image_loader() -> PdfDocumentLoader {
@@ -357,7 +349,7 @@ mod tests {
     }
 
     /// A JPEG-encoded image of a solid colour, as bytes (a self-contained
-    /// `.jpg` file, so the loader surfaces it, see `embedding_hint`).
+    /// `.jpg` file, so the loader surfaces it, see `surfaced_image`).
     fn jpeg(rgb: [u8; 3]) -> Vec<u8> {
         let img = image::RgbImage::from_pixel(8, 8, image::Rgb(rgb));
         let mut out = std::io::Cursor::new(Vec::new());
@@ -367,26 +359,48 @@ mod tests {
         out.into_inner()
     }
 
+    /// An image XObject dictionary of `width` x `height` 8-bit RGB samples
+    /// stored with `filter`.
+    fn image_dict(width: i64, height: i64, filter: &str) -> Dictionary {
+        let mut img = Dictionary::new();
+        img.set("Type", Object::Name(b"XObject".to_vec()));
+        img.set("Subtype", Object::Name(b"Image".to_vec()));
+        img.set("Width", Object::Integer(width));
+        img.set("Height", Object::Integer(height));
+        img.set("ColorSpace", Object::Name(b"DeviceRGB".to_vec()));
+        img.set("BitsPerComponent", Object::Integer(8));
+        img.set("Filter", Object::Name(filter.as_bytes().to_vec()));
+        img
+    }
+
     /// A one-page PDF with a single embedded JPEG (`DCTDecode`) image XObject,
     /// the kind whose raw stream bytes are a decodable file. Returns the
     /// document bytes and the image's `(number, generation)` id.
     fn image_pdf() -> (Vec<u8>, (u32, u16)) {
+        let image = Stream::new(image_dict(8, 8, "DCTDecode"), jpeg([255, 255, 255]));
+        pdf_drawing(vec![image], Vec::new())
+    }
+
+    /// A one-page PDF that draws each of `images` (named `Im1`, `Im2`, …),
+    /// then runs the `extra` operations. Returns the document bytes and the
+    /// first image's `(number, generation)` id.
+    fn pdf_drawing(images: Vec<Stream>, extra: Vec<Operation>) -> (Vec<u8>, (u32, u16)) {
         let mut doc = Document::with_version("1.5");
         let pages_id = doc.new_object_id();
-        let jpeg = jpeg([255, 255, 255]);
-        let mut img = Dictionary::new();
-        img.set("Type", Object::Name(b"XObject".to_vec()));
-        img.set("Subtype", Object::Name(b"Image".to_vec()));
-        img.set("Width", Object::Integer(8));
-        img.set("Height", Object::Integer(8));
-        img.set("ColorSpace", Object::Name(b"DeviceRGB".to_vec()));
-        img.set("BitsPerComponent", Object::Integer(8));
-        img.set("Filter", Object::Name(b"DCTDecode".to_vec()));
-        let image_id = doc.add_object(Stream::new(img, jpeg));
-        let res = doc.add_object(dictionary! { "XObject" => dictionary! { "Im1" => image_id } });
-        let content = Content {
-            operations: vec![Operation::new("Do", vec![Object::Name(b"Im1".to_vec())])],
-        };
+        let mut xobjects = Dictionary::new();
+        let mut operations = Vec::new();
+        let mut first = None;
+        for (index, image) in images.into_iter().enumerate() {
+            let id = doc.add_object(image);
+            first.get_or_insert(id);
+            let name = format!("Im{}", index + 1);
+            xobjects.set(name.as_bytes(), id);
+            operations.push(Operation::new("Do", vec![Object::Name(name.into_bytes())]));
+        }
+        operations.extend(extra);
+        let image_id = first.expect("an image");
+        let res = doc.add_object(dictionary! { "XObject" => xobjects });
+        let content = Content { operations };
         let cid = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
         let page = doc.add_object(dictionary! {
             "Type" => "Page", "Parent" => pages_id, "Contents" => cid, "Resources" => res,
@@ -425,6 +439,84 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// The PNG signature every surfaced raw-sample image starts with.
+    const PNG: &[u8] = b"\x89PNG";
+
+    /// Raw samples (a lossless image, or a page this crate flattened) surface
+    /// as a PNG, and a redaction of one is written back and passes the check.
+    #[tokio::test]
+    async fn raw_samples_surface_as_png_and_round_trip() {
+        let mut raw = Stream::new(image_dict(2, 2, "FlateDecode"), vec![200; 12]);
+        raw.dict.remove(b"Filter");
+        raw.compress().unwrap();
+        let (pdf, _) = pdf_drawing(vec![raw], Vec::new());
+        let mut doc = image_loader()
+            .decode(
+                ContentData::new(Bytes::from(pdf)),
+                HiddenContentPolicy::default(),
+            )
+            .await
+            .expect("decode");
+        let blobs = image_blobs(&doc);
+        assert_eq!(blobs.len(), 1);
+        assert!(blobs[0].1.starts_with(PNG));
+
+        doc.replace_part(&LocalId::new(blobs[0].0.clone()), Bytes::from(black_png()))
+            .unwrap();
+        let encoded = doc.encode().expect("a redacted raw image passes the check");
+        assert_eq!(
+            Pdf::open(encoded.as_bytes())
+                .unwrap()
+                .extract()
+                .0
+                .embeddings
+                .len(),
+            1
+        );
+    }
+
+    /// What cannot be surfaced (fax samples, an inline image) is removed at
+    /// decode, and an image no codec could read is removed on encode, its
+    /// drawing cut rather than blanked.
+    #[tokio::test]
+    async fn unsurfaceable_and_unreadable_images_are_removed() {
+        let fax = Stream::new(image_dict(8, 8, "CCITTFaxDecode"), vec![0; 4]);
+        let jpeg = Stream::new(image_dict(8, 8, "DCTDecode"), jpeg([255, 255, 255]));
+        let inline = Operation::new(
+            "BI",
+            vec![Object::Stream(Stream::new(
+                dictionary! { "W" => 1, "H" => 1, "BPC" => 8, "CS" => "G" },
+                vec![0],
+            ))],
+        );
+        let (pdf, _) = pdf_drawing(vec![fax, jpeg], vec![inline]);
+        let mut doc = image_loader()
+            .decode(
+                ContentData::new(Bytes::from(pdf)),
+                HiddenContentPolicy::default(),
+            )
+            .await
+            .expect("decode");
+        let unreadable: usize = doc
+            .stripped()
+            .iter()
+            .filter(|entry| entry.content == HiddenContent::Unreadable)
+            .map(|entry| entry.count)
+            .sum();
+        assert_eq!(unreadable, 2);
+
+        let blobs = image_blobs(&doc);
+        assert_eq!(blobs.len(), 1);
+        doc.remove_part(&LocalId::new(blobs[0].0.clone())).unwrap();
+        let encoded = doc.encode().expect("encode");
+        let out = Pdf::open(encoded.as_bytes()).unwrap();
+        assert!(out.extract().0.embeddings.is_empty());
+        let saved = Document::load_mem(encoded.as_bytes()).unwrap();
+        let page = saved.get_pages().into_values().next().unwrap();
+        let drawn = String::from_utf8_lossy(&saved.get_page_content(page)).into_owned();
+        assert!(!drawn.contains("Do") && !drawn.contains("BI"), "{drawn}");
     }
 
     #[test]
@@ -531,7 +623,7 @@ mod raster_tests {
 /// textless page as an image blob, accepts a redacted replacement, and reflattens
 /// it on encode. Built directly with a pre-rendered raster (as the loader's render
 /// step would produce), so it needs no PDFium.
-#[cfg(all(test, feature = "render", feature = "image"))]
+#[cfg(all(test, feature = "render"))]
 mod scanned_page_tests {
     use std::io::Cursor;
 

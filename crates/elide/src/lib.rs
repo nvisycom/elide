@@ -40,7 +40,7 @@ pub use elide_core::{Error, ErrorKind, Result};
 #[doc(inline)]
 pub use elide_engine::{
     AnalyzedDocument, ArtifactSet, AsDocuments, Directives, Document, Orchestrator, PartId,
-    RegistryDocumentExt, Report, ReportDeserializer,
+    RegistryDocumentExt, Report, ReportDeserializer, StrippedItem,
 };
 
 pub mod prelude;

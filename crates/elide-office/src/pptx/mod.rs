@@ -10,7 +10,7 @@
 mod sanitize;
 
 use crate::ooxml::OoxmlFormat;
-use crate::opc::{PartClassifier, PartKind, PartRole};
+use crate::opc::{PartClassifier, PartKind, PartRole, TextAttribute};
 
 /// The PresentationML format seam: maps each kind of part to the neutral
 /// [`PartRole`] the engine acts on.
@@ -19,7 +19,8 @@ use crate::opc::{PartClassifier, PartKind, PartRole};
 /// when collaboration content is redacted), and the charts and SmartArt carry
 /// element text; a relationships part carries external hyperlink targets; an
 /// embedding is binary; the document properties are a property part; the
-/// presentation part and everything else is structure.
+/// presentation part and everything else is structure. Section and custom-show
+/// names and comment authors are text attributes.
 #[derive(Debug, Clone, Copy)]
 pub struct SlideFormat;
 
@@ -36,6 +37,10 @@ impl PartClassifier for SlideFormat {
             PartKind::Properties => PartRole::Property,
             _ => PartRole::Structure,
         }
+    }
+
+    fn text_attributes(&self) -> &'static [TextAttribute] {
+        sanitize::TEXT_ATTRIBUTES
     }
 }
 

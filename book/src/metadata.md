@@ -15,8 +15,7 @@ metadata pipeline on the orchestrator:
 ```rust,no_run
 use elide::prelude::operators::*;
 use elide::prelude::*;
-use elide::recognition::docprops::DocPropsRecognizer;
-use elide::recognition::exif::ExifRecognizer;
+use elide::recognition::metadata::FieldRecognizer;
 
 #[tokio::main]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
@@ -30,8 +29,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .with_registry(registry)
         .with_modality::<Metadata>(
             Analyzer::new()
-                .with_recognizer(ExifRecognizer)
-                .with_recognizer(DocPropsRecognizer),
+                .with_recognizer(FieldRecognizer),
             Anonymizer::new().with(Rule::fallback(Erase)),
         );
     orchestrator
@@ -41,16 +39,22 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-`ExifRecognizer` reports the privacy-relevant EXIF fields of PNG, JPEG, and
-TIFF images: location, time, device, and the author, copyright, and free-text
-fields; `DocPropsRecognizer` reports the author, last editor, company, and
-timestamps in DOCX, PPTX, and XLSX properties. Metadata a format cannot
-surface field by field (XMP, IPTC, audio tags, a PDF's `/Info`) is stripped
-even under `Redact`.
+Each codec labels the fields it surfaces with what they are, by its format's
+own schema: an image's EXIF location, time, device, author, copyright, and
+free-text fields, and a document's author, last editor, company, and
+timestamps. `FieldRecognizer` turns each labelled field into an entity, the
+same way for every format, so one registration covers them all. Metadata a format cannot
+surface field by field (XMP, IPTC, audio tags, a PDF's `/Info`, a camera's
+maker note, an EXIF tag no field reads) is stripped even under `Redact`, and
+so is an image's embedded thumbnail, a preview of the unredacted pixels.
 
 ## Redact without a pipeline
 
 Under `Redact`, a field no pipeline flags is kept: the policy hands the
-decision to detection. Without a metadata pipeline, nothing is flagged and the
-fields ship as they were, so leave the policy at `Strip` unless a pipeline is
-registered.
+decision to detection. Without a metadata pipeline nothing could make that
+decision, so the metadata is removed instead of shipped unexamined, and the
+report records it as `HiddenContent::Unscanned`.
+
+Only fields a codec labels are surfaced: a field whose meaning the format's
+schema does not fix (keywords, a template path, a custom document property)
+is stripped under `Redact` too, since no recognizer could flag it.

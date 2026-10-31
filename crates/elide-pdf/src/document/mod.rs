@@ -9,27 +9,28 @@
 //! container holds no capability logic itself.
 
 mod data;
-#[cfg(feature = "image")]
 mod role;
 
+use std::collections::HashSet;
 use std::num::NonZeroUsize;
 
 use elide_codec::StrippedContent;
 use elide_core::{Error, ErrorKind, Result};
-use lopdf::{Document, Object};
+#[cfg(feature = "render")]
+use lopdf::Dictionary;
+use lopdf::{Document, Object, ObjectId};
 
 pub(crate) use self::data::Store;
-#[cfg(feature = "image")]
 pub(crate) use self::role::ObjectRole;
 use crate::attachment::{Attachment, AttachmentId, AttachmentReplacement};
-use crate::extract::Extraction;
-use crate::redact::Detection;
-#[cfg(feature = "image")]
-use crate::redact::ImageReplacement;
+use crate::content::remove_images;
+use crate::extract::{Extraction, ImageId};
 #[cfg(feature = "render")]
 use crate::redact::PageReplacement;
+use crate::redact::{Detection, ImageReplacement};
 #[cfg(feature = "render")]
 use crate::render::{PageObservation, RenderedPage};
+use crate::samples::png;
 use crate::sanitize::{check_store, sanitize_store};
 
 /// An opened PDF document: parsed once, then reused across operations.
@@ -53,9 +54,11 @@ impl Pdf {
     /// # Errors
     ///
     /// [`ErrorKind::ResourceLimit`](crate::ErrorKind::ResourceLimit) if the input
-    /// exceeds [`MAX_DOCUMENT_BYTES`](Pdf::MAX_DOCUMENT_BYTES), or
+    /// exceeds [`MAX_DOCUMENT_BYTES`](Pdf::MAX_DOCUMENT_BYTES),
     /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if the
-    /// bytes are not a readable PDF.
+    /// bytes are not a readable PDF, or
+    /// [`ErrorKind::CapabilityUnavailable`](crate::ErrorKind::CapabilityUnavailable)
+    /// if it is encrypted with a user password.
     pub fn open(document: &[u8]) -> Result<Self> {
         Self::open_with_limit(document, Self::DEFAULT_MAX_PAGE_BYTES)
     }
@@ -112,6 +115,75 @@ impl Pdf {
         check_store(&self.0)
     }
 
+    /// The embedded image `id`, stored as raw samples, decoded and encoded as a
+    /// PNG for the image pipeline.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if `id`
+    /// is not an image stream or its samples cannot be decoded.
+    pub(crate) fn image_png(&self, id: ImageId) -> Result<Vec<u8>> {
+        let doc = self.0.doc();
+        let stream = doc
+            .get_object(id.object())
+            .and_then(Object::as_stream)
+            .map_err(|e| {
+                Error::new(
+                    ErrorKind::MalformedInput,
+                    format!("image ({}, {}): {e}", id.number, id.generation),
+                )
+            })?;
+        png(doc, stream)
+    }
+
+    /// The document with the embedded images `ids` removed: every drawing of
+    /// one cut from the pages and form XObjects, and the image dropped from the
+    /// file. A page positions what it draws, so the image's area is left empty
+    /// and nothing else moves.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if a
+    /// content stream cannot be rewritten or the document cannot be saved.
+    pub(crate) fn remove_images(&self, ids: &[ImageId]) -> Result<Vec<u8>> {
+        let mut doc = self.0.clone_doc();
+        let images: HashSet<ObjectId> = ids.iter().map(|id| id.object()).collect();
+        remove_images(&mut doc, &images, false)?;
+        save(&mut doc)
+    }
+
+    /// The document with the content of the 1-based pages `numbers` cleared:
+    /// each page keeps its place and size, but draws nothing and holds no
+    /// resources, so what it drew is dropped from the file.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if a page
+    /// does not exist or the document cannot be saved.
+    #[cfg(feature = "render")]
+    pub(crate) fn clear_pages(&self, numbers: &[u32]) -> Result<Vec<u8>> {
+        let mut doc = self.0.clone_doc();
+        let pages = doc.get_pages();
+        for number in numbers {
+            let id = *pages.get(number).ok_or_else(|| {
+                Error::new(
+                    ErrorKind::MalformedInput,
+                    format!("page {number} does not exist"),
+                )
+            })?;
+            doc.change_page_content(id, Vec::new()).map_err(|e| {
+                Error::new(
+                    ErrorKind::MalformedInput,
+                    format!("clear page {number}: {e}"),
+                )
+            })?;
+            if let Ok(page) = doc.get_dictionary_mut(id) {
+                page.set("Resources", Dictionary::new());
+            }
+        }
+        save(&mut doc)
+    }
+
     /// Every attached file (the `/EmbeddedFiles` name tree), decoded, in tree
     /// order.
     ///
@@ -160,8 +232,6 @@ impl Pdf {
     ///
     /// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a replacement
     /// names a non-image object or an image that cannot be decoded.
-    #[cfg(feature = "image")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "image")))]
     pub fn redact_images(&self, replacements: &[ImageReplacement]) -> Result<Vec<u8>> {
         crate::redact::redact_images(&self.0, replacements)
     }

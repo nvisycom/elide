@@ -23,7 +23,7 @@ use smallvec::{SmallVec, smallvec};
 /// segment can itself contain any delimiter). Backed by a `SmallVec` sized for
 /// one inline segment: the depth-1 case (an un-nested container, every part
 /// today) allocates nothing, and only genuine nesting spills to the heap.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PartId(SmallVec<[LocalId; 1]>);
 
 impl PartId {

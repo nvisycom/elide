@@ -10,9 +10,8 @@ use std::collections::HashSet;
 
 use elide_core::redaction::HiddenContentPolicy;
 use elide_core::{Error, ErrorKind, Result};
-use quick_xml::NsReader;
+use quick_xml::Reader;
 use quick_xml::events::Event;
-use quick_xml::name::{Namespace, ResolveResult};
 
 use crate::opc::index::{Index, text};
 use crate::opc::part::PartPath;
@@ -100,52 +99,26 @@ pub(crate) fn check(
     Ok(())
 }
 
-/// The elements whose text a structure part may carry: a workbook's defined
-/// names, whose text is a formula naming a range.
-const STRUCTURAL_TEXT: &[(&str, &str)] = &[(
-    "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
-    "definedName",
-)];
-
-/// The first non-blank text of `raw` outside a [`STRUCTURAL_TEXT`] element, or
-/// `None` when the part carries none.
+/// The first non-blank text of `raw`, or `None` when the part carries none.
 ///
 /// # Errors
 ///
 /// [`ErrorKind::MalformedInput`] if `raw` is not well-formed XML.
 fn stray_text(raw: &str) -> Result<Option<String>> {
-    let mut reader = NsReader::from_str(raw);
-    // How many structural-text elements the reader is inside.
-    let mut allowed = 0usize;
-    let mut open: Vec<bool> = Vec::new();
+    let mut reader = Reader::from_str(raw);
     loop {
-        let (resolved, event) = reader.read_resolved_event().map_err(|e| {
+        let event = reader.read_event().map_err(|e| {
             Error::new(
                 ErrorKind::MalformedInput,
                 format!("malformed part XML: {e}"),
             )
         })?;
-        let namespace = match resolved {
-            ResolveResult::Bound(Namespace(uri)) => Some(uri.to_owned()),
-            _ => None,
-        };
         match event {
             Event::Eof => return Ok(None),
-            Event::Start(e) => {
-                let structural = STRUCTURAL_TEXT.iter().any(|&(ns, local)| {
-                    namespace.as_deref() == Some(ns) && e.local_name().into_inner() == local
-                });
-                allowed += usize::from(structural);
-                open.push(structural);
-            }
-            Event::End(_) => {
-                let closed_structural = open.pop() == Some(true);
-                allowed -= usize::from(closed_structural);
-            }
-            Event::Text(text) if allowed == 0 && !text.trim().is_empty() => {
+            Event::Text(text) if !text.trim().is_empty() => {
                 return Ok(Some(text.trim().chars().take(40).collect()));
             }
-            Event::CData(text) if allowed == 0 && !text.trim().is_empty() => {
+            Event::CData(text) if !text.trim().is_empty() => {
                 return Ok(Some(text.trim().chars().take(40).collect()));
             }
             _ => {}

@@ -63,6 +63,16 @@ impl Store {
                 format!("not a readable PDF: {e}"),
             )
         })?;
+        // A document with an empty user password decrypts on load. One that
+        // still carries `/Encrypt` needs a password: its strings and streams are
+        // ciphertext nothing can extract or redact, so it is refused rather than
+        // passed through unread.
+        if doc.is_encrypted() {
+            return Err(Error::new(
+                ErrorKind::CapabilityUnavailable,
+                "PDF is encrypted with a user password, so its content cannot be read",
+            ));
+        }
         Ok(Self {
             doc,
             #[cfg(feature = "render")]
@@ -91,5 +101,59 @@ impl Store {
     /// The per-page decompression bound.
     pub(crate) fn max_page_bytes(&self) -> NonZeroUsize {
         self.max_page_bytes
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lopdf::{EncryptionState, EncryptionVersion, Object, Permissions, dictionary};
+
+    use super::*;
+
+    /// A one-page PDF encrypted with `user_password`, as bytes.
+    fn encrypted(user_password: &str) -> Vec<u8> {
+        let mut doc = Document::with_version("1.7");
+        let pages = doc.new_object_id();
+        let page = doc.add_object(dictionary! { "Type" => "Page", "Parent" => pages });
+        doc.objects.insert(
+            pages,
+            Object::Dictionary(
+                dictionary! { "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1 },
+            ),
+        );
+        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
+        doc.trailer.set("Root", catalog);
+        doc.trailer.set(
+            "ID",
+            vec![
+                Object::string_literal("0123456789abcdef"),
+                Object::string_literal("0123456789abcdef"),
+            ],
+        );
+        let state = EncryptionState::try_from(EncryptionVersion::V2 {
+            document: &doc,
+            owner_password: "owner",
+            user_password,
+            key_length: 128,
+            permissions: Permissions::all(),
+        })
+        .unwrap();
+        doc.encrypt(&state).unwrap();
+        let mut out = Vec::new();
+        doc.save_to(&mut out).unwrap();
+        out
+    }
+
+    #[test]
+    fn a_pdf_that_needs_a_password_is_refused() {
+        let error = Store::open(&encrypted("secret"), Store::DEFAULT_MAX_PAGE_BYTES)
+            .expect_err("a password-protected PDF");
+        assert_eq!(error.kind(), ErrorKind::CapabilityUnavailable);
+    }
+
+    #[test]
+    fn a_pdf_with_an_empty_user_password_opens() {
+        let store = Store::open(&encrypted(""), Store::DEFAULT_MAX_PAGE_BYTES).expect("opens");
+        assert!(!store.doc().is_encrypted());
     }
 }

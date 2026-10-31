@@ -1,14 +1,11 @@
-//! Surfacing EXIF fields as [`Entity<Metadata>`] values.
+//! What each surfaced EXIF field is, and the fields and entities built from it.
 //!
-//! Reading metadata tells you *what* an image carries; this turns each present
-//! privacy-relevant field into an entity so it flows through the same
-//! detect/select/redact/audit pipeline as a text span. A stripped GPS tag then
-//! shows up in the audit trail beside a redacted name, and a caller can choose,
-//! per field, whether to remove it.
-//!
-//! The key→label table here is the single source of truth: the standalone
-//! [`entities`](Source::entities) read and the [`ExifRecognizer`] that runs in
-//! the analyze pipeline both classify a field through [`label_for`].
+//! The key→label table here is the format's schema: a `GPSLatitude` is a
+//! location, an `Artist` a person, whatever its value. Each surfaced field is
+//! stamped with its label, so the format-neutral field recognizer
+//! (`elide-detection`'s `FieldRecognizer`) turns it into an entity in the
+//! analyze pipeline, and the standalone
+//! [`entities`](Source::entities) read builds the same entities directly.
 
 use elide_core::Result;
 use elide_core::entity::{Entity, LabelRef, builtins};
@@ -16,17 +13,13 @@ use elide_core::modality::metadata::{Metadata, MetadataData};
 
 use super::Source;
 
-/// The recognizer id recorded on each field's detection audit event.
-pub(crate) const SOURCE: &str = "exif";
-
-/// The label for an EXIF tag `key`, or `None` when the tag is not one this
-/// crate treats as privacy-relevant. The single classification table, shared by
-/// the standalone read and the recognizer.
-pub(crate) fn label_for(key: &str) -> Option<LabelRef> {
+/// What the EXIF field `key` is, or `None` when the tag is not one this crate
+/// surfaces.
+fn label_for(key: &str) -> Option<LabelRef> {
     let label = match key {
         "GPSLatitude" | "GPSLongitude" => &builtins::GEOLOCATION_METADATA,
         "DateTimeOriginal" => &builtins::DATE_TIME,
-        "Make" | "Model" | "SerialNumber" | "ImageUniqueID" | "MakerNote" => &builtins::DEVICE_ID,
+        "Make" | "Model" | "SerialNumber" | "ImageUniqueID" => &builtins::DEVICE_ID,
         "Artist" | "OwnerName" | "Copyright" => &builtins::PERSON_NAME,
         "ImageDescription" | "UserComment" => &builtins::COMMUNICATIONS_CONTENT,
         "Software" => &builtins::PRODUCT,
@@ -50,17 +43,18 @@ impl Source<'_> {
     /// the metadata is present but unparseable.
     pub(crate) fn entities(&self) -> Result<Vec<Entity<Metadata>>> {
         Ok(self
-            .values()?
+            .fields()?
             .into_iter()
-            .filter_map(|(key, _)| {
-                label_for(key).and_then(|label| Metadata::field_entity(key, label, SOURCE))
+            .filter_map(|field| {
+                let label = field.label.clone()?;
+                Metadata::field_entity(field.key(), label)
             })
             .collect())
     }
 
-    /// Each surfaced EXIF field the image carries, as a [`MetadataData`], for
-    /// a caller (the codec) that streams fields to a recognizer. Every surfaced
-    /// field has a label, so the recognizer classifies each one.
+    /// Each surfaced EXIF field the image carries, as a [`MetadataData`]
+    /// labelled with what it is, for a caller (the codec) that streams fields
+    /// to a recognizer.
     ///
     /// # Errors
     ///
@@ -70,7 +64,13 @@ impl Source<'_> {
         Ok(self
             .values()?
             .into_iter()
-            .map(|(key, value)| MetadataData::new(key.to_owned(), value))
+            .map(|(key, value)| {
+                let field = MetadataData::new(key.to_owned(), value);
+                match label_for(key) {
+                    Some(label) => field.with_label(label),
+                    None => field,
+                }
+            })
             .collect())
     }
 }

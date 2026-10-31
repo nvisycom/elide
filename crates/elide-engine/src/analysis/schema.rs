@@ -28,6 +28,7 @@ use std::borrow::Cow;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 use elide_core::modality::text::Text;
+use elide_core::redaction::{HiddenContent, HiddenContentKind};
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 
 use super::artifacts::ArtifactSet;
@@ -79,11 +80,26 @@ impl JsonSchema for Report {
             "discriminator": { "propertyName": "modality" },
         });
 
-        // `parts` is an array of part entries, each a discriminated group.
+        // One `stripped` entry: the part's path, the item, its kind, and a count.
+        let stripped = json_schema!({
+            "type": "object",
+            "properties": {
+                "id": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+                "kind": generator.subschema_for::<HiddenContentKind>(),
+                "item": generator.subschema_for::<HiddenContent>(),
+                "count": { "type": "integer", "minimum": 1 },
+            },
+            "required": ["id", "kind", "item", "count"],
+        });
+
+        // `parts` is an array of part entries, each a discriminated group;
+        // `stripped` (output only, ignored on input) lists the hidden content
+        // stripped from each part.
         json_schema!({
             "type": "object",
             "properties": {
                 "parts": { "type": "array", "items": group },
+                "stripped": { "type": "array", "items": stripped },
             },
             "required": ["parts"],
         })

@@ -8,21 +8,25 @@
 //! [`escape`](Span::escape) a replacement for the context it lands in. Everything
 //! operates on a bare `&str`; nothing here knows about packages or parts.
 //!
-//! Two producers cover the two kinds of PII-bearing text an OOXML part holds:
-//! [`text_spans`] for the element text of story parts (body, headers, notes, …)
-//! and [`relationship_spans`] for the external hyperlink `Target` values of a
+//! The producers cover the kinds of PII-bearing text an OOXML part holds:
+//! [`text_spans`] for the element text of story parts (body, headers, notes, …),
+//! [`cell_markup_spans`] for the text of a spreadsheet cell part outside its
+//! cells, [`attribute_spans`] for the text attributes a format names, and
+//! [`relationship_spans`] for the external hyperlink `Target` values of a
 //! relationships part.
 
 use std::borrow::Cow;
 use std::ops::Range;
 
 use elide_core::{Error, ErrorKind, Result};
-use quick_xml::Reader;
 use quick_xml::escape::{escape, partial_escape, unescape};
 use quick_xml::events::Event;
+use quick_xml::{NsReader, Reader};
 
+use crate::opc::attributes::TextAttribute;
 use crate::opc::block::Replacement;
 use crate::opc::offset::{OffsetMap, OffsetRun};
+use crate::opc::xml_edit::{Name, bound};
 
 /// The XML construct a redactable span lives inside, which determines how a
 /// replacement spliced into it must be escaped or framed.
@@ -196,6 +200,35 @@ fn offset_map(slice: &str, base: usize) -> std::result::Result<OffsetMap, ()> {
 /// them is coalesced into one `Text` span (covering the entity bytes) so
 /// unescaping the whole span yields the decoded logical text.
 pub(crate) fn text_spans(raw: &str) -> std::result::Result<Vec<Span>, ()> {
+    text_spans_where(raw, |_| true)
+}
+
+/// The text spans of a SpreadsheetML cell part `raw` that its cell model does
+/// not read: everything but a cell's value (`<c>…<v>`), an inline string's
+/// runs (`<c>…<t>`), and a shared string's runs (`<si>…<t>`, its phonetic
+/// reading `<rPh>` excepted). A header or footer, a validation list, a formula,
+/// and a phonetic reading are all surfaced. Errs on malformed XML.
+pub(crate) fn cell_markup_spans(raw: &str) -> std::result::Result<Vec<Span>, ()> {
+    text_spans_where(raw, |open| !is_cell_text(open))
+}
+
+/// Whether text inside the elements `open` (outermost first, by local name) is
+/// read by the cell model.
+fn is_cell_text(open: &[String]) -> bool {
+    let has = |local: &str| open.iter().any(|name| name == local);
+    match open.last().map(String::as_str) {
+        Some("v") => has("c"),
+        Some("t") => has("c") || (has("si") && !has("rPh")),
+        _ => false,
+    }
+}
+
+/// The text/comment/CDATA spans of `raw` inside elements `keep` accepts, given
+/// the open elements' local names, outermost first.
+fn text_spans_where(
+    raw: &str,
+    keep: impl Fn(&[String]) -> bool,
+) -> std::result::Result<Vec<Span>, ()> {
     let mut reader = Reader::from_str(raw);
     let mut spans = Vec::new();
     // quick-xml reports positions relative to the text *after* a leading BOM, but
@@ -203,6 +236,7 @@ pub(crate) fn text_spans(raw: &str) -> std::result::Result<Vec<Span>, ()> {
     let bom = bom_len(raw);
     let mut last = bom;
     let mut run: Option<Range<usize>> = None;
+    let mut open: Vec<String> = Vec::new();
 
     loop {
         let event = reader.read_event().map_err(|_| ())?;
@@ -216,11 +250,21 @@ pub(crate) fn text_spans(raw: &str) -> std::result::Result<Vec<Span>, ()> {
                 continue;
             }
             // Any other event ends the run; flush it before handling this event.
-            _ => flush_text_run(raw, &mut run, &mut spans),
+            _ if keep(&open) => flush_text_run(raw, &mut run, &mut spans),
+            _ => run = None,
         }
 
         let found = match event {
+            Event::Start(ref e) => {
+                open.push(e.local_name().as_ref().to_owned());
+                None
+            }
+            Event::End(_) => {
+                open.pop();
+                None
+            }
             Event::Eof => break,
+            _ if !keep(&open) => None,
             Event::Comment(_) => {
                 strip(span, "<!--", "-->").map(|s| Span::new(s, BlockKind::Comment))
             }
@@ -231,6 +275,52 @@ pub(crate) fn text_spans(raw: &str) -> std::result::Result<Vec<Span>, ()> {
         };
         if let Some(found) = found {
             spans.push(found);
+        }
+    }
+    Ok(spans)
+}
+
+/// The value spans of the attributes of `raw` that `attributes` names, each
+/// tagged [`BlockKind::Attribute`]; an empty value is skipped. Errs on
+/// malformed XML.
+pub(crate) fn attribute_spans(
+    raw: &str,
+    attributes: &[TextAttribute],
+) -> std::result::Result<Vec<Span>, ()> {
+    if attributes.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut reader = NsReader::from_str(raw);
+    let mut spans = Vec::new();
+    loop {
+        let (resolved, event) = reader.read_resolved_event().map_err(|_| ())?;
+        let element_ns = bound(&resolved);
+        let elem = match event {
+            Event::Eof => break,
+            Event::Start(e) | Event::Empty(e) => e,
+            _ => continue,
+        };
+        let element = Name {
+            namespace: element_ns.as_deref(),
+            local: elem.local_name().into_inner(),
+        };
+        for attr in elem.attributes() {
+            let attr = attr.map_err(|_| ())?;
+            let (resolved, local) = reader.resolver().resolve_attribute(attr.key);
+            let attribute_ns = bound(&resolved);
+            let attribute = Name {
+                namespace: attribute_ns.as_deref(),
+                local: local.into_inner(),
+            };
+            let named = attributes
+                .iter()
+                .any(|text| text.matches(element, attribute));
+            if named && !attr.value.is_empty() {
+                spans.push(Span::new(
+                    sub_slice_range(raw, attr.value.as_ref())?,
+                    BlockKind::Attribute,
+                ));
+            }
         }
     }
     Ok(spans)

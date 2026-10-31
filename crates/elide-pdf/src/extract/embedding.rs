@@ -33,7 +33,6 @@ impl ImageId {
     }
 
     /// This id as a lopdf `ObjectId` pair.
-    #[cfg(feature = "image")]
     pub(crate) fn object(self) -> (u32, u16) {
         (self.number, self.generation)
     }

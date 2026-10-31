@@ -5,7 +5,7 @@
 //!
 //! The `sample.docx` fixture carries `lastModifiedBy = "Oleh Martsokha"` in its
 //! core properties. Under a hidden-content policy that redacts metadata, the
-//! `Metadata` pipeline's `DocPropsRecognizer` surfaces that field and `Erase`
+//! `Metadata` pipeline's `FieldRecognizer` flags that labelled field and `Erase`
 //! removes it; the DOCX re-encode folds the cleared property part back into the
 //! package, so the output no longer names the editor. Under the default policy
 //! the property parts are removed whole at decode.
@@ -16,7 +16,7 @@ use elide::entity::LabelCatalog;
 use elide::modality::metadata::Metadata;
 use elide::modality::text::Text;
 use elide::recognition::Scope;
-use elide::recognition::docprops::DocPropsRecognizer;
+use elide::recognition::metadata::FieldRecognizer;
 use elide::redaction::operators::Erase;
 use elide::redaction::{Anonymizer, Disposition, HiddenContentPolicy, Rule};
 use elide::{Directives, Document, Orchestrator};
@@ -53,9 +53,9 @@ async fn docx_core_properties_are_stripped_through_the_facade() {
             Analyzer::new(),
             Anonymizer::new().with(Rule::fallback(Erase)),
         )
-        // docProps: the DocPropsRecognizer surfaces the author/editor fields.
+        // docProps: the field recognizer flags the labelled author/editor fields.
         .with_modality::<Metadata>(
-            Analyzer::new().with_recognizer(DocPropsRecognizer),
+            Analyzer::new().with_recognizer(FieldRecognizer),
             Anonymizer::new().with(Rule::fallback(Erase)),
         );
 
@@ -83,12 +83,13 @@ async fn docx_core_properties_are_stripped_through_the_facade() {
         read_part(&out, "word/document.xml").is_some(),
         "body part missing after docProps strip"
     );
-    // And a still-populated core property (the revision count) is preserved,
-    // confirming the strip cleared only the picked fields.
+    // The part itself survives, but a property no field surfaces (the
+    // revision count) is stripped at decode: nothing could have detected what
+    // it holds.
     let core = read_part(&out, "docProps/core.xml").expect("core.xml survives");
     assert!(
-        std::str::from_utf8(&core).unwrap().contains("<revision>"),
-        "non-sensitive core properties were dropped"
+        !std::str::from_utf8(&core).unwrap().contains("revision>"),
+        "an unsurfaced core property shipped"
     );
 }
 

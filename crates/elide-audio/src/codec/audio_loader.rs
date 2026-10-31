@@ -41,7 +41,9 @@ impl DocumentLoader for AudioDocumentLoader {
         // as exactly that, no re-detection.
         let mut clip = AudioBuffer::open(content.as_bytes(), self.format)?;
         let mut stripped = StrippedContent::new();
-        stripped.record(HiddenContent::Properties, None, clip.strip_metadata()?);
+        let removed = clip.strip_metadata()?;
+        stripped.record(HiddenContent::Properties, None, removed.tags);
+        stripped.record(HiddenContent::PriorRevision, None, removed.padding);
         let stream: Box<dyn Stream<Audio>> = Box::new(AudioStream {
             clip,
             format_id: self.format_id.clone(),

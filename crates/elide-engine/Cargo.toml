@@ -46,7 +46,7 @@ schema = [
 image = ["dep:elide-image"]
 audio = ["dep:elide-audio"]
 tabular = ["elide-core/tabular"]
-metadata = ["elide-core/metadata"]
+metadata = ["elide-core/metadata", "elide-detection/metadata"]
 
 
 [dependencies]

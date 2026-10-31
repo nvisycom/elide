@@ -15,7 +15,7 @@ mod xlsx;
 
 pub use self::docx::format as docx_format;
 pub use self::pptx::format as pptx_format;
-pub use self::props::{DocPropsRecognizer, format as docprops_format};
+pub use self::props::format as docprops_format;
 pub use self::xlsx::format as xlsx_format;
 
 /// The registry hint (pseudo-extension) the OOXML `#docprops` sub-part is decoded

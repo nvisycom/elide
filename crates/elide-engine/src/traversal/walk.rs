@@ -1,6 +1,13 @@
 //! [`Walk`]: the one recursive part-tree walk both phases drive.
 
+#[cfg(feature = "metadata")]
+use std::any::TypeId;
+
+use bytes::Bytes;
 use elide_codec::{Document as CodecDocument, DocumentPart, ErasedStream, LocalId};
+#[cfg(feature = "metadata")]
+use elide_core::modality::metadata::Metadata;
+use elide_core::redaction::HiddenContent;
 use elide_core::{Error, ErrorKind, Result};
 
 use super::{Child, Fold, MAX_CONTAINER_DEPTH, PartVisitor, body_part_id};
@@ -41,7 +48,8 @@ impl<'a, V: PartVisitor> Walk<'a, V> {
     /// only when its recursion changed it.
     ///
     /// A blob deeper than [`MAX_CONTAINER_DEPTH`] is a hard error. A blob no codec
-    /// can read is offered to the visitor as [`Child::Undecodable`]; any other
+    /// can read, or that carries metadata no pipeline scans, is offered to the
+    /// visitor as [`Child::Unredactable`]; any other
     /// decode failure is a hard error.
     pub(crate) fn parts<'s>(
         &'s mut self,
@@ -53,11 +61,20 @@ impl<'a, V: PartVisitor> Walk<'a, V> {
             // One pass over this level's parts: stream handles kept as `&mut` for
             // the leaf action, blob work cloned out so no borrow is held across the
             // recursion (which needs a fresh `&mut document` to fold back).
+            // What decode stripped from this document, each item at the part it
+            // came from or with.
+            let stripped = self.visitor.stripped();
+            for entry in document.stripped().iter() {
+                let part = entry
+                    .at
+                    .map_or_else(|| prefix.clone(), |at| prefix.child(at));
+                stripped.record(part, entry.content, entry.count);
+            }
             // Every embedded document is decoded under its parent's policy, so
             // one policy governs the whole tree.
             let policy = document.hidden_content_policy();
             let mut streams: Vec<(PartId, &mut ErasedStream)> = Vec::new();
-            let mut blobs: Vec<(LocalId, PartId, bytes::Bytes, String)> = Vec::new();
+            let mut blobs: Vec<(LocalId, PartId, Bytes, String)> = Vec::new();
             let mut body_seen = false;
             for part in document.parts_mut() {
                 match part {
@@ -101,6 +118,12 @@ impl<'a, V: PartVisitor> Walk<'a, V> {
                     .decode(bytes, &hint, policy)
                     .await
                 {
+                    Ok(child) if self.has_unscanned_metadata(&child) => {
+                        self.visitor
+                            .stripped()
+                            .record(part_id, HiddenContent::Unscanned, 1);
+                        self.visitor.fold_child(Child::Unredactable)?
+                    }
                     Ok(mut child) => {
                         let subtree_changed = self.parts(&mut child, &part_id, depth + 1).await?;
                         self.visitor.fold_child(Child::Decoded {
@@ -109,7 +132,10 @@ impl<'a, V: PartVisitor> Walk<'a, V> {
                         })?
                     }
                     Err(error) if is_undecodable(&error) => {
-                        self.visitor.fold_child(Child::Undecodable)?
+                        self.visitor
+                            .stripped()
+                            .record(part_id, HiddenContent::Unreadable, 1);
+                        self.visitor.fold_child(Child::Unredactable)?
                     }
                     Err(error) => return Err(error),
                 };
@@ -133,10 +159,43 @@ impl<'a, V: PartVisitor> Walk<'a, V> {
     }
 }
 
+impl<V: PartVisitor> Walk<'_, V> {
+    /// Whether `document` surfaces metadata for detection that no pipeline
+    /// scans: a metadata stream, with no metadata pipeline registered. Under a
+    /// redacted metadata disposition such fields would otherwise ship
+    /// unexamined, so the blob is removed instead.
+    fn has_unscanned_metadata(&self, document: &CodecDocument) -> bool {
+        #[cfg(feature = "metadata")]
+        {
+            let scanned = self
+                .orchestrator
+                .pipeline_for(TypeId::of::<Metadata>())
+                .is_some();
+            !scanned
+                && document.parts().iter().any(|part| {
+                    matches!(part, DocumentPart::Stream { handle, .. } if handle.is::<Metadata>())
+                })
+        }
+        #[cfg(not(feature = "metadata"))]
+        {
+            let _ = document;
+            false
+        }
+    }
+}
+
 /// Whether a blob's decode `error` means no codec can read it: none is
 /// registered for its hint, or the one that is rejected its bytes. Any other
 /// failure (a resource limit, a provider error) is not about the blob's
 /// readability and propagates.
+///
+/// So the same structure is refused at the top and removed when nested: a
+/// document whose own format refuses it (an office package with a part or
+/// vocabulary nobody reviewed) is an error to its caller, while the same
+/// document embedded in another is unreadable content of its parent, stripped
+/// and recorded as [`HiddenContent::Unreadable`] so the parent still redacts.
+/// A resource limit is different: a decompression bomb nested anywhere fails
+/// the whole document rather than be quietly dropped.
 fn is_undecodable(error: &Error) -> bool {
     matches!(
         error.kind(),

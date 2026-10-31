@@ -3,6 +3,33 @@
 //! metadata removal, and which are safe to transfer onto re-encoded pixels.
 
 use little_exif::exif_tag::ExifTag;
+use little_exif::ifd::ExifTagGroup;
+
+/// The IFD0 tags that lay out, orient, and colour an image's pixels (TIFF 6.0
+/// baseline and extensions, plus the embedded ICC profile). A TIFF cannot be
+/// read without them, and none describes the author, the device, or the
+/// scene.
+const LAYOUT_TAGS: [u16; 39] = [
+    0x00FE, 0x00FF, 0x0100, 0x0101, 0x0102, 0x0103, 0x0106, 0x0107, 0x0108, 0x0109, 0x010A, 0x0111,
+    0x0115, 0x0116, 0x0117, 0x0118, 0x0119, 0x011A, 0x011B, 0x011C, 0x0128, 0x012D, 0x013D, 0x013E,
+    0x013F, 0x0140, 0x0141, 0x0142, 0x0143, 0x0144, 0x0145, 0x0152, 0x0153, 0x0211, 0x0212, 0x0213,
+    0x0214, 0x0112, 0x8773,
+];
+
+/// The tags that hold EXIF together: the pointers to the EXIF, GPS, and
+/// Interop IFDs, and the EXIF and GPS versions.
+const STRUCTURE_TAGS: [(u16, ExifTagGroup); 5] = [
+    (0x8769, ExifTagGroup::GENERIC),
+    (0x8825, ExifTagGroup::GENERIC),
+    (0xA005, ExifTagGroup::EXIF),
+    (0x9000, ExifTagGroup::EXIF),
+    (0x0000, ExifTagGroup::GPS),
+];
+
+/// The offset and length of an embedded JPEG: in an image's EXIF the thumbnail
+/// (IFD1), a preview of the unredacted pixels; in a TIFF old-style JPEG image
+/// data, which is layout.
+pub(super) const THUMBNAIL_TAGS: [u16; 2] = [0x0201, 0x0202];
 
 /// Whether `tag` is a benign IFD0 (GENERIC) descriptive tag safe to carry from
 /// the source onto a freshly-encoded TIFF.
@@ -35,7 +62,11 @@ pub(super) fn is_transferable_ifd0_tag(tag: &ExifTag) -> bool {
 /// The keys of the EXIF fields surfaced as metadata, in the order they are
 /// streamed. Each is read through [`read_tags`] and cleared through
 /// [`tags_for_key`]; the entity label each carries is chosen in `entity`.
-pub(super) const FIELD_KEYS: [&str; 14] = [
+///
+/// Only fields whose value is text a recognizer can read are surfaced. A
+/// vendor's binary maker note cannot be, so it is never surfaced and is
+/// stripped under every disposition.
+pub(super) const FIELD_KEYS: [&str; 13] = [
     "GPSLatitude",
     "GPSLongitude",
     "DateTimeOriginal",
@@ -49,7 +80,6 @@ pub(super) const FIELD_KEYS: [&str; 14] = [
     "UserComment",
     "Software",
     "ImageUniqueID",
-    "MakerNote",
 ];
 
 /// The tags a field `key`'s value is read from, in priority order: the first
@@ -97,6 +127,26 @@ pub(super) fn render_tags() -> [ExifTag; 1] {
     [ExifTag::Orientation(Vec::new())]
 }
 
+/// Whether the tag `hex` in an IFD of `group`, in an image of the `tiff`
+/// container or another, stays when metadata is redacted: a surfaced field's
+/// tag (or one of the logical group its field stands for, which follows the
+/// field's decision), the render tag, a structural pointer, or a TIFF's pixel
+/// layout. Everything else in EXIF (the tags no field surfaces, an embedded
+/// thumbnail, a maker note, vendor tags) cannot reach detection, so it is
+/// stripped.
+pub(super) fn kept_under_redact(hex: u16, group: ExifTagGroup, tiff: bool) -> bool {
+    let generic = group == ExifTagGroup::GENERIC;
+    STRUCTURE_TAGS.contains(&(hex, group))
+        || (generic && LAYOUT_TAGS.contains(&hex))
+        || (generic && tiff && THUMBNAIL_TAGS.contains(&hex))
+        || FIELD_KEYS.iter().any(|key| {
+            read_tags(key)
+                .into_iter()
+                .chain(tags_for_key(key))
+                .any(|field| field.as_u16() == hex && field.get_group() == group)
+        })
+}
+
 /// The one tag a free-standing field `key` names: the authorship, ownership,
 /// free-text, and identifier fields, each cleared on its own.
 fn own_tag(key: &str) -> Option<ExifTag> {
@@ -113,7 +163,6 @@ fn own_tag(key: &str) -> Option<ExifTag> {
         "UserComment" => ExifTag::UserComment(Vec::new()),
         "Software" => ExifTag::Software(String::new()),
         "ImageUniqueID" => ExifTag::ImageUniqueID(String::new()),
-        "MakerNote" => ExifTag::MakerNote(Vec::new()),
         _ => return None,
     })
 }

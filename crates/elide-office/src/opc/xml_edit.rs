@@ -3,7 +3,8 @@
 //!
 //! An OOXML part is sanitized by cutting byte ranges out of its source: an
 //! element removed with its subtree, an element unwrapped (its tags gone, its
-//! children kept), or an attribute removed from a start tag. Nothing is
+//! children kept), an attribute removed from a start tag, or an attribute's
+//! value replaced with a neutral one. Nothing is
 //! re-serialized, so formatting, namespace declarations, and every untouched
 //! element round-trip exactly. Element and attribute names are matched by
 //! namespace URI, never by prefix, so a part that binds `w:` to an unusual
@@ -47,6 +48,8 @@ pub(crate) struct Attribute<'a> {
     pub(crate) value: &'a str,
     /// The attribute's byte range in the part, its leading whitespace included.
     range: Range<usize>,
+    /// The byte range of its value, inside the quotes.
+    value_range: Range<usize>,
 }
 
 /// What an edit does with an element.
@@ -72,6 +75,43 @@ pub(crate) trait Rules {
 
     /// Whether to remove `attribute` from a kept element `element`.
     fn removes_attribute(&self, element: Name<'_>, attribute: &Attribute<'_>) -> bool;
+
+    /// The neutral value to give `attribute` of a kept element `element`, for
+    /// one that cannot be removed. An attribute already holding it is left as
+    /// it is, so a neutralized part edits to nothing.
+    fn neutralizes_attribute(
+        &self,
+        _element: Name<'_>,
+        _attribute: &Attribute<'_>,
+    ) -> Option<&'static str> {
+        None
+    }
+}
+
+/// One edit of an XML part, naming the hidden content it removes. Every
+/// [`Rules`] is one, applied by [`edit`]; an edit that must see inside an
+/// element before cutting it implements this directly.
+pub(crate) trait Edit {
+    /// The hidden content every removal this edit makes is, or `None` (as
+    /// [`Rules::content`]).
+    fn content(&self) -> Option<HiddenContent>;
+
+    /// `raw` edited, or `None` when the edit changes nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`] if `raw` is not well-formed XML.
+    fn apply(&self, raw: &str) -> Result<Option<Edited>>;
+}
+
+impl<R: Rules> Edit for R {
+    fn content(&self) -> Option<HiddenContent> {
+        Rules::content(self)
+    }
+
+    fn apply(&self, raw: &str) -> Result<Option<Edited>> {
+        edit(raw, self)
+    }
 }
 
 /// A namespace-qualified name to match: `(namespace URI, local name)`.
@@ -86,6 +126,17 @@ pub(crate) enum Local {
     Prefix(&'static str),
     /// Any local name.
     Any,
+}
+
+impl Local {
+    /// Whether `local` is matched.
+    pub(crate) fn matches(self, local: &str) -> bool {
+        match self {
+            Self::Exact(exact) => local == exact,
+            Self::Prefix(prefix) => local.starts_with(prefix),
+            Self::Any => true,
+        }
+    }
 }
 
 /// [`Rules`] declared as name lists: elements to remove, elements to unwrap,
@@ -120,12 +171,7 @@ impl Rules for Declared {
 
     fn removes_attribute(&self, _element: Name<'_>, attribute: &Attribute<'_>) -> bool {
         self.attributes.iter().any(|&(namespace, local)| {
-            attribute.name.in_namespace(namespace)
-                && match local {
-                    Local::Exact(exact) => attribute.name.local == exact,
-                    Local::Prefix(prefix) => attribute.name.local.starts_with(prefix),
-                    Local::Any => true,
-                }
+            attribute.name.in_namespace(namespace) && local.matches(attribute.name.local)
         })
     }
 }
@@ -183,9 +229,11 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
     // original bytes.
     let bom = if raw.starts_with('\u{feff}') { 3 } else { 0 };
     let mut last = bom;
-    let mut cuts: Vec<Range<usize>> = Vec::new();
-    // Elements and attributes removed or unwrapped; an unwrapped element's end
-    // tag is cut too, but it is one element.
+    // Each byte range cut, and what takes its place (nothing, or a neutral
+    // attribute value).
+    let mut cuts: Vec<(Range<usize>, &str)> = Vec::new();
+    // Elements and attributes removed, unwrapped, or neutralized; an unwrapped
+    // element's end tag is cut too, but it is one element.
     let mut count = 0;
     // The open elements' actions, to know what an end tag closes.
     let mut open: Vec<Action> = Vec::new();
@@ -206,7 +254,7 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
                 Event::End(_) => {
                     *depth -= 1;
                     if *depth == 0 {
-                        cuts.push(*start..span.end);
+                        cuts.push((*start..span.end, ""));
                         removing = None;
                     }
                 }
@@ -238,21 +286,25 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
                         count += 1;
                     }
                     Action::Remove | Action::Unwrap => {
-                        cuts.push(span.clone());
+                        cuts.push((span.clone(), ""));
                         count += 1;
                         if is_start {
                             open.push(Action::Unwrap);
                         }
                     }
                     Action::Keep => {
-                        let before = cuts.len();
-                        cuts.extend(
-                            attributes
-                                .iter()
-                                .filter(|attribute| rules.removes_attribute(name, attribute))
-                                .map(|attribute| attribute.range.clone()),
-                        );
-                        count += cuts.len() - before;
+                        for attribute in &attributes {
+                            if rules.removes_attribute(name, attribute) {
+                                cuts.push((attribute.range.clone(), ""));
+                                count += 1;
+                            } else if let Some(neutral) =
+                                rules.neutralizes_attribute(name, attribute)
+                                && attribute.value != neutral
+                            {
+                                cuts.push((attribute.value_range.clone(), neutral));
+                                count += 1;
+                            }
+                        }
                         if is_start {
                             open.push(Action::Keep);
                         }
@@ -262,7 +314,7 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
             Event::End(_) => {
                 let closed = open.pop();
                 if closed == Some(Action::Unwrap) {
-                    cuts.push(span);
+                    cuts.push((span, ""));
                 }
             }
             _ => {}
@@ -274,11 +326,12 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
     }
     // An attribute cut never overlaps another cut: an element removed whole is
     // cut before its attributes are looked at.
-    cuts.sort_by_key(|range| range.start);
+    cuts.sort_by_key(|(range, _)| range.start);
     let mut out = String::with_capacity(raw.len());
     let mut cursor = 0;
-    for cut in cuts {
+    for (cut, with) in cuts {
         out.push_str(&raw[cursor..cut.start]);
+        out.push_str(with);
         cursor = cut.end;
     }
     out.push_str(&raw[cursor..]);
@@ -292,6 +345,7 @@ struct OwnedAttribute<'a> {
     local: &'a str,
     value: &'a str,
     range: Range<usize>,
+    value_range: Range<usize>,
 }
 
 impl OwnedAttribute<'_> {
@@ -303,12 +357,13 @@ impl OwnedAttribute<'_> {
             },
             value: self.value,
             range: self.range.clone(),
+            value_range: self.value_range.clone(),
         }
     }
 }
 
 /// The namespace URI a resolved name is bound to, if any.
-fn bound(resolved: &ResolveResult<'_>) -> Option<String> {
+pub(crate) fn bound(resolved: &ResolveResult<'_>) -> Option<String> {
     match resolved {
         ResolveResult::Bound(Namespace(uri)) => Some((*uri).to_owned()),
         _ => None,
@@ -348,12 +403,13 @@ fn attributes<'a>(
             value: &raw[value_start..value_end],
             // Past the closing quote.
             range: start..value_end + 1,
+            value_range: value_start..value_end,
         });
     }
     Ok(out)
 }
 
-fn malformed(e: quick_xml::Error) -> Error {
+pub(crate) fn malformed(e: quick_xml::Error) -> Error {
     Error::new(
         ErrorKind::MalformedInput,
         format!("malformed part XML: {e}"),

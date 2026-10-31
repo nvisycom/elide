@@ -9,11 +9,10 @@ use elide_core::Result;
 use super::{PdfPage, RedactMode};
 use crate::attachment::{AttachmentId, AttachmentReplacement};
 use crate::document::Pdf;
-use crate::redact::Detection;
-#[cfg(feature = "image")]
-use crate::redact::ImageReplacement;
+use crate::extract::ImageId;
 #[cfg(feature = "render")]
 use crate::redact::PageReplacement;
+use crate::redact::{Detection, ImageReplacement};
 use crate::text::PageGeometry;
 
 /// The document's editable redaction state, behind the shared [`PdfState`] lock.
@@ -125,15 +124,25 @@ impl PdfState {
                     Pdf::open(document).and_then(|pdf| pdf.redact_text(&inner.deletions))?;
 
                 // Then fold in any redacted embedded images.
-                #[cfg(feature = "image")]
                 if !folds.images.is_empty() {
                     out = Pdf::open(&out).and_then(|pdf| pdf.redact_images(&folds.images))?;
                 }
 
-                // Then reflatten any scanned pages to their redacted raster.
+                // Then remove the images no codec could read.
+                if !folds.removed_images.is_empty() {
+                    out =
+                        Pdf::open(&out).and_then(|pdf| pdf.remove_images(&folds.removed_images))?;
+                }
+
+                // Then reflatten any scanned pages to their redacted raster, and
+                // clear the ones no codec could read.
                 #[cfg(feature = "render")]
                 if !folds.pages.is_empty() {
                     out = Pdf::open(&out).and_then(|pdf| pdf.redact_pages(&folds.pages))?;
+                }
+                #[cfg(feature = "render")]
+                if !folds.removed_pages.is_empty() {
+                    out = Pdf::open(&out).and_then(|pdf| pdf.clear_pages(&folds.removed_pages))?;
                 }
 
                 // Then write back the redacted attachments and drop the removed.
@@ -165,15 +174,20 @@ impl PdfState {
 
 /// The blob parts folded back into a PDF on encode: the redacted embedded
 /// images and scanned pages, and the redacted and removed attachments. An image
-/// or page whose blob was removed folds back as a blank replacement.
+/// whose blob was removed is removed from the document, and a scanned page whose
+/// blob was removed is cleared.
 #[derive(Debug, Default)]
 pub(super) struct Folds {
     /// Embedded images to replace with their redacted bytes.
-    #[cfg(feature = "image")]
     pub(super) images: Vec<ImageReplacement>,
     /// Scanned pages to reflatten to their redacted raster.
     #[cfg(feature = "render")]
     pub(super) pages: Vec<PageReplacement>,
+    /// Embedded images no codec could read, removed from the document.
+    pub(super) removed_images: Vec<ImageId>,
+    /// Scanned pages no codec could read, cleared.
+    #[cfg(feature = "render")]
+    pub(super) removed_pages: Vec<u32>,
     /// Attachments to replace with their redacted bytes.
     pub(super) attachments: Vec<AttachmentReplacement>,
     /// Attachments to drop from the document.
@@ -183,14 +197,15 @@ pub(super) struct Folds {
 impl Folds {
     /// Whether nothing folds back.
     fn is_empty(&self) -> bool {
-        #[cfg(feature = "image")]
         let images = self.images.is_empty();
-        #[cfg(not(feature = "image"))]
-        let images = true;
         #[cfg(feature = "render")]
-        let pages = self.pages.is_empty();
+        let pages = self.pages.is_empty() && self.removed_pages.is_empty();
         #[cfg(not(feature = "render"))]
         let pages = true;
-        images && pages && self.attachments.is_empty() && self.removed_attachments.is_empty()
+        images
+            && pages
+            && self.removed_images.is_empty()
+            && self.attachments.is_empty()
+            && self.removed_attachments.is_empty()
     }
 }

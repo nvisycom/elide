@@ -19,6 +19,7 @@ use elide_core::Result;
 pub(crate) use self::phase::{Analyze, Redact};
 pub(crate) use self::walk::Walk;
 use crate::Orchestrator;
+use crate::analysis::StrippedRecord;
 use crate::part_id::PartId;
 use crate::pipeline::BoxFuture;
 
@@ -59,6 +60,9 @@ pub(crate) trait PartVisitor: Send {
     ///
     /// A re-encode failure of the changed child.
     fn fold_child(&mut self, child: Child<'_>) -> Result<Fold>;
+
+    /// The record the walk adds each document's stripped hidden content to.
+    fn stripped(&mut self) -> &mut StrippedRecord;
 }
 
 /// A blob part after the walk tried to decode it.
@@ -72,9 +76,10 @@ pub(crate) enum Child<'a> {
         /// Whether the child differs from the parent's blob bytes.
         changed: bool,
     },
-    /// No codec can read the blob: none is registered for it, or the one that
-    /// is rejected its bytes.
-    Undecodable,
+    /// The blob cannot be redacted: no codec can read it (none is registered
+    /// for it, or the one that is rejected its bytes), or it carries content
+    /// surfaced for detection that no pipeline scans.
+    Unredactable,
 }
 
 /// How a blob part folds back into its parent document.

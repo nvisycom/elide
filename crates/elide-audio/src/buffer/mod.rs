@@ -151,17 +151,21 @@ impl AudioBuffer {
 
     /// Remove every tag block the clip carries beside its samples (ID3, APE,
     /// and Lyrics3 tags of an MP3; every chunk of a WAV but its format and
-    /// sample data), in place. Returns how many tag blocks were removed.
+    /// sample data), in place. Returns what was removed.
     ///
     /// # Errors
     ///
     /// [`ErrorKind::MalformedInput`] if a tag block overruns the container.
-    pub fn strip_metadata(&mut self) -> Result<usize> {
+    pub fn strip_metadata(&mut self) -> Result<StrippedTags> {
         let untagged = Self::strip(&self.source, self.format)?;
-        if untagged.tags > 0 {
+        let stripped = StrippedTags {
+            tags: untagged.tags,
+            padding: untagged.padding,
+        };
+        if stripped != StrippedTags::default() {
             self.source = Bytes::from(untagged.bytes);
         }
-        Ok(untagged.tags)
+        Ok(stripped)
     }
 
     /// Whether the `format` clip `bytes` carries a tag block
@@ -171,7 +175,8 @@ impl AudioBuffer {
     ///
     /// [`ErrorKind::MalformedInput`] if a tag block overruns the container.
     pub fn carries_metadata(bytes: &[u8], format: AudioFormat) -> Result<bool> {
-        Ok(Self::strip(bytes, format)?.tags > 0)
+        let untagged = Self::strip(bytes, format)?;
+        Ok(untagged.tags + untagged.padding > 0)
     }
 
     /// The `format` clip `bytes` with every tag block removed.
@@ -259,12 +264,23 @@ impl AudioBuffer {
     }
 }
 
-/// A clip with its tag blocks removed: the remaining bytes, and how many tag
-/// blocks were removed.
+/// A clip with its tag blocks removed: the remaining bytes, how many tag
+/// blocks were removed, and how many padding chunks.
 #[derive(Debug)]
 pub(crate) struct Untagged {
     pub(crate) bytes: Vec<u8>,
     pub(crate) tags: usize,
+    pub(crate) padding: usize,
+}
+
+/// What a tag strip removed from a clip: how many tag blocks, and how many
+/// padding chunks (space a writer reserved, which can keep stale bytes).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StrippedTags {
+    /// Tag blocks: ID3, APE, and Lyrics3 tags, and WAV metadata chunks.
+    pub tags: usize,
+    /// Padding chunks.
+    pub padding: usize,
 }
 
 #[cfg(all(test, feature = "wav"))]

@@ -10,7 +10,7 @@ use elide::{Orchestrator as CoreOrchestrator, Report as CoreReport};
 use tsify::Ts;
 use wasm_bindgen::prelude::*;
 
-pub use self::report::{Entity, Location, Modality, Report};
+pub use self::report::{Entity, Location, Modality, Report, Stripped};
 use crate::analyzer::{Analyzer, StageModality};
 use crate::anonymizer::Anonymizer;
 use crate::error::{ElideError, ElideErrorKind};
@@ -197,10 +197,21 @@ async fn run(pipeline: &Orchestrator, bytes: Vec<u8>, hint: String) -> Result<Re
         }
     });
 
+    let stripped = report
+        .stripped()
+        .map(|item| Stripped {
+            id: item.part.segments().map(str::to_owned).collect(),
+            kind: item.content.kind(),
+            item: item.content,
+            count: item.count,
+        })
+        .collect();
+
     let encoded = document.document.encode()?;
     Ok(Report {
         redacted: encoded.as_bytes().to_vec(),
         entities,
+        stripped,
     })
 }
 

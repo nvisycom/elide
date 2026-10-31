@@ -8,7 +8,7 @@
 mod sanitize;
 
 use crate::ooxml::OoxmlFormat;
-use crate::opc::{PartClassifier, PartKind, PartRole};
+use crate::opc::{Names, PartClassifier, PartKind, PartRole, TextAttribute};
 
 /// The Word format seam: maps each kind of part to the neutral [`PartRole`] the
 /// engine acts on.
@@ -17,7 +17,8 @@ use crate::opc::{PartClassifier, PartKind, PartRole};
 /// (kept only when collaboration content is redacted), and its charts and
 /// SmartArt carry element text; a relationships part carries external hyperlink
 /// targets; an embedding is binary; the document properties are a property
-/// part; everything else is structure.
+/// part; everything else is structure. Comment and change authors, dropdown
+/// entries, and field instructions are text attributes.
 #[derive(Debug, Clone, Copy)]
 pub struct WordFormat;
 
@@ -35,6 +36,14 @@ impl PartClassifier for WordFormat {
             PartKind::Properties => PartRole::Property,
             _ => PartRole::Structure,
         }
+    }
+
+    fn text_attributes(&self) -> &'static [TextAttribute] {
+        sanitize::TEXT_ATTRIBUTES
+    }
+
+    fn names(&self) -> &'static Names {
+        &sanitize::NAMES
     }
 }
 

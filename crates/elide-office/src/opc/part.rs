@@ -8,8 +8,10 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use crate::opc::attributes::TextAttribute;
 use crate::opc::block::EmbeddingKind;
 use crate::opc::kind::PartKind;
+use crate::opc::names::Names;
 
 /// A package-part path within an OOXML zip (e.g. `word/document.xml`,
 /// `word/media/image1.png`).
@@ -101,6 +103,9 @@ impl From<String> for PartPath {
 /// roles, and the engine acts on the role alone, so the neutral core never
 /// needs to know a `word/header2.xml` from a `word/comments.xml`, only that both
 /// hold element text.
+///
+/// Whatever its role, an XML part's [text
+/// attributes](PartClassifier::text_attributes) are redacted as well.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PartRole {
     /// Redact the element text (text/comment/CDATA events) of this XML part.
@@ -116,20 +121,16 @@ pub enum PartRole {
     /// whole-part replacement, but it is not prose, so it is never text-spliced.
     Property,
     /// A spreadsheet's cell part (a worksheet or the shared-string table): its
-    /// text is redacted out of band through the cell model and the part
-    /// replaced whole, so it is never text-spliced.
+    /// cell text is redacted out of band through the cell model and the part
+    /// replaced whole. Every other text it carries (a header or footer, a
+    /// validation list, a formula, a phonetic reading) is redacted as element
+    /// text.
     Cells,
-    /// Structure carried through unchanged.
+    /// Structure carried through unchanged, save for its text attributes.
     Structure,
 }
 
 impl PartRole {
-    /// Whether this role yields redactable text, element text or relationship
-    /// targets, so the engine reads it as a text-splice part.
-    pub(crate) fn is_redactable(self) -> bool {
-        matches!(self, Self::ElementText | Self::RelationshipTargets)
-    }
-
     /// Whether a whole-part byte replacement may target this part: a binary
     /// embedding is replaced wholesale, and a property or cell part is rewritten
     /// out of band. A text part is only ever spliced, and a structure part
@@ -146,6 +147,19 @@ impl PartRole {
 pub trait PartClassifier {
     /// The role the engine applies to a part of `kind`.
     fn role(&self, kind: PartKind) -> PartRole;
+
+    /// The attributes whose values are text a reader sees or the policy keeps,
+    /// redacted in every XML part like element text.
+    fn text_attributes(&self) -> &'static [TextAttribute] {
+        &[]
+    }
+
+    /// The names the format holds to rules of their own, and the attributes
+    /// that refer to them; each is among the
+    /// [`text_attributes`](Self::text_attributes).
+    fn names(&self) -> &'static Names {
+        &Names::NONE
+    }
 }
 
 #[cfg(test)]

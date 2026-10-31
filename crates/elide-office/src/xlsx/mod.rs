@@ -9,6 +9,7 @@
 //! so the pooled value other cells still reference is left untouched.
 
 mod cellref;
+mod names;
 mod sanitize;
 mod sheet;
 mod strings;
@@ -25,7 +26,8 @@ use self::sheet::{CellSource, parse_cells};
 use self::strings::{parse_shared_strings, shared_string_items};
 use self::workbook::{Sheet, resolve_sheets};
 use crate::opc::{
-    Extraction, Package, PartClassifier, PartKind, PartPath, PartReplacement, PartRole, Replacement,
+    Extraction, Names, Package, PartClassifier, PartKind, PartPath, PartReplacement, PartRole,
+    Replacement, TextAttribute,
 };
 
 /// The well-known part path of the workbook and its shared-string table.
@@ -37,11 +39,14 @@ const SHARED_STRINGS_PART: &str = "xl/sharedStrings.xml";
 /// [`PartRole`] the engine acts on.
 ///
 /// The worksheets and the shared-string table are cell parts, redacted through
-/// the cell model; comments (kept only when collaboration content is
-/// redacted), drawings, and charts hold element text and relationships parts
-/// external hyperlink targets, redacted through the shared text path; an
-/// embedding is binary; the document properties are a property part; the
-/// workbook and everything else is structure.
+/// the cell model, their text outside the cells through the shared text path;
+/// the workbook (its defined names), comments (kept only when collaboration
+/// content is redacted), drawings, and charts hold element text and
+/// relationships parts external hyperlink targets, redacted through the shared
+/// text path; an embedding is binary; the document properties are a property
+/// part; everything else is structure. Sheet and table column names, data
+/// validation messages, and the other [text attributes](sanitize::TEXT_ATTRIBUTES)
+/// are redacted too.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SheetClassifier;
 
@@ -49,14 +54,24 @@ impl PartClassifier for SheetClassifier {
     fn role(&self, kind: PartKind) -> PartRole {
         match kind {
             PartKind::Story => PartRole::Cells,
-            PartKind::Comments | PartKind::Chart | PartKind::Diagram | PartKind::Drawing => {
-                PartRole::ElementText
-            }
+            PartKind::Main
+            | PartKind::Comments
+            | PartKind::Chart
+            | PartKind::Diagram
+            | PartKind::Drawing => PartRole::ElementText,
             PartKind::Relationships => PartRole::RelationshipTargets,
             PartKind::Embedding(kind) => PartRole::Binary(kind),
             PartKind::Properties => PartRole::Property,
             _ => PartRole::Structure,
         }
+    }
+
+    fn text_attributes(&self) -> &'static [TextAttribute] {
+        sanitize::TEXT_ATTRIBUTES
+    }
+
+    fn names(&self) -> &'static Names {
+        &names::NAMES
     }
 }
 
@@ -201,10 +216,16 @@ impl Xlsx {
         self.package.part_bytes(path)
     }
 
-    /// Rewrite cell `edits`, splice `text` replacements into the non-cell text
-    /// parts (comments, drawings, charts, relationship targets), and replace
-    /// whole embedding and document-property `parts`, re-packing every other
-    /// part byte-for-byte.
+    /// Rewrite cell `edits`, splice `text` replacements into the workbook's text
+    /// outside its cells (the defined names, comments, drawings, charts,
+    /// relationship targets, text attributes, and the cell parts' own text
+    /// outside their cells), and replace whole embedding and document-property
+    /// `parts`, re-packing every other part byte-for-byte.
+    ///
+    /// A replacement in a cell part is spliced before the cell edits land on
+    /// it, so the two never overlap; one in a sheet, defined, table, or
+    /// table-column name replaces the whole name, fitted to Excel's rules for
+    /// it (see [`names`]).
     ///
     /// A cell edit naming an unknown sheet, a text replacement outside a
     /// text-bearing part, or a part replacement naming anything but an
@@ -220,6 +241,40 @@ impl Xlsx {
         text: &[Replacement],
         parts: &[PartReplacement],
     ) -> Result<Vec<u8>> {
+        let text = self.package.fit_names(text)?;
+
+        // Splice the replacements that land in a cell part now, so the cell
+        // edits apply on top of them.
+        let mut in_cells: HashMap<&PartPath, Vec<&Replacement>> = HashMap::new();
+        let mut elsewhere = Vec::new();
+        for replacement in &text {
+            if self.package.role_of(&replacement.part) == Some(PartRole::Cells) {
+                in_cells
+                    .entry(&replacement.part)
+                    .or_default()
+                    .push(replacement);
+            } else {
+                elsewhere.push(replacement.clone());
+            }
+        }
+        let mut spliced: HashMap<String, String> = HashMap::new();
+        for (part, replacements) in in_cells {
+            spliced.insert(
+                part.as_str().to_owned(),
+                self.package.splice_part(part, &replacements)?,
+            );
+        }
+        // A cell part's text: spliced above, or as the package holds it.
+        let current = |part: &str| -> Result<String> {
+            if let Some(text) = spliced.get(part) {
+                return Ok(text.clone());
+            }
+            let bytes = self.package.part_bytes(part).ok_or_else(|| {
+                Error::new(ErrorKind::Processing, format!("part `{part}` not found"))
+            })?;
+            decode_part(part, &bytes)
+        };
+
         // Group edits by the sheet part they land in, keyed by (row, column).
         let mut by_part: HashMap<String, HashMap<(u32, u32), &CellEdit>> = HashMap::new();
         for edit in edits {
@@ -243,25 +298,32 @@ impl Xlsx {
         // as whole-part replacements for the byte-faithful re-zip.
         let mut replacements = Vec::new();
         for (part, cell_edits) in &by_part {
-            let bytes = self.package.part_bytes(part).ok_or_else(|| {
-                Error::new(
-                    ErrorKind::Processing,
-                    format!("sheet part `{part}` not found"),
-                )
-            })?;
-            let raw = decode_part(part, &bytes)?;
-            let spliced = self.splice_sheet(part, &raw, cell_edits)?;
+            let raw = current(part)?;
+            let edited = self.splice_sheet(part, &raw, cell_edits)?;
             replacements.push(PartReplacement::new(
                 PartPath::from(part.clone()),
-                spliced.into_bytes(),
+                edited.into_bytes(),
             ));
         }
 
         // De-sharing a `t="s"` cell drops a reference to its pooled string; a
         // pool entry that loses its last reference would otherwise linger in
         // `sharedStrings.xml` as orphaned bytes, a leak. Blank any such entry.
-        if let Some(pruned) = self.prune_orphaned_strings(&by_part)? {
-            replacements.push(pruned);
+        let pruned = self.prune_orphaned_strings(&by_part, &current)?;
+        if let Some(pruned) = &pruned {
+            replacements.push(pruned.clone());
+        }
+
+        // A cell part spliced but otherwise unedited goes back as spliced.
+        for (part, text) in &spliced {
+            let rewritten =
+                by_part.contains_key(part) || (part == SHARED_STRINGS_PART && pruned.is_some());
+            if !rewritten {
+                replacements.push(PartReplacement::new(
+                    PartPath::from(part.clone()),
+                    text.clone().into_bytes(),
+                ));
+            }
         }
 
         // Fold in the redacted embeddings and document-property parts. A cell
@@ -281,7 +343,7 @@ impl Xlsx {
             replacements.push(part.clone());
         }
 
-        self.package.rewrite_with_parts(text, &replacements)
+        self.package.rewrite_fitted(&elsewhere, &replacements)
     }
 
     /// The workbook's content outside its cells: the text blocks of its
@@ -293,7 +355,8 @@ impl Xlsx {
     }
 
     /// Blank every shared-string entry that, after the de-share edits in
-    /// `by_part`, no `t="s"` cell references any longer, so an orphaned pooled
+    /// `by_part` over the cell parts' `current` text, no `t="s"` cell
+    /// references any longer, so an orphaned pooled
     /// value cannot survive in the output. Returns the rewritten
     /// `sharedStrings.xml` part, or `None` if nothing is orphaned (or the
     /// workbook has no shared-string table).
@@ -304,11 +367,12 @@ impl Xlsx {
     fn prune_orphaned_strings(
         &self,
         by_part: &HashMap<String, HashMap<(u32, u32), &CellEdit>>,
+        current: &dyn Fn(&str) -> Result<String>,
     ) -> Result<Option<PartReplacement>> {
-        let Some(bytes) = self.package.part_bytes(SHARED_STRINGS_PART) else {
+        if !self.package.contains_part(SHARED_STRINGS_PART) {
             return Ok(None);
-        };
-        let raw = decode_part(SHARED_STRINGS_PART, &bytes)?;
+        }
+        let raw = current(SHARED_STRINGS_PART)?;
         let items = shared_string_items(&raw)?;
 
         // Count, across every sheet, the `t="s"` cells that still reference each
@@ -316,10 +380,10 @@ impl Xlsx {
         // edit de-shares it (an inline cell never referenced the pool).
         let mut referenced = vec![false; items.len()];
         for path in self.sheets.iter().map(|s| &s.part) {
-            let Some(sheet_bytes) = self.package.part_bytes(path) else {
+            if !self.package.contains_part(path) {
                 continue;
-            };
-            let sheet_raw = decode_part(path, &sheet_bytes)?;
+            }
+            let sheet_raw = current(path)?;
             let edited = by_part.get(path.as_str());
             for cell in parse_cells(&sheet_raw)? {
                 let Some(index) = cell.shared_index else {
@@ -478,6 +542,8 @@ fn decode_part(path: &str, bytes: &[u8]) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    use elide_core::redaction::HiddenContentPolicy;
+
     use super::*;
 
     /// A real Excel-authored workbook (Microsoft): one sheet `in`, a header row
@@ -490,6 +556,117 @@ mod tests {
     /// `Customers!B2`. Its two sheets sharing a pooled value drive the de-share
     /// and orphan-prune tests, which a single-sheet workbook cannot exercise.
     const SHARED: &[u8] = include_bytes!("../../tests/testdata/shared_across_sheets.xlsx");
+
+    /// SpreadsheetML's main namespace, declared on the hand-built parts.
+    const SML_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+
+    /// A hand-built workbook carrying text outside its cells: sheets named after
+    /// people, a defined name holding a literal, a sheet with a header, a data
+    /// validation's prompt and list, and a formula literal, a hyperlink to the
+    /// first sheet, and a phonetic reading in the shared-string table, beside
+    /// one shared-string cell and one inline cell.
+    fn markup_workbook() -> Vec<u8> {
+        let types = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>"#;
+        let workbook = format!(
+            r#"<?xml version="1.0"?><workbook xmlns="{SML_NS}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Jane Roe" sheetId="1" r:id="rId1"/><sheet name="John Doe" sheetId="2" r:id="rId2"/></sheets><definedNames><definedName name="Owner">"Jane Roe"</definedName></definedNames></workbook>"#
+        );
+        let rels = r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>"#;
+        let sheet = format!(
+            r#"<?xml version="1.0"?><worksheet xmlns="{SML_NS}"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="inlineStr"><is><t>jane@example.com</t></is></c><c r="C1"><f>IF(A1="Jane Roe",1,0)</f><v>1</v></c></row></sheetData><dataValidations count="1"><dataValidation type="list" sqref="D1" prompt="Ask Jane Roe"><formula1>"Jane Roe,John Doe"</formula1></dataValidation></dataValidations><headerFooter><oddHeader>Prepared by Jane Roe</oddHeader></headerFooter></worksheet>"#
+        );
+        let linked = format!(
+            r#"<?xml version="1.0"?><worksheet xmlns="{SML_NS}"><sheetData/><hyperlinks><hyperlink ref="A1" location="'Jane Roe'!A1"/></hyperlinks></worksheet>"#
+        );
+        let strings = format!(
+            r#"<?xml version="1.0"?><sst xmlns="{SML_NS}" count="1" uniqueCount="1"><si><t>Roe</t><rPh sb="0" eb="3"><t>ロウ ジェーン</t></rPh></si></sst>"#
+        );
+        crate::opc::fixtures::pack_parts(&[
+            ("[Content_Types].xml", types.as_bytes()),
+            ("_rels/.rels", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>"#),
+            ("xl/workbook.xml", workbook.as_bytes()),
+            ("xl/_rels/workbook.xml.rels", rels.as_bytes()),
+            ("xl/worksheets/sheet1.xml", sheet.as_bytes()),
+            ("xl/worksheets/sheet2.xml", linked.as_bytes()),
+            ("xl/sharedStrings.xml", strings.as_bytes()),
+        ])
+    }
+
+    #[test]
+    fn text_outside_the_cells_is_surfaced_and_cell_text_is_not() {
+        let xlsx = Xlsx::open(&markup_workbook()).unwrap();
+        let markup = xlsx.markup();
+        assert!(markup.issues.is_empty(), "{:?}", markup.issues);
+        let mut texts: Vec<&str> = markup.blocks.iter().map(|b| b.text.as_str()).collect();
+        texts.sort_unstable();
+        assert_eq!(
+            texts,
+            [
+                "\"Jane Roe\"",
+                "\"Jane Roe,John Doe\"",
+                "'Jane Roe'!A1",
+                "Ask Jane Roe",
+                "IF(A1=\"Jane Roe\",1,0)",
+                "Jane Roe",
+                "John Doe",
+                "Owner",
+                "Prepared by Jane Roe",
+                "ロウ ジェーン",
+            ]
+        );
+    }
+
+    #[test]
+    fn markup_and_cell_redactions_land_together_and_names_stay_valid() {
+        let source = markup_workbook();
+        let xlsx = Xlsx::open(&source).unwrap();
+        let text: Vec<Replacement> = xlsx
+            .markup()
+            .blocks
+            .iter()
+            .map(|block| Replacement::for_block(block, "[PERSON]"))
+            .collect();
+        let edits = [
+            CellEdit::new("Jane Roe", 0, 0, "[PERSON]"),
+            CellEdit::new("Jane Roe", 0, 1, "[EMAIL]"),
+        ];
+        let out = xlsx.rewrite(&edits, &text, &[]).unwrap();
+        crate::opc::check::check(&out, HiddenContentPolicy::default(), &SheetClassifier)
+            .expect("the redacted workbook passes the output check");
+
+        let workbook =
+            String::from_utf8(crate::opc::fixtures::read_part(&out, "xl/workbook.xml").unwrap())
+                .unwrap();
+        assert!(workbook.contains(r#"name="(PERSON)""#), "{workbook}");
+        assert!(workbook.contains(r#"name="(PERSON) (2)""#), "{workbook}");
+        assert!(
+            workbook.contains(r#"definedName name="_PERSON_""#),
+            "{workbook}"
+        );
+        let linked = String::from_utf8(
+            crate::opc::fixtures::read_part(&out, "xl/worksheets/sheet2.xml").unwrap(),
+        )
+        .unwrap();
+        // The hyperlink follows the sheet it pointed at, whichever number the
+        // sheet got.
+        assert!(linked.contains("location=\"&apos;(PERSON)"), "{linked}");
+        let sheet = String::from_utf8(
+            crate::opc::fixtures::read_part(&out, "xl/worksheets/sheet1.xml").unwrap(),
+        )
+        .unwrap();
+        for leaked in ["Jane", "jane@example.com"] {
+            assert!(!sheet.contains(leaked), "{leaked} in {sheet}");
+        }
+        assert!(sheet.contains("<oddHeader>[PERSON]</oddHeader>"), "{sheet}");
+        assert!(sheet.contains("[EMAIL]"), "{sheet}");
+        let strings = String::from_utf8(
+            crate::opc::fixtures::read_part(&out, "xl/sharedStrings.xml").unwrap(),
+        )
+        .unwrap();
+        assert!(
+            !strings.contains("ジェーン") && !strings.contains("Roe"),
+            "{strings}"
+        );
+    }
 
     fn cell<'a>(cells: &'a [Cell], sheet: &str, row: u32, col: u32) -> Option<&'a Cell> {
         cells

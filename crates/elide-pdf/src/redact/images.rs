@@ -6,10 +6,6 @@
 //! the result back as an [`ImageReplacement`]. The XObject is then rebuilt from
 //! those encoded bytes so its stream and dictionary (dimensions, colour space,
 //! filter) stay consistent, the redacted pixels genuinely replace the original.
-//!
-//! Behind the `image` feature, which pulls the `image` crate (via lopdf's
-//! `embed_image`) to build the XObject; the default build carries no image
-//! dependency.
 
 use elide_core::{Error, ErrorKind, Result};
 use lopdf::Object;
@@ -22,7 +18,6 @@ use crate::extract::ImageId;
 ///
 /// The `image` bytes are a self-contained encoded image (PNG or JPEG), the same
 /// form a caller extracts, redacts, and re-encodes.
-#[cfg_attr(docsrs, doc(cfg(feature = "image")))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageReplacement {
     /// The image to replace.

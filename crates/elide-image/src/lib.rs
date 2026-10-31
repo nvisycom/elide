@@ -15,4 +15,6 @@ pub mod modality;
 pub mod ocr;
 pub mod primitive;
 
+#[cfg(feature = "exif")]
+pub use self::buffer::StrippedMetadata;
 pub use self::buffer::{ImageBuffer, RasterImage};

@@ -27,12 +27,14 @@ const PNG_RENDER_CHUNKS: [&[u8; 4]; 14] = [
     b"cLLi", b"acTL", b"fcTL", b"fdAT",
 ];
 
-/// A container with metadata blocks dropped: the remaining bytes, and how many
-/// blocks (JPEG segments, PNG chunks, TIFF metadata tags) were dropped.
+/// A container with metadata dropped: the remaining bytes, how many metadata
+/// blocks or tags (JPEG segments, PNG chunks, EXIF and TIFF tags) were dropped,
+/// and how many embedded thumbnails.
 #[derive(Debug)]
 pub(crate) struct Scrubbed {
     pub(crate) bytes: Vec<u8>,
     pub(crate) removed: usize,
+    pub(crate) thumbnails: usize,
 }
 
 /// The keyword of the PNG text chunk some writers store raw EXIF in.
@@ -75,6 +77,7 @@ pub(super) fn scrub_jpeg(bytes: &[u8], keep_exif: bool) -> Result<Scrubbed> {
             return Ok(Scrubbed {
                 bytes: out,
                 removed,
+                thumbnails: 0,
             });
         }
         let length = bytes
@@ -149,6 +152,7 @@ pub(super) fn scrub_png(bytes: &[u8], keep_exif: bool) -> Result<Scrubbed> {
     Ok(Scrubbed {
         bytes: out,
         removed,
+        thumbnails: 0,
     })
 }
 

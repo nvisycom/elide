@@ -96,34 +96,17 @@ pub mod pattern {
     pub use elide_pattern::*;
 }
 
-/// EXIF metadata recognition: surface an image's privacy-relevant EXIF fields
-/// as `Entity<Metadata>` values.
+/// Metadata recognition: turn each metadata field into an `Entity<Metadata>`
+/// by what its format says it is.
 ///
-/// Wire it into a `Metadata` pipeline to strip an image's metadata alongside its
-/// pixels: `.with_modality::<Metadata>(Analyzer::new().with_recognizer(exif::ExifRecognizer),
+/// A codec labels every field it surfaces (an EXIF `GPSLatitude` is a
+/// location, a document's `creator` a person), so one recognizer serves every
+/// format: wire it into a `Metadata` pipeline,
+/// `.with_modality::<Metadata>(Analyzer::new().with_recognizer(metadata::FieldRecognizer),
 /// Anonymizer::new().with(Rule::fallback(Erase)))`.
-#[cfg(any(feature = "codec-png", feature = "codec-jpeg", feature = "codec-tiff"))]
-#[cfg_attr(
-    docsrs,
-    doc(cfg(any(feature = "codec-png", feature = "codec-jpeg", feature = "codec-tiff")))
-)]
-pub mod exif {
+#[cfg(feature = "metadata")]
+#[cfg_attr(docsrs, doc(cfg(feature = "metadata")))]
+pub mod metadata {
     #[doc(inline)]
-    pub use elide_image::exif::ExifRecognizer;
-}
-
-/// OOXML document-property recognition: surface a Word/PowerPoint/Excel
-/// document's `docProps` fields (author, last editor, company, timestamps) as
-/// `Entity<Metadata>`.
-///
-/// Wire it into a `Metadata` pipeline to strip document properties alongside the
-/// body text.
-#[cfg(any(feature = "codec-docx", feature = "codec-pptx", feature = "codec-xlsx"))]
-#[cfg_attr(
-    docsrs,
-    doc(cfg(any(feature = "codec-docx", feature = "codec-pptx", feature = "codec-xlsx")))
-)]
-pub mod docprops {
-    #[doc(inline)]
-    pub use elide_office::codec::DocPropsRecognizer;
+    pub use elide_detection::FieldRecognizer;
 }

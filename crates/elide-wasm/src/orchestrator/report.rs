@@ -2,6 +2,7 @@
 //! JavaScript: the redacted blob and the entities it found, in `Tsify`-generated
 //! TypeScript shapes.
 
+use elide::redaction::{HiddenContent, HiddenContentKind};
 use serde::Serialize;
 use tsify::Tsify;
 
@@ -101,8 +102,28 @@ pub enum Location {
     },
 }
 
+/// One item of hidden content the run stripped, mirroring the toolkit's
+/// `StrippedItem`: the part it came from (its path, one segment per container
+/// level), the item and its kind (snake-case names, e.g. `comment` /
+/// `collaboration`), and how many.
+#[derive(Serialize, Tsify)]
+#[serde(rename_all = "camelCase")]
+pub struct Stripped {
+    /// The part's path, outermost segment first.
+    pub id: Vec<String>,
+    /// The kind of hidden content.
+    #[tsify(type = "string")]
+    pub kind: HiddenContentKind,
+    /// The item of hidden content.
+    #[tsify(type = "string")]
+    pub item: HiddenContent,
+    /// How many were stripped.
+    pub count: usize,
+}
+
 /// The outcome of a pipeline run, mirroring the toolkit's own `Report`: the
-/// redacted blob and every entity it detected.
+/// redacted blob, every entity it detected, and the hidden content it
+/// stripped.
 ///
 /// `redacted` is the re-encoded document in the same format as the input, as raw
 /// bytes; the caller decodes it however it consumed the input (a `Blob`, a data
@@ -119,4 +140,6 @@ pub struct Report {
     pub redacted: Vec<u8>,
     /// Every entity the pipeline detected, across modalities.
     pub entities: Vec<Entity>,
+    /// Every item of hidden content stripped from the document.
+    pub stripped: Vec<Stripped>,
 }

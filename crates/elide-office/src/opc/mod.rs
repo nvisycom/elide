@@ -10,13 +10,15 @@
 //! package.
 
 pub(crate) mod archive;
+mod attributes;
 mod block;
 pub(crate) mod check;
 pub(crate) mod content_types;
-#[cfg(feature = "fixtures")]
+#[cfg(any(test, feature = "fixtures"))]
 pub mod fixtures;
 pub(crate) mod index;
 pub(crate) mod kind;
+pub(crate) mod names;
 mod offset;
 mod part;
 pub mod props;
@@ -26,18 +28,21 @@ pub(crate) mod sanitize;
 mod store;
 pub(crate) mod vocabulary;
 pub(crate) mod xml_edit;
-mod xml_span;
+pub(crate) mod xml_span;
 
 use std::collections::HashMap;
 
 use bytes::Bytes;
 use elide_core::{Error, ErrorKind, Result};
 
+pub use self::attributes::TextAttribute;
+pub(crate) use self::attributes::{NEUTRAL_DATE, NeutralizeAttributes, Ns, StripAttributes};
 pub use self::block::{
     Block, Embedding, EmbeddingKind, Extraction, Issue, IssueKind, PartReplacement, Replacement,
 };
 use self::index::Index;
 pub use self::kind::PartKind;
+pub use self::names::{NameReference, NameRule, Names};
 pub use self::offset::{OffsetMap, OffsetRun, RunKind};
 pub use self::part::{PartClassifier, PartPath, PartRole};
 use self::store::StoredPart;
@@ -52,6 +57,8 @@ use self::store::StoredPart;
 pub struct Package {
     /// Every package part, in archive order.
     parts: Vec<StoredPart>,
+    /// The format's names, fitted to their rules when redacted.
+    names: &'static Names,
     /// The original archive bytes, retained so [`rewrite_with_parts`](Self::rewrite_with_parts) can
     /// copy an untouched part's already-compressed data straight through instead
     /// of inflating and re-deflating it.
@@ -102,11 +109,19 @@ impl Package {
             .iter()
             .map(|(path, bytes)| {
                 let kind = index.kind(path);
-                StoredPart::new(path.clone(), kind, classifier.role(kind), bytes.clone())
+                let attributes = index.is_xml(path).then(|| classifier.text_attributes());
+                StoredPart::new(
+                    path.clone(),
+                    kind,
+                    classifier.role(kind),
+                    bytes.clone(),
+                    attributes,
+                )
             })
             .collect();
         Ok(Self {
             parts,
+            names: classifier.names(),
             source: Bytes::copy_from_slice(document),
         })
     }
@@ -160,7 +175,7 @@ impl Package {
         let mut blocks = Vec::new();
         let mut issues = Vec::new();
         for part in &self.parts {
-            if part.role().is_redactable() {
+            if part.is_text() {
                 // Partial-success: a part that fails to parse yields no blocks
                 // and is recorded as an issue rather than failing the whole
                 // extraction.
@@ -211,6 +226,31 @@ impl Package {
     ///
     /// [`ErrorKind::Processing`] if a
     /// replacement can't be applied.
+    /// The text of the part at `path` with `replacements` spliced in, for a
+    /// facade that rewrites the part further before handing it back whole.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::Processing`] if the package has no such text part or a
+    /// replacement does not land on one of its text spans.
+    pub(crate) fn splice_part(
+        &self,
+        path: &PartPath,
+        replacements: &[&Replacement],
+    ) -> Result<String> {
+        let part = self
+            .parts
+            .iter()
+            .find(|part| part.path() == path && part.is_text())
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Processing,
+                    format!("replacement names non-text part `{path}`"),
+                )
+            })?;
+        part.splice(replacements)
+    }
+
     pub fn rewrite(&self, replacements: &[Replacement]) -> Result<Vec<u8>> {
         self.rewrite_with_parts(replacements, &[])
     }
@@ -229,6 +269,42 @@ impl Package {
         replacements: &[Replacement],
         parts: &[PartReplacement],
     ) -> Result<Vec<u8>> {
+        let replacements = self.fit_names(replacements)?;
+        self.rewrite_fitted(&replacements, parts)
+    }
+
+    /// `replacements` with each one landing in a name of the format folded into
+    /// a replacement of the whole name fitted to its rules, and the references
+    /// to a renamed name rewritten (see [`names`]).
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`] if a text part is not UTF-8 or well-formed
+    /// XML.
+    pub(crate) fn fit_names(&self, replacements: &[Replacement]) -> Result<Vec<Replacement>> {
+        let mut texts = Vec::new();
+        for part in &self.parts {
+            if !part.is_text() || part.role() == PartRole::RelationshipTargets {
+                continue;
+            }
+            let text = part.text().ok_or_else(|| {
+                Error::new(
+                    ErrorKind::MalformedInput,
+                    format!("part `{}` not UTF-8", part.path()),
+                )
+            })?;
+            texts.push((part.path(), text));
+        }
+        names::fit_names(self.names, texts.iter().copied(), replacements)
+    }
+
+    /// [`rewrite_with_parts`](Self::rewrite_with_parts) with the names already
+    /// fitted.
+    pub(crate) fn rewrite_fitted(
+        &self,
+        replacements: &[Replacement],
+        parts: &[PartReplacement],
+    ) -> Result<Vec<u8>> {
         // Index every stored part once for O(1) lookup during validation.
         let index: HashMap<&PartPath, &StoredPart> =
             self.parts.iter().map(|p| (p.path(), p)).collect();
@@ -243,7 +319,7 @@ impl Package {
                     format!("replacement names unknown part `{}`", r.part),
                 ));
             };
-            if !part.role().is_redactable() {
+            if !part.is_text() {
                 return Err(Error::new(
                     ErrorKind::Processing,
                     format!("replacement names non-text part `{}`", r.part),

@@ -72,7 +72,7 @@ tiff = ["dep:elide-image", "elide-image/codec", "elide-image/tiff"]
 docx = ["dep:elide-office", "internal_office"]
 pptx = ["dep:elide-office", "internal_office"]
 pdf = ["dep:elide-pdf"]
-pdf-render = ["pdf", "elide-pdf/render", "elide-pdf/image"]
+pdf-render = ["pdf", "elide-pdf/render"]
 
 ## The tabular formats: CSV's handler lives in the `elide-plain` engine; XLSX
 ## adapts the `elide-office`-hosted OOXML engine.

@@ -66,8 +66,8 @@ pub use self::artifacts::ArtifactSet;
 pub(crate) use self::group::{ArtifactGroup, EntityGroup};
 pub(crate) use self::registry::ModalityRegistry;
 pub use self::registry::ReportDeserializer;
-pub(crate) use self::report::PartReport;
-pub use self::report::Report;
+pub(crate) use self::report::{PartReport, StrippedRecord};
+pub use self::report::{Report, StrippedItem};
 
 /// The result of analyzing a document: its findings and the enrichment that
 /// produced them.

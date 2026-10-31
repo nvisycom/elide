@@ -44,20 +44,21 @@ impl DocumentLoader for ImageDocumentLoader {
         // The registry routed to this loader for its one format; decode the
         // bytes as exactly that, no re-detection.
         let mut buffer = ImageBuffer::open(content.as_bytes(), self.format)?;
-        let (blocks, exif) = match policy.metadata {
+        let (removed, exif) = match policy.metadata {
             Disposition::Strip => (buffer.strip_metadata()?, None),
             Disposition::Redact => {
-                let blocks = buffer.strip_unsurfaced_metadata()?;
+                let removed = buffer.strip_unsurfaced_metadata()?;
                 let exif = DocumentPart::Blob {
                     id: LocalId::new(EXIF_PART_ID),
                     bytes: buffer.source_bytes(),
                     hint: EXIF_HINT.to_owned(),
                 };
-                (blocks, Some(exif))
+                (removed, Some(exif))
             }
         };
         let mut stripped = StrippedContent::new();
-        stripped.record(HiddenContent::Properties, None, blocks);
+        stripped.record(HiddenContent::Properties, None, removed.properties);
+        stripped.record(HiddenContent::Thumbnail, None, removed.thumbnails);
         let state = ImageState::new(buffer);
 
         let pixels: Box<dyn Stream<Image>> = Box::new(PixelStream {

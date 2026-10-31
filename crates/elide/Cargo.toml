@@ -106,7 +106,12 @@ audio = ["dep:elide-audio", "elide-operator/audio", "elide-engine?/audio"]
 image = ["dep:elide-image", "elide-image/exif", "elide-operator/image", "elide-engine?/image", "metadata"]
 ## The `metadata` modality: a document's out-of-band fields (EXIF, document
 ## properties) as redaction subjects.
-metadata = ["elide-core/metadata", "elide-operator/metadata", "elide-engine?/metadata"]
+metadata = [
+    "elide-core/metadata",
+    "elide-detection/metadata",
+    "elide-operator/metadata",
+    "elide-engine?/metadata",
+]
 ## The `tabular` modality. Implied by the tabular codec formats.
 tabular = ["elide-core/tabular", "elide-operator/tabular", "elide-redaction/tabular", "elide-engine?/tabular"]
 

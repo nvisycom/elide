@@ -11,7 +11,11 @@ use little_exif::metadata::Metadata as ExifMetadata;
 
 use super::container::{Scrubbed, scrub_jpeg, scrub_png};
 use super::guard;
-use super::tags::{FIELD_KEYS, is_transferable_ifd0_tag, read_tags, render_tags, tags_for_key};
+use super::tags::{
+    FIELD_KEYS, THUMBNAIL_TAGS, is_transferable_ifd0_tag, kept_under_redact, render_tags,
+    tags_for_key,
+};
+use super::value::render;
 
 /// The TIFF IFD0 tags that each hold a whole non-EXIF metadata block: XMP
 /// (700), IPTC (33723), and Photoshop image resources (34377).
@@ -43,26 +47,34 @@ impl<'a> Source<'a> {
     }
 
     /// The value of every surfaced field the image carries, as `(key, value)`
-    /// in [`FIELD_KEYS`] order. Empty when the image carries no EXIF (the
-    /// common case for PNG).
+    /// in [`FIELD_KEYS`] order, each rendered as the text a reader would see.
+    /// Empty when the image carries no EXIF (the common case for PNG).
     pub(crate) fn values(&self) -> Result<Vec<(&'static str, String)>> {
         let Some(exif) = self.parse()? else {
             return Ok(Vec::new());
         };
-        let value = |tag: &ExifTag| {
-            guard(|| exif.get_tag(tag).next().map(|t| format!("{t:?}")))
-                .ok()
-                .flatten()
-        };
         Ok(FIELD_KEYS
             .into_iter()
             .filter_map(|key| {
-                read_tags(key)
-                    .iter()
-                    .find_map(value)
-                    .map(|value| (key, value))
+                let value = guard(AssertUnwindSafe(|| render(key, &exif)))
+                    .ok()
+                    .flatten()?;
+                Some((key, value))
             })
             .collect())
+    }
+
+    /// Whether the EXIF `exif` embeds a thumbnail: an image's IFD1 preview.
+    /// A TIFF's embedded JPEG is its image data, never a thumbnail.
+    fn has_thumbnail(&self, exif: &ExifMetadata) -> bool {
+        !matches!(self.format, FileExtension::TIFF)
+            && exif.get_ifds().iter().any(|ifd| {
+                ifd.get_ifd_type() == ExifTagGroup::GENERIC
+                    && ifd
+                        .get_tags()
+                        .iter()
+                        .any(|tag| THUMBNAIL_TAGS.contains(&tag.as_u16()))
+            })
     }
 
     /// Remove every metadata block but what a viewer needs to render the image
@@ -74,14 +86,15 @@ impl<'a> Source<'a> {
     /// survive. The kept render tags are then written back as a minimal EXIF
     /// block.
     pub(crate) fn strip(&self) -> Result<Scrubbed> {
-        let kept: Vec<ExifTag> = match self.parse()? {
+        let (kept, thumbnails): (Vec<ExifTag>, usize) = match self.parse()? {
             Some(exif) => guard(|| {
-                render_tags()
+                let kept = render_tags()
                     .iter()
                     .filter_map(|tag| exif.get_tag(tag).next().cloned())
-                    .collect()
+                    .collect();
+                (kept, usize::from(self.has_thumbnail(&exif)))
             })?,
-            None => Vec::new(),
+            None => (Vec::new(), 0),
         };
         let cleared = match self.format {
             FileExtension::JPEG => scrub_jpeg(self.bytes, false)?,
@@ -97,9 +110,14 @@ impl<'a> Source<'a> {
                 Scrubbed {
                     bytes: buf,
                     removed,
+                    thumbnails: 0,
                 }
             }
             other => return Err(unsupported(other)),
+        };
+        let cleared = Scrubbed {
+            thumbnails,
+            ..cleared
         };
         if kept.is_empty() || cleared.removed == 0 {
             return Ok(cleared);
@@ -114,7 +132,76 @@ impl<'a> Source<'a> {
         Ok(Scrubbed {
             bytes: source.write(&exif)?,
             removed: cleared.removed,
+            thumbnails,
         })
+    }
+
+    /// Reduce the metadata to what [`Redact`] can stand behind: every EXIF tag
+    /// a surfaced field reads or clears, the render tag, the structure, and a
+    /// TIFF's pixel layout. Every other EXIF tag (one no field surfaces, an
+    /// embedded thumbnail, a maker note, a vendor tag) and every block outside
+    /// EXIF is removed, since none of it can reach detection. Returns the
+    /// resulting container, how many tags and blocks went, and how many
+    /// thumbnails.
+    ///
+    /// [`Redact`]: elide_core::redaction::Disposition::Redact
+    pub(crate) fn reduce_to_surfaced(&self) -> Result<Scrubbed> {
+        let tiff = matches!(self.format, FileExtension::TIFF);
+        let (edited, tags, thumbnails) = match self.parse()? {
+            Some(mut exif) => {
+                let thumbnails = usize::from(self.has_thumbnail(&exif));
+                let unsurfaced = self.unsurfaced(&exif);
+                if unsurfaced.is_empty() {
+                    (self.bytes.to_vec(), 0, 0)
+                } else {
+                    let tags = unsurfaced.len();
+                    guard(AssertUnwindSafe(|| {
+                        for (hex, group) in unsurfaced {
+                            exif.remove_tag_by_hex_group(hex, group);
+                        }
+                    }))?;
+                    (self.write(&exif)?, tags, thumbnails)
+                }
+            }
+            None => (self.bytes.to_vec(), 0, 0),
+        };
+        let mut scrubbed = match self.format {
+            FileExtension::JPEG => scrub_jpeg(&edited, true)?,
+            FileExtension::PNG { .. } => scrub_png(&edited, true)?,
+            FileExtension::TIFF => Scrubbed {
+                bytes: edited,
+                removed: 0,
+                thumbnails: 0,
+            },
+            other => return Err(unsupported(other)),
+        };
+        // A thumbnail's two tags are one thumbnail, not two stripped tags.
+        let thumbnail_tags = if tiff {
+            0
+        } else {
+            thumbnails * THUMBNAIL_TAGS.len()
+        };
+        scrubbed.removed += tags - thumbnail_tags.min(tags);
+        scrubbed.thumbnails = thumbnails;
+        Ok(scrubbed)
+    }
+
+    /// The `(tag, IFD group)` of every EXIF tag in `exif` a redacted image may
+    /// not keep, each once.
+    fn unsurfaced(&self, exif: &ExifMetadata) -> Vec<(u16, ExifTagGroup)> {
+        let tiff = matches!(self.format, FileExtension::TIFF);
+        let mut out: Vec<(u16, ExifTagGroup)> = exif
+            .get_ifds()
+            .iter()
+            .flat_map(|ifd| {
+                let group = ifd.get_ifd_type();
+                ifd.get_tags().iter().map(move |tag| (tag.as_u16(), group))
+            })
+            .filter(|&(hex, group)| !kept_under_redact(hex, group, tiff))
+            .collect();
+        out.sort_unstable_by_key(|&(hex, group)| (hex, group as u8));
+        out.dedup();
+        out
     }
 
     /// Remove exactly the fields named by `keys` (each an EXIF tag key such as
@@ -163,6 +250,7 @@ impl<'a> Source<'a> {
             FileExtension::TIFF => Ok(Scrubbed {
                 bytes: edited,
                 removed: tiff_blocks,
+                thumbnails: 0,
             }),
             other => Err(unsupported(other)),
         }
@@ -193,7 +281,15 @@ impl<'a> Source<'a> {
         if outside_exif {
             return Err(survived("a metadata block outside EXIF"));
         }
-        if !fields_allowed && let Some((key, _)) = self.values()?.first() {
+        if fields_allowed {
+            let unsurfaced = match self.parse()? {
+                Some(exif) => guard(AssertUnwindSafe(|| self.unsurfaced(&exif)))?,
+                None => Vec::new(),
+            };
+            if let Some((hex, _)) = unsurfaced.first() {
+                return Err(survived(&format!("EXIF tag {hex:#06x} no field surfaces")));
+            }
+        } else if let Some((key, _)) = self.values()?.first() {
             return Err(survived(key));
         }
         Ok(())
@@ -289,6 +385,7 @@ fn unsupported(format: FileExtension) -> Error {
 #[cfg(all(test, feature = "jpeg"))]
 mod tests {
     use image::{ImageFormat as ImgFormat, RgbImage};
+    use little_exif::rational::uR64;
 
     use super::*;
 
@@ -503,5 +600,73 @@ mod tests {
             !present(&ExifTag::GPSDateStamp(String::new())),
             "gps date survived"
         );
+    }
+
+    fn rational(nominator: u32) -> uR64 {
+        uR64 {
+            nominator,
+            denominator: 1,
+        }
+    }
+
+    /// Under `Redact` only what a surfaced field reads or clears stays: a maker
+    /// note and a tag no field surfaces go, and the output check holds the
+    /// reduced image to the same allowlist.
+    #[cfg(feature = "codec")]
+    #[test]
+    fn redact_keeps_only_what_a_field_surfaces() {
+        let bytes = jpeg_with(vec![
+            ExifTag::Artist("Jane Roe".to_owned()),
+            ExifTag::MakerNote(b"body serial 1234".to_vec()),
+            ExifTag::ExposureTime(vec![uR64 {
+                nominator: 1,
+                denominator: 100,
+            }]),
+        ]);
+        assert!(source(&bytes).check_stripped(true).is_err());
+
+        let reduced = source(&bytes).reduce_to_surfaced().expect("reduce");
+        assert_eq!(reduced.removed, 2);
+        assert_eq!(keys(&reduced.bytes), ["Artist"]);
+        assert!(!carries(&reduced.bytes, &ExifTag::MakerNote(Vec::new())));
+        source(&reduced.bytes)
+            .check_stripped(true)
+            .expect("a reduced image passes");
+    }
+
+    /// An embedded thumbnail is a preview of the unredacted pixels: `Redact`
+    /// strips it, counted as a thumbnail rather than as two tags.
+    #[test]
+    fn redact_strips_an_embedded_thumbnail() {
+        let preview = b"\xFF\xD8 preview of Jane \xFF\xD9".to_vec();
+        let bytes = jpeg_with(vec![
+            ExifTag::Artist("Jane Roe".to_owned()),
+            ExifTag::ThumbnailOffset(vec![0], preview.clone()),
+            ExifTag::ThumbnailLength(vec![preview.len() as u32]),
+        ]);
+        assert!(contains(&bytes, b"preview of Jane"));
+
+        let reduced = source(&bytes).reduce_to_surfaced().expect("reduce");
+        assert_eq!((reduced.thumbnails, reduced.removed), (1, 0));
+        assert!(!contains(&reduced.bytes, b"preview of Jane"));
+        assert_eq!(keys(&reduced.bytes), ["Artist"]);
+    }
+
+    fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack.windows(needle.len()).any(|w| w == needle)
+    }
+
+    #[test]
+    fn surfaced_values_read_as_text() {
+        let bytes = jpeg_with(vec![
+            ExifTag::Artist("Jane Roe".to_owned()),
+            ExifTag::GPSLatitude(vec![rational(51), rational(30), rational(0)]),
+            ExifTag::GPSLatitudeRef("N".to_owned()),
+            ExifTag::UserComment(b"ASCII\0\0\0meet at noon".to_vec()),
+        ]);
+        let values = source(&bytes).values().expect("read");
+        assert!(values.contains(&("GPSLatitude", "51.500000 N".to_owned())));
+        assert!(values.contains(&("Artist", "Jane Roe".to_owned())));
+        assert!(values.contains(&("UserComment", "meet at noon".to_owned())));
     }
 }

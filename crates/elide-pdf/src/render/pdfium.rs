@@ -43,7 +43,6 @@ thread_local! {
 /// number, on the dedicated PDFium thread. Pages not in `numbers` are not
 /// rendered at all (so a scanned-page pass over a mostly-text document does not
 /// pay to rasterise every page).
-#[cfg(feature = "image")]
 pub(crate) fn render_pages(
     pdf_bytes: Vec<u8>,
     numbers: BTreeSet<u32>,
@@ -96,7 +95,6 @@ impl Binding {
     }
 
     /// Render only the 1-based pages in `numbers`, keyed by page number.
-    #[cfg(feature = "image")]
     fn render_pages(
         &self,
         pdf_bytes: &[u8],
@@ -243,7 +241,6 @@ impl Binding {
 }
 
 /// Render one page to a PNG at `config`'s scale.
-#[cfg(feature = "image")]
 fn render_page(page: &PdfPage, config: &PdfRenderConfig) -> Result<RenderedPage> {
     let bitmap = page.render_with_config(config).map_err(|e| {
         Error::new(

@@ -13,6 +13,17 @@ use elide_core::modality::metadata::{Metadata, MetadataData};
 use elide_core::{Error, ErrorKind, Result};
 
 pub use self::raster::RasterImage;
+
+/// What a metadata strip removed from an image: how many metadata blocks and
+/// tags, and how many embedded thumbnails.
+#[cfg(feature = "exif")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StrippedMetadata {
+    /// Metadata blocks (JPEG segments, PNG chunks) and EXIF or TIFF tags.
+    pub properties: usize,
+    /// Embedded thumbnails, previews of the unredacted pixels.
+    pub thumbnails: usize,
+}
 #[cfg(feature = "exif")]
 use crate::exif::{Scrubbed, Source};
 use crate::modality::{ImageFormat, ImageReplacement};
@@ -149,8 +160,9 @@ impl ImageBuffer {
         self.exif_source().entities()
     }
 
-    /// Each privacy-relevant EXIF field as a [`MetadataData`], for a caller that
-    /// streams fields to a recognizer (the codec's EXIF handler).
+    /// Each privacy-relevant EXIF field as a [`MetadataData`] labelled with
+    /// what it is, for a caller that streams fields to a recognizer (the codec's
+    /// EXIF handler).
     ///
     /// # Errors
     ///
@@ -182,39 +194,44 @@ impl ImageBuffer {
 
     /// Remove the source's metadata in place, keeping only what a viewer needs
     /// to render the image (its orientation), so every later read and encode
-    /// sees the stripped container. Returns how many metadata blocks were
-    /// removed.
+    /// sees the stripped container. Returns what was removed.
     ///
     /// # Errors
     ///
     /// [`ErrorKind::MalformedInput`] if the metadata edit fails.
     #[cfg(feature = "exif")]
-    pub fn strip_metadata(&mut self) -> Result<usize> {
+    pub fn strip_metadata(&mut self) -> Result<StrippedMetadata> {
         let stripped = self.exif_source().strip()?;
         Ok(self.replace_source(stripped))
     }
 
-    /// Remove the source's metadata blocks outside EXIF (XMP, IPTC, comments,
-    /// text chunks) in place, keeping every EXIF field for field-level
-    /// redaction. Returns how many metadata blocks were removed.
+    /// Remove, in place, the metadata no surfaced EXIF field stands for: every
+    /// block outside EXIF (XMP, IPTC, comments, text chunks), every EXIF tag no
+    /// field reads or clears (a maker note, vendor tags), and an embedded
+    /// thumbnail. What stays is exactly what detection sees as fields, plus
+    /// what the image needs to render. Returns what was removed.
     ///
     /// # Errors
     ///
     /// [`ErrorKind::MalformedInput`] if the metadata edit fails.
     #[cfg(feature = "exif")]
-    pub fn strip_unsurfaced_metadata(&mut self) -> Result<usize> {
-        let scrubbed = self.exif_source().remove_keys(&[])?;
+    pub fn strip_unsurfaced_metadata(&mut self) -> Result<StrippedMetadata> {
+        let scrubbed = self.exif_source().reduce_to_surfaced()?;
         Ok(self.replace_source(scrubbed))
     }
 
     /// Replace the source container with the `scrubbed` one when it removed
-    /// anything, returning how many blocks it removed.
+    /// anything, returning what it removed.
     #[cfg(feature = "exif")]
-    fn replace_source(&mut self, scrubbed: Scrubbed) -> usize {
-        if scrubbed.removed > 0 {
+    fn replace_source(&mut self, scrubbed: Scrubbed) -> StrippedMetadata {
+        let stripped = StrippedMetadata {
+            properties: scrubbed.removed,
+            thumbnails: scrubbed.thumbnails,
+        };
+        if stripped != StrippedMetadata::default() {
             self.source = Bytes::from(scrubbed.bytes);
         }
-        scrubbed.removed
+        stripped
     }
 
     /// Re-encode the image, returning the container bytes with the source's
@@ -504,7 +521,7 @@ mod tests {
             .expect("write exif");
 
         let mut buffer = ImageBuffer::open(&bytes, ImageFormat::Jpeg).expect("open");
-        assert!(buffer.strip_metadata().expect("strip") > 0);
+        assert!(buffer.strip_metadata().expect("strip").properties > 0);
         // Redact a pixel so the buffer is dirty (forces the re-encode path).
         buffer.redact(
             BoundingBox::from_origin(Point::new(0, 0), Dimensions::new(2, 2)),

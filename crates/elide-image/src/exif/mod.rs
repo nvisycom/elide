@@ -1,6 +1,7 @@
-//! EXIF metadata read, strip, and field-level removal, plus the
-//! [`ExifRecognizer`] that surfaces privacy-relevant fields as
-//! `Entity<Metadata>`.
+//! EXIF metadata read, strip, and field-level removal. Each surfaced field is
+//! labelled with what it is (a location, a person, a device, a time), so the
+//! format-neutral field recognizer (`elide-detection`'s `FieldRecognizer`)
+//! turns it into an `Entity<Metadata>`.
 //!
 //! Backed by `little_exif`, the one permissive pure-Rust crate that both reads
 //! and edits EXIF for JPEG, PNG, and TIFF. Its parser can panic on malformed
@@ -14,21 +15,19 @@
 //! [`ImageBuffer`], which opens the image once and drives these helpers with a
 //! format it already knows.
 //!
-//! [`ExifRecognizer`]: crate::exif::ExifRecognizer
 //! [`ImageBuffer`]: crate::ImageBuffer
 
 mod container;
 mod entity;
-mod recognizer;
 mod source;
 mod tags;
+mod value;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use elide_core::{Error, ErrorKind, Result};
 
 pub(crate) use self::container::Scrubbed;
-pub use self::recognizer::ExifRecognizer;
 pub(crate) use self::source::Source;
 
 /// Run `f`, turning a panic (little_exif can panic on malformed input) into a
