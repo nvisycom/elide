@@ -3,8 +3,8 @@
 #
 # Converted from stella/anonymize; see ../../STELLA.md.
 #
-# `languages/<lang>.toml` holds each language's head words, each also in
-# capitals, and the words that shape a name, including the generic words that
+# `languages/<lang>.toml` holds each language's context keywords, its head
+# words, each also in capitals, and the words that shape a name, including the generic words that
 # do not name an institution on their own ("Audit Committee", "Board of
 # Directors"). `ambiguous` heads also name everyday things (`Office`): a name
 # around one needs a context keyword nearby.

@@ -44,7 +44,7 @@ impl CompiledWalk {
             }
             // "…of Finance." ends the sentence: the word is part of the name,
             // its dot is not.
-            let ends = scan::ends_sentence(word);
+            let ends = words.ends_sentence(word);
             let range = if ends { step.start..step.end - 1 } else { step };
             let word = &text[range.clone()];
             match scan::kind(word) {

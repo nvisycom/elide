@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use elide_core::primitive::LanguageTag;
 
 use super::lowercase::Bridge;
-use super::{Lowercase, Words};
+use super::{Lowercase, Words, scan};
 
 /// The tag of language-neutral words, which apply in every language.
 const ANY_LANGUAGE: &str = "und";
@@ -30,6 +30,7 @@ pub(super) struct Lexicon {
     pub(super) firm_nouns: HashSet<String>,
     pub(super) generic: HashSet<String>,
     pub(super) generic_before: HashSet<String>,
+    abbreviations: HashSet<String>,
 }
 
 impl Lexicon {
@@ -69,6 +70,7 @@ impl Lexicon {
             firm_nouns: all(|w| &w.firm_nouns),
             generic: all(|w| &w.generic),
             generic_before: all(|w| &w.generic_before),
+            abbreviations: all(|w| &w.abbreviations),
         }
     }
 
@@ -102,6 +104,15 @@ impl Lexicon {
                 .flat_map(|(.., words)| words.iter().cloned())
                 .collect(),
         ))
+    }
+
+    /// Whether `word` ends a sentence: see [`scan::ends_sentence`]. A known
+    /// abbreviation does not (`Bros.`).
+    pub(super) fn ends_sentence(&self, word: &str) -> bool {
+        scan::ends_sentence(word)
+            && !self
+                .abbreviations
+                .contains(&word.trim_end_matches('.').to_lowercase())
     }
 
     /// Whether `word` is a party role or a document noun.

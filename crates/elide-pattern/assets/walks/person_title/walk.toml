@@ -3,8 +3,8 @@
 #
 # Converted from stella/anonymize; see ../../STELLA.md.
 #
-# `languages/<lang>.toml` holds the titles each language uses, each also in
-# capitals; a title several languages share (`Dr.`) is in each of them. Every
+# `languages/<lang>.toml` holds each language's context keywords and the
+# titles it uses, each also in capitals; a title several languages share (`Dr.`) is in each of them. Every
 # title applies whatever the language of the text. `ambiguous` titles are also
 # ordinary words (`Judge`, `Me`, `Don`): a name after one needs a context
 # keyword nearby.

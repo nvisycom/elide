@@ -45,3 +45,6 @@ firm_nouns = [
   "Trust", "Partners", "Associates", "Corporation", "Industries",
   "Enterprises", "Solutions", "Systems", "Services", "Foundation", "Institute"
 ]
+abbreviations = [
+  "assn", "bros", "hldgs", "intl", "mfg", "natl", "svcs"
+]

@@ -76,4 +76,9 @@ async fn an_ambiguous_title_needs_context() {
     let hits = walks::found(person_title(), "Judge Alito wrote", &[]).await;
     assert_eq!(hits.len(), 1);
     assert!(!ConfidenceThreshold::BASELINE.passes(hits[0].1));
+
+    let hits = walks::found(person_title(), "the court ruled, Judge Alito wrote", &[]).await;
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].0, "Alito");
+    assert!(ConfidenceThreshold::BASELINE.passes(hits[0].1));
 }

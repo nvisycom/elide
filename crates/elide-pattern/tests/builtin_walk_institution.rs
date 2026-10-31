@@ -57,4 +57,9 @@ async fn an_ambiguous_head_needs_context() {
     let hits = walks::found(institution(), "the Microsoft Office suite", &[]).await;
     assert_eq!(hits.len(), 1);
     assert!(!ConfidenceThreshold::BASELINE.passes(hits[0].1));
+
+    let hits = walks::found(institution(), "filed with the Patent Office", &[]).await;
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].0, "Patent Office");
+    assert!(ConfidenceThreshold::BASELINE.passes(hits[0].1));
 }

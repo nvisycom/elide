@@ -1,3 +1,8 @@
+keywords = [
+  "government", "governmental", "federal", "official", "regulator",
+  "regulatory", "filed with", "issued by"
+]
+
 [markers]
 distinctive = [
   "AGENCY", "ASSOCIATION", "AUTHORITY", "Agency", "Association", "Authority",
@@ -38,4 +43,7 @@ generic = [
 ]
 generic_before = [
   "company", "finance", "financial", "st", "trade"
+]
+abbreviations = [
+  "assn", "dept", "intl", "natl", "univ"
 ]

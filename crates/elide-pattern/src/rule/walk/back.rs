@@ -36,7 +36,7 @@ impl CompiledWalk {
                 break;
             };
             let word = &text[range.clone()];
-            if scan::ends_sentence(word) {
+            if words.ends_sentence(word) {
                 break;
             }
             match scan::kind(word) {

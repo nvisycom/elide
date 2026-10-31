@@ -1,3 +1,8 @@
+keywords = [
+  "court", "honorable", "presiding", "ruled", "ruling", "opinion",
+  "hearing", "plaintiff", "defendant", "testified"
+]
+
 [markers]
 distinctive = [
   "Dr", "DR.", "Dr.", "MESSRS", "Messrs", "Mr", "MR.", "Mr.", "Mrs", "MRS.",

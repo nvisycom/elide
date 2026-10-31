@@ -265,6 +265,18 @@ async fn needs_a_capitalized_name_and_a_whole_marker() {
 }
 
 #[tokio::test]
+async fn an_abbreviation_inside_a_name_is_not_a_sentence_end() {
+    assert_eq!(
+        names("It licensed Warner Bros. Ltd to distribute.").await,
+        ["Warner Bros. Ltd"]
+    );
+    assert_eq!(
+        names("It moved to Berlin. Acme GmbH filed.").await,
+        ["Acme GmbH"]
+    );
+}
+
+#[tokio::test]
 async fn an_ambiguous_form_needs_context() {
     let hits = found("Apple AG filed jointly.", &[]).await;
     assert_eq!(hits.len(), 1);

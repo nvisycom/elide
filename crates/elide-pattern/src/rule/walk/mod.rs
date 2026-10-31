@@ -157,6 +157,11 @@ pub struct Words {
     /// not.
     #[serde(default)]
     pub generic_before: Vec<String>,
+    /// Abbreviations a name may contain, without their dot: after `bros`,
+    /// "Warner Bros. Ltd" goes on past the dot rather than ending a sentence
+    /// there.
+    #[serde(default)]
+    pub abbreviations: Vec<String>,
 }
 
 /// Which side of its marker a walk finds a name on.
