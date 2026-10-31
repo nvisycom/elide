@@ -58,7 +58,9 @@ async fn main() -> Result<()> {
     let input = "Contact Dana at dana.reed@example.com or +1 415 555 0100.";
 
     let registry = FormatRegistry::with_builtin();
-    let mut document = registry.decode(input, "txt").await?;
+    let mut document = registry
+        .decode(input, "txt", HiddenContentPolicy::default())
+        .await?;
 
     let analyzer = Analyzer::<Text>::new()
         .with_recognizer(

@@ -6,6 +6,10 @@ use bytes::Bytes;
 use elide_core::redaction::Redactions;
 use elide_core::{Error, ErrorKind, Result};
 
+#[cfg(feature = "mp3")]
+use crate::engine::tags::strip_mp3;
+#[cfg(feature = "wav")]
+use crate::engine::tags::strip_wav;
 use crate::modality::{Audio, AudioFormat, AudioLocation, AudioReplacement};
 use crate::primitive::TimeSpan;
 
@@ -139,6 +143,58 @@ impl AudioBuffer {
                 }
                 #[cfg(not(feature = "mp3"))]
                 {
+                    unreachable!("an mp3 buffer requires the mp3 codec")
+                }
+            }
+        }
+    }
+
+    /// Remove every tag block the clip carries beside its samples (ID3, APE,
+    /// and Lyrics3 tags of an MP3; every chunk of a WAV but its format and
+    /// sample data), in place. Returns whether anything was removed.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`] if a tag block overruns the container.
+    pub fn strip_metadata(&mut self) -> Result<bool> {
+        let stripped = Bytes::from(Self::strip(&self.source, self.format)?);
+        let changed = stripped != self.source;
+        self.source = stripped;
+        Ok(changed)
+    }
+
+    /// Whether the `format` clip `bytes` carries a tag block
+    /// [`strip_metadata`](Self::strip_metadata) would remove.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`] if a tag block overruns the container.
+    pub fn carries_metadata(bytes: &[u8], format: AudioFormat) -> Result<bool> {
+        Ok(Self::strip(bytes, format)? != bytes)
+    }
+
+    /// The `format` clip `bytes` with every tag block removed.
+    fn strip(bytes: &[u8], format: AudioFormat) -> Result<Vec<u8>> {
+        match format {
+            AudioFormat::Wav => {
+                #[cfg(feature = "wav")]
+                {
+                    strip_wav(bytes)
+                }
+                #[cfg(not(feature = "wav"))]
+                {
+                    let _ = bytes;
+                    unreachable!("a wav buffer requires the wav codec")
+                }
+            }
+            AudioFormat::Mp3 => {
+                #[cfg(feature = "mp3")]
+                {
+                    strip_mp3(bytes)
+                }
+                #[cfg(not(feature = "mp3"))]
+                {
+                    let _ = bytes;
                     unreachable!("an mp3 buffer requires the mp3 codec")
                 }
             }

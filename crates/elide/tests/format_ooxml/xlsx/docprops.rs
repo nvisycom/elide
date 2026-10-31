@@ -3,9 +3,10 @@
 //! `Orchestrator` a caller assembles from the re-exported vocabulary.
 //!
 //! Proves the OOXML `#docprops` sub-part model works for the tabular family too:
-//! the `sample.xlsx` fixture carries populated `dcterms:created`/`modified`, the
-//! `Metadata` pipeline's `DocPropsRecognizer` surfaces them, and `Erase` clears
-//! them; the workbook re-encode folds the edited property part back in.
+//! the `sample.xlsx` fixture carries populated `dcterms:created`/`modified`, and
+//! under a hidden-content policy that redacts metadata the `Metadata` pipeline's
+//! `DocPropsRecognizer` surfaces them, and `Erase` clears them; the workbook
+//! re-encode folds the edited property part back in.
 
 use elide::codec::FormatRegistry;
 use elide::detection::Analyzer;
@@ -15,7 +16,7 @@ use elide::modality::tabular::Tabular;
 use elide::recognition::Scope;
 use elide::recognition::docprops::DocPropsRecognizer;
 use elide::redaction::operators::Erase;
-use elide::redaction::{Anonymizer, Rule};
+use elide::redaction::{Anonymizer, Disposition, HiddenContentPolicy, Rule};
 use elide::{Directives, Document, Orchestrator};
 use elide_office::opc::fixtures::read_part;
 use elide_office::opc::props;
@@ -39,6 +40,7 @@ async fn xlsx_core_property_timestamps_are_stripped_through_the_facade() {
     assert!(has_timestamp(&original), "fixture should carry timestamps");
 
     let registry = FormatRegistry::with_builtin();
+    let policy = HiddenContentPolicy::default().with_metadata(Disposition::Redact);
     let orchestrator = Orchestrator::new()
         .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
         .with_registry(registry.clone())
@@ -54,7 +56,7 @@ async fn xlsx_core_property_timestamps_are_stripped_through_the_facade() {
         );
 
     let handle = registry
-        .decode(original.clone(), "xlsx")
+        .decode(original.clone(), "xlsx", policy)
         .await
         .expect("decode xlsx");
     let mut documents = [Document::new("sample.xlsx", handle)];

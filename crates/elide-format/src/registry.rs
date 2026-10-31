@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use elide_codec::content::ContentData;
 use elide_codec::{Document, Format, FormatId};
+use elide_core::redaction::HiddenContentPolicy;
 use elide_core::{Error, ErrorKind, Result};
 
 /// Lowercase `s` for ASCII case-insensitive extension / content-type keys,
@@ -42,7 +43,8 @@ fn ascii_lower_key(s: Cow<'static, str>) -> Cow<'static, str> {
 /// Owns the registered [`Format`]s and resolves content to one of them.
 ///
 /// Resolves by file extension, MIME content type, or [`FormatId`], then
-/// decodes through the matched format's loader.
+/// decodes through the matched format's loader under the caller's
+/// [`HiddenContentPolicy`].
 ///
 /// A registry is a cheap-to-`Clone` handle over immutable shared state: the
 /// registered formats and their lookup maps live behind an [`Arc`], so cloning
@@ -181,8 +183,7 @@ impl FormatRegistry {
     ///
     /// ```ignore
     /// let registry = FormatRegistry::with_builtin()
-    ///     .with_replaced_format(elide_pdf::codec::pdf_format_with(RasterMode::always()))
-    ///     .with_replaced_format(elide_plain::html_format_with(ScanText, Skip));
+    ///     .with_replaced_format(elide_pdf::codec::pdf_format_with(RasterMode::Always { dpi: Dpi::OCR }));
     /// ```
     ///
     /// Registering a format whose id is *not* present behaves like
@@ -232,8 +233,9 @@ impl FormatRegistry {
     }
 
     /// Decode raw content using the format resolved from the extension
-    /// hint. Accepts anything convertible into [`ContentData`]: `&str`,
-    /// `&[u8]`, `Vec<u8>`, `Bytes`, `String`.
+    /// hint, handling its hidden content under `policy`. Accepts anything
+    /// convertible into [`ContentData`]: `&str`, `&[u8]`, `Vec<u8>`, `Bytes`,
+    /// `String`.
     ///
     /// # Errors
     ///
@@ -244,6 +246,7 @@ impl FormatRegistry {
         &self,
         content: impl Into<ContentData>,
         extension: &str,
+        policy: HiddenContentPolicy,
     ) -> Result<Document> {
         let format = self.by_extension(extension).ok_or_else(|| {
             Error::new(
@@ -251,11 +254,12 @@ impl FormatRegistry {
                 format!("no codec registered for extension `{extension}`"),
             )
         })?;
-        format.decode(content.into()).await
+        format.decode(content.into(), policy).await
     }
 
-    /// Decode [`ContentData`], resolving the format from the metadata it
-    /// carries: its [`extension`] first, then its declared [`content_type`].
+    /// Decode [`ContentData`] with its hidden content handled under `policy`,
+    /// resolving the format from the metadata it carries: its [`extension`]
+    /// first, then its declared [`content_type`].
     ///
     /// With the `sniff` feature, a last resort infers the format from the
     /// leading bytes when the content asserts neither — so a caller who holds
@@ -271,7 +275,11 @@ impl FormatRegistry {
     ///
     /// [`extension`]: ContentData::extension
     /// [`content_type`]: ContentData::content_type
-    pub async fn decode_content(&self, content: ContentData) -> Result<Document> {
+    pub async fn decode_content(
+        &self,
+        content: ContentData,
+        policy: HiddenContentPolicy,
+    ) -> Result<Document> {
         let by_ext = content
             .extension()
             .and_then(|ext| self.by_extension(&ext))
@@ -299,7 +307,7 @@ impl FormatRegistry {
         };
         // `format_id` came from a lookup above, so this is present.
         let format = self.by_id(&format_id).expect("resolved format present");
-        format.decode(content).await
+        format.decode(content, policy).await
     }
 
     /// The format inferred from the leading bytes' magic number, when the

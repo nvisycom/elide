@@ -17,7 +17,7 @@ use elide::modality::text::Text;
 use elide::recognition::Scope;
 use elide::recognition::pattern::PatternRecognizer;
 use elide::redaction::operators::{Mask, Replace};
-use elide::redaction::{Anonymizer, Rule};
+use elide::redaction::{Anonymizer, HiddenContentPolicy, Rule};
 use elide::{Directives, Document, Orchestrator, RegistryDocumentExt};
 use tokio::runtime::{Builder, Runtime};
 
@@ -66,7 +66,7 @@ const DECODED_TEXT_LEN: u64 = 102_000;
 /// Decode a fresh text document from the corpus (async: the codec runs on the rt).
 async fn fresh_text(registry: &FormatRegistry, text: &str) -> Document {
     registry
-        .document("sample.txt", text)
+        .document("sample.txt", text, HiddenContentPolicy::default())
         .await
         .expect("decode text document")
 }
@@ -74,7 +74,7 @@ async fn fresh_text(registry: &FormatRegistry, text: &str) -> Document {
 /// Decode a fresh document from the big `.docx` bytes.
 async fn fresh_docx(registry: &FormatRegistry) -> Document {
     registry
-        .document("large.docx", LARGE_DOCX)
+        .document("large.docx", LARGE_DOCX, HiddenContentPolicy::default())
         .await
         .expect("decode docx document")
 }

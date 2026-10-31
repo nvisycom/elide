@@ -23,7 +23,7 @@ use bytes::Bytes;
 use elide_core::Result;
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
-use elide_core::redaction::Redactions;
+use elide_core::redaction::{HiddenContentPolicy, Redactions};
 
 use crate::content::ContentData;
 use crate::string::RedactRange;
@@ -171,7 +171,7 @@ pub struct MockRecombine {
 }
 
 impl Recombine for MockRecombine {
-    fn assemble(&self, parts: &[EncodedPart]) -> Result<ContentData> {
+    fn assemble(&self, parts: &[EncodedPart], _removed: &[LocalId]) -> Result<ContentData> {
         let body = parts
             .iter()
             .find(|p| p.id.as_str() == MOCK_BODY_ID)
@@ -191,6 +191,12 @@ impl Recombine for MockRecombine {
             .collect();
         Ok(ContentData::new(encode_mock(&body, &blobs)))
     }
+
+    /// The mock wire format carries no hidden content, so there is nothing to
+    /// check.
+    fn validate(&self, _output: &ContentData) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// A [`DocumentLoader`] that decodes the mock wire format into a [`Document`]: a
@@ -200,7 +206,7 @@ pub struct MockLoader;
 
 #[async_trait::async_trait]
 impl DocumentLoader for MockLoader {
-    async fn decode(&self, content: ContentData) -> Result<Document> {
+    async fn decode(&self, content: ContentData, _policy: HiddenContentPolicy) -> Result<Document> {
         let (body, parts) = decode_mock(content.as_bytes());
         let hints = parts
             .iter()

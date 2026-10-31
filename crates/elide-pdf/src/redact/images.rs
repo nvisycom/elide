@@ -11,13 +11,10 @@
 //! `embed_image`) to build the XObject; the default build carries no image
 //! dependency.
 
-use std::collections::BTreeSet;
-
 use elide_core::{Error, ErrorKind, Result};
-use lopdf::{Object, ObjectId};
+use lopdf::Object;
 
-use super::graph::referenced_from_survivors;
-use crate::document::{ObjectRole, Store};
+use crate::document::{ObjectRole, Store, save};
 use crate::extract::ImageId;
 
 /// One image replacement: overwrite the image XObject [`id`](ImageReplacement::id)
@@ -52,16 +49,11 @@ pub struct ImageReplacement {
 pub(crate) fn redact_images(store: &Store, replacements: &[ImageReplacement]) -> Result<Vec<u8>> {
     let mut doc = store.clone_doc();
 
-    // The original images' sub-objects that encode pixel content, soft
-    // masks, stencil masks, alternate representations, become orphaned when
-    // the rebuilt XObject drops these dict keys. They must be deleted (else
-    // `save_to` still serialises them, leaving a mask that carries the
-    // sensitive shape in the bytes), but only if no *surviving* object still
-    // references them: a mask shared with a retained object would corrupt
-    // the PDF if removed. So gather candidates now, insert all replacements,
-    // then prune with a survivor-reference guard.
-    let mut orphans: BTreeSet<ObjectId> = BTreeSet::new();
-
+    // The original images' sub-objects that encode pixel content (soft masks,
+    // stencil masks, alternate representations) become unreachable when the
+    // rebuilt XObject drops their dict keys, and the save prunes them, so no
+    // mask carrying the sensitive shape survives in the bytes. A mask shared
+    // with a retained object stays reachable and is kept.
     for replacement in replacements {
         let id = replacement.id.object();
 
@@ -78,14 +70,6 @@ pub(crate) fn redact_images(store: &Store, replacements: &[ImageReplacement]) ->
             ));
         }
 
-        if let Some(stream) = doc.get_object(id).ok().and_then(|o| o.as_stream().ok()) {
-            orphans.extend(
-                [b"SMask".as_slice(), b"Mask", b"Alternates"]
-                    .iter()
-                    .filter_map(|key| stream.dict.get(key).and_then(Object::as_reference).ok()),
-            );
-        }
-
         // Rebuild a valid image XObject from the encoded bytes (lopdf sets
         // the dictionary, dimensions, colour space, filter, to match).
         let stream = lopdf::xobject::image_from(replacement.image.clone()).map_err(|e| {
@@ -100,21 +84,5 @@ pub(crate) fn redact_images(store: &Store, replacements: &[ImageReplacement]) ->
         doc.objects.insert(id, Object::Stream(stream));
     }
 
-    // With every replacement inserted, an orphan still referenced from a
-    // surviving object is shared and must be kept; delete only the rest.
-    let referenced_by_survivors = referenced_from_survivors(&doc, &orphans);
-    for orphan in &orphans {
-        if !referenced_by_survivors.contains(orphan) {
-            doc.objects.remove(orphan);
-        }
-    }
-
-    let mut out = Vec::new();
-    doc.save_to(&mut out).map_err(|e| {
-        Error::new(
-            ErrorKind::MalformedInput,
-            format!("could not save PDF: {e}"),
-        )
-    })?;
-    Ok(out)
+    save(&mut doc)
 }

@@ -32,6 +32,13 @@ and this project adheres to
 - Coreference-aware pseudonymization with a vault for stable replacements
 - Optional PDF page rendering to images via the native PDFium library
   (`pdf-render` feature)
+- Hidden-content sanitizing: every codec strips metadata, comments and
+  tracked revisions, previews, external references, active content, and
+  editor fingerprints at decode, under a per-document `HiddenContentPolicy`
+  whose metadata and collaboration `Disposition` can be `Redact` instead;
+  embedded documents are decoded under their parent's policy, every encode
+  checks the output carries none, and an office document with an
+  unrecognized part or XML vocabulary is refused
 
 ### Crates
 

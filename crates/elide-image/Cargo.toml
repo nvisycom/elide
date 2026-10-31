@@ -58,9 +58,9 @@ fixtures = ["exif", "jpeg", "png"]
 ## image types the engine speaks in.
 serde = ["dep:serde", "elide-core/serde"]
 
-## Derive `schemars::JsonSchema` on the schema-relevant types (e.g. `ExifPolicy`),
-## for a caller that emits a JSON schema for a config surface the enum appears in.
-## Implies `serde`.
+## Derive `schemars::JsonSchema` on the schema-relevant types (the image
+## modality's location, replacement, and layout), for a caller that emits a JSON
+## schema for a config surface they appear in. Implies `serde`.
 schema = ["serde", "dep:schemars", "elide-core/schema"]
 
 ## OCR: the `OcrBackend` trait, the `OcrEnricher`, and the request/response

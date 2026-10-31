@@ -3,7 +3,7 @@
 use elide_codec::{Document as CodecDocument, DocumentPart, ErasedStream, LocalId};
 use elide_core::{Error, ErrorKind, Result};
 
-use super::{MAX_CONTAINER_DEPTH, PartVisitor, body_part_id};
+use super::{Child, Fold, MAX_CONTAINER_DEPTH, PartVisitor, body_part_id};
 use crate::Orchestrator;
 use crate::part_id::PartId;
 use crate::pipeline::BoxFuture;
@@ -40,8 +40,9 @@ impl<'a, V: PartVisitor> Walk<'a, V> {
     /// subtree changed the document, threaded up so a parent folds a child back
     /// only when its recursion changed it.
     ///
-    /// A blob deeper than [`MAX_CONTAINER_DEPTH`] is a hard error; a blob no codec
-    /// can decode is left as-is (opaque pass-through).
+    /// A blob deeper than [`MAX_CONTAINER_DEPTH`] is a hard error. A blob no codec
+    /// can read is offered to the visitor as [`Child::Undecodable`]; any other
+    /// decode failure is a hard error.
     pub(crate) fn parts<'s>(
         &'s mut self,
         document: &'s mut CodecDocument,
@@ -52,6 +53,9 @@ impl<'a, V: PartVisitor> Walk<'a, V> {
             // One pass over this level's parts: stream handles kept as `&mut` for
             // the leaf action, blob work cloned out so no borrow is held across the
             // recursion (which needs a fresh `&mut document` to fold back).
+            // Every embedded document is decoded under its parent's policy, so
+            // one policy governs the whole tree.
+            let policy = document.hidden_content_policy();
             let mut streams: Vec<(PartId, &mut ErasedStream)> = Vec::new();
             let mut blobs: Vec<(LocalId, PartId, bytes::Bytes, String)> = Vec::new();
             let mut body_seen = false;
@@ -80,7 +84,7 @@ impl<'a, V: PartVisitor> Walk<'a, V> {
             // so a child re-encodes its own subtree before its parent assembles it.
             // `replace_part` needs a fresh `&mut document`, so the folds are staged
             // and applied after the recursion releases the borrow.
-            let mut folded: Vec<(LocalId, bytes::Bytes)> = Vec::new();
+            let mut folds: Vec<(LocalId, Fold)> = Vec::new();
             for (id, part_id, bytes, hint) in blobs {
                 if depth + 1 > MAX_CONTAINER_DEPTH {
                     return Err(Error::new(
@@ -91,19 +95,51 @@ impl<'a, V: PartVisitor> Walk<'a, V> {
                         ),
                     ));
                 }
-                let Ok(mut child) = self.orchestrator.registry().decode(bytes, &hint).await else {
-                    continue; // no codec for this blob, opaque, left as-is
+                let fold = match self
+                    .orchestrator
+                    .registry()
+                    .decode(bytes, &hint, policy)
+                    .await
+                {
+                    Ok(mut child) => {
+                        let subtree_changed = self.parts(&mut child, &part_id, depth + 1).await?;
+                        self.visitor.fold_child(Child::Decoded {
+                            changed: subtree_changed || child.changed_at_decode(),
+                            document: &child,
+                        })?
+                    }
+                    Err(error) if is_undecodable(&error) => {
+                        self.visitor.fold_child(Child::Undecodable)?
+                    }
+                    Err(error) => return Err(error),
                 };
-                let child_changed = self.parts(&mut child, &part_id, depth + 1).await?;
-                if let Some(folded_bytes) = self.visitor.fold_child(child_changed, &child)? {
-                    folded.push((id, folded_bytes));
-                }
+                folds.push((id, fold));
             }
-            changed |= !folded.is_empty();
-            for (id, bytes) in folded {
-                document.replace_part(&id, bytes)?;
+            for (id, fold) in folds {
+                match fold {
+                    Fold::Keep => {}
+                    Fold::Replace(bytes) => {
+                        document.replace_part(&id, bytes)?;
+                        changed = true;
+                    }
+                    Fold::Remove => {
+                        document.remove_part(&id)?;
+                        changed = true;
+                    }
+                }
             }
             Ok(changed)
         })
     }
+}
+
+/// Whether a blob's decode `error` means no codec can read it: none is
+/// registered for its hint, or the one that is rejected its bytes. Any other
+/// failure (a resource limit, a provider error) is not about the blob's
+/// readability and propagates.
+fn is_undecodable(error: &Error) -> bool {
+    matches!(
+        error.kind(),
+        ErrorKind::CapabilityUnavailable | ErrorKind::MalformedInput
+    )
 }

@@ -1,5 +1,5 @@
-//! The shared OOXML codec layer: helpers common to the docx and pptx adapters
-//! over this crate's package engine.
+//! The shared OOXML codec layer: helpers common to the docx, pptx, and xlsx
+//! adapters over this crate's package engine.
 //!
 //! The two text-only OOXML formats decode to the same
 //! [`OoxmlPackage`](crate::ooxml::OoxmlPackage) and build the same parts-model
@@ -17,17 +17,22 @@ mod addresser;
 mod loader;
 mod recombine;
 
+use std::collections::HashSet;
 use std::ops::Range;
 
-use elide_codec::FormatId;
+use elide_codec::extract::ExtractedItem;
+use elide_codec::{FormatId, LocalId};
+use elide_core::Result;
 
+pub(crate) use self::addresser::OoxmlAddresser;
 pub(crate) use self::loader::OoxmlLoader;
 #[cfg(test)]
 pub(crate) use self::loader::decode_parts;
 #[cfg(test)]
 pub(crate) use self::recombine::OoxmlRecombine;
 use crate::ooxml::OoxmlFormat;
-use crate::opc::{OffsetMap, PartPath};
+use crate::opc::sanitize::remove_parts;
+use crate::opc::{Block, OffsetMap, PartPath, Replacement};
 
 /// The document-local id of the body text stream part (not a zip entry).
 const BODY_PART_ID: &str = "body";
@@ -57,4 +62,50 @@ pub(crate) struct OoxmlAddress {
     pub(crate) span: Range<usize>,
     /// The block's decoded-to-raw offset map.
     pub(crate) offsets: OffsetMap,
+}
+
+/// The extracted items of an OOXML text stream: one per block, its value the
+/// block's decoded text, addressed by its part, raw span, and offset map.
+pub(crate) fn items(blocks: Vec<Block>) -> Vec<ExtractedItem<OoxmlAddress>> {
+    blocks
+        .into_iter()
+        .map(|block| ExtractedItem {
+            value: block.text.to_string(),
+            address: OoxmlAddress {
+                part: block.part,
+                span: block.start..block.end,
+                offsets: block.offsets,
+            },
+            hints: Vec::new(),
+        })
+        .collect()
+}
+
+/// The text replacements that write each item's current value back over its
+/// raw span.
+pub(crate) fn replacements(items: &[ExtractedItem<OoxmlAddress>]) -> Vec<Replacement> {
+    items
+        .iter()
+        .map(|item| Replacement {
+            part: item.address.part.clone(),
+            start: item.address.span.start,
+            end: item.address.span.end,
+            text: item.value.clone().into(),
+        })
+        .collect()
+}
+
+/// `package` without the blob parts `removed` names (each id is its zip entry
+/// path), along with every relationship and element that references one.
+///
+/// # Errors
+///
+/// [`MalformedInput`](elide_core::ErrorKind::MalformedInput) if the package
+/// cannot be read or repacked.
+pub(crate) fn without_removed(package: Vec<u8>, removed: &[LocalId]) -> Result<Vec<u8>> {
+    let gone: HashSet<PartPath> = removed
+        .iter()
+        .map(|id| PartPath::from(id.as_str()))
+        .collect();
+    Ok(remove_parts(&package, gone)?.unwrap_or(package))
 }

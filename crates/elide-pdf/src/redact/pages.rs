@@ -11,13 +11,10 @@
 //! Behind the `image` feature (like [`redact_images`](crate::document::Pdf::redact_images)),
 //! which pulls the `image` crate to build the XObject.
 
-use std::collections::BTreeSet;
-
 use elide_core::{Error, ErrorKind, Result};
-use lopdf::{Object, ObjectId, dictionary};
+use lopdf::{Object, dictionary};
 
-use super::graph::referenced_from_survivors;
-use crate::document::Store;
+use crate::document::{Store, save};
 
 /// One page reflatten: replace page [`number`](PageReplacement::number)'s whole
 /// content with a redacted image of the page.
@@ -52,12 +49,10 @@ pub(crate) fn redact_pages(store: &Store, replacements: &[PageReplacement]) -> R
     let mut doc = store.clone_doc();
     let pages = doc.get_pages();
 
-    // The replaced pages' old content and resource objects become orphans.
-    // An orphaned object is still serialised by `save_to`, so the original
-    // page raster would survive in the bytes; gather the objects each
-    // replaced page owns and prune them after, guarding shared objects.
-    let mut orphans: BTreeSet<ObjectId> = BTreeSet::new();
-
+    // The replaced pages' old content and resource objects become unreachable
+    // once each page is repointed, and the save prunes them, so the original
+    // page raster does not survive in the bytes. An object shared with a
+    // surviving page stays reachable and is kept.
     for replacement in replacements {
         let Some(&page_id) = pages.get(&replacement.number) else {
             return Err(Error::new(
@@ -65,10 +60,6 @@ pub(crate) fn redact_pages(store: &Store, replacements: &[PageReplacement]) -> R
                 format!("page {} does not exist", replacement.number),
             ));
         };
-
-        // The page's current content and resource subtrees, doomed once the
-        // page is repointed at the redacted image.
-        collect_page_owned(&doc, page_id, &mut orphans);
 
         // Build a valid image XObject from the encoded bytes; lopdf sets the
         // dimensions, colour space, and filter to match.
@@ -90,9 +81,7 @@ pub(crate) fn redact_pages(store: &Store, replacements: &[PageReplacement]) -> R
         });
 
         // Repoint the page at the new content and resources, and size its
-        // box to the image. The old content/resources become orphans and are
-        // dropped by the object-graph write below (they are page-owned, not
-        // shared with a surviving page).
+        // box to the image.
         let page = doc.get_dictionary_mut(page_id).map_err(|e| {
             Error::new(
                 ErrorKind::Redaction,
@@ -119,76 +108,7 @@ pub(crate) fn redact_pages(store: &Store, replacements: &[PageReplacement]) -> R
         page.set("UserUnit", 1);
     }
 
-    // The new content/resources/image were just added, so they are the
-    // survivors that keep any shared object alive; prune only orphans not
-    // still referenced from outside the doomed set.
-    let referenced_by_survivors = referenced_from_survivors(&doc, &orphans);
-    for orphan in &orphans {
-        if !referenced_by_survivors.contains(orphan) {
-            doc.objects.remove(orphan);
-        }
-    }
-
-    let mut out = Vec::new();
-    doc.save_to(&mut out).map_err(|e| {
-        Error::new(
-            ErrorKind::MalformedInput,
-            format!("could not save PDF: {e}"),
-        )
-    })?;
-    Ok(out)
-}
-
-/// Collect the object ids a page owns through its `/Contents` and `/Resources`
-/// (and everything those reference), the subtrees replaced when the page is
-/// reflattened.
-fn collect_page_owned(doc: &lopdf::Document, page_id: ObjectId, out: &mut BTreeSet<ObjectId>) {
-    let Ok(page) = doc.get_dictionary(page_id) else {
-        return;
-    };
-    for key in [b"Contents".as_slice(), b"Resources"] {
-        if let Ok(entry) = page.get(key) {
-            for id in reachable(doc, entry) {
-                out.insert(id);
-            }
-        }
-    }
-}
-
-/// Every object id reachable from `entry` (a reference, or an inline
-/// dictionary/array/stream that references others), transitively.
-fn reachable(doc: &lopdf::Document, entry: &Object) -> BTreeSet<ObjectId> {
-    let mut seen = BTreeSet::new();
-    let mut stack: Vec<ObjectId> = direct_refs(entry);
-    while let Some(id) = stack.pop() {
-        if !seen.insert(id) {
-            continue;
-        }
-        if let Ok(obj) = doc.get_object(id) {
-            stack.extend(direct_refs(obj));
-        }
-    }
-    seen
-}
-
-/// The object ids referenced by `object`, recursing into inline dictionaries
-/// and arrays (a page's `/Resources` nests its `/XObject` references one inline
-/// dictionary deep, so a shallow scan would miss them).
-fn direct_refs(object: &Object) -> Vec<ObjectId> {
-    let mut out = Vec::new();
-    collect_refs(object, &mut out);
-    out
-}
-
-/// Push every reference reachable within `object`'s own inline structure.
-fn collect_refs(object: &Object, out: &mut Vec<ObjectId>) {
-    match object {
-        Object::Reference(id) => out.push(*id),
-        Object::Array(items) => items.iter().for_each(|o| collect_refs(o, out)),
-        Object::Dictionary(dict) => dict.iter().for_each(|(_, v)| collect_refs(v, out)),
-        Object::Stream(stream) => stream.dict.iter().for_each(|(_, v)| collect_refs(v, out)),
-        _ => {}
-    }
+    save(&mut doc)
 }
 
 /// Read the pixel width and height lopdf recorded on the built image XObject.

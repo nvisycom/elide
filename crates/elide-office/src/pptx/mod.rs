@@ -1,41 +1,46 @@
-//! [`SlideFormat`]: the PPTX part-classifier seam over the shared
-//! [`opc`](crate::opc) engine.
+//! [`SlideFormat`]: the PPTX format seam over the shared [`opc`](crate::opc)
+//! engine.
 //!
 //! A presentation's user text lives as DrawingML `a:t` runs in its slides,
 //! notes, and slide masters/layouts, and as `<t>` in its comments, all element
 //! text, with no shared-string indirection. So a PPTX is just the shared
-//! `OoxmlPackage` facade specialized to this classifier; only the classifier
-//! and the required presentation part are PPTX-specific.
+//! `OoxmlPackage` facade specialized to this format: the role each kind of part
+//! plays, and the element edits that sanitize it.
 
-mod kind;
+mod sanitize;
 
-pub use self::kind::PartKind;
 use crate::ooxml::OoxmlFormat;
-use crate::opc::{PartClassifier, PartPath, PartRole};
+use crate::opc::{PartClassifier, PartKind, PartRole};
 
-/// The PresentationML part classifier and format seam: maps a package path to
-/// its [`PartKind`], then down to the neutral [`PartRole`] the engine acts on,
-/// marks the parts whose bytes a binary replacement must never overwrite, and
-/// names the presentation part every presentation must have.
+/// The PresentationML format seam: maps each kind of part to the neutral
+/// [`PartRole`] the engine acts on.
+///
+/// The slides, layouts, masters, notes, and handouts, the comments (kept only
+/// when collaboration content is redacted), and the charts and SmartArt carry
+/// element text; a relationships part carries external hyperlink targets; an
+/// embedding is binary; the document properties are a property part; the
+/// presentation part and everything else is structure.
 #[derive(Debug, Clone, Copy)]
 pub struct SlideFormat;
 
 impl PartClassifier for SlideFormat {
-    fn role(&self, path: &PartPath) -> PartRole {
-        PartKind::of(path).role()
-    }
-
-    fn is_protected(&self, path: &PartPath) -> bool {
-        // The presentation part and the content-types manifest carry the
-        // package's structure; clobbering either corrupts the presentation
-        // rather than redacting it.
-        PartKind::of(path) == PartKind::Presentation || path.as_str() == "[Content_Types].xml"
+    fn role(&self, kind: PartKind) -> PartRole {
+        match kind {
+            PartKind::Story
+            | PartKind::Comments
+            | PartKind::Chart
+            | PartKind::Diagram
+            | PartKind::Drawing => PartRole::ElementText,
+            PartKind::Relationships => PartRole::RelationshipTargets,
+            PartKind::Embedding(kind) => PartRole::Binary(kind),
+            PartKind::Properties => PartRole::Property,
+            _ => PartRole::Structure,
+        }
     }
 }
 
 impl OoxmlFormat for SlideFormat {
-    const ROOT_LABEL: &'static str = "presentation";
-    const ROOT_PART: &'static str = "ppt/presentation.xml";
+    const MAIN_LABEL: &'static str = "presentation";
 
     fn classifier() -> Self {
         Self

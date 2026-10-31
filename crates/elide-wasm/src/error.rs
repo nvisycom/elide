@@ -27,6 +27,8 @@ pub enum ElideErrorKind {
     Recognition,
     /// Redaction failed.
     Redaction,
+    /// An encoded document failed its hidden-content check.
+    Sanitization,
     /// An integrity or consistency check failed.
     Integrity,
     /// A backing provider (a JS callback backend) failed.
@@ -47,6 +49,7 @@ impl From<elide::ErrorKind> for ElideErrorKind {
             elide::ErrorKind::CapabilityUnavailable => Self::CapabilityUnavailable,
             elide::ErrorKind::Recognition => Self::Recognition,
             elide::ErrorKind::Redaction => Self::Redaction,
+            elide::ErrorKind::Sanitization => Self::Sanitization,
             elide::ErrorKind::Integrity => Self::Integrity,
             elide::ErrorKind::Provider => Self::Provider,
             elide::ErrorKind::Transport => Self::Transport,

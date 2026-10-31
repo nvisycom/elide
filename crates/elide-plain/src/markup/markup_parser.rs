@@ -316,25 +316,25 @@ struct SkipRegion {
     depth: usize,
 }
 
-fn malformed(e: quick_xml::Error) -> Error {
+pub(super) fn malformed(e: quick_xml::Error) -> Error {
     Error::new(ErrorKind::MalformedInput, format!("malformed markup: {e}"))
 }
 
 /// The byte length of a leading UTF-8 BOM (`U+FEFF`), or 0 if absent. quick-xml
 /// skips it and reports positions past it, so spans over the original bytes must
 /// add it back.
-fn bom_len(raw: &str) -> usize {
+pub(super) fn bom_len(raw: &str) -> usize {
     if raw.starts_with('\u{feff}') { 3 } else { 0 }
 }
 
 /// The start tag's lowercased local name (HTML is case-insensitive; lowercasing
 /// makes `<SCRIPT>` and `<P>` match too).
-fn local_name(e: &BytesStart<'_>) -> String {
+pub(super) fn local_name(e: &BytesStart<'_>) -> String {
     e.local_name().as_ref().to_ascii_lowercase()
 }
 
 /// The end tag's lowercased local name, matched against an open skip element.
-fn end_name(e: &BytesEnd<'_>) -> String {
+pub(super) fn end_name(e: &BytesEnd<'_>) -> String {
     e.local_name().as_ref().to_ascii_lowercase()
 }
 

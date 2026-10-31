@@ -90,6 +90,7 @@ mod book {
         Reversible: "reversible.md",
         Formats: "formats.md",
         Containers: "containers.md",
+        HiddenContent: "hidden-content.md",
         Review: "review.md",
         Metadata: "metadata.md",
         Images: "images.md",

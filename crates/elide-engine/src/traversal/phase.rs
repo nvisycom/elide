@@ -1,13 +1,14 @@
 //! The two [`PartVisitor`]s the part-walk drives: [`Analyze`] (batch the stream
 //! leaves, scatter findings, never fold) and [`Redact`] (apply each stream's
-//! report entry in place, fold changed blob children back).
+//! report entry in place, fold changed blob children back, remove unreadable
+//! ones).
 
-use elide_codec::{Document as CodecDocument, ErasedStream};
+use elide_codec::ErasedStream;
 use elide_core::Result;
 use elide_core::modality::NoArtifact;
 use elide_core::recognition::Scope;
 
-use super::PartVisitor;
+use super::{Child, Fold, PartVisitor};
 use crate::Orchestrator;
 use crate::analysis::{ArtifactGroup, ArtifactSet, PartReport, Report};
 use crate::directives::AnnotationSet;
@@ -84,18 +85,14 @@ impl PartVisitor for Analyze<'_> {
         })
     }
 
-    fn fold_child(
-        &mut self,
-        _changed: bool,
-        _child: &CodecDocument,
-    ) -> Result<Option<bytes::Bytes>> {
-        Ok(None)
+    fn fold_child(&mut self, _child: Child<'_>) -> Result<Fold> {
+        Ok(Fold::Keep)
     }
 }
 
 /// The redaction phase: redact each stream part in place through its report
-/// entry, marking the document changed, and fold a changed blob child's
-/// re-encoded bytes back into its parent.
+/// entry, marking the document changed, fold a changed blob child's re-encoded
+/// bytes back into its parent, and remove a blob no codec can read.
 pub(crate) struct Redact<'p> {
     /// The (possibly edited) report to apply; entities gain a redaction event.
     pub(crate) report: &'p mut Report,
@@ -125,14 +122,17 @@ impl PartVisitor for Redact<'_> {
         })
     }
 
-    fn fold_child(&mut self, changed: bool, child: &CodecDocument) -> Result<Option<bytes::Bytes>> {
+    fn fold_child(&mut self, child: Child<'_>) -> Result<Fold> {
         // A changed child re-encodes its own redacted subtree and folds back; an
         // unchanged one keeps its parent's original blob bytes, so an untouched
         // embedding is never re-serialized.
-        if changed {
-            Ok(Some(child.encode()?.into_bytes()))
-        } else {
-            Ok(None)
-        }
+        Ok(match child {
+            Child::Decoded {
+                document,
+                changed: true,
+            } => Fold::Replace(document.encode()?.into_bytes()),
+            Child::Decoded { changed: false, .. } => Fold::Keep,
+            Child::Undecodable => Fold::Remove,
+        })
     }
 }

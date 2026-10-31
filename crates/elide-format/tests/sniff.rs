@@ -5,6 +5,7 @@
 #![cfg(all(feature = "sniff", feature = "png"))]
 
 use elide_codec::content::ContentData;
+use elide_core::redaction::HiddenContentPolicy;
 use elide_format::FormatRegistry;
 
 /// Raw PNG bytes with no filename and no content type resolve by their magic
@@ -13,7 +14,10 @@ use elide_format::FormatRegistry;
 async fn sniffs_a_png_from_raw_bytes() {
     let reg = FormatRegistry::with_builtin();
     let content = ContentData::new(elide_image::fixtures::png(2, 2));
-    let handle = reg.decode_content(content).await.expect("sniffed png");
+    let handle = reg
+        .decode_content(content, HiddenContentPolicy::default())
+        .await
+        .expect("sniffed png");
     assert_eq!(handle.format_id().as_str(), "elide.image.png");
 }
 
@@ -29,7 +33,7 @@ async fn an_asserted_extension_beats_the_sniff() {
     let reg = FormatRegistry::with_builtin();
     let content = ContentData::new(elide_image::fixtures::png(2, 2)).with_filename("note.txt");
     let err = reg
-        .decode_content(content)
+        .decode_content(content, HiddenContentPolicy::default())
         .await
         .expect_err("png bytes are not valid text");
     // The text handler's decode error, not a successful image decode: the `.txt`
@@ -43,7 +47,11 @@ async fn an_asserted_extension_beats_the_sniff() {
 async fn plain_text_does_not_sniff() {
     let reg = FormatRegistry::with_builtin();
     let content = ContentData::from_text("just some words");
-    assert!(reg.decode_content(content).await.is_err());
+    assert!(
+        reg.decode_content(content, HiddenContentPolicy::default())
+            .await
+            .is_err()
+    );
 }
 
 /// An unregistered but *present* hint suppresses the sniff: the caller asserted
@@ -54,7 +62,9 @@ async fn an_unregistered_extension_suppresses_the_sniff() {
     let reg = FormatRegistry::with_builtin();
     let content = ContentData::new(elide_image::fixtures::png(2, 2)).with_filename("data.unknown");
     assert!(
-        reg.decode_content(content).await.is_err(),
+        reg.decode_content(content, HiddenContentPolicy::default())
+            .await
+            .is_err(),
         "a present-but-unregistered extension must not fall through to a sniff"
     );
 }

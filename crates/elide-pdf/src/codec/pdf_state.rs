@@ -7,6 +7,7 @@ use bytes::Bytes;
 use elide_core::Result;
 
 use super::{PdfPage, RedactMode};
+use crate::attachment::{AttachmentId, AttachmentReplacement};
 use crate::document::Pdf;
 use crate::redact::Detection;
 #[cfg(feature = "image")]
@@ -108,47 +109,38 @@ impl PdfState {
         self.0.lock().unwrap().record(number, range);
     }
 
-    /// Apply the recorded redactions to `document` per the [`RedactMode`], folding
-    /// in the redacted `image_replacements` and (scanned) `page_replacements`.
-    /// Returns the original bytes when nothing was recorded.
-    pub(super) fn redact(
-        &self,
-        document: &Bytes,
-        #[cfg(feature = "image")] image_replacements: Vec<ImageReplacement>,
-        #[cfg(feature = "render")] page_replacements: Vec<PageReplacement>,
-    ) -> Result<Bytes> {
+    /// Apply the recorded redactions to `document` per the [`RedactMode`], then
+    /// fold in the redacted and removed blob parts. Returns the original bytes
+    /// when nothing was recorded or folded.
+    pub(super) fn redact(&self, document: &Bytes, folds: Folds) -> Result<Bytes> {
         let inner = self.0.lock().unwrap();
         match &inner.mode {
             RedactMode::GlyphDelete => {
-                #[cfg(feature = "image")]
-                let has_images = !image_replacements.is_empty();
-                #[cfg(not(feature = "image"))]
-                let has_images = false;
-                #[cfg(feature = "render")]
-                let has_pages = !page_replacements.is_empty();
-                #[cfg(not(feature = "render"))]
-                let has_pages = false;
-                if inner.deletions.is_empty() && !has_images && !has_pages {
+                if inner.deletions.is_empty() && folds.is_empty() {
                     return Ok(document.clone());
                 }
 
-                // Delete the detected glyphs and strip annotations/metadata,
-                // keeping a selectable text layer. (`mut` is used only when the
-                // image fold below is compiled in.)
-                #[cfg_attr(not(feature = "image"), allow(unused_mut))]
+                // Delete the detected glyphs, keeping a selectable text layer.
                 let mut out =
                     Pdf::open(document).and_then(|pdf| pdf.redact_text(&inner.deletions))?;
 
                 // Then fold in any redacted embedded images.
                 #[cfg(feature = "image")]
-                if has_images {
-                    out = Pdf::open(&out).and_then(|pdf| pdf.redact_images(&image_replacements))?;
+                if !folds.images.is_empty() {
+                    out = Pdf::open(&out).and_then(|pdf| pdf.redact_images(&folds.images))?;
                 }
 
                 // Then reflatten any scanned pages to their redacted raster.
                 #[cfg(feature = "render")]
-                if has_pages {
-                    out = Pdf::open(&out).and_then(|pdf| pdf.redact_pages(&page_replacements))?;
+                if !folds.pages.is_empty() {
+                    out = Pdf::open(&out).and_then(|pdf| pdf.redact_pages(&folds.pages))?;
+                }
+
+                // Then write back the redacted attachments and drop the removed.
+                if !folds.attachments.is_empty() || !folds.removed_attachments.is_empty() {
+                    out = Pdf::open(&out).and_then(|pdf| {
+                        pdf.redact_attachments(&folds.attachments, &folds.removed_attachments)
+                    })?;
                 }
 
                 Ok(Bytes::from(out))
@@ -168,5 +160,37 @@ impl PdfState {
                 Ok(Bytes::from(out))
             }
         }
+    }
+}
+
+/// The blob parts folded back into a PDF on encode: the redacted embedded
+/// images and scanned pages, and the redacted and removed attachments. An image
+/// or page whose blob was removed folds back as a blank replacement.
+#[derive(Debug, Default)]
+pub(super) struct Folds {
+    /// Embedded images to replace with their redacted bytes.
+    #[cfg(feature = "image")]
+    pub(super) images: Vec<ImageReplacement>,
+    /// Scanned pages to reflatten to their redacted raster.
+    #[cfg(feature = "render")]
+    pub(super) pages: Vec<PageReplacement>,
+    /// Attachments to replace with their redacted bytes.
+    pub(super) attachments: Vec<AttachmentReplacement>,
+    /// Attachments to drop from the document.
+    pub(super) removed_attachments: Vec<AttachmentId>,
+}
+
+impl Folds {
+    /// Whether nothing folds back.
+    fn is_empty(&self) -> bool {
+        #[cfg(feature = "image")]
+        let images = self.images.is_empty();
+        #[cfg(not(feature = "image"))]
+        let images = true;
+        #[cfg(feature = "render")]
+        let pages = self.pages.is_empty();
+        #[cfg(not(feature = "render"))]
+        let pages = true;
+        images && pages && self.attachments.is_empty() && self.removed_attachments.is_empty()
     }
 }

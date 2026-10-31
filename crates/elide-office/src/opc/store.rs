@@ -1,11 +1,13 @@
 //! [`StoredPart`]: one package part, read once and tagged with its
-//! [`PartRole`], with the XML text extraction and splicing it supports.
+//! [`PartKind`] and [`PartRole`], with the XML text extraction and splicing it
+//! supports.
 
 use bytes::Bytes;
 use elide_core::{Error, ErrorKind, Result};
 use hipstr::HipStr;
 
 use crate::opc::block::{Block, IssueKind, Replacement};
+use crate::opc::kind::PartKind;
 use crate::opc::part::{PartPath, PartRole};
 use crate::opc::xml_span::{Span, relationship_spans, text_spans};
 
@@ -14,14 +16,25 @@ use crate::opc::xml_span::{Span, relationship_spans, text_spans};
 #[derive(Debug, Clone)]
 pub(crate) struct StoredPart {
     path: PartPath,
+    kind: PartKind,
     role: PartRole,
     bytes: Bytes,
 }
 
 impl StoredPart {
-    /// The part at `path`, tagged with `role`, holding `bytes`.
-    pub(crate) fn new(path: PartPath, role: PartRole, bytes: Bytes) -> Self {
-        Self { path, role, bytes }
+    /// The part at `path` of `kind`, tagged with `role`, holding `bytes`.
+    pub(crate) fn new(path: PartPath, kind: PartKind, role: PartRole, bytes: Bytes) -> Self {
+        Self {
+            path,
+            kind,
+            role,
+            bytes,
+        }
+    }
+
+    /// What the part is.
+    pub(crate) fn kind(&self) -> PartKind {
+        self.kind
     }
 
     /// The part's path.
@@ -170,6 +183,7 @@ mod tests {
     fn element(xml: &'static str) -> StoredPart {
         StoredPart::new(
             PartPath::from("word/document.xml"),
+            PartKind::Main,
             PartRole::ElementText,
             Bytes::from(xml),
         )
@@ -179,6 +193,7 @@ mod tests {
     fn rels(xml: impl Into<Bytes>) -> StoredPart {
         StoredPart::new(
             PartPath::from("word/_rels/document.xml.rels"),
+            PartKind::Relationships,
             PartRole::RelationshipTargets,
             xml.into(),
         )

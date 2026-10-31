@@ -20,6 +20,7 @@ use elide::codec::pdf::{RasterMode, pdf_format_with};
 use elide::codec::{DocumentPart, FormatRegistry};
 use elide::modality::StreamDataReader;
 use elide::modality::text::Text;
+use elide::redaction::HiddenContentPolicy;
 
 use crate::support::fixture::Fixture;
 
@@ -32,7 +33,9 @@ const FIXTURE: Fixture = Fixture {
 /// Re-decode a PDF through the registry and concatenate its extracted text.
 async fn extracted_text(pdf: &[u8]) -> Result<String> {
     let registry = FormatRegistry::with_builtin();
-    let mut document = registry.decode(pdf, "pdf").await?;
+    let mut document = registry
+        .decode(pdf, "pdf", HiddenContentPolicy::default())
+        .await?;
     let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else {
         panic!("the pdf codec yields a text body stream")
     };

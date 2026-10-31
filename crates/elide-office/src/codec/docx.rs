@@ -42,6 +42,7 @@ mod tests {
     use elide_codec::{Recombine, Stream};
     use elide_core::modality::Chunk;
     use elide_core::modality::text::{SourceRef, Text, TextLocation};
+    use elide_core::redaction::HiddenContentPolicy;
 
     use super::*;
     use crate::codec::ooxml::{OoxmlAddress, OoxmlRecombine, decode_parts};
@@ -49,13 +50,16 @@ mod tests {
 
     const BODY_PART: &str = "word/document.xml";
 
+    /// A content-types manifest typing the fixture's relationships and body.
+    const CONTENT_TYPES: &[u8] = br#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#;
+
     /// A minimal one-part `.docx` whose body carries `body_text` in a `w:t` run.
     fn docx_with_body(body_text: &str) -> ContentData {
         let body = format!(
             r#"<?xml version="1.0"?><w:document><w:body><w:p><w:r><w:t>{body_text}</w:t></w:r></w:p></w:body></w:document>"#
         );
         let package = fixtures::pack_parts(&[
-            ("[Content_Types].xml", br#"<?xml version="1.0"?><Types/>"#),
+            ("[Content_Types].xml", CONTENT_TYPES),
             ("_rels/.rels", br#"<?xml version="1.0"?><Relationships/>"#),
             (BODY_PART, body.as_bytes()),
         ]);
@@ -64,7 +68,7 @@ mod tests {
 
     /// Decode `content` into the DOCX body stream and its recombiner.
     fn decode(content: ContentData) -> (ExtractStream<OoxmlAddress>, OoxmlRecombine<DocxCodec>) {
-        decode_parts::<DocxCodec>(content).unwrap()
+        decode_parts::<DocxCodec>(content, HiddenContentPolicy::default()).unwrap()
     }
 
     /// The first chunk whose decoded text equals `value`.
@@ -160,7 +164,7 @@ mod tests {
         stream.write_at(redactions).await.unwrap();
 
         // The rebuilt part has "Bob" replaced, "Alice" untouched.
-        let out = recombine.assemble(&[]).unwrap();
+        let out = recombine.assemble(&[], &[]).unwrap();
         // The output is an OPC package; the body part contains the replacement.
         let body_bytes = fixtures::read_part(out.as_bytes(), BODY_PART).expect("body part present");
         let body = String::from_utf8(body_bytes).expect("body part is UTF-8");

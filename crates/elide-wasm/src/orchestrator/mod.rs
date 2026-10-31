@@ -147,7 +147,9 @@ impl Orchestrator {
 /// only deals with [`ElideError`].
 async fn run(pipeline: &Orchestrator, bytes: Vec<u8>, hint: String) -> Result<Report> {
     let registry = FormatRegistry::with_builtin();
-    let mut document = registry.document_with("input", &hint, bytes).await?;
+    let mut document = registry
+        .document_with("input", &hint, bytes, HiddenContentPolicy::default())
+        .await?;
     let report = pipeline
         .core()
         .anonymize(&mut document, &Directives::new())

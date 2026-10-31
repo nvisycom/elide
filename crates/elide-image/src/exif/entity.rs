@@ -26,7 +26,10 @@ pub(crate) fn label_for(key: &str) -> Option<LabelRef> {
     let label = match key {
         "GPSLatitude" | "GPSLongitude" => &builtins::GEOLOCATION_METADATA,
         "DateTimeOriginal" => &builtins::DATE_TIME,
-        "Make" | "Model" | "SerialNumber" => &builtins::DEVICE_ID,
+        "Make" | "Model" | "SerialNumber" | "ImageUniqueID" | "MakerNote" => &builtins::DEVICE_ID,
+        "Artist" | "OwnerName" | "Copyright" => &builtins::PERSON_NAME,
+        "ImageDescription" | "UserComment" => &builtins::COMMUNICATIONS_CONTENT,
+        "Software" => &builtins::PRODUCT,
         _ => return None,
     };
     Some(LabelRef::from(&**label))
@@ -37,58 +40,38 @@ impl Source<'_> {
     /// actually carries.
     ///
     /// Each entity is addressed by its tag key, labelled by what it exposes
-    /// (location, time, device), and carries a deterministic detection event: an
-    /// EXIF field is present or it is not, so confidence is `MAX`.
+    /// (location, time, device, a person), and carries a deterministic
+    /// detection event: an EXIF field is present or it is not, so confidence is
+    /// `MAX`.
     ///
     /// # Errors
     ///
     /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
     /// the metadata is present but unparseable.
     pub(crate) fn entities(&self) -> Result<Vec<Entity<Metadata>>> {
-        let meta = self.read()?;
-        let mut entities = Vec::new();
-        let mut push = |present: bool, key: &'static str| {
-            if present
-                && let Some(label) = label_for(key)
-                && let Some(entity) = Metadata::field_entity(key, label, SOURCE)
-            {
-                entities.push(entity);
-            }
-        };
-        push(meta.gps_latitude.is_some(), "GPSLatitude");
-        push(meta.gps_longitude.is_some(), "GPSLongitude");
-        push(meta.timestamp.is_some(), "DateTimeOriginal");
-        push(meta.device_make.is_some(), "Make");
-        push(meta.device_model.is_some(), "Model");
-        push(meta.device_serial.is_some(), "SerialNumber");
-        Ok(entities)
+        Ok(self
+            .values()?
+            .into_iter()
+            .filter_map(|(key, _)| {
+                label_for(key).and_then(|label| Metadata::field_entity(key, label, SOURCE))
+            })
+            .collect())
     }
 
-    /// Each privacy-relevant EXIF field the image carries, as a
-    /// [`MetadataData`], for a caller (the codec) that streams fields to a
-    /// recognizer.
+    /// Each surfaced EXIF field the image carries, as a [`MetadataData`], for
+    /// a caller (the codec) that streams fields to a recognizer. Every surfaced
+    /// field has a label, so the recognizer classifies each one.
     ///
     /// # Errors
     ///
     /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
     /// the metadata is present but unparseable.
     pub(crate) fn fields(&self) -> Result<Vec<MetadataData>> {
-        let meta = self.read()?;
-        let mut fields = Vec::new();
-        let mut push = |key: &str, value: Option<String>| {
-            if let Some(value) = value
-                && label_for(key).is_some()
-            {
-                fields.push(MetadataData::new(key.to_owned(), value));
-            }
-        };
-        push("GPSLatitude", meta.gps_latitude);
-        push("GPSLongitude", meta.gps_longitude);
-        push("DateTimeOriginal", meta.timestamp);
-        push("Make", meta.device_make);
-        push("Model", meta.device_model);
-        push("SerialNumber", meta.device_serial);
-        Ok(fields)
+        Ok(self
+            .values()?
+            .into_iter()
+            .map(|(key, value)| MetadataData::new(key.to_owned(), value))
+            .collect())
     }
 }
 
@@ -99,6 +82,7 @@ mod tests {
     use little_exif::metadata::Metadata as ExifMetadata;
 
     use super::*;
+    use crate::exif::tags::FIELD_KEYS;
 
     /// A JPEG carrying the given EXIF tags.
     fn jpeg_with(tags: Vec<ExifTag>) -> Vec<u8> {
@@ -154,5 +138,12 @@ mod tests {
     fn no_entities_without_exif() {
         let bytes = jpeg_with(Vec::new());
         assert!(source(&bytes).entities().expect("entities").is_empty());
+    }
+
+    #[test]
+    fn every_surfaced_field_has_a_label() {
+        for key in FIELD_KEYS {
+            assert!(label_for(key).is_some(), "{key} has no label");
+        }
     }
 }

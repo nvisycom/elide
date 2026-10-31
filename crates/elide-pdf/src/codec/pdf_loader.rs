@@ -10,11 +10,13 @@ use elide_codec::content::ContentData;
 use elide_codec::{Document, DocumentLoader, DocumentPart, ErasedStream, LocalId, Stream};
 use elide_core::Result;
 use elide_core::modality::text::Text;
+use elide_core::redaction::HiddenContentPolicy;
 
 use super::pdf_recombine::PdfRecombine;
 use super::pdf_state::{PdfInner, PdfState};
 use super::pdf_stream::PdfStream;
 use super::{BODY_PART_ID, FORMAT_ID, PdfPage, RedactMode};
+use crate::attachment::AttachmentId;
 use crate::document::Pdf;
 use crate::extract::Block;
 #[cfg(feature = "image")]
@@ -51,8 +53,9 @@ impl PdfDocumentLoader {
         Self { raster }
     }
 
-    /// Build a [`Document`] from the decoded `state`, `document` bytes, and
-    /// `blobs` (the surfaced embedded-image / scanned-page parts).
+    /// Build a [`Document`] from the decoded `state`, the (sanitized)
+    /// `document` bytes, and `blobs` (the surfaced embedded-image / scanned-page
+    /// parts).
     pub(super) fn document(document: Bytes, state: PdfState, blobs: Vec<DocumentPart>) -> Document {
         let mut parts = Vec::with_capacity(blobs.len() + 1);
         let stream: Box<dyn Stream<Text>> = Box::new(PdfStream {
@@ -73,8 +76,17 @@ impl PdfDocumentLoader {
 
 #[async_trait::async_trait]
 impl DocumentLoader for PdfDocumentLoader {
-    async fn decode(&self, content: ContentData) -> Result<Document> {
-        let document = content.to_bytes();
+    async fn decode(&self, content: ContentData, _policy: HiddenContentPolicy) -> Result<Document> {
+        // Hidden content goes first, so everything below (extraction, rendering,
+        // the surfaced images) reads only what will ship.
+        let opened = Pdf::open(content.as_bytes())?;
+        let (document, pdf, sanitized) = match opened.sanitize()? {
+            Some(bytes) => {
+                let pdf = Pdf::open(&bytes)?;
+                (Bytes::from(bytes), pdf, true)
+            }
+            None => (content.to_bytes(), opened, false),
+        };
 
         // `RasterMode::Always` (feature `render`): observe each page, its text
         // comes from the renderer alongside its glyph geometry, so redaction on
@@ -100,15 +112,17 @@ impl DocumentLoader for PdfDocumentLoader {
                     detections: Vec::new(),
                 },
             });
-            return Ok(Self::document(document, state, Vec::new()));
+            return Ok(
+                Self::document(document, state, Vec::new()).with_changed_at_decode(sanitized)
+            );
         }
 
         // Default (`Auto`/`Never`, and the whole pure-Rust build): glyph
         // deletion. The page text comes from `extract`, the same content walk
         // `redact_text` uses, so a detection's character span maps to the glyphs
-        // it drew. On encode the glyphs are deleted and annotations/metadata
-        // stripped, keeping a selectable text layer.
-        let pdf = Pdf::open(&document)?;
+        // it drew. On encode the glyphs are deleted, keeping a selectable text
+        // layer.
+        //
         // Extract once: `blocks` drive glyph deletion, `embeddings` become image
         // blobs, and (in `Auto`) `issues` name the textless pages to render. A
         // second `extract()` would re-walk every page and re-copy the embedded
@@ -120,10 +134,7 @@ impl DocumentLoader for PdfDocumentLoader {
         // image pipeline (only with an image codec able to redact them). Only
         // images whose bytes are a decodable file are surfaced (see
         // `embedding_hint`).
-        // `mut` is used only when the scanned-page fold below (render + image) is
-        // compiled in; under `image` alone nothing else extends the list.
         #[cfg(feature = "image")]
-        #[cfg_attr(not(feature = "render"), allow(unused_mut))]
         let mut blobs: Vec<DocumentPart> = extraction
             .embeddings
             .into_iter()
@@ -137,7 +148,19 @@ impl DocumentLoader for PdfDocumentLoader {
             })
             .collect();
         #[cfg(not(feature = "image"))]
-        let blobs: Vec<DocumentPart> = Vec::new();
+        let mut blobs: Vec<DocumentPart> = Vec::new();
+
+        // Each attached file is content of its own format, decoded and redacted
+        // through the registry like any embedding.
+        blobs.extend(
+            pdf.attachments()?
+                .into_iter()
+                .map(|attachment| DocumentPart::Blob {
+                    id: LocalId::new(attachment_part_id(attachment.id)),
+                    hint: attachment_hint(&attachment.name),
+                    bytes: attachment.bytes,
+                }),
+        );
 
         // `RasterMode::Auto` (feature `render` + an image codec): a textless
         // (scanned) page has no glyphs to delete, so render it and surface it as
@@ -160,7 +183,7 @@ impl DocumentLoader for PdfDocumentLoader {
             deletions: Vec::new(),
             mode: RedactMode::GlyphDelete,
         });
-        Ok(Self::document(document, state, blobs))
+        Ok(Self::document(document, state, blobs).with_changed_at_decode(sanitized))
     }
 }
 
@@ -242,8 +265,32 @@ pub(super) fn parse_image_part_id(s: &str) -> Option<ImageId> {
     Some(ImageId::new(number.parse().ok()?, generation.parse().ok()?))
 }
 
+/// The local part-id string for an attachment: `"att-{number}-{generation}"`.
+fn attachment_part_id(id: AttachmentId) -> String {
+    format!("att-{}-{}", id.number, id.generation)
+}
+
+/// Parse an attachment part-id string back into an [`AttachmentId`].
+pub(super) fn parse_attachment_part_id(s: &str) -> Option<AttachmentId> {
+    let rest = s.strip_prefix("att-")?;
+    let (number, generation) = rest.split_once('-')?;
+    Some(AttachmentId::new(
+        number.parse().ok()?,
+        generation.parse().ok()?,
+    ))
+}
+
+/// The registry hint for an attachment named `name`: its lowercased file
+/// extension, empty when it has none (no codec then reads it, so it is removed).
+fn attachment_hint(name: &str) -> String {
+    name.rsplit_once('.')
+        .map(|(_, extension)| extension.to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
 /// The local part-id string for a scanned page: `"page-{number}"`. A distinct
-/// namespace from embedded images (`img-{number}-{generation}`).
+/// namespace from embedded images (`img-{number}-{generation}`) and attachments
+/// (`att-{number}-{generation}`).
 #[cfg(feature = "render")]
 fn page_part_id(number: u32) -> String {
     format!("page-{number}")
@@ -285,6 +332,7 @@ mod tests {
     use bytes::Bytes;
     use elide_codec::content::ContentData;
     use elide_codec::{DocumentLoader as _, DocumentPart, LocalId};
+    use elide_core::redaction::HiddenContentPolicy;
     use lopdf::content::{Content, Operation};
     use lopdf::{Dictionary, Document, Object, Stream, dictionary};
 
@@ -390,7 +438,10 @@ mod tests {
     async fn document_surfaces_and_replaces_an_image() {
         let (pdf, image_id) = image_pdf();
         let mut doc = image_loader()
-            .decode(ContentData::new(Bytes::from(pdf)))
+            .decode(
+                ContentData::new(Bytes::from(pdf)),
+                HiddenContentPolicy::default(),
+            )
             .await
             .unwrap();
 
@@ -419,7 +470,10 @@ mod tests {
     async fn replace_part_rejects_an_unknown_id() {
         let (pdf, _) = image_pdf();
         let mut doc = image_loader()
-            .decode(ContentData::new(Bytes::from(pdf)))
+            .decode(
+                ContentData::new(Bytes::from(pdf)),
+                HiddenContentPolicy::default(),
+            )
             .await
             .unwrap();
         let err = doc
@@ -584,5 +638,123 @@ mod scanned_page_tests {
             .replace_part(&LocalId::new("page-1"), Bytes::from_static(b"x"))
             .unwrap_err();
         assert_eq!(err.kind(), elide_core::ErrorKind::MalformedInput);
+    }
+}
+
+#[cfg(test)]
+mod sanitize_tests {
+    use bytes::Bytes;
+    use elide_codec::content::ContentData;
+    use elide_codec::{DocumentLoader as _, DocumentPart};
+    use elide_core::redaction::{Disposition, HiddenContentPolicy};
+    use lopdf::{Document, Object, Stream, dictionary};
+
+    use super::PdfDocumentLoader;
+    use crate::document::Pdf;
+    #[cfg(feature = "render")]
+    use crate::primitive::RasterMode;
+
+    /// A one-page PDF with an `/Info` author and one attached `notes.txt`.
+    fn pdf() -> Vec<u8> {
+        let mut doc = Document::with_version("1.7");
+        let pages = doc.new_object_id();
+        let page = doc.add_object(dictionary! { "Type" => "Page", "Parent" => pages });
+        doc.objects.insert(
+            pages,
+            Object::Dictionary(
+                dictionary! { "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1 },
+            ),
+        );
+        let file = doc.add_object(Stream::new(
+            dictionary! { "Type" => "EmbeddedFile" },
+            b"Jane Roe".to_vec(),
+        ));
+        let spec = doc.add_object(dictionary! {
+            "Type" => "Filespec",
+            "F" => Object::string_literal("notes.txt"),
+            "EF" => dictionary! { "F" => file },
+        });
+        let catalog = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages,
+            "Names" => dictionary! {
+                "EmbeddedFiles" => dictionary! { "Names" => vec![Object::string_literal("notes.txt"), spec.into()] },
+            },
+        });
+        let info = doc.add_object(dictionary! { "Author" => Object::string_literal("Jane Roe") });
+        doc.trailer.set("Root", catalog);
+        doc.trailer.set("Info", info);
+        let mut out = Vec::new();
+        doc.save_to(&mut out).unwrap();
+        out
+    }
+
+    /// A loader on the glyph-deletion path: the synthetic page has no text, so
+    /// the default `Auto` mode would render it with PDFium for nothing.
+    fn loader() -> PdfDocumentLoader {
+        #[cfg(feature = "render")]
+        {
+            PdfDocumentLoader::with_raster(RasterMode::Never)
+        }
+        #[cfg(not(feature = "render"))]
+        {
+            PdfDocumentLoader::new()
+        }
+    }
+
+    async fn decode(policy: HiddenContentPolicy) -> elide_codec::Document {
+        loader()
+            .decode(ContentData::new(Bytes::from(pdf())), policy)
+            .await
+            .expect("decode")
+    }
+
+    fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack.windows(needle.len()).any(|w| w == needle)
+    }
+
+    #[tokio::test]
+    async fn decode_removes_metadata_and_surfaces_attachments() {
+        let doc = decode(HiddenContentPolicy::default()).await;
+        assert!(doc.changed_at_decode());
+        let attachment = doc.parts().iter().find_map(|part| match part {
+            DocumentPart::Blob { id, bytes, hint } if id.as_str().starts_with("att-") => {
+                Some((bytes.clone(), hint.clone()))
+            }
+            _ => None,
+        });
+        assert_eq!(
+            attachment,
+            Some((Bytes::from_static(b"Jane Roe"), "txt".to_owned()))
+        );
+        let out = doc.encode().expect("encode");
+        assert!(!contains(out.as_bytes(), b"/Author"), "Info survived");
+    }
+
+    #[tokio::test]
+    async fn redacted_metadata_is_still_stripped() {
+        let policy = HiddenContentPolicy::default().with_metadata(Disposition::Redact);
+        let doc = decode(policy).await;
+        let out = doc.encode().expect("encode");
+        assert!(!contains(out.as_bytes(), b"/Author"), "Info survived");
+    }
+
+    #[tokio::test]
+    async fn a_removed_attachment_is_dropped_on_encode() {
+        let mut doc = decode(HiddenContentPolicy::default()).await;
+        let id = doc
+            .parts()
+            .iter()
+            .find_map(|part| match part {
+                DocumentPart::Blob { id, .. } if id.as_str().starts_with("att-") => {
+                    Some(id.clone())
+                }
+                _ => None,
+            })
+            .expect("attachment blob");
+        doc.remove_part(&id).unwrap();
+        let out = doc.encode().expect("encode");
+        let attachments = Pdf::open(out.as_bytes()).unwrap().attachments().unwrap();
+        assert!(attachments.is_empty(), "attachment survived");
     }
 }

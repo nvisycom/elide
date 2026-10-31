@@ -15,6 +15,7 @@ use elide::codec::FormatRegistry;
 use elide::entity::audit::AuditKind;
 use elide::modality::image::Image;
 use elide::modality::text::Text;
+use elide::redaction::HiddenContentPolicy;
 use elide::{Directives, Orchestrator, PartId, RegistryDocumentExt, Report, Result};
 
 use crate::support::orchestrator::TestOrchestrator;
@@ -38,7 +39,9 @@ async fn anonymize_records_reviewable_body_picks() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
     let orchestrator = orchestrator(registry.clone())?;
 
-    let mut doc = registry.document(DOC, SAMPLE).await?;
+    let mut doc = registry
+        .document(DOC, SAMPLE, HiddenContentPolicy::default())
+        .await?;
     let report = orchestrator
         .analyze(&mut doc, &Directives::new())
         .await?
@@ -99,7 +102,9 @@ async fn anonymize_over_an_empty_part_records_nothing() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
     let orchestrator = orchestrator(registry.clone())?;
 
-    let mut doc = registry.document(DOC, SAMPLE).await?;
+    let mut doc = registry
+        .document(DOC, SAMPLE, HiddenContentPolicy::default())
+        .await?;
     // A report carrying one image part with no detected entities, apply routes
     // through the image pipeline (Anonymizer::new(), no rules) and does nothing.
     // The part is keyed under the document's name (a nested path) so apply

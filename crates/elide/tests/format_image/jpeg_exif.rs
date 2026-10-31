@@ -16,7 +16,7 @@ use elide::modality::metadata::Metadata;
 use elide::recognition::Scope;
 use elide::recognition::exif::ExifRecognizer;
 use elide::redaction::operators::Erase;
-use elide::redaction::{Anonymizer, Rule};
+use elide::redaction::{Anonymizer, HiddenContentPolicy, Rule};
 use elide::{Directives, Document, Orchestrator};
 use elide_image::fixtures::{has_gps, is_valid_image, jpeg_with_gps};
 
@@ -39,7 +39,7 @@ async fn jpeg_gps_is_stripped_through_the_facade() {
         );
 
     let handle = registry
-        .decode(original.clone(), "jpg")
+        .decode(original.clone(), "jpg", HiddenContentPolicy::default())
         .await
         .expect("decode jpeg");
     let mut documents = [Document::new("photo.jpg", handle)];

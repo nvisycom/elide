@@ -11,6 +11,7 @@ use elide::enrichment::ocr::MockBackend;
 use elide::entity::Entity;
 use elide::modality::image::{Image, ImageLocation, LayoutRegion};
 use elide::primitive::{BoundingBox, Dimensions, Point};
+use elide::redaction::HiddenContentPolicy;
 use elide::{Directives, Orchestrator, PartId, RegistryDocumentExt, Result};
 
 use crate::support::orchestrator::{TestOrchestrator, erase_anonymizer, ocr_analyzer};
@@ -60,7 +61,9 @@ async fn re_analyze_reuses_the_prior_ocr_artifact() -> Result<()> {
         FormatRegistry::with_builtin(),
         MockBackend::with(vec![region]),
     )?;
-    let mut document = FormatRegistry::with_builtin().document(DOC, SAMPLE).await?;
+    let mut document = FormatRegistry::with_builtin()
+        .document(DOC, SAMPLE, HiddenContentPolicy::default())
+        .await?;
     let analyzed = first.analyze(&mut document, &Directives::new()).await?;
 
     let found = image_entities(&analyzed);
@@ -77,7 +80,9 @@ async fn re_analyze_reuses_the_prior_ocr_artifact() -> Result<()> {
     // If re_analyze re-enriched, it would OCR nothing and detect nothing; it
     // instead seeds the recognition with the persisted Layout.
     let second = orchestrator(FormatRegistry::with_builtin(), MockBackend::new())?;
-    let mut document = FormatRegistry::with_builtin().document(DOC, SAMPLE).await?;
+    let mut document = FormatRegistry::with_builtin()
+        .document(DOC, SAMPLE, HiddenContentPolicy::default())
+        .await?;
     let reanalyzed = second
         .re_analyze(&mut document, &analyzed.artifacts, &Directives::new())
         .await?;
@@ -100,7 +105,9 @@ async fn re_analyze_reuses_the_prior_ocr_artifact() -> Result<()> {
 #[tokio::test]
 async fn an_empty_backend_without_a_seed_finds_nothing() -> Result<()> {
     let orchestrator = orchestrator(FormatRegistry::with_builtin(), MockBackend::new())?;
-    let mut document = FormatRegistry::with_builtin().document(DOC, SAMPLE).await?;
+    let mut document = FormatRegistry::with_builtin()
+        .document(DOC, SAMPLE, HiddenContentPolicy::default())
+        .await?;
     let analyzed = orchestrator
         .analyze(&mut document, &Directives::new())
         .await?;
@@ -124,7 +131,9 @@ async fn artifacts_round_trip_through_deserialize_for_a_re_run() -> Result<()> {
         FormatRegistry::with_builtin(),
         MockBackend::with(vec![region]),
     )?;
-    let mut document = FormatRegistry::with_builtin().document(DOC, SAMPLE).await?;
+    let mut document = FormatRegistry::with_builtin()
+        .document(DOC, SAMPLE, HiddenContentPolicy::default())
+        .await?;
     let analyzed = first.analyze(&mut document, &Directives::new()).await?;
     assert_eq!(image_entities(&analyzed).len(), 1);
     let json = serde_json::to_string(&analyzed.artifacts).expect("artifacts serialize");
@@ -135,7 +144,9 @@ async fn artifacts_round_trip_through_deserialize_for_a_re_run() -> Result<()> {
     let second = orchestrator(FormatRegistry::with_builtin(), MockBackend::new())?;
     let mut de = serde_json::Deserializer::from_str(&json);
     let restored = second.deserialize_artifacts(&mut de)?;
-    let mut document = FormatRegistry::with_builtin().document(DOC, SAMPLE).await?;
+    let mut document = FormatRegistry::with_builtin()
+        .document(DOC, SAMPLE, HiddenContentPolicy::default())
+        .await?;
     let reanalyzed = second
         .re_analyze(&mut document, &restored, &Directives::new())
         .await?;

@@ -178,6 +178,14 @@ pub enum ErrorKind {
     Recognition,
     /// A redaction operator failed while transforming content.
     Redaction,
+    /// An encoded document failed its hidden-content check and was refused
+    /// rather than returned: it still carries content decode strips (metadata,
+    /// comments, scripts), structure its format does not recognize, or a
+    /// dangling internal reference. Distinct from [`Processing`]: the encode
+    /// completed, but its output is not safe to ship.
+    ///
+    /// [`Processing`]: Self::Processing
+    Sanitization,
     /// A tamper-evident structure failed verification: an entity's audit
     /// trail (an [`AuditLog`]) no longer matches its recorded hashes, so it
     /// was edited, reordered, or truncated after the fact. Distinct from
@@ -206,6 +214,7 @@ impl ErrorKind {
             Self::CapabilityUnavailable => "required capability is unavailable",
             Self::Recognition => "recognition failed",
             Self::Redaction => "redaction failed",
+            Self::Sanitization => "output failed its hidden-content check",
             Self::Integrity => "integrity verification failed",
             Self::Provider => "provider returned an error",
             Self::Transport => "transport failure",
@@ -231,6 +240,7 @@ impl ErrorKind {
             | Self::CapabilityUnavailable
             | Self::Recognition
             | Self::Redaction
+            | Self::Sanitization
             | Self::Integrity
             | Self::Provider => false,
         }
@@ -260,6 +270,7 @@ mod tests {
             ErrorKind::CapabilityUnavailable,
             ErrorKind::Recognition,
             ErrorKind::Redaction,
+            ErrorKind::Sanitization,
             ErrorKind::Integrity,
             ErrorKind::Provider,
         ] {

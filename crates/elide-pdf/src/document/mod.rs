@@ -14,11 +14,13 @@ mod role;
 
 use std::num::NonZeroUsize;
 
-use elide_core::Result;
+use elide_core::{Error, ErrorKind, Result};
+use lopdf::{Document, Object};
 
 pub(crate) use self::data::Store;
 #[cfg(feature = "image")]
 pub(crate) use self::role::ObjectRole;
+use crate::attachment::{Attachment, AttachmentId, AttachmentReplacement};
 use crate::extract::Extraction;
 use crate::redact::Detection;
 #[cfg(feature = "image")]
@@ -27,6 +29,7 @@ use crate::redact::ImageReplacement;
 use crate::redact::PageReplacement;
 #[cfg(feature = "render")]
 use crate::render::{PageObservation, RenderedPage};
+use crate::sanitize::{check_store, sanitize_store};
 
 /// An opened PDF document: parsed once, then reused across operations.
 ///
@@ -80,8 +83,63 @@ impl Pdf {
         Extraction::from_store_with_geometry(&self.0)
     }
 
-    /// Redact `detections` by deleting the glyphs that drew them, then sanitise
-    /// the document, returning the new bytes.
+    /// The document with its hidden content removed, as new bytes, or `None`
+    /// when it carries none: metadata, annotations other than internal links, actions and scripts, form values,
+    /// the outline and structure tree, hidden layers, thumbnails, and every
+    /// object no longer reachable from the document.
+    ///
+    /// The codec runs this at decode, so the text extracted for detection is the
+    /// text that ships.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if the
+    /// sanitized document cannot be saved.
+    pub fn sanitize(&self) -> Result<Option<Vec<u8>>> {
+        sanitize_store(&self.0)
+    }
+
+    /// Check that the document carries no hidden content: what the codec runs
+    /// on an encoded PDF before returning it.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::Sanitization`](crate::ErrorKind::Sanitization) naming what
+    /// survived.
+    pub fn check_sanitized(&self) -> Result<()> {
+        check_store(&self.0)
+    }
+
+    /// Every attached file (the `/EmbeddedFiles` name tree), decoded, in tree
+    /// order.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if the
+    /// tree or a file cannot be read, or
+    /// [`ErrorKind::ResourceLimit`](crate::ErrorKind::ResourceLimit) if a file
+    /// decompresses past the bound.
+    pub(crate) fn attachments(&self) -> Result<Vec<Attachment>> {
+        crate::attachment::attachments(&self.0)
+    }
+
+    /// Write each replacement's redacted bytes into its attached file and drop
+    /// each `removed` attachment, returning the new bytes.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a replacement or
+    /// removal names no attachment of the document.
+    pub fn redact_attachments(
+        &self,
+        replacements: &[AttachmentReplacement],
+        removed: &[AttachmentId],
+    ) -> Result<Vec<u8>> {
+        crate::attachment::redact_attachments(&self.0, replacements, removed)
+    }
+
+    /// Redact `detections` by deleting the glyphs that drew them, returning the
+    /// new bytes.
     ///
     /// # Errors
     ///
@@ -168,4 +226,32 @@ impl Pdf {
     ) -> Result<(Vec<u8>, crate::render::Certificate)> {
         crate::render::redact_raster(&self.0, pages, detections, fill)
     }
+}
+
+/// Save `doc`, first dropping every object it no longer reaches: a superseded
+/// content stream, a replaced image's mask, a stale cross-reference stream. An
+/// unreachable object is still serialized by `save_to`, so without the prune a
+/// redacted original would survive in the bytes.
+///
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if the
+/// document cannot be serialized.
+pub(crate) fn save(doc: &mut Document) -> Result<Vec<u8>> {
+    doc.objects.retain(|_, object| !is_xref_stream(object));
+    doc.prune_objects();
+    let mut out = Vec::new();
+    doc.save_to(&mut out).map_err(|e| {
+        Error::new(
+            ErrorKind::MalformedInput,
+            format!("could not save PDF: {e}"),
+        )
+    })?;
+    Ok(out)
+}
+
+/// Whether `object` is a cross-reference stream: file structure the next save
+/// rewrites, never content.
+pub(crate) fn is_xref_stream(object: &Object) -> bool {
+    matches!(object, Object::Stream(stream) if stream.dict.has_type(b"XRef"))
 }

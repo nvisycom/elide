@@ -3,9 +3,10 @@
 //!
 //! [`redact_text`](crate::document::Pdf::redact_text) **deletes** the glyphs of detected
 //! spans from the content streams (rather than re-encoding a replacement, which
-//! corrupts subset/CID fonts) and strips the structures that retain copies of
-//! the text (annotations, `/Info`, `/Metadata`), keeping a real selectable text
-//! layer with the detected spans gone. `redact_images` (feature `image`)
+//! corrupts subset/CID fonts), keeping a real selectable text layer with the
+//! detected spans gone. The structures that would retain copies of the text
+//! (annotations, `/Info`, `/Metadata`) were already removed at decode by
+//! [`sanitize`](crate::sanitize). `redact_images` (feature `image`)
 //! replaces an embedded image XObject with a redacted image.
 //!
 //! The text location comes from the [`text`](crate::text) engine: a detected
@@ -14,12 +15,10 @@
 //! delete, in whichever content stream drew them.
 
 mod detection;
-mod graph;
 #[cfg(feature = "image")]
 mod images;
 #[cfg(feature = "render")]
 mod pages;
-mod sanitize;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -36,7 +35,7 @@ pub(crate) use self::images::redact_images;
 pub use self::pages::PageReplacement;
 #[cfg(feature = "render")]
 pub(crate) use self::pages::redact_pages;
-use crate::document::Store;
+use crate::document::{Store, save};
 use crate::text::{Address, GlyphBytes, StreamTarget, TextBlock, scrub, text_blocks};
 
 /// The physical content stream a deletion edits, distinguishing streams an
@@ -64,9 +63,8 @@ enum StreamKey {
 /// of byte ranges (`(start, end)`) within that operand's string to drain.
 type Deletions = BTreeMap<StreamKey, BTreeMap<Address, Vec<(usize, usize)>>>;
 
-/// Redact `detections` by deleting the glyphs that drew them, then sanitise the
-/// document (strip annotations, form values, embedded files, the outline,
-/// `/Info`, and `/Metadata`), returning the new bytes.
+/// Redact `detections` by deleting the glyphs that drew them, returning the new
+/// bytes.
 ///
 /// The output keeps a selectable text layer: only the detected glyphs are
 /// removed, with the original fonts and remaining text intact. Because it
@@ -227,12 +225,7 @@ pub(crate) fn redact_text(store: &Store, detections: &[Detection]) -> Result<Vec
     // can't be recovered through the code->Unicode table.
     scrub(&mut doc, &deleted_codes, &surviving_codes)?;
 
-    sanitize::sanitize(&mut doc);
-
-    let mut out = Vec::new();
-    doc.save_to(&mut out)
-        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("save redacted PDF: {e}")))?;
-    Ok(out)
+    save(&mut doc)
 }
 
 /// Decode each distinct content stream the given glyphs live in (the page's own

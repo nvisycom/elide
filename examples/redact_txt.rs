@@ -44,7 +44,9 @@ async fn main() -> Result<()> {
     // 1. Decode the text file through the codec layer. A txt file is a leaf
     //    document: one text stream part.
     let registry = FormatRegistry::with_builtin();
-    let mut document = registry.decode(SAMPLE, "txt").await?;
+    let mut document = registry
+        .decode(SAMPLE, "txt", HiddenContentPolicy::default())
+        .await?;
 
     // 2. Assemble the analyzer once; it is reused for every chunk.
     let analyzer = build_analyzer()?;

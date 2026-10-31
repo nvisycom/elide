@@ -12,6 +12,7 @@
 mod phase;
 mod walk;
 
+use bytes::Bytes;
 use elide_codec::{Document as CodecDocument, ErasedStream, LocalId};
 use elide_core::Result;
 
@@ -49,15 +50,42 @@ pub(crate) trait PartVisitor: Send {
         streams: Vec<(PartId, &'a mut ErasedStream)>,
     ) -> BoxFuture<'a, Result<bool>>;
 
-    /// A recursed blob `child` whose subtree reported `changed`. Return the bytes
-    /// to fold back into the parent (redaction re-encodes the child when it
-    /// changed), or `None` to leave the parent's blob bytes untouched (analysis
-    /// never folds; redaction skips an unchanged child).
+    /// How a blob part's `child` folds back into its parent: kept as-is,
+    /// replaced by the child's re-encoded bytes, or removed. Analysis always
+    /// keeps; redaction re-encodes a changed child, keeps an unchanged one, and
+    /// removes one no codec can read.
     ///
     /// # Errors
     ///
     /// A re-encode failure of the changed child.
-    fn fold_child(&mut self, changed: bool, child: &CodecDocument) -> Result<Option<bytes::Bytes>>;
+    fn fold_child(&mut self, child: Child<'_>) -> Result<Fold>;
+}
+
+/// A blob part after the walk tried to decode it.
+pub(crate) enum Child<'a> {
+    /// Decoded into its own document and walked. `changed` holds when anything
+    /// in its subtree changed it: a redaction, or the decode-time sanitizing
+    /// that makes it differ from the parent's blob bytes.
+    Decoded {
+        /// The decoded child document.
+        document: &'a CodecDocument,
+        /// Whether the child differs from the parent's blob bytes.
+        changed: bool,
+    },
+    /// No codec can read the blob: none is registered for it, or the one that
+    /// is rejected its bytes.
+    Undecodable,
+}
+
+/// How a blob part folds back into its parent document.
+pub(crate) enum Fold {
+    /// Leave the parent's blob bytes untouched.
+    Keep,
+    /// Replace the parent's blob bytes with these.
+    Replace(Bytes),
+    /// Remove the blob from the parent: content no codec can read cannot be
+    /// redacted, so it is dropped rather than shipped as-is.
+    Remove,
 }
 
 /// The [`PartId`] for a stream part: the first stream of a document is its body,

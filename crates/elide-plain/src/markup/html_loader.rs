@@ -1,22 +1,24 @@
 //! HTML loader: runs the XML markup engine over HTML with lenient parsing.
 //!
-//! HTML has no engine of its own. It configures the shared XML engine
-//! ([`build_items`]) leniently (tolerating void elements, stray end tags, and
-//! bare `&`) and supplies the two HTML vocabularies the engine takes as plain
-//! element-name lists: the block elements that group sibling text for context
-//! hints, and, translated from the loader's [`ScriptPolicy`], the
-//! `<script>` / `<style>` bodies not to scan. Everything downstream,
-//! streaming, redaction, byte-faithful splice, is the XML handler.
+//! HTML has no engine of its own. Its hidden content (scripts and other active
+//! content, comments, `<meta>` fields) is cut out first by the
+//! [`MarkupSanitizer`]; then the shared XML engine ([`build_items`]) reads the
+//! rest leniently (tolerating void elements, stray end tags, and bare `&`) with
+//! the two HTML vocabularies it takes as plain element-name lists: the block
+//! elements that group sibling text for context hints, and the `<style>` bodies
+//! not to scan. Everything downstream, streaming, redaction, byte-faithful
+//! splice, is the XML handler.
 
 use elide_codec::content::ContentData;
 use elide_codec::{Document, DocumentLoader};
 use elide_core::Result;
+use elide_core::redaction::HiddenContentPolicy;
 
 use super::config::MarkupConfig;
 use super::html_handler::FORMAT_ID;
 use super::markup_parser::build_items;
+use super::sanitize::{Dialect, MarkupSanitizer};
 use super::xml_handler::markup_document;
-use crate::primitive::ScriptPolicy;
 
 /// HTML block-level elements: their text children form one sibling-hint group,
 /// so prose split across inline wrappers (`Card <code>4111…</code> on file`)
@@ -57,40 +59,24 @@ const BLOCK_ELEMENTS: &[&str] = &[
     "ul",
 ];
 
-/// Loader for HTML files. Produces one leaf [`Document`] per input.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct HtmlLoader {
-    /// How `<script>` element bodies enter the detection stream.
-    pub script_policy: ScriptPolicy,
-    /// How `<style>` element bodies enter the detection stream.
-    pub style_policy: ScriptPolicy,
-}
+/// Element bodies the engine does not scan: a `<style>` sheet is presentation,
+/// not content. (Scripts never reach the engine; the sanitizer removes them.)
+const SKIP_BODY_ELEMENTS: &[&str] = &["style"];
 
-impl HtmlLoader {
-    /// The element bodies the engine should not scan: `<script>` / `<style>`
-    /// under a [`ScriptPolicy::Skip`]. A [`ScriptPolicy::ScanText`] element is
-    /// omitted, so its body is scanned as ordinary text.
-    fn skip_body_elements(&self) -> Vec<&'static str> {
-        let mut skip = Vec::new();
-        if self.script_policy == ScriptPolicy::Skip {
-            skip.push("script");
-        }
-        if self.style_policy == ScriptPolicy::Skip {
-            skip.push("style");
-        }
-        skip
-    }
-}
+/// Loader for HTML files. Produces one leaf [`Document`] per input.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct HtmlLoader;
 
 #[async_trait::async_trait]
 impl DocumentLoader for HtmlLoader {
-    async fn decode(&self, content: ContentData) -> Result<Document> {
-        let text = content.decode()?;
-        let skip = self.skip_body_elements();
-        let config = MarkupConfig::lenient(BLOCK_ELEMENTS, &skip);
+    async fn decode(&self, content: ContentData, policy: HiddenContentPolicy) -> Result<Document> {
+        let sanitizer = MarkupSanitizer::new(Dialect::Html, policy);
+        let (text, sanitized) = sanitizer.sanitize(content.decode()?)?;
+        let config = MarkupConfig::lenient(BLOCK_ELEMENTS, SKIP_BODY_ELEMENTS);
         // `build_items` already reports a `MalformedInput` parse error.
         let items = build_items(&text, config)?;
-        Ok(markup_document(FORMAT_ID.clone(), text, items))
+        Ok(markup_document(FORMAT_ID.clone(), text, items, sanitizer)
+            .with_changed_at_decode(sanitized))
     }
 }
 
@@ -99,7 +85,7 @@ mod tests {
     use elide_codec::{Document, DocumentPart};
     use elide_core::modality::text::{Text, TextReplacement};
     use elide_core::modality::{DataWriter, StreamDataReader};
-    use elide_core::redaction::Redactions;
+    use elide_core::redaction::{Disposition, Redactions};
 
     use super::*;
 
@@ -113,15 +99,15 @@ mod tests {
         }
     }
 
-    async fn load_with(raw: &str, loader: HtmlLoader) -> Document {
-        loader
-            .decode(ContentData::from_text(raw))
+    async fn load_with(raw: &str, policy: HiddenContentPolicy) -> Document {
+        HtmlLoader
+            .decode(ContentData::from_text(raw), policy)
             .await
             .expect("html decode succeeds")
     }
 
     async fn load(raw: &str) -> Document {
-        load_with(raw, HtmlLoader::default()).await
+        load_with(raw, HiddenContentPolicy::default()).await
     }
 
     fn encoded(doc: &Document) -> String {
@@ -145,9 +131,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stream_yields_text_attribute_and_comment() {
+    async fn stream_yields_text_attribute_and_a_redacted_comment() {
         let raw = r#"<html><body><!-- secret 1 --><img alt="hello" title="alt"></body></html>"#;
-        let mut doc = load(raw).await;
+        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::Redact);
+        let mut doc = load_with(raw, policy).await;
         let vs = values(&mut doc);
         assert!(vs.iter().any(|v| v == " secret 1 "), "comment: {vs:?}");
         assert!(vs.iter().any(|v| v == "hello"), "alt: {vs:?}");
@@ -175,28 +162,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn script_body_skipped_by_default_scanned_on_request() {
-        let raw = r#"<html><body><script>var a="alice@example.com";</script></body></html>"#;
-
-        // Default: script bodies are skipped.
-        let mut default = load(raw).await;
-        let vs = values(&mut default);
+    async fn hidden_content_is_removed_at_decode() {
+        let raw = r#"<html><body><!-- ask Jane --><p onclick="x()">Hi</p><script>var a="alice@example.com";</script></body></html>"#;
+        let mut doc = load(raw).await;
+        assert!(doc.changed_at_decode());
+        let vs = values(&mut doc);
         assert!(
-            !vs.iter().any(|v| v.contains("alice@example.com")),
-            "default leaked script body: {vs:?}"
+            !vs.iter()
+                .any(|v| v.contains("alice@example.com") || v.contains("Jane")),
+            "hidden content reached detection: {vs:?}"
         );
-
-        // ScanText: the body is scanned.
-        let loader = HtmlLoader {
-            script_policy: ScriptPolicy::ScanText,
-            ..HtmlLoader::default()
-        };
-        let mut scan = load_with(raw, loader).await;
-        let vs = values(&mut scan);
-        assert!(
-            vs.iter().any(|v| v.contains("alice@example.com")),
-            "scan missed script body: {vs:?}"
-        );
+        assert_eq!(encoded(&doc), "<html><body><p>Hi</p></body></html>");
     }
 
     #[tokio::test]

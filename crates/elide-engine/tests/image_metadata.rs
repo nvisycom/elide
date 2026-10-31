@@ -2,10 +2,10 @@
 //! [`Orchestrator`], routed as the image handler's `#exif` sub-part.
 //!
 //! Confirms the nested-metadata model composes through the engine's own
-//! analyze + anonymize + bottom-up fold, with no engine changes: the image is a
-//! depth-1 document, its `#exif` a depth-2 nested part; the metadata pipeline
-//! detects the GPS field, `Erase` picks it for removal, and the fold re-encodes
-//! the image once with the field gone.
+//! analyze + anonymize + bottom-up fold: under a hidden-content policy that redacts
+//! metadata, the image is a depth-1 document and its `#exif` a depth-2 nested
+//! part; the metadata pipeline detects the GPS field, `Erase` picks it for
+//! removal, and the fold re-encodes the image once with the field gone.
 
 #![cfg(all(feature = "image", feature = "metadata"))]
 
@@ -15,6 +15,7 @@ use elide_core::entity::{Entity, LabelCatalog, builtins};
 use elide_core::modality::metadata::Metadata;
 use elide_core::primitive::{ComponentId, Confidence};
 use elide_core::recognition::{Context, Recognizer, Scope, Subject};
+use elide_core::redaction::{Disposition, HiddenContentPolicy};
 use elide_detection::Analyzer;
 use elide_engine::{Directives, Document, Orchestrator};
 use elide_format::FormatRegistry;
@@ -62,6 +63,7 @@ async fn jpeg_gps_is_detected_and_stripped_through_the_orchestrator() {
     assert!(has_gps(&original), "fixture should carry GPS");
 
     let registry = FormatRegistry::with_builtin();
+    let policy = HiddenContentPolicy::default().with_metadata(Disposition::Redact);
     let orchestrator = Orchestrator::new()
         .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
         .with_registry(registry.clone())
@@ -77,7 +79,7 @@ async fn jpeg_gps_is_detected_and_stripped_through_the_orchestrator() {
         );
 
     let handle = registry
-        .decode(original.clone(), "jpg")
+        .decode(original.clone(), "jpg", policy)
         .await
         .expect("decode jpeg");
     let mut documents = [Document::new("photo.jpg", handle)];
@@ -173,7 +175,7 @@ async fn pixel_redaction_and_gps_strip_compose_end_to_end() {
         );
 
     let handle = registry
-        .decode(original.clone(), "jpg")
+        .decode(original.clone(), "jpg", HiddenContentPolicy::default())
         .await
         .expect("decode jpeg");
     let mut documents = [Document::new("photo.jpg", handle)];

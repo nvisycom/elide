@@ -7,7 +7,7 @@ use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
 
-use super::{EncodedPart, FormatId, Recombine, Stream};
+use super::{EncodedPart, FormatId, LocalId, Recombine, Stream};
 use crate::content::ContentData;
 
 /// A minimal text stream holding one editable string. Its `encode` returns the
@@ -48,11 +48,15 @@ impl DataWriter<Text> for StrStream {
 pub(crate) struct JoinRecombine;
 
 impl Recombine for JoinRecombine {
-    fn assemble(&self, parts: &[EncodedPart]) -> Result<ContentData> {
+    fn assemble(&self, parts: &[EncodedPart], _removed: &[LocalId]) -> Result<ContentData> {
         let mut out = Vec::new();
         for part in parts {
             out.extend_from_slice(&part.bytes);
         }
         Ok(ContentData::new(bytes::Bytes::from(out)))
+    }
+
+    fn validate(&self, _output: &ContentData) -> Result<()> {
+        Ok(())
     }
 }

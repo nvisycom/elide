@@ -4,9 +4,11 @@
 //! vocabulary.
 //!
 //! The `sample.docx` fixture carries `lastModifiedBy = "Oleh Martsokha"` in its
-//! core properties. The `Metadata` pipeline's `DocPropsRecognizer` surfaces that
-//! field and `Erase` removes it; the DOCX re-encode folds the cleared property
-//! part back into the package, so the output no longer names the editor.
+//! core properties. Under a hidden-content policy that redacts metadata, the
+//! `Metadata` pipeline's `DocPropsRecognizer` surfaces that field and `Erase`
+//! removes it; the DOCX re-encode folds the cleared property part back into the
+//! package, so the output no longer names the editor. Under the default policy
+//! the property parts are removed whole at decode.
 
 use elide::codec::FormatRegistry;
 use elide::detection::Analyzer;
@@ -16,7 +18,7 @@ use elide::modality::text::Text;
 use elide::recognition::Scope;
 use elide::recognition::docprops::DocPropsRecognizer;
 use elide::redaction::operators::Erase;
-use elide::redaction::{Anonymizer, Rule};
+use elide::redaction::{Anonymizer, Disposition, HiddenContentPolicy, Rule};
 use elide::{Directives, Document, Orchestrator};
 use elide_office::opc::fixtures::read_part;
 use elide_office::opc::props;
@@ -42,6 +44,7 @@ async fn docx_core_properties_are_stripped_through_the_facade() {
     assert!(has_editor(&original), "fixture should name the editor");
 
     let registry = FormatRegistry::with_builtin();
+    let policy = HiddenContentPolicy::default().with_metadata(Disposition::Redact);
     let orchestrator = Orchestrator::new()
         .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
         .with_registry(registry.clone())
@@ -57,7 +60,7 @@ async fn docx_core_properties_are_stripped_through_the_facade() {
         );
 
     let handle = registry
-        .decode(original.clone(), "docx")
+        .decode(original.clone(), "docx", policy)
         .await
         .expect("decode docx");
     let mut documents = [Document::new("sample.docx", handle)];
@@ -86,5 +89,27 @@ async fn docx_core_properties_are_stripped_through_the_facade() {
     assert!(
         std::str::from_utf8(&core).unwrap().contains("<revision>"),
         "non-sensitive core properties were dropped"
+    );
+}
+
+#[tokio::test]
+async fn docx_core_properties_are_removed_by_default() {
+    let registry = FormatRegistry::with_builtin();
+    let document = registry
+        .decode(
+            bytes::Bytes::from_static(FIXTURE.source),
+            "docx",
+            HiddenContentPolicy::default(),
+        )
+        .await
+        .expect("decode docx");
+    let out = document.encode().expect("encode").to_bytes();
+    assert!(
+        read_part(&out, "docProps/core.xml").is_none(),
+        "core.xml survived"
+    );
+    assert!(
+        read_part(&out, "word/document.xml").is_some(),
+        "body part missing"
     );
 }

@@ -18,6 +18,7 @@ use elide::enrichment::ocr::MockBackend;
 use elide::modality::image::{Image, ImageLocation, LayoutRegion};
 use elide::modality::text::Text;
 use elide::primitive::{BoundingBox, Dimensions, Point};
+use elide::redaction::HiddenContentPolicy;
 use elide::{Directives, PartId, RegistryDocumentExt, Result};
 
 use crate::support::orchestrator::{
@@ -57,8 +58,12 @@ async fn a_set_treats_each_file_as_a_named_part() -> Result<()> {
 
     // Two standalone images, supplied side by side.
     let mut documents = [
-        registry.document("scan-A.png", SAMPLE_PNG).await?,
-        registry.document("scan-B.png", SAMPLE_PNG).await?,
+        registry
+            .document("scan-A.png", SAMPLE_PNG, HiddenContentPolicy::default())
+            .await?,
+        registry
+            .document("scan-B.png", SAMPLE_PNG, HiddenContentPolicy::default())
+            .await?,
     ];
 
     let analyzed = orchestrator
@@ -120,8 +125,12 @@ async fn a_set_redacts_each_files_own_content() -> Result<()> {
 
     // Two DOCX files supplied together; each carries an email in its body.
     let mut documents = [
-        registry.document("first.docx", SAMPLE_DOCX).await?,
-        registry.document("second.docx", SAMPLE_DOCX).await?,
+        registry
+            .document("first.docx", SAMPLE_DOCX, HiddenContentPolicy::default())
+            .await?,
+        registry
+            .document("second.docx", SAMPLE_DOCX, HiddenContentPolicy::default())
+            .await?,
     ];
 
     let analyzed = orchestrator
@@ -184,7 +193,9 @@ async fn a_nested_container_keeps_its_own_redaction_when_a_descendant_folds() ->
         .with_registry(registry.clone())
         .with_text(default_text_analyzer()?, build_anonymizer::<Text>())
         .build();
-    let mut document = registry.document("outer.docx", NESTED_DOCX).await?;
+    let mut document = registry
+        .document("outer.docx", NESTED_DOCX, HiddenContentPolicy::default())
+        .await?;
 
     let analyzed = orchestrator
         .analyze(&mut document, &Directives::new())
@@ -251,8 +262,12 @@ async fn duplicate_document_names_are_rejected() -> Result<()> {
         .build();
 
     let mut documents = [
-        registry.document("scan.png", SAMPLE_PNG).await?,
-        registry.document("scan.png", SAMPLE_PNG).await?,
+        registry
+            .document("scan.png", SAMPLE_PNG, HiddenContentPolicy::default())
+            .await?,
+        registry
+            .document("scan.png", SAMPLE_PNG, HiddenContentPolicy::default())
+            .await?,
     ];
     let err = match orchestrator
         .analyze(&mut documents, &Directives::new())

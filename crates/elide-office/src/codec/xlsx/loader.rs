@@ -1,26 +1,45 @@
 //! [`XlsxDocumentLoader`]: decode a workbook into a parts-model [`Document`].
 
+use std::sync::Arc;
+
+use bytes::Bytes;
 use elide_codec::content::ContentData;
+use elide_codec::extract::{ExtractStream, SharedSplice};
 use elide_codec::{Document, DocumentLoader, DocumentPart, ErasedStream, LocalId, Stream};
-use elide_core::Result;
 use elide_core::modality::tabular::Tabular;
+use elide_core::modality::text::Text;
+use elide_core::redaction::{Disposition, HiddenContentPolicy};
+use elide_core::{Error, ErrorKind, Result};
 
 use super::recombine::XlsxRecombine;
 use super::state::XlsxState;
 use super::stream::XlsxStream;
-use super::{BODY_PART_ID, FORMAT_ID, XlsxCell};
-use crate::xlsx::Xlsx;
+use super::{BODY_PART_ID, FORMAT_ID, TEXT_PART_ID, XlsxCell};
+use crate::codec::docprops_hint;
+use crate::codec::ooxml::{OoxmlAddress, OoxmlAddresser, items};
+use crate::codec::props::read_doc_props;
+use crate::opc::sanitize::sanitize;
+use crate::xlsx::{SheetClassifier, Xlsx};
 
 /// A [`DocumentLoader`] that decodes an XLSX workbook into a [`Document`]: the
-/// cell body [`Stream`] plus a [`Blob`](DocumentPart::Blob) per non-cell text
-/// part and per document-property part.
+/// cell body [`Stream`], a text [`Stream`] over the workbook's content outside
+/// its cells (comments, drawings, charts, external hyperlink targets), and a
+/// [`Blob`](DocumentPart::Blob) per embedding and (when metadata is redacted)
+/// per document-property part. The workbook is sanitized under the policy
+/// first, so every part is read from what will ship.
+///
+/// **Fail-closed:** a non-cell text part that cannot be read refuses the
+/// decode, since its text would ship un-redacted.
 #[derive(Debug)]
 pub(crate) struct XlsxDocumentLoader;
 
 #[async_trait::async_trait]
 impl DocumentLoader for XlsxDocumentLoader {
-    async fn decode(&self, content: ContentData) -> Result<Document> {
-        let archive = content.to_bytes();
+    async fn decode(&self, content: ContentData, policy: HiddenContentPolicy) -> Result<Document> {
+        let source = content.to_bytes();
+        let (sanitized, _) = sanitize(&source, policy, &SheetClassifier)?;
+        let changed = sanitized.is_some();
+        let archive = sanitized.map_or(source, Bytes::from);
         let workbook = Xlsx::open(&archive)?;
         let cells: Vec<XlsxCell> = workbook
             .extract()?
@@ -32,41 +51,75 @@ impl DocumentLoader for XlsxDocumentLoader {
                 text: cell.text.as_str().to_owned(),
             })
             .collect();
-        let text_parts = workbook.text_parts();
-        let doc_props = crate::codec::props::read_doc_props(|path| workbook.part_bytes(path));
-
         let state = XlsxState::new(cells);
 
-        // The cell body plus one blob per non-cell text part (markup pipeline) and
-        // per document-property part (metadata pipeline).
-        let mut parts = Vec::with_capacity(text_parts.len() + doc_props.len() + 1);
-        let stream: Box<dyn Stream<Tabular>> = Box::new(XlsxStream {
+        let markup = workbook.markup();
+        if let Some(issue) = markup.issues.first() {
+            return Err(Error::new(
+                ErrorKind::MalformedInput,
+                format!(
+                    "xlsx: text-bearing part `{}` could not be extracted ({:?})",
+                    issue.part, issue.kind
+                ),
+            ));
+        }
+        let text: SharedSplice<OoxmlAddress> = SharedSplice::new(items(markup.blocks));
+
+        // The cell body, the non-cell text, then one blob per embedding (its own
+        // format's pipeline) and per document-property part (metadata
+        // pipeline).
+        let cells_stream: Box<dyn Stream<Tabular>> = Box::new(XlsxStream {
             state: state.clone(),
         });
-        parts.push(DocumentPart::Stream {
-            id: LocalId::new(BODY_PART_ID),
-            handle: ErasedStream::new(FORMAT_ID.clone(), stream),
-        });
-        for (path, bytes) in text_parts {
-            parts.push(DocumentPart::Blob {
-                id: LocalId::new(path),
-                bytes,
-                hint: "xml".to_owned(),
-            });
-        }
-        for (path, bytes) in doc_props {
-            parts.push(DocumentPart::Blob {
-                id: LocalId::new(path),
-                bytes,
-                hint: crate::codec::docprops_hint().to_owned(),
-            });
-        }
-
-        Ok(Document::new(
+        let text_stream: Box<dyn Stream<Text>> = Box::new(ExtractStream::new(
             FORMAT_ID.clone(),
-            parts,
-            Box::new(XlsxRecombine { archive, state }),
-        ))
+            text.clone(),
+            Arc::new(OoxmlAddresser),
+        ));
+        let streams = [
+            DocumentPart::Stream {
+                id: LocalId::new(BODY_PART_ID),
+                handle: ErasedStream::new(FORMAT_ID.clone(), cells_stream),
+            },
+            DocumentPart::Stream {
+                id: LocalId::new(TEXT_PART_ID),
+                handle: ErasedStream::new(FORMAT_ID.clone(), text_stream),
+            },
+        ];
+        let embeddings = markup.embeddings.into_iter().map(|embedding| {
+            let id = LocalId::new(embedding.part.as_str().to_owned());
+            let hint = id.extension().unwrap_or_default().to_owned();
+            DocumentPart::Blob {
+                id,
+                bytes: embedding.bytes,
+                hint,
+            }
+        });
+        let doc_props = match policy.metadata {
+            Disposition::Redact => read_doc_props(|path| workbook.part_bytes(path)),
+            Disposition::Strip => Vec::new(),
+        };
+        let properties = doc_props
+            .into_iter()
+            .map(|(path, bytes)| DocumentPart::Blob {
+                id: LocalId::new(path),
+                bytes,
+                hint: docprops_hint().to_owned(),
+            });
+        let parts = streams
+            .into_iter()
+            .chain(embeddings)
+            .chain(properties)
+            .collect();
+
+        let recombine = XlsxRecombine {
+            archive,
+            state,
+            text,
+            policy,
+        };
+        Ok(Document::new(FORMAT_ID.clone(), parts, Box::new(recombine))
+            .with_changed_at_decode(changed))
     }
 }
 
@@ -74,13 +127,14 @@ impl DocumentLoader for XlsxDocumentLoader {
 mod tests {
     use bytes::Bytes;
     use elide_codec::content::ContentData;
-    use elide_codec::{Document, DocumentLoader as _, DocumentPart, LocalId, TypedStream};
+    use elide_codec::{Document, DocumentLoader as _, DocumentPart, TypedStream};
     use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
-    use elide_core::modality::text::TextReplacement;
+    use elide_core::modality::text::{Text, TextReplacement};
     use elide_core::modality::{DataReader as _, DataWriter as _, StreamDataReader as _};
-    use elide_core::redaction::Redactions;
+    use elide_core::redaction::{Disposition, HiddenContentPolicy, Redactions};
 
     use super::XlsxDocumentLoader;
+    use crate::opc::fixtures::part_names;
 
     /// The two-sheet workbook whose shared string is reused across sheets, for
     /// the de-share / cell-addressing mechanics tests.
@@ -95,10 +149,21 @@ mod tests {
 
     /// Decode `bytes` into an XLSX [`Document`].
     async fn decode(bytes: &'static [u8]) -> Document {
+        decode_with(bytes, HiddenContentPolicy::default()).await
+    }
+
+    /// Decode `bytes` under `policy`.
+    async fn decode_with(bytes: &'static [u8], policy: HiddenContentPolicy) -> Document {
         XlsxDocumentLoader
-            .decode(ContentData::new(Bytes::from_static(bytes)))
+            .decode(ContentData::new(Bytes::from_static(bytes)), policy)
             .await
             .unwrap()
+    }
+
+    /// Decode `bytes` keeping its comments for redaction.
+    async fn decode_redacting_comments(bytes: &'static [u8]) -> Document {
+        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::Redact);
+        decode_with(bytes, policy).await
     }
 
     /// The document's cell body stream, downcast to `Tabular`.
@@ -204,7 +269,10 @@ mod tests {
         // The redacted output is a valid workbook whose Customers!A2 is gone but
         // whose Notes!A1 (sharing the pool) still reads alice.
         let mut reopened = XlsxDocumentLoader
-            .decode(ContentData::new(out.to_bytes()))
+            .decode(
+                ContentData::new(out.to_bytes()),
+                HiddenContentPolicy::default(),
+            )
             .await
             .unwrap();
         let seen = cells_of(&mut reopened);
@@ -248,7 +316,10 @@ mod tests {
         // The encode carries none of the batch: Customers!A2 still reads alice.
         let out = doc.encode().unwrap();
         let mut reopened = XlsxDocumentLoader
-            .decode(ContentData::new(out.to_bytes()))
+            .decode(
+                ContentData::new(out.to_bytes()),
+                HiddenContentPolicy::default(),
+            )
             .await
             .unwrap();
         let seen = cells_of(&mut reopened);
@@ -303,40 +374,65 @@ mod tests {
         assert!(body(&mut doc).write_at(batch).await.is_err());
     }
 
+    /// The document's non-cell text stream part, downcast to `Text`.
+    fn text(doc: &mut Document) -> &mut TypedStream<Text> {
+        match &mut doc.parts_mut()[1] {
+            DocumentPart::Stream { handle, .. } => {
+                handle.downcast_mut::<Text>().expect("text stream")
+            }
+            _ => panic!("part 1 is the text stream"),
+        }
+    }
+
     #[tokio::test]
-    async fn exposes_non_cell_text_parts_as_xml_container_parts() {
-        let doc = decode(SAMPLE2).await;
-        // The comment and drawing parts are surfaced as xml-hinted blobs.
-        let blob = |id: &str| {
-            doc.parts().iter().any(|p| {
-                matches!(p, DocumentPart::Blob { id: bid, hint, .. }
-                    if bid.as_str() == id && hint == "xml")
-            })
-        };
-        assert!(blob("xl/comments1.xml"), "comment part not surfaced");
+    async fn streams_non_cell_text_beside_the_cells() {
+        let mut doc = decode_redacting_comments(SAMPLE2).await;
+        let values: Vec<String> = text(&mut doc)
+            .chunks()
+            .unwrap()
+            .into_iter()
+            .map(|chunk| chunk.data.as_str().to_owned())
+            .collect();
         assert!(
-            blob("xl/drawings/drawing1.xml"),
-            "drawing part not surfaced"
+            values.iter().any(|v| v.contains("carol@example.com")),
+            "comment text missing: {values:?}"
+        );
+        // No part is surfaced as a generic XML blob.
+        assert!(
+            !doc.parts()
+                .iter()
+                .any(|p| matches!(p, DocumentPart::Blob { hint, .. } if hint == "xml"))
         );
     }
 
     #[tokio::test]
-    async fn replace_part_folds_redacted_text_into_the_encode() {
-        let mut doc = decode(SAMPLE2).await;
-        let redacted = Bytes::from_static(
-            br#"<?xml version="1.0"?><comments><commentList><comment ref="A1"><text><r><t>[EMAIL]</t></r></text></comment></commentList></comments>"#,
-        );
-        doc.replace_part(&LocalId::new("xl/comments1.xml"), redacted)
-            .unwrap();
-        // An id the workbook does not surface is refused.
-        assert!(
-            doc.replace_part(&LocalId::new("xl/nope.xml"), Bytes::new())
-                .is_err()
-        );
+    async fn comments_are_removed_by_default() {
+        let doc = decode(SAMPLE2).await;
+        assert!(doc.changed_at_decode());
         let out = doc.encode().unwrap();
-        let comment = read_part(out.as_bytes(), "xl/comments1.xml");
-        assert!(String::from_utf8_lossy(&comment).contains("[EMAIL]"));
-        assert!(!String::from_utf8_lossy(&comment).contains("carol@example.com"));
+        assert!(
+            !part_names(out.as_bytes())
+                .iter()
+                .any(|name| name == "xl/comments1.xml")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_text_redaction_splices_into_its_comment() {
+        let mut doc = decode_redacting_comments(SAMPLE2).await;
+        let chunk = text(&mut doc)
+            .chunks()
+            .unwrap()
+            .into_iter()
+            .find(|chunk| chunk.data.as_str().contains("carol@example.com"))
+            .expect("comment chunk");
+        let mut batch: Redactions<Text> = Redactions::new();
+        batch.push(chunk.location, TextReplacement::substituted("[EMAIL]"));
+        text(&mut doc).write_at(batch).await.unwrap();
+        let out = doc.encode().unwrap();
+        let comment = String::from_utf8(read_part(out.as_bytes(), "xl/comments1.xml")).unwrap();
+        assert!(comment.contains("[EMAIL]"), "{comment}");
+        assert!(!comment.contains("carol@example.com"));
     }
 
     fn read_part(bytes: &[u8], name: &str) -> Vec<u8> {

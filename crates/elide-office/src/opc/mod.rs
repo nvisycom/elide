@@ -9,84 +9,82 @@
 //! and an exact byte span) and rewrites those spans back into a byte-faithful
 //! package.
 
+pub(crate) mod archive;
 mod block;
+pub(crate) mod check;
+pub(crate) mod content_types;
 #[cfg(feature = "fixtures")]
 pub mod fixtures;
+pub(crate) mod index;
+pub(crate) mod kind;
 mod offset;
 mod part;
 pub mod props;
+pub(crate) mod references;
+pub(crate) mod relationships;
+pub(crate) mod sanitize;
 mod store;
+pub(crate) mod vocabulary;
+pub(crate) mod xml_edit;
 mod xml_span;
 
 use std::collections::HashMap;
-use std::io::{Cursor, Read, Write};
 
 use bytes::Bytes;
 use elide_core::{Error, ErrorKind, Result};
-use zip::write::SimpleFileOptions;
-use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 pub use self::block::{
     Block, Embedding, EmbeddingKind, Extraction, Issue, IssueKind, PartReplacement, Replacement,
 };
+use self::index::Index;
+pub use self::kind::PartKind;
 pub use self::offset::{OffsetMap, OffsetRun, RunKind};
 pub use self::part::{PartClassifier, PartPath, PartRole};
 use self::store::StoredPart;
 
-/// The largest a single package part may be. A zip entry may claim any
-/// uncompressed size, so extraction is capped and the read is bounded to this
-/// many bytes to refuse allocation-DoS and zip-bomb parts. 512 MiB comfortably
-/// exceeds any legitimate OOXML part while staying far below memory a
-/// decompressed bomb would demand.
-const MAX_PART_BYTES: u64 = 512 * 1024 * 1024;
-
-/// The largest total uncompressed size a package may inflate to across all its
-/// parts. The per-part cap alone lets an archive of many large entries exhaust
-/// memory, since [`open`](Package::open) retains every part; this bounds the sum
-/// so a bomb of many parts is refused before it can. 1 GiB comfortably exceeds
-/// any legitimate OOXML document while staying well within process memory.
-const MAX_PACKAGE_BYTES: u64 = 1024 * 1024 * 1024;
-
-/// An opened OOXML package: every part read once and classified by the
-/// format's `C`, ready to [`extract`](Package::extract) the text of every
-/// text-bearing part or [`rewrite`](Package::rewrite) them back to bytes.
+/// An opened OOXML package: every part read once and classified, ready to
+/// [`extract`](Package::extract) the text of every text-bearing part or
+/// [`rewrite`](Package::rewrite) them back to bytes.
 ///
 /// Open a document once and reuse it for both operations; the package is parsed
 /// a single time.
 #[derive(Debug, Clone)]
-pub struct Package<C: PartClassifier> {
+pub struct Package {
     /// Every package part, in archive order.
     parts: Vec<StoredPart>,
-    /// The format's part classifier, retained for rewrite-time protection
-    /// checks.
-    classifier: C,
     /// The original archive bytes, retained so [`rewrite_with_parts`](Self::rewrite_with_parts) can
     /// copy an untouched part's already-compressed data straight through instead
     /// of inflating and re-deflating it.
     ///
     /// Bounded by the same open-time caps as the parts: deflate does not expand
-    /// content, so the compressed archive is within `MAX_PACKAGE_BYTES` (plus
-    /// small per-entry zip overhead) of the decompressed parts already retained.
-    /// It adds at most a second copy of the already-in-memory input, never an
+    /// content, so the compressed archive is within the package cap (plus small
+    /// per-entry zip overhead) of the decompressed parts already retained. It
+    /// adds at most a second copy of the already-in-memory input, never an
     /// unbounded allocation.
     source: Bytes,
 }
 
-impl<C: PartClassifier> Package<C> {
-    /// Open a package from its bytes, reading every part and tagging it with the
-    /// role `classifier` assigns.
+impl Package {
+    /// Open a package from its bytes, reading and classifying every part (by
+    /// its content type) and tagging it with the role `classifier` assigns its
+    /// kind.
     ///
     /// This is the neutral open: it validates the zip and reads every part, but
-    /// applies no format-specific structural requirement (e.g. "a body part must
+    /// applies no format-specific structural requirement (e.g. "a main part must
     /// exist"), a format facade layers that on top.
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if the
-    /// bytes are not a readable zip, a part is unreadable, or a part exceeds the
-    /// size cap.
-    pub fn open(document: &[u8], classifier: C) -> Result<Self> {
-        Self::open_with_limits(document, classifier, MAX_PART_BYTES, MAX_PACKAGE_BYTES)
+    /// [`ErrorKind::MalformedInput`] if the bytes are not a readable zip, the
+    /// content-types manifest or a relationships part is unreadable, a part is
+    /// unreadable, or a part exceeds the size cap.
+    pub fn open(document: &[u8], classifier: &dyn PartClassifier) -> Result<Self> {
+        Self::open_with_limits(
+            document,
+            classifier,
+            archive::MAX_PART_BYTES,
+            archive::MAX_PACKAGE_BYTES,
+        )
     }
 
     /// [`open`](Package::open) with explicit `part_cap` (per-part) and
@@ -94,68 +92,43 @@ impl<C: PartClassifier> Package<C> {
     /// a small archive.
     fn open_with_limits(
         document: &[u8],
-        classifier: C,
+        classifier: &dyn PartClassifier,
         part_cap: u64,
         package_cap: u64,
     ) -> Result<Self> {
-        let mut zip = ZipArchive::new(Cursor::new(document))
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("not a zip: {e}")))?;
-
-        let mut parts = Vec::with_capacity(zip.len());
-        // Bytes still allowed across the whole package; each part's read and
-        // allocation are bounded by this, so a bomb of many parts is refused
-        // before it can inflate past the package cap.
-        let mut budget = package_cap;
-        for i in 0..zip.len() {
-            let entry = zip.by_index(i).map_err(|e| {
-                Error::new(ErrorKind::MalformedInput, format!("bad zip entry: {e}"))
-            })?;
-            let name = entry.name().map_err(|e| {
-                Error::new(
-                    ErrorKind::MalformedInput,
-                    format!("bad zip entry name: {e}"),
-                )
-            })?;
-            let path = PartPath::from(name.as_ref());
-            let role = classifier.role(&path);
-            // Cap this part at the smaller of the per-part limit and what remains
-            // of the package budget. Reserve only up to that cap (the entry's
-            // claimed size may lie), and bound the read one byte past it so an
-            // over-large part is detected rather than inflated.
-            let cap = part_cap.min(budget);
-            let claimed = entry.size().min(cap);
-            let mut buf = Vec::with_capacity(claimed as usize);
-            let read = entry.take(cap + 1).read_to_end(&mut buf).map_err(|e| {
-                Error::new(
-                    ErrorKind::MalformedInput,
-                    format!("part `{path}` unreadable: {e}"),
-                )
-            })?;
-            if read as u64 > cap {
-                return Err(Error::new(
-                    ErrorKind::MalformedInput,
-                    format!(
-                        "package exceeds size limits at part `{path}` \
-                     (part cap {part_cap}, package cap {package_cap} bytes)"
-                    ),
-                ));
-            }
-            budget -= read as u64;
-            parts.push(StoredPart::new(path, role, Bytes::from(buf)));
-        }
-
+        let index = Index::read_with_limits(document, part_cap, package_cap)?;
+        let parts = index
+            .parts
+            .iter()
+            .map(|(path, bytes)| {
+                let kind = index.kind(path);
+                StoredPart::new(path.clone(), kind, classifier.role(kind), bytes.clone())
+            })
+            .collect();
         Ok(Self {
             parts,
-            classifier,
             source: Bytes::copy_from_slice(document),
         })
     }
 
-    /// Whether the package contains a part at `path`, so a facade can enforce a
-    /// format's required part (e.g. a Word document must have
-    /// `word/document.xml`).
+    /// Whether the package contains a part of `kind`, so a facade can enforce a
+    /// format's required part (e.g. a Word document must have its main part).
+    pub fn contains_kind(&self, kind: PartKind) -> bool {
+        self.parts.iter().any(|p| p.kind() == kind)
+    }
+
+    /// Whether the package contains a part at `path`.
     pub fn contains_part(&self, path: &str) -> bool {
         self.parts.iter().any(|p| p.path().as_str() == path)
+    }
+
+    /// The role of the part at `path`, or `None` when the package has no such
+    /// part.
+    pub fn role_of(&self, path: &PartPath) -> Option<PartRole> {
+        self.parts
+            .iter()
+            .find(|p| p.path() == path)
+            .map(StoredPart::role)
     }
 
     /// The raw bytes of the part at `path`, or `None` when the package has no
@@ -185,12 +158,9 @@ impl<C: PartClassifier> Package<C> {
     /// rather than failing the whole document.
     pub fn extract(&self) -> Extraction {
         let mut blocks = Vec::new();
-        let mut embeddings = Vec::new();
         let mut issues = Vec::new();
-
         for part in &self.parts {
-            let role = part.role();
-            if role.is_redactable() {
+            if part.role().is_redactable() {
                 // Partial-success: a part that fails to parse yields no blocks
                 // and is recorded as an issue rather than failing the whole
                 // extraction.
@@ -201,20 +171,29 @@ impl<C: PartClassifier> Package<C> {
                         kind,
                     }),
                 }
-            } else if let PartRole::Binary(kind) = role {
-                embeddings.push(Embedding {
+            }
+        }
+        Extraction {
+            blocks,
+            embeddings: self.embeddings(),
+            issues,
+        }
+    }
+
+    /// The binary embeddings (images, media, embedded objects) the classifier
+    /// surfaces for redaction, each addressed by its part.
+    pub fn embeddings(&self) -> Vec<Embedding> {
+        self.parts
+            .iter()
+            .filter_map(|part| match part.role() {
+                PartRole::Binary(kind) => Some(Embedding {
                     part: part.path().clone(),
                     kind,
                     bytes: part.bytes(),
-                });
-            }
-        }
-
-        Extraction {
-            blocks,
-            embeddings,
-            issues,
-        }
+                }),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Rewrite text `replacements` across their parts and re-pack every other
@@ -274,8 +253,8 @@ impl<C: PartClassifier> Package<C> {
         }
 
         // Index whole-part replacements, validating each names an existing part
-        // that is redactable (never a structure/metadata part), not protected,
-        // and not already targeted by a text splice.
+        // whose role admits a whole replacement and that is not already targeted
+        // by a text splice.
         let mut part_bytes: HashMap<&PartPath, &[u8]> = HashMap::new();
         for pr in parts {
             let Some(part) = index.get(&pr.part) else {
@@ -285,23 +264,14 @@ impl<C: PartClassifier> Package<C> {
                 ));
             };
             // A whole-part replacement may only overwrite a part whose role
-            // admits it: a binary embedding or a document-property part. Refusing
-            // every other role closes the hole where redacted bytes could
-            // overwrite styles, the theme, the content-types manifest, or splice
-            // a text part out of band.
+            // admits it: a binary embedding, a property part, or a cell part.
+            // Refusing every other role closes the hole where redacted bytes
+            // could overwrite the main part, styles, the theme, the content-types
+            // manifest, or splice a text part out of band.
             if !part.role().is_whole_part_replaceable() {
                 return Err(Error::new(
                     ErrorKind::Processing,
                     format!("part replacement targets non-redactable part `{}`", pr.part),
-                ));
-            }
-            if self.classifier.is_protected(&pr.part) {
-                return Err(Error::new(
-                    ErrorKind::Processing,
-                    format!(
-                        "part replacement targets protected structural part `{}`",
-                        pr.part
-                    ),
                 ));
             }
             if by_part.contains_key(&pr.part) {
@@ -319,111 +289,92 @@ impl<C: PartClassifier> Package<C> {
         // Re-pack in archive order: a changed part (spliced text or replaced
         // bytes) is re-deflated; an untouched part is copied straight from the
         // source with its data still compressed, no inflate/deflate round-trip.
-        let mut source = ZipArchive::new(Cursor::new(self.source.clone()))
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("reopen source: {e}")))?;
-        let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
-        let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        let mut changed: Vec<(&PartPath, Vec<u8>)> = Vec::new();
         for part in &self.parts {
-            let fail = |e: String| {
-                Error::new(
-                    ErrorKind::MalformedInput,
-                    format!("repack `{}`: {e}", part.path()),
-                )
-            };
-            let changed: Option<Vec<u8>> = match by_part.get(part.path()) {
-                Some(edits) => Some(part.splice(edits)?.into_bytes()),
-                None => part_bytes
-                    .get(part.path())
-                    .map(|replaced| replaced.to_vec()),
-            };
-            match changed {
-                Some(bytes) => {
-                    zip.start_file(part.path().as_str(), opts)
-                        .map_err(|e| fail(e.to_string()))?;
-                    zip.write_all(&bytes).map_err(|e| fail(e.to_string()))?;
-                }
-                // Copy the already-compressed entry through. Fall back to a fresh
-                // deflate if the source entry cannot be reached (it always
-                // should, the part came from this archive).
-                None => match source.by_name(part.path().as_str()) {
-                    Ok(entry) => zip.raw_copy_file(entry).map_err(|e| fail(e.to_string()))?,
-                    Err(_) => {
-                        zip.start_file(part.path().as_str(), opts)
-                            .map_err(|e| fail(e.to_string()))?;
-                        zip.write_all(&part.bytes())
-                            .map_err(|e| fail(e.to_string()))?;
+            match by_part.get(part.path()) {
+                Some(edits) => changed.push((part.path(), part.splice(edits)?.into_bytes())),
+                None => {
+                    if let Some(bytes) = part_bytes.get(part.path()) {
+                        changed.push((part.path(), bytes.to_vec()));
                     }
-                },
+                }
             }
         }
-        let cursor = zip
-            .finish()
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("repack failed: {e}")))?;
-        Ok(cursor.into_inner())
+        let entries = self.parts.iter().map(|part| {
+            match changed.iter().find(|(path, _)| *path == part.path()) {
+                Some((path, bytes)) => archive::Entry::Changed(path, bytes),
+                None => archive::Entry::Unchanged(part.path()),
+            }
+        });
+        archive::write(&self.source, entries)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
+    use std::io::{Cursor, Write};
 
     use zip::write::SimpleFileOptions;
     use zip::{CompressionMethod, ZipWriter};
 
     use super::*;
 
-    /// A classifier that routes one text part and one media part, marking the
-    /// text part protected, so every role and guard can be exercised.
+    /// A classifier that makes the main part text, an image binary, and the
+    /// rest structure, so every replacement guard can be exercised.
     struct TestClassifier;
 
     impl PartClassifier for TestClassifier {
-        fn role(&self, path: &PartPath) -> PartRole {
-            match path.as_str() {
-                "doc/text.xml" => PartRole::ElementText,
-                "media/image1.png" => PartRole::Binary(EmbeddingKind::Image),
+        fn role(&self, kind: PartKind) -> PartRole {
+            match kind {
+                PartKind::Main => PartRole::ElementText,
+                PartKind::Embedding(kind) => PartRole::Binary(kind),
                 _ => PartRole::Structure,
             }
         }
-
-        fn is_protected(&self, path: &PartPath) -> bool {
-            path.as_str() == "doc/text.xml"
-        }
     }
 
-    /// A zip of `(name, bytes)` entries.
-    fn zip_of(entries: &[(&str, &[u8])]) -> Vec<u8> {
+    /// A package of a main text part, a style part, and an image, with its
+    /// content-types manifest.
+    fn package() -> Vec<u8> {
+        let manifest = br#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="png" ContentType="image/png"/><Override PartName="/doc/text.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>"#;
         let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
         let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        let entries: [(&str, &[u8]); 4] = [
+            ("[Content_Types].xml", manifest),
+            ("doc/text.xml", b"<t>hi</t>"),
+            ("styles.xml", b"<styles/>"),
+            ("media/image1.png", b"\x89PNG original"),
+        ];
         for (name, bytes) in entries {
-            zip.start_file(*name, opts).unwrap();
+            zip.start_file(name, opts).unwrap();
             zip.write_all(bytes).unwrap();
         }
         zip.finish().unwrap().into_inner()
     }
 
     #[test]
-    fn a_part_replacement_targeting_a_structure_part_is_refused() {
-        let bytes = zip_of(&[("styles.xml", b"<styles/>"), ("doc/text.xml", b"<t>hi</t>")]);
-        let package = Package::open(&bytes, TestClassifier).unwrap();
-        // `styles.xml` is a Structure part: replacing its bytes wholesale must be
-        // refused, so redacted bytes can't overwrite the package's structure.
-        let replacement = PartReplacement::new(PartPath::from("styles.xml"), b"<evil/>".to_vec());
-        assert!(package.rewrite_with_parts(&[], &[replacement]).is_err());
+    fn a_part_replacement_targeting_structure_or_text_is_refused() {
+        let package = Package::open(&package(), &TestClassifier).unwrap();
+        // Neither a structure part nor the main text part may be overwritten
+        // wholesale, so redacted bytes can't replace the package's structure.
+        for path in ["styles.xml", "doc/text.xml", "[Content_Types].xml"] {
+            let replacement = PartReplacement::new(PartPath::from(path), b"<evil/>".to_vec());
+            assert!(
+                package.rewrite_with_parts(&[], &[replacement]).is_err(),
+                "{path}"
+            );
+        }
     }
 
     #[test]
     fn a_part_replacement_on_a_binary_part_is_accepted() {
-        let bytes = zip_of(&[
-            ("media/image1.png", b"\x89PNG original"),
-            ("doc/text.xml", b"<t>hi</t>"),
-        ]);
-        let package = Package::open(&bytes, TestClassifier).unwrap();
+        let package = Package::open(&package(), &TestClassifier).unwrap();
         let replacement = PartReplacement::new(
             PartPath::from("media/image1.png"),
             b"\x89PNG redacted".to_vec(),
         );
         let out = package.rewrite_with_parts(&[], &[replacement]).unwrap();
-        let repacked = Package::open(&out, TestClassifier).unwrap();
+        let repacked = Package::open(&out, &TestClassifier).unwrap();
         assert_eq!(
             repacked.part_bytes("media/image1.png").unwrap().as_ref(),
             b"\x89PNG redacted"
@@ -431,28 +382,11 @@ mod tests {
     }
 
     #[test]
-    fn a_package_exceeding_the_aggregate_size_limit_is_refused() {
-        // Two parts each within the per-part cap but together over the package
-        // cap: the second crosses the aggregate budget and is refused, even
-        // though neither part alone is too large. Tiny caps keep the archive
-        // small.
-        let bytes = zip_of(&[("a.xml", &[b'x'; 40]), ("b.xml", &[b'y'; 40])]);
-        // Per-part cap 100 (each 40-byte part is fine); package cap 64 (the two
-        // parts sum to 80, so the second overflows).
-        let err = Package::open_with_limits(&bytes, TestClassifier, 100, 64);
-        assert!(
-            err.is_err(),
-            "aggregate over-budget package must be refused"
-        );
-
-        // The same archive opens when the package cap admits both parts.
-        assert!(Package::open_with_limits(&bytes, TestClassifier, 100, 100).is_ok());
-    }
-
-    #[test]
-    fn a_single_part_over_the_per_part_cap_is_refused() {
-        let bytes = zip_of(&[("a.xml", &[b'x'; 200])]);
-        // Per-part cap 100 rejects the 200-byte part; package cap is generous.
-        assert!(Package::open_with_limits(&bytes, TestClassifier, 100, 10_000).is_err());
+    fn parts_are_classified_by_content_type() {
+        let package = Package::open(&package(), &TestClassifier).unwrap();
+        assert!(package.contains_kind(PartKind::Main));
+        let extraction = package.extract();
+        assert_eq!(extraction.blocks.len(), 1);
+        assert_eq!(extraction.embeddings.len(), 1);
     }
 }

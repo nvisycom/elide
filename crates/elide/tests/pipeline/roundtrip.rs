@@ -15,7 +15,7 @@ use elide::modality::text::Text;
 use elide::recognition::Scope;
 use elide::recognition::pattern::PatternRecognizer;
 use elide::redaction::operators::Replace;
-use elide::redaction::{Anonymizer, Rule};
+use elide::redaction::{Anonymizer, HiddenContentPolicy, Rule};
 use elide::{Directives, Orchestrator, RegistryDocumentExt, Result};
 
 use crate::support::orchestrator::TestOrchestrator;
@@ -39,7 +39,9 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
     let orchestrator = orchestrator(registry.clone())?;
 
     // Analyze, then serialize the report, the artifact a review layer ships.
-    let mut doc = registry.document(DOC, SAMPLE).await?;
+    let mut doc = registry
+        .document(DOC, SAMPLE, HiddenContentPolicy::default())
+        .await?;
     let report = orchestrator
         .analyze(&mut doc, &Directives::new())
         .await?
@@ -64,7 +66,9 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
 
     // The rebuilt report (no cached handles) redacts against a fresh decode of
     // the same document, stamping pick + redaction on every entity.
-    let mut doc2 = registry.document(DOC, SAMPLE).await?;
+    let mut doc2 = registry
+        .document(DOC, SAMPLE, HiddenContentPolicy::default())
+        .await?;
     let applied = orchestrator.anonymize_with(&mut doc2, rebuilt).await?;
     for entity in applied.entities::<Text>().expect("applied content").iter() {
         assert!(entity.audit.selection().is_some(), "records the pick");
@@ -105,7 +109,9 @@ async fn report_deserializer_rebuilds_a_report_standalone() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
     let orchestrator = orchestrator(registry.clone())?;
 
-    let mut doc = registry.document(DOC, SAMPLE).await?;
+    let mut doc = registry
+        .document(DOC, SAMPLE, HiddenContentPolicy::default())
+        .await?;
     let report = orchestrator
         .analyze(&mut doc, &Directives::new())
         .await?
@@ -151,7 +157,9 @@ async fn split_pipeline_halves_detect_and_redact() -> Result<()> {
         .with_analyzer::<Text>(Analyzer::new().with_recognizer(patterns))
         .with_anonymizer::<Text>(text_redact);
 
-    let mut doc = registry.document(DOC, SAMPLE).await?;
+    let mut doc = registry
+        .document(DOC, SAMPLE, HiddenContentPolicy::default())
+        .await?;
     let applied = orchestrator.anonymize(&mut doc, &Directives::new()).await?;
 
     let body = applied.entities::<Text>().expect("text content");

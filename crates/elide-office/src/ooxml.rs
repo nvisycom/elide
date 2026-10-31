@@ -3,9 +3,9 @@
 //!
 //! DOCX and PPTX are the same document to the engine: a bag of parts whose text
 //! lives as element text (with no shared-string indirection), extracted and
-//! rewritten entirely through the neutral text path. They differ only in how
-//! they classify a part and in which single part must exist for the bytes to be
-//! that format. [`OoxmlFormat`] captures exactly that difference, and
+//! rewritten entirely through the neutral text path. They differ only in the
+//! role each kind of part plays, the element edits that sanitize them, and the
+//! name of their main part. [`OoxmlFormat`] captures exactly that difference, and
 //! `OoxmlPackage<F>` carries everything else, so each format is a marker type
 //! plus a type alias rather than a copy of the facade.
 //!
@@ -13,26 +13,25 @@
 //! by cell coordinates, real format-specific logic that does not reduce to the
 //! element-text path, so it keeps its own facade.
 
+use std::marker::PhantomData;
+
 use bytes::Bytes;
 use elide_core::{Error, ErrorKind, Result};
 
-use crate::opc::{Extraction, Package, PartClassifier, PartReplacement, Replacement};
+use crate::opc::sanitize::Sanitizer;
+use crate::opc::{Extraction, Package, PartClassifier, PartKind, PartReplacement, Replacement};
 
-/// A text-only OOXML format's seam: how it classifies a part, and which single
-/// part must be present for the bytes to be a valid document of the format.
+/// A text-only OOXML format's seam: the role each kind of part plays, the
+/// element edits that sanitize the parts it keeps, and the name of its main
+/// part, which must be present for the bytes to be a document of the format.
 ///
-/// The classifier ([`PartClassifier`]) is what the engine already consumes; the
-/// two `ROOT_*` constants are the one structural requirement a facade layers on
-/// top of the neutral open. A format implements this on a zero-sized marker
-/// type, so [`OoxmlPackage`] carries no per-format state beyond the classifier.
-pub trait OoxmlFormat: PartClassifier + Clone {
-    /// The part path that must exist for the bytes to be this format (e.g.
-    /// `word/document.xml` for WordprocessingML).
-    const ROOT_PART: &'static str;
-
-    /// A short human name for the required part, used in the open-time error
-    /// (e.g. `body` for `word/document.xml`).
-    const ROOT_LABEL: &'static str;
+/// The classifier ([`PartClassifier`]) is what the engine consumes, and the
+/// [`Sanitizer`] the element edits decode applies. A format implements this on
+/// a zero-sized marker type, so [`OoxmlPackage`] carries no per-format state.
+pub(crate) trait OoxmlFormat: PartClassifier + Sanitizer + Clone {
+    /// A short human name for the format's main part, used in the open-time
+    /// error (e.g. `body` for a WordprocessingML document).
+    const MAIN_LABEL: &'static str;
 
     /// The classifier instance the engine opens the package with.
     fn classifier() -> Self;
@@ -45,32 +44,33 @@ pub trait OoxmlFormat: PartClassifier + Clone {
 /// Open a document once and reuse it for both operations; the package is parsed
 /// a single time.
 #[derive(Debug, Clone)]
-pub struct OoxmlPackage<F: OoxmlFormat> {
-    package: Package<F>,
+pub(crate) struct OoxmlPackage<F: OoxmlFormat> {
+    package: Package,
+    _format: PhantomData<F>,
 }
 
 impl<F: OoxmlFormat> OoxmlPackage<F> {
     /// Open a package from its bytes, reading and classifying every part and
-    /// enforcing that the format's [required part](OoxmlFormat::ROOT_PART) is
-    /// present.
+    /// enforcing that the format's main part is present.
     ///
     /// # Errors
     ///
-    /// - [`ErrorKind::MalformedInput`] if the
-    ///   bytes are not a zip;
-    /// - [`ErrorKind::MalformedInput`] if the
-    ///   format's required part is missing.
+    /// - [`ErrorKind::MalformedInput`] if the bytes are not a package;
+    /// - [`ErrorKind::MalformedInput`] if the format's main part is missing.
     pub fn open(document: &[u8]) -> Result<Self> {
-        let package = Package::open(document, F::classifier())?;
-        // Without the format's root part the bytes are a zip but not a usable
-        // document of this format.
-        if !package.contains_part(F::ROOT_PART) {
+        let package = Package::open(document, &F::classifier())?;
+        // Without a main part the bytes are a package but not a usable document
+        // of this format.
+        if !package.contains_kind(PartKind::Main) {
             return Err(Error::new(
                 ErrorKind::MalformedInput,
-                format!("missing {} part `{}`", F::ROOT_LABEL, F::ROOT_PART),
+                format!("missing {} part", F::MAIN_LABEL),
             ));
         }
-        Ok(Self { package })
+        Ok(Self {
+            package,
+            _format: PhantomData,
+        })
     }
 
     /// Extract the redactable text and embedded media of the package.

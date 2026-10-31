@@ -12,7 +12,7 @@ use super::OoxmlAddress;
 /// shared [`opc_source`](super::super::opc_source) helpers so the forward and
 /// reverse maps can't drift.
 #[derive(Debug, Default)]
-pub(super) struct OoxmlAddresser;
+pub(crate) struct OoxmlAddresser;
 
 impl SourceAddresser<OoxmlAddress> for OoxmlAddresser {
     fn source_span(

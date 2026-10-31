@@ -11,6 +11,7 @@ use elide::entity::audit::AuditKind;
 use elide::entity::builtins;
 use elide::modality::StreamDataReader;
 use elide::modality::text::Text;
+use elide::redaction::HiddenContentPolicy;
 use elide_core::assert_label_present;
 
 use crate::support::asserts::assert_pii_removed;
@@ -21,7 +22,9 @@ use crate::support::fixture::Fixture;
 /// so the text is only legible through a real decode, not by grepping bytes.
 async fn extracted_text(pdf: &[u8]) -> Result<String> {
     let registry = FormatRegistry::with_builtin();
-    let mut document = registry.decode(pdf, "pdf").await?;
+    let mut document = registry
+        .decode(pdf, "pdf", HiddenContentPolicy::default())
+        .await?;
     let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else {
         panic!("the pdf codec yields a text body stream")
     };

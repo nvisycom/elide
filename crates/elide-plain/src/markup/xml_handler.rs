@@ -22,6 +22,7 @@ use elide_core::modality::text::{SourceRef, Text};
 use elide_core::{Error, ErrorKind, Result};
 
 use super::XmlLoader;
+use super::sanitize::MarkupSanitizer;
 
 /// Stable [`FormatId`] for the XML codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.text.xml");
@@ -90,29 +91,42 @@ impl SourceAddresser<XmlSpan> for MarkupAddresser {
 
 /// Re-serialises a markup document by splicing each item's current value back at
 /// its source span into the retained raw string. Holds the shared item state the
-/// [`ExtractStream`](elide_codec::extract::ExtractStream) redacts in place.
+/// [`ExtractStream`](elide_codec::extract::ExtractStream) redacts in place, and
+/// the sanitizer the output is checked against.
 #[derive(Debug)]
 pub(crate) struct MarkupRecombine {
-    /// The retained raw document.
+    /// The retained (sanitized) raw document.
     pub(super) raw: String,
     /// The (redacted-in-place) item stream, shared with the body stream.
     pub(super) state: SharedSplice<XmlSpan>,
+    /// The sanitizer the decode applied, which the output must pass.
+    pub(super) sanitizer: MarkupSanitizer,
 }
 
 impl Recombine for MarkupRecombine {
-    fn assemble(&self, _parts: &[EncodedPart]) -> Result<ContentData> {
+    fn assemble(&self, _parts: &[EncodedPart], _removed: &[LocalId]) -> Result<ContentData> {
         // The body stream's `EncodedPart` bytes are the ignored marker (a spliced
         // body has no standalone bytes); the redacted items live in the shared
         // state, spliced back over the retained raw source.
         let out = self.state.with_items(|items| splice(&self.raw, items))?;
         Ok(ContentData::new(out.into_bytes().into()))
     }
+
+    fn validate(&self, output: &ContentData) -> Result<()> {
+        self.sanitizer.check(&output.decode()?)
+    }
 }
 
 /// Assemble a leaf markup [`Document`] under `format_id` from the parsed
-/// `items` over the retained `raw` source: one body [`ExtractStream`] sharing
-/// its item state with a [`MarkupRecombine`]. Shared by the XML and HTML loaders.
-pub(crate) fn markup_document(format_id: FormatId, raw: String, items: Vec<XmlItem>) -> Document {
+/// `items` over the retained (sanitized) `raw` source: one body
+/// [`ExtractStream`] sharing its item state with a [`MarkupRecombine`] that
+/// checks its output against `sanitizer`. Shared by the XML and HTML loaders.
+pub(crate) fn markup_document(
+    format_id: FormatId,
+    raw: String,
+    items: Vec<XmlItem>,
+    sanitizer: MarkupSanitizer,
+) -> Document {
     let state: SharedSplice<XmlSpan> = SharedSplice::new(items);
     let stream = ExtractStream::new(format_id.clone(), state.clone(), Arc::new(MarkupAddresser));
     Document::new(
@@ -121,7 +135,11 @@ pub(crate) fn markup_document(format_id: FormatId, raw: String, items: Vec<XmlIt
             id: LocalId::new("body"),
             handle: ErasedStream::new(format_id, Box::new(stream) as Box<dyn Stream<Text>>),
         }],
-        Box::new(MarkupRecombine { raw, state }),
+        Box::new(MarkupRecombine {
+            raw,
+            state,
+            sanitizer,
+        }),
     )
 }
 
@@ -171,11 +189,12 @@ pub(crate) fn splice(raw: &str, items: &[XmlItem]) -> Result<String> {
 mod tests {
     use elide_core::modality::DataWriter;
     use elide_core::modality::text::{TextLocation, TextReplacement};
-    use elide_core::redaction::Redactions;
+    use elide_core::redaction::{HiddenContentPolicy, Redactions};
 
     use super::*;
     use crate::markup::config::MarkupConfig;
     use crate::markup::markup_parser::build_items;
+    use crate::markup::sanitize::Dialect;
 
     /// A markup body stream paired with the recombiner that re-serialises it,
     /// both over one shared item state (so a redaction on the stream is visible
@@ -197,12 +216,13 @@ mod tests {
                 recombine: MarkupRecombine {
                     raw: raw.to_owned(),
                     state,
+                    sanitizer: MarkupSanitizer::new(Dialect::Xml, HiddenContentPolicy::default()),
                 },
             }
         }
 
         fn encoded(&self) -> String {
-            self.recombine.assemble(&[]).unwrap().decode().unwrap()
+            self.recombine.assemble(&[], &[]).unwrap().decode().unwrap()
         }
     }
 

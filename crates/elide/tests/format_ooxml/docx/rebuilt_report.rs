@@ -8,6 +8,7 @@
 use elide::codec::FormatRegistry;
 use elide::entity::audit::AuditKind;
 use elide::modality::text::Text;
+use elide::redaction::HiddenContentPolicy;
 use elide::{Directives, PartId, RegistryDocumentExt, Report, Result};
 
 use super::{BODY_PART, FIXTURE};
@@ -26,7 +27,9 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
 
     // Phase 1: analyze, then copy the document's own entities out, exactly what
     // a caller can serialize and ship to another process.
-    let mut doc = registry.document(DOC, FIXTURE.source).await?;
+    let mut doc = registry
+        .document(DOC, FIXTURE.source, HiddenContentPolicy::default())
+        .await?;
     let report = orchestrator
         .analyze(&mut doc, &Directives::new())
         .await?
@@ -41,7 +44,9 @@ async fn rebuilt_report_redacts_via_redecode() -> Result<()> {
     // handles), on a FRESH document handle, and apply. This forces the
     // re-decode path, the proof a deserialized report still redacts.
     let rebuilt = Report::new().insert_part::<Text>(PartId::from(DOC), body);
-    let mut doc2 = registry.document(DOC, FIXTURE.source).await?;
+    let mut doc2 = registry
+        .document(DOC, FIXTURE.source, HiddenContentPolicy::default())
+        .await?;
     let applied = orchestrator.anonymize_with(&mut doc2, rebuilt).await?;
 
     // Scan the *decompressed* body part, not the deflated archive bytes: a
