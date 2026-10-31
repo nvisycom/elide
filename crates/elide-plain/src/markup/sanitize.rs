@@ -20,7 +20,8 @@
 use std::borrow::Cow;
 use std::ops::Range;
 
-use elide_core::redaction::{Disposition, HiddenContentPolicy};
+use elide_codec::StrippedContent;
+use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
 use elide_core::{Error, ErrorKind, Result};
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
@@ -59,25 +60,27 @@ impl MarkupSanitizer {
         Self { dialect, policy }
     }
 
-    /// `raw` with its hidden content cut out, and whether any was.
+    /// `raw` with its hidden content cut out, and the record of what was.
     ///
     /// # Errors
     ///
     /// [`ErrorKind::MalformedInput`] if the markup cannot be read, or its
     /// document type declares entities.
-    pub(crate) fn sanitize(&self, raw: String) -> Result<(String, bool)> {
+    pub(crate) fn sanitize(&self, raw: String) -> Result<(String, StrippedContent)> {
         let removals = self.removals(&raw)?;
+        let mut stripped = StrippedContent::new();
         if removals.is_empty() {
-            return Ok((raw, false));
+            return Ok((raw, stripped));
         }
         let mut out = String::with_capacity(raw.len());
         let mut cursor = 0;
-        for range in removals {
-            out.push_str(&raw[cursor..range.start]);
-            cursor = range.end;
+        for removal in removals {
+            out.push_str(&raw[cursor..removal.range.start]);
+            cursor = removal.range.end;
+            stripped.record(removal.content, None, 1);
         }
         out.push_str(&raw[cursor..]);
-        Ok((out, true))
+        Ok((out, stripped))
     }
 
     /// Check that `raw` carries no hidden content this sanitizer would remove.
@@ -97,8 +100,9 @@ impl MarkupSanitizer {
         }
     }
 
-    /// The disjoint byte ranges of `raw` to remove, in document order.
-    fn removals(&self, raw: &str) -> Result<Vec<Range<usize>>> {
+    /// The disjoint byte ranges of `raw` to remove, in document order, each
+    /// with the hidden content it holds.
+    fn removals(&self, raw: &str) -> Result<Vec<Removal>> {
         let html = self.dialect == Dialect::Html;
         let mut reader = Reader::from_str(raw);
         if html {
@@ -125,14 +129,14 @@ impl MarkupSanitizer {
                     Event::End(e) if end_name(e) == region.name => {
                         region.depth -= 1;
                         if region.depth == 0 {
-                            removals.push(region.start..span.end);
+                            removals.push(region.removal(span.end));
                             removing = None;
                         }
                     }
                     // An active element left open by lenient HTML runs to the
                     // end of the document.
                     Event::Eof => {
-                        removals.push(region.start..raw.len());
+                        removals.push(region.removal(raw.len()));
                         break;
                     }
                     _ => {}
@@ -149,24 +153,40 @@ impl MarkupSanitizer {
                     ));
                 }
                 Event::Comment(_) if self.policy.collaboration == Disposition::Strip => {
-                    removals.push(span);
+                    removals.push(Removal {
+                        range: span,
+                        content: HiddenContent::Comment,
+                    });
                 }
                 Event::Start(e) | Event::Empty(e) if html => {
                     let name = local_name(e);
                     let is_start = matches!(event, Event::Start(_));
                     if is_start && ACTIVE_ELEMENTS.contains(&name.as_str()) {
                         removing = Some(ActiveRegion {
+                            content: active_content(&name),
                             name,
                             depth: 1,
                             start: span.start,
                         });
                     } else if ACTIVE_ELEMENTS.contains(&name.as_str())
                         || ACTIVE_VOID_ELEMENTS.contains(&name.as_str())
-                        || (name == "meta" && self.removes_meta(raw, e))
                     {
-                        removals.push(span);
+                        removals.push(Removal {
+                            range: span,
+                            content: active_content(&name),
+                        });
+                    } else if name == "meta" && self.removes_meta(raw, e) {
+                        removals.push(Removal {
+                            range: span,
+                            content: HiddenContent::Properties,
+                        });
                     } else {
-                        removals.extend(active_attributes(raw, e));
+                        removals.extend(active_attributes(raw, e).into_iter().map(|range| {
+                            Removal {
+                                range,
+                                content: HiddenContent::Script,
+                            }
+                        }));
                     }
                 }
                 _ => {}
@@ -191,13 +211,40 @@ impl MarkupSanitizer {
     }
 }
 
-/// An active element being removed: its lowercased name, the open depth of that
-/// same name (so a nested one resolves to the matching close), and the byte
-/// where its start tag begins.
+/// A byte range of the source to remove, with the hidden content it holds.
+struct Removal {
+    range: Range<usize>,
+    content: HiddenContent,
+}
+
+/// An active element being removed: its lowercased name, the hidden content it
+/// is, the open depth of that same name (so a nested one resolves to the
+/// matching close), and the byte where its start tag begins.
 struct ActiveRegion {
     name: String,
+    content: HiddenContent,
     depth: usize,
     start: usize,
+}
+
+impl ActiveRegion {
+    /// The removal of this region, closed at byte `end`.
+    fn removal(&self, end: usize) -> Removal {
+        Removal {
+            range: self.start..end,
+            content: self.content,
+        }
+    }
+}
+
+/// The hidden content the active element `name` is: a `<script>` runs script,
+/// every other one embeds a plugin control.
+fn active_content(name: &str) -> HiddenContent {
+    if name == "script" {
+        HiddenContent::Script
+    } else {
+        HiddenContent::Control
+    }
 }
 
 /// One attribute of a tag: its key and raw value as written, and the byte range
@@ -314,6 +361,27 @@ mod tests {
         );
         let redact = HiddenContentPolicy::default().with_metadata(Disposition::Redact);
         assert_eq!(sanitize(html(redact), raw), raw);
+    }
+
+    #[test]
+    fn the_record_names_each_removal_by_what_it_is() {
+        let raw = r#"<head><meta name="author" content="Jane"></head><!-- note --><p onclick="x()">a</p><script>s()</script><object>o</object>"#;
+        let (_, stripped) = html(HiddenContentPolicy::default())
+            .sanitize(raw.to_owned())
+            .expect("sanitize");
+        let counts: Vec<(HiddenContent, usize)> = stripped
+            .iter()
+            .map(|entry| (entry.content, entry.count))
+            .collect();
+        assert_eq!(
+            counts,
+            [
+                (HiddenContent::Properties, 1),
+                (HiddenContent::Comment, 1),
+                (HiddenContent::Script, 2),
+                (HiddenContent::Control, 1),
+            ]
+        );
     }
 
     #[test]

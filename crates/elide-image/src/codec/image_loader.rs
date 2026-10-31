@@ -6,9 +6,10 @@ use std::iter;
 use elide_codec::content::ContentData;
 use elide_codec::{
     Document, DocumentLoader, DocumentPart, ErasedStream, FormatId, LocalId, Stream,
+    StrippedContent,
 };
 use elide_core::Result;
-use elide_core::redaction::{Disposition, HiddenContentPolicy};
+use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
 
 use super::exif_handler::EXIF_HINT;
 use super::image_recombine::ImageRecombine;
@@ -43,18 +44,20 @@ impl DocumentLoader for ImageDocumentLoader {
         // The registry routed to this loader for its one format; decode the
         // bytes as exactly that, no re-detection.
         let mut buffer = ImageBuffer::open(content.as_bytes(), self.format)?;
-        let (sanitized, exif) = match policy.metadata {
+        let (blocks, exif) = match policy.metadata {
             Disposition::Strip => (buffer.strip_metadata()?, None),
             Disposition::Redact => {
-                let sanitized = buffer.strip_unsurfaced_metadata()?;
+                let blocks = buffer.strip_unsurfaced_metadata()?;
                 let exif = DocumentPart::Blob {
                     id: LocalId::new(EXIF_PART_ID),
                     bytes: buffer.source_bytes(),
                     hint: EXIF_HINT.to_owned(),
                 };
-                (sanitized, Some(exif))
+                (blocks, Some(exif))
             }
         };
+        let mut stripped = StrippedContent::new();
+        stripped.record(HiddenContent::Properties, None, blocks);
         let state = ImageState::new(buffer);
 
         let pixels: Box<dyn Stream<Image>> = Box::new(PixelStream {
@@ -75,7 +78,7 @@ impl DocumentLoader for ImageDocumentLoader {
         };
         Ok(
             Document::new(self.format_id.clone(), parts, Box::new(recombine))
-                .with_changed_at_decode(sanitized),
+                .with_stripped(stripped),
         )
     }
 }

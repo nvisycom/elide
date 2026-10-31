@@ -12,6 +12,7 @@
 use std::borrow::Cow;
 use std::ops::Range;
 
+use elide_core::redaction::HiddenContent;
 use elide_core::{Error, ErrorKind, Result};
 use quick_xml::NsReader;
 use quick_xml::events::{BytesStart, Event};
@@ -61,6 +62,11 @@ pub(crate) enum Action {
 
 /// The decisions an [`edit`] asks of a format, for each element it meets.
 pub(crate) trait Rules {
+    /// The hidden content every removal these rules make is, or `None` for
+    /// rules whose removals are not hidden content of their own (a cascade
+    /// that follows another removal, or a check that removes nothing).
+    fn content(&self) -> Option<HiddenContent>;
+
     /// What to do with the element `name` carrying `attributes`.
     fn element(&self, name: Name<'_>, attributes: &[Attribute<'_>]) -> Action;
 
@@ -84,15 +90,20 @@ pub(crate) enum Local {
 
 /// [`Rules`] declared as name lists: elements to remove, elements to unwrap,
 /// and attributes (by namespace and local-name match) to remove from every
-/// element kept.
-#[derive(Debug, Clone, Copy, Default)]
+/// element kept, all of them the one item of hidden content `content`.
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct Declared {
+    pub(crate) content: HiddenContent,
     pub(crate) remove: &'static [QName],
     pub(crate) unwrap: &'static [QName],
     pub(crate) attributes: &'static [(&'static str, Local)],
 }
 
 impl Rules for Declared {
+    fn content(&self) -> Option<HiddenContent> {
+        Some(self.content)
+    }
+
     fn element(&self, name: Name<'_>, _attributes: &[Attribute<'_>]) -> Action {
         let matches = |list: &[QName]| {
             list.iter()
@@ -138,6 +149,10 @@ pub(crate) fn check(raw: &str) -> Result<()> {
 struct Unchanged;
 
 impl Rules for Unchanged {
+    fn content(&self) -> Option<HiddenContent> {
+        None
+    }
+
     fn element(&self, _name: Name<'_>, _attributes: &[Attribute<'_>]) -> Action {
         Action::Keep
     }
@@ -147,6 +162,14 @@ impl Rules for Unchanged {
     }
 }
 
+/// A part edited by [`edit`]: its new text, and how many elements and
+/// attributes the edit removed or unwrapped.
+#[derive(Debug)]
+pub(crate) struct Edited {
+    pub(crate) text: String,
+    pub(crate) count: usize,
+}
+
 /// `raw` edited by `rules`, or `None` when the rules change nothing.
 ///
 /// # Errors
@@ -154,13 +177,16 @@ impl Rules for Unchanged {
 /// [`ErrorKind::MalformedInput`] if `raw` is not well-formed XML, nests past
 /// [`MAX_DEPTH`], or declares a document type: a DTD's entities expand into
 /// text no extraction reads, and OOXML never uses one.
-pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<String>> {
+pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
     let mut reader = NsReader::from_str(raw);
     // quick-xml reports positions past a leading BOM, but the ranges index the
     // original bytes.
     let bom = if raw.starts_with('\u{feff}') { 3 } else { 0 };
     let mut last = bom;
     let mut cuts: Vec<Range<usize>> = Vec::new();
+    // Elements and attributes removed or unwrapped; an unwrapped element's end
+    // tag is cut too, but it is one element.
+    let mut count = 0;
     // The open elements' actions, to know what an end tag closes.
     let mut open: Vec<Action> = Vec::new();
     // A removed element in progress: its start byte and the open depth inside it.
@@ -207,20 +233,26 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<String>> {
                 let attributes: Vec<Attribute<'_>> =
                     owned.iter().map(OwnedAttribute::view).collect();
                 match rules.element(name, &attributes) {
-                    Action::Remove if is_start => removing = Some((span.start, 1)),
+                    Action::Remove if is_start => {
+                        removing = Some((span.start, 1));
+                        count += 1;
+                    }
                     Action::Remove | Action::Unwrap => {
                         cuts.push(span.clone());
+                        count += 1;
                         if is_start {
                             open.push(Action::Unwrap);
                         }
                     }
                     Action::Keep => {
+                        let before = cuts.len();
                         cuts.extend(
                             attributes
                                 .iter()
                                 .filter(|attribute| rules.removes_attribute(name, attribute))
                                 .map(|attribute| attribute.range.clone()),
                         );
+                        count += cuts.len() - before;
                         if is_start {
                             open.push(Action::Keep);
                         }
@@ -250,7 +282,7 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<String>> {
         cursor = cut.end;
     }
     out.push_str(&raw[cursor..]);
-    Ok(Some(out))
+    Ok(Some(Edited { text: out, count }))
 }
 
 /// An attribute with its namespace resolved into an owned string, so it
@@ -345,6 +377,10 @@ mod tests {
     struct Revisions;
 
     impl Rules for Revisions {
+        fn content(&self) -> Option<HiddenContent> {
+            Some(HiddenContent::TrackedChange)
+        }
+
         fn element(&self, name: Name<'_>, _attributes: &[Attribute<'_>]) -> Action {
             if name.is(W, "del") {
                 Action::Remove
@@ -363,9 +399,11 @@ mod tests {
     #[test]
     fn removes_unwraps_and_strips_attributes_byte_faithfully() {
         let raw = r#"<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:rsidR="00AB"><w:ins w:author="Jane"><w:r><w:t>kept</w:t></w:r></w:ins><w:del w:author="Jane"><w:r><w:delText>gone</w:delText></w:r></w:del><w:r w:rsidRPr="1"><w:t xml:space="preserve"> tail</w:t></w:r></w:p>"#;
-        let out = edit(raw, &Revisions).unwrap().unwrap();
+        let edited = edit(raw, &Revisions).unwrap().unwrap();
+        // The paragraph's rsid, the insertion, the deletion, the run's rsid.
+        assert_eq!(edited.count, 4);
         assert_eq!(
-            out,
+            edited.text,
             r#"<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:r><w:t>kept</w:t></w:r><w:r><w:t xml:space="preserve"> tail</w:t></w:r></w:p>"#
         );
     }
@@ -373,7 +411,10 @@ mod tests {
     #[test]
     fn matches_by_namespace_not_prefix() {
         let raw = r#"<x:del xmlns:x="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><x:r/></x:del><del>kept</del>"#;
-        assert_eq!(edit(raw, &Revisions).unwrap().unwrap(), "<del>kept</del>");
+        assert_eq!(
+            edit(raw, &Revisions).unwrap().unwrap().text,
+            "<del>kept</del>"
+        );
     }
 
     #[test]

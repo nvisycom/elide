@@ -14,6 +14,7 @@ mod role;
 
 use std::num::NonZeroUsize;
 
+use elide_codec::StrippedContent;
 use elide_core::{Error, ErrorKind, Result};
 use lopdf::{Document, Object};
 
@@ -83,10 +84,11 @@ impl Pdf {
         Extraction::from_store_with_geometry(&self.0)
     }
 
-    /// The document with its hidden content removed, as new bytes, or `None`
-    /// when it carries none: metadata, annotations other than internal links, actions and scripts, form values,
-    /// the outline and structure tree, hidden layers, thumbnails, and every
-    /// object no longer reachable from the document.
+    /// The document with its hidden content removed, as new bytes with the
+    /// record of what was removed, or `None` when it carries none: metadata,
+    /// annotations other than internal links, actions and scripts, form values,
+    /// the outline and structure tree, optional-content layers, thumbnails, and
+    /// every object no longer reachable from the document.
     ///
     /// The codec runs this at decode, so the text extracted for detection is the
     /// text that ships.
@@ -95,7 +97,7 @@ impl Pdf {
     ///
     /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if the
     /// sanitized document cannot be saved.
-    pub fn sanitize(&self) -> Result<Option<Vec<u8>>> {
+    pub fn sanitize(&self) -> Result<Option<(Vec<u8>, StrippedContent)>> {
         sanitize_store(&self.0)
     }
 

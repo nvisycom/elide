@@ -10,6 +10,8 @@
 
 use std::cell::RefCell;
 
+use elide_core::redaction::HiddenContent;
+
 use crate::opc::xml_edit::{Action, Attribute, Name, Rules};
 
 /// The reviewed namespaces: OPC packaging, the ECMA-376 transitional and strict
@@ -161,6 +163,10 @@ impl Vocabulary {
 }
 
 impl Rules for Vocabulary {
+    fn content(&self) -> Option<HiddenContent> {
+        None
+    }
+
     fn element(&self, name: Name<'_>, attributes: &[Attribute<'_>]) -> Action {
         // Every OOXML element is namespaced; one in no namespace (or under an
         // undeclared prefix) is in no vocabulary at all.

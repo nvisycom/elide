@@ -14,7 +14,7 @@ use elide_core::{Error, ErrorKind, Result};
 
 pub use self::raster::RasterImage;
 #[cfg(feature = "exif")]
-use crate::exif::Source;
+use crate::exif::{Scrubbed, Source};
 use crate::modality::{ImageFormat, ImageReplacement};
 use crate::primitive::{BoundingBox, Dimensions};
 
@@ -177,42 +177,44 @@ impl ImageBuffer {
     /// [`ErrorKind::MalformedInput`] if a metadata edit fails.
     #[cfg(feature = "exif")]
     pub fn strip_metadata_keys(&self, keys: &[&str]) -> Result<Bytes> {
-        Ok(self.exif_source().remove_keys(keys)?.into())
+        Ok(self.exif_source().remove_keys(keys)?.bytes.into())
     }
 
     /// Remove the source's metadata in place, keeping only what a viewer needs
     /// to render the image (its orientation), so every later read and encode
-    /// sees the stripped container. Returns whether anything was removed.
+    /// sees the stripped container. Returns how many metadata blocks were
+    /// removed.
     ///
     /// # Errors
     ///
     /// [`ErrorKind::MalformedInput`] if the metadata edit fails.
     #[cfg(feature = "exif")]
-    pub fn strip_metadata(&mut self) -> Result<bool> {
+    pub fn strip_metadata(&mut self) -> Result<usize> {
         let stripped = self.exif_source().strip()?;
         Ok(self.replace_source(stripped))
     }
 
     /// Remove the source's metadata blocks outside EXIF (XMP, IPTC, comments,
     /// text chunks) in place, keeping every EXIF field for field-level
-    /// redaction. Returns whether anything was removed.
+    /// redaction. Returns how many metadata blocks were removed.
     ///
     /// # Errors
     ///
     /// [`ErrorKind::MalformedInput`] if the metadata edit fails.
     #[cfg(feature = "exif")]
-    pub fn strip_unsurfaced_metadata(&mut self) -> Result<bool> {
+    pub fn strip_unsurfaced_metadata(&mut self) -> Result<usize> {
         let scrubbed = self.exif_source().remove_keys(&[])?;
         Ok(self.replace_source(scrubbed))
     }
 
-    /// Replace the source container with `bytes`, returning whether it changed.
+    /// Replace the source container with the `scrubbed` one when it removed
+    /// anything, returning how many blocks it removed.
     #[cfg(feature = "exif")]
-    fn replace_source(&mut self, bytes: Vec<u8>) -> bool {
-        let bytes = Bytes::from(bytes);
-        let changed = bytes != self.source;
-        self.source = bytes;
-        changed
+    fn replace_source(&mut self, scrubbed: Scrubbed) -> usize {
+        if scrubbed.removed > 0 {
+            self.source = Bytes::from(scrubbed.bytes);
+        }
+        scrubbed.removed
     }
 
     /// Re-encode the image, returning the container bytes with the source's
@@ -291,7 +293,7 @@ impl ImageBuffer {
     #[cfg(feature = "exif")]
     pub fn encode_without_metadata(&self) -> Result<Bytes> {
         let stripped = self.exif_source().strip()?;
-        self.encode_over_metadata(&stripped)
+        self.encode_over_metadata(&stripped.bytes)
     }
 
     /// Crop the in-bounds intersection of `region` out as a bare
@@ -502,7 +504,7 @@ mod tests {
             .expect("write exif");
 
         let mut buffer = ImageBuffer::open(&bytes, ImageFormat::Jpeg).expect("open");
-        assert!(buffer.strip_metadata().expect("strip"));
+        assert!(buffer.strip_metadata().expect("strip") > 0);
         // Redact a pixel so the buffer is dirty (forces the re-encode path).
         buffer.redact(
             BoundingBox::from_origin(Point::new(0, 0), Dimensions::new(2, 2)),

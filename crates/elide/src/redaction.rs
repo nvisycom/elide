@@ -20,8 +20,8 @@
 // under, re-surfaced through the redaction crate.
 #[doc(inline)]
 pub use elide_core::redaction::{
-    Disposition, HiddenContentPolicy, LeakProfile, Operator, OperatorId, Redactions,
-    ReversibleOperator,
+    Disposition, HiddenContent, HiddenContentKind, HiddenContentPolicy, LeakProfile, Operator,
+    OperatorId, Redactions, ReversibleOperator,
 };
 // The selection/apply engines live in `elide-redaction`; the shipped operators,
 // the key vault, and the pseudonym generators live in `elide-operator`.

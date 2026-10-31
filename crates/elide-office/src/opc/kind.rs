@@ -7,6 +7,8 @@
 //! [`Unknown`](PartKind::Unknown), and the sanitizer refuses a document holding
 //! one rather than carry structure it cannot vouch for.
 
+use elide_core::redaction::HiddenContent;
+
 use crate::opc::block::EmbeddingKind;
 use crate::opc::part::PartPath;
 
@@ -39,25 +41,16 @@ pub enum PartKind {
     Properties,
     /// A custom XML data part or its properties.
     CustomXml,
-    /// The package thumbnail, a rendered preview of the first page.
-    Thumbnail,
     /// A binary embedding: an image, media clip, embedded object, or imported
     /// chunk.
     Embedding(EmbeddingKind),
     /// An embedded font.
     Font,
-    /// Code or an add-in: a VBA project, an ActiveX control, a web extension.
-    Active,
-    /// A link to data outside the document: an external workbook, a data
-    /// connection, a query table.
-    ExternalData,
-    /// Printer settings, a fingerprint of the author's machine.
-    PrinterSettings,
-    /// A digital signature, which names its signer.
-    Signature,
-    /// Application-private data: presentation tags, revision ids, the editor's
-    /// writing-assistance state.
-    Private,
+    /// A part that is hidden content in its entirety and always stripped,
+    /// named by what it is: the thumbnail, a macro project, an ActiveX control,
+    /// an add-in, a link to an external workbook, a data connection, printer
+    /// settings, a signature, or application-private data.
+    Hidden(HiddenContent),
     /// Structure that carries no user content: styles, themes, settings,
     /// numbering, fonts tables, properties of the view.
     Structure,
@@ -90,7 +83,7 @@ impl PartKind {
         // The thumbnail and imported chunks are typed by the relationship that
         // reaches them: their content types are a plain image or document type.
         if incoming.contains(&THUMBNAIL) {
-            return Self::Thumbnail;
+            return Self::Hidden(HiddenContent::Thumbnail);
         }
         if incoming.contains(&IMPORTED_CHUNK) {
             return Self::Embedding(EmbeddingKind::Object);
@@ -160,7 +153,7 @@ impl PartKind {
             "comments+xml" => Self::Comments,
             "styles+xml" | "settings+xml" | "websettings+xml" | "fonttable+xml"
             | "numbering+xml" => Self::Structure,
-            "printersettings" => Self::PrinterSettings,
+            "printersettings" => Self::Hidden(HiddenContent::PrinterSettings),
             _ => Self::Unknown,
         }
     }
@@ -174,8 +167,8 @@ impl PartKind {
             "comments+xml" => Self::Comments,
             "commentauthors+xml" => Self::CommentAuthors,
             "presprops+xml" | "viewprops+xml" | "tablestyles+xml" => Self::Structure,
-            "tags+xml" => Self::Private,
-            "printersettings" => Self::PrinterSettings,
+            "tags+xml" => Self::Hidden(HiddenContent::ApplicationData),
+            "printersettings" => Self::Hidden(HiddenContent::PrinterSettings),
             _ => Self::Unknown,
         }
     }
@@ -194,11 +187,12 @@ impl PartKind {
             | "table+xml"
             | "sheetmetadata+xml"
             | "volatiledependencies+xml" => Self::Structure,
-            "externallink+xml" | "connections+xml" | "querytable+xml" => Self::ExternalData,
+            "externallink+xml" => Self::Hidden(HiddenContent::Link),
+            "connections+xml" | "querytable+xml" => Self::Hidden(HiddenContent::DataConnection),
             "pivottable+xml" | "pivotcachedefinition+xml" | "pivotcacherecords+xml" => {
                 Self::Unsupported
             }
-            "printersettings" => Self::PrinterSettings,
+            "printersettings" => Self::Hidden(HiddenContent::PrinterSettings),
             _ => Self::Unknown,
         }
     }
@@ -244,18 +238,27 @@ impl PartKind {
             | "application/vnd.ms-office.vbaprojectsignatureagile"
             | "application/vnd.ms-office.vbaprojectsignaturev3"
             | "application/vnd.ms-word.vbadata+xml"
-            | "application/vnd.ms-word.keymapcustomizations+xml"
-            | "application/vnd.ms-office.activex+xml"
-            | "application/vnd.ms-office.activex"
-            | "application/vnd.ms-office.webextension+xml"
-            | "application/vnd.ms-office.webextensiontaskpanes+xml" => Self::Active,
+            | "application/vnd.ms-word.keymapcustomizations+xml" => {
+                Self::Hidden(HiddenContent::Macro)
+            }
+            "application/vnd.ms-office.activex+xml" | "application/vnd.ms-office.activex" => {
+                Self::Hidden(HiddenContent::Control)
+            }
+            "application/vnd.ms-office.webextension+xml"
+            | "application/vnd.ms-office.webextensiontaskpanes+xml" => {
+                Self::Hidden(HiddenContent::AddIn)
+            }
             "application/vnd.openxmlformats-package.digital-signature-origin"
             | "application/vnd.openxmlformats-package.digital-signature-xmlsignature+xml"
             | "application/vnd.openxmlformats-package.digital-signature-certificate" => {
-                Self::Signature
+                Self::Hidden(HiddenContent::Signature)
             }
-            "application/vnd.ms-powerpoint.revisioninfo+xml"
-            | "application/vnd.ms-office.intelligence2+xml" => Self::Private,
+            "application/vnd.ms-powerpoint.revisioninfo+xml" => {
+                Self::Hidden(HiddenContent::EditingSessionId)
+            }
+            "application/vnd.ms-office.intelligence2+xml" => {
+                Self::Hidden(HiddenContent::ApplicationData)
+            }
             "application/vnd.ms-excel.slicer+xml"
             | "application/vnd.ms-excel.slicercache+xml"
             | "application/vnd.ms-excel.timeline+xml"
@@ -303,7 +306,7 @@ mod tests {
                 "word/vbaProject.bin",
                 "application/vnd.ms-office.vbaProject"
             ),
-            PartKind::Active
+            PartKind::Hidden(HiddenContent::Macro)
         );
     }
 
@@ -326,7 +329,7 @@ mod tests {
             Some("image/jpeg"),
             &[THUMBNAIL],
         );
-        assert_eq!(thumbnail, PartKind::Thumbnail);
+        assert_eq!(thumbnail, PartKind::Hidden(HiddenContent::Thumbnail));
         assert_eq!(
             kind("customXml/item1.xml", "application/xml"),
             PartKind::CustomXml

@@ -26,7 +26,8 @@ pub use elide_codec::content::{ContentData, TextEncoding};
 #[doc(inline)]
 pub use elide_codec::{
     Document, DocumentLoader, DocumentPart, EncodedPart, ErasedStream, Format, FormatId,
-    LeafLoader, LeafRecombine, Loader, LocalId, Recombine, Stream, TypedStream,
+    LeafLoader, LeafRecombine, Loader, LocalId, Recombine, Stream, Stripped, StrippedContent,
+    TypedStream,
 };
 #[doc(inline)]
 pub use elide_format::FormatRegistry;

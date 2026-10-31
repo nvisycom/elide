@@ -4,9 +4,10 @@
 use elide_codec::content::ContentData;
 use elide_codec::{
     Document, DocumentLoader, DocumentPart, ErasedStream, FormatId, LocalId, Stream,
+    StrippedContent,
 };
 use elide_core::Result;
-use elide_core::redaction::HiddenContentPolicy;
+use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
 
 use super::audio_recombine::AudioRecombine;
 use super::audio_stream::AudioStream;
@@ -39,7 +40,8 @@ impl DocumentLoader for AudioDocumentLoader {
         // The registry routed to this loader for its one format; open the bytes
         // as exactly that, no re-detection.
         let mut clip = AudioBuffer::open(content.as_bytes(), self.format)?;
-        let sanitized = clip.strip_metadata()?;
+        let mut stripped = StrippedContent::new();
+        stripped.record(HiddenContent::Properties, None, clip.strip_metadata()?);
         let stream: Box<dyn Stream<Audio>> = Box::new(AudioStream {
             clip,
             format_id: self.format_id.clone(),
@@ -53,7 +55,7 @@ impl DocumentLoader for AudioDocumentLoader {
         };
         Ok(
             Document::new(self.format_id.clone(), vec![part], Box::new(recombine))
-                .with_changed_at_decode(sanitized),
+                .with_stripped(stripped),
         )
     }
 }

@@ -17,7 +17,7 @@
 //! - **Custom XML bindings**, always: the content-control bindings into the
 //!   custom XML data store, which is stripped.
 
-use elide_core::redaction::{Disposition, HiddenContentPolicy};
+use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
 
 use super::WordFormat;
 use crate::opc::PartKind;
@@ -31,17 +31,11 @@ const W14: &str = "http://schemas.microsoft.com/office/word/2010/wordml";
 /// The Word 2012 extension namespace (document id).
 const W15: &str = "http://schemas.microsoft.com/office/word/2012/wordml";
 
-/// Editor fingerprints and settings that leave the document, removed always.
-const FINGERPRINTS: Declared = Declared {
-    remove: &[
-        (W, "permStart"),
-        (W, "permEnd"),
-        (W, "rsids"),
-        (W, "documentProtection"),
-        (W, "writeProtection"),
-        (W14, "docId"),
-        (W15, "docId"),
-    ],
+/// The editing-session ids: the `rsid` table and attributes, and the paragraph
+/// and text ids.
+const EDITING_SESSION_IDS: Declared = Declared {
+    content: HiddenContent::EditingSessionId,
+    remove: &[(W, "rsids")],
     unwrap: &[],
     attributes: &[
         (W, Local::Prefix("rsid")),
@@ -50,22 +44,50 @@ const FINGERPRINTS: Declared = Declared {
     ],
 };
 
-/// Settings that reach outside the document, removed always. Their
-/// relationships are external, so the reference cascade would drop them too;
-/// naming them keeps a setting with no relationship (an inline data source)
-/// from surviving.
-const EXTERNAL: Declared = Declared {
+/// The document ids.
+const DOCUMENT_IDS: Declared = Declared {
+    content: HiddenContent::DocumentId,
+    remove: &[(W14, "docId"), (W15, "docId")],
+    unwrap: &[],
+    attributes: &[],
+};
+
+/// Range permissions, which name the users allowed to edit, and document and
+/// write protection, which carry a password hash.
+const CREDENTIALS: Declared = Declared {
+    content: HiddenContent::Credential,
     remove: &[
-        (W, "attachedTemplate"),
-        (W, "mailMerge"),
-        (W, "saveThroughXslt"),
+        (W, "permStart"),
+        (W, "permEnd"),
+        (W, "documentProtection"),
+        (W, "writeProtection"),
     ],
+    unwrap: &[],
+    attributes: &[],
+};
+
+/// Settings that reach outside the document: the attached template and an XSLT
+/// save transform. Their relationships are external, so the reference cascade
+/// would drop them too; naming them keeps a setting with no relationship from
+/// surviving.
+const LINKS: Declared = Declared {
+    content: HiddenContent::Link,
+    remove: &[(W, "attachedTemplate"), (W, "saveThroughXslt")],
+    unwrap: &[],
+    attributes: &[],
+};
+
+/// The mail-merge data source, inline or linked.
+const DATA_CONNECTIONS: Declared = Declared {
+    content: HiddenContent::DataConnection,
+    remove: &[(W, "mailMerge")],
     unwrap: &[],
     attributes: &[],
 };
 
 /// The elements that accept every tracked revision.
 const REVISIONS: Declared = Declared {
+    content: HiddenContent::TrackedChange,
     remove: &[
         (W, "del"),
         (W, "moveFrom"),
@@ -101,6 +123,7 @@ const REVISIONS: Declared = Declared {
 
 /// The comment anchors in the stories.
 const COMMENT_ANCHORS: Declared = Declared {
+    content: HiddenContent::Comment,
     remove: &[
         (W, "commentRangeStart"),
         (W, "commentRangeEnd"),
@@ -112,6 +135,7 @@ const COMMENT_ANCHORS: Declared = Declared {
 
 /// Document variables: name-value metadata no field surfaces.
 const VARIABLES: Declared = Declared {
+    content: HiddenContent::Properties,
     remove: &[(W, "docVars")],
     unwrap: &[],
     attributes: &[],
@@ -119,6 +143,7 @@ const VARIABLES: Declared = Declared {
 
 /// Content-control bindings into the custom XML data store.
 const BINDINGS: Declared = Declared {
+    content: HiddenContent::CustomData,
     remove: &[(W, "dataBinding")],
     unwrap: &[],
     attributes: &[],
@@ -134,14 +159,17 @@ impl Sanitizer for WordFormat {
             return Vec::new();
         }
         let mut edits: Edits<'static> = vec![
-            ("editor fingerprints", &FINGERPRINTS),
-            ("external references", &EXTERNAL),
-            ("metadata", &VARIABLES),
-            ("custom XML", &BINDINGS),
+            &EDITING_SESSION_IDS,
+            &DOCUMENT_IDS,
+            &CREDENTIALS,
+            &LINKS,
+            &DATA_CONNECTIONS,
+            &VARIABLES,
+            &BINDINGS,
         ];
         if policy.collaboration == Disposition::Strip {
-            edits.push(("revisions", &REVISIONS));
-            edits.push(("comments", &COMMENT_ANCHORS));
+            edits.push(&REVISIONS);
+            edits.push(&COMMENT_ANCHORS);
         }
         edits
     }

@@ -37,8 +37,7 @@ pub(crate) struct XlsxDocumentLoader;
 impl DocumentLoader for XlsxDocumentLoader {
     async fn decode(&self, content: ContentData, policy: HiddenContentPolicy) -> Result<Document> {
         let source = content.to_bytes();
-        let (sanitized, _) = sanitize(&source, policy, &SheetClassifier)?;
-        let changed = sanitized.is_some();
+        let (sanitized, stripped) = sanitize(&source, policy, &SheetClassifier)?;
         let archive = sanitized.map_or(source, Bytes::from);
         let workbook = Xlsx::open(&archive)?;
         let cells: Vec<XlsxCell> = workbook
@@ -118,8 +117,7 @@ impl DocumentLoader for XlsxDocumentLoader {
             text,
             policy,
         };
-        Ok(Document::new(FORMAT_ID.clone(), parts, Box::new(recombine))
-            .with_changed_at_decode(changed))
+        Ok(Document::new(FORMAT_ID.clone(), parts, Box::new(recombine)).with_stripped(stripped))
     }
 }
 
@@ -127,11 +125,11 @@ impl DocumentLoader for XlsxDocumentLoader {
 mod tests {
     use bytes::Bytes;
     use elide_codec::content::ContentData;
-    use elide_codec::{Document, DocumentLoader as _, DocumentPart, TypedStream};
+    use elide_codec::{Document, DocumentLoader as _, DocumentPart, LocalId, TypedStream};
     use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
     use elide_core::modality::text::{Text, TextReplacement};
     use elide_core::modality::{DataReader as _, DataWriter as _, StreamDataReader as _};
-    use elide_core::redaction::{Disposition, HiddenContentPolicy, Redactions};
+    use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy, Redactions};
 
     use super::XlsxDocumentLoader;
     use crate::opc::fixtures::part_names;
@@ -408,7 +406,10 @@ mod tests {
     #[tokio::test]
     async fn comments_are_removed_by_default() {
         let doc = decode(SAMPLE2).await;
-        assert!(doc.changed_at_decode());
+        assert!(doc.stripped().iter().any(|entry| {
+            entry.content == HiddenContent::Comment
+                && entry.at.as_ref().map(LocalId::as_str) == Some("xl/comments1.xml")
+        }));
         let out = doc.encode().unwrap();
         assert!(
             !part_names(out.as_bytes())

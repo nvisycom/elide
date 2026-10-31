@@ -13,7 +13,7 @@ use std::path::Path;
 /// `PartId` tree path when documents nest (two documents can share a local id,
 /// which the path disambiguates). Backed by a `Cow<'static, str>`, so a
 /// `&'static str` id costs no allocation.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct LocalId(Cow<'static, str>);
 
 impl LocalId {

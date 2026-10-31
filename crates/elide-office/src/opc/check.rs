@@ -35,11 +35,15 @@ pub(crate) fn check(
     policy: HiddenContentPolicy,
     sanitizer: &dyn Sanitizer,
 ) -> Result<()> {
-    let (_, removed) = sanitize(document, policy, sanitizer)?;
-    if !removed.is_empty() {
+    let (_, survived) = sanitize(document, policy, sanitizer)?;
+    if let Some(entry) = survived.iter().next() {
+        let place = entry.at.as_ref().map_or("the package", |at| at.as_str());
         return Err(Error::new(
             ErrorKind::Sanitization,
-            format!("encoded package still carries hidden content: {removed}"),
+            format!(
+                "encoded package still carries hidden content: {:?} in {place}",
+                entry.content
+            ),
         ));
     }
     let index = Index::read(document)?;

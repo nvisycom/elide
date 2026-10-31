@@ -14,10 +14,10 @@ impl_audio_handler! {
 #[cfg(test)]
 mod tests {
     use elide_codec::content::ContentData;
-    use elide_codec::{Document, DocumentPart};
+    use elide_codec::{Document, DocumentPart, Stripped};
     use elide_core::Result;
     use elide_core::modality::StreamDataReader as _;
-    use elide_core::redaction::{Disposition, HiddenContentPolicy};
+    use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
 
     use super::*;
     use crate::fixtures;
@@ -61,7 +61,15 @@ mod tests {
         let doc = decode(with_artist(&fixtures::wav_ramp(1)), Disposition::Strip)
             .await
             .expect("decode");
-        assert!(doc.changed_at_decode());
+        let stripped: Vec<Stripped> = doc.stripped().iter().collect();
+        assert_eq!(
+            stripped,
+            [Stripped {
+                content: HiddenContent::Properties,
+                at: None,
+                count: 1,
+            }]
+        );
         let out = doc.encode().expect("encode");
         assert!(!contains(out.as_bytes(), b"Jane R"));
     }

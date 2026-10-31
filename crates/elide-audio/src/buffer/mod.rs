@@ -151,16 +151,17 @@ impl AudioBuffer {
 
     /// Remove every tag block the clip carries beside its samples (ID3, APE,
     /// and Lyrics3 tags of an MP3; every chunk of a WAV but its format and
-    /// sample data), in place. Returns whether anything was removed.
+    /// sample data), in place. Returns how many tag blocks were removed.
     ///
     /// # Errors
     ///
     /// [`ErrorKind::MalformedInput`] if a tag block overruns the container.
-    pub fn strip_metadata(&mut self) -> Result<bool> {
-        let stripped = Bytes::from(Self::strip(&self.source, self.format)?);
-        let changed = stripped != self.source;
-        self.source = stripped;
-        Ok(changed)
+    pub fn strip_metadata(&mut self) -> Result<usize> {
+        let untagged = Self::strip(&self.source, self.format)?;
+        if untagged.tags > 0 {
+            self.source = Bytes::from(untagged.bytes);
+        }
+        Ok(untagged.tags)
     }
 
     /// Whether the `format` clip `bytes` carries a tag block
@@ -170,11 +171,11 @@ impl AudioBuffer {
     ///
     /// [`ErrorKind::MalformedInput`] if a tag block overruns the container.
     pub fn carries_metadata(bytes: &[u8], format: AudioFormat) -> Result<bool> {
-        Ok(Self::strip(bytes, format)? != bytes)
+        Ok(Self::strip(bytes, format)?.tags > 0)
     }
 
     /// The `format` clip `bytes` with every tag block removed.
-    fn strip(bytes: &[u8], format: AudioFormat) -> Result<Vec<u8>> {
+    fn strip(bytes: &[u8], format: AudioFormat) -> Result<Untagged> {
         match format {
             AudioFormat::Wav => {
                 #[cfg(feature = "wav")]
@@ -256,6 +257,14 @@ impl AudioBuffer {
             }
         }
     }
+}
+
+/// A clip with its tag blocks removed: the remaining bytes, and how many tag
+/// blocks were removed.
+#[derive(Debug)]
+pub(crate) struct Untagged {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) tags: usize,
 }
 
 #[cfg(all(test, feature = "wav"))]

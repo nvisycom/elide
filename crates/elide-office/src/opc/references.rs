@@ -4,6 +4,8 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 
+use elide_core::redaction::HiddenContent;
+
 use crate::opc::relationships::RELATIONSHIP_ATTRIBUTES;
 use crate::opc::xml_edit::{Action, Attribute, Name, Rules};
 
@@ -43,6 +45,12 @@ impl<'a> References<'a> {
 }
 
 impl Rules for References<'_> {
+    /// An element naming a dropped relationship goes with it, counted once with
+    /// the relationship rather than again per element.
+    fn content(&self) -> Option<HiddenContent> {
+        None
+    }
+
     fn element(&self, _name: Name<'_>, attributes: &[Attribute<'_>]) -> Action {
         let named = attributes
             .iter()

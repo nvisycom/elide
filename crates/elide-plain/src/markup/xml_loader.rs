@@ -24,9 +24,8 @@ pub(crate) struct XmlLoader;
 impl DocumentLoader for XmlLoader {
     async fn decode(&self, content: ContentData, policy: HiddenContentPolicy) -> Result<Document> {
         let sanitizer = MarkupSanitizer::new(Dialect::Xml, policy);
-        let (text, sanitized) = sanitizer.sanitize(content.decode()?)?;
+        let (text, stripped) = sanitizer.sanitize(content.decode()?)?;
         let items = build_items(&text, MarkupConfig::xml())?;
-        Ok(markup_document(FORMAT_ID.clone(), text, items, sanitizer)
-            .with_changed_at_decode(sanitized))
+        Ok(markup_document(FORMAT_ID.clone(), text, items, sanitizer).with_stripped(stripped))
     }
 }

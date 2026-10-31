@@ -27,6 +27,14 @@ const PNG_RENDER_CHUNKS: [&[u8; 4]; 14] = [
     b"cLLi", b"acTL", b"fcTL", b"fdAT",
 ];
 
+/// A container with metadata blocks dropped: the remaining bytes, and how many
+/// blocks (JPEG segments, PNG chunks, TIFF metadata tags) were dropped.
+#[derive(Debug)]
+pub(crate) struct Scrubbed {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) removed: usize,
+}
+
 /// The keyword of the PNG text chunk some writers store raw EXIF in.
 const PNG_RAW_EXIF_KEYWORD: &[u8] = b"Raw profile type exif";
 
@@ -38,12 +46,13 @@ const PNG_RAW_EXIF_KEYWORD: &[u8] = b"Raw profile type exif";
 ///
 /// [`ErrorKind::MalformedInput`] if the bytes are not a well-formed JPEG
 /// header.
-pub(super) fn scrub_jpeg(bytes: &[u8], keep_exif: bool) -> Result<Vec<u8>> {
+pub(super) fn scrub_jpeg(bytes: &[u8], keep_exif: bool) -> Result<Scrubbed> {
     if !bytes.starts_with(&JPEG_SOI) {
         return Err(malformed("not a JPEG stream"));
     }
     let mut out = Vec::with_capacity(bytes.len());
     out.extend_from_slice(&JPEG_SOI);
+    let mut removed = 0;
     let mut at = JPEG_SOI.len();
     loop {
         // Fill bytes (repeated 0xFF) may precede a marker.
@@ -63,7 +72,10 @@ pub(super) fn scrub_jpeg(bytes: &[u8], keep_exif: bool) -> Result<Vec<u8>> {
         // data and everything after it carry no metadata segments.
         if marker == 0xD9 || marker == 0xDA {
             out.extend_from_slice(&bytes[at..]);
-            return Ok(out);
+            return Ok(Scrubbed {
+                bytes: out,
+                removed,
+            });
         }
         let length = bytes
             .get(at + 2..at + 4)
@@ -76,6 +88,8 @@ pub(super) fn scrub_jpeg(bytes: &[u8], keep_exif: bool) -> Result<Vec<u8>> {
         let payload = &bytes[at + 4..end];
         if keeps_jpeg_segment(marker, payload, keep_exif) {
             out.extend_from_slice(&bytes[at..end]);
+        } else {
+            removed += 1;
         }
         at = end;
     }
@@ -101,12 +115,13 @@ fn keeps_jpeg_segment(marker: u8, payload: &[u8], keep_exif: bool) -> bool {
 ///
 /// [`ErrorKind::MalformedInput`] if the bytes are not a well-formed PNG chunk
 /// stream.
-pub(super) fn scrub_png(bytes: &[u8], keep_exif: bool) -> Result<Vec<u8>> {
+pub(super) fn scrub_png(bytes: &[u8], keep_exif: bool) -> Result<Scrubbed> {
     if !bytes.starts_with(&PNG_SIGNATURE) {
         return Err(malformed("not a PNG stream"));
     }
     let mut out = Vec::with_capacity(bytes.len());
     out.extend_from_slice(&PNG_SIGNATURE);
+    let mut removed = 0;
     let mut at = PNG_SIGNATURE.len();
     while at < bytes.len() {
         let header = bytes
@@ -123,13 +138,18 @@ pub(super) fn scrub_png(bytes: &[u8], keep_exif: bool) -> Result<Vec<u8>> {
         let data = &bytes[at + 8..end - 4];
         if keeps_png_chunk(kind, data, keep_exif) {
             out.extend_from_slice(&bytes[at..end]);
+        } else {
+            removed += 1;
         }
         at = end;
         if kind == b"IEND" {
             break;
         }
     }
-    Ok(out)
+    Ok(Scrubbed {
+        bytes: out,
+        removed,
+    })
 }
 
 /// Whether the PNG chunk `kind` with `data` survives the scrub.
@@ -218,7 +238,7 @@ mod tests {
             segment(0xFE, b"taken by Jane"),
             segment(0xDB, b"quant-table"),
         ]);
-        let out = scrub_jpeg(&bytes, false).unwrap();
+        let out = scrub_jpeg(&bytes, false).unwrap().bytes;
         assert!(contains(&out, b"JFIF"));
         assert!(contains(&out, b"ICC_PROFILE"));
         assert!(contains(&out, b"quant-table"));
@@ -235,7 +255,7 @@ mod tests {
             segment(0xE1, b"Exif\0\0exif-block"),
             segment(0xE1, b"http://ns.adobe.com/xap/1.0/\0xmp"),
         ]);
-        let out = scrub_jpeg(&bytes, true).unwrap();
+        let out = scrub_jpeg(&bytes, true).unwrap().bytes;
         assert!(contains(&out, b"exif-block"));
         assert!(!contains(&out, b"xap"));
     }
@@ -258,7 +278,7 @@ mod tests {
             chunk(b"eXIf", b"exif-block"),
             chunk(b"pHYs", &[0; 9]),
         ]);
-        let out = scrub_png(&bytes, false).unwrap();
+        let out = scrub_png(&bytes, false).unwrap().bytes;
         assert!(contains(&out, b"iCCP"));
         assert!(contains(&out, b"pHYs"));
         assert!(contains(&out, b"IDAT"));
@@ -276,7 +296,7 @@ mod tests {
             chunk(b"zTXt", b"Raw profile type exif\0\0raw"),
             chunk(b"tEXt", b"Comment\0hello"),
         ]);
-        let out = scrub_png(&bytes, true).unwrap();
+        let out = scrub_png(&bytes, true).unwrap().bytes;
         assert!(contains(&out, b"exif-block"));
         assert!(contains(&out, b"Raw profile type exif"));
         assert!(!contains(&out, b"hello"));

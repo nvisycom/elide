@@ -2,106 +2,84 @@
 //!
 //! A PDF carries content outside its page content streams that a reader of the
 //! page never sees, or that detection never reads. The sanitizer removes it at
-//! decode, so detection runs over exactly what will ship:
+//! decode, so detection runs over exactly what will ship, and records each item
+//! it removes by the [`HiddenContent`] vocabulary:
 //!
 //! - **Metadata**: the trailer `/Info` dictionary, every `/Metadata` XMP
 //!   stream (the catalog's, a page's, an image's), and an attachment's
 //!   description and timestamps.
-//! - **Annotations**, every one but an internal link: comments, highlights,
-//!   stamps, form widgets, file attachments, and links that leave the document.
+//! - **Annotations**, every one but an internal link, each by what it is: a
+//!   markup annotation, a form widget, a link that leaves the document, or rich
+//!   media.
+//! - **Active content**: document and page actions (`/OpenAction`, `/AA`), and
+//!   the JavaScript and rendition name trees.
+//! - **Content no extraction reads**: interactive forms (`/AcroForm`), the
+//!   outline and article threads, the logical structure tree and its
+//!   alternate text, optional-content layers, and associated files outside the
+//!   attachment tree.
+//! - **Previews and fingerprints**: page thumbnails, application private data
+//!   (`/PieceInfo`), and the trailer `/ID`.
+//! - **Prior revisions**: every object no longer reachable from the document,
+//!   a previous revision's content.
 //!
 //! A PDF surfaces neither its metadata nor its annotations to detection, so
 //! both are stripped whatever the
-//! [`HiddenContentPolicy`](elide_core::redaction::HiddenContentPolicy) asks:
-//! a format that cannot redact hidden content strips it.
-//! - **Active content**: document and page actions (`/OpenAction`, `/AA`) and
-//!   the JavaScript name tree.
-//! - **Structures detection does not read**: interactive form values
-//!   (`/AcroForm`), the outline (`/Outlines`), the logical structure tree and
-//!   its alternate text (`/StructTreeRoot`), article threads, associated files
-//!   outside the attachment tree, page thumbnails, and application private data
-//!   (`/PieceInfo`).
-//! - **Hidden layers**: optional-content groups are dissolved, so content that
-//!   was hidden behind a layer is extracted (and redacted) like any other.
-//! - **History and fingerprints**: the trailer `/ID`, and every object no
-//!   longer reachable from the document (a previous revision's content).
+//! [`HiddenContentPolicy`](elide_core::redaction::HiddenContentPolicy) asks: a
+//! format that cannot redact hidden content strips it.
 //!
 //! Each removal drops the reference; a final prune deletes every object no
 //! surviving object reaches, so a removed structure's whole subtree goes without
 //! touching anything still in use.
 
 use std::collections::BTreeSet;
-use std::fmt;
 
+use elide_codec::StrippedContent;
+use elide_core::redaction::HiddenContent;
 use elide_core::{Error, ErrorKind, Result};
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
 use crate::document::{Store, is_xref_stream, save};
 
-/// The catalog entries removed.
-const CATALOG_REMOVED: [&[u8]; 8] = [
-    b"AcroForm",
-    b"Outlines",
-    b"OpenAction",
-    b"OCProperties",
-    b"StructTreeRoot",
-    b"MarkInfo",
-    b"Threads",
-    b"URI",
+/// The catalog entries removed, each with the hidden content it holds.
+const CATALOG_REMOVED: [(&[u8], HiddenContent); 8] = [
+    (b"AcroForm", HiddenContent::FormField),
+    (b"Outlines", HiddenContent::Outline),
+    (b"Threads", HiddenContent::Outline),
+    (b"OpenAction", HiddenContent::Action),
+    (b"OCProperties", HiddenContent::Layer),
+    (b"StructTreeRoot", HiddenContent::AlternativeText),
+    (b"MarkInfo", HiddenContent::AlternativeText),
+    (b"URI", HiddenContent::Link),
 ];
 
 /// The name-tree entries kept in the catalog's `/Names`: named destinations
 /// (navigation) and the attachments, which are surfaced as content.
 const NAMES_KEPT: [&[u8]; 2] = [b"Dests", b"EmbeddedFiles"];
 
-/// The keys removed from every dictionary, each named by
-/// the hidden content it holds.
-const EVERYWHERE_REMOVED: [(&str, &[u8]); 5] = [
-    ("private data", b"PieceInfo"),
-    ("layers", b"OC"),
-    ("actions", b"AA"),
-    ("thumbnails", b"Thumb"),
-    ("associated files", b"AF"),
+/// The keys removed from every dictionary, each with the hidden content it
+/// holds.
+const EVERYWHERE_REMOVED: [(&[u8], HiddenContent); 6] = [
+    (b"PieceInfo", HiddenContent::ApplicationData),
+    (b"OC", HiddenContent::Layer),
+    (b"AA", HiddenContent::Action),
+    (b"Thumb", HiddenContent::Thumbnail),
+    (b"AF", HiddenContent::Unreadable),
+    (b"Metadata", HiddenContent::Properties),
 ];
 
-/// What a sanitize pass removed, by kind; empty when the document carried no
-/// hidden content.
-#[derive(Debug, Default)]
-pub(crate) struct Removed(BTreeSet<&'static str>);
-
-impl Removed {
-    /// Record that hidden content of kind `what` was found, when `found` holds.
-    fn note(&mut self, what: &'static str, found: bool) {
-        if found {
-            self.0.insert(what);
-        }
-    }
-
-    /// Whether nothing was removed.
-    pub(crate) fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-}
-
-impl fmt::Display for Removed {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let kinds: Vec<&str> = self.0.iter().copied().collect();
-        f.write_str(&kinds.join(", "))
-    }
-}
-
-/// The document in `store` with its hidden content removed, as
-/// new bytes, or `None` when it carries none.
+/// The document in `store` with its hidden content removed, as new bytes with
+/// the record of what was removed, or `None` when it carries none.
 ///
 /// # Errors
 ///
 /// [`ErrorKind::MalformedInput`] if the sanitized document cannot be saved.
-pub(crate) fn sanitize_store(store: &Store) -> Result<Option<Vec<u8>>> {
+pub(crate) fn sanitize_store(store: &Store) -> Result<Option<(Vec<u8>, StrippedContent)>> {
     let mut doc = store.clone_doc();
-    if sanitize(&mut doc).is_empty() {
+    let stripped = sanitize(&mut doc);
+    if stripped.is_empty() {
         return Ok(None);
     }
-    save(&mut doc).map(Some)
+    Ok(Some((save(&mut doc)?, stripped)))
 }
 
 /// Check that the document in `store` carries no hidden content.
@@ -110,24 +88,44 @@ pub(crate) fn sanitize_store(store: &Store) -> Result<Option<Vec<u8>>> {
 ///
 /// [`ErrorKind::Sanitization`] naming what survived.
 pub(crate) fn check_store(store: &Store) -> Result<()> {
-    let removed = sanitize(&mut store.clone_doc());
-    if removed.is_empty() {
+    let survived = sanitize(&mut store.clone_doc());
+    if survived.is_empty() {
         return Ok(());
     }
+    let items: Vec<String> = survived
+        .iter()
+        .map(|entry| format!("{:?}", entry.content))
+        .collect();
     Err(Error::new(
         ErrorKind::Sanitization,
-        format!("encoded PDF still carries hidden content: {removed}"),
+        format!(
+            "encoded PDF still carries hidden content: {}",
+            items.join(", ")
+        ),
     ))
 }
 
-/// Remove `doc`'s hidden content, returning what was removed.
-pub(crate) fn sanitize(doc: &mut Document) -> Removed {
-    let mut removed = Removed::default();
+/// Remove `doc`'s hidden content, returning the record of what was removed.
+pub(crate) fn sanitize(doc: &mut Document) -> StrippedContent {
+    let mut stripped = StrippedContent::new();
+
+    // A cross-reference stream is file structure the next save rewrites, not
+    // content: a loaded one is a stale copy, dropped before anything is
+    // counted. What is unreachable now is a prior revision's content; what the
+    // removals below leave unreachable is counted with the removal itself.
+    doc.objects.retain(|_, object| !is_xref_stream(object));
+    stripped.record(
+        HiddenContent::PriorRevision,
+        None,
+        doc.prune_objects().len(),
+    );
 
     for page in doc.get_pages().into_values() {
-        removed.note("annotations", keep_internal_links(doc, page));
+        for content in keep_internal_links(doc, page) {
+            stripped.record(content, None, 1);
+        }
     }
-    removed.note("catalog structures", sanitize_catalog(doc));
+    sanitize_catalog(doc, &mut stripped);
 
     // A resource dictionary's `/Properties` names the optional-content groups
     // its content marks; with the groups gone, the names go too. A resource
@@ -142,68 +140,88 @@ pub(crate) fn sanitize(doc: &mut Document) -> Removed {
         let Some(dict) = dictionary_mut(object) else {
             continue;
         };
-        for (what, key) in EVERYWHERE_REMOVED {
-            removed.note(what, remove_keys(dict, &[key]));
+        for (key, content) in EVERYWHERE_REMOVED {
+            stripped.record(content, None, removed(dict, key));
         }
-        removed.note("metadata", remove_keys(dict, &[b"Metadata"]));
-        removed.note("metadata", sanitize_attachment_metadata(dict));
+        stripped.record(
+            HiddenContent::Properties,
+            None,
+            sanitize_attachment_metadata(dict),
+        );
         if resources.contains(id) {
-            removed.note("layers", remove_keys(dict, &[b"Properties"]));
+            stripped.record(HiddenContent::Layer, None, removed(dict, b"Properties"));
         }
         if let Ok(Object::Dictionary(inline)) = dict.get_mut(b"Resources") {
-            removed.note("layers", remove_keys(inline, &[b"Properties"]));
+            stripped.record(HiddenContent::Layer, None, removed(inline, b"Properties"));
         }
     }
 
-    removed.note("metadata", remove_keys(&mut doc.trailer, &[b"Info"]));
-    removed.note("file identifier", remove_keys(&mut doc.trailer, &[b"ID"]));
-    // A cross-reference stream is file structure the next save rewrites, not
-    // content: a loaded one is a stale copy, dropped without counting as hidden
-    // content before the prune.
-    doc.objects.retain(|_, object| !is_xref_stream(object));
-    removed.note("unreachable objects", !doc.prune_objects().is_empty());
-    removed
+    stripped.record(
+        HiddenContent::Properties,
+        None,
+        removed(&mut doc.trailer, b"Info"),
+    );
+    stripped.record(
+        HiddenContent::DocumentId,
+        None,
+        removed(&mut doc.trailer, b"ID"),
+    );
+    doc.prune_objects();
+    stripped
 }
 
-/// Remove every annotation of `page` but its internal links, returning whether
-/// any was removed.
-fn keep_internal_links(doc: &mut Document, page: ObjectId) -> bool {
+/// Remove every annotation of `page` but its internal links, returning the
+/// hidden content each removed one was.
+fn keep_internal_links(doc: &mut Document, page: ObjectId) -> Vec<HiddenContent> {
     let annotations: Vec<Object> = match doc.get_dictionary(page).and_then(|p| p.get(b"Annots")) {
         Ok(Object::Reference(id)) => match doc.get_object(*id).and_then(Object::as_array) {
             Ok(array) => array.clone(),
             Err(_) => Vec::new(),
         },
         Ok(Object::Array(array)) => array.clone(),
-        _ => return false,
+        _ => return Vec::new(),
     };
-    let kept: Vec<Object> = annotations
-        .iter()
-        .filter(|annotation| {
-            let dict = match annotation {
-                Object::Reference(id) => doc.get_dictionary(*id).ok(),
-                Object::Dictionary(dict) => Some(dict),
-                _ => None,
-            };
-            dict.is_some_and(is_internal_link)
-        })
-        .cloned()
-        .collect();
-    if kept.len() == annotations.len() {
-        return false;
+    let mut kept = Vec::new();
+    let mut dropped = Vec::new();
+    for annotation in annotations {
+        let dict = match &annotation {
+            Object::Reference(id) => doc.get_dictionary(*id).ok(),
+            Object::Dictionary(dict) => Some(dict),
+            _ => None,
+        };
+        match dict {
+            Some(dict) if is_internal_link(dict) => kept.push(annotation),
+            Some(dict) => dropped.push(annotation_content(dict)),
+            None => dropped.push(HiddenContent::Annotation),
+        }
     }
-    let Some(page) = doc
+    if dropped.is_empty() {
+        return dropped;
+    }
+    if let Some(page) = doc
         .get_object_mut(page)
         .ok()
         .and_then(|o| o.as_dict_mut().ok())
-    else {
-        return false;
-    };
-    if kept.is_empty() {
-        page.remove(b"Annots");
-    } else {
-        page.set("Annots", Object::Array(kept));
+    {
+        if kept.is_empty() {
+            page.remove(b"Annots");
+        } else {
+            page.set("Annots", Object::Array(kept));
+        }
     }
-    true
+    dropped
+}
+
+/// The hidden content an annotation is, by its subtype: a form widget, a link,
+/// rich media, or (every other subtype) a markup annotation.
+fn annotation_content(annotation: &Dictionary) -> HiddenContent {
+    let subtype = annotation.get(b"Subtype").and_then(Object::as_name);
+    match subtype.unwrap_or_default() {
+        b"Widget" => HiddenContent::FormField,
+        b"Link" => HiddenContent::Link,
+        b"Screen" | b"RichMedia" | b"Movie" | b"Sound" | b"3D" => HiddenContent::Control,
+        _ => HiddenContent::Annotation,
+    }
 }
 
 /// Whether an annotation is a link to a place in this same document: a `/Link`
@@ -226,57 +244,73 @@ fn is_internal_link(annotation: &Dictionary) -> bool {
 }
 
 /// Remove the catalog's hidden structures and every name tree but the kept
-/// ones, returning whether anything was removed.
-fn sanitize_catalog(doc: &mut Document) -> bool {
+/// ones, recording each in `stripped`.
+fn sanitize_catalog(doc: &mut Document, stripped: &mut StrippedContent) {
     let names = doc
         .catalog()
         .ok()
         .and_then(|catalog| catalog.get(b"Names").ok())
         .cloned();
-    let mut changed = match names {
-        Some(Object::Reference(id)) => doc
+    if let Some(Object::Reference(id)) = names
+        && let Some(names) = doc
             .get_object_mut(id)
             .ok()
             .and_then(|o| o.as_dict_mut().ok())
-            .is_some_and(retain_kept_names),
-        _ => false,
-    };
+    {
+        retain_kept_names(names, stripped);
+    }
     let Ok(catalog) = doc.catalog_mut() else {
-        return changed;
+        return;
     };
     if let Ok(Object::Dictionary(names)) = catalog.get_mut(b"Names") {
-        changed |= retain_kept_names(names);
+        retain_kept_names(names, stripped);
     }
-    changed | remove_keys(catalog, &CATALOG_REMOVED)
+    for (key, content) in CATALOG_REMOVED {
+        stripped.record(content, None, removed(catalog, key));
+    }
 }
 
 /// Drop every entry of a `/Names` dictionary but the kept name trees,
-/// returning whether any was dropped.
-fn retain_kept_names(names: &mut Dictionary) -> bool {
+/// recording each by the hidden content it holds.
+fn retain_kept_names(names: &mut Dictionary, stripped: &mut StrippedContent) {
     let dropped: Vec<Vec<u8>> = names
         .iter()
         .map(|(key, _)| key.clone())
         .filter(|key| !NAMES_KEPT.contains(&key.as_slice()))
         .collect();
-    for key in &dropped {
-        names.remove(key);
+    for key in dropped {
+        names.remove(&key);
+        stripped.record(name_tree_content(&key), None, 1);
     }
-    !dropped.is_empty()
+}
+
+/// The hidden content a catalog name tree holds, by its key.
+fn name_tree_content(key: &[u8]) -> HiddenContent {
+    match key {
+        b"JavaScript" => HiddenContent::Script,
+        b"IDS" | b"URLS" => HiddenContent::Link,
+        b"Renditions" | b"AlternatePresentations" => HiddenContent::Control,
+        b"AP" => HiddenContent::Annotation,
+        b"Pages" | b"Templates" => HiddenContent::FormField,
+        _ => HiddenContent::ApplicationData,
+    }
 }
 
 /// Remove an attachment file specification's description and its embedded
-/// file's timestamps and checksum, returning whether any was removed.
-fn sanitize_attachment_metadata(dict: &mut Dictionary) -> bool {
-    let mut changed = false;
+/// file's timestamps and checksum, returning how many were removed.
+fn sanitize_attachment_metadata(dict: &mut Dictionary) -> usize {
+    let mut count = 0;
     if dict.has_type(b"Filespec") {
-        changed |= remove_keys(dict, &[b"Desc"]);
+        count += removed(dict, b"Desc");
     }
     if dict.has_type(b"EmbeddedFile")
         && let Ok(Object::Dictionary(params)) = dict.get_mut(b"Params")
     {
-        changed |= remove_keys(params, &[b"CreationDate", b"ModDate", b"CheckSum", b"Mac"]);
+        for key in [&b"CreationDate"[..], b"ModDate", b"CheckSum", b"Mac"] {
+            count += removed(params, key);
+        }
     }
-    changed
+    count
 }
 
 /// `object`'s dictionary: its own, or a stream's.
@@ -297,10 +331,9 @@ fn dictionary_mut(object: &mut Object) -> Option<&mut Dictionary> {
     }
 }
 
-/// Remove `keys` from `dict`, returning whether any was present.
-fn remove_keys(dict: &mut Dictionary, keys: &[&[u8]]) -> bool {
-    keys.iter()
-        .fold(false, |changed, key| dict.remove(key).is_some() | changed)
+/// Remove `key` from `dict`, returning 1 when it was present and 0 otherwise.
+fn removed(dict: &mut Dictionary, key: &[u8]) -> usize {
+    usize::from(dict.remove(key).is_some())
 }
 
 #[cfg(test)]
@@ -397,6 +430,41 @@ mod tests {
             "Subtype" => "Link",
             "A" => dictionary! { "S" => "URI", "URI" => Object::string_literal("mailto:jane@example.com") },
         })
+    }
+
+    #[test]
+    fn the_record_names_each_removed_item() {
+        let mut doc = document(vec![sticky_note(), internal_link(), external_link()]);
+        let counts: Vec<(HiddenContent, usize)> = sanitize(&mut doc)
+            .iter()
+            .map(|entry| (entry.content, entry.count))
+            .collect();
+        assert_eq!(
+            counts,
+            [
+                (HiddenContent::Properties, 2),
+                (HiddenContent::Annotation, 1),
+                (HiddenContent::Thumbnail, 1),
+                (HiddenContent::Link, 1),
+                (HiddenContent::Script, 1),
+                (HiddenContent::Action, 1),
+                (HiddenContent::DocumentId, 1),
+                (HiddenContent::ApplicationData, 1),
+                (HiddenContent::Outline, 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_unreachable_object_is_a_prior_revision() {
+        let mut doc = document(Vec::new());
+        doc.add_object(Object::string_literal("deleted paragraph"));
+        let stripped = sanitize(&mut doc);
+        assert!(
+            stripped
+                .iter()
+                .any(|entry| { entry.content == HiddenContent::PriorRevision && entry.count == 1 })
+        );
     }
 
     #[test]

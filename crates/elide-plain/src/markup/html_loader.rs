@@ -71,12 +71,11 @@ pub(crate) struct HtmlLoader;
 impl DocumentLoader for HtmlLoader {
     async fn decode(&self, content: ContentData, policy: HiddenContentPolicy) -> Result<Document> {
         let sanitizer = MarkupSanitizer::new(Dialect::Html, policy);
-        let (text, sanitized) = sanitizer.sanitize(content.decode()?)?;
+        let (text, stripped) = sanitizer.sanitize(content.decode()?)?;
         let config = MarkupConfig::lenient(BLOCK_ELEMENTS, SKIP_BODY_ELEMENTS);
         // `build_items` already reports a `MalformedInput` parse error.
         let items = build_items(&text, config)?;
-        Ok(markup_document(FORMAT_ID.clone(), text, items, sanitizer)
-            .with_changed_at_decode(sanitized))
+        Ok(markup_document(FORMAT_ID.clone(), text, items, sanitizer).with_stripped(stripped))
     }
 }
 

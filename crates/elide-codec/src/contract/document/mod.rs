@@ -12,6 +12,7 @@
 
 mod local_id;
 mod recombine;
+mod stripped;
 
 use std::fmt;
 
@@ -22,6 +23,7 @@ use elide_core::{Error, ErrorKind, Result};
 
 pub use self::local_id::LocalId;
 pub use self::recombine::{LeafRecombine, Recombine};
+pub use self::stripped::{Stripped, StrippedContent};
 use super::{ErasedStream, FormatId, Stream};
 use crate::content::ContentData;
 
@@ -32,8 +34,8 @@ pub struct Document {
     parts: Vec<DocumentPart>,
     /// Blob parts dropped since decode, removed from the output on encode.
     removed: Vec<LocalId>,
-    /// Whether decode changed the content (stripping its hidden content).
-    changed_at_decode: bool,
+    /// What decode stripped from the content.
+    stripped: StrippedContent,
     /// The policy the document's hidden content was handled under.
     policy: HiddenContentPolicy,
     recombine: Box<dyn Recombine>,
@@ -101,26 +103,30 @@ impl Document {
             format_id,
             parts,
             removed: Vec::new(),
-            changed_at_decode: false,
+            stripped: StrippedContent::new(),
             policy: HiddenContentPolicy::default(),
             recombine,
         }
     }
 
-    /// This document marked as changed at decode, when `changed` holds: decode
-    /// stripped hidden content, so the document differs from its input bytes.
-    /// Such a document is re-encoded even when detection changes nothing in
-    /// it, so a nested one folds its stripped bytes back into its parent
-    /// instead of the original.
+    /// This document with the record of what its decode stripped.
     #[must_use]
-    pub fn with_changed_at_decode(mut self, changed: bool) -> Self {
-        self.changed_at_decode = changed;
+    pub fn with_stripped(mut self, stripped: StrippedContent) -> Self {
+        self.stripped = stripped;
         self
     }
 
-    /// Whether decode changed the content (stripping its hidden content).
+    /// What decode stripped from the content.
+    pub fn stripped(&self) -> &StrippedContent {
+        &self.stripped
+    }
+
+    /// Whether decode changed the content: it stripped something, so the
+    /// document differs from its input bytes. Such a document is re-encoded
+    /// even when detection changes nothing in it, so a nested one folds its
+    /// stripped bytes back into its parent instead of the original.
     pub fn changed_at_decode(&self) -> bool {
-        self.changed_at_decode
+        !self.stripped.is_empty()
     }
 
     /// The [`HiddenContentPolicy`] the document was decoded under, which every

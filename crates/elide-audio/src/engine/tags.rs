@@ -14,6 +14,8 @@ use std::str;
 
 use elide_core::{Error, ErrorKind, Result};
 
+use crate::buffer::Untagged;
+
 /// Remove every tag block from the MP3 `bytes`, leaving the frame stream.
 ///
 /// # Errors
@@ -21,10 +23,12 @@ use elide_core::{Error, ErrorKind, Result};
 /// [`ErrorKind::MalformedInput`] if a tag block's declared size overruns the
 /// file.
 #[cfg(feature = "mp3")]
-pub(crate) fn strip_mp3(bytes: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn strip_mp3(bytes: &[u8]) -> Result<Untagged> {
+    let mut tags = 0;
     let mut start = 0;
     while let Some(len) = id3v2_header_tag(&bytes[start..])? {
         start += len;
+        tags += 1;
     }
     let mut end = bytes.len();
     loop {
@@ -43,8 +47,12 @@ pub(crate) fn strip_mp3(bytes: &[u8]) -> Result<Vec<u8>> {
             },
         };
         end -= len;
+        tags += 1;
     }
-    Ok(bytes[start..end].to_vec())
+    Ok(Untagged {
+        bytes: bytes[start..end].to_vec(),
+        tags,
+    })
 }
 
 /// The length of the ID3v2 tag opening `bytes`, or `None` when it opens with
@@ -144,11 +152,12 @@ const WAV_PLAYBACK_CHUNKS: [&[u8; 4]; 3] = [b"fmt ", b"fact", b"data"];
 /// [`ErrorKind::MalformedInput`] if the bytes are not a RIFF `WAVE` file or a
 /// chunk overruns it.
 #[cfg(feature = "wav")]
-pub(crate) fn strip_wav(bytes: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn strip_wav(bytes: &[u8]) -> Result<Untagged> {
     if bytes.len() < 12 || !bytes.starts_with(b"RIFF") || &bytes[8..12] != b"WAVE" {
         return Err(malformed("not a RIFF WAVE file"));
     }
     let mut chunks = Vec::with_capacity(bytes.len());
+    let mut tags = 0;
     let mut at = 12;
     while at < bytes.len() {
         let header = bytes
@@ -160,6 +169,8 @@ pub(crate) fn strip_wav(bytes: &[u8]) -> Result<Vec<u8>> {
         let end = within(end, bytes.len(), "WAV chunk")?;
         if WAV_PLAYBACK_CHUNKS.contains(&header[..4].try_into().expect("4 bytes")) {
             chunks.extend_from_slice(&bytes[at..end]);
+        } else {
+            tags += 1;
         }
         at = end;
     }
@@ -170,7 +181,7 @@ pub(crate) fn strip_wav(bytes: &[u8]) -> Result<Vec<u8>> {
     out.extend_from_slice(&riff_size.to_le_bytes());
     out.extend_from_slice(b"WAVE");
     out.extend_from_slice(&chunks);
-    Ok(out)
+    Ok(Untagged { bytes: out, tags })
 }
 
 /// `len` when it fits in `available` bytes, else a malformed error naming
@@ -247,8 +258,9 @@ mod tests {
             bytes.extend_from_slice(FRAMES);
             bytes.extend(apev2(b"Artist=Jane"));
             bytes.extend(id3v1("Jane"));
-            let out = strip_mp3(&bytes).unwrap();
-            assert_eq!(out, FRAMES);
+            let untagged = strip_mp3(&bytes).unwrap();
+            assert_eq!(untagged.bytes, FRAMES);
+            assert_eq!(untagged.tags, 4);
         }
 
         #[test]
@@ -257,12 +269,13 @@ mod tests {
             let lyrics = b"LYRICSBEGININD00002Jane";
             bytes.extend_from_slice(lyrics);
             bytes.extend(format!("{:06}LYRICS200", lyrics.len()).as_bytes());
-            assert_eq!(strip_mp3(&bytes).unwrap(), FRAMES);
+            assert_eq!(strip_mp3(&bytes).unwrap().bytes, FRAMES);
         }
 
         #[test]
         fn leaves_an_untagged_stream_unchanged() {
-            assert_eq!(strip_mp3(FRAMES).unwrap(), FRAMES);
+            let untagged = strip_mp3(FRAMES).unwrap();
+            assert_eq!((untagged.bytes.as_slice(), untagged.tags), (FRAMES, 0));
         }
 
         #[test]
@@ -309,7 +322,9 @@ mod tests {
                 data.clone(),
                 chunk(b"id3 ", b"ID3 tag"),
             ]);
-            assert_eq!(strip_wav(&bytes).unwrap(), wav(&[fmt, data]));
+            let untagged = strip_wav(&bytes).unwrap();
+            assert_eq!(untagged.bytes, wav(&[fmt, data]));
+            assert_eq!(untagged.tags, 3);
         }
 
         #[test]

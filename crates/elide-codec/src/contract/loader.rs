@@ -61,10 +61,11 @@ pub trait Loader: Send + Sync + 'static {
 ///
 /// Decoding is where a format applies the [`HiddenContentPolicy`]: hidden content
 /// the policy strips is gone before any part is built, so detection only sees
-/// what the encoded document will carry. A format that changes the content
-/// while stripping marks the document
-/// [`changed_at_decode`](Document::changed_at_decode), so it is re-encoded even
-/// when detection finds nothing.
+/// what the encoded document will carry. A format records what it stripped on
+/// the document ([`with_stripped`](Document::with_stripped)), naming each item
+/// by the [`HiddenContent`](elide_core::redaction::HiddenContent) vocabulary,
+/// so the strip is reported and the document is re-encoded even when detection
+/// finds nothing.
 #[async_trait::async_trait]
 pub trait DocumentLoader: Send + Sync + 'static {
     /// Validate, sanitize under `policy`, and parse the content into a

@@ -8,7 +8,9 @@ use std::sync::Arc;
 use bytes::Bytes;
 use elide_codec::content::ContentData;
 use elide_codec::extract::{ExtractStream, SharedSplice};
-use elide_codec::{Document, DocumentLoader, DocumentPart, ErasedStream, LocalId, Stream};
+use elide_codec::{
+    Document, DocumentLoader, DocumentPart, ErasedStream, LocalId, Stream, StrippedContent,
+};
 use elide_core::modality::text::Text;
 use elide_core::redaction::{Disposition, HiddenContentPolicy};
 use elide_core::{Error, ErrorKind, Result};
@@ -27,7 +29,7 @@ struct Decoded<C: OoxmlCodec> {
     stream: ExtractStream<OoxmlAddress>,
     recombine: OoxmlRecombine<C>,
     blobs: Vec<DocumentPart>,
-    sanitized: bool,
+    stripped: StrippedContent,
 }
 
 /// Sanitize the package under `policy`, extract its text blocks and
@@ -47,8 +49,7 @@ fn decode_package<C: OoxmlCodec>(
     policy: HiddenContentPolicy,
 ) -> Result<Decoded<C>> {
     let source = content.to_bytes();
-    let (sanitized, _) = sanitize(&source, policy, &C::Format::classifier())?;
-    let changed = sanitized.is_some();
+    let (sanitized, stripped) = sanitize(&source, policy, &C::Format::classifier())?;
     let archive = sanitized.map_or(source, Bytes::from);
     let pkg = OoxmlPackage::<C::Format>::open(&archive)?;
     let doc_props = match policy.metadata {
@@ -105,7 +106,7 @@ fn decode_package<C: OoxmlCodec>(
             _codec: PhantomData,
         },
         blobs: embeddings.chain(properties).collect(),
-        sanitized: changed,
+        stripped,
     })
 }
 
@@ -133,7 +134,7 @@ pub(crate) fn decode_document<C: OoxmlCodec>(
     let parts = iter::once(body).chain(decoded.blobs).collect();
     Ok(
         Document::new(C::FORMAT_ID, parts, Box::new(decoded.recombine))
-            .with_changed_at_decode(decoded.sanitized),
+            .with_stripped(decoded.stripped),
     )
 }
 

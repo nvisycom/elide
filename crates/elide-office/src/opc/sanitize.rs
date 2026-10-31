@@ -24,11 +24,11 @@
 //! revision marks, comment anchors, editor fingerprints. Everything else is
 //! repacked byte-for-byte.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
-use std::fmt;
+use std::collections::{HashMap, HashSet};
 
 use bytes::Bytes;
-use elide_core::redaction::{Disposition, HiddenContentPolicy};
+use elide_codec::{LocalId, StrippedContent};
+use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
 use elide_core::{Error, ErrorKind, Result};
 
 use crate::opc::PartClassifier;
@@ -41,45 +41,22 @@ use crate::opc::references::References;
 use crate::opc::relationships::{self, HYPERLINK};
 use crate::opc::xml_edit::{self, Rules};
 
-/// A list of element edits, each named by the hidden content it removes.
-pub(crate) type Edits<'a> = Vec<(&'static str, &'a dyn Rules)>;
+/// A list of element edits, each naming the hidden content it removes through
+/// [`Rules::content`].
+pub(crate) type Edits<'a> = Vec<&'a dyn Rules>;
 
 /// A format's part of the sanitizing: the element edits it applies to the
 /// parts that stay. A sanitizer is a [`PartClassifier`] too, so checking an
 /// encoded package knows which parts the format extracts text from.
 pub(crate) trait Sanitizer: PartClassifier {
-    /// The element edits for a kept XML part of `kind` under `policy`, each
-    /// named by the hidden content it removes.
+    /// The element edits for a kept XML part of `kind` under `policy`.
     fn edits(&self, kind: PartKind, policy: HiddenContentPolicy) -> Edits<'static>;
 }
 
-/// What a sanitize pass removed, by kind; empty when the package carried no
-/// hidden content.
-#[derive(Debug, Default)]
-pub(crate) struct Removed(BTreeSet<&'static str>);
-
-impl Removed {
-    /// Record that hidden content of kind `what` was removed.
-    fn note(&mut self, what: &'static str) {
-        self.0.insert(what);
-    }
-
-    /// Whether nothing was removed.
-    pub(crate) fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-}
-
-impl fmt::Display for Removed {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let kinds: Vec<&str> = self.0.iter().copied().collect();
-        f.write_str(&kinds.join(", "))
-    }
-}
-
 /// The package `document` with its hidden content removed under `policy` and
-/// `sanitizer`'s edits: the new bytes (`None` when nothing changed) and what
-/// was removed.
+/// `sanitizer`'s edits: the new bytes (`None` when nothing changed) and the
+/// record of what was removed, each item at the part it was removed from or
+/// with.
 ///
 /// # Errors
 ///
@@ -89,9 +66,9 @@ pub(crate) fn sanitize(
     document: &[u8],
     policy: HiddenContentPolicy,
     sanitizer: &dyn Sanitizer,
-) -> Result<(Option<Vec<u8>>, Removed)> {
+) -> Result<(Option<Vec<u8>>, StrippedContent)> {
     let index = Index::read(document)?;
-    let mut removed = Removed::default();
+    let mut stripped = StrippedContent::new();
 
     // Decide each part's fate by its kind.
     let kinds: HashMap<&PartPath, PartKind> = index
@@ -102,15 +79,15 @@ pub(crate) fn sanitize(
         .collect();
     let mut gone: HashSet<PartPath> = HashSet::new();
     for (&path, &kind) in &kinds {
-        if let Some(what) = removal(kind, policy, path)? {
-            removed.note(what);
+        if let Some(content) = removal(kind, policy, path)? {
+            stripped.record(content, Some(local_id(path)), 1);
             gone.insert(path.clone());
         }
     }
 
     let edits = |path: &PartPath| sanitizer.edits(kinds[path], policy);
-    let bytes = repack(document, &index, gone, &edits, &mut removed)?;
-    Ok((bytes, removed))
+    let bytes = repack(document, &index, gone, &edits, &mut stripped)?;
+    Ok((bytes, stripped))
 }
 
 /// The package `document` with `parts` removed, along with every relationship
@@ -130,7 +107,7 @@ pub(crate) fn remove_parts(document: &[u8], parts: HashSet<PartPath>) -> Result<
         &index,
         parts,
         &|_| Vec::new(),
-        &mut Removed::default(),
+        &mut StrippedContent::new(),
     )
 }
 
@@ -138,14 +115,15 @@ pub(crate) fn remove_parts(document: &[u8], parts: HashSet<PartPath>) -> Result<
 /// relationships go with it, every relationship that targets a removed part or
 /// leaves the package other than as a hyperlink is dropped from its source, and
 /// every kept XML part gets the element `edits` for its path plus the removal of
-/// the elements naming a dropped relationship. Returns the new bytes, or `None`
-/// when nothing changes.
+/// the elements naming a dropped relationship. Each external relationship
+/// dropped and each element edit is recorded in `stripped`. Returns the new
+/// bytes, or `None` when nothing changes.
 fn repack(
     document: &[u8],
     index: &Index,
     mut gone: HashSet<PartPath>,
     edits: &dyn Fn(&PartPath) -> Edits<'static>,
-    removed: &mut Removed,
+    stripped: &mut StrippedContent,
 ) -> Result<Option<Vec<u8>>> {
     let mut dropped: HashMap<PartPath, HashSet<String>> = HashMap::new();
     for (rels_path, (source, rels)) in &index.relationships {
@@ -159,7 +137,7 @@ fn repack(
                 None => {
                     let hidden = rel.kind != HYPERLINK;
                     if hidden {
-                        removed.note("external references");
+                        stripped.record(HiddenContent::Link, source.as_ref().map(local_id), 1);
                     }
                     hidden
                 }
@@ -200,9 +178,9 @@ fn repack(
                 .map(References::dropping);
             let mut part_edits: Edits<'_> = if xml { edits(path) } else { Vec::new() };
             if let Some(references) = &references {
-                part_edits.push(("external references", references));
+                part_edits.push(references);
             }
-            edit_part(path, bytes, part_edits, removed)?
+            edit_part(path, bytes, part_edits, stripped)?
         };
         if let Some(edited) = edited {
             changed.insert(path.clone(), edited.into_bytes());
@@ -223,25 +201,24 @@ fn repack(
     archive::write(document, entries).map(Some)
 }
 
-/// What happens to a part of `kind` under `policy`: removed (named by what it
-/// is), kept (`None`), or the document refused.
+/// What happens to a part of `kind` under `policy`: removed (as the hidden
+/// content it is), kept (`None`), or the document refused.
 fn removal(
     kind: PartKind,
     policy: HiddenContentPolicy,
     path: &PartPath,
-) -> Result<Option<&'static str>> {
-    let removes_collaboration = policy.collaboration == Disposition::Strip;
+) -> Result<Option<HiddenContent>> {
+    let strips_collaboration = policy.collaboration == Disposition::Strip;
     Ok(match kind {
-        PartKind::Properties if policy.metadata == Disposition::Strip => Some("metadata"),
-        PartKind::CustomXml => Some("custom XML"),
-        PartKind::Comments | PartKind::CommentAuthors if removes_collaboration => Some("comments"),
-        PartKind::Revisions if removes_collaboration => Some("revisions"),
-        PartKind::Thumbnail => Some("thumbnail"),
-        PartKind::Active => Some("active content"),
-        PartKind::ExternalData => Some("external references"),
-        PartKind::PrinterSettings => Some("printer settings"),
-        PartKind::Signature => Some("signatures"),
-        PartKind::Private => Some("private data"),
+        PartKind::Properties if policy.metadata == Disposition::Strip => {
+            Some(HiddenContent::Properties)
+        }
+        PartKind::CustomXml => Some(HiddenContent::CustomData),
+        PartKind::Comments | PartKind::CommentAuthors if strips_collaboration => {
+            Some(HiddenContent::Comment)
+        }
+        PartKind::Revisions if strips_collaboration => Some(HiddenContent::TrackedChange),
+        PartKind::Hidden(content) => Some(content),
         PartKind::Unsupported => return Err(refused(path, "is not supported for redaction")),
         PartKind::Unknown => {
             return Err(refused(
@@ -254,22 +231,30 @@ fn removal(
 }
 
 /// `bytes` of the kept XML part `path` with `edits` applied in turn, each
-/// recording in `removed` what it removed, or `None` when nothing changes.
+/// recording in `stripped` what it removed, or `None` when nothing changes.
 fn edit_part(
     path: &PartPath,
     bytes: &Bytes,
     edits: Edits<'_>,
-    removed: &mut Removed,
+    stripped: &mut StrippedContent,
 ) -> Result<Option<String>> {
     let mut current: Option<String> = None;
-    for (what, rules) in edits {
+    for rules in edits {
         let source = current.as_deref().map_or_else(|| text(path, bytes), Ok)?;
         if let Some(edited) = xml_edit::edit(source, rules)? {
-            removed.note(what);
-            current = Some(edited);
+            if let Some(content) = rules.content() {
+                stripped.record(content, Some(local_id(path)), edited.count);
+            }
+            current = Some(edited.text);
         }
     }
     Ok(current)
+}
+
+/// The container-local id of the package part `path`, the place a record
+/// entry names.
+fn local_id(path: &PartPath) -> LocalId {
+    LocalId::new(path.as_str().to_owned())
 }
 
 fn refused(path: &PartPath, why: &str) -> Error {

@@ -7,7 +7,9 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use elide_codec::content::ContentData;
-use elide_codec::{Document, DocumentLoader, DocumentPart, ErasedStream, LocalId, Stream};
+use elide_codec::{
+    Document, DocumentLoader, DocumentPart, ErasedStream, LocalId, Stream, StrippedContent,
+};
 use elide_core::Result;
 use elide_core::modality::text::Text;
 use elide_core::redaction::HiddenContentPolicy;
@@ -80,12 +82,12 @@ impl DocumentLoader for PdfDocumentLoader {
         // Hidden content goes first, so everything below (extraction, rendering,
         // the surfaced images) reads only what will ship.
         let opened = Pdf::open(content.as_bytes())?;
-        let (document, pdf, sanitized) = match opened.sanitize()? {
-            Some(bytes) => {
+        let (document, pdf, stripped) = match opened.sanitize()? {
+            Some((bytes, stripped)) => {
                 let pdf = Pdf::open(&bytes)?;
-                (Bytes::from(bytes), pdf, true)
+                (Bytes::from(bytes), pdf, stripped)
             }
-            None => (content.to_bytes(), opened, false),
+            None => (content.to_bytes(), opened, StrippedContent::new()),
         };
 
         // `RasterMode::Always` (feature `render`): observe each page, its text
@@ -112,9 +114,7 @@ impl DocumentLoader for PdfDocumentLoader {
                     detections: Vec::new(),
                 },
             });
-            return Ok(
-                Self::document(document, state, Vec::new()).with_changed_at_decode(sanitized)
-            );
+            return Ok(Self::document(document, state, Vec::new()).with_stripped(stripped));
         }
 
         // Default (`Auto`/`Never`, and the whole pure-Rust build): glyph
@@ -183,7 +183,7 @@ impl DocumentLoader for PdfDocumentLoader {
             deletions: Vec::new(),
             mode: RedactMode::GlyphDelete,
         });
-        Ok(Self::document(document, state, blobs).with_changed_at_decode(sanitized))
+        Ok(Self::document(document, state, blobs).with_stripped(stripped))
     }
 }
 

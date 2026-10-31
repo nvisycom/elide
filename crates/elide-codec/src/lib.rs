@@ -12,5 +12,6 @@ pub mod string;
 
 pub use self::contract::{
     Document, DocumentLoader, DocumentPart, EncodedPart, ErasedStream, Format, FormatId,
-    LeafLoader, LeafRecombine, Loader, LocalId, Recombine, Stream, TypedStream,
+    LeafLoader, LeafRecombine, Loader, LocalId, Recombine, Stream, Stripped, StrippedContent,
+    TypedStream,
 };

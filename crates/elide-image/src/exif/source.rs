@@ -9,7 +9,7 @@ use little_exif::filetype::FileExtension;
 use little_exif::ifd::ExifTagGroup;
 use little_exif::metadata::Metadata as ExifMetadata;
 
-use super::container::{scrub_jpeg, scrub_png};
+use super::container::{Scrubbed, scrub_jpeg, scrub_png};
 use super::guard;
 use super::tags::{FIELD_KEYS, is_transferable_ifd0_tag, read_tags, render_tags, tags_for_key};
 
@@ -66,13 +66,14 @@ impl<'a> Source<'a> {
     }
 
     /// Remove every metadata block but what a viewer needs to render the image
-    /// (its orientation), returning the resulting container bytes.
+    /// (its orientation), returning the resulting container and how many blocks
+    /// were removed.
     ///
     /// The whole container is scrubbed, not only its EXIF: XMP, IPTC, comments,
     /// and text chunks go too, so nothing the field table does not name can
     /// survive. The kept render tags are then written back as a minimal EXIF
     /// block.
-    pub(crate) fn strip(&self) -> Result<Vec<u8>> {
+    pub(crate) fn strip(&self) -> Result<Scrubbed> {
         let kept: Vec<ExifTag> = match self.parse()? {
             Some(exif) => guard(|| {
                 render_tags()
@@ -92,26 +93,34 @@ impl<'a> Source<'a> {
                 guard(|| ExifMetadata::clear_metadata(&mut buf, FileExtension::TIFF))?.map_err(
                     |e| Error::new(ErrorKind::MalformedInput, format!("exif strip: {e}")),
                 )?;
-                buf
+                let removed = usize::from(buf != self.bytes);
+                Scrubbed {
+                    bytes: buf,
+                    removed,
+                }
             }
             other => return Err(unsupported(other)),
         };
-        if kept.is_empty() {
+        if kept.is_empty() || cleared.removed == 0 {
             return Ok(cleared);
         }
-        let cleared = Source::new(&cleared, self.format);
-        let mut exif = cleared.parse()?.unwrap_or_else(ExifMetadata::new);
+        let source = Source::new(&cleared.bytes, self.format);
+        let mut exif = source.parse()?.unwrap_or_else(ExifMetadata::new);
         guard(AssertUnwindSafe(|| {
             for tag in kept {
                 exif.set_tag(tag);
             }
         }))?;
-        cleared.write(&exif)
+        Ok(Scrubbed {
+            bytes: source.write(&exif)?,
+            removed: cleared.removed,
+        })
     }
 
     /// Remove exactly the fields named by `keys` (each an EXIF tag key such as
     /// `"GPSLatitude"`), leaving all other EXIF fields intact, then scrub every
-    /// metadata block outside EXIF, returning the resulting container bytes.
+    /// metadata block outside EXIF, returning the resulting container and how
+    /// many blocks outside EXIF were removed.
     ///
     /// Unlike [`strip`](Self::strip), which drops everything but the render
     /// tags, this removes only the caller's chosen keys, so a per-field
@@ -120,9 +129,10 @@ impl<'a> Source<'a> {
     /// blocks outside EXIF (XMP, IPTC, comments, text chunks) cannot be
     /// addressed as fields, so they are always removed, even when `keys` is
     /// empty.
-    pub(crate) fn remove_keys(&self, keys: &[&str]) -> Result<Vec<u8>> {
+    pub(crate) fn remove_keys(&self, keys: &[&str]) -> Result<Scrubbed> {
         let tags: Vec<ExifTag> = keys.iter().flat_map(|k| tags_for_key(k)).collect();
         let is_tiff = matches!(self.format, FileExtension::TIFF);
+        let mut tiff_blocks = 0;
         let edited = match self.parse()? {
             Some(mut exif) if is_tiff || !tags.is_empty() => {
                 guard(AssertUnwindSafe(|| {
@@ -132,7 +142,14 @@ impl<'a> Source<'a> {
                     // A TIFF keeps its non-EXIF metadata blocks as IFD0 tags.
                     if is_tiff {
                         for hex in TIFF_METADATA_BLOCK_TAGS {
-                            exif.remove_tag_by_hex_group(hex, ExifTagGroup::GENERIC);
+                            let present = exif
+                                .get_tag_by_hex(hex, Some(ExifTagGroup::GENERIC))
+                                .next()
+                                .is_some();
+                            if present {
+                                exif.remove_tag_by_hex_group(hex, ExifTagGroup::GENERIC);
+                                tiff_blocks += 1;
+                            }
                         }
                     }
                 }))?;
@@ -143,7 +160,10 @@ impl<'a> Source<'a> {
         match self.format {
             FileExtension::JPEG => scrub_jpeg(&edited, true),
             FileExtension::PNG { .. } => scrub_png(&edited, true),
-            FileExtension::TIFF => Ok(edited),
+            FileExtension::TIFF => Ok(Scrubbed {
+                bytes: edited,
+                removed: tiff_blocks,
+            }),
             other => Err(unsupported(other)),
         }
     }
@@ -159,8 +179,8 @@ impl<'a> Source<'a> {
     #[cfg(feature = "codec")]
     pub(crate) fn check_stripped(&self, fields_allowed: bool) -> Result<()> {
         let outside_exif = match self.format {
-            FileExtension::JPEG => scrub_jpeg(self.bytes, true)? != self.bytes,
-            FileExtension::PNG { .. } => scrub_png(self.bytes, true)? != self.bytes,
+            FileExtension::JPEG => scrub_jpeg(self.bytes, true)?.removed > 0,
+            FileExtension::PNG { .. } => scrub_png(self.bytes, true)?.removed > 0,
             FileExtension::TIFF => self.parse()?.is_some_and(|exif| {
                 TIFF_METADATA_BLOCK_TAGS.iter().any(|&hex| {
                     exif.get_tag_by_hex(hex, Some(ExifTagGroup::GENERIC))
@@ -365,14 +385,17 @@ mod tests {
             }]),
             ExifTag::Orientation(vec![6]),
         ]);
-        let stripped = source(&bytes).strip().expect("strip");
+        let stripped = source(&bytes).strip().expect("strip").bytes;
         assert!(keys(&stripped).is_empty(), "left: {:?}", keys(&stripped));
         assert!(carries(&stripped, &ExifTag::Orientation(Vec::new())));
     }
 
     #[test]
     fn strip_on_a_bare_image_is_a_successful_no_op() {
-        let stripped = source(&jpeg_bare()).strip().expect("strip a bare image");
+        let stripped = source(&jpeg_bare())
+            .strip()
+            .expect("strip a bare image")
+            .bytes;
         assert!(keys(&stripped).is_empty());
         assert!(!carries(&stripped, &ExifTag::Orientation(Vec::new())));
     }
@@ -389,7 +412,10 @@ mod tests {
         let png = FileExtension::PNG {
             as_zTXt_chunk: false,
         };
-        let stripped = Source::new(&bytes, png).strip().expect("strip a bare png");
+        let stripped = Source::new(&bytes, png)
+            .strip()
+            .expect("strip a bare png")
+            .bytes;
         assert!(
             Source::new(&stripped, png)
                 .values()
@@ -411,7 +437,10 @@ mod tests {
             ExifTag::Artist("Jane Roe".into()),
             ExifTag::Make("Nvisy".into()),
         ]);
-        let stripped = source(&bytes).remove_keys(&["Artist"]).expect("strip");
+        let stripped = source(&bytes)
+            .remove_keys(&["Artist"])
+            .expect("strip")
+            .bytes;
         assert_eq!(keys(&stripped), ["Make"]);
     }
 
@@ -437,7 +466,10 @@ mod tests {
             ExifTag::GPSDateStamp("2024:01:02".into()),
         ]);
         // The picked key is the one the entity surfaces.
-        let stripped = source(&bytes).remove_keys(&["GPSLatitude"]).expect("strip");
+        let stripped = source(&bytes)
+            .remove_keys(&["GPSLatitude"])
+            .expect("strip")
+            .bytes;
 
         // Every GPS tag must be gone, read straight from little_exif so no tag
         // the structured `Metadata` view omits can hide.

@@ -6,7 +6,7 @@
 //! hidden in the kept parts is an editor fingerprint: the creation id each slide
 //! carries.
 
-use elide_core::redaction::HiddenContentPolicy;
+use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
 
 use super::SlideFormat;
 use crate::opc::PartKind;
@@ -16,8 +16,9 @@ use crate::opc::xml_edit::Declared;
 /// The PowerPoint 2010 extension namespace (slide creation ids).
 const P14: &str = "http://schemas.microsoft.com/office/powerpoint/2010/main";
 
-/// Editor fingerprints, removed always.
-const FINGERPRINTS: Declared = Declared {
+/// The creation id each slide carries.
+const EDITING_SESSION_IDS: Declared = Declared {
+    content: HiddenContent::EditingSessionId,
     remove: &[(P14, "creationId")],
     unwrap: &[],
     attributes: &[],
@@ -27,7 +28,7 @@ impl Sanitizer for SlideFormat {
     fn edits(&self, kind: PartKind, _policy: HiddenContentPolicy) -> Edits<'static> {
         match kind {
             PartKind::Main | PartKind::Story => {
-                vec![("editor fingerprints", &FINGERPRINTS)]
+                vec![&EDITING_SESSION_IDS]
             }
             _ => Vec::new(),
         }

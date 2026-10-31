@@ -27,6 +27,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use elide_core::{Error, ErrorKind, Result};
 
+pub(crate) use self::container::Scrubbed;
 pub use self::recognizer::ExifRecognizer;
 pub(crate) use self::source::Source;
 

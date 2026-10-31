@@ -8,7 +8,7 @@
 //! - **External references**, always: the workbook's list of linked external
 //!   workbooks, whose parts are removed.
 
-use elide_core::redaction::HiddenContentPolicy;
+use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
 
 use super::SheetClassifier;
 use crate::opc::PartKind;
@@ -26,13 +26,10 @@ const XR3: &str = "http://schemas.microsoft.com/office/spreadsheetml/2016/revisi
 const XR6: &str = "http://schemas.microsoft.com/office/spreadsheetml/2016/revision6";
 const XR10: &str = "http://schemas.microsoft.com/office/spreadsheetml/2016/revision10";
 
-/// Editor fingerprints and external references, removed always.
-const FINGERPRINTS: Declared = Declared {
-    remove: &[
-        (XR, "revisionPtr"),
-        (X15AC, "absPath"),
-        (SML, "fileSharing"),
-    ],
+/// The revision ids Excel stamps on the workbook, sheets, and tables.
+const EDITING_SESSION_IDS: Declared = Declared {
+    content: HiddenContent::EditingSessionId,
+    remove: &[(XR, "revisionPtr")],
     unwrap: &[],
     attributes: &[
         (XR, Local::Any),
@@ -43,8 +40,25 @@ const FINGERPRINTS: Declared = Declared {
     ],
 };
 
+/// The absolute path the workbook was last saved to.
+const FILE_PATH: Declared = Declared {
+    content: HiddenContent::FilePath,
+    remove: &[(X15AC, "absPath")],
+    unwrap: &[],
+    attributes: &[],
+};
+
+/// The file-sharing reservation: a user name and a password hash.
+const CREDENTIALS: Declared = Declared {
+    content: HiddenContent::Credential,
+    remove: &[(SML, "fileSharing")],
+    unwrap: &[],
+    attributes: &[],
+};
+
 /// The workbook's list of linked external workbooks.
-const EXTERNAL: Declared = Declared {
+const EXTERNAL_WORKBOOKS: Declared = Declared {
+    content: HiddenContent::Link,
     remove: &[(SML, "externalReferences")],
     unwrap: &[],
     attributes: &[],
@@ -54,11 +68,13 @@ impl Sanitizer for SheetClassifier {
     fn edits(&self, kind: PartKind, _policy: HiddenContentPolicy) -> Edits<'static> {
         match kind {
             PartKind::Main => vec![
-                ("editor fingerprints", &FINGERPRINTS),
-                ("external references", &EXTERNAL),
+                &EDITING_SESSION_IDS,
+                &FILE_PATH,
+                &CREDENTIALS,
+                &EXTERNAL_WORKBOOKS,
             ],
             PartKind::Story | PartKind::Structure | PartKind::Drawing | PartKind::Comments => {
-                vec![("editor fingerprints", &FINGERPRINTS)]
+                vec![&EDITING_SESSION_IDS]
             }
             _ => Vec::new(),
         }
