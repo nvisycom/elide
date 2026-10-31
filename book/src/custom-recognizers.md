@@ -70,8 +70,7 @@ let analyzer = Analyzer::<Text>::new().with_recognizer(TicketRecognizer);
 The recognition event is the first entry of the entity's audit trail: it
 records which recognizer found the entity, where, and how sure it was. The
 entity's confidence comes from it. The recognized range is where the match
-sits in the text the recognizer read; `Enhanced` looks for context keywords
-around it, so set it on every text match.
+sits in the text the recognizer read; set it on every text match.
 
 The `Context` carries the call's scope: check `ctx.languages(subject)` or the
 countries before running a rule that only applies to some of them.

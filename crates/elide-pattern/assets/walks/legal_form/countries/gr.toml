@@ -1,0 +1,9 @@
+# Greece (GR)
+
+[markers]
+distinctive = [
+  "E.P.E.", "I.K.E.", "SCE"
+]
+ambiguous = [
+  "A.E.", "E.E.", "O.E.", "SE"
+]

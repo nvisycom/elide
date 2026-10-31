@@ -1,0 +1,10 @@
+[markers]
+distinctive = [
+  "Bc", "BC.", "Bc.", "Dr", "DR.", "Dr.", "Ing", "ING.", "Ing.", "JUDR.",
+  "JUDr.", "Mgr", "MGR.", "Mgr.", "MUDR.", "MUDr.", "MVDR.", "MVDr.",
+  "PAEDDR.", "PaedDr.", "PHDR.", "PhDr.", "PROF", "Prof", "PROF.", "Prof.",
+  "RNDR.", "RNDr.", "THDR.", "ThDr."
+]
+ambiguous = [
+  "DOC.", "Doc.", "doc."
+]

@@ -4,7 +4,7 @@
 name = "datetime"
 labels = ["date_time"]
 
-[context]
+[context.languages]
 en = ["timestamp", "created", "modified", "logged", "at", "time"]
 es = ["marca de tiempo", "creado", "creada", "modificado", "modificada", "registrado", "a las", "hora", "fecha"]
 de = ["zeitstempel", "erstellt", "geändert", "geandert", "protokolliert", "um", "uhrzeit", "zeit"]

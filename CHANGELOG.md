@@ -15,6 +15,9 @@ and this project adheres to
 - File-format codecs for plain-text, JSON, HTML, XML, DOCX, PDF, RTF, PNG, JPEG,
   TIFF, WAV, MP3, CSV, and XLSX
 - Pattern-based entity detection with regex and dictionary recognizers
+- Name walks: company names ending in a legal form, institutions around a
+  head word, and a person's name after a title, with legal forms and word
+  lists converted from stella/anonymize
 - Post-match validators (Luhn checksum, SSN format) to reduce false positives
 - Built-in dictionaries for nationalities, religions, currencies,
   cryptocurrencies, and languages
@@ -33,8 +36,8 @@ and this project adheres to
 ### Crates
 
 - **elide-core:** Domain types, traits, and errors for the toolkit
-- **elide-context:** Post-recognition keyword-boost enhancer for entities
-- **elide-pattern:** Pattern and dictionary recognizers for PII/PHI detection
+- **elide-pattern:** Pattern and dictionary recognizers for PII/PHI detection,
+  with keyword-boost context enhancement
 - **elide-ner:** NER traits and language detection
 - **elide-llm:** LLM-mediated entity recognizer (text NER + image VLM)
 - **elide-stt:** Speech-to-text backends and transcription types

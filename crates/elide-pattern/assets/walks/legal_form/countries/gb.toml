@@ -1,0 +1,22 @@
+# United Kingdom (GB)
+
+[markers]
+distinctive = [
+  "CHARITABLE INCORPORATED ORGANISATION",
+  "Charitable Incorporated Organisation", "CIC", "CIO", "CO-OPERATIVE SOCIETY",
+  "Co-operative Society", "COMMUNITY BENEFIT SOCIETY",
+  "Community Benefit Society", "COMMUNITY INTEREST COMPANY",
+  "Community Interest Company", "INDUSTRIAL AND PROVIDENT SOCIETY",
+  "Industrial and Provident Society", "LIMITED", "Limited",
+  "LIMITED LIABILITY PARTNERSHIP", "Limited Liability Partnership",
+  "LIMITED PARTNERSHIP", "Limited Partnership", "LLP", "LTD", "Ltd", "PLC",
+  "plc", "PUBLIC LIMITED COMPANY", "Public Limited Company",
+  "REGISTERED SOCIETY", "Registered Society", "ROYAL CHARTER COMPANY",
+  "Royal Charter Company", "SCOTTISH CHARITABLE INCORPORATED ORGANISATION",
+  "Scottish Charitable Incorporated Organisation",
+  "SCOTTISH LIMITED PARTNERSHIP", "Scottish Limited Partnership",
+  "SOLE TRADER", "Sole Trader", "UNLIMITED COMPANY", "Unlimited Company"
+]
+ambiguous = [
+  "LP", "PARTNERSHIP", "Partnership", "SE"
+]

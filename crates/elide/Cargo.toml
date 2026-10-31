@@ -192,7 +192,6 @@ operator-fake = ["elide-operator/fake"]
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }
-elide-context = { workspace = true, features = [] }
 elide-detection = { workspace = true, features = [] }
 elide-pattern = { workspace = true, features = [], optional = true }
 elide-ner = { workspace = true, features = [], optional = true }

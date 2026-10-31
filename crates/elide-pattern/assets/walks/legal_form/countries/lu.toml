@@ -1,0 +1,18 @@
+# Luxembourg (LU)
+
+[markers]
+distinctive = [
+  "ASBL", "ASSOCIATION SANS BUT LUCRATIF", "Association Sans But Lucratif",
+  "FONDS D'INVESTISSEMENT SPÉCIALISÉ", "Fonds d'Investissement Spécialisé",
+  "GIE", "GROUPEMENT D'INTÉRÊT ÉCONOMIQUE", "Groupement d'Intérêt Économique",
+  "S.C.A.", "S.C.S.", "S.C.SP.", "S.C.Sp.", "S.E.C.S.", "S.e.C.S.", "S.À R.L.",
+  "S.à r.l.", "SCE", "SCSP", "SCSp", "SICAR", "SIF", "SOCIÉTÉ ANONYME",
+  "Société Anonyme", "SOCIÉTÉ COOPÉRATIVE", "Société Coopérative",
+  "SOCIÉTÉ EN COMMANDITE PAR ACTIONS", "Société en Commandite par Actions",
+  "SOCIÉTÉ EN COMMANDITE SIMPLE", "Société en Commandite Simple",
+  "SOCIÉTÉ EN NOM COLLECTIF", "Société en Nom Collectif",
+  "SOCIÉTÉ À RESPONSABILITÉ LIMITÉE", "Société à Responsabilité Limitée"
+]
+ambiguous = [
+  "FONDATION", "Fondation", "S.A.", "S.C.", "SE"
+]

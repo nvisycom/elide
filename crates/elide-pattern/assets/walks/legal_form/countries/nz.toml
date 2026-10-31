@@ -1,0 +1,13 @@
+# New Zealand (NZ)
+
+[markers]
+distinctive = [
+  "CHARITABLE TRUST", "Charitable Trust", "CO-OPERATIVE COMPANY",
+  "Co-operative Company", "GENERAL PARTNERSHIP", "General Partnership",
+  "INCORPORATED SOCIETY", "Incorporated Society", "LAQC", "LIMITED", "Limited",
+  "LIMITED PARTNERSHIP", "Limited Partnership", "LTC", "LTD", "Ltd",
+  "SOLE TRADER", "Sole Trader"
+]
+ambiguous = [
+  "TRUST", "Trust"
+]

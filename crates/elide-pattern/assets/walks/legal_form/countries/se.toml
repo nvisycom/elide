@@ -1,0 +1,13 @@
+# Sweden (SE)
+
+[markers]
+distinctive = [
+  "AKTIEBOLAG", "Aktiebolag", "BOSTADSRÄTTSFÖRENING", "Bostadsrättsförening",
+  "BRF", "EKONOMISK FÖRENING", "Ekonomisk förening", "ENSKILD FIRMA",
+  "Enskild firma", "HANDELSBOLAG", "Handelsbolag", "IDEELL FÖRENING",
+  "Ideell förening", "KOMMANDITBOLAG", "Kommanditbolag", "SCE"
+]
+ambiguous = [
+  "AB", "EF", "HB", "KB", "KOOPERATIV", "Kooperativ", "SE", "STIFTELSE",
+  "Stiftelse"
+]

@@ -1,0 +1,20 @@
+# Austria (AT)
+
+[markers]
+distinctive = [
+  "AKTIENGESELLSCHAFT", "Aktiengesellschaft", "E.GEN.", "e.Gen.", "e.U.",
+  "EINGETRAGENES EINZELUNTERNEHMEN", "eingetragenes Einzelunternehmen",
+  "GEN.M.B.H.", "Gen.m.b.H.", "GENOSSENSCHAFT MIT BESCHRÄNKTER HAFTUNG",
+  "Genossenschaft mit beschränkter Haftung", "GESBR", "GesbR",
+  "GESELLSCHAFT BÜRGERLICHEN RECHTS", "Gesellschaft bürgerlichen Rechts",
+  "GESELLSCHAFT MIT BESCHRÄNKTER HAFTUNG",
+  "Gesellschaft mit beschränkter Haftung", "GMBH", "GmbH", "GMBH & CO KG",
+  "GmbH & Co KG", "GMBH & CO OG", "GmbH & Co OG", "KOMMANDITGESELLSCHAFT",
+  "Kommanditgesellschaft", "OFFENE GESELLSCHAFT", "Offene Gesellschaft",
+  "PARTG", "PartG", "PARTNERSCHAFTSGESELLSCHAFT", "Partnerschaftsgesellschaft",
+  "PRIVATSTIFTUNG", "Privatstiftung", "SCE"
+]
+ambiguous = [
+  "AG", "E.U.", "EINZELUNTERNEHMEN", "Einzelunternehmen", "GENOSSENSCHAFT",
+  "Genossenschaft", "KG", "OG", "SE", "VEREIN", "Verein"
+]

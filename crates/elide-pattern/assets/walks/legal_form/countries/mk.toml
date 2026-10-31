@@ -1,0 +1,9 @@
+# North Macedonia (MK)
+
+[markers]
+distinctive = [
+  "DOO", "DOOEL", "JTD"
+]
+ambiguous = [
+  "AD", "KD"
+]

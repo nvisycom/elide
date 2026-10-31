@@ -2,7 +2,7 @@
 //!
 //! See `assets/NOTICE.md` for third-party attribution.
 
-use crate::{__shipped_pattern as shipped_pattern, Regex};
+use crate::{__shipped_pattern as shipped_pattern, Pattern};
 
 shipped_pattern!(
     /// UK NHS numbers (10-digit, mod-11 validated).
@@ -33,7 +33,7 @@ shipped_pattern!(
 
 /// Every UK-scoped built-in pattern.
 #[must_use]
-pub fn all() -> Vec<Regex> {
+pub fn all() -> Vec<Pattern> {
     vec![
         nhs(),
         nino(),

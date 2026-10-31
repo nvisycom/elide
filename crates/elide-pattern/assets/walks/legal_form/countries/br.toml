@@ -1,0 +1,20 @@
+# Brazil (BR)
+
+[markers]
+distinctive = [
+  "EIRELI", "EMPRESA DE PEQUENO PORTE", "Empresa de Pequeno Porte",
+  "EMPRESA INDIVIDUAL DE RESPONSABILIDADE LIMITADA",
+  "Empresa Individual de Responsabilidade Limitada", "LTDA", "Ltda", "LTDA.",
+  "Ltda.", "MICROEMPREENDEDOR INDIVIDUAL", "Microempreendedor Individual",
+  "S/A", "SLU", "SOCIEDADE ANÔNIMA", "Sociedade Anônima",
+  "SOCIEDADE COOPERATIVA", "Sociedade Cooperativa",
+  "SOCIEDADE EM COMANDITA POR AÇÕES", "Sociedade em Comandita por Ações",
+  "SOCIEDADE EM COMANDITA SIMPLES", "Sociedade em Comandita Simples",
+  "SOCIEDADE EM NOME COLETIVO", "Sociedade em Nome Coletivo",
+  "SOCIEDADE LIMITADA", "Sociedade Limitada", "SOCIEDADE LIMITADA UNIPESSOAL",
+  "Sociedade Limitada Unipessoal", "SOCIEDADE SIMPLES", "Sociedade Simples"
+]
+ambiguous = [
+  "ASSOCIAÇÃO", "Associação", "EPP", "FUNDAÇÃO", "Fundação", "ME", "MEI",
+  "MICROEMPRESA", "Microempresa", "S.A.", "SS"
+]

@@ -697,15 +697,6 @@ checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
 name = "convert_case"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "633458d4ef8c78b72454de2d54fd6ab2e60f9e02be22f3c6104cdc8a4e0fceb9"
-dependencies = [
- "unicode-segmentation",
-]
-
-[[package]]
-name = "convert_case"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "affbf0190ed2caf063e3def54ff444b449371d55c58e513a95ab98eca50adb49"
@@ -1052,29 +1043,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "derive_more"
-version = "2.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d751e9e49156b02b44f9c1815bcb94b984cdcc4396ecc32521c739452808b134"
-dependencies = [
- "derive_more-impl",
-]
-
-[[package]]
-name = "derive_more-impl"
-version = "2.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "799a97264921d8623a957f6c3b9011f3b5492f557bbb7a5a19b7fa6d06ba8dcb"
-dependencies = [
- "convert_case 0.10.0",
- "proc-macro2",
- "quote",
- "rustc_version",
- "syn 2.0.119",
- "unicode-xid",
-]
-
-[[package]]
 name = "deunicode"
 version = "1.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1156,7 +1124,6 @@ dependencies = [
  "elide-audio",
  "elide-backend",
  "elide-codec",
- "elide-context",
  "elide-core",
  "elide-detection",
  "elide-engine",
@@ -1221,16 +1188,6 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "tokio",
-]
-
-[[package]]
-name = "elide-context"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "elide-core",
- "hipstr",
- "unicode-segmentation",
 ]
 
 [[package]]
@@ -1448,9 +1405,8 @@ dependencies = [
  "criterion",
  "csv",
  "derive_builder",
- "derive_more",
- "elide-context",
  "elide-core",
+ "hipstr",
  "iban_validate",
  "jiff",
  "phonenumber",
@@ -1458,6 +1414,7 @@ dependencies = [
  "serde",
  "tokio",
  "toml",
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -5008,7 +4965,7 @@ version = "0.44.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1146bdcb55a3b2dbdd9d2df7a8846714499c9985e9042926c06ffe98b3a821bc"
 dependencies = [
- "convert_case 0.11.0",
+ "convert_case",
  "proc-macro-crate",
  "proc-macro2",
  "quote",
@@ -6202,12 +6159,6 @@ name = "unicode-segmentation"
 version = "1.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
-
-[[package]]
-name = "unicode-xid"
-version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
 name = "universal-hash"

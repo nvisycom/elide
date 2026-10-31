@@ -2,7 +2,7 @@
 //!
 //! See `assets/PRESIDIO.md` for third-party attribution.
 
-use crate::{__shipped_pattern as shipped_pattern, Regex};
+use crate::{__shipped_pattern as shipped_pattern, Pattern};
 
 shipped_pattern!(
     /// Betriebsstättennummer (BSNR), 9-digit clinic/practice ID.
@@ -68,7 +68,7 @@ shipped_pattern!(
 
 /// Every DE-scoped built-in pattern.
 #[must_use]
-pub fn all() -> Vec<Regex> {
+pub fn all() -> Vec<Pattern> {
     vec![
         bsnr(),
         lanr(),

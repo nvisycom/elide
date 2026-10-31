@@ -1,0 +1,16 @@
+# Slovenia (SI)
+
+[markers]
+distinctive = [
+  "d.d.", "D.N.O.", "d.n.o.", "D.O.O.", "d.o.o.", "DELNIŠKA DRUŽBA",
+  "Delniška družba", "DRUŽBA Z NEOMEJENO ODGOVORNOSTJO",
+  "Družba z neomejeno odgovornostjo", "DRUŽBA Z OMEJENO ODGOVORNOSTJO",
+  "Družba z omejeno odgovornostjo", "k.d.", "K.D.D.", "k.d.d.",
+  "KOMANDITNA DELNIŠKA DRUŽBA", "Komanditna delniška družba",
+  "KOMANDITNA DRUŽBA", "Komanditna družba", "s.p.", "SAMOSTOJNI PODJETNIK",
+  "Samostojni podjetnik", "SCE"
+]
+ambiguous = [
+  "D.D.", "DRUŠTVO", "Društvo", "K.D.", "S.P.", "SE", "USTANOVA", "Ustanova",
+  "ZADRUGA", "Zadruga", "ZAVOD", "Zavod"
+]

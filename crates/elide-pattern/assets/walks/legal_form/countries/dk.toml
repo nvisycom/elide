@@ -1,0 +1,17 @@
+# Denmark (DK)
+
+[markers]
+distinctive = [
+  "A/S", "AKTIESELSKAB", "Aktieselskab", "AMBA", "AmbA",
+  "ANDELSSELSKAB MED BEGRÆNSET ANSVAR", "Andelsselskab med begrænset ansvar",
+  "ANPARTSSELSKAB", "Anpartsselskab", "APS", "ApS", "ENKELTMANDSVIRKSOMHED",
+  "Enkeltmandsvirksomhed", "ERHVERVSDRIVENDE FOND", "Erhvervsdrivende fond",
+  "F.M.B.A.", "FORENING MED BEGRÆNSET ANSVAR", "Forening med begrænset ansvar",
+  "G/S", "I/S", "INTERESSENTSKAB", "Interessentskab", "IVS",
+  "IVÆRKSÆTTERSELSKAB", "Iværksætterselskab", "K/S", "KOMMANDITSELSKAB",
+  "Kommanditselskab", "P/S", "PARTNERSELSKAB", "Partnerselskab", "S.M.B.A.",
+  "SCE", "SELSKAB MED BEGRÆNSET ANSVAR", "Selskab med begrænset ansvar"
+]
+ambiguous = [
+  "FOND", "Fond", "SE"
+]

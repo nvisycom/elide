@@ -1,0 +1,30 @@
+# France (FR)
+
+[markers]
+distinctive = [
+  "ENTREPRISE INDIVIDUELLE", "Entreprise individuelle",
+  "ENTREPRISE UNIPERSONNELLE À RESPONSABILITÉ LIMITÉE",
+  "Entreprise unipersonnelle à responsabilité limitée", "EURL", "GEIE", "GIE",
+  "GROUPEMENT D'INTÉRÊT ÉCONOMIQUE", "Groupement d'intérêt économique", "SARL",
+  "SASU", "SCE", "SCOP", "SCP", "SCPI", "SCS", "SEL", "SELAFA", "SELARL",
+  "SELAS", "SELCA", "SEM", "SEP", "SICAV", "SOCIÉTÉ ANONYME",
+  "Société anonyme", "SOCIÉTÉ CIVILE IMMOBILIÈRE",
+  "Société civile immobilière", "SOCIÉTÉ CIVILE PROFESSIONNELLE",
+  "Société civile professionnelle", "SOCIÉTÉ COOPÉRATIVE ET PARTICIPATIVE",
+  "Société coopérative et participative", "SOCIÉTÉ D'EXERCICE LIBÉRAL",
+  "Société d'exercice libéral", "SOCIÉTÉ D'ÉCONOMIE MIXTE",
+  "Société d'économie mixte", "SOCIÉTÉ EN COMMANDITE PAR ACTIONS",
+  "Société en commandite par actions", "SOCIÉTÉ EN COMMANDITE SIMPLE",
+  "Société en commandite simple", "SOCIÉTÉ EN NOM COLLECTIF",
+  "Société en nom collectif", "SOCIÉTÉ EN PARTICIPATION",
+  "Société en participation", "SOCIÉTÉ PAR ACTIONS SIMPLIFIÉE",
+  "Société par actions simplifiée",
+  "SOCIÉTÉ PAR ACTIONS SIMPLIFIÉE UNIPERSONNELLE",
+  "Société par actions simplifiée unipersonnelle",
+  "SOCIÉTÉ À RESPONSABILITÉ LIMITÉE", "Société à responsabilité limitée"
+]
+ambiguous = [
+  "ASSOCIATION", "Association", "AUTO-ENTREPRENEUR", "Auto-entrepreneur",
+  "FONDATION", "Fondation", "MICRO-ENTREPRISE", "Micro-entreprise", "SA",
+  "SAS", "SCA", "SCI", "SE", "SNC"
+]

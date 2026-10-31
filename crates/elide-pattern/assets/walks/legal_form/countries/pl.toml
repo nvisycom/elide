@@ -1,0 +1,20 @@
+# Poland (PL)
+
+[markers]
+distinctive = [
+  "JEDNOOSOBOWA DZIAŁALNOŚĆ GOSPODARCZA",
+  "Jednoosobowa działalność gospodarcza", "P.S.A.", "PROSTA SPÓŁKA AKCYJNA",
+  "Prosta spółka akcyjna", "PRZEDSIĘBIORCA JEDNOOSOBOWY",
+  "Przedsiębiorca jednoosobowy", "S.K.A.", "SCE", "SP. J.", "Sp. j.", "SP. K.",
+  "Sp. k.", "SP. P.", "Sp. p.", "SP. Z O.O.", "Sp. z o.o.",
+  "SP. Z O.O. SP. K.", "Sp. z o.o. Sp. k.", "SPÓŁKA AKCYJNA", "Spółka Akcyjna",
+  "SPÓŁKA CYWILNA", "Spółka cywilna", "SPÓŁKA JAWNA", "Spółka jawna",
+  "SPÓŁKA KOMANDYTOWA", "Spółka komandytowa", "SPÓŁKA KOMANDYTOWO-AKCYJNA",
+  "Spółka komandytowo-akcyjna", "SPÓŁKA PARTNERSKA", "Spółka partnerska",
+  "SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ",
+  "Spółka z ograniczoną odpowiedzialnością"
+]
+ambiguous = [
+  "FUNDACJA", "Fundacja", "S.A.", "SE", "SPÓŁDZIELNIA", "Spółdzielnia",
+  "STOWARZYSZENIE", "Stowarzyszenie"
+]

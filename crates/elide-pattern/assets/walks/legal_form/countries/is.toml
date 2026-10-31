@@ -1,0 +1,15 @@
+# Iceland (IS)
+
+[markers]
+distinctive = [
+  "bs.", "EHF.", "ehf.", "EINKAHLUTAFÉLAG", "Einkahlutafélag",
+  "EINSTAKLINGSFYRIRTÆKI", "Einstaklingsfyrirtæki", "hf.", "HLUTAFÉLAG",
+  "Hlutafélag", "OHF.", "ohf.", "OPINBERT HLUTAFÉLAG", "Opinbert hlutafélag",
+  "SAMEIGNARFÉLAG", "Sameignarfélag", "SAMLAGSHLUTAFÉLAG", "Samlagshlutafélag",
+  "SAMVINNUFÉLAG", "Samvinnufélag", "SES.", "ses.", "sf.",
+  "SJÁLFSEIGNARSTOFNUN", "Sjálfseignarstofnun", "SLHF.", "slhf.", "SVF.",
+  "svf."
+]
+ambiguous = [
+  "BS.", "FÉLAG", "Félag", "HF.", "SF."
+]

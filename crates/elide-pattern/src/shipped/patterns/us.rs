@@ -1,6 +1,6 @@
 //! United States, patterns scoped to US jurisdictional formats.
 
-use crate::{__shipped_pattern as shipped_pattern, Regex};
+use crate::{__shipped_pattern as shipped_pattern, Pattern};
 
 shipped_pattern!(
     /// US bank routing numbers (ABA RTN, mod-10 validated).
@@ -47,7 +47,7 @@ shipped_pattern!(
 
 /// Every US-scoped built-in pattern.
 #[must_use]
-pub fn all() -> Vec<Regex> {
+pub fn all() -> Vec<Pattern> {
     vec![
         bank_routing(),
         ssn(),

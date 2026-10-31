@@ -1,0 +1,21 @@
+# Spain (ES)
+
+[markers]
+distinctive = [
+  "COMUNIDAD DE BIENES", "Comunidad de Bienes", "EMPRESARIO INDIVIDUAL",
+  "Empresario Individual", "S. COOP.", "S. Coop.", "S.A.U.", "S.COM.",
+  "S.Com.", "S.L.L.", "S.L.N.E.", "S.L.U.", "S.R.C.", "SCE",
+  "SOCIEDAD ANÓNIMA", "Sociedad Anónima", "SOCIEDAD ANÓNIMA UNIPERSONAL",
+  "Sociedad Anónima Unipersonal", "SOCIEDAD CIVIL", "Sociedad Civil",
+  "SOCIEDAD COLECTIVA", "Sociedad Colectiva", "SOCIEDAD COMANDITARIA",
+  "Sociedad Comanditaria", "SOCIEDAD COMANDITARIA POR ACCIONES",
+  "Sociedad Comanditaria por Acciones", "SOCIEDAD COOPERATIVA",
+  "Sociedad Cooperativa", "SOCIEDAD LIMITADA", "Sociedad Limitada",
+  "SOCIEDAD LIMITADA LABORAL", "Sociedad Limitada Laboral",
+  "SOCIEDAD LIMITADA NUEVA EMPRESA", "Sociedad Limitada Nueva Empresa",
+  "SOCIEDAD LIMITADA UNIPERSONAL", "Sociedad Limitada Unipersonal"
+]
+ambiguous = [
+  "ASOCIACIÓN", "Asociación", "AUTÓNOMO", "Autónomo", "FUNDACIÓN", "Fundación",
+  "S.A.", "S.C.", "S.L.", "SC", "SE"
+]

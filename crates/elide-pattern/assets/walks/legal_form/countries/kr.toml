@@ -1,0 +1,8 @@
+# South Korea (KR)
+
+[markers]
+distinctive = [
+  "CHUSIK HOESA", "Chusik Hoesa", "HAPJA HOESA", "Hapja Hoesa",
+  "HAPMYEONG HOESA", "Hapmyeong Hoesa", "YUHAN CHAEGIM HOESA",
+  "Yuhan Chaegim Hoesa", "YUHAN HOESA", "Yuhan Hoesa"
+]

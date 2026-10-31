@@ -1,0 +1,15 @@
+# Hong Kong (HK)
+
+[markers]
+distinctive = [
+  "COMPANY LIMITED BY GUARANTEE", "Company Limited by Guarantee", "LIMITED",
+  "Limited", "LIMITED PARTNERSHIP", "Limited Partnership", "LTD", "Ltd",
+  "PRIVATE COMPANY LIMITED BY SHARES", "Private Company Limited by Shares",
+  "PUBLIC COMPANY LIMITED BY SHARES", "Public Company Limited by Shares",
+  "REGISTERED NON-HONG KONG COMPANY", "Registered Non-Hong Kong Company",
+  "SOLE PROPRIETORSHIP", "Sole Proprietorship", "UNLIMITED COMPANY",
+  "Unlimited Company"
+]
+ambiguous = [
+  "PARTNERSHIP", "Partnership"
+]

@@ -1,0 +1,18 @@
+# Morocco (MA)
+
+[markers]
+distinctive = [
+  "GROUPEMENT D'INTÉRÊT ÉCONOMIQUE", "Groupement d'Intérêt Économique", "SARL",
+  "SARL AU", "SCS", "SOCIÉTÉ ANONYME", "Société Anonyme",
+  "SOCIÉTÉ EN COMMANDITE PAR ACTIONS", "Société en Commandite par Actions",
+  "SOCIÉTÉ EN COMMANDITE SIMPLE", "Société en Commandite Simple",
+  "SOCIÉTÉ EN NOM COLLECTIF", "Société en Nom Collectif",
+  "SOCIÉTÉ PAR ACTIONS SIMPLIFIÉE", "Société par Actions Simplifiée",
+  "SOCIÉTÉ À RESPONSABILITÉ LIMITÉE", "Société à Responsabilité Limitée",
+  "SOCIÉTÉ À RESPONSABILITÉ LIMITÉE À ASSOCIÉ UNIQUE",
+  "Société à Responsabilité Limitée à Associé Unique"
+]
+ambiguous = [
+  "ASSOCIATION", "Association", "AUTO-ENTREPRENEUR", "Auto-entrepreneur",
+  "COOPÉRATIVE", "Coopérative", "SA", "SAS", "SCA", "SNC"
+]

@@ -1,0 +1,22 @@
+# Portugal (PT)
+
+[markers]
+distinctive = [
+  "ACE", "AEIE", "COOPERATIVA DE RESPONSABILIDADE LIMITADA",
+  "Cooperativa de Responsabilidade Limitada", "CRL", "EMPRESA INDIVIDUAL",
+  "Empresa Individual", "EMPRESÁRIO EM NOME INDIVIDUAL",
+  "Empresário em Nome Individual",
+  "ESTABELECIMENTO INDIVIDUAL DE RESPONSABILIDADE LIMITADA",
+  "Estabelecimento Individual de Responsabilidade Limitada", "LDA.", "Lda.",
+  "S.A.R.L.", "SCE", "SGPS", "SOCIEDADE ANÓNIMA", "Sociedade Anónima",
+  "SOCIEDADE EM COMANDITA", "Sociedade em Comandita",
+  "SOCIEDADE EM COMANDITA POR ACÇÕES", "Sociedade em Comandita por Acções",
+  "SOCIEDADE EM NOME COLECTIVO", "Sociedade em Nome Colectivo",
+  "SOCIEDADE POR QUOTAS", "Sociedade por Quotas",
+  "SOCIEDADE POR QUOTAS UNIPESSOAL", "Sociedade por Quotas Unipessoal",
+  "UNIPESSOAL LDA.", "Unipessoal Lda."
+]
+ambiguous = [
+  "ASSOCIAÇÃO", "Associação", "COOPERATIVA", "Cooperativa", "FUNDAÇÃO",
+  "Fundação", "S.A.", "SC", "SE"
+]

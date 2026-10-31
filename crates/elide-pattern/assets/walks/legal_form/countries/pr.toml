@@ -1,0 +1,15 @@
+# Puerto Rico (PR)
+
+[markers]
+distinctive = [
+  "CORP.", "Corp.", "CORPORATION", "Corporation", "INC.", "Inc.",
+  "INCORPORATED", "Incorporated", "LIMITED LIABILITY COMPANY",
+  "Limited Liability Company", "LIMITED LIABILITY PARTNERSHIP",
+  "Limited Liability Partnership", "LIMITED PARTNERSHIP",
+  "Limited Partnership", "LLC", "LLP", "NON-PROFIT CORPORATION",
+  "Non-Profit Corporation", "PROFESSIONAL CORPORATION",
+  "Professional Corporation", "SOLE PROPRIETORSHIP", "Sole Proprietorship"
+]
+ambiguous = [
+  "COOPERATIVE", "Cooperative", "LP", "PARTNERSHIP", "Partnership"
+]

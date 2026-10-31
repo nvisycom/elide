@@ -1,0 +1,23 @@
+# Italy (IT)
+
+[markers]
+distinctive = [
+  "DITTA INDIVIDUALE", "Ditta individuale", "IMPRESA INDIVIDUALE",
+  "Impresa individuale", "S.A.P.A.", "S.a.p.a.", "S.A.S.", "S.a.s.",
+  "S.C.A.R.L.", "S.c.a.r.l.", "S.C.R.L.", "S.c.r.l.", "S.N.C.", "S.n.c.",
+  "S.P.A.", "S.p.A.", "S.R.L.", "S.r.l.", "S.R.L.S.", "S.r.l.s.", "SCE",
+  "SOCIETÀ A RESPONSABILITÀ LIMITATA", "Società a responsabilità limitata",
+  "SOCIETÀ A RESPONSABILITÀ LIMITATA SEMPLIFICATA",
+  "Società a responsabilità limitata semplificata", "SOCIETÀ COOPERATIVA",
+  "Società cooperativa", "SOCIETÀ COOPERATIVA A RESPONSABILITÀ LIMITATA",
+  "Società cooperativa a responsabilità limitata",
+  "SOCIETÀ IN ACCOMANDITA PER AZIONI", "Società in accomandita per azioni",
+  "SOCIETÀ IN ACCOMANDITA SEMPLICE", "Società in accomandita semplice",
+  "SOCIETÀ IN NOME COLLETTIVO", "Società in nome collettivo",
+  "SOCIETÀ PER AZIONI", "Società per azioni", "SOCIETÀ SEMPLICE",
+  "Società semplice", "SPA", "SpA", "SRL", "Srl"
+]
+ambiguous = [
+  "ASSOCIAZIONE", "Associazione", "CONSORZIO", "Consorzio", "FONDAZIONE",
+  "Fondazione", "S.S.", "SE"
+]

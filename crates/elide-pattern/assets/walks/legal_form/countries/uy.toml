@@ -1,0 +1,14 @@
+# Uruguay (UY)
+
+[markers]
+distinctive = [
+  "ASOCIACIÓN CIVIL", "Asociación Civil", "S. EN C.", "S. en C.", "S.A.S.",
+  "S.R.L.", "SOCIEDAD ANÓNIMA", "Sociedad Anónima", "SOCIEDAD COLECTIVA",
+  "Sociedad Colectiva", "SOCIEDAD DE RESPONSABILIDAD LIMITADA",
+  "Sociedad de Responsabilidad Limitada", "SOCIEDAD EN COMANDITA",
+  "Sociedad en Comandita", "SOCIEDAD POR ACCIONES SIMPLIFICADA",
+  "Sociedad por Acciones Simplificada"
+]
+ambiguous = [
+  "COOPERATIVA", "Cooperativa", "FUNDACIÓN", "Fundación", "S.A.", "SAS"
+]

@@ -12,7 +12,6 @@ mod pattern;
 
 use elide::modality::{Modality, TextRecognizable};
 use elide::recognition::Recognizer as RecognizerTrait;
-use elide::recognition::context::Enhanced;
 use elide::recognition::ner::NerRecognizer;
 use elide::recognition::pattern::PatternRecognizer;
 use js_sys::Function;
@@ -26,8 +25,8 @@ use crate::error::ElideError;
 /// modality; the enum lets one opaque handle serve every text-shaped stage
 /// without erasing the modality too early.
 enum Kind {
-    /// A context-enhanced pattern recognizer.
-    Pattern(Enhanced<PatternRecognizer>),
+    /// A pattern recognizer.
+    Pattern(PatternRecognizer),
     /// A NER recognizer backed by a JS callback.
     Ner(NerRecognizer<self::ner::JsCallbackBackend>),
 }

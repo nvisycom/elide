@@ -1,0 +1,13 @@
+# Montenegro (ME)
+
+[markers]
+distinctive = [
+  "a.d.", "AKCIONARSKO DRUŠTVO", "Akcionarsko društvo", "D.O.O.", "d.o.o.",
+  "DRUŠTVO SA OGRANIČENOM ODGOVORNOŠĆU", "Društvo sa ograničenom odgovornošću",
+  "k.d.", "KOMANDITNO DRUŠTVO", "Komanditno društvo", "NEVLADINA ORGANIZACIJA",
+  "Nevladina organizacija", "o.d.", "ORTAČKO DRUŠTVO", "Ortačko društvo"
+]
+ambiguous = [
+  "A.D.", "FONDACIJA", "Fondacija", "K.D.", "O.D.", "PREDUZETNIK",
+  "Preduzetnik", "SE", "ZADRUGA", "Zadruga"
+]

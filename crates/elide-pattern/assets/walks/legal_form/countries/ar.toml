@@ -1,0 +1,17 @@
+# Argentina (AR)
+
+[markers]
+distinctive = [
+  "ASOCIACIÓN CIVIL", "Asociación Civil", "S.A.S.", "S.C.A.", "S.R.L.",
+  "SOCIEDAD ANÓNIMA", "Sociedad Anónima", "SOCIEDAD COLECTIVA",
+  "Sociedad Colectiva", "SOCIEDAD DE RESPONSABILIDAD LIMITADA",
+  "Sociedad de Responsabilidad Limitada", "SOCIEDAD EN COMANDITA POR ACCIONES",
+  "Sociedad en Comandita por Acciones", "SOCIEDAD EN COMANDITA SIMPLE",
+  "Sociedad en Comandita Simple", "SOCIEDAD POR ACCIONES SIMPLIFICADA",
+  "Sociedad por Acciones Simplificada", "SRL", "UNIÓN TRANSITORIA DE EMPRESAS",
+  "Unión Transitoria de Empresas"
+]
+ambiguous = [
+  "COOPERATIVA", "Cooperativa", "FIDEICOMISO", "Fideicomiso", "FUNDACIÓN",
+  "Fundación", "S.A.", "S.C.", "SAS"
+]

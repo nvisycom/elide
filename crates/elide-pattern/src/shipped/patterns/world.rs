@@ -1,6 +1,6 @@
 //! Universal patterns, apply regardless of jurisdiction.
 
-use crate::{__shipped_pattern as shipped_pattern, Regex};
+use crate::{__shipped_pattern as shipped_pattern, Pattern};
 
 shipped_pattern!(
     /// Email address (RFC-loose).
@@ -85,7 +85,7 @@ shipped_pattern!(
 
 /// Every world-scoped built-in pattern.
 #[must_use]
-pub fn all() -> Vec<Regex> {
+pub fn all() -> Vec<Pattern> {
     vec![
         email(),
         phone(),

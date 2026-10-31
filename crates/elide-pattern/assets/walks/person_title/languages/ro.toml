@@ -1,0 +1,5 @@
+[markers]
+distinctive = [
+  "DOAMNA", "Doamna", "DOMNUL", "Domnul", "Dr", "DR.", "Dr.", "Ing", "ING.",
+  "Ing.", "PROF", "Prof", "PROF.", "Prof."
+]

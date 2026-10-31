@@ -18,7 +18,8 @@ let analyzer = Analyzer::<Text>::new()
         PatternRecognizer::builder()
             .with_builtin_patterns()
             .with_builtin_dictionaries()
-            .build_context_enhanced()?,
+            .with_builtin_walks()
+            .build()?,
     )
     .with_layer(ReconcileLayer::same_label(Merging::max()))
     .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE));
@@ -64,7 +65,8 @@ async fn main() -> Result<()> {
             PatternRecognizer::builder()
                 .with_builtin_patterns()
                 .with_builtin_dictionaries()
-                .build_context_enhanced()?,
+                .with_builtin_walks()
+                .build()?,
         )
         .with_layer(ReconcileLayer::same_label(Merging::max()))
         .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE));

@@ -1,0 +1,15 @@
+# Croatia (HR)
+
+[markers]
+distinctive = [
+  "d.d.", "D.O.O.", "d.o.o.", "DIONIČKO DRUŠTVO", "Dioničko društvo",
+  "DRUŠTVO S OGRANIČENOM ODGOVORNOŠĆU", "Društvo s ograničenom odgovornošću",
+  "J.D.O.O.", "j.d.o.o.", "J.T.D.", "j.t.d.", "JAVNO TRGOVAČKO DRUŠTVO",
+  "Javno trgovačko društvo", "JEDNOSTAVNO DRUŠTVO S OGRANIČENOM ODGOVORNOŠĆU",
+  "Jednostavno društvo s ograničenom odgovornošću", "k.d.",
+  "KOMANDITNO DRUŠTVO", "Komanditno društvo", "SCE"
+]
+ambiguous = [
+  "D.D.", "K.D.", "OBRT", "Obrt", "SE", "UDRUGA", "Udruga", "USTANOVA",
+  "Ustanova", "ZADRUGA", "Zadruga", "ZAKLADA", "Zaklada"
+]

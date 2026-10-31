@@ -1,0 +1,16 @@
+# Lithuania (LT)
+
+[markers]
+distinctive = [
+  "AKCINĖ BENDROVĖ", "Akcinė bendrovė", "INDIVIDUALI ĮMONĖ",
+  "Individuali įmonė", "KOMANDITINĖ ŪKINĖ BENDRIJA",
+  "Komanditinė ūkinė bendrija", "KOOPERATINĖ BENDROVĖ", "Kooperatinė bendrovė",
+  "KŪB", "LABDAROS IR PARAMOS FONDAS", "Labdaros ir paramos fondas",
+  "MAŽOJI BENDRIJA", "Mažoji bendrija", "SCE", "TIKROJI ŪKINĖ BENDRIJA",
+  "Tikroji ūkinė bendrija", "TŪB", "UAB", "UŽDAROJI AKCINĖ BENDROVĖ",
+  "Uždaroji akcinė bendrovė", "VIEŠOJI ĮSTAIGA", "Viešoji įstaiga", "VŠĮ",
+  "VšĮ"
+]
+ambiguous = [
+  "AB", "ASOCIACIJA", "Asociacija", "IĮ", "MB", "SE"
+]

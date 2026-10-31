@@ -1,0 +1,14 @@
+# Latvia (LV)
+
+[markers]
+distinctive = [
+  "AKCIJU SABIEDRĪBA", "Akciju sabiedrība", "INDIVIDUĀLAIS KOMERSANTS",
+  "Individuālais komersants", "KOMANDĪTSABIEDRĪBA", "Komandītsabiedrība",
+  "KOOPERATĪVĀ SABIEDRĪBA", "Kooperatīvā sabiedrība", "NODIBINĀJUMS",
+  "Nodibinājums", "PILNSABIEDRĪBA", "Pilnsabiedrība",
+  "SABIEDRĪBA AR IEROBEŽOTU ATBILDĪBU", "Sabiedrība ar ierobežotu atbildību",
+  "SCE", "SIA", "ZEMNIEKU SAIMNIECĪBA", "Zemnieku saimniecība"
+]
+ambiguous = [
+  "AS", "BIEDRĪBA", "Biedrība", "IK", "KS", "PS", "SE", "ZS"
+]

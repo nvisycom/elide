@@ -42,14 +42,10 @@ pub use self::chunking::{CharWindows, Chunking, Window, WordWindows};
 /// drops in anywhere a text recognizer goes and composes with the other
 /// decorators.
 ///
-/// Compose it *closest to* the length-limited recognizer: wrap the bare
-/// recognizer (NER, pattern) and layer context enhancement outside, as
-/// `Enhanced::new(ChunkedRecognizer::new(ner), …)`. The bare recognizers read
-/// only the chunk text, so windowing is lossless for them, and the outer
-/// `Enhanced` sees the whole subject with its hints and tokens. Wrapping the
-/// other way (`ChunkedRecognizer<Enhanced<_>>`) enhances inside each window:
-/// hints still apply (they are carried per window), but lemma-aware matching
-/// degrades to surface text, since a window carries no re-tokenized artifact.
+/// Wrap the length-limited recognizer itself (a NER model, say). A recognizer
+/// that reads only the text loses nothing to windowing. One that also reads
+/// the subject's hints still sees them, since every window carries them, but
+/// one that reads the enrichment artifact (tokens) gets none inside a window.
 pub struct ChunkedRecognizer<R, C = WordWindows> {
     inner: R,
     chunking: C,
@@ -95,15 +91,10 @@ impl<R: Recognizer<Text>, C: Chunking> ChunkedRecognizer<R, C> {
         //
         // The subject's hints are chunk-global context (a column header, an
         // object key — content matched against the whole chunk, not indexed by a
-        // body-text offset), so each window carries all of them unchanged; a
-        // context recognizer like `Enhanced` wrapped *inside* the chunker then
-        // still sees them. The enrichment artifact is left unset: its coordinates
-        // (producer tokens) are body-text-local and would be wrong in a window
-        // slice, and re-tokenizing a window is an enricher's job, not a chunker's
-        // — a context recognizer degrades to surface-text matching inside a
-        // window. The intended composition keeps that moot: wrap the
-        // length-limited recognizer and enhance *outside* the chunker, so
-        // `Enhanced` sees the whole subject with its artifact intact.
+        // body-text offset), so each window carries all of them unchanged. The
+        // enrichment artifact is left unset: its coordinates (producer tokens)
+        // are body-text-local and would be wrong in a window slice, and
+        // re-tokenizing a window is an enricher's job, not a chunker's.
         let subjects: Vec<Subject<Text>> = windows
             .iter()
             .map(|w| {

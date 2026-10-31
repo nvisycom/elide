@@ -1,0 +1,34 @@
+keywords = [
+  "spółka", "firma", "przedsiębiorstwo", "siedziba", "krs", "nip", "regon"
+]
+
+[words]
+lowercase = "open"
+party_connectors = [
+  "i"
+]
+verbs = [
+  "jest", "są", "był", "była", "było", "były", "będzie", "będą", "nie jest",
+  "oświadcza", "oświadczają", "sprzedaje", "sprzedają", "kupuje", "kupują",
+  "zawiera", "zawierają", "podpisuje", "płaci", "wynajmuje"
+]
+roles = [
+  "sprzedawca", "sprzedawcy", "sprzedawcą", "sprzedający", "sprzedającego",
+  "sprzedającemu", "sprzedającym", "kupujący", "kupującego", "kupującemu",
+  "kupującym", "wynajmujący", "wynajmującego", "wynajmującemu", "wynajmującym",
+  "wynajmująca", "wynajmującej", "wynajmującą", "najemca", "najemcy",
+  "najemcę", "najemcą", "zleceniodawca", "zleceniodawcy", "zleceniodawcę",
+  "zleceniodawcą", "zleceniobiorca", "zleceniobiorcy", "zleceniobiorcę",
+  "zleceniobiorcą", "wykonawca", "wykonawcy", "wykonawcę", "wykonawcą",
+  "zamawiający", "zamawiającego", "zamawiającemu", "zamawiającym", "dostawca",
+  "dostawcy", "dostawcę", "dostawcą", "odbiorca", "odbiorcy", "odbiorcę",
+  "odbiorcą", "pracodawca", "pracodawcy", "pracodawcę", "pracodawcą",
+  "pracownik", "pracownika", "pracownikowi", "pracownikiem", "pożyczkodawca",
+  "pożyczkodawcy", "pożyczkodawcę", "pożyczkodawcą", "pożyczkobiorca",
+  "pożyczkobiorcy", "pożyczkobiorcę", "pożyczkobiorcą", "strona", "strony",
+  "stronie", "stroną", "stronami", "stronom", "ubezpieczyciel",
+  "ubezpieczyciela", "ubezpieczonego", "ubezpieczony", "cena"
+]
+structural = [
+  "aneksem", "artykuł", "paragraf", "punkt", "sekcja", "załącznik"
+]

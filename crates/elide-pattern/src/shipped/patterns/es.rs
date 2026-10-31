@@ -2,7 +2,7 @@
 //!
 //! See `assets/PRESIDIO.md` for third-party attribution.
 
-use crate::{__shipped_pattern as shipped_pattern, Regex};
+use crate::{__shipped_pattern as shipped_pattern, Pattern};
 
 shipped_pattern!(
     /// NIF / DNI, 8-digit national ID + Mod 23 letter.
@@ -29,6 +29,6 @@ shipped_pattern!(
 
 /// Every ES-scoped built-in pattern.
 #[must_use]
-pub fn all() -> Vec<Regex> {
+pub fn all() -> Vec<Pattern> {
     vec![nif(), nie(), passport(), cif(), codigo_postal()]
 }

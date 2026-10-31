@@ -1,0 +1,13 @@
+# Malta (MT)
+
+[markers]
+distinctive = [
+  "CO-OPERATIVE SOCIETY", "Co-operative Society", "GENERAL PARTNERSHIP",
+  "General Partnership", "LIMITED", "Limited", "LIMITED PARTNERSHIP",
+  "Limited Partnership", "LTD", "Ltd", "PLC", "plc", "PUBLIC LIMITED COMPANY",
+  "Public Limited Company", "SCE", "VOLUNTARY ORGANISATION",
+  "Voluntary Organisation"
+]
+ambiguous = [
+  "FOUNDATION", "Foundation", "SE"
+]

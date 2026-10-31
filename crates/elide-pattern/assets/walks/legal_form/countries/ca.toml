@@ -1,0 +1,19 @@
+# Canada (CA)
+
+[markers]
+distinctive = [
+  "CORP.", "Corp.", "CORPORATION", "Corporation", "CROWN CORPORATION",
+  "Crown Corporation", "FEDERAL CORPORATION", "Federal Corporation", "INC.",
+  "Inc.", "INCORPORATED", "Incorporated", "LIMITED", "Limited",
+  "LIMITED LIABILITY PARTNERSHIP", "Limited Liability Partnership",
+  "LIMITED PARTNERSHIP", "Limited Partnership", "LIMITÉE", "Limitée", "LLP",
+  "LTD.", "Ltd.", "LTÉE", "Ltée", "LTÉE.", "Ltée.",
+  "NOT-FOR-PROFIT CORPORATION", "Not-for-Profit Corporation",
+  "PROFESSIONAL CORPORATION", "Professional Corporation",
+  "PROVINCIAL CORPORATION", "Provincial Corporation", "S.E.N.C.",
+  "SOCIÉTÉ EN COMMANDITE", "Société en commandite", "SOCIÉTÉ EN NOM COLLECTIF",
+  "Société en nom collectif", "SOLE PROPRIETORSHIP", "Sole Proprietorship"
+]
+ambiguous = [
+  "CO.", "Co.", "COOPERATIVE", "Cooperative", "LP"
+]

@@ -1,0 +1,13 @@
+# Cyprus (CY)
+
+[markers]
+distinctive = [
+  "CO-OPERATIVE SOCIETY", "Co-operative Society", "EUROPEAN COMPANY",
+  "European Company", "LIMITED", "Limited", "LTD", "Ltd",
+  "NON-PROFIT ORGANISATION", "Non-Profit Organisation", "PLC", "plc",
+  "PUBLIC LIMITED COMPANY", "Public Limited Company", "SCE",
+  "SOLE PROPRIETORSHIP", "Sole Proprietorship"
+]
+ambiguous = [
+  "PARTNERSHIP", "Partnership", "SE"
+]

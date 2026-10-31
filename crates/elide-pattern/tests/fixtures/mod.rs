@@ -40,7 +40,8 @@ async fn scan_scoped(text: &str, scope: Scope) -> (String, Vec<Entity<Text>>) {
     let recognizer = PatternRecognizer::builder()
         .with_builtin_patterns()
         .with_builtin_dictionaries()
-        .build_context_enhanced()
+        .with_builtin_walks()
+        .build()
         .expect("shipped recognizer builds");
     let data = TextData::new(text.to_owned());
     let ctx = Context::new(&scope);

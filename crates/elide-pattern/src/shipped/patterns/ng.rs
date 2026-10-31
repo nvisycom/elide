@@ -2,7 +2,7 @@
 //!
 //! See `assets/PRESIDIO.md` for third-party attribution.
 
-use crate::{__shipped_pattern as shipped_pattern, Regex};
+use crate::{__shipped_pattern as shipped_pattern, Pattern};
 
 shipped_pattern!(
     /// NIN, 11-digit National Identification Number with
@@ -17,6 +17,6 @@ shipped_pattern!(
 
 /// Every NG-scoped built-in pattern.
 #[must_use]
-pub fn all() -> Vec<Regex> {
+pub fn all() -> Vec<Pattern> {
     vec![nin(), vehicle_registration()]
 }

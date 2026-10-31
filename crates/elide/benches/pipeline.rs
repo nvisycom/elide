@@ -39,7 +39,8 @@ fn build_orchestrator() -> Orchestrator {
     let patterns = PatternRecognizer::builder()
         .with_builtin_patterns()
         .with_builtin_dictionaries()
-        .build_context_enhanced()
+        .with_builtin_walks()
+        .build()
         .expect("build recognizer");
     let analyzer = Analyzer::<Text>::new().with_recognizer(patterns);
     let anonymizer = Anonymizer::<Text>::new()

@@ -39,16 +39,32 @@ assets/
     en/                    English-language terms
       finance/             currencies (USD, US Dollar, EUR, …)
       personal/            languages, nationalities, religions
+
+  walks/                   one folder per walk, each laid out the same way:
+    <walk>/
+      walk.toml            the rule: name, label, direction, and the words
+                           that shape a name in any language
+      countries/<cc>.toml  the markers a country defines, when its markers
+                           belong to countries (legal forms)
+      languages/<lang>.toml
+                           a language's markers, context keywords, and the
+                           words that shape a name: connectors, lead-in
+                           clauses, verbs, roles
+    legal_form/            company names ending in a legal form
+    institution/           institutions around a head word
+    person_title/          a person's name after a title
 ```
 
 Each pattern is a TOML file (`<name>.toml`). Each dictionary pairs a TOML
 metadata sidecar with a term source: `.csv` for multi-column lists (term + alias
-columns with per-column scores), `.txt` for one-per-line lists.
+columns with per-column scores), `.txt` for one-per-line lists. A walk is a TOML
+rule plus the markers a name sits next to and the per-language words that shape
+a name.
 
 ## Scoring conventions
 
-Scores are baseline confidence; the context enhancer (in `elide-context`) lifts
-them when configured keywords appear nearby. The toolkit's default confidence
+Scores are baseline confidence; a rule's `[context]` (`elide_pattern::context`)
+lifts them when its keywords appear nearby. The toolkit's default confidence
 threshold is `0.35`; anything below needs context boost or an out-of-band hint
 (CSV column header, JSON object key, HTML parent text) to clear it.
 
@@ -76,8 +92,27 @@ post-match structural check. Built-in names (resolved via
 
 Each lives in `src/validators/` under the matching submodule.
 
+## Spans
+
+A match's span is the whole match, unless the regex defines a capture group
+named `entity`: then only that group is reported, and the rest of the match is
+context that must be present but is not part of the entity. This stands in for
+lookaround, which the `regex` crate does not support:
+
+```toml
+# Require a token boundary after the address without including it.
+regex = '\b(?P<entity>(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{1,4})(?:$|[^0-9A-Za-z:.%/_-])'
+```
+
+A validator sees only the group's text. Context outside the group is consumed,
+so the next match starts after it. `world/network/ipv6.toml` uses this for both
+a leading and a trailing boundary.
+
 ## Attribution
 
 Many patterns + validators are ports of upstream Microsoft Presidio recognizers.
 See [`PRESIDIO.md`](PRESIDIO.md) for the MIT-license attribution and the
 upstream class references that each adapted TOML's leading comment links to.
+
+The walks' markers and word lists are converted from stella/anonymize; see
+[`STELLA.md`](STELLA.md) for the Apache-2.0 attribution.

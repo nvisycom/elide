@@ -1,0 +1,19 @@
+# Peru (PE)
+
+[markers]
+distinctive = [
+  "E.I.R.L.", "EMPRESA INDIVIDUAL DE RESPONSABILIDAD LIMITADA",
+  "Empresa Individual de Responsabilidad Limitada", "S.A.A.", "S.A.C.",
+  "S.C.R.L.", "S.R.L.", "SOCIEDAD ANÓNIMA", "Sociedad Anónima",
+  "SOCIEDAD ANÓNIMA ABIERTA", "Sociedad Anónima Abierta",
+  "SOCIEDAD ANÓNIMA CERRADA", "Sociedad Anónima Cerrada",
+  "SOCIEDAD CIVIL DE RESPONSABILIDAD LIMITADA",
+  "Sociedad Civil de Responsabilidad Limitada", "SOCIEDAD COLECTIVA",
+  "Sociedad Colectiva", "SOCIEDAD COMERCIAL DE RESPONSABILIDAD LIMITADA",
+  "Sociedad Comercial de Responsabilidad Limitada", "SOCIEDAD EN COMANDITA",
+  "Sociedad en Comandita"
+]
+ambiguous = [
+  "ASOCIACIÓN", "Asociación", "COMITÉ", "Comité", "COOPERATIVA", "Cooperativa",
+  "FUNDACIÓN", "Fundación", "S.A."
+]

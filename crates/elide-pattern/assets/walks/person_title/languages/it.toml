@@ -1,0 +1,9 @@
+[markers]
+distinctive = [
+  "AVV.", "Avv.", "DOTT.", "Dott.", "Dr", "DR.", "Dr.", "Ing", "ING.", "Ing.",
+  "PROF", "Prof", "PROF.", "Prof.", "SIG.", "Sig.", "SIG.RA", "Sig.ra",
+  "SIGNOR", "Signor", "SIGNORA", "Signora", "SIGNORINA", "Signorina"
+]
+ambiguous = [
+  "Don"
+]

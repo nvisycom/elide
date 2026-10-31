@@ -1,0 +1,16 @@
+# Türkiye (TR)
+
+[markers]
+distinctive = [
+  "ANONIM ŞIRKET", "Anonim Şirket", "ANONIM ŞIRKETI", "Anonim Şirketi",
+  "KOLL. ŞTI.", "Koll. Şti.", "KOLLEKTIF ŞIRKET", "Kollektif Şirket",
+  "KOLLEKTIF ŞIRKETI", "Kollektif Şirketi", "KOM. ŞTI.", "Kom. Şti.",
+  "KOMANDIT ŞIRKET", "Komandit Şirket", "KOMANDIT ŞIRKETI", "Komandit Şirketi",
+  "KOOP.", "Koop.", "KOOPERATIF ŞIRKETI", "Kooperatif Şirketi",
+  "LIMITED ŞIRKET", "Limited Şirket", "LIMITED ŞIRKETI", "Limited Şirketi",
+  "LTD. ŞTI.", "Ltd. Şti.", "ŞAHIS ŞIRKETI", "Şahıs Şirketi"
+]
+ambiguous = [
+  "A.Ş.", "DERNEK", "Dernek", "KOOPERATIF", "Kooperatif", "SE", "VAKIF",
+  "Vakıf"
+]

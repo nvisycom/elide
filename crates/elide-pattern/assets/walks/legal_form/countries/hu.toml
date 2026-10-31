@@ -1,0 +1,16 @@
+# Hungary (HU)
+
+[markers]
+distinctive = [
+  "BETÉTI TÁRSASÁG", "Betéti Társaság", "Bt.", "EGYÉNI CÉG", "Egyéni cég",
+  "EGYÉNI VÁLLALKOZÓ", "Egyéni vállalkozó", "KFT.", "Kft.", "KKT.", "Kkt.",
+  "KORLÁTOLT FELELŐSSÉGŰ TÁRSASÁG", "Korlátolt Felelősségű Társaság",
+  "KÖZKERESETI TÁRSASÁG", "Közkereseti Társaság",
+  "NYILVÁNOSAN MŰKÖDŐ RÉSZVÉNYTÁRSASÁG", "Nyilvánosan Működő Részvénytársaság",
+  "NYRT.", "Nyrt.", "SCE", "SZÖV.", "Szöv.", "ZRT.", "Zrt.",
+  "ZÁRTKÖRŰEN MŰKÖDŐ RÉSZVÉNYTÁRSASÁG", "Zártkörűen Működő Részvénytársaság"
+]
+ambiguous = [
+  "ALAPÍTVÁNY", "Alapítvány", "BT.", "EGYESÜLET", "Egyesület", "SE",
+  "SZÖVETKEZET", "Szövetkezet"
+]

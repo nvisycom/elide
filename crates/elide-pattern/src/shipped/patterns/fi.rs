@@ -2,7 +2,7 @@
 //!
 //! See `assets/PRESIDIO.md` for third-party attribution.
 
-use crate::{__shipped_pattern as shipped_pattern, Regex};
+use crate::{__shipped_pattern as shipped_pattern, Pattern};
 
 shipped_pattern!(
     /// HETU, Finnish personal identity code with mod-31 control
@@ -12,6 +12,6 @@ shipped_pattern!(
 
 /// Every FI-scoped built-in pattern.
 #[must_use]
-pub fn all() -> Vec<Regex> {
+pub fn all() -> Vec<Pattern> {
     vec![hetu()]
 }

@@ -2,7 +2,7 @@
 //!
 //! See `assets/PRESIDIO.md` for third-party attribution.
 
-use crate::{__shipped_pattern as shipped_pattern, Regex};
+use crate::{__shipped_pattern as shipped_pattern, Pattern};
 
 shipped_pattern!(
     /// RRN, 13-digit Resident Registration Number with
@@ -31,6 +31,6 @@ shipped_pattern!(
 
 /// Every KR-scoped built-in pattern.
 #[must_use]
-pub fn all() -> Vec<Regex> {
+pub fn all() -> Vec<Pattern> {
     vec![rrn(), frn(), brn(), passport(), driver_license()]
 }

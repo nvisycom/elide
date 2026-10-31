@@ -1,0 +1,6 @@
+# Bahrain (BH)
+
+[markers]
+distinctive = [
+  "B.S.C.", "B.S.C. (C)", "B.S.C. (c)", "BSC", "W.L.L.", "WLL"
+]

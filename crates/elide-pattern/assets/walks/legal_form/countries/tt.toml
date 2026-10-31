@@ -1,0 +1,15 @@
+# Trinidad and Tobago (TT)
+
+[markers]
+distinctive = [
+  "CO-OPERATIVE SOCIETY", "Co-operative Society",
+  "COMPANY LIMITED BY GUARANTEE", "Company Limited by Guarantee",
+  "COMPANY LIMITED BY SHARES", "Company Limited by Shares", "EXTERNAL COMPANY",
+  "External Company", "INC.", "Inc.", "INCORPORATED", "Incorporated",
+  "LIMITED", "Limited", "LTD", "Ltd", "NON-PROFIT ORGANISATION",
+  "Non-Profit Organisation", "SOLE PROPRIETORSHIP", "Sole Proprietorship",
+  "UNLIMITED COMPANY", "Unlimited Company"
+]
+ambiguous = [
+  "PARTNERSHIP", "Partnership", "UNLIMITED", "Unlimited"
+]

@@ -1,6 +1,5 @@
 //! The pattern recognizer building block.
 
-use elide::recognition::context::Enhanced;
 use elide::recognition::pattern::PatternRecognizer;
 use serde::Deserialize;
 use tsify::{Ts, Tsify};
@@ -11,8 +10,8 @@ use crate::error::{ElideError, ElideErrorKind};
 ///
 /// `Tsify` generates the matching TypeScript `interface` (with camelCase
 /// fields), so the JS side passes a typed
-/// `{ builtinPatterns, builtinDictionaries }` object. With both `false`, the
-/// recognizer detects nothing. It crosses the boundary as a
+/// `{ builtinPatterns, builtinDictionaries, builtinWalks? }` object. With all
+/// off, the recognizer detects nothing. It crosses the boundary as a
 /// [`Ts<PatternRecognizerConfig>`], tsify's transparent wrapper that
 /// deserializes inside the factory without leaking a table slot.
 #[derive(Deserialize, Tsify)]
@@ -22,13 +21,15 @@ pub struct PatternRecognizerConfig {
     pub builtin_patterns: bool,
     /// Enable the shipped dictionaries.
     pub builtin_dictionaries: bool,
+    /// Enable the shipped walks: company names ending in a legal form,
+    /// institutions, and a person's name after a title (default `false`).
+    pub builtin_walks: Option<bool>,
 }
 
-/// Compile a context-enhanced pattern recognizer from the selected built-in
-/// sources.
+/// Compile a pattern recognizer from the selected built-in sources.
 pub(super) fn build_pattern(
     config: Ts<PatternRecognizerConfig>,
-) -> Result<Enhanced<PatternRecognizer>, ElideError> {
+) -> Result<PatternRecognizer, ElideError> {
     let config = config.to_rust().map_err(|e| {
         ElideError::new(
             ElideErrorKind::Configuration,
@@ -42,5 +43,8 @@ pub(super) fn build_pattern(
     if config.builtin_dictionaries {
         builder = builder.with_builtin_dictionaries();
     }
-    Ok(builder.build_context_enhanced()?)
+    if config.builtin_walks.unwrap_or(false) {
+        builder = builder.with_builtin_walks();
+    }
+    Ok(builder.build()?)
 }

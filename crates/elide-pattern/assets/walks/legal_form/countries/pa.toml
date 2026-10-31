@@ -1,0 +1,15 @@
+# Panama (PA)
+
+[markers]
+distinctive = [
+  "EMPRESA INDIVIDUAL", "Empresa Individual", "FUNDACIÓN DE INTERÉS PRIVADO",
+  "Fundación de Interés Privado", "S. DE R.L.", "S. de R.L.", "S. EN C.",
+  "S. en C.", "S.R.L.", "SOCIEDAD ANÓNIMA", "Sociedad Anónima",
+  "SOCIEDAD CIVIL", "Sociedad Civil", "SOCIEDAD COLECTIVA",
+  "Sociedad Colectiva", "SOCIEDAD DE RESPONSABILIDAD LIMITADA",
+  "Sociedad de Responsabilidad Limitada", "SOCIEDAD EN COMANDITA",
+  "Sociedad en Comandita"
+]
+ambiguous = [
+  "COOPERATIVA", "Cooperativa", "S.A.", "S.C."
+]

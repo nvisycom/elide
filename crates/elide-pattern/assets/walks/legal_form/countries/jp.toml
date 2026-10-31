@@ -1,0 +1,11 @@
+# Japan (JP)
+
+[markers]
+distinctive = [
+  "GODO KAISHA", "Godo Kaisha", "GOMEI KAISHA", "Gomei Kaisha", "GOSHI KAISHA",
+  "Goshi Kaisha", "KABUSHIKI KAISHA", "Kabushiki Kaisha", "YUGEN KAISHA",
+  "Yugen Kaisha"
+]
+ambiguous = [
+  "G.K.", "K.K.", "N.K.", "Y.K."
+]

@@ -1,0 +1,17 @@
+# Vietnam (VN)
+
+[markers]
+distinctive = [
+  "CÔNG TY CP", "Công ty CP", "CÔNG TY CỔ PHẦN", "Công ty Cổ phần",
+  "CÔNG TY HỢP DANH", "Công ty Hợp danh", "CÔNG TY TNHH", "Công ty TNHH",
+  "CÔNG TY TNHH HAI THÀNH VIÊN TRỞ LÊN", "Công ty TNHH Hai Thành Viên Trở Lên",
+  "CÔNG TY TNHH MTV", "Công ty TNHH MTV", "CÔNG TY TNHH MỘT THÀNH VIÊN",
+  "Công ty TNHH Một Thành Viên", "CÔNG TY TRÁCH NHIỆM HỮU HẠN",
+  "Công ty trách nhiệm hữu hạn", "CÔNG TY TRÁCH NHIỆM HỮU HẠN MỘT THÀNH VIÊN",
+  "Công ty trách nhiệm hữu hạn một thành viên", "DOANH NGHIỆP TƯ NHÂN",
+  "Doanh nghiệp tư nhân", "HỘ KINH DOANH", "Hộ kinh doanh", "HỢP TÁC XÃ",
+  "Hợp tác xã", "TNHH", "TNHH MTV"
+]
+ambiguous = [
+  "CP"
+]

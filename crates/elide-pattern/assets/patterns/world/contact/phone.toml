@@ -16,7 +16,7 @@
 name = "phone"
 labels = ["phone_number"]
 
-[context]
+[context.languages]
 en = ["phone", "call", "mobile", "tel", "fax", "contact"]
 es = ["teléfono", "telefono", "llamar", "móvil", "movil", "celular", "tel", "fax", "contacto"]
 de = ["telefon", "anruf", "mobil", "handy", "tel", "fax", "kontakt"]

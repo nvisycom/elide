@@ -1,0 +1,16 @@
+# Philippines (PH)
+
+[markers]
+distinctive = [
+  "CORP.", "Corp.", "CORPORATION", "Corporation", "GENERAL PARTNERSHIP",
+  "General Partnership", "INC.", "Inc.", "INCORPORATED", "Incorporated",
+  "LIMITED PARTNERSHIP", "Limited Partnership", "LLC", "LTD.", "Ltd.",
+  "NON-PROFIT ORGANIZATION", "Non-Profit Organization",
+  "NON-STOCK CORPORATION", "Non-Stock Corporation", "ONE PERSON CORPORATION",
+  "One Person Corporation", "OPC", "PROFESSIONAL PARTNERSHIP",
+  "Professional Partnership", "SOLE PROPRIETORSHIP", "Sole Proprietorship"
+]
+ambiguous = [
+  "CO.", "Co.", "COOPERATIVE", "Cooperative", "FOUNDATION", "Foundation",
+  "PARTNERSHIP", "Partnership"
+]

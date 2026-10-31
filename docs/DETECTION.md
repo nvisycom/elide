@@ -164,22 +164,22 @@ taxonomy.
 
 ## 5. Context Enhancement
 
-Between recognition and reconciliation sits an optional post-recognition pass:
-keyword-based confidence boosting, the context-enhancement pass. The premise is
-that the words surrounding a candidate carry evidence the recognizer that
-produced the candidate may not have weighed. A bare nine-digit number is a weak
-social security number on its own; the same number a few words after the phrase
-"SSN:" is a much stronger one.
+The pattern recognizer weighs the words around each match before it reports
+it: keyword-based confidence boosting, the context-enhancement pass. The premise
+is that the words surrounding a candidate carry evidence its shape alone does
+not. A bare nine-digit number is a weak social security number on its own; the
+same number a few words after the phrase "SSN:" is a much stronger one.
 
-The pass is driven by boost rules, and it is applied by wrapping any text
-recognizer so that it behaves as a recognizer in turn. From the find engine's
-point of view nothing changed: the wrapper defers to the inner recognizer, then
-runs over the produced entities, raising the confidence of those whose
-surrounding window matches a rule. Out-of-band context that has no place in the
-payload text itself, a column header or a structural key, is surfaced to the
-pass through the context hints carried alongside the payload, so a cell value
-can be boosted by the column it sits under even though that header is not
-adjacent text.
+Each pattern or dictionary declares its own context: keywords, optionally per
+language, and an anchor, another label whose match nearby counts as evidence
+(a currency beside a number). The context applies to that rule's matches only,
+lifting a match once for a keyword and once for an anchor, and each lift is
+recorded in the entity's audit trail. Out-of-band context that has no place in
+the payload text itself, a column header or a structural key, is surfaced to
+the pass through the context hints carried alongside the payload, so a cell
+value can be boosted by the column it sits under even though that header is not
+adjacent text. Model-based recognizers weigh context themselves and do not go
+through this pass.
 
 ## 6. Per-Call State: Scope and Context
 

@@ -1,0 +1,16 @@
+# Barbados (BB)
+
+[markers]
+distinctive = [
+  "COMPANY LIMITED BY GUARANTEE", "Company Limited by Guarantee",
+  "COMPANY LIMITED BY SHARES", "Company Limited by Shares", "CORP.", "Corp.",
+  "CORPORATION", "Corporation", "EXEMPT INSURANCE COMPANY",
+  "Exempt Insurance Company", "EXTERNAL COMPANY", "External Company", "INC.",
+  "Inc.", "INCORPORATED", "Incorporated", "INTERNATIONAL BUSINESS COMPANY",
+  "International Business Company", "LIMITED", "Limited", "LTD", "Ltd",
+  "QUALIFYING INSURANCE COMPANY", "Qualifying Insurance Company",
+  "SOLE PROPRIETORSHIP", "Sole Proprietorship"
+]
+ambiguous = [
+  "PARTNERSHIP", "Partnership", "SOCIETY", "Society"
+]

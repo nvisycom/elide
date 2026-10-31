@@ -74,9 +74,3 @@ let recognizer = EscalatingRecognizer::new(
 # Ok(())
 # }
 ```
-
-## Context
-
-`Enhanced`, in `elide::recognition::context`, raises the confidence of
-findings with keywords nearby. `PatternRecognizer` builds one with
-`build_context_enhanced`, but it wraps any recognizer.

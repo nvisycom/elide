@@ -1,0 +1,15 @@
+# Netherlands (NL)
+
+[markers]
+distinctive = [
+  "BESLOTEN VENNOOTSCHAP", "Besloten Vennootschap",
+  "COMMANDITAIRE VENNOOTSCHAP", "Commanditaire Vennootschap",
+  "NAAMLOZE VENNOOTSCHAP", "Naamloze Vennootschap",
+  "ONDERLINGE WAARBORGMAATSCHAPPIJ", "Onderlinge Waarborgmaatschappij", "SCE",
+  "V.O.F.", "VENNOOTSCHAP ONDER FIRMA", "Vennootschap onder Firma"
+]
+ambiguous = [
+  "B.V.", "BV", "COÖPERATIE", "Coöperatie", "CV", "EENMANSZAAK", "Eenmanszaak",
+  "MAATSCHAP", "Maatschap", "N.V.", "NV", "SE", "STICHTING", "Stichting",
+  "VERENIGING", "Vereniging"
+]

@@ -2,7 +2,7 @@
 //!
 //! See `assets/PRESIDIO.md` for third-party attribution.
 
-use crate::{__shipped_pattern as shipped_pattern, Regex};
+use crate::{__shipped_pattern as shipped_pattern, Pattern};
 
 shipped_pattern!(
     /// Aadhaar, 12-digit UIDAI ID with Verhoeff checksum and
@@ -37,7 +37,7 @@ shipped_pattern!(
 
 /// Every IN-scoped built-in pattern.
 #[must_use]
-pub fn all() -> Vec<Regex> {
+pub fn all() -> Vec<Pattern> {
     vec![
         aadhaar(),
         pan(),

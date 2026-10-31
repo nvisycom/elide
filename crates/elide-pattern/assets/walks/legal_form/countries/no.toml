@@ -1,0 +1,17 @@
+# Norway (NO)
+
+[markers]
+distinctive = [
+  "AKSJESELSKAP", "Aksjeselskap", "ALLMENNAKSJESELSKAP", "Allmennaksjeselskap",
+  "ANS", "ANSVARLIG SELSKAP", "Ansvarlig selskap", "ASA", "BORETTSLAG",
+  "Borettslag", "ENK", "ENKELTPERSONFORETAK", "Enkeltpersonforetak",
+  "KOMMANDITTSELSKAP", "Kommandittselskap",
+  "NORSKREGISTRERT UTENLANDSK FORETAK", "Norskregistrert utenlandsk foretak",
+  "NUF", "SAMVIRKEFORETAK", "Samvirkeforetak", "SCE",
+  "SELSKAP MED DELT ANSVAR", "Selskap med delt ansvar", "STATSFORETAK",
+  "Statsforetak"
+]
+ambiguous = [
+  "AS", "BA", "DA", "FORENING", "Forening", "KS", "SA", "SE", "SF",
+  "STIFTELSE", "Stiftelse"
+]

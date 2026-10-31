@@ -1,0 +1,15 @@
+# San Marino (SM)
+
+[markers]
+distinctive = [
+  "IMPRESA INDIVIDUALE", "Impresa Individuale", "S.A.S.", "S.a.s.", "S.N.C.",
+  "S.n.c.", "S.P.A.", "S.p.A.", "S.R.L.", "S.r.l.",
+  "SOCIETÀ A RESPONSABILITÀ LIMITATA", "Società a Responsabilità Limitata",
+  "SOCIETÀ COOPERATIVA", "Società Cooperativa",
+  "SOCIETÀ IN ACCOMANDITA SEMPLICE", "Società in Accomandita Semplice",
+  "SOCIETÀ IN NOME COLLETTIVO", "Società in Nome Collettivo",
+  "SOCIETÀ PER AZIONI", "Società per Azioni", "SPA", "SpA", "SRL", "Srl"
+]
+ambiguous = [
+  "ASSOCIAZIONE", "Associazione", "FONDAZIONE", "Fondazione"
+]

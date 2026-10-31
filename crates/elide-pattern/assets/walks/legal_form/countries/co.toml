@@ -1,0 +1,19 @@
+# Colombia (CO)
+
+[markers]
+distinctive = [
+  "EMPRESA UNIPERSONAL", "Empresa Unipersonal", "ENTIDAD SIN ÁNIMO DE LUCRO",
+  "Entidad Sin Ánimo de Lucro", "ESALES", "ESALes", "LTDA.", "Ltda.",
+  "S. EN C.", "S. en C.", "S. EN C.A.", "S. en C.A.", "S.A.S.",
+  "SOCIEDAD ANÓNIMA", "Sociedad Anónima", "SOCIEDAD COLECTIVA",
+  "Sociedad Colectiva", "SOCIEDAD DE RESPONSABILIDAD LIMITADA",
+  "Sociedad de Responsabilidad Limitada", "SOCIEDAD EN COMANDITA",
+  "Sociedad en Comandita", "SOCIEDAD EN COMANDITA POR ACCIONES",
+  "Sociedad en Comandita por Acciones", "SOCIEDAD LIMITADA",
+  "Sociedad Limitada", "SOCIEDAD POR ACCIONES SIMPLIFICADA",
+  "Sociedad por Acciones Simplificada"
+]
+ambiguous = [
+  "ASOCIACIÓN", "Asociación", "COOPERATIVA", "Cooperativa", "E.U.",
+  "FUNDACIÓN", "Fundación", "S.A.", "S.C.", "SAS", "SUCURSAL", "Sucursal"
+]

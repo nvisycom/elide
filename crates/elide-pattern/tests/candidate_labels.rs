@@ -5,13 +5,13 @@
 use elide_core::entity::{Label, LabelCatalog, LabelRef, builtins};
 use elide_core::modality::text::{Text, TextData};
 use elide_core::recognition::{Context, Recognizer, Scope, Subject};
-use elide_pattern::{PatternRecognizer, Regex, Variant};
+use elide_pattern::{Pattern, PatternRecognizer, Variant};
 
 /// A pattern matching a street-address-like token, listing the specific label
 /// first and the coarse one as a fallback.
 fn address_recognizer() -> PatternRecognizer {
     let variant = Variant::new(r"\d+ \w+ St").expect("variant builds");
-    let rule = Regex::builder()
+    let rule = Pattern::builder()
         .with_name("street")
         .with_labels(vec![
             builtins::STREET_ADDRESS.to_ref(),

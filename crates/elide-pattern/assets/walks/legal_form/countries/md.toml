@@ -1,0 +1,15 @@
+# Moldova (MD)
+
+[markers]
+distinctive = [
+  "SOCIETATE CU RĂSPUNDERE LIMITATĂ", "Societate cu răspundere limitată",
+  "SOCIETATE PE ACȚIUNI", "Societate pe acțiuni", "SOCIETATE ÎN COMANDITĂ",
+  "Societate în comandită", "SOCIETATE ÎN NUME COLECTIV",
+  "Societate în nume colectiv", "SRL", "ÎNTREPRINDERE DE STAT",
+  "Întreprindere de stat", "ÎNTREPRINDERE INDIVIDUALĂ",
+  "Întreprindere individuală", "ÎNTREPRINDERE MIXTĂ", "Întreprindere mixtă"
+]
+ambiguous = [
+  "ASOCIAȚIE", "Asociație", "COOPERATIVĂ", "Cooperativă", "FUNDAȚIE",
+  "Fundație", "SA", "SC", "Î.I.", "Î.M.", "Î.S."
+]
