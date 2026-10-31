@@ -9,13 +9,11 @@ use super::{KeywordMatcher, SubstringMatcher};
 
 /// Lemma-aware [`KeywordMatcher`].
 ///
-/// Compares each lemma in `tokens` against the keyword list with ASCII
-/// case-insensitive equality.
-///
-/// Falls back to [`SubstringMatcher`] semantics when `tokens` is
-/// empty (no shared NLP artifact was produced) so context matching
-/// runs uniformly regardless of whether the upstream pass emitted
-/// tokens.
+/// Finds every [`SubstringMatcher`] hit, so an inflected keyword (`ruled`)
+/// or a phrase (`filed with`) still matches the text as written, plus each
+/// token in `tokens` whose lemma equals a keyword (ASCII case-insensitive).
+/// Without `tokens` (no shared NLP artifact was produced), only the
+/// substring hits apply.
 ///
 /// Recognizes morphological variants the substring matcher cannot:
 /// `"running" → "run"`, `"dogs" → "dog"`, `"SSNs" → "ssn"`. Cost
@@ -31,8 +29,9 @@ impl KeywordMatcher for LemmaMatcher {
         tokens: &[Token],
         keywords: &[HipStr<'static>],
     ) -> Vec<Range<usize>> {
+        let mut found = SubstringMatcher.matches(window, tokens, keywords);
         if tokens.is_empty() {
-            return SubstringMatcher.matches(window, tokens, keywords);
+            return found;
         }
         let lowered_keywords: Vec<String> = keywords
             .iter()
@@ -42,15 +41,15 @@ impl KeywordMatcher for LemmaMatcher {
         // *window*-relative range. The window spans from the first token
         // (see `token_span`), so subtracting its start rebases each match.
         let base = tokens[0].offset.start;
-        tokens
-            .iter()
-            .filter_map(|tok| {
-                let lemma = tok.lemma.as_str().to_ascii_lowercase();
-                lowered_keywords
-                    .contains(&lemma)
-                    .then(|| tok.offset.start - base..tok.offset.end - base)
-            })
-            .collect()
+        found.extend(tokens.iter().filter_map(|tok| {
+            let lemma = tok.lemma.as_str().to_ascii_lowercase();
+            lowered_keywords
+                .contains(&lemma)
+                .then(|| tok.offset.start - base..tok.offset.end - base)
+        }));
+        found.sort_by_key(|m| (m.start, m.end));
+        found.dedup();
+        found
     }
 }
 
@@ -75,6 +74,30 @@ mod tests {
         assert_eq!(m.matches("", &tokens, &kws(&["run"])), vec![4..11]);
         assert_eq!(m.matches("", &tokens, &kws(&["dog"])), vec![12..16]);
         assert!(m.matches("", &tokens, &kws(&["cat"])).is_empty());
+    }
+
+    #[test]
+    fn matches_the_text_as_written() {
+        let window = "Judge Alito ruled, filed with";
+        let tokens = vec![
+            Token::from_text("Judge", 0..5),
+            Token::from_text("Alito", 6..11),
+            Token::from_text("ruled", 12..17).with_lemma("rule"),
+            Token::from_text("filed", 19..24).with_lemma("file"),
+            Token::from_text("with", 25..29),
+        ];
+        let m = LemmaMatcher;
+        assert_eq!(m.matches(window, &tokens, &kws(&["ruled"])), vec![12..17]);
+        // The substring inside `ruled`, which the recognizer's word-boundary
+        // check drops, and the token whose lemma is `rule`.
+        assert_eq!(
+            m.matches(window, &tokens, &kws(&["rule"])),
+            vec![12..16, 12..17]
+        );
+        assert_eq!(
+            m.matches(window, &tokens, &kws(&["filed with"])),
+            vec![19..29]
+        );
     }
 
     #[test]
