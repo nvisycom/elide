@@ -112,7 +112,7 @@ impl ModalityRegistry {
             .map_err(|e| elide_core::Error::malformed(e.to_string()))
     }
 
-    /// Reconstruct an [`ArtifactSet`](crate::ArtifactSet) from `deserializer`,
+    /// Reconstruct an [`ArtifactSet`] from `deserializer`,
     /// routing each group's artifact to its registered modality's
     /// `parse_artifact`. Maps any failure to a [`MalformedInput`] error.
     ///
@@ -198,7 +198,7 @@ impl ReportDeserializer {
         self.registry.deserialize(deserializer)
     }
 
-    /// Reconstruct an [`ArtifactSet`](crate::ArtifactSet) from `deserializer`,
+    /// Reconstruct an [`ArtifactSet`] from `deserializer`,
     /// routing each group's artifact to a registered modality. The
     /// artifact-side counterpart to [`deserialize`](Self::deserialize), for
     /// restoring the enrichment persisted beside a report.

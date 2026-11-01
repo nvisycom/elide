@@ -100,7 +100,7 @@ pub(crate) trait Edit {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if `raw` is not well-formed XML.
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if `raw` is not well-formed XML.
     fn apply(&self, raw: &str) -> Result<Option<Edited>>;
 }
 
@@ -220,7 +220,7 @@ pub(crate) struct Edited {
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`] if `raw` is not well-formed XML, nests past
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if `raw` is not well-formed XML, nests past
 /// [`MAX_DEPTH`], or declares a document type: a DTD's entities expand into
 /// text no extraction reads, and OOXML never uses one.
 pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {

@@ -71,7 +71,7 @@ impl RasterImage {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::Processing`] if the encoder rejects the image.
+    /// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) if the encoder rejects the image.
     pub(super) fn encode_raw(&self) -> Result<Bytes> {
         self.encode_bytes(self.format)
     }

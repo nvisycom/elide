@@ -6,7 +6,7 @@
 use std::borrow::Cow;
 use std::ops::Range;
 
-use elide_codec::extract::ExtractedItem;
+use elide_codec::extract::{ExtractedItem, Passage};
 use elide_core::modality::ResolvedHint;
 use elide_core::modality::text::Text;
 use elide_core::{Error, Result};
@@ -45,12 +45,6 @@ impl<'a> MarkupSource<'a> {
         &self.raw[range]
     }
 
-    /// `span` unless it covers only whitespace (blank runs carry no PII and only
-    /// clutter the stream).
-    pub(super) fn non_blank(&self, span: Range<usize>) -> Option<Range<usize>> {
-        (!self.raw[span.clone()].trim().is_empty()).then_some(span)
-    }
-
     /// Each redactable attribute of an element: the source span of its name (a
     /// located context hint) and the source byte span of its value, the inner
     /// bytes between the quotes. Values pass through verbatim, so a `mailto:` URL
@@ -59,7 +53,7 @@ impl<'a> MarkupSource<'a> {
     /// boosted by its attribute name.
     ///
     /// Strict XML validates attributes (rejecting e.g. a duplicate key) and
-    /// reports an [`AttrError`] as [`ErrorKind::MalformedInput`]; lenient HTML
+    /// reports an [`AttrError`] as [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput); lenient HTML
     /// turns validation off and skips an unparseable attribute rather than
     /// failing.
     ///
@@ -144,15 +138,17 @@ impl MarkupSink {
         self.offset
     }
 
-    /// Append an item for `value` at source `span`, advancing the offset by the
-    /// value's length. Returns the new item's index.
-    pub(super) fn push(&mut self, value: String, span: Range<usize>) -> usize {
+    /// Append an item for `value` read at `address`, joining the passage
+    /// before it as `passage` says, and advance the offset by the value's
+    /// length. Returns the new item's index.
+    pub(super) fn push(&mut self, (value, address): (String, XmlSpan), passage: Passage) -> usize {
         self.offset += value.len();
         let index = self.items.len();
         self.items.push(ExtractedItem {
             value,
-            address: XmlSpan(span),
+            address,
             hints: Vec::new(),
+            passage,
         });
         index
     }

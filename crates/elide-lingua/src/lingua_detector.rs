@@ -72,9 +72,9 @@ impl LinguaDetector {
     /// Run detection on `text`.
     ///
     /// Empty for ambiguous inputs (lingua refused to commit), one
-    /// or more entries otherwise. Each entry has a populated
-    /// [`LanguageSpan`] so mixed-language input can be attributed
-    /// region-by-region.
+    /// or more entries otherwise. Each entry carries its
+    /// [`span`](LanguageClaim::span) so mixed-language input can be
+    /// attributed region-by-region.
     pub fn detect(&self, text: &str) -> Result<Vec<LanguageClaim>> {
         let detections = self
             .inner

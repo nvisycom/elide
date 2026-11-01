@@ -31,7 +31,7 @@ impl ContentTypes {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if the manifest is not well-formed.
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the manifest is not well-formed.
     pub(crate) fn parse(xml: &str) -> Result<Self> {
         let mut types = Self::default();
         let mut reader = Reader::from_str(xml);
@@ -92,7 +92,7 @@ impl ContentTypes {
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`] if the manifest is not well-formed.
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the manifest is not well-formed.
 pub(crate) fn without_parts(xml: &str, removed: &HashSet<PartPath>) -> Result<String> {
     let removed: HashSet<String> = removed
         .iter()

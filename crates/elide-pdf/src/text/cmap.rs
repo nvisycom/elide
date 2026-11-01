@@ -17,7 +17,7 @@ use lopdf::{Document, Object, ObjectId};
 ///
 /// # Errors
 ///
-/// [`ErrorKind::Redaction`] if a deleted
+/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if a deleted
 /// code falls inside a multi-code `bfrange` (which cannot be scrubbed without
 /// re-deriving the range) or if a CMap stream cannot be read, so the redaction
 /// fails closed rather than leaving a recoverable code->Unicode entry.

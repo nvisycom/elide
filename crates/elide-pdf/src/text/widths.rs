@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 
 use lopdf::{Dictionary, Document, Object};
 
-use crate::lopdf_ext::{DictionaryExt, DocumentExt, ObjectExt};
+use crate::document::object::{DictionaryExt, DocumentExt, ObjectExt};
 
 /// The default glyph width (glyph-space thousandths) when a font declares none:
 /// the PDF default for a composite font's `/DW`, and a reasonable stand-in for a

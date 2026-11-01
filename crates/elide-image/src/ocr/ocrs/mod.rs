@@ -4,7 +4,7 @@
 //! loading the two model files and running the recognition pipeline, exposing a
 //! single elide-shaped [`Engine::recognize`](engine::Engine::recognize) that
 //! takes image bytes and returns core [`LayoutRegion`]s. This backend layer holds
-//! only elide concerns: the [`Backend`](elide_core::backend::Backend) impl,
+//! only elide concerns: the [`Backend`] impl,
 //! provenance, and the async offload of the CPU-bound engine call, no
 //! `ocrs`/`rten` type appears here.
 //!

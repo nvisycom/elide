@@ -29,9 +29,10 @@ default = []
 ## so a caller can ship an extraction result across a boundary.
 serde = ["dep:serde"]
 
-## Expose `opc::fixtures`, readers that decompress a package's parts so a
-## dependent crate's tests can assert on individual parts. Test scaffolding,
-## not part of the shipped surface.
+## Expose `fixtures`: build an OPC package from its parts and read a rewritten
+## one back (decompressed parts, document-property fields), so a dependent
+## crate's tests can assert on individual parts. Test scaffolding, not part of
+## the shipped surface.
 fixtures = []
 
 [dependencies]

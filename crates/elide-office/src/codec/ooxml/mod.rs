@@ -7,9 +7,8 @@
 //! that would otherwise be copy-pasted across them: extract element-text blocks
 //! addressed by `(part, span, OffsetMap)` into a body
 //! [`ExtractStream`](elide_codec::extract::ExtractStream) (the
-//! [`addresser`](self::addresser) maps decoded↔raw), surface embeddings and
-//! document-property parts as blob sub-parts, and re-pack (the
-//! [`recombine`](self::recombine)r). The only per-format differences — the engine
+//! [`addresser`] maps decoded↔raw), surface embeddings and document-property
+//! parts as blob sub-parts, and re-pack (the recombiner, [`recombine`]). The only per-format differences — the engine
 //! format, the codec [`FormatId`], and the label used in errors — are named by
 //! the [`OoxmlCodec`] seam.
 
@@ -20,7 +19,7 @@ mod recombine;
 use std::collections::HashSet;
 use std::ops::Range;
 
-use elide_codec::extract::ExtractedItem;
+use elide_codec::extract::{ExtractedItem, OffsetMap, Passage};
 use elide_codec::{FormatId, LocalId};
 use elide_core::Result;
 
@@ -32,7 +31,7 @@ pub(crate) use self::loader::decode_parts;
 pub(crate) use self::recombine::OoxmlRecombine;
 use crate::ooxml::OoxmlFormat;
 use crate::opc::sanitize::remove_parts;
-use crate::opc::{Block, OffsetMap, PartPath, Replacement};
+use crate::opc::{Block, PartPath, Replacement};
 
 /// The document-local id of the body text stream part (not a zip entry).
 const BODY_PART_ID: &str = "body";
@@ -77,15 +76,17 @@ pub(crate) fn items(blocks: Vec<Block>) -> Vec<ExtractedItem<OoxmlAddress>> {
                 offsets: block.offsets,
             },
             hints: Vec::new(),
+            passage: block.passage,
         })
         .collect()
 }
 
 /// The text replacements that write each item's current value back over its
-/// raw span.
+/// raw span; a separator is never written back.
 pub(crate) fn replacements(items: &[ExtractedItem<OoxmlAddress>]) -> Vec<Replacement> {
     items
         .iter()
+        .filter(|item| item.passage != Passage::Separator)
         .map(|item| Replacement {
             part: item.address.part.clone(),
             start: item.address.span.start,

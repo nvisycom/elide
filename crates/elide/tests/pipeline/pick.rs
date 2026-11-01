@@ -20,10 +20,10 @@ use elide::{Directives, Orchestrator, PartId, RegistryDocumentExt, Report, Resul
 
 use crate::support::orchestrator::TestOrchestrator;
 
-const SAMPLE: &[u8] = include_bytes!("../testdata/sample.docx");
+const SAMPLE: &[u8] = include_bytes!("../testdata/docx/body_header_hyperlink.docx");
 
 /// The fixture document's name, its depth-1 part key in the report.
-const DOC: &str = "sample.docx";
+const DOC: &str = "body_header_hyperlink.docx";
 
 /// Build an orchestrator whose body rule set is deterministic enough to read
 /// back from the picks: every detected label redacts through `Replace` (`[{label}]`).

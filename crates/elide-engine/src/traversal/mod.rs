@@ -6,7 +6,7 @@
 //! Analyzing and redacting walk that tree the same way — number each part, handle
 //! the stream leaves, recurse into each blob, enforce the depth limit — and differ
 //! only in *what* a stream leaf does and whether a blob child folds back.
-//! [`walk_parts`] owns the shared structure; a [`PartVisitor`] supplies the
+//! A [`Walk`] owns the shared structure; a [`PartVisitor`] supplies the
 //! per-phase leaf behavior. [`Analyze`] and [`Redact`] are the two visitors.
 
 mod phase;
@@ -33,7 +33,7 @@ use crate::pipeline::BoxFuture;
 /// not a silent stop, so nothing nested is left un-analyzed or un-redacted.
 pub(crate) const MAX_CONTAINER_DEPTH: usize = 8;
 
-/// The per-phase behavior [`walk_parts`] drives at each leaf: what a level's
+/// The per-phase behavior a [`Walk`] drives at each leaf: what a level's
 /// stream parts do, and whether a recursed blob child folds its re-encoded bytes
 /// back into its parent.
 ///

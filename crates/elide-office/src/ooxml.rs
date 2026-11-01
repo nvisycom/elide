@@ -55,8 +55,8 @@ impl<F: OoxmlFormat> OoxmlPackage<F> {
     ///
     /// # Errors
     ///
-    /// - [`ErrorKind::MalformedInput`] if the bytes are not a package;
-    /// - [`ErrorKind::MalformedInput`] if the format's main part is missing.
+    /// - [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the bytes are not a package;
+    /// - [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the format's main part is missing.
     pub fn open(document: &[u8]) -> Result<Self> {
         let package = Package::open(document, &F::classifier())?;
         // Without a main part the bytes are a package but not a usable document

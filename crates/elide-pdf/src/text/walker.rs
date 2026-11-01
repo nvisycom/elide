@@ -21,7 +21,7 @@ use super::glyphs::decode_glyphs;
 use super::widths::{GlyphMetrics, WidthSource};
 use super::{Address, FontEntry, GlyphBytes, OffsetMap, OffsetRun, StreamTarget, TextBlock};
 use crate::document::Store;
-use crate::lopdf_ext::{DictionaryExt, DocumentExt, ObjectExt};
+use crate::document::object::{DictionaryExt, DocumentExt, ObjectExt};
 
 /// The character code of the single-byte space, the only code `Tw` word spacing
 /// applies to (ISO 32000-1 §9.3.3).
@@ -361,9 +361,9 @@ fn inherited_rect(doc: &Document, page_id: ObjectId, key: &[u8]) -> Option<[f64;
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`] if a page's
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a page's
 /// content, resources, or an XObject stream cannot be read;
-/// [`ErrorKind::Redaction`] if a page draws text
+/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if a page draws text
 /// with a font whose encoding cannot be decoded.
 pub(crate) fn text_blocks(store: &Store) -> Result<Vec<TextBlock>> {
     let doc = store.doc();
@@ -386,9 +386,9 @@ pub(crate) fn text_blocks(store: &Store) -> Result<Vec<TextBlock>> {
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`] if the page's
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the page's
 /// content, resources, or an XObject stream cannot be read;
-/// [`ErrorKind::Redaction`] if the page draws text
+/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if the page draws text
 /// with a font whose encoding cannot be decoded.
 pub(crate) fn text_block_for_page(
     doc: &Document,

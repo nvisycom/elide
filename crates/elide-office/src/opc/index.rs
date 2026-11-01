@@ -53,7 +53,7 @@ impl Index {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if the package, its content-types
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the package, its content-types
     /// manifest, or a relationships part cannot be read, or a size cap is
     /// exceeded.
     pub(crate) fn read_with_limits(

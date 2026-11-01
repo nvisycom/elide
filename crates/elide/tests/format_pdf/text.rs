@@ -37,12 +37,15 @@ async fn extracted_text(pdf: &[u8]) -> Result<String> {
 }
 
 const FIXTURE: Fixture = Fixture {
-    path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/sample.pdf"),
-    source: include_bytes!("../testdata/sample.pdf"),
+    path: concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/testdata/pdf/born_digital_text.pdf"
+    ),
+    source: include_bytes!("../testdata/pdf/born_digital_text.pdf"),
     extension: "pdf",
 };
 
-/// The six PII values the `sample.pdf` fixture carries, none of which may
+/// The six PII values the `pdf/born_digital_text.pdf` fixture carries, none of which may
 /// survive redaction.
 const PII: [&str; 6] = [
     "alice.johnson@example.com",

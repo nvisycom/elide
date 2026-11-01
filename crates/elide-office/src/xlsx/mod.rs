@@ -129,11 +129,11 @@ impl Xlsx {
     ///
     /// # Errors
     ///
-    /// - [`ErrorKind::MalformedInput`] if the
+    /// - [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the
     ///   bytes are not a zip;
-    /// - [`ErrorKind::MalformedInput`] if the
+    /// - [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the
     ///   workbook part is missing;
-    /// - [`ErrorKind::MalformedInput`] if the workbook
+    /// - [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the workbook
     ///   or its relationships are malformed.
     pub fn open(document: &[u8]) -> Result<Self> {
         let package = Package::open(document, &SheetClassifier)?;
@@ -165,9 +165,9 @@ impl Xlsx {
     ///
     /// # Errors
     ///
-    /// - [`ErrorKind::MalformedInput`] if a
+    /// - [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a
     ///   referenced worksheet part is missing;
-    /// - [`ErrorKind::MalformedInput`] if a sheet or the
+    /// - [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a sheet or the
     ///   shared-string table is not UTF-8 or is malformed.
     pub fn extract(&self) -> Result<Vec<Cell>> {
         let shared = self.shared_strings()?;
@@ -227,8 +227,8 @@ impl Xlsx {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::Processing`] if an edit or replacement cannot be applied, or
-    /// [`ErrorKind::MalformedInput`] if a sheet cannot be read.
+    /// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) if an edit or replacement cannot be applied, or
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a sheet cannot be read.
     pub fn rewrite(
         &self,
         edits: &[CellEdit],
@@ -528,13 +528,13 @@ mod tests {
     /// A real Excel-authored workbook (Microsoft): one sheet `in`, a header row
     /// and two data rows of PII (names, emails, phones, cards, IBANs, SSNs, IPs)
     /// stored as shared strings, with a full styles/theme package.
-    const SAMPLE: &[u8] = include_bytes!("../../tests/testdata/sample.xlsx");
+    const SAMPLE: &[u8] = include_bytes!("../../testdata/xlsx/shared_string_cells.xlsx");
 
     /// A hand-built workbook whose shared string `alice@example.com` (index 1) is
     /// referenced by both `Customers!A2` and `Notes!A1`, plus an inline SSN at
     /// `Customers!B2`. Its two sheets sharing a pooled value drive the de-share
     /// and orphan-prune tests, which a single-sheet workbook cannot exercise.
-    const SHARED: &[u8] = include_bytes!("../../tests/testdata/shared_across_sheets.xlsx");
+    const SHARED: &[u8] = include_bytes!("../../testdata/xlsx/shared_across_sheets.xlsx");
 
     /// SpreadsheetML's main namespace, declared on the hand-built parts.
     const SML_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
@@ -559,7 +559,7 @@ mod tests {
         let strings = format!(
             r#"<?xml version="1.0"?><sst xmlns="{SML_NS}" count="1" uniqueCount="1"><si><t>Roe</t><rPh sb="0" eb="3"><t>ロウ ジェーン</t></rPh></si></sst>"#
         );
-        crate::opc::fixtures::pack_parts(&[
+        crate::fixtures::pack_parts(&[
             ("[Content_Types].xml", types.as_bytes()),
             ("_rels/.rels", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>"#),
             ("xl/workbook.xml", workbook.as_bytes()),
@@ -602,7 +602,12 @@ mod tests {
             .markup()
             .blocks
             .iter()
-            .map(|block| Replacement::for_block(block, "[PERSON]"))
+            .map(|block| Replacement {
+                part: block.part.clone(),
+                start: block.start,
+                end: block.end,
+                text: "[PERSON]".into(),
+            })
             .collect();
         let edits = [
             CellEdit::new("Jane Roe", 0, 0, "[PERSON]"),
@@ -613,7 +618,7 @@ mod tests {
             .expect("the redacted workbook passes the output check");
 
         let workbook =
-            String::from_utf8(crate::opc::fixtures::read_part(&out, "xl/workbook.xml").unwrap())
+            String::from_utf8(crate::fixtures::read_part(&out, "xl/workbook.xml").unwrap())
                 .unwrap();
         assert!(workbook.contains(r#"name="(PERSON)""#), "{workbook}");
         assert!(workbook.contains(r#"name="(PERSON) (2)""#), "{workbook}");
@@ -622,14 +627,14 @@ mod tests {
             "{workbook}"
         );
         let linked = String::from_utf8(
-            crate::opc::fixtures::read_part(&out, "xl/worksheets/sheet2.xml").unwrap(),
+            crate::fixtures::read_part(&out, "xl/worksheets/sheet2.xml").unwrap(),
         )
         .unwrap();
         // The hyperlink follows the sheet it pointed at, whichever number the
         // sheet got.
         assert!(linked.contains("location=\"&apos;(PERSON)"), "{linked}");
         let sheet = String::from_utf8(
-            crate::opc::fixtures::read_part(&out, "xl/worksheets/sheet1.xml").unwrap(),
+            crate::fixtures::read_part(&out, "xl/worksheets/sheet1.xml").unwrap(),
         )
         .unwrap();
         for leaked in ["Jane", "jane@example.com"] {
@@ -637,10 +642,9 @@ mod tests {
         }
         assert!(sheet.contains("<oddHeader>[PERSON]</oddHeader>"), "{sheet}");
         assert!(sheet.contains("[EMAIL]"), "{sheet}");
-        let strings = String::from_utf8(
-            crate::opc::fixtures::read_part(&out, "xl/sharedStrings.xml").unwrap(),
-        )
-        .unwrap();
+        let strings =
+            String::from_utf8(crate::fixtures::read_part(&out, "xl/sharedStrings.xml").unwrap())
+                .unwrap();
         assert!(
             !strings.contains("ジェーン") && !strings.contains("Roe"),
             "{strings}"
@@ -870,7 +874,7 @@ mod tests {
     /// A second workbook carrying non-cell text: a cell comment
     /// (`xl/comments1.xml`) and a drawing (`xl/drawings/drawing1.xml`), each with
     /// PII.
-    const SAMPLE2: &[u8] = include_bytes!("../../tests/testdata/sample2.xlsx");
+    const SAMPLE2: &[u8] = include_bytes!("../../testdata/xlsx/non_cell_text.xlsx");
 
     #[test]
     fn markup_covers_comments_drawings_and_relationship_targets() {
@@ -904,7 +908,16 @@ mod tests {
             .find(|b| b.part.as_str() == "xl/comments1.xml" && b.text.contains("carol@example.com"))
             .expect("comment block");
         let out = xlsx
-            .rewrite(&[], &[Replacement::for_block(block, "[EMAIL]")], &[])
+            .rewrite(
+                &[],
+                &[Replacement {
+                    part: block.part.clone(),
+                    start: block.start,
+                    end: block.end,
+                    text: "[EMAIL]".into(),
+                }],
+                &[],
+            )
             .unwrap();
         let comment = String::from_utf8(read_part(&out, "xl/comments1.xml")).unwrap();
         assert!(comment.contains("[EMAIL]") && !comment.contains("carol@example.com"));

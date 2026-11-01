@@ -37,7 +37,7 @@ use crate::validators::ValidationContext;
 ///
 /// Each rule's `[context]` then lifts the confidence of its own matches
 /// whose neighbourhood holds one of its keywords or anchor matches; see
-/// [`context`](crate::context).
+/// [`context`].
 ///
 /// Construct via [`PatternRecognizer::builder`].
 ///

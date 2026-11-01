@@ -261,8 +261,8 @@ impl<'a> Source<'a> {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::Sanitization`] if metadata survived, or
-    /// [`ErrorKind::MalformedInput`] if the container cannot be read.
+    /// [`ErrorKind::Sanitization`](elide_core::ErrorKind::Sanitization) if metadata survived, or
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the container cannot be read.
     #[cfg(feature = "codec")]
     pub(crate) fn check_stripped(&self, fields_allowed: bool) -> Result<()> {
         let outside_exif = match self.format {

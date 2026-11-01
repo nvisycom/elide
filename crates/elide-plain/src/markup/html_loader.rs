@@ -20,9 +20,9 @@ use super::markup_parser::build_items;
 use super::sanitize::{Dialect, MarkupSanitizer};
 use super::xml_handler::markup_document;
 
-/// HTML block-level elements: their text children form one sibling-hint group,
-/// so prose split across inline wrappers (`Card <code>4111…</code> on file`)
-/// still surfaces the surrounding context to a boost. Names are lowercased and
+/// HTML block-level elements: each ends a passage, and its text children form
+/// one sibling-hint group, so a label and a value in separate passages of one
+/// block (`<td>Card number<p>4111…</p></td>`) still surface to a boost. Names are lowercased and
 /// sorted. Membership is a linear scan (see `MarkupConfig::is_block`), fine for
 /// a list this size checked once per closing tag.
 const BLOCK_ELEMENTS: &[&str] = &[
@@ -59,6 +59,17 @@ const BLOCK_ELEMENTS: &[&str] = &[
     "ul",
 ];
 
+/// HTML elements that end a passage besides the block elements: text does not
+/// read across the document structure, a form control, or embedded content, so
+/// `<title>Jane</title>…<body>Roe` or two `<option>`s never join into one
+/// value. Names are lowercased and sorted.
+const PASSAGE_BOUNDS: &[&str] = &[
+    "audio", "body", "button", "canvas", "details", "embed", "fieldset", "figure", "frame",
+    "frameset", "head", "hr", "html", "iframe", "input", "legend", "menu", "meter", "noscript",
+    "object", "optgroup", "option", "output", "picture", "progress", "select", "summary", "svg",
+    "tbody", "template", "textarea", "tfoot", "thead", "title", "video",
+];
+
 /// Element bodies the engine does not scan: a `<style>` sheet is presentation,
 /// not content. (Scripts never reach the engine; the sanitizer removes them.)
 const SKIP_BODY_ELEMENTS: &[&str] = &["style"];
@@ -72,7 +83,8 @@ impl DocumentLoader for HtmlLoader {
     async fn decode(&self, content: ContentData, policy: HiddenContentPolicy) -> Result<Document> {
         let sanitizer = MarkupSanitizer::new(Dialect::Html, policy);
         let (text, stripped) = sanitizer.sanitize(content.decode()?)?;
-        let config = MarkupConfig::lenient(BLOCK_ELEMENTS, SKIP_BODY_ELEMENTS);
+        let config = MarkupConfig::lenient(BLOCK_ELEMENTS, SKIP_BODY_ELEMENTS)
+            .with_passage_bounds(PASSAGE_BOUNDS);
         // `build_items` already reports a `MalformedInput` parse error.
         let items = build_items(&text, config)?;
         Ok(markup_document(FORMAT_ID.clone(), text, items, sanitizer).with_stripped(stripped))
@@ -120,6 +132,24 @@ mod tests {
             .into_iter()
             .map(|chunk| chunk.data.as_str().to_owned())
             .collect()
+    }
+
+    #[tokio::test]
+    async fn text_does_not_read_across_document_structure_or_form_controls() {
+        let raw = concat!(
+            "<html><head><title>Jane</title></head><body>Roe ",
+            "<select><option>4111</option><option>1111</option></select></body></html>",
+        );
+        let mut doc = load(raw).await;
+        assert_eq!(values(&mut doc), ["Jane", "Roe ", "4111", "1111"]);
+    }
+
+    #[tokio::test]
+    async fn html_named_references_read_decoded() {
+        let raw = "<p>Jane&nbsp;Roe &amp; jane&#46;roe&#64;example.com</p>";
+        let mut doc = load(raw).await;
+        assert_eq!(values(&mut doc), ["Jane\u{a0}Roe & jane.roe@example.com"]);
+        assert_eq!(encoded(&doc), raw);
     }
 
     #[tokio::test]
@@ -174,16 +204,36 @@ mod tests {
         assert_eq!(encoded(&doc), "<html><body><p>Hi</p></body></html>");
     }
 
-    #[tokio::test]
-    async fn sibling_hints_span_the_real_block_vocabulary() {
-        // A <td> (in the real BLOCK_ELEMENTS) groups its split text for hints.
-        let raw = "<table><tr><td>Card <code>4111 1111 1111 1111</code> on file</td></tr></table>";
-        let mut doc = load(raw).await;
-        let any_hint = body(&mut doc)
+    /// The hint texts of the chunk reading `text`.
+    fn hint_texts(doc: &mut Document, text: &str) -> Vec<String> {
+        let chunk = body(doc)
             .chunks()
             .unwrap()
+            .into_iter()
+            .find(|chunk| chunk.data.as_str() == text)
+            .expect("chunk");
+        chunk
+            .hints
             .iter()
-            .any(|chunk| !chunk.hints.is_empty());
-        assert!(any_hint, "expected sibling hints under the <td> block");
+            .map(|hint| hint.data.as_str().to_owned())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_sibling_hint_links_passages_of_one_block() {
+        // The <td> (in the real BLOCK_ELEMENTS) holds the label and, in a
+        // nested <p>, the number: two passages its sibling hints link.
+        let raw = "<table><tr><td>Card number<p>4111 1111 1111 1111</p></td></tr></table>";
+        let mut doc = load(raw).await;
+        let hints = hint_texts(&mut doc, "4111 1111 1111 1111");
+        assert!(hints.iter().any(|hint| hint == "Card number"), "{hints:?}");
+    }
+
+    #[tokio::test]
+    async fn text_in_one_passage_gets_no_sibling_hint() {
+        let raw = "<table><tr><td>Card <code>4111 1111 1111 1111</code> on file</td></tr></table>";
+        let mut doc = load(raw).await;
+        let hints = hint_texts(&mut doc, "Card 4111 1111 1111 1111 on file");
+        assert!(!hints.iter().any(|hint| hint == "on file"), "{hints:?}");
     }
 }

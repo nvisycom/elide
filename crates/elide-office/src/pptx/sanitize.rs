@@ -81,8 +81,8 @@ mod tests {
     use elide_core::redaction::{Disposition, HiddenContentPolicy};
 
     use super::*;
+    use crate::fixtures::{pack_parts, read_part};
     use crate::ooxml::OoxmlPackage;
-    use crate::opc::fixtures::{pack_parts, read_part};
     use crate::opc::sanitize::sanitize;
 
     const PML_NS: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";

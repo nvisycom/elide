@@ -1,16 +1,26 @@
-//! [`Pdf`]: the opened-document orchestrator.
+//! The PDF engine: an opened document ([`Pdf`], over its [`Store`]) and what
+//! the crate does with one.
 //!
-//! A `Pdf` is a thin wrapper over a `Store` (the data holder: object graph +
-//! source bytes + limits). Its methods are the crate's public capability API,
-//! extract text, sanitize, redact, render, each delegating to the capability's
-//! own module ([`extract`](crate::extract), [`sanitize`](crate::sanitize),
-//! [`text`], [`image`],
-//! [`attachment`], and `render` behind the `render`
-//! feature). A redaction is applied in one pass over one copy of the document
-//! and saved once ([`Redaction`]). The container holds no capability logic
-//! itself.
+//! - [`extract`] reads its pages' text and embedded images;
+//! - [`sanitize`] removes its hidden content, and checks an encoded one carries
+//!   none;
+//! - [`image`] and [`attachment`] surface, replace, and remove its embedded
+//!   images and files;
+//! - [`content`] rewrites its content streams, and [`object`] extends lopdf's
+//!   object model with the reads the rest share.
+//!
+//! A redaction is applied in one pass over one copy of the document and saved
+//! once ([`Redaction`]). Text extraction and glyph deletion live beside the
+//! engine in [`text`], and page rendering in `render` behind the
+//! `render` feature.
 
-mod data;
+pub(crate) mod attachment;
+pub(crate) mod content;
+pub(crate) mod extract;
+pub(crate) mod image;
+pub(crate) mod object;
+pub(crate) mod sanitize;
+mod store;
 
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
@@ -20,14 +30,14 @@ use elide_codec::StrippedContent;
 use elide_core::Result;
 use lopdf::ObjectId;
 
-pub(crate) use self::data::Store;
-use crate::attachment::{self, Attachment, AttachmentId, AttachmentReplacement};
-use crate::extract::Extraction;
-use crate::image::{self, EmbeddingKind, ImageId, ImageReplacement};
-use crate::lopdf_ext::DocumentExt;
+use self::attachment::{Attachment, AttachmentId, AttachmentReplacement};
+use self::extract::Extraction;
+use self::image::{EmbeddingKind, ImageId, ImageReplacement};
+use self::object::DocumentExt;
+use self::sanitize::SanitizeDocumentExt;
+pub(crate) use self::store::Store;
 #[cfg(feature = "render")]
 use crate::render::{self, PageObservation, PageReplacement, RenderedPage};
-use crate::sanitize::SanitizeDocumentExt;
 use crate::text::{self, Detection};
 
 /// An opened PDF document: parsed once, then reused across operations.
@@ -71,13 +81,13 @@ impl Pdf {
     }
 
     /// Extract the document's text and embedded images, with a per-page
-    /// [`issue`](crate::extract::Extraction::issues) for any page that yielded no
+    /// [`issue`](crate::document::extract::Extraction::issues) for any page that yielded no
     /// text (scanned, needs OCR) or could not be decoded, and each readable page's
     /// rendered glyph [`geometry`](crate::text::PageGeometry) from the *same*
     /// content walk (so per-entity page rectangles cost no second walk).
     ///
     /// This is the text surface a caller runs detection over: a
-    /// [`Block`](crate::extract::Block)'s character offsets into its text are what
+    /// [`Block`](crate::document::extract::Block)'s character offsets into its text are what
     /// [`apply`](Pdf::apply) expects in its [`Detection`]s, since both
     /// use the same content walk. The geometry maps a detected character span back
     /// to the page rectangles it covers.

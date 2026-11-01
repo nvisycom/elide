@@ -6,7 +6,7 @@
 //! keeping a real selectable text layer with the detected spans gone. The
 //! structures that would retain copies of the text (annotations, `/Info`,
 //! `/Metadata`) were already removed at decode by
-//! [`sanitize`](crate::sanitize).
+//! [`sanitize`](crate::document::sanitize).
 //!
 //! A detected character span resolves through the page's [`OffsetMap`] to the
 //! exact glyph byte ranges to delete, in whichever content stream drew them.
@@ -21,7 +21,7 @@ use lopdf::{Document, Object, ObjectId};
 use super::OffsetMap;
 use super::detection::Detection;
 use crate::document::Store;
-use crate::lopdf_ext::DocumentExt;
+use crate::document::object::DocumentExt;
 use crate::text::{Address, GlyphBytes, StreamTarget, TextBlock, scrub, text_blocks};
 
 /// The physical content stream a deletion edits, distinguishing streams an
@@ -58,9 +58,9 @@ type Deletions = BTreeMap<StreamKey, BTreeMap<Address, Vec<(usize, usize)>>>;
 ///
 /// # Errors
 ///
-/// - [`ErrorKind::MalformedInput`] if the
+/// - [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the
 ///   document cannot be read or re-saved;
-/// - [`ErrorKind::Redaction`] if a page draws text
+/// - [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if a page draws text
 ///   with an undecodable font, redaction is refused rather than silently leaving
 ///   that text in place.
 pub(crate) fn delete(store: &Store, doc: &mut Document, detections: &[Detection]) -> Result<()> {

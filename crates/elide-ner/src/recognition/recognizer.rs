@@ -34,7 +34,7 @@ use crate::backend::MockBackend;
 use crate::backend::{NerRequest, NerResponse, NerSpan};
 
 /// Trait-driven NER recognizer, generic over its NER backend `B` — any
-/// [`Backend`](elide_core::backend::Backend) whose request is [`NerRequest`] and
+/// [`Backend`] whose request is [`NerRequest`] and
 /// whose response is [`NerResponse`].
 #[derive(Clone)]
 pub struct NerRecognizer<B = ()> {

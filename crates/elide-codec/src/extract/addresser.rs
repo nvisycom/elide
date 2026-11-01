@@ -33,24 +33,21 @@ pub trait SourceAddresser<A>: Send + Sync {
         Vec::new()
     }
 
-    /// Reverse of [`source_span`](Self::source_span): locate the item and the
-    /// decoded-local byte range that the raw `source` references address.
+    /// Reverse of [`source_span`](Self::source_span): locate the items and the
+    /// decoded-local byte ranges that the raw `source` references address.
     ///
     /// This is what lets a redaction target a span the caller has only in raw
     /// source coordinates, e.g. an entity a review layer added by selecting
     /// text in a container part, which it can express as part byte spans but not
     /// as a decoded-stream offset. `source` is the entity's whole
-    /// [`SourceRef`](elide_core::modality::text::TextLocation::source) list, which
-    /// must resolve to one contiguous decoded range within a single item (the
-    /// runs of one selection share an item). Returns the [`ItemEdit`] to apply,
-    /// or `None` when the references do not resolve to a single item (or the
-    /// addresser does not address items by source span, the default). The
-    /// returned edit feeds the same path a decoded-range redaction uses.
-    fn locate_source(
-        &self,
-        _items: &[ExtractedItem<A>],
-        _source: &[SourceRef],
-    ) -> Option<ItemEdit> {
-        None
+    /// [`SourceRef`](elide_core::modality::text::TextLocation::source) list; each
+    /// reference must lie within one item, and the references within one item
+    /// resolve to one contiguous decoded range of it. Returns the [`ItemEdit`]s to
+    /// apply, one per item in item order, or none when a reference resolves to no
+    /// item (or the addresser does not address items by source span, the
+    /// default). The returned edits feed the same path a decoded-range redaction
+    /// uses.
+    fn locate_source(&self, _items: &[ExtractedItem<A>], _source: &[SourceRef]) -> Vec<ItemEdit> {
+        Vec::new()
     }
 }

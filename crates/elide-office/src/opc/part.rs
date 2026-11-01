@@ -113,7 +113,8 @@ pub enum PartRole {
     /// Redact the external-hyperlink `Target` attribute values of this
     /// relationships part.
     RelationshipTargets,
-    /// A binary embedding (image, embedded object, font) surfaced as bytes,
+    /// A binary embedding (image, audio or video clip, embedded object)
+    /// surfaced as bytes,
     /// tagged with what kind of embedding it is.
     Binary(EmbeddingKind),
     /// A document-property part (docProps/core.xml, app.xml): its named fields

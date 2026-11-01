@@ -8,7 +8,8 @@
 //! can't.
 //!
 //! [`ValidatorRegistry::builtin`] ships universal validators
-//! ([`luhn`], [`iban`], [`phone`], [`date`], [`btc`]) plus
+//! ([`luhn`](fn@luhn), [`iban`](fn@iban), [`phone`](fn@phone),
+//! [`date`](fn@date), [`btc`](fn@btc)) plus
 //! jurisdiction-scoped sets re-exported from [`us`] (`"us.ssn"`,
 //! `"us.aba_routing"`, `"us.npi"`, `"us.dea_number"`,
 //! `"us.postal_code"`), [`uk`]

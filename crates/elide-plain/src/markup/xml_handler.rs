@@ -3,23 +3,27 @@
 //! on it too) uses to map and re-serialise a mutated item stream.
 //!
 //! Re-serialisation preserves the document **verbatim**: [`MarkupRecombine`]
-//! splices each item's current value back at its recorded source byte span into
-//! the retained raw string, leaving the declaration, whitespace, attribute
-//! quoting, and everything outside the redacted spans byte-identical. Splices
-//! apply right-to-left so an earlier edit's length delta never shifts a later
-//! span.
+//! writes back only the stretch of each item's value a redaction changed,
+//! escaped for where it lands, leaving the declaration, whitespace, attribute
+//! quoting, character references, and everything outside the redacted
+//! stretches byte-identical. Splices apply right-to-left so an earlier edit's
+//! length delta never shifts a later span.
 
 use std::cmp::Reverse;
 use std::ops::Range;
 use std::sync::Arc;
 
 use elide_codec::content::ContentData;
-use elide_codec::extract::{ExtractStream, ExtractedItem, ItemEdit, SharedSplice, SourceAddresser};
+use elide_codec::extract::{
+    ExtractStream, ExtractedItem, ItemEdit, OffsetMap, Passage, SharedSplice, SourceAddresser,
+    decode_references,
+};
 use elide_codec::{
     Document, DocumentPart, EncodedPart, ErasedStream, Format, FormatId, LocalId, Recombine, Stream,
 };
 use elide_core::modality::text::{SourceRef, Text};
 use elide_core::{Error, Result};
+use quick_xml::escape::{escape, partial_escape};
 
 use super::XmlLoader;
 use super::sanitize::MarkupSanitizer;
@@ -27,21 +31,146 @@ use super::sanitize::MarkupSanitizer;
 /// Stable [`FormatId`] for the XML codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.text.xml");
 
-/// An XML [`ExtractedItem`] addressed by the source byte span its
-/// `value` occupies in the original document.
+/// An XML [`ExtractedItem`] addressed by the source bytes its `value` was read
+/// from.
 ///
 /// [`ExtractedItem`]: elide_codec::extract::ExtractedItem
 pub(crate) type XmlItem = ExtractedItem<XmlSpan>;
 
-/// The source byte span (in the retained raw document) that an
-/// [`ExtractedItem`]'s value occupies: the region the recombiner
-/// overwrites. These are the *inner* bytes: a text node's text, an
-/// attribute value between the quotes, a comment body between `<!--` and
-/// `-->`, a CDATA payload between `<![CDATA[` and `]]>`.
+/// Where an [`ExtractedItem`]'s value was read from in the retained raw
+/// document, and how a new value is written back there.
+///
+/// The value is the text a reader sees: a text run's or an attribute value's
+/// character references (`&amp;`, `&#64;`, HTML's `&nbsp;`) are decoded, and
+/// [`offsets`](Self::offsets) maps it back onto the raw bytes.
 ///
 /// [`ExtractedItem`]: elide_codec::extract::ExtractedItem
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct XmlSpan(pub(super) Range<usize>);
+pub(crate) struct XmlSpan {
+    /// The *inner* raw bytes the value was read from: a text run, an
+    /// attribute value between its quotes, a comment body between `<!--` and
+    /// `-->`, a CDATA payload between `<![CDATA[` and `]]>`.
+    pub(super) range: Range<usize>,
+    /// The map from the value back onto [`range`](Self::range).
+    pub(super) offsets: OffsetMap,
+    /// How a new value is escaped where it lands.
+    pub(super) kind: SpanKind,
+    /// The value as read, which a write-back compares the current value
+    /// against.
+    pub(super) read: String,
+}
+
+/// How a new value is escaped where an [`XmlSpan`] lands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SpanKind {
+    /// Character data: `<`, `>`, and `&` are escaped.
+    Text,
+    /// An attribute value: quotes are escaped too, so the value cannot end
+    /// early.
+    Attribute,
+    /// A comment body or CDATA payload, written as it is.
+    Verbatim,
+}
+
+impl XmlSpan {
+    /// The value of the escaped `kind` text at `range` of `raw`, its
+    /// references decoded by `resolve`, and its span.
+    pub(super) fn escaped(
+        raw: &str,
+        range: Range<usize>,
+        kind: SpanKind,
+        resolve: fn(&str) -> Option<&'static str>,
+    ) -> (String, Self) {
+        let (value, offsets) = decode_references(&raw[range.clone()], range.start, resolve);
+        (value.clone(), Self::new(range, offsets, kind, value))
+    }
+
+    /// The value of the verbatim text at `range` of `raw`, and its span.
+    pub(super) fn verbatim(raw: &str, range: Range<usize>) -> (String, Self) {
+        let value = raw[range.clone()].to_owned();
+        let offsets = OffsetMap::identity(range.start, range.len());
+        (
+            value.clone(),
+            Self::new(range, offsets, SpanKind::Verbatim, value),
+        )
+    }
+
+    /// The span of a separator reading as `value`, which stands for the markup
+    /// at `range` and maps to no source text.
+    pub(super) fn separator(range: Range<usize>, value: &str) -> (String, Self) {
+        let span = Self::new(
+            range,
+            OffsetMap::default(),
+            SpanKind::Verbatim,
+            value.to_owned(),
+        );
+        (value.to_owned(), span)
+    }
+
+    fn new(range: Range<usize>, offsets: OffsetMap, kind: SpanKind, read: String) -> Self {
+        Self {
+            range,
+            offsets,
+            kind,
+            read,
+        }
+    }
+
+    /// The raw range to replace, and its new raw text, that write `value` back
+    /// over this span; `None` while `value` is as read.
+    ///
+    /// Only the stretch between the longest unchanged start and end is
+    /// rewritten, widened to whole character references, so a reference the
+    /// redaction did not touch keeps its spelling.
+    fn write_back(&self, value: &str) -> Option<(Range<usize>, String)> {
+        let read = self.read.as_str();
+        if value == read {
+            return None;
+        }
+        let prefix = common_prefix(read, value);
+        let suffix = common_suffix(&read[prefix..], &value[prefix..]);
+        let mut changed = prefix..read.len() - suffix;
+        // A pure insertion covers no read text; widen it by one character so it
+        // lands on raw bytes.
+        if changed.is_empty() {
+            match read[changed.end..].chars().next() {
+                Some(next) => changed.end += next.len_utf8(),
+                None => changed.start -= read[..changed.start].chars().next_back()?.len_utf8(),
+            }
+        }
+        let raw = self.offsets.raw_ranges(changed);
+        let raw = raw.first()?.start..raw.last()?.end;
+        let decoded = self.offsets.decoded_ranges(raw.clone());
+        let decoded = decoded.first()?.start..decoded.last()?.end;
+        let text = &value[decoded.start..value.len() - (read.len() - decoded.end)];
+        let text = match self.kind {
+            SpanKind::Text => partial_escape(text),
+            SpanKind::Attribute => escape(text),
+            SpanKind::Verbatim => text.into(),
+        };
+        Some((raw, text.into_owned()))
+    }
+}
+
+/// The byte length of the longest common prefix of `a` and `b`, on a character
+/// boundary.
+fn common_prefix(a: &str, b: &str) -> usize {
+    a.char_indices()
+        .zip(b.chars())
+        .find(|((_, x), y)| x != y)
+        .map_or(a.len().min(b.len()), |((at, _), _)| at)
+}
+
+/// The byte length of the longest common suffix of `a` and `b`, on a character
+/// boundary.
+fn common_suffix(a: &str, b: &str) -> usize {
+    a.chars()
+        .rev()
+        .zip(b.chars().rev())
+        .take_while(|(x, y)| x == y)
+        .map(|(x, _)| x.len_utf8())
+        .sum()
+}
 
 /// [`Format`] descriptor registered into `FormatRegistry`.
 pub fn format() -> Format {
@@ -50,48 +179,52 @@ pub fn format() -> Format {
         .with_content_types(["application/xml", "text/xml"])
 }
 
-/// Maps a markup item's decoded value range to/from its raw source span. The
-/// item value is the verbatim source slice at its [`XmlSpan`], so the mapping is
-/// a bounded offset add (forward) / subtract (reverse); at most one range (the
-/// value carries no entity to split on), single-file (no part tag).
+/// Maps a markup item's decoded value range to/from its raw source bytes
+/// through its [`XmlSpan`]'s offset map, single-file (no part tag).
 #[derive(Debug, Default)]
 pub(crate) struct MarkupAddresser;
 
 impl SourceAddresser<XmlSpan> for MarkupAddresser {
     fn source_span(&self, item: &XmlItem, local: Range<usize>) -> Vec<SourceRef> {
-        let base = &item.address.0;
-        let mapped = base
-            .start
-            .checked_add(local.start)
-            .zip(base.start.checked_add(local.end))
-            .filter(|&(start, end)| start <= end && end <= base.end)
-            .map(|(start, end)| SourceRef::new(start..end));
-        mapped.into_iter().collect()
+        item.address
+            .offsets
+            .raw_ranges(local)
+            .into_iter()
+            .map(SourceRef::new)
+            .collect()
     }
 
-    fn locate_source(&self, items: &[XmlItem], source: &[SourceRef]) -> Option<ItemEdit> {
+    fn locate_source(&self, items: &[XmlItem], source: &[SourceRef]) -> Vec<ItemEdit> {
         // XML is a single file, so its source references carry no part; reject
-        // any part-tagged reference rather than misresolve it.
-        if source.iter().any(|s| s.part.is_some()) {
-            return None;
+        // any part-tagged reference rather than misresolve it. Each reference
+        // must lie within one item.
+        let mut edits = Vec::with_capacity(source.len());
+        for reference in source {
+            let raw = &reference.range;
+            let item = items.iter().enumerate().find(|(_, item)| {
+                item.passage != Passage::Separator
+                    && item.address.range.start <= raw.start
+                    && raw.end <= item.address.range.end
+            });
+            let (None, Some((item, found))) = (&reference.part, item) else {
+                return Vec::new();
+            };
+            let decoded = found.address.offsets.decoded_ranges(raw.clone());
+            let (Some(first), Some(last)) = (decoded.first(), decoded.last()) else {
+                return Vec::new();
+            };
+            edits.push(ItemEdit {
+                item,
+                local: first.start..last.end,
+            });
         }
-        let raw_start = source.iter().map(|s| s.range.start).min()?;
-        let raw_end = source.iter().map(|s| s.range.end).max()?;
-        let (item, base) = items
-            .iter()
-            .map(|item| &item.address.0)
-            .enumerate()
-            .find(|(_, base)| base.start <= raw_start && raw_end <= base.end)?;
-        Some(ItemEdit {
-            item,
-            local: (raw_start - base.start)..(raw_end - base.start),
-        })
+        ItemEdit::merged(edits)
     }
 }
 
 /// Re-serialises a markup document by splicing each item's current value back at
 /// its source span into the retained raw string. Holds the shared item state the
-/// [`ExtractStream`](elide_codec::extract::ExtractStream) redacts in place, and
+/// [`ExtractStream`] redacts in place, and
 /// the sanitizer the output is checked against.
 #[derive(Debug)]
 pub(crate) struct MarkupRecombine {
@@ -143,20 +276,24 @@ pub(crate) fn markup_document(
     )
 }
 
-/// Splice each item's current value back at its source span into `raw`,
-/// returning the rebuilt string. Shared by the markup recombiner and by
-/// container formats (DOCX) that redact an XML part and re-pack it.
+/// Write each item's current value back into `raw`, returning the rebuilt
+/// string: only the stretch of each item a redaction changed, escaped for
+/// where it lands.
 ///
 /// Item spans come from disjoint quick-xml events over this same `raw`, so
 /// they never overlap. Applying them right-to-left means each splice's
-/// length delta can't shift the spans of items earlier in the document.
+/// length delta can't shift the spans of items earlier in the document. A
+/// separator stands for its markup and is never written back.
 pub(crate) fn splice(raw: &str, items: &[XmlItem]) -> Result<String> {
-    let mut ordered: Vec<&XmlItem> = items.iter().collect();
-    ordered.sort_by_key(|item| Reverse(item.address.0.start));
+    let mut edits: Vec<(Range<usize>, String)> = items
+        .iter()
+        .filter(|item| item.passage != Passage::Separator)
+        .filter_map(|item| item.address.write_back(&item.value))
+        .collect();
+    edits.sort_by_key(|(range, _)| Reverse(range.start));
 
     let mut out = raw.to_owned();
-    for item in ordered {
-        let Range { start, end } = item.address.0.clone();
+    for (Range { start, end }, text) in edits {
         // Spans index into `out`, which starts as `raw` and only ever
         // grows/shrinks to the right of the current splice, so they stay
         // in-bounds and on char boundaries by construction. The guards are
@@ -173,10 +310,7 @@ pub(crate) fn splice(raw: &str, items: &[XmlItem]) -> Result<String> {
                 "xml splice span {start}..{end} falls mid-character"
             )));
         }
-        // `value` is the raw on-the-wire slice (the loader stores source
-        // bytes verbatim, never a decoded form), so it splices back with
-        // no escape transform: only the redacted sub-range ever changed.
-        out.replace_range(start..end, &item.value);
+        out.replace_range(start..end, &text);
     }
     Ok(out)
 }
@@ -238,6 +372,70 @@ mod tests {
             .into_iter()
             .find(|c| pred(c.data.as_str()))
             .expect("chunk")
+    }
+
+    /// Redact each of `needles` where it reads in the decoded body, the way the
+    /// pipeline does: found in a chunk, lifted to source coordinates, written.
+    async fn redact(doc: &mut Doc, needles: &[(&str, &str)]) {
+        let mut redactions = Redactions::new();
+        for (needle, replacement) in needles {
+            let chunk = chunk_where(doc, |text| text.contains(needle));
+            let at = chunk.data.as_str().find(needle).unwrap();
+            let location = doc
+                .stream
+                .lift(&chunk, TextLocation::inline(at..at + needle.len()))
+                .expect("lifts");
+            redactions.push(location, TextReplacement::substituted(*replacement));
+        }
+        doc.stream.write_at(redactions).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn character_references_read_decoded_and_untouched_ones_keep_their_spelling() {
+        let raw = "<r><n>Write to jane&#46;roe&#64;example.com &amp; A&#x26;B</n></r>";
+        let mut doc = load(raw);
+        // The run reads decoded, as one chunk.
+        chunk_where(&mut doc, |text| {
+            text == "Write to jane.roe@example.com & A&B"
+        });
+        redact(&mut doc, &[("jane.roe@example.com", "[EMAIL]")]).await;
+        assert_eq!(
+            doc.encoded(),
+            "<r><n>Write to [EMAIL] &amp; A&#x26;B</n></r>"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_attribute_value_reads_decoded_and_a_replacement_is_escaped() {
+        let raw = r#"<r><a href="mailto:jane&#64;example.com">x</a><n>Tom</n></r>"#;
+        let mut doc = load(raw);
+        redact(
+            &mut doc,
+            &[("jane@example.com", "[EMAIL]"), ("Tom", "<\"name\" & co>")],
+        )
+        .await;
+        assert_eq!(
+            doc.encoded(),
+            r#"<r><a href="mailto:[EMAIL]">x</a><n>&lt;"name" &amp; co&gt;</n></r>"#
+        );
+    }
+
+    #[test]
+    fn a_write_back_rewrites_only_the_changed_stretch_widened_to_whole_references() {
+        let raw = "a&amp;b&amp;c";
+        let (_, span) = XmlSpan::escaped(
+            raw,
+            0..raw.len(),
+            SpanKind::Text,
+            quick_xml::escape::resolve_predefined_entity,
+        );
+        // "a&b&c" → "a&X&c": the middle `b` alone.
+        assert_eq!(span.write_back("a&X&c"), Some((6..7, "X".to_owned())));
+        // "a&b&c" → "a?b&c": the first reference, whole.
+        assert_eq!(span.write_back("a?b&c"), Some((1..6, "?".to_owned())));
+        // An insertion lands on the character after it.
+        assert_eq!(span.write_back("a&b&cd"), Some((12..13, "cd".to_owned())));
+        assert_eq!(span.write_back("a&b&c"), None);
     }
 
     #[tokio::test]

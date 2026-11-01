@@ -31,7 +31,7 @@ use crate::text::Detection;
 ///
 /// # Errors
 ///
-/// [`ErrorKind::Redaction`] if a page's pixel buffer
+/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if a page's pixel buffer
 /// size does not match its dimensions, or a detection names a page not present in
 /// `pages` or selects no glyph to redact.
 pub(crate) fn redact_raster(
@@ -80,7 +80,7 @@ pub(crate) fn redact_raster(
 ///
 /// # Errors
 ///
-/// [`ErrorKind::Redaction`] if a page's
+/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if a page's
 /// pixel buffer size does not match its dimensions, a detection names a page
 /// not present in `pages` or selects no glyph, or a covered pixel is not
 /// `fill_rgb` (naming the page and the offending pixel).

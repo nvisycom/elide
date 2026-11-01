@@ -63,7 +63,7 @@ mod tests {
 
     /// A hand-built presentation: one slide with two `a:t` runs (an email and a
     /// phone), and a slide relationships part with an external `mailto:` target.
-    const SAMPLE: &[u8] = include_bytes!("../../tests/testdata/sample.pptx");
+    const SAMPLE: &[u8] = include_bytes!("../../testdata/pptx/slide_text.pptx");
 
     #[test]
     fn open_requires_a_presentation_part() {
@@ -94,7 +94,12 @@ mod tests {
             .iter()
             .find(|b| b.text.contains("alice@example.com"))
             .expect("slide email block");
-        let replacement = Replacement::for_block(block, "[EMAIL]");
+        let replacement = Replacement {
+            part: block.part.clone(),
+            start: block.start,
+            end: block.end,
+            text: "[EMAIL]".into(),
+        };
         let out = pptx.rewrite_with_parts(&[replacement], &[]).unwrap();
 
         let slide = read_part(&out, "ppt/slides/slide1.xml");

@@ -19,7 +19,7 @@ use crate::modality::Audio;
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`] if the bytes are not a readable WAV.
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the bytes are not a readable WAV.
 pub(crate) fn validate(bytes: &Bytes) -> Result<()> {
     WavReader::new(Cursor::new(bytes.clone()))
         .map_err(|e| Error::malformed(format!("not a valid WAV: {e}")))?;
@@ -33,8 +33,8 @@ pub(crate) fn validate(bytes: &Bytes) -> Result<()> {
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`] for an unreadable clip or an unsupported
-/// sample format, or [`ErrorKind::Processing`] if re-encoding fails.
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) for an unreadable clip or an unsupported
+/// sample format, or [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) if re-encoding fails.
 pub(crate) fn redact_all(source: &Bytes, redactions: &Redactions<Audio>) -> Result<Bytes> {
     // Sort by position so the per-type pass can walk the batch in a
     // deterministic order (and reverse it to apply right-to-left).

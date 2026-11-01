@@ -129,8 +129,9 @@ impl MarkupSanitizer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if the markup cannot be read, or its
-    /// document type declares entities or (in XML) names an external one.
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the
+    /// markup cannot be read, or its document type declares entities or (in XML)
+    /// names an external one.
     pub(crate) fn sanitize(&self, raw: String) -> Result<(String, StrippedContent)> {
         let removals = self.removals(&raw)?;
         let mut stripped = StrippedContent::new();
@@ -152,7 +153,7 @@ impl MarkupSanitizer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::Sanitization`] if hidden content survived, or the errors of
+    /// [`ErrorKind::Sanitization`](elide_core::ErrorKind::Sanitization) if hidden content survived, or the errors of
     /// [`sanitize`](Self::sanitize).
     pub(crate) fn check(&self, raw: &str) -> Result<()> {
         if self.removals(raw)?.is_empty() {

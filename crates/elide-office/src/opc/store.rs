@@ -3,6 +3,7 @@
 //! supports.
 
 use bytes::Bytes;
+use elide_codec::extract::Passage;
 use elide_core::{Error, Result};
 use hipstr::HipStr;
 
@@ -11,7 +12,8 @@ use crate::opc::block::{Block, IssueKind, Replacement};
 use crate::opc::kind::PartKind;
 use crate::opc::part::{PartPath, PartRole};
 use crate::opc::xml_span::{
-    Span, attribute_spans, cell_markup_spans, relationship_spans, text_spans,
+    BlockKind, PRESERVE_SPACE, Span, attribute_spans, cell_markup_spans, preserve_space_at,
+    relationship_spans, text_spans,
 };
 
 /// One package part: its path, its role, and its bytes, retained for extraction
@@ -105,6 +107,7 @@ impl StoredPart {
                 start: span.range.start,
                 end: span.range.end,
                 offsets,
+                passage: span.passage,
             });
         }
         Ok(blocks)
@@ -115,18 +118,30 @@ impl StoredPart {
     /// part, the text outside the cells of a [`Cells`](PartRole::Cells) part, or
     /// the external hyperlink `Target` values of a
     /// [`RelationshipTargets`](PartRole::RelationshipTargets) part; and the
-    /// values of its text attributes. Errs on malformed XML.
+    /// values of its text attributes. An attribute inside a passage follows the
+    /// whole passage, which stays unbroken. Errs on malformed XML.
     fn spans(&self, raw: &str) -> std::result::Result<Vec<Span>, ()> {
-        let mut spans = match self.role {
+        let text = match self.role {
             PartRole::RelationshipTargets => return relationship_spans(raw),
             PartRole::ElementText => text_spans(raw)?,
             PartRole::Cells => cell_markup_spans(raw)?,
             PartRole::Structure => Vec::new(),
             PartRole::Property | PartRole::Binary(_) => return Ok(Vec::new()),
         };
-        spans.extend(attribute_spans(raw, self.attributes.unwrap_or_default())?);
-        spans.sort_by_key(|span| span.range.start);
-        Ok(spans)
+        // Each span sorts by where its passage starts, then by its own start.
+        let mut anchored = Vec::new();
+        let mut anchor = 0;
+        for span in text {
+            if span.passage == Passage::Start {
+                anchor = span.range.start;
+            }
+            anchored.push((anchor, span));
+        }
+        for span in attribute_spans(raw, self.attributes.unwrap_or_default())? {
+            anchored.push((span.range.start, span));
+        }
+        anchored.sort_by_key(|(anchor, span)| (*anchor, span.range.start));
+        Ok(anchored.into_iter().map(|(_, span)| span).collect())
     }
 
     /// Splice `replacements` into this part's XML, leaving every byte outside a
@@ -181,6 +196,15 @@ impl StoredPart {
                 ))
             })?;
             let safe = span.escape(&r.text, r)?;
+            // A run whose new text starts or ends with whitespace keeps it.
+            if span.kind == BlockKind::Text
+                && let Some(at) = preserve_space_at(raw, r.start, &safe)
+                && at >= cursor
+            {
+                out.push_str(&raw[cursor..at]);
+                out.push_str(PRESERVE_SPACE);
+                cursor = at;
+            }
             out.push_str(&raw[cursor..r.start]);
             out.push_str(&safe);
             cursor = r.end;
@@ -214,6 +238,25 @@ mod tests {
             xml.into(),
             Some(&[]),
         )
+    }
+
+    #[test]
+    fn splice_keeps_the_edge_whitespace_a_replacement_leaves() {
+        let part = element(
+            r#"<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:r><w:t>Roe and</w:t></w:r></w:p>"#,
+        );
+        let raw = part.text().unwrap();
+        let start = raw.find("Roe and").unwrap();
+        let replacement = Replacement {
+            part: part.path().clone(),
+            start,
+            end: start + "Roe and".len(),
+            text: " and".into(),
+        };
+        assert_eq!(
+            part.splice(&[&replacement]).unwrap(),
+            r#"<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:r><w:t xml:space="preserve"> and</w:t></w:r></w:p>"#,
+        );
     }
 
     #[test]
@@ -300,7 +343,12 @@ mod tests {
     fn relationship_target_round_trips_through_a_splice() {
         let part = rels(RELS);
         let block = &part.text_blocks().expect("decodes")[0];
-        let replacement = Replacement::for_block(block, "mailto:[EMAIL]");
+        let replacement = Replacement {
+            part: block.part.clone(),
+            start: block.start,
+            end: block.end,
+            text: "mailto:[EMAIL]".into(),
+        };
         let out = part.splice(&[&replacement]).expect("splices");
 
         // The original email is gone; the redacted target sits in its place, and

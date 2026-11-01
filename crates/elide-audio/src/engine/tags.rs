@@ -25,7 +25,7 @@ use crate::buffer::Untagged;
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`] if a tag block's declared size overruns the
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a tag block's declared size overruns the
 /// file.
 #[cfg(feature = "mp3")]
 pub(crate) fn strip_mp3(bytes: &[u8]) -> Result<Untagged> {
@@ -270,7 +270,7 @@ const WAV_PADDING_CHUNKS: [&[u8; 4]; 3] = [b"JUNK", b"PAD ", b"FLLR"];
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`] if the bytes are not a RIFF `WAVE` file or a
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the bytes are not a RIFF `WAVE` file or a
 /// chunk overruns it.
 #[cfg(feature = "wav")]
 pub(crate) fn strip_wav(bytes: &[u8]) -> Result<Untagged> {

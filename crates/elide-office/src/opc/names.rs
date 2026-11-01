@@ -108,7 +108,7 @@ struct Found {
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`] if a part is not well-formed XML or holds a
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a part is not well-formed XML or holds a
 /// malformed attribute value.
 pub(crate) fn fit_names<'a>(
     names: &'static Names,

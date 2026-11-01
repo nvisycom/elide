@@ -56,7 +56,7 @@ fn same_line(a: &super::geometry::DeviceRect, b: &super::geometry::DeviceRect) -
 
 /// One page's rendered glyph geometry, carried from extraction to the codec so a
 /// detected entity's char span can be resolved to page-normalized rectangles.
-/// Separate from the public [`Block`](crate::extract::Block) so geometry stays a
+/// Separate from the public [`Block`](crate::document::extract::Block) so geometry stays a
 /// crate-internal concern.
 #[derive(Debug, Clone)]
 pub(crate) struct PageGeometry {

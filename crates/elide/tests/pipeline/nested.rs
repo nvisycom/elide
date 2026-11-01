@@ -26,7 +26,7 @@ use crate::support::orchestrator::{
 };
 
 /// A real (small) PNG the image codec decodes.
-const SAMPLE_PNG: &[u8] = include_bytes!("../testdata/sample.png");
+const SAMPLE_PNG: &[u8] = include_bytes!("../testdata/png/plain.png");
 
 /// An orchestrator that redacts inside images: OCR text carrying a detectable
 /// email, a pattern recognizer over it, an erase anonymizer.
@@ -115,7 +115,7 @@ async fn a_set_treats_each_file_as_a_named_part() -> Result<()> {
 async fn a_set_redacts_each_files_own_content() -> Result<()> {
     use elide::modality::text::Text;
 
-    const SAMPLE_DOCX: &[u8] = include_bytes!("../testdata/sample.docx");
+    const SAMPLE_DOCX: &[u8] = include_bytes!("../testdata/docx/body_header_hyperlink.docx");
 
     let registry = FormatRegistry::with_builtin();
     let orchestrator = TestOrchestrator::bare()
@@ -158,7 +158,7 @@ async fn a_set_redacts_each_files_own_content() -> Result<()> {
     // redacted, not merely re-encoded unchanged.
     for file in &documents {
         let out = file.document.encode()?;
-        let body = elide_office::opc::fixtures::read_part(out.as_bytes(), "word/document.xml")
+        let body = elide_office::fixtures::read_part(out.as_bytes(), "word/document.xml")
             .expect("output has a word/document.xml part");
         let body = String::from_utf8(body).expect("body is UTF-8");
         assert!(
@@ -221,7 +221,7 @@ async fn a_nested_container_keeps_its_own_redaction_when_a_descendant_folds() ->
     let out = document.document.encode()?;
     let out_bytes = out.as_bytes().to_vec();
     let read = |pkg: &[u8], part: &str| {
-        elide_office::opc::fixtures::read_part(pkg, part)
+        elide_office::fixtures::read_part(pkg, part)
             .map(|b| String::from_utf8_lossy(&b).into_owned())
     };
     let outer_body = read(&out_bytes, "word/document.xml").expect("outer body");
@@ -230,18 +230,16 @@ async fn a_nested_container_keeps_its_own_redaction_when_a_descendant_folds() ->
         "outer body: {outer_body}"
     );
 
-    let middle_bytes =
-        elide_office::opc::fixtures::read_part(&out_bytes, "word/embeddings/middle.docx")
-            .expect("middle embedded");
+    let middle_bytes = elide_office::fixtures::read_part(&out_bytes, "word/embeddings/middle.docx")
+        .expect("middle embedded");
     let middle_body = read(&middle_bytes, "word/document.xml").expect("middle body");
     assert!(
         !middle_body.contains("bob@example.com"),
         "the nested container's OWN body redaction was lost: {middle_body}",
     );
 
-    let leaf_bytes =
-        elide_office::opc::fixtures::read_part(&middle_bytes, "word/embeddings/leaf.docx")
-            .expect("leaf embedded in middle");
+    let leaf_bytes = elide_office::fixtures::read_part(&middle_bytes, "word/embeddings/leaf.docx")
+        .expect("leaf embedded in middle");
     let leaf_body = read(&leaf_bytes, "word/document.xml").expect("leaf body");
     assert!(
         !leaf_body.contains("carol@example.com"),

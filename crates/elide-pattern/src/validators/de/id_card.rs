@@ -6,7 +6,7 @@
 //!   9 alphanumeric characters, ICAO Doc 9303 charset
 //!   (excludes A, B, D, E, I, O, Q, S, U) plus a trailing check
 //!   digit. The check digit uses 7-3-1 weights, same as
-//!   [`super::passport`].
+//!   [`super::passport`](fn@super::passport).
 //! - **Legacy** `T`-prefix card, issued before 2010: letter `T`
 //!   followed by 8 digits. The trailing digit is part of the
 //!   serial, not a checksum. Accepted at pattern confidence

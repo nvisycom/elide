@@ -14,12 +14,9 @@ mod attributes;
 mod block;
 pub(crate) mod check;
 pub(crate) mod content_types;
-#[cfg(any(test, feature = "fixtures"))]
-pub mod fixtures;
 pub(crate) mod index;
 pub(crate) mod kind;
 pub(crate) mod names;
-mod offset;
 mod part;
 pub mod props;
 pub(crate) mod references;
@@ -37,19 +34,16 @@ use elide_core::{Error, Result};
 
 pub use self::attributes::TextAttribute;
 pub(crate) use self::attributes::{NEUTRAL_DATE, NeutralizeAttributes, Ns, StripAttributes};
-pub use self::block::{
-    Block, Embedding, EmbeddingKind, Extraction, Issue, IssueKind, PartReplacement, Replacement,
-};
+pub use self::block::{Block, Embedding, Extraction, Issue, PartReplacement, Replacement};
 use self::index::Index;
 pub use self::kind::PartKind;
-pub use self::names::{NameReference, NameRule, Names};
-pub use self::offset::{OffsetMap, OffsetRun, RunKind};
+pub use self::names::Names;
 pub use self::part::{PartClassifier, PartPath, PartRole};
 use self::store::StoredPart;
 
 /// An opened OOXML package: every part read once and classified, ready to
 /// [`extract`](Package::extract) the text of every text-bearing part or
-/// [`rewrite`](Package::rewrite) them back to bytes.
+/// [`rewrite_with_parts`](Package::rewrite_with_parts) them back to bytes.
 ///
 /// Open a document once and reuse it for both operations; the package is parsed
 /// a single time.
@@ -157,13 +151,6 @@ impl Package {
             .map(StoredPart::bytes)
     }
 
-    /// The paths of every part, in archive order, so a facade can discover its
-    /// parts (e.g. XLSX enumerating `xl/worksheets/sheet*.xml`) without assuming
-    /// fixed names.
-    pub fn part_paths(&self) -> impl Iterator<Item = &PartPath> {
-        self.parts.iter().map(StoredPart::path)
-    }
-
     /// Extract the redactable text and embedded media of the package.
     ///
     /// Each [`Block`] is addressed by its part and an exact byte span into that
@@ -211,28 +198,14 @@ impl Package {
             .collect()
     }
 
-    /// Rewrite text `replacements` across their parts and re-pack every other
-    /// part byte-for-byte.
-    ///
-    /// See [`rewrite_with_parts`](Package::rewrite_with_parts) to also replace
-    /// binary parts (e.g. redact an embedded image).
-    ///
-    /// **Fail-closed:** an out-of-bounds, overlapping, or mid-character
-    /// replacement, or one naming a part not in the package, refuses the whole
-    /// rewrite with [`ErrorKind::Processing`]
-    /// rather than emitting a partially-redacted document.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::Processing`] if a
-    /// replacement can't be applied.
     /// The text of the part at `path` with `replacements` spliced in, for a
     /// facade that rewrites the part further before handing it back whole.
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::Processing`] if the package has no such text part or a
-    /// replacement does not land on one of its text spans.
+    /// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) if the
+    /// package has no such text part or a replacement does not land on one of
+    /// its text spans.
     pub(crate) fn splice_part(
         &self,
         path: &PartPath,
@@ -248,19 +221,19 @@ impl Package {
         part.splice(replacements)
     }
 
-    pub fn rewrite(&self, replacements: &[Replacement]) -> Result<Vec<u8>> {
-        self.rewrite_with_parts(replacements, &[])
-    }
-
     /// Rewrite text `replacements` *and* replace binary `parts` (each a part
-    /// path mapped to its new bytes).
+    /// path mapped to its new bytes), re-packing every other part
+    /// byte-for-byte.
     ///
-    /// A [`PartReplacement`] naming a part not in the package refuses the
-    /// rewrite; the text rules match [`rewrite`](Package::rewrite).
+    /// **Fail-closed:** an out-of-bounds, overlapping, or mid-character
+    /// replacement, or a replacement or [`PartReplacement`] naming a part not
+    /// in the package, refuses the whole rewrite rather than emitting a
+    /// partially-redacted document.
     ///
     /// # Errors
     ///
-    /// As [`rewrite`](Package::rewrite).
+    /// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) if a
+    /// replacement can't be applied.
     pub fn rewrite_with_parts(
         &self,
         replacements: &[Replacement],
@@ -276,7 +249,7 @@ impl Package {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if a text part is not UTF-8 or well-formed
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a text part is not UTF-8 or well-formed
     /// XML.
     pub(crate) fn fit_names(&self, replacements: &[Replacement]) -> Result<Vec<Replacement>> {
         let mut texts = Vec::new();

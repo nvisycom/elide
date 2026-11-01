@@ -7,7 +7,7 @@
 //! recognizer uses.
 //!
 //! [`Recognizer<Text>`]: elide_core::recognition::Recognizer
-//! [`Text`]: elide_core::modality::Text
+//! [`Text`]: elide_core::modality::text::Text
 
 mod aggregation;
 mod alignment;

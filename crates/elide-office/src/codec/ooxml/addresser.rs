@@ -8,7 +8,7 @@ use elide_core::modality::text::SourceRef;
 use super::OoxmlAddress;
 
 /// Maps an OOXML block's decoded value range to/from its raw source span via the
-/// block's [`OffsetMap`](crate::opc::OffsetMap), part-tagged. Delegates to the
+/// block's [`OffsetMap`](elide_codec::extract::OffsetMap), part-tagged. Delegates to the
 /// shared [`opc_source`](super::super::opc_source) helpers so the forward and
 /// reverse maps can't drift.
 #[derive(Debug, Default)]
@@ -31,7 +31,7 @@ impl SourceAddresser<OoxmlAddress> for OoxmlAddresser {
         &self,
         items: &[ExtractedItem<OoxmlAddress>],
         source: &[SourceRef],
-    ) -> Option<ItemEdit> {
+    ) -> Vec<ItemEdit> {
         super::super::opc_source::locate_source(
             items.iter().map(|item| {
                 (

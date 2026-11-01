@@ -52,14 +52,8 @@ temp/
 CLAUDE.md
 
 # E2E-test artifacts
-**/testdata/audits/*
-!**/testdata/audits/.gitkeep
-**/testdata/results/*
-!**/testdata/results/.gitkeep
-**/testdata/**/audits/*
-!**/testdata/**/audits/.gitkeep
-**/testdata/**/results/*
-!**/testdata/**/results/.gitkeep
+**/testdata/**/audits/
+**/testdata/**/results/
 
 # Example output
 examples/data/*.redacted.*

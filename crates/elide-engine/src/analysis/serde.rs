@@ -9,7 +9,7 @@
 //! never collide with a same-named part in another document). Each entry is
 //! tagged with its [`modality`](elide_core::modality::Modality::NAME) so the
 //! orchestrator can route it back on deserialization. Reconstruction is driven
-//! by the [`ModalityRegistry`](super::registry::ModalityRegistry): the wire form
+//! by the [`ModalityRegistry`]: the wire form
 //! drops the concrete modality type, deserialization is not object-safe, so each
 //! group is buffered and replayed through the per-modality parser resolved from
 //! the registry.

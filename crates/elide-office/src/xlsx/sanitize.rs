@@ -271,7 +271,7 @@ mod tests {
     use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
 
     use super::*;
-    use crate::opc::fixtures::{pack_parts, part_names, read_part};
+    use crate::fixtures::{pack_parts, part_names, read_part};
     use crate::opc::sanitize::sanitize;
 
     const SML_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";

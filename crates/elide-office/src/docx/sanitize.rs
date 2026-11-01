@@ -298,10 +298,10 @@ mod tests {
     use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
 
     use super::*;
+    use crate::fixtures::{pack_parts, read_part};
     use crate::ooxml::OoxmlPackage;
     use crate::opc::Replacement;
     use crate::opc::check::check;
-    use crate::opc::fixtures::{pack_parts, read_part};
     use crate::opc::sanitize::sanitize;
 
     const TYPES: &str = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/></Types>"#;
@@ -347,7 +347,15 @@ mod tests {
             .find(|block| block.start == bookmark)
             .expect("the bookmark name is surfaced");
         let out = package
-            .rewrite_with_parts(&[Replacement::for_block(&block, "[PERSON]")], &[])
+            .rewrite_with_parts(
+                &[Replacement {
+                    part: block.part.clone(),
+                    start: block.start,
+                    end: block.end,
+                    text: "[PERSON]".into(),
+                }],
+                &[],
+            )
             .unwrap();
         let body = part(&out, "word/document.xml");
         assert!(body.contains(r#"w:name="PERSON_""#), "{body}");

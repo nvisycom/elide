@@ -1,9 +1,10 @@
 //! The mutable decoded item stream ([`SpliceState<A>`]) and its `Clone`-to-share
 //! handle ([`SharedSplice<A>`]), with the lock hidden behind methods.
 
+use std::ops::Range;
 use std::sync::{Arc, Mutex};
 
-use super::ExtractedItem;
+use super::{ExtractedItem, ItemEdit, Passage};
 
 /// The mutable decoded item stream of a structured document, shared between an
 /// [`ExtractStream`](super::ExtractStream) and the format's
@@ -41,6 +42,46 @@ impl<A> SpliceState<A> {
             .partition_point(|&start| start <= byte_offset)
             .checked_sub(1)?;
         (i < self.items.len()).then_some(i)
+    }
+
+    /// The item index range of each passage, in order.
+    pub(super) fn passages(&self) -> Vec<Range<usize>> {
+        let mut passages = Vec::new();
+        let mut start = 0;
+        for (i, item) in self.items.iter().enumerate().skip(1) {
+            if item.passage == Passage::Start {
+                passages.push(start..i);
+                start = i;
+            }
+        }
+        if start < self.items.len() {
+            passages.push(start..self.items.len());
+        }
+        passages
+    }
+
+    /// The items `range` (a range of the concatenated stream) covers, each with
+    /// the part of its value covered, in item order; `None` when `range` runs
+    /// past the stream. An item `range` only touches at an edge is left out,
+    /// unless `range` is empty and touches nothing else.
+    pub(super) fn covering(&self, range: Range<usize>) -> Option<Vec<ItemEdit>> {
+        if range.start > range.end || range.end > *self.item_starts.last()? {
+            return None;
+        }
+        let first = self.item_for(range.start)?;
+        let mut edits = Vec::new();
+        for item in first..self.items.len() {
+            let start = self.item_starts[item];
+            let end = self.item_starts[item + 1];
+            if item > first && start >= range.end {
+                break;
+            }
+            let local = range.start.max(start) - start..range.end.min(end) - start;
+            if item == first || !local.is_empty() {
+                edits.push(ItemEdit { item, local });
+            }
+        }
+        Some(edits)
     }
 
     /// Shift every offset after item `i` by `delta` (an edit's length change).

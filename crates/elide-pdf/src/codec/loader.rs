@@ -19,7 +19,7 @@ use super::state::{PdfInner, PdfState};
 use super::stream::PdfStream;
 use super::{BODY_PART_ID, FORMAT_ID, PdfPage, RedactMode};
 use crate::document::Pdf;
-use crate::extract::Block;
+use crate::document::extract::Block;
 #[cfg(feature = "render")]
 use crate::primitive::RasterMode;
 #[cfg(feature = "render")]
@@ -187,9 +187,9 @@ impl DocumentLoader for PdfDocumentLoader {
 #[cfg(feature = "render")]
 fn scanned_pages(
     pdf: &Pdf,
-    issues: &[crate::extract::Issue],
+    issues: &[crate::document::extract::Issue],
 ) -> Result<std::collections::BTreeMap<u32, Bytes>> {
-    use crate::extract::IssueKind;
+    use crate::document::extract::IssueKind;
 
     // Which 1-based pages have no text layer.
     let textless: std::collections::BTreeSet<u32> = issues

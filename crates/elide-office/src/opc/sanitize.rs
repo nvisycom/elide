@@ -64,7 +64,7 @@ pub(crate) trait Sanitizer: PartClassifier {
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`] if the package cannot be read, or holds a
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the package cannot be read, or holds a
 /// part this crate does not recognize or cannot redact.
 pub(crate) fn sanitize(
     document: &[u8],
@@ -110,7 +110,7 @@ pub(crate) fn sanitize(
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`] if the package cannot be read or repacked.
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the package cannot be read or repacked.
 pub(crate) fn remove_parts(document: &[u8], parts: HashSet<PartPath>) -> Result<Option<Vec<u8>>> {
     if parts.is_empty() {
         return Ok(None);

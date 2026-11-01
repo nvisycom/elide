@@ -77,7 +77,7 @@ impl AesEncrypt {
         OperatorId::new("encrypt", "1.0.0")
     }
 
-    /// The cipher for `label`'s key, or a [`Redaction`](ErrorKind::Redaction)
+    /// The cipher for `label`'s key, or a [`Redaction`](elide_core::ErrorKind::Redaction)
     /// error if the provider returns a key that isn't 32 bytes.
     fn cipher(&self, label: &LabelRef) -> Result<Aes256Gcm> {
         let key = self.keys.key(label)?;

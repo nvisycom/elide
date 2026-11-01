@@ -18,10 +18,10 @@ use crate::support::orchestrator::{TestOrchestrator, erase_anonymizer, ocr_analy
 
 /// Any decodable PNG: the mock OCR backend ignores the pixels and returns its
 /// canned regions, so the fixture only has to decode to an image.
-const SAMPLE: &[u8] = include_bytes!("../testdata/sample.png");
+const SAMPLE: &[u8] = include_bytes!("../testdata/png/plain.png");
 
 /// The fixture document's name, its depth-1 part key in the report.
-const DOC: &str = "sample.png";
+const DOC: &str = "plain.png";
 
 fn loc() -> ImageLocation {
     ImageLocation::new(BoundingBox::from_origin(

@@ -6,7 +6,7 @@
 //! 1. Inputs that parse as E.164 (carry their own `+CC` prefix)
 //!    validate directly, regardless of caller context.
 //! 2. Inputs in national format (no leading `+`) need a region
-//!    hint. When [`ValidationContext::country`] is set we use it;
+//!    hint. When [`ValidationContext::countries`] names any we try each;
 //!    otherwise we fail closed, region-less national-format
 //!    matching is genuinely ambiguous (a 13-digit run can be a
 //!    valid IL/IN phone *and* the leading 13 digits of a Visa

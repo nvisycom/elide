@@ -3,8 +3,8 @@
 
 use std::fmt;
 
-use crate::attachment::AttachmentId;
-use crate::image::ImageId;
+use crate::document::attachment::AttachmentId;
+use crate::document::image::ImageId;
 
 /// What a blob part of a decoded PDF is: an embedded image (`img-N-G`), an
 /// attachment (`att-N-G`), or a scanned page (`page-N`).

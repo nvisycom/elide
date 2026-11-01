@@ -27,7 +27,7 @@ use crate::opc::{PartRole, xml_edit};
 ///
 /// # Errors
 ///
-/// [`ErrorKind::Sanitization`] naming what survived or what dangles, or the
+/// [`ErrorKind::Sanitization`](elide_core::ErrorKind::Sanitization) naming what survived or what dangles, or the
 /// errors of [`sanitize`].
 pub(crate) fn check(
     document: &[u8],
@@ -100,7 +100,7 @@ pub(crate) fn check(
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`] if `raw` is not well-formed XML.
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if `raw` is not well-formed XML.
 fn stray_text(raw: &str) -> Result<Option<String>> {
     let mut reader = Reader::from_str(raw);
     loop {
@@ -129,10 +129,10 @@ mod tests {
     use crate::pptx::SlideFormat;
     use crate::xlsx::SheetClassifier;
 
-    const SAMPLE_DOCX: &[u8] = include_bytes!("../../../elide/tests/testdata/sample.docx");
-    const SAMPLE_PPTX: &[u8] = include_bytes!("../../tests/testdata/sample.pptx");
-    const SAMPLE_XLSX: &[u8] = include_bytes!("../../tests/testdata/sample.xlsx");
-    const SAMPLE2_XLSX: &[u8] = include_bytes!("../../tests/testdata/sample2.xlsx");
+    const SAMPLE_DOCX: &[u8] = include_bytes!("../../testdata/docx/body_header_hyperlink.docx");
+    const SAMPLE_PPTX: &[u8] = include_bytes!("../../testdata/pptx/slide_text.pptx");
+    const SAMPLE_XLSX: &[u8] = include_bytes!("../../testdata/xlsx/shared_string_cells.xlsx");
+    const SAMPLE2_XLSX: &[u8] = include_bytes!("../../testdata/xlsx/non_cell_text.xlsx");
 
     /// Sanitize `document`, then check the result passes: nothing more to
     /// remove, every reference resolved, every vocabulary reviewed.

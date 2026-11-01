@@ -1,7 +1,7 @@
 //! The image modality's always-on metadata-scrub analyzer.
 //!
 //! An image carries two redactable surfaces. Its EXIF metadata is surfaced by
-//! [`FieldRecognizer`](elide::recognition::metadata::FieldRecognizer) as
+//! [`FieldRecognizer`] as
 //! `Entity<Metadata>` and erased — always, regardless of the caller's
 //! [`Analyzer`](crate::analyzer::Analyzer), which configures only the pixel side.
 

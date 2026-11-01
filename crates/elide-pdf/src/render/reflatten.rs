@@ -37,7 +37,7 @@ pub struct PageReplacement {
 ///
 /// # Errors
 ///
-/// [`ErrorKind::Redaction`] if a replacement could
+/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if a replacement could
 /// not be applied.
 pub(crate) fn reflatten(doc: &mut Document, replacements: &[PageReplacement]) -> Result<()> {
     let pages = doc.get_pages();
@@ -106,7 +106,7 @@ pub(crate) fn reflatten(doc: &mut Document, replacements: &[PageReplacement]) ->
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`] if a page does not exist or its content
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a page does not exist or its content
 /// cannot be replaced.
 pub(crate) fn clear(doc: &mut Document, numbers: &[u32]) -> Result<()> {
     let pages = doc.get_pages();

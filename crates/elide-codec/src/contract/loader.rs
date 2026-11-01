@@ -1,7 +1,7 @@
 //! Decoding raw bytes into a [`Document`].
 //!
 //! - [`Loader`]: per-modality decoder a leaf format implementation writes.
-//!   Returns a concrete [`Stream`](super::Stream).
+//!   Returns a concrete [`Stream`].
 //! - [`DocumentLoader`]: the parts-model decoder the `FormatRegistry` holds
 //!   behind `Arc`; it produces the whole [`Document`]. [`LeafLoader`] adapts a
 //!   [`Loader`] into one for a leaf format.
@@ -16,7 +16,7 @@ use crate::content::ContentData;
 /// Per-modality leaf-format loader.
 ///
 /// A loader validates and parses raw content for its [`Modality`], producing a
-/// single [`Stream`](super::Stream). Leaf formats with no hidden content (a
+/// single [`Stream`]. Leaf formats with no hidden content (a
 /// `.txt`, a JSON or CSV file) implement this; [`Format::new`] wraps it in a
 /// [`LeafLoader`] to a one-[`Stream`](super::Stream) [`Document`]. A multi-part
 /// format, or one that carries metadata or other hidden content to sanitize

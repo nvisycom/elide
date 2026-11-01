@@ -29,7 +29,7 @@ txt = []
 json = ["dep:serde_json"]
 ## XML and HTML drive `elide-codec`'s shared extract-and-splice engine.
 xml = ["elide-codec/extract", "dep:quick-xml"]
-html = ["xml"]
+html = ["xml", "quick-xml/escape-html"]
 ## CSV cells are addressed as the `Tabular` modality.
 csv = ["elide-core/tabular", "dep:csv"]
 

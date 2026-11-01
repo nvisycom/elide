@@ -20,10 +20,10 @@ use elide::{Directives, Orchestrator, RegistryDocumentExt, Result};
 
 use crate::support::orchestrator::TestOrchestrator;
 
-const SAMPLE: &[u8] = include_bytes!("../testdata/sample.docx");
+const SAMPLE: &[u8] = include_bytes!("../testdata/docx/body_header_hyperlink.docx");
 
 /// The fixture document's name, its depth-1 part key in the report.
-const DOC: &str = "sample.docx";
+const DOC: &str = "body_header_hyperlink.docx";
 
 fn orchestrator(registry: FormatRegistry) -> Result<Orchestrator> {
     Ok(TestOrchestrator::new()?.with_registry(registry).build())

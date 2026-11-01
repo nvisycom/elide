@@ -9,9 +9,9 @@ use elide_core::Result;
 
 use super::part_id::PartId;
 use super::state::PdfState;
-use crate::attachment::AttachmentReplacement;
+use crate::document::attachment::AttachmentReplacement;
+use crate::document::image::ImageReplacement;
 use crate::document::{Pdf, Redaction};
-use crate::image::ImageReplacement;
 #[cfg(feature = "render")]
 use crate::render::PageReplacement;
 

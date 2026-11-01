@@ -4,8 +4,8 @@
 //!
 //! This is the engine both extraction and glyph-deletion redaction stand on: the
 //! walker decodes one page (and the whole document) into per-page blocks of text
-//! plus their [`OffsetMap`]. [`extract`](crate::extract) turns that walk into the
-//! public [`Extraction`](crate::extract::Extraction), and [`redact`] resolves a
+//! plus their [`OffsetMap`]. [`extract`](crate::document::extract) turns that walk into the
+//! public [`Extraction`](crate::document::extract::Extraction), and [`redact`] resolves a
 //! detected character range back through the map to the glyph bytes to delete.
 //!
 //! The addressing vocabulary lives here with the engine that speaks it: an

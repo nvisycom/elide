@@ -50,7 +50,7 @@ impl Relationship {
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`] if the part is not well-formed.
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the part is not well-formed.
 pub(crate) fn parse(xml: &str) -> Result<Vec<Relationship>> {
     let mut reader = Reader::from_str(xml);
     let mut relationships = Vec::new();
@@ -92,7 +92,7 @@ pub(crate) fn parse(xml: &str) -> Result<Vec<Relationship>> {
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`] if the part is not well-formed.
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the part is not well-formed.
 pub(crate) fn without(xml: &str, removed: &HashSet<String>) -> Result<String> {
     let mut reader = Reader::from_str(xml);
     let mut out = String::with_capacity(xml.len());

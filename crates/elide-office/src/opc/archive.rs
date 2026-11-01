@@ -30,7 +30,7 @@ pub(crate) const MAX_PACKAGE_BYTES: u64 = 1024 * 1024 * 1024;
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`] if the bytes are not a readable zip, a part is
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the bytes are not a readable zip, a part is
 /// unreadable, or a size cap is exceeded.
 pub(crate) fn read(
     document: &[u8],
@@ -89,7 +89,7 @@ pub(crate) enum Entry<'a> {
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`] if the source cannot be reopened or the
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the source cannot be reopened or the
 /// package cannot be written.
 pub(crate) fn write<'a>(
     source: &[u8],

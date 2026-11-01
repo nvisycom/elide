@@ -1,9 +1,9 @@
 //! XLSX codec on the parts model: a workbook is a [`Document`] whose body is a
 //! [`Stream<Tabular>`] of cells, plus a text stream over its content outside the
 //! cells (comments, drawings, charts, external hyperlink targets) and a
-//! [`Blob`](DocumentPart::Blob) per embedding and per document-property part.
+//! [`Blob`] per embedding and per document-property part.
 //!
-//! A cell holds text, so a [`TabularReplacement`]'s cell treatment applies
+//! A cell holds text, so a `TabularReplacement`'s cell treatment applies
 //! through the shared text-redaction helper. Only the *location* is tabular: a
 //! `(sheet, row, column)` address with an optional intra-cell byte range. The
 //! [`XlsxRecombine`](recombine::XlsxRecombine) re-packs the workbook
@@ -13,8 +13,7 @@
 //!
 //! [`Document`]: elide_codec::Document
 //! [`Stream<Tabular>`]: elide_codec::Stream
-//! [`Blob`](DocumentPart::Blob): elide_codec::DocumentPart::Blob
-//! [`TabularReplacement`]: elide_core::modality::tabular::TabularReplacement
+//! [`Blob`]: elide_codec::DocumentPart::Blob
 
 mod loader;
 mod recombine;

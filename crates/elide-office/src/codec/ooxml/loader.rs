@@ -113,7 +113,7 @@ fn decode_package<C: OoxmlCodec>(
 ///
 /// # Errors
 ///
-/// - [`MalformedInput`](ErrorKind::MalformedInput) if the bytes are not a valid
+/// - [`MalformedInput`](elide_core::ErrorKind::MalformedInput) if the bytes are not a valid
 ///   package of the format, hold a part this crate cannot redact, or a
 ///   text-bearing part could not be extracted.
 pub(crate) fn decode_document<C: OoxmlCodec>(

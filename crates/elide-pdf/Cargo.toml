@@ -33,6 +33,11 @@ serde = ["dep:serde"]
 ## `Dpi`). Implies `serde`.
 schema = ["serde", "dep:schemars"]
 
+## Expose `fixtures`: build small in-memory PDF fixtures (embedded images,
+## an attachment, metadata) and inspect an encoded PDF, so a downstream crate
+## can exercise the PDF codec without depending on `lopdf`/`image` itself.
+fixtures = []
+
 ## Render pages to images (for OCR of scanned/image-only PDFs) via the native
 ## PDFium shared library, and redact them by reflattening. Off by default: the default build is pure-Rust with no native
 ## dependency. Requires the PDFium `.so`/`.dylib` at runtime (see

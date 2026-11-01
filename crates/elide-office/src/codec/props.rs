@@ -23,8 +23,8 @@ use elide_core::redaction::Redactions;
 
 use crate::opc::props;
 
-/// Stable [`FormatId`](elide_codec::FormatId) for an OOXML property sub-part.
-pub const FORMAT_ID: elide_codec::FormatId = elide_codec::FormatId::new("elide.office.docprops");
+/// Stable [`FormatId`] for an OOXML property sub-part.
+pub const FORMAT_ID: FormatId = FormatId::new("elide.office.docprops");
 
 /// The pseudo-extension a `docProps/*` sub-part is decoded with; it resolves this
 /// format in the registry (the fold looks a part up by its hint as an extension).

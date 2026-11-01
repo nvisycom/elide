@@ -46,7 +46,7 @@ const PNG_RAW_EXIF_KEYWORD: &[u8] = b"Raw profile type exif";
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`] if the bytes are not a well-formed JPEG
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the bytes are not a well-formed JPEG
 /// header.
 pub(super) fn scrub_jpeg(bytes: &[u8], keep_exif: bool) -> Result<Scrubbed> {
     if !bytes.starts_with(&JPEG_SOI) {
@@ -118,7 +118,7 @@ fn keeps_jpeg_segment(marker: u8, payload: &[u8], keep_exif: bool) -> bool {
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`] if the bytes are not a well-formed PNG chunk
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the bytes are not a well-formed PNG chunk
 /// stream.
 pub(super) fn scrub_png(bytes: &[u8], keep_exif: bool) -> Result<Scrubbed> {
     if !bytes.starts_with(&PNG_SIGNATURE) {

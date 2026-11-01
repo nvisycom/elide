@@ -1,7 +1,7 @@
 //! The language-detection enricher building block.
 //!
 //! Unlike OCR and STT, language detection is pure Rust
-//! ([`LinguaEnricher`](elide::enrichment::lingua::LinguaEnricher)) and needs no
+//! ([`LinguaEnricher`]) and needs no
 //! JavaScript model, so [`Enricher::language`](super::Enricher::language) takes
 //! no callback.
 
