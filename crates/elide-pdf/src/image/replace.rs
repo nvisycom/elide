@@ -1,5 +1,5 @@
-//! Image redaction: replace an embedded image XObject with a redacted image,
-//! rebuilding a valid XObject from encoded bytes.
+//! Replace an embedded image XObject with a redacted image, rebuilding a
+//! valid XObject from encoded bytes.
 //!
 //! A caller extracts an [`Embedding`](crate::extract::Embedding)'s bytes,
 //! redacts the image (blanking the sensitive region), re-encodes it, and hands
@@ -8,10 +8,10 @@
 //! filter) stay consistent, the redacted pixels genuinely replace the original.
 
 use elide_core::{Error, ErrorKind, Result};
-use lopdf::Object;
+use lopdf::{Document, Object, ObjectId};
 
-use crate::document::{ObjectRole, Store, save};
-use crate::extract::ImageId;
+use super::ImageId;
+use crate::lopdf_ext::DictionaryExt;
 
 /// One image replacement: overwrite the image XObject [`id`](ImageReplacement::id)
 /// with a redacted image.
@@ -26,12 +26,11 @@ pub struct ImageReplacement {
     pub image: Vec<u8>,
 }
 
-/// Replace the embedded images named in `replacements` with redacted images,
-/// returning the new document bytes.
+/// Replace the embedded images named in `replacements` in `doc` with redacted
+/// images.
 ///
 /// Each [`ImageReplacement`] carries an encoded image (PNG/JPEG); its XObject is
-/// rebuilt so the stream and dictionary stay consistent. The rest of the
-/// document is re-saved unchanged.
+/// rebuilt so the stream and dictionary stay consistent.
 ///
 /// **Fail-closed:** a replacement naming an object that is not an image XObject,
 /// or an image that cannot be decoded, refuses the whole rewrite rather than
@@ -39,11 +38,9 @@ pub struct ImageReplacement {
 ///
 /// # Errors
 ///
-/// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a replacement could
+/// [`ErrorKind::Redaction`] if a replacement could
 /// not be applied.
-pub(crate) fn redact_images(store: &Store, replacements: &[ImageReplacement]) -> Result<Vec<u8>> {
-    let mut doc = store.clone_doc();
-
+pub(crate) fn replace(doc: &mut Document, replacements: &[ImageReplacement]) -> Result<()> {
     // The original images' sub-objects that encode pixel content (soft masks,
     // stencil masks, alternate representations) become unreachable when the
     // rebuilt XObject drops their dict keys, and the save prunes them, so no
@@ -52,10 +49,9 @@ pub(crate) fn redact_images(store: &Store, replacements: &[ImageReplacement]) ->
     for replacement in replacements {
         let id = replacement.id.object();
 
-        // The target must be an image XObject the role seam classifies as
-        // whole-object-replaceable, not a content or font stream, or a
-        // structural object, that happens to share the id.
-        if !ObjectRole::of(&doc, id).is_whole_object_replaceable() {
+        // The target must be an image XObject, not a content or font stream,
+        // or a structural object, that happens to share the id.
+        if !is_image(doc, id) {
             return Err(Error::new(
                 ErrorKind::Redaction,
                 format!(
@@ -78,6 +74,33 @@ pub(crate) fn redact_images(store: &Store, replacements: &[ImageReplacement]) ->
         })?;
         doc.objects.insert(id, Object::Stream(stream));
     }
+    Ok(())
+}
 
-    save(&mut doc)
+/// Whether `id` is an image XObject of `doc`.
+fn is_image(doc: &Document, id: ObjectId) -> bool {
+    matches!(doc.get_object(id), Ok(Object::Stream(stream)) if stream.dict.has_subtype(b"Image"))
+}
+
+#[cfg(test)]
+mod tests {
+    use lopdf::{Stream, dictionary};
+
+    use super::*;
+
+    #[test]
+    fn only_an_image_xobject_is_replaced() {
+        let mut doc = Document::with_version("1.5");
+        let catalog = doc.add_object(dictionary! { "Type" => "Catalog" });
+        let page = doc.add_object(dictionary! { "Type" => "Page" });
+        let font = doc.add_object(dictionary! { "Type" => "Font", "Subtype" => "Type1" });
+        let image = doc.add_object(Stream::new(
+            dictionary! { "Type" => "XObject", "Subtype" => "Image" },
+            b"pixels".to_vec(),
+        ));
+        for id in [catalog, page, font] {
+            assert!(!is_image(&doc, id));
+        }
+        assert!(is_image(&doc, image));
+    }
 }

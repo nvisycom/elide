@@ -2,7 +2,7 @@
 //!
 //! A `/ToUnicode` CMap maps character codes to Unicode, so text can be recovered
 //! from it (copy, search, extraction) independently of the drawn glyphs. When
-//! [`redact_text`](crate::document::Pdf::redact_text) deletes a glyph, its code must also
+//! [`delete`](crate::text::redact::delete) deletes a glyph, its code must also
 //! be removed from this table, or the redacted text survives as a code->Unicode
 //! entry. The CMap is edited textually: a `bfchar` entry for a deleted code is
 //! dropped, and a `bfrange` covering one fails closed (its interior can't be
@@ -17,7 +17,7 @@ use lopdf::{Document, Object, ObjectId};
 ///
 /// # Errors
 ///
-/// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a deleted
+/// [`ErrorKind::Redaction`] if a deleted
 /// code falls inside a multi-code `bfrange` (which cannot be scrubbed without
 /// re-deriving the range) or if a CMap stream cannot be read, so the redaction
 /// fails closed rather than leaving a recoverable code->Unicode entry.

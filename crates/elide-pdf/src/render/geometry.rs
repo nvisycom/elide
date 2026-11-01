@@ -93,7 +93,7 @@ pub enum GlyphSource {
 /// One glyph: the span of page text it covers and its box in rendered pixels.
 ///
 /// `start`/`end` are Unicode scalar (`char`) offsets into the page's text, the
-/// same unit a [`Detection`](crate::Detection) carries, so a detected span
+/// same unit a [`Detection`](crate::text::Detection) carries, so a detected span
 /// selects the glyphs to redact.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

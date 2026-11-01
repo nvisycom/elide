@@ -11,11 +11,11 @@ use elide_core::primitive::UnitBoundingBox;
 use elide_core::redaction::Redactions;
 
 use super::FORMAT_ID;
-use super::pdf_state::PdfState;
+use super::state::PdfState;
 
 /// The body [`Stream<Text>`] of a PDF: yields each page's text as a chunk and
 /// records per-page redactions onto the shared [`PdfState`], which the
-/// [`PdfRecombine`](super::pdf_recombine::PdfRecombine) applies on encode.
+/// [`PdfRecombine`](super::recombine::PdfRecombine) applies on encode.
 pub(super) struct PdfStream {
     pub(super) state: PdfState,
 }

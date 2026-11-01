@@ -15,9 +15,11 @@
 
 use std::io::Cursor;
 
+use ::image::{DynamicImage, GrayImage, ImageFormat, RgbImage};
 use elide_core::{Error, ErrorKind, Result};
-use image::{DynamicImage, GrayImage, ImageFormat, RgbImage};
 use lopdf::{Dictionary, Document, Object, Stream};
+
+use crate::lopdf_ext::DocumentExt;
 
 /// The largest decoded image accepted, in bytes: a sample stream may claim any
 /// size, so its decode is bounded to refuse a decompression bomb.
@@ -100,7 +102,7 @@ fn layout(doc: &Document, dict: &Dictionary) -> Option<Layout> {
         bits: bits as usize,
         space: space(
             doc,
-            resolve(doc, dict.get(b"ColorSpace").ok()?)?,
+            doc.resolve(dict.get(b"ColorSpace").ok()?)?,
             decode_array(dict),
         )?,
     };
@@ -175,14 +177,6 @@ pub(crate) fn png(doc: &Document, stream: &Stream) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-/// `object`, following a reference.
-fn resolve<'a>(doc: &'a Document, object: &'a Object) -> Option<&'a Object> {
-    match object {
-        Object::Reference(id) => doc.get_object(*id).ok(),
-        other => Some(other),
-    }
-}
-
 /// Whether the image's `/Decode` array inverts a gray sample, or `None` when
 /// it maps samples some other non-default way.
 fn decode_array(dict: &Dictionary) -> Option<bool> {
@@ -224,18 +218,18 @@ fn space(doc: &Document, object: &Object, inverted: Option<bool>) -> Option<Spac
                 b"CalGray" => by_components(1),
                 b"CalRGB" => by_components(3),
                 b"ICCBased" => {
-                    let profile = resolve(doc, array.get(1)?)?.as_stream().ok()?;
+                    let profile = doc.resolve(array.get(1)?)?.as_stream().ok()?;
                     by_components(profile.dict.get(b"N").ok()?.as_i64().ok()?)
                 }
                 b"Indexed" | b"I" if !inverted => {
-                    let base = space(doc, resolve(doc, array.get(1)?)?, Some(false))?;
+                    let base = space(doc, doc.resolve(array.get(1)?)?, Some(false))?;
                     let rgb = match base {
                         Space::Gray { .. } => false,
                         Space::Rgb => true,
                         _ => return None,
                     };
                     let hival = usize::try_from(array.get(2)?.as_i64().ok()?).ok()?;
-                    let palette = match resolve(doc, array.get(3)?)? {
+                    let palette = match doc.resolve(array.get(3)?)? {
                         Object::String(bytes, _) => bytes.clone(),
                         Object::Stream(stream) => stream.decompressed_content().ok()?,
                         _ => return None,

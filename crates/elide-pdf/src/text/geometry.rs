@@ -219,7 +219,7 @@ impl DeviceRect {
 /// device-space [`DeviceRect`] into a page-normalized [`UnitBoundingBox`].
 ///
 /// The walker's device coordinates are in unrotated PDF user space (bottom-left
-/// origin). A viewer displays the page's [`CropBox`](Self::crop) region, rotated
+/// origin). A viewer displays the page's `CropBox` region, rotated
 /// by [`rotate`](Self::rotate) degrees, so normalization must (1) place the crop
 /// origin at zero, (2) divide by the crop size, (3) apply the rotation, and
 /// (4) flip Y to the top-left origin a renderer uses.

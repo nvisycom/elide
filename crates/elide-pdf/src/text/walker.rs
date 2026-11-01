@@ -18,9 +18,10 @@ use lopdf::{Document, Encoding, Object, ObjectId};
 
 use super::geometry::{Cursor, DeviceRect, Matrix, PageFrame, SpaceRule, TextState};
 use super::glyphs::decode_glyphs;
-use super::widths::{GlyphMetrics, WidthSource, object_as_f64};
+use super::widths::{GlyphMetrics, WidthSource};
 use super::{Address, FontEntry, GlyphBytes, OffsetMap, OffsetRun, StreamTarget, TextBlock};
 use crate::document::Store;
+use crate::lopdf_ext::{DictionaryExt, DocumentExt, ObjectExt};
 
 /// The character code of the single-byte space, the only code `Tw` word spacing
 /// applies to (ISO 32000-1 §9.3.3).
@@ -170,7 +171,7 @@ impl TextRun<'_> {
                                 self.show_string(enc, bytes, address)?;
                             }
                             Object::Integer(_) | Object::Real(_) => {
-                                let kern = object_as_f64(item);
+                                let kern = item.as_number().unwrap_or(0.0);
                                 // Displacement is −kern/1000 × font size × hscale.
                                 let tx = -kern / 1000.0 * self.state.font_size * self.state.h_scale;
                                 self.cursor.advance(tx);
@@ -268,7 +269,10 @@ impl TextRun<'_> {
 /// (a malformed operator reads as its zero, never a hard error — positioning is
 /// best-effort for spacing).
 fn operand_f64(operands: &[Object], index: usize) -> f64 {
-    operands.get(index).map(object_as_f64).unwrap_or(0.0)
+    operands
+        .get(index)
+        .map(|o| o.as_number().unwrap_or(0.0))
+        .unwrap_or(0.0)
 }
 
 /// Read six numeric operands from `base` as a [`Matrix`] `[a b c d e f]`, or
@@ -298,7 +302,9 @@ fn read_matrix(operands: &[Object], base: usize) -> Option<Matrix> {
 fn page_frame(doc: &Document, page_id: ObjectId) -> PageFrame {
     let crop = inherited_rect(doc, page_id, b"CropBox")
         .or_else(|| inherited_rect(doc, page_id, b"MediaBox"));
-    let rotate = inherited_int(doc, page_id, b"Rotate").unwrap_or(0);
+    let rotate = doc
+        .inherited(page_id, b"Rotate", |value| value.as_i64().ok())
+        .unwrap_or(0);
     // Normalize rotation to 0/90/180/270 (PDF requires a multiple of 90, but be
     // defensive against junk).
     let rotate = rotate.rem_euclid(360) as u32;
@@ -332,55 +338,21 @@ fn page_frame(doc: &Document, page_id: ObjectId) -> PageFrame {
 /// `None`), so the caller's fallback chain (CropBox → MediaBox → unit frame)
 /// stays available rather than accepting a distorted box.
 fn inherited_rect(doc: &Document, page_id: ObjectId, key: &[u8]) -> Option<[f64; 4]> {
-    let mut id = page_id;
-    for _ in 0..MAX_PARENT_WALK {
-        let dict = doc.get_dictionary(id).ok()?;
-        if let Ok(value) = dict.get(key)
-            && let Ok((_, resolved)) = doc.dereference(value)
-            && let Ok(array) = resolved.as_array()
-            && array.len() == 4
-        {
-            // All four elements must resolve to numbers; a single unresolvable
-            // one fails the whole box rather than defaulting to 0.
-            return Some([
-                resolved_f64(doc, &array[0])?,
-                resolved_f64(doc, &array[1])?,
-                resolved_f64(doc, &array[2])?,
-                resolved_f64(doc, &array[3])?,
-            ]);
-        }
-        id = dict.get(b"Parent").ok()?.as_reference().ok()?;
-    }
-    None
+    doc.inherited(page_id, key, |value| {
+        let array = doc.resolve_array(value)?;
+        let [a, b, c, d] = array.as_slice() else {
+            return None;
+        };
+        // All four elements must resolve to numbers; a single unresolvable one
+        // fails the whole box rather than defaulting to 0.
+        Some([
+            doc.resolve_number(a)?,
+            doc.resolve_number(b)?,
+            doc.resolve_number(c)?,
+            doc.resolve_number(d)?,
+        ])
+    })
 }
-
-/// An `Object` as `f64`, dereferencing an indirect reference first. `None` when
-/// it does not resolve to an integer or real (an unresolvable reference, or a
-/// non-numeric object) so a caller can reject the whole structure.
-fn resolved_f64(doc: &Document, object: &Object) -> Option<f64> {
-    let (_, resolved) = doc.dereference(object).ok()?;
-    match resolved {
-        Object::Integer(i) => Some(*i as f64),
-        Object::Real(r) => Some(f64::from(*r)),
-        _ => None,
-    }
-}
-
-/// Resolve an integer attribute (`Rotate`) on a page, walking up `/Parent`.
-fn inherited_int(doc: &Document, page_id: ObjectId, key: &[u8]) -> Option<i64> {
-    let mut id = page_id;
-    for _ in 0..MAX_PARENT_WALK {
-        let dict = doc.get_dictionary(id).ok()?;
-        if let Ok(value) = dict.get(key).and_then(|o| o.as_i64()) {
-            return Some(value);
-        }
-        id = dict.get(b"Parent").ok()?.as_reference().ok()?;
-    }
-    None
-}
-
-/// A guard on the `/Parent` inheritance walk, against a cyclic page tree.
-const MAX_PARENT_WALK: u32 = 64;
 
 /// Build one [`TextBlock`] per page by walking its content in operator order,
 /// the same order lopdf's text extraction uses, so a character offset maps to
@@ -389,9 +361,9 @@ const MAX_PARENT_WALK: u32 = 64;
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if a page's
+/// [`ErrorKind::MalformedInput`] if a page's
 /// content, resources, or an XObject stream cannot be read;
-/// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a page draws text
+/// [`ErrorKind::Redaction`] if a page draws text
 /// with a font whose encoding cannot be decoded.
 pub(crate) fn text_blocks(store: &Store) -> Result<Vec<TextBlock>> {
     let doc = store.doc();
@@ -414,9 +386,9 @@ pub(crate) fn text_blocks(store: &Store) -> Result<Vec<TextBlock>> {
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if the page's
+/// [`ErrorKind::MalformedInput`] if the page's
 /// content, resources, or an XObject stream cannot be read;
-/// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if the page draws text
+/// [`ErrorKind::Redaction`] if the page draws text
 /// with a font whose encoding cannot be decoded.
 pub(crate) fn text_block_for_page(
     doc: &Document,
@@ -817,13 +789,7 @@ fn walk_xobject<'a>(
         return Ok(());
     };
     // Only Form XObjects carry content to walk; images are not text.
-    if stream_obj
-        .dict
-        .get(b"Subtype")
-        .and_then(Object::as_name)
-        .ok()
-        != Some(b"Form")
-    {
+    if !stream_obj.dict.has_subtype(b"Form") {
         return Ok(());
     }
     let bytes = stream_obj

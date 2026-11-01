@@ -42,9 +42,9 @@ impl Store {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::ResourceLimit`](crate::ErrorKind::ResourceLimit) if the input
+    /// [`ErrorKind::ResourceLimit`] if the input
     /// exceeds [`MAX_DOCUMENT_BYTES`](Self::MAX_DOCUMENT_BYTES), or
-    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if the
+    /// [`ErrorKind::MalformedInput`] if the
     /// bytes are not a readable PDF.
     pub(crate) fn open(document: &[u8], max_page_bytes: NonZeroUsize) -> Result<Self> {
         if document.len() > Self::MAX_DOCUMENT_BYTES {

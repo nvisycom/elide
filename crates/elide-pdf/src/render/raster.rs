@@ -16,7 +16,7 @@ use elide_core::{Error, ErrorKind, Result};
 
 use super::{Glyph, PageObservation, PixelRect, emit};
 use crate::document::Store;
-use crate::redact::Detection;
+use crate::text::Detection;
 
 /// Redact `detections` by destructively overwriting their pixels in the rendered
 /// `pages`, then emit a fresh image-only PDF from the document in `store`.
@@ -31,7 +31,7 @@ use crate::redact::Detection;
 ///
 /// # Errors
 ///
-/// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a page's pixel buffer
+/// [`ErrorKind::Redaction`] if a page's pixel buffer
 /// size does not match its dimensions, or a detection names a page not present in
 /// `pages` or selects no glyph to redact.
 pub(crate) fn redact_raster(
@@ -80,7 +80,7 @@ pub(crate) fn redact_raster(
 ///
 /// # Errors
 ///
-/// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a page's
+/// [`ErrorKind::Redaction`] if a page's
 /// pixel buffer size does not match its dimensions, a detection names a page
 /// not present in `pages` or selects no glyph, or a covered pixel is not
 /// `fill_rgb` (naming the page and the offending pixel).
@@ -222,8 +222,8 @@ mod tests {
     use elide_core::ErrorKind;
 
     use super::verify_raster_coverage;
-    use crate::redact::Detection;
     use crate::render::{Glyph, GlyphSource, PageObservation, PixelRect};
+    use crate::text::Detection;
 
     const FILL: [u8; 3] = [255, 0, 0];
 

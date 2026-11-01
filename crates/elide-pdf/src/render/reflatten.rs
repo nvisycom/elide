@@ -1,4 +1,5 @@
-//! Page reflatten: replace a whole page's content with a single redacted image.
+//! Page reflatten: replace a whole page's content with a single redacted image,
+//! or clear a page no codec could read.
 //!
 //! A scanned or image-only page carries no born-digital text to delete, so its
 //! redaction is a redacted raster of the page. A caller renders the page,
@@ -9,9 +10,9 @@
 //! untouched (a born-digital page keeps its selectable, glyph-redacted text).
 
 use elide_core::{Error, ErrorKind, Result};
-use lopdf::{Object, dictionary};
+use lopdf::{Dictionary, Document, Object, dictionary};
 
-use crate::document::{Store, save};
+use crate::error::malformed;
 
 /// One page reflatten: replace page [`number`](PageReplacement::number)'s whole
 /// content with a redacted image of the page.
@@ -26,12 +27,11 @@ pub struct PageReplacement {
     pub image: Vec<u8>,
 }
 
-/// Reflatten the pages named in `replacements`: replace each page's whole
-/// content with a single redacted image, returning the new document bytes.
+/// Reflatten the pages of `doc` named in `replacements`: replace each page's
+/// whole content with a single redacted image.
 ///
-/// Only the named pages are rewritten; every other page is re-saved unchanged,
-/// so a mixed document keeps its born-digital pages' selectable text and
-/// flattens only the scanned ones.
+/// Only the named pages are rewritten, so a mixed document keeps its
+/// born-digital pages' selectable text and flattens only the scanned ones.
 ///
 /// **Fail-closed:** a replacement naming a page that does not exist, or an image
 /// that cannot be decoded into a valid XObject, refuses the whole rewrite rather
@@ -39,10 +39,9 @@ pub struct PageReplacement {
 ///
 /// # Errors
 ///
-/// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a replacement could
+/// [`ErrorKind::Redaction`] if a replacement could
 /// not be applied.
-pub(crate) fn redact_pages(store: &Store, replacements: &[PageReplacement]) -> Result<Vec<u8>> {
-    let mut doc = store.clone_doc();
+pub(crate) fn reflatten(doc: &mut Document, replacements: &[PageReplacement]) -> Result<()> {
     let pages = doc.get_pages();
 
     // The replaced pages' old content and resource objects become unreachable
@@ -103,8 +102,30 @@ pub(crate) fn redact_pages(store: &Store, replacements: &[PageReplacement]) -> R
         page.set("Rotate", 0);
         page.set("UserUnit", 1);
     }
+    Ok(())
+}
 
-    save(&mut doc)
+/// Clear the content of the 1-based pages `numbers` of `doc`: each page keeps
+/// its place and size, but draws nothing and holds no resources, so what it
+/// drew is dropped from the file.
+///
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`] if a page does not exist or its content
+/// cannot be replaced.
+pub(crate) fn clear(doc: &mut Document, numbers: &[u32]) -> Result<()> {
+    let pages = doc.get_pages();
+    for number in numbers {
+        let id = *pages
+            .get(number)
+            .ok_or_else(|| malformed(format!("page {number} does not exist")))?;
+        doc.change_page_content(id, Vec::new())
+            .map_err(|e| malformed(format!("clear page {number}: {e}")))?;
+        if let Ok(page) = doc.get_dictionary_mut(id) {
+            page.set("Resources", Dictionary::new());
+        }
+    }
+    Ok(())
 }
 
 /// Read the pixel width and height lopdf recorded on the built image XObject.

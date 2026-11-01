@@ -2,44 +2,42 @@
 //!
 //! A `Pdf` is a thin wrapper over a `Store` (the data holder: object graph +
 //! source bytes + limits). Its methods are the crate's public capability API,
-//! extract text, inspect structure, redact, render, each delegating to a
-//! function in the capability's own module ([`extract`](crate::extract),
-//! [`text`](crate::text), [`inspect`](crate::inspect), [`redact`](crate::redact),
-//! and `render` behind the `render` feature) that operates over the `Store`. The
-//! container holds no capability logic itself.
+//! extract text, sanitize, redact, render, each delegating to the capability's
+//! own module ([`extract`](crate::extract), [`sanitize`](crate::sanitize),
+//! [`text`], [`image`],
+//! [`attachment`], and `render` behind the `render`
+//! feature). A redaction is applied in one pass over one copy of the document
+//! and saved once ([`Redaction`]). The container holds no capability logic
+//! itself.
 
 mod data;
-mod role;
 
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
 
+use bytes::Bytes;
 use elide_codec::StrippedContent;
-use elide_core::{Error, ErrorKind, Result};
-#[cfg(feature = "render")]
-use lopdf::Dictionary;
-use lopdf::{Document, Object, ObjectId};
+use elide_core::Result;
+use lopdf::ObjectId;
 
 pub(crate) use self::data::Store;
-pub(crate) use self::role::ObjectRole;
-use crate::attachment::{Attachment, AttachmentId, AttachmentReplacement};
-use crate::content::remove_images;
-use crate::extract::{Extraction, ImageId};
+use crate::attachment::{self, Attachment, AttachmentId, AttachmentReplacement};
+use crate::extract::Extraction;
+use crate::image::{self, EmbeddingKind, ImageId, ImageReplacement};
+use crate::lopdf_ext::DocumentExt;
 #[cfg(feature = "render")]
-use crate::redact::PageReplacement;
-use crate::redact::{Detection, ImageReplacement};
-#[cfg(feature = "render")]
-use crate::render::{PageObservation, RenderedPage};
-use crate::samples::png;
-use crate::sanitize::{check_store, sanitize_store};
+use crate::render::{self, PageObservation, PageReplacement, RenderedPage};
+use crate::sanitize::SanitizeDocumentExt;
+use crate::text::{self, Detection};
 
 /// An opened PDF document: parsed once, then reused across operations.
 ///
-/// Open with [`open`](Pdf::open), then extract its text ([`extract`](Pdf::extract),
-/// inspect its structure ([`inspect`](Pdf::inspect),
-/// [`verify_flattened`](Pdf::verify_flattened)), or redact it,
-/// [`redact_text`](Pdf::redact_text) deletes glyphs keeping a selectable layer,
-/// and with the `render` feature `redact_raster` flattens pages to images.
+/// Open with [`open`](Pdf::open), then extract its text
+/// ([`extract`](Pdf::extract)), sanitize it ([`sanitize`](Pdf::sanitize)), or
+/// redact it: [`apply`](Pdf::apply) deletes glyphs keeping a selectable layer
+/// and writes redacted images, pages, and attachments back, and with the
+/// `render` feature [`redact_raster`](Pdf::redact_raster) flattens pages to
+/// images.
 #[derive(Debug, Clone)]
 pub struct Pdf(Store);
 
@@ -54,7 +52,7 @@ impl Pdf {
     /// # Errors
     ///
     /// [`ErrorKind::ResourceLimit`](crate::ErrorKind::ResourceLimit) if the input
-    /// exceeds [`MAX_DOCUMENT_BYTES`](Pdf::MAX_DOCUMENT_BYTES),
+    /// exceeds [`MAX_DOCUMENT_BYTES`](Store::MAX_DOCUMENT_BYTES),
     /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if the
     /// bytes are not a readable PDF, or
     /// [`ErrorKind::CapabilityUnavailable`](crate::ErrorKind::CapabilityUnavailable)
@@ -80,7 +78,7 @@ impl Pdf {
     ///
     /// This is the text surface a caller runs detection over: a
     /// [`Block`](crate::extract::Block)'s character offsets into its text are what
-    /// [`redact_text`](Pdf::redact_text) expects in its [`Detection`]s, since both
+    /// [`apply`](Pdf::apply) expects in its [`Detection`]s, since both
     /// use the same content walk. The geometry maps a detected character span back
     /// to the page rectangles it covers.
     pub(crate) fn extract(&self) -> (Extraction, Vec<crate::text::PageGeometry>) {
@@ -101,7 +99,12 @@ impl Pdf {
     /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if the
     /// sanitized document cannot be saved.
     pub fn sanitize(&self) -> Result<Option<(Vec<u8>, StrippedContent)>> {
-        sanitize_store(&self.0)
+        let mut doc = self.0.clone_doc();
+        let stripped = doc.sanitize()?;
+        if stripped.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some((doc.save_pruned()?, stripped)))
     }
 
     /// Check that the document carries no hidden content: what the codec runs
@@ -112,76 +115,63 @@ impl Pdf {
     /// [`ErrorKind::Sanitization`](crate::ErrorKind::Sanitization) naming what
     /// survived.
     pub fn check_sanitized(&self) -> Result<()> {
-        check_store(&self.0)
+        self.0.doc().check_sanitized()
     }
 
-    /// The embedded image `id`, stored as raw samples, decoded and encoded as a
-    /// PNG for the image pipeline.
+    /// The embedded image `id` of `kind`, stored as `bytes`, as the image
+    /// pipeline reads it, with its file-extension hint (see
+    /// [`image::surface`]).
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if `id`
-    /// is not an image stream or its samples cannot be decoded.
-    pub(crate) fn image_png(&self, id: ImageId) -> Result<Vec<u8>> {
-        let doc = self.0.doc();
-        let stream = doc
-            .get_object(id.object())
-            .and_then(Object::as_stream)
-            .map_err(|e| {
-                Error::new(
-                    ErrorKind::MalformedInput,
-                    format!("image ({}, {}): {e}", id.number, id.generation),
-                )
-            })?;
-        png(doc, stream)
+    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if raw
+    /// samples the sanitizer kept cannot be decoded.
+    pub(crate) fn surface_image(
+        &self,
+        id: ImageId,
+        kind: EmbeddingKind,
+        bytes: Bytes,
+    ) -> Result<Option<(Bytes, &'static str)>> {
+        image::surface(self.0.doc(), id, kind, bytes)
     }
 
-    /// The document with the embedded images `ids` removed: every drawing of
-    /// one cut from the pages and form XObjects, and the image dropped from the
-    /// file. A page positions what it draws, so the image's area is left empty
-    /// and nothing else moves.
+    /// The document with `redaction` applied, every step on one copy of the
+    /// document and saved once: the glyphs of the detected text deleted, the
+    /// redacted images and scanned pages written back, the unreadable ones
+    /// removed or cleared, and the attachments replaced or dropped.
     ///
     /// # Errors
     ///
+    /// As each step: [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a
+    /// replacement or removal names nothing in the document, or a page draws
+    /// text with an undecodable font;
     /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if a
     /// content stream cannot be rewritten or the document cannot be saved.
-    pub(crate) fn remove_images(&self, ids: &[ImageId]) -> Result<Vec<u8>> {
+    pub(crate) fn apply(&self, redaction: &Redaction) -> Result<Vec<u8>> {
         let mut doc = self.0.clone_doc();
-        let images: HashSet<ObjectId> = ids.iter().map(|id| id.object()).collect();
-        remove_images(&mut doc, &images, false)?;
-        save(&mut doc)
-    }
-
-    /// The document with the content of the 1-based pages `numbers` cleared:
-    /// each page keeps its place and size, but draws nothing and holds no
-    /// resources, so what it drew is dropped from the file.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if a page
-    /// does not exist or the document cannot be saved.
-    #[cfg(feature = "render")]
-    pub(crate) fn clear_pages(&self, numbers: &[u32]) -> Result<Vec<u8>> {
-        let mut doc = self.0.clone_doc();
-        let pages = doc.get_pages();
-        for number in numbers {
-            let id = *pages.get(number).ok_or_else(|| {
-                Error::new(
-                    ErrorKind::MalformedInput,
-                    format!("page {number} does not exist"),
-                )
-            })?;
-            doc.change_page_content(id, Vec::new()).map_err(|e| {
-                Error::new(
-                    ErrorKind::MalformedInput,
-                    format!("clear page {number}: {e}"),
-                )
-            })?;
-            if let Ok(page) = doc.get_dictionary_mut(id) {
-                page.set("Resources", Dictionary::new());
-            }
+        if !redaction.text.is_empty() {
+            text::redact::delete(&self.0, &mut doc, &redaction.text)?;
         }
-        save(&mut doc)
+        image::replace(&mut doc, &redaction.images)?;
+        if !redaction.removed_images.is_empty() {
+            let removed: HashSet<ObjectId> = redaction
+                .removed_images
+                .iter()
+                .map(|id| id.object())
+                .collect();
+            image::remove(&mut doc, &removed, false)?;
+        }
+        #[cfg(feature = "render")]
+        {
+            render::reflatten(&mut doc, &redaction.pages)?;
+            render::clear(&mut doc, &redaction.cleared_pages)?;
+        }
+        attachment::replace(
+            &mut doc,
+            &redaction.attachments,
+            &redaction.removed_attachments,
+        )?;
+        doc.save_pruned()
     }
 
     /// Every attached file (the `/EmbeddedFiles` name tree), decoded, in tree
@@ -194,59 +184,7 @@ impl Pdf {
     /// [`ErrorKind::ResourceLimit`](crate::ErrorKind::ResourceLimit) if a file
     /// decompresses past the bound.
     pub(crate) fn attachments(&self) -> Result<Vec<Attachment>> {
-        crate::attachment::attachments(&self.0)
-    }
-
-    /// Write each replacement's redacted bytes into its attached file and drop
-    /// each `removed` attachment, returning the new bytes.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a replacement or
-    /// removal names no attachment of the document.
-    pub fn redact_attachments(
-        &self,
-        replacements: &[AttachmentReplacement],
-        removed: &[AttachmentId],
-    ) -> Result<Vec<u8>> {
-        crate::attachment::redact_attachments(&self.0, replacements, removed)
-    }
-
-    /// Redact `detections` by deleting the glyphs that drew them, returning the
-    /// new bytes.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if the
-    /// document cannot be read or re-saved, or
-    /// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a page draws text
-    /// with an undecodable font, refused rather than left in place.
-    pub fn redact_text(&self, detections: &[Detection]) -> Result<Vec<u8>> {
-        crate::redact::redact_text(&self.0, detections)
-    }
-
-    /// Replace embedded image XObjects with redacted images, returning the new
-    /// bytes.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a replacement
-    /// names a non-image object or an image that cannot be decoded.
-    pub fn redact_images(&self, replacements: &[ImageReplacement]) -> Result<Vec<u8>> {
-        crate::redact::redact_images(&self.0, replacements)
-    }
-
-    /// Reflatten the named pages, replacing each page's whole content with a
-    /// redacted image, returning the new bytes.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a replacement
-    /// names a page that does not exist or an undecodable image.
-    #[cfg(feature = "render")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "render")))]
-    pub fn redact_pages(&self, replacements: &[PageReplacement]) -> Result<Vec<u8>> {
-        crate::redact::redact_pages(&self.0, replacements)
+        attachment::attachments(&self.0)
     }
 
     /// Render only the 1-based pages in `numbers` at `scale`, keyed by page
@@ -300,30 +238,40 @@ impl Pdf {
     }
 }
 
-/// Save `doc`, first dropping every object it no longer reaches: a superseded
-/// content stream, a replaced image's mask, a stale cross-reference stream. An
-/// unreachable object is still serialized by `save_to`, so without the prune a
-/// redacted original would survive in the bytes.
-///
-/// # Errors
-///
-/// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if the
-/// document cannot be serialized.
-pub(crate) fn save(doc: &mut Document) -> Result<Vec<u8>> {
-    doc.objects.retain(|_, object| !is_xref_stream(object));
-    doc.prune_objects();
-    let mut out = Vec::new();
-    doc.save_to(&mut out).map_err(|e| {
-        Error::new(
-            ErrorKind::MalformedInput,
-            format!("could not save PDF: {e}"),
-        )
-    })?;
-    Ok(out)
+/// Everything an encode writes into a document, applied by [`Pdf::apply`] in
+/// one pass and saved once.
+#[derive(Debug, Default)]
+pub(crate) struct Redaction {
+    /// The detected text spans whose glyphs are deleted.
+    pub(crate) text: Vec<Detection>,
+    /// Embedded images replaced with their redacted bytes.
+    pub(crate) images: Vec<ImageReplacement>,
+    /// Embedded images no codec could read, removed.
+    pub(crate) removed_images: Vec<ImageId>,
+    /// Scanned pages reflattened to their redacted raster.
+    #[cfg(feature = "render")]
+    pub(crate) pages: Vec<PageReplacement>,
+    /// Scanned pages no codec could read, cleared.
+    #[cfg(feature = "render")]
+    pub(crate) cleared_pages: Vec<u32>,
+    /// Attachments replaced with their redacted bytes.
+    pub(crate) attachments: Vec<AttachmentReplacement>,
+    /// Attachments dropped from the document.
+    pub(crate) removed_attachments: Vec<AttachmentId>,
 }
 
-/// Whether `object` is a cross-reference stream: file structure the next save
-/// rewrites, never content.
-pub(crate) fn is_xref_stream(object: &Object) -> bool {
-    matches!(object, Object::Stream(stream) if stream.dict.has_type(b"XRef"))
+impl Redaction {
+    /// Whether the redaction changes nothing.
+    pub(crate) fn is_empty(&self) -> bool {
+        #[cfg(feature = "render")]
+        let pages = self.pages.is_empty() && self.cleared_pages.is_empty();
+        #[cfg(not(feature = "render"))]
+        let pages = true;
+        self.text.is_empty()
+            && self.images.is_empty()
+            && self.removed_images.is_empty()
+            && pages
+            && self.attachments.is_empty()
+            && self.removed_attachments.is_empty()
+    }
 }

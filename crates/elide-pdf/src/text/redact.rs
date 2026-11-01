@@ -1,38 +1,27 @@
-//! Redaction that preserves the document (no rasterising): delete text glyphs
-//! and replace embedded images.
+//! Text redaction that preserves the document: delete the glyphs that drew a
+//! detected span.
 //!
-//! [`redact_text`](crate::document::Pdf::redact_text) **deletes** the glyphs of detected
-//! spans from the content streams (rather than re-encoding a replacement, which
-//! corrupts subset/CID fonts), keeping a real selectable text layer with the
-//! detected spans gone. The structures that would retain copies of the text
-//! (annotations, `/Info`, `/Metadata`) were already removed at decode by
-//! [`sanitize`](crate::sanitize). `redact_images`
-//! replaces an embedded image XObject with a redacted image.
+//! [`delete`] **deletes** the glyphs of detected spans from the content streams
+//! (rather than re-encoding a replacement, which corrupts subset/CID fonts),
+//! keeping a real selectable text layer with the detected spans gone. The
+//! structures that would retain copies of the text (annotations, `/Info`,
+//! `/Metadata`) were already removed at decode by
+//! [`sanitize`](crate::sanitize).
 //!
-//! The text location comes from the [`text`](crate::text) engine: a detected
-//! character span resolves through the page's
-//! [`OffsetMap`](crate::text::OffsetMap) to the exact glyph byte ranges to
-//! delete, in whichever content stream drew them.
-
-mod detection;
-mod images;
-#[cfg(feature = "render")]
-mod pages;
+//! A detected character span resolves through the page's [`OffsetMap`] to the
+//! exact glyph byte ranges to delete, in whichever content stream drew them.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use elide_core::{Error, ErrorKind, Result};
 use lopdf::content::Content;
-use lopdf::{Object, ObjectId};
+use lopdf::{Document, Object, ObjectId};
 
-pub use self::detection::Detection;
-pub use self::images::ImageReplacement;
-pub(crate) use self::images::redact_images;
-#[cfg(feature = "render")]
-pub use self::pages::PageReplacement;
-#[cfg(feature = "render")]
-pub(crate) use self::pages::redact_pages;
-use crate::document::{Store, save};
+#[cfg(doc)]
+use super::OffsetMap;
+use super::detection::Detection;
+use crate::document::Store;
+use crate::lopdf_ext::DocumentExt;
 use crate::text::{Address, GlyphBytes, StreamTarget, TextBlock, scrub, text_blocks};
 
 /// The physical content stream a deletion edits, distinguishing streams an
@@ -60,8 +49,8 @@ enum StreamKey {
 /// of byte ranges (`(start, end)`) within that operand's string to drain.
 type Deletions = BTreeMap<StreamKey, BTreeMap<Address, Vec<(usize, usize)>>>;
 
-/// Redact `detections` by deleting the glyphs that drew them, returning the new
-/// bytes.
+/// Redact `detections` in `doc` by deleting the glyphs that drew them, read
+/// from the pristine document in `store`.
 ///
 /// The output keeps a selectable text layer: only the detected glyphs are
 /// removed, with the original fonts and remaining text intact. Because it
@@ -69,14 +58,13 @@ type Deletions = BTreeMap<StreamKey, BTreeMap<Address, Vec<(usize, usize)>>>;
 ///
 /// # Errors
 ///
-/// - [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if the
+/// - [`ErrorKind::MalformedInput`] if the
 ///   document cannot be read or re-saved;
-/// - [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a page draws text
+/// - [`ErrorKind::Redaction`] if a page draws text
 ///   with an undecodable font, redaction is refused rather than silently leaving
 ///   that text in place.
-pub(crate) fn redact_text(store: &Store, detections: &[Detection]) -> Result<Vec<u8>> {
+pub(crate) fn delete(store: &Store, doc: &mut Document, detections: &[Detection]) -> Result<()> {
     let blocks = text_blocks(store)?;
-    let mut doc = store.clone_doc();
 
     // Raw glyph codes deleted from each font, keyed by that font's
     // `/ToUnicode` stream object id, gathered across pages so a shared CMap is
@@ -214,15 +202,14 @@ pub(crate) fn redact_text(store: &Store, detections: &[Detection]) -> Result<Vec
         let new_content = content
             .encode()
             .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("encode content: {e}")))?;
-        write_xobject_content(&mut doc, id, new_content)?;
+        doc.set_stream_content(id, new_content)?;
     }
 
     // Scrub the deleted codes from each affected font's `/ToUnicode` CMap
     // (sparing any code still used by surviving text), so the removed text
     // can't be recovered through the code->Unicode table.
-    scrub(&mut doc, &deleted_codes, &surviving_codes)?;
-
-    save(&mut doc)
+    scrub(doc, &deleted_codes, &surviving_codes)?;
+    Ok(())
 }
 
 /// Decode each distinct content stream the given glyphs live in (the page's own
@@ -295,21 +282,6 @@ fn collect_deleted_codes(
                 .or_default()
                 .insert(b[g.byte_start..g.byte_end].to_vec());
         }
-    }
-}
-
-/// Write `content` back as the decompressed body of the Form XObject `id`,
-/// leaving its other stream keys intact.
-fn write_xobject_content(doc: &mut lopdf::Document, id: ObjectId, content: Vec<u8>) -> Result<()> {
-    match doc.get_object_mut(id) {
-        Ok(Object::Stream(stream)) => {
-            stream.set_plain_content(content);
-            Ok(())
-        }
-        _ => Err(Error::new(
-            ErrorKind::MalformedInput,
-            format!("XObject {id:?} is not a stream to rewrite"),
-        )),
     }
 }
 

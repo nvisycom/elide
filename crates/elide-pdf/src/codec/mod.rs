@@ -11,7 +11,7 @@
 //!
 //! - **Glyph deletion** (default, pure-Rust): the detected glyphs are deleted
 //!   from the content streams and annotations/metadata stripped, keeping a
-//!   selectable text layer with the detected spans gone (`Pdf::redact_text`).
+//!   selectable text layer with the detected spans gone (`Pdf::apply`).
 //! - **Raster** (feature `render`, [`RasterMode::Always`]): the page text comes
 //!   from `Pdf::observe` alongside its glyph geometry, so a redaction's span
 //!   maps to pixel boxes; encode fills them and emits a fresh image-only PDF, the
@@ -23,22 +23,23 @@
 //! [`RasterMode`]: crate::primitive::RasterMode
 //! [`RasterMode::Always`]: crate::primitive::RasterMode::Always
 
-mod pdf_loader;
-mod pdf_recombine;
-mod pdf_state;
-mod pdf_stream;
+mod loader;
+mod part_id;
+mod recombine;
+mod state;
+mod stream;
 
 use std::sync::Arc;
 
 use elide_codec::{Format, FormatId};
 
-use self::pdf_loader::PdfDocumentLoader;
+use self::loader::PdfDocumentLoader;
 #[cfg(feature = "render")]
 use crate::primitive::RasterMode;
 #[cfg(feature = "render")]
-use crate::redact::Detection;
-#[cfg(feature = "render")]
 use crate::render::PageObservation;
+#[cfg(feature = "render")]
+use crate::text::Detection;
 use crate::text::PageGeometry;
 
 /// Stable [`FormatId`] for the PDF codec.
@@ -91,7 +92,7 @@ pub(crate) struct PdfPage {
 /// How the document's recorded redactions are applied on encode.
 #[derive(Debug, Default)]
 pub(crate) enum RedactMode {
-    /// Glyph deletion via [`Pdf::redact_text`](crate::document::Pdf::redact_text): the
+    /// Glyph deletion via [`Pdf::apply`](crate::document::Pdf::apply): the
     /// detected glyphs are removed and annotations/metadata stripped, keeping a
     /// selectable text layer. The default pure-Rust redaction path.
     #[default]

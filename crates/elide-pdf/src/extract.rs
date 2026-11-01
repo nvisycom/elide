@@ -2,9 +2,6 @@
 //! its per-page text [`Block`]s, the [`Embedding`]s it surfaces for image
 //! redaction, and the [`Issue`]s recording pages it could not read.
 
-mod embedding;
-mod issue;
-
 use std::collections::HashSet;
 
 use bytes::Bytes;
@@ -12,9 +9,8 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-pub use self::embedding::{Embedding, EmbeddingKind, ImageId};
-pub use self::issue::{Issue, IssueKind};
 use crate::document::Store;
+use crate::image::{EmbeddingKind, ImageId};
 use crate::text::text_block_for_page;
 
 /// The result of [`Pdf::extract`](crate::document::Pdf::extract): per-page text blocks,
@@ -147,4 +143,57 @@ impl Extraction {
             geometry,
         )
     }
+}
+
+/// One embedded image surfaced for redaction, addressed by its object id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Embedding {
+    /// The image XObject's object id.
+    pub id: ImageId,
+    /// The 1-based page the image appears on.
+    pub page: u32,
+    /// How the image is encoded.
+    pub kind: EmbeddingKind,
+    /// Pixel width.
+    pub width: u32,
+    /// Pixel height.
+    pub height: u32,
+    /// The image's raw stream bytes (a cheap ref-counted share).
+    pub bytes: Bytes,
+}
+
+/// A page that [`Pdf::extract`](crate::document::Pdf::extract) recovered no text from, so
+/// its text is **not** covered by the extracted blocks.
+///
+/// Extraction is partial-success: a page that yields no text does not fail the
+/// whole document. An `Issue` records the gap and *why*, so a caller does not
+/// silently treat a scanned or unreadable page as fully redacted, the dangerous
+/// failure mode for redaction. A document whose every page yields text produces
+/// none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Issue {
+    /// The 1-based page number.
+    pub page: u32,
+    /// Why the page yielded no text.
+    pub kind: IssueKind,
+}
+
+/// Why a page yielded no extractable text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(Serialize, Deserialize),
+    serde(rename_all = "snake_case")
+)]
+#[non_exhaustive]
+pub enum IssueKind {
+    /// The page has no text layer: it is a scanned image, or its text is drawn
+    /// as vector outlines. It needs OCR (see the `render` feature) rather than
+    /// text redaction.
+    NeedsOcr,
+    /// The page's content could not be read (e.g. it exceeded the decompressed
+    /// -size bound).
+    Unreadable,
 }

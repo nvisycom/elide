@@ -7,13 +7,8 @@ use bytes::Bytes;
 use elide_core::Result;
 
 use super::{PdfPage, RedactMode};
-use crate::attachment::{AttachmentId, AttachmentReplacement};
-use crate::document::Pdf;
-use crate::extract::ImageId;
-#[cfg(feature = "render")]
-use crate::redact::PageReplacement;
-use crate::redact::{Detection, ImageReplacement};
-use crate::text::PageGeometry;
+use crate::document::{Pdf, Redaction};
+use crate::text::{Detection, PageGeometry};
 
 /// The document's editable redaction state, behind the shared [`PdfState`] lock.
 #[derive(Debug, Default)]
@@ -53,8 +48,8 @@ impl PdfInner {
 }
 
 /// The document's editable redaction state, shared between the body
-/// [`PdfStream`](super::pdf_stream::PdfStream) and the
-/// [`PdfRecombine`](super::pdf_recombine::PdfRecombine) so a redaction recorded on
+/// [`PdfStream`](super::stream::PdfStream) and the
+/// [`PdfRecombine`](super::recombine::PdfRecombine) so a redaction recorded on
 /// the stream is visible when the recombiner re-serialises. `Clone` shares the
 /// one state (an `Arc` bump); the lock is held only inside these methods.
 #[derive(Clone)]
@@ -108,50 +103,18 @@ impl PdfState {
         self.0.lock().unwrap().record(number, range);
     }
 
-    /// Apply the recorded redactions to `document` per the [`RedactMode`], then
-    /// fold in the redacted and removed blob parts. Returns the original bytes
-    /// when nothing was recorded or folded.
-    pub(super) fn redact(&self, document: &Bytes, folds: Folds) -> Result<Bytes> {
+    /// Apply the recorded redactions to `document` per the [`RedactMode`]; on
+    /// the glyph path, with the redacted and removed blob parts in `redaction`,
+    /// all in one pass. Returns the original bytes when nothing changes.
+    pub(super) fn redact(&self, document: &Bytes, mut redaction: Redaction) -> Result<Bytes> {
         let inner = self.0.lock().unwrap();
         match &inner.mode {
             RedactMode::GlyphDelete => {
-                if inner.deletions.is_empty() && folds.is_empty() {
+                redaction.text.clone_from(&inner.deletions);
+                if redaction.is_empty() {
                     return Ok(document.clone());
                 }
-
-                // Delete the detected glyphs, keeping a selectable text layer.
-                let mut out =
-                    Pdf::open(document).and_then(|pdf| pdf.redact_text(&inner.deletions))?;
-
-                // Then fold in any redacted embedded images.
-                if !folds.images.is_empty() {
-                    out = Pdf::open(&out).and_then(|pdf| pdf.redact_images(&folds.images))?;
-                }
-
-                // Then remove the images no codec could read.
-                if !folds.removed_images.is_empty() {
-                    out =
-                        Pdf::open(&out).and_then(|pdf| pdf.remove_images(&folds.removed_images))?;
-                }
-
-                // Then reflatten any scanned pages to their redacted raster, and
-                // clear the ones no codec could read.
-                #[cfg(feature = "render")]
-                if !folds.pages.is_empty() {
-                    out = Pdf::open(&out).and_then(|pdf| pdf.redact_pages(&folds.pages))?;
-                }
-                #[cfg(feature = "render")]
-                if !folds.removed_pages.is_empty() {
-                    out = Pdf::open(&out).and_then(|pdf| pdf.clear_pages(&folds.removed_pages))?;
-                }
-
-                // Then write back the redacted attachments and drop the removed.
-                if !folds.attachments.is_empty() || !folds.removed_attachments.is_empty() {
-                    out = Pdf::open(&out).and_then(|pdf| {
-                        pdf.redact_attachments(&folds.attachments, &folds.removed_attachments)
-                    })?;
-                }
-
+                let out = Pdf::open(document)?.apply(&redaction)?;
                 Ok(Bytes::from(out))
             }
             #[cfg(feature = "render")]
@@ -169,43 +132,5 @@ impl PdfState {
                 Ok(Bytes::from(out))
             }
         }
-    }
-}
-
-/// The blob parts folded back into a PDF on encode: the redacted embedded
-/// images and scanned pages, and the redacted and removed attachments. An image
-/// whose blob was removed is removed from the document, and a scanned page whose
-/// blob was removed is cleared.
-#[derive(Debug, Default)]
-pub(super) struct Folds {
-    /// Embedded images to replace with their redacted bytes.
-    pub(super) images: Vec<ImageReplacement>,
-    /// Scanned pages to reflatten to their redacted raster.
-    #[cfg(feature = "render")]
-    pub(super) pages: Vec<PageReplacement>,
-    /// Embedded images no codec could read, removed from the document.
-    pub(super) removed_images: Vec<ImageId>,
-    /// Scanned pages no codec could read, cleared.
-    #[cfg(feature = "render")]
-    pub(super) removed_pages: Vec<u32>,
-    /// Attachments to replace with their redacted bytes.
-    pub(super) attachments: Vec<AttachmentReplacement>,
-    /// Attachments to drop from the document.
-    pub(super) removed_attachments: Vec<AttachmentId>,
-}
-
-impl Folds {
-    /// Whether nothing folds back.
-    fn is_empty(&self) -> bool {
-        let images = self.images.is_empty();
-        #[cfg(feature = "render")]
-        let pages = self.pages.is_empty() && self.removed_pages.is_empty();
-        #[cfg(not(feature = "render"))]
-        let pages = true;
-        images
-            && pages
-            && self.removed_images.is_empty()
-            && self.attachments.is_empty()
-            && self.removed_attachments.is_empty()
     }
 }
