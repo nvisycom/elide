@@ -5,7 +5,7 @@ mod compiled;
 use derive_builder::Builder;
 use elide_core::entity::LabelRef;
 use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use regex::Regex;
 use serde::Deserialize;
 
@@ -78,10 +78,7 @@ impl Variant {
     pub fn new(regex: impl Into<String>) -> Result<Self> {
         let regex = regex.into();
         if let Err(e) = Regex::new(&regex) {
-            return Err(Error::new(
-                ErrorKind::Configuration,
-                format!("invalid regex: {e}"),
-            ));
+            return Err(Error::configuration(format!("invalid regex: {e}")));
         }
         Ok(Self {
             regex,
@@ -210,7 +207,6 @@ impl Pattern {
     /// Returns a validation error when the TOML is malformed or
     /// missing required fields.
     pub fn from_toml(raw: &str) -> Result<Self> {
-        toml::from_str(raw)
-            .map_err(|e| Error::new(ErrorKind::Configuration, format!("pattern rule TOML: {e}")))
+        toml::from_str(raw).map_err(|e| Error::configuration(format!("pattern rule TOML: {e}")))
     }
 }

@@ -11,7 +11,7 @@ use std::num::NonZeroUsize;
 
 #[cfg(feature = "render")]
 use bytes::Bytes;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use lopdf::Document;
 
 /// The opened-document data holder: the parsed object graph, the source bytes,
@@ -48,28 +48,20 @@ impl Store {
     /// bytes are not a readable PDF.
     pub(crate) fn open(document: &[u8], max_page_bytes: NonZeroUsize) -> Result<Self> {
         if document.len() > Self::MAX_DOCUMENT_BYTES {
-            return Err(Error::new(
-                ErrorKind::ResourceLimit,
-                format!(
-                    "document is {} bytes, over the {}-byte limit",
-                    document.len(),
-                    Self::MAX_DOCUMENT_BYTES
-                ),
-            ));
+            return Err(Error::resource_limit(format!(
+                "document is {} bytes, over the {}-byte limit",
+                document.len(),
+                Self::MAX_DOCUMENT_BYTES
+            )));
         }
-        let doc = Document::load_mem(document).map_err(|e| {
-            Error::new(
-                ErrorKind::MalformedInput,
-                format!("not a readable PDF: {e}"),
-            )
-        })?;
+        let doc = Document::load_mem(document)
+            .map_err(|e| Error::malformed(format!("not a readable PDF: {e}")))?;
         // A document with an empty user password decrypts on load. One that
         // still carries `/Encrypt` needs a password: its strings and streams are
         // ciphertext nothing can extract or redact, so it is refused rather than
         // passed through unread.
         if doc.is_encrypted() {
-            return Err(Error::new(
-                ErrorKind::CapabilityUnavailable,
+            return Err(Error::capability_unavailable(
                 "PDF is encrypted with a user password, so its content cannot be read",
             ));
         }
@@ -106,6 +98,7 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
+    use elide_core::ErrorKind;
     use lopdf::{EncryptionState, EncryptionVersion, Object, Permissions, dictionary};
 
     use super::*;

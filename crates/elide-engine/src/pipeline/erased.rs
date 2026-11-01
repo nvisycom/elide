@@ -10,7 +10,7 @@ use elide_codec::{ErasedStream, TypedStream};
 use elide_core::entity::Entity;
 use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::recognition::Scope;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 use super::ModalityPipeline;
 use super::outcome::{BoxFuture, PartAnalysis};
@@ -95,10 +95,7 @@ where
             let mut streams = Vec::with_capacity(handles.len());
             for handle in handles.iter_mut() {
                 let stream = handle.downcast_mut::<M>().ok_or_else(|| {
-                    Error::new(
-                        ErrorKind::MalformedInput,
-                        format!("batched part is not {} despite matching", M::NAME),
-                    )
+                    Error::malformed(format!("batched part is not {} despite matching", M::NAME))
                 })?;
                 streams.push(stream);
             }
@@ -139,16 +136,16 @@ where
             // while the stream there is another, so a mismatch is malformed input,
             // not an invariant break.
             let Some(stream) = handle.downcast_mut::<M>() else {
-                return Err(Error::new(
-                    ErrorKind::MalformedInput,
-                    format!("report keys this part as {} but its stream is not", M::NAME),
-                ));
+                return Err(Error::malformed(format!(
+                    "report keys this part as {} but its stream is not",
+                    M::NAME
+                )));
             };
             let Some(entities) = entities.as_any_mut().downcast_mut::<Vec<Entity<M>>>() else {
-                return Err(Error::new(
-                    ErrorKind::MalformedInput,
-                    format!("report entities for this part are not {}", M::NAME),
-                ));
+                return Err(Error::malformed(format!(
+                    "report entities for this part are not {}",
+                    M::NAME
+                )));
             };
             self.anonymizer.anonymize(stream, entities, scope).await
         })

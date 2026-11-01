@@ -10,7 +10,7 @@ use std::path::Path;
 use elide_codec::content::ContentData;
 use elide_codec::{Document as CodecDocument, FormatId};
 use elide_core::redaction::HiddenContentPolicy;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use elide_format::FormatRegistry;
 
 /// One document the engine redacts: its name and its decoded parts.
@@ -188,13 +188,10 @@ impl RegistryDocumentExt for FormatRegistry {
             .and_then(|e| e.to_str())
             .map(str::to_ascii_lowercase);
         let Some(extension) = extension else {
-            return Err(Error::new(
-                ErrorKind::MalformedInput,
-                format!(
-                    "document name `{name}` has no extension to resolve a format from; \
+            return Err(Error::malformed(format!(
+                "document name `{name}` has no extension to resolve a format from; \
                      use `document_with` with an explicit extension"
-                ),
-            ));
+            )));
         };
         let document = self.decode(bytes, &extension, policy).await?;
         Ok(Document::new(name, document))

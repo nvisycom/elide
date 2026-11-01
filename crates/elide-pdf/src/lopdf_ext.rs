@@ -1,10 +1,8 @@
 //! Extensions to lopdf's object model: the generic reads and writes the
 //! crate's modules share, as methods on the types they read.
 
-use elide_core::Result;
+use elide_core::{Error, Result};
 use lopdf::{Dictionary, Document, Object, ObjectId, decode_text_string};
-
-use crate::error::malformed;
 
 /// How far a `/Parent` inheritance walk goes, against a cyclic page tree.
 const MAX_PARENT_WALK: u32 = 64;
@@ -114,7 +112,7 @@ impl DocumentExt for Document {
                 stream.set_plain_content(content);
                 Ok(())
             }
-            _ => Err(malformed(format!(
+            _ => Err(Error::malformed(format!(
                 "object {id:?} is not a stream to rewrite"
             ))),
         }
@@ -125,7 +123,7 @@ impl DocumentExt for Document {
         self.prune_objects();
         let mut out = Vec::new();
         self.save_to(&mut out)
-            .map_err(|e| malformed(format!("could not save PDF: {e}")))?;
+            .map_err(|e| Error::malformed(format!("could not save PDF: {e}")))?;
         Ok(out)
     }
 }

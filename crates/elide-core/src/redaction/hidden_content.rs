@@ -73,12 +73,12 @@ pub enum Disposition {
     Redact,
 }
 
-/// One item of hidden content a codec strips, named by what it is, never by
-/// the format that carries it: EXIF, a PDF's `/Info`, an ID3 tag, and an HTML
-/// `<meta>` field are all [`Properties`](Self::Properties).
+/// One item of hidden content a codec strips.
 ///
-/// Every item belongs to exactly one [`HiddenContentKind`], its
-/// [`kind`](Self::kind).
+/// An item is named by what it is, never by the format that carries it: EXIF,
+/// a PDF's `/Info`, an ID3 tag, and an HTML `<meta>` field are all
+/// [`Properties`](Self::Properties). Every item belongs to exactly one
+/// [`HiddenContentKind`], its [`kind`](Self::kind).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
@@ -187,9 +187,11 @@ impl HiddenContent {
     }
 }
 
-/// The kind of a [`HiddenContent`] item. [`Metadata`](Self::Metadata) and
-/// [`Collaboration`](Self::Collaboration) are what a [`HiddenContentPolicy`]
-/// chooses for; every other kind is always stripped.
+/// The kind of a [`HiddenContent`] item.
+///
+/// [`Metadata`](Self::Metadata) and [`Collaboration`](Self::Collaboration) are
+/// what a [`HiddenContentPolicy`] chooses for; every other kind is always
+/// stripped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]

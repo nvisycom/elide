@@ -3,12 +3,11 @@
 
 use std::collections::HashSet;
 
-use elide_core::Result;
+use elide_core::{Error, Result};
 use lopdf::content::{Content, Operation};
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
 use crate::content::{apply, drop_xobjects, plan};
-use crate::error::malformed;
 use crate::lopdf_ext::DocumentExt;
 
 /// Remove the image XObjects `images` from `doc`'s pages and form XObjects,
@@ -30,7 +29,7 @@ pub(crate) fn remove(
 ) -> Result<usize> {
     let edits = plan(doc, |bytes, resources| {
         let content =
-            Content::decode(bytes).map_err(|e| malformed(format!("decode content: {e}")))?;
+            Content::decode(bytes).map_err(|e| Error::malformed(format!("decode content: {e}")))?;
         let before = content.operations.len();
         let kept: Vec<Operation> = content
             .operations
@@ -47,7 +46,7 @@ pub(crate) fn remove(
         }
         let encoded = Content { operations: kept }
             .encode()
-            .map_err(|e| malformed(format!("encode content: {e}")))?;
+            .map_err(|e| Error::malformed(format!("encode content: {e}")))?;
         Ok(Some((encoded, cut)))
     })?;
     let cut = apply(doc, edits)?.into_iter().sum();

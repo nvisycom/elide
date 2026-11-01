@@ -10,7 +10,7 @@
 //! block itself, when the caller keeps it for field-level redaction), so a
 //! vendor or future metadata segment cannot slip through.
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 /// The JPEG `SOI` marker that opens every JPEG stream.
 const JPEG_SOI: [u8; 2] = [0xFF, 0xD8];
@@ -50,7 +50,7 @@ const PNG_RAW_EXIF_KEYWORD: &[u8] = b"Raw profile type exif";
 /// header.
 pub(super) fn scrub_jpeg(bytes: &[u8], keep_exif: bool) -> Result<Scrubbed> {
     if !bytes.starts_with(&JPEG_SOI) {
-        return Err(malformed("not a JPEG stream"));
+        return Err(Error::malformed("not a JPEG stream"));
     }
     let mut out = Vec::with_capacity(bytes.len());
     out.extend_from_slice(&JPEG_SOI);
@@ -62,7 +62,9 @@ pub(super) fn scrub_jpeg(bytes: &[u8], keep_exif: bool) -> Result<Scrubbed> {
             at += 1;
         }
         let (Some(&0xFF), Some(&marker)) = (bytes.get(at), bytes.get(at + 1)) else {
-            return Err(malformed("JPEG segment does not start with a marker"));
+            return Err(Error::malformed(
+                "JPEG segment does not start with a marker",
+            ));
         };
         // Standalone markers carry no length: TEM and the restart markers.
         if marker == 0x01 || (0xD0..=0xD7).contains(&marker) {
@@ -83,10 +85,10 @@ pub(super) fn scrub_jpeg(bytes: &[u8], keep_exif: bool) -> Result<Scrubbed> {
         let length = bytes
             .get(at + 2..at + 4)
             .map(|len| usize::from(u16::from_be_bytes([len[0], len[1]])))
-            .ok_or_else(|| malformed("truncated JPEG segment length"))?;
+            .ok_or_else(|| Error::malformed("truncated JPEG segment length"))?;
         let end = at + 2 + length;
         if length < 2 || end > bytes.len() {
-            return Err(malformed("JPEG segment overruns the stream"));
+            return Err(Error::malformed("JPEG segment overruns the stream"));
         }
         let payload = &bytes[at + 4..end];
         if keeps_jpeg_segment(marker, payload, keep_exif) {
@@ -120,7 +122,7 @@ fn keeps_jpeg_segment(marker: u8, payload: &[u8], keep_exif: bool) -> bool {
 /// stream.
 pub(super) fn scrub_png(bytes: &[u8], keep_exif: bool) -> Result<Scrubbed> {
     if !bytes.starts_with(&PNG_SIGNATURE) {
-        return Err(malformed("not a PNG stream"));
+        return Err(Error::malformed("not a PNG stream"));
     }
     let mut out = Vec::with_capacity(bytes.len());
     out.extend_from_slice(&PNG_SIGNATURE);
@@ -129,7 +131,7 @@ pub(super) fn scrub_png(bytes: &[u8], keep_exif: bool) -> Result<Scrubbed> {
     while at < bytes.len() {
         let header = bytes
             .get(at..at + 8)
-            .ok_or_else(|| malformed("truncated PNG chunk header"))?;
+            .ok_or_else(|| Error::malformed("truncated PNG chunk header"))?;
         let length = u32::from_be_bytes([header[0], header[1], header[2], header[3]]) as usize;
         let kind: &[u8; 4] = header[4..8].try_into().expect("four bytes");
         // Length, type, data, CRC.
@@ -137,7 +139,7 @@ pub(super) fn scrub_png(bytes: &[u8], keep_exif: bool) -> Result<Scrubbed> {
             .checked_add(12)
             .and_then(|n| n.checked_add(length))
             .filter(|&end| end <= bytes.len())
-            .ok_or_else(|| malformed("PNG chunk overruns the stream"))?;
+            .ok_or_else(|| Error::malformed("PNG chunk overruns the stream"))?;
         let data = &bytes[at + 8..end - 4];
         if keeps_png_chunk(kind, data, keep_exif) {
             out.extend_from_slice(&bytes[at..end]);
@@ -170,14 +172,6 @@ fn keeps_png_chunk(kind: &[u8; 4], data: &[u8], keep_exif: bool) -> bool {
         b"zTXt" | b"tEXt" | b"iTXt" => data.starts_with(PNG_RAW_EXIF_KEYWORD),
         _ => false,
     }
-}
-
-/// A malformed-container error with `message`.
-fn malformed(message: &str) -> Error {
-    Error::new(
-        ErrorKind::MalformedInput,
-        format!("image metadata scrub: {message}"),
-    )
 }
 
 #[cfg(test)]

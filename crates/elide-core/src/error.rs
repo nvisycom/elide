@@ -17,7 +17,8 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// Error type returned across the core domain operations.
 ///
-/// Opaque by design: construct one with [`Error::new`] (kind + cause) or
+/// Opaque by design: construct one with [`Error::new`] (kind + cause), a
+/// constructor named for its kind ([`Error::malformed`], …), or
 /// [`Error::from`] (kind only), inspect it with [`Error::kind`], and
 /// recover the cause, if any, with [`Error::into_source`] or the standard
 /// [`source`].
@@ -38,6 +39,94 @@ impl Error {
             kind,
             source: Some(source.into()),
         }
+    }
+
+    /// An [`MalformedInput`](ErrorKind::MalformedInput) error caused by `source`.
+    pub fn malformed<E>(source: E) -> Self
+    where
+        E: Into<BoxError>,
+    {
+        Self::new(ErrorKind::MalformedInput, source)
+    }
+
+    /// An [`Configuration`](ErrorKind::Configuration) error caused by `source`.
+    pub fn configuration<E>(source: E) -> Self
+    where
+        E: Into<BoxError>,
+    {
+        Self::new(ErrorKind::Configuration, source)
+    }
+
+    /// An [`Processing`](ErrorKind::Processing) error caused by `source`.
+    pub fn processing<E>(source: E) -> Self
+    where
+        E: Into<BoxError>,
+    {
+        Self::new(ErrorKind::Processing, source)
+    }
+
+    /// An [`ResourceLimit`](ErrorKind::ResourceLimit) error caused by `source`.
+    pub fn resource_limit<E>(source: E) -> Self
+    where
+        E: Into<BoxError>,
+    {
+        Self::new(ErrorKind::ResourceLimit, source)
+    }
+
+    /// An [`CapabilityUnavailable`](ErrorKind::CapabilityUnavailable) error caused by `source`.
+    pub fn capability_unavailable<E>(source: E) -> Self
+    where
+        E: Into<BoxError>,
+    {
+        Self::new(ErrorKind::CapabilityUnavailable, source)
+    }
+
+    /// An [`Recognition`](ErrorKind::Recognition) error caused by `source`.
+    pub fn recognition<E>(source: E) -> Self
+    where
+        E: Into<BoxError>,
+    {
+        Self::new(ErrorKind::Recognition, source)
+    }
+
+    /// An [`Redaction`](ErrorKind::Redaction) error caused by `source`.
+    pub fn redaction<E>(source: E) -> Self
+    where
+        E: Into<BoxError>,
+    {
+        Self::new(ErrorKind::Redaction, source)
+    }
+
+    /// An [`Sanitization`](ErrorKind::Sanitization) error caused by `source`.
+    pub fn sanitization<E>(source: E) -> Self
+    where
+        E: Into<BoxError>,
+    {
+        Self::new(ErrorKind::Sanitization, source)
+    }
+
+    /// An [`Integrity`](ErrorKind::Integrity) error caused by `source`.
+    pub fn integrity<E>(source: E) -> Self
+    where
+        E: Into<BoxError>,
+    {
+        Self::new(ErrorKind::Integrity, source)
+    }
+
+    /// An [`Provider`](ErrorKind::Provider) error caused by `source`.
+    pub fn provider<E>(source: E) -> Self
+    where
+        E: Into<BoxError>,
+    {
+        Self::new(ErrorKind::Provider, source)
+    }
+
+    /// An [`Transport`](ErrorKind::Transport) error caused by `source`.
+    pub fn transport<E>(source: E) -> Self
+    where
+        E: Into<BoxError>,
+    {
+        Self::new(ErrorKind::Transport, source)
     }
 
     /// Coarse category of this error, for control-flow matching.

@@ -3,10 +3,10 @@
 
 use std::sync::Arc;
 
-use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation, TextReplacement};
+use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 use super::{ItemEdit, SharedSplice, SourceAddresser, SpliceState};
 use crate::content::ContentData;
@@ -83,7 +83,24 @@ impl<A: Send + Sync + 'static> ExtractStream<A> {
             let edit = self
                 .addresser
                 .locate_source(&state.items, source)
-                .ok_or_else(|| unresolvable_source(source))?;
+                .ok_or_else(|| {
+                    // A raw source reference that resolves to no redactable
+                    // item (a bad part name, an offset past the part, a span
+                    // crossing parts) is the caller's coordinate at fault.
+                    let refs: Vec<String> = source
+                        .iter()
+                        .map(|src| match &src.part {
+                            Some(part) => {
+                                format!("{part}#{}..{}", src.range.start, src.range.end)
+                            }
+                            None => format!("{}..{}", src.range.start, src.range.end),
+                        })
+                        .collect();
+                    Error::malformed(format!(
+                        "source reference resolves to no redactable item: {}",
+                        refs.join(" ")
+                    ))
+                })?;
             return Ok(Some(edit));
         }
         // No source refs and no decoded range: a source-only location with an
@@ -105,23 +122,6 @@ impl<A: Send + Sync + 'static> ExtractStream<A> {
             local: (range.start - item_start)..(range.end - item_start),
         }))
     }
-}
-
-/// A location's raw [`source`](TextLocation::source) reference could not be
-/// reverse-resolved to any redactable item, a bad part name, an offset past
-/// the part, or a span crossing parts. `MalformedInput`: the caller-supplied
-/// coordinate is at fault.
-fn unresolvable_source(source: &[SourceRef]) -> Error {
-    let mut msg = String::from("source reference resolves to no redactable item:");
-    for src in source {
-        match &src.part {
-            Some(part) => {
-                msg.push_str(&format!(" {}#{}..{}", part, src.range.start, src.range.end))
-            }
-            None => msg.push_str(&format!(" {}..{}", src.range.start, src.range.end)),
-        }
-    }
-    Error::new(ErrorKind::MalformedInput, msg)
 }
 
 impl<A: Send + Sync + 'static> Stream<Text> for ExtractStream<A> {

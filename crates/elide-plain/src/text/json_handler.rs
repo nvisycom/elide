@@ -23,7 +23,7 @@ use elide_codec::{Format, FormatId, Stream};
 use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter, ResolvedHint};
 use elide_core::redaction::Redactions;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 use super::JsonLoader;
 use super::json_escape::{decode_escape, json_escape};
@@ -153,10 +153,10 @@ impl Leaf {
         // the leaf's own bytes), then splice the escaped replacement there.
         let source_start = self
             .value_to_source(0, value_range.start)
-            .ok_or_else(|| Error::new(ErrorKind::MalformedInput, "value offset out of range"))?;
+            .ok_or_else(|| Error::malformed("value offset out of range"))?;
         let source_end = self
             .value_to_source(0, value_range.end)
-            .ok_or_else(|| Error::new(ErrorKind::MalformedInput, "value offset out of range"))?;
+            .ok_or_else(|| Error::malformed("value offset out of range"))?;
         self.serialized
             .redact_range(&json_escape(replacement), source_start..source_end)?;
         self.value.redact_range(replacement, value_range)?;
@@ -550,7 +550,7 @@ impl JsonHandler {
         for source in rest {
             let next = self.resolve_one_source(source)?;
             if next.slot != edit.slot {
-                return Err(malformed(format_args!(
+                return Err(Error::malformed(format!(
                     "source references span more than one JSON value (slots {} and {})",
                     edit.slot, next.slot
                 )));
@@ -569,13 +569,13 @@ impl JsonHandler {
             // JSON is single-file: a part-tagged ref does not address it. The
             // caller supplied a raw coordinate to redact; silently dropping it
             // would leave a green audit over an unredacted document.
-            return Err(malformed(format_args!(
+            return Err(Error::malformed(format!(
                 "source reference names container part {part:?}, but JSON has no parts"
             )));
         }
         let raw = &source.range;
         if raw.start > raw.end {
-            return Err(malformed(format_args!(
+            return Err(Error::malformed(format!(
                 "source range {}..{} is reversed",
                 raw.start, raw.end
             )));
@@ -586,7 +586,7 @@ impl JsonHandler {
         // interior (`2..2` in `"bcd"`) and for a scalar alike, whose mapping is
         // identity. Reject it before any mapping.
         if raw.start == raw.end {
-            return Err(malformed(format_args!(
+            return Err(Error::malformed(format!(
                 "source range {}..{} is empty",
                 raw.start, raw.end
             )));
@@ -606,13 +606,13 @@ impl JsonHandler {
                 // replacement into the adjacent value rather than redact. Reject
                 // it rather than silently corrupt the value.
                 if leaf.is_quoted() && leaf.escaped_bounds(slot_start).is_delimiter_only(raw) {
-                    return Err(malformed(format_args!(
+                    return Err(Error::malformed(format!(
                         "source range {}..{} covers only a JSON string delimiter, no value",
                         raw.start, raw.end
                     )));
                 }
                 let split = || {
-                    malformed(format_args!(
+                    Error::malformed(format!(
                         "source range {}..{} splits a JSON escape",
                         raw.start, raw.end
                     ))
@@ -634,7 +634,7 @@ impl JsonHandler {
         // document, no leaf value to redact. As with a part-tagged ref, an
         // explicit-but-unresolvable source is a caller mistake, not a no-op:
         // erroring keeps a green audit off an unredacted document.
-        Err(malformed(format_args!(
+        Err(Error::malformed(format!(
             "source range {}..{} resolves to no JSON string value",
             raw.start, raw.end
         )))
@@ -653,7 +653,7 @@ impl JsonHandler {
             return Ok(None);
         };
         if range.start > range.end {
-            return Err(malformed(format_args!(
+            return Err(Error::malformed(format!(
                 "redaction range {}..{} is reversed",
                 range.start, range.end
             )));
@@ -663,7 +663,7 @@ impl JsonHandler {
             let slot_end = slot_start + slot.decoded_len();
             if range.start < slot_end {
                 let Slot::Leaf(leaf) = slot else {
-                    return Err(malformed(format_args!(
+                    return Err(Error::malformed(format!(
                         "redaction range {}..{} does not start in a JSON value",
                         range.start, range.end
                     )));
@@ -671,7 +671,7 @@ impl JsonHandler {
                 let value_start = range.start - slot_start;
                 let value_end = range.end - slot_start;
                 if value_end > leaf.value.len() {
-                    return Err(malformed(format_args!(
+                    return Err(Error::malformed(format!(
                         "redaction range {}..{} extends past its JSON value",
                         range.start, range.end
                     )));
@@ -679,7 +679,7 @@ impl JsonHandler {
                 if !leaf.value.is_char_boundary(value_start)
                     || !leaf.value.is_char_boundary(value_end)
                 {
-                    return Err(malformed(format_args!(
+                    return Err(Error::malformed(format!(
                         "redaction range {}..{} splits a UTF-8 character",
                         range.start, range.end
                     )));
@@ -691,16 +691,11 @@ impl JsonHandler {
             }
             slot_start = slot_end;
         }
-        Err(malformed(format_args!(
+        Err(Error::malformed(format!(
             "redaction range {}..{} is past the end of the document",
             range.start, range.end
         )))
     }
-}
-
-/// A `MalformedInput` error with a formatted message.
-fn malformed(args: std::fmt::Arguments) -> Error {
-    Error::new(ErrorKind::MalformedInput, args.to_string())
 }
 
 impl Slot {
@@ -725,6 +720,7 @@ impl Slot {
 
 #[cfg(test)]
 mod tests {
+    use elide_core::ErrorKind;
     use elide_core::modality::text::TextReplacement;
 
     use super::*;

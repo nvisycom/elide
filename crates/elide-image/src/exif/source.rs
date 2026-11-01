@@ -3,7 +3,7 @@
 
 use std::panic::AssertUnwindSafe;
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use little_exif::exif_tag::ExifTag;
 use little_exif::filetype::FileExtension;
 use little_exif::ifd::ExifTagGroup;
@@ -103,9 +103,8 @@ impl<'a> Source<'a> {
             // pixels need.
             FileExtension::TIFF => {
                 let mut buf = self.bytes.to_vec();
-                guard(|| ExifMetadata::clear_metadata(&mut buf, FileExtension::TIFF))?.map_err(
-                    |e| Error::new(ErrorKind::MalformedInput, format!("exif strip: {e}")),
-                )?;
+                guard(|| ExifMetadata::clear_metadata(&mut buf, FileExtension::TIFF))?
+                    .map_err(|e| Error::malformed(format!("exif strip: {e}")))?;
                 let removed = usize::from(buf != self.bytes);
                 Scrubbed {
                     bytes: buf,
@@ -314,7 +313,7 @@ impl<'a> Source<'a> {
         let format = self.format;
         let mut out = dest;
         guard(AssertUnwindSafe(|| exif.write_to_vec(&mut out, format)))?
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("exif transfer: {e}")))?;
+            .map_err(|e| Error::malformed(format!("exif transfer: {e}")))?;
         Ok(out)
     }
 
@@ -332,7 +331,7 @@ impl<'a> Source<'a> {
     /// strip-based re-encode) can never point the output IFD at the wrong pixels.
     fn transfer_tiff(&self, source: &ExifMetadata, dest: Vec<u8>) -> Result<Vec<u8>> {
         let mut out = guard(|| ExifMetadata::new_from_vec(&dest, FileExtension::TIFF))?
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("tiff reparse: {e}")))?;
+            .map_err(|e| Error::malformed(format!("tiff reparse: {e}")))?;
         guard(AssertUnwindSafe(|| {
             for ifd in source.get_ifds() {
                 let generic = ifd.get_ifd_type() == ExifTagGroup::GENERIC;
@@ -350,7 +349,7 @@ impl<'a> Source<'a> {
         guard(AssertUnwindSafe(|| {
             out.write_to_vec(&mut buf, FileExtension::TIFF)
         }))?
-        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("tiff transfer: {e}")))?;
+        .map_err(|e| Error::malformed(format!("tiff transfer: {e}")))?;
         Ok(buf)
     }
 
@@ -359,7 +358,7 @@ impl<'a> Source<'a> {
         let format = self.format;
         let mut buf = self.bytes.to_vec();
         guard(AssertUnwindSafe(|| exif.write_to_vec(&mut buf, format)))?
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("exif rewrite: {e}")))?;
+            .map_err(|e| Error::malformed(format!("exif rewrite: {e}")))?;
         Ok(buf)
     }
 }
@@ -368,18 +367,14 @@ impl<'a> Source<'a> {
 /// image.
 #[cfg(feature = "codec")]
 fn survived(what: &str) -> Error {
-    Error::new(
-        ErrorKind::Sanitization,
-        format!("encoded image still carries metadata: {what}"),
-    )
+    Error::sanitization(format!("encoded image still carries metadata: {what}"))
 }
 
 /// The error for a container format this crate opens no images as.
 fn unsupported(format: FileExtension) -> Error {
-    Error::new(
-        ErrorKind::CapabilityUnavailable,
-        format!("image metadata edit: unsupported container {format:?}"),
-    )
+    Error::capability_unavailable(format!(
+        "image metadata edit: unsupported container {format:?}"
+    ))
 }
 
 #[cfg(all(test, feature = "jpeg"))]

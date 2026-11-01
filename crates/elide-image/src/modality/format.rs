@@ -69,17 +69,16 @@ impl ImageFormat {
     /// [`ErrorKind::CapabilityUnavailable`](elide_core::ErrorKind::CapabilityUnavailable)
     /// for a recognized format this crate does not model.
     pub fn detect(bytes: &[u8]) -> elide_core::Result<Self> {
-        use elide_core::{Error, ErrorKind};
+        use elide_core::Error;
         let guessed = image::guess_format(bytes)
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("unknown image: {e}")))?;
+            .map_err(|e| Error::malformed(format!("unknown image: {e}")))?;
         match guessed {
             image::ImageFormat::Png => Ok(ImageFormat::Png),
             image::ImageFormat::Jpeg => Ok(ImageFormat::Jpeg),
             image::ImageFormat::Tiff => Ok(ImageFormat::Tiff),
-            other => Err(Error::new(
-                ErrorKind::CapabilityUnavailable,
-                format!("unsupported image format: {other:?}"),
-            )),
+            other => Err(Error::capability_unavailable(format!(
+                "unsupported image format: {other:?}"
+            ))),
         }
     }
 

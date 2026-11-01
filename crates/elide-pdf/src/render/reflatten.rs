@@ -9,10 +9,8 @@
 //! content survives underneath, while every other page of the document is left
 //! untouched (a born-digital page keeps its selectable, glyph-redacted text).
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use lopdf::{Dictionary, Document, Object, dictionary};
-
-use crate::error::malformed;
 
 /// One page reflatten: replace page [`number`](PageReplacement::number)'s whole
 /// content with a redacted image of the page.
@@ -50,19 +48,19 @@ pub(crate) fn reflatten(doc: &mut Document, replacements: &[PageReplacement]) ->
     // surviving page stays reachable and is kept.
     for replacement in replacements {
         let Some(&page_id) = pages.get(&replacement.number) else {
-            return Err(Error::new(
-                ErrorKind::Redaction,
-                format!("page {} does not exist", replacement.number),
-            ));
+            return Err(Error::redaction(format!(
+                "page {} does not exist",
+                replacement.number
+            )));
         };
 
         // Build a valid image XObject from the encoded bytes; lopdf sets the
         // dimensions, colour space, and filter to match.
         let image = lopdf::xobject::image_from(replacement.image.clone()).map_err(|e| {
-            Error::new(
-                ErrorKind::Redaction,
-                format!("could not build image for page {}: {e}", replacement.number),
-            )
+            Error::redaction(format!(
+                "could not build image for page {}: {e}",
+                replacement.number
+            ))
         })?;
         let (width, height) = image_dimensions(&image, replacement.number)?;
         let image_id = doc.add_object(image);
@@ -78,10 +76,7 @@ pub(crate) fn reflatten(doc: &mut Document, replacements: &[PageReplacement]) ->
         // Repoint the page at the new content and resources, and size its
         // box to the image.
         let page = doc.get_dictionary_mut(page_id).map_err(|e| {
-            Error::new(
-                ErrorKind::Redaction,
-                format!("page {} is unreadable: {e}", replacement.number),
-            )
+            Error::redaction(format!("page {} is unreadable: {e}", replacement.number))
         })?;
         page.set("Contents", Object::Reference(content_id));
         page.set("Resources", Object::Reference(resources_id));
@@ -118,9 +113,9 @@ pub(crate) fn clear(doc: &mut Document, numbers: &[u32]) -> Result<()> {
     for number in numbers {
         let id = *pages
             .get(number)
-            .ok_or_else(|| malformed(format!("page {number} does not exist")))?;
+            .ok_or_else(|| Error::malformed(format!("page {number} does not exist")))?;
         doc.change_page_content(id, Vec::new())
-            .map_err(|e| malformed(format!("clear page {number}: {e}")))?;
+            .map_err(|e| Error::malformed(format!("clear page {number}: {e}")))?;
         if let Ok(page) = doc.get_dictionary_mut(id) {
             page.set("Resources", Dictionary::new());
         }
@@ -144,9 +139,8 @@ fn image_dimensions(image: &lopdf::Stream, page: u32) -> Result<(u32, u32)> {
         .and_then(|h| u32::try_from(h).ok());
     match (width, height) {
         (Some(w), Some(h)) if w > 0 && h > 0 => Ok((w, h)),
-        _ => Err(Error::new(
-            ErrorKind::Redaction,
-            format!("page {page} image has no valid dimensions"),
-        )),
+        _ => Err(Error::redaction(format!(
+            "page {page} image has no valid dimensions"
+        ))),
     }
 }

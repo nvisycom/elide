@@ -31,7 +31,7 @@ use std::collections::{HashMap, HashSet};
 use bytes::Bytes;
 use elide_codec::{LocalId, StrippedContent};
 use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 use crate::opc::PartClassifier;
 use crate::opc::archive::{self, Entry};
@@ -235,12 +235,15 @@ fn removal(
         // whatever the policy.
         PartKind::Revisions => Some(HiddenContent::TrackedChange),
         PartKind::Hidden(content) => Some(content),
-        PartKind::Unsupported => return Err(refused(path, "is not supported for redaction")),
+        PartKind::Unsupported => {
+            return Err(Error::malformed(format!(
+                "part `{path}` is not supported for redaction"
+            )));
+        }
         PartKind::Unknown => {
-            return Err(refused(
-                path,
-                "has a content type this crate does not recognize",
-            ));
+            return Err(Error::malformed(format!(
+                "part `{path}` has a content type this crate does not recognize"
+            )));
         }
         _ => None,
     })
@@ -271,8 +274,4 @@ fn edit_part(
 /// entry names.
 fn local_id(path: &PartPath) -> LocalId {
     LocalId::new(path.as_str().to_owned())
-}
-
-fn refused(path: &PartPath, why: &str) -> Error {
-    Error::new(ErrorKind::MalformedInput, format!("part `{path}` {why}"))
 }

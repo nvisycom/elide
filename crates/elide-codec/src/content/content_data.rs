@@ -6,7 +6,7 @@ use std::ops::Range;
 use std::path::Path;
 
 use bytes::Bytes;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use sha2::{Digest, Sha256};
 
 use super::TextEncoding;
@@ -183,16 +183,15 @@ impl ContentData {
     pub fn slice(&self, range: Range<usize>) -> Result<Bytes> {
         let Range { start, end } = range;
         if end > self.data.len() {
-            return Err(Error::new(
-                ErrorKind::MalformedInput,
-                format!("slice end {end} exceeds content length {}", self.data.len()),
-            ));
+            return Err(Error::malformed(format!(
+                "slice end {end} exceeds content length {}",
+                self.data.len()
+            )));
         }
         if start > end {
-            return Err(Error::new(
-                ErrorKind::MalformedInput,
-                format!("slice start {start} is greater than end {end}"),
-            ));
+            return Err(Error::malformed(format!(
+                "slice start {start} is greater than end {end}"
+            )));
         }
         Ok(Bytes::copy_from_slice(&self.data[start..end]))
     }

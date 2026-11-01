@@ -458,14 +458,11 @@ impl Fixture {
             })
             .unwrap_or(false);
         if !body_is_m {
-            return Err(Error::new(
-                ErrorKind::CapabilityUnavailable,
-                format!(
-                    "{} did not resolve to the {} modality",
-                    self.extension,
-                    M::NAME
-                ),
-            ));
+            return Err(Error::capability_unavailable(format!(
+                "{} did not resolve to the {} modality",
+                self.extension,
+                M::NAME
+            )));
         }
         Ok(document)
     }

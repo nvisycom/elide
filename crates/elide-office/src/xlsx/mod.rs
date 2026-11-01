@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use bytes::Bytes;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use quick_xml::escape::escape;
 
 use self::sheet::{CellSource, parse_cells};
@@ -138,10 +138,7 @@ impl Xlsx {
     pub fn open(document: &[u8]) -> Result<Self> {
         let package = Package::open(document, &SheetClassifier)?;
         if !package.contains_part(WORKBOOK_PART) {
-            return Err(Error::new(
-                ErrorKind::MalformedInput,
-                "missing workbook part `xl/workbook.xml`",
-            ));
+            return Err(Error::malformed("missing workbook part `xl/workbook.xml`"));
         }
         let workbook = part_text(&package, WORKBOOK_PART)?;
         // A workbook with no relationships part has no resolvable sheets; treat
@@ -177,13 +174,10 @@ impl Xlsx {
         let mut cells = Vec::new();
         for sheet in &self.sheets {
             let bytes = self.package.part_bytes(&sheet.part).ok_or_else(|| {
-                Error::new(
-                    ErrorKind::MalformedInput,
-                    format!(
-                        "worksheet `{}` referenced by sheet `{}` is missing",
-                        sheet.part, sheet.name
-                    ),
-                )
+                Error::malformed(format!(
+                    "worksheet `{}` referenced by sheet `{}` is missing",
+                    sheet.part, sheet.name
+                ))
             })?;
             let raw = decode_part(&sheet.part, &bytes)?;
             for cell in parse_cells(&raw)? {
@@ -269,9 +263,10 @@ impl Xlsx {
             if let Some(text) = spliced.get(part) {
                 return Ok(text.clone());
             }
-            let bytes = self.package.part_bytes(part).ok_or_else(|| {
-                Error::new(ErrorKind::Processing, format!("part `{part}` not found"))
-            })?;
+            let bytes = self
+                .package
+                .part_bytes(part)
+                .ok_or_else(|| Error::processing(format!("part `{part}` not found")))?;
             decode_part(part, &bytes)
         };
 
@@ -283,10 +278,7 @@ impl Xlsx {
                 .iter()
                 .find(|s| s.name == edit.sheet.as_str())
                 .ok_or_else(|| {
-                    Error::new(
-                        ErrorKind::Processing,
-                        format!("edit names unknown sheet `{}`", edit.sheet),
-                    )
+                    Error::processing(format!("edit names unknown sheet `{}`", edit.sheet))
                 })?;
             by_part
                 .entry(sheet.part.clone())
@@ -332,13 +324,10 @@ impl Xlsx {
         for part in parts {
             let role = self.package.role_of(&part.part);
             if !matches!(role, Some(PartRole::Property | PartRole::Binary(_))) {
-                return Err(Error::new(
-                    ErrorKind::Processing,
-                    format!(
-                        "part replacement targets non-redactable part `{}`",
-                        part.part
-                    ),
-                ));
+                return Err(Error::processing(format!(
+                    "part replacement targets non-redactable part `{}`",
+                    part.part
+                )));
             }
             replacements.push(part.clone());
         }
@@ -471,14 +460,11 @@ impl Xlsx {
         // Fail closed if any edit did not land on a text-bearing cell: a redaction
         // that produced no splice would otherwise leave its target untouched.
         if matched != edits.len() {
-            return Err(Error::new(
-                ErrorKind::Processing,
-                format!(
-                    "in `{part}`, {} of {} cell edits matched no text-bearing cell",
-                    edits.len() - matched,
-                    edits.len()
-                ),
-            ));
+            return Err(Error::processing(format!(
+                "in `{part}`, {} of {} cell edits matched no text-bearing cell",
+                edits.len() - matched,
+                edits.len()
+            )));
         }
 
         // Reject overlapping splices (two edits landing on the same/nested span)
@@ -488,22 +474,18 @@ impl Xlsx {
         let mut prev_end = 0usize;
         for (range, _) in &splices {
             if range.start < prev_end {
-                return Err(Error::new(
-                    ErrorKind::Processing,
-                    format!("overlapping cell edits in `{part}`"),
-                ));
+                return Err(Error::processing(format!(
+                    "overlapping cell edits in `{part}`"
+                )));
             }
             if range.end > raw.len()
                 || !raw.is_char_boundary(range.start)
                 || !raw.is_char_boundary(range.end)
             {
-                return Err(Error::new(
-                    ErrorKind::Processing,
-                    format!(
-                        "cell edit span {}..{} out of bounds in `{part}`",
-                        range.start, range.end
-                    ),
-                ));
+                return Err(Error::processing(format!(
+                    "cell edit span {}..{} out of bounds in `{part}`",
+                    range.start, range.end
+                )));
             }
             prev_end = range.end;
         }
@@ -524,7 +506,7 @@ impl Xlsx {
 fn part_text(package: &Package, path: &str) -> Result<String> {
     let bytes = package
         .part_bytes(path)
-        .ok_or_else(|| Error::new(ErrorKind::MalformedInput, format!("missing part `{path}`")))?;
+        .ok_or_else(|| Error::malformed(format!("missing part `{path}`")))?;
     decode_part(path, &bytes)
 }
 
@@ -532,12 +514,9 @@ fn part_text(package: &Package, path: &str) -> Result<String> {
 ///
 /// [`ErrorKind::MalformedInput`]: elide_core::ErrorKind::MalformedInput
 fn decode_part(path: &str, bytes: &[u8]) -> Result<String> {
-    std::str::from_utf8(bytes).map(str::to_owned).map_err(|_| {
-        Error::new(
-            ErrorKind::MalformedInput,
-            format!("part `{path}` is not UTF-8"),
-        )
-    })
+    std::str::from_utf8(bytes)
+        .map(str::to_owned)
+        .map_err(|_| Error::malformed(format!("part `{path}` is not UTF-8")))
 }
 
 #[cfg(test)]

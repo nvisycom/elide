@@ -10,7 +10,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use lopdf::{Document, Object, ObjectId};
 
 /// Remove `deleted` codes from each named `/ToUnicode` CMap stream.
@@ -43,7 +43,7 @@ pub(crate) fn scrub(
         };
         let text = stream
             .decompressed_content()
-            .map_err(|e| Error::new(ErrorKind::Redaction, format!("read /ToUnicode CMap: {e}")))?;
+            .map_err(|e| Error::redaction(format!("read /ToUnicode CMap: {e}")))?;
         let edited = strip_codes(&text, codes)?;
 
         let Ok(Object::Stream(stream)) = doc.get_object_mut(cmap_id) else {
@@ -148,8 +148,7 @@ fn copy_bfrange_section(
                     i += if tokens.get(i + 2).is_some() { 3 } else { 2 };
                     continue;
                 }
-                return Err(Error::new(
-                    ErrorKind::Redaction,
+                return Err(Error::redaction(
                     "a deleted glyph's code falls inside a /ToUnicode bfrange; \
                      the code->Unicode mapping cannot be scrubbed safely",
                 ));

@@ -12,7 +12,7 @@ use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId, ReversibleOperator};
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 #[cfg(feature = "serde")]
 use serde::Serialize;
 
@@ -39,7 +39,7 @@ const NONCE_LEN: usize = 12;
 /// by [`LabelRef`], so a deployment can encrypt distinct label classes under
 /// distinct keys; [`deanonymize`] resolves the same entity's label, so it
 /// recovers under the same key. AES-256 needs a 32-byte key: a provider that
-/// returns any other length is a [`Redaction`](ErrorKind::Redaction) error at
+/// returns any other length is a [`Redaction`](elide_core::ErrorKind::Redaction) error at
 /// apply time, not a silent truncation.
 ///
 /// [`deanonymize`]: ReversibleOperator::deanonymize
@@ -82,8 +82,7 @@ impl AesEncrypt {
     fn cipher(&self, label: &LabelRef) -> Result<Aes256Gcm> {
         let key = self.keys.key(label)?;
         let key: [u8; KEY_LEN] = key.as_slice().try_into().map_err(|_| {
-            Error::new(
-                ErrorKind::Redaction,
+            Error::redaction(
                 "AES-256 requires a 32-byte key; the provider returned a different length",
             )
         })?;
@@ -97,7 +96,7 @@ impl AesEncrypt {
         let ciphertext = self
             .cipher(label)?
             .encrypt(&nonce, plaintext.as_bytes())
-            .map_err(|_| Error::new(ErrorKind::Redaction, "encryption failed"))?;
+            .map_err(|_| Error::redaction("encryption failed"))?;
 
         // Prepend the nonce so the replacement is self-describing.
         let mut blob = Vec::with_capacity(NONCE_LEN + ciphertext.len());
@@ -136,9 +135,8 @@ impl AesEncrypt {
             // Authentication failed or wrong key: not recoverable here.
             Err(_) => Ok(None),
             Ok(plaintext) => {
-                let text = String::from_utf8(plaintext).map_err(|_| {
-                    Error::new(ErrorKind::Redaction, "decrypted bytes are not UTF-8")
-                })?;
+                let text = String::from_utf8(plaintext)
+                    .map_err(|_| Error::redaction("decrypted bytes are not UTF-8"))?;
                 Ok(Some(TextData::new(text)))
             }
         }
@@ -219,6 +217,7 @@ impl ReversibleOperator<Tabular> for AesEncrypt {
 
 #[cfg(test)]
 mod tests {
+    use elide_core::ErrorKind;
     use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
     use elide_core::modality::text::TextLocation;
     use elide_core::primitive::Confidence;

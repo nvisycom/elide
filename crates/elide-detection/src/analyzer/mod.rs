@@ -27,7 +27,7 @@ use elide_core::entity::Entity;
 use elide_core::modality::{Chunk, Modality, ModalityLocation, StreamDataReader};
 use elide_core::recognition::annotation::{Annotations, Exclusion};
 use elide_core::recognition::{Context, Recognizer, Scope, Subject};
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use futures::future;
 
 pub use self::analysis::Analysis;
@@ -256,14 +256,11 @@ impl<M: Modality> Analyzer<M> {
         S: StreamDataReader<M> + ?Sized,
     {
         if sources.len() != seeds.len() {
-            return Err(Error::new(
-                ErrorKind::MalformedInput,
-                format!(
-                    "analyze_streams: {} sources but {} seeds; expected one seed per source",
-                    sources.len(),
-                    seeds.len()
-                ),
-            ));
+            return Err(Error::malformed(format!(
+                "analyze_streams: {} sources but {} seeds; expected one seed per source",
+                sources.len(),
+                seeds.len()
+            )));
         }
         let ctx = Context::new(scope).with_annotations(annotations);
 
@@ -379,14 +376,11 @@ impl<M: Modality> Analyzer<M> {
         for found in future::join_all(futures).await {
             let found = found?;
             if found.len() != subjects.len() {
-                return Err(Error::new(
-                    ErrorKind::Recognition,
-                    format!(
-                        "recognizer returned {} entity lists for {} subjects",
-                        found.len(),
-                        subjects.len()
-                    ),
-                ));
+                return Err(Error::recognition(format!(
+                    "recognizer returned {} entity lists for {} subjects",
+                    found.len(),
+                    subjects.len()
+                )));
             }
             for (slot, found_for_subject) in entities.iter_mut().zip(found) {
                 slot.extend(found_for_subject);
@@ -468,6 +462,7 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use elide_core::ErrorKind;
     use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
     use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
     use elide_core::mocks::MockRecognizer;

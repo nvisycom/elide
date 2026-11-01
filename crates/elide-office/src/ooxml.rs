@@ -16,7 +16,7 @@
 use std::marker::PhantomData;
 
 use bytes::Bytes;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 use crate::opc::sanitize::Sanitizer;
 use crate::opc::{Extraction, Package, PartClassifier, PartKind, PartReplacement, Replacement};
@@ -62,10 +62,7 @@ impl<F: OoxmlFormat> OoxmlPackage<F> {
         // Without a main part the bytes are a package but not a usable document
         // of this format.
         if !package.contains_kind(PartKind::Main) {
-            return Err(Error::new(
-                ErrorKind::MalformedInput,
-                format!("missing {} part", F::MAIN_LABEL),
-            ));
+            return Err(Error::malformed(format!("missing {} part", F::MAIN_LABEL)));
         }
         Ok(Self {
             package,

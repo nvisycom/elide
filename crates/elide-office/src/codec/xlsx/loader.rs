@@ -9,7 +9,7 @@ use elide_codec::{Document, DocumentLoader, DocumentPart, ErasedStream, LocalId,
 use elide_core::modality::tabular::Tabular;
 use elide_core::modality::text::Text;
 use elide_core::redaction::{Disposition, HiddenContentPolicy};
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 use super::recombine::XlsxRecombine;
 use super::state::XlsxState;
@@ -54,13 +54,10 @@ impl DocumentLoader for XlsxDocumentLoader {
 
         let markup = workbook.markup();
         if let Some(issue) = markup.issues.first() {
-            return Err(Error::new(
-                ErrorKind::MalformedInput,
-                format!(
-                    "xlsx: text-bearing part `{}` could not be extracted ({:?})",
-                    issue.part, issue.kind
-                ),
-            ));
+            return Err(Error::malformed(format!(
+                "xlsx: text-bearing part `{}` could not be extracted ({:?})",
+                issue.part, issue.kind
+            )));
         }
         let text: SharedSplice<OoxmlAddress> = SharedSplice::new(items(markup.blocks));
 

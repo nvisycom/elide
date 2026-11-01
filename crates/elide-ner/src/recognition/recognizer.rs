@@ -24,7 +24,7 @@ use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::ComponentId;
 use elide_core::recognition::{Context, Recognizer, Subject};
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use hipstr::HipStr;
 
 use super::aggregation::AggregationStrategy;
@@ -213,14 +213,11 @@ where
         // otherwise let the zip silently leave the tail subjects unrecognized.
         let responses = self.backend.call_batch(requests).await?;
         if responses.len() != targets.len() {
-            return Err(Error::new(
-                ErrorKind::Provider,
-                format!(
-                    "NER backend returned {} responses for {} requests",
-                    responses.len(),
-                    targets.len()
-                ),
-            ));
+            return Err(Error::provider(format!(
+                "NER backend returned {} responses for {} requests",
+                responses.len(),
+                targets.len()
+            )));
         }
         for (&index, response) in targets.iter().zip(responses) {
             per_subject[index] =
@@ -281,6 +278,7 @@ fn ner_request<'a, M: TextRecognizable>(
 
 #[cfg(test)]
 mod tests {
+    use elide_core::ErrorKind;
     use elide_core::entity::{LabelCatalog, LabelLocale};
     use elide_core::modality::text::{Text, TextData};
     use elide_core::primitive::LanguageTag;

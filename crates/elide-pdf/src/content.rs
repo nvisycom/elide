@@ -7,10 +7,9 @@
 
 use std::collections::{BTreeSet, HashSet};
 
-use elide_core::Result;
+use elide_core::{Error, Result};
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
-use crate::error::malformed;
 use crate::lopdf_ext::{DictionaryExt, DocumentExt};
 
 /// Where a content stream is written back: a page's content, or a form
@@ -50,7 +49,7 @@ pub(crate) fn plan<C>(
         }
         let bytes = stream
             .decompressed_content()
-            .map_err(|e| malformed(format!("form content: {e}")))?;
+            .map_err(|e| Error::malformed(format!("form content: {e}")))?;
         let resources: Vec<Dictionary> = stream
             .dict
             .get(b"Resources")
@@ -73,7 +72,7 @@ pub(crate) fn apply<C>(doc: &mut Document, edits: Vec<(Target, Vec<u8>, C)>) -> 
         match target {
             Target::Page(page) => doc
                 .change_page_content(page, content)
-                .map_err(|e| malformed(format!("write page content: {e}")))?,
+                .map_err(|e| Error::malformed(format!("write page content: {e}")))?,
             Target::Form(id) => doc.set_stream_content(id, content)?,
         }
         cuts.push(cut);

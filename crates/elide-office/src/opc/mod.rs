@@ -33,7 +33,7 @@ pub(crate) mod xml_span;
 use std::collections::HashMap;
 
 use bytes::Bytes;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 pub use self::attributes::TextAttribute;
 pub(crate) use self::attributes::{NEUTRAL_DATE, NeutralizeAttributes, Ns, StripAttributes};
@@ -82,7 +82,7 @@ impl Package {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if the bytes are not a readable zip, the
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the bytes are not a readable zip, the
     /// content-types manifest or a relationships part is unreadable, a part is
     /// unreadable, or a part exceeds the size cap.
     pub fn open(document: &[u8], classifier: &dyn PartClassifier) -> Result<Self> {
@@ -243,10 +243,7 @@ impl Package {
             .iter()
             .find(|part| part.path() == path && part.is_text())
             .ok_or_else(|| {
-                Error::new(
-                    ErrorKind::Processing,
-                    format!("replacement names non-text part `{path}`"),
-                )
+                Error::processing(format!("replacement names non-text part `{path}`"))
             })?;
         part.splice(replacements)
     }
@@ -287,12 +284,9 @@ impl Package {
             if !part.is_text() || part.role() == PartRole::RelationshipTargets {
                 continue;
             }
-            let text = part.text().ok_or_else(|| {
-                Error::new(
-                    ErrorKind::MalformedInput,
-                    format!("part `{}` not UTF-8", part.path()),
-                )
-            })?;
+            let text = part
+                .text()
+                .ok_or_else(|| Error::malformed(format!("part `{}` not UTF-8", part.path())))?;
             texts.push((part.path(), text));
         }
         names::fit_names(self.names, texts.iter().copied(), replacements)
@@ -314,16 +308,16 @@ impl Package {
         let mut by_part: HashMap<&PartPath, Vec<&Replacement>> = HashMap::new();
         for r in replacements {
             let Some(part) = index.get(&r.part) else {
-                return Err(Error::new(
-                    ErrorKind::Processing,
-                    format!("replacement names unknown part `{}`", r.part),
-                ));
+                return Err(Error::processing(format!(
+                    "replacement names unknown part `{}`",
+                    r.part
+                )));
             };
             if !part.is_text() {
-                return Err(Error::new(
-                    ErrorKind::Processing,
-                    format!("replacement names non-text part `{}`", r.part),
-                ));
+                return Err(Error::processing(format!(
+                    "replacement names non-text part `{}`",
+                    r.part
+                )));
             }
             by_part.entry(&r.part).or_default().push(r);
         }
@@ -334,10 +328,10 @@ impl Package {
         let mut part_bytes: HashMap<&PartPath, &[u8]> = HashMap::new();
         for pr in parts {
             let Some(part) = index.get(&pr.part) else {
-                return Err(Error::new(
-                    ErrorKind::Processing,
-                    format!("part replacement names unknown part `{}`", pr.part),
-                ));
+                return Err(Error::processing(format!(
+                    "part replacement names unknown part `{}`",
+                    pr.part
+                )));
             };
             // A whole-part replacement may only overwrite a part whose role
             // admits it: a binary embedding, a property part, or a cell part.
@@ -345,19 +339,16 @@ impl Package {
             // could overwrite the main part, styles, the theme, the content-types
             // manifest, or splice a text part out of band.
             if !part.role().is_whole_part_replaceable() {
-                return Err(Error::new(
-                    ErrorKind::Processing,
-                    format!("part replacement targets non-redactable part `{}`", pr.part),
-                ));
+                return Err(Error::processing(format!(
+                    "part replacement targets non-redactable part `{}`",
+                    pr.part
+                )));
             }
             if by_part.contains_key(&pr.part) {
-                return Err(Error::new(
-                    ErrorKind::Processing,
-                    format!(
-                        "part `{}` has both a text splice and a binary replacement",
-                        pr.part
-                    ),
-                ));
+                return Err(Error::processing(format!(
+                    "part `{}` has both a text splice and a binary replacement",
+                    pr.part
+                )));
             }
             part_bytes.insert(&pr.part, &pr.bytes);
         }

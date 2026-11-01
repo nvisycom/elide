@@ -1,7 +1,7 @@
 //! [`RasterImage`]: a decoded image and its format, the pixel-editing core.
 
 use bytes::Bytes;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView, Rgba, RgbaImage};
 
@@ -49,7 +49,7 @@ impl RasterImage {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::Processing`] if the encoder rejects the image.
+    /// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) if the encoder rejects the image.
     pub fn encode(&self) -> Result<Bytes> {
         self.encode_as(self.format)
     }
@@ -60,7 +60,7 @@ impl RasterImage {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::Processing`] if the encoder rejects the image.
+    /// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) if the encoder rejects the image.
     pub fn encode_as(&self, format: ImageFormat) -> Result<Bytes> {
         self.encode_bytes(format)
     }
@@ -83,7 +83,7 @@ impl RasterImage {
         let mut buf = Cursor::new(Vec::new());
         self.inner
             .write_to(&mut buf, format.to_image())
-            .map_err(|e| Error::new(ErrorKind::Processing, format!("image encode: {e}")))?;
+            .map_err(|e| Error::processing(format!("image encode: {e}")))?;
         Ok(Bytes::from(buf.into_inner()))
     }
 

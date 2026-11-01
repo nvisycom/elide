@@ -18,13 +18,12 @@
 
 use std::collections::HashSet;
 
-use elide_core::Result;
+use elide_core::{Error, Result};
 use lopdf::content::{Content, Operation};
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
 use super::ext::SanitizeOperationExt;
 use crate::content::{apply, drop_xobjects, plan};
-use crate::error::malformed;
 use crate::lopdf_ext::DocumentExt;
 
 /// How deep a visibility expression (`/VE`) may nest before it is refused.
@@ -141,7 +140,7 @@ impl Layers<'_> {
         resources: &[Dictionary],
     ) -> Result<Option<(Vec<u8>, ContentCuts)>> {
         let content =
-            Content::decode(bytes).map_err(|e| malformed(format!("decode content: {e}")))?;
+            Content::decode(bytes).map_err(|e| Error::malformed(format!("decode content: {e}")))?;
         let mut kept: Vec<Operation> = Vec::with_capacity(content.operations.len());
         // One entry per open marked-content sequence: whether it hides.
         let mut open: Vec<bool> = Vec::new();
@@ -180,7 +179,7 @@ impl Layers<'_> {
         }
         let encoded = Content { operations: kept }
             .encode()
-            .map_err(|e| malformed(format!("encode content: {e}")))?;
+            .map_err(|e| Error::malformed(format!("encode content: {e}")))?;
         Ok(Some((encoded, cuts)))
     }
 

@@ -14,7 +14,7 @@ use elide::enrichment::ocr::{OcrEnricher, OcrRequest, OcrResponse};
 use elide::entity::audit::ModelEvent;
 use elide::modality::image::{ImageLocation, LayoutRegion};
 use elide::primitive::{BoundingBox, Confidence, Dimensions, Point};
-use elide::{Error, ErrorKind, Result};
+use elide::{Error, Result};
 use js_sys::{Function, Promise, Uint8Array};
 use send_wrapper::SendWrapper;
 use serde::Deserialize;
@@ -101,10 +101,7 @@ impl Backend for JsCallbackBackend {
             .await
             .map_err(super::js_to_error)?;
         let regions: Vec<OcrRegion> = serde_wasm_bindgen::from_value(value).map_err(|e| {
-            Error::new(
-                ErrorKind::MalformedInput,
-                format!("OCR callback returned an unreadable value: {e}"),
-            )
+            Error::malformed(format!("OCR callback returned an unreadable value: {e}"))
         })?;
         let regions = regions
             .into_iter()

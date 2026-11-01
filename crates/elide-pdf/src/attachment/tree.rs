@@ -3,10 +3,9 @@
 
 use std::collections::BTreeSet;
 
-use elide_core::Result;
+use elide_core::{Error, Result};
 use lopdf::{Dictionary, Document, Object, ObjectId, decode_text_string};
 
-use crate::error::malformed;
 use crate::lopdf_ext::{DictionaryExt, ObjectExt};
 
 /// How deep the name tree is walked before it is treated as malformed: a real
@@ -74,20 +73,22 @@ impl Tree {
         depth: usize,
     ) -> Result<()> {
         if depth > MAX_TREE_DEPTH {
-            return Err(malformed("attachment name tree is too deep"));
+            return Err(Error::malformed("attachment name tree is too deep"));
         }
         if let Node::Object(id) = node
             && !visited.insert(id)
         {
-            return Err(malformed("attachment name tree is cyclic"));
+            return Err(Error::malformed("attachment name tree is cyclic"));
         }
         let dict = node_dict(doc, node)
-            .ok_or_else(|| malformed("unreadable attachment name tree node"))?;
+            .ok_or_else(|| Error::malformed("unreadable attachment name tree node"))?;
         self.nodes.push(node);
         if let Ok(names) = dict.get(b"Names").and_then(Object::as_array) {
             for pair in names.chunks(2) {
                 let [key, value] = pair else {
-                    return Err(malformed("attachment name tree has an unpaired name"));
+                    return Err(Error::malformed(
+                        "attachment name tree has an unpaired name",
+                    ));
                 };
                 if let Some(entry) = entry(doc, key, value) {
                     self.entries.push(entry);
@@ -98,7 +99,7 @@ impl Tree {
             for kid in kids {
                 let id = kid
                     .as_reference()
-                    .map_err(|_| malformed("attachment name tree kid is not a reference"))?;
+                    .map_err(|_| Error::malformed("attachment name tree kid is not a reference"))?;
                 self.walk(doc, Node::Object(id), visited, depth + 1)?;
             }
         }

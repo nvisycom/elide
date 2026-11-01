@@ -12,7 +12,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use lopdf::content::Content;
 use lopdf::{Document, Encoding, Object, ObjectId};
 
@@ -400,28 +400,18 @@ pub(crate) fn text_block_for_page(
     // Guard against a decompression bomb: refuse a page whose (already
     // decompressed) content stream exceeds the bound rather than walking it.
     if content_data.len() > max_page_bytes {
-        return Err(Error::new(
-            ErrorKind::ResourceLimit,
-            format!(
-                "page {page} content is {} bytes, over the {max_page_bytes}-byte limit",
-                content_data.len()
-            ),
-        ));
+        return Err(Error::resource_limit(format!(
+            "page {page} content is {} bytes, over the {max_page_bytes}-byte limit",
+            content_data.len()
+        )));
     }
-    let content = Content::decode(&content_data).map_err(|e| {
-        Error::new(
-            ErrorKind::MalformedInput,
-            format!("page {page} content: {e}"),
-        )
-    })?;
+    let content = Content::decode(&content_data)
+        .map_err(|e| Error::malformed(format!("page {page} content: {e}")))?;
 
     // The page's own resources, the scope its `Tf`/`Do` names resolve in.
-    let (resources, resource_ids) = doc.get_page_resources(page_id).map_err(|e| {
-        Error::new(
-            ErrorKind::MalformedInput,
-            format!("page {page} resources: {e}"),
-        )
-    })?;
+    let (resources, resource_ids) = doc
+        .get_page_resources(page_id)
+        .map_err(|e| Error::malformed(format!("page {page} resources: {e}")))?;
 
     let mut text = String::new();
     let mut runs: Vec<OffsetRun> = Vec::new();
@@ -555,15 +545,12 @@ fn walk_stream(
         // truncate and misroute the scrub, leaving deleted text recoverable.
         // Fail closed instead, as everywhere else a glyph might slip the scrub.
         let Ok(slot) = u16::try_from(ctx.accum.fonts.len()) else {
-            return Err(Error::new(
-                ErrorKind::Redaction,
-                format!(
-                    "page {} references more than {} fonts across its content \
+            return Err(Error::redaction(format!(
+                "page {} references more than {} fonts across its content \
                      streams; its text cannot be safely redacted",
-                    ctx.page,
-                    u16::MAX,
-                ),
-            ));
+                ctx.page,
+                u16::MAX,
+            )));
         };
         ctx.accum.fonts.push(FontEntry { to_unicode });
         font_slot.insert(name.clone(), slot);
@@ -718,15 +705,12 @@ fn walk_stream(
                         run.show(enc, operands, op_idx, base)?;
                     }
                     Some(None) => {
-                        return Err(Error::new(
-                            ErrorKind::Redaction,
-                            format!(
-                                "page {} draws text with a font whose encoding \
+                        return Err(Error::redaction(format!(
+                            "page {} draws text with a font whose encoding \
                                  could not be decoded or was not found in the page \
                                  resources; its text cannot be redacted",
-                                ctx.page
-                            ),
-                        ));
+                            ctx.page
+                        )));
                     }
                     None => {}
                 }
@@ -794,25 +778,18 @@ fn walk_xobject<'a>(
     }
     let bytes = stream_obj
         .decompressed_content()
-        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("XObject content: {e}")))?;
+        .map_err(|e| Error::malformed(format!("XObject content: {e}")))?;
     // Bound the decompressed XObject stream, as for page content: a Form XObject
     // is another place a decompression bomb could hide.
     if bytes.len() > ctx.max_page_bytes {
-        return Err(Error::new(
-            ErrorKind::ResourceLimit,
-            format!(
-                "XObject content is {} bytes, over the {}-byte limit",
-                bytes.len(),
-                ctx.max_page_bytes
-            ),
-        ));
+        return Err(Error::resource_limit(format!(
+            "XObject content is {} bytes, over the {}-byte limit",
+            bytes.len(),
+            ctx.max_page_bytes
+        )));
     }
-    let content = Content::decode(&bytes).map_err(|e| {
-        Error::new(
-            ErrorKind::MalformedInput,
-            format!("decode XObject content: {e}"),
-        )
-    })?;
+    let content = Content::decode(&bytes)
+        .map_err(|e| Error::malformed(format!("decode XObject content: {e}")))?;
 
     // The form's own resources, or the parent scope when it declares none.
     let inner_resources = stream_obj
@@ -832,14 +809,11 @@ fn walk_xobject<'a>(
     // we will decode). Exhausting it means a page fans out to more walks than any
     // legitimate document, so fail closed rather than let the walk run away.
     let Some(remaining) = ctx.walks_remaining.checked_sub(1) else {
-        return Err(Error::new(
-            ErrorKind::ResourceLimit,
-            format!(
-                "page {} draws more than {MAX_XOBJECT_WALKS} Form XObjects; \
+        return Err(Error::resource_limit(format!(
+            "page {} draws more than {MAX_XOBJECT_WALKS} Form XObjects; \
                  its text cannot be walked within the resource budget",
-                ctx.page
-            ),
-        ));
+            ctx.page
+        )));
     };
     ctx.walks_remaining = remaining;
 

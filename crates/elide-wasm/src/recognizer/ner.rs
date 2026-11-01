@@ -12,7 +12,7 @@ use elide::backend::Backend;
 use elide::entity::audit::ModelEvent;
 use elide::recognition::ner::NerRecognizer;
 use elide::recognition::ner::backend::{NerRequest, NerResponse, NerSpan};
-use elide::{Error, ErrorKind, Result};
+use elide::{Error, Result};
 use js_sys::{Array, Function, Promise};
 use send_wrapper::SendWrapper;
 use serde::Deserialize;
@@ -88,10 +88,7 @@ impl Backend for JsCallbackBackend {
             .await
             .map_err(js_to_error)?;
         let spans: Vec<JsSpan> = serde_wasm_bindgen::from_value(value).map_err(|e| {
-            Error::new(
-                ErrorKind::MalformedInput,
-                format!("NER callback returned an unreadable value: {e}"),
-            )
+            Error::malformed(format!("NER callback returned an unreadable value: {e}"))
         })?;
         // The callback's byte offsets are untrusted: a reversed range, an end
         // past the text, or an offset mid-character would produce a nonsensical
@@ -105,15 +102,12 @@ impl Backend for JsCallbackBackend {
                     || !text.is_char_boundary(s.start)
                     || !text.is_char_boundary(s.end)
                 {
-                    return Err(Error::new(
-                        ErrorKind::MalformedInput,
-                        format!(
-                            "NER callback returned an invalid span [{}, {}) for text of {} bytes",
-                            s.start,
-                            s.end,
-                            text.len()
-                        ),
-                    ));
+                    return Err(Error::malformed(format!(
+                        "NER callback returned an invalid span [{}, {}) for text of {} bytes",
+                        s.start,
+                        s.end,
+                        text.len()
+                    )));
                 }
                 Ok(NerSpan::new(s.label, s.score, s.start..s.end))
             })
@@ -130,7 +124,7 @@ fn js_to_error(value: JsValue) -> Error {
             .and_then(|m| m.as_string())
             .unwrap_or_else(|| "NER callback rejected".to_owned())
     });
-    Error::new(ErrorKind::Processing, message)
+    Error::processing(message)
 }
 
 /// Build a NER recognizer whose inference is the JavaScript `callback`.

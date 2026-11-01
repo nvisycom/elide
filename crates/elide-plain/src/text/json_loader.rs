@@ -6,7 +6,7 @@
 use elide_codec::Loader;
 use elide_codec::content::ContentData;
 use elide_core::modality::text::Text;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 use super::JsonHandler;
 
@@ -25,7 +25,7 @@ impl Loader for JsonLoader {
         // but with a friendlier error path. Reject here so callers get a
         // single decode-time validation point.
         serde_json::from_str::<serde_json::Value>(&text)
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("invalid JSON: {e}")))?;
+            .map_err(|e| Error::malformed(format!("invalid JSON: {e}")))?;
         Ok(JsonHandler::from_source_string(text))
     }
 }

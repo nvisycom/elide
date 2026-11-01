@@ -16,14 +16,14 @@
 
 use std::ops::Range;
 
-use elide_core::Result;
 use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
+use elide_core::{Error, Result};
 use quick_xml::NsReader;
 use quick_xml::events::Event;
 
 use super::SheetClassifier;
 use crate::opc::sanitize::{Edits, Sanitizer};
-use crate::opc::xml_edit::{Declared, Edit, Edited, Local, bound, malformed};
+use crate::opc::xml_edit::{Declared, Edit, Edited, Local, bound};
 use crate::opc::{Ns, PartKind, StripAttributes, TextAttribute};
 
 /// The SpreadsheetML main namespace.
@@ -121,7 +121,9 @@ impl Edit for CommentNotes {
         let mut open: Vec<bool> = Vec::new();
         let mut cuts: Vec<Range<usize>> = Vec::new();
         loop {
-            let (resolved, event) = reader.read_resolved_event().map_err(malformed)?;
+            let (resolved, event) = reader
+                .read_resolved_event()
+                .map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
             let namespace = bound(&resolved);
             let span = last..reader.buffer_position() as usize + bom;
             last = span.end;

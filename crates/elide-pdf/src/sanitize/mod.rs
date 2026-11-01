@@ -52,7 +52,7 @@ use std::collections::HashSet;
 
 use elide_codec::StrippedContent;
 use elide_core::redaction::HiddenContent;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use lopdf::{Document, Object, ObjectId};
 
 use crate::image;
@@ -145,13 +145,10 @@ impl SanitizeDocumentExt for Document {
             .iter()
             .map(|entry| format!("{:?}", entry.content))
             .collect();
-        Err(Error::new(
-            ErrorKind::Sanitization,
-            format!(
-                "encoded PDF still carries hidden content: {}",
-                items.join(", ")
-            ),
-        ))
+        Err(Error::sanitization(format!(
+            "encoded PDF still carries hidden content: {}",
+            items.join(", ")
+        )))
     }
 }
 

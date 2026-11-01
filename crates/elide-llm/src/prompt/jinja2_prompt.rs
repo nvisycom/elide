@@ -22,7 +22,7 @@ use std::path::Path;
 use elide_core::modality::Modality;
 use elide_core::modality::text::Text;
 use elide_core::recognition::{Context, Subject};
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use elide_image::modality::Image;
 use minijinja::{Environment, context};
 
@@ -52,12 +52,7 @@ impl<M> Jinja2Prompt<M> {
     pub fn from_template(template: impl Into<String>) -> Result<Self> {
         let mut env = Environment::new();
         env.add_template_owned("prompt", template.into())
-            .map_err(|e| {
-                Error::new(
-                    ErrorKind::Configuration,
-                    format!("template compile error: {e}"),
-                )
-            })?;
+            .map_err(|e| Error::configuration(format!("template compile error: {e}")))?;
         Ok(Self {
             env,
             _modality: PhantomData,
@@ -71,12 +66,8 @@ impl<M> Jinja2Prompt<M> {
     /// Returns a validation error when the file is missing or the template
     /// fails to compile.
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self> {
-        let raw = fs::read_to_string(path.as_ref()).map_err(|e| {
-            Error::new(
-                ErrorKind::Configuration,
-                format!("reading prompt file: {e}"),
-            )
-        })?;
+        let raw = fs::read_to_string(path.as_ref())
+            .map_err(|e| Error::configuration(format!("reading prompt file: {e}")))?;
         Self::from_template(raw)
     }
 

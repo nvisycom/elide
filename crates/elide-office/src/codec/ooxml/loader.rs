@@ -13,7 +13,7 @@ use elide_codec::{
 };
 use elide_core::modality::text::Text;
 use elide_core::redaction::{Disposition, HiddenContentPolicy};
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 use super::addresser::OoxmlAddresser;
 use super::recombine::OoxmlRecombine;
@@ -65,13 +65,10 @@ fn decode_package<C: OoxmlCodec>(
             .map(|issue| format!("{} ({:?})", issue.part, issue.kind))
             .collect::<Vec<_>>()
             .join(", ");
-        return Err(Error::new(
-            ErrorKind::MalformedInput,
-            format!(
-                "{}: text-bearing part(s) could not be extracted: {parts}",
-                C::LABEL
-            ),
-        ));
+        return Err(Error::malformed(format!(
+            "{}: text-bearing part(s) could not be extracted: {parts}",
+            C::LABEL
+        )));
     }
 
     let state: SharedSplice<OoxmlAddress> = SharedSplice::new(items(extraction.blocks));

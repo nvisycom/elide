@@ -13,7 +13,7 @@
 
 use std::path::{Path, PathBuf};
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use ocrs::{ImageSource, OcrEngine, OcrEngineParams, TextItem, TextLine};
 use rten_imageproc::Rect;
 
@@ -57,7 +57,7 @@ impl Engine {
             recognition_model: Some(recognition),
             ..Default::default()
         })
-        .map_err(|e| Error::new(ErrorKind::Configuration, format!("init OCR engine: {e}")))?;
+        .map_err(|e| Error::configuration(format!("init OCR engine: {e}")))?;
         Ok(Self { engine })
     }
 
@@ -80,10 +80,9 @@ impl Engine {
     /// [`new`](Self::new).
     pub(super) fn from_env() -> Result<Self> {
         let dir = std::env::var_os(OCRS_MODELS_DIR_ENV).ok_or_else(|| {
-            Error::new(
-                ErrorKind::CapabilityUnavailable,
-                format!("{OCRS_MODELS_DIR_ENV} is not set; OCR models are not installed"),
-            )
+            Error::capability_unavailable(format!(
+                "{OCRS_MODELS_DIR_ENV} is not set; OCR models are not installed"
+            ))
         })?;
         Self::from_models_dir(&PathBuf::from(dir))
     }
@@ -103,25 +102,25 @@ impl Engine {
     pub(super) fn recognize(&self, image: &[u8]) -> Result<Vec<LayoutRegion>> {
         // Decode to RGB8; ocrs takes raw interleaved pixels plus dimensions.
         let decoded = image::load_from_memory(image)
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("decode OCR image: {e}")))?
+            .map_err(|e| Error::malformed(format!("decode OCR image: {e}")))?
             .to_rgb8();
         let (width, height) = decoded.dimensions();
         let source = ImageSource::from_bytes(decoded.as_raw(), (width, height))
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("OCR image source: {e}")))?;
+            .map_err(|e| Error::malformed(format!("OCR image source: {e}")))?;
 
         let input = self
             .engine
             .prepare_input(source)
-            .map_err(|e| Error::new(ErrorKind::Processing, format!("OCR prepare input: {e}")))?;
+            .map_err(|e| Error::processing(format!("OCR prepare input: {e}")))?;
         let word_rects = self
             .engine
             .detect_words(&input)
-            .map_err(|e| Error::new(ErrorKind::Processing, format!("OCR detect words: {e}")))?;
+            .map_err(|e| Error::processing(format!("OCR detect words: {e}")))?;
         let line_rects = self.engine.find_text_lines(&input, &word_rects);
         let lines = self
             .engine
             .recognize_text(&input, &line_rects)
-            .map_err(|e| Error::new(ErrorKind::Processing, format!("OCR recognize: {e}")))?;
+            .map_err(|e| Error::processing(format!("OCR recognize: {e}")))?;
 
         Ok(lines
             .into_iter()
@@ -133,12 +132,8 @@ impl Engine {
 
 /// Load one RTen model file, naming its `role` in any error.
 fn load_model(path: &Path, role: &str) -> Result<rten::Model> {
-    rten::Model::load_file(path).map_err(|e| {
-        Error::new(
-            ErrorKind::Configuration,
-            format!("load OCR {role} model {}: {e}", path.display()),
-        )
-    })
+    rten::Model::load_file(path)
+        .map_err(|e| Error::configuration(format!("load OCR {role} model {}: {e}", path.display())))
 }
 
 /// Convert one recognized `ocrs` text line into its per-word [`LayoutRegion`]s,

@@ -13,7 +13,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use lopdf::content::Content;
 use lopdf::{Document, Object, ObjectId};
 
@@ -177,31 +177,27 @@ pub(crate) fn delete(store: &Store, doc: &mut Document, detections: &[Detection]
         }
         let bytes = pristine.get_page_content(page_id);
         let mut content = Content::decode(&bytes)
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("decode content: {e}")))?;
+            .map_err(|e| Error::malformed(format!("decode content: {e}")))?;
         apply_deletions(&mut content, &to_delete, &StreamKey::Page(content_ids));
         let new_content = content
             .encode()
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("encode content: {e}")))?;
-        doc.change_page_content(page_id, new_content).map_err(|e| {
-            Error::new(
-                ErrorKind::MalformedInput,
-                format!("write page content: {e}"),
-            )
-        })?;
+            .map_err(|e| Error::malformed(format!("encode content: {e}")))?;
+        doc.change_page_content(page_id, new_content)
+            .map_err(|e| Error::malformed(format!("write page content: {e}")))?;
     }
     for id in edited_xobjects {
         let bytes = match pristine.get_object(id) {
-            Ok(Object::Stream(s)) => s.decompressed_content().map_err(|e| {
-                Error::new(ErrorKind::MalformedInput, format!("XObject content: {e}"))
-            })?,
+            Ok(Object::Stream(s)) => s
+                .decompressed_content()
+                .map_err(|e| Error::malformed(format!("XObject content: {e}")))?,
             _ => continue,
         };
         let mut content = Content::decode(&bytes)
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("decode content: {e}")))?;
+            .map_err(|e| Error::malformed(format!("decode content: {e}")))?;
         apply_deletions(&mut content, &to_delete, &StreamKey::XObject(id));
         let new_content = content
             .encode()
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("encode content: {e}")))?;
+            .map_err(|e| Error::malformed(format!("encode content: {e}")))?;
         doc.set_stream_content(id, new_content)?;
     }
 
@@ -228,14 +224,14 @@ fn decode_glyph_streams(
         let bytes = match g.address.stream {
             StreamTarget::PageContent => doc.get_page_content(page_id),
             StreamTarget::XObject(id) => match doc.get_object(id) {
-                Ok(Object::Stream(s)) => s.decompressed_content().map_err(|e| {
-                    Error::new(ErrorKind::MalformedInput, format!("XObject content: {e}"))
-                })?,
+                Ok(Object::Stream(s)) => s
+                    .decompressed_content()
+                    .map_err(|e| Error::malformed(format!("XObject content: {e}")))?,
                 _ => continue,
             },
         };
         let content = Content::decode(&bytes)
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("decode content: {e}")))?;
+            .map_err(|e| Error::malformed(format!("decode content: {e}")))?;
         out.insert(g.address.stream, content);
     }
     Ok(out)

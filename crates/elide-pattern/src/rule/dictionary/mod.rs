@@ -6,7 +6,7 @@ mod term;
 use derive_builder::Builder;
 use elide_core::entity::LabelRef;
 use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use serde::Deserialize;
 
 pub(crate) use self::compiled::CompiledDictionary;
@@ -191,8 +191,7 @@ impl Dictionary {
     ///
     /// [`metadata_from_toml`]: Self::metadata_from_toml
     pub fn from_toml(raw: &str) -> Result<Self> {
-        toml::from_str(raw)
-            .map_err(|e| Error::new(ErrorKind::Configuration, format!("dictionary TOML: {e}")))
+        toml::from_str(raw).map_err(|e| Error::configuration(format!("dictionary TOML: {e}")))
     }
 
     /// Parse dictionary metadata from a sidecar TOML source.
@@ -238,12 +237,8 @@ impl Dictionary {
     /// Parse the sidecar metadata into a seeded builder and its `has_headers`
     /// flag (which is a term-loading concern, not a `Dictionary` field).
     fn parse_metadata(raw: &str) -> Result<(DictionaryBuilder, bool)> {
-        let metadata: DictionaryMetadata = toml::from_str(raw).map_err(|e| {
-            Error::new(
-                ErrorKind::Configuration,
-                format!("dictionary metadata TOML: {e}"),
-            )
-        })?;
+        let metadata: DictionaryMetadata = toml::from_str(raw)
+            .map_err(|e| Error::configuration(format!("dictionary metadata TOML: {e}")))?;
         let mut builder = Dictionary::builder()
             .with_name(metadata.name)
             .with_labels(metadata.labels);

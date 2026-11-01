@@ -1,7 +1,7 @@
 //! [`Recombine`]: how a format assembles its (possibly redacted) parts back into
 //! native bytes, and [`LeafRecombine`], the trivial one-part passthrough.
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 use super::{EncodedPart, LocalId};
 use crate::content::ContentData;
@@ -35,7 +35,7 @@ pub trait Recombine: Send + Sync {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::Sanitization`] if the output fails a check; the document is
+    /// [`ErrorKind::Sanitization`](elide_core::ErrorKind::Sanitization) if the output fails a check; the document is
     /// refused rather than returned.
     fn validate(&self, output: &ContentData) -> Result<()>;
 }
@@ -51,8 +51,7 @@ impl Recombine for LeafRecombine {
     fn assemble(&self, parts: &[EncodedPart], _removed: &[LocalId]) -> Result<ContentData> {
         match parts {
             [only] => Ok(ContentData::new(only.bytes.clone())),
-            _ => Err(Error::new(
-                ErrorKind::Processing,
+            _ => Err(Error::processing(
                 "a leaf document must have exactly one part",
             )),
         }

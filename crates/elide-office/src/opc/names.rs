@@ -13,7 +13,7 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use quick_xml::escape::unescape;
 
 use crate::opc::attributes::TextAttribute;
@@ -210,7 +210,7 @@ pub(crate) fn fit_names<'a>(
 fn spans(part: &PartPath, raw: &str, attribute: TextAttribute) -> Result<Vec<Range<usize>>> {
     attribute_spans(raw, &[attribute])
         .map(|spans| spans.into_iter().map(|span| span.range).collect())
-        .map_err(|()| Error::new(ErrorKind::MalformedInput, format!("`{part}` malformed XML")))
+        .map_err(|()| Error::malformed(format!("`{part}` malformed XML")))
 }
 
 /// `pending` split into the replacements inside `range` and the rest.
@@ -245,12 +245,9 @@ fn redacted(
 
 /// `raw` attribute text with its entities resolved.
 fn decoded(part: &PartPath, raw: &str) -> Result<String> {
-    unescape(raw).map(|text| text.into_owned()).map_err(|e| {
-        Error::new(
-            ErrorKind::MalformedInput,
-            format!("`{part}` has a malformed attribute value: {e}"),
-        )
-    })
+    unescape(raw)
+        .map(|text| text.into_owned())
+        .map_err(|e| Error::malformed(format!("`{part}` has a malformed attribute value: {e}")))
 }
 
 /// `name`, or it numbered by `rule` within its length, whichever is first not

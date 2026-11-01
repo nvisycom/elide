@@ -8,7 +8,6 @@ pub mod primitive;
 pub(crate) mod attachment;
 pub(crate) mod content;
 pub(crate) mod document;
-pub(crate) mod error;
 pub(crate) mod extract;
 pub(crate) mod image;
 pub(crate) mod lopdf_ext;

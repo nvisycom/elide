@@ -13,7 +13,7 @@
 #[cfg(feature = "mp3")]
 use std::str;
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 #[cfg(feature = "mp3")]
 use symphonia::core::checksum::Crc16AnsiLe;
 #[cfg(feature = "mp3")]
@@ -197,7 +197,9 @@ fn apev2_tag(bytes: &[u8]) -> Result<Option<usize>> {
     // footer's own 32 bytes; a smaller one would peel nothing off and loop.
     let size = le(12) as usize;
     if size < 32 {
-        return Err(malformed("APEv2 tag size is smaller than its footer"));
+        return Err(Error::malformed(
+            "APEv2 tag size is smaller than its footer",
+        ));
     }
     let header = if le(20) & 0x8000_0000 != 0 { 32 } else { 0 };
     let len = size + header;
@@ -215,10 +217,12 @@ fn lyrics3v2_tag(bytes: &[u8]) -> Result<Option<usize>> {
     let size = str::from_utf8(digits)
         .ok()
         .and_then(|d| d.parse::<usize>().ok())
-        .ok_or_else(|| malformed("Lyrics3 block size is not a number"))?;
+        .ok_or_else(|| Error::malformed("Lyrics3 block size is not a number"))?;
     let len = within(size + 6 + END.len(), bytes.len(), "Lyrics3 block")?;
     if !bytes[bytes.len() - len..].starts_with(b"LYRICSBEGIN") {
-        return Err(malformed("Lyrics3 block does not open with LYRICSBEGIN"));
+        return Err(Error::malformed(
+            "Lyrics3 block does not open with LYRICSBEGIN",
+        ));
     }
     Ok(Some(len))
 }
@@ -245,7 +249,7 @@ fn lyrics3v1_tag(bytes: &[u8]) -> Option<usize> {
 fn syncsafe(bytes: &[u8]) -> Result<usize> {
     bytes.iter().try_fold(0usize, |acc, &b| {
         if b & 0x80 != 0 {
-            return Err(malformed("ID3v2 size is not syncsafe"));
+            return Err(Error::malformed("ID3v2 size is not syncsafe"));
         }
         Ok((acc << 7) | usize::from(b))
     })
@@ -271,7 +275,7 @@ const WAV_PADDING_CHUNKS: [&[u8; 4]; 3] = [b"JUNK", b"PAD ", b"FLLR"];
 #[cfg(feature = "wav")]
 pub(crate) fn strip_wav(bytes: &[u8]) -> Result<Untagged> {
     if bytes.len() < 12 || !bytes.starts_with(b"RIFF") || &bytes[8..12] != b"WAVE" {
-        return Err(malformed("not a RIFF WAVE file"));
+        return Err(Error::malformed("not a RIFF WAVE file"));
     }
     let mut chunks = Vec::with_capacity(bytes.len());
     let mut tags = 0;
@@ -280,7 +284,7 @@ pub(crate) fn strip_wav(bytes: &[u8]) -> Result<Untagged> {
     while at < bytes.len() {
         let header = bytes
             .get(at..at + 8)
-            .ok_or_else(|| malformed("truncated WAV chunk header"))?;
+            .ok_or_else(|| Error::malformed("truncated WAV chunk header"))?;
         let size = u32::from_le_bytes(header[4..8].try_into().expect("4 bytes")) as usize;
         // A chunk's data is padded to an even length.
         let end = at + 8 + size + size % 2;
@@ -296,7 +300,7 @@ pub(crate) fn strip_wav(bytes: &[u8]) -> Result<Untagged> {
         at = end;
     }
     let riff_size = u32::try_from(chunks.len() + 4)
-        .map_err(|_| malformed("WAV larger than a RIFF file can describe"))?;
+        .map_err(|_| Error::malformed("WAV larger than a RIFF file can describe"))?;
     let mut out = Vec::with_capacity(chunks.len() + 12);
     out.extend_from_slice(b"RIFF");
     out.extend_from_slice(&riff_size.to_le_bytes());
@@ -313,17 +317,9 @@ pub(crate) fn strip_wav(bytes: &[u8]) -> Result<Untagged> {
 /// `what` overran.
 fn within(len: usize, available: usize, what: &str) -> Result<usize> {
     if len > available {
-        return Err(malformed(&format!("{what} overruns the file")));
+        return Err(Error::malformed(format!("{what} overruns the file")));
     }
     Ok(len)
-}
-
-/// A malformed-container error with `message`.
-fn malformed(message: &str) -> Error {
-    Error::new(
-        ErrorKind::MalformedInput,
-        format!("audio metadata strip: {message}"),
-    )
 }
 
 #[cfg(test)]

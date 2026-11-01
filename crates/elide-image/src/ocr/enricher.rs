@@ -17,7 +17,7 @@ use elide_core::backend::Backend;
 use elide_core::enrichment::Enricher;
 use elide_core::primitive::ComponentId;
 use elide_core::recognition::{Context, Subject};
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use hipstr::HipStr;
 
 #[cfg(any(test, feature = "mocks"))]
@@ -137,14 +137,11 @@ where
         // otherwise let the zip silently leave the tail subjects un-transcribed.
         let responses = self.backend.call_batch(requests).await?;
         if responses.len() != targets.len() {
-            return Err(Error::new(
-                ErrorKind::Provider,
-                format!(
-                    "OCR backend returned {} responses for {} requests",
-                    responses.len(),
-                    targets.len()
-                ),
-            ));
+            return Err(Error::provider(format!(
+                "OCR backend returned {} responses for {} requests",
+                responses.len(),
+                targets.len()
+            )));
         }
         for (&index, response) in targets.iter().zip(responses) {
             subjects[index].set_artifact(Layout::new(response.regions));
@@ -169,6 +166,7 @@ fn ocr_request<'a>(subject: &'a Subject<Image>, ctx: &'a Context<'_, Image>) -> 
 // `fixtures` feature provides (it implies the decoders).
 #[cfg(all(test, feature = "fixtures"))]
 mod tests {
+    use elide_core::ErrorKind;
     use elide_core::backend::Backend;
     use elide_core::entity::audit::ModelEvent;
     use elide_core::modality::TextRecognizable;

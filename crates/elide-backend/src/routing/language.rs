@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use elide_core::backend::{Backend, BackendRequest};
 use elide_core::entity::audit::ModelEvent;
 use elide_core::primitive::LanguageTag;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 /// Routes each request to the backend registered for its language (the call's
 /// primary language: caller-asserted, or else detected), falling back to a
@@ -147,14 +147,11 @@ impl<B: Backend> Backend for LanguageRouted<B> {
         for (target, (positions, group)) in groups {
             let responses = self.backend(target).call_batch(group).await?;
             if responses.len() != positions.len() {
-                return Err(Error::new(
-                    ErrorKind::Processing,
-                    format!(
-                        "routed backend returned {} responses for a batch of {}",
-                        responses.len(),
-                        positions.len(),
-                    ),
-                ));
+                return Err(Error::processing(format!(
+                    "routed backend returned {} responses for a batch of {}",
+                    responses.len(),
+                    positions.len(),
+                )));
             }
             for (position, response) in positions.into_iter().zip(responses) {
                 slots[position] = Some(response);

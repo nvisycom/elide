@@ -2,7 +2,7 @@
 
 use elide_codec::content::ContentData;
 use elide_codec::{EncodedPart, LeafRecombine, LocalId, Recombine};
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 use crate::AudioBuffer;
 use crate::modality::AudioFormat;
@@ -21,8 +21,7 @@ impl Recombine for AudioRecombine {
 
     fn validate(&self, output: &ContentData) -> Result<()> {
         if AudioBuffer::carries_metadata(output.as_bytes(), self.format)? {
-            return Err(Error::new(
-                ErrorKind::Sanitization,
+            return Err(Error::sanitization(
                 "encoded audio still carries a tag block",
             ));
         }

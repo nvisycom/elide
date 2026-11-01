@@ -10,7 +10,7 @@ use bytes::Bytes;
 use elide_core::entity::Entity;
 #[cfg(feature = "exif")]
 use elide_core::modality::metadata::{Metadata, MetadataData};
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 pub use self::raster::RasterImage;
 
@@ -78,21 +78,20 @@ impl ImageBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::CapabilityUnavailable`] if this build has no codec for
-    /// `format`, or [`ErrorKind::MalformedInput`] if the bytes do not decode as
+    /// [`ErrorKind::CapabilityUnavailable`](elide_core::ErrorKind::CapabilityUnavailable) if this build has no codec for
+    /// `format`, or [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the bytes do not decode as
     /// it.
     pub fn open(bytes: &[u8], format: ImageFormat) -> Result<Self> {
         // The format is not detected here — the ingestion registry already
         // resolved it and routed to the matching codec; this decodes the bytes
         // as that format.
         if !format.can_decode() {
-            return Err(Error::new(
-                ErrorKind::CapabilityUnavailable,
-                format!("no codec for {format:?} in this build"),
-            ));
+            return Err(Error::capability_unavailable(format!(
+                "no codec for {format:?} in this build"
+            )));
         }
         let inner = image::load_from_memory_with_format(bytes, format.to_image())
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("image decode: {e}")))?;
+            .map_err(|e| Error::malformed(format!("image decode: {e}")))?;
         Ok(Self {
             raster: RasterImage::new(inner, format),
             source: Bytes::copy_from_slice(bytes),
@@ -110,14 +109,14 @@ impl ImageBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if the bytes are not a readable image.
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the bytes are not a readable image.
     pub fn dimensions_of(bytes: &[u8]) -> Result<Dimensions<u32>> {
         let reader = image::ImageReader::new(std::io::Cursor::new(bytes))
             .with_guessed_format()
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("unknown image: {e}")))?;
+            .map_err(|e| Error::malformed(format!("unknown image: {e}")))?;
         let (w, h) = reader
             .into_dimensions()
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("image header: {e}")))?;
+            .map_err(|e| Error::malformed(format!("image header: {e}")))?;
         Ok(Dimensions::new(w, h))
     }
 
@@ -154,7 +153,7 @@ impl ImageBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if the metadata is present but unparseable.
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the metadata is present but unparseable.
     #[cfg(feature = "exif")]
     pub fn metadata_entities(&self) -> Result<Vec<Entity<Metadata>>> {
         self.exif_source().entities()
@@ -166,7 +165,7 @@ impl ImageBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if the metadata is present but unparseable.
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the metadata is present but unparseable.
     #[cfg(feature = "exif")]
     pub fn metadata_fields(&self) -> Result<Vec<MetadataData>> {
         self.exif_source().fields()
@@ -186,7 +185,7 @@ impl ImageBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if a metadata edit fails.
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a metadata edit fails.
     #[cfg(feature = "exif")]
     pub fn strip_metadata_keys(&self, keys: &[&str]) -> Result<Bytes> {
         Ok(self.exif_source().remove_keys(keys)?.bytes.into())
@@ -198,7 +197,7 @@ impl ImageBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if the metadata edit fails.
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the metadata edit fails.
     #[cfg(feature = "exif")]
     pub fn strip_metadata(&mut self) -> Result<StrippedMetadata> {
         let stripped = self.exif_source().strip()?;
@@ -213,7 +212,7 @@ impl ImageBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if the metadata edit fails.
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the metadata edit fails.
     #[cfg(feature = "exif")]
     pub fn strip_unsurfaced_metadata(&mut self) -> Result<StrippedMetadata> {
         let scrubbed = self.exif_source().reduce_to_surfaced()?;
@@ -245,8 +244,8 @@ impl ImageBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::Processing`] if the encoder rejects the image, or
-    /// [`ErrorKind::MalformedInput`] if the metadata transfer fails.
+    /// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) if the encoder rejects the image, or
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the metadata transfer fails.
     #[cfg(feature = "exif")]
     pub fn encode(&self) -> Result<Bytes> {
         if !self.dirty {
@@ -285,8 +284,8 @@ impl ImageBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::Processing`] if the encoder rejects the image, or
-    /// [`ErrorKind::MalformedInput`] if the metadata transfer fails.
+    /// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) if the encoder rejects the image, or
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the metadata transfer fails.
     #[cfg(feature = "exif")]
     pub fn encode_over_metadata(&self, container: &[u8]) -> Result<Bytes> {
         if !self.dirty {
@@ -305,8 +304,8 @@ impl ImageBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::Processing`] if the encoder rejects the image, or
-    /// [`ErrorKind::MalformedInput`] if the metadata edit fails.
+    /// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) if the encoder rejects the image, or
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the metadata edit fails.
     #[cfg(feature = "exif")]
     pub fn encode_without_metadata(&self) -> Result<Bytes> {
         let stripped = self.exif_source().strip()?;

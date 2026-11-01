@@ -4,7 +4,7 @@
 
 use bytes::Bytes;
 use elide_core::redaction::Redactions;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 #[cfg(feature = "mp3")]
 use crate::engine::tags::strip_mp3;
@@ -41,15 +41,14 @@ impl AudioBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::CapabilityUnavailable`] if this build has no codec for
-    /// `format`, or [`ErrorKind::MalformedInput`] if the bytes do not decode as
+    /// [`ErrorKind::CapabilityUnavailable`](elide_core::ErrorKind::CapabilityUnavailable) if this build has no codec for
+    /// `format`, or [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the bytes do not decode as
     /// it.
     pub fn open(bytes: &[u8], format: AudioFormat) -> Result<Self> {
         if !format.can_decode() {
-            return Err(Error::new(
-                ErrorKind::CapabilityUnavailable,
-                format!("no codec for {format:?} in this build"),
-            ));
+            return Err(Error::capability_unavailable(format!(
+                "no codec for {format:?} in this build"
+            )));
         }
         let source = Bytes::copy_from_slice(bytes);
         Self::validate(&source, format)?;
@@ -80,12 +79,9 @@ impl AudioBuffer {
                     // is rejected here rather than silently altered on encode.
                     let channels = crate::engine::mp3::probe_channels(source)?;
                     if channels > 2 {
-                        return Err(Error::new(
-                            ErrorKind::MalformedInput,
-                            format!(
-                                "MP3 has {channels} channels; only mono and stereo are supported"
-                            ),
-                        ));
+                        return Err(Error::malformed(format!(
+                            "MP3 has {channels} channels; only mono and stereo are supported"
+                        )));
                     }
                     Ok(())
                 }
@@ -120,7 +116,7 @@ impl AudioBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if the duration cannot be determined from
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the duration cannot be determined from
     /// the container.
     pub fn duration_ms(&self) -> Result<u64> {
         // `open` only ever wraps a format whose codec is built, so the arm for a
@@ -155,7 +151,7 @@ impl AudioBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if a tag block overruns the container.
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a tag block overruns the container.
     pub fn strip_metadata(&mut self) -> Result<StrippedTags> {
         let untagged = Self::strip(&self.source, self.format)?;
         let stripped = StrippedTags {
@@ -173,7 +169,7 @@ impl AudioBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if a tag block overruns the container.
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a tag block overruns the container.
     pub fn carries_metadata(bytes: &[u8], format: AudioFormat) -> Result<bool> {
         let untagged = Self::strip(bytes, format)?;
         Ok(untagged.tags + untagged.padding > 0)
@@ -232,8 +228,8 @@ impl AudioBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if decoding fails, or
-    /// [`ErrorKind::Processing`] if re-encoding fails.
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if decoding fails, or
+    /// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) if re-encoding fails.
     pub fn encode(&self) -> Result<Bytes> {
         if self.redactions.is_empty() {
             return Ok(self.source.clone());
@@ -287,6 +283,7 @@ pub struct StrippedTags {
 mod tests {
     use std::io::Cursor;
 
+    use elide_core::ErrorKind;
     use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 
     use super::*;

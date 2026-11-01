@@ -25,7 +25,7 @@ mod value;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 pub(crate) use self::container::Scrubbed;
 pub(crate) use self::source::Source;
@@ -33,10 +33,6 @@ pub(crate) use self::source::Source;
 /// Run `f`, turning a panic (little_exif can panic on malformed input) into a
 /// fail-closed [`ErrorKind::MalformedInput`] instead of aborting.
 fn guard<T>(f: impl FnOnce() -> T) -> Result<T> {
-    catch_unwind(AssertUnwindSafe(f)).map_err(|_| {
-        Error::new(
-            ErrorKind::MalformedInput,
-            "image metadata parser panicked on malformed input",
-        )
-    })
+    catch_unwind(AssertUnwindSafe(f))
+        .map_err(|_| Error::malformed("image metadata parser panicked on malformed input"))
 }

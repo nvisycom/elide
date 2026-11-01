@@ -14,14 +14,13 @@ pub(crate) mod tree;
 use std::collections::BTreeSet;
 
 use bytes::Bytes;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use lopdf::{Document, Object, ObjectId};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use self::tree::{Tree, associated, drop_associated};
 use crate::document::Store;
-use crate::error::malformed;
 
 /// The largest an attached file may decompress to. An attachment's stream may
 /// claim any size, so its decode is bounded to refuse a decompression bomb.
@@ -93,17 +92,14 @@ pub(crate) fn attachments(store: &Store) -> Result<Vec<Attachment>> {
             let stream = doc
                 .get_object(entry.stream)
                 .and_then(Object::as_stream)
-                .map_err(|e| malformed(format!("attachment stream: {e}")))?;
+                .map_err(|e| Error::malformed(format!("attachment stream: {e}")))?;
             let bytes = stream
                 .get_plain_content_with_limit(MAX_ATTACHMENT_BYTES)
                 .map_err(|e| {
-                    Error::new(
-                        ErrorKind::ResourceLimit,
-                        format!(
-                            "attachment `{}` could not be decoded within bounds: {e}",
-                            entry.name
-                        ),
-                    )
+                    Error::resource_limit(format!(
+                        "attachment `{}` could not be decoded within bounds: {e}",
+                        entry.name
+                    ))
                 })?;
             Ok(Attachment {
                 id: AttachmentId::from_object(entry.stream),
@@ -141,18 +137,15 @@ pub(crate) fn replace(
         .chain(removed.iter().copied())
         .find(|id| !known.contains(&id.object()));
     if let Some(id) = unknown {
-        return Err(Error::new(
-            ErrorKind::Redaction,
-            format!(
-                "object ({}, {}) is not an attachment of this document",
-                id.number, id.generation
-            ),
-        ));
+        return Err(Error::redaction(format!(
+            "object ({}, {}) is not an attachment of this document",
+            id.number, id.generation
+        )));
     }
 
     for replacement in replacements {
         let Ok(Object::Stream(stream)) = doc.get_object_mut(replacement.id.object()) else {
-            return Err(malformed(format!(
+            return Err(Error::malformed(format!(
                 "attachment ({}, {}) is not a stream",
                 replacement.id.number, replacement.id.generation
             )));

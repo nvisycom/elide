@@ -5,7 +5,7 @@ use std::fmt::Display;
 use std::io::{Cursor, Read, Write};
 
 use bytes::Bytes;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
@@ -38,7 +38,7 @@ pub(crate) fn read(
     package_cap: u64,
 ) -> Result<Vec<(PartPath, Bytes)>> {
     let mut zip = ZipArchive::new(Cursor::new(document))
-        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("not a zip: {e}")))?;
+        .map_err(|e| Error::malformed(format!("not a zip: {e}")))?;
     let mut parts = Vec::with_capacity(zip.len());
     // Bytes still allowed across the whole package; each part's read and
     // allocation are bounded by this, so a bomb of many parts is refused before
@@ -47,13 +47,10 @@ pub(crate) fn read(
     for i in 0..zip.len() {
         let entry = zip
             .by_index(i)
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("bad zip entry: {e}")))?;
-        let name = entry.name().map_err(|e| {
-            Error::new(
-                ErrorKind::MalformedInput,
-                format!("bad zip entry name: {e}"),
-            )
-        })?;
+            .map_err(|e| Error::malformed(format!("bad zip entry: {e}")))?;
+        let name = entry
+            .name()
+            .map_err(|e| Error::malformed(format!("bad zip entry name: {e}")))?;
         let path = PartPath::from(name.as_ref());
         // Cap this part at the smaller of the per-part limit and what remains of
         // the package budget. Reserve only up to that cap (the entry's claimed
@@ -62,20 +59,15 @@ pub(crate) fn read(
         let cap = part_cap.min(budget);
         let claimed = entry.size().min(cap);
         let mut buf = Vec::with_capacity(claimed as usize);
-        let read = entry.take(cap + 1).read_to_end(&mut buf).map_err(|e| {
-            Error::new(
-                ErrorKind::MalformedInput,
-                format!("part `{path}` unreadable: {e}"),
-            )
-        })?;
+        let read = entry
+            .take(cap + 1)
+            .read_to_end(&mut buf)
+            .map_err(|e| Error::malformed(format!("part `{path}` unreadable: {e}")))?;
         if read as u64 > cap {
-            return Err(Error::new(
-                ErrorKind::MalformedInput,
-                format!(
-                    "package exceeds size limits at part `{path}` \
+            return Err(Error::malformed(format!(
+                "package exceeds size limits at part `{path}` \
                      (part cap {part_cap}, package cap {package_cap} bytes)"
-                ),
-            ));
+            )));
         }
         budget -= read as u64;
         parts.push((path, Bytes::from(buf)));
@@ -104,7 +96,7 @@ pub(crate) fn write<'a>(
     entries: impl IntoIterator<Item = Entry<'a>>,
 ) -> Result<Vec<u8>> {
     let mut source = ZipArchive::new(Cursor::new(source))
-        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("reopen source: {e}")))?;
+        .map_err(|e| Error::malformed(format!("reopen source: {e}")))?;
     let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
     let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
     for entry in entries {
@@ -124,13 +116,13 @@ pub(crate) fn write<'a>(
     }
     let cursor = zip
         .finish()
-        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("repack failed: {e}")))?;
+        .map_err(|e| Error::malformed(format!("repack failed: {e}")))?;
     Ok(cursor.into_inner())
 }
 
 /// The error for a part that could not be repacked.
 fn repack(path: &PartPath, e: impl Display) -> Error {
-    Error::new(ErrorKind::MalformedInput, format!("repack `{path}`: {e}"))
+    Error::malformed(format!("repack `{path}`: {e}"))
 }
 
 #[cfg(test)]

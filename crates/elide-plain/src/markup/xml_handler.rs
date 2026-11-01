@@ -19,7 +19,7 @@ use elide_codec::{
     Document, DocumentPart, EncodedPart, ErasedStream, Format, FormatId, LocalId, Recombine, Stream,
 };
 use elide_core::modality::text::{SourceRef, Text};
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 use super::XmlLoader;
 use super::sanitize::MarkupSanitizer;
@@ -163,19 +163,15 @@ pub(crate) fn splice(raw: &str, items: &[XmlItem]) -> Result<String> {
         // defensive: a malformed loader would surface here rather than
         // panic in `replace_range`.
         if end > out.len() || start > end {
-            return Err(Error::new(
-                ErrorKind::Processing,
-                format!(
-                    "xml splice span {start}..{end} out of bounds (len {})",
-                    out.len()
-                ),
-            ));
+            return Err(Error::processing(format!(
+                "xml splice span {start}..{end} out of bounds (len {})",
+                out.len()
+            )));
         }
         if !out.is_char_boundary(start) || !out.is_char_boundary(end) {
-            return Err(Error::new(
-                ErrorKind::Processing,
-                format!("xml splice span {start}..{end} falls mid-character"),
-            ));
+            return Err(Error::processing(format!(
+                "xml splice span {start}..{end} falls mid-character"
+            )));
         }
         // `value` is the raw on-the-wire slice (the loader stores source
         // bytes verbatim, never a decoded form), so it splices back with
@@ -187,6 +183,7 @@ pub(crate) fn splice(raw: &str, items: &[XmlItem]) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    use elide_core::ErrorKind;
     use elide_core::modality::DataWriter;
     use elide_core::modality::text::{TextLocation, TextReplacement};
     use elide_core::redaction::{HiddenContentPolicy, Redactions};

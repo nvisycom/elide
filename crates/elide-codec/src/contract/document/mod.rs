@@ -19,7 +19,7 @@ use std::fmt;
 use bytes::Bytes;
 use elide_core::modality::Modality;
 use elide_core::redaction::HiddenContentPolicy;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 pub use self::local_id::LocalId;
 pub use self::recombine::{LeafRecombine, Recombine};
@@ -181,10 +181,9 @@ impl Document {
                 return Ok(());
             }
         }
-        Err(Error::new(
-            ErrorKind::MalformedInput,
-            format!("replace_part: `{id}` is not a blob part of this document"),
-        ))
+        Err(Error::malformed(format!(
+            "replace_part: `{id}` is not a blob part of this document"
+        )))
     }
 
     /// Drop the blob part with document-local `id`, removing it from the output
@@ -204,10 +203,9 @@ impl Document {
                 |part| matches!(part, DocumentPart::Blob { id: blob_id, .. } if blob_id == id),
             )
             .ok_or_else(|| {
-                Error::new(
-                    ErrorKind::MalformedInput,
-                    format!("remove_part: `{id}` is not a blob part of this document"),
-                )
+                Error::malformed(format!(
+                    "remove_part: `{id}` is not a blob part of this document"
+                ))
             })?;
         self.parts.remove(index);
         self.removed.push(id.clone());

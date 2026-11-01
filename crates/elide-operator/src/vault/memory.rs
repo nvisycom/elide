@@ -101,11 +101,11 @@ mod tests {
 
     #[tokio::test]
     async fn get_or_try_insert_with_propagates_init_error() {
-        use elide_core::{Error, ErrorKind};
+        use elide_core::Error;
         let vault = InMemoryVault::<&str, u32>::new();
 
         let result = vault
-            .get_or_try_insert_with("k", || Err(Error::new(ErrorKind::Redaction, "boom")))
+            .get_or_try_insert_with("k", || Err(Error::redaction("boom")))
             .await;
 
         assert!(result.is_err());

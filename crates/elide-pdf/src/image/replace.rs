@@ -7,7 +7,7 @@
 //! those encoded bytes so its stream and dictionary (dimensions, colour space,
 //! filter) stay consistent, the redacted pixels genuinely replace the original.
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use lopdf::{Document, Object, ObjectId};
 
 use super::ImageId;
@@ -52,25 +52,19 @@ pub(crate) fn replace(doc: &mut Document, replacements: &[ImageReplacement]) -> 
         // The target must be an image XObject, not a content or font stream,
         // or a structural object, that happens to share the id.
         if !is_image(doc, id) {
-            return Err(Error::new(
-                ErrorKind::Redaction,
-                format!(
-                    "object ({}, {}) is not a replaceable image XObject",
-                    replacement.id.number, replacement.id.generation
-                ),
-            ));
+            return Err(Error::redaction(format!(
+                "object ({}, {}) is not a replaceable image XObject",
+                replacement.id.number, replacement.id.generation
+            )));
         }
 
         // Rebuild a valid image XObject from the encoded bytes (lopdf sets
         // the dictionary, dimensions, colour space, filter, to match).
         let stream = lopdf::xobject::image_from(replacement.image.clone()).map_err(|e| {
-            Error::new(
-                ErrorKind::Redaction,
-                format!(
-                    "could not build image ({}, {}): {e}",
-                    replacement.id.number, replacement.id.generation
-                ),
-            )
+            Error::redaction(format!(
+                "could not build image ({}, {}): {e}",
+                replacement.id.number, replacement.id.generation
+            ))
         })?;
         doc.objects.insert(id, Object::Stream(stream));
     }

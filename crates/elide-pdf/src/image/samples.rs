@@ -16,7 +16,7 @@
 use std::io::Cursor;
 
 use ::image::{DynamicImage, GrayImage, ImageFormat, RgbImage};
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use lopdf::{Dictionary, Document, Object, Stream};
 
 use crate::lopdf_ext::DocumentExt;
@@ -119,13 +119,13 @@ fn layout(doc: &Document, dict: &Dictionary) -> Option<Layout> {
 /// [`is_supported`]), its samples cannot be decompressed, or an index falls
 /// outside its palette.
 pub(crate) fn decode(doc: &Document, stream: &Stream) -> Result<Pixels> {
-    let malformed = |reason: &str| Error::new(ErrorKind::MalformedInput, reason.to_owned());
-    let layout = layout(doc, &stream.dict).ok_or_else(|| malformed("unsupported image samples"))?;
+    let layout =
+        layout(doc, &stream.dict).ok_or_else(|| Error::malformed("unsupported image samples"))?;
     let row_bytes = layout.row_bytes();
     let size = row_bytes * layout.height as usize;
     let mut samples = stream
         .decompressed_content_with_limit(MAX_SAMPLE_BYTES)
-        .map_err(|e| malformed(&format!("image samples: {e}")))?;
+        .map_err(|e| Error::malformed(format!("image samples: {e}")))?;
     samples.resize(size, 0);
 
     let count = layout.width as usize * layout.space.components();
@@ -133,7 +133,7 @@ pub(crate) fn decode(doc: &Document, stream: &Stream) -> Result<Pixels> {
     for row in samples.chunks_exact(row_bytes) {
         let values = unpack(row, layout.bits, count);
         pixels(&layout.space, layout.bits, &values, &mut data)
-            .ok_or_else(|| malformed("image palette index out of range"))?;
+            .ok_or_else(|| Error::malformed("image palette index out of range"))?;
     }
     let rgb = !matches!(
         layout.space,
@@ -164,16 +164,11 @@ pub(crate) fn png(doc: &Document, stream: &Stream) -> Result<Vec<u8>> {
     } else {
         GrayImage::from_raw(width, height, data).map(DynamicImage::ImageLuma8)
     };
-    let image = image.ok_or_else(|| {
-        Error::new(
-            ErrorKind::MalformedInput,
-            "image pixels do not fill the image",
-        )
-    })?;
+    let image = image.ok_or_else(|| Error::malformed("image pixels do not fill the image"))?;
     let mut out = Vec::new();
     image
         .write_to(&mut Cursor::new(&mut out), ImageFormat::Png)
-        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("encode PNG: {e}")))?;
+        .map_err(|e| Error::malformed(format!("encode PNG: {e}")))?;
     Ok(out)
 }
 

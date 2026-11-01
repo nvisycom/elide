@@ -6,7 +6,7 @@ use std::result;
 
 use bytes::Bytes;
 use elide_core::redaction::Redactions;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 
 use super::redact;
@@ -22,7 +22,7 @@ use crate::modality::Audio;
 /// [`ErrorKind::MalformedInput`] if the bytes are not a readable WAV.
 pub(crate) fn validate(bytes: &Bytes) -> Result<()> {
     WavReader::new(Cursor::new(bytes.clone()))
-        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("not a valid WAV: {e}")))?;
+        .map_err(|e| Error::malformed(format!("not a valid WAV: {e}")))?;
     Ok(())
 }
 
@@ -46,10 +46,9 @@ pub(crate) fn redact_all(source: &Bytes, redactions: &Redactions<Audio>) -> Resu
         (SampleFormat::Int, 16) => redact_typed::<i16>(source, spec, &sorted),
         (SampleFormat::Int, 24 | 32) => redact_typed::<i32>(source, spec, &sorted),
         (SampleFormat::Float, 32) => redact_typed::<f32>(source, spec, &sorted),
-        (fmt, bits) => Err(Error::new(
-            ErrorKind::MalformedInput,
-            format!("unsupported WAV sample format {fmt:?} at {bits} bits"),
-        )),
+        (fmt, bits) => Err(Error::malformed(format!(
+            "unsupported WAV sample format {fmt:?} at {bits} bits"
+        ))),
     }
 }
 
@@ -60,11 +59,11 @@ where
     S: hound::Sample + Default + Clone + redact::ToneSample,
 {
     let mut reader = WavReader::new(Cursor::new(source.clone()))
-        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("WAV read failed: {e}")))?;
+        .map_err(|e| Error::malformed(format!("WAV read failed: {e}")))?;
     let mut samples: Vec<S> = reader
         .samples::<S>()
         .collect::<result::Result<_, _>>()
-        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("WAV decode failed: {e}")))?;
+        .map_err(|e| Error::malformed(format!("WAV decode failed: {e}")))?;
 
     // The peak a `Tone` scales to. For integer WAV the container's range is
     // set by the bit depth, not the decode type: a 24-bit clip decodes into
@@ -92,15 +91,15 @@ where
     let mut buf = Cursor::new(Vec::new());
     {
         let mut writer = WavWriter::new(&mut buf, spec)
-            .map_err(|e| Error::new(ErrorKind::Processing, format!("WAV write failed: {e}")))?;
+            .map_err(|e| Error::processing(format!("WAV write failed: {e}")))?;
         for sample in samples {
-            writer.write_sample(sample).map_err(|e| {
-                Error::new(ErrorKind::Processing, format!("WAV encode failed: {e}"))
-            })?;
+            writer
+                .write_sample(sample)
+                .map_err(|e| Error::processing(format!("WAV encode failed: {e}")))?;
         }
         writer
             .finalize()
-            .map_err(|e| Error::new(ErrorKind::Processing, format!("WAV finalize failed: {e}")))?;
+            .map_err(|e| Error::processing(format!("WAV finalize failed: {e}")))?;
     }
     Ok(Bytes::from(buf.into_inner()))
 }
@@ -109,7 +108,7 @@ where
 /// encoded bytes.
 fn wav_spec(bytes: &Bytes) -> Result<WavSpec> {
     let reader = WavReader::new(Cursor::new(bytes.clone()))
-        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("not a valid WAV: {e}")))?;
+        .map_err(|e| Error::malformed(format!("not a valid WAV: {e}")))?;
     Ok(reader.spec())
 }
 

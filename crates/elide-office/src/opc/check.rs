@@ -9,7 +9,7 @@
 use std::collections::HashSet;
 
 use elide_core::redaction::HiddenContentPolicy;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use quick_xml::Reader;
 use quick_xml::events::Event;
 
@@ -37,13 +37,10 @@ pub(crate) fn check(
     let (_, survived) = sanitize(document, policy, sanitizer)?;
     if let Some(entry) = survived.iter().next() {
         let place = entry.at.as_ref().map_or("the package", |at| at.as_str());
-        return Err(Error::new(
-            ErrorKind::Sanitization,
-            format!(
-                "encoded package still carries hidden content: {:?} in {place}",
-                entry.content
-            ),
-        ));
+        return Err(Error::sanitization(format!(
+            "encoded package still carries hidden content: {:?} in {place}",
+            entry.content
+        )));
     }
     let index = Index::read(document)?;
     let present: HashSet<&PartPath> = index.parts.iter().map(|(path, _)| path).collect();
@@ -52,8 +49,9 @@ pub(crate) fn check(
             if let Some(target) = rel.target_part(source.as_ref())
                 && !present.contains(&target)
             {
-                return Err(dangling(format!(
-                    "relationship `{}` in `{rels_path}` targets missing part `{target}`",
+                return Err(Error::sanitization(format!(
+                    "encoded package has a dangling reference: relationship `{}` in \
+                     `{rels_path}` targets missing part `{target}`",
                     rel.id
                 )));
             }
@@ -72,8 +70,9 @@ pub(crate) fn check(
         let references = References::checking(&ids);
         xml_edit::edit(raw, &references)?;
         if let Some(id) = references.dangling() {
-            return Err(dangling(format!(
-                "`{path}` names missing relationship `{id}`"
+            return Err(Error::sanitization(format!(
+                "encoded package has a dangling reference: `{path}` names missing \
+                 relationship `{id}`"
             )));
         }
         let kind = index.kind(path);
@@ -82,18 +81,16 @@ pub(crate) fn check(
         if sanitizer.role(kind) == PartRole::Structure
             && let Some(stray) = stray_text(raw)?
         {
-            return Err(Error::new(
-                ErrorKind::Sanitization,
-                format!("`{path}` carries text no extraction reads: `{stray}`"),
-            ));
+            return Err(Error::sanitization(format!(
+                "`{path}` carries text no extraction reads: `{stray}`"
+            )));
         }
         let vocabulary = Vocabulary::default();
         xml_edit::edit(raw, &vocabulary)?;
         if let Some(namespace) = vocabulary.unknown() {
-            return Err(Error::new(
-                ErrorKind::Sanitization,
-                format!("`{path}` uses the unreviewed XML namespace `{namespace}`"),
-            ));
+            return Err(Error::sanitization(format!(
+                "`{path}` uses the unreviewed XML namespace `{namespace}`"
+            )));
         }
     }
     Ok(())
@@ -107,12 +104,9 @@ pub(crate) fn check(
 fn stray_text(raw: &str) -> Result<Option<String>> {
     let mut reader = Reader::from_str(raw);
     loop {
-        let event = reader.read_event().map_err(|e| {
-            Error::new(
-                ErrorKind::MalformedInput,
-                format!("malformed part XML: {e}"),
-            )
-        })?;
+        let event = reader
+            .read_event()
+            .map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
         match event {
             Event::Eof => return Ok(None),
             Event::Text(text) if !text.trim().is_empty() => {
@@ -124,13 +118,6 @@ fn stray_text(raw: &str) -> Result<Option<String>> {
             _ => {}
         }
     }
-}
-
-fn dangling(message: String) -> Error {
-    Error::new(
-        ErrorKind::Sanitization,
-        format!("encoded package has a dangling reference: {message}"),
-    )
 }
 
 #[cfg(test)]

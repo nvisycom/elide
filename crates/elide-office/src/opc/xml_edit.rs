@@ -14,7 +14,7 @@ use std::borrow::Cow;
 use std::ops::Range;
 
 use elide_core::redaction::HiddenContent;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use quick_xml::NsReader;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::{Namespace, ResolveResult};
@@ -242,7 +242,9 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
 
     loop {
         let (namespace, event) = {
-            let (resolved, event) = reader.read_resolved_event().map_err(malformed)?;
+            let (resolved, event) = reader
+                .read_resolved_event()
+                .map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
             (bound(&resolved), event)
         };
         let span = last..reader.buffer_position() as usize + bom;
@@ -258,7 +260,7 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
                         removing = None;
                     }
                 }
-                Event::Eof => return Err(malformed_message("unclosed element")),
+                Event::Eof => return Err(Error::malformed("malformed part XML: unclosed element")),
                 _ => {}
             }
             continue;
@@ -266,11 +268,17 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
 
         match event {
             Event::Eof => break,
-            Event::DocType(_) => return Err(malformed_message("a document type declaration")),
+            Event::DocType(_) => {
+                return Err(Error::malformed(
+                    "malformed part XML: a document type declaration",
+                ));
+            }
             Event::Start(ref e) | Event::Empty(ref e) => {
                 let is_start = matches!(event, Event::Start(_));
                 if is_start && open.len() >= MAX_DEPTH {
-                    return Err(malformed_message("elements nest too deep"));
+                    return Err(Error::malformed(
+                        "malformed part XML: elements nest too deep",
+                    ));
                 }
                 let local = e.local_name();
                 let name = Name {
@@ -381,15 +389,17 @@ fn attributes<'a>(
         (slice.as_ptr() as usize)
             .checked_sub(base)
             .filter(|&at| at + slice.len() <= raw.len())
-            .ok_or_else(|| malformed_message("attribute outside the part"))
+            .ok_or_else(|| Error::malformed("malformed part XML: attribute outside the part"))
     };
     let mut out = Vec::new();
     for attr in e.attributes() {
-        let attr = attr.map_err(|e| malformed(e.into()))?;
+        let attr = attr.map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
         let key = attr.key.into_inner();
         let key_start = offset(key)?;
         let Cow::Borrowed(value) = attr.value else {
-            return Err(malformed_message("attribute without a source"));
+            return Err(Error::malformed(
+                "malformed part XML: attribute without a source",
+            ));
         };
         let value_start = offset(value)?;
         let value_end = value_start + value.len();
@@ -407,20 +417,6 @@ fn attributes<'a>(
         });
     }
     Ok(out)
-}
-
-pub(crate) fn malformed(e: quick_xml::Error) -> Error {
-    Error::new(
-        ErrorKind::MalformedInput,
-        format!("malformed part XML: {e}"),
-    )
-}
-
-fn malformed_message(message: &str) -> Error {
-    Error::new(
-        ErrorKind::MalformedInput,
-        format!("malformed part XML: {message}"),
-    )
 }
 
 #[cfg(test)]

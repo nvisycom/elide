@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use quick_xml::Reader;
 use quick_xml::escape::unescape;
 use quick_xml::events::Event;
@@ -36,7 +36,10 @@ impl ContentTypes {
         let mut types = Self::default();
         let mut reader = Reader::from_str(xml);
         loop {
-            let element = match reader.read_event().map_err(malformed)? {
+            let element = match reader
+                .read_event()
+                .map_err(|e| Error::malformed(format!("[Content_Types].xml malformed: {e}")))?
+            {
                 Event::Eof => break,
                 Event::Empty(e) | Event::Start(e) => e,
                 _ => continue,
@@ -44,8 +47,10 @@ impl ContentTypes {
             let mut key = None;
             let mut content_type = None;
             for attr in element.attributes() {
-                let attr = attr.map_err(|e| malformed(e.into()))?;
-                let value = unescape(&attr.value).map_err(|e| malformed(e.into()))?;
+                let attr = attr
+                    .map_err(|e| Error::malformed(format!("[Content_Types].xml malformed: {e}")))?;
+                let value = unescape(&attr.value)
+                    .map_err(|e| Error::malformed(format!("[Content_Types].xml malformed: {e}")))?;
                 match attr.key.local_name().as_ref() {
                     "Extension" | "PartName" => key = Some(value.to_ascii_lowercase()),
                     "ContentType" => content_type = Some(value.into_owned()),
@@ -98,7 +103,9 @@ pub(crate) fn without_parts(xml: &str, removed: &HashSet<PartPath>) -> Result<St
     let mut cursor = 0;
     let mut last = 0;
     loop {
-        let event = reader.read_event().map_err(malformed)?;
+        let event = reader
+            .read_event()
+            .map_err(|e| Error::malformed(format!("[Content_Types].xml malformed: {e}")))?;
         let span = last..reader.buffer_position() as usize;
         last = span.end;
         let element = match event {
@@ -118,13 +125,6 @@ pub(crate) fn without_parts(xml: &str, removed: &HashSet<PartPath>) -> Result<St
     }
     out.push_str(&xml[cursor..]);
     Ok(out)
-}
-
-fn malformed(e: quick_xml::Error) -> Error {
-    Error::new(
-        ErrorKind::MalformedInput,
-        format!("[Content_Types].xml malformed: {e}"),
-    )
 }
 
 #[cfg(test)]

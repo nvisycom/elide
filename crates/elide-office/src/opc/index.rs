@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::str;
 
 use bytes::Bytes;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 use crate::opc::archive;
 use crate::opc::content_types::{CONTENT_TYPES_PART, ContentTypes};
@@ -65,12 +65,7 @@ impl Index {
         let manifest = parts
             .iter()
             .find(|(path, _)| path.as_str() == CONTENT_TYPES_PART)
-            .ok_or_else(|| {
-                Error::new(
-                    ErrorKind::MalformedInput,
-                    format!("missing `{CONTENT_TYPES_PART}`"),
-                )
-            })?;
+            .ok_or_else(|| Error::malformed(format!("missing `{CONTENT_TYPES_PART}`")))?;
         let content_types = ContentTypes::parse(text(&manifest.0, &manifest.1)?)?;
         let mut relationships = HashMap::new();
         for (path, bytes) in parts.iter().filter(|(path, _)| path.is_relationships()) {
@@ -149,10 +144,5 @@ impl Index {
 
 /// The part `path`'s bytes as UTF-8 text.
 pub(crate) fn text<'a>(path: &PartPath, bytes: &'a Bytes) -> Result<&'a str> {
-    str::from_utf8(bytes).map_err(|_| {
-        Error::new(
-            ErrorKind::MalformedInput,
-            format!("part `{path}` is not UTF-8"),
-        )
-    })
+    str::from_utf8(bytes).map_err(|_| Error::malformed(format!("part `{path}` is not UTF-8")))
 }

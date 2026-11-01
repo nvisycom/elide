@@ -16,7 +16,7 @@ use elide_codec::TypedStream;
 use elide_core::entity::Entity;
 use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::recognition::Scope;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use elide_detection::Analyzer;
 use elide_format::FormatRegistry;
 use elide_redaction::Anonymizer;
@@ -331,10 +331,10 @@ impl Orchestrator {
         let mut names = std::collections::HashSet::new();
         for document in documents.iter() {
             if !names.insert(document.name.as_str()) {
-                return Err(Error::new(
-                    ErrorKind::MalformedInput,
-                    format!("duplicate document name `{}` in the set", document.name),
-                ));
+                return Err(Error::malformed(format!(
+                    "duplicate document name `{}` in the set",
+                    document.name
+                )));
             }
         }
 

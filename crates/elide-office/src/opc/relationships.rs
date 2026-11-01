@@ -10,7 +10,7 @@
 
 use std::collections::HashSet;
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use quick_xml::Reader;
 use quick_xml::escape::unescape;
 use quick_xml::events::Event;
@@ -55,7 +55,10 @@ pub(crate) fn parse(xml: &str) -> Result<Vec<Relationship>> {
     let mut reader = Reader::from_str(xml);
     let mut relationships = Vec::new();
     loop {
-        let element = match reader.read_event().map_err(malformed)? {
+        let element = match reader
+            .read_event()
+            .map_err(|e| Error::malformed(format!("relationships part malformed: {e}")))?
+        {
             Event::Eof => break,
             Event::Empty(e) | Event::Start(e) if e.local_name().as_ref() == "Relationship" => e,
             _ => continue,
@@ -67,8 +70,10 @@ pub(crate) fn parse(xml: &str) -> Result<Vec<Relationship>> {
             external: false,
         };
         for attr in element.attributes() {
-            let attr = attr.map_err(|e| malformed(e.into()))?;
-            let value = unescape(&attr.value).map_err(|e| malformed(e.into()))?;
+            let attr =
+                attr.map_err(|e| Error::malformed(format!("relationships part malformed: {e}")))?;
+            let value = unescape(&attr.value)
+                .map_err(|e| Error::malformed(format!("relationships part malformed: {e}")))?;
             match attr.key.local_name().as_ref() {
                 "Id" => relationship.id = value.into_owned(),
                 "Type" => relationship.kind = value.into_owned(),
@@ -94,7 +99,9 @@ pub(crate) fn without(xml: &str, removed: &HashSet<String>) -> Result<String> {
     let mut cursor = 0;
     let mut last = 0;
     loop {
-        let event = reader.read_event().map_err(malformed)?;
+        let event = reader
+            .read_event()
+            .map_err(|e| Error::malformed(format!("relationships part malformed: {e}")))?;
         let span = last..reader.buffer_position() as usize;
         last = span.end;
         let element = match event {
@@ -164,13 +171,6 @@ pub(crate) fn resolve(source: Option<&PartPath>, target: &str) -> PartPath {
         }
     }
     PartPath::from(segments.join("/"))
-}
-
-fn malformed(e: quick_xml::Error) -> Error {
-    Error::new(
-        ErrorKind::MalformedInput,
-        format!("relationships part malformed: {e}"),
-    )
 }
 
 #[cfg(test)]

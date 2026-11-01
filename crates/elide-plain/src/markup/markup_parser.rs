@@ -24,7 +24,7 @@ use std::ops::Range;
 use elide_codec::string::ContextWords;
 use elide_core::modality::ResolvedHint;
 use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation};
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use quick_xml::Reader;
 use quick_xml::events::{BytesEnd, BytesStart, Event};
 
@@ -96,7 +96,9 @@ impl<'a> MarkupParser<'a> {
         let mut last = bom;
 
         loop {
-            let event = reader.read_event().map_err(malformed)?;
+            let event = reader
+                .read_event()
+                .map_err(|e| Error::malformed(format!("malformed markup: {e}")))?;
             let span = last..reader.buffer_position() as usize + bom;
             last = span.end;
 
@@ -314,10 +316,6 @@ struct Frame {
 struct SkipRegion {
     name: String,
     depth: usize,
-}
-
-pub(super) fn malformed(e: quick_xml::Error) -> Error {
-    Error::new(ErrorKind::MalformedInput, format!("malformed markup: {e}"))
 }
 
 /// The byte length of a leading UTF-8 BOM (`U+FEFF`), or 0 if absent. quick-xml

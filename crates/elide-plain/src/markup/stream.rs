@@ -9,7 +9,7 @@ use std::ops::Range;
 use elide_codec::extract::ExtractedItem;
 use elide_core::modality::ResolvedHint;
 use elide_core::modality::text::Text;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use quick_xml::events::BytesStart;
 
 use super::xml_handler::{XmlItem, XmlSpan};
@@ -77,10 +77,7 @@ impl<'a> MarkupSource<'a> {
                 // does not, a duplicate key or unquoted value is malformed.
                 Err(_) if lenient => continue,
                 Err(e) => {
-                    return Err(Error::new(
-                        ErrorKind::MalformedInput,
-                        format!("malformed attribute: {e}"),
-                    ));
+                    return Err(Error::malformed(format!("malformed attribute: {e}")));
                 }
             };
             // `Attribute::value` is the *raw* on-the-wire text, entity spellings

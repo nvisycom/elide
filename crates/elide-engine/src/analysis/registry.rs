@@ -109,9 +109,7 @@ impl ModalityRegistry {
     {
         ReportSeed::new(self)
             .deserialize(deserializer)
-            .map_err(|e| {
-                elide_core::Error::new(elide_core::ErrorKind::MalformedInput, e.to_string())
-            })
+            .map_err(|e| elide_core::Error::malformed(e.to_string()))
     }
 
     /// Reconstruct an [`ArtifactSet`](crate::ArtifactSet) from `deserializer`,
@@ -128,9 +126,7 @@ impl ModalityRegistry {
     {
         ArtifactSetSeed::new(self)
             .deserialize(deserializer)
-            .map_err(|e| {
-                elide_core::Error::new(elide_core::ErrorKind::MalformedInput, e.to_string())
-            })
+            .map_err(|e| elide_core::Error::malformed(e.to_string()))
     }
 }
 

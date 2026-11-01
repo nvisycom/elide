@@ -4,7 +4,7 @@
 use elide_codec::Loader;
 use elide_codec::content::ContentData;
 use elide_core::modality::tabular::Tabular;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 use super::csv_handler::{CsvData, CsvHandler};
 
@@ -59,7 +59,7 @@ impl Loader for CsvLoader {
         let headers = if self.has_headers {
             let record = reader
                 .headers()
-                .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("CSV header: {e}")))?;
+                .map_err(|e| Error::malformed(format!("CSV header: {e}")))?;
             Some(record.iter().map(String::from).collect())
         } else {
             None
@@ -67,8 +67,7 @@ impl Loader for CsvLoader {
 
         let mut rows = Vec::new();
         for record in reader.records() {
-            let record = record
-                .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("CSV row: {e}")))?;
+            let record = record.map_err(|e| Error::malformed(format!("CSV row: {e}")))?;
             rows.push(record.iter().map(String::from).collect());
         }
 

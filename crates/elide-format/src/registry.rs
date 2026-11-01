@@ -11,7 +11,7 @@ use std::sync::Arc;
 use elide_codec::content::ContentData;
 use elide_codec::{Document, Format, FormatId};
 use elide_core::redaction::HiddenContentPolicy;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 /// Lowercase `s` for ASCII case-insensitive extension / content-type keys,
 /// **borrowing** when it is already lowercase (the conventional case) so no
@@ -239,7 +239,7 @@ impl FormatRegistry {
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorKind::CapabilityUnavailable`] when no format is
+    /// Returns [`ErrorKind::CapabilityUnavailable`](elide_core::ErrorKind::CapabilityUnavailable) when no format is
     /// registered for `extension`; otherwise propagates the loader's decode
     /// error.
     pub async fn decode(
@@ -249,10 +249,9 @@ impl FormatRegistry {
         policy: HiddenContentPolicy,
     ) -> Result<Document> {
         let format = self.by_extension(extension).ok_or_else(|| {
-            Error::new(
-                ErrorKind::CapabilityUnavailable,
-                format!("no codec registered for extension `{extension}`"),
-            )
+            Error::capability_unavailable(format!(
+                "no codec registered for extension `{extension}`"
+            ))
         })?;
         format.decode(content.into(), policy).await
     }
@@ -269,7 +268,7 @@ impl FormatRegistry {
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorKind::CapabilityUnavailable`] when the format cannot be
+    /// Returns [`ErrorKind::CapabilityUnavailable`](elide_core::ErrorKind::CapabilityUnavailable) when the format cannot be
     /// resolved from the content's extension, content type, or (with `sniff`)
     /// its bytes; otherwise propagates the loader's decode error.
     ///
@@ -300,8 +299,7 @@ impl FormatRegistry {
                 .flatten()
         });
         let Some(format_id) = format_id else {
-            return Err(Error::new(
-                ErrorKind::CapabilityUnavailable,
+            return Err(Error::capability_unavailable(
                 "content carries no resolvable filename extension or content type",
             ));
         };

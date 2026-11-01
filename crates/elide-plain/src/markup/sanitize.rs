@@ -34,13 +34,13 @@ use std::ops::Range;
 
 use elide_codec::StrippedContent;
 use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use quick_xml::NsReader;
 use quick_xml::escape::unescape;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::{Namespace, ResolveResult};
 
-use super::markup_parser::{bom_len, end_name, local_name, malformed};
+use super::markup_parser::{bom_len, end_name, local_name};
 
 /// HTML elements that run or embed active content, removed with their whole
 /// subtree: a script, a plugin object, and a frame that loads another page or
@@ -158,8 +158,7 @@ impl MarkupSanitizer {
         if self.removals(raw)?.is_empty() {
             Ok(())
         } else {
-            Err(Error::new(
-                ErrorKind::Sanitization,
+            Err(Error::sanitization(
                 "encoded markup still carries hidden content",
             ))
         }
@@ -185,7 +184,9 @@ impl MarkupSanitizer {
         let mut style: Option<StyleSheet> = None;
 
         loop {
-            let (namespace, event) = reader.read_resolved_event().map_err(malformed)?;
+            let (namespace, event) = reader
+                .read_resolved_event()
+                .map_err(|e| Error::malformed(format!("malformed markup: {e}")))?;
             let in_xinclude =
                 matches!(namespace, ResolveResult::Bound(Namespace(uri)) if uri == XINCLUDE);
             let span = last..reader.buffer_position() as usize + bom;
@@ -304,15 +305,13 @@ impl MarkupSanitizer {
     /// external one. HTML's document type is never fetched.
     fn check_doctype(&self, doctype: &str) -> Result<()> {
         if doctype.contains("<!ENTITY") {
-            return Err(Error::new(
-                ErrorKind::MalformedInput,
+            return Err(Error::malformed(
                 "markup document type declares entities, whose text would bypass detection",
             ));
         }
         let external = doctype.contains("SYSTEM") || doctype.contains("PUBLIC");
         if self.dialect == Dialect::Xml && external {
-            return Err(Error::new(
-                ErrorKind::MalformedInput,
+            return Err(Error::malformed(
                 "XML document type names an external one, whose text would bypass detection",
             ));
         }

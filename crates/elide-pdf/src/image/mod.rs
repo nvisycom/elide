@@ -13,7 +13,7 @@ mod replace;
 mod samples;
 
 use bytes::Bytes;
-use elide_core::Result;
+use elide_core::{Error, Result};
 use lopdf::{Document, Stream};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -21,7 +21,6 @@ use serde::{Deserialize, Serialize};
 pub(crate) use self::remove::remove;
 pub use self::replace::ImageReplacement;
 pub(crate) use self::replace::replace;
-use crate::error::malformed;
 
 /// The identity of an image XObject within a PDF: its indirect-object id
 /// (object number and generation).
@@ -137,7 +136,9 @@ pub(crate) fn surface(
             let stream = doc
                 .get_object(id.object())
                 .and_then(lopdf::Object::as_stream)
-                .map_err(|e| malformed(format!("image ({}, {}): {e}", id.number, id.generation)))?;
+                .map_err(|e| {
+                    Error::malformed(format!("image ({}, {}): {e}", id.number, id.generation))
+                })?;
             Some((Bytes::from(samples::png(doc, stream)?), "png"))
         }
         EmbeddingKind::CcittFax | EmbeddingKind::Jbig2 => None,

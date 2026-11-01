@@ -2,7 +2,7 @@
 
 use std::ops::Range;
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 /// Apply a redaction to a string in place: replace a byte range with a
 /// replacement value.
@@ -29,15 +29,12 @@ impl RedactRange for String {
             return Ok(());
         }
         if !self.is_char_boundary(s) || !self.is_char_boundary(e) {
-            return Err(Error::new(
-                ErrorKind::Redaction,
-                format!(
-                    "redaction offset falls mid-character (start={}, end={}, len={})",
-                    range.start,
-                    range.end,
-                    self.len()
-                ),
-            ));
+            return Err(Error::redaction(format!(
+                "redaction offset falls mid-character (start={}, end={}, len={})",
+                range.start,
+                range.end,
+                self.len()
+            )));
         }
         self.replace_range(s..e, value);
         Ok(())

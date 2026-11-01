@@ -104,13 +104,10 @@ impl<'a, V: PartVisitor> Walk<'a, V> {
             let mut folds: Vec<(LocalId, Fold)> = Vec::new();
             for (id, part_id, bytes, hint) in blobs {
                 if depth + 1 > MAX_CONTAINER_DEPTH {
-                    return Err(Error::new(
-                        ErrorKind::MalformedInput,
-                        format!(
-                            "container nesting exceeds the depth limit of \
+                    return Err(Error::malformed(format!(
+                        "container nesting exceeds the depth limit of \
                              {MAX_CONTAINER_DEPTH} at part `{part_id}`"
-                        ),
-                    ));
+                    )));
                 }
                 let fold = match self
                     .orchestrator
