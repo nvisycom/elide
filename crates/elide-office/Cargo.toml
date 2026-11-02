@@ -39,6 +39,7 @@ fixtures = []
 # Internal crates
 elide-core = { workspace = true, features = ["metadata", "tabular"] }
 elide-codec = { workspace = true, features = ["extract"] }
+elide-markup = { workspace = true, features = [] }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }

@@ -1,0 +1,48 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "elide-markup"
+description = "Markup format handlers (HTML, XML) and character reference decoding over the elide-codec extract engine"
+keywords = ["elide", "codec", "markup", "html", "xml"]
+categories = ["encoding", "text-processing"]
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+## No format enabled by default: only the character reference decoder.
+default = []
+
+## The XML format, over the shared markup engine.
+xml = ["dep:async-trait"]
+## The HTML format: the markup engine read as a browser reads HTML.
+html = ["xml", "quick-xml/escape-html"]
+
+[dependencies]
+# Internal crates
+elide-core = { workspace = true, features = [] }
+elide-codec = { workspace = true, features = ["extract"] }
+
+# Async runtime & parallelism
+async-trait = { workspace = true, features = [], optional = true }
+
+# Markup parsing
+quick-xml = { workspace = true, features = [] }
+
+[dev-dependencies]
+# Markup parsing
+html5ever = { workspace = true, features = [] }
+
+# Async runtime & parallelism
+tokio = { workspace = true, features = ["macros", "rt"] }

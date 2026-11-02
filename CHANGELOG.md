@@ -78,6 +78,11 @@ and this project adheres to
   `HiddenContent` vocabulary, filled by `analyze` and replaced by what
   `anonymize_with` saw, and serialized (output only) as the report's
   `stripped` section
+- HTML and XML have their own engine crate, `elide-markup`, which also owns
+  character reference decoding (`decode_references`, `CharacterReferences`)
+  for any format that reads XML; their constructors move from
+  `elide::codec::plain` to `elide::codec::markup`, and `elide-plain` keeps
+  TXT, JSON, and CSV, one module per format
 
 ### Crates
 
@@ -90,6 +95,8 @@ and this project adheres to
 - **elide-ocr:** OCR backends and recognized-text types
 - **elide-codec:** Codec traits and format handlers for reading and redacting
   documents
+- **elide-markup:** HTML and XML format handlers, the markup sanitizer, and
+  character reference decoding
 - **elide:** Composable component library for pipelines: recognizers, dedup
   layers, checks, redaction strategies
 

@@ -52,11 +52,12 @@ schema = [
 ## are unaffected.
 sniff = ["dep:infer"]
 
-## The text-shaped leaf formats (handlers live in the `elide-plain` engine).
+## The plain-text leaf formats (handlers live in the `elide-plain` crate).
 txt = ["dep:elide-plain", "elide-plain/txt"]
 json = ["dep:elide-plain", "elide-plain/json"]
-xml = ["dep:elide-plain", "elide-plain/xml"]
-html = ["dep:elide-plain", "elide-plain/html"]
+## The markup formats (handlers live in the `elide-markup` engine).
+xml = ["dep:elide-markup", "elide-markup/xml"]
+html = ["dep:elide-markup", "elide-markup/html"]
 
 ## The audio formats: the `elide-audio` engine reads and re-writes samples.
 wav = ["dep:elide-audio", "elide-audio/codec", "elide-audio/wav"]
@@ -89,6 +90,7 @@ internal_office = ["dep:elide-office"]
 elide-core = { workspace = true, features = [] }
 elide-codec = { workspace = true, features = [] }
 elide-plain = { workspace = true, features = [], optional = true }
+elide-markup = { workspace = true, features = [], optional = true }
 elide-audio = { workspace = true, features = [], optional = true }
 elide-image = { workspace = true, features = [], optional = true }
 elide-office = { workspace = true, features = [], optional = true }

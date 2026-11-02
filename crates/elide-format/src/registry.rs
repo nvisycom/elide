@@ -96,15 +96,16 @@ impl FormatRegistry {
     /// [`add_format`]: Self::add_format
     pub fn with_builtin() -> Self {
         let mut registry = Self::new();
-        // Leaf text-shaped formats: handlers live in the `elide-plain` engine.
+        // Plain-text leaf formats: handlers live in the `elide-plain` crate.
         #[cfg(feature = "txt")]
         registry.add_format(elide_plain::txt_format());
         #[cfg(feature = "json")]
         registry.add_format(elide_plain::json_format());
+        // Markup formats: handlers live in the `elide-markup` engine.
         #[cfg(feature = "html")]
-        registry.add_format(elide_plain::html_format());
+        registry.add_format(elide_markup::html_format());
         #[cfg(feature = "xml")]
-        registry.add_format(elide_plain::xml_format());
+        registry.add_format(elide_markup::xml_format());
         #[cfg(feature = "csv")]
         registry.add_format(elide_plain::csv_format());
         // Audio formats: handlers live in the `elide-audio` engine.

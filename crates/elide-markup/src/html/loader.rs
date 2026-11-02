@@ -14,11 +14,11 @@ use elide_codec::{Document, DocumentLoader};
 use elide_core::Result;
 use elide_core::redaction::HiddenContentPolicy;
 
-use super::config::MarkupConfig;
-use super::html_handler::FORMAT_ID;
-use super::markup_parser::build_items;
-use super::sanitize::{Dialect, MarkupSanitizer};
-use super::xml_handler::markup_document;
+use super::handler::FORMAT_ID;
+use crate::engine::config::MarkupConfig;
+use crate::engine::parser::build_items;
+use crate::engine::recombine::markup_document;
+use crate::sanitize::{Dialect, MarkupSanitizer};
 
 /// HTML block-level elements: each ends a passage, and its text children form
 /// one sibling-hint group, so a label and a value in separate passages of one

@@ -2,25 +2,19 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 
-#[cfg(any(feature = "html", feature = "xml"))]
-mod markup;
 #[cfg(feature = "csv")]
-mod tabular;
-#[cfg(any(feature = "txt", feature = "json"))]
-mod text;
+mod csv;
+#[cfg(feature = "json")]
+mod json;
+#[cfg(feature = "txt")]
+mod txt;
 
-#[cfg(feature = "html")]
-#[cfg_attr(docsrs, doc(cfg(feature = "html")))]
-pub use self::markup::html_format;
-#[cfg(feature = "xml")]
-#[cfg_attr(docsrs, doc(cfg(feature = "xml")))]
-pub use self::markup::xml_format;
 #[cfg(feature = "csv")]
 #[cfg_attr(docsrs, doc(cfg(feature = "csv")))]
-pub use self::tabular::{csv_format, csv_format_with};
+pub use self::csv::{format as csv_format, format_with as csv_format_with};
 #[cfg(feature = "json")]
 #[cfg_attr(docsrs, doc(cfg(feature = "json")))]
-pub use self::text::json_format;
+pub use self::json::format as json_format;
 #[cfg(feature = "txt")]
 #[cfg_attr(docsrs, doc(cfg(feature = "txt")))]
-pub use self::text::txt_format;
+pub use self::txt::format as txt_format;

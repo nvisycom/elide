@@ -2,8 +2,8 @@
 //!
 //! HTML runs on the shared markup engine, the same byte-span tokenize-and-splice
 //! [`ExtractStream`](elide_codec::extract::ExtractStream) /
-//! [`MarkupRecombine`](super::xml_handler::MarkupRecombine), configured leniently
-//! (see [`MarkupConfig::lenient`](super::config::MarkupConfig::lenient)). There is
+//! [`MarkupRecombine`](crate::engine::recombine::MarkupRecombine), configured leniently
+//! (see [`MarkupConfig::lenient`](crate::engine::config::MarkupConfig::lenient)). There is
 //! no separate HTML stream or recombine type; this module supplies only the
 //! [`Format`].
 

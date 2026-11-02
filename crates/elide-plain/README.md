@@ -2,28 +2,28 @@
 
 [![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/elide/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/elide/actions/workflows/build.yml)
 
-The leaf text-shaped format handlers: plain text, JSON, HTML, XML, and CSV.
+The leaf plain-text format handlers: plain text, JSON, and CSV.
 
 ## Overview
 
 Most formats a redaction toolkit handles are backed by a dedicated engine — an
-image decoder, an audio codec, a PDF parser. The text-shaped formats are the
-exception: TXT, JSON, HTML, XML, and CSV are all fundamentally text, and their
-handlers need no binary engine, only the codec contracts and the shared
-text-extraction machinery. This crate is their home.
+image decoder, an audio codec, a PDF parser, a markup reader. The plain-text
+formats are the exception: TXT, JSON, and CSV are all fundamentally text, and
+their handlers need no engine of their own, only the codec contracts and the
+shared string helpers. This crate is their home; HTML and XML live in
+`elide-markup`.
 
 Each format ships a `Handler` + `Loader` pair behind a `*_format()` constructor,
 implemented against the traits in `elide-codec`. The handlers read a document's
 text so recognizers can scan it, then splice redactions back into the exact
 source positions and re-encode — faithfully, so only the redacted spans change.
-The structured formats (JSON, HTML, XML) reuse the shared extract-and-splice
-engine to map decoded text back to raw source offsets; CSV redacts cells as
-text.
+JSON maps each decoded string back to its raw source offsets; CSV redacts cells
+as text.
 
 These constructors are the crate's public surface. `elide-format`'s
 `FormatRegistry::with_builtin` wires the enabled ones into the registry alongside
-the rich-media formats from the other engine crates. Formats are opt-in: enable
-only the ones a build needs.
+the formats from the engine crates. Formats are opt-in: enable only the ones a
+build needs.
 
 ## Documentation
 

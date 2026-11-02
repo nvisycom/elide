@@ -66,7 +66,7 @@ feature flags:
 | `elide-backend` | Backend decorators: metering, rate limits, routing |
 | `elide-engine` | The `Orchestrator` for multi-part documents |
 | `elide-image`, `elide-audio` | The image and audio modalities, OCR, and speech-to-text |
-| `elide-plain`, `elide-office`, `elide-pdf` | Format codecs |
+| `elide-plain`, `elide-markup`, `elide-office`, `elide-pdf` | Format codecs |
 
 The API reference is on [docs.nvisy.com](https://docs.nvisy.com). This book is
 the guide: it explains how the pieces fit together, chapter by chapter.

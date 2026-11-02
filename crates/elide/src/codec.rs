@@ -83,48 +83,46 @@ pub mod image {
     pub use elide_image::codec::tiff_format;
 }
 
-/// Plain-text codec: the `*_format` constructors for the text-shaped formats
-/// (TXT, JSON, HTML, XML, CSV), and [`csv_format_with`] for a custom CSV
-/// dialect.
+/// Plain-text codec: the `*_format` constructors for the plain-text formats
+/// (TXT, JSON, CSV), and [`csv_format_with`] for a custom CSV dialect.
 ///
 /// Pass a constructor to [`FormatRegistry::with_replaced_format`] to swap the
 /// registered handler for a specific format.
 ///
 /// [`csv_format_with`]: elide_plain::csv_format_with
 /// [`FormatRegistry::with_replaced_format`]: elide_format::FormatRegistry::with_replaced_format
-#[cfg(any(
-    feature = "codec-txt",
-    feature = "codec-json",
-    feature = "codec-html",
-    feature = "codec-xml",
-    feature = "codec-csv"
-))]
+#[cfg(any(feature = "codec-txt", feature = "codec-json", feature = "codec-csv"))]
 #[cfg_attr(
     docsrs,
-    doc(cfg(any(
-        feature = "codec-txt",
-        feature = "codec-json",
-        feature = "codec-html",
-        feature = "codec-xml",
-        feature = "codec-csv"
-    )))
+    doc(cfg(any(feature = "codec-txt", feature = "codec-json", feature = "codec-csv")))
 )]
 pub mod plain {
-    #[cfg(feature = "codec-html")]
-    #[doc(inline)]
-    pub use elide_plain::html_format;
     #[cfg(feature = "codec-json")]
     #[doc(inline)]
     pub use elide_plain::json_format;
     #[cfg(feature = "codec-txt")]
     #[doc(inline)]
     pub use elide_plain::txt_format;
-    #[cfg(feature = "codec-xml")]
-    #[doc(inline)]
-    pub use elide_plain::xml_format;
     #[cfg(feature = "codec-csv")]
     #[doc(inline)]
     pub use elide_plain::{csv_format, csv_format_with};
+}
+
+/// Markup codec: the `*_format` constructors for the HTML and XML handlers.
+///
+/// Pass a constructor to [`FormatRegistry::with_replaced_format`] to swap the
+/// registered handler for a specific format.
+///
+/// [`FormatRegistry::with_replaced_format`]: elide_format::FormatRegistry::with_replaced_format
+#[cfg(any(feature = "codec-html", feature = "codec-xml"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "codec-html", feature = "codec-xml"))))]
+pub mod markup {
+    #[cfg(feature = "codec-html")]
+    #[doc(inline)]
+    pub use elide_markup::html_format;
+    #[cfg(feature = "codec-xml")]
+    #[doc(inline)]
+    pub use elide_markup::xml_format;
 }
 
 /// Office-document codec: the `*_format` constructors for the OOXML containers
