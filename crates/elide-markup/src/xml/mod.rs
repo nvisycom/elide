@@ -3,5 +3,7 @@
 mod handler;
 mod loader;
 
-pub use self::handler::{FORMAT_ID, format};
+#[cfg(test)]
+pub(crate) use self::handler::FORMAT_ID;
+pub use self::handler::format;
 pub(crate) use self::loader::XmlLoader;
