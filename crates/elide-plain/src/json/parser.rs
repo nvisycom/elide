@@ -14,8 +14,8 @@ use elide_core::modality::ResolvedHint;
 use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation};
 use elide_core::{Error, Result};
 
-use super::json_escape::decode_escape;
-use super::json_handler::{Leaf, LeafKind, Slot, is_json_literal};
+use super::escape::decode_escape;
+use super::handler::{Leaf, LeafKind, Slot, is_json_literal};
 
 /// Lex JSON source into a flat ordered slot list.
 ///

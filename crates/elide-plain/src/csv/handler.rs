@@ -18,7 +18,7 @@ use elide_core::modality::{Chunk, DataReader, DataWriter, ResolvedHint};
 use elide_core::redaction::Redactions;
 use elide_core::{Error, Result};
 
-use super::csv_loader::CsvLoader;
+use super::loader::CsvLoader;
 
 /// Stable [`FormatId`] for the CSV codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.tabular.csv");
@@ -324,7 +324,7 @@ impl DataWriter<Tabular> for CsvHandler {
 mod tests {
     use elide_codec::Loader;
 
-    use super::super::csv_loader::CsvLoader;
+    use super::super::loader::CsvLoader;
     use super::*;
 
     async fn load(text: &str) -> CsvHandler {

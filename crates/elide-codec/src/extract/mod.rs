@@ -40,7 +40,7 @@ use elide_core::modality::ResolvedHint;
 use elide_core::modality::text::Text;
 
 pub use self::addresser::SourceAddresser;
-pub use self::offset::{CharacterReferences, OffsetMap, OffsetRun, RunKind, decode_references};
+pub use self::offset::{OffsetMap, OffsetRun, RunKind};
 pub use self::state::{SharedSplice, SpliceState};
 pub use self::stream::ExtractStream;
 

@@ -38,7 +38,7 @@ schema = ["elide-core/schema"]
 ## Compile the `extract` module: the shared text-extract-and-splice engine
 ## (`Encoder`, `ExtractHandler`) that maps a decoded value back to raw source
 ## offsets. Enabled by a crate that drives a structured text format on it
-## (`elide-plain`'s markup handlers, `elide-office`'s OOXML). The `string` and
+## (`elide-markup`'s HTML and XML, `elide-office`'s OOXML). The `string` and
 ## `content` helpers it builds on are always compiled.
 extract = []
 

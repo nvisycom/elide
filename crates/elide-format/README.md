@@ -10,9 +10,10 @@ and decode it.
 `elide-codec` defines the codec *contracts* — the `Handler` and `Loader` traits,
 the `Format` descriptor, and the format-neutral decode machinery. The concrete
 handlers live with their engines, each behind that engine's `codec` feature: the
-leaf text-shaped formats (TXT, JSON, HTML, XML, CSV) in `elide-plain`, and the
-rich-media formats in `elide-image`, `elide-pdf`, `elide-audio`, and
-`elide-office`. This crate is the *assembly* layer that ties them together.
+plain-text formats (TXT, JSON, CSV) in `elide-plain`, HTML and XML in
+`elide-markup`, and the rich-media formats in `elide-image`, `elide-pdf`,
+`elide-audio`, and `elide-office`. This crate is the *assembly* layer that ties
+them together.
 
 It owns the `FormatRegistry`, which indexes every enabled format by its
 identifier, file extension, and content type, and decodes raw bytes through the

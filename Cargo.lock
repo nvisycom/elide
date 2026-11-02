@@ -1131,6 +1131,7 @@ dependencies = [
  "elide-image",
  "elide-lingua",
  "elide-llm",
+ "elide-markup",
  "elide-ner",
  "elide-office",
  "elide-operator",
@@ -1277,6 +1278,7 @@ dependencies = [
  "elide-codec",
  "elide-core",
  "elide-image",
+ "elide-markup",
  "elide-office",
  "elide-pdf",
  "elide-plain",
@@ -1343,6 +1345,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "elide-markup"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "elide-codec",
+ "elide-core",
+ "html5ever",
+ "quick-xml 0.42.0",
+ "tokio",
+]
+
+[[package]]
 name = "elide-ner"
 version = "0.1.0"
 dependencies = [
@@ -1363,6 +1377,7 @@ dependencies = [
  "bytes",
  "elide-codec",
  "elide-core",
+ "elide-markup",
  "hipstr",
  "quick-xml 0.42.0",
  "serde",
@@ -1446,8 +1461,6 @@ dependencies = [
  "csv",
  "elide-codec",
  "elide-core",
- "html5ever",
- "quick-xml 0.42.0",
  "serde_json",
  "tokio",
  "tracing",

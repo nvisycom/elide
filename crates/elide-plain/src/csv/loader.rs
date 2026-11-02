@@ -6,7 +6,7 @@ use elide_codec::content::ContentData;
 use elide_core::modality::tabular::Tabular;
 use elide_core::{Error, Result};
 
-use super::csv_handler::{CsvData, CsvHandler};
+use super::handler::{CsvData, CsvHandler};
 
 /// Loader for delimited text. Parses with the [`csv`] crate, treating the
 /// first row as headers and auto-detecting the field delimiter unless one

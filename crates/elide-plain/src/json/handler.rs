@@ -26,8 +26,8 @@ use elide_core::redaction::Redactions;
 use elide_core::{Error, Result};
 
 use super::JsonLoader;
-use super::json_escape::{decode_escape, json_escape};
-use super::json_parser::parse_slots;
+use super::escape::{decode_escape, json_escape};
+use super::parser::parse_slots;
 
 /// Stable [`FormatId`] for the JSON codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.text.json");

@@ -18,8 +18,9 @@
 use std::borrow::Cow;
 use std::ops::Range;
 
-use elide_codec::extract::{CharacterReferences, OffsetMap, Passage, decode_references};
+use elide_codec::extract::{OffsetMap, Passage};
 use elide_core::{Error, Result};
+use elide_markup::{CharacterReferences, decode_references};
 use quick_xml::escape::{escape, partial_escape, unescape};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::{NsReader, Reader};

@@ -16,7 +16,7 @@
 //! the parser itself knows nothing of `<script>` or "block level".
 //!
 //! [`ExtractedItem`]: elide_codec::extract::ExtractedItem
-//! [`MarkupRecombine`]: super::xml_handler::MarkupRecombine
+//! [`MarkupRecombine`]: super::recombine::MarkupRecombine
 //! [`MarkupConfig`]: super::config::MarkupConfig
 
 use std::ops::Range;
@@ -29,10 +29,10 @@ use elide_core::{Error, Result};
 use quick_xml::Reader;
 use quick_xml::events::{BytesEnd, BytesStart, Event};
 
+use super::address::{SpanKind, XmlItem, XmlSpan};
 use super::config::MarkupConfig;
-use super::stream::{AttributeSpan, MarkupSink, MarkupSource};
+use super::source::{AttributeSpan, MarkupSink, MarkupSource};
 use super::tag::HtmlTagExt;
-use super::xml_handler::{SpanKind, XmlItem, XmlSpan};
 
 /// Extract the redactable markup items from `raw` under `config`. Exposed for
 /// the HTML loader (lenient config) and for container formats that run the
@@ -436,14 +436,14 @@ struct SkipRegion {
 /// The byte length of a leading UTF-8 BOM (`U+FEFF`), or 0 if absent. quick-xml
 /// skips it and reports positions past it, so spans over the original bytes must
 /// add it back.
-pub(super) fn bom_len(raw: &str) -> usize {
+pub(crate) fn bom_len(raw: &str) -> usize {
     if raw.starts_with('\u{feff}') { 3 } else { 0 }
 }
 
 /// The lowercased name of the start tag `e`, read from `raw`: as a browser
 /// reads it in `html`, its local name in XML. HTML is case-insensitive, so
 /// lowercasing makes `<SCRIPT>` and `<P>` match too.
-pub(super) fn start_name(e: &BytesStart<'_>, raw: &str, html: bool) -> Result<String> {
+pub(crate) fn start_name(e: &BytesStart<'_>, raw: &str, html: bool) -> Result<String> {
     if html {
         return Ok(e.html5_tag(raw)?.name.to_ascii_lowercase());
     }
@@ -451,7 +451,7 @@ pub(super) fn start_name(e: &BytesStart<'_>, raw: &str, html: bool) -> Result<St
 }
 
 /// The end tag's lowercased name, read as [`start_name`] reads a start tag.
-pub(super) fn end_name(e: &BytesEnd<'_>, raw: &str, html: bool) -> Result<String> {
+pub(crate) fn end_name(e: &BytesEnd<'_>, raw: &str, html: bool) -> Result<String> {
     if html {
         return Ok(e.html5_tag(raw)?.name.to_ascii_lowercase());
     }
@@ -511,7 +511,8 @@ mod tests {
     use elide_core::modality::Chunk;
 
     use super::*;
-    use crate::markup::xml_handler::{FORMAT_ID, MarkupAddresser, XmlSpan};
+    use crate::engine::address::{MarkupAddresser, XmlSpan};
+    use crate::xml::FORMAT_ID;
 
     /// Build a body stream over `raw` with an explicit config so a test can read
     /// out what the parser extracted (values and hints).

@@ -12,47 +12,47 @@ use elide_core::modality::text::Text;
 use elide_core::{Error, Result};
 use quick_xml::events::BytesStart;
 
+use super::address::{XmlItem, XmlSpan};
 use super::tag::HtmlTagExt;
-use super::xml_handler::{XmlItem, XmlSpan};
 
 /// One redactable attribute's source spans: its `value` (the redactable inner
 /// bytes) and its `name` (the located context hint), the latter `None` when the
 /// name could not be placed in the source.
-pub(super) struct AttributeSpan {
-    pub(super) name: Option<Range<usize>>,
-    pub(super) value: Range<usize>,
+pub(crate) struct AttributeSpan {
+    pub(crate) name: Option<Range<usize>>,
+    pub(crate) value: Range<usize>,
 }
 
 /// A start tag as the engine reads it.
-pub(super) struct StartTag {
+pub(crate) struct StartTag {
     /// The name, lowercased for matching.
-    pub(super) name: String,
+    pub(crate) name: String,
     /// The name as written, for its context hint.
-    pub(super) written: String,
+    pub(crate) written: String,
     /// The redactable attributes, in source order.
-    pub(super) attributes: Vec<AttributeSpan>,
+    pub(crate) attributes: Vec<AttributeSpan>,
 }
 
 /// The retained source document, read-only. Owns the span queries the engine
 /// runs against it: slicing a range, finding an attribute value's source span,
 /// and dropping whitespace-only spans.
 #[derive(Clone, Copy)]
-pub(super) struct MarkupSource<'a> {
+pub(crate) struct MarkupSource<'a> {
     raw: &'a str,
 }
 
 impl<'a> MarkupSource<'a> {
-    pub(super) fn new(raw: &'a str) -> Self {
+    pub(crate) fn new(raw: &'a str) -> Self {
         Self { raw }
     }
 
     /// The whole retained source document.
-    pub(super) fn raw(&self) -> &'a str {
+    pub(crate) fn raw(&self) -> &'a str {
         self.raw
     }
 
     /// The source text over `range`.
-    pub(super) fn slice(&self, range: Range<usize>) -> &'a str {
+    pub(crate) fn slice(&self, range: Range<usize>) -> &'a str {
         &self.raw[range]
     }
 
@@ -71,7 +71,7 @@ impl<'a> MarkupSource<'a> {
     /// redact and is left out.
     ///
     /// [`AttrError`]: quick_xml::events::attributes::AttrError
-    pub(super) fn start_tag(&self, e: &BytesStart<'_>, html: bool) -> Result<StartTag> {
+    pub(crate) fn start_tag(&self, e: &BytesStart<'_>, html: bool) -> Result<StartTag> {
         let mut attributes = Vec::new();
         if html {
             let tag = e.html5_tag(self.raw)?;
@@ -139,13 +139,13 @@ impl<'a> MarkupSource<'a> {
 /// offset (the cumulative length of their values). [`push`](Self::push) keeps
 /// the two in step, every item advances the offset by its own length, so the
 /// offset a chunk carries can never drift from the stream it indexes.
-pub(super) struct MarkupSink {
+pub(crate) struct MarkupSink {
     items: Vec<XmlItem>,
     offset: usize,
 }
 
 impl MarkupSink {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             items: Vec::new(),
             offset: 0,
@@ -153,14 +153,14 @@ impl MarkupSink {
     }
 
     /// The current engine-space offset (where the next item's value begins).
-    pub(super) fn offset(&self) -> usize {
+    pub(crate) fn offset(&self) -> usize {
         self.offset
     }
 
     /// Append an item for `value` read at `address`, joining the passage
     /// before it as `passage` says, and advance the offset by the value's
     /// length. Returns the new item's index.
-    pub(super) fn push(&mut self, (value, address): (String, XmlSpan), passage: Passage) -> usize {
+    pub(crate) fn push(&mut self, (value, address): (String, XmlSpan), passage: Passage) -> usize {
         self.offset += value.len();
         let index = self.items.len();
         self.items.push(ExtractedItem {
@@ -174,7 +174,7 @@ impl MarkupSink {
 
     /// Attach hints to items, each pair naming an item index and its hints.
     /// Empty hint lists are ignored.
-    pub(super) fn apply_hints(
+    pub(crate) fn apply_hints(
         &mut self,
         hints: impl IntoIterator<Item = (usize, Vec<ResolvedHint<Text>>)>,
     ) {
@@ -186,7 +186,7 @@ impl MarkupSink {
     }
 
     /// The finished item stream.
-    pub(super) fn into_items(self) -> Vec<XmlItem> {
+    pub(crate) fn into_items(self) -> Vec<XmlItem> {
         self.items
     }
 }

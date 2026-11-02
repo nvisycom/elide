@@ -21,28 +21,28 @@ use quick_xml::events::{BytesEnd, BytesStart};
 
 /// An HTML tag as a browser reads it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct HtmlTag<'a> {
+pub(crate) struct HtmlTag<'a> {
     /// The tag name as written; a browser matches it lowercased.
-    pub(super) name: &'a str,
+    pub(crate) name: &'a str,
     /// The attributes, in source order.
-    pub(super) attributes: Vec<HtmlAttribute<'a>>,
+    pub(crate) attributes: Vec<HtmlAttribute<'a>>,
 }
 
 /// One attribute of an HTML tag, borrowed from the tag as written.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct HtmlAttribute<'a> {
+pub(crate) struct HtmlAttribute<'a> {
     /// The name as written.
-    pub(super) name: &'a str,
+    pub(crate) name: &'a str,
     /// The value as written, between its quotes; `None` for an attribute
     /// written without one (`<input disabled>`).
-    pub(super) value: Option<&'a str>,
+    pub(crate) value: Option<&'a str>,
     /// The whole attribute, from its name to the end of its value (closing
     /// quote included).
-    pub(super) source: &'a str,
+    pub(crate) source: &'a str,
 }
 
 /// Reads a quick-xml tag event the way a browser reads the HTML tag.
-pub(super) trait HtmlTagExt {
+pub(crate) trait HtmlTagExt {
     /// The tag's name and attributes as a browser reads them, borrowed from
     /// `raw`, the document the event was read from.
     ///

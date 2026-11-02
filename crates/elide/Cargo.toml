@@ -148,8 +148,8 @@ codec-ooxml = ["codec-docx", "codec-pptx"]
 ## Per-format handlers.
 codec-txt = ["codec", "dep:elide-plain", "elide-plain/txt", "elide-format/txt"]
 codec-json = ["codec", "dep:elide-plain", "elide-plain/json", "elide-format/json"]
-codec-html = ["codec", "dep:elide-plain", "elide-plain/html", "elide-format/html"]
-codec-xml = ["codec", "dep:elide-plain", "elide-plain/xml", "elide-format/xml"]
+codec-html = ["codec", "dep:elide-markup", "elide-markup/html", "elide-format/html"]
+codec-xml = ["codec", "dep:elide-markup", "elide-markup/xml", "elide-format/xml"]
 codec-csv = ["codec", "tabular", "dep:elide-plain", "elide-plain/csv", "elide-format/csv"]
 codec-xlsx = ["codec", "tabular", "dep:elide-office", "elide-format/xlsx", "metadata"]
 codec-png = ["codec", "image", "elide-image/codec", "elide-image/png", "elide-format/png"]
@@ -205,6 +205,7 @@ elide-llm = { workspace = true, features = [], optional = true }
 elide-audio = { workspace = true, features = [], optional = true }
 elide-image = { workspace = true, features = [], optional = true }
 elide-plain = { workspace = true, features = [], optional = true }
+elide-markup = { workspace = true, features = [], optional = true }
 elide-office = { workspace = true, features = [], optional = true }
 elide-pdf = { workspace = true, features = [], optional = true }
 elide-codec = { workspace = true, features = [], optional = true }
