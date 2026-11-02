@@ -1,9 +1,0 @@
-# Bulgaria (BG)
-
-[markers]
-distinctive = [
-  "EOOD", "KDA", "OOD", "SCE"
-]
-ambiguous = [
-  "AD", "ET", "KD", "SD", "SE"
-]

@@ -35,7 +35,6 @@ function build(sources: Sources): Orchestrator {
   const recognizer = Recognizer.pattern({
     builtinPatterns: sources.patterns,
     builtinDictionaries: sources.dictionaries,
-    builtinWalks: sources.patterns,
   });
   // A text-only pipeline: one recognizer, the default layers, the policy above.
   return new Orchestrator().with(

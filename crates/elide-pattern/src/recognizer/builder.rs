@@ -14,9 +14,7 @@ use regex::{Error as RegexError, Regex, RegexBuilder, RegexSet, RegexSetBuilder}
 use super::PatternRecognizer;
 use crate::context::matching::{KeywordMatcher, SubstringMatcher};
 use crate::context::{CompiledContext, RuleContext};
-use crate::rule::{
-    CompiledDictionary, CompiledPattern, CompiledWalk, Dictionary, Pattern, Variant, Walk,
-};
+use crate::rule::{CompiledDictionary, CompiledPattern, Dictionary, Pattern, Variant};
 use crate::shipped;
 use crate::validators::ValidatorRegistry;
 
@@ -52,7 +50,7 @@ impl RegexBudget {
 
 /// Accumulator of rules + validator registry for [`PatternRecognizer`].
 ///
-/// Patterns, dictionaries, and walks are stored as authored, compilation
+/// Patterns and dictionaries are stored as authored, compilation
 /// into the pooled scanners happens in [`build`].
 ///
 /// [`build`]: Self::build
@@ -65,7 +63,6 @@ pub struct PatternRecognizerBuilder {
     ///
     /// [`filter_by_catalog`]: Self::filter_by_catalog
     context_sources: Vec<Dictionary>,
-    walks: Vec<Walk>,
     validators: Option<ValidatorRegistry>,
     /// Byte budget for each *individual* variant regex. This is the knob to
     /// bound a caller-supplied rule: a legitimate single regex compiles well
@@ -95,17 +92,15 @@ impl PatternRecognizerBuilder {
         Self::default()
     }
 
-    /// Pre-seed with the shipped built-in patterns, dictionaries, and
-    /// walks.
+    /// Pre-seed with the shipped built-in patterns and dictionaries.
     ///
     /// Shorthand for `Self::new().with_builtin_patterns()
-    /// .with_builtin_dictionaries().with_builtin_walks()`.
+    /// .with_builtin_dictionaries()`.
     #[must_use]
     pub fn builtin() -> Self {
         Self::new()
             .with_builtin_patterns()
             .with_builtin_dictionaries()
-            .with_builtin_walks()
     }
 
     /// Register one pattern; patterns accumulate in registration
@@ -124,26 +119,10 @@ impl PatternRecognizerBuilder {
         self
     }
 
-    /// Register one walk; walks accumulate in registration order.
-    #[must_use]
-    pub fn with_walk(mut self, walk: Walk) -> Self {
-        self.walks.push(walk);
-        self
-    }
-
     /// Register every shipped built-in pattern.
     #[must_use]
     pub fn with_builtin_patterns(mut self) -> Self {
         self.patterns.extend(shipped::patterns::all());
-        self
-    }
-
-    /// Register every shipped built-in walk: company names ending in a legal
-    /// form, institutions around a head word, and a person's name after a
-    /// title.
-    #[must_use]
-    pub fn with_builtin_walks(mut self) -> Self {
-        self.walks.extend(shipped::walks::all());
         self
     }
 
@@ -241,7 +220,7 @@ impl PatternRecognizerBuilder {
         self
     }
 
-    /// Drop every pattern, dictionary, and walk none of whose candidate
+    /// Drop every pattern and dictionary none of whose candidate
     /// labels are declared in `catalog`.
     ///
     /// The engine uses this to build a per-request recognizer from a
@@ -254,8 +233,6 @@ impl PatternRecognizerBuilder {
     pub fn filter_by_catalog(mut self, catalog: &LabelCatalog) -> Self {
         self.patterns
             .retain(|p| p.labels.iter().any(|l| catalog.contains(l)));
-        self.walks
-            .retain(|w| w.labels.iter().any(|l| catalog.contains(l)));
         let (kept, dropped): (Vec<_>, Vec<_>) = mem::take(&mut self.dictionaries)
             .into_iter()
             .partition(|d| d.labels.iter().any(|l| catalog.contains(l)));
@@ -265,8 +242,7 @@ impl PatternRecognizerBuilder {
             .patterns
             .iter()
             .map(|p| &p.context)
-            .chain(self.dictionaries.iter().map(|d| &d.context))
-            .chain(self.walks.iter().map(|w| &w.context));
+            .chain(self.dictionaries.iter().map(|d| &d.context));
         let referenced: HashSet<&str> = contexts
             .flat_map(|c| c.dictionaries.iter().map(String::as_str))
             .collect();
@@ -279,14 +255,13 @@ impl PatternRecognizerBuilder {
         self
     }
 
-    /// Return `true` when no patterns, dictionaries, or walks are
-    /// registered.
+    /// Return `true` when no patterns or dictionaries are registered.
     ///
     /// The engine uses this to skip the per-request recognizer
     /// entirely after a catalog filter dropped every rule.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.patterns.is_empty() && self.dictionaries.is_empty() && self.walks.is_empty()
+        self.patterns.is_empty() && self.dictionaries.is_empty()
     }
 
     /// Borrow the accumulated patterns.
@@ -301,12 +276,6 @@ impl PatternRecognizerBuilder {
         &self.dictionaries
     }
 
-    /// Borrow the accumulated walks.
-    #[must_use]
-    pub fn walks(&self) -> &[Walk] {
-        &self.walks
-    }
-
     /// Compile every rule, and its `[context]`, into the pooled scanners.
     ///
     /// # Errors
@@ -315,7 +284,7 @@ impl PatternRecognizerBuilder {
     /// fails to compile, when a variant references an unknown
     /// validator name, when a dictionary's `scoring` is invalid
     /// or under-declared for some term's source column, or when
-    /// a walk's or the shared automata cannot be constructed.
+    /// the shared automata cannot be constructed.
     pub fn build(self) -> Result<PatternRecognizer> {
         let validators = self
             .validators
@@ -324,20 +293,11 @@ impl PatternRecognizerBuilder {
         let mut contexts = Vec::new();
         let (compiled_patterns, regex_set) = self.compile_patterns(&validators, &mut contexts)?;
         let (compiled_dicts, aho) = self.compile_dictionaries(&mut contexts)?;
-        let walks = self
-            .walks
-            .iter()
-            .map(|walk| {
-                CompiledWalk::compile(walk, self.compile_context(&walk.context, &mut contexts))
-            })
-            .collect::<Result<_>>()?;
-
         Ok(PatternRecognizer {
             patterns: compiled_patterns,
             regex_set,
             dictionaries: compiled_dicts,
             aho,
-            walks,
             contexts,
             keyword_matcher: self
                 .keyword_matcher
