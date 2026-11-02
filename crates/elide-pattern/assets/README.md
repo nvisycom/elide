@@ -39,27 +39,11 @@ assets/
     en/                    English-language terms
       finance/             currencies (USD, US Dollar, EUR, …)
       personal/            languages, nationalities, religions
-
-  walks/                   one folder per walk, each laid out the same way:
-    <walk>/
-      walk.toml            the rule: name, label, direction, and the words
-                           that shape a name in any language
-      countries/<cc>.toml  the markers a country defines, when its markers
-                           belong to countries (legal forms)
-      languages/<lang>.toml
-                           a language's markers, context keywords, and the
-                           words that shape a name: connectors, lead-in
-                           clauses, verbs, roles
-    legal_form/            company names ending in a legal form
-    institution/           institutions around a head word
-    person_title/          a person's name after a title
 ```
 
 Each pattern is a TOML file (`<name>.toml`). Each dictionary pairs a TOML
 metadata sidecar with a term source: `.csv` for multi-column lists (term + alias
-columns with per-column scores), `.txt` for one-per-line lists. A walk is a TOML
-rule plus the markers a name sits next to and the per-language words that shape
-a name.
+columns with per-column scores), `.txt` for one-per-line lists.
 
 ## Scoring conventions
 
@@ -113,6 +97,3 @@ a leading and a trailing boundary.
 Many patterns + validators are ports of upstream Microsoft Presidio recognizers.
 See [`PRESIDIO.md`](PRESIDIO.md) for the MIT-license attribution and the
 upstream class references that each adapted TOML's leading comment links to.
-
-The walks' markers and word lists are converted from stella/anonymize; see
-[`STELLA.md`](STELLA.md) for the Apache-2.0 attribution.

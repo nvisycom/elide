@@ -21,9 +21,6 @@ pub struct PatternRecognizerConfig {
     pub builtin_patterns: bool,
     /// Enable the shipped dictionaries.
     pub builtin_dictionaries: bool,
-    /// Enable the shipped walks: company names ending in a legal form,
-    /// institutions, and a person's name after a title (default `false`).
-    pub builtin_walks: Option<bool>,
 }
 
 /// Compile a pattern recognizer from the selected built-in sources.
@@ -42,9 +39,6 @@ pub(super) fn build_pattern(
     }
     if config.builtin_dictionaries {
         builder = builder.with_builtin_dictionaries();
-    }
-    if config.builtin_walks.unwrap_or(false) {
-        builder = builder.with_builtin_walks();
     }
     Ok(builder.build()?)
 }

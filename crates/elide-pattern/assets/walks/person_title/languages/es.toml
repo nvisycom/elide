@@ -1,8 +1,0 @@
-[markers]
-distinctive = [
-  "Dr", "DR.", "Dr.", "PROF", "Prof", "PROF.", "Prof.", "SR.", "Sr.", "SRA.",
-  "Sra."
-]
-ambiguous = [
-  "Don", "DOÑA", "Doña", "SEÑOR", "Señor", "SEÑORA", "Señora"
-]
