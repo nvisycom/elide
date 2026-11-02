@@ -84,7 +84,6 @@ tsify = { version = "0.5", default-features = false, features = ["js"] }
 
 # Derive macros & error handling
 thiserror = { version = "2.0", features = [] }
-derive_more = { version = "2.0", features = ["as_ref", "deref", "deref_mut", "display", "from", "from_str", "into", "into_iterator", "is_variant"] }
 derive_builder = { version = "0.20", features = [] }
 
 # Primitive datatypes
@@ -138,6 +137,7 @@ phonenumber = { version = "0.3", default-features = false }
 
 # Markup parsing
 quick-xml = { version = "0.42", features = [] }
+html5ever = { version = "0.40", default-features = false, features = [] }
 lopdf = { version = "0.46", default-features = false }
 
 # File-type inference

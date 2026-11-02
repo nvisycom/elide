@@ -29,14 +29,18 @@ mod html_loader;
 #[cfg(feature = "xml")]
 mod markup_parser;
 #[cfg(feature = "xml")]
+mod sanitize;
+#[cfg(feature = "xml")]
 mod stream;
+#[cfg(feature = "xml")]
+mod tag;
 #[cfg(feature = "xml")]
 mod xml_handler;
 #[cfg(feature = "xml")]
 mod xml_loader;
 
 #[cfg(feature = "html")]
-pub use self::html_handler::{format as html_format, format_with as html_format_with};
+pub use self::html_handler::format as html_format;
 #[cfg(feature = "html")]
 pub(crate) use self::html_loader::HtmlLoader;
 #[cfg(feature = "xml")]

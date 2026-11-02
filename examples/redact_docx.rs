@@ -44,7 +44,9 @@ async fn main() -> Result<()> {
     // 1. Decode the container through the codec layer. The orchestrator
     //    discovers each part's modality by trial, so no modality is named here.
     let registry = FormatRegistry::with_builtin();
-    let mut document = registry.document("contact.docx", SAMPLE).await?;
+    let mut document = registry
+        .document("contact.docx", SAMPLE, HiddenContentPolicy::default())
+        .await?;
 
     // 2. Assemble the orchestrator: one shared scope, plus a text pipeline
     //    for the body and an image pipeline for the embedded media. The

@@ -48,27 +48,27 @@ impl Modality for Metadata {
 }
 
 impl Metadata {
-    /// Build the detection entity for a metadata field.
-    ///
-    /// Every metadata owner (EXIF, document properties, …) recognizes a field the
-    /// same mechanical way — a present field with a known `label` becomes a
-    /// max-confidence entity carrying one detection event attributed to `source`
-    /// (the reader that surfaced it) — and differs only in its key→label mapping.
-    /// This is that shared mechanical half, so each owner writes just the mapping.
+    /// The source every metadata field entity is attributed to: a field is
+    /// recognized by the label its codec stamped, the same way wherever the
+    /// entity is built.
+    pub const FIELD_SOURCE: &'static str = "metadata-field";
+
+    /// Build the detection entity for a metadata field `key` its format labels
+    /// `label`, attributed to [`FIELD_SOURCE`](Self::FIELD_SOURCE).
     ///
     /// A metadata field is present or it is not, nothing probabilistic to weigh,
     /// so the entity carries [`Confidence::MAX`]. Returns `None` only if the
     /// entity builder rejects it, which cannot happen here: both the label and
     /// the location are always set.
     #[must_use]
-    pub fn field_entity(key: &str, label: LabelRef, source: &str) -> Option<Entity<Self>> {
+    pub fn field_entity(key: &str, label: LabelRef) -> Option<Entity<Self>> {
         let location = MetadataLocation::new(key.to_owned());
         let event = AuditEvent::metadata(
-            source,
+            Self::FIELD_SOURCE,
             Confidence::MAX,
             location.clone(),
             MetadataEvent {
-                source: source.to_owned().into(),
+                source: Self::FIELD_SOURCE.into(),
             },
         );
         Entity::builder()

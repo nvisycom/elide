@@ -1,27 +1,63 @@
 //! [`StoredPart`]: one package part, read once and tagged with its
-//! [`PartRole`], with the XML text extraction and splicing it supports.
+//! [`PartKind`] and [`PartRole`], with the XML text extraction and splicing it
+//! supports.
 
 use bytes::Bytes;
-use elide_core::{Error, ErrorKind, Result};
+use elide_codec::extract::Passage;
+use elide_core::{Error, Result};
 use hipstr::HipStr;
 
+use crate::opc::attributes::TextAttribute;
 use crate::opc::block::{Block, IssueKind, Replacement};
+use crate::opc::kind::PartKind;
 use crate::opc::part::{PartPath, PartRole};
-use crate::opc::xml_span::{Span, relationship_spans, text_spans};
+use crate::opc::xml_span::{
+    BlockKind, PRESERVE_SPACE, Span, attribute_spans, cell_markup_spans, preserve_space_at,
+    relationship_spans, text_spans,
+};
 
 /// One package part: its path, its role, and its bytes, retained for extraction
 /// and a byte-faithful re-pack.
 #[derive(Debug, Clone)]
 pub(crate) struct StoredPart {
     path: PartPath,
+    kind: PartKind,
     role: PartRole,
     bytes: Bytes,
+    /// For an XML part, the text attributes redacted in it; `None` for a part
+    /// that is not XML.
+    attributes: Option<&'static [TextAttribute]>,
 }
 
 impl StoredPart {
-    /// The part at `path`, tagged with `role`, holding `bytes`.
-    pub(crate) fn new(path: PartPath, role: PartRole, bytes: Bytes) -> Self {
-        Self { path, role, bytes }
+    /// The part at `path` of `kind`, tagged with `role`, holding `bytes`; an XML
+    /// part carries the text `attributes` redacted in it.
+    pub(crate) fn new(
+        path: PartPath,
+        kind: PartKind,
+        role: PartRole,
+        bytes: Bytes,
+        attributes: Option<&'static [TextAttribute]>,
+    ) -> Self {
+        Self {
+            path,
+            kind,
+            role,
+            bytes,
+            attributes,
+        }
+    }
+
+    /// Whether the part's text is read into blocks and spliced: every XML part
+    /// but a property part, which is redacted whole, and a relationships part.
+    pub(crate) fn is_text(&self) -> bool {
+        self.attributes.is_some() && self.role != PartRole::Property
+            || self.role == PartRole::RelationshipTargets
+    }
+
+    /// What the part is.
+    pub(crate) fn kind(&self) -> PartKind {
+        self.kind
     }
 
     /// The part's path.
@@ -32,6 +68,11 @@ impl StoredPart {
     /// The part's role.
     pub(crate) fn role(&self) -> PartRole {
         self.role
+    }
+
+    /// The part's bytes as UTF-8 text, or `None` when they are not.
+    pub(crate) fn text(&self) -> Option<&str> {
+        self.as_text().ok()
     }
 
     /// The part's raw bytes (a cheap ref-counted share).
@@ -66,66 +107,74 @@ impl StoredPart {
                 start: span.range.start,
                 end: span.range.end,
                 offsets,
+                passage: span.passage,
             });
         }
         Ok(blocks)
     }
 
-    /// The redactable spans of `raw`, chosen by this part's role: the
+    /// The redactable spans of `raw`, in source order: by this part's role, the
     /// text/comment/CDATA spans of an [`ElementText`](PartRole::ElementText)
-    /// part, or the external hyperlink `Target` values of a
-    /// [`RelationshipTargets`](PartRole::RelationshipTargets) part. Errs on
-    /// malformed XML.
+    /// part, the text outside the cells of a [`Cells`](PartRole::Cells) part, or
+    /// the external hyperlink `Target` values of a
+    /// [`RelationshipTargets`](PartRole::RelationshipTargets) part; and the
+    /// values of its text attributes. An attribute inside a passage follows the
+    /// whole passage, which stays unbroken. Errs on malformed XML.
     fn spans(&self, raw: &str) -> std::result::Result<Vec<Span>, ()> {
-        match self.role {
-            PartRole::RelationshipTargets => relationship_spans(raw),
-            _ => text_spans(raw),
+        let text = match self.role {
+            PartRole::RelationshipTargets => return relationship_spans(raw),
+            PartRole::ElementText => text_spans(raw)?,
+            PartRole::Cells => cell_markup_spans(raw)?,
+            PartRole::Structure => Vec::new(),
+            PartRole::Property | PartRole::Binary(_) => return Ok(Vec::new()),
+        };
+        // Each span sorts by where its passage starts, then by its own start.
+        let mut anchored = Vec::new();
+        let mut anchor = 0;
+        for span in text {
+            if span.passage == Passage::Start {
+                anchor = span.range.start;
+            }
+            anchored.push((anchor, span));
         }
+        for span in attribute_spans(raw, self.attributes.unwrap_or_default())? {
+            anchored.push((span.range.start, span));
+        }
+        anchored.sort_by_key(|(anchor, span)| (*anchor, span.range.start));
+        Ok(anchored.into_iter().map(|(_, span)| span).collect())
     }
 
     /// Splice `replacements` into this part's XML, leaving every byte outside a
     /// replaced span identical. Fail-closed: validates the whole set first.
     pub(crate) fn splice(&self, replacements: &[&Replacement]) -> Result<String> {
-        let raw = self.as_text().map_err(|_| {
-            Error::new(
-                ErrorKind::MalformedInput,
-                format!("part `{}` not UTF-8", self.path),
-            )
-        })?;
+        let raw = self
+            .as_text()
+            .map_err(|_| Error::malformed(format!("part `{}` not UTF-8", self.path)))?;
         let mut ordered = replacements.to_vec();
         ordered.sort_by_key(|r| (r.start, r.end));
 
         let mut prev_end = 0usize;
         for r in &ordered {
             if r.start > r.end || r.end > raw.len() {
-                return Err(Error::new(
-                    ErrorKind::Processing,
-                    format!(
-                        "span {}..{} out of bounds in `{}` (len {})",
-                        r.start,
-                        r.end,
-                        r.part,
-                        raw.len()
-                    ),
-                ));
+                return Err(Error::processing(format!(
+                    "span {}..{} out of bounds in `{}` (len {})",
+                    r.start,
+                    r.end,
+                    r.part,
+                    raw.len()
+                )));
             }
             if !raw.is_char_boundary(r.start) || !raw.is_char_boundary(r.end) {
-                return Err(Error::new(
-                    ErrorKind::Processing,
-                    format!(
-                        "span {}..{} falls mid-character in `{}`",
-                        r.start, r.end, r.part
-                    ),
-                ));
+                return Err(Error::processing(format!(
+                    "span {}..{} falls mid-character in `{}`",
+                    r.start, r.end, r.part
+                )));
             }
             if r.start < prev_end {
-                return Err(Error::new(
-                    ErrorKind::Processing,
-                    format!(
-                        "span {}..{} overlaps an earlier one in `{}`",
-                        r.start, r.end, r.part
-                    ),
-                ));
+                return Err(Error::processing(format!(
+                    "span {}..{} overlaps an earlier one in `{}`",
+                    r.start, r.end, r.part
+                )));
             }
             prev_end = r.end;
         }
@@ -133,26 +182,29 @@ impl StoredPart {
         // Recover each span's event kind so the replacement text is escaped for
         // its context (text content, attribute value) or validated against
         // comment/CDATA framing, before it enters the byte stream.
-        let spans = self.spans(raw).map_err(|_| {
-            Error::new(
-                ErrorKind::MalformedInput,
-                format!("part `{}` malformed XML", self.path),
-            )
-        })?;
+        let spans = self
+            .spans(raw)
+            .map_err(|_| Error::malformed(format!("part `{}` malformed XML", self.path)))?;
 
         let mut out = String::with_capacity(raw.len());
         let mut cursor = 0usize;
         for r in ordered {
             let span = Span::covering(&spans, r.start, r.end).ok_or_else(|| {
-                Error::new(
-                    ErrorKind::Processing,
-                    format!(
-                        "span {}..{} is not a text span in `{}`",
-                        r.start, r.end, r.part
-                    ),
-                )
+                Error::processing(format!(
+                    "span {}..{} is not a text span in `{}`",
+                    r.start, r.end, r.part
+                ))
             })?;
             let safe = span.escape(&r.text, r)?;
+            // A run whose new text starts or ends with whitespace keeps it.
+            if span.kind == BlockKind::Text
+                && let Some(at) = preserve_space_at(raw, r.start, &safe)
+                && at >= cursor
+            {
+                out.push_str(&raw[cursor..at]);
+                out.push_str(PRESERVE_SPACE);
+                cursor = at;
+            }
             out.push_str(&raw[cursor..r.start]);
             out.push_str(&safe);
             cursor = r.end;
@@ -170,8 +222,10 @@ mod tests {
     fn element(xml: &'static str) -> StoredPart {
         StoredPart::new(
             PartPath::from("word/document.xml"),
+            PartKind::Main,
             PartRole::ElementText,
             Bytes::from(xml),
+            Some(&[]),
         )
     }
 
@@ -179,9 +233,30 @@ mod tests {
     fn rels(xml: impl Into<Bytes>) -> StoredPart {
         StoredPart::new(
             PartPath::from("word/_rels/document.xml.rels"),
+            PartKind::Relationships,
             PartRole::RelationshipTargets,
             xml.into(),
+            Some(&[]),
         )
+    }
+
+    #[test]
+    fn splice_keeps_the_edge_whitespace_a_replacement_leaves() {
+        let part = element(
+            r#"<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:r><w:t>Roe and</w:t></w:r></w:p>"#,
+        );
+        let raw = part.text().unwrap();
+        let start = raw.find("Roe and").unwrap();
+        let replacement = Replacement {
+            part: part.path().clone(),
+            start,
+            end: start + "Roe and".len(),
+            text: " and".into(),
+        };
+        assert_eq!(
+            part.splice(&[&replacement]).unwrap(),
+            r#"<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:r><w:t xml:space="preserve"> and</w:t></w:r></w:p>"#,
+        );
     }
 
     #[test]
@@ -268,7 +343,12 @@ mod tests {
     fn relationship_target_round_trips_through_a_splice() {
         let part = rels(RELS);
         let block = &part.text_blocks().expect("decodes")[0];
-        let replacement = Replacement::for_block(block, "mailto:[EMAIL]");
+        let replacement = Replacement {
+            part: block.part.clone(),
+            start: block.start,
+            end: block.end,
+            text: "mailto:[EMAIL]".into(),
+        };
         let out = part.splice(&[&replacement]).expect("splices");
 
         // The original email is gone; the redacted target sits in its place, and

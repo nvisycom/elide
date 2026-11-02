@@ -12,7 +12,7 @@
 mod config;
 mod middleware;
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use reqwest_middleware::ClientBuilder;
 use reqwest_middleware::reqwest::Client;
 use rig_reqwest::ReqwestMiddlewareClient;
@@ -49,12 +49,7 @@ pub fn build_http_client(config: &HttpConfig) -> Result<ReqwestMiddlewareClient>
         .connect_timeout(config.connect_timeout)
         .pool_idle_timeout(config.idle_timeout)
         .build()
-        .map_err(|e| {
-            Error::new(
-                ErrorKind::Configuration,
-                format!("failed to build HTTP client: {e}"),
-            )
-        })?;
+        .map_err(|e| Error::configuration(format!("failed to build HTTP client: {e}")))?;
 
     let middleware = ClientBuilder::new(client)
         .with(tracing_layer())

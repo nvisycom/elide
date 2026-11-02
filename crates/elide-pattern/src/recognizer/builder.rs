@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use aho_corasick::{AhoCorasick, MatchKind};
 use elide_core::entity::LabelCatalog;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use regex::{Error as RegexError, Regex, RegexBuilder, RegexSet, RegexSetBuilder};
 
 use super::PatternRecognizer;
@@ -374,18 +374,15 @@ impl PatternRecognizerBuilder {
             let context = self.compile_context(&pattern.context, contexts);
             for variant in &pattern.variants {
                 let regex = self.compile_regex(&variant.regex).map_err(|e| {
-                    Error::new(
-                        ErrorKind::Configuration,
-                        format!("pattern `{}`: invalid regex: {e}", pattern.name),
-                    )
+                    Error::configuration(format!("pattern `{}`: invalid regex: {e}", pattern.name))
                 })?;
                 let validator = match variant.validator.as_deref() {
                     None => None,
                     Some(name) => Some(validators.resolve(name).ok_or_else(|| {
-                        Error::new(
-                            ErrorKind::Configuration,
-                            format!("pattern `{}`: unknown validator `{}`", pattern.name, name),
-                        )
+                        Error::configuration(format!(
+                            "pattern `{}`: unknown validator `{}`",
+                            pattern.name, name
+                        ))
                     })?),
                 };
                 let span_group = regex
@@ -416,12 +413,11 @@ impl PatternRecognizerBuilder {
             if let Some(bytes) = self.union_budget.dfa_size {
                 builder.dfa_size_limit(bytes);
             }
-            Some(builder.build().map_err(|e| {
-                Error::new(
-                    ErrorKind::Configuration,
-                    format!("compiling regex set: {e}"),
-                )
-            })?)
+            Some(
+                builder
+                    .build()
+                    .map_err(|e| Error::configuration(format!("compiling regex set: {e}")))?,
+            )
         };
         Ok((compiled, regex_set))
     }
@@ -457,10 +453,10 @@ impl PatternRecognizerBuilder {
 
         for dict in &self.dictionaries {
             if let Err(reason) = dict.scoring.validate() {
-                return Err(Error::new(
-                    ErrorKind::Configuration,
-                    format!("dictionary `{}`: {reason}", dict.name),
-                ));
+                return Err(Error::configuration(format!(
+                    "dictionary `{}`: {reason}",
+                    dict.name
+                )));
             }
             let term_start = all_terms.len();
             let mut term_scores = Vec::with_capacity(dict.terms.len());
@@ -479,14 +475,11 @@ impl PatternRecognizerBuilder {
                         let column_desc = entry
                             .column
                             .map_or_else(|| "no column".to_owned(), |c| format!("column {c}"));
-                        Error::new(
-                            ErrorKind::Configuration,
-                            format!(
-                                "dictionary `{}`: term `{}` ({column_desc}) has no score in \
+                        Error::configuration(format!(
+                            "dictionary `{}`: term `{}` ({column_desc}) has no score in \
                                  dictionary scoring",
-                                dict.name, entry.term,
-                            ),
-                        )
+                            dict.name, entry.term,
+                        ))
                     })?;
                 term_scores.push(score);
             }
@@ -510,21 +503,17 @@ impl PatternRecognizerBuilder {
         if let Some(max) = self.term_count_limit
             && all_terms.len() > max
         {
-            return Err(Error::new(
-                ErrorKind::Configuration,
-                format!(
-                    "dictionary term count {} exceeds limit {max}",
-                    all_terms.len()
-                ),
-            ));
+            return Err(Error::configuration(format!(
+                "dictionary term count {} exceeds limit {max}",
+                all_terms.len()
+            )));
         }
         if let Some(max) = self.term_bytes_limit {
             let total: usize = all_terms.iter().map(String::len).sum();
             if total > max {
-                return Err(Error::new(
-                    ErrorKind::Configuration,
-                    format!("dictionary term bytes {total} exceeds limit {max}"),
-                ));
+                return Err(Error::configuration(format!(
+                    "dictionary term bytes {total} exceeds limit {max}"
+                )));
             }
         }
 
@@ -543,10 +532,7 @@ impl PatternRecognizerBuilder {
                     .match_kind(MatchKind::LeftmostLongest)
                     .build(&all_terms)
                     .map_err(|e| {
-                        Error::new(
-                            ErrorKind::Configuration,
-                            format!("compiling dictionary automaton: {e}"),
-                        )
+                        Error::configuration(format!("compiling dictionary automaton: {e}"))
                     })?,
             )
         };

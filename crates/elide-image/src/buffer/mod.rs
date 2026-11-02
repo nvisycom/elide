@@ -10,13 +10,22 @@ use bytes::Bytes;
 use elide_core::entity::Entity;
 #[cfg(feature = "exif")]
 use elide_core::modality::metadata::{Metadata, MetadataData};
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 pub use self::raster::RasterImage;
+
+/// What a metadata strip removed from an image: how many metadata blocks and
+/// tags, and how many embedded thumbnails.
 #[cfg(feature = "exif")]
-use crate::exif::ExifPolicy;
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StrippedMetadata {
+    /// Metadata blocks (JPEG segments, PNG chunks) and EXIF or TIFF tags.
+    pub properties: usize,
+    /// Embedded thumbnails, previews of the unredacted pixels.
+    pub thumbnails: usize,
+}
 #[cfg(feature = "exif")]
-use crate::exif::Source;
+use crate::exif::{Scrubbed, Source};
 use crate::modality::{ImageFormat, ImageReplacement};
 use crate::primitive::{BoundingBox, Dimensions};
 
@@ -25,10 +34,10 @@ use crate::primitive::{BoundingBox, Dimensions};
 /// [`open`](Self::open) ingests the bytes once, as the caller-resolved format:
 /// it decodes the pixels into a [`RasterImage`] and retains the source container
 /// so metadata is available without a second decode. Reuse the buffer to
-/// [`redact`](Self::redact) pixel regions and
-/// [`encode`](Self::encode) back out under an EXIF policy, all paying the decode
-/// cost a single time. With the `exif` feature it also surfaces the source's
-/// privacy-relevant EXIF fields as `Entity<Metadata>` values.
+/// [`redact`](Self::redact) pixel regions and [`encode`](Self::encode) back
+/// out, all paying the decode cost a single time. With the `exif` feature it
+/// also surfaces the source's privacy-relevant EXIF fields as
+/// `Entity<Metadata>` values and [strips](Self::strip_metadata) them.
 ///
 /// The pixel work is the [`RasterImage`]'s; this type adds the source container
 /// and metadata story on top. Cropping a buffer ([`crop`](Self::crop)) hands
@@ -37,8 +46,10 @@ use crate::primitive::{BoundingBox, Dimensions};
 pub struct ImageBuffer {
     /// The decoded pixels and their format; all pixel operations delegate here.
     raster: RasterImage,
-    /// The original container bytes, kept so metadata (which the pixel decode
-    /// discards) can be read or carried through on encode.
+    /// The source container bytes, kept so metadata (which the pixel decode
+    /// discards) can be read or carried through on encode. The original bytes,
+    /// or the metadata-stripped container once
+    /// [`strip_metadata`](Self::strip_metadata) ran.
     source: Bytes,
     /// Whether a redaction has changed the pixels since `open`. When clean, an
     /// encode can operate on `source` directly (lossless); when dirty, the
@@ -67,21 +78,20 @@ impl ImageBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::CapabilityUnavailable`] if this build has no codec for
-    /// `format`, or [`ErrorKind::MalformedInput`] if the bytes do not decode as
+    /// [`ErrorKind::CapabilityUnavailable`](elide_core::ErrorKind::CapabilityUnavailable) if this build has no codec for
+    /// `format`, or [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the bytes do not decode as
     /// it.
     pub fn open(bytes: &[u8], format: ImageFormat) -> Result<Self> {
         // The format is not detected here — the ingestion registry already
         // resolved it and routed to the matching codec; this decodes the bytes
         // as that format.
         if !format.can_decode() {
-            return Err(Error::new(
-                ErrorKind::CapabilityUnavailable,
-                format!("no codec for {format:?} in this build"),
-            ));
+            return Err(Error::capability_unavailable(format!(
+                "no codec for {format:?} in this build"
+            )));
         }
         let inner = image::load_from_memory_with_format(bytes, format.to_image())
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("image decode: {e}")))?;
+            .map_err(|e| Error::malformed(format!("image decode: {e}")))?;
         Ok(Self {
             raster: RasterImage::new(inner, format),
             source: Bytes::copy_from_slice(bytes),
@@ -99,14 +109,14 @@ impl ImageBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if the bytes are not a readable image.
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the bytes are not a readable image.
     pub fn dimensions_of(bytes: &[u8]) -> Result<Dimensions<u32>> {
         let reader = image::ImageReader::new(std::io::Cursor::new(bytes))
             .with_guessed_format()
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("unknown image: {e}")))?;
+            .map_err(|e| Error::malformed(format!("unknown image: {e}")))?;
         let (w, h) = reader
             .into_dimensions()
-            .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("image header: {e}")))?;
+            .map_err(|e| Error::malformed(format!("image header: {e}")))?;
         Ok(Dimensions::new(w, h))
     }
 
@@ -143,18 +153,19 @@ impl ImageBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if the metadata is present but unparseable.
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the metadata is present but unparseable.
     #[cfg(feature = "exif")]
     pub fn metadata_entities(&self) -> Result<Vec<Entity<Metadata>>> {
         self.exif_source().entities()
     }
 
-    /// Each privacy-relevant EXIF field as a [`MetadataData`], for a caller that
-    /// streams fields to a recognizer (the codec's EXIF handler).
+    /// Each privacy-relevant EXIF field as a [`MetadataData`] labelled with
+    /// what it is, for a caller that streams fields to a recognizer (the codec's
+    /// EXIF handler).
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if the metadata is present but unparseable.
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the metadata is present but unparseable.
     #[cfg(feature = "exif")]
     pub fn metadata_fields(&self) -> Result<Vec<MetadataData>> {
         self.exif_source().fields()
@@ -174,53 +185,74 @@ impl ImageBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if a metadata edit fails.
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a metadata edit fails.
     #[cfg(feature = "exif")]
     pub fn strip_metadata_keys(&self, keys: &[&str]) -> Result<Bytes> {
-        Ok(self.exif_source().remove_keys(keys)?.into())
+        Ok(self.exif_source().remove_keys(keys)?.bytes.into())
     }
 
-    /// Re-encode the image under `policy`, returning the container bytes.
-    ///
-    /// When no redaction has been applied, an EXIF strip edits the source
-    /// container losslessly (no pixel recompression) and [`Retain`](ExifPolicy::Retain)
-    /// returns the source untouched. When pixels have been redacted, the modified
-    /// image is re-encoded (the fresh bytes carry no EXIF), and the source's
-    /// metadata is carried onto the result according to `policy`:
-    /// [`Retain`](ExifPolicy::Retain) transfers all of it,
-    /// [`StripSensitive`](ExifPolicy::StripSensitive) transfers only the
-    /// non-sensitive fields the policy retains (e.g. `Orientation`), and
-    /// [`Strip`](ExifPolicy::Strip) transfers none.
+    /// Remove the source's metadata in place, keeping only what a viewer needs
+    /// to render the image (its orientation), so every later read and encode
+    /// sees the stripped container. Returns what was removed.
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::Processing`] if the encoder rejects the image, or
-    /// [`ErrorKind::MalformedInput`] if a metadata edit fails.
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the metadata edit fails.
     #[cfg(feature = "exif")]
-    pub fn encode(&self, policy: ExifPolicy) -> Result<Bytes> {
-        if !self.dirty {
-            // Pixels unchanged: act on the source container directly (lossless).
-            return Ok(self.exif_source().strip(policy)?.into());
+    pub fn strip_metadata(&mut self) -> Result<StrippedMetadata> {
+        let stripped = self.exif_source().strip()?;
+        Ok(self.replace_source(stripped))
+    }
+
+    /// Remove, in place, the metadata no surfaced EXIF field stands for: every
+    /// block outside EXIF (XMP, IPTC, comments, text chunks), every EXIF tag no
+    /// field reads or clears (a maker note, vendor tags), and an embedded
+    /// thumbnail. What stays is exactly what detection sees as fields, plus
+    /// what the image needs to render. Returns what was removed.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the metadata edit fails.
+    #[cfg(feature = "exif")]
+    pub fn strip_unsurfaced_metadata(&mut self) -> Result<StrippedMetadata> {
+        let scrubbed = self.exif_source().reduce_to_surfaced()?;
+        Ok(self.replace_source(scrubbed))
+    }
+
+    /// Replace the source container with the `scrubbed` one when it removed
+    /// anything, returning what it removed.
+    #[cfg(feature = "exif")]
+    fn replace_source(&mut self, scrubbed: Scrubbed) -> StrippedMetadata {
+        let stripped = StrippedMetadata {
+            properties: scrubbed.removed,
+            thumbnails: scrubbed.thumbnails,
+        };
+        if stripped != StrippedMetadata::default() {
+            self.source = Bytes::from(scrubbed.bytes);
         }
-        // Pixels redacted: re-encode them. The fresh bytes carry no EXIF, so the
-        // metadata to keep is transferred from the source onto them.
+        stripped
+    }
+
+    /// Re-encode the image, returning the container bytes with the source's
+    /// metadata.
+    ///
+    /// When no redaction has been applied the source container is returned
+    /// untouched (lossless). When pixels have been redacted, the modified image
+    /// is re-encoded and the source's metadata, whatever
+    /// [`strip_metadata`](Self::strip_metadata) left of it, is carried onto the
+    /// fresh bytes.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) if the encoder rejects the image, or
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the metadata transfer fails.
+    #[cfg(feature = "exif")]
+    pub fn encode(&self) -> Result<Bytes> {
+        if !self.dirty {
+            return Ok(self.source.clone());
+        }
         let encoded = self.raster.encode_raw()?;
-        Ok(match policy {
-            // Nothing to carry: the re-encoded bytes already hold no metadata.
-            ExifPolicy::Strip => encoded,
-            // Transfer everything from the original source.
-            ExifPolicy::Retain => self.exif_source().transfer(encoded.into())?.into(),
-            // Transfer only what survives a sensitive strip: apply the strip to
-            // the source container first, then carry its remaining (non-sensitive)
-            // metadata onto the fresh pixels, so benign fields like Orientation
-            // are retained rather than dropped with everything else.
-            ExifPolicy::StripSensitive => {
-                let retained = self.exif_source().strip(ExifPolicy::StripSensitive)?;
-                Source::new(&retained, self.format().to_exif())
-                    .transfer(encoded.into())?
-                    .into()
-            }
-        })
+        Ok(self.exif_source().transfer(encoded.into())?.into())
     }
 
     /// Re-encode the image, returning the container bytes.
@@ -252,8 +284,8 @@ impl ImageBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::Processing`] if the encoder rejects the image, or
-    /// [`ErrorKind::MalformedInput`] if the metadata transfer fails.
+    /// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) if the encoder rejects the image, or
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the metadata transfer fails.
     #[cfg(feature = "exif")]
     pub fn encode_over_metadata(&self, container: &[u8]) -> Result<Bytes> {
         if !self.dirty {
@@ -264,6 +296,20 @@ impl ImageBuffer {
         let encoded = self.raster.encode_raw()?;
         let source = Source::new(container, self.format().to_exif());
         Ok(source.transfer(encoded.into())?.into())
+    }
+
+    /// Re-encode the current (possibly redacted) pixels with the source's
+    /// metadata removed down to what a viewer needs to render them, without
+    /// changing this buffer's source.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) if the encoder rejects the image, or
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the metadata edit fails.
+    #[cfg(feature = "exif")]
+    pub fn encode_without_metadata(&self) -> Result<Bytes> {
+        let stripped = self.exif_source().strip()?;
+        self.encode_over_metadata(&stripped.bytes)
     }
 
     /// Crop the in-bounds intersection of `region` out as a bare
@@ -412,7 +458,7 @@ mod tests {
             },
         );
         assert!(buffer.dirty);
-        let out = encode_buffer(&buffer);
+        let out = buffer.encode().expect("encode");
         assert_eq!(
             pixel_at(&out, 3, 3),
             Rgba([0, 0, 0, 255]),
@@ -423,19 +469,6 @@ mod tests {
             Rgba([200, 30, 30, 255]),
             "untargeted pixel changed"
         );
-    }
-
-    /// Encode a redacted PNG buffer to bytes, feature-agnostic across the two
-    /// `encode` signatures.
-    fn encode_buffer(buffer: &ImageBuffer) -> Bytes {
-        #[cfg(feature = "exif")]
-        {
-            buffer.encode(ExifPolicy::Strip).expect("encode")
-        }
-        #[cfg(not(feature = "exif"))]
-        {
-            buffer.encode().expect("encode")
-        }
     }
 
     #[test]
@@ -457,17 +490,17 @@ mod tests {
                 color: Color::BLACK,
             },
         );
-        let out = encode_buffer(&buffer);
+        let out = buffer.encode().expect("encode");
         assert_eq!(pixel_at(&out, 0, 0), Rgba([0, 0, 0, 255]));
         assert_eq!(pixel_at(&out, 5, 1), Rgba([200, 30, 30, 255]));
     }
 
-    /// After a pixel redaction, `StripSensitive` must retain benign metadata
-    /// (Orientation) while dropping sensitive fields (GPS) — not throw away all
-    /// EXIF with the re-encode, which the policy promises to preserve.
+    /// A stripped then redacted image keeps the render-critical Orientation and
+    /// drops everything else (GPS): the re-encode carries exactly what the strip
+    /// left onto the redacted pixels.
     #[cfg(all(feature = "jpeg", feature = "exif"))]
     #[test]
-    fn strip_sensitive_after_redaction_keeps_benign_metadata() {
+    fn strip_then_redact_keeps_only_the_orientation() {
         use little_exif::exif_tag::ExifTag;
         use little_exif::filetype::FileExtension;
         use little_exif::metadata::Metadata as ExifMetadata;
@@ -486,17 +519,17 @@ mod tests {
         exif.write_to_vec(&mut bytes, FileExtension::JPEG)
             .expect("write exif");
 
-        // Redact a pixel so the buffer is dirty (forces the re-encode path).
         let mut buffer = ImageBuffer::open(&bytes, ImageFormat::Jpeg).expect("open");
+        assert!(buffer.strip_metadata().expect("strip").properties > 0);
+        // Redact a pixel so the buffer is dirty (forces the re-encode path).
         buffer.redact(
             BoundingBox::from_origin(Point::new(0, 0), Dimensions::new(2, 2)),
             &ImageReplacement::Block {
                 color: Color::BLACK,
             },
         );
-        let out = buffer.encode(ExifPolicy::StripSensitive).expect("encode");
+        let out = buffer.encode().expect("encode");
 
-        // The GPS field is gone; the benign Orientation survives.
         let out_exif = ExifMetadata::new_from_vec(&out.to_vec(), FileExtension::JPEG)
             .expect("parse output exif");
         assert!(
@@ -504,21 +537,20 @@ mod tests {
                 .get_tag(&ExifTag::GPSLatitude(Vec::new()))
                 .next()
                 .is_none(),
-            "sensitive GPS survived a StripSensitive re-encode"
+            "GPS survived the strip"
         );
         assert!(
             out_exif
                 .get_tag(&ExifTag::Orientation(Vec::new()))
                 .next()
                 .is_some(),
-            "benign Orientation was dropped by a StripSensitive re-encode"
+            "Orientation was dropped by the strip"
         );
     }
 
-    /// Metadata-only strip on a TIFF (pixels untouched): the lossless path reads
-    /// the source TIFF's IFD, drops the sensitive tags, and writes the whole
-    /// file back. TIFF stores EXIF as its own IFD, so this exercises the
-    /// EXIF-as-IFD read-modify-write.
+    /// Metadata-only strip on a TIFF (pixels untouched): the lossless path clears
+    /// the source TIFF's metadata and writes the whole file back. TIFF stores
+    /// EXIF as its own IFD, so this exercises the EXIF-as-IFD read-modify-write.
     #[cfg(all(feature = "tiff", feature = "exif"))]
     #[test]
     fn strip_gps_without_redaction_round_trips_tiff() {
@@ -533,8 +565,9 @@ mod tests {
         );
 
         // No pixel redaction: the lossless strip path.
-        let buffer = ImageBuffer::open(&bytes, ImageFormat::Tiff).expect("open");
-        let out = buffer.encode(ExifPolicy::StripSensitive).expect("encode");
+        let mut buffer = ImageBuffer::open(&bytes, ImageFormat::Tiff).expect("open");
+        buffer.strip_metadata().expect("strip");
+        let out = buffer.encode().expect("encode");
 
         // Pixels intact, GPS gone.
         assert_eq!(
@@ -572,7 +605,7 @@ mod tests {
                 color: Color::BLACK,
             },
         );
-        let out = buffer.encode(ExifPolicy::Retain).expect("encode");
+        let out = buffer.encode().expect("encode");
         // The pixel redaction survives.
         assert_eq!(
             pixel_at(&out, 0, 0),
@@ -584,7 +617,7 @@ mod tests {
             Rgba([200, 30, 30, 255]),
             "untargeted pixel changed"
         );
-        // And the kept EXIF (GPS, under Retain) is carried onto the redacted TIFF.
+        // And the unstripped EXIF (GPS) is carried onto the redacted TIFF.
         assert!(
             ExifMetadata::new_from_vec(&out.to_vec(), FileExtension::TIFF)
                 .expect("parse output")
@@ -595,14 +628,14 @@ mod tests {
         );
     }
 
-    /// Pixel redaction + `StripSensitive` on a TIFF, the leak-safety contract:
-    /// after redacting pixels, every sensitive field (GPS in its sub-IFD, a
-    /// device Make in IFD0) is gone, the redacted pixels survive, and a benign
-    /// field (Orientation) is retained — proving the sub-IFD wholesale transfer
-    /// and the IFD0 allowlist neither leak PII nor drop render-critical metadata.
+    /// Metadata strip + pixel redaction on a TIFF, the leak-safety contract:
+    /// every identifying field (GPS in its sub-IFD, a device Make in IFD0) is
+    /// gone, the redacted pixels survive, and the render-critical Orientation is
+    /// retained — proving the sub-IFD transfer and the IFD0 allowlist neither
+    /// leak PII nor drop render-critical metadata.
     #[cfg(all(feature = "tiff", feature = "exif"))]
     #[test]
-    fn redact_then_strip_sensitive_tiff() {
+    fn strip_then_redact_tiff() {
         use little_exif::exif_tag::ExifTag;
         use little_exif::filetype::FileExtension;
         use little_exif::metadata::Metadata as ExifMetadata;
@@ -624,13 +657,14 @@ mod tests {
             .expect("write exif");
 
         let mut buffer = ImageBuffer::open(&bytes, ImageFormat::Tiff).expect("open");
+        buffer.strip_metadata().expect("strip");
         buffer.redact(
             BoundingBox::from_origin(Point::new(0, 0), Dimensions::new(2, 2)),
             &ImageReplacement::Block {
                 color: Color::BLACK,
             },
         );
-        let out = buffer.encode(ExifPolicy::StripSensitive).expect("encode");
+        let out = buffer.encode().expect("encode");
         let out_exif =
             ExifMetadata::new_from_vec(&out.to_vec(), FileExtension::TIFF).expect("parse output");
         let has = |tag: &ExifTag| out_exif.get_tag(tag).next().is_some();

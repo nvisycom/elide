@@ -9,12 +9,17 @@
 //! `scripts/install-pdfium.sh`); the module is behind the `render` feature so
 //! the default build needs no native library.
 //!
+//! A scanned page redacted through the image pipeline is written back as one
+//! image over the whole page ([`reflatten`](fn@reflatten)), and one no codec could read is
+//! cleared.
+//!
 //! The geometry types carry no elide dependency, so the crate stays standalone.
 
 mod emit;
 mod geometry;
 mod pdfium;
 mod raster;
+mod reflatten;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -23,6 +28,8 @@ use elide_core::Result;
 pub use self::emit::Certificate;
 pub use self::geometry::{Glyph, GlyphSource, PageObservation, PixelRect};
 pub(crate) use self::raster::redact_raster;
+pub use self::reflatten::PageReplacement;
+pub(crate) use self::reflatten::{clear, reflatten};
 use crate::document::Store;
 
 /// A page rendered to a PNG image, with its pixel dimensions.
@@ -50,7 +57,6 @@ pub struct RenderedPage {
 ///
 /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if PDFium
 /// cannot load or render the document (or the native library is unavailable).
-#[cfg(feature = "image")]
 pub(crate) fn render_pages(
     store: &Store,
     numbers: BTreeSet<u32>,

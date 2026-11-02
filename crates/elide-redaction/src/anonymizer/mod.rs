@@ -1,6 +1,6 @@
 //! The [`Anonymizer`], the "hide" engine.
 //!
-//! The redaction counterpart to [`Analyzer`]: an ordered list of selection
+//! The redaction counterpart to the detection `Analyzer`: an ordered list of selection
 //! rules plus its entry points. [`pick`] resolves each entity's operator and
 //! records the decision as a [`Selection`] event on the entity's audit trail,
 //! without touching the data, so the picks can be reviewed (and the entities
@@ -8,7 +8,6 @@
 //! [`Replacement`], and applies the batch back into the target; [`anonymize`]
 //! does both in one step.
 //!
-//! [`Analyzer`]: crate::Analyzer
 //! [`pick`]: Anonymizer::pick
 //! [`redact`]: Anonymizer::redact
 //! [`anonymize`]: Anonymizer::anonymize

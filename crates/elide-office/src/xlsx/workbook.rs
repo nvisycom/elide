@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use quick_xml::Reader;
 use quick_xml::escape::unescape;
 use quick_xml::events::Event;
@@ -30,17 +30,14 @@ pub(crate) struct Sheet {
 /// successful redaction while an unresolved worksheet's text ships unread.
 pub(crate) fn resolve_sheets(raw: &str, rels: &str) -> Result<Vec<Sheet>> {
     let targets = relationship_targets(rels)?;
-    let malformed = |e: quick_xml::Error| {
-        Error::new(
-            ErrorKind::MalformedInput,
-            format!("workbook.xml malformed: {e}"),
-        )
-    };
     let mut reader = Reader::from_str(raw);
     let mut sheets = Vec::new();
 
     loop {
-        let elem = match reader.read_event().map_err(malformed)? {
+        let elem = match reader
+            .read_event()
+            .map_err(|e| Error::malformed(format!("workbook.xml malformed: {e}")))?
+        {
             Event::Eof => break,
             Event::Empty(e) | Event::Start(e) => e,
             _ => continue,
@@ -51,9 +48,7 @@ pub(crate) fn resolve_sheets(raw: &str, rels: &str) -> Result<Vec<Sheet>> {
         let mut name = None;
         let mut rid = None;
         for attr in elem.attributes() {
-            let attr = attr.map_err(|e| {
-                Error::new(ErrorKind::MalformedInput, format!("workbook.xml attr: {e}"))
-            })?;
+            let attr = attr.map_err(|e| Error::malformed(format!("workbook.xml attr: {e}")))?;
             match attr.key.local_name().as_ref() {
                 "name" => name = Some(decode(attr.value.as_ref())?),
                 // The relationship id is `r:id`; match on the local name so the
@@ -66,16 +61,14 @@ pub(crate) fn resolve_sheets(raw: &str, rels: &str) -> Result<Vec<Sheet>> {
         // a worksheet target; anything else leaves a worksheet unprocessed, so it
         // fails closed rather than being dropped.
         let (Some(name), Some(rid)) = (name, rid) else {
-            return Err(Error::new(
-                ErrorKind::MalformedInput,
+            return Err(Error::malformed(
                 "workbook `<sheet>` missing a name or relationship id".to_owned(),
             ));
         };
         let Some(target) = targets.get(&rid) else {
-            return Err(Error::new(
-                ErrorKind::MalformedInput,
-                format!("sheet `{name}` references relationship `{rid}` with no worksheet target"),
-            ));
+            return Err(Error::malformed(format!(
+                "sheet `{name}` references relationship `{rid}` with no worksheet target"
+            )));
         };
         sheets.push(Sheet {
             name,
@@ -91,17 +84,14 @@ pub(crate) fn resolve_sheets(raw: &str, rels: &str) -> Result<Vec<Sheet>> {
 fn relationship_targets(rels: &str) -> Result<HashMap<String, String>> {
     const WORKSHEET_TYPE: &str =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
-    let malformed = |e: quick_xml::Error| {
-        Error::new(
-            ErrorKind::MalformedInput,
-            format!("workbook.xml.rels malformed: {e}"),
-        )
-    };
     let mut reader = Reader::from_str(rels);
     let mut targets = HashMap::new();
 
     loop {
-        let elem = match reader.read_event().map_err(malformed)? {
+        let elem = match reader
+            .read_event()
+            .map_err(|e| Error::malformed(format!("workbook.xml.rels malformed: {e}")))?
+        {
             Event::Eof => break,
             Event::Empty(e) | Event::Start(e) => e,
             _ => continue,
@@ -113,12 +103,8 @@ fn relationship_targets(rels: &str) -> Result<HashMap<String, String>> {
         let mut target = None;
         let mut is_worksheet = false;
         for attr in elem.attributes() {
-            let attr = attr.map_err(|e| {
-                Error::new(
-                    ErrorKind::MalformedInput,
-                    format!("workbook.xml.rels attr: {e}"),
-                )
-            })?;
+            let attr =
+                attr.map_err(|e| Error::malformed(format!("workbook.xml.rels attr: {e}")))?;
             match attr.key.local_name().as_ref() {
                 "Id" => id = Some(decode(attr.value.as_ref())?),
                 "Target" => target = Some(decode(attr.value.as_ref())?),
@@ -166,12 +152,7 @@ fn normalize_target(target: &str) -> String {
 /// Decode an attribute value to an unescaped owned `String`.
 fn decode(value: &str) -> Result<String> {
     Ok(unescape(value)
-        .map_err(|e| {
-            Error::new(
-                ErrorKind::MalformedInput,
-                format!("workbook attribute entity: {e}"),
-            )
-        })?
+        .map_err(|e| Error::malformed(format!("workbook attribute entity: {e}")))?
         .into_owned())
 }
 

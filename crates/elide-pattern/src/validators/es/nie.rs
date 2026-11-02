@@ -2,7 +2,7 @@
 //!
 //! Format `[XYZ]` + 7 digits + control letter. The first letter
 //! is replaced by its position in `XYZ` (`X→0`, `Y→1`, `Z→2`),
-//! then the same Mod 23 check used by [`super::nif`] applies.
+//! then the same Mod 23 check used by [`super::nif`](fn@super::nif) applies.
 
 use std::iter;
 

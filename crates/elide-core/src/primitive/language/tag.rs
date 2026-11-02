@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 use hipstr::HipStr;
 use oxilangtag::LanguageTag as RawLanguageTag;
 
-use crate::{Error, ErrorKind, Result};
+use crate::{Error, Result};
 
 /// Well-formed [BCP 47] language tag, such as `en`, `en-US`, or
 /// `zh-Hant-HK`.
@@ -39,12 +39,9 @@ impl LanguageTag {
     /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if `tag`
     /// is not a well-formed BCP 47 tag.
     pub fn parse(tag: impl Into<HipStr<'static>>) -> Result<Self> {
-        RawLanguageTag::parse(tag.into()).map(Self).map_err(|e| {
-            Error::new(
-                ErrorKind::MalformedInput,
-                format!("invalid language tag: {e}"),
-            )
-        })
+        RawLanguageTag::parse(tag.into())
+            .map(Self)
+            .map_err(|e| Error::malformed(format!("invalid language tag: {e}")))
     }
 
     /// Primary language subtag (e.g. `"en"` for `"en-US"`).

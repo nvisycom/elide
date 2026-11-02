@@ -16,13 +16,13 @@ use elide_codec::TypedStream;
 use elide_core::entity::Entity;
 use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::recognition::Scope;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use elide_detection::Analyzer;
 use elide_format::FormatRegistry;
 use elide_redaction::Anonymizer;
 
-use self::analysis::ModalityRegistry;
-pub use self::analysis::{AnalyzedDocument, ArtifactSet, Report, ReportDeserializer};
+pub use self::analysis::{AnalyzedDocument, ArtifactSet, Report, ReportDeserializer, StrippedItem};
+use self::analysis::{ModalityRegistry, StrippedRecord};
 pub use self::directives::Directives;
 pub use self::document::{AsDocuments, Document, RegistryDocumentExt};
 pub use self::part_id::PartId;
@@ -331,10 +331,10 @@ impl Orchestrator {
         let mut names = std::collections::HashSet::new();
         for document in documents.iter() {
             if !names.insert(document.name.as_str()) {
-                return Err(Error::new(
-                    ErrorKind::MalformedInput,
-                    format!("duplicate document name `{}` in the set", document.name),
-                ));
+                return Err(Error::malformed(format!(
+                    "duplicate document name `{}` in the set",
+                    document.name
+                )));
             }
         }
 
@@ -349,6 +349,7 @@ impl Orchestrator {
             annotations,
             report: &mut report,
             artifacts: &mut artifacts,
+            stripped: StrippedRecord::default(),
         };
         for document in documents.iter_mut() {
             let prefix = PartId::leaf(document.name.clone());
@@ -356,6 +357,8 @@ impl Orchestrator {
                 .parts(&mut document.document, &prefix, 0)
                 .await?;
         }
+        let stripped = visitor.stripped;
+        report.set_stripped(stripped);
 
         Ok(AnalyzedDocument { report, artifacts })
     }
@@ -389,8 +392,11 @@ impl Orchestrator {
         // happens on `report`'s own groups, which are returned as the audit
         // trail. Each document redacts its stream parts in place and folds its
         // blob sub-parts bottom-up through the recursion.
+        // The applied report's stripped section is what this walk saw, whatever
+        // the report passed in carried.
         let mut visitor = Redact {
             report: &mut report,
+            stripped: StrippedRecord::default(),
         };
         for document in documents.iter_mut() {
             let prefix = PartId::leaf(document.name.clone());
@@ -398,6 +404,8 @@ impl Orchestrator {
                 .parts(&mut document.document, &prefix, 0)
                 .await?;
         }
+        let stripped = visitor.stripped;
+        report.set_stripped(stripped);
         Ok(report)
     }
 

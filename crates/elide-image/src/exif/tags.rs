@@ -1,8 +1,35 @@
-//! The EXIF tag sets: which `little_exif` tags a redaction of each logical
-//! field must clear, which are safe to transfer, and which the sensitive-strip
-//! policy removes.
+//! The EXIF tag sets: which fields are surfaced and the tags each is read from,
+//! which tags a redaction of each logical field must clear, which survive a
+//! metadata removal, and which are safe to transfer onto re-encoded pixels.
 
 use little_exif::exif_tag::ExifTag;
+use little_exif::ifd::ExifTagGroup;
+
+/// The IFD0 tags that lay out, orient, and colour an image's pixels (TIFF 6.0
+/// baseline and extensions, plus the embedded ICC profile). A TIFF cannot be
+/// read without them, and none describes the author, the device, or the
+/// scene.
+const LAYOUT_TAGS: [u16; 39] = [
+    0x00FE, 0x00FF, 0x0100, 0x0101, 0x0102, 0x0103, 0x0106, 0x0107, 0x0108, 0x0109, 0x010A, 0x0111,
+    0x0115, 0x0116, 0x0117, 0x0118, 0x0119, 0x011A, 0x011B, 0x011C, 0x0128, 0x012D, 0x013D, 0x013E,
+    0x013F, 0x0140, 0x0141, 0x0142, 0x0143, 0x0144, 0x0145, 0x0152, 0x0153, 0x0211, 0x0212, 0x0213,
+    0x0214, 0x0112, 0x8773,
+];
+
+/// The tags that hold EXIF together: the pointers to the EXIF, GPS, and
+/// Interop IFDs, and the EXIF and GPS versions.
+const STRUCTURE_TAGS: [(u16, ExifTagGroup); 5] = [
+    (0x8769, ExifTagGroup::GENERIC),
+    (0x8825, ExifTagGroup::GENERIC),
+    (0xA005, ExifTagGroup::EXIF),
+    (0x9000, ExifTagGroup::EXIF),
+    (0x0000, ExifTagGroup::GPS),
+];
+
+/// The offset and length of an embedded JPEG: in an image's EXIF the thumbnail
+/// (IFD1), a preview of the unredacted pixels; in a TIFF old-style JPEG image
+/// data, which is layout.
+pub(super) const THUMBNAIL_TAGS: [u16; 2] = [0x0201, 0x0202];
 
 /// Whether `tag` is a benign IFD0 (GENERIC) descriptive tag safe to carry from
 /// the source onto a freshly-encoded TIFF.
@@ -32,6 +59,45 @@ pub(super) fn is_transferable_ifd0_tag(tag: &ExifTag) -> bool {
     )
 }
 
+/// The keys of the EXIF fields surfaced as metadata, in the order they are
+/// streamed. Each is read through [`read_tags`] and cleared through
+/// [`tags_for_key`]; the entity label each carries is chosen in `entity`.
+///
+/// Only fields whose value is text a recognizer can read are surfaced. A
+/// vendor's binary maker note cannot be, so it is never surfaced and is
+/// stripped under every disposition.
+pub(super) const FIELD_KEYS: [&str; 13] = [
+    "GPSLatitude",
+    "GPSLongitude",
+    "DateTimeOriginal",
+    "Make",
+    "Model",
+    "SerialNumber",
+    "Artist",
+    "OwnerName",
+    "Copyright",
+    "ImageDescription",
+    "UserComment",
+    "Software",
+    "ImageUniqueID",
+];
+
+/// The tags a field `key`'s value is read from, in priority order: the first
+/// the image carries is the value. Empty for a key this crate does not map.
+///
+/// Values are placeholders: `get_tag` matches on tag identity, not value.
+pub(super) fn read_tags(key: &str) -> Vec<ExifTag> {
+    match key {
+        // A capture time falls back to the create date when the original is
+        // absent, so an image carrying only one still surfaces its time.
+        "DateTimeOriginal" => vec![
+            ExifTag::DateTimeOriginal(String::new()),
+            ExifTag::CreateDate(String::new()),
+        ],
+        _ => own_tag(key).into_iter().collect(),
+    }
+}
+
 /// Every tag a picked field `key` must remove, or empty for a key this crate
 /// does not map.
 ///
@@ -45,19 +111,64 @@ pub(super) fn is_transferable_ifd0_tag(tag: &ExifTag) -> bool {
 /// coordinates behind, so a "geolocation" redaction would still ship location.
 ///
 /// Values are placeholders: `remove_tag` matches on tag identity, not value.
-#[cfg(feature = "exif")]
 pub(super) fn tags_for_key(key: &str) -> Vec<ExifTag> {
     match key {
         "GPSLatitude" | "GPSLongitude" => gps_tags(),
         "DateTimeOriginal" => timestamp_tags(),
         "Make" | "Model" | "SerialNumber" => device_tags(),
-        _ => Vec::new(),
+        _ => own_tag(key).into_iter().collect(),
     }
+}
+
+/// The tags an image keeps when its metadata is removed: only what a viewer
+/// needs to display it as intended. Orientation decides which way up the pixels
+/// are drawn; the colour profile lives outside EXIF and is never touched.
+pub(super) fn render_tags() -> [ExifTag; 1] {
+    [ExifTag::Orientation(Vec::new())]
+}
+
+/// Whether the tag `hex` in an IFD of `group`, in an image of the `tiff`
+/// container or another, stays when metadata is redacted: a surfaced field's
+/// tag (or one of the logical group its field stands for, which follows the
+/// field's decision), the render tag, a structural pointer, or a TIFF's pixel
+/// layout. Everything else in EXIF (the tags no field surfaces, an embedded
+/// thumbnail, a maker note, vendor tags) cannot reach detection, so it is
+/// stripped.
+pub(super) fn kept_under_redact(hex: u16, group: ExifTagGroup, tiff: bool) -> bool {
+    let generic = group == ExifTagGroup::GENERIC;
+    STRUCTURE_TAGS.contains(&(hex, group))
+        || (generic && LAYOUT_TAGS.contains(&hex))
+        || (generic && tiff && THUMBNAIL_TAGS.contains(&hex))
+        || FIELD_KEYS.iter().any(|key| {
+            read_tags(key)
+                .into_iter()
+                .chain(tags_for_key(key))
+                .any(|field| field.as_u16() == hex && field.get_group() == group)
+        })
+}
+
+/// The one tag a free-standing field `key` names: the authorship, ownership,
+/// free-text, and identifier fields, each cleared on its own.
+fn own_tag(key: &str) -> Option<ExifTag> {
+    Some(match key {
+        "GPSLatitude" => ExifTag::GPSLatitude(Vec::new()),
+        "GPSLongitude" => ExifTag::GPSLongitude(Vec::new()),
+        "Make" => ExifTag::Make(String::new()),
+        "Model" => ExifTag::Model(String::new()),
+        "SerialNumber" => ExifTag::SerialNumber(String::new()),
+        "Artist" => ExifTag::Artist(String::new()),
+        "OwnerName" => ExifTag::OwnerName(String::new()),
+        "Copyright" => ExifTag::Copyright(String::new()),
+        "ImageDescription" => ExifTag::ImageDescription(String::new()),
+        "UserComment" => ExifTag::UserComment(Vec::new()),
+        "Software" => ExifTag::Software(String::new()),
+        "ImageUniqueID" => ExifTag::ImageUniqueID(String::new()),
+        _ => return None,
+    })
 }
 
 /// The whole GPS IFD: the offset pointer plus every coordinate, reference,
 /// altitude, time, direction, and destination tag.
-#[cfg(feature = "exif")]
 fn gps_tags() -> Vec<ExifTag> {
     vec![
         ExifTag::GPSInfo(Vec::new()),
@@ -79,7 +190,6 @@ fn gps_tags() -> Vec<ExifTag> {
 }
 
 /// Every capture/create/modify timestamp and its UTC offset.
-#[cfg(feature = "exif")]
 fn timestamp_tags() -> Vec<ExifTag> {
     vec![
         ExifTag::DateTimeOriginal(String::new()),
@@ -92,7 +202,6 @@ fn timestamp_tags() -> Vec<ExifTag> {
 }
 
 /// Device and lens identity, including the serials that fingerprint a body.
-#[cfg(feature = "exif")]
 fn device_tags() -> Vec<ExifTag> {
     vec![
         ExifTag::Make(String::new()),
@@ -102,37 +211,4 @@ fn device_tags() -> Vec<ExifTag> {
         ExifTag::LensModel(String::new()),
         ExifTag::LensSerialNumber(String::new()),
     ]
-}
-
-/// The privacy-sensitive tags removed by
-/// [`StripSensitive`](crate::exif::ExifPolicy::StripSensitive): every field that
-/// can place a photo (GPS), time it (capture/create/modify/offset), or tie it to
-/// a person or device (make/model/serials, owner, artist, copyright, software,
-/// unique id, and the free-text comment/description fields that routinely carry
-/// names or notes).
-///
-/// Render-critical tags (orientation, resolution, colour) are deliberately left
-/// in, so the stripped image still displays as intended. Values here are
-/// placeholders: `remove_tag` matches on tag identity, not on the value.
-///
-/// This is a denylist, not an allowlist: a proprietary MakerNote sub-tag not
-/// modelled by `little_exif`, or a new tag added to a future EXIF revision, can
-/// slip through. For a hard guarantee that nothing personal survives, use
-/// [`Strip`](crate::exif::ExifPolicy::Strip), which drops the block wholesale.
-pub(super) fn sensitive_tags() -> Vec<ExifTag> {
-    let mut tags = gps_tags();
-    tags.extend(timestamp_tags());
-    tags.extend(device_tags());
-    // Authorship, ownership, and free-text fields that carry names/notes.
-    tags.extend([
-        ExifTag::OwnerName(String::new()),
-        ExifTag::Artist(String::new()),
-        ExifTag::Copyright(String::new()),
-        ExifTag::Software(String::new()),
-        ExifTag::ImageDescription(String::new()),
-        ExifTag::ImageUniqueID(String::new()),
-        ExifTag::UserComment(Vec::new()),
-        ExifTag::MakerNote(Vec::new()),
-    ]);
-    tags
 }

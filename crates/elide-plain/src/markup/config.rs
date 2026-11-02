@@ -1,6 +1,10 @@
 //! [`MarkupConfig`]: how the shared markup engine reads a document, strict
 //! XML, or lenient HTML.
 
+use elide_codec::extract::CharacterReferences;
+#[cfg(feature = "html")]
+use quick_xml::escape::resolve_html5_entity;
+
 /// How the markup engine reads a document.
 ///
 /// The same byte-span tokenize-and-splice engine serves both XML and HTML. XML
@@ -16,6 +20,12 @@
 pub(super) struct MarkupConfig<'a> {
     /// Whether to tolerate HTML's non-well-formed constructs.
     pub(super) lenient: bool,
+    /// The rules the dialect reads character references by.
+    pub(super) references: CharacterReferences,
+    /// Whether text reads on across the elements outside `block_elements` as
+    /// one passage (HTML's inline elements), with a `<br>` as a line break in
+    /// it. Off, every element bounds a passage (the XML default).
+    pub(super) inline_passages: bool,
     /// Element names (lowercased) whose text children form one sibling-hint
     /// group. Empty disables sibling hints (the XML default).
     pub(super) block_elements: &'a [&'a str],
@@ -23,23 +33,31 @@ pub(super) struct MarkupConfig<'a> {
     /// body the caller does not want scanned (HTML `<script>` / `<style>` under a
     /// skip policy). Empty scans every element's text (the XML default).
     pub(super) skip_body_elements: &'a [&'a str],
+    /// Element names (lowercased) that end a passage besides the block
+    /// elements and skipped bodies: the elements text does not read across
+    /// (HTML's document structure, form controls, embedded content).
+    pub(super) passage_bounds: &'a [&'a str],
 }
 
 impl MarkupConfig<'static> {
-    /// Strict, well-formed XML: no leniency, no block grouping, every body
-    /// scanned.
+    /// Strict, well-formed XML: no leniency, no block grouping, a passage per
+    /// text node, every body scanned.
     pub(super) fn xml() -> Self {
         Self {
             lenient: false,
+            references: CharacterReferences::Xml,
+            inline_passages: false,
             block_elements: &[],
             skip_body_elements: &[],
+            passage_bounds: &[],
         }
     }
 }
 
 impl<'a> MarkupConfig<'a> {
-    /// Lenient parsing with the caller's `block_elements` (sibling-hint groups)
-    /// and `skip_body_elements` (bodies not to scan) vocabularies.
+    /// Lenient parsing with the caller's `block_elements` (sibling-hint groups
+    /// and passage bounds) and `skip_body_elements` (bodies not to scan)
+    /// vocabularies; text reads on across every other element.
     ///
     /// Only HTML parses leniently; XML is always strict.
     #[cfg(feature = "html")]
@@ -49,8 +67,20 @@ impl<'a> MarkupConfig<'a> {
     ) -> Self {
         Self {
             lenient: true,
+            references: CharacterReferences::Html(resolve_html5_entity),
+            inline_passages: true,
             block_elements,
             skip_body_elements,
+            passage_bounds: &[],
+        }
+    }
+
+    /// The same config with `passage_bounds` also ending a passage.
+    #[cfg(feature = "html")]
+    pub(super) fn with_passage_bounds(self, passage_bounds: &'a [&'a str]) -> Self {
+        Self {
+            passage_bounds,
+            ..self
         }
     }
 
@@ -63,5 +93,19 @@ impl<'a> MarkupConfig<'a> {
     /// Whether `name` (lowercased) is an element whose body text is not emitted.
     pub(super) fn skips_body(&self, name: &str) -> bool {
         self.skip_body_elements.contains(&name)
+    }
+
+    /// Whether the element `name` (lowercased) ends the passage before it.
+    pub(super) fn bounds_passage(&self, name: &str) -> bool {
+        !self.inline_passages
+            || self.is_block(name)
+            || self.skips_body(name)
+            || self.passage_bounds.contains(&name)
+    }
+
+    /// Whether the element `name` (lowercased) is a line break inside its
+    /// passage.
+    pub(super) fn is_line_break(&self, name: &str) -> bool {
+        self.inline_passages && name == "br"
     }
 }

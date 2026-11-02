@@ -18,7 +18,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 #   let vision = MockBackend::<Image>::new();
 
     let registry = FormatRegistry::with_builtin();
-    let mut document = registry.document("contract.docx", bytes).await?;
+    let mut document = registry
+        .document("contract.docx", bytes, HiddenContentPolicy::default())
+        .await?;
 
     let orchestrator = Orchestrator::new()
         .with_registry(registry)
@@ -47,8 +49,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 `anonymize` analyzes every part, redacts it, and writes the parts back into
 the container; `encode` then produces a complete replacement file.
 
-Parts in a modality with no pipeline are left untouched. Here that is the
-document properties; [Metadata](metadata.md) shows how to redact them too.
+Parts in a modality with no pipeline are left untouched. The document
+properties and comments are removed at decode by default (see
+[Hidden content](hidden-content.md)); [Metadata](metadata.md) shows how to
+redact properties field by field instead.
 
 ## Many documents
 

@@ -1,0 +1,136 @@
+//! The shared redaction state: [`PdfInner`] (pages + recorded detections + mode)
+//! behind the `Clone`-to-share [`PdfState`] lock.
+
+use std::sync::{Arc, Mutex};
+
+use bytes::Bytes;
+use elide_core::Result;
+
+use super::{PdfPage, RedactMode};
+use crate::document::{Pdf, Redaction};
+use crate::text::{Detection, PageGeometry};
+
+/// The document's editable redaction state, behind the shared [`PdfState`] lock.
+#[derive(Debug, Default)]
+pub(super) struct PdfInner {
+    /// Extracted pages, in page order, with stream offsets for `chunks`.
+    pub(super) pages: Vec<PdfPage>,
+    /// Recorded glyph-deletion detections (per-page character spans), applied at
+    /// encode in [`RedactMode::GlyphDelete`].
+    pub(super) deletions: Vec<Detection>,
+    /// How recorded redactions are applied on encode.
+    pub(super) mode: RedactMode,
+}
+
+impl PdfInner {
+    /// Record a redaction at page-local byte `range` on the page numbered
+    /// `number`, as a per-page character-span [`Detection`] routed to the
+    /// glyph-delete or raster accumulator per `mode`. A range on no such page, or
+    /// off a char boundary, is skipped.
+    fn record(&mut self, number: u32, range: &std::ops::Range<usize>) {
+        let Some(page) = self.pages.iter().find(|p| p.number == number) else {
+            return;
+        };
+        if page.text.get(range.clone()).is_none() {
+            return; // range out of bounds or not on a char boundary
+        }
+        // Both paths address glyphs by a character span into the page text, so
+        // the byte range is measured as character offsets.
+        let start = page.text[..range.start].chars().count();
+        let end = page.text[..range.end].chars().count();
+        let detection = Detection::new(page.number, start, end);
+        match &mut self.mode {
+            #[cfg(feature = "render")]
+            RedactMode::Raster { detections, .. } => detections.push(detection),
+            _ => self.deletions.push(detection),
+        }
+    }
+}
+
+/// The document's editable redaction state, shared between the body
+/// [`PdfStream`](super::stream::PdfStream) and the
+/// [`PdfRecombine`](super::recombine::PdfRecombine) so a redaction recorded on
+/// the stream is visible when the recombiner re-serialises. `Clone` shares the
+/// one state (an `Arc` bump); the lock is held only inside these methods.
+#[derive(Clone)]
+pub(crate) struct PdfState(Arc<Mutex<PdfInner>>);
+
+impl PdfState {
+    /// Wrap the decoded redaction state.
+    pub(super) fn new(inner: PdfInner) -> Self {
+        Self(Arc::new(Mutex::new(inner)))
+    }
+
+    /// The page at `index` in page order, cloned.
+    pub(super) fn page(&self, index: usize) -> Option<PdfPage> {
+        self.0.lock().unwrap().pages.get(index).cloned()
+    }
+
+    /// The number of extracted pages.
+    pub(super) fn page_count(&self) -> usize {
+        self.0.lock().unwrap().pages.len()
+    }
+
+    /// The rendered glyph geometry of the page numbered `number`, for resolving a
+    /// detected span to page-normalized highlight rectangles. Returns a cheap
+    /// [`Arc`] clone (a refcount bump), not a deep copy of the page's glyph list,
+    /// so a lookup per detected entity stays O(1) and the lock is held only for
+    /// the lookup.
+    pub(super) fn geometry_for(&self, number: u32) -> Option<Arc<PageGeometry>> {
+        self.0
+            .lock()
+            .unwrap()
+            .pages
+            .iter()
+            .find(|p| p.number == number)
+            .and_then(|p| p.geometry.clone())
+    }
+
+    /// The page numbered `number`, cloned, for reading its text back.
+    pub(super) fn page_by_number(&self, number: u32) -> Option<PdfPage> {
+        self.0
+            .lock()
+            .unwrap()
+            .pages
+            .iter()
+            .find(|p| p.number == number)
+            .cloned()
+    }
+
+    /// Record a redaction at page-local `range` on page `number` (see
+    /// [`PdfInner::record`]).
+    pub(super) fn record(&self, number: u32, range: &std::ops::Range<usize>) {
+        self.0.lock().unwrap().record(number, range);
+    }
+
+    /// Apply the recorded redactions to `document` per the [`RedactMode`]; on
+    /// the glyph path, with the redacted and removed blob parts in `redaction`,
+    /// all in one pass. Returns the original bytes when nothing changes.
+    pub(super) fn redact(&self, document: &Bytes, mut redaction: Redaction) -> Result<Bytes> {
+        let inner = self.0.lock().unwrap();
+        match &inner.mode {
+            RedactMode::GlyphDelete => {
+                redaction.text.clone_from(&inner.deletions);
+                if redaction.is_empty() {
+                    return Ok(document.clone());
+                }
+                let out = Pdf::open(document)?.apply(&redaction)?;
+                Ok(Bytes::from(out))
+            }
+            #[cfg(feature = "render")]
+            RedactMode::Raster {
+                observations,
+                detections,
+            } => {
+                if detections.is_empty() {
+                    return Ok(document.clone());
+                }
+                // Fill the detected glyph boxes and emit a fresh image-only PDF,
+                // the strong redaction guarantee. Black fill.
+                let (out, _certificate) = Pdf::open(document)
+                    .and_then(|pdf| pdf.redact_raster(observations, detections, [0, 0, 0]))?;
+                Ok(Bytes::from(out))
+            }
+        }
+    }
+}

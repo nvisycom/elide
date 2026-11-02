@@ -17,6 +17,8 @@ use std::collections::BTreeMap;
 
 use lopdf::{Dictionary, Document, Object};
 
+use crate::document::object::{DictionaryExt, DocumentExt, ObjectExt};
+
 /// The default glyph width (glyph-space thousandths) when a font declares none:
 /// the PDF default for a composite font's `/DW`, and a reasonable stand-in for a
 /// simple font's `/MissingWidth`.
@@ -58,12 +60,7 @@ impl WidthSource {
     /// treated as simple (`/Widths` + `/FirstChar`). Anything missing or
     /// unreadable yields [`Unknown`](WidthSource::Unknown).
     pub(super) fn from_font(doc: &Document, font: &Dictionary) -> WidthSource {
-        let is_type0 = font
-            .get(b"Subtype")
-            .and_then(Object::as_name)
-            .map(|n| n == b"Type0")
-            .unwrap_or(false);
-        if is_type0 {
+        if font.has_subtype(b"Type0") {
             Self::from_type0(doc, font)
         } else {
             Self::from_simple(doc, font)
@@ -112,17 +109,21 @@ impl WidthSource {
         let Some(widths) = font
             .get(b"Widths")
             .ok()
-            .and_then(|o| resolve_array(doc, o))
-            .map(|arr| arr.iter().map(object_as_f64).collect::<Vec<_>>())
+            .and_then(|o| doc.resolve_array(o))
+            .map(|arr| {
+                arr.iter()
+                    .map(|o| o.as_number().unwrap_or(0.0))
+                    .collect::<Vec<_>>()
+            })
         else {
             return WidthSource::Unknown;
         };
         let missing = font
             .get(b"FontDescriptor")
             .ok()
-            .and_then(|o| resolve_dict(doc, o))
+            .and_then(|o| doc.resolve_dict(o))
             .and_then(|fd| fd.get(b"MissingWidth").ok())
-            .map(object_as_f64)
+            .map(|o| o.as_number().unwrap_or(0.0))
             .unwrap_or(0.0);
         WidthSource::Simple {
             first_char,
@@ -138,9 +139,9 @@ impl WidthSource {
         let Some(cid_font) = font
             .get(b"DescendantFonts")
             .ok()
-            .and_then(|o| resolve_array(doc, o))
+            .and_then(|o| doc.resolve_array(o))
             .and_then(|arr| arr.first())
-            .and_then(|o| resolve_dict(doc, o))
+            .and_then(|o| doc.resolve_dict(o))
         else {
             return WidthSource::Unknown;
         };
@@ -148,12 +149,12 @@ impl WidthSource {
         let dw = cid_font
             .get(b"DW")
             .ok()
-            .map(object_as_f64)
+            .map(|o| o.as_number().unwrap_or(0.0))
             .unwrap_or(DEFAULT_WIDTH);
 
         let mut w = BTreeMap::new();
         let mut ranges = Vec::new();
-        if let Some(entries) = cid_font.get(b"W").ok().and_then(|o| resolve_array(doc, o)) {
+        if let Some(entries) = cid_font.get(b"W").ok().and_then(|o| doc.resolve_array(o)) {
             parse_w_array(entries, &mut w, &mut ranges);
         }
         WidthSource::Composite { dw, w, ranges }
@@ -212,7 +213,7 @@ impl GlyphMetrics {
         let em = |key: &[u8]| {
             fd.get(key)
                 .ok()
-                .map(object_as_f64)
+                .map(|o| o.as_number().unwrap_or(0.0))
                 .filter(|v| *v != 0.0)
                 .map(|v| v / 1000.0)
         };
@@ -233,24 +234,19 @@ impl GlyphMetrics {
 /// Resolve a font's `/FontDescriptor`, following a `/Type0` font to its
 /// descendant CIDFont (whose descriptor carries the metrics).
 fn font_descriptor<'a>(doc: &'a Document, font: &'a Dictionary) -> Option<&'a Dictionary> {
-    let is_type0 = font
-        .get(b"Subtype")
-        .and_then(Object::as_name)
-        .map(|n| n == b"Type0")
-        .unwrap_or(false);
-    let owner = if is_type0 {
+    let owner = if font.has_subtype(b"Type0") {
         font.get(b"DescendantFonts")
             .ok()
-            .and_then(|o| resolve_array(doc, o))
+            .and_then(|o| doc.resolve_array(o))
             .and_then(|arr| arr.first())
-            .and_then(|o| resolve_dict(doc, o))?
+            .and_then(|o| doc.resolve_dict(o))?
     } else {
         font
     };
     owner
         .get(b"FontDescriptor")
         .ok()
-        .and_then(|o| resolve_dict(doc, o))
+        .and_then(|o| doc.resolve_dict(o))
 }
 
 /// Parse a Type0 `/W` array into explicit per-CID widths plus compact ranges.
@@ -273,7 +269,7 @@ fn parse_w_array(entries: &[Object], out: &mut BTreeMap<u32, f64>, ranges: &mut 
             Some(Object::Array(list)) => {
                 for (offset, width) in list.iter().enumerate() {
                     if let Ok(cid) = u32::try_from(start + offset as i64) {
-                        out.insert(cid, object_as_f64(width));
+                        out.insert(cid, width.as_number().unwrap_or(0.0));
                     }
                 }
                 i += 2;
@@ -284,7 +280,7 @@ fn parse_w_array(entries: &[Object], out: &mut BTreeMap<u32, f64>, ranges: &mut 
                 let Some(end) = end_obj.as_i64().ok() else {
                     break;
                 };
-                let Some(width) = entries.get(i + 2).map(object_as_f64) else {
+                let Some(width) = entries.get(i + 2).map(|o| o.as_number().unwrap_or(0.0)) else {
                     break;
                 };
                 if let (Ok(first), Ok(last)) = (u32::try_from(start), u32::try_from(end))
@@ -296,37 +292,6 @@ fn parse_w_array(entries: &[Object], out: &mut BTreeMap<u32, f64>, ranges: &mut 
             }
             None => break,
         }
-    }
-}
-
-/// A numeric object as `f64`, treating a non-number as zero (a PDF number operand
-/// is an integer or a real; a stray non-number is best-effort-ignored as zero).
-pub(super) fn object_as_f64(object: &Object) -> f64 {
-    match object {
-        Object::Integer(i) => *i as f64,
-        Object::Real(r) => f64::from(*r),
-        _ => 0.0,
-    }
-}
-
-/// Resolve an object that is an array, inline or by reference.
-fn resolve_array<'a>(doc: &'a Document, object: &'a Object) -> Option<&'a Vec<Object>> {
-    match object {
-        Object::Array(arr) => Some(arr),
-        Object::Reference(id) => doc.get_object(*id).ok().and_then(|o| match o {
-            Object::Array(arr) => Some(arr),
-            _ => None,
-        }),
-        _ => None,
-    }
-}
-
-/// Resolve an object that is a dictionary, inline or by reference.
-fn resolve_dict<'a>(doc: &'a Document, object: &'a Object) -> Option<&'a Dictionary> {
-    match object {
-        Object::Dictionary(dict) => Some(dict),
-        Object::Reference(id) => doc.get_dictionary(*id).ok(),
-        _ => None,
     }
 }
 

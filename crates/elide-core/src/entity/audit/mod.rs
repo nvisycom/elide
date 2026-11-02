@@ -20,7 +20,7 @@ pub use self::hash::AuditHash;
 pub use self::rule_match::RuleMatch;
 use crate::modality::Modality;
 use crate::primitive::Confidence;
-use crate::{Error, ErrorKind, Result};
+use crate::{Error, Result};
 
 /// Full audit trail of an [`Entity`]: every [`AuditEvent`] in its life, as a
 /// tamper-evident DAG.
@@ -272,7 +272,7 @@ impl<M: Modality> AuditLog<M> {
     /// its children is an equivalent DAG, not a tamper.
     ///
     /// Returns `Ok(())` for an intact DAG (an empty log trivially passes), or an
-    /// [`Error`] of kind [`ErrorKind::Integrity`] naming the first break. This
+    /// [`Error`] of kind [`ErrorKind::Integrity`](crate::ErrorKind::Integrity) naming the first break. This
     /// is the tamper check to run on a loaded trail.
     pub fn verify(&self) -> Result<()> {
         let mut seen: Vec<AuditHash> = Vec::with_capacity(self.events.len());
@@ -283,30 +283,27 @@ impl<M: Modality> AuditLog<M> {
         for (index, event) in self.events.iter().enumerate() {
             for parent in &event.parents {
                 if !seen.contains(parent) {
-                    return Err(Error::new(
-                        ErrorKind::Integrity,
-                        format!("audit event at index {index} names an unknown parent"),
-                    ));
+                    return Err(Error::integrity(format!(
+                        "audit event at index {index} names an unknown parent"
+                    )));
                 }
                 if !referenced.contains(parent) {
                     referenced.push(*parent);
                 }
             }
             if event.digest() != event.hash {
-                return Err(Error::new(
-                    ErrorKind::Integrity,
-                    format!("audit event at index {index} was altered: hash mismatch"),
-                ));
+                return Err(Error::integrity(format!(
+                    "audit event at index {index} was altered: hash mismatch"
+                )));
             }
             // Each event is a distinct DAG node: a repeated hash would let a
             // duplicated event stand in as another's referenced parent, masking
             // an insertion. A genuine trail never repeats one (timestamps
             // differ), so a duplicate is a tamper.
             if seen.contains(&event.hash) {
-                return Err(Error::new(
-                    ErrorKind::Integrity,
-                    format!("audit event at index {index} is a duplicate"),
-                ));
+                return Err(Error::integrity(format!(
+                    "audit event at index {index} is a duplicate"
+                )));
             }
             seen.push(event.hash);
         }
@@ -316,17 +313,13 @@ impl<M: Modality> AuditLog<M> {
         if let Some((last, rest)) = self.events.split_last() {
             for (index, event) in rest.iter().enumerate() {
                 if !referenced.contains(&event.hash) {
-                    return Err(Error::new(
-                        ErrorKind::Integrity,
-                        format!(
-                            "audit event at index {index} is unreachable (trail forked or truncated)"
-                        ),
-                    ));
+                    return Err(Error::integrity(format!(
+                        "audit event at index {index} is unreachable (trail forked or truncated)"
+                    )));
                 }
             }
             if referenced.contains(&last.hash) {
-                return Err(Error::new(
-                    ErrorKind::Integrity,
+                return Err(Error::integrity(
                     "audit trail has no single tip (an event was appended past its end)".to_owned(),
                 ));
             }

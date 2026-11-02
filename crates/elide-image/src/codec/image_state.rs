@@ -8,7 +8,6 @@ use elide_core::Result;
 use elide_core::redaction::Redactions;
 
 use crate::ImageBuffer;
-use crate::exif::ExifPolicy;
 use crate::modality::{Image, ImageData, ImageLocation};
 use crate::primitive::Dimensions;
 
@@ -30,9 +29,9 @@ impl ImageState {
         self.0.lock().unwrap().dimensions()
     }
 
-    /// Encode the current pixels to bytes, applying `policy` to the metadata.
-    pub(super) fn encode(&self, policy: ExifPolicy) -> Result<Bytes> {
-        self.0.lock().unwrap().encode(policy)
+    /// Encode the current pixels to bytes with the source's metadata.
+    pub(super) fn encode(&self) -> Result<Bytes> {
+        self.0.lock().unwrap().encode()
     }
 
     /// Encode the current pixels laid over the metadata-stripped `container`.
@@ -40,11 +39,16 @@ impl ImageState {
         self.0.lock().unwrap().encode_over_metadata(container)
     }
 
+    /// Encode the current pixels with the source's metadata removed.
+    pub(super) fn encode_without_metadata(&self) -> Result<Bytes> {
+        self.0.lock().unwrap().encode_without_metadata()
+    }
+
     /// The whole decoded frame as an [`ImageData`]: the decoded pixels plus the
-    /// re-encoded bytes as its source, under `policy`.
-    pub(super) fn image_data(&self, policy: ExifPolicy) -> Result<ImageData> {
+    /// re-encoded bytes as its source.
+    pub(super) fn image_data(&self) -> Result<ImageData> {
         let buffer = self.0.lock().unwrap();
-        let source = buffer.encode(policy)?;
+        let source = buffer.encode()?;
         Ok(ImageData::new(buffer.raster().clone(), source))
     }
 

@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use derive_builder::Builder;
 use elide_core::entity::LabelRef;
 use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use serde::Deserialize;
 
 pub(crate) use self::compiled::CompiledWalk;
@@ -218,8 +218,7 @@ impl Walk {
     /// Returns a validation error when the TOML is malformed or missing
     /// required fields.
     pub fn from_toml(raw: &str) -> Result<Self> {
-        toml::from_str(raw)
-            .map_err(|e| Error::new(ErrorKind::Configuration, format!("walk rule TOML: {e}")))
+        toml::from_str(raw).map_err(|e| Error::configuration(format!("walk rule TOML: {e}")))
     }
 }
 

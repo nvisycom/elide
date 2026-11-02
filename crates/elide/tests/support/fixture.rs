@@ -23,7 +23,7 @@ use elide::modality::{DataReader, DataWriter, Modality, StreamDataReader, TextRe
 use elide::primitive::LanguageTag;
 use elide::recognition::Scope;
 use elide::redaction::operators::{Erase, Mask, Replace};
-use elide::redaction::{Anonymizer, Operator, Rule};
+use elide::redaction::{Anonymizer, HiddenContentPolicy, Operator, Rule};
 use elide::{
     Directives, Document, Error, ErrorKind, Orchestrator, RegistryDocumentExt, Report, Result,
 };
@@ -71,7 +71,7 @@ impl<M: Modality> PipelineOutcome<M> {
     /// if absent. The OOXML packaging lives in `elide-office`, so the read
     /// goes through its part reader rather than reconstructing the zip here.
     pub fn part(&self, name: &str) -> Option<Vec<u8>> {
-        elide_office::opc::fixtures::read_part(&self.redacted, name)
+        elide_office::fixtures::read_part(&self.redacted, name)
     }
 
     /// Every text-bearing part of the redacted package (OOXML container
@@ -83,7 +83,7 @@ impl<M: Modality> PipelineOutcome<M> {
     /// give a false pass. `elide-office` owns this, read the parts back
     /// out, then scan.
     pub fn text_parts(&self) -> Vec<(String, String)> {
-        elide_office::opc::fixtures::text_parts(&self.redacted)
+        elide_office::fixtures::text_parts(&self.redacted)
     }
 
     /// Assert that no value in `pii` survives in any text-bearing part of
@@ -128,7 +128,17 @@ impl Fixture {
     /// Run the pipeline as the [`Text`] modality (`txt`, `json`, `html`,
     /// and a DOCX's body), over the default built-in registry.
     pub async fn run(&self) -> Result<PipelineOutcome<Text>> {
-        self.run_typed::<Text>(FormatRegistry::with_builtin()).await
+        self.run_with_policy(HiddenContentPolicy::default()).await
+    }
+
+    /// Run the [`Text`] pipeline with the fixture's hidden content handled
+    /// under `policy`.
+    pub async fn run_with_policy(
+        &self,
+        policy: HiddenContentPolicy,
+    ) -> Result<PipelineOutcome<Text>> {
+        self.run_typed::<Text>(FormatRegistry::with_builtin(), policy)
+            .await
     }
 
     /// Run the [`Text`] pipeline over a caller-supplied `registry`, so a
@@ -137,7 +147,8 @@ impl Fixture {
     ///
     /// [`pdf_format_with`]: elide::codec::pdf::pdf_format_with
     pub async fn run_with(&self, registry: FormatRegistry) -> Result<PipelineOutcome<Text>> {
-        self.run_typed::<Text>(registry).await
+        self.run_typed::<Text>(registry, HiddenContentPolicy::default())
+            .await
     }
 
     /// Run the [`Text`] pipeline with the request [`LabelCatalog`] scoped to
@@ -149,8 +160,12 @@ impl Fixture {
         labels: impl IntoIterator<Item = Label>,
     ) -> Result<PipelineOutcome<Text>> {
         let scope = Scope::new().with_catalog(labels.into_iter().collect());
-        self.run_typed_with::<Text>(FormatRegistry::with_builtin(), scope)
-            .await
+        self.run_typed_with::<Text>(
+            FormatRegistry::with_builtin(),
+            HiddenContentPolicy::default(),
+            scope,
+        )
+        .await
     }
 
     /// Run the [`Text`] pipeline with a caller-**asserted** language, so a
@@ -162,8 +177,12 @@ impl Fixture {
         let scope = Scope::new()
             .with_language(language)
             .with_catalog(LabelCatalog::with_builtins());
-        self.run_typed_with::<Text>(FormatRegistry::with_builtin(), scope)
-            .await
+        self.run_typed_with::<Text>(
+            FormatRegistry::with_builtin(),
+            HiddenContentPolicy::default(),
+            scope,
+        )
+        .await
     }
 
     /// Run the pipeline as the [`Tabular`] modality (`csv`).
@@ -171,7 +190,20 @@ impl Fixture {
     /// [`Tabular`]: elide::modality::tabular::Tabular
     #[cfg(feature = "tabular")]
     pub async fn run_tabular(&self) -> Result<PipelineOutcome<Tabular>> {
-        self.run_typed::<Tabular>(FormatRegistry::with_builtin())
+        self.run_tabular_with_policy(HiddenContentPolicy::default())
+            .await
+    }
+
+    /// Run the [`Tabular`] pipeline with the fixture's hidden content handled
+    /// under `policy`.
+    ///
+    /// [`Tabular`]: elide::modality::tabular::Tabular
+    #[cfg(feature = "tabular")]
+    pub async fn run_tabular_with_policy(
+        &self,
+        policy: HiddenContentPolicy,
+    ) -> Result<PipelineOutcome<Tabular>> {
+        self.run_typed::<Tabular>(FormatRegistry::with_builtin(), policy)
             .await
     }
 
@@ -192,7 +224,9 @@ impl Fixture {
         use elide::redaction::operators::{Erase, Silence};
 
         let registry = FormatRegistry::with_builtin();
-        let mut document = self.decode_document::<Audio>(&registry).await?;
+        let mut document = self
+            .decode_document::<Audio>(&registry, HiddenContentPolicy::default())
+            .await?;
 
         // The mock STT backend transcribes nothing, so recognition finds
         // nothing; the anonymizer would silence/erase any time spans it did.
@@ -251,7 +285,9 @@ impl Fixture {
         use elide::redaction::operators::Erase;
 
         let registry = FormatRegistry::with_builtin();
-        let mut document = self.decode_document::<Image>(&registry).await?;
+        let mut document = self
+            .decode_document::<Image>(&registry, HiddenContentPolicy::default())
+            .await?;
 
         // The mock OCR backend recognizes nothing, so recognition finds
         // nothing; the anonymizer would clear any regions it did.
@@ -301,7 +337,11 @@ impl Fixture {
     /// a container fixture's embedded media is driven too. Registering the
     /// image modality is format-neutral: it only fires for a document that
     /// actually has image parts (a DOCX), and is inert for the rest.
-    async fn run_typed<M>(&self, registry: FormatRegistry) -> Result<PipelineOutcome<M>>
+    async fn run_typed<M>(
+        &self,
+        registry: FormatRegistry,
+        policy: HiddenContentPolicy,
+    ) -> Result<PipelineOutcome<M>>
     where
         M: TextRecognizable,
         Entity<M>: Clone,
@@ -318,7 +358,7 @@ impl Fixture {
         // would suppress detection, see `LinguaEnricher::enrich`). The catalog
         // requests every built-in label, so recognizers emit all they find.
         let scope = Scope::new().with_catalog(LabelCatalog::with_builtins());
-        self.run_typed_with::<M>(registry, scope).await
+        self.run_typed_with::<M>(registry, policy, scope).await
     }
 
     /// [`run_typed`] with a caller-supplied [`Scope`], so a test can scope the
@@ -329,6 +369,7 @@ impl Fixture {
     async fn run_typed_with<M>(
         &self,
         registry: FormatRegistry,
+        policy: HiddenContentPolicy,
         scope: Scope,
     ) -> Result<PipelineOutcome<M>>
     where
@@ -341,7 +382,7 @@ impl Fixture {
         Mask: Operator<M>,
         Erase: Operator<M>,
     {
-        let mut document = self.decode_document::<M>(&registry).await?;
+        let mut document = self.decode_document::<M>(&registry, policy).await?;
 
         // One scope, shared across every modality pipeline. Built through
         // `TestOrchestrator`, the shared construction path.
@@ -392,15 +433,20 @@ impl Fixture {
     }
 
     /// Decode this fixture's bytes into a named [`Document`] whose body stream is
-    /// the `M` modality, resolving the format from the fixture's extension.
+    /// the `M` modality, its hidden content handled under `policy`, resolving
+    /// the format from the fixture's extension.
     ///
     /// Asserts the body modality so a fixture whose extension decodes to another
     /// modality (a `.txt` run through `run_audio`) fails here with
     /// [`CapabilityUnavailable`](ErrorKind::CapabilityUnavailable), rather than
     /// analyzing to no findings and reporting a hollow round trip.
-    async fn decode_document<M: Modality>(&self, registry: &FormatRegistry) -> Result<Document> {
+    async fn decode_document<M: Modality>(
+        &self,
+        registry: &FormatRegistry,
+        policy: HiddenContentPolicy,
+    ) -> Result<Document> {
         let document = registry
-            .document_with(DOC, self.extension, self.source)
+            .document_with(DOC, self.extension, self.source, policy)
             .await?;
         let body_is_m = document
             .document
@@ -412,20 +458,17 @@ impl Fixture {
             })
             .unwrap_or(false);
         if !body_is_m {
-            return Err(Error::new(
-                ErrorKind::CapabilityUnavailable,
-                format!(
-                    "{} did not resolve to the {} modality",
-                    self.extension,
-                    M::NAME
-                ),
-            ));
+            return Err(Error::capability_unavailable(format!(
+                "{} did not resolve to the {} modality",
+                self.extension,
+                M::NAME
+            )));
         }
         Ok(document)
     }
 
     /// Write the serialized detection [`Report`] to `testdata/audits/` as
-    /// `{filename}.json` (e.g. `sample.docx.json`): the body and any
+    /// `{filename}.json` (e.g. `body_header_hyperlink.docx.json`): the body and any
     /// container parts' findings, grouped by part id. Only with the `serde`
     /// feature; the whole `audits/` directory is gitignored.
     #[cfg(feature = "serde")]

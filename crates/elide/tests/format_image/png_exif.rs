@@ -13,9 +13,9 @@ use elide::entity::LabelCatalog;
 use elide::modality::image::Image;
 use elide::modality::metadata::Metadata;
 use elide::recognition::Scope;
-use elide::recognition::exif::ExifRecognizer;
+use elide::recognition::metadata::FieldRecognizer;
 use elide::redaction::operators::Erase;
-use elide::redaction::{Anonymizer, Rule};
+use elide::redaction::{Anonymizer, HiddenContentPolicy, Rule};
 use elide::{Directives, Document, Orchestrator};
 use elide_image::fixtures::{has_gps_png, is_valid_image, png_with_gps};
 
@@ -33,12 +33,12 @@ async fn png_gps_is_stripped_through_the_facade() {
             Anonymizer::new().with(Rule::fallback(Erase)),
         )
         .with_modality::<Metadata>(
-            Analyzer::new().with_recognizer(ExifRecognizer),
+            Analyzer::new().with_recognizer(FieldRecognizer),
             Anonymizer::new().with(Rule::fallback(Erase)),
         );
 
     let handle = registry
-        .decode(original.clone(), "png")
+        .decode(original.clone(), "png", HiddenContentPolicy::default())
         .await
         .expect("decode png");
     let mut documents = [Document::new("photo.png", handle)];

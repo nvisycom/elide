@@ -28,6 +28,7 @@
 - [Formats](formats.md)
 - [Containers](containers.md)
 - [Reviewing before redacting](review.md)
+- [Hidden content](hidden-content.md)
 - [Metadata](metadata.md)
 
 # Images and audio

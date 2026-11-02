@@ -1,6 +1,6 @@
 //! [`PartPath`]: a typed package-part path, and the [`PartRole`] /
-//! [`PartClassifier`] seam a format supplies to tell the engine how each part is
-//! treated.
+//! [`PartClassifier`] seam a format supplies to tell the engine how each kind of
+//! part is treated.
 
 use std::fmt;
 
@@ -8,7 +8,10 @@ use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use crate::opc::attributes::TextAttribute;
 use crate::opc::block::EmbeddingKind;
+use crate::opc::kind::PartKind;
+use crate::opc::names::Names;
 
 /// A package-part path within an OOXML zip (e.g. `word/document.xml`,
 /// `word/media/image1.png`).
@@ -73,35 +76,6 @@ impl PartPath {
         self.has_extension("rels")
             && (self.as_str() == "_rels/.rels" || self.as_str().contains("/_rels/"))
     }
-
-    /// Whether this path is `<prefix><digits><suffix>` for at least one digit,
-    /// e.g. `word/header2.xml` matches `("word/header", ".xml")`. The shape of a
-    /// numbered OOXML part (headers, footers, slides, notes), so a classifier
-    /// can group `header1.xml`, `header2.xml`, … without listing each.
-    pub(crate) fn numbered(&self, prefix: &str, suffix: &str) -> bool {
-        self.as_str()
-            .strip_prefix(prefix)
-            .and_then(|rest| rest.strip_suffix(suffix))
-            .is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
-    }
-
-    /// The [`EmbeddingKind`] of a binary part under an OOXML format's part tree
-    /// rooted at `base` (`"word"`, `"ppt"`, `"xl"`), or `None` when the path is
-    /// not an embedding. `<base>/media/*` is a media file (kind by extension),
-    /// `<base>/embeddings/*` an embedded object, `<base>/fonts/*` a font. Every
-    /// OOXML format lays its binaries out this way, so one classifier serves all
-    /// three (a format with no `fonts` dir simply never matches that arm).
-    pub(crate) fn embedding_under(&self, base: &str) -> Option<EmbeddingKind> {
-        if self.in_dir(&format!("{base}/media")) {
-            Some(EmbeddingKind::from_path(self.as_str()))
-        } else if self.in_dir(&format!("{base}/embeddings")) {
-            Some(EmbeddingKind::Object)
-        } else if self.in_dir(&format!("{base}/fonts")) {
-            Some(EmbeddingKind::Font)
-        } else {
-            None
-        }
-    }
 }
 
 impl fmt::Display for PartPath {
@@ -129,6 +103,9 @@ impl From<String> for PartPath {
 /// roles, and the engine acts on the role alone, so the neutral core never
 /// needs to know a `word/header2.xml` from a `word/comments.xml`, only that both
 /// hold element text.
+///
+/// Whatever its role, an XML part's [text
+/// attributes](PartClassifier::text_attributes) are redacted as well.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PartRole {
     /// Redact the element text (text/comment/CDATA events) of this XML part.
@@ -136,50 +113,53 @@ pub enum PartRole {
     /// Redact the external-hyperlink `Target` attribute values of this
     /// relationships part.
     RelationshipTargets,
-    /// A binary embedding (image, embedded object, font) surfaced as bytes,
+    /// A binary embedding (image, audio or video clip, embedded object)
+    /// surfaced as bytes,
     /// tagged with what kind of embedding it is.
     Binary(EmbeddingKind),
     /// A document-property part (docProps/core.xml, app.xml): its named fields
     /// carry personal data (author, timestamps, company), so it is surfaced for
     /// whole-part replacement, but it is not prose, so it is never text-spliced.
     Property,
-    /// Structure carried through unchanged.
+    /// A spreadsheet's cell part (a worksheet or the shared-string table): its
+    /// cell text is redacted out of band through the cell model and the part
+    /// replaced whole. Every other text it carries (a header or footer, a
+    /// validation list, a formula, a phonetic reading) is redacted as element
+    /// text.
+    Cells,
+    /// Structure carried through unchanged, save for its text attributes.
     Structure,
 }
 
 impl PartRole {
-    /// Whether this role yields redactable text, element text or relationship
-    /// targets, so the engine reads it as a text-splice part.
-    pub(crate) fn is_redactable(self) -> bool {
-        matches!(self, Self::ElementText | Self::RelationshipTargets)
-    }
-
-    /// Whether a whole-part byte replacement may target this part. A binary
-    /// embedding is replaced wholesale, a property part is rewritten out of band,
-    /// and a redactable text part may be replaced whole when a caller redacts it
-    /// out of band (e.g. an xlsx sheet). Only a [`Structure`](Self::Structure)
-    /// part, carried through untouched, refuses replacement.
+    /// Whether a whole-part byte replacement may target this part: a binary
+    /// embedding is replaced wholesale, and a property or cell part is rewritten
+    /// out of band. A text part is only ever spliced, and a structure part
+    /// (the main part, the manifest, styles) never replaced, so redacted bytes
+    /// can never overwrite the package's structure.
     pub(crate) fn is_whole_part_replaceable(self) -> bool {
-        !matches!(self, Self::Structure)
+        matches!(self, Self::Binary(_) | Self::Property | Self::Cells)
     }
 }
 
-/// A format supplies this so the engine can classify parts without knowing the
-/// format's schema.
-///
-/// The engine calls [`role`](PartClassifier::role) to decide how to extract and
-/// rewrite each part, and [`is_protected`](PartClassifier::is_protected) to
-/// refuse a binary part replacement that would corrupt the package.
+/// A format supplies this so the engine acts on parts without knowing the
+/// format's schema: it maps what a part is ([`PartKind`], decided once from the
+/// part's content type) to how the engine treats it.
 pub trait PartClassifier {
-    /// The role the engine should apply to the part at `path`.
-    fn role(&self, path: &PartPath) -> PartRole;
+    /// The role the engine applies to a part of `kind`.
+    fn role(&self, kind: PartKind) -> PartRole;
 
-    /// Whether `path` is a structural part a binary part replacement must never
-    /// overwrite (clobbering it would corrupt the package rather than redact
-    /// it). The default protects nothing; a format overrides it for the parts
-    /// whose bytes hold the package's structure.
-    fn is_protected(&self, _path: &PartPath) -> bool {
-        false
+    /// The attributes whose values are text a reader sees or the policy keeps,
+    /// redacted in every XML part like element text.
+    fn text_attributes(&self) -> &'static [TextAttribute] {
+        &[]
+    }
+
+    /// The names the format holds to rules of their own, and the attributes
+    /// that refer to them; each is among the
+    /// [`text_attributes`](Self::text_attributes).
+    fn names(&self) -> &'static Names {
+        &Names::NONE
     }
 }
 

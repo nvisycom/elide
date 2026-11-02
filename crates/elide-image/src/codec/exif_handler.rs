@@ -56,11 +56,8 @@ impl Stream<Metadata> for ExifHandler {
     }
 
     fn encode(&self) -> Result<ContentData> {
-        // No field was removed: return the source bytes untouched. Stripping an
-        // empty key set would still rewrite a JPEG's APP12/APP13 baseline, which
-        // changes the `#exif` bytes and would make the recombiner lay pixels over
-        // them instead of applying the fallback `ExifPolicy` — leaking EXIF the
-        // policy should strip.
+        // No field was removed: the source is already scrubbed of every block
+        // outside EXIF at decode, so it is the answer as-is.
         if self.removed.is_empty() {
             return Ok(ContentData::new(self.buffer.source_bytes()));
         }

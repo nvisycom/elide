@@ -51,7 +51,9 @@ use elide::prelude::*;
 
 # #[tokio::main]
 # async fn main() -> Result<()> {
-# let mut document = FormatRegistry::with_builtin().decode("mail a@b.com now", "txt").await?;
+# let mut document = FormatRegistry::with_builtin()
+#     .decode("mail a@b.com now", "txt", HiddenContentPolicy::default())
+#     .await?;
 # let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else { unreachable!() };
 # let stream = handle.downcast_mut::<Text>().unwrap();
 # let scope = Scope::new().with_catalog(LabelCatalog::with_builtins());

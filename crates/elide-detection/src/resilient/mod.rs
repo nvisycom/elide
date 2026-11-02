@@ -94,9 +94,9 @@ impl<M: Modality, R: Recognizer<M>> Recognizer<M> for ResilientRecognizer<R> {
 
 #[cfg(test)]
 mod tests {
+    use elide_core::Error;
     use elide_core::modality::text::{Text, TextData};
     use elide_core::recognition::{Scope, Subject};
-    use elide_core::{Error, ErrorKind};
 
     use super::*;
 
@@ -114,7 +114,7 @@ mod tests {
             _subject: &Subject<Text>,
             _ctx: &Context<'_, Text>,
         ) -> Result<Vec<Entity<Text>>> {
-            Err(Error::new(ErrorKind::Recognition, "boom"))
+            Err(Error::recognition("boom"))
         }
     }
 

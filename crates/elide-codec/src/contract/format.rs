@@ -13,6 +13,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use elide_core::Result;
+use elide_core::redaction::HiddenContentPolicy;
 
 use super::loader::LeafLoader;
 use super::{Document, DocumentLoader, Loader};
@@ -146,15 +147,22 @@ impl Format {
         &self.content_types
     }
 
-    /// Decode raw content through this format's loader into a [`Document`].
-    /// Equivalent to resolving the format yourself and calling
-    /// `FormatRegistry::decode`.
+    /// Decode raw content through this format's loader into a [`Document`],
+    /// stripping its hidden content under `policy`, and record `policy` on the
+    /// document so every document embedded in it is decoded under the same one
+    /// ([`Document::hidden_content_policy`]). Equivalent to resolving the format
+    /// yourself and calling `FormatRegistry::decode`.
     ///
     /// # Errors
     ///
     /// Propagates the loader's decode error.
-    pub async fn decode(&self, content: ContentData) -> Result<Document> {
-        self.loader.decode(content).await
+    pub async fn decode(
+        &self,
+        content: ContentData,
+        policy: HiddenContentPolicy,
+    ) -> Result<Document> {
+        let document = self.loader.decode(content, policy).await?;
+        Ok(document.decoded_under(policy))
     }
 }
 

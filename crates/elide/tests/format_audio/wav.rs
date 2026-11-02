@@ -10,8 +10,11 @@ use elide::Result;
 use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
-    path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/sample.wav"),
-    source: include_bytes!("../testdata/sample.wav"),
+    path: concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/testdata/wav/short_clip.wav"
+    ),
+    source: include_bytes!("../testdata/wav/short_clip.wav"),
     extension: "wav",
 };
 

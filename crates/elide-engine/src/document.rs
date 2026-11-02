@@ -9,7 +9,8 @@ use std::path::Path;
 
 use elide_codec::content::ContentData;
 use elide_codec::{Document as CodecDocument, FormatId};
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::redaction::HiddenContentPolicy;
+use elide_core::{Error, Result};
 use elide_format::FormatRegistry;
 
 /// One document the engine redacts: its name and its decoded parts.
@@ -119,7 +120,9 @@ impl<T: AsDocuments + ?Sized> AsDocuments for &mut T {
 /// [`FormatRegistry`].
 ///
 /// The codec stays byte-and-format only (a document carries no filename) while
-/// the engine attaches the name it owns. [`document`] infers the format from the
+/// the engine attaches the name it owns. The [`HiddenContentPolicy`] given here
+/// governs the whole document: every document embedded in it is decoded under
+/// the same policy when the engine walks it. [`document`] infers the format from the
 /// name's own extension (a real filename like `report.docx`); [`document_with`]
 /// takes the format explicitly, for a name that carries none or a misleading one.
 ///
@@ -128,8 +131,9 @@ impl<T: AsDocuments + ?Sized> AsDocuments for &mut T {
 /// [`document`]: Self::document
 /// [`document_with`]: Self::document_with
 pub trait RegistryDocumentExt: sealed::Sealed {
-    /// Decode `bytes` into a [`Document`] named `name`, resolving the format from
-    /// the extension of `name` itself (`report.docx` → `docx`).
+    /// Decode `bytes` into a [`Document`] named `name`, its hidden content
+    /// handled under `policy`, resolving the format from the extension of
+    /// `name` itself (`report.docx` → `docx`).
     ///
     /// # Errors
     ///
@@ -145,10 +149,12 @@ pub trait RegistryDocumentExt: sealed::Sealed {
         &self,
         name: impl Into<String>,
         bytes: impl Into<ContentData>,
+        policy: HiddenContentPolicy,
     ) -> impl std::future::Future<Output = Result<Document>>;
 
-    /// Decode `bytes` into a [`Document`] named `name`, resolving the format from
-    /// the explicit `extension` (which always wins, whatever `name` looks like).
+    /// Decode `bytes` into a [`Document`] named `name`, its hidden content
+    /// handled under `policy`, resolving the format from the explicit
+    /// `extension` (which always wins, whatever `name` looks like).
     ///
     /// # Errors
     ///
@@ -161,6 +167,7 @@ pub trait RegistryDocumentExt: sealed::Sealed {
         name: impl Into<String>,
         extension: &str,
         bytes: impl Into<ContentData>,
+        policy: HiddenContentPolicy,
     ) -> impl std::future::Future<Output = Result<Document>>;
 }
 
@@ -171,6 +178,7 @@ impl RegistryDocumentExt for FormatRegistry {
         &self,
         name: impl Into<String>,
         bytes: impl Into<ContentData>,
+        policy: HiddenContentPolicy,
     ) -> Result<Document> {
         let name = name.into();
         // The format is the name's own extension, lowercased, resolved via
@@ -180,15 +188,12 @@ impl RegistryDocumentExt for FormatRegistry {
             .and_then(|e| e.to_str())
             .map(str::to_ascii_lowercase);
         let Some(extension) = extension else {
-            return Err(Error::new(
-                ErrorKind::MalformedInput,
-                format!(
-                    "document name `{name}` has no extension to resolve a format from; \
+            return Err(Error::malformed(format!(
+                "document name `{name}` has no extension to resolve a format from; \
                      use `document_with` with an explicit extension"
-                ),
-            ));
+            )));
         };
-        let document = self.decode(bytes, &extension).await?;
+        let document = self.decode(bytes, &extension, policy).await?;
         Ok(Document::new(name, document))
     }
 
@@ -197,8 +202,9 @@ impl RegistryDocumentExt for FormatRegistry {
         name: impl Into<String>,
         extension: &str,
         bytes: impl Into<ContentData>,
+        policy: HiddenContentPolicy,
     ) -> Result<Document> {
-        let document = self.decode(bytes, extension).await?;
+        let document = self.decode(bytes, extension, policy).await?;
         Ok(Document::new(name, document))
     }
 }

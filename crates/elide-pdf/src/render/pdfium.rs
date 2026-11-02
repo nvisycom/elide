@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use image::{GenericImageView, ImageFormat};
 use pdfium_render::prelude::*;
 
@@ -43,7 +43,6 @@ thread_local! {
 /// number, on the dedicated PDFium thread. Pages not in `numbers` are not
 /// rendered at all (so a scanned-page pass over a mostly-text document does not
 /// pay to rasterise every page).
-#[cfg(feature = "image")]
 pub(crate) fn render_pages(
     pdf_bytes: Vec<u8>,
     numbers: BTreeSet<u32>,
@@ -84,19 +83,13 @@ impl Binding {
     fn new() -> Result<Self> {
         let bindings = Pdfium::bind_to_system_library()
             .or_else(|_| Pdfium::bind_to_library("libpdfium"))
-            .map_err(|e| {
-                Error::new(
-                    ErrorKind::MalformedInput,
-                    format!("failed to load PDFium library: {e}"),
-                )
-            })?;
+            .map_err(|e| Error::malformed(format!("failed to load PDFium library: {e}")))?;
         Ok(Self {
             pdfium: Pdfium::new(bindings),
         })
     }
 
     /// Render only the 1-based pages in `numbers`, keyed by page number.
-    #[cfg(feature = "image")]
     fn render_pages(
         &self,
         pdf_bytes: &[u8],
@@ -106,20 +99,14 @@ impl Binding {
         let document = self
             .pdfium
             .load_pdf_from_byte_slice(pdf_bytes, None)
-            .map_err(|e| {
-                Error::new(
-                    ErrorKind::MalformedInput,
-                    format!("failed to load PDF: {e}"),
-                )
-            })?;
+            .map_err(|e| Error::malformed(format!("failed to load PDF: {e}")))?;
         let config = PdfRenderConfig::new().scale_page_by_factor(scale);
 
         let page_count = document.pages().len() as usize;
         if page_count > MAX_PAGES {
-            return Err(Error::new(
-                ErrorKind::ResourceLimit,
-                format!("document has {page_count} pages, over the {MAX_PAGES}-page render limit"),
-            ));
+            return Err(Error::resource_limit(format!(
+                "document has {page_count} pages, over the {MAX_PAGES}-page render limit"
+            )));
         }
 
         let mut out = BTreeMap::new();
@@ -142,49 +129,32 @@ impl Binding {
         let document = self
             .pdfium
             .load_pdf_from_byte_slice(pdf_bytes, None)
-            .map_err(|e| {
-                Error::new(
-                    ErrorKind::MalformedInput,
-                    format!("failed to load PDF: {e}"),
-                )
-            })?;
+            .map_err(|e| Error::malformed(format!("failed to load PDF: {e}")))?;
         let config = PdfRenderConfig::new().scale_page_by_factor(scale);
 
         let page_count = document.pages().len() as usize;
         if page_count > MAX_PAGES {
-            return Err(Error::new(
-                ErrorKind::ResourceLimit,
-                format!("document has {page_count} pages, over the {MAX_PAGES}-page render limit"),
-            ));
+            return Err(Error::resource_limit(format!(
+                "document has {page_count} pages, over the {MAX_PAGES}-page render limit"
+            )));
         }
 
         let mut observations = Vec::new();
         for (index, page) in document.pages().iter().enumerate() {
-            let bitmap = page.render_with_config(&config).map_err(|e| {
-                Error::new(
-                    ErrorKind::MalformedInput,
-                    format!("failed to render PDF page: {e}"),
-                )
-            })?;
+            let bitmap = page
+                .render_with_config(&config)
+                .map_err(|e| Error::malformed(format!("failed to render PDF page: {e}")))?;
             let image = bitmap
                 .as_image()
-                .map_err(|e| {
-                    Error::new(
-                        ErrorKind::MalformedInput,
-                        format!("failed to convert PDF page bitmap: {e}"),
-                    )
-                })?
+                .map_err(|e| Error::malformed(format!("failed to convert PDF page bitmap: {e}")))?
                 .into_rgb8();
             let (width, height) = image.dimensions();
             if width > MAX_PAGE_DIMENSION_PX || height > MAX_PAGE_DIMENSION_PX {
-                return Err(Error::new(
-                    ErrorKind::ResourceLimit,
-                    format!(
-                        "page {} renders to {width}x{height} px, over the \
+                return Err(Error::resource_limit(format!(
+                    "page {} renders to {width}x{height} px, over the \
                      {MAX_PAGE_DIMENSION_PX}px per-side render limit",
-                        index + 1
-                    ),
-                ));
+                    index + 1
+                )));
             }
             let pixels = image.into_raw();
 
@@ -243,40 +213,27 @@ impl Binding {
 }
 
 /// Render one page to a PNG at `config`'s scale.
-#[cfg(feature = "image")]
 fn render_page(page: &PdfPage, config: &PdfRenderConfig) -> Result<RenderedPage> {
-    let bitmap = page.render_with_config(config).map_err(|e| {
-        Error::new(
-            ErrorKind::MalformedInput,
-            format!("failed to render PDF page: {e}"),
-        )
-    })?;
-    let image = bitmap.as_image().map_err(|e| {
-        Error::new(
-            ErrorKind::MalformedInput,
-            format!("failed to convert PDF page bitmap: {e}"),
-        )
-    })?;
+    let bitmap = page
+        .render_with_config(config)
+        .map_err(|e| Error::malformed(format!("failed to render PDF page: {e}")))?;
+    let image = bitmap
+        .as_image()
+        .map_err(|e| Error::malformed(format!("failed to convert PDF page bitmap: {e}")))?;
     let (width, height) = image.dimensions();
     // Reject an oversized render before encoding, so a page that rasterises to a
     // huge bitmap cannot drive unbounded PNG-encoding memory (the same bound
     // `observe_all` applies to the glyph-observation path).
     if width > MAX_PAGE_DIMENSION_PX || height > MAX_PAGE_DIMENSION_PX {
-        return Err(Error::new(
-            ErrorKind::ResourceLimit,
-            format!(
-                "page renders to {width}x{height} px, over the \
+        return Err(Error::resource_limit(format!(
+            "page renders to {width}x{height} px, over the \
                  {MAX_PAGE_DIMENSION_PX}px per-side render limit"
-            ),
-        ));
+        )));
     }
     let mut png = std::io::Cursor::new(Vec::new());
-    image.write_to(&mut png, ImageFormat::Png).map_err(|e| {
-        Error::new(
-            ErrorKind::MalformedInput,
-            format!("failed to encode page PNG: {e}"),
-        )
-    })?;
+    image
+        .write_to(&mut png, ImageFormat::Png)
+        .map_err(|e| Error::malformed(format!("failed to encode page PNG: {e}")))?;
     Ok(RenderedPage {
         png: png.into_inner(),
         width,

@@ -16,7 +16,7 @@ use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement
 use elide_core::modality::text::{TextData, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter, ResolvedHint};
 use elide_core::redaction::Redactions;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 use super::csv_loader::CsvLoader;
 
@@ -137,16 +137,16 @@ impl CsvHandler {
         if let Some(headers) = &self.data.headers {
             writer
                 .write_record(headers)
-                .map_err(|e| Error::new(ErrorKind::Processing, format!("CSV write: {e}")))?;
+                .map_err(|e| Error::processing(format!("CSV write: {e}")))?;
         }
         for row in &self.data.rows {
             writer
                 .write_record(row)
-                .map_err(|e| Error::new(ErrorKind::Processing, format!("CSV write: {e}")))?;
+                .map_err(|e| Error::processing(format!("CSV write: {e}")))?;
         }
         let mut bytes = writer
             .into_inner()
-            .map_err(|e| Error::new(ErrorKind::Processing, format!("CSV flush: {e}")))?;
+            .map_err(|e| Error::processing(format!("CSV flush: {e}")))?;
         // The csv crate writes CRLF; normalize to LF and honor the
         // original trailing-newline so a clean file round-trips exactly.
         bytes.retain(|&b| b != b'\r');

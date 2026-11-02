@@ -11,8 +11,8 @@
 //! ambiguous). Callers verify that themselves through the regex
 //! character class; this helper only computes the checksum.
 //!
-//! [`passport`]: super::passport
-//! [`id_card`]: super::id_card
+//! [`passport`]: fn@super::passport
+//! [`id_card`]: fn@super::id_card
 
 /// Compute the ICAO Doc 9303 check digit over an 8-character
 /// alphanumeric serial. Returns `None` when a character is not

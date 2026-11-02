@@ -12,15 +12,16 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use lopdf::content::Content;
 use lopdf::{Document, Encoding, Object, ObjectId};
 
 use super::geometry::{Cursor, DeviceRect, Matrix, PageFrame, SpaceRule, TextState};
 use super::glyphs::decode_glyphs;
-use super::widths::{GlyphMetrics, WidthSource, object_as_f64};
+use super::widths::{GlyphMetrics, WidthSource};
 use super::{Address, FontEntry, GlyphBytes, OffsetMap, OffsetRun, StreamTarget, TextBlock};
 use crate::document::Store;
+use crate::document::object::{DictionaryExt, DocumentExt, ObjectExt};
 
 /// The character code of the single-byte space, the only code `Tw` word spacing
 /// applies to (ISO 32000-1 §9.3.3).
@@ -170,7 +171,7 @@ impl TextRun<'_> {
                                 self.show_string(enc, bytes, address)?;
                             }
                             Object::Integer(_) | Object::Real(_) => {
-                                let kern = object_as_f64(item);
+                                let kern = item.as_number().unwrap_or(0.0);
                                 // Displacement is −kern/1000 × font size × hscale.
                                 let tx = -kern / 1000.0 * self.state.font_size * self.state.h_scale;
                                 self.cursor.advance(tx);
@@ -268,7 +269,10 @@ impl TextRun<'_> {
 /// (a malformed operator reads as its zero, never a hard error — positioning is
 /// best-effort for spacing).
 fn operand_f64(operands: &[Object], index: usize) -> f64 {
-    operands.get(index).map(object_as_f64).unwrap_or(0.0)
+    operands
+        .get(index)
+        .map(|o| o.as_number().unwrap_or(0.0))
+        .unwrap_or(0.0)
 }
 
 /// Read six numeric operands from `base` as a [`Matrix`] `[a b c d e f]`, or
@@ -298,7 +302,9 @@ fn read_matrix(operands: &[Object], base: usize) -> Option<Matrix> {
 fn page_frame(doc: &Document, page_id: ObjectId) -> PageFrame {
     let crop = inherited_rect(doc, page_id, b"CropBox")
         .or_else(|| inherited_rect(doc, page_id, b"MediaBox"));
-    let rotate = inherited_int(doc, page_id, b"Rotate").unwrap_or(0);
+    let rotate = doc
+        .inherited(page_id, b"Rotate", |value| value.as_i64().ok())
+        .unwrap_or(0);
     // Normalize rotation to 0/90/180/270 (PDF requires a multiple of 90, but be
     // defensive against junk).
     let rotate = rotate.rem_euclid(360) as u32;
@@ -332,55 +338,21 @@ fn page_frame(doc: &Document, page_id: ObjectId) -> PageFrame {
 /// `None`), so the caller's fallback chain (CropBox → MediaBox → unit frame)
 /// stays available rather than accepting a distorted box.
 fn inherited_rect(doc: &Document, page_id: ObjectId, key: &[u8]) -> Option<[f64; 4]> {
-    let mut id = page_id;
-    for _ in 0..MAX_PARENT_WALK {
-        let dict = doc.get_dictionary(id).ok()?;
-        if let Ok(value) = dict.get(key)
-            && let Ok((_, resolved)) = doc.dereference(value)
-            && let Ok(array) = resolved.as_array()
-            && array.len() == 4
-        {
-            // All four elements must resolve to numbers; a single unresolvable
-            // one fails the whole box rather than defaulting to 0.
-            return Some([
-                resolved_f64(doc, &array[0])?,
-                resolved_f64(doc, &array[1])?,
-                resolved_f64(doc, &array[2])?,
-                resolved_f64(doc, &array[3])?,
-            ]);
-        }
-        id = dict.get(b"Parent").ok()?.as_reference().ok()?;
-    }
-    None
+    doc.inherited(page_id, key, |value| {
+        let array = doc.resolve_array(value)?;
+        let [a, b, c, d] = array.as_slice() else {
+            return None;
+        };
+        // All four elements must resolve to numbers; a single unresolvable one
+        // fails the whole box rather than defaulting to 0.
+        Some([
+            doc.resolve_number(a)?,
+            doc.resolve_number(b)?,
+            doc.resolve_number(c)?,
+            doc.resolve_number(d)?,
+        ])
+    })
 }
-
-/// An `Object` as `f64`, dereferencing an indirect reference first. `None` when
-/// it does not resolve to an integer or real (an unresolvable reference, or a
-/// non-numeric object) so a caller can reject the whole structure.
-fn resolved_f64(doc: &Document, object: &Object) -> Option<f64> {
-    let (_, resolved) = doc.dereference(object).ok()?;
-    match resolved {
-        Object::Integer(i) => Some(*i as f64),
-        Object::Real(r) => Some(f64::from(*r)),
-        _ => None,
-    }
-}
-
-/// Resolve an integer attribute (`Rotate`) on a page, walking up `/Parent`.
-fn inherited_int(doc: &Document, page_id: ObjectId, key: &[u8]) -> Option<i64> {
-    let mut id = page_id;
-    for _ in 0..MAX_PARENT_WALK {
-        let dict = doc.get_dictionary(id).ok()?;
-        if let Ok(value) = dict.get(key).and_then(|o| o.as_i64()) {
-            return Some(value);
-        }
-        id = dict.get(b"Parent").ok()?.as_reference().ok()?;
-    }
-    None
-}
-
-/// A guard on the `/Parent` inheritance walk, against a cyclic page tree.
-const MAX_PARENT_WALK: u32 = 64;
 
 /// Build one [`TextBlock`] per page by walking its content in operator order,
 /// the same order lopdf's text extraction uses, so a character offset maps to
@@ -389,9 +361,9 @@ const MAX_PARENT_WALK: u32 = 64;
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if a page's
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a page's
 /// content, resources, or an XObject stream cannot be read;
-/// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a page draws text
+/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if a page draws text
 /// with a font whose encoding cannot be decoded.
 pub(crate) fn text_blocks(store: &Store) -> Result<Vec<TextBlock>> {
     let doc = store.doc();
@@ -414,9 +386,9 @@ pub(crate) fn text_blocks(store: &Store) -> Result<Vec<TextBlock>> {
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if the page's
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the page's
 /// content, resources, or an XObject stream cannot be read;
-/// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if the page draws text
+/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if the page draws text
 /// with a font whose encoding cannot be decoded.
 pub(crate) fn text_block_for_page(
     doc: &Document,
@@ -428,28 +400,18 @@ pub(crate) fn text_block_for_page(
     // Guard against a decompression bomb: refuse a page whose (already
     // decompressed) content stream exceeds the bound rather than walking it.
     if content_data.len() > max_page_bytes {
-        return Err(Error::new(
-            ErrorKind::ResourceLimit,
-            format!(
-                "page {page} content is {} bytes, over the {max_page_bytes}-byte limit",
-                content_data.len()
-            ),
-        ));
+        return Err(Error::resource_limit(format!(
+            "page {page} content is {} bytes, over the {max_page_bytes}-byte limit",
+            content_data.len()
+        )));
     }
-    let content = Content::decode(&content_data).map_err(|e| {
-        Error::new(
-            ErrorKind::MalformedInput,
-            format!("page {page} content: {e}"),
-        )
-    })?;
+    let content = Content::decode(&content_data)
+        .map_err(|e| Error::malformed(format!("page {page} content: {e}")))?;
 
     // The page's own resources, the scope its `Tf`/`Do` names resolve in.
-    let (resources, resource_ids) = doc.get_page_resources(page_id).map_err(|e| {
-        Error::new(
-            ErrorKind::MalformedInput,
-            format!("page {page} resources: {e}"),
-        )
-    })?;
+    let (resources, resource_ids) = doc
+        .get_page_resources(page_id)
+        .map_err(|e| Error::malformed(format!("page {page} resources: {e}")))?;
 
     let mut text = String::new();
     let mut runs: Vec<OffsetRun> = Vec::new();
@@ -583,15 +545,12 @@ fn walk_stream(
         // truncate and misroute the scrub, leaving deleted text recoverable.
         // Fail closed instead, as everywhere else a glyph might slip the scrub.
         let Ok(slot) = u16::try_from(ctx.accum.fonts.len()) else {
-            return Err(Error::new(
-                ErrorKind::Redaction,
-                format!(
-                    "page {} references more than {} fonts across its content \
+            return Err(Error::redaction(format!(
+                "page {} references more than {} fonts across its content \
                      streams; its text cannot be safely redacted",
-                    ctx.page,
-                    u16::MAX,
-                ),
-            ));
+                ctx.page,
+                u16::MAX,
+            )));
         };
         ctx.accum.fonts.push(FontEntry { to_unicode });
         font_slot.insert(name.clone(), slot);
@@ -746,15 +705,12 @@ fn walk_stream(
                         run.show(enc, operands, op_idx, base)?;
                     }
                     Some(None) => {
-                        return Err(Error::new(
-                            ErrorKind::Redaction,
-                            format!(
-                                "page {} draws text with a font whose encoding \
+                        return Err(Error::redaction(format!(
+                            "page {} draws text with a font whose encoding \
                                  could not be decoded or was not found in the page \
                                  resources; its text cannot be redacted",
-                                ctx.page
-                            ),
-                        ));
+                            ctx.page
+                        )));
                     }
                     None => {}
                 }
@@ -817,36 +773,23 @@ fn walk_xobject<'a>(
         return Ok(());
     };
     // Only Form XObjects carry content to walk; images are not text.
-    if stream_obj
-        .dict
-        .get(b"Subtype")
-        .and_then(Object::as_name)
-        .ok()
-        != Some(b"Form")
-    {
+    if !stream_obj.dict.has_subtype(b"Form") {
         return Ok(());
     }
     let bytes = stream_obj
         .decompressed_content()
-        .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("XObject content: {e}")))?;
+        .map_err(|e| Error::malformed(format!("XObject content: {e}")))?;
     // Bound the decompressed XObject stream, as for page content: a Form XObject
     // is another place a decompression bomb could hide.
     if bytes.len() > ctx.max_page_bytes {
-        return Err(Error::new(
-            ErrorKind::ResourceLimit,
-            format!(
-                "XObject content is {} bytes, over the {}-byte limit",
-                bytes.len(),
-                ctx.max_page_bytes
-            ),
-        ));
+        return Err(Error::resource_limit(format!(
+            "XObject content is {} bytes, over the {}-byte limit",
+            bytes.len(),
+            ctx.max_page_bytes
+        )));
     }
-    let content = Content::decode(&bytes).map_err(|e| {
-        Error::new(
-            ErrorKind::MalformedInput,
-            format!("decode XObject content: {e}"),
-        )
-    })?;
+    let content = Content::decode(&bytes)
+        .map_err(|e| Error::malformed(format!("decode XObject content: {e}")))?;
 
     // The form's own resources, or the parent scope when it declares none.
     let inner_resources = stream_obj
@@ -866,14 +809,11 @@ fn walk_xobject<'a>(
     // we will decode). Exhausting it means a page fans out to more walks than any
     // legitimate document, so fail closed rather than let the walk run away.
     let Some(remaining) = ctx.walks_remaining.checked_sub(1) else {
-        return Err(Error::new(
-            ErrorKind::ResourceLimit,
-            format!(
-                "page {} draws more than {MAX_XOBJECT_WALKS} Form XObjects; \
+        return Err(Error::resource_limit(format!(
+            "page {} draws more than {MAX_XOBJECT_WALKS} Form XObjects; \
                  its text cannot be walked within the resource budget",
-                ctx.page
-            ),
-        ));
+            ctx.page
+        )));
     };
     ctx.walks_remaining = remaining;
 

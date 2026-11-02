@@ -12,7 +12,7 @@ use std::mem;
 use elide_codec::string::ContextWords;
 use elide_core::modality::ResolvedHint;
 use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation};
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 use super::json_escape::decode_escape;
 use super::json_handler::{Leaf, LeafKind, Slot, is_json_literal};
@@ -30,10 +30,10 @@ pub(super) fn parse_slots(src: &str) -> Result<Vec<Slot>> {
     p.consume_whitespace();
     p.flush_passthrough();
     if p.pos != src.len() {
-        return Err(Error::new(
-            ErrorKind::MalformedInput,
-            format!("trailing bytes after JSON value at offset {}", p.pos),
-        ));
+        return Err(Error::malformed(format!(
+            "trailing bytes after JSON value at offset {}",
+            p.pos
+        )));
     }
     Ok(p.slots)
 }
@@ -98,10 +98,10 @@ impl<'a> SlotParser<'a> {
 
     fn consume_punct(&mut self, c: u8) -> Result<()> {
         if self.peek() != Some(c) {
-            return Err(Error::new(
-                ErrorKind::MalformedInput,
-                format!("expected {:?} at offset {}", c as char, self.pos),
-            ));
+            return Err(Error::malformed(format!(
+                "expected {:?} at offset {}",
+                c as char, self.pos
+            )));
         }
         self.pending.push(c as char);
         self.pos += 1;
@@ -120,10 +120,10 @@ impl<'a> SlotParser<'a> {
     fn parse_value(&mut self, key_context: Option<&ResolvedHint<Text>>) -> Result<()> {
         self.consume_whitespace();
         match self.peek() {
-            Some(b'{') | Some(b'[') if self.depth >= MAX_DEPTH => Err(Error::new(
-                ErrorKind::MalformedInput,
-                format!("JSON nested deeper than {MAX_DEPTH} at offset {}", self.pos),
-            )),
+            Some(b'{') | Some(b'[') if self.depth >= MAX_DEPTH => Err(Error::malformed(format!(
+                "JSON nested deeper than {MAX_DEPTH} at offset {}",
+                self.pos
+            ))),
             Some(b'{') => self.nested(Self::parse_object),
             Some(b'[') => self.nested(|p| p.parse_array(key_context)),
             Some(b'"') => {
@@ -142,14 +142,11 @@ impl<'a> SlotParser<'a> {
                 self.push_leaf(leaf);
                 Ok(())
             }
-            Some(b) => Err(Error::new(
-                ErrorKind::MalformedInput,
-                format!("unexpected byte {b:#x} at offset {}", self.pos),
-            )),
-            None => Err(Error::new(
-                ErrorKind::MalformedInput,
-                "unexpected end of input".to_string(),
-            )),
+            Some(b) => Err(Error::malformed(format!(
+                "unexpected byte {b:#x} at offset {}",
+                self.pos
+            ))),
+            None => Err(Error::malformed("unexpected end of input".to_string())),
         }
     }
 
@@ -191,10 +188,10 @@ impl<'a> SlotParser<'a> {
                     return Ok(());
                 }
                 _ => {
-                    return Err(Error::new(
-                        ErrorKind::MalformedInput,
-                        format!("expected ',' or '}}' at offset {}", self.pos),
-                    ));
+                    return Err(Error::malformed(format!(
+                        "expected ',' or '}}' at offset {}",
+                        self.pos
+                    )));
                 }
             }
         }
@@ -222,10 +219,10 @@ impl<'a> SlotParser<'a> {
                     return Ok(());
                 }
                 _ => {
-                    return Err(Error::new(
-                        ErrorKind::MalformedInput,
-                        format!("expected ',' or ']' at offset {}", self.pos),
-                    ));
+                    return Err(Error::malformed(format!(
+                        "expected ',' or ']' at offset {}",
+                        self.pos
+                    )));
                 }
             }
         }
@@ -233,10 +230,10 @@ impl<'a> SlotParser<'a> {
 
     fn parse_string_leaf(&mut self, kind: LeafKind) -> Result<Leaf> {
         if self.peek() != Some(b'"') {
-            return Err(Error::new(
-                ErrorKind::MalformedInput,
-                format!("expected '\"' at offset {}", self.pos),
-            ));
+            return Err(Error::malformed(format!(
+                "expected '\"' at offset {}",
+                self.pos
+            )));
         }
         let start = self.pos;
         self.pos += 1;
@@ -256,10 +253,7 @@ impl<'a> SlotParser<'a> {
                 Some(b'\\') => {
                     let (source_len, decoded) =
                         decode_escape(&self.bytes[self.pos..]).ok_or_else(|| {
-                            Error::new(
-                                ErrorKind::MalformedInput,
-                                format!("invalid escape at offset {}", self.pos),
-                            )
+                            Error::malformed(format!("invalid escape at offset {}", self.pos))
                         })?;
                     value.push(decoded);
                     self.pos += source_len;
@@ -269,17 +263,15 @@ impl<'a> SlotParser<'a> {
                     // Advance one UTF-8 codepoint without reading the
                     // escape table.
                     let rest = &self.src[ch_start..];
-                    let ch = rest.chars().next().ok_or_else(|| {
-                        Error::new(ErrorKind::MalformedInput, "unterminated string".to_string())
-                    })?;
+                    let ch = rest
+                        .chars()
+                        .next()
+                        .ok_or_else(|| Error::malformed("unterminated string".to_string()))?;
                     value.push(ch);
                     self.pos += ch.len_utf8();
                 }
                 None => {
-                    return Err(Error::new(
-                        ErrorKind::MalformedInput,
-                        "unterminated string".to_string(),
-                    ));
+                    return Err(Error::malformed("unterminated string".to_string()));
                 }
             }
         }
@@ -297,10 +289,9 @@ impl<'a> SlotParser<'a> {
             }
         }
         if start == self.pos {
-            return Err(Error::new(
-                ErrorKind::MalformedInput,
-                format!("expected scalar at offset {start}"),
-            ));
+            return Err(Error::malformed(format!(
+                "expected scalar at offset {start}"
+            )));
         }
         let literal = self.src[start..self.pos].to_string();
         // The scalar byte class (`alnum | - | + | . | _`) is permissive and
@@ -308,10 +299,9 @@ impl<'a> SlotParser<'a> {
         // anything that is not a well-formed JSON literal so the lexer honors
         // its contract of erroring on malformed input.
         if !is_json_literal(&literal) {
-            return Err(Error::new(
-                ErrorKind::MalformedInput,
-                format!("invalid JSON literal {literal:?} at offset {start}"),
-            ));
+            return Err(Error::malformed(format!(
+                "invalid JSON literal {literal:?} at offset {start}"
+            )));
         }
         Ok(Leaf {
             kind: LeafKind::Scalar,
@@ -324,6 +314,8 @@ impl<'a> SlotParser<'a> {
 
 #[cfg(test)]
 mod tests {
+    use elide_core::ErrorKind;
+
     use super::*;
 
     #[test]

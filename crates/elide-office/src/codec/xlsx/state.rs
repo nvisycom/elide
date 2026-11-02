@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use elide_codec::string::RedactRange;
 use elide_core::modality::tabular::TabularLocation;
 use elide_core::modality::text::TextReplacement;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 use super::XlsxCell;
 use crate::xlsx::CellEdit;
@@ -35,13 +35,10 @@ impl XlsxInner {
         });
         let first = matches.next().map(|(i, _)| i);
         if first.is_some() && matches.next().is_some() {
-            return Err(Error::new(
-                ErrorKind::MalformedInput,
-                format!(
-                    "xlsx redaction at (row {row}, column {column}) is ambiguous \
+            return Err(Error::malformed(format!(
+                "xlsx redaction at (row {row}, column {column}) is ambiguous \
                      across sheets; a sheet name is required"
-                ),
-            ));
+            )));
         }
         Ok(first)
     }
@@ -120,13 +117,10 @@ impl XlsxState {
             let index = inner
                 .cell_index(sheet, location.row_index, location.column_index)?
                 .ok_or_else(|| {
-                    Error::new(
-                        ErrorKind::MalformedInput,
-                        format!(
-                            "xlsx redaction targets no cell at sheet {:?} (row {}, column {})",
-                            sheet, location.row_index, location.column_index
-                        ),
-                    )
+                    Error::malformed(format!(
+                        "xlsx redaction targets no cell at sheet {:?} (row {}, column {})",
+                        sheet, location.row_index, location.column_index
+                    ))
                 })?;
             let text = working
                 .entry(index)

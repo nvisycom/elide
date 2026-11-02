@@ -1,53 +1,51 @@
 //! [`ImageRecombine`]: fold the redacted pixels and the `#exif` blob into one
-//! image.
+//! image, then check its metadata.
 
-use bytes::Bytes;
 use elide_codec::content::ContentData;
-use elide_codec::{EncodedPart, Recombine};
+use elide_codec::{EncodedPart, LocalId, Recombine};
 use elide_core::Result;
+use elide_core::redaction::Disposition;
 
 use super::image_state::ImageState;
 use super::{EXIF_PART_ID, PIXEL_PART_ID};
-use crate::exif::ExifPolicy;
+use crate::exif::Source;
+use crate::modality::ImageFormat;
 
-/// The recombiner: fold the redacted pixels (from the shared buffer) and the
-/// `#exif` blob into one image.
+/// The recombiner: fold the redacted pixels (from the shared buffer) and, when
+/// metadata is redacted, the `#exif` blob into one image.
 ///
-/// The `#exif` blob is the image's own bytes at decode. When a metadata pipeline
-/// redacted it, its bytes differ from `original_exif`, so the redacted pixels are
-/// laid over that metadata-stripped container (`encode_over_metadata`). When the
-/// blob is untouched — its bytes still equal `original_exif` — no metadata
-/// pipeline ran, so the fallback [`ExifPolicy`] governs the metadata instead.
+/// The decode already decided the metadata: under
+/// [`Strip`](Disposition::Strip) the buffer's source was stripped, and under
+/// [`Redact`](Disposition::Redact) the `#exif` blob carries the container
+/// whose fields detection edits. So the pixel part's own encoding is the answer
+/// unless an `#exif` blob is present (lay the pixels over its container) or was
+/// removed because no codec could read it (strip the metadata instead).
 pub(super) struct ImageRecombine {
     pub(super) state: ImageState,
-    pub(super) policy: ExifPolicy,
-    /// The `#exif` blob's bytes at decode, to detect whether it was redacted.
-    pub(super) original_exif: Bytes,
+    /// The image's container format, to read the encoded output's metadata.
+    pub(super) format: ImageFormat,
+    /// The metadata disposition the decode applied, which the output must
+    /// honour.
+    pub(super) metadata: Disposition,
 }
 
 impl Recombine for ImageRecombine {
-    fn assemble(&self, parts: &[EncodedPart]) -> Result<ContentData> {
-        // A metadata pipeline redacts the `#exif` blob in place, changing its
-        // bytes; only then does its container matter here.
-        let exif = parts.iter().find(|p| p.id.as_str() == EXIF_PART_ID);
-        let bytes = if exif.is_some_and(|p| p.bytes != self.original_exif) {
-            // A metadata pipeline stripped the `#exif` container; lay the redacted
-            // pixels over it. The pixel part's own encoding used the fallback
-            // policy, so it can't be reused: the pixels must be re-laid over this
-            // stripped container instead.
-            let container = &exif.expect("checked present").bytes;
-            self.state.encode_over_metadata(container)?
+    fn assemble(&self, parts: &[EncodedPart], removed: &[LocalId]) -> Result<ContentData> {
+        let bytes = if let Some(exif) = parts.iter().find(|p| p.id.as_str() == EXIF_PART_ID) {
+            self.state.encode_over_metadata(&exif.bytes)?
+        } else if removed.iter().any(|id| id.as_str() == EXIF_PART_ID) {
+            self.state.encode_without_metadata()?
         } else {
-            // Untouched metadata: the fallback policy governs it, which is exactly
-            // how `PixelStream::encode` already encoded the pixel body part. Reuse
-            // those bytes rather than encoding the image a second time.
-            parts
-                .iter()
-                .find(|p| p.id.as_str() == PIXEL_PART_ID)
-                .map(|p| p.bytes.clone())
-                .map(Ok)
-                .unwrap_or_else(|| self.state.encode(self.policy))?
+            match parts.iter().find(|p| p.id.as_str() == PIXEL_PART_ID) {
+                Some(pixels) => pixels.bytes.clone(),
+                None => self.state.encode()?,
+            }
         };
         Ok(ContentData::new(bytes))
+    }
+
+    fn validate(&self, output: &ContentData) -> Result<()> {
+        let source = Source::new(output.as_bytes(), self.format.to_exif());
+        source.check_stripped(self.metadata == Disposition::Redact)
     }
 }

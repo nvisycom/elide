@@ -3,7 +3,11 @@
 #![doc = include_str!("../README.md")]
 
 pub mod codec;
-pub mod opc;
+#[cfg(any(test, feature = "fixtures"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "fixtures")))]
+pub mod fixtures;
+
+pub(crate) mod opc;
 
 pub(crate) mod docx;
 pub(crate) mod ooxml;

@@ -5,10 +5,8 @@
 
 use std::ops::Range;
 
-use elide_codec::extract::ItemEdit;
+use elide_codec::extract::{ItemEdit, OffsetMap};
 use elide_core::modality::text::SourceRef;
-
-use crate::opc::OffsetMap;
 
 /// The raw source range(s), part-tagged, that a decoded-value `local` range
 /// in a block at `part` came from, via the block's offset map. The forward
@@ -21,40 +19,45 @@ pub(super) fn source_span(part: &str, offsets: &OffsetMap, local: Range<usize>) 
         .collect()
 }
 
-/// Reverse of [`source_span`]: locate the block index and decoded-local range
-/// that raw `source` references address. `blocks` yields each block's part
-/// and offset map in item order. The references of one selection share a
-/// part and a block; the covered raw span (first start .. last end) is
-/// reverse-mapped through that block's offset map.
+/// Reverse of [`source_span`]: locate the block indices and decoded-local
+/// ranges that raw `source` references address. `blocks` yields each block's
+/// part, raw span, and offset map in item order. Each reference must lie
+/// within one block of its part; the references within one block resolve to
+/// the range from the first decoded start to the last decoded end.
 ///
-/// Fails closed (`None`) when the references do not all name the same part,
-/// raw offsets are part-local, so aggregating a span across parts would be
-/// meaningless (two parts can share the same numeric offsets).
+/// Fails closed (no edits) when a reference names no part or lies in no block:
+/// raw offsets are part-local, so a reference is never matched against another
+/// part's blocks (two parts can share the same numeric offsets).
 pub(super) fn locate_source<'a>(
     blocks: impl Iterator<Item = (&'a str, Range<usize>, &'a OffsetMap)>,
     source: &[SourceRef],
-) -> Option<ItemEdit> {
-    let part = source.first()?.part.as_deref()?;
-    // Every reference must be in the same part before the bounds below are
-    // aggregated, offsets across parts are not comparable.
-    if source.iter().any(|s| s.part.as_deref() != Some(part)) {
-        return None;
+) -> Vec<ItemEdit> {
+    let blocks: Vec<_> = blocks.collect();
+    let mut edits = Vec::with_capacity(source.len());
+    for reference in source {
+        let Some(part) = reference.part.as_deref() else {
+            return Vec::new();
+        };
+        let raw = &reference.range;
+        let block = blocks
+            .iter()
+            .enumerate()
+            .find(|(_, (block_part, span, _))| {
+                *block_part == part && span.start <= raw.start && raw.end <= span.end
+            });
+        let Some((item, (_, _, offsets))) = block else {
+            return Vec::new();
+        };
+        let decoded = offsets.decoded_ranges(raw.clone());
+        let (Some(first), Some(last)) = (decoded.first(), decoded.last()) else {
+            return Vec::new();
+        };
+        edits.push(ItemEdit {
+            item,
+            local: first.start..last.end,
+        });
     }
-    let raw_start = source.iter().map(|s| s.range.start).min()?;
-    let raw_end = source.iter().map(|s| s.range.end).max()?;
-
-    let (item, offsets) = blocks
-        .enumerate()
-        .find_map(|(item, (block_part, span, offsets))| {
-            (block_part == part && span.start <= raw_start && raw_end <= span.end)
-                .then_some((item, offsets))
-        })?;
-
-    let decoded = offsets.decoded_ranges(raw_start..raw_end);
-    Some(ItemEdit {
-        item,
-        local: decoded.first()?.start..decoded.last()?.end,
-    })
+    ItemEdit::merged(edits)
 }
 
 #[cfg(test)]
@@ -80,22 +83,47 @@ mod tests {
     fn single_part_selection_resolves() {
         let parts = two_parts();
         let source = [SourceRef::in_part(2..5, "word/header1.xml")];
-        let edit = locate_source(blocks(&parts), &source).expect("resolves");
-        assert_eq!(edit.item, 1, "the header block");
-        assert_eq!(edit.local, 2..5);
+        let edits = locate_source(blocks(&parts), &source);
+        assert_eq!(
+            edits,
+            vec![ItemEdit {
+                item: 1,
+                local: 2..5
+            }],
+            "the header block"
+        );
     }
 
     #[test]
-    fn cross_part_selection_fails_closed() {
+    fn each_reference_resolves_in_its_own_part() {
         let parts = two_parts();
-        // Two references with overlapping numeric offsets but different parts.
+        // Two references with the same numeric offsets in different parts.
         let source = [
             SourceRef::in_part(2..5, "word/document.xml"),
             SourceRef::in_part(2..5, "word/header1.xml"),
         ];
-        assert!(
-            locate_source(blocks(&parts), &source).is_none(),
-            "a cross-part selection must not resolve",
+        assert_eq!(
+            locate_source(blocks(&parts), &source),
+            vec![
+                ItemEdit {
+                    item: 0,
+                    local: 2..5
+                },
+                ItemEdit {
+                    item: 1,
+                    local: 2..5
+                },
+            ],
         );
+    }
+
+    #[test]
+    fn a_reference_outside_every_block_fails_closed() {
+        let parts = two_parts();
+        let source = [
+            SourceRef::in_part(2..5, "word/document.xml"),
+            SourceRef::in_part(8..12, "word/header1.xml"),
+        ];
+        assert!(locate_source(blocks(&parts), &source).is_empty());
     }
 }

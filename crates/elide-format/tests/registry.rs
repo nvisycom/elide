@@ -8,14 +8,14 @@ use elide_codec::DocumentPart;
 use elide_codec::content::ContentData;
 use elide_core::modality::DataWriter;
 use elide_core::modality::text::{Text, TextLocation, TextReplacement};
-use elide_core::redaction::Redactions;
+use elide_core::redaction::{HiddenContentPolicy, Redactions};
 use elide_format::FormatRegistry;
 
 #[tokio::test]
 async fn registry_decodes_txt_by_extension() {
     let reg = FormatRegistry::with_builtin();
     let document = reg
-        .decode("hello\nworld\n", "txt")
+        .decode("hello\nworld\n", "txt", HiddenContentPolicy::default())
         .await
         .expect("txt decoded");
     assert_eq!(document.format_id().as_str(), "elide.text.txt");
@@ -31,7 +31,7 @@ async fn decode_content_resolves_from_filename() {
     let reg = FormatRegistry::with_builtin();
     let content = ContentData::from_text("hello\nworld\n").with_filename("notes.txt");
     let handle = reg
-        .decode_content(content)
+        .decode_content(content, HiddenContentPolicy::default())
         .await
         .expect("resolved by filename");
     assert_eq!(handle.format_id().as_str(), "elide.text.txt");
@@ -42,7 +42,7 @@ async fn decode_content_resolves_from_content_type() {
     let reg = FormatRegistry::with_builtin();
     let content = ContentData::from_text("plain").with_content_type("text/plain");
     let handle = reg
-        .decode_content(content)
+        .decode_content(content, HiddenContentPolicy::default())
         .await
         .expect("resolved by content type");
     assert_eq!(handle.format_id().as_str(), "elide.text.txt");
@@ -52,7 +52,7 @@ async fn decode_content_resolves_from_content_type() {
 async fn decode_content_without_hints_is_an_error() {
     let reg = FormatRegistry::with_builtin();
     assert!(
-        reg.decode_content(ContentData::from_text("x"))
+        reg.decode_content(ContentData::from_text("x"), HiddenContentPolicy::default())
             .await
             .is_err()
     );
@@ -61,7 +61,10 @@ async fn decode_content_without_hints_is_an_error() {
 #[tokio::test]
 async fn stream_part_recovers_its_modality() {
     let reg = FormatRegistry::with_builtin();
-    let mut document = reg.decode("hi", "txt").await.expect("decoded");
+    let mut document = reg
+        .decode("hi", "txt", HiddenContentPolicy::default())
+        .await
+        .expect("decoded");
     assert_eq!(document.format_id().as_str(), "elide.text.txt");
     // The body stream recovers as Text; the TypeId downcast is exact.
     let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else {
@@ -74,7 +77,11 @@ async fn stream_part_recovers_its_modality() {
 async fn decode_redact_reencode_round_trip() {
     let reg = FormatRegistry::with_builtin();
     let mut document = reg
-        .decode("contact alice@example.test today", "txt")
+        .decode(
+            "contact alice@example.test today",
+            "txt",
+            HiddenContentPolicy::default(),
+        )
         .await
         .expect("decoded");
     let DocumentPart::Stream { handle, .. } = &mut document.parts_mut()[0] else {
@@ -97,7 +104,11 @@ async fn decode_redact_reencode_round_trip() {
 #[tokio::test]
 async fn unknown_extension_is_an_error() {
     let reg = FormatRegistry::with_builtin();
-    assert!(reg.decode("data", "xyz").await.is_err());
+    assert!(
+        reg.decode("data", "xyz", HiddenContentPolicy::default())
+            .await
+            .is_err()
+    );
 }
 
 #[cfg(feature = "csv")]
@@ -108,7 +119,11 @@ async fn registry_decodes_and_redacts_csv() {
 
     let reg = FormatRegistry::with_builtin();
     let mut document = reg
-        .decode("name,email\nAlice,alice@x.test\n", "csv")
+        .decode(
+            "name,email\nAlice,alice@x.test\n",
+            "csv",
+            HiddenContentPolicy::default(),
+        )
         .await
         .expect("csv decoded");
     assert_eq!(document.format_id().as_str(), "elide.tabular.csv");

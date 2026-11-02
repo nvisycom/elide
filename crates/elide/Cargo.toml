@@ -100,13 +100,18 @@ ocr = ["dep:elide-image", "elide-image/ocr", "image"]
 ## The `audio` modality. Implied by the audio codec formats.
 audio = ["dep:elide-audio", "elide-operator/audio", "elide-engine?/audio"]
 ## The `image` modality. Implied by the image codec formats. Enables the light
-## `exif` path (little_exif, no pixel codec) so `ExifPolicy` is nameable without
-## a decoder, and pulls in the `metadata` modality: a raster image carries EXIF
-## metadata as a redactable sub-part.
+## `exif` path (little_exif, no pixel codec) so the EXIF recognizer is available
+## without a decoder, and pulls in the `metadata` modality: a raster image
+## carries EXIF metadata as a redactable sub-part.
 image = ["dep:elide-image", "elide-image/exif", "elide-operator/image", "elide-engine?/image", "metadata"]
 ## The `metadata` modality: a document's out-of-band fields (EXIF, document
 ## properties) as redaction subjects.
-metadata = ["elide-core/metadata", "elide-operator/metadata", "elide-engine?/metadata"]
+metadata = [
+    "elide-core/metadata",
+    "elide-detection/metadata",
+    "elide-operator/metadata",
+    "elide-engine?/metadata",
+]
 ## The `tabular` modality. Implied by the tabular codec formats.
 tabular = ["elide-core/tabular", "elide-operator/tabular", "elide-redaction/tabular", "elide-engine?/tabular"]
 
@@ -218,6 +223,7 @@ elide-core = { workspace = true, features = ["fixtures", "mocks"] }
 elide-office = { workspace = true, features = ["fixtures"] }
 elide-image = { workspace = true, features = ["fixtures"] }
 elide-audio = { workspace = true, features = ["fixtures", "wav"] }
+elide-pdf = { workspace = true, features = ["fixtures"] }
 
 # (De)serialization
 serde = { workspace = true, features = [] }
@@ -238,13 +244,19 @@ name = "pipeline"
 harness = false
 required-features = ["engine", "codec-txt", "codec-docx"]
 
-# Format families: one test binary per format (or format family), each a
-# folder of scenario files under a same-named driver. The OOXML formats
-# (docx, xlsx, …) share the OPC package engine, so they share one `office`
-# binary; PDF's born-digital and raster paths share `format_pdf`.
+# One test binary per format, each a folder of scenario files under a
+# same-named driver.
 [[test]]
-name = "format_ooxml"
-required-features = ["codec-docx", "codec-xlsx", "codec-pptx", "codec-xml", "mocks", "engine", "serde"]
+name = "format_docx"
+required-features = ["codec-docx", "mocks", "engine", "serde"]
+
+[[test]]
+name = "format_pptx"
+required-features = ["codec-pptx", "mocks", "engine", "serde"]
+
+[[test]]
+name = "format_xlsx"
+required-features = ["codec-xlsx", "mocks", "engine", "serde"]
 
 [[test]]
 name = "format_pdf"

@@ -14,7 +14,7 @@ into a new document that is byte-for-byte identical outside the redacted text. I
 performs no filesystem or network I/O and carries no detection logic; a caller
 supplies document bytes and receives extracted text or a rewritten document.
 
-The [`opc`](crate::opc) module is the format-neutral core: the package
+An internal OPC engine is the format-neutral core: the package
 container, the typed part path, the decoded-to-raw offset map, and the
 escape-aware span engine. A format module supplies only its part-classification
 rules and drives the shared engine: `docx` for Word, `pptx` for PowerPoint —
@@ -27,8 +27,9 @@ Every part is typed, so a block, a replacement, and an embedding each name their
 part explicitly rather than a bare path. Redaction is fail-closed: an
 out-of-bounds, overlapping, or mid-character replacement, or one naming a part
 that is not present or not text-bearing, refuses the whole rewrite rather than
-emitting a partially-redacted document. Binary embeddings (images, objects,
-fonts) are surfaced and can be replaced alongside the text in the same pass.
+emitting a partially-redacted document. Binary embeddings (images, audio and
+video clips, embedded objects) are surfaced and can be replaced alongside the
+text in the same pass; embedded fonts are kept as they are.
 Extraction is partial-success: a text part that cannot be parsed is reported as
 a typed issue rather than failing the whole document, so a silently un-redacted
 part is made explicit.

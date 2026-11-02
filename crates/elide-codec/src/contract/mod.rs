@@ -25,7 +25,10 @@ mod stream;
 #[cfg(test)]
 mod test_support;
 
-pub use self::document::{Document, DocumentPart, EncodedPart, LeafRecombine, LocalId, Recombine};
+pub use self::document::{
+    Document, DocumentPart, EncodedPart, LeafRecombine, LocalId, Recombine, Stripped,
+    StrippedContent,
+};
 pub use self::format::{Format, FormatId};
 pub use self::loader::{DocumentLoader, LeafLoader, Loader};
 pub use self::stream::{ErasedStream, Stream, TypedStream};

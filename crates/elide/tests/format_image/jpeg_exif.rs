@@ -4,7 +4,7 @@
 //!
 //! Proves the metadata pipeline is reachable and wires cleanly: the image is a
 //! document, its EXIF the `#exif` sub-part; the `Metadata` pipeline's
-//! `ExifRecognizer` surfaces the GPS field and `Erase` removes it, folded into
+//! `FieldRecognizer` flags the labelled GPS field and `Erase` removes it, folded into
 //! the one re-encode. The fixture and its assertions come from
 //! `elide_image::fixtures`, so this test needs no image/EXIF crate of its own.
 
@@ -14,9 +14,9 @@ use elide::entity::LabelCatalog;
 use elide::modality::image::Image;
 use elide::modality::metadata::Metadata;
 use elide::recognition::Scope;
-use elide::recognition::exif::ExifRecognizer;
+use elide::recognition::metadata::FieldRecognizer;
 use elide::redaction::operators::Erase;
-use elide::redaction::{Anonymizer, Rule};
+use elide::redaction::{Anonymizer, HiddenContentPolicy, Rule};
 use elide::{Directives, Document, Orchestrator};
 use elide_image::fixtures::{has_gps, is_valid_image, jpeg_with_gps};
 
@@ -34,12 +34,12 @@ async fn jpeg_gps_is_stripped_through_the_facade() {
             Anonymizer::new().with(Rule::fallback(Erase)),
         )
         .with_modality::<Metadata>(
-            Analyzer::new().with_recognizer(ExifRecognizer),
+            Analyzer::new().with_recognizer(FieldRecognizer),
             Anonymizer::new().with(Rule::fallback(Erase)),
         );
 
     let handle = registry
-        .decode(original.clone(), "jpg")
+        .decode(original.clone(), "jpg", HiddenContentPolicy::default())
         .await
         .expect("decode jpeg");
     let mut documents = [Document::new("photo.jpg", handle)];

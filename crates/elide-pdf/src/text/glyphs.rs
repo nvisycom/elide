@@ -8,7 +8,7 @@
 //! decodes one byte per glyph. This mirrors lopdf's own text extraction, so a
 //! character offset lines up with the glyph that drew it.
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use lopdf::Encoding;
 
 /// One decoded glyph within an operand's bytes.
@@ -52,8 +52,7 @@ pub(super) fn decode_glyphs(encoding: &Encoding, bytes: &[u8]) -> Result<Vec<Gly
                         // surrogate): a lossy `�` would misrepresent the source
                         // text and could make a PII character undetectable.
                         let decoded = String::from_utf16(&utf16).map_err(|_| {
-                            Error::new(
-                                ErrorKind::Redaction,
+                            Error::redaction(
                                 "text drawn with a code whose CMap mapping is not \
                                  valid UTF-16; its glyph cannot be reliably decoded \
                                  for redaction",
@@ -65,8 +64,7 @@ pub(super) fn decode_glyphs(encoding: &Encoding, bytes: &[u8]) -> Result<Vec<Gly
                     }
                 }
                 let Some(text) = text else {
-                    return Err(Error::new(
-                        ErrorKind::Redaction,
+                    return Err(Error::redaction(
                         "text drawn with a code that has no CMap mapping; \
                          its glyph cannot be located for redaction",
                     ));
@@ -88,8 +86,7 @@ pub(super) fn decode_glyphs(encoding: &Encoding, bytes: &[u8]) -> Result<Vec<Gly
             .enumerate()
             .map(|(i, &b)| {
                 let text = encoding.bytes_to_string(&[b]).map_err(|_| {
-                    Error::new(
-                        ErrorKind::Redaction,
+                    Error::redaction(
                         "text drawn with a byte that does not decode under its font; \
                          its glyph cannot be located for redaction",
                     )

@@ -14,4 +14,4 @@ pub mod primitive;
 #[cfg(feature = "stt")]
 pub mod stt;
 
-pub use self::buffer::AudioBuffer;
+pub use self::buffer::{AudioBuffer, StrippedTags};

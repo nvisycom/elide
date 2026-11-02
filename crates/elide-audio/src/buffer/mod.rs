@@ -4,8 +4,12 @@
 
 use bytes::Bytes;
 use elide_core::redaction::Redactions;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
+#[cfg(feature = "mp3")]
+use crate::engine::tags::strip_mp3;
+#[cfg(feature = "wav")]
+use crate::engine::tags::strip_wav;
 use crate::modality::{Audio, AudioFormat, AudioLocation, AudioReplacement};
 use crate::primitive::TimeSpan;
 
@@ -37,15 +41,14 @@ impl AudioBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::CapabilityUnavailable`] if this build has no codec for
-    /// `format`, or [`ErrorKind::MalformedInput`] if the bytes do not decode as
+    /// [`ErrorKind::CapabilityUnavailable`](elide_core::ErrorKind::CapabilityUnavailable) if this build has no codec for
+    /// `format`, or [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the bytes do not decode as
     /// it.
     pub fn open(bytes: &[u8], format: AudioFormat) -> Result<Self> {
         if !format.can_decode() {
-            return Err(Error::new(
-                ErrorKind::CapabilityUnavailable,
-                format!("no codec for {format:?} in this build"),
-            ));
+            return Err(Error::capability_unavailable(format!(
+                "no codec for {format:?} in this build"
+            )));
         }
         let source = Bytes::copy_from_slice(bytes);
         Self::validate(&source, format)?;
@@ -76,12 +79,9 @@ impl AudioBuffer {
                     // is rejected here rather than silently altered on encode.
                     let channels = crate::engine::mp3::probe_channels(source)?;
                     if channels > 2 {
-                        return Err(Error::new(
-                            ErrorKind::MalformedInput,
-                            format!(
-                                "MP3 has {channels} channels; only mono and stereo are supported"
-                            ),
-                        ));
+                        return Err(Error::malformed(format!(
+                            "MP3 has {channels} channels; only mono and stereo are supported"
+                        )));
                     }
                     Ok(())
                 }
@@ -116,7 +116,7 @@ impl AudioBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if the duration cannot be determined from
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the duration cannot be determined from
     /// the container.
     pub fn duration_ms(&self) -> Result<u64> {
         // `open` only ever wraps a format whose codec is built, so the arm for a
@@ -139,6 +139,64 @@ impl AudioBuffer {
                 }
                 #[cfg(not(feature = "mp3"))]
                 {
+                    unreachable!("an mp3 buffer requires the mp3 codec")
+                }
+            }
+        }
+    }
+
+    /// Remove every tag block the clip carries beside its samples (ID3, APE,
+    /// and Lyrics3 tags of an MP3; every chunk of a WAV but its format and
+    /// sample data), in place. Returns what was removed.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a tag block overruns the container.
+    pub fn strip_metadata(&mut self) -> Result<StrippedTags> {
+        let untagged = Self::strip(&self.source, self.format)?;
+        let stripped = StrippedTags {
+            tags: untagged.tags,
+            padding: untagged.padding,
+        };
+        if stripped != StrippedTags::default() {
+            self.source = Bytes::from(untagged.bytes);
+        }
+        Ok(stripped)
+    }
+
+    /// Whether the `format` clip `bytes` carries a tag block
+    /// [`strip_metadata`](Self::strip_metadata) would remove.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a tag block overruns the container.
+    pub fn carries_metadata(bytes: &[u8], format: AudioFormat) -> Result<bool> {
+        let untagged = Self::strip(bytes, format)?;
+        Ok(untagged.tags + untagged.padding > 0)
+    }
+
+    /// The `format` clip `bytes` with every tag block removed.
+    fn strip(bytes: &[u8], format: AudioFormat) -> Result<Untagged> {
+        match format {
+            AudioFormat::Wav => {
+                #[cfg(feature = "wav")]
+                {
+                    strip_wav(bytes)
+                }
+                #[cfg(not(feature = "wav"))]
+                {
+                    let _ = bytes;
+                    unreachable!("a wav buffer requires the wav codec")
+                }
+            }
+            AudioFormat::Mp3 => {
+                #[cfg(feature = "mp3")]
+                {
+                    strip_mp3(bytes)
+                }
+                #[cfg(not(feature = "mp3"))]
+                {
+                    let _ = bytes;
                     unreachable!("an mp3 buffer requires the mp3 codec")
                 }
             }
@@ -170,8 +228,8 @@ impl AudioBuffer {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`] if decoding fails, or
-    /// [`ErrorKind::Processing`] if re-encoding fails.
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if decoding fails, or
+    /// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) if re-encoding fails.
     pub fn encode(&self) -> Result<Bytes> {
         if self.redactions.is_empty() {
             return Ok(self.source.clone());
@@ -202,10 +260,30 @@ impl AudioBuffer {
     }
 }
 
+/// A clip with its tag blocks removed: the remaining bytes, how many tag
+/// blocks were removed, and how many padding chunks.
+#[derive(Debug)]
+pub(crate) struct Untagged {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) tags: usize,
+    pub(crate) padding: usize,
+}
+
+/// What a tag strip removed from a clip: how many tag blocks, and how many
+/// padding chunks (space a writer reserved, which can keep stale bytes).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StrippedTags {
+    /// Tag blocks: ID3, APE, and Lyrics3 tags, and WAV metadata chunks.
+    pub tags: usize,
+    /// Padding chunks.
+    pub padding: usize,
+}
+
 #[cfg(all(test, feature = "wav"))]
 mod tests {
     use std::io::Cursor;
 
+    use elide_core::ErrorKind;
     use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 
     use super::*;

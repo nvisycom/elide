@@ -176,5 +176,5 @@ pub(super) fn js_to_error(value: JsValue) -> elide::Error {
             .and_then(|m| m.as_string())
             .unwrap_or_else(|| "enricher callback rejected".to_owned())
     });
-    elide::Error::new(elide::ErrorKind::Processing, message)
+    elide::Error::processing(message)
 }

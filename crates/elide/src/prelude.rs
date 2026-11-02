@@ -2,7 +2,8 @@
 //!
 //! A `use elide::prelude::*;` brings the engines ([`Analyzer`],
 //! [`Anonymizer`], [`Deanonymizer`], and, with `codec`, `Orchestrator`
-//! and the `FormatRegistry` that decodes documents),
+//! and the `FormatRegistry` that decodes documents under a
+//! [`HiddenContentPolicy`] and its [`Disposition`]s),
 //! the error types, the [`Recognizer`]/[`Operator`]/[`Modality`] contracts
 //! and the [`Scope`] they run against, the reconciliation [`Layer`]s with
 //! their usual strategies, and the common vocabulary, the modality markers
@@ -19,6 +20,8 @@
 //! [`Deanonymizer`]: crate::redaction::Deanonymizer
 //! [`Recognizer`]: crate::recognition::Recognizer
 //! [`Operator`]: crate::redaction::Operator
+//! [`HiddenContentPolicy`]: crate::redaction::HiddenContentPolicy
+//! [`Disposition`]: crate::redaction::Disposition
 //! [`Modality`]: crate::modality::Modality
 //! [`Scope`]: crate::recognition::Scope
 //! [`Layer`]: crate::detection::Layer
@@ -47,6 +50,8 @@ pub use elide_core::modality::text::Text;
 pub use elide_core::primitive::{Confidence, ConfidenceThreshold, LanguageClaim, LanguageTag};
 #[doc(no_inline)]
 pub use elide_core::recognition::{Recognizer, Scope};
+#[doc(no_inline)]
+pub use elide_core::redaction::{Disposition, HiddenContentPolicy};
 #[doc(no_inline)]
 pub use elide_core::{Error, ErrorKind, Result};
 #[doc(no_inline)]

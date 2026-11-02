@@ -1,4 +1,4 @@
-//! The result type a matched in-place analysis hands back ([`InPlaceAnalysis`]),
+//! The result type a matched in-place analysis hands back ([`PartAnalysis`]),
 //! plus the [`BoxFuture`] alias the erased async methods return.
 
 use std::future::Future;

@@ -25,7 +25,7 @@
 //! [`anonymize_with`]: crate::Orchestrator::anonymize_with
 
 use std::any::TypeId;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::ControlFlow;
 
 #[cfg(doc)]
@@ -33,6 +33,7 @@ use elide_core::entity::CustomEntity;
 use elide_core::entity::Entity;
 use elide_core::entity::audit::{Attribution, AuditEvent, AuditKind, ManualIntent};
 use elide_core::modality::Modality;
+use elide_core::redaction::HiddenContent;
 use uuid::Uuid;
 
 use super::group::EntityGroup;
@@ -106,6 +107,37 @@ pub struct Report {
     /// Every part's entry, keyed by its [`PartId`] path, a named document's own
     /// content is its depth-1 part, container parts nest below.
     pub(crate) parts: HashMap<PartId, PartReport>,
+    /// The hidden content the last walk over the documents saw stripped.
+    pub(crate) stripped: StrippedRecord,
+}
+
+/// The hidden content a walk saw stripped, keyed by part and item, with how
+/// many. Each walk builds its own and hands it to the report whole.
+#[derive(Debug, Default)]
+pub(crate) struct StrippedRecord(BTreeMap<(PartId, HiddenContent), usize>);
+
+impl StrippedRecord {
+    /// Record `count` of `content` stripped from `part`.
+    pub(crate) fn record(&mut self, part: PartId, content: HiddenContent, count: usize) {
+        if count > 0 {
+            *self.0.entry((part, content)).or_default() += count;
+        }
+    }
+}
+
+/// One item of hidden content stripped from a document, as a [`Report`]
+/// records it: where, what, and how many. Never the stripped value itself, so
+/// the report can be shared without shipping what was removed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StrippedItem {
+    /// The part it was stripped from: a document's own path, or a part within
+    /// it (a removed or edited package part, an embedded file).
+    pub part: PartId,
+    /// The item stripped.
+    pub content: HiddenContent,
+    /// How many were stripped: elements, parts, blocks, or objects, as the
+    /// format counts them.
+    pub count: usize,
 }
 
 impl Report {
@@ -117,6 +149,7 @@ impl Report {
     pub fn new() -> Self {
         Self {
             parts: HashMap::new(),
+            stripped: StrippedRecord::default(),
         }
     }
 
@@ -136,6 +169,39 @@ impl Report {
     #[must_use]
     pub fn deserializer() -> ReportDeserializer {
         ReportDeserializer::new()
+    }
+
+    /// Every item of hidden content stripped from the documents, ordered by part
+    /// then item.
+    ///
+    /// The section is output only: a record of what a walk over the documents
+    /// saw, never a decision a reviewer edits, so it is serialized but never
+    /// read back. [`analyze`] fills it, so the removals can be reviewed before
+    /// anything is redacted, and [`anonymize_with`] replaces it with what its
+    /// own walk saw, so the applied report is the audit of that run whatever
+    /// report was passed in.
+    ///
+    /// [`analyze`]: crate::Orchestrator::analyze
+    /// [`anonymize_with`]: crate::Orchestrator::anonymize_with
+    pub fn stripped(&self) -> impl Iterator<Item = StrippedItem> + '_ {
+        self.stripped
+            .0
+            .iter()
+            .map(|((part, content), &count)| StrippedItem {
+                part: part.clone(),
+                content: *content,
+                count,
+            })
+    }
+
+    /// The items of hidden content stripped from the part `id` itself.
+    pub fn part_stripped<'a>(&'a self, id: &'a PartId) -> impl Iterator<Item = StrippedItem> + 'a {
+        self.stripped().filter(move |item| &item.part == id)
+    }
+
+    /// Replace the stripped section with the `record` a walk built.
+    pub(crate) fn set_stripped(&mut self, record: StrippedRecord) {
+        self.stripped = record;
     }
 
     /// Set the entities of the container part `id`, as modality `P`,

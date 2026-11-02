@@ -7,7 +7,7 @@ use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement
 use elide_core::modality::text::TextData;
 use elide_core::modality::{Chunk, DataReader, DataWriter, ResolvedHint};
 use elide_core::redaction::Redactions;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 use super::FORMAT_ID;
 use super::state::XlsxState;
@@ -123,8 +123,7 @@ impl DataWriter<Tabular> for XlsxStream {
                 // reference across the sheet; that structural rewrite is not yet
                 // supported, so refuse it rather than silently keep the data.
                 TabularReplacement::DropRow | TabularReplacement::DropColumn => {
-                    return Err(Error::new(
-                        ErrorKind::CapabilityUnavailable,
+                    return Err(Error::capability_unavailable(
                         "XLSX structural row/column drops are not yet supported",
                     ));
                 }

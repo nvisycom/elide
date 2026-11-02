@@ -3,7 +3,7 @@
 //! [`Dictionary`]: crate::Dictionary
 
 use elide_core::primitive::Confidence;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use serde::Deserialize;
 
 /// One literal scanned for by a [`Dictionary`].
@@ -114,8 +114,7 @@ impl Term {
             .from_reader(raw.as_bytes());
         let mut entries = Vec::new();
         for row in reader.records() {
-            let row =
-                row.map_err(|e| Error::new(ErrorKind::Configuration, format!("terms CSV: {e}")))?;
+            let row = row.map_err(|e| Error::configuration(format!("terms CSV: {e}")))?;
             for (col_idx, cell) in row.iter().enumerate() {
                 let trimmed = cell.trim();
                 if !trimmed.is_empty() {

@@ -4,7 +4,7 @@
 //! loading the two model files and running the recognition pipeline, exposing a
 //! single elide-shaped [`Engine::recognize`](engine::Engine::recognize) that
 //! takes image bytes and returns core [`LayoutRegion`]s. This backend layer holds
-//! only elide concerns: the [`Backend`](elide_core::backend::Backend) impl,
+//! only elide concerns: the [`Backend`] impl,
 //! provenance, and the async offload of the CPU-bound engine call, no
 //! `ocrs`/`rten` type appears here.
 //!
@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use elide_core::backend::Backend;
 use elide_core::entity::audit::ModelEvent;
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 use self::engine::Engine;
 pub use self::engine::OCRS_MODELS_DIR_ENV;
@@ -120,21 +120,15 @@ impl Backend for OcrsBackend {
             let result =
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| engine.recognize(&image)))
                     .unwrap_or_else(|_| {
-                        Err(Error::new(
-                            ErrorKind::Processing,
-                            "OCR engine panicked during recognition",
-                        ))
+                        Err(Error::processing("OCR engine panicked during recognition"))
                     });
             // The receiver is dropped only if the caller's future was cancelled;
             // nothing to do with the result then.
             let _ = tx.send(result);
         });
-        let regions = rx.await.map_err(|_| {
-            Error::new(
-                ErrorKind::Processing,
-                "OCR worker canceled before returning a result",
-            )
-        })??;
+        let regions = rx
+            .await
+            .map_err(|_| Error::processing("OCR worker canceled before returning a result"))??;
         Ok(OcrResponse::new(regions))
     }
 }

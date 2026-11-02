@@ -10,8 +10,8 @@ use elide::Result;
 use crate::support::fixture::Fixture;
 
 const FIXTURE: Fixture = Fixture {
-    path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/sample.png"),
-    source: include_bytes!("../testdata/sample.png"),
+    path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/png/plain.png"),
+    source: include_bytes!("../testdata/png/plain.png"),
     extension: "png",
 };
 

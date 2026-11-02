@@ -6,7 +6,14 @@
 //! original container. The codec *contracts* come from [`elide_codec`]; the
 //! [`FormatRegistry`] that assembles the handlers comes from [`elide_format`].
 //!
+//! Every decode takes a [`HiddenContentPolicy`]: hidden content (metadata,
+//! comments and revisions, previews, scripts, external references) is
+//! stripped before detection runs, every document embedded in the decoded one
+//! is handled under the same policy, and every encode checks the output still
+//! carries none.
+//!
 //! [`FormatRegistry`]: elide_format::FormatRegistry
+//! [`HiddenContentPolicy`]: crate::redaction::HiddenContentPolicy
 
 // The codec contract: the document/stream types and the loader/recombine
 // traits a handler implements, plus the `ContentData`/`TextEncoding` its
@@ -19,7 +26,8 @@ pub use elide_codec::content::{ContentData, TextEncoding};
 #[doc(inline)]
 pub use elide_codec::{
     Document, DocumentLoader, DocumentPart, EncodedPart, ErasedStream, Format, FormatId,
-    LeafLoader, LeafRecombine, Loader, LocalId, Recombine, Stream, TypedStream,
+    LeafLoader, LeafRecombine, Loader, LocalId, Recombine, Stream, Stripped, StrippedContent,
+    TypedStream,
 };
 #[doc(inline)]
 pub use elide_format::FormatRegistry;
@@ -47,17 +55,14 @@ pub mod pdf {
     pub use elide_pdf::primitive::{Dpi, RasterMode};
 }
 
-/// Raster-image codec: the `*_format`/`*_format_with` constructors for the PNG,
-/// JPEG, and TIFF handlers, plus [`exif_format`] for the standalone
-/// EXIF-metadata format.
+/// Raster-image codec: the `*_format` constructors for the PNG, JPEG, and TIFF
+/// handlers, plus [`exif_format`] for the EXIF-metadata sub-part a raster
+/// image surfaces when its metadata is redacted.
 ///
 /// Pass a constructor to [`FormatRegistry::with_replaced_format`] to swap the
-/// registered handler for a specific format (e.g. a stricter EXIF policy). The
-/// [`ExifPolicy`] a `*_format_with` is built with lives one level up, under the
-/// `image` modality — naming it needs no pixel codec.
+/// registered handler for a specific format.
 ///
 /// [`exif_format`]: elide_image::codec::exif_format
-/// [`ExifPolicy`]: crate::codec::ExifPolicy
 /// [`FormatRegistry::with_replaced_format`]: elide_format::FormatRegistry::with_replaced_format
 #[cfg(any(feature = "codec-png", feature = "codec-jpeg", feature = "codec-tiff"))]
 #[cfg_attr(
@@ -69,40 +74,23 @@ pub mod image {
     pub use elide_image::codec::exif_format;
     #[cfg(feature = "codec-jpeg")]
     #[doc(inline)]
-    pub use elide_image::codec::{jpeg_format, jpeg_format_with};
+    pub use elide_image::codec::jpeg_format;
     #[cfg(feature = "codec-png")]
     #[doc(inline)]
-    pub use elide_image::codec::{png_format, png_format_with};
+    pub use elide_image::codec::png_format;
     #[cfg(feature = "codec-tiff")]
     #[doc(inline)]
-    pub use elide_image::codec::{tiff_format, tiff_format_with};
+    pub use elide_image::codec::tiff_format;
 }
 
-/// The [`ExifPolicy`] that governs how a raster image's EXIF metadata is
-/// stripped on re-encode.
-///
-/// Re-exported at the `image` modality, not behind a pixel codec: naming or
-/// storing a policy (as a service does in its config) strips no pixels and needs
-/// no PNG/JPEG/TIFF decoder — the policy is applied by the metadata sub-part
-/// path, which the light `exif` feature carries. The `*_format_with` codec
-/// constructors that consume a policy live in [`image`].
-///
-/// [`ExifPolicy`]: elide_image::exif::ExifPolicy
-/// [`image`]: crate::codec::image
-#[cfg(feature = "image")]
-#[cfg_attr(docsrs, doc(cfg(feature = "image")))]
-#[doc(inline)]
-pub use elide_image::exif::ExifPolicy;
-
-/// Plain-text codec: the `*_format`/`*_format_with` constructors for the
-/// text-shaped formats (TXT, JSON, HTML, XML, CSV), and the [`ScriptPolicy`] an
-/// HTML format is built with.
+/// Plain-text codec: the `*_format` constructors for the text-shaped formats
+/// (TXT, JSON, HTML, XML, CSV), and [`csv_format_with`] for a custom CSV
+/// dialect.
 ///
 /// Pass a constructor to [`FormatRegistry::with_replaced_format`] to swap the
-/// registered handler for a specific format (e.g. HTML that scans `<script>`
-/// bodies, or a custom CSV dialect).
+/// registered handler for a specific format.
 ///
-/// [`ScriptPolicy`]: elide_plain::primitive::ScriptPolicy
+/// [`csv_format_with`]: elide_plain::csv_format_with
 /// [`FormatRegistry::with_replaced_format`]: elide_format::FormatRegistry::with_replaced_format
 #[cfg(any(
     feature = "codec-txt",
@@ -122,12 +110,12 @@ pub use elide_image::exif::ExifPolicy;
     )))
 )]
 pub mod plain {
+    #[cfg(feature = "codec-html")]
+    #[doc(inline)]
+    pub use elide_plain::html_format;
     #[cfg(feature = "codec-json")]
     #[doc(inline)]
     pub use elide_plain::json_format;
-    #[cfg(feature = "codec-html")]
-    #[doc(inline)]
-    pub use elide_plain::primitive::ScriptPolicy;
     #[cfg(feature = "codec-txt")]
     #[doc(inline)]
     pub use elide_plain::txt_format;
@@ -137,9 +125,6 @@ pub mod plain {
     #[cfg(feature = "codec-csv")]
     #[doc(inline)]
     pub use elide_plain::{csv_format, csv_format_with};
-    #[cfg(feature = "codec-html")]
-    #[doc(inline)]
-    pub use elide_plain::{html_format, html_format_with};
 }
 
 /// Office-document codec: the `*_format` constructors for the OOXML containers
@@ -147,10 +132,10 @@ pub mod plain {
 /// takes configuration.
 ///
 /// Pass a constructor to [`FormatRegistry::with_replaced_format`] to swap the
-/// registered handler for a specific format. The matching [`DocPropsRecognizer`]
-/// lives under [`recognition::docprops`](crate::recognition::docprops).
+/// registered handler for a specific format. Each `docProps` field it surfaces
+/// is labelled, so [`recognition::metadata::FieldRecognizer`] flags it.
 ///
-/// [`DocPropsRecognizer`]: crate::recognition::docprops::DocPropsRecognizer
+/// [`recognition::metadata::FieldRecognizer`]: crate::recognition::metadata::FieldRecognizer
 /// [`FormatRegistry::with_replaced_format`]: elide_format::FormatRegistry::with_replaced_format
 #[cfg(any(feature = "codec-docx", feature = "codec-pptx", feature = "codec-xlsx"))]
 #[cfg_attr(

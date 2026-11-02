@@ -2,7 +2,7 @@
 //!
 //! A `/ToUnicode` CMap maps character codes to Unicode, so text can be recovered
 //! from it (copy, search, extraction) independently of the drawn glyphs. When
-//! [`redact_text`](crate::document::Pdf::redact_text) deletes a glyph, its code must also
+//! [`delete`](crate::text::redact::delete) deletes a glyph, its code must also
 //! be removed from this table, or the redacted text survives as a code->Unicode
 //! entry. The CMap is edited textually: a `bfchar` entry for a deleted code is
 //! dropped, and a `bfrange` covering one fails closed (its interior can't be
@@ -10,14 +10,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use lopdf::{Document, Object, ObjectId};
 
 /// Remove `deleted` codes from each named `/ToUnicode` CMap stream.
 ///
 /// # Errors
 ///
-/// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a deleted
+/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if a deleted
 /// code falls inside a multi-code `bfrange` (which cannot be scrubbed without
 /// re-deriving the range) or if a CMap stream cannot be read, so the redaction
 /// fails closed rather than leaving a recoverable code->Unicode entry.
@@ -43,7 +43,7 @@ pub(crate) fn scrub(
         };
         let text = stream
             .decompressed_content()
-            .map_err(|e| Error::new(ErrorKind::Redaction, format!("read /ToUnicode CMap: {e}")))?;
+            .map_err(|e| Error::redaction(format!("read /ToUnicode CMap: {e}")))?;
         let edited = strip_codes(&text, codes)?;
 
         let Ok(Object::Stream(stream)) = doc.get_object_mut(cmap_id) else {
@@ -148,8 +148,7 @@ fn copy_bfrange_section(
                     i += if tokens.get(i + 2).is_some() { 3 } else { 2 };
                     continue;
                 }
-                return Err(Error::new(
-                    ErrorKind::Redaction,
+                return Err(Error::redaction(
                     "a deleted glyph's code falls inside a /ToUnicode bfrange; \
                      the code->Unicode mapping cannot be scrubbed safely",
                 ));

@@ -1,6 +1,8 @@
 //! [`Pseudonymize`]: replace an entity with a consistent synthetic value,
 //! backed by a vault so every mention of one entity reads the same.
 
+#[cfg(feature = "tabular")]
+use elide_core::Error;
 use elide_core::Result;
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::Modality;
@@ -8,8 +10,6 @@ use elide_core::modality::Modality;
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId};
-#[cfg(feature = "tabular")]
-use elide_core::{Error, ErrorKind};
 
 use crate::generator::Generator;
 use crate::vault::Vault;
@@ -167,8 +167,7 @@ where
             .vault
             .get_or_try_insert_with(key, || match self.generator.generate(entity, data) {
                 TabularReplacement::Cell(replacement) => Ok(replacement),
-                _ => Err(Error::new(
-                    ErrorKind::Redaction,
+                _ => Err(Error::redaction(
                     "pseudonymize generator must produce a cell surrogate",
                 )),
             })

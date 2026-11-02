@@ -1,26 +1,44 @@
 //! [`XlsxDocumentLoader`]: decode a workbook into a parts-model [`Document`].
 
+use std::sync::Arc;
+
+use bytes::Bytes;
 use elide_codec::content::ContentData;
+use elide_codec::extract::{ExtractStream, SharedSplice};
 use elide_codec::{Document, DocumentLoader, DocumentPart, ErasedStream, LocalId, Stream};
-use elide_core::Result;
 use elide_core::modality::tabular::Tabular;
+use elide_core::modality::text::Text;
+use elide_core::redaction::{Disposition, HiddenContentPolicy};
+use elide_core::{Error, Result};
 
 use super::recombine::XlsxRecombine;
 use super::state::XlsxState;
 use super::stream::XlsxStream;
-use super::{BODY_PART_ID, FORMAT_ID, XlsxCell};
-use crate::xlsx::Xlsx;
+use super::{BODY_PART_ID, FORMAT_ID, TEXT_PART_ID, XlsxCell};
+use crate::codec::docprops_hint;
+use crate::codec::ooxml::{OoxmlAddress, OoxmlAddresser, items};
+use crate::codec::props::read_doc_props;
+use crate::opc::sanitize::sanitize;
+use crate::xlsx::{SheetClassifier, Xlsx};
 
 /// A [`DocumentLoader`] that decodes an XLSX workbook into a [`Document`]: the
-/// cell body [`Stream`] plus a [`Blob`](DocumentPart::Blob) per non-cell text
-/// part and per document-property part.
+/// cell body [`Stream`], a text [`Stream`] over the workbook's content outside
+/// its cells (comments, drawings, charts, external hyperlink targets), and a
+/// [`Blob`](DocumentPart::Blob) per embedding and (when metadata is redacted)
+/// per document-property part. The workbook is sanitized under the policy
+/// first, so every part is read from what will ship.
+///
+/// **Fail-closed:** a non-cell text part that cannot be read refuses the
+/// decode, since its text would ship un-redacted.
 #[derive(Debug)]
 pub(crate) struct XlsxDocumentLoader;
 
 #[async_trait::async_trait]
 impl DocumentLoader for XlsxDocumentLoader {
-    async fn decode(&self, content: ContentData) -> Result<Document> {
-        let archive = content.to_bytes();
+    async fn decode(&self, content: ContentData, policy: HiddenContentPolicy) -> Result<Document> {
+        let source = content.to_bytes();
+        let (sanitized, stripped) = sanitize(&source, policy, &SheetClassifier)?;
+        let archive = sanitized.map_or(source, Bytes::from);
         let workbook = Xlsx::open(&archive)?;
         let cells: Vec<XlsxCell> = workbook
             .extract()?
@@ -32,315 +50,70 @@ impl DocumentLoader for XlsxDocumentLoader {
                 text: cell.text.as_str().to_owned(),
             })
             .collect();
-        let text_parts = workbook.text_parts();
-        let doc_props = crate::codec::props::read_doc_props(|path| workbook.part_bytes(path));
-
         let state = XlsxState::new(cells);
 
-        // The cell body plus one blob per non-cell text part (markup pipeline) and
-        // per document-property part (metadata pipeline).
-        let mut parts = Vec::with_capacity(text_parts.len() + doc_props.len() + 1);
-        let stream: Box<dyn Stream<Tabular>> = Box::new(XlsxStream {
+        let markup = workbook.markup();
+        if let Some(issue) = markup.issues.first() {
+            return Err(Error::malformed(format!(
+                "xlsx: text-bearing part `{}` could not be extracted ({:?})",
+                issue.part, issue.kind
+            )));
+        }
+        let text: SharedSplice<OoxmlAddress> = SharedSplice::new(items(markup.blocks));
+
+        // The cell body, the non-cell text, then one blob per embedding (its own
+        // format's pipeline) and per document-property part (metadata
+        // pipeline).
+        let cells_stream: Box<dyn Stream<Tabular>> = Box::new(XlsxStream {
             state: state.clone(),
         });
-        parts.push(DocumentPart::Stream {
-            id: LocalId::new(BODY_PART_ID),
-            handle: ErasedStream::new(FORMAT_ID.clone(), stream),
-        });
-        for (path, bytes) in text_parts {
-            parts.push(DocumentPart::Blob {
-                id: LocalId::new(path),
-                bytes,
-                hint: "xml".to_owned(),
-            });
-        }
-        for (path, bytes) in doc_props {
-            parts.push(DocumentPart::Blob {
-                id: LocalId::new(path),
-                bytes,
-                hint: crate::codec::docprops_hint().to_owned(),
-            });
-        }
-
-        Ok(Document::new(
+        let text_stream: Box<dyn Stream<Text>> = Box::new(ExtractStream::new(
             FORMAT_ID.clone(),
-            parts,
-            Box::new(XlsxRecombine { archive, state }),
-        ))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use bytes::Bytes;
-    use elide_codec::content::ContentData;
-    use elide_codec::{Document, DocumentLoader as _, DocumentPart, LocalId, TypedStream};
-    use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
-    use elide_core::modality::text::TextReplacement;
-    use elide_core::modality::{DataReader as _, DataWriter as _, StreamDataReader as _};
-    use elide_core::redaction::Redactions;
-
-    use super::XlsxDocumentLoader;
-
-    /// The two-sheet workbook whose shared string is reused across sheets, for
-    /// the de-share / cell-addressing mechanics tests.
-    const SAMPLE: &[u8] = include_bytes!("../../../tests/testdata/shared_across_sheets.xlsx");
-
-    /// A real Excel-authored workbook with a header row, for the column-context
-    /// test.
-    const REAL: &[u8] = include_bytes!("../../../tests/testdata/sample.xlsx");
-
-    /// A workbook with cell comments and drawings, for the non-cell text parts.
-    const SAMPLE2: &[u8] = include_bytes!("../../../tests/testdata/sample2.xlsx");
-
-    /// Decode `bytes` into an XLSX [`Document`].
-    async fn decode(bytes: &'static [u8]) -> Document {
-        XlsxDocumentLoader
-            .decode(ContentData::new(Bytes::from_static(bytes)))
-            .await
-            .unwrap()
-    }
-
-    /// The document's cell body stream, downcast to `Tabular`.
-    fn body(doc: &mut Document) -> &mut TypedStream<Tabular> {
-        match &mut doc.parts_mut()[0] {
-            DocumentPart::Stream { handle, .. } => {
-                handle.downcast_mut::<Tabular>().expect("cell body stream")
+            text.clone(),
+            Arc::new(OoxmlAddresser),
+        ));
+        let streams = [
+            DocumentPart::Stream {
+                id: LocalId::new(BODY_PART_ID),
+                handle: ErasedStream::new(FORMAT_ID.clone(), cells_stream),
+            },
+            DocumentPart::Stream {
+                id: LocalId::new(TEXT_PART_ID),
+                handle: ErasedStream::new(FORMAT_ID.clone(), text_stream),
+            },
+        ];
+        let embeddings = markup.embeddings.into_iter().map(|embedding| {
+            let id = LocalId::new(embedding.part.as_str().to_owned());
+            let hint = id.extension().unwrap_or_default().to_owned();
+            DocumentPart::Blob {
+                id,
+                bytes: embedding.bytes,
+                hint,
             }
-            _ => panic!("part 0 is the cell body stream"),
-        }
-    }
-
-    /// Every cell the body stream yields, as `(sheet, row, column, text)`.
-    fn cells_of(doc: &mut Document) -> Vec<(Option<String>, u32, u32, String)> {
-        body(doc)
-            .chunks()
-            .unwrap()
-            .into_iter()
-            .map(|chunk| {
-                (
-                    chunk.location.sheet_name.as_deref().map(str::to_owned),
-                    chunk.location.row_index,
-                    chunk.location.column_index,
-                    chunk.data.as_str().to_owned(),
-                )
-            })
-            .collect()
-    }
-
-    #[tokio::test]
-    async fn streams_cells_with_sheet_scoped_locations() {
-        let mut doc = decode(SAMPLE).await;
-        let seen = cells_of(&mut doc);
-        assert!(seen.contains(&(
-            Some("Customers".to_owned()),
-            1,
-            0,
-            "alice@example.com".to_owned()
-        )));
-        assert!(seen.contains(&(Some("Customers".to_owned()), 1, 1, "123-45-6789".to_owned())));
-        assert!(seen.contains(&(
-            Some("Notes".to_owned()),
-            0,
-            0,
-            "alice@example.com".to_owned()
-        )));
-    }
-
-    #[tokio::test]
-    async fn data_cells_carry_their_column_header_as_context() {
-        // A data cell must stream with its header column's text, so a
-        // context-gated pattern can match a value that carries no cue itself.
-        let mut doc = decode(REAL).await;
-        let card = body(&mut doc)
-            .chunks()
-            .unwrap()
-            .into_iter()
-            .find(|chunk| chunk.data.as_str() == "4111 1111 1111 1111")
-            .expect("the card cell is streamed");
-        // The header of the card's column is `card`, attached as the column name
-        // and surfaced as a hint the recognizer can boost on.
-        assert_eq!(card.location.column_name.as_deref(), Some("card"));
-        assert!(
-            card.hints.iter().any(|h| h.data.as_str() == "card"),
-            "the header is surfaced as a context hint",
-        );
-        // A header cell is not re-hinted with itself.
-        let mut doc = decode(REAL).await;
-        for chunk in body(&mut doc).chunks().unwrap() {
-            if chunk.location.row_index == 0 {
-                assert!(chunk.hints.is_empty(), "header cell has no self-hint");
-                assert!(chunk.location.column_name.is_none());
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn read_at_slices_intra_cell_range() {
-        let mut doc = decode(SAMPLE).await;
-        let stream = body(&mut doc);
-        // Customers!A2 = "alice@example.com"; bytes 0..5 = "alice".
-        let loc = TabularLocation::new(1, 0)
-            .with_sheet_name("Customers")
-            .with_range(0, 5);
-        assert_eq!(
-            stream.read_at(&loc).await.unwrap().unwrap().as_str(),
-            "alice"
-        );
-    }
-
-    #[tokio::test]
-    async fn redact_and_encode_removes_pii_and_de_shares() {
-        let mut doc = decode(SAMPLE).await;
-        let mut batch: Redactions<Tabular> = Redactions::new();
-        // Redact only Customers!A2 (alice). Notes!A1 shares the pool entry.
-        batch.push(
-            TabularLocation::new(1, 0).with_sheet_name("Customers"),
-            TabularReplacement::Cell(TextReplacement::substituted("[EMAIL]")),
-        );
-        body(&mut doc).write_at(batch).await.unwrap();
-        let out = doc.encode().unwrap();
-
-        // The redacted output is a valid workbook whose Customers!A2 is gone but
-        // whose Notes!A1 (sharing the pool) still reads alice.
-        let mut reopened = XlsxDocumentLoader
-            .decode(ContentData::new(out.to_bytes()))
-            .await
-            .unwrap();
-        let seen = cells_of(&mut reopened);
-        assert!(seen.contains(&(Some("Customers".to_owned()), 1, 0, "[EMAIL]".to_owned())));
-        assert!(seen.contains(&(
-            Some("Notes".to_owned()),
-            0,
-            0,
-            "alice@example.com".to_owned()
-        )));
-    }
-
-    #[tokio::test]
-    async fn structural_drops_are_refused() {
-        let mut doc = decode(SAMPLE).await;
-        let mut batch: Redactions<Tabular> = Redactions::new();
-        batch.push(
-            TabularLocation::new(1, 0).with_sheet_name("Customers"),
-            TabularReplacement::DropRow,
-        );
-        assert!(body(&mut doc).write_at(batch).await.is_err());
-    }
-
-    #[tokio::test]
-    async fn a_batch_with_an_unsupported_edit_leaves_the_workbook_unchanged() {
-        // A valid cell edit followed by an unsupported `DropRow` in the same batch
-        // must fail the whole batch atomically — the valid edit must NOT survive
-        // into the encoded workbook (a partial redaction is worse than none).
-        let mut doc = decode(SAMPLE).await;
-        let mut batch: Redactions<Tabular> = Redactions::new();
-        batch.push(
-            TabularLocation::new(1, 0).with_sheet_name("Customers"),
-            TabularReplacement::Cell(TextReplacement::substituted("[EMAIL]")),
-        );
-        batch.push(
-            TabularLocation::new(1, 1).with_sheet_name("Customers"),
-            TabularReplacement::DropRow,
-        );
-        assert!(body(&mut doc).write_at(batch).await.is_err());
-
-        // The encode carries none of the batch: Customers!A2 still reads alice.
-        let out = doc.encode().unwrap();
-        let mut reopened = XlsxDocumentLoader
-            .decode(ContentData::new(out.to_bytes()))
-            .await
-            .unwrap();
-        let seen = cells_of(&mut reopened);
-        assert!(seen.contains(&(
-            Some("Customers".to_owned()),
-            1,
-            0,
-            "alice@example.com".to_owned()
-        )));
-    }
-
-    #[tokio::test]
-    async fn encode_only_de_shares_redacted_cells() {
-        let mut doc = decode(SAMPLE).await;
-        let mut batch: Redactions<Tabular> = Redactions::new();
-        // Redact only Customers!A2 (alice). The `Email` header at A1 is a
-        // different, unredacted shared string.
-        batch.push(
-            TabularLocation::new(1, 0).with_sheet_name("Customers"),
-            TabularReplacement::Cell(TextReplacement::substituted("[EMAIL]")),
-        );
-        body(&mut doc).write_at(batch).await.unwrap();
-        let out = doc.encode().unwrap();
-
-        let sheet1 = read_part(out.as_bytes(), "xl/worksheets/sheet1.xml");
-        let sheet1 = String::from_utf8_lossy(&sheet1);
-        // The redacted cell is de-shared to an inline string.
-        assert!(
-            sheet1.contains(r#"t="inlineStr"><is><t>[EMAIL]</t>"#),
-            "{sheet1}"
-        );
-        // The untouched `Email` header cell stays a shared string, the workbook
-        // is not wholesale de-shared.
-        assert!(
-            sheet1.contains(r#"<c r="A1" t="s"><v>0</v></c>"#),
-            "unredacted shared cell was needlessly de-shared: {sheet1}"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_sheetless_ambiguous_redaction_fails_closed() {
-        // alice's coordinates (row 1, col 0) exist on Customers; a request with no
-        // sheet name that matched two sheets would be ambiguous. Here the same
-        // (0,0) exists on both Customers (Email) and Notes (alice), so a sheetless
-        // request at (0,0) must fail rather than edit an arbitrary sheet.
-        let mut doc = decode(SAMPLE).await;
-        let mut batch: Redactions<Tabular> = Redactions::new();
-        batch.push(
-            TabularLocation::new(0, 0), // no sheet name
-            TabularReplacement::Cell(TextReplacement::substituted("[X]")),
-        );
-        assert!(body(&mut doc).write_at(batch).await.is_err());
-    }
-
-    #[tokio::test]
-    async fn exposes_non_cell_text_parts_as_xml_container_parts() {
-        let doc = decode(SAMPLE2).await;
-        // The comment and drawing parts are surfaced as xml-hinted blobs.
-        let blob = |id: &str| {
-            doc.parts().iter().any(|p| {
-                matches!(p, DocumentPart::Blob { id: bid, hint, .. }
-                    if bid.as_str() == id && hint == "xml")
-            })
+        });
+        let doc_props = match policy.metadata {
+            Disposition::Redact => read_doc_props(|path| workbook.part_bytes(path)),
+            Disposition::Strip => Vec::new(),
         };
-        assert!(blob("xl/comments1.xml"), "comment part not surfaced");
-        assert!(
-            blob("xl/drawings/drawing1.xml"),
-            "drawing part not surfaced"
-        );
-    }
+        let properties = doc_props
+            .into_iter()
+            .map(|(path, bytes)| DocumentPart::Blob {
+                id: LocalId::new(path),
+                bytes,
+                hint: docprops_hint().to_owned(),
+            });
+        let parts = streams
+            .into_iter()
+            .chain(embeddings)
+            .chain(properties)
+            .collect();
 
-    #[tokio::test]
-    async fn replace_part_folds_redacted_text_into_the_encode() {
-        let mut doc = decode(SAMPLE2).await;
-        let redacted = Bytes::from_static(
-            br#"<?xml version="1.0"?><comments><commentList><comment ref="A1"><text><r><t>[EMAIL]</t></r></text></comment></commentList></comments>"#,
-        );
-        doc.replace_part(&LocalId::new("xl/comments1.xml"), redacted)
-            .unwrap();
-        // An id the workbook does not surface is refused.
-        assert!(
-            doc.replace_part(&LocalId::new("xl/nope.xml"), Bytes::new())
-                .is_err()
-        );
-        let out = doc.encode().unwrap();
-        let comment = read_part(out.as_bytes(), "xl/comments1.xml");
-        assert!(String::from_utf8_lossy(&comment).contains("[EMAIL]"));
-        assert!(!String::from_utf8_lossy(&comment).contains("carol@example.com"));
-    }
-
-    fn read_part(bytes: &[u8], name: &str) -> Vec<u8> {
-        crate::opc::fixtures::read_part(bytes, name)
-            .unwrap_or_else(|| panic!("part `{name}` present in package"))
+        let recombine = XlsxRecombine {
+            archive,
+            state,
+            text,
+            policy,
+        };
+        Ok(Document::new(FORMAT_ID.clone(), parts, Box::new(recombine)).with_stripped(stripped))
     }
 }

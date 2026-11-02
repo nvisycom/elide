@@ -18,6 +18,7 @@
 //! [`Replacement`]: crate::modality::Modality::Replacement
 
 mod generator;
+mod hidden_content;
 mod leak_profile;
 mod operator_id;
 mod redactions;
@@ -25,6 +26,9 @@ mod redactions;
 use std::sync::Arc;
 
 pub use self::generator::Generator;
+pub use self::hidden_content::{
+    Disposition, HiddenContent, HiddenContentKind, HiddenContentPolicy,
+};
 pub use self::leak_profile::LeakProfile;
 pub use self::operator_id::OperatorId;
 pub use self::redactions::Redactions;

@@ -12,11 +12,11 @@
 //! The output is not searchable or accessible: it is images. That is the
 //! deliberate trade for a guarantee that the original text is gone.
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 use super::{Glyph, PageObservation, PixelRect, emit};
 use crate::document::Store;
-use crate::redact::Detection;
+use crate::text::Detection;
 
 /// Redact `detections` by destructively overwriting their pixels in the rendered
 /// `pages`, then emit a fresh image-only PDF from the document in `store`.
@@ -31,7 +31,7 @@ use crate::redact::Detection;
 ///
 /// # Errors
 ///
-/// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a page's pixel buffer
+/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if a page's pixel buffer
 /// size does not match its dimensions, or a detection names a page not present in
 /// `pages` or selects no glyph to redact.
 pub(crate) fn redact_raster(
@@ -80,7 +80,7 @@ pub(crate) fn redact_raster(
 ///
 /// # Errors
 ///
-/// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a page's
+/// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if a page's
 /// pixel buffer size does not match its dimensions, a detection names a page
 /// not present in `pages` or selects no glyph, or a covered pixel is not
 /// `fill_rgb` (naming the page and the offending pixel).
@@ -95,13 +95,10 @@ pub(crate) fn verify_raster_coverage(
         for d in detections.iter().filter(|d| d.page == page.page) {
             for rect in glyph_rects(&page.glyphs, d.start, d.end) {
                 if let Some((x, y)) = unfilled_pixel(&page.pixels, page.width, rect, fill_rgb) {
-                    return Err(Error::new(
-                        ErrorKind::Redaction,
-                        format!(
-                            "page {} pixel ({x}, {y}) in glyph box {rect:?} is not the fill colour {fill_rgb:?}",
-                            page.page
-                        ),
-                    ));
+                    return Err(Error::redaction(format!(
+                        "page {} pixel ({x}, {y}) in glyph box {rect:?} is not the fill colour {fill_rgb:?}",
+                        page.page
+                    )));
                 }
             }
         }
@@ -121,24 +118,21 @@ fn validate_pages(pages: &[PageObservation], detections: &[Detection]) -> Result
             .checked_mul(page.height as usize)
             .and_then(|n| n.checked_mul(3));
         if expected != Some(page.pixels.len()) {
-            return Err(Error::new(
-                ErrorKind::Redaction,
-                format!(
-                    "page {} pixel buffer is {} bytes, expected {:?}",
-                    page.page,
-                    page.pixels.len(),
-                    expected
-                ),
-            ));
+            return Err(Error::redaction(format!(
+                "page {} pixel buffer is {} bytes, expected {:?}",
+                page.page,
+                page.pixels.len(),
+                expected
+            )));
         }
     }
 
     for d in detections {
         let Some(page) = pages.iter().find(|p| p.page == d.page) else {
-            return Err(Error::new(
-                ErrorKind::Redaction,
-                format!("detection names page {} not in the observed pages", d.page),
-            ));
+            return Err(Error::redaction(format!(
+                "detection names page {} not in the observed pages",
+                d.page
+            )));
         };
         // A detection that maps to no glyph would paint nothing, and both the
         // fill and the coverage check would then "succeed" over an empty set,
@@ -146,13 +140,10 @@ fn validate_pages(pages: &[PageObservation], detections: &[Detection]) -> Result
         // empty, out-of-range, or unmapped span is a redaction that cannot be
         // carried out, not a no-op.
         if glyph_rects(&page.glyphs, d.start, d.end).next().is_none() {
-            return Err(Error::new(
-                ErrorKind::Redaction,
-                format!(
-                    "detection on page {} (chars {}..{}) selects no glyph to redact",
-                    d.page, d.start, d.end
-                ),
-            ));
+            return Err(Error::redaction(format!(
+                "detection on page {} (chars {}..{}) selects no glyph to redact",
+                d.page, d.start, d.end
+            )));
         }
     }
 
@@ -222,8 +213,8 @@ mod tests {
     use elide_core::ErrorKind;
 
     use super::verify_raster_coverage;
-    use crate::redact::Detection;
     use crate::render::{Glyph, GlyphSource, PageObservation, PixelRect};
+    use crate::text::Detection;
 
     const FILL: [u8; 3] = [255, 0, 0];
 

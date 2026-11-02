@@ -3,11 +3,12 @@
 #![doc = include_str!("../README.md")]
 
 pub mod codec;
+#[cfg(feature = "fixtures")]
+#[cfg_attr(docsrs, doc(cfg(feature = "fixtures")))]
+pub mod fixtures;
 pub mod primitive;
 
 pub(crate) mod document;
-pub(crate) mod extract;
-pub(crate) mod redact;
 #[cfg(feature = "render")]
 pub(crate) mod render;
 pub(crate) mod text;

@@ -23,6 +23,7 @@ use elide_core::mocks::MockOperator;
 use elide_core::modality::text::{Text, TextLocation};
 use elide_core::primitive::{ComponentId, Confidence};
 use elide_core::recognition::{Context, Recognizer, Scope, Subject};
+use elide_core::redaction::HiddenContentPolicy;
 use elide_detection::Analyzer;
 use elide_engine::{Directives, Document, Orchestrator};
 use elide_format::FormatRegistry;
@@ -113,7 +114,13 @@ async fn nested_container_keeps_its_own_redaction_with_an_extensionless_id() -> 
     let registry = FormatRegistry::new().with_format(mock_format());
     let orchestrator = orchestrator(registry.clone());
 
-    let handle = registry.decode(outer_bytes.clone(), MOCK_EXT).await?;
+    let handle = registry
+        .decode(
+            outer_bytes.clone(),
+            MOCK_EXT,
+            HiddenContentPolicy::default(),
+        )
+        .await?;
     let mut documents = [Document::new("outer.mock", handle)];
 
     let analyzed = orchestrator

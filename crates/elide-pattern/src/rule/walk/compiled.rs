@@ -7,7 +7,7 @@ use aho_corasick::{AhoCorasick, MatchKind};
 use elide_core::entity::LabelRef;
 use elide_core::entity::audit::PatternEvent;
 use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 use super::lexicon::Lexicon;
 use super::lowercase::Bridge;
@@ -58,10 +58,7 @@ impl Markers {
                 .match_kind(MatchKind::LeftmostLongest)
                 .build(walk.markers.iter().map(|t| t.term.as_str()))
                 .map_err(|e| {
-                    Error::new(
-                        ErrorKind::Configuration,
-                        format!("walk `{}`: compiling markers: {e}", walk.name),
-                    )
+                    Error::configuration(format!("walk `{}`: compiling markers: {e}", walk.name))
                 })?;
             Some(automaton)
         };
@@ -109,13 +106,10 @@ impl CompiledWalk {
     /// Compile `walk`, its context already compiled at index `context`.
     pub(crate) fn compile(walk: &Walk, context: Option<usize>) -> Result<Self> {
         if walk.direction == Direction::Both && !walk.include_marker {
-            return Err(Error::new(
-                ErrorKind::Configuration,
-                format!(
-                    "walk `{}`: a walk in both directions keeps its marker inside the name",
-                    walk.name
-                ),
-            ));
+            return Err(Error::configuration(format!(
+                "walk `{}`: a walk in both directions keeps its marker inside the name",
+                walk.name
+            )));
         }
         Ok(Self {
             name: walk.name.clone(),

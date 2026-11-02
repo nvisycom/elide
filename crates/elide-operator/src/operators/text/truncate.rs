@@ -8,7 +8,7 @@ use elide_core::entity::Entity;
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
 use elide_core::redaction::{LeakProfile, Operator, OperatorId};
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -67,8 +67,7 @@ impl Truncate {
         let chars: Vec<char> = value.chars().collect();
         let total = chars.len();
         if self.keep_prefix.saturating_add(self.keep_suffix) >= total {
-            return Err(Error::new(
-                ErrorKind::Redaction,
+            return Err(Error::redaction(
                 "truncate keeps at least the whole value; nothing would be dropped",
             ));
         }

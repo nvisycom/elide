@@ -8,7 +8,6 @@ use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
 
 use super::image_state::ImageState;
-use crate::exif::ExifPolicy;
 use crate::modality::{Image, ImageData, ImageLocation};
 use crate::primitive::{BoundingBox, Dimensions, Point};
 
@@ -18,7 +17,6 @@ use crate::primitive::{BoundingBox, Dimensions, Point};
 pub(super) struct PixelStream {
     pub(super) state: ImageState,
     pub(super) format_id: FormatId,
-    pub(super) policy: ExifPolicy,
 }
 
 impl Stream<Image> for PixelStream {
@@ -27,7 +25,7 @@ impl Stream<Image> for PixelStream {
     }
 
     fn encode(&self) -> Result<ContentData> {
-        Ok(ContentData::new(self.state.encode(self.policy)?))
+        Ok(ContentData::new(self.state.encode()?))
     }
 
     fn chunks(&self) -> Result<Vec<Chunk<Image>>> {
@@ -36,7 +34,7 @@ impl Stream<Image> for PixelStream {
             Point::new(0.0, 0.0),
             Dimensions::new(dims.width as f64, dims.height as f64),
         );
-        let data = self.state.image_data(self.policy)?;
+        let data = self.state.image_data()?;
         Ok(vec![Chunk {
             location: ImageLocation::new(bbox),
             data,

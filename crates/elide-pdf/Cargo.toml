@@ -33,18 +33,16 @@ serde = ["dep:serde"]
 ## `Dpi`). Implies `serde`.
 schema = ["serde", "dep:schemars"]
 
-## Redact embedded images by replacing an image XObject's stream with new
-## (redacted) bytes, rebuilding a valid XObject from an encoded PNG/JPEG.
-## Pure-Rust; pulls the `image` crate (via lopdf's `embed_image`) to build the
-## XObject. Off by default so a text-only build stays lean.
-image = ["dep:image", "lopdf/embed_image"]
+## Expose `fixtures`: build small in-memory PDF fixtures (embedded images,
+## an attachment, metadata) and inspect an encoded PDF, so a downstream crate
+## can exercise the PDF codec without depending on `lopdf`/`image` itself.
+fixtures = []
 
 ## Render pages to images (for OCR of scanned/image-only PDFs) via the native
-## PDFium shared library, and redact them by reflattening — so `render` implies
-## `image`. Off by default: the default build is pure-Rust with no native
+## PDFium shared library, and redact them by reflattening. Off by default: the default build is pure-Rust with no native
 ## dependency. Requires the PDFium `.so`/`.dylib` at runtime (see
 ## `scripts/install-pdfium.sh`); pulls `pdfium-render`, `rayon`, and `sha2`.
-render = ["image", "dep:pdfium-render", "dep:rayon", "dep:sha2"]
+render = ["dep:pdfium-render", "dep:rayon", "dep:sha2"]
 
 [dependencies]
 # Internal crates
@@ -67,10 +65,10 @@ rayon = { workspace = true, features = [], optional = true }
 async-trait = { workspace = true, features = [] }
 
 # Markup parsing
-lopdf = { workspace = true, default-features = false }
+lopdf = { workspace = true, default-features = false, features = ["embed_image"] }
 
 # Image processing
-image = { workspace = true, features = [], optional = true }
+image = { workspace = true, features = [] }
 
 # Rendering
 pdfium-render = { workspace = true, features = [], optional = true }

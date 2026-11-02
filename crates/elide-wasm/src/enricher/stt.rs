@@ -11,7 +11,7 @@ use elide::enrichment::stt::{SttEnricher, SttRequest, SttResponse};
 use elide::entity::audit::ModelEvent;
 use elide::modality::audio::TranscriptSegment;
 use elide::primitive::TimeSpan;
-use elide::{Error, ErrorKind, Result};
+use elide::{Error, Result};
 use js_sys::{Function, Promise, Uint8Array};
 use send_wrapper::SendWrapper;
 use serde::Deserialize;
@@ -75,10 +75,7 @@ impl Backend for JsCallbackBackend {
             .await
             .map_err(super::js_to_error)?;
         let segments: Vec<Segment> = serde_wasm_bindgen::from_value(value).map_err(|e| {
-            Error::new(
-                ErrorKind::MalformedInput,
-                format!("STT callback returned an unreadable value: {e}"),
-            )
+            Error::malformed(format!("STT callback returned an unreadable value: {e}"))
         })?;
         // The callback's time offsets are untrusted: reject a reversed span
         // fail-closed rather than let it be silently clamped to zero length.
@@ -86,13 +83,10 @@ impl Backend for JsCallbackBackend {
             .into_iter()
             .map(|s| {
                 if s.start_ms > s.end_ms {
-                    return Err(Error::new(
-                        ErrorKind::MalformedInput,
-                        format!(
-                            "STT callback returned a reversed span [{} ms, {} ms)",
-                            s.start_ms, s.end_ms
-                        ),
-                    ));
+                    return Err(Error::malformed(format!(
+                        "STT callback returned a reversed span [{} ms, {} ms)",
+                        s.start_ms, s.end_ms
+                    )));
                 }
                 Ok(TranscriptSegment::new(
                     TimeSpan::from_millis(s.start_ms, s.end_ms),

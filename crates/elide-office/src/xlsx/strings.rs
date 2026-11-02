@@ -7,7 +7,7 @@
 
 use std::ops::Range;
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 use quick_xml::Reader;
 use quick_xml::escape::unescape;
 use quick_xml::events::Event;
@@ -40,12 +40,6 @@ pub(crate) struct SharedItem {
 /// The shared-string table with each entry's `<si>` inner byte range, in
 /// document order. Index `i` is the `i`-th `<si>`.
 pub(crate) fn shared_string_items(raw: &str) -> Result<Vec<SharedItem>> {
-    let malformed = |e: quick_xml::Error| {
-        Error::new(
-            ErrorKind::MalformedInput,
-            format!("sharedStrings.xml malformed: {e}"),
-        )
-    };
     let mut reader = Reader::from_str(raw);
     let bom = bom_len(raw);
     let mut last = bom;
@@ -58,7 +52,9 @@ pub(crate) fn shared_string_items(raw: &str) -> Result<Vec<SharedItem>> {
     let mut phonetic_depth = 0u32;
 
     loop {
-        let event = reader.read_event().map_err(malformed)?;
+        let event = reader
+            .read_event()
+            .map_err(|e| Error::malformed(format!("sharedStrings.xml malformed: {e}")))?;
         let span = last..reader.buffer_position() as usize + bom;
         last = span.end;
 
@@ -92,12 +88,8 @@ pub(crate) fn shared_string_items(raw: &str) -> Result<Vec<SharedItem>> {
             }
             Event::End(e) if e.local_name().as_ref() == "t" => {
                 if let Some(start) = text_open.take() {
-                    let decoded = unescape(&raw[start..span.start]).map_err(|e| {
-                        Error::new(
-                            ErrorKind::MalformedInput,
-                            format!("sharedStrings.xml entity: {e}"),
-                        )
-                    })?;
+                    let decoded = unescape(&raw[start..span.start])
+                        .map_err(|e| Error::malformed(format!("sharedStrings.xml entity: {e}")))?;
                     current.push_str(&decoded);
                 }
             }

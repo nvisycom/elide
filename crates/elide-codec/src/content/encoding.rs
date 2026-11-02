@@ -1,6 +1,6 @@
 //! Character encoding for text-based loaders.
 
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 /// Character encoding used to decode raw bytes before parsing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -20,7 +20,7 @@ impl TextEncoding {
     pub fn decode_bytes(self, bytes: &[u8]) -> Result<String> {
         match self {
             Self::Utf8 => String::from_utf8(bytes.to_vec())
-                .map_err(|e| Error::new(ErrorKind::MalformedInput, format!("invalid UTF-8: {e}"))),
+                .map_err(|e| Error::malformed(format!("invalid UTF-8: {e}"))),
         }
     }
 }

@@ -15,14 +15,15 @@ use elide::codec::FormatRegistry;
 use elide::entity::audit::AuditKind;
 use elide::modality::image::Image;
 use elide::modality::text::Text;
+use elide::redaction::HiddenContentPolicy;
 use elide::{Directives, Orchestrator, PartId, RegistryDocumentExt, Report, Result};
 
 use crate::support::orchestrator::TestOrchestrator;
 
-const SAMPLE: &[u8] = include_bytes!("../testdata/sample.docx");
+const SAMPLE: &[u8] = include_bytes!("../testdata/docx/body_header_hyperlink.docx");
 
 /// The fixture document's name, its depth-1 part key in the report.
-const DOC: &str = "sample.docx";
+const DOC: &str = "body_header_hyperlink.docx";
 
 /// Build an orchestrator whose body rule set is deterministic enough to read
 /// back from the picks: every detected label redacts through `Replace` (`[{label}]`).
@@ -38,7 +39,9 @@ async fn anonymize_records_reviewable_body_picks() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
     let orchestrator = orchestrator(registry.clone())?;
 
-    let mut doc = registry.document(DOC, SAMPLE).await?;
+    let mut doc = registry
+        .document(DOC, SAMPLE, HiddenContentPolicy::default())
+        .await?;
     let report = orchestrator
         .analyze(&mut doc, &Directives::new())
         .await?
@@ -99,7 +102,9 @@ async fn anonymize_over_an_empty_part_records_nothing() -> Result<()> {
     let registry = FormatRegistry::with_builtin();
     let orchestrator = orchestrator(registry.clone())?;
 
-    let mut doc = registry.document(DOC, SAMPLE).await?;
+    let mut doc = registry
+        .document(DOC, SAMPLE, HiddenContentPolicy::default())
+        .await?;
     // A report carrying one image part with no detected entities, apply routes
     // through the image pipeline (Anonymizer::new(), no rules) and does nothing.
     // The part is keyed under the document's name (a nested path) so apply

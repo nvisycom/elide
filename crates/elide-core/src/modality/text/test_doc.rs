@@ -4,7 +4,7 @@
 use super::{Text, TextData, TextLocation, TextReplacement};
 use crate::modality::{DataReader, DataWriter};
 use crate::redaction::Redactions;
-use crate::{Error, ErrorKind, Result};
+use crate::{Error, Result};
 
 /// An in-memory read/write text document: the standard [`Text`] test double.
 ///
@@ -64,7 +64,7 @@ impl DataReader<Text> for TextDoc {
 impl DataWriter<Text> for TextDoc {
     async fn write_at(&mut self, mut redactions: Redactions<Text>) -> Result<()> {
         if self.fail_writes {
-            return Err(Error::new(ErrorKind::Redaction, "write failed".to_owned()));
+            return Err(Error::redaction("write failed".to_owned()));
         }
         redactions.sort_by_position();
         for (location, replacement) in redactions.iter().rev() {

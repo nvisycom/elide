@@ -30,6 +30,7 @@
 //! [`Text`]: elide_core::modality::text::Text
 
 mod addresser;
+mod offset;
 mod state;
 mod stream;
 
@@ -39,6 +40,7 @@ use elide_core::modality::ResolvedHint;
 use elide_core::modality::text::Text;
 
 pub use self::addresser::SourceAddresser;
+pub use self::offset::{CharacterReferences, OffsetMap, OffsetRun, RunKind, decode_references};
 pub use self::state::{SharedSplice, SpliceState};
 pub use self::stream::ExtractStream;
 
@@ -62,6 +64,28 @@ pub struct ExtractedItem<A> {
     /// the source span where its text sits with that text (for keyword
     /// matching). Empty when there's no useful surrounding context.
     pub hints: Vec<ResolvedHint<Text>>,
+    /// How this item joins the passage of the item before it.
+    pub passage: Passage,
+}
+
+/// How an [`ExtractedItem`] joins the items before it into a passage: the text
+/// a reader takes in as one, which detection scans as one chunk.
+///
+/// A document often stores one passage across several items (a Word paragraph
+/// in runs split by formatting or editing sessions, an HTML paragraph across
+/// inline elements), and an entity split between two items is found only when
+/// detection reads them together. The first item always starts a passage.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Passage {
+    /// The item begins a new passage.
+    #[default]
+    Start,
+    /// The item reads on from the item before it.
+    Continue,
+    /// A separator inside the passage that the format stores as markup, not
+    /// text (a tab, a line break): it reads on from the item before it, and
+    /// redaction never edits it.
+    Separator,
 }
 
 /// A resolved redaction target: which item to edit, and the byte range within
@@ -74,4 +98,22 @@ pub struct ItemEdit {
     pub item: usize,
     /// The byte range to replace within that item's decoded value.
     pub local: Range<usize>,
+}
+
+impl ItemEdit {
+    /// `edits` merged per item, in item order: the edits of one item become one
+    /// covering the first start to the last end.
+    pub fn merged(mut edits: Vec<ItemEdit>) -> Vec<ItemEdit> {
+        edits.sort_by_key(|edit| (edit.item, edit.local.start));
+        let mut merged: Vec<ItemEdit> = Vec::with_capacity(edits.len());
+        for edit in edits {
+            match merged.last_mut() {
+                Some(last) if last.item == edit.item => {
+                    last.local.end = last.local.end.max(edit.local.end);
+                }
+                _ => merged.push(edit),
+            }
+        }
+        merged
+    }
 }

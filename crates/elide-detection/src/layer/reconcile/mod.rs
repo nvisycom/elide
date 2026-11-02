@@ -1,12 +1,12 @@
 //! Reconciliation: deciding what happens to overlapping entities.
 //!
-//! One layer, two axes. A [`GroupPredicate`](group::GroupPredicate) (`G`)
+//! One layer, two axes. A [`GroupPredicate`] (`G`)
 //! decides *which* entities cluster, and a [`Reconciler`] (`R`) decides *what
 //! to do* with a grouped pair. Fusion and cross-label resolution are two
 //! configurations of the same [`ReconcileLayer`]:
 //!
-//! - fusion = `ReconcileLayer<`[`SameLabel`](group::SameLabel)`, `[`Merging`]`<…>>`
-//! - resolution = `ReconcileLayer<`[`CrossLabel`](group::CrossLabel)`, `[`Structural`]`<…>>`
+//! - fusion = `ReconcileLayer<`[`SameLabel`]`, `[`Merging`]`<…>>`
+//! - resolution = `ReconcileLayer<`[`CrossLabel`]`, `[`Structural`]`<…>>`
 //!
 //! The [`Reconciler`]s, [`Merging`], [`Structural`], [`Exclusive`],
 //! [`Permissive`], sit here at the root. The customization traits live in

@@ -9,7 +9,7 @@
 //! never collide with a same-named part in another document). Each entry is
 //! tagged with its [`modality`](elide_core::modality::Modality::NAME) so the
 //! orchestrator can route it back on deserialization. Reconstruction is driven
-//! by the [`ModalityRegistry`](super::registry::ModalityRegistry): the wire form
+//! by the [`ModalityRegistry`]: the wire form
 //! drops the concrete modality type, deserialization is not object-safe, so each
 //! group is buffered and replayed through the per-modality parser resolved from
 //! the registry.
@@ -33,6 +33,7 @@
 use std::any::TypeId;
 use std::marker::PhantomData;
 
+use elide_core::redaction::{HiddenContent, HiddenContentKind};
 use serde::de::{
     DeserializeSeed, Deserializer, Error as DeError, IntoDeserializer, MapAccess, Visitor,
 };
@@ -52,6 +53,18 @@ impl serde::Serialize for PathField<'_> {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         s.collect_seq(self.0.segments())
     }
+}
+
+/// One entry of a report's `stripped` section on the wire: the part's path, the
+/// item stripped, its kind, and how many. `kind` is derived from `item`; it
+/// rides along so a consumer can group entries without its own table. The
+/// section is output only, so it is never read back.
+#[derive(serde::Serialize)]
+struct StrippedEntry {
+    id: Vec<String>,
+    kind: HiddenContentKind,
+    item: HiddenContent,
+    count: usize,
 }
 
 impl serde::Serialize for Report {
@@ -91,8 +104,19 @@ impl serde::Serialize for Report {
         // reports serialize identically and the order follows the `PartId` tree.
         parts.sort_unstable_by(|a, b| a.0.segments().cmp(b.0.segments()));
 
-        let mut state = serializer.serialize_struct("Report", 1)?;
+        let stripped: Vec<StrippedEntry> = self
+            .stripped()
+            .map(|item| StrippedEntry {
+                id: item.part.segments().map(str::to_owned).collect(),
+                kind: item.content.kind(),
+                item: item.content,
+                count: item.count,
+            })
+            .collect();
+
+        let mut state = serializer.serialize_struct("Report", 2)?;
         state.serialize_field("parts", &parts)?;
+        state.serialize_field("stripped", &stripped)?;
         state.end()
     }
 }
@@ -466,8 +490,9 @@ impl<'de, L: Leaf> Visitor<'de> for SetSeed<'_, L> {
                     })?);
                 }
                 // Any field other than `parts` is ignored, so a wire form
-                // carrying extra derived output still deserializes. `parts` is
-                // optional: a set with no parts is valid.
+                // carrying derived output (a report's `stripped` section) still
+                // deserializes. `parts` is optional: a set with no parts is
+                // valid.
                 _ => {
                     map.next_value::<serde::de::IgnoredAny>()?;
                 }
@@ -488,6 +513,7 @@ mod tests {
     use super::super::test_support::{doc, text_entity};
     use super::*;
     use crate::PartId;
+    use crate::analysis::StrippedRecord;
 
     /// A registry with `Text` registered, the unit under test needs only the
     /// group parsers, not a full orchestrator.
@@ -524,6 +550,30 @@ mod tests {
         // No parts → an empty array.
         let empty = serde_json::to_value(Report::new()).unwrap();
         assert!(empty["parts"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_stripped_section_is_written_but_never_read_back() {
+        let mut record = StrippedRecord::default();
+        record.record(
+            PartId::new("report.docx").child("word/comments.xml"),
+            HiddenContent::Comment,
+            3,
+        );
+        let mut report = Report::new();
+        report.set_stripped(record);
+
+        let value = serde_json::to_value(&report).unwrap();
+        assert_eq!(
+            value["stripped"],
+            serde_json::json!([{
+                "id": ["report.docx", "word/comments.xml"],
+                "kind": "collaboration",
+                "item": "comment",
+                "count": 3,
+            }])
+        );
+        assert_eq!(round_trip(&report, &text_registry()).stripped().count(), 0);
     }
 
     /// A nested part serializes its full path as a segment array, so a part

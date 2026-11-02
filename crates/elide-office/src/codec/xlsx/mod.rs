@@ -1,19 +1,19 @@
 //! XLSX codec on the parts model: a workbook is a [`Document`] whose body is a
-//! [`Stream<Tabular>`] of cells, plus a [`Blob`](DocumentPart::Blob) per non-cell
-//! text part (comments, drawings, charts) and per document-property part.
+//! [`Stream<Tabular>`] of cells, plus a text stream over its content outside the
+//! cells (comments, drawings, charts, external hyperlink targets) and a
+//! [`Blob`] per embedding and per document-property part.
 //!
-//! A cell holds text, so a [`TabularReplacement`]'s cell treatment applies
+//! A cell holds text, so a `TabularReplacement`'s cell treatment applies
 //! through the shared text-redaction helper. Only the *location* is tabular: a
 //! `(sheet, row, column)` address with an optional intra-cell byte range. The
 //! [`XlsxRecombine`](recombine::XlsxRecombine) re-packs the workbook
 //! byte-faithfully, de-sharing any shared-string cell that a redaction changed so
-//! other cells keep the pooled value, and folding the redacted text/property
-//! parts in alongside.
+//! other cells keep the pooled value, and splicing the redacted text and folding
+//! the redacted embedding/property parts in alongside.
 //!
 //! [`Document`]: elide_codec::Document
 //! [`Stream<Tabular>`]: elide_codec::Stream
-//! [`Blob`](DocumentPart::Blob): elide_codec::DocumentPart::Blob
-//! [`TabularReplacement`]: elide_core::modality::tabular::TabularReplacement
+//! [`Blob`]: elide_codec::DocumentPart::Blob
 
 mod loader;
 mod recombine;
@@ -27,8 +27,13 @@ use self::loader::XlsxDocumentLoader;
 /// Stable [`FormatId`] for the XLSX codec.
 pub const FORMAT_ID: FormatId = FormatId::new("elide.tabular.xlsx");
 
-/// The body stream's part id; excluded from the re-packed part replacements.
+/// The cell body stream's part id; excluded from the re-packed part
+/// replacements.
 const BODY_PART_ID: &str = "body";
+
+/// The non-cell text stream's part id; excluded from the re-packed part
+/// replacements.
+const TEXT_PART_ID: &str = "text";
 
 /// [`Format`] descriptor registered into `FormatRegistry`.
 pub fn format() -> Format {

@@ -3,15 +3,12 @@
 //! [`PartReplacement`] applied on rewrite, each addressed by a typed
 //! [`PartPath`].
 
-use std::ops::Range;
-use std::path::Path;
-
 use bytes::Bytes;
+use elide_codec::extract::{OffsetMap, Passage};
 use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::opc::offset::OffsetMap;
 use crate::opc::part::PartPath;
 
 /// The result of extracting a package: the redactable text
@@ -24,7 +21,8 @@ pub struct Extraction {
     /// The redactable text blocks, in part-then-document order. Each carries the
     /// part it came from and its byte span within that part.
     pub blocks: Vec<Block>,
-    /// The binary embeddings (images, objects, fonts) surfaced for redaction.
+    /// The binary embeddings (images, audio, video, objects) surfaced for
+    /// redaction.
     pub embeddings: Vec<Embedding>,
     /// The text-bearing parts that could not be extracted. Empty on a clean
     /// extraction; a non-empty list means some part's text is not covered by
@@ -40,8 +38,9 @@ pub struct Block {
     /// The package part this text is in.
     pub part: PartPath,
     /// The block's logical text, with XML entities decoded (e.g. `&amp;` reads
-    /// as `&`), so recognizers match the text a reader sees. The byte
-    /// [`span`](Block::span) still addresses the raw source range.
+    /// as `&`), so recognizers match the text a reader sees. The byte range
+    /// [`start`](Block::start)`..`[`end`](Block::end) still addresses the raw
+    /// source.
     pub text: HipStr<'static>,
     /// Start of the byte range within the part's XML.
     pub start: usize,
@@ -50,15 +49,13 @@ pub struct Block {
     /// The decoded-to-raw byte correspondence: how a byte offset into
     /// [`text`](Block::text) maps back to a part-absolute raw byte range,
     /// accounting for entity substitutions. Its raw offsets are absolute in the
-    /// part, so they line up with [`span`](Block::span).
+    /// part, so they line up with [`start`](Block::start) and
+    /// [`end`](Block::end).
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub offsets: OffsetMap,
-}
-
-impl Block {
-    /// The block's byte range within its part's XML.
-    pub fn span(&self) -> Range<usize> {
-        self.start..self.end
-    }
+    /// How the block joins the passage of the block before it.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub passage: Passage,
 }
 
 /// The kind of binary embedding a part holds.
@@ -78,16 +75,10 @@ pub enum EmbeddingKind {
     Video,
     /// An embedded object / OLE package (e.g. `word/embeddings/*`).
     Object,
-    /// An embedded font (e.g. `word/fonts/*`).
-    Font,
-    /// Embedded media whose type could not be determined from its path, a
-    /// `media/` part with an unrecognized (or absent) extension. It still
-    /// redacts as opaque bytes; the kind just makes no claim it can't back up.
-    Other,
 }
 
-/// One binary embedding surfaced for redaction (an image, embedded object, or
-/// font), addressed by its part.
+/// One binary embedding surfaced for redaction (an image, audio or video clip,
+/// or embedded object), addressed by its part.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Embedding {
@@ -148,18 +139,6 @@ pub struct Replacement {
     pub text: HipStr<'static>,
 }
 
-impl Replacement {
-    /// A replacement overwriting `block`'s span with `text`.
-    pub fn for_block(block: &Block, text: impl Into<HipStr<'static>>) -> Self {
-        Self {
-            part: block.part.clone(),
-            start: block.start,
-            end: block.end,
-            text: text.into(),
-        }
-    }
-}
-
 /// One binary part replacement: overwrite `part`'s bytes with `bytes` (e.g. a
 /// redacted image).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -175,33 +154,5 @@ impl PartReplacement {
     /// A replacement overwriting `part`'s bytes with `bytes`.
     pub fn new(part: PartPath, bytes: Vec<u8>) -> Self {
         Self { part, bytes }
-    }
-}
-
-impl EmbeddingKind {
-    /// The [`EmbeddingKind`] of a `*/media/*` part, chosen by its file extension.
-    ///
-    /// An OOXML `media/` directory mixes images, audio, and video, so the
-    /// directory alone can't say which, a caller redacting embedded media wants
-    /// an mp3 surfaced as [`Audio`](EmbeddingKind::Audio), not misreported as an
-    /// image. An unrecognized or extension-less part is
-    /// [`Other`](EmbeddingKind::Other) rather than a guessed type: it still
-    /// redacts as opaque bytes, but the kind claims nothing it can't back up.
-    #[must_use]
-    pub fn from_path(path: &str) -> Self {
-        let ext = Path::new(path)
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        match ext.as_str() {
-            "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tif" | "tiff" | "svg" | "webp" | "emf"
-            | "wmf" | "ico" => EmbeddingKind::Image,
-            "mp3" | "wav" | "m4a" | "aac" | "wma" | "flac" | "oga" | "ogg" => EmbeddingKind::Audio,
-            "mp4" | "mov" | "avi" | "wmv" | "m4v" | "mkv" | "webm" | "mpg" | "mpeg" => {
-                EmbeddingKind::Video
-            }
-            _ => EmbeddingKind::Other,
-        }
     }
 }

@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use elide_core::backend::Backend;
 use elide_core::entity::audit::ModelEvent;
 use elide_core::entity::{Label, LabelRef};
-use elide_core::{Error, ErrorKind, Result};
+use elide_core::{Error, Result};
 
 use crate::backend::{NerRequest, NerResponse};
 
@@ -140,14 +140,11 @@ where
         let forwarded_len = forwarded.len();
         let inner_responses = self.inner.call_batch(forwarded).await?;
         if inner_responses.len() != forwarded_len {
-            return Err(Error::new(
-                ErrorKind::Provider,
-                format!(
-                    "NER backend returned {} responses for {} requests",
-                    inner_responses.len(),
-                    forwarded_len
-                ),
-            ));
+            return Err(Error::provider(format!(
+                "NER backend returned {} responses for {} requests",
+                inner_responses.len(),
+                forwarded_len
+            )));
         }
         for (position, mut response) in positions.into_iter().zip(inner_responses) {
             self.filter(&mut response);
@@ -161,6 +158,7 @@ where
 mod tests {
     use std::sync::Mutex;
 
+    use elide_core::ErrorKind;
     use elide_core::entity::builtins;
     use elide_core::primitive::{Confidence, LanguageTag};
 

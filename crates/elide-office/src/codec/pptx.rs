@@ -3,9 +3,9 @@
 //!
 //! Everything but the format identity lives in [`super::ooxml`]: the document is
 //! a body [`ExtractStream`](elide_codec::extract::ExtractStream) over the
-//! element-text blocks [`Pptx::extract`](crate::pptx::Pptx::extract) recovers
-//! plus its embedding / document-property blobs, re-packed via the shared
-//! [`OoxmlRecombine`](super::ooxml::OoxmlRecombine).
+//! element-text blocks [`OoxmlPackage::extract`](crate::ooxml::OoxmlPackage::extract)
+//! recovers plus its embedding / document-property blobs, re-packed via the
+//! shared `OoxmlRecombine`.
 
 use elide_codec::{Format, FormatId};
 

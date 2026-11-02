@@ -1,17 +1,19 @@
 //! [`OoxmlRecombine`]: re-pack an OOXML document from its redacted body items and
-//! blob parts.
+//! blob parts, then check the package it produced.
 
 use std::marker::PhantomData;
 
 use bytes::Bytes;
 use elide_codec::content::ContentData;
 use elide_codec::extract::SharedSplice;
-use elide_codec::{EncodedPart, Recombine};
+use elide_codec::{EncodedPart, LocalId, Recombine};
 use elide_core::Result;
+use elide_core::redaction::HiddenContentPolicy;
 
-use super::{BODY_PART_ID, OoxmlAddress, OoxmlCodec};
-use crate::ooxml::OoxmlPackage;
-use crate::opc::{PartPath, PartReplacement, Replacement};
+use super::{BODY_PART_ID, OoxmlAddress, OoxmlCodec, replacements, without_removed};
+use crate::ooxml::{OoxmlFormat, OoxmlPackage};
+use crate::opc::check::check;
+use crate::opc::{PartPath, PartReplacement};
 
 /// Re-packs an OOXML document from its redacted parts. Holds the original
 /// package bytes and the shared body-item state (redacted in place by the body
@@ -26,24 +28,16 @@ pub(crate) struct OoxmlRecombine<C: OoxmlCodec> {
     pub(super) archive: Bytes,
     /// The (redacted-in-place) body text blocks, shared with the body stream.
     pub(super) state: SharedSplice<OoxmlAddress>,
+    /// The policy the decode sanitized under, which the output must pass.
+    pub(super) policy: HiddenContentPolicy,
     pub(super) _codec: PhantomData<C>,
 }
 
 impl<C: OoxmlCodec> Recombine for OoxmlRecombine<C> {
-    fn assemble(&self, parts: &[EncodedPart]) -> Result<ContentData> {
+    fn assemble(&self, parts: &[EncodedPart], removed: &[LocalId]) -> Result<ContentData> {
         // Each body block's (current) value overwrites its source byte span in
         // its part's XML.
-        let text_replacements: Vec<Replacement> = self.state.with_items(|items| {
-            items
-                .iter()
-                .map(|item| Replacement {
-                    part: item.address.part.clone(),
-                    start: item.address.span.start,
-                    end: item.address.span.end,
-                    text: item.value.clone().into(),
-                })
-                .collect()
-        });
+        let text_replacements = self.state.with_items(replacements);
         // Every blob sub-part's id is its zip entry path; its (possibly redacted)
         // bytes travel as a part replacement. An unredacted part's bytes equal
         // the original, so its replacement is a no-op re-pack. The body stream's
@@ -57,6 +51,11 @@ impl<C: OoxmlCodec> Recombine for OoxmlRecombine<C> {
 
         let out = OoxmlPackage::<C::Format>::open(&self.archive)
             .and_then(|pkg| pkg.rewrite_with_parts(&text_replacements, &media))?;
+        let out = without_removed(out, removed)?;
         Ok(ContentData::new(Bytes::from(out)))
+    }
+
+    fn validate(&self, output: &ContentData) -> Result<()> {
+        check(output.as_bytes(), self.policy, &C::Format::classifier())
     }
 }

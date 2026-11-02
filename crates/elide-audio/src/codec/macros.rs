@@ -1,21 +1,17 @@
-//! `impl_audio_handler!`: generate a per-format audio handler + loader +
-//! `format()` constructor.
+//! `impl_audio_handler!`: generate a per-format audio `format()` constructor.
 //!
 //! WAV and MP3 differ only in their [`FormatId`], lookup keys, and content
-//! types; everything else (holding an [`AudioBuffer`], streaming the whole clip
-//! as one chunk, resolving a time range to the full clip, and accumulating a
-//! redaction batch) is identical and delegates to this crate's [`AudioBuffer`]
-//! engine. The macro stamps out that shared body so the per-format files stay
-//! declarative.
+//! types; the decode-redact-encode body is one shared [`AudioDocumentLoader`]
+//! over this crate's [`AudioBuffer`] engine. The macro stamps out the
+//! per-format id and lookup keys so the per-format files stay declarative.
 //!
 //! [`FormatId`]: elide_codec::FormatId
 //! [`AudioBuffer`]: crate::AudioBuffer
+//! [`AudioDocumentLoader`]: super::audio_loader::AudioDocumentLoader
 
-/// Stamp out the handler, loader, and `format()` for one audio format.
+/// Stamp out the `format()` constructor for one audio format.
 macro_rules! impl_audio_handler {
     (
-        handler = $handler:ident,
-        loader = $loader:ident,
         format_id = $format_id:literal,
         audio_format = $audio_format:expr,
         extensions = [$($ext:literal),* $(,)?],
@@ -26,109 +22,18 @@ macro_rules! impl_audio_handler {
         /// [`FormatId`]: elide_codec::FormatId
         pub const FORMAT_ID: ::elide_codec::FormatId = ::elide_codec::FormatId::new($format_id);
 
-        /// [`Format`] descriptor registered into `FormatRegistry`.
+        /// [`Format`] descriptor registered into `FormatRegistry`. Decodes into a
+        /// one-stream [`Document`](elide_codec::Document) of the clip, its tags
+        /// stripped.
         ///
         /// [`Format`]: elide_codec::Format
         pub fn format() -> ::elide_codec::Format {
-            ::elide_codec::Format::new(FORMAT_ID.clone(), $loader)
-                .with_extensions([$($ext),*])
-                .with_content_types([$($mime),*])
-        }
-
-        #[doc = concat!("Stream for a loaded ", $format_id, " clip.")]
-        ///
-        /// Holds the clip as an [`AudioBuffer`]; redaction accumulates on it and
-        /// `encode` applies the batch and re-serializes to the original format.
-        /// All sample work delegates to the [`AudioBuffer`] engine.
-        ///
-        /// [`AudioBuffer`]: crate::AudioBuffer
-        #[derive(Debug)]
-        pub(crate) struct $handler {
-            clip: crate::AudioBuffer,
-        }
-
-        impl $handler {
-            /// Wrap an opened clip.
-            pub(crate) fn new(clip: crate::AudioBuffer) -> Self {
-                Self { clip }
-            }
-        }
-
-        impl ::elide_codec::Stream<crate::modality::Audio> for $handler {
-            fn format(&self) -> ::elide_codec::FormatId {
-                FORMAT_ID.clone()
-            }
-
-            fn encode(&self) -> ::elide_core::Result<::elide_codec::content::ContentData> {
-                Ok(::elide_codec::content::ContentData::new(self.clip.encode()?))
-            }
-
-            fn chunks(
-                &self,
-            ) -> ::elide_core::Result<
-                ::std::vec::Vec<::elide_core::modality::Chunk<crate::modality::Audio>>,
-            > {
-                let total_ms = self.clip.duration_ms()?;
-                Ok(::std::vec![::elide_core::modality::Chunk {
-                    location: crate::modality::AudioLocation::from_millis(0, total_ms),
-                    data: crate::modality::AudioData::new(
-                        self.clip.encode()?,
-                        self.clip.format(),
-                    ),
-                    hints: ::std::vec::Vec::new(),
-                }])
-            }
-        }
-
-        #[::async_trait::async_trait]
-        impl ::elide_core::modality::DataReader<crate::modality::Audio> for $handler {
-            async fn read_at(
-                &self,
-                _location: &crate::modality::AudioLocation,
-            ) -> ::elide_core::Result<
-                ::std::option::Option<crate::modality::AudioData>,
-            > {
-                // The whole clip is the addressable unit; a partial time range
-                // still resolves to the full audio for downstream extraction.
-                Ok(Some(crate::modality::AudioData::new(
-                    self.clip.encode()?,
-                    self.clip.format(),
-                )))
-            }
-        }
-
-        #[::async_trait::async_trait]
-        impl ::elide_core::modality::DataWriter<crate::modality::Audio> for $handler {
-            async fn write_at(
-                &mut self,
-                redactions: ::elide_core::redaction::Redactions<
-                    crate::modality::Audio,
-                >,
-            ) -> ::elide_core::Result<()> {
-                self.clip.redact_batch(redactions);
-                Ok(())
-            }
-        }
-
-        /// Loader that opens raw bytes into a
-        #[doc = concat!("[`", stringify!($handler), "`].")]
-        #[derive(Debug)]
-        pub(crate) struct $loader;
-
-        #[::async_trait::async_trait]
-        impl ::elide_codec::Loader for $loader {
-            type Modality = crate::modality::Audio;
-            type Stream = $handler;
-
-            async fn decode(
-                &self,
-                content: ::elide_codec::content::ContentData,
-            ) -> ::elide_core::Result<$handler> {
-                // The registry routed to this loader for its one format; open the
-                // bytes as exactly that, no re-detection.
-                let clip = crate::AudioBuffer::open(content.as_bytes(), $audio_format)?;
-                Ok($handler::new(clip))
-            }
+            ::elide_codec::Format::with_document_loader(
+                FORMAT_ID.clone(),
+                super::audio_loader::AudioDocumentLoader::new(FORMAT_ID.clone(), $audio_format),
+            )
+            .with_extensions([$($ext),*])
+            .with_content_types([$($mime),*])
         }
     };
 }
