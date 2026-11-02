@@ -7,9 +7,7 @@ mod raster;
 
 use bytes::Bytes;
 #[cfg(feature = "exif")]
-use elide_core::entity::Entity;
-#[cfg(feature = "exif")]
-use elide_core::modality::metadata::{Metadata, MetadataData};
+use elide_core::modality::metadata::MetadataData;
 use elide_core::{Error, Result};
 
 pub use self::raster::RasterImage;
@@ -36,8 +34,9 @@ use crate::primitive::{BoundingBox, Dimensions};
 /// so metadata is available without a second decode. Reuse the buffer to
 /// [`redact`](Self::redact) pixel regions and [`encode`](Self::encode) back
 /// out, all paying the decode cost a single time. With the `exif` feature it
-/// also surfaces the source's privacy-relevant EXIF fields as
-/// `Entity<Metadata>` values and [strips](Self::strip_metadata) them.
+/// also surfaces the source's privacy-relevant EXIF fields as labelled
+/// [`MetadataData`] values, [edits](Self::edit_metadata) them, and
+/// [strips](Self::strip_metadata) them.
 ///
 /// The pixel work is the [`RasterImage`]'s; this type adds the source container
 /// and metadata story on top. Cropping a buffer ([`crop`](Self::crop)) hands
@@ -144,24 +143,8 @@ impl ImageBuffer {
         Source::new(&self.source, self.format().to_exif())
     }
 
-    /// One entity per privacy-relevant EXIF field the source image carries, so a
-    /// metadata field flows through the same detect/select/redact/audit pipeline
-    /// as a text span.
-    ///
-    /// Read from the retained source, so it reflects the original image
-    /// regardless of any redaction applied since.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the metadata is present but unparseable.
-    #[cfg(feature = "exif")]
-    pub fn metadata_entities(&self) -> Result<Vec<Entity<Metadata>>> {
-        self.exif_source().entities()
-    }
-
     /// Each privacy-relevant EXIF field as a [`MetadataData`] labelled with
-    /// what it is, for a caller that streams fields to a recognizer (the codec's
-    /// EXIF handler).
+    /// what it is, for a caller that streams fields (the codec's EXIF stream).
     ///
     /// # Errors
     ///
@@ -171,24 +154,30 @@ impl ImageBuffer {
         self.exif_source().fields()
     }
 
-    /// The original source container bytes, for a caller that needs to decode
-    /// the image's metadata track separately (the codec's `#exif` sub-part).
+    /// The source container bytes: the original, or the container as the
+    /// metadata edits so far left it.
     #[cfg(feature = "exif")]
     #[must_use]
     pub fn source_bytes(&self) -> Bytes {
         self.source.clone()
     }
 
-    /// Remove the EXIF fields named by `keys` from the source container and run
-    /// the format's baseline scrub, returning the metadata-edited bytes. The
-    /// pixels are untouched; this is the source's metadata track only.
+    /// Edit the source's EXIF fields in place: remove those named by `removed`
+    /// and overwrite those named by `replaced` with their new text, each with
+    /// its whole logical group cleared first (the GPS IFD for a coordinate,
+    /// the lens tags for a device). A field that cannot hold text, such as a
+    /// coordinate or a timestamp, is removed instead of overwritten. Every
+    /// metadata block outside EXIF is removed too. The pixels are untouched;
+    /// a later [`encode`](Self::encode) carries the edited metadata.
     ///
     /// # Errors
     ///
     /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a metadata edit fails.
     #[cfg(feature = "exif")]
-    pub fn strip_metadata_keys(&self, keys: &[&str]) -> Result<Bytes> {
-        Ok(self.exif_source().remove_keys(keys)?.bytes.into())
+    pub fn edit_metadata(&mut self, removed: &[&str], replaced: &[(&str, &str)]) -> Result<()> {
+        let edited = self.exif_source().edit(removed, replaced)?;
+        self.source = Bytes::from(edited.bytes);
+        Ok(())
     }
 
     /// Remove the source's metadata in place, keeping only what a viewer needs
@@ -270,46 +259,6 @@ impl ImageBuffer {
             return Ok(self.source.clone());
         }
         self.raster.encode_raw()
-    }
-
-    /// Re-encode the current (possibly redacted) pixels, carrying the EXIF
-    /// metadata from `container` rather than from this image's own source.
-    ///
-    /// The composition step for an image whose metadata was edited separately:
-    /// `container` is the metadata-stripped image the `#exif` sub-part produced,
-    /// and this lays the redacted pixels over it, so the one output has both the
-    /// pixel redactions and exactly the metadata the sub-part kept. When the
-    /// pixels are unchanged, `container` already *is* the answer (its pixels are
-    /// the originals), so it is returned as-is.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) if the encoder rejects the image, or
-    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the metadata transfer fails.
-    #[cfg(feature = "exif")]
-    pub fn encode_over_metadata(&self, container: &[u8]) -> Result<Bytes> {
-        if !self.dirty {
-            // Pixels untouched: the sub-part's container already carries the
-            // original pixels plus its metadata edit.
-            return Ok(Bytes::copy_from_slice(container));
-        }
-        let encoded = self.raster.encode_raw()?;
-        let source = Source::new(container, self.format().to_exif());
-        Ok(source.transfer(encoded.into())?.into())
-    }
-
-    /// Re-encode the current (possibly redacted) pixels with the source's
-    /// metadata removed down to what a viewer needs to render them, without
-    /// changing this buffer's source.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::Processing`](elide_core::ErrorKind::Processing) if the encoder rejects the image, or
-    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the metadata edit fails.
-    #[cfg(feature = "exif")]
-    pub fn encode_without_metadata(&self) -> Result<Bytes> {
-        let stripped = self.exif_source().strip()?;
-        self.encode_over_metadata(&stripped.bytes)
     }
 
     /// Crop the in-bounds intersection of `region` out as a bare

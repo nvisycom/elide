@@ -14,6 +14,7 @@ use std::collections::HashMap;
 
 use elide_codec::TypedStream;
 use elide_core::entity::Entity;
+use elide_core::modality::metadata::Metadata;
 use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::recognition::Scope;
 use elide_core::{Error, Result};
@@ -26,7 +27,7 @@ use self::analysis::{ModalityRegistry, StrippedRecord};
 pub use self::directives::Directives;
 pub use self::document::{AsDocuments, Document, RegistryDocumentExt};
 pub use self::part_id::PartId;
-use self::pipeline::{ErasedPipeline, ModalityPipeline};
+use self::pipeline::{ErasedPipeline, MetadataPipeline, ModalityPipeline};
 use self::traversal::{Analyze, Redact, Walk};
 
 /// Drives analyze + redact across a set of documents.
@@ -44,12 +45,16 @@ use self::traversal::{Analyze, Redact, Walk};
 /// Holds the [`FormatRegistry`] used to decode each container part and an
 /// erased pipeline per modality, keyed by the modality's [`TypeId`].
 ///
+/// Every orchestrator drives [`Metadata`] without being configured: a field's
+/// format labels it, so each surfaced field the scope's catalog declares is
+/// detected, and erased unless [`with_anonymizer`] sets another treatment.
+///
 /// [`with_modality`]: Orchestrator::with_modality
 /// [`with_registry`]: Orchestrator::with_registry
 /// [`analyze`]: Orchestrator::analyze
 /// [`anonymize_with`]: Orchestrator::anonymize_with
 /// [`anonymize`]: Orchestrator::anonymize
-#[derive(Default)]
+/// [`with_anonymizer`]: Orchestrator::with_anonymizer
 pub struct Orchestrator {
     registry: FormatRegistry,
     pipelines: HashMap<TypeId, Box<dyn ErasedPipeline>>,
@@ -62,10 +67,28 @@ pub struct Orchestrator {
     scope: Scope,
 }
 
+impl Default for Orchestrator {
+    fn default() -> Self {
+        let mut pipelines: HashMap<TypeId, Box<dyn ErasedPipeline>> = HashMap::new();
+        pipelines.insert(
+            TypeId::of::<Metadata>(),
+            Box::new(MetadataPipeline::default()),
+        );
+        let mut groups = ModalityRegistry::default();
+        groups.register::<Metadata>();
+        Self {
+            registry: FormatRegistry::default(),
+            pipelines,
+            groups,
+            scope: Scope::default(),
+        }
+    }
+}
+
 impl Orchestrator {
-    /// A new orchestrator: no modality pipelines, an empty [`Scope`], and an
-    /// empty [`FormatRegistry`] (so container parts do not decode until one is
-    /// supplied via [`with_registry`]).
+    /// A new orchestrator: only the built-in [`Metadata`] pipeline, an empty
+    /// [`Scope`], and an empty [`FormatRegistry`] (so container parts do not
+    /// decode until one is supplied via [`with_registry`]).
     ///
     /// [`with_registry`]: Self::with_registry
     pub fn new() -> Self {
@@ -105,7 +128,8 @@ impl Orchestrator {
     /// Register the analyze + redact pipeline for modality `M`. A part
     /// that decodes to `M` is driven by this pipeline; parts of a modality
     /// with no registered pipeline pass through untouched. Re-registering
-    /// a modality replaces both halves.
+    /// a modality replaces both halves. For [`Metadata`] the halves add to the
+    /// built-in schema detection rather than replace it.
     ///
     /// When a modality only ever detects *or* only ever redacts, register just
     /// the half it needs with [`with_analyzer`] / [`with_anonymizer`] instead,
@@ -121,13 +145,13 @@ impl Orchestrator {
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
         TypedStream<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
     {
-        self.pipelines.insert(
-            TypeId::of::<M>(),
-            Box::new(ModalityPipeline::new(analyzer, anonymizer)),
-        );
-        // Register the parser that reconstructs this modality's group from the
-        // wire, so `deserialize_report` can route it back by name.
-        self.groups.register::<M>();
+        match self.modality_pipeline_mut::<M>() {
+            Some(pipeline) => {
+                pipeline.analyzer = analyzer;
+                pipeline.anonymizer = anonymizer;
+            }
+            None => self.insert_pipeline::<M>(analyzer, anonymizer),
+        }
         self
     }
 

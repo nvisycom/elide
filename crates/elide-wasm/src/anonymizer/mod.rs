@@ -162,6 +162,6 @@ fn split(kind: RuleKind) -> (Option<LabelRef>, crate::operator::OperatorKind) {
 }
 
 pub(crate) use default::{
-    audio as default_audio, image_metadata as default_image_metadata,
-    image_pixels as default_image_pixels, tabular as default_text_tabular, text as default_text,
+    audio as default_audio, image_pixels as default_image_pixels, tabular as default_text_tabular,
+    text as default_text,
 };

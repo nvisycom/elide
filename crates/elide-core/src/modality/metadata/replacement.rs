@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::modality::ModalityReplacement;
+use crate::modality::text::TextReplacement;
 
 /// What a metadata operator produces for a field.
 ///
@@ -25,6 +26,15 @@ pub enum MetadataReplacement {
     Removed,
     /// Overwrite the field's value with the given text.
     Replace(String),
+}
+
+impl From<TextReplacement> for MetadataReplacement {
+    fn from(replacement: TextReplacement) -> Self {
+        match replacement {
+            TextReplacement::Substituted(value) => Self::Replace(value),
+            TextReplacement::Removed => Self::Removed,
+        }
+    }
 }
 
 impl ModalityReplacement for MetadataReplacement {}

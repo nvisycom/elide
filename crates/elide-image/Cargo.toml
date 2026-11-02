@@ -41,11 +41,12 @@ tiff = ["image/tiff"]
 ## needn't enable it.
 exif = ["dep:little_exif", "elide-core/metadata"]
 
-## Adapt the image formats to the `elide-codec` `Handler`/`Loader` contracts:
-## the per-format pixel handlers (PNG, JPEG, TIFF), the `#exif` metadata
-## sub-part handler, and their `*_format()` descriptors the format registry
-## assembles. Pulls `exif` (the sub-part reads and strips EXIF fields); needs at
-## least one format feature (`png`/`jpeg`/`tiff`) to register a pixel format.
+## Adapt the image formats to the `elide-codec` `Stream`/`Loader` contracts:
+## the per-format loaders (PNG, JPEG, TIFF), each decoding into a pixel stream
+## and an EXIF metadata stream, and their `*_format()` descriptors the format
+## registry assembles. Pulls `exif` (the metadata stream reads and edits EXIF
+## fields); needs at least one format feature (`png`/`jpeg`/`tiff`) to register
+## a pixel format.
 codec = ["dep:elide-codec", "dep:async-trait", "exif"]
 
 ## Expose `fixtures`: build small in-memory image fixtures (a JPEG carrying a

@@ -30,15 +30,20 @@ use serde::{Deserialize, Serialize};
 pub struct HiddenContentPolicy {
     /// What to do with document metadata.
     ///
-    /// [`Strip`](Disposition::Strip) keeps only the fields the format needs to
-    /// render correctly (an image's orientation and colour profile, an HTML
-    /// page's character set).
+    /// [`StripNonEssential`](Disposition::StripNonEssential) keeps only the
+    /// fields the format needs to render correctly (an image's orientation and
+    /// colour profile, an HTML page's character set).
+    /// [`TreatAsContent`](Disposition::TreatAsContent) keeps the fields the
+    /// format's schema labels (a location, an author, a device) and strips the
+    /// rest; each labelled field is an entity whose label the request's
+    /// catalog selects or leaves.
     pub metadata: Disposition,
     /// What to do with collaboration content.
     ///
-    /// [`Strip`](Disposition::Strip) produces the final visible document:
-    /// tracked insertions are accepted (their text kept), tracked deletions
-    /// applied, and comments and annotations dropped with their authors.
+    /// [`StripNonEssential`](Disposition::StripNonEssential) produces the final
+    /// visible document: tracked insertions are accepted (their text kept),
+    /// tracked deletions applied, and comments and annotations dropped with
+    /// their authors.
     pub collaboration: Disposition,
 }
 
@@ -64,13 +69,14 @@ impl HiddenContentPolicy {
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum Disposition {
-    /// Strip the content down to what a reader of the document sees.
+    /// Remove the content without inspecting it, keeping only what the format
+    /// needs to render the visible document.
     #[default]
-    Strip,
-    /// Keep the content and redact it through detection like any other
-    /// content, its author and date fields included. A format that cannot
-    /// surface the content to detection strips it instead.
-    Redact,
+    StripNonEssential,
+    /// Keep the content and handle it like visible content: what the request's
+    /// label catalog covers is redacted, the rest is kept. Content the format
+    /// cannot surface to detection is stripped.
+    TreatAsContent,
 }
 
 /// One item of hidden content a codec strips.
@@ -152,10 +158,6 @@ pub enum HiddenContent {
     Layer,
     /// An embedded file no codec can read, so it cannot be redacted.
     Unreadable,
-    /// Embedded content surfaced for detection that no pipeline is configured
-    /// to scan, such as a document's metadata redacted with no metadata
-    /// pipeline, so it cannot be redacted.
-    Unscanned,
 }
 
 impl HiddenContent {
@@ -182,7 +184,7 @@ impl HiddenContent {
             Self::FormField | Self::Outline | Self::AlternativeText | Self::Layer => {
                 HiddenContentKind::Unextracted
             }
-            Self::Unreadable | Self::Unscanned => HiddenContentKind::EmbeddedObject,
+            Self::Unreadable => HiddenContentKind::EmbeddedObject,
         }
     }
 }
@@ -215,8 +217,7 @@ pub enum HiddenContentKind {
     /// Content a reader can reach that no extraction reads, so detection
     /// cannot redact it.
     Unextracted,
-    /// Embedded content that cannot be redacted: no codec reads it, or no
-    /// pipeline scans it.
+    /// Embedded content that cannot be redacted because no codec reads it.
     EmbeddedObject,
 }
 
@@ -227,8 +228,8 @@ mod tests {
     #[test]
     fn the_default_strips_all_hidden_content() {
         let policy = HiddenContentPolicy::default();
-        assert_eq!(policy.metadata, Disposition::Strip);
-        assert_eq!(policy.collaboration, Disposition::Strip);
+        assert_eq!(policy.metadata, Disposition::StripNonEssential);
+        assert_eq!(policy.collaboration, Disposition::StripNonEssential);
     }
 
     #[test]
@@ -249,8 +250,8 @@ mod tests {
 
     #[test]
     fn builders_set_one_disposition_each() {
-        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::Redact);
-        assert_eq!(policy.metadata, Disposition::Strip);
-        assert_eq!(policy.collaboration, Disposition::Redact);
+        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent);
+        assert_eq!(policy.metadata, Disposition::StripNonEssential);
+        assert_eq!(policy.collaboration, Disposition::TreatAsContent);
     }
 }

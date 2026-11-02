@@ -46,7 +46,7 @@ async fn comments_are_removed_and_cdata_pii_is_redacted() -> Result<()> {
 
 #[tokio::test]
 async fn redacted_comments_keep_their_delimiters() -> Result<()> {
-    let policy = HiddenContentPolicy::default().with_collaboration(Disposition::Redact);
+    let policy = HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent);
     let outcome = FIXTURE.run_with_policy(policy).await?;
 
     assert_label_present!(outcome.entities, builtins::PHONE_NUMBER.to_ref());

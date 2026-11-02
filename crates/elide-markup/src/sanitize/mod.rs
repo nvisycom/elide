@@ -19,9 +19,9 @@
 //!   XInclude.
 //! - **Content never displayed**, always (HTML): a `<template>`, and an element
 //!   marked `hidden` (one only hidden until found stays).
-//! - **Collaboration**, under [`Disposition::Strip`]: comments, the
+//! - **Collaboration**, under [`Disposition::StripNonEssential`]: comments, the
 //!   author's notes a reader never sees.
-//! - **Metadata**, under [`Disposition::Strip`] (HTML): `<meta>` fields,
+//! - **Metadata**, under [`Disposition::StripNonEssential`] (HTML): `<meta>` fields,
 //!   except the ones that render the page (its character set, a rendering
 //!   `http-equiv` directive, the viewport).
 //!
@@ -219,7 +219,9 @@ impl MarkupSanitizer {
                         content: HiddenContent::Script,
                     });
                 }
-                Event::Comment(_) if self.policy.collaboration == Disposition::Strip => {
+                Event::Comment(_)
+                    if self.policy.collaboration == Disposition::StripNonEssential =>
+                {
                     removals.push(Removal {
                         range: span,
                         content: HiddenContent::Comment,
@@ -408,15 +410,16 @@ mod tests {
             "<p><![CDATA[><img src=x onerror=steal()>]]></p>",
             "<!DOCTYPE html [<!-- x -->]><p>t</p>",
         ] {
-            let sanitizer =
-                html(HiddenContentPolicy::default().with_collaboration(Disposition::Redact));
+            let sanitizer = html(
+                HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent),
+            );
             let error = sanitizer.sanitize(raw.to_owned()).expect_err(raw);
             assert!(error.to_string().contains("earlier `>`"), "{raw}: {error}");
         }
         // An ordinary comment, processing instruction, and document type stay.
         let raw = "<!DOCTYPE html><?xml version=\"1.0\"?><p><!-- note --></p>";
         let sanitizer =
-            html(HiddenContentPolicy::default().with_collaboration(Disposition::Redact));
+            html(HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent));
         assert!(sanitizer.sanitize(raw.to_owned()).is_ok());
     }
 
@@ -436,7 +439,7 @@ mod tests {
             sanitize(html(HiddenContentPolicy::default()), raw),
             "<p>a</p>"
         );
-        let redact = HiddenContentPolicy::default().with_collaboration(Disposition::Redact);
+        let redact = HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent);
         assert_eq!(sanitize(html(redact), raw), raw);
     }
 
@@ -448,7 +451,7 @@ mod tests {
             out,
             r#"<head><meta charset="utf-8"><meta name="viewport" content="w"><meta http-equiv="content-type" content="text/html"></head>"#
         );
-        let redact = HiddenContentPolicy::default().with_metadata(Disposition::Redact);
+        let redact = HiddenContentPolicy::default().with_metadata(Disposition::TreatAsContent);
         assert_eq!(sanitize(html(redact), raw), raw);
     }
 
@@ -457,7 +460,7 @@ mod tests {
     #[test]
     fn acting_meta_directives_go_under_every_policy() {
         let raw = r#"<head><meta http-equiv="refresh" content="0;url=javascript:steal()"><meta http-equiv="Set-Cookie" content="id=1"></head>"#;
-        let redact = HiddenContentPolicy::default().with_metadata(Disposition::Redact);
+        let redact = HiddenContentPolicy::default().with_metadata(Disposition::TreatAsContent);
         assert_eq!(sanitize(html(redact), raw), "<head></head>");
     }
 
@@ -514,7 +517,7 @@ mod tests {
     #[test]
     fn a_conditional_comment_goes_under_every_policy() {
         let raw = "<!--[if IE]><script>s()</script><![endif]--><!-- kept note -->";
-        let redact = HiddenContentPolicy::default().with_collaboration(Disposition::Redact);
+        let redact = HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent);
         assert_eq!(sanitize(html(redact), raw), "<!-- kept note -->");
     }
 

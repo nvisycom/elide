@@ -7,12 +7,12 @@
 //!
 //! - **Metadata**: the document properties are stripped unless the policy
 //!   redacts them; custom XML is not surfaced for detection, so it is stripped
-//!   under [`Redact`](Disposition::Redact) too.
+//!   under [`TreatAsContent`](Disposition::TreatAsContent) too.
 //! - **Collaboration** (comments and their authors) is stripped unless the
 //!   policy redacts it, and a format's tracked revisions and comment anchors
 //!   are resolved in its stories by the format's element edits. A workbook's
 //!   revision log is never extracted, so it is stripped under
-//!   [`Redact`](Disposition::Redact) too.
+//!   [`TreatAsContent`](Disposition::TreatAsContent) too.
 //! - **Always removed**: the thumbnail, active content (macros, ActiveX, web
 //!   extensions), links to external data, printer settings, signatures, and
 //!   application-private data; every external relationship but a hyperlink;
@@ -95,7 +95,7 @@ pub(crate) fn sanitize(
         edits.push(&ALTERNATIVE_TEXT);
         edits.push(&TOOLTIPS);
         // A redacted property part keeps only the fields detection sees.
-        if kind == PartKind::Properties && policy.metadata == Disposition::Redact {
+        if kind == PartKind::Properties && policy.metadata == Disposition::TreatAsContent {
             edits.push(&UnsurfacedProperties);
         }
         edits
@@ -222,9 +222,9 @@ fn removal(
     policy: HiddenContentPolicy,
     path: &PartPath,
 ) -> Result<Option<HiddenContent>> {
-    let strips_collaboration = policy.collaboration == Disposition::Strip;
+    let strips_collaboration = policy.collaboration == Disposition::StripNonEssential;
     Ok(match kind {
-        PartKind::Properties if policy.metadata == Disposition::Strip => {
+        PartKind::Properties if policy.metadata == Disposition::StripNonEssential => {
             Some(HiddenContent::Properties)
         }
         PartKind::CustomXml => Some(HiddenContent::CustomData),

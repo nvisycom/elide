@@ -15,17 +15,16 @@ use super::recombine::XlsxRecombine;
 use super::state::XlsxState;
 use super::stream::XlsxStream;
 use super::{BODY_PART_ID, FORMAT_ID, TEXT_PART_ID, XlsxCell};
-use crate::codec::docprops_hint;
 use crate::codec::ooxml::{OoxmlAddress, OoxmlAddresser, items};
-use crate::codec::props::read_doc_props;
+use crate::codec::props::doc_props_parts;
 use crate::opc::sanitize::sanitize;
 use crate::xlsx::{SheetClassifier, Xlsx};
 
 /// A [`DocumentLoader`] that decodes an XLSX workbook into a [`Document`]: the
 /// cell body [`Stream`], a text [`Stream`] over the workbook's content outside
-/// its cells (comments, drawings, charts, external hyperlink targets), and a
-/// [`Blob`](DocumentPart::Blob) per embedding and (when metadata is redacted)
-/// per document-property part. The workbook is sanitized under the policy
+/// its cells (comments, drawings, charts, external hyperlink targets), a
+/// [`Blob`](DocumentPart::Blob) per embedding, and (when metadata is treated as
+/// content) a metadata stream per document-property part. The workbook is sanitized under the policy
 /// first, so every part is read from what will ship.
 ///
 /// **Fail-closed:** a non-cell text part that cannot be read refuses the
@@ -62,8 +61,7 @@ impl DocumentLoader for XlsxDocumentLoader {
         let text: SharedSplice<OoxmlAddress> = SharedSplice::new(items(markup.blocks));
 
         // The cell body, the non-cell text, then one blob per embedding (its own
-        // format's pipeline) and per document-property part (metadata
-        // pipeline).
+        // format's pipeline) and a metadata stream per document-property part.
         let cells_stream: Box<dyn Stream<Tabular>> = Box::new(XlsxStream {
             state: state.clone(),
         });
@@ -91,17 +89,10 @@ impl DocumentLoader for XlsxDocumentLoader {
                 hint,
             }
         });
-        let doc_props = match policy.metadata {
-            Disposition::Redact => read_doc_props(|path| workbook.part_bytes(path)),
-            Disposition::Strip => Vec::new(),
+        let properties = match policy.metadata {
+            Disposition::TreatAsContent => doc_props_parts(|path| workbook.part_bytes(path)),
+            Disposition::StripNonEssential => Vec::new(),
         };
-        let properties = doc_props
-            .into_iter()
-            .map(|(path, bytes)| DocumentPart::Blob {
-                id: LocalId::new(path),
-                bytes,
-                hint: docprops_hint().to_owned(),
-            });
         let parts = streams
             .into_iter()
             .chain(embeddings)

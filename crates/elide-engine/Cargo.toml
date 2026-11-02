@@ -42,18 +42,18 @@ schema = [
 
 ## The non-text modalities, forwarded to `elide-core`. A report can carry a
 ## group of any compiled-in modality, so these gate the matching arm of the
-## `Report` JSON schema; `text` is always available.
+## `Report` JSON schema; `text` and `metadata` are always available.
 image = ["dep:elide-image"]
 audio = ["dep:elide-audio"]
 tabular = ["elide-core/tabular"]
-metadata = ["elide-core/metadata", "elide-detection/metadata"]
 
 
 [dependencies]
 # Internal crates
-elide-core = { workspace = true, features = ["serde"] }
+elide-core = { workspace = true, features = ["serde", "metadata"] }
 elide-detection = { workspace = true, features = ["serde"] }
 elide-redaction = { workspace = true, features = ["serde"] }
+elide-operator = { workspace = true, features = ["metadata"] }
 elide-codec = { workspace = true, features = ["serde"] }
 elide-format = { workspace = true, features = ["serde"] }
 elide-image = { workspace = true, features = ["serde"], optional = true }
@@ -79,7 +79,7 @@ elide-core = { workspace = true, features = ["mocks"] }
 elide-codec = { workspace = true, features = ["serde", "mocks"] }
 elide-format = { workspace = true, features = ["serde", "png", "jpeg"] }
 elide-image = { workspace = true, features = ["exif", "jpeg", "png"] }
-elide-operator = { workspace = true, features = ["image", "metadata"] }
+elide-operator = { workspace = true, features = ["image"] }
 
 # (De)serialization
 serde_json = { workspace = true, features = [] }

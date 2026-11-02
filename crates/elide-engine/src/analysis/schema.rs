@@ -7,7 +7,8 @@
 //! `entities`, whose element type depends on the sibling `modality` string, a
 //! discriminated union, expressed as `oneOf` over per-modality group arms with a
 //! `discriminator` on `modality`. Each arm is gated on its modality feature, so
-//! the schema enumerates exactly the modalities compiled in (`text` always).
+//! the schema enumerates exactly the modalities compiled in (`text` and
+//! `metadata` always).
 //!
 //! A round-trip test (in [`serde`](super::serde)'s test module)
 //! validates a serialized report against this schema, turning any drift into a
@@ -27,6 +28,7 @@ use std::borrow::Cow;
 
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
+use elide_core::modality::metadata::Metadata;
 use elide_core::modality::text::Text;
 use elide_core::redaction::{HiddenContent, HiddenContentKind};
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
@@ -68,6 +70,7 @@ impl JsonSchema for Report {
         // Only the compiled-in modalities appear.
         let arms = vec![
             group_arm::<Text>(generator),
+            group_arm::<Metadata>(generator),
             #[cfg(feature = "image")]
             group_arm::<elide_image::modality::Image>(generator),
             #[cfg(feature = "audio")]
@@ -143,6 +146,7 @@ impl JsonSchema for ArtifactSet {
         // mirroring `Report`, so a client reads both halves the same way.
         let arms = vec![
             artifact_arm::<Text>(generator),
+            artifact_arm::<Metadata>(generator),
             #[cfg(feature = "image")]
             artifact_arm::<elide_image::modality::Image>(generator),
             #[cfg(feature = "audio")]

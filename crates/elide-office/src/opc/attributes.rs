@@ -3,7 +3,7 @@
 //!
 //! A format names its text attributes in two closed lists. A visible one (a
 //! sheet name, a dropdown entry) or one the policy keeps (a comment's author
-//! under [`Redact`](elide_core::redaction::Disposition::Redact)) is surfaced
+//! under [`TreatAsContent`](elide_core::redaction::Disposition::TreatAsContent)) is surfaced
 //! for detection like element text, through the format's
 //! [`PartClassifier::text_attributes`](crate::opc::PartClassifier::text_attributes).
 //! A hidden one (alternative text, a tooltip) is stripped by

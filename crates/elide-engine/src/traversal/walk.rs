@@ -1,12 +1,7 @@
 //! [`Walk`]: the one recursive part-tree walk both phases drive.
 
-#[cfg(feature = "metadata")]
-use std::any::TypeId;
-
 use bytes::Bytes;
 use elide_codec::{Document as CodecDocument, DocumentPart, ErasedStream, LocalId};
-#[cfg(feature = "metadata")]
-use elide_core::modality::metadata::Metadata;
 use elide_core::redaction::HiddenContent;
 use elide_core::{Error, ErrorKind, Result};
 
@@ -48,8 +43,7 @@ impl<'a, V: PartVisitor> Walk<'a, V> {
     /// only when its recursion changed it.
     ///
     /// A blob deeper than [`MAX_CONTAINER_DEPTH`] is a hard error. A blob no codec
-    /// can read, or that carries metadata no pipeline scans, is offered to the
-    /// visitor as [`Child::Unredactable`]; any other
+    /// can read is offered to the visitor as [`Child::Unredactable`]; any other
     /// decode failure is a hard error.
     pub(crate) fn parts<'s>(
         &'s mut self,
@@ -115,12 +109,6 @@ impl<'a, V: PartVisitor> Walk<'a, V> {
                     .decode(bytes, &hint, policy)
                     .await
                 {
-                    Ok(child) if self.has_unscanned_metadata(&child) => {
-                        self.visitor
-                            .stripped()
-                            .record(part_id, HiddenContent::Unscanned, 1);
-                        self.visitor.fold_child(Child::Unredactable)?
-                    }
                     Ok(mut child) => {
                         let subtree_changed = self.parts(&mut child, &part_id, depth + 1).await?;
                         self.visitor.fold_child(Child::Decoded {
@@ -153,31 +141,6 @@ impl<'a, V: PartVisitor> Walk<'a, V> {
             }
             Ok(changed)
         })
-    }
-}
-
-impl<V: PartVisitor> Walk<'_, V> {
-    /// Whether `document` surfaces metadata for detection that no pipeline
-    /// scans: a metadata stream, with no metadata pipeline registered. Under a
-    /// redacted metadata disposition such fields would otherwise ship
-    /// unexamined, so the blob is removed instead.
-    fn has_unscanned_metadata(&self, document: &CodecDocument) -> bool {
-        #[cfg(feature = "metadata")]
-        {
-            let scanned = self
-                .orchestrator
-                .pipeline_for(TypeId::of::<Metadata>())
-                .is_some();
-            !scanned
-                && document.parts().iter().any(|part| {
-                    matches!(part, DocumentPart::Stream { handle, .. } if handle.is::<Metadata>())
-                })
-        }
-        #[cfg(not(feature = "metadata"))]
-        {
-            let _ = document;
-            false
-        }
     }
 }
 

@@ -12,8 +12,8 @@ use crate::modality::{Image, ImageData, ImageLocation};
 use crate::primitive::{BoundingBox, Dimensions, Point};
 
 /// The pixel stream part: yields the whole frame as one chunk, redacts regions in
-/// place on the shared [`ImageState`], and re-encodes just the pixels (its
-/// metadata is handled by the `#exif` blob and the recombiner).
+/// place on the shared [`ImageState`], and encodes the image (its metadata
+/// edited by the `#exif` stream on the same buffer).
 pub(super) struct PixelStream {
     pub(super) state: ImageState,
     pub(super) format_id: FormatId,

@@ -1,18 +1,20 @@
-//! [`ImageState`]: the decoded image shared between the pixel stream and the
-//! recombiner.
+//! [`ImageState`]: the decoded image shared between the pixel stream, the EXIF
+//! stream, and the recombiner.
 
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use elide_core::Result;
+use elide_core::modality::metadata::MetadataData;
 use elide_core::redaction::Redactions;
 
 use crate::ImageBuffer;
 use crate::modality::{Image, ImageData, ImageLocation};
 use crate::primitive::Dimensions;
 
-/// The decoded image, shared between the pixel stream and the recombiner so a
-/// redaction on the stream is visible when the recombiner re-encodes. `Clone`
+/// The decoded image, shared between the pixel stream, the EXIF stream, and the
+/// recombiner so a redaction on either stream is visible when the recombiner
+/// re-encodes. `Clone`
 /// shares the one buffer (an `Arc` bump); the lock is held only inside these
 /// methods.
 #[derive(Clone)]
@@ -34,14 +36,20 @@ impl ImageState {
         self.0.lock().unwrap().encode()
     }
 
-    /// Encode the current pixels laid over the metadata-stripped `container`.
-    pub(super) fn encode_over_metadata(&self, container: &[u8]) -> Result<Bytes> {
-        self.0.lock().unwrap().encode_over_metadata(container)
+    /// The source container as the metadata edits so far left it.
+    pub(super) fn source_bytes(&self) -> Bytes {
+        self.0.lock().unwrap().source_bytes()
     }
 
-    /// Encode the current pixels with the source's metadata removed.
-    pub(super) fn encode_without_metadata(&self) -> Result<Bytes> {
-        self.0.lock().unwrap().encode_without_metadata()
+    /// Each surfaced EXIF field the image carries.
+    pub(super) fn metadata_fields(&self) -> Result<Vec<MetadataData>> {
+        self.0.lock().unwrap().metadata_fields()
+    }
+
+    /// Remove the EXIF fields named by `removed` and overwrite those named by
+    /// `replaced`, in place.
+    pub(super) fn edit_metadata(&self, removed: &[&str], replaced: &[(&str, &str)]) -> Result<()> {
+        self.0.lock().unwrap().edit_metadata(removed, replaced)
     }
 
     /// The whole decoded frame as an [`ImageData`]: the decoded pixels plus the

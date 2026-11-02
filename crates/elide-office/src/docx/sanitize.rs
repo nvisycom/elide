@@ -4,7 +4,7 @@
 //! - **Editor fingerprints**, always: the `rsid` editing-session ids, paragraph
 //!   and text ids, document ids, the session table, range permissions (which
 //!   name their editors), and document protection (a password hash).
-//! - **Tracked revisions**, under [`Disposition::Strip`]: insertions
+//! - **Tracked revisions**, under [`Disposition::StripNonEssential`]: insertions
 //!   are accepted (their marks unwrapped, their content kept), deletions applied
 //!   (removed with their content), moves resolved the same way, and every
 //!   property-change record dropped, so the document is its final visible text.
@@ -21,7 +21,7 @@
 //! - **Table alternative text**, always: a table's caption and description.
 //! - **Collaboration dates**, always: when a comment was written or a change
 //!   made. A date cannot be redacted without breaking the document, so it goes
-//!   under [`Disposition::Redact`] too; the authors are surfaced instead (see
+//!   under [`Disposition::TreatAsContent`] too; the authors are surfaced instead (see
 //!   [`TEXT_ATTRIBUTES`]).
 
 use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
@@ -285,7 +285,7 @@ impl Sanitizer for WordFormat {
             &COMMENT_DATES,
             &CHANGE_DATES,
         ];
-        if policy.collaboration == Disposition::Strip {
+        if policy.collaboration == Disposition::StripNonEssential {
             edits.push(&REVISIONS);
             edits.push(&COMMENT_ANCHORS);
         }
@@ -391,7 +391,7 @@ mod tests {
 
     #[test]
     fn redacted_collaboration_surfaces_its_authors_and_drops_its_dates() {
-        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::Redact);
+        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent);
         let (out, _) = sanitize(&document(), policy, &WordFormat).unwrap();
         let out = out.unwrap();
         for name in ["word/document.xml", "word/comments.xml"] {

@@ -100,18 +100,13 @@ ocr = ["dep:elide-image", "elide-image/ocr", "image"]
 ## The `audio` modality. Implied by the audio codec formats.
 audio = ["dep:elide-audio", "elide-operator/audio", "elide-engine?/audio"]
 ## The `image` modality. Implied by the image codec formats. Enables the light
-## `exif` path (little_exif, no pixel codec) so the EXIF recognizer is available
+## `exif` path (little_exif, no pixel codec) so EXIF fields are readable
 ## without a decoder, and pulls in the `metadata` modality: a raster image
-## carries EXIF metadata as a redactable sub-part.
+## carries EXIF metadata as a redactable part.
 image = ["dep:elide-image", "elide-image/exif", "elide-operator/image", "elide-engine?/image", "metadata"]
 ## The `metadata` modality: a document's out-of-band fields (EXIF, document
 ## properties) as redaction subjects.
-metadata = [
-    "elide-core/metadata",
-    "elide-detection/metadata",
-    "elide-operator/metadata",
-    "elide-engine?/metadata",
-]
+metadata = ["elide-core/metadata", "elide-operator/metadata"]
 ## The `tabular` modality. Implied by the tabular codec formats.
 tabular = ["elide-core/tabular", "elide-operator/tabular", "elide-redaction/tabular", "elide-engine?/tabular"]
 
@@ -124,9 +119,10 @@ codec = ["dep:elide-codec", "dep:elide-format"]
 
 ## Re-export the orchestration engine: the `engine` module (`Orchestrator`,
 ## `Report`, `Directives`). Implies `codec` (the orchestrator decodes documents
-## through it) and `serde` (`elide-engine` requires it — a `Report` exists to be
-## serialized for review and reconstructed with `deserialize_report`).
-engine = ["dep:elide-engine", "codec", "serde"]
+## through it), `serde` (`elide-engine` requires it — a `Report` exists to be
+## serialized for review and reconstructed with `deserialize_report`), and
+## `metadata` (every orchestrator redacts a document's metadata).
+engine = ["dep:elide-engine", "codec", "serde", "metadata"]
 
 ## Magic-byte sniffing: infer a binary format from the leading bytes when a
 ## document carries no filename extension or content type (see

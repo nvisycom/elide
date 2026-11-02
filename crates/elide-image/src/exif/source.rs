@@ -12,8 +12,8 @@ use little_exif::metadata::Metadata as ExifMetadata;
 use super::container::{Scrubbed, scrub_jpeg, scrub_png};
 use super::guard;
 use super::tags::{
-    FIELD_KEYS, THUMBNAIL_TAGS, is_transferable_ifd0_tag, kept_under_redact, render_tags,
-    tags_for_key,
+    FIELD_KEYS, THUMBNAIL_TAGS, is_transferable_ifd0_tag, kept_as_content, render_tags,
+    tags_for_key, written_tag,
 };
 use super::value::render;
 
@@ -135,7 +135,7 @@ impl<'a> Source<'a> {
         })
     }
 
-    /// Reduce the metadata to what [`Redact`] can stand behind: every EXIF tag
+    /// Reduce the metadata to what [`TreatAsContent`] can stand behind: every EXIF tag
     /// a surfaced field reads or clears, the render tag, the structure, and a
     /// TIFF's pixel layout. Every other EXIF tag (one no field surfaces, an
     /// embedded thumbnail, a maker note, a vendor tag) and every block outside
@@ -143,7 +143,7 @@ impl<'a> Source<'a> {
     /// resulting container, how many tags and blocks went, and how many
     /// thumbnails.
     ///
-    /// [`Redact`]: elide_core::redaction::Disposition::Redact
+    /// [`TreatAsContent`]: elide_core::redaction::Disposition::TreatAsContent
     pub(crate) fn reduce_to_surfaced(&self) -> Result<Scrubbed> {
         let tiff = matches!(self.format, FileExtension::TIFF);
         let (edited, tags, thumbnails) = match self.parse()? {
@@ -196,34 +196,49 @@ impl<'a> Source<'a> {
                 let group = ifd.get_ifd_type();
                 ifd.get_tags().iter().map(move |tag| (tag.as_u16(), group))
             })
-            .filter(|&(hex, group)| !kept_under_redact(hex, group, tiff))
+            .filter(|&(hex, group)| !kept_as_content(hex, group, tiff))
             .collect();
         out.sort_unstable_by_key(|&(hex, group)| (hex, group as u8));
         out.dedup();
         out
     }
 
-    /// Remove exactly the fields named by `keys` (each an EXIF tag key such as
-    /// `"GPSLatitude"`), leaving all other EXIF fields intact, then scrub every
-    /// metadata block outside EXIF, returning the resulting container and how
-    /// many blocks outside EXIF were removed.
+    /// Remove the fields named by `removed` (each an EXIF tag key such as
+    /// `"GPSLatitude"`) and overwrite those named by `replaced` with their new
+    /// text, leaving all other EXIF fields intact, then scrub every metadata
+    /// block outside EXIF, returning the resulting container and how many
+    /// blocks outside EXIF were removed.
     ///
     /// Unlike [`strip`](Self::strip), which drops everything but the render
-    /// tags, this removes only the caller's chosen keys, so a per-field
+    /// tags, this edits only the caller's chosen keys, so a per-field
     /// redaction decision (from picked entities) maps straight to the byte edit.
+    /// A field is cleared with its whole logical group (the GPS IFD for a
+    /// coordinate, the lens tags for a device), and an overwritten field is
+    /// then written back alone; a field that cannot hold text is only cleared.
     /// A key not present, or not one this crate maps to a tag, is skipped. The
     /// blocks outside EXIF (XMP, IPTC, comments, text chunks) cannot be
-    /// addressed as fields, so they are always removed, even when `keys` is
-    /// empty.
-    pub(crate) fn remove_keys(&self, keys: &[&str]) -> Result<Scrubbed> {
-        let tags: Vec<ExifTag> = keys.iter().flat_map(|k| tags_for_key(k)).collect();
+    /// addressed as fields, so they are always removed, even when nothing is
+    /// edited.
+    pub(crate) fn edit(&self, removed: &[&str], replaced: &[(&str, &str)]) -> Result<Scrubbed> {
+        let cleared: Vec<ExifTag> = removed
+            .iter()
+            .chain(replaced.iter().map(|(key, _)| key))
+            .flat_map(|key| tags_for_key(key))
+            .collect();
+        let written: Vec<ExifTag> = replaced
+            .iter()
+            .filter_map(|(key, value)| written_tag(key, value))
+            .collect();
         let is_tiff = matches!(self.format, FileExtension::TIFF);
         let mut tiff_blocks = 0;
         let edited = match self.parse()? {
-            Some(mut exif) if is_tiff || !tags.is_empty() => {
+            Some(mut exif) if is_tiff || !cleared.is_empty() => {
                 guard(AssertUnwindSafe(|| {
-                    for tag in tags {
+                    for tag in cleared {
                         exif.remove_tag(tag);
+                    }
+                    for tag in written {
+                        exif.set_tag(tag);
                     }
                     // A TIFF keeps its non-EXIF metadata blocks as IFD0 tags.
                     if is_tiff {
@@ -529,11 +544,42 @@ mod tests {
             ExifTag::Artist("Jane Roe".into()),
             ExifTag::Make("Nvisy".into()),
         ]);
-        let stripped = source(&bytes)
-            .remove_keys(&["Artist"])
-            .expect("strip")
-            .bytes;
+        let stripped = source(&bytes).edit(&["Artist"], &[]).expect("strip").bytes;
         assert_eq!(keys(&stripped), ["Make"]);
+    }
+
+    #[test]
+    fn overwriting_a_text_key_writes_the_new_value() {
+        let bytes = jpeg_with(vec![
+            ExifTag::Artist("Jane Roe".into()),
+            ExifTag::Make("Nvisy".into()),
+        ]);
+        let edited = source(&bytes)
+            .edit(&[], &[("Artist", "[REDACTED]")])
+            .expect("edit")
+            .bytes;
+        let values = source(&edited).values().expect("values");
+        assert!(values.contains(&("Artist", "[REDACTED]".to_owned())));
+        assert!(values.contains(&("Make", "Nvisy".to_owned())));
+    }
+
+    #[test]
+    fn overwriting_a_coordinate_removes_it() {
+        let ur = |n| {
+            vec![little_exif::rational::uR64 {
+                nominator: n,
+                denominator: 1,
+            }]
+        };
+        let bytes = jpeg_with(vec![
+            ExifTag::GPSLatitude(ur(51)),
+            ExifTag::GPSLatitudeRef("N".into()),
+        ]);
+        let edited = source(&bytes)
+            .edit(&[], &[("GPSLatitude", "[REDACTED]")])
+            .expect("edit")
+            .bytes;
+        assert!(keys(&edited).is_empty());
     }
 
     /// Picking the surfaced `GPSLatitude` field removes the WHOLE GPS IFD, not
@@ -559,7 +605,7 @@ mod tests {
         ]);
         // The picked key is the one the entity surfaces.
         let stripped = source(&bytes)
-            .remove_keys(&["GPSLatitude"])
+            .edit(&["GPSLatitude"], &[])
             .expect("strip")
             .bytes;
 
@@ -604,12 +650,12 @@ mod tests {
         }
     }
 
-    /// Under `Redact` only what a surfaced field reads or clears stays: a maker
-    /// note and a tag no field surfaces go, and the output check holds the
-    /// reduced image to the same allowlist.
+    /// Under `TreatAsContent` only what a surfaced field reads or clears stays:
+    /// a maker note and a tag no field surfaces go, and the output check holds
+    /// the reduced image to the same allowlist.
     #[cfg(feature = "codec")]
     #[test]
-    fn redact_keeps_only_what_a_field_surfaces() {
+    fn treat_as_content_keeps_only_what_a_field_surfaces() {
         let bytes = jpeg_with(vec![
             ExifTag::Artist("Jane Roe".to_owned()),
             ExifTag::MakerNote(b"body serial 1234".to_vec()),
@@ -629,10 +675,10 @@ mod tests {
             .expect("a reduced image passes");
     }
 
-    /// An embedded thumbnail is a preview of the unredacted pixels: `Redact`
-    /// strips it, counted as a thumbnail rather than as two tags.
+    /// An embedded thumbnail is a preview of the unredacted pixels:
+    /// `TreatAsContent` strips it, counted as a thumbnail rather than as two tags.
     #[test]
-    fn redact_strips_an_embedded_thumbnail() {
+    fn treat_as_content_strips_an_embedded_thumbnail() {
         let preview = b"\xFF\xD8 preview of Jane \xFF\xD9".to_vec();
         let bytes = jpeg_with(vec![
             ExifTag::Artist("Jane Roe".to_owned()),

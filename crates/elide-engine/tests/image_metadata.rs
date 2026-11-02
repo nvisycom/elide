@@ -1,13 +1,12 @@
-//! End-to-end: a JPEG's EXIF metadata is detected and stripped through the real
-//! [`Orchestrator`], routed as the image handler's `#exif` sub-part.
+//! End-to-end: a JPEG's EXIF metadata is detected and redacted through the real
+//! [`Orchestrator`], routed as the image's `#exif` metadata stream.
 //!
-//! Confirms the nested-metadata model composes through the engine's own
-//! analyze + anonymize + bottom-up fold: under a hidden-content policy that redacts
-//! metadata, the image is a depth-1 document and its `#exif` a depth-2 nested
-//! part; the metadata pipeline detects the GPS field, `Erase` picks it for
-//! removal, and the fold re-encodes the image once with the field gone.
+//! Under a hidden-content policy that treats metadata as content, the image is
+//! a depth-1 document and its `#exif` stream a depth-2 part. Every orchestrator
+//! detects the labelled fields the scope's catalog declares with no
+//! configuration, erases them by default, and encodes the image once.
 
-#![cfg(all(feature = "image", feature = "metadata"))]
+#![cfg(feature = "image")]
 
 use elide_core::Result;
 use elide_core::entity::audit::{AuditEvent, ModelEvent};
@@ -15,20 +14,20 @@ use elide_core::entity::{Entity, LabelCatalog, builtins};
 use elide_core::modality::metadata::Metadata;
 use elide_core::primitive::{ComponentId, Confidence};
 use elide_core::recognition::{Context, Recognizer, Scope, Subject};
-use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
-use elide_detection::{Analyzer, FieldRecognizer};
-use elide_engine::{Directives, Document, Orchestrator, PartId};
+use elide_core::redaction::{Disposition, HiddenContentPolicy};
+use elide_detection::Analyzer;
+use elide_engine::{Directives, Document, Orchestrator};
 use elide_format::FormatRegistry;
 use elide_image::modality::{Image, ImageLocation};
 use elide_image::primitive::{BoundingBox, Dimensions, Point};
-use elide_operator::operators::Erase;
+use elide_operator::operators::{Erase, Replace};
 use elide_redaction::{Anonymizer, Rule};
 use little_exif::exif_tag::ExifTag;
 use little_exif::filetype::FileExtension;
 use little_exif::metadata::Metadata as ExifMetadata;
 
-/// A small JPEG carrying a GPS latitude tag.
-fn jpeg_with_gps() -> bytes::Bytes {
+/// A small JPEG carrying a GPS latitude and an artist.
+fn jpeg_with_exif() -> bytes::Bytes {
     let mut bytes = Vec::new();
     image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(4, 4, image::Rgb([200, 30, 30])))
         .write_to(
@@ -41,63 +40,79 @@ fn jpeg_with_gps() -> bytes::Bytes {
         nominator: 51,
         denominator: 1,
     }]));
+    exif.set_tag(ExifTag::Artist("Jane Roe".to_owned()));
     exif.write_to_vec(&mut bytes, FileExtension::JPEG).unwrap();
     bytes::Bytes::from(bytes)
 }
 
-/// Whether `jpeg` bytes still carry a GPS latitude tag.
-fn has_gps(jpeg: &[u8]) -> bool {
+/// The EXIF tag `tag` in `jpeg`, if present.
+fn tag(jpeg: &[u8], tag: &ExifTag) -> Option<ExifTag> {
     ExifMetadata::new_from_vec(&jpeg.to_vec(), FileExtension::JPEG)
-        .map(|m| {
-            m.get_tag(&ExifTag::GPSLatitude(Vec::new()))
-                .next()
-                .is_some()
-        })
-        .unwrap_or(false)
+        .ok()?
+        .get_tag(tag)
+        .next()
+        .cloned()
 }
 
-#[tokio::test]
-async fn jpeg_gps_is_detected_and_stripped_through_the_orchestrator() {
-    let original = jpeg_with_gps();
-    assert!(has_gps(&original), "fixture should carry GPS");
+/// Whether `jpeg` still carries a GPS latitude tag.
+fn has_gps(jpeg: &[u8]) -> bool {
+    tag(jpeg, &ExifTag::GPSLatitude(Vec::new())).is_some()
+}
 
+/// The artist `jpeg` carries, if any.
+fn artist(jpeg: &[u8]) -> Option<String> {
+    match tag(jpeg, &ExifTag::Artist(String::new()))? {
+        ExifTag::Artist(value) => Some(value.trim_end_matches('\0').to_owned()),
+        _ => None,
+    }
+}
+
+/// Decode `bytes` with metadata treated as content, run `orchestrator` over it,
+/// and return the redacted bytes.
+async fn redact(orchestrator: &Orchestrator, bytes: bytes::Bytes) -> bytes::Bytes {
     let registry = FormatRegistry::with_builtin();
-    let policy = HiddenContentPolicy::default().with_metadata(Disposition::Redact);
-    let orchestrator = Orchestrator::new()
-        .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
-        .with_registry(registry.clone())
-        // Image pixels: no recognizer (nothing to detect in the frame here).
-        .with_modality::<Image>(
-            Analyzer::new(),
-            Anonymizer::new().with(Rule::fallback(Erase)),
-        )
-        // Image EXIF: the field recognizer turns the labelled GPS field into an
-        // entity.
-        .with_modality::<Metadata>(
-            Analyzer::new().with_recognizer(FieldRecognizer),
-            Anonymizer::new().with(Rule::fallback(Erase)),
-        );
-
+    let policy = HiddenContentPolicy::default().with_metadata(Disposition::TreatAsContent);
     let handle = registry
-        .decode(original.clone(), "jpg", policy)
+        .decode(bytes, "jpg", policy)
         .await
         .expect("decode jpeg");
     let mut documents = [Document::new("photo.jpg", handle)];
+    orchestrator
+        .anonymize(&mut documents, &Directives::new())
+        .await
+        .expect("anonymize");
+    documents[0].document.encode().expect("encode").to_bytes()
+}
 
+/// An orchestrator over the builtin catalog with nothing configured.
+fn orchestrator() -> Orchestrator {
+    Orchestrator::new()
+        .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
+        .with_registry(FormatRegistry::with_builtin())
+}
+
+#[tokio::test]
+async fn labelled_fields_are_detected_and_erased_with_nothing_configured() {
+    let original = jpeg_with_exif();
+    assert!(has_gps(&original), "fixture should carry GPS");
+
+    let orchestrator = orchestrator();
+    let registry = FormatRegistry::with_builtin();
+    let policy = HiddenContentPolicy::default().with_metadata(Disposition::TreatAsContent);
+    let handle = registry
+        .decode(original, "jpg", policy)
+        .await
+        .expect("decode jpeg");
+    let mut documents = [Document::new("photo.jpg", handle)];
     let analyzed = orchestrator
         .analyze(&mut documents, &Directives::new())
         .await
         .expect("analyze");
 
-    // The `#exif` sub-part was reached: a depth-2 Metadata part exists.
-    let metadata_parts: Vec<_> = analyzed
-        .report
-        .part_ids()
-        .filter(|(id, _)| id.depth() == 2)
-        .collect();
+    // The `#exif` stream was reached: a depth-2 part exists.
     assert!(
-        !metadata_parts.is_empty(),
-        "the #exif sub-part should be analyzed; parts: {:?}",
+        analyzed.report.part_ids().any(|(id, _)| id.depth() == 2),
+        "the #exif stream should be analyzed; parts: {:?}",
         analyzed.report.part_ids().collect::<Vec<_>>()
     );
 
@@ -105,14 +120,53 @@ async fn jpeg_gps_is_detected_and_stripped_through_the_orchestrator() {
         .anonymize_with(&mut documents, analyzed.report)
         .await
         .expect("anonymize");
-
     let out = documents[0].document.encode().expect("encode").to_bytes();
-    assert!(!has_gps(&out), "GPS survived the end-to-end strip");
-    // The output is still a valid decodable JPEG.
+    assert!(!has_gps(&out), "GPS survived");
+    assert_eq!(artist(&out), None, "artist survived");
     assert!(
         image::load_from_memory(&out).is_ok(),
         "output not a valid image"
     );
+}
+
+#[tokio::test]
+async fn a_metadata_anonymizer_overwrites_what_it_can() {
+    let orchestrator = orchestrator().with_anonymizer::<Metadata>(
+        Anonymizer::new()
+            .with(Rule::label(
+                builtins::PERSON_NAME.to_ref(),
+                Replace::new("[REDACTED]"),
+            ))
+            .with(Rule::label(
+                builtins::GEOLOCATION_METADATA.to_ref(),
+                Replace::new("[REDACTED]"),
+            )),
+    );
+    let out = redact(&orchestrator, jpeg_with_exif()).await;
+    assert_eq!(artist(&out).as_deref(), Some("[REDACTED]"));
+    // A coordinate cannot hold text, so the overwrite removes it.
+    assert!(!has_gps(&out), "GPS survived the overwrite");
+}
+
+#[tokio::test]
+async fn the_catalog_decides_which_fields_are_redacted() {
+    let catalog: LabelCatalog = [(*builtins::PERSON_NAME).clone()].into_iter().collect();
+    let orchestrator = Orchestrator::new()
+        .with_scope(Scope::new().with_catalog(catalog))
+        .with_registry(FormatRegistry::with_builtin());
+    let out = redact(&orchestrator, jpeg_with_exif()).await;
+    assert_eq!(artist(&out), None, "artist survived");
+    assert!(has_gps(&out), "GPS was redacted outside the catalog");
+}
+
+#[tokio::test]
+async fn registering_a_metadata_analyzer_keeps_the_schema_detection() {
+    let orchestrator = orchestrator().with_modality::<Metadata>(
+        Analyzer::new(),
+        Anonymizer::new().with(Rule::fallback(Erase)),
+    );
+    let out = redact(&orchestrator, jpeg_with_exif()).await;
+    assert!(!has_gps(&out), "GPS survived");
 }
 
 /// An image recognizer that flags the whole frame, so the pixel track redacts
@@ -154,78 +208,25 @@ impl Recognizer<Image> for WholeFrame {
 }
 
 /// Both tracks at once: a JPEG whose PIXELS are redacted (image pipeline) AND
-/// whose EXIF GPS is stripped (metadata pipeline) must compose into one output
-/// carrying both edits, through the real analyze + anonymize + fold.
+/// whose EXIF GPS is erased (built-in metadata pipeline) must compose into one
+/// output carrying both edits, through the real analyze + anonymize.
 #[tokio::test]
-async fn pixel_redaction_and_gps_strip_compose_end_to_end() {
-    let original = jpeg_with_gps();
+async fn pixel_redaction_and_gps_erasure_compose_end_to_end() {
+    let original = jpeg_with_exif();
     let before = image::load_from_memory(&original).expect("decode fixture");
 
-    let registry = FormatRegistry::with_builtin();
-    let orchestrator = Orchestrator::new()
-        .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
-        .with_registry(registry.clone())
-        .with_modality::<Image>(
-            Analyzer::new().with_recognizer(WholeFrame),
-            Anonymizer::new().with(Rule::fallback(Erase)),
-        )
-        .with_modality::<Metadata>(
-            Analyzer::new().with_recognizer(FieldRecognizer),
-            Anonymizer::new().with(Rule::fallback(Erase)),
-        );
+    let orchestrator = orchestrator().with_modality::<Image>(
+        Analyzer::new().with_recognizer(WholeFrame),
+        Anonymizer::new().with(Rule::fallback(Erase)),
+    );
+    let out = redact(&orchestrator, original).await;
 
-    let handle = registry
-        .decode(original.clone(), "jpg", HiddenContentPolicy::default())
-        .await
-        .expect("decode jpeg");
-    let mut documents = [Document::new("photo.jpg", handle)];
-
-    let analyzed = orchestrator
-        .analyze(&mut documents, &Directives::new())
-        .await
-        .expect("analyze");
-    orchestrator
-        .anonymize_with(&mut documents, analyzed.report)
-        .await
-        .expect("anonymize");
-
-    let out = documents[0].document.encode().expect("encode").to_bytes();
     // Metadata track: GPS is gone.
-    assert!(!has_gps(&out), "GPS survived the both-track strip");
+    assert!(!has_gps(&out), "GPS survived the both-track redaction");
     // Pixel track: the frame was erased (blacked out), so the top-left pixel is
     // no longer the fixture's red.
     let after = image::load_from_memory(&out).expect("decode output");
     use image::GenericImageView;
     let (before_px, after_px) = (before.get_pixel(0, 0), after.get_pixel(0, 0));
     assert_ne!(before_px, after_px, "pixels were not redacted");
-}
-
-/// Redacting metadata with no metadata pipeline registered: nothing would scan
-/// the surfaced fields, so the `#exif` blob is removed (and reported) rather
-/// than shipped unexamined.
-#[tokio::test]
-async fn redacted_metadata_no_pipeline_scans_is_removed_and_reported() {
-    let original = jpeg_with_gps();
-    let registry = FormatRegistry::with_builtin();
-    let orchestrator = Orchestrator::new().with_registry(registry.clone());
-    let policy = HiddenContentPolicy::default().with_metadata(Disposition::Redact);
-
-    let handle = registry
-        .decode(original, "jpg", policy)
-        .await
-        .expect("decode jpeg");
-    let mut documents = [Document::new("photo.jpg", handle)];
-    let report = orchestrator
-        .anonymize(&mut documents, &Directives::new())
-        .await
-        .expect("anonymize");
-
-    let exif = PartId::new("photo.jpg").child("#exif");
-    let reported: Vec<HiddenContent> = report
-        .part_stripped(&exif)
-        .map(|item| item.content)
-        .collect();
-    assert_eq!(reported, [HiddenContent::Unscanned]);
-    let out = documents[0].document.encode().expect("encode");
-    assert!(!has_gps(out.as_bytes()), "unscanned GPS shipped");
 }

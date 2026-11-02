@@ -40,7 +40,8 @@ impl Recombine for XlsxRecombine {
         // and leaves the shared-string table otherwise intact.
         let edits = self.state.cell_edits();
         let text = self.text.with_items(replacements);
-        // Each blob's id is its zip entry path; the two stream parts carry none.
+        // Each embedding's and property part's id is its zip entry path; the
+        // cell and text streams carry none.
         let blobs: Vec<PartReplacement> = parts
             .iter()
             .filter(|p| p.id.as_str() != BODY_PART_ID && p.id.as_str() != TEXT_PART_ID)

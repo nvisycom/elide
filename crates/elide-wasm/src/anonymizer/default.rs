@@ -20,12 +20,6 @@ pub(crate) fn image_pixels() -> Anonymizer<Image> {
     Anonymizer::new().with(Rule::fallback(Blackbox::default()))
 }
 
-/// The always-on metadata policy: erase every detected EXIF field. Not
-/// caller-configurable; paired with the internal metadata analyzer.
-pub(crate) fn image_metadata() -> Anonymizer<Metadata> {
-    Anonymizer::new().with(Rule::fallback(Erase))
-}
-
 /// A policy that silences every detected span.
 pub(crate) fn audio() -> Anonymizer<Audio> {
     Anonymizer::new().with(Rule::fallback(Silence))

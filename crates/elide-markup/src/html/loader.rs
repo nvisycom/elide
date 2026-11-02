@@ -180,7 +180,7 @@ mod tests {
     #[tokio::test]
     async fn stream_yields_text_attribute_and_a_redacted_comment() {
         let raw = r#"<html><body><!-- secret 1 --><img alt="hello" title="alt"></body></html>"#;
-        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::Redact);
+        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent);
         let mut doc = load_with(raw, policy).await;
         let vs = values(&mut doc);
         assert!(vs.iter().any(|v| v == " secret 1 "), "comment: {vs:?}");

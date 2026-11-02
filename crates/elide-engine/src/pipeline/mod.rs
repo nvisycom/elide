@@ -12,6 +12,7 @@
 //! [`ErasedPipeline`]: erased::ErasedPipeline
 
 mod erased;
+mod metadata;
 mod outcome;
 
 use elide_core::modality::Modality;
@@ -19,6 +20,7 @@ use elide_detection::Analyzer;
 use elide_redaction::Anonymizer;
 
 pub(crate) use self::erased::ErasedPipeline;
+pub(crate) use self::metadata::MetadataPipeline;
 pub(crate) use self::outcome::BoxFuture;
 
 /// The concrete analyze + redact pipeline for one modality `M`: the

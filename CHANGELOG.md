@@ -32,7 +32,8 @@ and this project adheres to
 - Hidden-content sanitizing: every codec strips metadata, comments and
   tracked revisions, previews, external references, active content, and
   editor fingerprints at decode, under a per-document `HiddenContentPolicy`
-  whose metadata and collaboration `Disposition` can be `Redact` instead;
+  whose metadata and collaboration `Disposition` is `StripNonEssential` or
+  `TreatAsContent`;
   embedded documents are decoded under their parent's policy, every encode
   checks the output carries none, and an office document with an
   unrecognized part or XML vocabulary is refused
@@ -49,7 +50,7 @@ and this project adheres to
   no codec can read is removed or cleared instead of replaced with a blank
 - Office documents surface the text they keep in attributes and outside a
   workbook's cells: comment and change authors and a comment's title (under
-  collaboration `Redact`), sheet, table, table-column, and defined names and
+  collaboration `TreatAsContent`), sheet, table, table-column, and defined names and
   Word bookmarks (fitted to their format's naming rules and kept unique when
   redacted, with the hyperlinks to them following), dropdown entries,
   data-validation messages, section names, worksheet headers and footers,
@@ -58,18 +59,22 @@ and this project adheres to
   labels, and optional collaboration dates, set required ones to a neutral
   date, always strip a workbook's revision log, drop a stripped comment's
   legacy note shape, and accept Excel threaded comments and PowerPoint modern
-  comments under `Redact`
+  comments under `TreatAsContent`
 - HTML sanitizing reads URLs the way a browser does (character references
   decoded, tabs and line breaks dropped), and also strips frames, `<meta>`
   redirects and cookies, conditional comments, remote resource loads and
   pings, `<template>` and `hidden` elements; XML strips `xml-stylesheet` and
   XInclude references and refuses an external DTD
-- Metadata fields carry what they are: each codec labels the fields it
-  surfaces by its format's schema (`MetadataData::label`), and one
-  format-neutral `FieldRecognizer` turns them into entities, replacing the
-  per-format `ExifRecognizer` and `DocPropsRecognizer`; under `Redact` an
-  unlabelled field is stripped, and metadata no pipeline scans is removed and
-  reported as `HiddenContent::Unscanned`
+- Metadata is built into every orchestrator: each codec labels the fields it
+  surfaces by its format's schema (`MetadataData::label`, required), and the
+  label is the field's detection, so a field whose label the request's
+  catalog declares is redacted with nothing registered, replacing the
+  per-format `ExifRecognizer` and `DocPropsRecognizer`; under
+  `TreatAsContent` an unlabelled field is stripped at decode. Selected fields
+  are erased by default, or treated by a caller's `Anonymizer<Metadata>`:
+  `Replace` and `Mask` overwrite a field that holds text. An image's EXIF and
+  an office document's properties are metadata streams of their document,
+  not sub-parts decoded through a format of their own
 - Hidden-content audit: every stripped item is recorded on the `Report`
   (`stripped()`) by part, item, and count in a format-neutral
   `HiddenContent` vocabulary, filled by `analyze` and replaced by what

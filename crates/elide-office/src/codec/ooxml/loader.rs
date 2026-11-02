@@ -18,22 +18,21 @@ use elide_core::{Error, Result};
 use super::addresser::OoxmlAddresser;
 use super::recombine::OoxmlRecombine;
 use super::{BODY_PART_ID, OoxmlAddress, OoxmlCodec, items};
-use crate::codec::docprops_hint;
-use crate::codec::props::read_doc_props;
+use crate::codec::props::doc_props_parts;
 use crate::ooxml::{OoxmlFormat, OoxmlPackage};
 use crate::opc::sanitize::sanitize;
 
 /// The body of a decoded OOXML package: its text stream, the recombiner sharing
-/// its item state, and the blob parts surfaced beside it.
+/// its item state, and the parts surfaced beside it.
 struct Decoded<C: OoxmlCodec> {
     stream: ExtractStream<OoxmlAddress>,
     recombine: OoxmlRecombine<C>,
-    blobs: Vec<DocumentPart>,
+    parts: Vec<DocumentPart>,
     stripped: StrippedContent,
 }
 
 /// Sanitize the package under `policy`, extract its text blocks and
-/// embeddings, and build its body stream, recombiner, and blob parts.
+/// embeddings, and build its body stream, recombiner, and the parts beside it.
 ///
 /// **Fail-closed:** a non-empty [`issues`](crate::opc::Extraction::issues) list
 /// means a text-bearing part could not be read into blocks, so its text would
@@ -41,9 +40,10 @@ struct Decoded<C: OoxmlCodec> {
 /// partially-extracted document.
 ///
 /// Only embeddings the engine classifies as
-/// [`Binary`](crate::opc::PartRole::Binary), and the document-property parts
-/// when metadata is redacted, are surfaced as blobs; a text or structure part
-/// is never exposed, so it can't be clobbered past the text-splice path.
+/// [`Binary`](crate::opc::PartRole::Binary) are surfaced as blobs, and the
+/// document-property parts as metadata streams when metadata is treated as
+/// content; a text or structure part is never exposed, so it can't be
+/// clobbered past the text-splice path.
 fn decode_package<C: OoxmlCodec>(
     content: ContentData,
     policy: HiddenContentPolicy,
@@ -52,9 +52,9 @@ fn decode_package<C: OoxmlCodec>(
     let (sanitized, stripped) = sanitize(&source, policy, &C::Format::classifier())?;
     let archive = sanitized.map_or(source, Bytes::from);
     let pkg = OoxmlPackage::<C::Format>::open(&archive)?;
-    let doc_props = match policy.metadata {
-        Disposition::Redact => read_doc_props(|path| pkg.part_bytes(path)),
-        Disposition::Strip => Vec::new(),
+    let properties = match policy.metadata {
+        Disposition::TreatAsContent => doc_props_parts(|path| pkg.part_bytes(path)),
+        Disposition::StripNonEssential => Vec::new(),
     };
     let extraction = pkg.extract();
 
@@ -76,7 +76,7 @@ fn decode_package<C: OoxmlCodec>(
 
     // Each binary embedding the engine classifies (images, media, embedded
     // objects), keyed by its zip entry path and hinted by its extension; then
-    // each document-property part, decoded as the metadata modality.
+    // each document-property part's metadata stream.
     let embeddings = extraction.embeddings.into_iter().map(|embedding| {
         let id = LocalId::new(embedding.part.as_str().to_owned());
         let hint = id.extension().unwrap_or_default().to_owned();
@@ -86,13 +86,6 @@ fn decode_package<C: OoxmlCodec>(
             hint,
         }
     });
-    let properties = doc_props
-        .into_iter()
-        .map(|(path, bytes)| DocumentPart::Blob {
-            id: LocalId::new(path),
-            bytes,
-            hint: docprops_hint().to_owned(),
-        });
 
     Ok(Decoded {
         stream,
@@ -102,14 +95,15 @@ fn decode_package<C: OoxmlCodec>(
             policy,
             _codec: PhantomData,
         },
-        blobs: embeddings.chain(properties).collect(),
+        parts: embeddings.chain(properties).collect(),
         stripped,
     })
 }
 
 /// Decode `content` into the parts-model [`Document`]: a body
 /// [`ExtractStream`] plus a [`Blob`](DocumentPart::Blob) per surfaced embedding
-/// and document-property part. Shared by the DOCX and PPTX loaders.
+/// and a metadata stream per document-property part. Shared by the DOCX and
+/// PPTX loaders.
 ///
 /// # Errors
 ///
@@ -128,7 +122,7 @@ pub(crate) fn decode_document<C: OoxmlCodec>(
             Box::new(decoded.stream) as Box<dyn Stream<Text>>,
         ),
     };
-    let parts = iter::once(body).chain(decoded.blobs).collect();
+    let parts = iter::once(body).chain(decoded.parts).collect();
     Ok(
         Document::new(C::FORMAT_ID, parts, Box::new(decoded.recombine))
             .with_stripped(decoded.stripped),

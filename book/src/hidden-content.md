@@ -18,16 +18,17 @@ Only two kinds of hidden content are a choice, made per document with a
 
 | Category | Covers | Default |
 |---|---|---|
-| Metadata | Document properties, custom XML, EXIF and XMP, PDF `/Info`, audio tags, HTML `<meta>` | `Strip` |
-| Collaboration | Comments, tracked revisions, PDF annotations | `Strip` |
+| Metadata | Document properties, custom XML, EXIF and XMP, PDF `/Info`, audio tags, HTML `<meta>` | `StripNonEssential` |
+| Collaboration | Comments, tracked revisions, PDF annotations | `StripNonEssential` |
 
-`Strip` reduces the content to what a reader of the file sees. On metadata it
-keeps only what a viewer needs to render the file, such as an image's
-orientation. On collaboration it produces the final visible document:
-insertions accepted, deletions applied, comments dropped. `Redact` surfaces
-the content to detection like any other part (see [Metadata](metadata.md));
-a format that cannot surface it to detection strips it instead. A redacted
-office comment or change keeps its author's name and account, which are
+`StripNonEssential` removes the content without inspecting it, keeping only
+what a reader of the file sees. On metadata it keeps only what a viewer needs
+to render the file, such as an image's orientation. On collaboration it
+produces the final visible document: insertions accepted, deletions applied,
+comments dropped. `TreatAsContent` keeps the content and handles it like
+visible content: it is detected with the request's label catalog and what the
+catalog covers is redacted (see [Metadata](metadata.md)); a format that
+cannot surface it to detection strips it instead. A redacted office comment or change keeps its author's name and account, which are
 detected and redacted, but not its date: a date the format lets go is
 removed, and one it requires (a modern PowerPoint comment's) is set to one
 neutral date. A threaded Excel comment loses its mentions, which point into
@@ -51,8 +52,8 @@ use elide::prelude::*;
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let bytes = std::fs::read("report.docx")?;
     let policy = HiddenContentPolicy::default()
-        .with_metadata(Disposition::Redact)
-        .with_collaboration(Disposition::Redact);
+        .with_metadata(Disposition::TreatAsContent)
+        .with_collaboration(Disposition::TreatAsContent);
     let document = FormatRegistry::with_builtin()
         .document("report.docx", bytes, policy)
         .await?;

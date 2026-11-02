@@ -95,18 +95,3 @@ pub mod pattern {
     #[doc(inline)]
     pub use elide_pattern::*;
 }
-
-/// Metadata recognition: turn each metadata field into an `Entity<Metadata>`
-/// by what its format says it is.
-///
-/// A codec labels every field it surfaces (an EXIF `GPSLatitude` is a
-/// location, a document's `creator` a person), so one recognizer serves every
-/// format: wire it into a `Metadata` pipeline,
-/// `.with_modality::<Metadata>(Analyzer::new().with_recognizer(metadata::FieldRecognizer),
-/// Anonymizer::new().with(Rule::fallback(Erase)))`.
-#[cfg(feature = "metadata")]
-#[cfg_attr(docsrs, doc(cfg(feature = "metadata")))]
-pub mod metadata {
-    #[doc(inline)]
-    pub use elide_detection::FieldRecognizer;
-}

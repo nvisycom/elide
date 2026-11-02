@@ -105,7 +105,7 @@ mod tests {
             ("ppt/comments/modernComment1.xml", comments.as_bytes()),
             ("ppt/authors.xml", authors.as_bytes()),
         ]);
-        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::Redact);
+        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent);
         let (out, _) = sanitize(&package, policy, &SlideFormat).unwrap();
         let out = out.unwrap();
         let comments =
@@ -145,7 +145,7 @@ mod tests {
             ("ppt/commentAuthors.xml", authors.as_bytes()),
             ("ppt/comments/comment1.xml", comments.as_bytes()),
         ]);
-        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::Redact);
+        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent);
         let (out, _) = sanitize(&package, policy, &SlideFormat).unwrap();
         let out = out.unwrap();
         let comments =

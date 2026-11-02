@@ -38,8 +38,8 @@ impl<C: OoxmlCodec> Recombine for OoxmlRecombine<C> {
         // Each body block's (current) value overwrites its source byte span in
         // its part's XML.
         let text_replacements = self.state.with_items(replacements);
-        // Every blob sub-part's id is its zip entry path; its (possibly redacted)
-        // bytes travel as a part replacement. An unredacted part's bytes equal
+        // Every embedding's and property part's id is its zip entry path; its
+        // (possibly redacted) bytes travel as a part replacement. An unredacted part's bytes equal
         // the original, so its replacement is a no-op re-pack. The body stream's
         // own part carries no standalone bytes (the text lands via the
         // replacements above), so it is not a zip part and is skipped.

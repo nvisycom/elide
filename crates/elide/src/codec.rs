@@ -56,13 +56,11 @@ pub mod pdf {
 }
 
 /// Raster-image codec: the `*_format` constructors for the PNG, JPEG, and TIFF
-/// handlers, plus [`exif_format`] for the EXIF-metadata sub-part a raster
-/// image surfaces when its metadata is redacted.
+/// handlers.
 ///
 /// Pass a constructor to [`FormatRegistry::with_replaced_format`] to swap the
 /// registered handler for a specific format.
 ///
-/// [`exif_format`]: elide_image::codec::exif_format
 /// [`FormatRegistry::with_replaced_format`]: elide_format::FormatRegistry::with_replaced_format
 #[cfg(any(feature = "codec-png", feature = "codec-jpeg", feature = "codec-tiff"))]
 #[cfg_attr(
@@ -70,8 +68,6 @@ pub mod pdf {
     doc(cfg(any(feature = "codec-png", feature = "codec-jpeg", feature = "codec-tiff")))
 )]
 pub mod image {
-    #[doc(inline)]
-    pub use elide_image::codec::exif_format;
     #[cfg(feature = "codec-jpeg")]
     #[doc(inline)]
     pub use elide_image::codec::jpeg_format;
@@ -126,14 +122,11 @@ pub mod markup {
 }
 
 /// Office-document codec: the `*_format` constructors for the OOXML containers
-/// (DOCX, PPTX, XLSX) and the shared `docProps` metadata sub-part. No format
-/// takes configuration.
+/// (DOCX, PPTX, XLSX). No format takes configuration.
 ///
 /// Pass a constructor to [`FormatRegistry::with_replaced_format`] to swap the
-/// registered handler for a specific format. Each `docProps` field it surfaces
-/// is labelled, so [`recognition::metadata::FieldRecognizer`] flags it.
+/// registered handler for a specific format.
 ///
-/// [`recognition::metadata::FieldRecognizer`]: crate::recognition::metadata::FieldRecognizer
 /// [`FormatRegistry::with_replaced_format`]: elide_format::FormatRegistry::with_replaced_format
 #[cfg(any(feature = "codec-docx", feature = "codec-pptx", feature = "codec-xlsx"))]
 #[cfg_attr(
@@ -141,8 +134,6 @@ pub mod markup {
     doc(cfg(any(feature = "codec-docx", feature = "codec-pptx", feature = "codec-xlsx")))
 )]
 pub mod office {
-    #[doc(inline)]
-    pub use elide_office::codec::docprops_format;
     #[cfg(feature = "codec-docx")]
     #[doc(inline)]
     pub use elide_office::codec::docx_format;
