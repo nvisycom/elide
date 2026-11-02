@@ -12,6 +12,7 @@ use elide_core::modality::text::Text;
 use elide_core::{Error, Result};
 use quick_xml::events::BytesStart;
 
+use super::tag::HtmlTagExt;
 use super::xml_handler::{XmlItem, XmlSpan};
 
 /// One redactable attribute's source spans: its `value` (the redactable inner
@@ -20,6 +21,16 @@ use super::xml_handler::{XmlItem, XmlSpan};
 pub(super) struct AttributeSpan {
     pub(super) name: Option<Range<usize>>,
     pub(super) value: Range<usize>,
+}
+
+/// A start tag as the engine reads it.
+pub(super) struct StartTag {
+    /// The name, lowercased for matching.
+    pub(super) name: String,
+    /// The name as written, for its context hint.
+    pub(super) written: String,
+    /// The redactable attributes, in source order.
+    pub(super) attributes: Vec<AttributeSpan>,
 }
 
 /// The retained source document, read-only. Owns the span queries the engine
@@ -45,62 +56,70 @@ impl<'a> MarkupSource<'a> {
         &self.raw[range]
     }
 
-    /// Each redactable attribute of an element: the source span of its name (a
-    /// located context hint) and the source byte span of its value, the inner
-    /// bytes between the quotes. Values pass through verbatim, so a `mailto:` URL
-    /// has its email matched in place; the name lets a context-gated value
-    /// (`ssn="…"`) be
-    /// boosted by its attribute name.
+    /// The start tag `e` as the engine reads it: its name, and each redactable
+    /// attribute with the source span of its name (a located context hint)
+    /// and of its value, the inner bytes between the quotes, as written. The
+    /// name lets a context-gated value (`ssn="…"`) be boosted by its attribute
+    /// name.
     ///
-    /// Strict XML validates attributes (rejecting e.g. a duplicate key) and
-    /// reports an [`AttrError`] as [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput); lenient HTML
-    /// turns validation off and skips an unparseable attribute rather than
-    /// failing.
+    /// HTML reads the tag as a browser does ([`HtmlTagExt`]): unquoted and
+    /// missing values, and a `/` between attributes, included. Strict XML
+    /// validates attributes (rejecting e.g. a duplicate key or an unquoted
+    /// value) and reports an [`AttrError`] as
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput).
+    /// An attribute without a value, or with only whitespace, has nothing to
+    /// redact and is left out.
     ///
     /// [`AttrError`]: quick_xml::events::attributes::AttrError
-    pub(super) fn attributes(
-        &self,
-        e: &BytesStart<'_>,
-        lenient: bool,
-    ) -> Result<Vec<AttributeSpan>> {
-        let mut out = Vec::new();
-        for attr in e.attributes().with_checks(!lenient) {
-            let attr = match attr {
-                Ok(attr) => attr,
-                // Lenient parsing tolerates a malformed attribute; strict XML
-                // does not, a duplicate key or unquoted value is malformed.
-                Err(_) if lenient => continue,
-                Err(e) => {
-                    return Err(Error::malformed(format!("malformed attribute: {e}")));
+    pub(super) fn start_tag(&self, e: &BytesStart<'_>, html: bool) -> Result<StartTag> {
+        let mut attributes = Vec::new();
+        if html {
+            let tag = e.html5_tag(self.raw)?;
+            for attr in &tag.attributes {
+                if let Some(value) = attr.value {
+                    self.push_attribute(&mut attributes, attr.name, value)?;
                 }
-            };
-            // `Attribute::value` is the *raw* on-the-wire text, entity spellings
-            // intact (quick-xml unescapes only through `unescape_value`, which we
-            // never call, the engine redacts raw slices). Over a
-            // `Reader::from_str` it borrows straight out of the source buffer, so a
-            // borrowed value's slice position *is* the source span, even for an
-            // entity-bearing value. `Cow::Owned` arises only for a value with no
-            // source position; it is a defensive guard, and such an attribute is
-            // left un-redactable rather than guessed at.
-            let Cow::Borrowed(value) = attr.value else {
-                continue;
-            };
-            let Some(value_span) = self.slice_span(value) else {
-                continue;
-            };
-            if self.raw[value_span.clone()].trim().is_empty() {
-                continue;
             }
-            // The key borrows from the same source buffer, so its bytes locate
-            // the attribute name in the source, the out-of-band context whose
-            // presence boosts the value.
-            let name_span = self.slice_span(attr.key.as_ref());
-            out.push(AttributeSpan {
-                name: name_span,
-                value: value_span,
+            return Ok(StartTag {
+                name: tag.name.to_ascii_lowercase(),
+                written: tag.name.to_owned(),
+                attributes,
             });
         }
-        Ok(out)
+        for attr in e.attributes() {
+            let attr = attr.map_err(|e| Error::malformed(format!("malformed attribute: {e}")))?;
+            // Over a `Reader::from_str`, the key and the raw value (entity
+            // spellings intact) borrow straight out of the source buffer.
+            let Cow::Borrowed(value) = attr.value else {
+                return Err(Error::malformed(
+                    "an XML attribute value is not in the source",
+                ));
+            };
+            self.push_attribute(&mut attributes, AsRef::<str>::as_ref(&attr.key), value)?;
+        }
+        let written = AsRef::<str>::as_ref(&e.local_name()).to_owned();
+        Ok(StartTag {
+            name: written.to_ascii_lowercase(),
+            written,
+            attributes,
+        })
+    }
+
+    /// Push the attribute `name` with `value`, both borrowed from this source,
+    /// unless its value is blank. Fails closed when the value cannot be placed
+    /// in the source, which would leave it unredactable.
+    fn push_attribute(&self, out: &mut Vec<AttributeSpan>, name: &str, value: &str) -> Result<()> {
+        let value_span = self
+            .slice_span(value)
+            .ok_or_else(|| Error::malformed("an attribute value is not in the source"))?;
+        if value.trim().is_empty() {
+            return Ok(());
+        }
+        out.push(AttributeSpan {
+            name: self.slice_span(name),
+            value: value_span,
+        });
+        Ok(())
     }
 
     /// The byte range a `slice` borrowed out of this source occupies in it, or

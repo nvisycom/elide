@@ -153,6 +153,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_unquoted_attribute_value_is_read_and_redacted() {
+        let raw = "<p><input value=jane@example.com disabled><a title=Jane/onclick=x>t</a></p>";
+        let mut doc = load(raw).await;
+        let vs = values(&mut doc);
+        assert!(vs.iter().any(|v| v == "jane@example.com"), "{vs:?}");
+        let chunk = body(&mut doc)
+            .chunks()
+            .unwrap()
+            .into_iter()
+            .find(|chunk| chunk.data.as_str() == "jane@example.com")
+            .expect("chunk");
+        let mut redactions = Redactions::new();
+        redactions.push(chunk.location, TextReplacement::substituted("[EMAIL]"));
+        body(&mut doc).write_at(redactions).await.unwrap();
+        assert!(encoded(&doc).contains("<input value=[EMAIL] disabled>"));
+    }
+
+    #[tokio::test]
     async fn encode_unchanged_round_trips() {
         let raw = "<html><head></head><body><p>Hello</p></body></html>";
         let doc = load(raw).await;

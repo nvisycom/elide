@@ -29,18 +29,22 @@
 //! refused outright: its text is never extracted, so it would ship past
 //! detection.
 
-use std::borrow::Cow;
 use std::ops::Range;
 
 use elide_codec::StrippedContent;
+use elide_codec::extract::{CharacterReferences, decode_references};
 use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
 use elide_core::{Error, Result};
 use quick_xml::NsReader;
-use quick_xml::escape::unescape;
-use quick_xml::events::{BytesStart, Event};
+#[cfg(feature = "html")]
+use quick_xml::escape::resolve_html5_entity;
+#[cfg(not(feature = "html"))]
+use quick_xml::escape::resolve_predefined_entity;
+use quick_xml::events::Event;
 use quick_xml::name::{Namespace, ResolveResult};
 
-use super::markup_parser::{bom_len, end_name, local_name};
+use super::markup_parser::{bom_len, end_name, start_name};
+use super::tag::{HtmlTag, HtmlTagExt};
 
 /// HTML elements that run or embed active content, removed with their whole
 /// subtree: a script, a plugin object, and a frame that loads another page or
@@ -195,8 +199,10 @@ impl MarkupSanitizer {
 
             if let Some(region) = removing.as_mut() {
                 match &event {
-                    Event::Start(e) if local_name(e) == region.name => region.depth += 1,
-                    Event::End(e) if end_name(e) == region.name => {
+                    Event::Start(e) if start_name(e, raw, html)? == region.name => {
+                        region.depth += 1;
+                    }
+                    Event::End(e) if end_name(e, raw, html)? == region.name => {
                         region.depth -= 1;
                         if region.depth == 0 {
                             removals.push(region.removal(span.end));
@@ -220,7 +226,7 @@ impl MarkupSanitizer {
                 match &event {
                     Event::Text(text) => sheet.css.push_str(text.as_ref()),
                     Event::CData(text) => sheet.css.push_str(text.as_ref()),
-                    Event::End(e) if end_name(e) == "style" => {
+                    Event::End(e) if end_name(e, raw, html)? == "style" => {
                         if css_loads_remote(&sheet.css) {
                             removals.push(Removal {
                                 range: sheet.start..span.end,
@@ -235,6 +241,13 @@ impl MarkupSanitizer {
                 continue;
             }
 
+            // A construct a browser ends before quick-xml does hides live
+            // markup inside it from this reader.
+            if html && let Some(construct) = ends_early(&event) {
+                return Err(Error::malformed(format!(
+                    "a browser ends this HTML {construct} at an earlier `>`, so markup inside it renders"
+                )));
+            }
             match &event {
                 Event::Eof => break,
                 Event::DocType(doctype) => self.check_doctype(doctype.as_ref())?,
@@ -259,10 +272,16 @@ impl MarkupSanitizer {
                     });
                 }
                 Event::Start(e) | Event::Empty(e) => {
-                    let name = local_name(e);
                     let is_start = matches!(event, Event::Start(_));
-                    let verdict = if html {
-                        self.html_verdict(raw, e, &name, is_start)
+                    // An HTML tag is read once, as a browser reads it.
+                    let tag = if html { Some(e.html5_tag(raw)?) } else { None };
+                    let attributes = tag.as_ref().map(|tag| attributes(raw, tag)).transpose()?;
+                    let name = match &tag {
+                        Some(tag) => tag.name.to_ascii_lowercase(),
+                        None => start_name(e, raw, false)?,
+                    };
+                    let verdict = if let Some(attributes) = &attributes {
+                        self.html_verdict(attributes, &name, is_start)
                     } else if in_xinclude && name == "include" {
                         Verdict::Tree(HiddenContent::Link)
                     } else {
@@ -283,16 +302,17 @@ impl MarkupSanitizer {
                                 content,
                             });
                         }
-                        Verdict::Keep if html => {
-                            if is_start && name == "style" {
+                        Verdict::Keep => {
+                            if is_start && html && name == "style" {
                                 style = Some(StyleSheet {
                                     start: span.start,
                                     css: String::new(),
                                 });
                             }
-                            removals.extend(hidden_attributes(raw, e, &name));
+                            if let Some(attributes) = attributes {
+                                removals.extend(hidden_attributes(attributes, &name));
+                            }
                         }
-                        Verdict::Keep => {}
                     }
                 }
                 _ => {}
@@ -320,8 +340,7 @@ impl MarkupSanitizer {
     }
 
     /// What happens to the HTML element `e` named `name`.
-    fn html_verdict(&self, raw: &str, e: &BytesStart<'_>, name: &str, is_start: bool) -> Verdict {
-        let attributes = attributes(raw, e);
+    fn html_verdict(&self, attributes: &[Attribute<'_>], name: &str, is_start: bool) -> Verdict {
         let attribute = |key: &str| {
             attributes
                 .iter()
@@ -351,7 +370,7 @@ impl MarkupSanitizer {
                 return Verdict::Tag(HiddenContent::Link);
             }
             "meta" => {
-                if let Some(content) = self.meta_removal(&attributes) {
+                if let Some(content) = self.meta_removal(attributes) {
                     return Verdict::Tag(content);
                 }
             }
@@ -423,69 +442,64 @@ struct Removal {
 }
 
 /// One attribute of a tag: its key and raw value as written, and the byte range
-/// the whole attribute (with its leading whitespace) occupies.
+/// that removes it: the attribute with what separates it from the one before.
 struct Attribute<'a> {
     key: &'a str,
     value: &'a str,
     range: Range<usize>,
 }
 
-/// Every attribute of `e` that could be placed in `raw`. Lenient: an attribute
-/// quick-xml cannot parse, or one not borrowed from `raw`, is skipped.
-fn attributes<'a>(raw: &'a str, e: &BytesStart<'a>) -> Vec<Attribute<'a>> {
-    let base = raw.as_ptr() as usize;
-    let offset = |slice: &str| {
+/// Every attribute of the HTML `tag`, read from `raw`, placed in it.
+///
+/// # Errors
+///
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) when a
+/// browser reads the tag differently from quick-xml, or an attribute cannot be
+/// placed in `raw`: an attribute the sanitizer cannot see is one it cannot
+/// remove.
+fn attributes<'a>(raw: &'a str, tag: &HtmlTag<'a>) -> Result<Vec<Attribute<'a>>> {
+    let place = |slice: &str| {
         (slice.as_ptr() as usize)
-            .checked_sub(base)
+            .checked_sub(raw.as_ptr() as usize)
             .filter(|&at| at + slice.len() <= raw.len())
+            .map(|at| at..at + slice.len())
+            .ok_or_else(|| Error::malformed("an HTML tag is not in the source"))
     };
+    let bytes = raw.as_bytes();
+    let mut previous = place(tag.name)?.end;
     let mut out = Vec::new();
-    for attr in e.html_attributes().with_checks(false).flatten() {
-        let Some(key_start) = offset(attr.key.as_ref()) else {
-            continue;
-        };
-        let Some(key) = raw.get(key_start..key_start + attr.key.as_ref().len()) else {
-            continue;
-        };
-        let (value, end) = match &attr.value {
-            // A value-less attribute (`<div hidden>`) reads as an empty value
-            // that sits nowhere in the source; it ends with its key.
-            Cow::Borrowed(value) if value.is_empty() && offset(value).is_none() => {
-                ("", key_start + key.len())
-            }
-            Cow::Borrowed(value) => {
-                let Some(start) = offset(value) else {
-                    continue;
-                };
-                let end = start + value.len();
-                let quoted = matches!(raw.as_bytes().get(end), Some(b'"' | b'\''));
-                let Some(value) = raw.get(start..end) else {
-                    continue;
-                };
-                (value, end + usize::from(quoted))
-            }
-            // A value-less attribute (`<input disabled>`) ends with its key.
-            Cow::Owned(_) => ("", key_start + key.len()),
-        };
-        let start = raw[..key_start]
-            .trim_end_matches(|c: char| c.is_ascii_whitespace())
-            .len();
+    for attr in &tag.attributes {
+        let source = place(attr.source)?;
+        // The removal takes the whitespace and stray `/`s before the attribute,
+        // back to the one before it, and keeps one when the attribute runs
+        // straight into the next, so the two around it never join.
+        let mut from = raw[..source.start]
+            .trim_end_matches(|c: char| c.is_ascii_whitespace() || c == '/')
+            .len()
+            .max(previous);
+        let joins_next = bytes
+            .get(source.end)
+            .is_some_and(|&b| !b.is_ascii_whitespace() && b != b'/' && b != b'>');
+        if joins_next && from < source.start {
+            from += 1;
+        }
         out.push(Attribute {
-            key,
-            value,
-            range: start..end,
+            key: attr.name,
+            value: attr.value.unwrap_or_default(),
+            range: from..source.end,
         });
+        previous = source.end;
     }
-    out
+    Ok(out)
 }
 
 /// The ranges of the HTML element `name`'s attributes to remove, each with the
 /// hidden content it holds: an `on*` event handler or a URL that runs script,
 /// a URL the page loads from a server, a `ping` that reports a followed link,
 /// and inline style that loads from a server.
-fn hidden_attributes(raw: &str, e: &BytesStart<'_>, name: &str) -> Vec<Removal> {
+fn hidden_attributes(attributes: Vec<Attribute<'_>>, name: &str) -> Vec<Removal> {
     let hyperlink = name == "a" || name == "area";
-    attributes(raw, e)
+    attributes
         .into_iter()
         .filter_map(|attr| {
             let key = attr.key.to_ascii_lowercase();
@@ -548,11 +562,43 @@ fn css_loads_remote(css: &str) -> bool {
     urls.chain(imports).any(is_remote)
 }
 
+/// The construct `event` is, when a browser ends it before quick-xml does, so
+/// markup quick-xml reads as inside it renders: a comment a browser closes
+/// abruptly (`<!-->`, `<!--->`) or at `--!>`, and a processing instruction,
+/// CDATA section, or document type with a `>` inside, which a browser ends at
+/// its first `>`.
+fn ends_early(event: &Event<'_>) -> Option<&'static str> {
+    match event {
+        Event::Comment(text) => {
+            let text: &str = text.as_ref();
+            (text.starts_with('>') || text.starts_with("->") || text.contains("--!>"))
+                .then_some("comment")
+        }
+        Event::PI(text) => text
+            .as_ref()
+            .contains('>')
+            .then_some("processing instruction"),
+        Event::CData(text) => text.as_ref().contains('>').then_some("CDATA section"),
+        Event::DocType(text) => text.as_ref().contains('>').then_some("document type"),
+        _ => None,
+    }
+}
+
+/// The text of the HTML named character reference `name`: HTML's table, or
+/// XML's five where the `html` feature, which brings the table and every HTML
+/// document, is off.
+fn html_entity(name: &str) -> Option<&'static str> {
+    #[cfg(feature = "html")]
+    return resolve_html5_entity(name);
+    #[cfg(not(feature = "html"))]
+    resolve_predefined_entity(name)
+}
+
 /// A URL attribute's `value` as a browser reads its scheme: character
 /// references decoded, the tab and line breaks a URL parser drops removed, and
 /// leading spaces and control characters trimmed, lowercased.
 fn normalized_url(value: &str) -> String {
-    let decoded = unescape(value).unwrap_or(Cow::Borrowed(value));
+    let (decoded, _) = decode_references(value, 0, CharacterReferences::Html(html_entity));
     decoded
         .chars()
         .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
@@ -584,6 +630,53 @@ mod tests {
         let raw = r#"<p onclick="track('jane')">Hi</p><script>var u = {"email":"jane@example.com"};</script><embed src="x.swf"><object data="y"><param name="a">fallback</object><a href=" JavaScript:steal()">x</a><a href="/ok">y</a>"#;
         let out = sanitize(html(HiddenContentPolicy::default()), raw);
         assert_eq!(out, r#"<p>Hi</p><a>x</a><a href="/ok">y</a>"#);
+    }
+
+    #[test]
+    fn a_handler_after_a_slash_or_unquoted_is_removed() {
+        // A browser reads a `/` between attributes like whitespace, so each of
+        // these is an `a` with an `onclick` handler.
+        let raw = r#"<a/onclick=steal()>x</a><a title="t"/onclick=steal()>y</a><a href=javascript:steal()>z</a>"#;
+        let out = sanitize(html(HiddenContentPolicy::default()), raw);
+        assert_eq!(out, r#"<a>x</a><a title="t">y</a><a>z</a>"#);
+        // An attribute removed from between two others never joins them.
+        let raw = r#"<img src="https://x.test/p.png"alt="Jane">"#;
+        let out = sanitize(html(HiddenContentPolicy::default()), raw);
+        assert_eq!(out, r#"<img alt="Jane">"#);
+    }
+
+    #[test]
+    fn a_script_url_spelled_with_html_references_is_removed() {
+        // A browser decodes HTML's named references and numeric ones without
+        // a `;` before it reads the scheme.
+        let raw = r#"<a href="javascript&colon;steal()">x</a><a href="jav&Tab;ascript:steal()">y</a><a href="javascript&#58steal()">z</a>"#;
+        let out = sanitize(html(HiddenContentPolicy::default()), raw);
+        assert_eq!(out, "<a>x</a><a>y</a><a>z</a>");
+    }
+
+    #[test]
+    fn a_construct_a_browser_ends_early_is_refused() {
+        // A browser reads each `<img>` here as an element, quick-xml as the
+        // text of a comment, processing instruction, CDATA section, or
+        // document type.
+        for raw in [
+            "<p><!--><img src=x onerror=steal()>--></p>",
+            "<p><!---><img src=x onerror=steal()>--></p>",
+            "<p><!-- a --!><img src=x onerror=steal()>--></p>",
+            "<p><?x><img src=x onerror=steal()>?></p>",
+            "<p><![CDATA[><img src=x onerror=steal()>]]></p>",
+            "<!DOCTYPE html [<!-- x -->]><p>t</p>",
+        ] {
+            let sanitizer =
+                html(HiddenContentPolicy::default().with_collaboration(Disposition::Redact));
+            let error = sanitizer.sanitize(raw.to_owned()).expect_err(raw);
+            assert!(error.to_string().contains("earlier `>`"), "{raw}: {error}");
+        }
+        // An ordinary comment, processing instruction, and document type stay.
+        let raw = "<!DOCTYPE html><?xml version=\"1.0\"?><p><!-- note --></p>";
+        let sanitizer =
+            html(HiddenContentPolicy::default().with_collaboration(Disposition::Redact));
+        assert!(sanitizer.sanitize(raw.to_owned()).is_ok());
     }
 
     #[test]

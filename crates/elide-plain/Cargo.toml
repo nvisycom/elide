@@ -55,5 +55,8 @@ tracing = { workspace = true, features = [] }
 quick-xml = { workspace = true, features = [], optional = true }
 
 [dev-dependencies]
+# Markup parsing
+html5ever = { workspace = true, features = [] }
+
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["macros", "rt"] }

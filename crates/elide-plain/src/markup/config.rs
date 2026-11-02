@@ -1,9 +1,9 @@
 //! [`MarkupConfig`]: how the shared markup engine reads a document, strict
 //! XML, or lenient HTML.
 
+use elide_codec::extract::CharacterReferences;
 #[cfg(feature = "html")]
 use quick_xml::escape::resolve_html5_entity;
-use quick_xml::escape::resolve_predefined_entity;
 
 /// How the markup engine reads a document.
 ///
@@ -20,9 +20,8 @@ use quick_xml::escape::resolve_predefined_entity;
 pub(super) struct MarkupConfig<'a> {
     /// Whether to tolerate HTML's non-well-formed constructs.
     pub(super) lenient: bool,
-    /// The named character references the dialect knows (XML's five,
-    /// HTML's table), by name.
-    pub(super) entities: fn(&str) -> Option<&'static str>,
+    /// The rules the dialect reads character references by.
+    pub(super) references: CharacterReferences,
     /// Whether text reads on across the elements outside `block_elements` as
     /// one passage (HTML's inline elements), with a `<br>` as a line break in
     /// it. Off, every element bounds a passage (the XML default).
@@ -46,7 +45,7 @@ impl MarkupConfig<'static> {
     pub(super) fn xml() -> Self {
         Self {
             lenient: false,
-            entities: resolve_predefined_entity,
+            references: CharacterReferences::Xml,
             inline_passages: false,
             block_elements: &[],
             skip_body_elements: &[],
@@ -68,7 +67,7 @@ impl<'a> MarkupConfig<'a> {
     ) -> Self {
         Self {
             lenient: true,
-            entities: resolve_html5_entity,
+            references: CharacterReferences::Html(resolve_html5_entity),
             inline_passages: true,
             block_elements,
             skip_body_elements,

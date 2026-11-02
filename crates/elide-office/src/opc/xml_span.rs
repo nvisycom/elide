@@ -18,9 +18,9 @@
 use std::borrow::Cow;
 use std::ops::Range;
 
-use elide_codec::extract::{OffsetMap, Passage, decode_references};
+use elide_codec::extract::{CharacterReferences, OffsetMap, Passage, decode_references};
 use elide_core::{Error, Result};
-use quick_xml::escape::{escape, partial_escape, resolve_predefined_entity, unescape};
+use quick_xml::escape::{escape, partial_escape, unescape};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::{NsReader, Reader};
 
@@ -96,7 +96,7 @@ impl Span {
                 // unescape whole before it is mapped reference by reference.
                 unescape(slice).map_err(|_| ())?;
                 let (text, offsets) =
-                    decode_references(slice, self.range.start, resolve_predefined_entity);
+                    decode_references(slice, self.range.start, CharacterReferences::Xml);
                 Ok((Cow::Owned(text), offsets))
             }
             BlockKind::Comment | BlockKind::Cdata => Ok((

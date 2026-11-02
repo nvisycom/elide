@@ -15,8 +15,8 @@ use std::sync::Arc;
 
 use elide_codec::content::ContentData;
 use elide_codec::extract::{
-    ExtractStream, ExtractedItem, ItemEdit, OffsetMap, Passage, SharedSplice, SourceAddresser,
-    decode_references,
+    CharacterReferences, ExtractStream, ExtractedItem, ItemEdit, OffsetMap, Passage, SharedSplice,
+    SourceAddresser, decode_references,
 };
 use elide_codec::{
     Document, DocumentPart, EncodedPart, ErasedStream, Format, FormatId, LocalId, Recombine, Stream,
@@ -74,14 +74,14 @@ pub(crate) enum SpanKind {
 
 impl XmlSpan {
     /// The value of the escaped `kind` text at `range` of `raw`, its
-    /// references decoded by `resolve`, and its span.
+    /// references decoded by `references`, and its span.
     pub(super) fn escaped(
         raw: &str,
         range: Range<usize>,
         kind: SpanKind,
-        resolve: fn(&str) -> Option<&'static str>,
+        references: CharacterReferences,
     ) -> (String, Self) {
-        let (value, offsets) = decode_references(&raw[range.clone()], range.start, resolve);
+        let (value, offsets) = decode_references(&raw[range.clone()], range.start, references);
         (value.clone(), Self::new(range, offsets, kind, value))
     }
 
@@ -423,12 +423,8 @@ mod tests {
     #[test]
     fn a_write_back_rewrites_only_the_changed_stretch_widened_to_whole_references() {
         let raw = "a&amp;b&amp;c";
-        let (_, span) = XmlSpan::escaped(
-            raw,
-            0..raw.len(),
-            SpanKind::Text,
-            quick_xml::escape::resolve_predefined_entity,
-        );
+        let (_, span) =
+            XmlSpan::escaped(raw, 0..raw.len(), SpanKind::Text, CharacterReferences::Xml);
         // "a&b&c" → "a&X&c": the middle `b` alone.
         assert_eq!(span.write_back("a&X&c"), Some((6..7, "X".to_owned())));
         // "a&b&c" → "a?b&c": the first reference, whole.

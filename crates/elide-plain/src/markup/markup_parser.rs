@@ -31,6 +31,7 @@ use quick_xml::events::{BytesEnd, BytesStart, Event};
 
 use super::config::MarkupConfig;
 use super::stream::{AttributeSpan, MarkupSink, MarkupSource};
+use super::tag::HtmlTagExt;
 use super::xml_handler::{SpanKind, XmlItem, XmlSpan};
 
 /// Extract the redactable markup items from `raw` under `config`. Exposed for
@@ -117,7 +118,7 @@ impl<'a> MarkupParser<'a> {
             let span = last..reader.buffer_position() as usize + bom;
             last = span.end;
 
-            if self.skipping(&event) {
+            if self.skipping(&event)? {
                 if matches!(event, Event::Eof) {
                     break;
                 }
@@ -139,16 +140,18 @@ impl<'a> MarkupParser<'a> {
             match event {
                 Event::Eof => break,
                 Event::Start(ref e) => {
-                    self.open_passage_element(&local_name(e), span.clone());
-                    self.attributes(e)?;
-                    self.open_element(e, span);
+                    let tag = self.source.start_tag(e, self.config.lenient)?;
+                    self.open_passage_element(&tag.name, span.clone());
+                    self.attributes(tag.attributes);
+                    self.open_element(tag.name, &tag.written, span);
                 }
                 Event::Empty(ref e) => {
-                    self.open_passage_element(&local_name(e), span);
-                    self.attributes(e)?;
+                    let tag = self.source.start_tag(e, self.config.lenient)?;
+                    self.open_passage_element(&tag.name, span);
+                    self.attributes(tag.attributes);
                 }
                 Event::End(ref e) => {
-                    let name = end_name(e);
+                    let name = end_name(e, self.source.raw(), self.config.lenient)?;
                     if self.config.bounds_passage(&name) {
                         self.end_passage();
                     }
@@ -189,13 +192,14 @@ impl<'a> MarkupParser<'a> {
     /// While inside a skipped subtree, track only that element's own open/close
     /// depth and swallow everything else. Returns whether `event` was consumed
     /// by the skip (the caller should `continue`).
-    fn skipping(&mut self, event: &Event<'_>) -> bool {
+    fn skipping(&mut self, event: &Event<'_>) -> Result<bool> {
+        let (raw, html) = (self.source.raw(), self.config.lenient);
         let Some(region) = &mut self.skip else {
-            return false;
+            return Ok(false);
         };
         match event {
-            Event::Start(e) if local_name(e) == region.name => region.depth += 1,
-            Event::End(e) if end_name(e) == region.name => {
+            Event::Start(e) if start_name(e, raw, html)? == region.name => region.depth += 1,
+            Event::End(e) if end_name(e, raw, html)? == region.name => {
                 region.depth -= 1;
                 if region.depth == 0 {
                     self.skip = None;
@@ -203,7 +207,7 @@ impl<'a> MarkupParser<'a> {
             }
             _ => {}
         }
-        true
+        Ok(true)
     }
 
     /// Track the passage at the element `name` opening at `span`: a line break
@@ -233,15 +237,14 @@ impl<'a> MarkupParser<'a> {
 
     /// Push each redactable attribute value, or defer it while a passage is
     /// open.
-    fn attributes(&mut self, e: &BytesStart<'_>) -> Result<()> {
-        for attr in self.source.attributes(e, self.config.lenient)? {
+    fn attributes(&mut self, attributes: Vec<AttributeSpan>) {
+        for attr in attributes {
             if self.in_passage {
                 self.deferred.push(Deferred::Attribute(attr));
             } else {
                 self.attribute(attr);
             }
         }
-        Ok(())
     }
 
     /// Push a comment body.
@@ -270,19 +273,18 @@ impl<'a> MarkupParser<'a> {
         }
     }
 
-    /// Open an element: enter a skipped subtree, or push a [`Frame`] whose name
-    /// becomes the context hint for the element's text and CDATA children.
-    fn open_element(&mut self, e: &BytesStart<'_>, span: Range<usize>) {
-        let name = local_name(e);
+    /// Open the element `name`, `written` so in the source: enter a skipped
+    /// subtree, or push a [`Frame`] whose name becomes the context hint for the
+    /// element's text and CDATA children.
+    fn open_element(&mut self, name: String, written: &str, span: Range<usize>) {
         if self.config.skips_body(&name) {
             self.skip = Some(SkipRegion { name, depth: 1 });
         } else {
             // The hint text is the element name split into context words,
-            // computed from the *original-case* local name so a camelCase
-            // boundary (`paymentCard` → `payment Card`) survives; `name` itself
-            // is lowercased for tag matching and would lose that boundary.
-            let local = e.local_name();
-            let hint = AsRef::<str>::as_ref(&local).context_words();
+            // computed from the name *as written* so a camelCase boundary
+            // (`paymentCard` → `payment Card`) survives; `name` itself is
+            // lowercased for tag matching and would lose that boundary.
+            let hint = written.context_words();
             self.stack.push(Frame {
                 name,
                 hint,
@@ -352,7 +354,7 @@ impl<'a> MarkupParser<'a> {
     /// The decoded value of the escaped `kind` text at `range`, and its
     /// address.
     fn escaped(&self, range: Range<usize>, kind: SpanKind) -> (String, XmlSpan) {
-        XmlSpan::escaped(self.source.raw(), range, kind, self.config.entities)
+        XmlSpan::escaped(self.source.raw(), range, kind, self.config.references)
     }
 
     /// Record a CDATA body, hinted by its enclosing element name, CDATA is
@@ -438,15 +440,22 @@ pub(super) fn bom_len(raw: &str) -> usize {
     if raw.starts_with('\u{feff}') { 3 } else { 0 }
 }
 
-/// The start tag's lowercased local name (HTML is case-insensitive; lowercasing
-/// makes `<SCRIPT>` and `<P>` match too).
-pub(super) fn local_name(e: &BytesStart<'_>) -> String {
-    e.local_name().as_ref().to_ascii_lowercase()
+/// The lowercased name of the start tag `e`, read from `raw`: as a browser
+/// reads it in `html`, its local name in XML. HTML is case-insensitive, so
+/// lowercasing makes `<SCRIPT>` and `<P>` match too.
+pub(super) fn start_name(e: &BytesStart<'_>, raw: &str, html: bool) -> Result<String> {
+    if html {
+        return Ok(e.html5_tag(raw)?.name.to_ascii_lowercase());
+    }
+    Ok(e.local_name().as_ref().to_ascii_lowercase())
 }
 
-/// The end tag's lowercased local name, matched against an open skip element.
-pub(super) fn end_name(e: &BytesEnd<'_>) -> String {
-    e.local_name().as_ref().to_ascii_lowercase()
+/// The end tag's lowercased name, read as [`start_name`] reads a start tag.
+pub(super) fn end_name(e: &BytesEnd<'_>, raw: &str, html: bool) -> Result<String> {
+    if html {
+        return Ok(e.html5_tag(raw)?.name.to_ascii_lowercase());
+    }
+    Ok(e.local_name().as_ref().to_ascii_lowercase())
 }
 
 /// Narrow `span` by its `open`/`close` delimiters, returning the inner range.

@@ -33,6 +33,8 @@ mod sanitize;
 #[cfg(feature = "xml")]
 mod stream;
 #[cfg(feature = "xml")]
+mod tag;
+#[cfg(feature = "xml")]
 mod xml_handler;
 #[cfg(feature = "xml")]
 mod xml_loader;
