@@ -9,9 +9,8 @@ use elide_core::modality::Modality;
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
-use elide_core::redaction::{LeakProfile, Operator, OperatorId};
+use elide_core::redaction::{Generator, LeakProfile, Operator, OperatorId};
 
-use crate::generator::Generator;
 use crate::vault::Vault;
 
 /// Replace an entity with a consistent generated surrogate.
@@ -53,7 +52,7 @@ use crate::vault::Vault;
 /// reversible.
 ///
 /// [`Vault`]: crate::vault::Vault
-/// [`Generator`]: crate::generator::Generator
+/// [`Generator`]: elide_core::redaction::Generator
 /// [`RandomToken`]: crate::generator::RandomToken
 /// [`get_or_try_insert_with`]: crate::vault::Vault::get_or_try_insert_with
 /// [coreference]: elide_core::entity::EntityCoRef

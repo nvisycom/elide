@@ -144,16 +144,16 @@ impl<M: Modality> Default for Deanonymizer<M> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "aes"))]
 mod tests {
     use std::sync::Arc;
 
     use elide_core::entity::LabelRef;
     use elide_core::modality::text::Text;
     use elide_core::redaction::ReversibleOperator;
-    use elide_operator::operators::AesEncrypt;
 
     use crate::Deanonymizer;
+    use crate::operators::AesEncrypt;
 
     /// A dynamically built reversible trait object flows into the builder:
     /// `ReversibleOperator` is implemented for `Box<dyn ReversibleOperator>`

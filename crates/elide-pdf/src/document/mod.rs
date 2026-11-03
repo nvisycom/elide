@@ -61,11 +61,11 @@ impl Pdf {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::ResourceLimit`](crate::ErrorKind::ResourceLimit) if the input
+    /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if the input
     /// exceeds [`MAX_DOCUMENT_BYTES`](Store::MAX_DOCUMENT_BYTES),
-    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if the
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the
     /// bytes are not a readable PDF, or
-    /// [`ErrorKind::CapabilityUnavailable`](crate::ErrorKind::CapabilityUnavailable)
+    /// [`ErrorKind::CapabilityUnavailable`](elide_core::ErrorKind::CapabilityUnavailable)
     /// if it is encrypted with a user password.
     pub fn open(document: &[u8]) -> Result<Self> {
         Self::open_with_limit(document, Self::DEFAULT_MAX_PAGE_BYTES)
@@ -106,7 +106,7 @@ impl Pdf {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if the
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the
     /// sanitized document cannot be saved.
     pub fn sanitize(&self) -> Result<Option<(Vec<u8>, StrippedContent)>> {
         let mut doc = self.0.clone_doc();
@@ -122,7 +122,7 @@ impl Pdf {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::Sanitization`](crate::ErrorKind::Sanitization) naming what
+    /// [`ErrorKind::Sanitization`](elide_core::ErrorKind::Sanitization) naming what
     /// survived.
     pub fn check_sanitized(&self) -> Result<()> {
         self.0.doc().check_sanitized()
@@ -134,7 +134,7 @@ impl Pdf {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if raw
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if raw
     /// samples the sanitizer kept cannot be decoded.
     pub(crate) fn surface_image(
         &self,
@@ -152,10 +152,10 @@ impl Pdf {
     ///
     /// # Errors
     ///
-    /// As each step: [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if a
+    /// As each step: [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if a
     /// replacement or removal names nothing in the document, or a page draws
     /// text with an undecodable font;
-    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if a
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a
     /// content stream cannot be rewritten or the document cannot be saved.
     pub(crate) fn apply(&self, redaction: &Redaction) -> Result<Vec<u8>> {
         let mut doc = self.0.clone_doc();
@@ -189,9 +189,9 @@ impl Pdf {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if the
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the
     /// tree or a file cannot be read, or
-    /// [`ErrorKind::ResourceLimit`](crate::ErrorKind::ResourceLimit) if a file
+    /// [`ErrorKind::ResourceLimit`](elide_core::ErrorKind::ResourceLimit) if a file
     /// decompresses past the bound.
     pub(crate) fn attachments(&self) -> Result<Vec<Attachment>> {
         attachment::attachments(&self.0)
@@ -203,7 +203,7 @@ impl Pdf {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if PDFium
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if PDFium
     /// cannot load or render the document (or the native library is unavailable).
     #[cfg(feature = "render")]
     #[cfg_attr(docsrs, doc(cfg(feature = "render")))]
@@ -232,9 +232,9 @@ impl Pdf {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) for a
+    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) for a
     /// malformed observation, or
-    /// [`ErrorKind::Redaction`](crate::ErrorKind::Redaction) if the redacted PDF
+    /// [`ErrorKind::Redaction`](elide_core::ErrorKind::Redaction) if the redacted PDF
     /// cannot be emitted.
     #[cfg(feature = "render")]
     #[cfg_attr(docsrs, doc(cfg(feature = "render")))]

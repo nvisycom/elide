@@ -85,6 +85,12 @@ and this project adheres to
   for any format that reads XML; their constructors move from
   `elide::codec::plain` to `elide::codec::markup`, and `elide-plain` keeps
   TXT, JSON, and CSV, one module per format
+- `elide-operator` is merged into `elide-redaction`: the operators, vault,
+  and generators are `elide_redaction::{operators, vault, generator}`, beside
+  the `Anonymizer` and `Deanonymizer`; the facade's `elide::redaction` paths
+  are unchanged
+- The recognizer decorators share one module per decorator under
+  `elide::recognition::decorator`: `resilient`, `chunked`, and `escalation`
 
 ### Crates
 

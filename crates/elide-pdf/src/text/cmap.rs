@@ -281,6 +281,8 @@ fn hex_to_bytes(hex: &str) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    use elide_core::ErrorKind;
+
     use super::*;
 
     fn codes(list: &[&[u8]]) -> BTreeSet<Vec<u8>> {
@@ -315,7 +317,7 @@ mod tests {
     fn fails_closed_on_a_code_inside_a_real_bfrange() {
         let cmap = b"1 beginbfrange\n<0041> <005A> <0041>\nendbfrange\n";
         let err = strip_codes(cmap, &codes(&[&[0x00, 0x42]])).unwrap_err();
-        assert_eq!(err.kind(), crate::ErrorKind::Redaction);
+        assert_eq!(err.kind(), ErrorKind::Redaction);
     }
 
     #[test]

@@ -51,7 +51,7 @@ pub use elide_core::primitive::{Confidence, ConfidenceThreshold, LanguageClaim, 
 #[doc(no_inline)]
 pub use elide_core::recognition::{Recognizer, Scope};
 #[doc(no_inline)]
-pub use elide_core::redaction::{Disposition, HiddenContentPolicy};
+pub use elide_core::redaction::{Disposition, HiddenContentPolicy, Operator};
 #[doc(no_inline)]
 pub use elide_core::{Error, ErrorKind, Result};
 #[doc(no_inline)]
@@ -77,6 +77,4 @@ pub use elide_format::FormatRegistry;
 #[doc(no_inline)]
 pub use elide_image::modality::Image;
 #[doc(no_inline)]
-pub use elide_operator::operators;
-#[doc(no_inline)]
-pub use elide_redaction::{Anonymizer, Deanonymizer, Operator, Rule};
+pub use elide_redaction::{Anonymizer, Deanonymizer, Rule, operators};

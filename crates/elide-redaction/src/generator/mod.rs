@@ -6,6 +6,4 @@
 
 mod random;
 
-pub use elide_core::redaction::Generator;
-
 pub use self::random::RandomToken;

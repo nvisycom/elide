@@ -2,17 +2,17 @@
 
 [![Build](https://img.shields.io/github/actions/workflow/status/nvisycom/elide/build.yml?branch=main&label=build%20%26%20test&style=flat-square)](https://github.com/nvisycom/elide/actions/workflows/build.yml)
 
-The redaction engine for PII/PHI: the `Anonymizer` and `Deanonymizer` that
-select and apply operators.
+Redaction for PII/PHI: the shipped operators, and the `Anonymizer` and
+`Deanonymizer` that select and apply them.
 
 ## Overview
 
 Once entities are detected, they have to be hidden — and the *how* is a policy
 decision: mask a phone number, replace an email, encrypt a record number so it
-can be recovered, drop a whole table row. This crate is the "hide" engine: it
-*selects* an operator per entity and *applies* it. The operators themselves —
-the strategies — live in [`elide-operator`], so the engine can be depended on
-without the operator library, and vice versa.
+can be recovered, drop a whole table row. An **operator** is one such strategy:
+it reads an entity's value and returns a modality `Replacement`. Every operator
+implements the `Operator` trait from `elide-core`; the reversible ones
+(`AesEncrypt`) also implement `ReversibleOperator`.
 
 `Anonymizer` is the redaction counterpart to the detection `Analyzer`. It holds
 an ordered list of selection `Rule`s (bind an operator to a label, a tag, a
@@ -26,11 +26,11 @@ predicate over a `MatchContext`, or a catch-all fallback) and two paths:
   into the target in one step. `anonymize_selections` applies a (possibly
   reviewed) set of selections.
 
-`Deanonymizer` reverses a reversible operator (`AesEncrypt`) given the key,
-recovering the original value.
+`Deanonymizer` reverses a reversible operator given the key, recovering the
+original value.
 
 ```rust,ignore
-use elide_operator::operators::{Erase, Mask, Replace};
+use elide_redaction::operators::{Erase, Mask, Replace};
 use elide_redaction::{Anonymizer, Rule};
 
 Anonymizer::new()
@@ -41,12 +41,30 @@ Anonymizer::new()
     .await?;
 ```
 
-The engine is generic over the `Operator` trait (re-exported from `elide-core`)
-and never names a concrete operator, so it carries no operator features — those
-live on [`elide-operator`]. The `elide` facade re-exports both under
-`elide::redaction` so a caller reaches the engine and the operators together.
+## What's here
 
-[`elide-operator`]: ../elide-operator
+- **`operators`** — the shipped operators, grouped by modality:
+  - Text/tabular: `Mask`, `Replace`, `Truncate`, `Clamp`, `Pseudonymize`,
+    `GeneralizeDate` (feature `datetime`), `Sha2Hash` (`sha2`), `HmacHash`
+    (`hmac`), `AesEncrypt` (`aes`), `Fake` (`fake`).
+  - Tabular: `DropRow`, `DropColumn` (feature `tabular`).
+  - Image: `Blur`, `Pixelate`, `Blackbox` (feature `image`).
+  - Audio: `Silence`, `Beep` (feature `audio`).
+  - Cross-modality: `Erase`, `Keep`, and `WithFallback` for composing a
+    declining `TryOperator` with a fallback.
+- **`vault`** — the `Vault` trait and the default `InMemoryVault`, backing the
+  stable per-entity surrogates `Pseudonymize` produces.
+- **`generator`** — the pseudonym generators (e.g. `RandomToken`).
+
+## Features
+
+Each modality and each crypto/format operator sits behind a feature so a build
+pulls only what it uses: `audio`, `image`, `tabular`, `metadata`, `sha2`,
+`hmac`, `aes`, `datetime`, `fake`, plus `serde`/`schema` for (de)serializing
+operator config.
+
+The whole-document orchestration over this crate is `elide-engine`. The `elide`
+facade re-exports both, under `elide::redaction` for this one.
 
 ## Documentation
 

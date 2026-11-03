@@ -26,7 +26,7 @@ use elide_core::recognition::{Context, Recognizer, Subject};
 ///
 /// Because it is itself a `Recognizer` over the same modality, it drops in
 /// anywhere the inner recognizer goes and composes with the other decorators
-/// (e.g. wrap an [`EscalatingRecognizer`](crate::escalation::EscalatingRecognizer)
+/// (e.g. wrap an [`EscalatingRecognizer`](crate::decorator::escalation::EscalatingRecognizer)
 /// to make its whole escalation best-effort).
 pub struct ResilientRecognizer<R> {
     inner: R,

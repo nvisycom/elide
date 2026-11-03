@@ -4,8 +4,7 @@ A decorator wraps a recognizer and is a recognizer itself, so decorators
 compose with each other and go anywhere a recognizer does. Each changes how
 the wrapped recognizer runs, and with it what comes out: which errors fail
 the call, which findings are kept, and how confident they are, as each
-section below says. They live in `elide::recognition::decorator` and
-`elide::recognition::escalation`.
+section below says. They live in `elide::recognition::decorator`.
 
 ## Resilience
 
@@ -15,7 +14,7 @@ than none, such as a hosted model that may time out, opt out per
 recognizer:
 
 ```rust
-use elide::recognition::decorator::ResilientRecognizer;
+use elide::recognition::decorator::resilient::ResilientRecognizer;
 use elide::recognition::ner::NerRecognizer;
 
 # fn main() {
@@ -33,7 +32,7 @@ long text into overlapping windows, runs the recognizer on each, and moves
 the findings back to their place in the full text:
 
 ```rust
-use elide::recognition::decorator::{CharWindows, ChunkedRecognizer};
+use elide::recognition::decorator::chunked::{CharWindows, ChunkedRecognizer};
 use elide::recognition::ner::NerRecognizer;
 
 # fn main() {
@@ -57,7 +56,7 @@ cheap recognizer's findings are not confident enough:
 
 ```rust
 use elide::prelude::*;
-use elide::recognition::escalation::{ConfidenceDecider, EscalatingRecognizer};
+use elide::recognition::decorator::escalation::{ConfidenceDecider, EscalatingRecognizer};
 use elide::recognition::llm::LlmRecognizer;
 use elide::recognition::llm::backend::MockBackend;
 use elide::recognition::pattern::PatternRecognizer;

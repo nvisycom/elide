@@ -1134,7 +1134,6 @@ dependencies = [
  "elide-markup",
  "elide-ner",
  "elide-office",
- "elide-operator",
  "elide-pattern",
  "elide-pdf",
  "elide-plain",
@@ -1234,7 +1233,6 @@ dependencies = [
  "elide-detection",
  "elide-format",
  "elide-image",
- "elide-operator",
  "elide-redaction",
  "erased-serde",
  "image",
@@ -1387,30 +1385,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "elide-operator"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "async-trait",
- "base64 0.23.1",
- "bytes",
- "elide-audio",
- "elide-core",
- "elide-fake",
- "elide-image",
- "hex",
- "hipstr",
- "hmac",
- "jiff",
- "schemars",
- "serde",
- "sha2 0.11.1",
- "tokio",
- "uuid",
- "zeroize",
-]
-
-[[package]]
 name = "elide-pattern"
 version = "0.1.0"
 dependencies = [
@@ -1470,12 +1444,26 @@ dependencies = [
 name = "elide-redaction"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
+ "async-trait",
+ "base64 0.23.1",
+ "bytes",
  "criterion",
+ "elide-audio",
  "elide-core",
- "elide-operator",
+ "elide-fake",
+ "elide-image",
+ "hex",
  "hipstr",
+ "hmac",
+ "jiff",
+ "schemars",
+ "serde",
+ "sha2 0.11.1",
  "tokio",
  "tracing",
+ "uuid",
+ "zeroize",
 ]
 
 [[package]]

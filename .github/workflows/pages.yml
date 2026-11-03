@@ -21,7 +21,6 @@ on:
       - "crates/elide-pattern/**"
       - "crates/elide-detection/**"
       - "crates/elide-redaction/**"
-      - "crates/elide-operator/**"
       - "crates/elide-engine/**"
       - "crates/elide-codec/**"
       - "crates/elide-fake/**"

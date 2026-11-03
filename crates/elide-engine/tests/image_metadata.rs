@@ -20,7 +20,7 @@ use elide_engine::{Directives, Document, Orchestrator};
 use elide_format::FormatRegistry;
 use elide_image::modality::{Image, ImageLocation};
 use elide_image::primitive::{BoundingBox, Dimensions, Point};
-use elide_operator::operators::{Erase, Replace};
+use elide_redaction::operators::{Erase, Replace};
 use elide_redaction::{Anonymizer, Rule};
 use little_exif::exif_tag::ExifTag;
 use little_exif::filetype::FileExtension;

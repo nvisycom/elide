@@ -26,7 +26,7 @@ const NEUTRAL_PREFIX: &str = "attachment-";
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if the attachment tree cannot be read.
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the attachment tree cannot be read.
 pub(super) fn neutralize(doc: &mut Document) -> Result<usize> {
     let specs: Vec<ObjectId> = doc
         .objects

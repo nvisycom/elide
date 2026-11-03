@@ -12,5 +12,3 @@ pub(crate) mod document;
 #[cfg(feature = "render")]
 pub(crate) mod render;
 pub(crate) mod text;
-
-pub use elide_core::{Error, ErrorKind, Result};

@@ -13,5 +13,3 @@ pub(crate) mod docx;
 pub(crate) mod ooxml;
 pub(crate) mod pptx;
 pub(crate) mod xlsx;
-
-pub use elide_core::{Error, ErrorKind, Result};

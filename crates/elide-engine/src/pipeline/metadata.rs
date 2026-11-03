@@ -15,7 +15,7 @@ use elide_core::modality::{ModalityLocation, StreamDataReader};
 use elide_core::recognition::Scope;
 use elide_core::recognition::annotation::Annotations;
 use elide_detection::Analyzer;
-use elide_operator::operators::Erase;
+use elide_redaction::operators::Erase;
 use elide_redaction::{Anonymizer, Rule};
 
 use super::ModalityPipeline;

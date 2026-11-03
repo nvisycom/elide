@@ -5,13 +5,9 @@
 mod anonymizer;
 mod deanonymizer;
 
-// The core operator contract the engines are generic over. The shipped
-// operators themselves live in `elide-operator`; this crate only *selects and
-// applies* them, so it names the trait, not the concrete types.
-#[doc(inline)]
-pub use elide_core::redaction::{
-    LeakProfile, Operator, OperatorId, Redactions, ReversibleOperator,
-};
+pub mod generator;
+pub mod operators;
+pub mod vault;
 
 pub use self::anonymizer::{Anonymizer, MatchContext, Rule};
 pub use self::deanonymizer::Deanonymizer;

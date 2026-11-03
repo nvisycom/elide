@@ -11,7 +11,7 @@ use elide_core::entity::Entity;
 use elide_core::modality::text::{Text, TextDoc};
 use elide_core::primitive::Confidence;
 use elide_core::recognition::Scope;
-use elide_operator::operators::Replace;
+use elide_redaction::operators::Replace;
 use elide_redaction::{Anonymizer, Rule};
 use tokio::runtime::{Builder, Runtime};
 
