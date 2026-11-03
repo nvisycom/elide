@@ -4,19 +4,17 @@
 //! vocabulary.
 //!
 //! The `docx/body_header_hyperlink.docx` fixture carries `lastModifiedBy = "Oleh Martsokha"` in its
-//! core properties. Under a hidden-content policy that redacts metadata, the
-//! `Metadata` pipeline's `FieldRecognizer` flags that labelled field and `Erase`
-//! removes it; the DOCX re-encode folds the cleared property part back into the
+//! core properties. Under a hidden-content policy that treats metadata as
+//! content, the built-in metadata pipeline detects that labelled field and
+//! erases it; the DOCX re-encode writes the cleared property part back into the
 //! package, so the output no longer names the editor. Under the default policy
 //! the property parts are removed whole at decode.
 
 use elide::codec::FormatRegistry;
 use elide::detection::Analyzer;
 use elide::entity::LabelCatalog;
-use elide::modality::metadata::Metadata;
 use elide::modality::text::Text;
 use elide::recognition::Scope;
-use elide::recognition::metadata::FieldRecognizer;
 use elide::redaction::operators::Erase;
 use elide::redaction::{Anonymizer, Disposition, HiddenContentPolicy, Rule};
 use elide::{Directives, Document, Orchestrator};
@@ -43,18 +41,13 @@ async fn docx_core_properties_are_stripped_through_the_facade() {
     assert!(has_editor(&original), "fixture should name the editor");
 
     let registry = FormatRegistry::with_builtin();
-    let policy = HiddenContentPolicy::default().with_metadata(Disposition::Redact);
+    let policy = HiddenContentPolicy::default().with_metadata(Disposition::TreatAsContent);
     let orchestrator = Orchestrator::new()
         .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
         .with_registry(registry.clone())
         // Body text: an erase pipeline (any detected text redacts; not the focus).
         .with_modality::<Text>(
             Analyzer::new(),
-            Anonymizer::new().with(Rule::fallback(Erase)),
-        )
-        // docProps: the field recognizer flags the labelled author/editor fields.
-        .with_modality::<Metadata>(
-            Analyzer::new().with_recognizer(FieldRecognizer),
             Anonymizer::new().with(Rule::fallback(Erase)),
         );
 

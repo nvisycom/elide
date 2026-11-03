@@ -36,39 +36,25 @@ pub use elide_core::recognition::{
 ///   default strategy; [`CharWindows`] bounds by character count (a tighter
 ///   proxy for a token limit — [`CharWindows::for_gliner`] is the conservative
 ///   512-token setting).
+/// - [`EscalatingRecognizer`] runs a cheap baseline recognizer always and a
+///   costly one (a hosted LLM/VLM, say) only on the subjects a [`Decider`] —
+///   e.g. [`ConfidenceDecider`] — picks from what the baseline found.
 ///
 /// Re-exported from [`elide_detection`].
 ///
 /// [`Recognizer`]: elide_core::recognition::Recognizer
-/// [`ResilientRecognizer`]: elide_detection::ResilientRecognizer
-/// [`ChunkedRecognizer`]: elide_detection::ChunkedRecognizer
-/// [`Chunking`]: elide_detection::Chunking
-/// [`WordWindows`]: elide_detection::WordWindows
-/// [`CharWindows`]: elide_detection::CharWindows
-/// [`CharWindows::for_gliner`]: elide_detection::CharWindows::for_gliner
+/// [`ResilientRecognizer`]: elide_detection::decorator::resilient::ResilientRecognizer
+/// [`ChunkedRecognizer`]: elide_detection::decorator::chunked::ChunkedRecognizer
+/// [`Chunking`]: elide_detection::decorator::chunked::Chunking
+/// [`WordWindows`]: elide_detection::decorator::chunked::WordWindows
+/// [`CharWindows`]: elide_detection::decorator::chunked::CharWindows
+/// [`CharWindows::for_gliner`]: elide_detection::decorator::chunked::CharWindows::for_gliner
+/// [`EscalatingRecognizer`]: elide_detection::decorator::escalation::EscalatingRecognizer
+/// [`Decider`]: elide_detection::decorator::escalation::Decider
+/// [`ConfidenceDecider`]: elide_detection::decorator::escalation::ConfidenceDecider
 pub mod decorator {
     #[doc(inline)]
-    pub use elide_detection::{
-        CharWindows, ChunkedRecognizer, Chunking, ResilientRecognizer, Window, WordWindows,
-    };
-}
-
-/// Escalating recognition: run a cheap recognizer always, a costly one only when
-/// a [`Decider`] judges it warranted.
-///
-/// [`EscalatingRecognizer`] wraps a baseline recognizer (always run) and an
-/// escalated one (a hosted LLM/VLM, say), running the latter only on the
-/// subjects a [`Decider`] — e.g. [`ConfidenceDecider`] — picks from what the
-/// baseline found. It is itself a [`Recognizer`]. Re-exported from
-/// [`elide_detection`].
-///
-/// [`Recognizer`]: elide_core::recognition::Recognizer
-/// [`EscalatingRecognizer`]: elide_detection::escalation::EscalatingRecognizer
-/// [`Decider`]: elide_detection::escalation::Decider
-/// [`ConfidenceDecider`]: elide_detection::escalation::ConfidenceDecider
-pub mod escalation {
-    #[doc(inline)]
-    pub use elide_detection::escalation::*;
+    pub use elide_detection::decorator::*;
 }
 
 /// LLM-mediated recognition: prompt a language or vision model over
@@ -94,19 +80,4 @@ pub mod ner {
 pub mod pattern {
     #[doc(inline)]
     pub use elide_pattern::*;
-}
-
-/// Metadata recognition: turn each metadata field into an `Entity<Metadata>`
-/// by what its format says it is.
-///
-/// A codec labels every field it surfaces (an EXIF `GPSLatitude` is a
-/// location, a document's `creator` a person), so one recognizer serves every
-/// format: wire it into a `Metadata` pipeline,
-/// `.with_modality::<Metadata>(Analyzer::new().with_recognizer(metadata::FieldRecognizer),
-/// Anonymizer::new().with(Rule::fallback(Erase)))`.
-#[cfg(feature = "metadata")]
-#[cfg_attr(docsrs, doc(cfg(feature = "metadata")))]
-pub mod metadata {
-    #[doc(inline)]
-    pub use elide_detection::FieldRecognizer;
 }

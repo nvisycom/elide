@@ -120,15 +120,11 @@ impl FormatRegistry {
         registry.add_format(elide_image::codec::jpeg_format());
         #[cfg(feature = "tiff")]
         registry.add_format(elide_image::codec::tiff_format());
-        #[cfg(any(feature = "png", feature = "jpeg", feature = "tiff"))]
-        registry.add_format(elide_image::codec::exif_format());
         // OOXML formats: handlers live in the `elide-office` engine.
         #[cfg(feature = "xlsx")]
         registry.add_format(elide_office::codec::xlsx_format());
         #[cfg(feature = "docx")]
         registry.add_format(elide_office::codec::docx_format());
-        #[cfg(feature = "internal_office")]
-        registry.add_format(elide_office::codec::docprops_format());
         #[cfg(feature = "pptx")]
         registry.add_format(elide_office::codec::pptx_format());
         // PDF: handler lives in the `elide-pdf` engine.

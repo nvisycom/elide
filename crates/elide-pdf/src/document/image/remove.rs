@@ -20,7 +20,7 @@ use crate::document::object::DocumentExt;
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if a content stream cannot be decoded or
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a content stream cannot be decoded or
 /// encoded.
 pub(crate) fn remove(
     doc: &mut Document,

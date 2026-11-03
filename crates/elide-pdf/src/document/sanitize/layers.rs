@@ -58,7 +58,7 @@ impl ContentCuts {
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if a content stream cannot be decoded or
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a content stream cannot be decoded or
 /// encoded.
 pub(super) fn strip(doc: &mut Document) -> Result<ContentCuts> {
     let hidden = hidden_groups(doc);

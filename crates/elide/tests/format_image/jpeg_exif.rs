@@ -2,21 +2,18 @@
 //! detected and stripped alongside its pixels, driven by an `Orchestrator` a
 //! caller assembles from the re-exported vocabulary.
 //!
-//! Proves the metadata pipeline is reachable and wires cleanly: the image is a
-//! document, its EXIF the `#exif` sub-part; the `Metadata` pipeline's
-//! `FieldRecognizer` flags the labelled GPS field and `Erase` removes it, folded into
-//! the one re-encode. The fixture and its assertions come from
+//! Proves the built-in metadata pipeline is reachable and wires cleanly: the
+//! image is a document, its EXIF the `#exif` stream; the labelled GPS field is
+//! detected with nothing configured and erased in the one re-encode. The fixture and its assertions come from
 //! `elide_image::fixtures`, so this test needs no image/EXIF crate of its own.
 
 use elide::codec::FormatRegistry;
 use elide::detection::Analyzer;
 use elide::entity::LabelCatalog;
 use elide::modality::image::Image;
-use elide::modality::metadata::Metadata;
 use elide::recognition::Scope;
-use elide::recognition::metadata::FieldRecognizer;
 use elide::redaction::operators::Erase;
-use elide::redaction::{Anonymizer, HiddenContentPolicy, Rule};
+use elide::redaction::{Anonymizer, Disposition, HiddenContentPolicy, Rule};
 use elide::{Directives, Document, Orchestrator};
 use elide_image::fixtures::{has_gps, is_valid_image, jpeg_with_gps};
 
@@ -26,20 +23,17 @@ async fn jpeg_gps_is_stripped_through_the_facade() {
     assert!(has_gps(&original), "fixture should carry GPS");
 
     let registry = FormatRegistry::with_builtin();
+    let policy = HiddenContentPolicy::default().with_metadata(Disposition::TreatAsContent);
     let orchestrator = Orchestrator::new()
         .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
         .with_registry(registry.clone())
         .with_modality::<Image>(
             Analyzer::new(),
             Anonymizer::new().with(Rule::fallback(Erase)),
-        )
-        .with_modality::<Metadata>(
-            Analyzer::new().with_recognizer(FieldRecognizer),
-            Anonymizer::new().with(Rule::fallback(Erase)),
         );
 
     let handle = registry
-        .decode(original.clone(), "jpg", HiddenContentPolicy::default())
+        .decode(original.clone(), "jpg", policy)
         .await
         .expect("decode jpeg");
     let mut documents = [Document::new("photo.jpg", handle)];

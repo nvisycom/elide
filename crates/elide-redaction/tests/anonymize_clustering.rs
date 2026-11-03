@@ -11,7 +11,7 @@ use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::Text;
 use elide_core::recognition::Scope;
 use elide_core::redaction::Operator;
-use elide_operator::operators::{Erase, Replace};
+use elide_redaction::operators::{Erase, Replace};
 use elide_redaction::{Anonymizer, Rule};
 use fixtures::TextDoc;
 

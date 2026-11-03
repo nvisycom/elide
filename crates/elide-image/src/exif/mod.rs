@@ -1,7 +1,7 @@
-//! EXIF metadata read, strip, and field-level removal. Each surfaced field is
-//! labelled with what it is (a location, a person, a device, a time), so the
-//! format-neutral field recognizer (`elide-detection`'s `FieldRecognizer`)
-//! turns it into an `Entity<Metadata>`.
+//! EXIF metadata read, strip, and field-level removal and overwrite. Each
+//! surfaced field is labelled with what it is (a location, a person, a device,
+//! a time), and the label is the field's detection: the orchestrator turns it
+//! into an `Entity<Metadata>`.
 //!
 //! Backed by `little_exif`, the one permissive pure-Rust crate that both reads
 //! and edits EXIF for JPEG, PNG, and TIFF. Its parser can panic on malformed

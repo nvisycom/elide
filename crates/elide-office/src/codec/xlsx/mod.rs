@@ -1,7 +1,7 @@
 //! XLSX codec on the parts model: a workbook is a [`Document`] whose body is a
 //! [`Stream<Tabular>`] of cells, plus a text stream over its content outside the
-//! cells (comments, drawings, charts, external hyperlink targets) and a
-//! [`Blob`] per embedding and per document-property part.
+//! cells (comments, drawings, charts, external hyperlink targets), a [`Blob`]
+//! per embedding, and a metadata stream per document-property part.
 //!
 //! A cell holds text, so a `TabularReplacement`'s cell treatment applies
 //! through the shared text-redaction helper. Only the *location* is tabular: a

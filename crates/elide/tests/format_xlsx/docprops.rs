@@ -2,19 +2,17 @@
 //! timestamps (`docProps/core.xml`) are detected and stripped, driven by an
 //! `Orchestrator` a caller assembles from the re-exported vocabulary.
 //!
-//! Proves the OOXML `#docprops` sub-part model works for the tabular family too:
-//! the `xlsx/shared_string_cells.xlsx` fixture carries populated `dcterms:created`/`modified`, and
-//! under a hidden-content policy that redacts metadata the `Metadata` pipeline's
-//! `FieldRecognizer` flags them, and `Erase` clears them; the workbook
-//! re-encode folds the edited property part back in.
+//! Proves the OOXML property-part metadata streams work for the tabular family
+//! too: the `xlsx/shared_string_cells.xlsx` fixture carries populated
+//! `dcterms:created`/`modified`, and under a hidden-content policy that treats
+//! metadata as content the built-in metadata pipeline detects and erases them;
+//! the workbook re-encode writes the edited property part back.
 
 use elide::codec::FormatRegistry;
 use elide::detection::Analyzer;
 use elide::entity::LabelCatalog;
-use elide::modality::metadata::Metadata;
 use elide::modality::tabular::Tabular;
 use elide::recognition::Scope;
-use elide::recognition::metadata::FieldRecognizer;
 use elide::redaction::operators::Erase;
 use elide::redaction::{Anonymizer, Disposition, HiddenContentPolicy, Rule};
 use elide::{Directives, Document, Orchestrator};
@@ -39,18 +37,13 @@ async fn xlsx_core_property_timestamps_are_stripped_through_the_facade() {
     assert!(has_timestamp(&original), "fixture should carry timestamps");
 
     let registry = FormatRegistry::with_builtin();
-    let policy = HiddenContentPolicy::default().with_metadata(Disposition::Redact);
+    let policy = HiddenContentPolicy::default().with_metadata(Disposition::TreatAsContent);
     let orchestrator = Orchestrator::new()
         .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
         .with_registry(registry.clone())
         // Cells: an erase pipeline (not the focus, but a registered body).
         .with_modality::<Tabular>(
             Analyzer::new(),
-            Anonymizer::new().with(Rule::fallback(Erase)),
-        )
-        // docProps: the field recognizer flags the labelled timestamp fields.
-        .with_modality::<Metadata>(
-            Analyzer::new().with_recognizer(FieldRecognizer),
             Anonymizer::new().with(Rule::fallback(Erase)),
         );
 

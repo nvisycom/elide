@@ -8,13 +8,14 @@ mod fixtures;
 
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::Text;
-use elide_operator::operators::{Clamp, Keep};
+use elide_redaction::operators::Clamp;
 use elide_redaction::{Anonymizer, Rule};
 use fixtures::anonymize_one;
 
+#[cfg(feature = "datetime")]
 #[tokio::test]
 async fn generalize_reduces_a_birthdate_to_the_year() {
-    use elide_operator::operators::{DateGranularity, GeneralizeDate};
+    use elide_redaction::operators::{DateGranularity, GeneralizeDate};
 
     //                    0         1
     //                    0123456789012345
@@ -30,9 +31,10 @@ async fn generalize_reduces_a_birthdate_to_the_year() {
     assert_eq!(out, "DOB: 1987");
 }
 
+#[cfg(feature = "datetime")]
 #[tokio::test]
 async fn generalize_erases_an_unparseable_value_by_default() {
-    use elide_operator::operators::{DateGranularity, GeneralizeDate};
+    use elide_redaction::operators::{DateGranularity, GeneralizeDate};
 
     let out = anonymize_one(
         Anonymizer::<Text>::new().with(Rule::label(
@@ -76,7 +78,7 @@ async fn clamp_passes_an_in_range_age_through() {
 
 #[tokio::test]
 async fn truncate_shortens_a_pan_to_bin_plus_last_four() {
-    use elide_operator::operators::Truncate;
+    use elide_redaction::operators::Truncate;
 
     //                    0               1
     //                    0123456789012345
@@ -93,9 +95,10 @@ async fn truncate_shortens_a_pan_to_bin_plus_last_four() {
     assert_eq!(out, "4111111234");
 }
 
+#[cfg(feature = "hmac")]
 #[tokio::test]
 async fn hmac_tokenizes_a_pan_deterministically() {
-    use elide_operator::operators::HmacHash;
+    use elide_redaction::operators::HmacHash;
 
     let key = b"deployment-secret".to_vec();
     let a = anonymize_one(
@@ -124,9 +127,10 @@ async fn hmac_tokenizes_a_pan_deterministically() {
     assert!(!a.is_empty(), "HMAC substitutes, never removes");
 }
 
+#[cfg(feature = "hmac")]
 #[tokio::test]
 async fn hmac_digest_changes_with_the_key() {
-    use elide_operator::operators::HmacHash;
+    use elide_redaction::operators::HmacHash;
 
     let a = anonymize_one(
         Anonymizer::<Text>::new().with(Rule::label(
@@ -174,9 +178,10 @@ async fn clamp_renders_the_bucket_in_the_entity_language() {
     assert_eq!(out, "âge 90 ou plus");
 }
 
+#[cfg(feature = "datetime")]
 #[tokio::test]
 async fn generalize_with_fallback_keeps_unparseable_intact() {
-    use elide_operator::operators::{DateGranularity, GeneralizeDate, WithFallback};
+    use elide_redaction::operators::{DateGranularity, GeneralizeDate, Keep, WithFallback};
 
     // A custom fallback (Keep) runs when GeneralizeDate declines the value,
     // instead of the bare operator's safe default (erase).

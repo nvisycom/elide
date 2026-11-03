@@ -128,13 +128,13 @@ pub(super) fn render_tags() -> [ExifTag; 1] {
 }
 
 /// Whether the tag `hex` in an IFD of `group`, in an image of the `tiff`
-/// container or another, stays when metadata is redacted: a surfaced field's
-/// tag (or one of the logical group its field stands for, which follows the
-/// field's decision), the render tag, a structural pointer, or a TIFF's pixel
-/// layout. Everything else in EXIF (the tags no field surfaces, an embedded
+/// container or another, stays when metadata is treated as content: a
+/// surfaced field's tag (or one of the logical group its field stands for,
+/// which follows the field's decision), the render tag, a structural pointer,
+/// or a TIFF's pixel layout. Everything else in EXIF (the tags no field surfaces, an embedded
 /// thumbnail, a maker note, vendor tags) cannot reach detection, so it is
 /// stripped.
-pub(super) fn kept_under_redact(hex: u16, group: ExifTagGroup, tiff: bool) -> bool {
+pub(super) fn kept_as_content(hex: u16, group: ExifTagGroup, tiff: bool) -> bool {
     let generic = group == ExifTagGroup::GENERIC;
     STRUCTURE_TAGS.contains(&(hex, group))
         || (generic && LAYOUT_TAGS.contains(&hex))
@@ -163,6 +163,26 @@ fn own_tag(key: &str) -> Option<ExifTag> {
         "UserComment" => ExifTag::UserComment(Vec::new()),
         "Software" => ExifTag::Software(String::new()),
         "ImageUniqueID" => ExifTag::ImageUniqueID(String::new()),
+        _ => return None,
+    })
+}
+
+/// The tag that holds `value` as the field `key`'s new value, or `None` when
+/// the field cannot hold arbitrary text: a coordinate, a timestamp in its fixed
+/// format, a user comment with its character-code prefix. Such a field is
+/// removed instead of overwritten.
+pub(super) fn written_tag(key: &str, value: &str) -> Option<ExifTag> {
+    let value = value.to_owned();
+    Some(match key {
+        "Make" => ExifTag::Make(value),
+        "Model" => ExifTag::Model(value),
+        "SerialNumber" => ExifTag::SerialNumber(value),
+        "Artist" => ExifTag::Artist(value),
+        "OwnerName" => ExifTag::OwnerName(value),
+        "Copyright" => ExifTag::Copyright(value),
+        "ImageDescription" => ExifTag::ImageDescription(value),
+        "Software" => ExifTag::Software(value),
+        "ImageUniqueID" => ExifTag::ImageUniqueID(value),
         _ => return None,
     })
 }

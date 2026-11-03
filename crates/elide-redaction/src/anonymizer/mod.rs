@@ -440,9 +440,9 @@ mod tests {
     use elide_core::entity::audit::{AuditEvent, AuditKind, Manual, ManualIntent, RuleMatch};
     use elide_core::modality::text::{Text, TextDoc};
     use elide_core::primitive::Confidence;
-    use elide_operator::operators::{Erase, Mask, Replace};
 
     use super::*;
+    use crate::operators::{Erase, Mask, Replace};
 
     fn entity(label: &str, start: usize, end: usize) -> Entity<Text> {
         Entity::fixture_conf(label, (start, end), Confidence::new(0.9).unwrap())

@@ -3,14 +3,13 @@
 //! PNG, JPEG and TIFF differ only in their [`FormatId`], lookup keys, and
 //! content types; the decode-redact-recompose body is one shared
 //! [`ImageDocumentLoader`], which builds a [`Document`] (the pixel [`Stream`],
-//! plus the `#exif` [`Blob`] when metadata is redacted) over this crate's
-//! [`ImageBuffer`] engine. The macro stamps out the per-format id and lookup keys so the
-//! per-format files stay declarative.
+//! plus the `#exif` metadata stream when metadata is treated as content) over
+//! this crate's [`ImageBuffer`] engine. The macro stamps out the per-format id
+//! and lookup keys so the per-format files stay declarative.
 //!
 //! [`FormatId`]: elide_codec::FormatId
 //! [`Document`]: elide_codec::Document
 //! [`Stream`]: elide_codec::Stream
-//! [`Blob`]: elide_codec::DocumentPart::Blob
 //! [`ImageBuffer`]: crate::ImageBuffer
 //! [`ImageDocumentLoader`]: super::image_loader::ImageDocumentLoader
 
@@ -29,7 +28,8 @@ macro_rules! impl_image_handler {
 
         /// [`Format`] descriptor registered into `FormatRegistry`. Decodes into a
         /// [`Document`](elide_codec::Document) of the pixel stream, plus the
-        /// `#exif` metadata sub-part when the hidden-content policy redacts metadata.
+        /// `#exif` metadata stream when the hidden-content policy treats metadata
+        /// as content.
         ///
         /// [`Format`]: elide_codec::Format
         pub fn format() -> ::elide_codec::Format {

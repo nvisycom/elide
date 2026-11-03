@@ -1,7 +1,5 @@
 //! [`ImageDocumentLoader`]: decode image bytes into a [`Document`]: the pixel
-//! stream, plus the `#exif` metadata blob when metadata is redacted.
-
-use std::iter;
+//! stream, plus the `#exif` metadata stream when metadata is treated as content.
 
 use elide_codec::content::ContentData;
 use elide_codec::{
@@ -9,9 +7,10 @@ use elide_codec::{
     StrippedContent,
 };
 use elide_core::Result;
+use elide_core::modality::metadata::Metadata;
 use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
 
-use super::exif_handler::EXIF_HINT;
+use super::exif_stream::ExifStream;
 use super::image_recombine::ImageRecombine;
 use super::image_state::ImageState;
 use super::image_stream::PixelStream;
@@ -20,12 +19,14 @@ use crate::ImageBuffer;
 use crate::modality::{Image, ImageFormat};
 
 /// A loader that decodes image bytes into a [`Document`]: the pixel stream, plus
-/// the `#exif` metadata blob when the [`HiddenContentPolicy`] redacts metadata.
+/// the `#exif` metadata stream when the [`HiddenContentPolicy`] treats metadata
+/// as content.
 ///
 /// The policy's metadata disposition is applied here, before any part exists:
-/// [`Strip`](Disposition::Strip) strips the source container down to its
-/// render tags, and [`Redact`](Disposition::Redact) strips the blocks outside
-/// EXIF and surfaces the EXIF fields as the `#exif` blob.
+/// [`StripNonEssential`](Disposition::StripNonEssential) strips the source
+/// container down to its render tags, and
+/// [`TreatAsContent`](Disposition::TreatAsContent) strips everything no
+/// surfaced field stands for and streams the surfaced EXIF fields.
 pub struct ImageDocumentLoader {
     format_id: FormatId,
     format: ImageFormat,
@@ -44,17 +45,9 @@ impl DocumentLoader for ImageDocumentLoader {
         // The registry routed to this loader for its one format; decode the
         // bytes as exactly that, no re-detection.
         let mut buffer = ImageBuffer::open(content.as_bytes(), self.format)?;
-        let (removed, exif) = match policy.metadata {
-            Disposition::Strip => (buffer.strip_metadata()?, None),
-            Disposition::Redact => {
-                let removed = buffer.strip_unsurfaced_metadata()?;
-                let exif = DocumentPart::Blob {
-                    id: LocalId::new(EXIF_PART_ID),
-                    bytes: buffer.source_bytes(),
-                    hint: EXIF_HINT.to_owned(),
-                };
-                (removed, Some(exif))
-            }
+        let removed = match policy.metadata {
+            Disposition::StripNonEssential => buffer.strip_metadata()?,
+            Disposition::TreatAsContent => buffer.strip_unsurfaced_metadata()?,
         };
         let mut stripped = StrippedContent::new();
         stripped.record(HiddenContent::Properties, None, removed.properties);
@@ -65,12 +58,18 @@ impl DocumentLoader for ImageDocumentLoader {
             state: state.clone(),
             format_id: self.format_id.clone(),
         });
-        let parts = iter::once(DocumentPart::Stream {
+        let mut parts = vec![DocumentPart::Stream {
             id: LocalId::new(PIXEL_PART_ID),
             handle: ErasedStream::new(self.format_id.clone(), pixels),
-        })
-        .chain(exif)
-        .collect();
+        }];
+        if policy.metadata == Disposition::TreatAsContent {
+            let exif: Box<dyn Stream<Metadata>> =
+                Box::new(ExifStream::new(state.clone(), self.format_id.clone())?);
+            parts.push(DocumentPart::Stream {
+                id: LocalId::new(EXIF_PART_ID),
+                handle: ErasedStream::new(self.format_id.clone(), exif),
+            });
+        }
 
         let recombine = ImageRecombine {
             state,
@@ -90,13 +89,12 @@ impl DocumentLoader for ImageDocumentLoader {
 #[cfg(all(test, feature = "fixtures"))]
 mod tests {
     use bytes::Bytes;
-    use elide_codec::{DocumentLoader as _, LeafLoader};
-    use elide_core::modality::metadata::{Metadata, MetadataLocation, MetadataReplacement};
+    use elide_codec::DocumentLoader as _;
+    use elide_core::modality::metadata::{MetadataLocation, MetadataReplacement};
     use elide_core::modality::{DataReader as _, DataWriter as _, StreamDataReader as _};
     use elide_core::redaction::Redactions;
     use image::GenericImageView;
 
-    use super::super::exif_handler::ExifLoader;
     use super::*;
     use crate::fixtures;
     use crate::modality::{ImageLocation, ImageReplacement};
@@ -133,17 +131,17 @@ mod tests {
         }
     }
 
-    /// The document's `#exif` blob bytes.
-    fn exif_bytes(doc: &Document) -> Bytes {
-        doc.parts()
-            .iter()
-            .find_map(|p| match p {
-                DocumentPart::Blob { id, bytes, .. } if id.as_str() == EXIF_PART_ID => {
-                    Some(bytes.clone())
+    /// The document's `#exif` metadata stream, downcast to `Metadata`.
+    fn exif(doc: &mut Document) -> &mut elide_codec::TypedStream<Metadata> {
+        doc.parts_mut()
+            .iter_mut()
+            .find_map(|part| match part {
+                DocumentPart::Stream { id, handle } if id.as_str() == EXIF_PART_ID => {
+                    handle.downcast_mut::<Metadata>()
                 }
                 _ => None,
             })
-            .expect("#exif blob")
+            .expect("#exif stream")
     }
 
     /// Redact the top-left 2x2 block of the pixel stream to black.
@@ -158,29 +156,16 @@ mod tests {
         pixels(doc).write_at(batch).await.unwrap();
     }
 
-    /// Strip the GPS latitude from `exif_bytes` through the metadata pipeline,
-    /// returning the metadata-stripped container bytes.
-    async fn strip_gps(exif_bytes: Bytes) -> Bytes {
-        let mut meta_doc = LeafLoader(ExifLoader)
-            .decode(ContentData::new(exif_bytes), HiddenContentPolicy::default())
-            .await
-            .unwrap();
-        let DocumentPart::Stream { handle, .. } = &mut meta_doc.parts_mut()[0] else {
-            panic!("exif is a stream")
-        };
-        let meta = handle.downcast_mut::<Metadata>().unwrap();
-        let mut mb: Redactions<Metadata> = Redactions::new();
-        mb.push(
-            MetadataLocation::new("GPSLatitude"),
-            MetadataReplacement::Removed,
-        );
-        meta.write_at(mb).await.unwrap();
-        meta_doc.encode().unwrap().into_bytes()
+    /// Apply `replacement` to the field `key` of the document's `#exif` stream.
+    async fn edit_field(doc: &mut Document, key: &str, replacement: MetadataReplacement) {
+        let mut batch: Redactions<Metadata> = Redactions::new();
+        batch.push(MetadataLocation::new(key.to_owned()), replacement);
+        exif(doc).write_at(batch).await.unwrap();
     }
 
     #[tokio::test]
     async fn decode_stream_reports_full_frame() {
-        let mut doc = decode(PNG, Disposition::Strip, fixtures::png(4, 4)).await;
+        let mut doc = decode(PNG, Disposition::StripNonEssential, fixtures::png(4, 4)).await;
         assert_eq!(doc.parts().len(), 1);
         let stream = pixels(&mut doc);
         assert_eq!(stream.format().as_str(), PNG);
@@ -192,14 +177,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn only_redacting_metadata_surfaces_the_exif_blob() {
+    async fn only_treating_metadata_as_content_surfaces_the_exif_stream() {
         let jpeg = fixtures::jpeg_with_gps;
         assert_eq!(
-            decode(JPEG, Disposition::Strip, jpeg()).await.parts().len(),
+            decode(JPEG, Disposition::StripNonEssential, jpeg())
+                .await
+                .parts()
+                .len(),
             1
         );
         assert_eq!(
-            decode(JPEG, Disposition::Redact, jpeg())
+            decode(JPEG, Disposition::TreatAsContent, jpeg())
                 .await
                 .parts()
                 .len(),
@@ -209,7 +197,7 @@ mod tests {
 
     #[tokio::test]
     async fn read_at_crops_region() {
-        let mut doc = decode(PNG, Disposition::Strip, fixtures::png(4, 4)).await;
+        let mut doc = decode(PNG, Disposition::StripNonEssential, fixtures::png(4, 4)).await;
         let stream = pixels(&mut doc);
         let data = stream
             .read_at(&bbox(1.0, 1.0, 2.0, 2.0))
@@ -230,7 +218,7 @@ mod tests {
 
     #[tokio::test]
     async fn redact_block_paints_region_and_reencodes() {
-        let mut doc = decode(PNG, Disposition::Strip, fixtures::png(4, 4)).await;
+        let mut doc = decode(PNG, Disposition::StripNonEssential, fixtures::png(4, 4)).await;
         redact_top_left(&mut doc).await;
         let out = doc.encode().unwrap();
         let painted = image::load_from_memory(out.as_bytes()).unwrap();
@@ -243,24 +231,29 @@ mod tests {
     /// its output carries no GPS even when nothing is redacted.
     #[tokio::test]
     async fn strip_removes_exif_at_decode() {
-        let doc = decode(PNG, Disposition::Strip, fixtures::png_with_gps()).await;
+        let doc = decode(
+            PNG,
+            Disposition::StripNonEssential,
+            fixtures::png_with_gps(),
+        )
+        .await;
         assert!(doc.changed_at_decode());
         let out = doc.encode().unwrap();
-        assert!(!fixtures::has_gps_png(out.as_bytes()), "GPS survived Strip");
+        assert!(
+            !fixtures::has_gps_png(out.as_bytes()),
+            "GPS survived StripNonEssential"
+        );
     }
 
-    /// The self-overlap composition: under `Redact` a jpeg decodes into a
-    /// two-part Document (pixel stream + `#exif` blob). Redacting the pixel
-    /// stream AND the exif blob (through its own decoded metadata document), then
-    /// folding the blob back and encoding, yields ONE image carrying both edits.
+    /// Under `TreatAsContent` a jpeg decodes into a pixel stream and an `#exif`
+    /// stream sharing one buffer, so redacting both yields one image carrying
+    /// both edits.
     #[tokio::test]
-    async fn image_document_composes_pixel_redaction_and_exif_strip() {
-        let mut doc = decode(JPEG, Disposition::Redact, fixtures::jpeg_with_gps()).await;
+    async fn image_document_composes_pixel_redaction_and_exif_removal() {
+        let mut doc = decode(JPEG, Disposition::TreatAsContent, fixtures::jpeg_with_gps()).await;
 
         redact_top_left(&mut doc).await;
-        let stripped = strip_gps(exif_bytes(&doc)).await;
-        doc.replace_part(&LocalId::new(EXIF_PART_ID), stripped)
-            .unwrap();
+        edit_field(&mut doc, "GPSLatitude", MetadataReplacement::Removed).await;
         let out = doc.encode().unwrap();
 
         // Both edits landed: the corner is dark and the GPS tag is gone.
@@ -273,29 +266,23 @@ mod tests {
         assert!(!fixtures::has_gps(out.as_bytes()), "GPS survived");
     }
 
-    /// Under `Redact` a field detection did not flag stays: the unedited `#exif`
-    /// blob's fields carry through.
+    /// The `#exif` stream yields the surfaced fields, each labelled.
     #[tokio::test]
-    async fn redact_keeps_an_unflagged_field() {
-        let mut doc = decode(PNG, Disposition::Redact, fixtures::png_with_gps()).await;
+    async fn the_exif_stream_yields_labelled_fields() {
+        let mut doc = decode(JPEG, Disposition::TreatAsContent, fixtures::jpeg_with_gps()).await;
+        let chunks = exif(&mut doc).chunks().unwrap();
+        assert!(chunks.iter().any(|chunk| chunk.data.key() == "GPSLatitude"));
+    }
+
+    /// Under `TreatAsContent` a field nothing redacts stays.
+    #[tokio::test]
+    async fn treat_as_content_keeps_an_unflagged_field() {
+        let mut doc = decode(PNG, Disposition::TreatAsContent, fixtures::png_with_gps()).await;
         redact_top_left(&mut doc).await;
         let out = doc.encode().unwrap();
         assert!(
             fixtures::has_gps_png(out.as_bytes()),
             "unflagged GPS dropped"
-        );
-    }
-
-    /// An `#exif` blob removed because no codec could read it falls back to
-    /// stripping the metadata, never to shipping it.
-    #[tokio::test]
-    async fn a_removed_exif_blob_strips_the_metadata() {
-        let mut doc = decode(PNG, Disposition::Redact, fixtures::png_with_gps()).await;
-        doc.remove_part(&LocalId::new(EXIF_PART_ID)).unwrap();
-        let out = doc.encode().unwrap();
-        assert!(
-            !fixtures::has_gps_png(out.as_bytes()),
-            "GPS survived the removal"
         );
     }
 }

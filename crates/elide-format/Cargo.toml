@@ -70,20 +70,15 @@ tiff = ["dep:elide-image", "elide-image/codec", "elide-image/tiff"]
 
 ## The rich-document formats. docx/pptx adapt the `elide-office`-hosted OOXML
 ## engine; PDF adapts the `elide-pdf`-hosted document engine.
-docx = ["dep:elide-office", "internal_office"]
-pptx = ["dep:elide-office", "internal_office"]
+docx = ["dep:elide-office"]
+pptx = ["dep:elide-office"]
 pdf = ["dep:elide-pdf"]
 pdf-render = ["pdf", "elide-pdf/render"]
 
 ## The tabular formats: CSV's handler lives in the `elide-plain` engine; XLSX
 ## adapts the `elide-office`-hosted OOXML engine.
 csv = ["dep:elide-plain", "elide-plain/csv"]
-xlsx = ["dep:elide-office", "internal_office"]
-
-# Internal marker, mirroring `elide-codec`: set automatically by a format
-# feature; not meant to be enabled directly. Gates registering the shared
-# OOXML docProps format, hosted in `elide-office`.
-internal_office = ["dep:elide-office"]
+xlsx = ["dep:elide-office"]
 
 [dependencies]
 # Internal crates

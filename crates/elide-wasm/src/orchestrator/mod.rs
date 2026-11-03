@@ -2,7 +2,6 @@
 //! detect-and-redact stages, and drives them over a blob with
 //! [`redact`](Orchestrator::redact).
 
-mod image;
 mod report;
 
 use elide::prelude::*;
@@ -106,10 +105,6 @@ impl Orchestrator {
                     None => crate::anonymizer::default_image_pixels(),
                 };
                 self.orchestrator
-                    .with_modality::<Metadata>(
-                        image::metadata_analyzer(),
-                        crate::anonymizer::default_image_metadata(),
-                    )
                     .with_modality::<Image>(analyzer.build_image()?, pixels)
             }
         };

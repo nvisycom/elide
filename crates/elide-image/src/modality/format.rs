@@ -58,9 +58,8 @@ impl ImageFormat {
     ///
     /// The ingestion registry resolves format from a hint (extension, content
     /// type) and only sniffs as a last resort, so most callers already know the
-    /// format and pass it to [`open`](crate::ImageBuffer::open). This is for the
-    /// one that genuinely has only bytes — the `#exif` sub-part reader, handed
-    /// the image's own container to strip metadata from.
+    /// format and pass it to [`open`](crate::ImageBuffer::open). This is for a
+    /// caller that genuinely has only bytes.
     ///
     /// # Errors
     ///

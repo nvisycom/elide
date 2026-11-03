@@ -26,7 +26,7 @@ use self::analysis::{ModalityRegistry, StrippedRecord};
 pub use self::directives::Directives;
 pub use self::document::{AsDocuments, Document, RegistryDocumentExt};
 pub use self::part_id::PartId;
-use self::pipeline::{ErasedPipeline, ModalityPipeline};
+use self::pipeline::{ErasedPipeline, ModalityPipeline, metadata};
 use self::traversal::{Analyze, Redact, Walk};
 
 /// Drives analyze + redact across a set of documents.
@@ -44,12 +44,17 @@ use self::traversal::{Analyze, Redact, Walk};
 /// Holds the [`FormatRegistry`] used to decode each container part and an
 /// erased pipeline per modality, keyed by the modality's [`TypeId`].
 ///
+/// Every orchestrator drives [`Metadata`] without being configured: a field's
+/// format labels it, so each surfaced field the scope's catalog declares is
+/// detected, and erased unless [`with_anonymizer`] sets another treatment.
+///
 /// [`with_modality`]: Orchestrator::with_modality
 /// [`with_registry`]: Orchestrator::with_registry
 /// [`analyze`]: Orchestrator::analyze
 /// [`anonymize_with`]: Orchestrator::anonymize_with
 /// [`anonymize`]: Orchestrator::anonymize
-#[derive(Default)]
+/// [`with_anonymizer`]: Orchestrator::with_anonymizer
+/// [`Metadata`]: elide_core::modality::metadata::Metadata
 pub struct Orchestrator {
     registry: FormatRegistry,
     pipelines: HashMap<TypeId, Box<dyn ErasedPipeline>>,
@@ -62,12 +67,26 @@ pub struct Orchestrator {
     scope: Scope,
 }
 
+impl Default for Orchestrator {
+    fn default() -> Self {
+        let mut orchestrator = Self {
+            registry: FormatRegistry::default(),
+            pipelines: HashMap::new(),
+            groups: ModalityRegistry::default(),
+            scope: Scope::default(),
+        };
+        orchestrator.insert_pipeline(metadata::pipeline());
+        orchestrator
+    }
+}
+
 impl Orchestrator {
-    /// A new orchestrator: no modality pipelines, an empty [`Scope`], and an
-    /// empty [`FormatRegistry`] (so container parts do not decode until one is
-    /// supplied via [`with_registry`]).
+    /// A new orchestrator: only the built-in [`Metadata`] pipeline, an empty
+    /// [`Scope`], and an empty [`FormatRegistry`] (so container parts do not
+    /// decode until one is supplied via [`with_registry`]).
     ///
     /// [`with_registry`]: Self::with_registry
+    /// [`Metadata`]: elide_core::modality::metadata::Metadata
     pub fn new() -> Self {
         Self::default()
     }
@@ -105,7 +124,8 @@ impl Orchestrator {
     /// Register the analyze + redact pipeline for modality `M`. A part
     /// that decodes to `M` is driven by this pipeline; parts of a modality
     /// with no registered pipeline pass through untouched. Re-registering
-    /// a modality replaces both halves.
+    /// a modality replaces both halves. For [`Metadata`] the halves add to the
+    /// built-in schema detection rather than replace it.
     ///
     /// When a modality only ever detects *or* only ever redacts, register just
     /// the half it needs with [`with_analyzer`] / [`with_anonymizer`] instead,
@@ -113,6 +133,7 @@ impl Orchestrator {
     ///
     /// [`with_analyzer`]: Self::with_analyzer
     /// [`with_anonymizer`]: Self::with_anonymizer
+    /// [`Metadata`]: elide_core::modality::metadata::Metadata
     #[must_use]
     pub fn with_modality<M>(mut self, analyzer: Analyzer<M>, anonymizer: Anonymizer<M>) -> Self
     where
@@ -121,13 +142,13 @@ impl Orchestrator {
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
         TypedStream<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
     {
-        self.pipelines.insert(
-            TypeId::of::<M>(),
-            Box::new(ModalityPipeline::new(analyzer, anonymizer)),
-        );
-        // Register the parser that reconstructs this modality's group from the
-        // wire, so `deserialize_report` can route it back by name.
-        self.groups.register::<M>();
+        match self.modality_pipeline_mut::<M>() {
+            Some(pipeline) => {
+                pipeline.analyzer = analyzer;
+                pipeline.anonymizer = anonymizer;
+            }
+            None => self.insert_pipeline(ModalityPipeline::new(analyzer, anonymizer)),
+        }
         self
     }
 
@@ -151,7 +172,7 @@ impl Orchestrator {
     {
         match self.modality_pipeline_mut::<M>() {
             Some(pipeline) => pipeline.analyzer = analyzer,
-            None => self.insert_pipeline::<M>(analyzer, Anonymizer::new()),
+            None => self.insert_pipeline(ModalityPipeline::new(analyzer, Anonymizer::new())),
         }
         self
     }
@@ -175,7 +196,7 @@ impl Orchestrator {
     {
         match self.modality_pipeline_mut::<M>() {
             Some(pipeline) => pipeline.anonymizer = anonymizer,
-            None => self.insert_pipeline::<M>(Analyzer::new(), anonymizer),
+            None => self.insert_pipeline(ModalityPipeline::new(Analyzer::new(), anonymizer)),
         }
         self
     }
@@ -193,18 +214,15 @@ impl Orchestrator {
             .downcast_mut::<ModalityPipeline<M>>()
     }
 
-    /// Insert a fresh pipeline for `M` and register its deserialize parser.
-    fn insert_pipeline<M>(&mut self, analyzer: Analyzer<M>, anonymizer: Anonymizer<M>)
+    /// Insert `pipeline` for `M` and register its deserialize parser.
+    fn insert_pipeline<M>(&mut self, pipeline: ModalityPipeline<M>)
     where
         M: Modality,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
         TypedStream<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
     {
-        self.pipelines.insert(
-            TypeId::of::<M>(),
-            Box::new(ModalityPipeline::new(analyzer, anonymizer)),
-        );
+        self.pipelines.insert(TypeId::of::<M>(), Box::new(pipeline));
         self.groups.register::<M>();
     }
 

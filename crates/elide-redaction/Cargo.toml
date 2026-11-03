@@ -2,7 +2,7 @@
 
 [package]
 name = "elide-redaction"
-description = "Redaction engine for the Elide toolkit: the Anonymizer and Deanonymizer that select and apply operators"
+description = "Redaction for the Elide toolkit: the shipped Operators, the Anonymizer and Deanonymizer that select and apply them, the key Vault, and pseudonym Generators"
 keywords = ["pii", "redaction", "anonymization", "masking"]
 categories = ["text-processing"]
 
@@ -23,41 +23,99 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 default = []
 
-## Forward `serde` support to `elide-core`, so the audit/entity types this
-## crate operates on serialize. This crate defines no types of its own that
-## derive serde, so it pulls no serde dependency directly.
-serde = ["elide-core/serde"]
+## Derive `serde::{Serialize, Deserialize}` on the operator types, and forward
+## `serde` to `elide-core` so the audit and entity types serialize.
+serde = [
+    "dep:serde",
+    "elide-core/serde",
+    "elide-image?/serde",
+    "elide-audio?/serde",
+    "bytes/serde",
+]
+## Derive `schemars::JsonSchema` on the operator types.
+schema = [
+    "dep:schemars",
+    "serde",
+    "elide-core/schema",
+    "elide-image?/schema",
+    "elide-audio?/schema",
+]
 
-## Forward `schemars` support to `elide-core`. As with `serde`, this crate
-## derives no schema of its own, so it only propagates the feature.
-schema = ["serde", "elide-core/schema"]
-
-## The `Deanonymizer` supports the `tabular` modality unconditionally (its impl
-## is generic over text-backed modalities); this only pulls `elide-core`'s
-## `tabular` feature so the doc references to `Tabular` resolve. No effect on
-## behaviour.
+## The `audio` modality operators (`Silence`, `Beep`).
+audio = ["dep:elide-audio"]
+## The `image` modality operators (`Blur`, `Pixelate`, `Blackbox`).
+image = ["dep:elide-image"]
+## The `tabular` modality operators (`DropRow`, `DropColumn`).
 tabular = ["elide-core/tabular"]
+## The `metadata` modality: `Erase` removes a metadata field; `Replace` and
+## `Mask` overwrite its value.
+metadata = ["elide-core/metadata"]
+
+## The one-way `Sha2Hash` operator (SHA-256 / SHA-512).
+sha2 = ["dep:sha2", "dep:hex"]
+## The keyed `HmacHash` operator (HMAC-SHA-256 / HMAC-SHA-512) and the shared `KeyProvider`.
+hmac = ["dep:hmac", "dep:sha2", "dep:hex", "dep:zeroize"]
+## The reversible `AesEncrypt` operator (AES-256-GCM) and the shared `KeyProvider`.
+aes = ["dep:aes-gcm", "dep:base64", "dep:zeroize"]
+## The `GeneralizeDate` operator (reduce date/timestamp granularity).
+datetime = ["dep:jiff"]
+## The locale-aware `Fake` redaction operator based on the `fake` crate.
+fake = ["dep:elide-fake", "tabular"]
 
 [dependencies]
 # Internal crates
 elide-core = { workspace = true, features = [] }
+elide-audio = { workspace = true, features = [], optional = true }
+elide-image = { workspace = true, features = [], optional = true }
+elide-fake = { workspace = true, features = [], optional = true }
+
+# (De)serialization
+serde = { workspace = true, features = ["derive"], optional = true }
 
 # Primitive datatypes
+bytes = { workspace = true, features = [] }
+uuid = { workspace = true, features = ["v4"] }
 hipstr = { workspace = true, features = [] }
+jiff = { workspace = true, features = [], optional = true }
+
+# Encoding & hashing
+sha2 = { workspace = true, features = [], optional = true }
+hmac = { workspace = true, features = [], optional = true }
+hex = { workspace = true, features = [], optional = true }
+base64 = { workspace = true, features = ["std"], optional = true }
+
+# Cryptography
+aes-gcm = { workspace = true, features = ["aes", "getrandom"], optional = true }
+zeroize = { workspace = true, features = [], optional = true }
+
+# Async runtime & parallelism
+async-trait = { workspace = true, features = [] }
 
 # Observability
 tracing = { workspace = true, features = [] }
 
+# Templating & schema
+schemars = { workspace = true, features = [], optional = true }
+
 [dev-dependencies]
 # Internal crates
 elide-core = { workspace = true, features = ["fixtures"] }
-elide-operator = { workspace = true, features = ["aes", "hmac", "datetime"] }
+# A real decoded image payload for the image-operator tests (implies the
+# decoders), so a test builds an `ImageData` the way ingestion does.
+elide-image = { workspace = true, features = ["fixtures"] }
+# Likewise a real audio payload for the audio-operator tests (`wav` provides the
+# fixture encoder `fixtures::blank_audio_data` uses).
+elide-audio = { workspace = true, features = ["fixtures", "wav"] }
 
 # Async runtime & parallelism
 tokio = { workspace = true, features = ["rt", "macros"] }
 
 # Testing and benchmarking
 criterion = { workspace = true }
+
+[[test]]
+name = "deanonymize"
+required-features = ["aes"]
 
 [[bench]]
 name = "anonymize"

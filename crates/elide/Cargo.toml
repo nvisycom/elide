@@ -35,7 +35,6 @@ default = ["pattern", "ner", "llm"]
 serde = [
     "elide-core/serde",
     "elide-detection/serde",
-    "elide-operator/serde",
     "elide-redaction/serde",
     "elide-audio?/serde",
     "elide-image?/serde",
@@ -55,7 +54,6 @@ schema = [
     "serde",
     "elide-core/schema",
     "elide-detection/schema",
-    "elide-operator/schema",
     "elide-redaction/schema",
     "elide-audio?/schema",
     "elide-image?/schema",
@@ -98,22 +96,17 @@ stt = ["dep:elide-audio", "elide-audio/stt", "audio"]
 ocr = ["dep:elide-image", "elide-image/ocr", "image"]
 
 ## The `audio` modality. Implied by the audio codec formats.
-audio = ["dep:elide-audio", "elide-operator/audio", "elide-engine?/audio"]
-## The `image` modality. Implied by the image codec formats. Enables the light
-## `exif` path (little_exif, no pixel codec) so the EXIF recognizer is available
-## without a decoder, and pulls in the `metadata` modality: a raster image
-## carries EXIF metadata as a redactable sub-part.
-image = ["dep:elide-image", "elide-image/exif", "elide-operator/image", "elide-engine?/image", "metadata"]
+audio = ["dep:elide-audio", "elide-redaction/audio", "elide-engine?/audio"]
+## The `image` modality. Implied by the image codec formats. Enables `exif`
+## (little_exif) and pulls in the `metadata` modality: a raster image carries
+## EXIF metadata as a redactable part. Reading it decodes the image, so it
+## needs the image's codec feature (`codec-png`, `codec-jpeg`, `codec-tiff`).
+image = ["dep:elide-image", "elide-image/exif", "elide-redaction/image", "elide-engine?/image", "metadata"]
 ## The `metadata` modality: a document's out-of-band fields (EXIF, document
 ## properties) as redaction subjects.
-metadata = [
-    "elide-core/metadata",
-    "elide-detection/metadata",
-    "elide-operator/metadata",
-    "elide-engine?/metadata",
-]
+metadata = ["elide-core/metadata", "elide-redaction/metadata"]
 ## The `tabular` modality. Implied by the tabular codec formats.
-tabular = ["elide-core/tabular", "elide-operator/tabular", "elide-redaction/tabular", "elide-engine?/tabular"]
+tabular = ["elide-core/tabular", "elide-redaction/tabular", "elide-engine?/tabular"]
 
 ## Re-export the codec crate: the `codec` module (`FormatRegistry`, decode /
 ## encode). On its own this enables no formats; use the per-modality or
@@ -124,9 +117,10 @@ codec = ["dep:elide-codec", "dep:elide-format"]
 
 ## Re-export the orchestration engine: the `engine` module (`Orchestrator`,
 ## `Report`, `Directives`). Implies `codec` (the orchestrator decodes documents
-## through it) and `serde` (`elide-engine` requires it — a `Report` exists to be
-## serialized for review and reconstructed with `deserialize_report`).
-engine = ["dep:elide-engine", "codec", "serde"]
+## through it), `serde` (`elide-engine` requires it — a `Report` exists to be
+## serialized for review and reconstructed with `deserialize_report`), and
+## `metadata` (every orchestrator redacts a document's metadata).
+engine = ["dep:elide-engine", "codec", "serde", "metadata"]
 
 ## Magic-byte sniffing: infer a binary format from the leading bytes when a
 ## document carries no filename extension or content type (see
@@ -184,15 +178,15 @@ metrics-recorder = ["metrics", "elide-backend/recorder"]
 metrics-tracing = ["metrics", "elide-backend/tracing"]
 
 ## The one-way `Sha2Hash` operator (SHA-256 / SHA-512).
-operator-sha2 = ["elide-operator/sha2"]
+operator-sha2 = ["elide-redaction/sha2"]
 ## The keyed `HmacHash` operator (HMAC-SHA-256 / HMAC-SHA-512).
-operator-hmac = ["elide-operator/hmac"]
+operator-hmac = ["elide-redaction/hmac"]
 ## The reversible `AesEncrypt` operator (AES-256-GCM) and its `KeyProvider`.
-operator-aes = ["elide-operator/aes"]
+operator-aes = ["elide-redaction/aes"]
 ## The `GeneralizeDate` operator (reduce date/timestamp granularity).
-operator-datetime = ["elide-operator/datetime"]
+operator-datetime = ["elide-redaction/datetime"]
 ## The locale-aware `Fake` redaction operator based on the `fake` crate.
-operator-fake = ["elide-operator/fake"]
+operator-fake = ["elide-redaction/fake"]
 
 [dependencies]
 # Internal crates
@@ -212,7 +206,6 @@ elide-codec = { workspace = true, features = [], optional = true }
 elide-format = { workspace = true, features = [], optional = true }
 elide-engine = { workspace = true, features = [], optional = true }
 elide-backend = { workspace = true, features = [], optional = true }
-elide-operator = { workspace = true, features = [] }
 elide-redaction = { workspace = true, features = [] }
 
 # Async runtime & parallelism

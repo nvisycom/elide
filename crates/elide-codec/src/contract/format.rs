@@ -93,9 +93,9 @@ impl Format {
     }
 
     /// Build a multi-part [`Format`] from a [`DocumentLoader`], which decodes
-    /// bytes into a [`Document`] of several parts (a stream plus blob sub-parts)
-    /// and its recombiner (e.g. a raster format whose `#exif` sub-part is
-    /// metadata).
+    /// bytes into a [`Document`] of several parts (streams and blob sub-parts)
+    /// and its recombiner (e.g. a raster format whose pixels and EXIF metadata
+    /// are two streams).
     pub fn with_document_loader<D: DocumentLoader>(id: FormatId, loader: D) -> Self {
         Self {
             id,

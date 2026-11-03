@@ -3,6 +3,8 @@
 
 use elide_core::Result;
 use elide_core::entity::Entity;
+#[cfg(feature = "metadata")]
+use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement};
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
@@ -122,5 +124,25 @@ impl Operator<Tabular> for Mask {
         data: &TextData,
     ) -> Result<TabularReplacement> {
         Ok(TextReplacement::substituted(self.render(data.as_str())).into())
+    }
+}
+
+#[cfg(feature = "metadata")]
+#[async_trait::async_trait]
+impl Operator<Metadata> for Mask {
+    fn id(&self) -> OperatorId {
+        Mask::id()
+    }
+
+    fn leak_profile(&self) -> LeakProfile {
+        LeakProfile::Partial
+    }
+
+    async fn anonymize(
+        &self,
+        _entity: &Entity<Metadata>,
+        data: &MetadataData,
+    ) -> Result<MetadataReplacement> {
+        Ok(MetadataReplacement::Replace(self.render(data.value())))
     }
 }

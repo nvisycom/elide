@@ -7,7 +7,7 @@
 //!   hash).
 //! - **External references**, always: the workbook's list of linked external
 //!   workbooks, whose parts are removed.
-//! - **Comment notes**, under [`Disposition::Strip`]: the legacy VML shape
+//! - **Comment notes**, under [`Disposition::StripNonEssential`]: the legacy VML shape
 //!   that draws each comment's note, left behind by the comments part.
 //! - **Threaded-comment dates and mentions**, when comments are redacted: when
 //!   a comment was written, and its mentions, which point into the comment's
@@ -249,7 +249,7 @@ impl Sanitizer for SheetClassifier {
     fn edits(&self, kind: PartKind, policy: HiddenContentPolicy) -> Edits<'static> {
         match kind {
             PartKind::Comments => vec![&EDITING_SESSION_IDS, &COMMENT_DATES, &MENTIONS],
-            PartKind::Drawing if policy.collaboration == Disposition::Strip => {
+            PartKind::Drawing if policy.collaboration == Disposition::StripNonEssential => {
                 vec![&EDITING_SESSION_IDS, &CommentNotes]
             }
             PartKind::Main => vec![
@@ -329,7 +329,7 @@ mod tests {
             ),
             ("xl/persons/person.xml", persons.as_bytes()),
         ]);
-        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::Redact);
+        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent);
         let (out, _) = sanitize(&package, policy, &SheetClassifier).unwrap();
         let out = out.unwrap();
         let comments =
@@ -350,7 +350,7 @@ mod tests {
 
     #[test]
     fn the_revision_log_is_stripped_even_when_collaboration_is_redacted() {
-        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::Redact);
+        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent);
         let (out, stripped) = sanitize(&workbook(), policy, &SheetClassifier).unwrap();
         let names = part_names(&out.unwrap());
         assert!(
@@ -375,7 +375,7 @@ mod tests {
         assert_eq!(count(&stripped, HiddenContent::Comment), 1);
 
         // Redacted comments keep their notes.
-        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::Redact);
+        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent);
         let (out, _) = sanitize(&workbook(), policy, &SheetClassifier).unwrap();
         let vml =
             String::from_utf8(read_part(&out.unwrap(), "xl/drawings/vmlDrawing1.vml").unwrap())

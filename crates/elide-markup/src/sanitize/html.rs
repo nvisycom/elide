@@ -121,7 +121,7 @@ impl MarkupSanitizer {
         }
         let renders = attribute("charset").is_some()
             || attribute("name").is_some_and(|name| name == "viewport");
-        (!renders && self.policy.metadata == Disposition::Strip)
+        (!renders && self.policy.metadata == Disposition::StripNonEssential)
             .then_some(HiddenContent::Properties)
     }
 }

@@ -1,15 +1,13 @@
-//! What each surfaced EXIF field is, and the fields and entities built from it.
+//! What each surfaced EXIF field is, and the fields built from it.
 //!
 //! The key→label table here is the format's schema: a `GPSLatitude` is a
 //! location, an `Artist` a person, whatever its value. Each surfaced field is
-//! stamped with its label, so the format-neutral field recognizer
-//! (`elide-detection`'s `FieldRecognizer`) turns it into an entity in the
-//! analyze pipeline, and the standalone
-//! [`entities`](Source::entities) read builds the same entities directly.
+//! stamped with its label, which is the field's detection: the orchestrator
+//! turns it into an entity.
 
 use elide_core::Result;
-use elide_core::entity::{Entity, LabelRef, builtins};
-use elide_core::modality::metadata::{Metadata, MetadataData};
+use elide_core::entity::{LabelRef, builtins};
+use elide_core::modality::metadata::MetadataData;
 
 use super::Source;
 
@@ -29,32 +27,8 @@ fn label_for(key: &str) -> Option<LabelRef> {
 }
 
 impl Source<'_> {
-    /// One [`Entity<Metadata>`] per privacy-relevant EXIF field the image
-    /// actually carries.
-    ///
-    /// Each entity is addressed by its tag key, labelled by what it exposes
-    /// (location, time, device, a person), and carries a deterministic
-    /// detection event: an EXIF field is present or it is not, so confidence is
-    /// `MAX`.
-    ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if
-    /// the metadata is present but unparseable.
-    pub(crate) fn entities(&self) -> Result<Vec<Entity<Metadata>>> {
-        Ok(self
-            .fields()?
-            .into_iter()
-            .filter_map(|field| {
-                let label = field.label.clone()?;
-                Metadata::field_entity(field.key(), label)
-            })
-            .collect())
-    }
-
     /// Each surfaced EXIF field the image carries, as a [`MetadataData`]
-    /// labelled with what it is, for a caller (the codec) that streams fields
-    /// to a recognizer.
+    /// labelled with what it is, for a caller (the codec) that streams fields.
     ///
     /// # Errors
     ///
@@ -64,12 +38,8 @@ impl Source<'_> {
         Ok(self
             .values()?
             .into_iter()
-            .map(|(key, value)| {
-                let field = MetadataData::new(key.to_owned(), value);
-                match label_for(key) {
-                    Some(label) => field.with_label(label),
-                    None => field,
-                }
+            .filter_map(|(key, value)| {
+                label_for(key).map(|label| MetadataData::new(key.to_owned(), value, label))
             })
             .collect())
     }
@@ -108,7 +78,7 @@ mod tests {
     }
 
     #[test]
-    fn one_entity_per_present_field_labelled_by_kind() {
+    fn one_field_per_present_tag_labelled_by_kind() {
         let bytes = jpeg_with(vec![
             ExifTag::Make("Nvisy".into()),
             ExifTag::DateTimeOriginal("2024:01:02 03:04:05".into()),
@@ -117,27 +87,32 @@ mod tests {
                 denominator: 1,
             }]),
         ]);
-        let entities = source(&bytes).entities().expect("entities");
+        let fields = source(&bytes).fields().expect("fields");
 
-        // GPS + timestamp + device make — three fields, three entities.
-        assert_eq!(entities.len(), 3);
+        // GPS + timestamp + device make — three tags, three fields.
+        assert_eq!(fields.len(), 3);
 
-        let at = |key: &str| entities.iter().find(|e| e.location.key == key);
-        let gps = at("GPSLatitude").expect("gps entity");
-        assert_eq!(gps.label, LabelRef::from(&*builtins::GEOLOCATION_METADATA));
-        let time = at("DateTimeOriginal").expect("time entity");
-        assert_eq!(time.label, LabelRef::from(&*builtins::DATE_TIME));
-        let make = at("Make").expect("make entity");
-        assert_eq!(make.label, LabelRef::from(&*builtins::DEVICE_ID));
-
-        // Each carries a detection event that verifies against its audit chain.
-        assert!(gps.audit.verify().is_ok());
+        let label = |key: &str| {
+            fields
+                .iter()
+                .find(|field| field.key() == key)
+                .map(|field| field.label().clone())
+        };
+        assert_eq!(
+            label("GPSLatitude"),
+            Some(LabelRef::from(&*builtins::GEOLOCATION_METADATA))
+        );
+        assert_eq!(
+            label("DateTimeOriginal"),
+            Some(LabelRef::from(&*builtins::DATE_TIME))
+        );
+        assert_eq!(label("Make"), Some(LabelRef::from(&*builtins::DEVICE_ID)));
     }
 
     #[test]
-    fn no_entities_without_exif() {
+    fn no_fields_without_exif() {
         let bytes = jpeg_with(Vec::new());
-        assert!(source(&bytes).entities().expect("entities").is_empty());
+        assert!(source(&bytes).fields().expect("fields").is_empty());
     }
 
     #[test]

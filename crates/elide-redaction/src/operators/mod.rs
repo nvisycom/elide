@@ -39,7 +39,7 @@
 //! [`Operator`]: elide_core::redaction::Operator
 //! [`Replacement`]: elide_core::modality::Modality::Replacement
 //! [`Vault`]: crate::vault::Vault
-//! [`Generator`]: crate::generator::Generator
+//! [`Generator`]: elide_core::redaction::Generator
 //! [`DataReader`]: elide_core::modality::DataReader
 
 // Operators grouped by modality (private submodules; the shipped types are

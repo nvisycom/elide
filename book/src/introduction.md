@@ -61,8 +61,7 @@ feature flags:
 | `elide-pattern` | Regex, dictionary, and checksum recognition |
 | `elide-ner` | Named-entity recognition over a model backend |
 | `elide-llm` | LLM and VLM recognition, and the `RigBackend` |
-| `elide-redaction` | The `Anonymizer` and `Deanonymizer` |
-| `elide-operator` | The redaction operators |
+| `elide-redaction` | The redaction operators, and the `Anonymizer` and `Deanonymizer` that apply them |
 | `elide-backend` | Backend decorators: metering, rate limits, routing |
 | `elide-engine` | The `Orchestrator` for multi-part documents |
 | `elide-image`, `elide-audio` | The image and audio modalities, OCR, and speech-to-text |

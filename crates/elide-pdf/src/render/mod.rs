@@ -55,7 +55,7 @@ pub struct RenderedPage {
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if PDFium
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if PDFium
 /// cannot load or render the document (or the native library is unavailable).
 pub(crate) fn render_pages(
     store: &Store,
@@ -76,7 +76,7 @@ pub(crate) fn render_pages(
 ///
 /// # Errors
 ///
-/// [`ErrorKind::MalformedInput`](crate::ErrorKind::MalformedInput) if PDFium
+/// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if PDFium
 /// cannot load or render the document (or the native library is unavailable).
 pub(crate) fn observe(store: &Store, scale: f32) -> Result<Vec<PageObservation>> {
     pdfium::observe(store.source_bytes().to_vec(), scale)
