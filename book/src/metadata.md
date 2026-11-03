@@ -59,11 +59,13 @@ metadata anonymizer; the operators that work on text, such as `Replace` and
 use elide::prelude::operators::*;
 use elide::prelude::*;
 
-let orchestrator = Orchestrator::new().with_anonymizer::<Metadata>(
-    Anonymizer::new()
-        .with(Rule::label(builtins::PERSON_NAME.to_ref(), Replace::new("[REDACTED]")))
-        .with(Rule::fallback(Erase)),
-);
+let orchestrator = Orchestrator::new()
+    .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
+    .with_anonymizer::<Metadata>(
+        Anonymizer::new()
+            .with(Rule::label(builtins::PERSON_NAME.to_ref(), Replace::new("[REDACTED]")))
+            .with(Rule::fallback(Erase)),
+    );
 ```
 
 A field that cannot hold arbitrary text, such as a GPS coordinate or a

@@ -99,10 +99,10 @@ ocr = ["dep:elide-image", "elide-image/ocr", "image"]
 
 ## The `audio` modality. Implied by the audio codec formats.
 audio = ["dep:elide-audio", "elide-operator/audio", "elide-engine?/audio"]
-## The `image` modality. Implied by the image codec formats. Enables the light
-## `exif` path (little_exif, no pixel codec) so EXIF fields are readable
-## without a decoder, and pulls in the `metadata` modality: a raster image
-## carries EXIF metadata as a redactable part.
+## The `image` modality. Implied by the image codec formats. Enables `exif`
+## (little_exif) and pulls in the `metadata` modality: a raster image carries
+## EXIF metadata as a redactable part. Reading it decodes the image, so it
+## needs the image's codec feature (`codec-png`, `codec-jpeg`, `codec-tiff`).
 image = ["dep:elide-image", "elide-image/exif", "elide-operator/image", "elide-engine?/image", "metadata"]
 ## The `metadata` modality: a document's out-of-band fields (EXIF, document
 ## properties) as redaction subjects.
