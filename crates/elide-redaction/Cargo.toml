@@ -25,7 +25,13 @@ default = []
 
 ## Derive `serde::{Serialize, Deserialize}` on the operator types, and forward
 ## `serde` to `elide-core` so the audit and entity types serialize.
-serde = ["dep:serde", "elide-core/serde", "bytes/serde"]
+serde = [
+    "dep:serde",
+    "elide-core/serde",
+    "elide-image?/serde",
+    "elide-audio?/serde",
+    "bytes/serde",
+]
 ## Derive `schemars::JsonSchema` on the operator types.
 schema = [
     "dep:schemars",

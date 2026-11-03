@@ -61,6 +61,7 @@ use elide::prelude::*;
 
 let orchestrator = Orchestrator::new()
     .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
+    .with_registry(FormatRegistry::with_builtin())
     .with_anonymizer::<Metadata>(
         Anonymizer::new()
             .with(Rule::label(builtins::PERSON_NAME.to_ref(), Replace::new("[REDACTED]")))
@@ -69,5 +70,6 @@ let orchestrator = Orchestrator::new()
 ```
 
 A field that cannot hold arbitrary text, such as a GPS coordinate or a
-timestamp in its fixed format, is removed instead of overwritten. A field no
-rule covers is kept, as in every other modality.
+timestamp in its fixed format, is removed instead of overwritten. The
+fallback rule erases every other redacted field; without one, a redacted
+field no rule covers is kept, as in every other modality.
