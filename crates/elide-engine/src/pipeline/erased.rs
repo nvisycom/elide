@@ -99,6 +99,13 @@ where
                 })?;
                 streams.push(stream);
             }
+            let schema = match self.schema {
+                Some(schema) => streams
+                    .iter()
+                    .map(|stream| schema(stream, scope, &regions))
+                    .collect::<Result<Vec<_>>>()?,
+                None => Vec::new(),
+            };
             // Each seed downcasts as in `analyze_stream`: a matching prior artifact
             // restores, anything else (first-pass `NoArtifact`, other modality) is
             // `None` so the group enriches from scratch.
@@ -106,10 +113,13 @@ where
                 .iter()
                 .map(|seed| seed.as_any().downcast_ref::<M::Artifact>().cloned())
                 .collect();
-            let analyses = self
+            let mut analyses = self
                 .analyzer
                 .analyze_streams(&mut streams, scope, &regions, seeds)
                 .await?;
+            for (analysis, entities) in analyses.iter_mut().zip(schema) {
+                analysis.entities.extend(entities);
+            }
             Ok(analyses
                 .into_iter()
                 .map(|analysis| {
