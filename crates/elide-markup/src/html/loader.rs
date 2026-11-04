@@ -225,6 +225,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_meta_name_is_read_as_a_browser_reads_it() {
+        let raw = r#"<html><head><meta name="view&#112;ort" content="width=device-width"><meta name="&#97;uthor" content="Jane Roe"></head><body><p>Hi</p></body></html>"#;
+        let policy = HiddenContentPolicy::default().with_metadata(Disposition::FlagEverything);
+        let mut doc = load_with(raw, policy).await;
+        let stream = body(&mut doc);
+        let flagged = stream.flagged().unwrap();
+        assert_eq!(flagged.len(), 1, "{flagged:?}");
+        assert_eq!(flagged[0].label, builtins::PERSON_NAME.to_ref());
+        let text = stream.read_at(&flagged[0].location).await.unwrap().unwrap();
+        assert_eq!(text.as_str(), "Jane Roe");
+    }
+
+    #[tokio::test]
     async fn attribute_redact_round_trips() {
         let raw = r#"<html><body><img alt="alice@example.com"></body></html>"#;
         let mut doc = load(raw).await;

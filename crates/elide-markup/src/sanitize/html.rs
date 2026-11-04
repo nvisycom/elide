@@ -8,8 +8,8 @@ use elide_core::{Error, Result};
 
 use super::url::{SCRIPT_SCHEMES, css_loads_remote, is_remote, loads_remote, normalized_url};
 use super::{MarkupSanitizer, Removal, Verdict};
+use crate::engine::meta;
 use crate::engine::tag::HtmlTag;
-use crate::html::meta;
 
 /// HTML elements that run or embed active content, removed with their whole
 /// subtree: a script, a plugin object, and a frame that loads another page or
@@ -101,7 +101,7 @@ impl MarkupSanitizer {
             attributes
                 .iter()
                 .find(|attr| attr.key.eq_ignore_ascii_case(key))
-                .map(|attr| attr.value.trim().to_ascii_lowercase())
+                .map(|attr| meta::normalized(attr.value))
         };
         if attribute("http-equiv")
             .is_some_and(|directive| ACTING_DIRECTIVES.contains(&directive.as_str()))

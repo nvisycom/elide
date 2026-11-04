@@ -35,10 +35,13 @@ cannot surface it to detection strips it instead. `FlagEverything` keeps the
 content as `ScanAsContent` does and also makes every item its format labels an
 entity, whatever the catalog declares: each metadata field (an HTML `<meta>`
 field included, labelled by its name), and each comment, author, and tracked
-deletion, which is then erased whole. A flagged item is erased even when the
+deletion, which is then erased whole; a legacy Excel note's own text is
+removed at decode and its shape kept. A flagged item is erased even when the
 anonymizer has no rule for its label; a rule that matches it decides instead,
 so a text rule for `communications_content` (what a comment says) or
-`person_name` (who wrote it), or `Keep` to leave it, treats it otherwise.
+`person_name` (who wrote it), or `Keep` to leave it, treats it otherwise. A kept
+item is still scanned, and what a recognizer finds inside it is redacted on its
+own. An exclusion spares a flagged item only when it covers the whole item.
 
 A redacted office comment or change keeps its author's name and account,
 which are detected and redacted, but not its date: a date the format lets go
@@ -97,6 +100,8 @@ Everything else hidden is handled the same way whatever the policy:
   alternative text and hyperlink tooltips in every format; an office form
   field's help and status text and a content control's title and tag; and a
   workbook's revision log, whatever the policy.
+- **XML comments** in an office document: nothing reads them and no reader
+  sees them.
 - **Hidden layers**: the content of a PDF layer the document hides by default,
   and the layer configuration itself; visible layers' content stays on the
   page and is redacted like the rest. An HTML `<template>` and an element

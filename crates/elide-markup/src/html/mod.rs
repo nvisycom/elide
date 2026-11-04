@@ -2,7 +2,6 @@
 
 mod handler;
 mod loader;
-pub(crate) mod meta;
 
 pub use self::handler::format;
 pub(crate) use self::loader::HtmlLoader;

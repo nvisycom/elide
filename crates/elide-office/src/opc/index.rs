@@ -104,6 +104,12 @@ impl Index {
             })
     }
 
+    /// Whether `part` is a legacy VML drawing.
+    pub(crate) fn is_vml(&self, part: &PartPath) -> bool {
+        self.content_type(part)
+            .is_some_and(|content_type| content_type.eq_ignore_ascii_case(VML))
+    }
+
     /// The kind of `part`.
     ///
     /// The content type decides, with the relationship that reaches the part

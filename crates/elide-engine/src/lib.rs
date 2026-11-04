@@ -14,6 +14,7 @@ use std::collections::HashMap;
 
 use elide_codec::TypedStream;
 use elide_core::entity::Entity;
+use elide_core::modality::text::Text;
 use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::recognition::Scope;
 use elide_core::redaction::Operator;
@@ -51,9 +52,11 @@ use self::traversal::{Analyze, Redact, Walk};
 /// one, under [`Disposition::FlagEverything`]) is detected, and erased unless
 /// [`with_anonymizer`] sets another treatment. Under `FlagEverything` for
 /// collaboration, each comment, author, and tracked deletion a format labels is
-/// an entity too. Every pipeline's anonymizer ends in a rule erasing flagged
-/// hidden content its own rules do not cover, so a flagged item is redacted
-/// unless a caller rule (a [`Keep`], say) matches it first.
+/// an entity too, so every orchestrator also drives text, with no recognizers
+/// until [`with_analyzer`] or [`with_modality`] sets some. Every pipeline's
+/// anonymizer ends in a rule erasing flagged hidden content its own rules do not
+/// cover, so a flagged item is redacted unless a caller rule (a [`Keep`], say)
+/// matches it first.
 ///
 /// [`with_modality`]: Orchestrator::with_modality
 /// [`with_registry`]: Orchestrator::with_registry
@@ -61,6 +64,7 @@ use self::traversal::{Analyze, Redact, Walk};
 /// [`anonymize_with`]: Orchestrator::anonymize_with
 /// [`anonymize`]: Orchestrator::anonymize
 /// [`with_anonymizer`]: Orchestrator::with_anonymizer
+/// [`with_analyzer`]: Orchestrator::with_analyzer
 /// [`Keep`]: elide_redaction::operators::Keep
 /// [`Metadata`]: elide_core::modality::metadata::Metadata
 /// [`Disposition::FlagEverything`]: elide_core::redaction::Disposition::FlagEverything
@@ -85,16 +89,22 @@ impl Default for Orchestrator {
             scope: Scope::default(),
         };
         orchestrator.insert_pipeline(metadata::pipeline());
+        orchestrator.insert_pipeline(ModalityPipeline::<Text>::new(
+            Analyzer::new(),
+            Anonymizer::new(),
+        ));
         orchestrator
     }
 }
 
 impl Orchestrator {
-    /// A new orchestrator: only the built-in [`Metadata`] pipeline, an empty
-    /// [`Scope`], and an empty [`FormatRegistry`] (so container parts do not
-    /// decode until one is supplied via [`with_registry`]).
+    /// A new orchestrator: only the built-in [`Metadata`] pipeline and a [`Text`]
+    /// pipeline that detects nothing and erases only flagged hidden content, an
+    /// empty [`Scope`], and an empty [`FormatRegistry`] (so container parts do
+    /// not decode until one is supplied via [`with_registry`]).
     ///
     /// [`with_registry`]: Self::with_registry
+    /// [`Text`]: elide_core::modality::text::Text
     /// [`Metadata`]: elide_core::modality::metadata::Metadata
     pub fn new() -> Self {
         Self::default()

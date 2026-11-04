@@ -3,6 +3,8 @@
 
 use elide_core::entity::{LabelRef, builtins};
 
+use crate::references::{CharacterReferences, decode_references};
+
 /// The `http-equiv` directives that only affect how the page renders.
 const RENDER_DIRECTIVES: [&str; 5] = [
     "content-type",
@@ -12,13 +14,39 @@ const RENDER_DIRECTIVES: [&str; 5] = [
     "default-style",
 ];
 
-/// Whether the `<meta>` tag whose (lowercased, trimmed) attribute values
-/// `attribute` reads renders the page: its character set, the viewport, or a
-/// rendering `http-equiv` directive.
+/// The attributes that name a `<meta>` field, in the order they are read.
+const FIELD_NAMES: [&str; 3] = ["name", "property", "itemprop"];
+
+/// A `<meta>` attribute's raw `value` as a browser compares it: character
+/// references decoded, trimmed, lowercased.
+pub(crate) fn normalized(value: &str) -> String {
+    let (decoded, _) = decode_references(value, 0, CharacterReferences::Html);
+    decoded.trim().to_ascii_lowercase()
+}
+
+/// The names of the fields the `<meta>` tag `attribute` reads declares.
+fn field_names(attribute: &impl Fn(&str) -> Option<String>) -> Vec<String> {
+    FIELD_NAMES
+        .into_iter()
+        .filter_map(attribute)
+        .filter(|name| !name.is_empty())
+        .collect()
+}
+
+/// Whether the `<meta>` tag whose [normalized](normalized) attribute values
+/// `attribute` reads renders the page: the viewport, or a tag naming no field
+/// that sets a rendering `http-equiv` directive or only the character set. A tag
+/// that names any other field is that field, whatever else it sets, and a
+/// character set beside a `content` is no reason to keep that content.
 pub(crate) fn renders(attribute: impl Fn(&str) -> Option<String>) -> bool {
+    let names = field_names(&attribute);
+    if !names.is_empty() {
+        return attribute("name").is_some_and(|name| name == "viewport")
+            && names.iter().all(|name| name == "viewport");
+    }
     attribute("http-equiv").is_some_and(|directive| RENDER_DIRECTIVES.contains(&directive.as_str()))
-        || attribute("charset").is_some()
-        || attribute("name").is_some_and(|name| name == "viewport")
+        || (attribute("charset").is_some()
+            && attribute("content").is_none_or(|content| content.is_empty()))
 }
 
 /// What the `content` of the `<meta>` tag `attribute` reads is, or `None` when
@@ -31,9 +59,13 @@ pub(crate) fn label(attribute: impl Fn(&str) -> Option<String>) -> Option<LabelR
     if renders(&attribute) {
         return None;
     }
-    let key = ["name", "property", "itemprop", "http-equiv"]
-        .into_iter()
-        .find_map(&attribute)
+    let names = field_names(&attribute);
+    let key = names
+        .iter()
+        .find(|name| *name != "viewport")
+        .or(names.first())
+        .cloned()
+        .or_else(|| attribute("http-equiv"))
         .unwrap_or_default();
     let label = match key.as_str() {
         "author" | "creator" | "dc.creator" | "article:author" | "book:author" => {
@@ -94,5 +126,33 @@ mod tests {
         assert_eq!(label_of(&[("charset", "utf-8")]), None);
         assert_eq!(label_of(&[("name", "viewport")]), None);
         assert_eq!(label_of(&[("http-equiv", "content-type")]), None);
+    }
+
+    #[test]
+    fn a_tag_naming_a_field_is_that_field_whatever_else_it_sets() {
+        let person = LabelRef::from(&*builtins::PERSON_NAME);
+        for other in [("charset", "utf-8"), ("http-equiv", "content-type")] {
+            assert_eq!(label_of(&[other, ("name", "author")]), Some(person.clone()));
+        }
+    }
+
+    #[test]
+    fn a_viewport_that_also_names_a_field_is_that_field() {
+        let tag = [("name", "viewport"), ("property", "author")];
+        assert_eq!(
+            label_of(&tag),
+            Some(LabelRef::from(&*builtins::PERSON_NAME))
+        );
+    }
+
+    #[test]
+    fn a_character_set_does_not_keep_a_content() {
+        let tag = [("charset", "utf-8"), ("content", "jane roe")];
+        assert_eq!(label_of(&tag), Some(LabelRef::from(&*builtins::UNRESOLVED)));
+    }
+
+    #[test]
+    fn a_value_is_compared_as_a_browser_reads_it() {
+        assert_eq!(normalized(" re&#102;RESH "), "refresh");
     }
 }

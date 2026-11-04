@@ -195,6 +195,20 @@ async fn a_metadata_anonymizer_treats_flagged_fields() {
     assert!(has_gps(&out), "GPS was redacted despite a rule keeping it");
 }
 
+/// A blank overwrite holds nothing, so the field goes and the encode check has
+/// nothing to object to.
+#[tokio::test]
+async fn overwriting_a_field_with_nothing_removes_it() {
+    let orchestrator = Orchestrator::new()
+        .with_anonymizer::<Metadata>(Anonymizer::new().with(Rule::label(
+            builtins::PERSON_NAME.to_ref(),
+            Replace::new(""),
+        )))
+        .with_registry(FormatRegistry::with_builtin());
+    let out = redact_under(&orchestrator, jpeg_with_exif(), Disposition::FlagEverything).await;
+    assert_eq!(artist(&out), None);
+}
+
 #[tokio::test]
 async fn a_flagged_field_no_rule_covers_is_erased() {
     let orchestrator = Orchestrator::new()

@@ -463,6 +463,29 @@ mod tests {
         assert_eq!(sanitize(html(redact), raw), "<head></head>");
     }
 
+    /// A browser decodes character references in a directive's name, so a
+    /// spelled-out redirect still redirects and is removed with the others.
+    #[test]
+    fn an_encoded_acting_directive_is_still_caught() {
+        let raw =
+            r#"<head><meta http-equiv="re&#102;resh" content="0;url=https://example.com/"></head>"#;
+        let redact = HiddenContentPolicy::default().with_metadata(Disposition::ScanAsContent);
+        assert_eq!(sanitize(html(redact), raw), "<head></head>");
+    }
+
+    /// A tag that names a field is metadata, even when it also sets something
+    /// that renders the page.
+    #[test]
+    fn a_rendering_attribute_does_not_keep_a_field() {
+        for raw in [
+            r#"<head><meta charset="utf-8" name="author" content="Jane Roe"></head>"#,
+            r#"<head><meta http-equiv="content-type" name="author" content="Jane Roe"></head>"#,
+        ] {
+            let out = sanitize(html(HiddenContentPolicy::default()), raw);
+            assert_eq!(out, "<head></head>");
+        }
+    }
+
     /// A browser decodes character references and drops tabs, line breaks, and
     /// leading control characters before it reads a URL's scheme, so the check
     /// does too.

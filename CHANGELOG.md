@@ -83,10 +83,23 @@ and this project adheres to
   whole; a stream reports its labelled hidden content through
   `Stream::flagged`, and the audit records it as a `Flagged` event naming its
   kind, replacing the metadata-only event
+- Every orchestrator drives text out of the box, with no recognizers, so
+  flagged hidden content in a text stream is erased with nothing registered
 - Every pipeline's anonymizer erases a flagged entity no rule covers, so
   flagged hidden content is never kept for want of a rule; registering a
   pipeline requires `Erase: Operator<M>`, and `Keep` and the new
-  `MetadataReplacement::Unchanged` leave a metadata field as it is
+  `MetadataReplacement::Unchanged` leave a metadata field as it is; an EXIF
+  field goes with its group when another of the group is redacted
+- Office documents always lose their XML comments, and a workbook with a legacy
+  VML drawing, whose root has no namespace, is no longer refused at encode
+- An EXIF tag of a logical group (a destination coordinate, a lens, a modify
+  date) is stripped when the image carries no field of that group, since it
+  could not reach detection
+- HTML `<meta>` names are read with character references decoded, so an encoded
+  redirect is removed; a tag naming a field is metadata even when it also sets
+  a character set or rendering directive, and a character set does not keep a
+  `content` beside it
+- Overwriting an EXIF field with blank text removes it
 - Hidden-content audit: every stripped item is recorded on the `Report`
   (`stripped()`) by part, item, and count in a format-neutral
   `HiddenContent` vocabulary, filled by `analyze` and replaced by what

@@ -85,7 +85,11 @@ pub(crate) fn check(
                 "`{path}` carries text no extraction reads: `{stray}`"
             )));
         }
-        let vocabulary = Vocabulary::default();
+        let vocabulary = if index.is_vml(path) {
+            Vocabulary::vml()
+        } else {
+            Vocabulary::default()
+        };
         xml_edit::edit(raw, &vocabulary)?;
         if let Some(namespace) = vocabulary.unknown() {
             return Err(Error::sanitization(format!(

@@ -8,7 +8,9 @@
 //! - **External references**, always: the workbook's list of linked external
 //!   workbooks, whose parts are removed.
 //! - **Comment notes**, under [`KeepOnlyEssential`](elide_core::redaction::Disposition::KeepOnlyEssential): the legacy VML shape
-//!   that draws each comment's note, left behind by the comments part.
+//!   that draws each comment's note, left behind by the comments part. Under
+//!   [`FlagEverything`](elide_core::redaction::Disposition::FlagEverything) the
+//!   shape stays, for the comment it draws, without any text of its own.
 //! - **Threaded-comment dates and mentions**, when comments are redacted: when
 //!   a comment was written, and its mentions, which point into the comment's
 //!   text by offset and would point at the wrong text once it is redacted (the
@@ -16,7 +18,7 @@
 
 use std::ops::Range;
 
-use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
+use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
 use elide_core::{Error, Result};
 use quick_xml::NsReader;
 use quick_xml::events::Event;
@@ -106,76 +108,128 @@ const EXCEL: &str = "urn:schemas-microsoft-com:office:excel";
 /// each shape whole before cutting it.
 struct CommentNotes;
 
+/// The text in the text boxes of the [comment notes](CommentNotes), which
+/// leaves the shapes in place.
+struct CommentNoteText;
+
+/// An open VML shape as [`cut_notes`] reads it.
+struct OpenShape {
+    start: usize,
+    note: bool,
+    /// The non-blank text of its text box.
+    text: Vec<Range<usize>>,
+}
+
 impl Edit for CommentNotes {
     fn content(&self) -> Option<HiddenContent> {
         Some(HiddenContent::Comment)
     }
 
     fn apply(&self, raw: &str) -> Result<Option<Edited>> {
-        let mut reader = NsReader::from_str(raw);
-        let bom = if raw.starts_with('\u{feff}') { 3 } else { 0 };
-        let mut last = bom;
-        // The open shapes: each one's start byte and whether it is a note.
-        let mut shapes: Vec<(usize, bool)> = Vec::new();
-        // Whether each open element is a shape.
-        let mut open: Vec<bool> = Vec::new();
-        let mut cuts: Vec<Range<usize>> = Vec::new();
-        loop {
-            let (resolved, event) = reader
-                .read_resolved_event()
-                .map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
-            let namespace = bound(&resolved);
-            let span = last..reader.buffer_position() as usize + bom;
-            last = span.end;
-            match event {
-                Event::Eof => break,
-                Event::Start(ref e) | Event::Empty(ref e) => {
-                    let local = e.local_name();
-                    let local = local.into_inner();
-                    let in_ns = |ns: &str| namespace.as_deref() == Some(ns);
-                    if in_ns(EXCEL) && local == "ClientData" {
-                        let note = e.attributes().flatten().any(|attr| {
-                            attr.key.local_name().as_ref() == "ObjectType"
-                                && attr.value.as_ref() == "Note"
-                        });
-                        if note && let Some(shape) = shapes.last_mut() {
-                            shape.1 = true;
-                        }
-                    }
-                    if matches!(event, Event::Start(_)) {
-                        let shape = in_ns(VML) && local == "shape";
-                        if shape {
-                            shapes.push((span.start, false));
-                        }
-                        open.push(shape);
-                    }
-                }
-                Event::End(_) => {
-                    if open.pop() == Some(true)
-                        && let Some((start, note)) = shapes.pop()
-                        && note
-                    {
-                        cuts.push(start..span.end);
-                    }
-                }
-                _ => {}
-            }
-        }
-        if cuts.is_empty() {
-            return Ok(None);
-        }
-        let count = cuts.len();
-        let mut text = String::with_capacity(raw.len());
-        let mut cursor = 0;
-        for cut in cuts {
-            // A note is never inside another, so the cuts are disjoint and in
-            // order.
-            text.push_str(&raw[cursor..cut.start]);
-            cursor = cut.end;
-        }
-        text.push_str(&raw[cursor..]);
-        Ok(Some(Edited { text, count }))
+        cut_notes(raw, true)
     }
+}
+
+impl Edit for CommentNoteText {
+    fn content(&self) -> Option<HiddenContent> {
+        Some(HiddenContent::Comment)
+    }
+
+    fn apply(&self, raw: &str) -> Result<Option<Edited>> {
+        cut_notes(raw, false)
+    }
+}
+
+/// `raw` without its comment notes: each `whole` shape, or else the text of each
+/// one's text box. The count is of the notes changed.
+fn cut_notes(raw: &str, whole: bool) -> Result<Option<Edited>> {
+    let mut reader = NsReader::from_str(raw);
+    let bom = if raw.starts_with('\u{feff}') { 3 } else { 0 };
+    let mut last = bom;
+    let mut shapes: Vec<OpenShape> = Vec::new();
+    // What each open element is.
+    let mut open: Vec<(bool, bool)> = Vec::new();
+    let mut cuts: Vec<Range<usize>> = Vec::new();
+    let mut count = 0;
+    loop {
+        let (resolved, event) = reader
+            .read_resolved_event()
+            .map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
+        let namespace = bound(&resolved);
+        let span = last..reader.buffer_position() as usize + bom;
+        last = span.end;
+        match event {
+            Event::Eof => break,
+            Event::Start(ref e) | Event::Empty(ref e) => {
+                let local = e.local_name();
+                let local = local.into_inner();
+                let in_ns = |ns: &str| namespace.as_deref() == Some(ns);
+                if in_ns(EXCEL) && local == "ClientData" {
+                    let note = e.attributes().flatten().any(|attr| {
+                        attr.key.local_name().as_ref() == "ObjectType"
+                            && attr.value.as_ref() == "Note"
+                    });
+                    if note && let Some(shape) = shapes.last_mut() {
+                        shape.note = true;
+                    }
+                }
+                if matches!(event, Event::Start(_)) {
+                    let shape = in_ns(VML) && local == "shape";
+                    if shape {
+                        shapes.push(OpenShape {
+                            start: span.start,
+                            note: false,
+                            text: Vec::new(),
+                        });
+                    }
+                    open.push((shape, in_ns(VML) && local == "textbox"));
+                }
+            }
+            Event::Text(_) | Event::GeneralRef(_) | Event::CData(_)
+                if open.iter().any(|&(_, textbox)| textbox)
+                    && !raw[span.clone()].trim().is_empty() =>
+            {
+                if let Some(shape) = shapes.last_mut() {
+                    shape.text.push(span);
+                }
+            }
+            Event::End(_) => {
+                if open.pop().is_some_and(|(shape, _)| shape)
+                    && let Some(shape) = shapes.pop()
+                    && shape.note
+                {
+                    if whole {
+                        count += 1;
+                        cuts.push(shape.start..span.end);
+                    } else if !shape.text.is_empty() {
+                        count += 1;
+                        cuts.extend(shape.text);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(cut(raw, cuts).map(|text| Edited { text, count }))
+}
+
+/// `raw` without the `cuts`, which may nest (a crafted drawing can put a shape
+/// inside another), or `None` when there are none.
+fn cut(raw: &str, mut cuts: Vec<Range<usize>>) -> Option<String> {
+    if cuts.is_empty() {
+        return None;
+    }
+    cuts.sort_unstable_by_key(|cut| cut.start);
+    let mut text = String::with_capacity(raw.len());
+    let mut cursor = 0;
+    for cut in cuts {
+        if cut.start >= cursor {
+            text.push_str(&raw[cursor..cut.start]);
+        }
+        cursor = cursor.max(cut.end);
+    }
+    text.push_str(&raw[cursor..]);
+    Some(text)
 }
 
 /// A sheet's name, shown on its tab.
@@ -254,6 +308,9 @@ impl Sanitizer for SheetClassifier {
             PartKind::Comments => vec![&EDITING_SESSION_IDS, &COMMENT_DATES, &MENTIONS],
             PartKind::Drawing if !policy.collaboration.treats_as_content() => {
                 vec![&EDITING_SESSION_IDS, &CommentNotes]
+            }
+            PartKind::Drawing if policy.collaboration == Disposition::FlagEverything => {
+                vec![&EDITING_SESSION_IDS, &CommentNoteText]
             }
             PartKind::Main => vec![
                 &EDITING_SESSION_IDS,
@@ -384,5 +441,39 @@ mod tests {
             String::from_utf8(read_part(&out.unwrap(), "xl/drawings/vmlDrawing1.vml").unwrap())
                 .unwrap();
         assert!(vml.contains("Note"), "{vml}");
+    }
+
+    /// A crafted drawing nests one note in another; both go without a panic.
+    #[test]
+    fn nested_notes_are_cut_whole() {
+        let raw = r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:x="urn:schemas-microsoft-com:office:excel"><v:shape>a<v:shape><x:ClientData ObjectType="Note"/></v:shape><x:ClientData ObjectType="Note"/></v:shape><v:rect/></xml>"#;
+        let edited = CommentNotes.apply(raw).unwrap().unwrap();
+        assert_eq!(
+            edited.text,
+            r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:x="urn:schemas-microsoft-com:office:excel"><v:rect/></xml>"#
+        );
+    }
+
+    /// One note counts once, however its text is split.
+    #[test]
+    fn a_note_counts_once_whatever_its_text_events() {
+        let raw = r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:x="urn:schemas-microsoft-com:office:excel"><v:shape><v:textbox><div>Jane &amp; Co</div></v:textbox><x:ClientData ObjectType="Note"/></v:shape></xml>"#;
+        let edited = CommentNoteText.apply(raw).unwrap().unwrap();
+        assert_eq!(edited.count, 1);
+        assert!(edited.text.contains("<div></div>"), "{}", edited.text);
+    }
+
+    #[test]
+    fn flagging_every_comment_empties_each_note_and_keeps_its_shape() {
+        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::FlagEverything);
+        let (out, stripped) = sanitize(&workbook(), policy, &SheetClassifier).unwrap();
+        let vml =
+            String::from_utf8(read_part(&out.unwrap(), "xl/drawings/vmlDrawing1.vml").unwrap())
+                .unwrap();
+        assert!(!vml.contains("<div>Note</div>"), "{vml}");
+        assert!(vml.contains(r#"ObjectType="Note""#), "{vml}");
+        assert!(vml.contains("<x:Row>0</x:Row>"), "{vml}");
+        assert!(vml.contains("<div>Button</div>"), "{vml}");
+        assert_eq!(count(&stripped, HiddenContent::Comment), 1);
     }
 }

@@ -33,9 +33,9 @@ use quick_xml::events::{BytesEnd, BytesStart, Event};
 
 use super::address::{SpanKind, XmlItem, XmlSpan};
 use super::config::MarkupConfig;
+use super::meta;
 use super::source::{AttributeSpan, MarkupSink, MarkupSource};
 use super::tag::HtmlTagExt;
-use crate::html::meta;
 
 /// Extract the redactable markup items from `raw` under `config`. Exposed for
 /// the HTML loader (lenient config) and for container formats that run the
@@ -276,12 +276,10 @@ impl<'a> MarkupParser<'a> {
                 .is_some_and(|name| self.source.slice(name).eq_ignore_ascii_case(key))
         };
         let label = meta::label(|key| {
-            attributes.iter().find(|attr| named(attr, key)).map(|attr| {
-                self.source
-                    .slice(attr.value.clone())
-                    .trim()
-                    .to_ascii_lowercase()
-            })
+            attributes
+                .iter()
+                .find(|attr| named(attr, key))
+                .map(|attr| meta::normalized(self.source.slice(attr.value.clone())))
         });
         let Some(label) = label else {
             return;

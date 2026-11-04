@@ -90,3 +90,10 @@ timestamp in its fixed format, is removed instead of overwritten. A redacted
 field no rule covers is erased: a field is hidden content its format flagged,
 so it is not kept for want of a rule. Only an entity a metadata analyzer adds
 is kept when no rule covers it, as in every other modality.
+
+Some EXIF fields are redacted as a group, since one alone would still give away
+what the others hold: GPS coordinates clear the whole GPS block, and `Make`,
+`Model`, or `SerialNumber` clear all three and the lens tags. Removal wins inside
+a group: keeping `Model` while erasing `Make` removes both. A tag in such a group
+stays only in an image that carries one of its fields; one with no such field
+cannot reach detection, so it is stripped.

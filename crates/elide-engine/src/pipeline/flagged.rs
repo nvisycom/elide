@@ -3,15 +3,18 @@
 //! entities as the document's [`HiddenContentPolicy`] says, before and beside
 //! any recognizer, and the rule that erases them when no caller rule says how.
 
+use std::any::TypeId;
+
 use elide_codec::{FlaggedItem, TypedStream};
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::entity::audit::{Attribution, AuditEvent, FlaggedEvent};
-use elide_core::modality::{Modality, ModalityLocation};
+use elide_core::modality::metadata::Metadata;
+use elide_core::modality::{Modality, ModalityLocation, Overlap};
 use elide_core::primitive::Confidence;
 use elide_core::recognition::Scope;
 use elide_core::recognition::annotation::Annotations;
-use elide_core::redaction::{Disposition, HiddenContentKind, HiddenContentPolicy, Operator};
+use elide_core::redaction::{Disposition, HiddenContentPolicy, Operator};
 use elide_redaction::Rule;
 use elide_redaction::operators::Erase;
 
@@ -34,13 +37,16 @@ where
 }
 
 /// One entity per item `stream` flags that `policy` selects and no exclusion
-/// covers.
+/// covers whole.
 ///
 /// Under [`FlagEverything`](Disposition::FlagEverything) every item is
-/// selected. Under [`ScanAsContent`](Disposition::ScanAsContent) a metadata
-/// field is selected when the scope's catalog declares its label, since no
-/// recognizer reads a field and its label is its detection; collaboration
-/// content is not, since recognizers scan its text like body text.
+/// selected. Under [`ScanAsContent`](Disposition::ScanAsContent) an item of a
+/// metadata stream is selected when the scope's catalog declares its label,
+/// since no recognizer reads a metadata field and its label is its detection;
+/// an item of a text stream is not, since recognizers scan it like body text.
+///
+/// An exclusion inside an item does not spare it: the item is one entity, and
+/// the rest of it has no other detection to fall back on.
 pub(crate) fn entities<M: Modality>(
     stream: &TypedStream<M>,
     scope: &Scope,
@@ -56,7 +62,7 @@ pub(crate) fn entities<M: Modality>(
             !annotations
                 .exclusions
                 .iter()
-                .any(|exclusion| item.location.overlaps(&exclusion.location))
+                .any(|exclusion| exclusion.location.overlap(&item.location) == Overlap::Contains)
         })
         .filter_map(|item| entity(source.as_str(), item))
         .collect())
@@ -67,7 +73,7 @@ fn selects<M: Modality>(policy: HiddenContentPolicy, scope: &Scope, item: &Flagg
     match policy.disposition(item.kind) {
         Some(Disposition::FlagEverything) => true,
         Some(Disposition::ScanAsContent) => {
-            item.kind == HiddenContentKind::Metadata && scope.catalog.contains(&item.label)
+            TypeId::of::<M>() == TypeId::of::<Metadata>() && scope.catalog.contains(&item.label)
         }
         Some(Disposition::KeepOnlyEssential) | None => false,
     }

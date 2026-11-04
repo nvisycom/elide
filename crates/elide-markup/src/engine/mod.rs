@@ -5,11 +5,12 @@
 //! comments) grouped into passages, the [`address`] of each maps its decoded
 //! value back onto the raw bytes, and the [`recombine`] step writes back only
 //! what a redaction changed. [`config`] says how a dialect is read, [`source`]
-//! holds the document and the growing item stream, and [`tag`] reads an HTML
-//! tag the way a browser does.
+//! holds the document and the growing item stream, [`tag`] reads an HTML tag
+//! the way a browser does, and [`meta`] says what an HTML `<meta>` tag is.
 
 pub(crate) mod address;
 pub(crate) mod config;
+pub(crate) mod meta;
 pub(crate) mod parser;
 pub(crate) mod recombine;
 pub(crate) mod source;

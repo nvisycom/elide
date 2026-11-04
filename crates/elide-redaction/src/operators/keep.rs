@@ -25,6 +25,10 @@ use serde::{Deserialize, Serialize};
 /// Works across modalities, a text/tabular span stays verbatim, an image
 /// region or audio range is left untouched, a metadata field keeps its value. Like the other operators, [`Keep`]
 /// is implemented per modality, so the one type serves every modality.
+///
+/// A field that stands for a group with others (an EXIF device or GPS field)
+/// goes with the group when another of its fields is redacted: removal wins,
+/// since what the group's other tags reveal is why the group is cleared.
 #[derive(Debug, Clone, Copy, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -35,7 +39,7 @@ const KEEP_LEAK: LeakProfile = LeakProfile::Recoverable;
 
 impl Keep {
     /// Identity shared by every modality's impl.
-    fn id() -> OperatorId {
+    pub(crate) fn id() -> OperatorId {
         OperatorId::new("keep", "1.0.0")
     }
 }

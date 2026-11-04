@@ -28,6 +28,7 @@ use elide_core::redaction::{Operator, Redactions};
 
 use self::registry::OperatorRegistry;
 pub use self::rule::{MatchContext, Rule};
+use crate::operators::Keep;
 
 /// An operator stored in a [`Rule`], type-erased and shared.
 pub(crate) type SharedOperator<M> = Arc<dyn Operator<M>>;
@@ -172,7 +173,30 @@ impl<M: Modality> Anonymizer<M> {
     ///
     /// [`anonymize`]: Self::anonymize
     /// [`LeakProfile`]: elide_core::redaction::LeakProfile
+    ///
+    /// **A flagged entity a rule keeps stays out of the merge.** It is a whole
+    /// hidden item, so merging it would let a finding inside it overwrite all of
+    /// it. It records its pick and nothing is written for it; the finding is
+    /// redacted on its own.
     pub fn pick(&self, entities: &mut [Entity<M>], scope: &Scope) {
+        for entity in entities.iter_mut() {
+            if !self.keeps_flagged(entity, scope)
+                || entity
+                    .audit
+                    .selection()
+                    .is_some_and(|s| s.operator == Keep::id())
+            {
+                continue;
+            }
+            if let Some(resolved) = self.operators.resolve(entity, scope) {
+                let mut selection = Selection::new(resolved.operator.id(), resolved.matched_by);
+                if let Some(attribution) = resolved.attribution.cloned() {
+                    selection = selection.with_attribution(attribution);
+                }
+                let event = AuditEvent::selection(selection, entity.confidence);
+                entity.audit.record(event);
+            }
+        }
         for cluster in self.resolve_clusters(entities, scope) {
             // Record the same pick on every covered entity. Built per member
             // (rather than cloned) because `AuditEvent<M>: Clone` would demand
@@ -200,9 +224,19 @@ impl<M: Modality> Anonymizer<M> {
         }
     }
 
+    /// Whether `entity` is flagged hidden content whose rule keeps it.
+    fn keeps_flagged(&self, entity: &Entity<M>, scope: &Scope) -> bool {
+        !entity.is_suppressed()
+            && entity.audit.is_flagged()
+            && self
+                .operators
+                .resolve(entity, scope)
+                .is_some_and(|resolved| resolved.operator.id() == Keep::id())
+    }
+
     /// Resolve each overlap cluster to its winning operator, dropping
-    /// reviewer-suppressed entities and clusters no rule covers, the shared
-    /// decision behind [`pick`](Self::pick) and [`redact`](Self::redact).
+    /// reviewer-suppressed entities, flagged ones a rule keeps, and clusters no
+    /// rule covers, the shared decision behind [`pick`](Self::pick) and [`redact`](Self::redact).
     ///
     /// Operators are cloned out of the rule registry (config intact) so the
     /// borrow on `self` ends and the caller can mutate `entities` freely.
@@ -214,7 +248,7 @@ impl<M: Modality> Anonymizer<M> {
         // from clustering entirely, so a suppressed span can never bridge two
         // live ones into a cluster that fails to coalesce once it is dropped.
         let live: Vec<usize> = (0..entities.len())
-            .filter(|&i| !entities[i].is_suppressed())
+            .filter(|&i| !entities[i].is_suppressed() && !self.keeps_flagged(&entities[i], scope))
             .collect();
         let mut resolved = Vec::new();
         for members in cluster_overlaps(entities, &live) {
@@ -437,15 +471,71 @@ fn cluster_overlaps<M: Modality>(entities: &[Entity<M>], candidates: &[usize]) -
 #[cfg(test)]
 mod tests {
     use elide_core::entity::LabelRef;
-    use elide_core::entity::audit::{AuditEvent, AuditKind, Manual, ManualIntent, RuleMatch};
+    use elide_core::entity::audit::{
+        AuditEvent, AuditKind, FlaggedEvent, Manual, ManualIntent, RuleMatch,
+    };
     use elide_core::modality::text::{Text, TextDoc};
     use elide_core::primitive::Confidence;
+    use elide_core::redaction::HiddenContentKind;
 
     use super::*;
-    use crate::operators::{Erase, Mask, Replace};
+    use crate::operators::{Erase, Keep, Mask, Replace};
 
     fn entity(label: &str, start: usize, end: usize) -> Entity<Text> {
         Entity::fixture_conf(label, (start, end), Confidence::new(0.9).unwrap())
+    }
+
+    /// A flagged entity over `start..end`, as a stream's format reports one.
+    fn flagged(label: &str, start: usize, end: usize) -> Entity<Text> {
+        let mut entity = entity(label, start, end);
+        entity.audit.record(AuditEvent::flagged(
+            "test",
+            entity.confidence,
+            entity.location.clone(),
+            FlaggedEvent {
+                content: HiddenContentKind::Collaboration,
+            },
+        ));
+        entity
+    }
+
+    /// Keeping a flagged comment keeps it around a finding inside it, which is
+    /// redacted on its own rather than overwriting the whole comment.
+    #[tokio::test]
+    async fn a_kept_flagged_entity_stays_out_of_the_merge() {
+        let mut target = TextDoc::new("ask bob by Friday");
+        let mut entities = vec![flagged("COMMENT", 0, 17), entity("NAME", 4, 7)];
+        let anonymizer = Anonymizer::new()
+            .with(Rule::label(LabelRef::new("COMMENT"), Keep))
+            .with(Rule::label(LabelRef::new("NAME"), Replace::new("[NAME]")));
+
+        anonymizer
+            .anonymize(&mut target, &mut entities, &Scope::default())
+            .await
+            .unwrap();
+
+        assert_eq!(target.text(), "ask [NAME] by Friday");
+        assert_eq!(
+            entities[0].audit.selection().map(|s| s.operator.clone()),
+            Some(Keep::id())
+        );
+        assert!(!entities[0].is_redacted());
+    }
+
+    /// A flagged entity another rule treats merges with what is inside it as any
+    /// other does, so the whole span goes.
+    #[tokio::test]
+    async fn a_treated_flagged_entity_covers_what_is_inside_it() {
+        let mut target = TextDoc::new("ask bob by Friday");
+        let mut entities = vec![flagged("COMMENT", 0, 17), entity("NAME", 4, 7)];
+        let anonymizer = Anonymizer::new().with(Rule::fallback(Erase));
+
+        anonymizer
+            .anonymize(&mut target, &mut entities, &Scope::default())
+            .await
+            .unwrap();
+
+        assert_eq!(target.text(), "");
     }
 
     /// `pick` records one [`Selection`] event per entity, naming the winning
