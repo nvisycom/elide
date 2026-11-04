@@ -6,7 +6,7 @@
 use std::borrow::Cow;
 use std::ops::Range;
 
-use elide_codec::extract::{ExtractedItem, Passage};
+use elide_codec::extract::{ExtractedItem, ItemFlag, Passage};
 use elide_core::modality::ResolvedHint;
 use elide_core::modality::text::Text;
 use elide_core::{Error, Result};
@@ -21,6 +21,8 @@ use super::tag::HtmlTagExt;
 pub(crate) struct AttributeSpan {
     pub(crate) name: Option<Range<usize>>,
     pub(crate) value: Range<usize>,
+    /// The hidden content the value is, when its format flags it.
+    pub(crate) flag: Option<ItemFlag>,
 }
 
 /// A start tag as the engine reads it.
@@ -118,6 +120,7 @@ impl<'a> MarkupSource<'a> {
         out.push(AttributeSpan {
             name: self.slice_span(name),
             value: value_span,
+            flag: None,
         });
         Ok(())
     }
@@ -168,8 +171,14 @@ impl MarkupSink {
             address,
             hints: Vec::new(),
             passage,
+            flag: None,
         });
         index
+    }
+
+    /// Mark the item at `index` as the hidden content `flag` says it is.
+    pub(crate) fn flag(&mut self, index: usize, flag: ItemFlag) {
+        self.items[index].flag = Some(flag);
     }
 
     /// Attach hints to items, each pair naming an item index and its hints.

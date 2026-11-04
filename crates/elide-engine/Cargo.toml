@@ -40,12 +40,13 @@ schema = [
     "elide-audio?/schema",
 ]
 
-## The non-text modalities, forwarded to `elide-core`. A report can carry a
+## The non-text modalities, forwarded to `elide-core` and to
+## `elide-redaction`, whose `Erase` every pipeline needs. A report can carry a
 ## group of any compiled-in modality, so these gate the matching arm of the
 ## `Report` JSON schema; `text` and `metadata` are always available.
-image = ["dep:elide-image"]
-audio = ["dep:elide-audio"]
-tabular = ["elide-core/tabular"]
+image = ["dep:elide-image", "elide-redaction/image"]
+audio = ["dep:elide-audio", "elide-redaction/audio"]
+tabular = ["elide-core/tabular", "elide-redaction/tabular"]
 
 
 [dependencies]

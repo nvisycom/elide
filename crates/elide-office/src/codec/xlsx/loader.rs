@@ -90,8 +90,10 @@ impl DocumentLoader for XlsxDocumentLoader {
             }
         });
         let properties = match policy.metadata {
-            Disposition::TreatAsContent => doc_props_parts(|path| workbook.part_bytes(path)),
-            Disposition::StripNonEssential => Vec::new(),
+            Disposition::ScanAsContent | Disposition::FlagEverything => {
+                doc_props_parts(|path| workbook.part_bytes(path))
+            }
+            Disposition::KeepOnlyEssential => Vec::new(),
         };
         let parts = streams
             .into_iter()

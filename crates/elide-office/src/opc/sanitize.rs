@@ -7,12 +7,12 @@
 //!
 //! - **Metadata**: the document properties are stripped unless the policy
 //!   redacts them; custom XML is not surfaced for detection, so it is stripped
-//!   under [`TreatAsContent`](Disposition::TreatAsContent) too.
+//!   under [`ScanAsContent`](elide_core::redaction::Disposition::ScanAsContent) too.
 //! - **Collaboration** (comments and their authors) is stripped unless the
 //!   policy redacts it, and a format's tracked revisions and comment anchors
 //!   are resolved in its stories by the format's element edits. A workbook's
 //!   revision log is never extracted, so it is stripped under
-//!   [`TreatAsContent`](Disposition::TreatAsContent) too.
+//!   [`ScanAsContent`](elide_core::redaction::Disposition::ScanAsContent) too.
 //! - **Always removed**: the thumbnail, active content (macros, ActiveX, web
 //!   extensions), links to external data, printer settings, signatures, and
 //!   application-private data; every external relationship but a hyperlink;
@@ -30,7 +30,7 @@ use std::collections::{HashMap, HashSet};
 
 use bytes::Bytes;
 use elide_codec::{LocalId, StrippedContent};
-use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
+use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
 use elide_core::{Error, Result};
 
 use crate::opc::PartClassifier;
@@ -95,7 +95,7 @@ pub(crate) fn sanitize(
         edits.push(&ALTERNATIVE_TEXT);
         edits.push(&TOOLTIPS);
         // A redacted property part keeps only the fields detection sees.
-        if kind == PartKind::Properties && policy.metadata == Disposition::TreatAsContent {
+        if kind == PartKind::Properties && policy.metadata.treats_as_content() {
             edits.push(&UnsurfacedProperties);
         }
         edits
@@ -222,9 +222,9 @@ fn removal(
     policy: HiddenContentPolicy,
     path: &PartPath,
 ) -> Result<Option<HiddenContent>> {
-    let strips_collaboration = policy.collaboration == Disposition::StripNonEssential;
+    let strips_collaboration = !policy.collaboration.treats_as_content();
     Ok(match kind {
-        PartKind::Properties if policy.metadata == Disposition::StripNonEssential => {
+        PartKind::Properties if !policy.metadata.treats_as_content() => {
             Some(HiddenContent::Properties)
         }
         PartKind::CustomXml => Some(HiddenContent::CustomData),

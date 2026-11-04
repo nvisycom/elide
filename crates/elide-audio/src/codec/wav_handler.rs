@@ -44,7 +44,7 @@ mod tests {
 
     #[tokio::test]
     async fn stream_reports_one_second() {
-        let mut doc = decode(fixtures::wav_ramp(1), Disposition::StripNonEssential)
+        let mut doc = decode(fixtures::wav_ramp(1), Disposition::KeepOnlyEssential)
             .await
             .expect("decode");
         let DocumentPart::Stream { handle, .. } = &mut doc.parts_mut()[0] else {
@@ -60,7 +60,7 @@ mod tests {
     async fn strip_removes_the_info_chunk_at_decode() {
         let doc = decode(
             with_artist(&fixtures::wav_ramp(1)),
-            Disposition::StripNonEssential,
+            Disposition::KeepOnlyEssential,
         )
         .await
         .expect("decode");
@@ -81,7 +81,7 @@ mod tests {
     async fn redact_strips_the_info_chunk_it_cannot_surface() {
         let doc = decode(
             with_artist(&fixtures::wav_ramp(1)),
-            Disposition::TreatAsContent,
+            Disposition::ScanAsContent,
         )
         .await
         .expect("decode");
@@ -94,7 +94,7 @@ mod tests {
     #[cfg(feature = "mp3")]
     #[tokio::test]
     async fn loader_rejects_content_of_another_format() {
-        let err = decode(fixtures::mp3_tone(1), Disposition::StripNonEssential)
+        let err = decode(fixtures::mp3_tone(1), Disposition::KeepOnlyEssential)
             .await
             .expect_err("mp3 content should not decode as wav");
         assert_eq!(err.kind(), elide_core::ErrorKind::MalformedInput);

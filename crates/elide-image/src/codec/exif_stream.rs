@@ -8,7 +8,7 @@
 //! metadata edits.
 
 use elide_codec::content::ContentData;
-use elide_codec::{FormatId, Stream};
+use elide_codec::{FlaggedItem, FormatId, Stream};
 use elide_core::Result;
 use elide_core::modality::metadata::{
     Metadata, MetadataData, MetadataLocation, MetadataReplacement,
@@ -57,6 +57,10 @@ impl Stream<Metadata> for ExifStream {
             .map(|field| Chunk::new(MetadataLocation::new(field.key.clone()), field.clone()))
             .collect())
     }
+
+    fn flagged(&self) -> Result<Vec<FlaggedItem<Metadata>>> {
+        Ok(self.fields.iter().map(FlaggedItem::field).collect())
+    }
 }
 
 #[async_trait::async_trait]
@@ -75,6 +79,7 @@ impl DataWriter<Metadata> for ExifStream {
         for (location, replacement) in redactions.into_iter() {
             match replacement {
                 MetadataReplacement::Replace(value) => replaced.push((location.key, value)),
+                MetadataReplacement::Unchanged => {}
                 // Removal, and any treatment added later, clears the field:
                 // nothing leaves it intact.
                 _ => removed.push(location.key),

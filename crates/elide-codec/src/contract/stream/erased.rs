@@ -10,7 +10,7 @@ use elide_core::entity::Entity;
 use elide_core::modality::{Chunk, DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::redaction::Redactions;
 
-use super::Stream;
+use super::{FlaggedItem, Stream};
 use crate::content::ContentData;
 use crate::contract::FormatId;
 
@@ -47,6 +47,16 @@ impl<M: Modality> TypedStream<M> {
     /// The [`FormatId`] of the format this stream represents.
     pub fn format(&self) -> FormatId {
         self.stream.format()
+    }
+
+    /// The items of hidden content the stream's format labels; see
+    /// [`Stream::flagged`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the source's decode error.
+    pub fn flagged(&self) -> Result<Vec<FlaggedItem<M>>> {
+        self.stream.flagged()
     }
 }
 

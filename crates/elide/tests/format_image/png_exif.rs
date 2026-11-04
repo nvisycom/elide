@@ -23,7 +23,7 @@ async fn png_gps_is_stripped_through_the_facade() {
     assert!(has_gps_png(&original), "fixture should carry GPS");
 
     let registry = FormatRegistry::with_builtin();
-    let policy = HiddenContentPolicy::default().with_metadata(Disposition::TreatAsContent);
+    let policy = HiddenContentPolicy::default().with_metadata(Disposition::ScanAsContent);
     let orchestrator = Orchestrator::new()
         .with_scope(Scope::new().with_catalog(LabelCatalog::with_builtins()))
         .with_registry(registry.clone())

@@ -1,6 +1,7 @@
 //! [`ExtractStream<A>`]: the [`Stream`] machinery over a shared
 //! extracted item stream.
 
+use std::ops::Range;
 use std::sync::Arc;
 
 use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation, TextReplacement};
@@ -11,7 +12,7 @@ use elide_core::{Error, Result};
 use super::{ItemEdit, Passage, SharedSplice, SourceAddresser, SpliceState};
 use crate::content::ContentData;
 use crate::string::RedactRange;
-use crate::{FormatId, Stream};
+use crate::{FlaggedItem, FormatId, Stream};
 
 /// The [`Stream`] machinery over a shared extracted item stream.
 ///
@@ -41,6 +42,27 @@ impl<A: Send + Sync + 'static> ExtractStream<A> {
             state,
             addresser,
         }
+    }
+
+    /// The location of the decoded range `range`, with the exact raw source
+    /// range(s) it came from, item by item, when the addresser can map them
+    /// (markup, whose item value is a verbatim source slice; OOXML, via its
+    /// per-block offset map). A separator has no source text of its own.
+    fn source_location(&self, range: Range<usize>) -> TextLocation {
+        let state = self.state.lock();
+        let source: Vec<SourceRef> = state
+            .covering(range.clone())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|edit| {
+                !edit.local.is_empty() && state.items[edit.item].passage != Passage::Separator
+            })
+            .flat_map(|edit| {
+                self.addresser
+                    .source_span(&state.items[edit.item], edit.local)
+            })
+            .collect();
+        TextLocation::source(range, source)
     }
 
     fn redact_one(
@@ -179,24 +201,30 @@ impl<A: Send + Sync + 'static> Stream<Text> for ExtractStream<A> {
         if start > end || end > chunk_range.end {
             return None;
         }
-        // The exact raw source range(s) this finding came from, item by item,
-        // when the addresser can map them (markup, whose item value is a
-        // verbatim source slice; OOXML, via its per-block offset map). Empty
-        // when it cannot. A separator has no source text of its own.
-        let state = self.state.lock();
-        let source: Vec<SourceRef> = state
-            .covering(start..end)
-            .unwrap_or_default()
+        Some(self.source_location(start..end))
+    }
+
+    fn flagged(&self) -> Result<Vec<FlaggedItem<Text>>> {
+        let flagged: Vec<_> = {
+            let state = self.state.lock();
+            state
+                .items
+                .iter()
+                .enumerate()
+                .filter(|(_, item)| item.passage != Passage::Separator)
+                .filter_map(|(index, item)| {
+                    let flag = item.flag.clone()?;
+                    let range = state.item_starts[index]..state.item_starts[index + 1];
+                    (!range.is_empty()).then_some((range, flag))
+                })
+                .collect()
+        };
+        Ok(flagged
             .into_iter()
-            .filter(|edit| {
-                !edit.local.is_empty() && state.items[edit.item].passage != Passage::Separator
+            .map(|(range, flag)| {
+                FlaggedItem::new(self.source_location(range), flag.label, flag.kind)
             })
-            .flat_map(|edit| {
-                self.addresser
-                    .source_span(&state.items[edit.item], edit.local)
-            })
-            .collect();
-        Some(TextLocation::source(start..end, source))
+            .collect())
     }
 }
 
@@ -252,6 +280,7 @@ mod tests {
             value: value.to_owned(),
             hints: Vec::new(),
             passage,
+            flag: None,
         }
     }
 

@@ -15,7 +15,7 @@ use super::SlideFormat;
 use crate::opc::sanitize::{Edits, Sanitizer};
 use crate::opc::xml_edit::{Declared, Local};
 use crate::opc::{
-    NEUTRAL_DATE, NeutralizeAttributes, Ns, PartKind, StripAttributes, TextAttribute,
+    Collaboration, NEUTRAL_DATE, NeutralizeAttributes, Ns, PartKind, StripAttributes, TextAttribute,
 };
 
 /// The PowerPoint 2010 extension namespace (slide creation ids).
@@ -54,14 +54,19 @@ const CREATION_DATES: NeutralizeAttributes = NeutralizeAttributes {
 /// custom-show names, a comment's title, and the names, initials, and accounts
 /// of its comment authors.
 pub(super) const TEXT_ATTRIBUTES: &[TextAttribute] = &[
-    TextAttribute::new((Ns::Any, Local::Exact("cm")), (Ns::None, "title")),
+    TextAttribute::new((Ns::Any, Local::Exact("cm")), (Ns::None, "title")).of(Collaboration::Text),
     TextAttribute::new((Ns::Any, Local::Exact("section")), (Ns::None, "name")),
     TextAttribute::new((Ns::Any, Local::Exact("custShow")), (Ns::None, "name")),
-    TextAttribute::new((Ns::Any, Local::Exact("cmAuthor")), (Ns::None, "name")),
-    TextAttribute::new((Ns::Any, Local::Exact("cmAuthor")), (Ns::None, "initials")),
-    TextAttribute::new((Ns::Any, Local::Exact("author")), (Ns::None, "name")),
-    TextAttribute::new((Ns::Any, Local::Exact("author")), (Ns::None, "initials")),
-    TextAttribute::new((Ns::Any, Local::Exact("author")), (Ns::None, "userId")),
+    TextAttribute::new((Ns::Any, Local::Exact("cmAuthor")), (Ns::None, "name"))
+        .of(Collaboration::Author),
+    TextAttribute::new((Ns::Any, Local::Exact("cmAuthor")), (Ns::None, "initials"))
+        .of(Collaboration::Author),
+    TextAttribute::new((Ns::Any, Local::Exact("author")), (Ns::None, "name"))
+        .of(Collaboration::Author),
+    TextAttribute::new((Ns::Any, Local::Exact("author")), (Ns::None, "initials"))
+        .of(Collaboration::Author),
+    TextAttribute::new((Ns::Any, Local::Exact("author")), (Ns::None, "userId"))
+        .of(Collaboration::Author),
 ];
 
 impl Sanitizer for SlideFormat {
@@ -105,7 +110,7 @@ mod tests {
             ("ppt/comments/modernComment1.xml", comments.as_bytes()),
             ("ppt/authors.xml", authors.as_bytes()),
         ]);
-        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent);
+        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
         let (out, _) = sanitize(&package, policy, &SlideFormat).unwrap();
         let out = out.unwrap();
         let comments =
@@ -145,7 +150,7 @@ mod tests {
             ("ppt/commentAuthors.xml", authors.as_bytes()),
             ("ppt/comments/comment1.xml", comments.as_bytes()),
         ]);
-        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent);
+        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
         let (out, _) = sanitize(&package, policy, &SlideFormat).unwrap();
         let out = out.unwrap();
         let comments =

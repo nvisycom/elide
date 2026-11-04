@@ -36,8 +36,10 @@ mod stream;
 
 use std::ops::Range;
 
+use elide_core::entity::LabelRef;
 use elide_core::modality::ResolvedHint;
 use elide_core::modality::text::Text;
+use elide_core::redaction::HiddenContentKind;
 
 pub use self::addresser::SourceAddresser;
 pub use self::offset::{OffsetMap, OffsetRun, RunKind};
@@ -66,6 +68,27 @@ pub struct ExtractedItem<A> {
     pub hints: Vec<ResolvedHint<Text>>,
     /// How this item joins the passage of the item before it.
     pub passage: Passage,
+    /// What the item is when it is hidden content its format labels (a
+    /// comment, its author, a tracked deletion); `None` for visible content.
+    pub flag: Option<ItemFlag>,
+}
+
+/// What an [`ExtractedItem`] of hidden content is: its label and the kind of
+/// hidden content it belongs to. The stream reports it as a
+/// [`FlaggedItem`](crate::FlaggedItem).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemFlag {
+    /// What the item is.
+    pub label: LabelRef,
+    /// The kind of hidden content the item is.
+    pub kind: HiddenContentKind,
+}
+
+impl ItemFlag {
+    /// An item of `kind`, labelled `label`.
+    pub fn new(label: LabelRef, kind: HiddenContentKind) -> Self {
+        Self { label, kind }
+    }
 }
 
 /// How an [`ExtractedItem`] joins the items before it into a passage: the text

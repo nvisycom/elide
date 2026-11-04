@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 
 pub use self::apply::{Manual, ManualIntent, Redaction, Selection};
 pub use self::kind::AuditKind;
-pub use self::recognition::{Metadata, MetadataEvent, Model, ModelEvent, Pattern, PatternEvent};
+pub use self::recognition::{Flagged, FlaggedEvent, Model, ModelEvent, Pattern, PatternEvent};
 pub use self::reconcile::{Calibration, Conflict, Contested, Deduplication, Refinement};
 use super::AuditHash;
 use super::hash::AuditHasher;
@@ -194,17 +194,17 @@ impl<M: Modality> AuditEvent<M> {
         Self::new(source, confidence, Model { location, model })
     }
 
-    /// Metadata-field detection: the `source` reader surfaced a named field at
-    /// `location` as a redaction subject. Unlike [`pattern`](Self::pattern) /
-    /// [`model`](Self::model), a metadata field is present rather than matched,
-    /// so it carries its own event kind.
-    pub fn metadata(
+    /// A flagged item: the `source` format labels an item of hidden content at
+    /// `location`, flagged as a redaction subject. Unlike
+    /// [`pattern`](Self::pattern) / [`model`](Self::model), the item is present
+    /// rather than matched, so it carries its own event kind.
+    pub fn flagged(
         source: impl Into<HipStr<'static>>,
         confidence: Confidence,
         location: M::Location,
-        metadata: MetadataEvent,
+        flagged: FlaggedEvent,
     ) -> Self {
-        Self::new(source, confidence, Metadata { location, metadata })
+        Self::new(source, confidence, Flagged { location, flagged })
     }
 
     /// Deduplication (fusion) event combining several detections. Its
@@ -310,11 +310,11 @@ impl<M: Modality> AuditEvent<M> {
         )
     }
 
-    /// Whether this event is a recognition (pattern, model, or metadata field).
+    /// Whether this event is a recognition (pattern, model, or flagged item).
     pub fn is_recognition(&self) -> bool {
         matches!(
             self.kind,
-            AuditKind::Pattern(_) | AuditKind::Model(_) | AuditKind::Metadata(_)
+            AuditKind::Pattern(_) | AuditKind::Model(_) | AuditKind::Flagged(_)
         )
     }
 

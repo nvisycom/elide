@@ -11,7 +11,7 @@ use super::{FIXTURE_NON_CELL, NON_CELL_PII};
 
 #[tokio::test]
 async fn xlsx_redacts_non_cell_text() -> Result<()> {
-    let policy = HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent);
+    let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
     let outcome = FIXTURE_NON_CELL.run_tabular_with_policy(policy).await?;
 
     outcome.assert_no_pii(NON_CELL_PII);

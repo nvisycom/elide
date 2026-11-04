@@ -140,8 +140,8 @@ mod tests {
         for policy in [
             HiddenContentPolicy::default(),
             HiddenContentPolicy::default()
-                .with_metadata(Disposition::TreatAsContent)
-                .with_collaboration(Disposition::TreatAsContent),
+                .with_metadata(Disposition::ScanAsContent)
+                .with_collaboration(Disposition::ScanAsContent),
         ] {
             let (sanitized, _) = sanitize(document, policy, sanitizer).unwrap();
             let sanitized = sanitized.unwrap_or_else(|| document.to_vec());

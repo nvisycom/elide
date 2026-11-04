@@ -31,4 +31,4 @@ pub use self::document::{
 };
 pub use self::format::{Format, FormatId};
 pub use self::loader::{DocumentLoader, LeafLoader, Loader};
-pub use self::stream::{ErasedStream, Stream, TypedStream};
+pub use self::stream::{ErasedStream, FlaggedItem, Stream, TypedStream};

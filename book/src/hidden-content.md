@@ -18,19 +18,31 @@ Only two kinds of hidden content are a choice, made per document with a
 
 | Category | Covers | Default |
 |---|---|---|
-| Metadata | Document properties, custom XML, EXIF and XMP, PDF `/Info`, audio tags, HTML `<meta>` | `StripNonEssential` |
-| Collaboration | Comments, tracked revisions, PDF annotations | `StripNonEssential` |
+| Metadata | Document properties, custom XML, EXIF and XMP, audio tags, HTML `<meta>` | `KeepOnlyEssential` |
+| Collaboration | Comments, tracked revisions | `KeepOnlyEssential` |
 
-`StripNonEssential` removes the content without inspecting it, keeping only
+A PDF's metadata (`/Info` and XMP) and its annotations are always stripped,
+whatever the policy (see [#345](https://github.com/nvisycom/elide/issues/345)).
+
+`KeepOnlyEssential` removes the content without inspecting it, keeping only
 what a reader of the file sees. On metadata it keeps only what a viewer needs
 to render the file, such as an image's orientation. On collaboration it
 produces the final visible document: insertions accepted, deletions applied,
-comments dropped. `TreatAsContent` keeps the content and handles it like
+comments dropped. `ScanAsContent` keeps the content and handles it like
 visible content: it is detected with the request's label catalog and what the
 catalog covers is redacted (see [Metadata](metadata.md)); a format that
-cannot surface it to detection strips it instead. A redacted office comment or change keeps its author's name and account, which are
-detected and redacted, but not its date: a date the format lets go is
-removed, and one it requires (a modern PowerPoint comment's) is set to one
+cannot surface it to detection strips it instead. `FlagEverything` keeps the
+content as `ScanAsContent` does and also makes every item its format labels an
+entity, whatever the catalog declares: each metadata field (an HTML `<meta>`
+field included, labelled by its name), and each comment, author, and tracked
+deletion, which is then erased whole. A flagged item is erased even when the
+anonymizer has no rule for its label; a rule that matches it decides instead,
+so a text rule for `communications_content` (what a comment says) or
+`person_name` (who wrote it), or `Keep` to leave it, treats it otherwise.
+
+A redacted office comment or change keeps its author's name and account,
+which are detected and redacted, but not its date: a date the format lets go
+is removed, and one it requires (a modern PowerPoint comment's) is set to one
 neutral date. A threaded Excel comment loses its mentions, which point into
 the comment's text by position; the mentioned name stays in the text and is
 redacted with it.
@@ -52,8 +64,8 @@ use elide::prelude::*;
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let bytes = std::fs::read("report.docx")?;
     let policy = HiddenContentPolicy::default()
-        .with_metadata(Disposition::TreatAsContent)
-        .with_collaboration(Disposition::TreatAsContent);
+        .with_metadata(Disposition::ScanAsContent)
+        .with_collaboration(Disposition::ScanAsContent);
     let document = FormatRegistry::with_builtin()
         .document("report.docx", bytes, policy)
         .await?;

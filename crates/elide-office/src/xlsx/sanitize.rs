@@ -7,7 +7,7 @@
 //!   hash).
 //! - **External references**, always: the workbook's list of linked external
 //!   workbooks, whose parts are removed.
-//! - **Comment notes**, under [`Disposition::StripNonEssential`]: the legacy VML shape
+//! - **Comment notes**, under [`KeepOnlyEssential`](elide_core::redaction::Disposition::KeepOnlyEssential): the legacy VML shape
 //!   that draws each comment's note, left behind by the comments part.
 //! - **Threaded-comment dates and mentions**, when comments are redacted: when
 //!   a comment was written, and its mentions, which point into the comment's
@@ -16,7 +16,7 @@
 
 use std::ops::Range;
 
-use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
+use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
 use elide_core::{Error, Result};
 use quick_xml::NsReader;
 use quick_xml::events::Event;
@@ -24,7 +24,7 @@ use quick_xml::events::Event;
 use super::SheetClassifier;
 use crate::opc::sanitize::{Edits, Sanitizer};
 use crate::opc::xml_edit::{Declared, Edit, Edited, Local, bound};
-use crate::opc::{Ns, PartKind, StripAttributes, TextAttribute};
+use crate::opc::{Collaboration, Ns, PartKind, StripAttributes, TextAttribute};
 
 /// The SpreadsheetML main namespace.
 const SML: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
@@ -236,20 +236,23 @@ pub(super) const TEXT_ATTRIBUTES: &[TextAttribute] = &[
     ),
     TextAttribute::new((Ns::Any, Local::Exact("scenario")), (Ns::None, "name")),
     TextAttribute::new((Ns::Any, Local::Exact("scenario")), (Ns::None, "comment")),
-    TextAttribute::new((Ns::Any, Local::Exact("scenario")), (Ns::None, "user")),
+    TextAttribute::new((Ns::Any, Local::Exact("scenario")), (Ns::None, "user"))
+        .of(Collaboration::Author),
     TextAttribute::new(
         (Ns::Any, Local::Exact("customWorkbookView")),
         (Ns::None, "name"),
     ),
-    TextAttribute::new((Ns::Any, Local::Exact("person")), (Ns::None, "displayName")),
-    TextAttribute::new((Ns::Any, Local::Exact("person")), (Ns::None, "userId")),
+    TextAttribute::new((Ns::Any, Local::Exact("person")), (Ns::None, "displayName"))
+        .of(Collaboration::Author),
+    TextAttribute::new((Ns::Any, Local::Exact("person")), (Ns::None, "userId"))
+        .of(Collaboration::Author),
 ];
 
 impl Sanitizer for SheetClassifier {
     fn edits(&self, kind: PartKind, policy: HiddenContentPolicy) -> Edits<'static> {
         match kind {
             PartKind::Comments => vec![&EDITING_SESSION_IDS, &COMMENT_DATES, &MENTIONS],
-            PartKind::Drawing if policy.collaboration == Disposition::StripNonEssential => {
+            PartKind::Drawing if !policy.collaboration.treats_as_content() => {
                 vec![&EDITING_SESSION_IDS, &CommentNotes]
             }
             PartKind::Main => vec![
@@ -329,7 +332,7 @@ mod tests {
             ),
             ("xl/persons/person.xml", persons.as_bytes()),
         ]);
-        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent);
+        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
         let (out, _) = sanitize(&package, policy, &SheetClassifier).unwrap();
         let out = out.unwrap();
         let comments =
@@ -350,7 +353,7 @@ mod tests {
 
     #[test]
     fn the_revision_log_is_stripped_even_when_collaboration_is_redacted() {
-        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent);
+        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
         let (out, stripped) = sanitize(&workbook(), policy, &SheetClassifier).unwrap();
         let names = part_names(&out.unwrap());
         assert!(
@@ -375,7 +378,7 @@ mod tests {
         assert_eq!(count(&stripped, HiddenContent::Comment), 1);
 
         // Redacted comments keep their notes.
-        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent);
+        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
         let (out, _) = sanitize(&workbook(), policy, &SheetClassifier).unwrap();
         let vml =
             String::from_utf8(read_part(&out.unwrap(), "xl/drawings/vmlDrawing1.vml").unwrap())

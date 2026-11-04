@@ -16,10 +16,12 @@ use elide_codec::TypedStream;
 use elide_core::entity::Entity;
 use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::recognition::Scope;
+use elide_core::redaction::Operator;
 use elide_core::{Error, Result};
 use elide_detection::Analyzer;
 use elide_format::FormatRegistry;
 use elide_redaction::Anonymizer;
+use elide_redaction::operators::Erase;
 
 pub use self::analysis::{AnalyzedDocument, ArtifactSet, Report, ReportDeserializer, StrippedItem};
 use self::analysis::{ModalityRegistry, StrippedRecord};
@@ -45,8 +47,13 @@ use self::traversal::{Analyze, Redact, Walk};
 /// erased pipeline per modality, keyed by the modality's [`TypeId`].
 ///
 /// Every orchestrator drives [`Metadata`] without being configured: a field's
-/// format labels it, so each surfaced field the scope's catalog declares is
-/// detected, and erased unless [`with_anonymizer`] sets another treatment.
+/// format labels it, so each surfaced field the scope's catalog declares (every
+/// one, under [`Disposition::FlagEverything`]) is detected, and erased unless
+/// [`with_anonymizer`] sets another treatment. Under `FlagEverything` for
+/// collaboration, each comment, author, and tracked deletion a format labels is
+/// an entity too. Every pipeline's anonymizer ends in a rule erasing flagged
+/// hidden content its own rules do not cover, so a flagged item is redacted
+/// unless a caller rule (a [`Keep`], say) matches it first.
 ///
 /// [`with_modality`]: Orchestrator::with_modality
 /// [`with_registry`]: Orchestrator::with_registry
@@ -54,7 +61,9 @@ use self::traversal::{Analyze, Redact, Walk};
 /// [`anonymize_with`]: Orchestrator::anonymize_with
 /// [`anonymize`]: Orchestrator::anonymize
 /// [`with_anonymizer`]: Orchestrator::with_anonymizer
+/// [`Keep`]: elide_redaction::operators::Keep
 /// [`Metadata`]: elide_core::modality::metadata::Metadata
+/// [`Disposition::FlagEverything`]: elide_core::redaction::Disposition::FlagEverything
 pub struct Orchestrator {
     registry: FormatRegistry,
     pipelines: HashMap<TypeId, Box<dyn ErasedPipeline>>,
@@ -125,11 +134,12 @@ impl Orchestrator {
     /// that decodes to `M` is driven by this pipeline; parts of a modality
     /// with no registered pipeline pass through untouched. Re-registering
     /// a modality replaces both halves. For [`Metadata`] the halves add to the
-    /// built-in schema detection rather than replace it.
+    /// flagged fields rather than replace them.
     ///
     /// When a modality only ever detects *or* only ever redacts, register just
     /// the half it needs with [`with_analyzer`] / [`with_anonymizer`] instead,
-    /// the other half defaults to a no-op.
+    /// the other half defaults to a no-op, which still erases flagged hidden
+    /// content.
     ///
     /// [`with_analyzer`]: Self::with_analyzer
     /// [`with_anonymizer`]: Self::with_anonymizer
@@ -141,11 +151,12 @@ impl Orchestrator {
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
         TypedStream<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
+        Erase: Operator<M>,
     {
         match self.modality_pipeline_mut::<M>() {
             Some(pipeline) => {
                 pipeline.analyzer = analyzer;
-                pipeline.anonymizer = anonymizer;
+                pipeline.set_anonymizer(anonymizer);
             }
             None => self.insert_pipeline(ModalityPipeline::new(analyzer, anonymizer)),
         }
@@ -169,6 +180,7 @@ impl Orchestrator {
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
         TypedStream<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
+        Erase: Operator<M>,
     {
         match self.modality_pipeline_mut::<M>() {
             Some(pipeline) => pipeline.analyzer = analyzer,
@@ -193,9 +205,10 @@ impl Orchestrator {
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
         TypedStream<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
+        Erase: Operator<M>,
     {
         match self.modality_pipeline_mut::<M>() {
-            Some(pipeline) => pipeline.anonymizer = anonymizer,
+            Some(pipeline) => pipeline.set_anonymizer(anonymizer),
             None => self.insert_pipeline(ModalityPipeline::new(Analyzer::new(), anonymizer)),
         }
         self

@@ -135,7 +135,7 @@ impl<'a> Source<'a> {
         })
     }
 
-    /// Reduce the metadata to what [`TreatAsContent`] can stand behind: every EXIF tag
+    /// Reduce the metadata to what [`ScanAsContent`] can stand behind: every EXIF tag
     /// a surfaced field reads or clears, the render tag, the structure, and a
     /// TIFF's pixel layout. Every other EXIF tag (one no field surfaces, an
     /// embedded thumbnail, a maker note, a vendor tag) and every block outside
@@ -143,7 +143,7 @@ impl<'a> Source<'a> {
     /// resulting container, how many tags and blocks went, and how many
     /// thumbnails.
     ///
-    /// [`TreatAsContent`]: elide_core::redaction::Disposition::TreatAsContent
+    /// [`ScanAsContent`]: elide_core::redaction::Disposition::ScanAsContent
     pub(crate) fn reduce_to_surfaced(&self) -> Result<Scrubbed> {
         let tiff = matches!(self.format, FileExtension::TIFF);
         let (edited, tags, thumbnails) = match self.parse()? {
@@ -650,12 +650,12 @@ mod tests {
         }
     }
 
-    /// Under `TreatAsContent` only what a surfaced field reads or clears stays:
+    /// Under `ScanAsContent` only what a surfaced field reads or clears stays:
     /// a maker note and a tag no field surfaces go, and the output check holds
     /// the reduced image to the same allowlist.
     #[cfg(feature = "codec")]
     #[test]
-    fn treat_as_content_keeps_only_what_a_field_surfaces() {
+    fn scan_as_content_keeps_only_what_a_field_surfaces() {
         let bytes = jpeg_with(vec![
             ExifTag::Artist("Jane Roe".to_owned()),
             ExifTag::MakerNote(b"body serial 1234".to_vec()),
@@ -676,9 +676,9 @@ mod tests {
     }
 
     /// An embedded thumbnail is a preview of the unredacted pixels:
-    /// `TreatAsContent` strips it, counted as a thumbnail rather than as two tags.
+    /// `ScanAsContent` strips it, counted as a thumbnail rather than as two tags.
     #[test]
-    fn treat_as_content_strips_an_embedded_thumbnail() {
+    fn scan_as_content_strips_an_embedded_thumbnail() {
         let preview = b"\xFF\xD8 preview of Jane \xFF\xD9".to_vec();
         let bytes = jpeg_with(vec![
             ExifTag::Artist("Jane Roe".to_owned()),

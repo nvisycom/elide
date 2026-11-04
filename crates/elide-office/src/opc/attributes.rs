@@ -3,13 +3,15 @@
 //!
 //! A format names its text attributes in two closed lists. A visible one (a
 //! sheet name, a dropdown entry) or one the policy keeps (a comment's author
-//! under [`TreatAsContent`](elide_core::redaction::Disposition::TreatAsContent)) is surfaced
+//! under [`ScanAsContent`](elide_core::redaction::Disposition::ScanAsContent)) is surfaced
 //! for detection like element text, through the format's
 //! [`PartClassifier::text_attributes`](crate::opc::PartClassifier::text_attributes).
 //! A hidden one (alternative text, a tooltip) is stripped by
 //! [`StripAttributes`] and recorded.
 
-use elide_core::redaction::HiddenContent;
+use elide_codec::extract::ItemFlag;
+use elide_core::entity::builtins;
+use elide_core::redaction::{HiddenContent, HiddenContentKind};
 
 use crate::opc::xml_edit::{Action, Attribute, Local, Name, Rules};
 
@@ -40,12 +42,25 @@ impl Ns {
 pub struct TextAttribute {
     pub(crate) element: (Ns, Local),
     pub(crate) attribute: (Ns, &'static str),
+    /// The collaboration item the value is, for an attribute of a comment or a
+    /// tracked change.
+    pub(crate) collaboration: Option<Collaboration>,
 }
 
 impl TextAttribute {
     /// The attribute `attribute` on the element `element`.
     pub(crate) const fn new(element: (Ns, Local), attribute: (Ns, &'static str)) -> Self {
-        Self { element, attribute }
+        Self {
+            element,
+            attribute,
+            collaboration: None,
+        }
+    }
+
+    /// This attribute, its value the collaboration item `collaboration`.
+    pub(crate) const fn of(mut self, collaboration: Collaboration) -> Self {
+        self.collaboration = Some(collaboration);
+        self
     }
 
     /// Whether `attribute` on `element` is this one.
@@ -56,6 +71,26 @@ impl TextAttribute {
             && element_local.matches(element.local)
             && attribute_ns.matches(attribute.namespace)
             && attribute.local == attribute_local
+    }
+}
+
+/// The collaboration item a span of a part holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Collaboration {
+    /// What a comment or a tracked deletion says.
+    Text,
+    /// Who wrote a comment or made a change.
+    Author,
+}
+
+impl Collaboration {
+    /// The flag of an item holding this.
+    pub(crate) fn flag(self) -> ItemFlag {
+        let label = match self {
+            Self::Text => &builtins::COMMUNICATIONS_CONTENT,
+            Self::Author => &builtins::PERSON_NAME,
+        };
+        ItemFlag::new(label.to_ref(), HiddenContentKind::Collaboration)
     }
 }
 

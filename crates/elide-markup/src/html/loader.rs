@@ -94,9 +94,10 @@ impl DocumentLoader for HtmlLoader {
 #[cfg(test)]
 mod tests {
     use elide_codec::{Document, DocumentPart};
+    use elide_core::entity::builtins;
     use elide_core::modality::text::{Text, TextReplacement};
-    use elide_core::modality::{DataWriter, StreamDataReader};
-    use elide_core::redaction::{Disposition, Redactions};
+    use elide_core::modality::{DataReader, DataWriter, StreamDataReader};
+    use elide_core::redaction::{Disposition, HiddenContentKind, Redactions};
 
     use super::*;
 
@@ -180,12 +181,47 @@ mod tests {
     #[tokio::test]
     async fn stream_yields_text_attribute_and_a_redacted_comment() {
         let raw = r#"<html><body><!-- secret 1 --><img alt="hello" title="alt"></body></html>"#;
-        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent);
+        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
         let mut doc = load_with(raw, policy).await;
         let vs = values(&mut doc);
         assert!(vs.iter().any(|v| v == " secret 1 "), "comment: {vs:?}");
         assert!(vs.iter().any(|v| v == "hello"), "alt: {vs:?}");
         assert!(vs.iter().any(|v| v == "alt"), "title: {vs:?}");
+    }
+
+    #[tokio::test]
+    async fn a_comment_is_flagged_and_visible_text_is_not() {
+        let raw = "<html><body><!-- ask Jane --><p>Hi</p></body></html>";
+        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::FlagEverything);
+        let mut doc = load_with(raw, policy).await;
+        let stream = body(&mut doc);
+        let flagged = stream.flagged().unwrap();
+        assert_eq!(flagged.len(), 1, "{flagged:?}");
+        let text = stream.read_at(&flagged[0].location).await.unwrap().unwrap();
+        assert_eq!(text.as_str(), " ask Jane ");
+        assert_eq!(flagged[0].kind, HiddenContentKind::Collaboration);
+    }
+
+    #[tokio::test]
+    async fn a_meta_field_is_flagged_and_the_viewport_is_not() {
+        let raw = r#"<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="Author" content="Jane Roe"><meta name="theme-color" content="red"></head><body><p>Hi</p></body></html>"#;
+        let policy = HiddenContentPolicy::default().with_metadata(Disposition::FlagEverything);
+        let mut doc = load_with(raw, policy).await;
+        let stream = body(&mut doc);
+        let flagged = stream.flagged().unwrap();
+        let mut fields = Vec::new();
+        for item in &flagged {
+            assert_eq!(item.kind, HiddenContentKind::Metadata);
+            let text = stream.read_at(&item.location).await.unwrap().unwrap();
+            fields.push((text.as_str().to_owned(), item.label.clone()));
+        }
+        assert_eq!(
+            fields,
+            [
+                ("Jane Roe".to_owned(), builtins::PERSON_NAME.to_ref()),
+                ("red".to_owned(), builtins::UNRESOLVED.to_ref()),
+            ]
+        );
     }
 
     #[tokio::test]

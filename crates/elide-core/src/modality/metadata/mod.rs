@@ -23,9 +23,6 @@ pub use self::data::MetadataData;
 pub use self::location::MetadataLocation;
 pub use self::replacement::MetadataReplacement;
 use super::{Modality, NoArtifact};
-use crate::entity::audit::{AuditEvent, MetadataEvent};
-use crate::entity::{Entity, LabelRef};
-use crate::primitive::Confidence;
 
 /// A document's out-of-band named fields — EXIF tags, filesystem timestamps and
 /// attributes, document properties — as redaction subjects.
@@ -45,37 +42,4 @@ impl Modality for Metadata {
     type Replacement = MetadataReplacement;
 
     const NAME: &'static str = "metadata";
-}
-
-impl Metadata {
-    /// The source every metadata field entity is attributed to: a field is
-    /// recognized by the label its codec stamped, the same way wherever the
-    /// entity is built.
-    pub const FIELD_SOURCE: &'static str = "metadata-field";
-
-    /// Build the detection entity for a metadata field `key` its format labels
-    /// `label`, attributed to [`FIELD_SOURCE`](Self::FIELD_SOURCE).
-    ///
-    /// A metadata field is present or it is not, nothing probabilistic to weigh,
-    /// so the entity carries [`Confidence::MAX`]. Returns `None` only if the
-    /// entity builder rejects it, which cannot happen here: both the label and
-    /// the location are always set.
-    #[must_use]
-    pub fn field_entity(key: &str, label: LabelRef) -> Option<Entity<Self>> {
-        let location = MetadataLocation::new(key.to_owned());
-        let event = AuditEvent::metadata(
-            Self::FIELD_SOURCE,
-            Confidence::MAX,
-            location.clone(),
-            MetadataEvent {
-                source: Self::FIELD_SOURCE.into(),
-            },
-        );
-        Entity::builder()
-            .with_label(label)
-            .with_location(location)
-            .with_confidence(Confidence::MAX)
-            .with_event(event)
-            .build()
-    }
 }
