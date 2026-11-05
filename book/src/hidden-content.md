@@ -40,8 +40,9 @@ removed at decode and its shape kept. A flagged item is erased even when the
 anonymizer has no rule for its label; a rule that matches it decides instead,
 so a text rule for `communications_content` (what a comment says) or
 `person_name` (who wrote it), or `Keep` to leave it, treats it otherwise. A kept
-item is still scanned, and what a recognizer finds inside it is redacted on its
-own. An exclusion spares a flagged item only when it covers the whole item.
+item is still scanned, and what a recognizer finds inside it takes the whole
+item; `ScanAsContent` is what redacts a finding and keeps the rest. An exclusion
+spares a flagged item only when it covers the whole item.
 
 A redacted office comment or change keeps its author's name and account,
 which are detected and redacted, but not its date: a date the format lets go

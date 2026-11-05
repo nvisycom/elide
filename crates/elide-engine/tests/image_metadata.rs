@@ -195,6 +195,51 @@ async fn a_metadata_anonymizer_treats_flagged_fields() {
     assert!(has_gps(&out), "GPS was redacted despite a rule keeping it");
 }
 
+/// A rule keeping one field of a group loses to another field's erasure: the
+/// field goes with its group, and a field outside the group stays.
+#[tokio::test]
+async fn a_kept_field_goes_with_its_group() {
+    let mut bytes = Vec::new();
+    image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(4, 4, image::Rgb([200, 30, 30])))
+        .write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Jpeg,
+        )
+        .unwrap();
+    let mut exif = ExifMetadata::new();
+    exif.set_tag(ExifTag::Make("Acme".to_owned()));
+    exif.set_tag(ExifTag::Model("X1".to_owned()));
+    exif.set_tag(ExifTag::Artist("Jane Roe".to_owned()));
+    exif.write_to_vec(&mut bytes, FileExtension::JPEG).unwrap();
+
+    let registry = FormatRegistry::with_builtin();
+    let orchestrator = Orchestrator::new()
+        .with_anonymizer::<Metadata>(
+            Anonymizer::new()
+                .with(Rule::<Metadata>::predicate(
+                    |cx| cx.entity.location.key.as_str() != "Make",
+                    Keep,
+                ))
+                .with(Rule::fallback(Erase)),
+        )
+        .with_registry(registry.clone());
+    let policy = HiddenContentPolicy::default().with_metadata(Disposition::FlagEverything);
+    let handle = registry
+        .decode(bytes::Bytes::from(bytes), "jpg", policy)
+        .await
+        .expect("decode jpeg");
+    let mut documents = [Document::new("photo.jpg", handle)];
+    orchestrator
+        .anonymize(&mut documents, &Directives::new())
+        .await
+        .expect("anonymize");
+    let out = documents[0].document.encode().expect("encode").to_bytes();
+
+    assert!(tag(&out, &ExifTag::Make(String::new())).is_none());
+    assert!(tag(&out, &ExifTag::Model(String::new())).is_none());
+    assert_eq!(artist(&out).as_deref(), Some("Jane Roe"));
+}
+
 /// A blank overwrite holds nothing, so the field goes and the encode check has
 /// nothing to object to.
 #[tokio::test]

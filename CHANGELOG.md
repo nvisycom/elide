@@ -89,7 +89,9 @@ and this project adheres to
   flagged hidden content is never kept for want of a rule; registering a
   pipeline requires `Erase: Operator<M>`, and `Keep` and the new
   `MetadataReplacement::Unchanged` leave a metadata field as it is; an EXIF
-  field goes with its group when another of the group is redacted
+  field goes with its group when another of the group is redacted, though its
+  audit still shows the `Keep`; a finding inside a kept flagged item takes the
+  whole item
 - Office documents always lose their XML comments, and a workbook with a legacy
   VML drawing, whose root has no namespace, is no longer refused at encode
 - An EXIF tag of a logical group (a destination coordinate, a lens, a modify

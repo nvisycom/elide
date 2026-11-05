@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 /// A field that stands for a group with others (an EXIF device or GPS field)
 /// goes with the group when another of its fields is redacted: removal wins,
 /// since what the group's other tags reveal is why the group is cleared.
+/// The field's audit still shows the selection of `Keep`.
 #[derive(Debug, Clone, Copy, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -39,7 +40,7 @@ const KEEP_LEAK: LeakProfile = LeakProfile::Recoverable;
 
 impl Keep {
     /// Identity shared by every modality's impl.
-    pub(crate) fn id() -> OperatorId {
+    fn id() -> OperatorId {
         OperatorId::new("keep", "1.0.0")
     }
 }

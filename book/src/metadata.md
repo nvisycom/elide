@@ -94,6 +94,7 @@ is kept when no rule covers it, as in every other modality.
 Some EXIF fields are redacted as a group, since one alone would still give away
 what the others hold: GPS coordinates clear the whole GPS block, and `Make`,
 `Model`, or `SerialNumber` clear all three and the lens tags. Removal wins inside
-a group: keeping `Model` while erasing `Make` removes both. A tag in such a group
+a group: keeping `Model` while erasing `Make` removes both, though `Model`'s audit
+still shows the `Keep` its rule selected. A tag in such a group
 stays only in an image that carries one of its fields; one with no such field
 cannot reach detection, so it is stripped.
