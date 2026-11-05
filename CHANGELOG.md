@@ -98,7 +98,8 @@ and this project adheres to
 - HTML `<meta>` names are read with character references decoded, so an encoded
   redirect is removed; a tag naming a field is metadata even when it also sets
   a character set or rendering directive, and a character set does not keep a
-  `content` beside it
+  `content` beside it; a tag repeating a classifying attribute is metadata too,
+  and every `content` it carries is flagged
 - Overwriting an EXIF field with blank text removes it
 - Hidden-content audit: every stripped item is recorded on the `Report`
   (`stripped()`) by part, item, and count in a format-neutral

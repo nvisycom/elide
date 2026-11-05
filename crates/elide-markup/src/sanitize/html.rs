@@ -8,7 +8,7 @@ use elide_core::{Error, Result};
 
 use super::url::{SCRIPT_SCHEMES, css_loads_remote, is_remote, loads_remote, normalized_url};
 use super::{MarkupSanitizer, Removal, Verdict};
-use crate::engine::meta;
+use crate::engine::meta::MetaTag;
 use crate::engine::tag::HtmlTag;
 
 /// HTML elements that run or embed active content, removed with their whole
@@ -97,18 +97,14 @@ impl MarkupSanitizer {
     /// stays: a directive that acts on opening goes whatever the policy, one
     /// that renders the page stays, and any other field is metadata.
     fn meta_removal(&self, attributes: &[Attribute<'_>]) -> Option<HiddenContent> {
-        let attribute = |key: &str| {
-            attributes
-                .iter()
-                .find(|attr| attr.key.eq_ignore_ascii_case(key))
-                .map(|attr| meta::normalized(attr.value))
-        };
-        if attribute("http-equiv")
-            .is_some_and(|directive| ACTING_DIRECTIVES.contains(&directive.as_str()))
+        let tag = MetaTag::new(attributes.iter().map(|attr| (attr.key, attr.value)));
+        if tag
+            .directive()
+            .is_some_and(|directive| ACTING_DIRECTIVES.contains(&directive))
         {
             return Some(HiddenContent::Action);
         }
-        (!meta::renders(attribute) && !self.policy.metadata.treats_as_content())
+        (!tag.renders() && !self.policy.metadata.treats_as_content())
             .then_some(HiddenContent::Properties)
     }
 }

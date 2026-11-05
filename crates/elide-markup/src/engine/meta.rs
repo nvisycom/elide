@@ -17,85 +17,139 @@ const RENDER_DIRECTIVES: [&str; 5] = [
 /// The attributes that name a `<meta>` field, in the order they are read.
 const FIELD_NAMES: [&str; 3] = ["name", "property", "itemprop"];
 
+/// The attributes that decide what a `<meta>` tag is.
+const CLASSIFYING: [&str; 6] = [
+    "name",
+    "property",
+    "itemprop",
+    "http-equiv",
+    "charset",
+    "content",
+];
+
 /// A `<meta>` attribute's raw `value` as a browser compares it: character
 /// references decoded, trimmed, lowercased.
-pub(crate) fn normalized(value: &str) -> String {
+fn normalized(value: &str) -> String {
     let (decoded, _) = decode_references(value, 0, CharacterReferences::Html);
     decoded.trim().to_ascii_lowercase()
 }
 
-/// The names of the fields the `<meta>` tag `attribute` reads declares.
-fn field_names(attribute: &impl Fn(&str) -> Option<String>) -> Vec<String> {
-    FIELD_NAMES
-        .into_iter()
-        .filter_map(attribute)
-        .filter(|name| !name.is_empty())
-        .collect()
+/// An HTML `<meta>` tag as a browser reads it: every attribute in source order,
+/// blank and valueless ones included, with the first of a repeated key winning.
+pub(crate) struct MetaTag {
+    attributes: Vec<(String, String)>,
 }
 
-/// Whether the `<meta>` tag whose [normalized](normalized) attribute values
-/// `attribute` reads renders the page: the viewport, or a tag naming no field
-/// that sets a rendering `http-equiv` directive or only the character set. A tag
-/// that names any other field is that field, whatever else it sets, and a
-/// character set beside a `content` is no reason to keep that content.
-pub(crate) fn renders(attribute: impl Fn(&str) -> Option<String>) -> bool {
-    let names = field_names(&attribute);
-    if !names.is_empty() {
-        return attribute("name").is_some_and(|name| name == "viewport")
-            && names.iter().all(|name| name == "viewport");
+impl MetaTag {
+    /// The tag with `attributes`, each a key and its raw value as written, a
+    /// valueless attribute having an empty one.
+    pub(crate) fn new<'a>(attributes: impl IntoIterator<Item = (&'a str, &'a str)>) -> Self {
+        let attributes = attributes
+            .into_iter()
+            .map(|(key, value)| (key.to_ascii_lowercase(), normalized(value)))
+            .collect();
+        Self { attributes }
     }
-    attribute("http-equiv").is_some_and(|directive| RENDER_DIRECTIVES.contains(&directive.as_str()))
-        || (attribute("charset").is_some()
-            && attribute("content").is_none_or(|content| content.is_empty()))
-}
 
-/// What the `content` of the `<meta>` tag `attribute` reads is, or `None` when
-/// the tag renders the page rather than describing it.
-///
-/// The field is named by its `name`, `property`, `itemprop`, or `http-equiv`.
-/// A name this table does not know is still a field, labelled
-/// [`UNRESOLVED`](builtins::UNRESOLVED).
-pub(crate) fn label(attribute: impl Fn(&str) -> Option<String>) -> Option<LabelRef> {
-    if renders(&attribute) {
-        return None;
+    /// The value a browser reads for `key`.
+    fn attribute(&self, key: &str) -> Option<&str> {
+        self.attributes
+            .iter()
+            .find(|(name, _)| name == key)
+            .map(|(_, value)| value.as_str())
     }
-    let names = field_names(&attribute);
-    let key = names
-        .iter()
-        .find(|name| *name != "viewport")
-        .or(names.first())
-        .cloned()
-        .or_else(|| attribute("http-equiv"))
-        .unwrap_or_default();
-    let label = match key.as_str() {
-        "author" | "creator" | "dc.creator" | "article:author" | "book:author" => {
-            &builtins::PERSON_NAME
+
+    /// The tag's `http-equiv` directive.
+    pub(crate) fn directive(&self) -> Option<&str> {
+        self.attribute("http-equiv")
+    }
+
+    /// Whether a classifying attribute is written twice. A browser ignores the
+    /// later copy, but its value is still in the document.
+    fn repeats(&self) -> bool {
+        CLASSIFYING.iter().any(|key| {
+            let copies = self.attributes.iter().filter(|(name, _)| name == key);
+            copies.count() > 1
+        })
+    }
+
+    /// The names of the fields the tag declares.
+    fn field_names(&self) -> Vec<&str> {
+        FIELD_NAMES
+            .into_iter()
+            .filter_map(|key| self.attribute(key))
+            .filter(|name| !name.is_empty())
+            .collect()
+    }
+
+    /// Whether the tag renders the page: the viewport, or a tag naming no field
+    /// that sets a rendering `http-equiv` directive or only the character set. A
+    /// tag that names any other field is that field, whatever else it sets, and a
+    /// character set beside a `content` is no reason to keep that content. A tag
+    /// repeating a classifying attribute never renders, whichever copy is read.
+    pub(crate) fn renders(&self) -> bool {
+        if self.repeats() {
+            return false;
         }
-        "twitter:creator" | "twitter:site" => &builtins::USERNAME,
-        "title"
-        | "subject"
-        | "description"
-        | "keywords"
-        | "dc.title"
-        | "dc.subject"
-        | "dc.description"
-        | "og:title"
-        | "og:description"
-        | "twitter:title"
-        | "twitter:description" => &builtins::COMMUNICATIONS_CONTENT,
-        "date"
-        | "dc.date"
-        | "article:published_time"
-        | "article:modified_time"
-        | "og:updated_time" => &builtins::DATE_TIME,
-        "publisher" | "copyright" | "dc.publisher" | "article:publisher" | "og:site_name" => {
-            &builtins::ORGANIZATION_NAME
+        let names = self.field_names();
+        if !names.is_empty() {
+            return self.attribute("name") == Some("viewport")
+                && names.iter().all(|name| *name == "viewport");
         }
-        "generator" | "application-name" => &builtins::PRODUCT,
-        "og:url" | "og:image" | "twitter:image" => &builtins::URL,
-        _ => &builtins::UNRESOLVED,
-    };
-    Some(LabelRef::from(&**label))
+        self.directive()
+            .is_some_and(|directive| RENDER_DIRECTIVES.contains(&directive))
+            || (self.attribute("charset").is_some()
+                && self.attribute("content").is_none_or(str::is_empty))
+    }
+
+    /// What the tag's `content` is, or `None` when the tag renders the page
+    /// rather than describing it.
+    ///
+    /// The field is named by its `name`, `property`, `itemprop`, or `http-equiv`.
+    /// A name this table does not know is still a field, labelled
+    /// [`UNRESOLVED`](builtins::UNRESOLVED).
+    pub(crate) fn label(&self) -> Option<LabelRef> {
+        if self.renders() {
+            return None;
+        }
+        let names = self.field_names();
+        let key = names
+            .iter()
+            .find(|name| **name != "viewport")
+            .or(names.first())
+            .copied()
+            .or_else(|| self.directive())
+            .unwrap_or_default();
+        let label = match key {
+            "author" | "creator" | "dc.creator" | "article:author" | "book:author" => {
+                &builtins::PERSON_NAME
+            }
+            "twitter:creator" | "twitter:site" => &builtins::USERNAME,
+            "title"
+            | "subject"
+            | "description"
+            | "keywords"
+            | "dc.title"
+            | "dc.subject"
+            | "dc.description"
+            | "og:title"
+            | "og:description"
+            | "twitter:title"
+            | "twitter:description" => &builtins::COMMUNICATIONS_CONTENT,
+            "date"
+            | "dc.date"
+            | "article:published_time"
+            | "article:modified_time"
+            | "og:updated_time" => &builtins::DATE_TIME,
+            "publisher" | "copyright" | "dc.publisher" | "article:publisher" | "og:site_name" => {
+                &builtins::ORGANIZATION_NAME
+            }
+            "generator" | "application-name" => &builtins::PRODUCT,
+            "og:url" | "og:image" | "twitter:image" => &builtins::URL,
+            _ => &builtins::UNRESOLVED,
+        };
+        Some(LabelRef::from(&**label))
+    }
 }
 
 #[cfg(test)]
@@ -104,12 +158,7 @@ mod tests {
 
     /// The label of a `<meta>` tag with `attributes`.
     fn label_of(attributes: &[(&str, &str)]) -> Option<LabelRef> {
-        label(|key| {
-            attributes
-                .iter()
-                .find(|(name, _)| *name == key)
-                .map(|(_, value)| (*value).to_owned())
-        })
+        MetaTag::new(attributes.iter().copied()).label()
     }
 
     #[test]
@@ -149,6 +198,33 @@ mod tests {
     fn a_character_set_does_not_keep_a_content() {
         let tag = [("charset", "utf-8"), ("content", "jane roe")];
         assert_eq!(label_of(&tag), Some(LabelRef::from(&*builtins::UNRESOLVED)));
+    }
+
+    /// Every reading of these is a rendering tag but for the copy a browser
+    /// ignores, which is still in the document.
+    #[test]
+    fn a_repeated_attribute_makes_the_tag_a_field() {
+        let unresolved = Some(LabelRef::from(&*builtins::UNRESOLVED));
+        for tag in [
+            &[("name", ""), ("name", "viewport")][..],
+            &[("http-equiv", ""), ("http-equiv", "content-type")],
+            &[("name", "viewport"), ("name", "author")],
+            &[("charset", "utf-8"), ("content", ""), ("content", "x")],
+        ] {
+            assert_eq!(label_of(tag), unresolved, "{tag:?}");
+        }
+    }
+
+    #[test]
+    fn a_blank_name_is_read_first_and_names_nothing() {
+        let tag = MetaTag::new([("NAME", ""), ("name", "author")]);
+        assert_eq!(tag.attribute("name"), Some(""));
+    }
+
+    #[test]
+    fn an_unrepeated_tag_is_unaffected_by_other_repeats() {
+        let tag = [("class", "a"), ("class", "b"), ("name", "viewport")];
+        assert_eq!(label_of(&tag), None);
     }
 
     #[test]

@@ -33,8 +33,8 @@ use quick_xml::events::{BytesEnd, BytesStart, Event};
 
 use super::address::{SpanKind, XmlItem, XmlSpan};
 use super::config::MarkupConfig;
-use super::meta;
-use super::source::{AttributeSpan, MarkupSink, MarkupSource};
+use super::meta::MetaTag;
+use super::source::{AttributeSpan, MarkupSink, MarkupSource, StartTag};
 use super::tag::HtmlTagExt;
 
 /// Extract the redactable markup items from `raw` under `config`. Exposed for
@@ -144,14 +144,14 @@ impl<'a> MarkupParser<'a> {
                 Event::Eof => break,
                 Event::Start(ref e) => {
                     let mut tag = self.source.start_tag(e, self.config.lenient)?;
-                    self.flag_meta(&tag.name, &mut tag.attributes);
+                    self.flag_meta(&mut tag);
                     self.open_passage_element(&tag.name, span.clone());
                     self.attributes(tag.attributes);
                     self.open_element(tag.name, &tag.written, span);
                 }
                 Event::Empty(ref e) => {
                     let mut tag = self.source.start_tag(e, self.config.lenient)?;
-                    self.flag_meta(&tag.name, &mut tag.attributes);
+                    self.flag_meta(&mut tag);
                     self.open_passage_element(&tag.name, span);
                     self.attributes(tag.attributes);
                 }
@@ -264,28 +264,19 @@ impl<'a> MarkupParser<'a> {
         self.items.flag(index, flag);
     }
 
-    /// Flag the `content` of an HTML `<meta>` field, the tag `name` with
-    /// `attributes`, as the metadata it is.
-    fn flag_meta(&self, name: &str, attributes: &mut [AttributeSpan]) {
-        if !self.config.lenient || name != "meta" {
+    /// Flag every `content` of an HTML `<meta>` field as the metadata it is.
+    fn flag_meta(&self, tag: &mut StartTag) {
+        let Some(label) = tag.meta.as_ref().and_then(MetaTag::label) else {
             return;
-        }
-        let named = |attr: &AttributeSpan, key: &str| {
-            attr.name
+        };
+        for attr in &mut tag.attributes {
+            let is_content = attr
+                .name
                 .clone()
-                .is_some_and(|name| self.source.slice(name).eq_ignore_ascii_case(key))
-        };
-        let label = meta::label(|key| {
-            attributes
-                .iter()
-                .find(|attr| named(attr, key))
-                .map(|attr| meta::normalized(self.source.slice(attr.value.clone())))
-        });
-        let Some(label) = label else {
-            return;
-        };
-        if let Some(content) = attributes.iter_mut().find(|attr| named(attr, "content")) {
-            content.flag = Some(ItemFlag::new(label, HiddenContentKind::Metadata));
+                .is_some_and(|name| self.source.slice(name).eq_ignore_ascii_case("content"));
+            if is_content {
+                attr.flag = Some(ItemFlag::new(label.clone(), HiddenContentKind::Metadata));
+            }
         }
     }
 

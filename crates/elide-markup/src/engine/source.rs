@@ -13,6 +13,7 @@ use elide_core::{Error, Result};
 use quick_xml::events::BytesStart;
 
 use super::address::{XmlItem, XmlSpan};
+use super::meta::MetaTag;
 use super::tag::HtmlTagExt;
 
 /// One redactable attribute's source spans: its `value` (the redactable inner
@@ -33,6 +34,8 @@ pub(crate) struct StartTag {
     pub(crate) written: String,
     /// The redactable attributes, in source order.
     pub(crate) attributes: Vec<AttributeSpan>,
+    /// What an HTML `<meta>` tag is, read from all its attributes.
+    pub(crate) meta: Option<MetaTag>,
 }
 
 /// The retained source document, read-only. Owns the span queries the engine
@@ -82,10 +85,18 @@ impl<'a> MarkupSource<'a> {
                     self.push_attribute(&mut attributes, attr.name, value)?;
                 }
             }
+            let meta = tag.name.eq_ignore_ascii_case("meta").then(|| {
+                MetaTag::new(
+                    tag.attributes
+                        .iter()
+                        .map(|attr| (attr.name, attr.value.unwrap_or_default())),
+                )
+            });
             return Ok(StartTag {
                 name: tag.name.to_ascii_lowercase(),
                 written: tag.name.to_owned(),
                 attributes,
+                meta,
             });
         }
         for attr in e.attributes() {
@@ -104,6 +115,7 @@ impl<'a> MarkupSource<'a> {
             name: written.to_ascii_lowercase(),
             written,
             attributes,
+            meta: None,
         })
     }
 

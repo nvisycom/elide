@@ -58,6 +58,39 @@ async fn flag_everything_erases_a_meta_field_with_no_catalog() {
     assert!(out.contains("<body>x</body>"), "{out}");
 }
 
+/// Tags a browser reads as a rendering tag or an empty field, with a value it
+/// ignores still in the document.
+const REPEATED: [&str; 7] = [
+    r#"<meta name="" name="viewport" content="Jane Roe">"#,
+    r#"<meta name name="viewport" content="Jane Roe">"#,
+    r#"<meta http-equiv="" http-equiv="content-type" content="Jane Roe">"#,
+    r#"<meta name="author" content="Bob" content="Jane Roe">"#,
+    r#"<meta name="author" content="" content="Jane Roe">"#,
+    r#"<meta charset="utf-8" content="" content="Jane Roe">"#,
+    r#"<meta name="viewport" name="author" content="Jane Roe">"#,
+];
+
+#[tokio::test]
+async fn a_repeated_meta_attribute_hides_nothing() {
+    let flag = HiddenContentPolicy::default().with_metadata(Disposition::FlagEverything);
+    for tag in REPEATED {
+        let raw = format!("<html><head>{tag}</head><body>x</body></html>");
+        for policy in [flag, HiddenContentPolicy::default()] {
+            let out = redact(&raw, policy, Scope::new(), Directives::new()).await;
+            assert!(!out.contains("Jane Roe"), "{policy:?}: {out}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn every_repeated_content_of_a_field_is_erased() {
+    let raw = r#"<html><head><meta name="author" content="Bob" content="Jane Roe"></head><body>x</body></html>"#;
+    let policy = HiddenContentPolicy::default().with_metadata(Disposition::FlagEverything);
+    let out = redact(raw, policy, Scope::new(), Directives::new()).await;
+    assert!(!out.contains("Bob"), "{out}");
+    assert!(!out.contains("Jane Roe"), "{out}");
+}
+
 /// A comment redacted under an exclusion of `range` in the decoded text.
 async fn comment_excluding(range: Range<usize>) -> String {
     let raw = "<!-- Acme call Jane --><p>x</p>";
