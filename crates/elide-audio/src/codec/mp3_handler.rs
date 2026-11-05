@@ -59,7 +59,7 @@ mod tests {
 
     #[tokio::test]
     async fn redact_strips_the_id3_tag_it_cannot_surface() {
-        let policy = HiddenContentPolicy::default().with_metadata(Disposition::TreatAsContent);
+        let policy = HiddenContentPolicy::default().with_metadata(Disposition::ScanAsContent);
         let doc = format()
             .decode(
                 ContentData::from(with_artist(&fixtures::mp3_tone(1))),

@@ -30,20 +30,24 @@ use serde::{Deserialize, Serialize};
 pub struct HiddenContentPolicy {
     /// What to do with document metadata.
     ///
-    /// [`StripNonEssential`](Disposition::StripNonEssential) keeps only the
+    /// [`KeepOnlyEssential`](Disposition::KeepOnlyEssential) keeps only the
     /// fields the format needs to render correctly (an image's orientation and
     /// colour profile, an HTML page's character set).
-    /// [`TreatAsContent`](Disposition::TreatAsContent) keeps the fields the
-    /// format's schema labels (a location, an author, a device) and strips the
-    /// rest; each labelled field is an entity whose label the request's
-    /// catalog selects or leaves.
+    /// [`ScanAsContent`](Disposition::ScanAsContent) keeps the fields the
+    /// format labels (a location, an author, a device) and strips the rest;
+    /// each labelled field is an entity when the request's catalog declares its
+    /// label. [`FlagEverything`](Disposition::FlagEverything) makes every
+    /// labelled field an entity.
     pub metadata: Disposition,
     /// What to do with collaboration content.
     ///
-    /// [`StripNonEssential`](Disposition::StripNonEssential) produces the final
+    /// [`KeepOnlyEssential`](Disposition::KeepOnlyEssential) produces the final
     /// visible document: tracked insertions are accepted (their text kept),
     /// tracked deletions applied, and comments and annotations dropped with
-    /// their authors.
+    /// their authors. [`ScanAsContent`](Disposition::ScanAsContent) keeps them
+    /// and detects in their text like body text.
+    /// [`FlagEverything`](Disposition::FlagEverything) also makes each
+    /// comment, author, and tracked deletion an entity of its own.
     pub collaboration: Disposition,
 }
 
@@ -53,6 +57,16 @@ impl HiddenContentPolicy {
     pub const fn with_metadata(mut self, metadata: Disposition) -> Self {
         self.metadata = metadata;
         self
+    }
+
+    /// The disposition this policy sets for hidden content of `kind`, or `None`
+    /// for a kind it does not choose for, which is always stripped.
+    pub const fn disposition(&self, kind: HiddenContentKind) -> Option<Disposition> {
+        match kind {
+            HiddenContentKind::Metadata => Some(self.metadata),
+            HiddenContentKind::Collaboration => Some(self.collaboration),
+            _ => None,
+        }
     }
 
     /// This policy with its collaboration disposition set to `collaboration`.
@@ -72,11 +86,25 @@ pub enum Disposition {
     /// Remove the content without inspecting it, keeping only what the format
     /// needs to render the visible document.
     #[default]
-    StripNonEssential,
-    /// Keep the content and handle it like visible content: what the request's
-    /// label catalog covers is redacted, the rest is kept. Content the format
-    /// cannot surface to detection is stripped.
-    TreatAsContent,
+    KeepOnlyEssential,
+    /// Keep the content and handle it like visible content: what detection
+    /// finds under the request's label catalog is redacted, the rest is kept.
+    /// Content the format cannot surface to detection is stripped.
+    ScanAsContent,
+    /// Keep the content as [`ScanAsContent`](Self::ScanAsContent) does, and
+    /// make every item the format labels (a metadata field, a comment, an
+    /// author, a tracked deletion) an entity, whatever the catalog declares.
+    /// The anonymizer decides how each is treated.
+    FlagEverything,
+}
+
+impl Disposition {
+    /// Whether the content is kept and handled as content, as
+    /// [`ScanAsContent`](Self::ScanAsContent) and
+    /// [`FlagEverything`](Self::FlagEverything) do.
+    pub const fn treats_as_content(self) -> bool {
+        !matches!(self, Self::KeepOnlyEssential)
+    }
 }
 
 /// One item of hidden content a codec strips.
@@ -228,8 +256,8 @@ mod tests {
     #[test]
     fn the_default_strips_all_hidden_content() {
         let policy = HiddenContentPolicy::default();
-        assert_eq!(policy.metadata, Disposition::StripNonEssential);
-        assert_eq!(policy.collaboration, Disposition::StripNonEssential);
+        assert_eq!(policy.metadata, Disposition::KeepOnlyEssential);
+        assert_eq!(policy.collaboration, Disposition::KeepOnlyEssential);
     }
 
     #[test]
@@ -250,8 +278,15 @@ mod tests {
 
     #[test]
     fn builders_set_one_disposition_each() {
-        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent);
-        assert_eq!(policy.metadata, Disposition::StripNonEssential);
-        assert_eq!(policy.collaboration, Disposition::TreatAsContent);
+        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
+        assert_eq!(policy.metadata, Disposition::KeepOnlyEssential);
+        assert_eq!(policy.collaboration, Disposition::ScanAsContent);
+    }
+
+    #[test]
+    fn only_keep_only_essential_strips() {
+        assert!(!Disposition::KeepOnlyEssential.treats_as_content());
+        assert!(Disposition::ScanAsContent.treats_as_content());
+        assert!(Disposition::FlagEverything.treats_as_content());
     }
 }

@@ -11,7 +11,7 @@ pub mod mocks;
 pub mod string;
 
 pub use self::contract::{
-    Document, DocumentLoader, DocumentPart, EncodedPart, ErasedStream, Format, FormatId,
-    LeafLoader, LeafRecombine, Loader, LocalId, Recombine, Stream, Stripped, StrippedContent,
-    TypedStream,
+    Document, DocumentLoader, DocumentPart, EncodedPart, ErasedStream, FlaggedItem, Format,
+    FormatId, LeafLoader, LeafRecombine, Loader, LocalId, Recombine, Stream, Stripped,
+    StrippedContent, TypedStream,
 };

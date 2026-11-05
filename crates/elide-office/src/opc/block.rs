@@ -4,7 +4,7 @@
 //! [`PartPath`].
 
 use bytes::Bytes;
-use elide_codec::extract::{OffsetMap, Passage};
+use elide_codec::extract::{ItemFlag, OffsetMap, Passage};
 use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -56,6 +56,10 @@ pub struct Block {
     /// How the block joins the passage of the block before it.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub passage: Passage,
+    /// What the block is when it is collaboration content (a comment, its
+    /// author, a tracked deletion); `None` for visible content.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub flag: Option<ItemFlag>,
 }
 
 /// The kind of binary embedding a part holds.

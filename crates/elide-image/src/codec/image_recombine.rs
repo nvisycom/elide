@@ -15,8 +15,8 @@ use crate::modality::ImageFormat;
 /// stream's redactions and the `#exif` stream's field edits, as one image.
 ///
 /// The decode already decided the metadata: under
-/// [`StripNonEssential`](Disposition::StripNonEssential) the buffer's source was
-/// stripped, and under [`TreatAsContent`](Disposition::TreatAsContent) the
+/// [`KeepOnlyEssential`](Disposition::KeepOnlyEssential) the buffer's source was
+/// stripped, and under [`ScanAsContent`](Disposition::ScanAsContent) the
 /// `#exif` stream edits the fields detection picked.
 pub(super) struct ImageRecombine {
     pub(super) state: ImageState,
@@ -39,6 +39,6 @@ impl Recombine for ImageRecombine {
 
     fn validate(&self, output: &ContentData) -> Result<()> {
         let source = Source::new(output.as_bytes(), self.format.to_exif());
-        source.check_stripped(self.metadata == Disposition::TreatAsContent)
+        source.check_stripped(self.metadata.treats_as_content())
     }
 }

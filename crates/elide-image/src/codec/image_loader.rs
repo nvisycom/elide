@@ -23,9 +23,9 @@ use crate::modality::{Image, ImageFormat};
 /// as content.
 ///
 /// The policy's metadata disposition is applied here, before any part exists:
-/// [`StripNonEssential`](Disposition::StripNonEssential) strips the source
+/// [`KeepOnlyEssential`](Disposition::KeepOnlyEssential) strips the source
 /// container down to its render tags, and
-/// [`TreatAsContent`](Disposition::TreatAsContent) strips everything no
+/// [`ScanAsContent`](Disposition::ScanAsContent) strips everything no
 /// surfaced field stands for and streams the surfaced EXIF fields.
 pub struct ImageDocumentLoader {
     format_id: FormatId,
@@ -46,8 +46,10 @@ impl DocumentLoader for ImageDocumentLoader {
         // bytes as exactly that, no re-detection.
         let mut buffer = ImageBuffer::open(content.as_bytes(), self.format)?;
         let removed = match policy.metadata {
-            Disposition::StripNonEssential => buffer.strip_metadata()?,
-            Disposition::TreatAsContent => buffer.strip_unsurfaced_metadata()?,
+            Disposition::KeepOnlyEssential => buffer.strip_metadata()?,
+            Disposition::ScanAsContent | Disposition::FlagEverything => {
+                buffer.strip_unsurfaced_metadata()?
+            }
         };
         let mut stripped = StrippedContent::new();
         stripped.record(HiddenContent::Properties, None, removed.properties);
@@ -62,7 +64,7 @@ impl DocumentLoader for ImageDocumentLoader {
             id: LocalId::new(PIXEL_PART_ID),
             handle: ErasedStream::new(self.format_id.clone(), pixels),
         }];
-        if policy.metadata == Disposition::TreatAsContent {
+        if policy.metadata.treats_as_content() {
             let exif: Box<dyn Stream<Metadata>> =
                 Box::new(ExifStream::new(state.clone(), self.format_id.clone())?);
             parts.push(DocumentPart::Stream {
@@ -165,7 +167,7 @@ mod tests {
 
     #[tokio::test]
     async fn decode_stream_reports_full_frame() {
-        let mut doc = decode(PNG, Disposition::StripNonEssential, fixtures::png(4, 4)).await;
+        let mut doc = decode(PNG, Disposition::KeepOnlyEssential, fixtures::png(4, 4)).await;
         assert_eq!(doc.parts().len(), 1);
         let stream = pixels(&mut doc);
         assert_eq!(stream.format().as_str(), PNG);
@@ -180,14 +182,14 @@ mod tests {
     async fn only_treating_metadata_as_content_surfaces_the_exif_stream() {
         let jpeg = fixtures::jpeg_with_gps;
         assert_eq!(
-            decode(JPEG, Disposition::StripNonEssential, jpeg())
+            decode(JPEG, Disposition::KeepOnlyEssential, jpeg())
                 .await
                 .parts()
                 .len(),
             1
         );
         assert_eq!(
-            decode(JPEG, Disposition::TreatAsContent, jpeg())
+            decode(JPEG, Disposition::ScanAsContent, jpeg())
                 .await
                 .parts()
                 .len(),
@@ -197,7 +199,7 @@ mod tests {
 
     #[tokio::test]
     async fn read_at_crops_region() {
-        let mut doc = decode(PNG, Disposition::StripNonEssential, fixtures::png(4, 4)).await;
+        let mut doc = decode(PNG, Disposition::KeepOnlyEssential, fixtures::png(4, 4)).await;
         let stream = pixels(&mut doc);
         let data = stream
             .read_at(&bbox(1.0, 1.0, 2.0, 2.0))
@@ -218,7 +220,7 @@ mod tests {
 
     #[tokio::test]
     async fn redact_block_paints_region_and_reencodes() {
-        let mut doc = decode(PNG, Disposition::StripNonEssential, fixtures::png(4, 4)).await;
+        let mut doc = decode(PNG, Disposition::KeepOnlyEssential, fixtures::png(4, 4)).await;
         redact_top_left(&mut doc).await;
         let out = doc.encode().unwrap();
         let painted = image::load_from_memory(out.as_bytes()).unwrap();
@@ -233,7 +235,7 @@ mod tests {
     async fn strip_removes_exif_at_decode() {
         let doc = decode(
             PNG,
-            Disposition::StripNonEssential,
+            Disposition::KeepOnlyEssential,
             fixtures::png_with_gps(),
         )
         .await;
@@ -241,16 +243,16 @@ mod tests {
         let out = doc.encode().unwrap();
         assert!(
             !fixtures::has_gps_png(out.as_bytes()),
-            "GPS survived StripNonEssential"
+            "GPS survived KeepOnlyEssential"
         );
     }
 
-    /// Under `TreatAsContent` a jpeg decodes into a pixel stream and an `#exif`
+    /// Under `ScanAsContent` a jpeg decodes into a pixel stream and an `#exif`
     /// stream sharing one buffer, so redacting both yields one image carrying
     /// both edits.
     #[tokio::test]
     async fn image_document_composes_pixel_redaction_and_exif_removal() {
-        let mut doc = decode(JPEG, Disposition::TreatAsContent, fixtures::jpeg_with_gps()).await;
+        let mut doc = decode(JPEG, Disposition::ScanAsContent, fixtures::jpeg_with_gps()).await;
 
         redact_top_left(&mut doc).await;
         edit_field(&mut doc, "GPSLatitude", MetadataReplacement::Removed).await;
@@ -269,15 +271,15 @@ mod tests {
     /// The `#exif` stream yields the surfaced fields, each labelled.
     #[tokio::test]
     async fn the_exif_stream_yields_labelled_fields() {
-        let mut doc = decode(JPEG, Disposition::TreatAsContent, fixtures::jpeg_with_gps()).await;
+        let mut doc = decode(JPEG, Disposition::ScanAsContent, fixtures::jpeg_with_gps()).await;
         let chunks = exif(&mut doc).chunks().unwrap();
         assert!(chunks.iter().any(|chunk| chunk.data.key() == "GPSLatitude"));
     }
 
-    /// Under `TreatAsContent` a field nothing redacts stays.
+    /// Under `ScanAsContent` a field nothing redacts stays.
     #[tokio::test]
-    async fn treat_as_content_keeps_an_unflagged_field() {
-        let mut doc = decode(PNG, Disposition::TreatAsContent, fixtures::png_with_gps()).await;
+    async fn scan_as_content_keeps_an_unflagged_field() {
+        let mut doc = decode(PNG, Disposition::ScanAsContent, fixtures::png_with_gps()).await;
         redact_top_left(&mut doc).await;
         let out = doc.encode().unwrap();
         assert!(

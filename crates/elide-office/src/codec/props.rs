@@ -14,7 +14,7 @@
 
 use bytes::Bytes;
 use elide_codec::content::ContentData;
-use elide_codec::{DocumentPart, ErasedStream, FormatId, LocalId, Stream};
+use elide_codec::{DocumentPart, ErasedStream, FlaggedItem, FormatId, LocalId, Stream};
 use elide_core::Result;
 use elide_core::modality::metadata::{
     Metadata, MetadataData, MetadataLocation, MetadataReplacement,
@@ -110,6 +110,10 @@ impl Stream<Metadata> for DocPropsStream {
             .map(|field| Chunk::new(MetadataLocation::new(field.key.clone()), field.clone()))
             .collect())
     }
+
+    fn flagged(&self) -> Result<Vec<FlaggedItem<Metadata>>> {
+        Ok(self.fields.iter().map(FlaggedItem::field).collect())
+    }
 }
 
 #[::async_trait::async_trait]
@@ -127,6 +131,7 @@ impl DataWriter<Metadata> for DocPropsStream {
             let key = location.key.as_str().to_owned();
             match replacement {
                 MetadataReplacement::Replace(value) => self.replaced.push((key, value)),
+                MetadataReplacement::Unchanged => {}
                 // Removal, and any treatment added later, clears the field:
                 // nothing leaves it intact.
                 _ => self.removed.push(key),

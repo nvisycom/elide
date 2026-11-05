@@ -77,6 +77,7 @@ pub(crate) fn items(blocks: Vec<Block>) -> Vec<ExtractedItem<OoxmlAddress>> {
             },
             hints: Vec::new(),
             passage: block.passage,
+            flag: block.flag,
         })
         .collect()
 }

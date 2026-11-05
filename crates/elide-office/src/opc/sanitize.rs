@@ -7,16 +7,16 @@
 //!
 //! - **Metadata**: the document properties are stripped unless the policy
 //!   redacts them; custom XML is not surfaced for detection, so it is stripped
-//!   under [`TreatAsContent`](Disposition::TreatAsContent) too.
+//!   under [`ScanAsContent`](elide_core::redaction::Disposition::ScanAsContent) too.
 //! - **Collaboration** (comments and their authors) is stripped unless the
 //!   policy redacts it, and a format's tracked revisions and comment anchors
 //!   are resolved in its stories by the format's element edits. A workbook's
 //!   revision log is never extracted, so it is stripped under
-//!   [`TreatAsContent`](Disposition::TreatAsContent) too.
+//!   [`ScanAsContent`](elide_core::redaction::Disposition::ScanAsContent) too.
 //! - **Always removed**: the thumbnail, active content (macros, ActiveX, web
 //!   extensions), links to external data, printer settings, signatures, and
 //!   application-private data; every external relationship but a hyperlink;
-//!   and, in every kept part, alternative text and tooltips.
+//!   and, in every kept part, alternative text, tooltips, and XML comments.
 //! - **Refused**: a part the table does not recognize, or one it recognizes but
 //!   cannot redact.
 //!
@@ -30,7 +30,7 @@ use std::collections::{HashMap, HashSet};
 
 use bytes::Bytes;
 use elide_codec::{LocalId, StrippedContent};
-use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
+use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
 use elide_core::{Error, Result};
 
 use crate::opc::PartClassifier;
@@ -43,7 +43,7 @@ use crate::opc::part::PartPath;
 use crate::opc::props::UnsurfacedProperties;
 use crate::opc::references::References;
 use crate::opc::relationships::{self, HYPERLINK};
-use crate::opc::xml_edit::{self, Edit};
+use crate::opc::xml_edit::{self, Edit, XmlComments};
 
 /// A list of element edits, each naming the hidden content it removes through
 /// [`Edit::content`].
@@ -95,7 +95,7 @@ pub(crate) fn sanitize(
         edits.push(&ALTERNATIVE_TEXT);
         edits.push(&TOOLTIPS);
         // A redacted property part keeps only the fields detection sees.
-        if kind == PartKind::Properties && policy.metadata == Disposition::TreatAsContent {
+        if kind == PartKind::Properties && policy.metadata.treats_as_content() {
             edits.push(&UnsurfacedProperties);
         }
         edits
@@ -174,14 +174,16 @@ fn repack(
             continue;
         }
         let edited = if path.as_str() == CONTENT_TYPES_PART {
-            (!gone.is_empty())
+            let edited = (!gone.is_empty())
                 .then(|| content_types::without_parts(text(path, bytes)?, &gone))
-                .transpose()?
+                .transpose()?;
+            edit_part(path, bytes, edited, vec![&XmlComments], stripped)?
         } else if path.is_relationships() {
-            dropped
+            let edited = dropped
                 .get(path)
                 .map(|ids| relationships::without(text(path, bytes)?, ids))
-                .transpose()?
+                .transpose()?;
+            edit_part(path, bytes, edited, vec![&XmlComments], stripped)?
         } else {
             let xml = index.is_xml(path);
             if xml {
@@ -194,7 +196,10 @@ fn repack(
             if let Some(references) = &references {
                 part_edits.push(references);
             }
-            edit_part(path, bytes, part_edits, stripped)?
+            if xml {
+                part_edits.push(&XmlComments);
+            }
+            edit_part(path, bytes, None, part_edits, stripped)?
         };
         if let Some(edited) = edited {
             changed.insert(path.clone(), edited.into_bytes());
@@ -222,9 +227,9 @@ fn removal(
     policy: HiddenContentPolicy,
     path: &PartPath,
 ) -> Result<Option<HiddenContent>> {
-    let strips_collaboration = policy.collaboration == Disposition::StripNonEssential;
+    let strips_collaboration = !policy.collaboration.treats_as_content();
     Ok(match kind {
-        PartKind::Properties if policy.metadata == Disposition::StripNonEssential => {
+        PartKind::Properties if !policy.metadata.treats_as_content() => {
             Some(HiddenContent::Properties)
         }
         PartKind::CustomXml => Some(HiddenContent::CustomData),
@@ -249,15 +254,17 @@ fn removal(
     })
 }
 
-/// `bytes` of the kept XML part `path` with `edits` applied in turn, each
-/// recording in `stripped` what it removed, or `None` when nothing changes.
+/// The kept XML part `path`, `edited` already or else as `bytes`, with `edits`
+/// applied in turn, each recording in `stripped` what it removed, or `None` when
+/// nothing changes.
 fn edit_part(
     path: &PartPath,
     bytes: &Bytes,
+    edited: Option<String>,
     edits: Edits<'_>,
     stripped: &mut StrippedContent,
 ) -> Result<Option<String>> {
-    let mut current: Option<String> = None;
+    let mut current = edited;
     for edit in edits {
         let source = current.as_deref().map_or_else(|| text(path, bytes), Ok)?;
         if let Some(edited) = edit.apply(source)? {

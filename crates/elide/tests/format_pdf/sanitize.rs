@@ -41,7 +41,7 @@ async fn decode_removes_metadata_and_surfaces_attachments() {
 
 #[tokio::test]
 async fn redacted_metadata_is_still_stripped() {
-    let policy = HiddenContentPolicy::default().with_metadata(Disposition::TreatAsContent);
+    let policy = HiddenContentPolicy::default().with_metadata(Disposition::ScanAsContent);
     let doc = decode(fixtures::metadata_and_attachment(), policy).await;
     let out = doc.encode().expect("encode");
     assert!(!contains(out.as_bytes(), b"/Author"), "Info survived");

@@ -8,7 +8,7 @@ needs to render the file.
 
 To keep the fields that are safe and redact only the ones the request asks
 for, decode under a hidden-content policy whose metadata disposition is
-`TreatAsContent`. Elide then exposes the fields as parts in the `Metadata`
+`ScanAsContent`. Elide then exposes the fields as parts in the `Metadata`
 modality and redacts them like content, with the same label catalog and the
 same audit trail. Nothing needs registering:
 
@@ -20,7 +20,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let bytes = std::fs::read("photo.jpg")?;
 
     let registry = FormatRegistry::with_builtin();
-    let policy = HiddenContentPolicy::default().with_metadata(Disposition::TreatAsContent);
+    let policy = HiddenContentPolicy::default().with_metadata(Disposition::ScanAsContent);
     let mut document = registry.document("photo.jpg", bytes, policy).await?;
 
     let orchestrator = Orchestrator::new()
@@ -39,15 +39,32 @@ free-text fields, and a document's author, last editor, company, and
 timestamps. The label is the field's detection, so every orchestrator turns
 each labelled field into an entity, the same way for every format. A field
 whose label the request's catalog declares is redacted; any other field is
-kept.
+kept, unless every field is flagged (see below).
 
 Metadata a format cannot surface field by field (XMP, IPTC, audio tags, a
 PDF's `/Info`, a camera's maker note, an EXIF tag no field reads) is stripped
-even under `TreatAsContent`, and so is an image's embedded thumbnail, a
+even under `ScanAsContent`, and so is an image's embedded thumbnail, a
 preview of the unredacted pixels. So is a field whose meaning the format's
 schema does not fix (keywords, a template path, a custom document property):
 only labelled fields are surfaced, so nothing ships that detection could not
 see.
+
+## Flagging every field
+
+The catalog is shared by every modality, so declaring `PERSON_NAME` to catch
+an EXIF author also detects person names in the text. To redact every
+labelled field without widening the catalog, decode under `FlagEverything`:
+
+```rust,no_run
+use elide::prelude::*;
+
+let policy = HiddenContentPolicy::default().with_metadata(Disposition::FlagEverything);
+```
+
+Each labelled field is then an entity whatever the catalog declares, and is
+erased with its own audit entry. A metadata anonymizer, as below, decides
+which fields are treated otherwise; a rule with `Keep` leaves a field as it
+is.
 
 ## Overwriting fields
 
@@ -64,12 +81,20 @@ let orchestrator = Orchestrator::new()
     .with_registry(FormatRegistry::with_builtin())
     .with_anonymizer::<Metadata>(
         Anonymizer::new()
-            .with(Rule::label(builtins::PERSON_NAME.to_ref(), Replace::new("[REDACTED]")))
-            .with(Rule::fallback(Erase)),
+            .with(Rule::label(builtins::PERSON_NAME.to_ref(), Replace::new("[REDACTED]"))),
     );
 ```
 
 A field that cannot hold arbitrary text, such as a GPS coordinate or a
-timestamp in its fixed format, is removed instead of overwritten. The
-fallback rule erases every other redacted field; without one, a redacted
-field no rule covers is kept, as in every other modality.
+timestamp in its fixed format, is removed instead of overwritten. A redacted
+field no rule covers is erased: a field is hidden content its format flagged,
+so it is not kept for want of a rule. Only an entity a metadata analyzer adds
+is kept when no rule covers it, as in every other modality.
+
+Some EXIF fields are redacted as a group, since one alone would still give away
+what the others hold: GPS coordinates clear the whole GPS block, and `Make`,
+`Model`, or `SerialNumber` clear all three and the lens tags. Removal wins inside
+a group: keeping `Model` while erasing `Make` removes both, though `Model`'s audit
+still shows the `Keep` its rule selected. A tag in such a group
+stays only in an image that carries one of its fields; one with no such field
+cannot reach detection, so it is stripped.

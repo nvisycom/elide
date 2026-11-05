@@ -32,8 +32,8 @@ and this project adheres to
 - Hidden-content sanitizing: every codec strips metadata, comments and
   tracked revisions, previews, external references, active content, and
   editor fingerprints at decode, under a per-document `HiddenContentPolicy`
-  whose metadata and collaboration `Disposition` is `StripNonEssential` or
-  `TreatAsContent`;
+  whose metadata and collaboration `Disposition` is `KeepOnlyEssential`,
+  `ScanAsContent`, or `FlagEverything`;
   embedded documents are decoded under their parent's policy, every encode
   checks the output carries none, and an office document with an
   unrecognized part or XML vocabulary is refused
@@ -50,7 +50,7 @@ and this project adheres to
   no codec can read is removed or cleared instead of replaced with a blank
 - Office documents surface the text they keep in attributes and outside a
   workbook's cells: comment and change authors and a comment's title (under
-  collaboration `TreatAsContent`), sheet, table, table-column, and defined names and
+  collaboration `ScanAsContent`), sheet, table, table-column, and defined names and
   Word bookmarks (fitted to their format's naming rules and kept unique when
   redacted, with the hyperlinks to them following), dropdown entries,
   data-validation messages, section names, worksheet headers and footers,
@@ -59,7 +59,7 @@ and this project adheres to
   labels, and optional collaboration dates, set required ones to a neutral
   date, always strip a workbook's revision log, drop a stripped comment's
   legacy note shape, and accept Excel threaded comments and PowerPoint modern
-  comments under `TreatAsContent`
+  comments under `ScanAsContent`
 - HTML sanitizing reads URLs the way a browser does (character references
   decoded, tabs and line breaks dropped), and also strips frames, `<meta>`
   redirects and cookies, conditional comments, remote resource loads and
@@ -70,11 +70,39 @@ and this project adheres to
   label is the field's detection, so a field whose label the request's
   catalog declares is redacted with nothing registered, replacing the
   per-format `ExifRecognizer` and `DocPropsRecognizer`; under
-  `TreatAsContent` an unlabelled field is stripped at decode. Selected fields
+  `ScanAsContent` an unlabelled field is stripped at decode. Selected fields
   are erased by default, or treated by a caller's `Anonymizer<Metadata>`:
   `Replace` and `Mask` overwrite a field that holds text. An image's EXIF and
   an office document's properties are metadata streams of their document,
   not sub-parts decoded through a format of their own
+- Hidden-content dispositions are `KeepOnlyEssential` (the default),
+  `ScanAsContent`, and `FlagEverything`, which also makes every item a format
+  labels an entity whatever the catalog declares: each metadata field, and
+  each comment, comment or revision author, and tracked deletion of an office
+  document, each markup comment, and each HTML `<meta>` field, redacted
+  whole; a stream reports its labelled hidden content through
+  `Stream::flagged`, and the audit records it as a `Flagged` event naming its
+  kind, replacing the metadata-only event
+- Every orchestrator drives text out of the box, with no recognizers, so
+  flagged hidden content in a text stream is erased with nothing registered
+- Every pipeline's anonymizer erases a flagged entity no rule covers, so
+  flagged hidden content is never kept for want of a rule; registering a
+  pipeline requires `Erase: Operator<M>`, and `Keep` and the new
+  `MetadataReplacement::Unchanged` leave a metadata field as it is; an EXIF
+  field goes with its group when another of the group is redacted, though its
+  audit still shows the `Keep`; a finding inside a kept flagged item takes the
+  whole item
+- Office documents always lose their XML comments, and a workbook with a legacy
+  VML drawing, whose root has no namespace, is no longer refused at encode
+- An EXIF tag of a logical group (a destination coordinate, a lens, a modify
+  date) is stripped when the image carries no field of that group, since it
+  could not reach detection
+- HTML `<meta>` names are read with character references decoded, so an encoded
+  redirect is removed; a tag naming a field is metadata even when it also sets
+  a character set or rendering directive, and a character set does not keep a
+  `content` beside it; a tag repeating a classifying attribute is metadata too,
+  and every `content` it carries is flagged
+- Overwriting an EXIF field with blank text removes it
 - Hidden-content audit: every stripped item is recorded on the `Report`
   (`stripped()`) by part, item, and count in a format-neutral
   `HiddenContent` vocabulary, filled by `analyze` and replaced by what

@@ -4,6 +4,8 @@
 use elide_audio::modality::{Audio, AudioData, AudioReplacement};
 use elide_core::Result;
 use elide_core::entity::Entity;
+#[cfg(feature = "metadata")]
+use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement};
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
@@ -21,8 +23,13 @@ use serde::{Deserialize, Serialize};
 /// shows up in the audit trail.
 ///
 /// Works across modalities, a text/tabular span stays verbatim, an image
-/// region or audio range is left untouched. Like the other operators, [`Keep`]
+/// region or audio range is left untouched, a metadata field keeps its value. Like the other operators, [`Keep`]
 /// is implemented per modality, so the one type serves every modality.
+///
+/// A field that stands for a group with others (an EXIF device or GPS field)
+/// goes with the group when another of its fields is redacted: removal wins,
+/// since what the group's other tags reveal is why the group is cleared.
+/// The field's audit still shows the selection of `Keep`.
 #[derive(Debug, Clone, Copy, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -110,6 +117,26 @@ impl Operator<Audio> for Keep {
         _data: &AudioData,
     ) -> Result<AudioReplacement> {
         Ok(AudioReplacement::Unchanged)
+    }
+}
+
+#[cfg(feature = "metadata")]
+#[async_trait::async_trait]
+impl Operator<Metadata> for Keep {
+    fn id(&self) -> OperatorId {
+        Keep::id()
+    }
+
+    fn leak_profile(&self) -> LeakProfile {
+        KEEP_LEAK
+    }
+
+    async fn anonymize(
+        &self,
+        _entity: &Entity<Metadata>,
+        _data: &MetadataData,
+    ) -> Result<MetadataReplacement> {
+        Ok(MetadataReplacement::Unchanged)
     }
 }
 

@@ -3,8 +3,9 @@
 //!
 //! Under a hidden-content policy that treats metadata as content, the image is
 //! a depth-1 document and its `#exif` stream a depth-2 part. Every orchestrator
-//! detects the labelled fields the scope's catalog declares with no
-//! configuration, erases them by default, and encodes the image once.
+//! detects the labelled fields the scope's catalog declares (or every labelled
+//! field, under `FlagEverything`) with no configuration, erases them by
+//! default, and encodes the image once.
 
 #![cfg(feature = "image")]
 
@@ -20,7 +21,7 @@ use elide_engine::{Directives, Document, Orchestrator};
 use elide_format::FormatRegistry;
 use elide_image::modality::{Image, ImageLocation};
 use elide_image::primitive::{BoundingBox, Dimensions, Point};
-use elide_redaction::operators::{Erase, Replace};
+use elide_redaction::operators::{Erase, Keep, Replace};
 use elide_redaction::{Anonymizer, Rule};
 use little_exif::exif_tag::ExifTag;
 use little_exif::filetype::FileExtension;
@@ -70,8 +71,18 @@ fn artist(jpeg: &[u8]) -> Option<String> {
 /// Decode `bytes` with metadata treated as content, run `orchestrator` over it,
 /// and return the redacted bytes.
 async fn redact(orchestrator: &Orchestrator, bytes: bytes::Bytes) -> bytes::Bytes {
+    redact_under(orchestrator, bytes, Disposition::ScanAsContent).await
+}
+
+/// Decode `bytes` under the metadata disposition `metadata`, run
+/// `orchestrator` over it, and return the redacted bytes.
+async fn redact_under(
+    orchestrator: &Orchestrator,
+    bytes: bytes::Bytes,
+    metadata: Disposition,
+) -> bytes::Bytes {
     let registry = FormatRegistry::with_builtin();
-    let policy = HiddenContentPolicy::default().with_metadata(Disposition::TreatAsContent);
+    let policy = HiddenContentPolicy::default().with_metadata(metadata);
     let handle = registry
         .decode(bytes, "jpg", policy)
         .await
@@ -98,7 +109,7 @@ async fn labelled_fields_are_detected_and_erased_with_nothing_configured() {
 
     let orchestrator = orchestrator();
     let registry = FormatRegistry::with_builtin();
-    let policy = HiddenContentPolicy::default().with_metadata(Disposition::TreatAsContent);
+    let policy = HiddenContentPolicy::default().with_metadata(Disposition::ScanAsContent);
     let handle = registry
         .decode(original, "jpg", policy)
         .await
@@ -160,7 +171,104 @@ async fn the_catalog_decides_which_fields_are_redacted() {
 }
 
 #[tokio::test]
-async fn registering_a_metadata_analyzer_keeps_the_schema_detection() {
+async fn flag_everything_redacts_every_field_without_a_catalog() {
+    let orchestrator = Orchestrator::new().with_registry(FormatRegistry::with_builtin());
+    let out = redact_under(&orchestrator, jpeg_with_exif(), Disposition::FlagEverything).await;
+    assert_eq!(artist(&out), None, "artist survived");
+    assert!(!has_gps(&out), "GPS survived");
+}
+
+#[tokio::test]
+async fn a_metadata_anonymizer_treats_flagged_fields() {
+    let orchestrator = Orchestrator::new()
+        .with_anonymizer::<Metadata>(
+            Anonymizer::new()
+                .with(Rule::label(
+                    builtins::PERSON_NAME.to_ref(),
+                    Replace::new("[REDACTED]"),
+                ))
+                .with(Rule::label(builtins::GEOLOCATION_METADATA.to_ref(), Keep)),
+        )
+        .with_registry(FormatRegistry::with_builtin());
+    let out = redact_under(&orchestrator, jpeg_with_exif(), Disposition::FlagEverything).await;
+    assert_eq!(artist(&out).as_deref(), Some("[REDACTED]"));
+    assert!(has_gps(&out), "GPS was redacted despite a rule keeping it");
+}
+
+/// A rule keeping one field of a group loses to another field's erasure: the
+/// field goes with its group, and a field outside the group stays.
+#[tokio::test]
+async fn a_kept_field_goes_with_its_group() {
+    let mut bytes = Vec::new();
+    image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(4, 4, image::Rgb([200, 30, 30])))
+        .write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Jpeg,
+        )
+        .unwrap();
+    let mut exif = ExifMetadata::new();
+    exif.set_tag(ExifTag::Make("Acme".to_owned()));
+    exif.set_tag(ExifTag::Model("X1".to_owned()));
+    exif.set_tag(ExifTag::Artist("Jane Roe".to_owned()));
+    exif.write_to_vec(&mut bytes, FileExtension::JPEG).unwrap();
+
+    let registry = FormatRegistry::with_builtin();
+    let orchestrator = Orchestrator::new()
+        .with_anonymizer::<Metadata>(
+            Anonymizer::new()
+                .with(Rule::<Metadata>::predicate(
+                    |cx| cx.entity.location.key.as_str() != "Make",
+                    Keep,
+                ))
+                .with(Rule::fallback(Erase)),
+        )
+        .with_registry(registry.clone());
+    let policy = HiddenContentPolicy::default().with_metadata(Disposition::FlagEverything);
+    let handle = registry
+        .decode(bytes::Bytes::from(bytes), "jpg", policy)
+        .await
+        .expect("decode jpeg");
+    let mut documents = [Document::new("photo.jpg", handle)];
+    orchestrator
+        .anonymize(&mut documents, &Directives::new())
+        .await
+        .expect("anonymize");
+    let out = documents[0].document.encode().expect("encode").to_bytes();
+
+    assert!(tag(&out, &ExifTag::Make(String::new())).is_none());
+    assert!(tag(&out, &ExifTag::Model(String::new())).is_none());
+    assert_eq!(artist(&out).as_deref(), Some("Jane Roe"));
+}
+
+/// A blank overwrite holds nothing, so the field goes and the encode check has
+/// nothing to object to.
+#[tokio::test]
+async fn overwriting_a_field_with_nothing_removes_it() {
+    let orchestrator = Orchestrator::new()
+        .with_anonymizer::<Metadata>(Anonymizer::new().with(Rule::label(
+            builtins::PERSON_NAME.to_ref(),
+            Replace::new(""),
+        )))
+        .with_registry(FormatRegistry::with_builtin());
+    let out = redact_under(&orchestrator, jpeg_with_exif(), Disposition::FlagEverything).await;
+    assert_eq!(artist(&out), None);
+}
+
+#[tokio::test]
+async fn a_flagged_field_no_rule_covers_is_erased() {
+    let orchestrator = Orchestrator::new()
+        .with_anonymizer::<Metadata>(Anonymizer::new().with(Rule::label(
+            builtins::PERSON_NAME.to_ref(),
+            Replace::new("[REDACTED]"),
+        )))
+        .with_registry(FormatRegistry::with_builtin());
+    let out = redact_under(&orchestrator, jpeg_with_exif(), Disposition::FlagEverything).await;
+    assert_eq!(artist(&out).as_deref(), Some("[REDACTED]"));
+    assert!(!has_gps(&out), "GPS survived with no rule covering it");
+}
+
+#[tokio::test]
+async fn registering_a_metadata_analyzer_keeps_the_flagged_fields() {
     let orchestrator = orchestrator().with_modality::<Metadata>(
         Analyzer::new(),
         Anonymizer::new().with(Rule::fallback(Erase)),

@@ -4,7 +4,7 @@
 //! - **Editor fingerprints**, always: the `rsid` editing-session ids, paragraph
 //!   and text ids, document ids, the session table, range permissions (which
 //!   name their editors), and document protection (a password hash).
-//! - **Tracked revisions**, under [`Disposition::StripNonEssential`]: insertions
+//! - **Tracked revisions**, under [`KeepOnlyEssential`](elide_core::redaction::Disposition::KeepOnlyEssential): insertions
 //!   are accepted (their marks unwrapped, their content kept), deletions applied
 //!   (removed with their content), moves resolved the same way, and every
 //!   property-change record dropped, so the document is its final visible text.
@@ -21,16 +21,16 @@
 //! - **Table alternative text**, always: a table's caption and description.
 //! - **Collaboration dates**, always: when a comment was written or a change
 //!   made. A date cannot be redacted without breaking the document, so it goes
-//!   under [`Disposition::TreatAsContent`] too; the authors are surfaced instead (see
+//!   under [`ScanAsContent`](elide_core::redaction::Disposition::ScanAsContent) too; the authors are surfaced instead (see
 //!   [`TEXT_ATTRIBUTES`]).
 
-use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
+use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
 
 use super::WordFormat;
 use crate::opc::names::{NameReference, NameRule, Numbering, ReferenceForm};
 use crate::opc::sanitize::{Edits, Sanitizer};
 use crate::opc::xml_edit::{Declared, Local};
-use crate::opc::{Names, Ns, PartKind, StripAttributes, TextAttribute};
+use crate::opc::{Collaboration, Names, Ns, PartKind, StripAttributes, TextAttribute};
 
 /// The WordprocessingML main namespace.
 const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
@@ -250,9 +250,11 @@ fn fit_bookmark_name(name: &str) -> String {
 pub(super) const TEXT_ATTRIBUTES: &[TextAttribute] = &[
     BOOKMARK_NAME,
     HYPERLINK_ANCHOR,
-    TextAttribute::new((Ns::Any, Local::Any), (Ns::Any, "author")),
-    TextAttribute::new((Ns::Any, Local::Exact("comment")), (Ns::Any, "initials")),
-    TextAttribute::new((Ns::Any, Local::Exact("presenceInfo")), (Ns::Any, "userId")),
+    TextAttribute::new((Ns::Any, Local::Any), (Ns::Any, "author")).of(Collaboration::Author),
+    TextAttribute::new((Ns::Any, Local::Exact("comment")), (Ns::Any, "initials"))
+        .of(Collaboration::Author),
+    TextAttribute::new((Ns::Any, Local::Exact("presenceInfo")), (Ns::Any, "userId"))
+        .of(Collaboration::Author),
     TextAttribute::new((Ns::Any, Local::Exact("listEntry")), (Ns::Any, "val")),
     TextAttribute::new(
         (Ns::Any, Local::Exact("listItem")),
@@ -285,7 +287,7 @@ impl Sanitizer for WordFormat {
             &COMMENT_DATES,
             &CHANGE_DATES,
         ];
-        if policy.collaboration == Disposition::StripNonEssential {
+        if !policy.collaboration.treats_as_content() {
             edits.push(&REVISIONS);
             edits.push(&COMMENT_ANCHORS);
         }
@@ -391,7 +393,7 @@ mod tests {
 
     #[test]
     fn redacted_collaboration_surfaces_its_authors_and_drops_its_dates() {
-        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent);
+        let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
         let (out, _) = sanitize(&document(), policy, &WordFormat).unwrap();
         let out = out.unwrap();
         for name in ["word/document.xml", "word/comments.xml"] {
@@ -411,5 +413,47 @@ mod tests {
             );
         }
         check(&out, policy, &WordFormat).unwrap();
+    }
+
+    #[test]
+    fn collaboration_blocks_are_flagged_by_what_they_are() {
+        let body = format!(
+            r#"<?xml version="1.0"?><w:document xmlns:w="{W}"><w:body><w:p><w:r><w:t>kept</w:t></w:r><w:del w:id="2" w:author="Jane Roe"><w:r><w:delText>gone</w:delText></w:r></w:del></w:p></w:body></w:document>"#
+        );
+        let comments = format!(
+            r#"<?xml version="1.0"?><w:comments xmlns:w="{W}"><w:comment w:id="0" w:author="John Doe" w:initials="JD"><w:p><w:r><w:t>check this</w:t></w:r></w:p></w:comment></w:comments>"#
+        );
+        let package = pack_parts(&[
+            ("[Content_Types].xml", TYPES.as_bytes()),
+            ("word/document.xml", body.as_bytes()),
+            ("word/comments.xml", comments.as_bytes()),
+        ]);
+        let package = OoxmlPackage::<WordFormat>::open(&package).unwrap();
+        let flags: Vec<(String, Option<String>)> = package
+            .extract()
+            .blocks
+            .into_iter()
+            .map(|block| {
+                let label = block.flag.map(|flag| flag.label.as_str().to_owned());
+                (block.text.to_string(), label)
+            })
+            .collect();
+        let flag = |text: &str| {
+            flags
+                .iter()
+                .find(|(block, _)| block == text)
+                .unwrap_or_else(|| panic!("{text} not in {flags:?}"))
+                .1
+                .clone()
+        };
+        assert_eq!(flag("kept"), None);
+        assert_eq!(flag("gone").as_deref(), Some("communications_content"));
+        assert_eq!(
+            flag("check this").as_deref(),
+            Some("communications_content")
+        );
+        for author in ["Jane Roe", "John Doe", "JD"] {
+            assert_eq!(flag(author).as_deref(), Some("person_name"), "{author}");
+        }
     }
 }

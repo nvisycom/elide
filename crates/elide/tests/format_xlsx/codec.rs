@@ -37,7 +37,7 @@ async fn decode_with(bytes: &'static [u8], policy: HiddenContentPolicy) -> Docum
 
 /// Decode `bytes` keeping its comments for redaction.
 async fn decode_redacting_comments(bytes: &'static [u8]) -> Document {
-    let policy = HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent);
+    let policy = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
     decode_with(bytes, policy).await
 }
 

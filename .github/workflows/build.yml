@@ -74,6 +74,13 @@ jobs:
       - name: Cargo check (all features)
         run: cargo check --workspace --all-features
 
+      # Workspace builds unify features, which hides a crate that only compiles
+      # with a feature some other crate turns on.
+      - name: Cargo check (feature-isolated crates)
+        run: |
+          cargo check -p elide-codec
+          cargo check -p elide-markup --no-default-features --features xml
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest

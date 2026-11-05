@@ -25,7 +25,7 @@ use quick_xml::escape::{escape, partial_escape, unescape};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::{NsReader, Reader};
 
-use crate::opc::attributes::TextAttribute;
+use crate::opc::attributes::{Collaboration, TextAttribute};
 use crate::opc::block::Replacement;
 use crate::opc::xml_edit::{Name, bound};
 
@@ -58,6 +58,8 @@ pub(crate) struct Span {
     pub(crate) kind: BlockKind,
     /// How the span joins the passage of the span before it.
     pub(crate) passage: Passage,
+    /// The collaboration item the span holds, if any.
+    pub(crate) collaboration: Option<Collaboration>,
 }
 
 impl Span {
@@ -67,6 +69,7 @@ impl Span {
             range,
             kind,
             passage: Passage::Start,
+            collaboration: None,
         }
     }
 
@@ -289,12 +292,17 @@ pub(crate) fn attribute_spans(
             };
             let named = attributes
                 .iter()
-                .any(|text| text.matches(element, attribute));
-            if named && !attr.value.is_empty() {
-                spans.push(Span::new(
-                    sub_slice_range(raw, attr.value.as_ref())?,
-                    BlockKind::Attribute,
-                ));
+                .find(|text| text.matches(element, attribute));
+            if let Some(named) = named
+                && !attr.value.is_empty()
+            {
+                spans.push(Span {
+                    collaboration: named.collaboration,
+                    ..Span::new(
+                        sub_slice_range(raw, attr.value.as_ref())?,
+                        BlockKind::Attribute,
+                    )
+                });
             }
         }
     }
@@ -400,7 +408,23 @@ fn flush_text_run(
         range,
         kind: BlockKind::Text,
         passage: passages.text(),
+        collaboration: collaboration(open),
     });
+}
+
+/// The collaboration item text inside the elements `open` is: a tracked
+/// deletion's text, or a legacy comment's author.
+fn collaboration(open: &[String]) -> Option<Collaboration> {
+    if open
+        .iter()
+        .any(|local| local == "del" || local == "moveFrom")
+    {
+        Some(Collaboration::Text)
+    } else if open.last().is_some_and(|local| local == "author") {
+        Some(Collaboration::Author)
+    } else {
+        None
+    }
 }
 
 /// The local names of the elements holding a run's text: WordprocessingML and
@@ -548,6 +572,7 @@ fn separator_span(
         range: span,
         kind: BlockKind::Separator(separator),
         passage: Passage::Separator,
+        collaboration: None,
     })
 }
 

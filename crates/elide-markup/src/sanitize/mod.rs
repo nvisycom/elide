@@ -19,9 +19,9 @@
 //!   XInclude.
 //! - **Content never displayed**, always (HTML): a `<template>`, and an element
 //!   marked `hidden` (one only hidden until found stays).
-//! - **Collaboration**, under [`Disposition::StripNonEssential`]: comments, the
+//! - **Collaboration**, under [`KeepOnlyEssential`](elide_core::redaction::Disposition::KeepOnlyEssential): comments, the
 //!   author's notes a reader never sees.
-//! - **Metadata**, under [`Disposition::StripNonEssential`] (HTML): `<meta>` fields,
+//! - **Metadata**, under [`KeepOnlyEssential`](elide_core::redaction::Disposition::KeepOnlyEssential) (HTML): `<meta>` fields,
 //!   except the ones that render the page (its character set, a rendering
 //!   `http-equiv` directive, the viewport).
 //!
@@ -35,7 +35,7 @@ mod url;
 use std::ops::Range;
 
 use elide_codec::StrippedContent;
-use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
+use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
 use elide_core::{Error, Result};
 use quick_xml::NsReader;
 use quick_xml::events::Event;
@@ -219,9 +219,7 @@ impl MarkupSanitizer {
                         content: HiddenContent::Script,
                     });
                 }
-                Event::Comment(_)
-                    if self.policy.collaboration == Disposition::StripNonEssential =>
-                {
+                Event::Comment(_) if !self.policy.collaboration.treats_as_content() => {
                     removals.push(Removal {
                         range: span,
                         content: HiddenContent::Comment,
@@ -358,6 +356,8 @@ fn is_conditional(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use elide_core::redaction::Disposition;
+
     use super::*;
 
     fn html(policy: HiddenContentPolicy) -> MarkupSanitizer {
@@ -410,16 +410,15 @@ mod tests {
             "<p><![CDATA[><img src=x onerror=steal()>]]></p>",
             "<!DOCTYPE html [<!-- x -->]><p>t</p>",
         ] {
-            let sanitizer = html(
-                HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent),
-            );
+            let sanitizer =
+                html(HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent));
             let error = sanitizer.sanitize(raw.to_owned()).expect_err(raw);
             assert!(error.to_string().contains("earlier `>`"), "{raw}: {error}");
         }
         // An ordinary comment, processing instruction, and document type stay.
         let raw = "<!DOCTYPE html><?xml version=\"1.0\"?><p><!-- note --></p>";
         let sanitizer =
-            html(HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent));
+            html(HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent));
         assert!(sanitizer.sanitize(raw.to_owned()).is_ok());
     }
 
@@ -439,7 +438,7 @@ mod tests {
             sanitize(html(HiddenContentPolicy::default()), raw),
             "<p>a</p>"
         );
-        let redact = HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent);
+        let redact = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
         assert_eq!(sanitize(html(redact), raw), raw);
     }
 
@@ -451,7 +450,7 @@ mod tests {
             out,
             r#"<head><meta charset="utf-8"><meta name="viewport" content="w"><meta http-equiv="content-type" content="text/html"></head>"#
         );
-        let redact = HiddenContentPolicy::default().with_metadata(Disposition::TreatAsContent);
+        let redact = HiddenContentPolicy::default().with_metadata(Disposition::ScanAsContent);
         assert_eq!(sanitize(html(redact), raw), raw);
     }
 
@@ -460,8 +459,31 @@ mod tests {
     #[test]
     fn acting_meta_directives_go_under_every_policy() {
         let raw = r#"<head><meta http-equiv="refresh" content="0;url=javascript:steal()"><meta http-equiv="Set-Cookie" content="id=1"></head>"#;
-        let redact = HiddenContentPolicy::default().with_metadata(Disposition::TreatAsContent);
+        let redact = HiddenContentPolicy::default().with_metadata(Disposition::ScanAsContent);
         assert_eq!(sanitize(html(redact), raw), "<head></head>");
+    }
+
+    /// A browser decodes character references in a directive's name, so a
+    /// spelled-out redirect still redirects and is removed with the others.
+    #[test]
+    fn an_encoded_acting_directive_is_still_caught() {
+        let raw =
+            r#"<head><meta http-equiv="re&#102;resh" content="0;url=https://example.com/"></head>"#;
+        let redact = HiddenContentPolicy::default().with_metadata(Disposition::ScanAsContent);
+        assert_eq!(sanitize(html(redact), raw), "<head></head>");
+    }
+
+    /// A tag that names a field is metadata, even when it also sets something
+    /// that renders the page.
+    #[test]
+    fn a_rendering_attribute_does_not_keep_a_field() {
+        for raw in [
+            r#"<head><meta charset="utf-8" name="author" content="Jane Roe"></head>"#,
+            r#"<head><meta http-equiv="content-type" name="author" content="Jane Roe"></head>"#,
+        ] {
+            let out = sanitize(html(HiddenContentPolicy::default()), raw);
+            assert_eq!(out, "<head></head>");
+        }
     }
 
     /// A browser decodes character references and drops tabs, line breaks, and
@@ -517,7 +539,7 @@ mod tests {
     #[test]
     fn a_conditional_comment_goes_under_every_policy() {
         let raw = "<!--[if IE]><script>s()</script><![endif]--><!-- kept note -->";
-        let redact = HiddenContentPolicy::default().with_collaboration(Disposition::TreatAsContent);
+        let redact = HiddenContentPolicy::default().with_collaboration(Disposition::ScanAsContent);
         assert_eq!(sanitize(html(redact), raw), "<!-- kept note -->");
     }
 

@@ -3,11 +3,12 @@
 
 use std::ops::Range;
 
-use elide_core::redaction::{Disposition, HiddenContent};
+use elide_core::redaction::HiddenContent;
 use elide_core::{Error, Result};
 
 use super::url::{SCRIPT_SCHEMES, css_loads_remote, is_remote, loads_remote, normalized_url};
 use super::{MarkupSanitizer, Removal, Verdict};
+use crate::engine::meta::MetaTag;
 use crate::engine::tag::HtmlTag;
 
 /// HTML elements that run or embed active content, removed with their whole
@@ -35,15 +36,6 @@ const LOADING_ATTRIBUTES: [&str; 10] = [
     "longdesc",
     "manifest",
     "icon",
-];
-
-/// The `http-equiv` directives that only affect how the page renders.
-const RENDER_DIRECTIVES: [&str; 5] = [
-    "content-type",
-    "content-language",
-    "x-ua-compatible",
-    "content-security-policy",
-    "default-style",
 ];
 
 /// The `http-equiv` directives that act when the page opens: a redirect, and a
@@ -105,23 +97,14 @@ impl MarkupSanitizer {
     /// stays: a directive that acts on opening goes whatever the policy, one
     /// that renders the page stays, and any other field is metadata.
     fn meta_removal(&self, attributes: &[Attribute<'_>]) -> Option<HiddenContent> {
-        let attribute = |key: &str| {
-            attributes
-                .iter()
-                .find(|attr| attr.key.eq_ignore_ascii_case(key))
-                .map(|attr| attr.value.trim().to_ascii_lowercase())
-        };
-        if let Some(directive) = attribute("http-equiv") {
-            if ACTING_DIRECTIVES.contains(&directive.as_str()) {
-                return Some(HiddenContent::Action);
-            }
-            if RENDER_DIRECTIVES.contains(&directive.as_str()) {
-                return None;
-            }
+        let tag = MetaTag::new(attributes.iter().map(|attr| (attr.key, attr.value)));
+        if tag
+            .directive()
+            .is_some_and(|directive| ACTING_DIRECTIVES.contains(&directive))
+        {
+            return Some(HiddenContent::Action);
         }
-        let renders = attribute("charset").is_some()
-            || attribute("name").is_some_and(|name| name == "viewport");
-        (!renders && self.policy.metadata == Disposition::StripNonEssential)
+        (!tag.renders() && !self.policy.metadata.treats_as_content())
             .then_some(HiddenContent::Properties)
     }
 }

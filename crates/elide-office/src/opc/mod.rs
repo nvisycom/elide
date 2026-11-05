@@ -33,7 +33,9 @@ use bytes::Bytes;
 use elide_core::{Error, Result};
 
 pub use self::attributes::TextAttribute;
-pub(crate) use self::attributes::{NEUTRAL_DATE, NeutralizeAttributes, Ns, StripAttributes};
+pub(crate) use self::attributes::{
+    Collaboration, NEUTRAL_DATE, NeutralizeAttributes, Ns, StripAttributes,
+};
 pub use self::block::{Block, Embedding, Extraction, Issue, PartReplacement, Replacement};
 use self::index::Index;
 pub use self::kind::PartKind;

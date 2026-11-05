@@ -220,6 +220,7 @@ impl TestOrchestrator {
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
         TypedStream<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
+        Erase: Operator<M>,
     {
         self.inner = self.inner.with_modality::<M>(analyzer, anonymizer);
         self

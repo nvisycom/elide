@@ -53,8 +53,10 @@ fn decode_package<C: OoxmlCodec>(
     let archive = sanitized.map_or(source, Bytes::from);
     let pkg = OoxmlPackage::<C::Format>::open(&archive)?;
     let properties = match policy.metadata {
-        Disposition::TreatAsContent => doc_props_parts(|path| pkg.part_bytes(path)),
-        Disposition::StripNonEssential => Vec::new(),
+        Disposition::ScanAsContent | Disposition::FlagEverything => {
+            doc_props_parts(|path| pkg.part_bytes(path))
+        }
+        Disposition::KeepOnlyEssential => Vec::new(),
     };
     let extraction = pkg.extract();
 

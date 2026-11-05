@@ -15,6 +15,7 @@ mod walk;
 use bytes::Bytes;
 use elide_codec::{Document as CodecDocument, ErasedStream, LocalId};
 use elide_core::Result;
+use elide_core::redaction::HiddenContentPolicy;
 
 pub(crate) use self::phase::{Analyze, Redact};
 pub(crate) use self::walk::Walk;
@@ -49,6 +50,7 @@ pub(crate) trait PartVisitor: Send {
         &'a mut self,
         orchestrator: &'a Orchestrator,
         streams: Vec<(PartId, &'a mut ErasedStream)>,
+        policy: HiddenContentPolicy,
     ) -> BoxFuture<'a, Result<bool>>;
 
     /// How a blob part's `child` folds back into its parent: kept as-is,

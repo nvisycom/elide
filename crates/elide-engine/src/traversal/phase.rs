@@ -7,6 +7,7 @@ use elide_codec::ErasedStream;
 use elide_core::Result;
 use elide_core::modality::NoArtifact;
 use elide_core::recognition::Scope;
+use elide_core::redaction::HiddenContentPolicy;
 
 use super::{Child, Fold, PartVisitor};
 use crate::Orchestrator;
@@ -40,6 +41,7 @@ impl PartVisitor for Analyze<'_> {
         &'a mut self,
         orchestrator: &'a Orchestrator,
         mut streams: Vec<(PartId, &'a mut ErasedStream)>,
+        policy: HiddenContentPolicy,
     ) -> BoxFuture<'a, Result<bool>> {
         Box::pin(async move {
             let no_artifact: Box<dyn ArtifactGroup> = Box::new(NoArtifact);
@@ -66,7 +68,7 @@ impl PartVisitor for Analyze<'_> {
                     })
                     .collect();
                 let analyses = pipeline
-                    .analyze_streams(&mut handles, self.scope, self.annotations, &seeds)
+                    .analyze_streams(&mut handles, self.scope, policy, self.annotations, &seeds)
                     .await?;
                 for (id, (entities, artifact)) in ids.into_iter().zip(analyses) {
                     let name = entities.modality_name();
@@ -111,6 +113,7 @@ impl PartVisitor for Redact<'_> {
         &'a mut self,
         orchestrator: &'a Orchestrator,
         streams: Vec<(PartId, &'a mut ErasedStream)>,
+        _policy: HiddenContentPolicy,
     ) -> BoxFuture<'a, Result<bool>> {
         Box::pin(async move {
             let mut changed = false;

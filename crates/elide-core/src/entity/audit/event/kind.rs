@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::super::hash::AuditHasher;
 use super::{
-    Calibration, Conflict, Contested, Deduplication, Manual, Metadata, Model, Pattern, Redaction,
+    Calibration, Conflict, Contested, Deduplication, Flagged, Manual, Model, Pattern, Redaction,
     Refinement, Selection,
 };
 use crate::modality::Modality;
@@ -64,9 +64,10 @@ pub enum AuditKind<M: Modality> {
     Pattern(Pattern<M>),
     /// A model / NER recognizer matched here.
     Model(Model<M>),
-    /// A metadata field (EXIF tag, file timestamp, document property) was
-    /// surfaced here as a redaction subject.
-    Metadata(Metadata<M>),
+    /// An item of hidden content its format labels (a metadata field, a
+    /// comment, an author, a tracked deletion) was flagged here as a redaction
+    /// subject.
+    Flagged(Flagged<M>),
     /// Several detections were fused into one entity.
     Deduplication(Deduplication),
     /// A competing detection of a different label over the same span was
@@ -108,9 +109,9 @@ impl<M: Modality> AuditKind<M> {
                 out.byte(Pattern::<M>::TAG);
                 p.hash_into(out);
             }
-            Self::Metadata(m) => {
-                out.byte(Metadata::<M>::TAG);
-                m.hash_into(out);
+            Self::Flagged(f) => {
+                out.byte(Flagged::<M>::TAG);
+                f.hash_into(out);
             }
             Self::Model(m) => {
                 out.byte(Model::<M>::TAG);
@@ -168,9 +169,9 @@ impl<M: Modality> From<Model<M>> for AuditKind<M> {
     }
 }
 
-impl<M: Modality> From<Metadata<M>> for AuditKind<M> {
-    fn from(payload: Metadata<M>) -> Self {
-        Self::Metadata(payload)
+impl<M: Modality> From<Flagged<M>> for AuditKind<M> {
+    fn from(payload: Flagged<M>) -> Self {
+        Self::Flagged(payload)
     }
 }
 
