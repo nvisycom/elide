@@ -82,18 +82,12 @@ pub(super) const FIELD_KEYS: [&str; 13] = [
     "ImageUniqueID",
 ];
 
-/// The tags a field `key`'s value is read from, in priority order: the first
-/// the image carries is the value. Empty for a key this crate does not map.
+/// The tags a field `key`'s value is read from: its own tag, and for a
+/// coordinate its hemisphere too. Empty for a key this crate does not map.
 ///
 /// Values are placeholders: `get_tag` matches on tag identity, not value.
 pub(super) fn read_tags(key: &str) -> Vec<ExifTag> {
     match key {
-        // A capture time falls back to the create date when the original is
-        // absent, so an image carrying only one still surfaces its time.
-        "DateTimeOriginal" => vec![
-            ExifTag::DateTimeOriginal(String::new()),
-            ExifTag::CreateDate(String::new()),
-        ],
         // A coordinate reads as its hemisphere too.
         "GPSLatitude" => vec![
             ExifTag::GPSLatitude(Vec::new()),
@@ -143,7 +137,8 @@ pub(super) fn render_tags() -> [ExifTag; 1] {
 /// else in EXIF cannot reach detection, so it is stripped: an embedded
 /// thumbnail, a maker note, vendor tags, and the members of a field's group no
 /// field reads (a lens serial beside a camera's make, a destination coordinate
-/// or altitude beside a position, a modify date beside a capture time).
+/// or altitude beside a position, a create or modify date beside a capture
+/// time).
 pub(super) fn kept_as_content(
     hex: u16,
     group: ExifTagGroup,
@@ -161,12 +156,12 @@ pub(super) fn kept_as_content(
         })
 }
 
-/// The one tag a free-standing field `key` names: the authorship, ownership,
-/// free-text, and identifier fields, each cleared on its own.
+/// The one tag a field `key` names.
 fn own_tag(key: &str) -> Option<ExifTag> {
     Some(match key {
         "GPSLatitude" => ExifTag::GPSLatitude(Vec::new()),
         "GPSLongitude" => ExifTag::GPSLongitude(Vec::new()),
+        "DateTimeOriginal" => ExifTag::DateTimeOriginal(String::new()),
         "Make" => ExifTag::Make(String::new()),
         "Model" => ExifTag::Model(String::new()),
         "SerialNumber" => ExifTag::SerialNumber(String::new()),

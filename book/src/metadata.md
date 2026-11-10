@@ -38,10 +38,10 @@ own schema: an image's EXIF location, time, device, author, copyright, and
 free-text fields, and a document's author, last editor, company, and
 timestamps, and its free text: title, subject, description, keywords,
 category, template path, hyperlink base, the titles of its parts (sheet names,
-slide titles), and custom properties. Every orchestrator turns each labelled
-field into an entity, the same way for every format. A field whose label the
-request's catalog declares is redacted; any other field is kept, unless every
-field is flagged (see below).
+slide titles), and each custom property's name and value. Every orchestrator
+turns each labelled field into an entity, the same way for every format. A
+field whose label the request's catalog declares is redacted; any other field
+is kept, unless every field is flagged (see below).
 
 An HTML page's `<meta>` fields are the exception: they stay in the page's
 text, so the text analyzer scans them like body text, and a catalog label
@@ -130,5 +130,5 @@ what the others hold: GPS coordinates clear the whole GPS block, and `Make`,
 `Model` while erasing `Make` removes both, though `Model`'s audit still shows
 the `Keep` its rule selected. Under `ScanAsContent` an image keeps only the tags
 a surfaced field is read from, a coordinate's hemisphere included; the rest of
-each group (the lens tags, a destination coordinate or altitude, a modify date
-or time offset) cannot reach detection, so it is stripped.
+each group (the lens tags, a destination coordinate or altitude, a create or
+modify date, a time offset) cannot reach detection, so it is stripped.

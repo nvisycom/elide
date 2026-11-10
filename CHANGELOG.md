@@ -89,12 +89,16 @@ and this project adheres to
   `ImageBuffer::edit_metadata` takes each field's new value, and a metadata
   stream keeps its fields in `elide_codec::metadata::MetadataFields`, which
   reads, redacts, and reports them. A docProps key is unique in its part: a
-  repeated name is keyed `name#2`, and the part lists are keyed
-  `TitlesOfParts/<n>` and `HeadingPairs/<n>`
+  repeated element is keyed `name#2`, the part lists `TitlesOfParts/<n>` and
+  `HeadingPairs/<n>`, and a custom property by its position, `property/<n>`,
+  with its name a field of its own (`property/<n>/name`) that is scanned and
+  rewritten like its value
 - Under `ScanAsContent` an image keeps only the EXIF tags a surfaced field is
   read from: the members of a field's group no field reads (the lens tags,
   destination coordinates, altitude, modify dates, time offsets) are stripped
-  at decode instead of following the field's decision unscanned
+  at decode instead of following the field's decision unscanned. A capture
+  time is read from `DateTimeOriginal` alone, so `CreateDate` is stripped
+  like `ModifyDate` instead of standing in for a missing capture time
 - Hidden-content dispositions are `KeepOnlyEssential` (the default),
   `ScanAsContent`, and `FlagEverything`, which also makes every item a format
   labels an entity whatever the catalog declares: each metadata field, and

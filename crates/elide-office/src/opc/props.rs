@@ -83,7 +83,8 @@ enum Place {
     Element,
     /// A text entry of a list, keyed `<list>/<index>` (`TitlesOfParts/2`).
     Entry,
-    /// A custom property, keyed by its name, its value in one typed child.
+    /// A custom property, keyed by its position, its value in one typed
+    /// child.
     Custom,
 }
 
@@ -104,8 +105,8 @@ impl Place {
 /// A property field: its key, its value, and what it is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Field {
-    /// The field's key: an element's local name, `<list>/<index>`, or a custom
-    /// property's name.
+    /// The field's key: an element's local name, `<list>/<n>`, or a custom
+    /// property's `property/<n>` (its name `property/<n>/name`).
     pub key: String,
     /// The field's value, trimmed.
     pub value: String,
@@ -153,12 +154,20 @@ impl Rules for UnsurfacedProperties {
     }
 }
 
-/// A field an element holds: its key in the part, where its value sits, and
-/// what it is.
+/// A field an element holds: its key in the part, where its value sits, what
+/// it is, and for a custom property, its name.
 struct Entered {
     key: String,
     place: Place,
     label: LabelRef,
+    name: Option<String>,
+}
+
+impl Entered {
+    /// The key of the field holding a custom property's name.
+    fn name_key(&self) -> String {
+        format!("{}/name", self.key)
+    }
 }
 
 /// The open elements of a property part, which say what field an element is.
@@ -168,40 +177,51 @@ struct Walk {
     open: Vec<String>,
     /// How many text entries of the current list have been entered.
     entries: usize,
-    /// How many fields each key has named so far.
+    /// How many named custom properties have been entered.
+    properties: usize,
+    /// How many times each element field has been entered.
     seen: HashMap<String, usize>,
 }
 
 impl Walk {
     /// Enter `elem`, returning the field it holds, if any.
     ///
-    /// A key is unique in its part: a key a field has already named (a second
-    /// custom property of one name, a repeated element) gets `#<n>` after it,
-    /// so each field is read and rewritten on its own.
+    /// Every key is unique in its part. An element field is keyed by its name,
+    /// a repeated one with `#<n>` after it (no element name holds a `#`). A
+    /// list entry is keyed `<list>/<n>`, and a custom property by its position,
+    /// `property/<n>`, since its name is free text that could look like any
+    /// key; the name is a field of its own, `property/<n>/name`.
     fn enter(&mut self, elem: &BytesStart<'_>) -> Option<Entered> {
-        let (name, place) = self.open_element(elem)?;
-        let label = place.label(&name);
-        let count = self.seen.entry(name.clone()).or_default();
-        *count += 1;
-        let key = match *count {
-            1 => name,
-            n => format!("{name}#{n}"),
-        };
-        Some(Entered { key, place, label })
-    }
-
-    /// Push `elem` onto the open elements, returning the field it holds by its
-    /// schema name, if any.
-    fn open_element(&mut self, elem: &BytesStart<'_>) -> Option<(String, Place)> {
         let local = local_name(elem);
-        let field = match self.open.len() {
-            1 if ELEMENT_FIELDS.contains(&local.as_str()) => Some((local.clone(), Place::Element)),
+        let entered = match self.open.len() {
+            1 if ELEMENT_FIELDS.contains(&local.as_str()) => {
+                let count = self.seen.entry(local.clone()).or_default();
+                *count += 1;
+                let key = match *count {
+                    1 => local.clone(),
+                    n => format!("{local}#{n}"),
+                };
+                Some(Entered {
+                    key,
+                    place: Place::Element,
+                    label: Place::Element.label(&local),
+                    name: None,
+                })
+            }
             1 if local == CUSTOM_PROPERTY => elem
                 .try_get_attribute("name")
                 .ok()
                 .flatten()
                 .and_then(|name| name.normalized_value(XmlVersion::Implicit1_0).ok())
-                .map(|name| (name.into_owned(), Place::Custom)),
+                .map(|name| {
+                    self.properties += 1;
+                    Entered {
+                        key: format!("{CUSTOM_PROPERTY}/{}", self.properties - 1),
+                        place: Place::Custom,
+                        label: Place::Custom.label(&local),
+                        name: Some(name.into_owned()),
+                    }
+                }),
             1 if LISTS.contains(&local.as_str()) => {
                 self.entries = 0;
                 None
@@ -214,15 +234,17 @@ impl Walk {
                     && TEXT_TYPES.contains(&local.as_str()) =>
             {
                 self.entries += 1;
-                Some((
-                    format!("{}/{}", self.open[1], self.entries - 1),
-                    Place::Entry,
-                ))
+                Some(Entered {
+                    key: format!("{}/{}", self.open[1], self.entries - 1),
+                    place: Place::Entry,
+                    label: Place::Entry.label(&local),
+                    name: None,
+                })
             }
             _ => None,
         };
         self.open.push(local);
-        field
+        entered
     }
 
     /// Leave the innermost open element.
@@ -271,6 +293,16 @@ pub fn fields(xml: &[u8]) -> Vec<Field> {
                     open.value.push('\n');
                 }
                 if reading.is_none() {
+                    if let Some(field) = &field
+                        && let Some(name) = field.name.as_deref().map(str::trim)
+                        && !name.is_empty()
+                    {
+                        fields.push(Field {
+                            key: field.name_key(),
+                            value: name.to_owned(),
+                            label: field.label.clone(),
+                        });
+                    }
                     reading = field.map(|field| Reading {
                         field,
                         depth: walk.depth(),
@@ -416,18 +448,44 @@ pub fn rewrite(xml: &[u8], fields: &[(&str, &str)]) -> Bytes {
                     let _ = writer.write_event(Event::Start(elem));
                     continue;
                 }
-                let edited = field.and_then(|field| Some((value_of(&field.key)?, field)));
-                let Some((value, Entered { key, place, .. })) = edited else {
+                let Some(field) = field else {
                     let _ = writer.write_event(Event::Start(elem));
                     continue;
                 };
-                match place {
-                    Place::Custom if value.is_empty() => dropping = 1,
-                    Place::Custom => held = Some((elem.into_owned(), value)),
+                let value = value_of(&field.key);
+                let name = (field.place == Place::Custom)
+                    .then(|| value_of(&field.name_key()))
+                    .flatten();
+                if value.is_none() && name.is_none() {
+                    let _ = writer.write_event(Event::Start(elem));
+                    continue;
+                }
+                match field.place {
+                    // A custom property needs a name and a value: a blank one
+                    // drops it whole.
+                    Place::Custom if value == Some("") || name == Some("") => dropping = 1,
+                    Place::Custom => {
+                        let elem = match name {
+                            Some(name) => renamed(&elem, name),
+                            None => elem.into_owned(),
+                        };
+                        match value {
+                            Some(value) => held = Some((elem, value)),
+                            None => {
+                                let _ = writer.write_event(Event::Start(elem));
+                            }
+                        }
+                    }
                     Place::Element | Place::Entry => {
+                        let value = value.unwrap_or_default();
                         let _ = writer.write_event(Event::Start(elem));
                         clearing = 1;
-                        let typed = place == Place::Element && TIMESTAMPS.contains(&key.as_str());
+                        let typed = field.place == Place::Element
+                            && field
+                                .key
+                                .split('#')
+                                .next()
+                                .is_some_and(|name| TIMESTAMPS.contains(&name));
                         if !value.is_empty() && !typed {
                             let _ = writer.write_event(Event::Text(BytesText::new(value)));
                         }
@@ -462,6 +520,20 @@ pub fn rewrite(xml: &[u8], fields: &[(&str, &str)]) -> Bytes {
         out = with_bom;
     }
     Bytes::from(out)
+}
+
+/// `elem` with its `name` attribute set to `name`, every other attribute as it
+/// was.
+fn renamed(elem: &BytesStart<'_>, name: &str) -> BytesStart<'static> {
+    let mut renamed = BytesStart::new(elem.name().as_ref().to_owned());
+    for attribute in elem.attributes().flatten() {
+        if attribute.key.as_ref() == "name" {
+            renamed.push_attribute(("name", name));
+        } else {
+            renamed.push_attribute(attribute);
+        }
+    }
+    renamed
 }
 
 /// The UTF-8 byte-order mark some Office parts carry.
@@ -593,13 +665,15 @@ mod tests {
     }
 
     #[test]
-    fn a_custom_property_is_a_field_by_its_name() {
+    fn a_custom_property_is_keyed_by_position_with_its_name_a_field() {
         let got = fields(CUSTOM);
         assert_eq!(
             pairs(CUSTOM),
             [
-                ("Client".to_owned(), "Jane Roe".to_owned()),
-                ("creator".to_owned(), "42".to_owned()),
+                ("property/0/name".to_owned(), "Client".to_owned()),
+                ("property/0".to_owned(), "Jane Roe".to_owned()),
+                ("property/1/name".to_owned(), "creator".to_owned()),
+                ("property/1".to_owned(), "42".to_owned()),
             ]
         );
         // Named like a core field, a custom property is still free content.
@@ -626,13 +700,16 @@ mod tests {
         let custom = br#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2" name="Reviewers"><vt:vector size="2" baseType="lpwstr"><vt:lpwstr>Jane Roe</vt:lpwstr><vt:lpwstr>carol@example.com</vt:lpwstr></vt:vector></property></Properties>"#;
         assert_eq!(
             pairs(custom),
-            [(
-                "Reviewers".to_owned(),
-                "Jane Roe\ncarol@example.com".to_owned()
-            )]
+            [
+                ("property/0/name".to_owned(), "Reviewers".to_owned()),
+                (
+                    "property/0".to_owned(),
+                    "Jane Roe\ncarol@example.com".to_owned()
+                ),
+            ]
         );
         // A list cannot hold the edited text, so the property goes whole.
-        let out = rewrite(custom, &[("Reviewers", "Jane Roe\n[EMAIL]")]);
+        let out = rewrite(custom, &[("property/0", "Jane Roe\n[EMAIL]")]);
         let text = std::str::from_utf8(&out).unwrap();
         assert!(
             !text.contains("Reviewers") && !text.contains("carol"),
@@ -642,22 +719,14 @@ mod tests {
 
     #[test]
     fn a_repeated_name_is_its_own_field() {
-        let custom = br#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2" name="Client"><vt:lpwstr>Jane Roe</vt:lpwstr></property><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="3" name="Client"><vt:lpwstr>ACME</vt:lpwstr></property></Properties>"#;
-        assert_eq!(
-            pairs(custom),
-            [
-                ("Client".to_owned(), "Jane Roe".to_owned()),
-                ("Client#2".to_owned(), "ACME".to_owned()),
-            ]
-        );
-        let out = rewrite(custom, &[("Client", "[NAME]")]);
-        assert_eq!(
-            pairs(&out),
-            [
-                ("Client".to_owned(), "[NAME]".to_owned()),
-                ("Client#2".to_owned(), "ACME".to_owned()),
-            ]
-        );
+        // Custom properties are keyed by position, so a repeated name, or one
+        // that looks like another key, never collides.
+        let custom = br#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2" name="Client"><vt:lpwstr>Jane Roe</vt:lpwstr></property><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="3" name="Client"><vt:lpwstr>ACME</vt:lpwstr></property><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="4" name="property/0"><vt:lpwstr>Kyiv</vt:lpwstr></property></Properties>"#;
+        let out = rewrite(custom, &[("property/0", "[NAME]")]);
+        let after = pairs(&out);
+        assert!(after.contains(&("property/0".to_owned(), "[NAME]".to_owned())));
+        assert!(after.contains(&("property/1".to_owned(), "ACME".to_owned())));
+        assert!(after.contains(&("property/2".to_owned(), "Kyiv".to_owned())));
 
         let core = br#"<coreProperties xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>Ada</dc:creator><dc:creator>Alan</dc:creator></coreProperties>"#;
         let got = fields(core);
@@ -666,8 +735,31 @@ mod tests {
     }
 
     #[test]
+    fn a_custom_property_is_renamed_or_dropped_with_its_name() {
+        let out = rewrite(CUSTOM, &[("property/0/name", "[NAME]")]);
+        let text = std::str::from_utf8(&out).unwrap();
+        assert!(
+            text.contains(r#"name="[NAME]""#) && !text.contains("Client"),
+            "{text}"
+        );
+        assert!(text.contains("Jane Roe"), "{text}");
+
+        let out = rewrite(CUSTOM, &[("property/0/name", "")]);
+        assert_eq!(
+            pairs(&out),
+            [
+                ("property/0/name".to_owned(), "creator".to_owned()),
+                ("property/0".to_owned(), "42".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
     fn a_custom_property_is_overwritten_in_its_text_or_dropped() {
-        let out = rewrite(CUSTOM, &[("Client", "[NAME]"), ("creator", "[NAME]")]);
+        let out = rewrite(
+            CUSTOM,
+            &[("property/0", "[NAME]"), ("property/1", "[NAME]")],
+        );
         let text = std::str::from_utf8(&out).unwrap();
         assert!(
             text.contains(r#"name="Client"><vt:lpwstr>[NAME]</vt:lpwstr></property>"#),
@@ -676,8 +768,14 @@ mod tests {
         // A number cannot hold the text, so the property goes whole.
         assert!(!text.contains("creator") && !text.contains("42"), "{text}");
 
-        let out = rewrite(CUSTOM, &[("Client", "")]);
-        assert_eq!(pairs(&out), [("creator".to_owned(), "42".to_owned())]);
+        let out = rewrite(CUSTOM, &[("property/0", "")]);
+        assert_eq!(
+            pairs(&out),
+            [
+                ("property/0/name".to_owned(), "creator".to_owned()),
+                ("property/0".to_owned(), "42".to_owned()),
+            ]
+        );
     }
 
     #[test]

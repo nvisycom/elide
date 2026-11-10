@@ -33,7 +33,6 @@ pub(super) fn render(key: &str, exif: &ExifMetadata) -> Option<String> {
 fn text(tag: &ExifTag) -> Option<String> {
     let raw = match tag {
         ExifTag::DateTimeOriginal(s)
-        | ExifTag::CreateDate(s)
         | ExifTag::Make(s)
         | ExifTag::Model(s)
         | ExifTag::SerialNumber(s)

@@ -196,8 +196,10 @@ async fn findings_inside_property_values_are_redacted_alone() {
     assert_eq!(
         fields(&out, "docProps/custom.xml"),
         [
-            ("Reviewer".to_owned(), "[email_address]".to_owned()),
-            ("Budget".to_owned(), "42".to_owned()),
+            ("property/0/name".to_owned(), "Reviewer".to_owned()),
+            ("property/0".to_owned(), "[email_address]".to_owned()),
+            ("property/1/name".to_owned(), "Budget".to_owned()),
+            ("property/1".to_owned(), "42".to_owned()),
         ]
     );
 }

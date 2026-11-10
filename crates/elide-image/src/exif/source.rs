@@ -467,6 +467,7 @@ mod tests {
             ExifTag::Make("Nvisy".into()),
             ExifTag::LensSerialNumber("LS-7".into()),
             ExifTag::DateTimeOriginal("2024:01:02 03:04:05".into()),
+            ExifTag::CreateDate("2024:01:02 03:04:05".into()),
             ExifTag::ModifyDate("2024:01:02 03:04:05".into()),
         ]);
         let reduced = source(&bytes).reduce_to_surfaced().expect("reduce");
@@ -483,6 +484,7 @@ mod tests {
         // The rest of each group is never read, so it goes.
         assert!(!has(&ExifTag::GPSDestLatitude(Vec::new())));
         assert!(!has(&ExifTag::LensSerialNumber(String::new())));
+        assert!(!has(&ExifTag::CreateDate(String::new())));
         assert!(!has(&ExifTag::ModifyDate(String::new())));
     }
 
@@ -508,15 +510,6 @@ mod tests {
         assert!(value("DateTimeOriginal").contains("2024"));
         assert!(value("Artist").contains("Jane Roe"));
         assert!(value("ImageDescription").contains("clinic"));
-    }
-
-    #[test]
-    fn a_capture_time_falls_back_to_the_create_date() {
-        let bytes = jpeg_with(vec![ExifTag::CreateDate("2023:05:06 07:08:09".into())]);
-        let values = source(&bytes).values().expect("read");
-        assert_eq!(values.len(), 1);
-        assert_eq!(values[0].0, "DateTimeOriginal");
-        assert!(values[0].1.contains("2023"));
     }
 
     #[test]
