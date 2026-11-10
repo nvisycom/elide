@@ -12,6 +12,8 @@ use quick_xml::Reader;
 use quick_xml::escape::unescape;
 use quick_xml::events::Event;
 
+use crate::opc::xml_edit::bom_len;
+
 /// The decoded strings of a shared-string table, indexed as the cells reference
 /// them. Index `i` is the text of the `i`-th `<si>` in document order.
 ///
@@ -97,11 +99,6 @@ pub(crate) fn shared_string_items(raw: &str) -> Result<Vec<SharedItem>> {
         }
     }
     Ok(items)
-}
-
-/// The byte length of a leading UTF-8 BOM (`U+FEFF`), or 0 if absent.
-fn bom_len(raw: &str) -> usize {
-    if raw.starts_with('\u{feff}') { 3 } else { 0 }
 }
 
 #[cfg(test)]

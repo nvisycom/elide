@@ -17,6 +17,7 @@ use quick_xml::events::Event;
 use quick_xml::events::attributes::Attribute;
 use quick_xml::{Reader, XmlVersion};
 
+use crate::opc::xml_edit::bom_len;
 use crate::xlsx::cellref::parse_cell_ref;
 
 /// The entity-decoded value of an attribute, for comparison or parsing.
@@ -362,11 +363,6 @@ fn unescape_text(text: &str) -> String {
 /// double quotes without breaking the tag or double-escaping.
 fn escape_attr_value(value: &str) -> String {
     value.replace('"', "&quot;")
-}
-
-/// The byte length of a leading UTF-8 BOM (`U+FEFF`), or 0 if absent.
-fn bom_len(raw: &str) -> usize {
-    if raw.starts_with('\u{feff}') { 3 } else { 0 }
 }
 
 #[cfg(test)]

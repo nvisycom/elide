@@ -27,7 +27,7 @@ use quick_xml::{NsReader, Reader};
 
 use crate::opc::attributes::{Collaboration, TextAttribute};
 use crate::opc::block::Replacement;
-use crate::opc::xml_edit::{Name, bound};
+use crate::opc::xml_edit::{Name, bom_len, bound};
 
 /// The XML construct a redactable span lives inside, which determines how a
 /// replacement spliced into it must be escaped or framed.
@@ -375,13 +375,6 @@ fn sub_slice_range(raw: &str, value: &str) -> std::result::Result<Range<usize>, 
         return Err(());
     }
     Ok(start..end)
-}
-
-/// The byte length of a leading UTF-8 BOM (`U+FEFF`), or 0 if absent. quick-xml
-/// skips it and reports positions past it, so spans over the original bytes must
-/// add it back.
-fn bom_len(raw: &str) -> usize {
-    if raw.starts_with('\u{feff}') { 3 } else { 0 }
 }
 
 /// Emit the pending text run as a `Text` span in its passage, then clear it. A
