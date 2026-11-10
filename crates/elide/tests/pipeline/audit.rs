@@ -14,18 +14,18 @@ fn redacted_entity(label: &str) -> Entity<Text> {
 
     let location = TextLocation::inline(0..5);
     let conf = Confidence::new(0.9).unwrap();
-    let mut audit = AuditLog::new(AuditEvent::pattern(
-        "t",
-        conf,
-        location.clone(),
-        PatternEvent::default(),
-    ));
-    audit.record(AuditEvent::redaction(
-        Redaction::new(OperatorId::new("erase", "1.0.0"), RuleMatch::Fallback)
-            .with_leak_profile(LeakProfile::Irrecoverable),
-        conf,
-    ));
-    Entity::new(LabelRef::new(label), location, audit)
+    Entity::new(LabelRef::new(label), location.clone())
+        .with_event(AuditEvent::pattern(
+            "t",
+            conf,
+            location,
+            PatternEvent::default(),
+        ))
+        .with_event(AuditEvent::redaction(
+            Redaction::new(OperatorId::new("erase", "1.0.0"), RuleMatch::Fallback)
+                .with_leak_profile(LeakProfile::Irrecoverable),
+            conf,
+        ))
 }
 
 #[test]

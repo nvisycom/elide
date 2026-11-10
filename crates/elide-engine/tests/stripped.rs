@@ -6,7 +6,7 @@ use bytes::Bytes;
 use elide_codec::mocks::{MOCK_EXT, MockPart, encode_mock, mock_format};
 use elide_core::Result;
 use elide_core::redaction::{HiddenContent, HiddenContentPolicy};
-use elide_engine::{Directives, Document, Orchestrator, PartId, Report};
+use elide_engine::{Document, Orchestrator, PartId, Report};
 use elide_format::FormatRegistry;
 
 /// A mock container whose one blob carries a hint no codec is registered for.
@@ -32,9 +32,7 @@ async fn an_unreadable_embedding_is_reported_before_it_is_removed() -> Result<()
         .await?;
     let mut documents = [Document::new("outer.mock", handle)];
 
-    let analyzed = orchestrator
-        .analyze(&mut documents, &Directives::new())
-        .await?;
+    let analyzed = orchestrator.analyze(&mut documents).await?;
     let reported: Vec<HiddenContent> = analyzed
         .report
         .part_stripped(&unreadable)

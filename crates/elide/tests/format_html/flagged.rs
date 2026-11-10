@@ -1,5 +1,5 @@
 //! Flagged HTML hidden content through the public facade: a `<meta>` field and
-//! a comment under the dispositions and exclusions that decide its fate.
+//! a comment under the dispositions, and the review edits, that decide its fate.
 
 use std::ops::Range;
 
@@ -7,16 +7,16 @@ use elide::codec::FormatRegistry;
 use elide::entity::LabelCatalog;
 use elide::modality::text::{Text, TextLocation};
 use elide::recognition::Scope;
-use elide::recognition::annotation::{Annotations, Exclusion};
 use elide::redaction::{Disposition, HiddenContentPolicy};
-use elide::{Directives, Document, Orchestrator};
+use elide::{Document, Orchestrator};
 
-/// `raw` decoded under `policy`, run under `scope` and `directives`, re-encoded.
-async fn redact(
+/// `raw` decoded under `policy`, run under `scope`, with each part of the
+/// report's document the `region` contains suppressed, re-encoded.
+async fn redact_sparing(
     raw: &str,
     policy: HiddenContentPolicy,
     scope: Scope,
-    directives: Directives,
+    region: Option<Range<usize>>,
 ) -> String {
     let registry = FormatRegistry::with_builtin();
     let orchestrator = Orchestrator::new()
@@ -28,12 +28,28 @@ async fn redact(
         .await
         .expect("decode html");
     let mut documents = [Document::new("page.html", handle)];
+    let mut report = orchestrator
+        .analyze(&mut documents)
+        .await
+        .expect("analyze")
+        .report;
+    if let Some(region) = region {
+        report
+            .document_mut::<Text>()
+            .expect("the page is text")
+            .suppress_within(&TextLocation::inline(region));
+    }
     orchestrator
-        .anonymize(&mut documents, &directives)
+        .anonymize_with(&mut documents, report)
         .await
         .expect("anonymize");
     let out = documents[0].document.encode().expect("encode").to_bytes();
     String::from_utf8(out.to_vec()).unwrap()
+}
+
+/// `raw` decoded under `policy`, run under `scope`, re-encoded.
+async fn redact(raw: &str, policy: HiddenContentPolicy, scope: Scope) -> String {
+    redact_sparing(raw, policy, scope, None).await
 }
 
 /// A scanned `<meta>` field is text recognizers read, so a declared catalog does
@@ -44,7 +60,7 @@ async fn scan_as_content_keeps_a_meta_field_nothing_detects() {
         r#"<html><head><meta name="description" content="A page"></head><body>x</body></html>"#;
     let policy = HiddenContentPolicy::default().with_metadata(Disposition::ScanAsContent);
     let scope = Scope::new().with_catalog(LabelCatalog::with_builtins());
-    let out = redact(raw, policy, scope, Directives::new()).await;
+    let out = redact(raw, policy, scope).await;
     assert!(out.contains("A page"), "{out}");
 }
 
@@ -53,7 +69,7 @@ async fn flag_everything_erases_a_meta_field_with_no_catalog() {
     let raw =
         r#"<html><head><meta name="description" content="A page"></head><body>x</body></html>"#;
     let policy = HiddenContentPolicy::default().with_metadata(Disposition::FlagEverything);
-    let out = redact(raw, policy, Scope::new(), Directives::new()).await;
+    let out = redact(raw, policy, Scope::new()).await;
     assert!(!out.contains("A page"), "{out}");
     assert!(out.contains("<body>x</body>"), "{out}");
 }
@@ -76,7 +92,7 @@ async fn a_repeated_meta_attribute_hides_nothing() {
     for tag in REPEATED {
         let raw = format!("<html><head>{tag}</head><body>x</body></html>");
         for policy in [flag, HiddenContentPolicy::default()] {
-            let out = redact(&raw, policy, Scope::new(), Directives::new()).await;
+            let out = redact(&raw, policy, Scope::new()).await;
             assert!(!out.contains("Jane Roe"), "{policy:?}: {out}");
         }
     }
@@ -86,29 +102,27 @@ async fn a_repeated_meta_attribute_hides_nothing() {
 async fn every_repeated_content_of_a_field_is_erased() {
     let raw = r#"<html><head><meta name="author" content="Bob" content="Jane Roe"></head><body>x</body></html>"#;
     let policy = HiddenContentPolicy::default().with_metadata(Disposition::FlagEverything);
-    let out = redact(raw, policy, Scope::new(), Directives::new()).await;
+    let out = redact(raw, policy, Scope::new()).await;
     assert!(!out.contains("Bob"), "{out}");
     assert!(!out.contains("Jane Roe"), "{out}");
 }
 
-/// A comment redacted under an exclusion of `range` in the decoded text.
-async fn comment_excluding(range: Range<usize>) -> String {
+/// A comment redacted with the entities `range` contains in the decoded text
+/// suppressed.
+async fn comment_sparing(range: Range<usize>) -> String {
     let raw = "<!-- Acme call Jane --><p>x</p>";
     let policy = HiddenContentPolicy::default().with_collaboration(Disposition::FlagEverything);
-    let annotations =
-        Annotations::<Text>::new().with_exclusion(Exclusion::new(TextLocation::inline(range)));
-    let directives = Directives::new().with_annotations(annotations);
-    redact(raw, policy, Scope::new(), directives).await
+    redact_sparing(raw, policy, Scope::new(), Some(range)).await
 }
 
 #[tokio::test]
-async fn an_exclusion_inside_a_flagged_item_does_not_spare_the_rest() {
-    let out = comment_excluding(1..5).await;
+async fn a_region_inside_a_flagged_item_does_not_spare_it() {
+    let out = comment_sparing(1..5).await;
     assert!(!out.contains("Jane"), "{out}");
 }
 
 #[tokio::test]
-async fn an_exclusion_of_a_whole_flagged_item_spares_it() {
-    let out = comment_excluding(0..16).await;
+async fn a_region_holding_a_whole_flagged_item_spares_it() {
+    let out = comment_sparing(0..16).await;
     assert!(out.contains("Acme call Jane"), "{out}");
 }

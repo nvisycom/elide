@@ -80,11 +80,7 @@ impl<M: Modality, D: Decider<M>> Recognizer<M> for EscalatingRecognizer<M, D> {
         self.baseline.id()
     }
 
-    async fn recognize(
-        &self,
-        subject: &Subject<M>,
-        ctx: &Context<'_, M>,
-    ) -> Result<Vec<Entity<M>>> {
+    async fn recognize(&self, subject: &Subject<M>, ctx: &Context<'_>) -> Result<Vec<Entity<M>>> {
         let mut entities = self.baseline.recognize(subject, ctx).await?;
         if self.decider.escalate(subject, &entities) {
             entities.extend(self.escalated.recognize(subject, ctx).await?);
@@ -95,7 +91,7 @@ impl<M: Modality, D: Decider<M>> Recognizer<M> for EscalatingRecognizer<M, D> {
     async fn recognize_batch(
         &self,
         subjects: &[Subject<M>],
-        ctx: &Context<'_, M>,
+        ctx: &Context<'_>,
     ) -> Result<Vec<Vec<Entity<M>>>> {
         // The baseline batches across all subjects at once (preserving a
         // provider-backed baseline's own coalescing). The decision needs the
@@ -141,7 +137,7 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
+    use elide_core::entity::audit::{AuditEvent, PatternEvent};
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::mocks::MockRecognizer;
     use elide_core::modality::text::{Text, TextData, TextLocation};
@@ -165,7 +161,7 @@ mod tests {
                 ..PatternEvent::default()
             },
         );
-        Entity::new(label, location, AuditLog::new(event))
+        Entity::new(label, location).with_event(event)
     }
 
     /// A recognizer that replays canned entities and counts how often it ran, so
@@ -184,7 +180,7 @@ mod tests {
         async fn recognize(
             &self,
             _subject: &Subject<Text>,
-            _ctx: &Context<'_, Text>,
+            _ctx: &Context<'_>,
         ) -> Result<Vec<Entity<Text>>> {
             self.calls.fetch_add(1, Ordering::Relaxed);
             Ok(self.entities.clone())
@@ -195,7 +191,7 @@ mod tests {
         Subject::new(TextData::new(text.to_owned()))
     }
 
-    fn ctx(scope: &Scope) -> Context<'_, Text> {
+    fn ctx(scope: &Scope) -> Context<'_> {
         Context::new(scope)
     }
 
@@ -322,7 +318,7 @@ mod tests {
             async fn recognize(
                 &self,
                 subject: &Subject<Text>,
-                _ctx: &Context<'_, Text>,
+                _ctx: &Context<'_>,
             ) -> Result<Vec<Entity<Text>>> {
                 // Only "b" gets a confident baseline hit; "a"/"c" get nothing.
                 if subject.data().as_str() == "b" {

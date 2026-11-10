@@ -129,7 +129,7 @@ impl<B: LlmBackend> Recognizer<B::Modality> for LlmRecognizer<B> {
     async fn recognize(
         &self,
         subject: &Subject<B::Modality>,
-        ctx: &Context<'_, B::Modality>,
+        ctx: &Context<'_>,
     ) -> Result<Vec<Entity<B::Modality>>> {
         let prompt = self.prompt.build(subject, ctx);
         let response = self

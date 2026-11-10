@@ -35,8 +35,8 @@ async fn keywords_boost_matches_near_them_only() {
     let text = "First SSN: 123-45-6789. Unrelated number 987-65-4329 elsewhere.";
     let data = TextData::new(text.to_owned());
     let scope = Scope::new();
-    let ctx = Context::<Text>::new(&scope);
-    let subject = Subject::new(data);
+    let ctx = Context::new(&scope);
+    let subject = Subject::<Text>::new(data);
     let entities = recognizer
         .recognize(&subject, &ctx)
         .await
@@ -117,8 +117,8 @@ async fn context_boost_override_applies_the_custom_lift() {
     let text = "SSN: 123-45-6789.";
     let data = TextData::new(text.to_owned());
     let scope = Scope::new();
-    let ctx = Context::<Text>::new(&scope);
-    let subject = Subject::new(data);
+    let ctx = Context::new(&scope);
+    let subject = Subject::<Text>::new(data);
     let entities = recognizer
         .recognize(&subject, &ctx)
         .await
@@ -162,8 +162,8 @@ async fn keywords_lift_only_their_own_rules_matches() {
 
     let text = "SSN 123-45-6789 AB123456";
     let scope = Scope::new();
-    let ctx = Context::<Text>::new(&scope);
-    let subject = Subject::new(TextData::new(text.to_owned()));
+    let ctx = Context::new(&scope);
+    let subject = Subject::<Text>::new(TextData::new(text.to_owned()));
     let entities = recognizer
         .recognize(&subject, &ctx)
         .await
@@ -221,9 +221,9 @@ async fn catalog_filter_keeps_context_dictionaries() {
 
     let data = TextData::new("SSN: 123-45-6789".to_owned());
     let scope = Scope::new();
-    let ctx = Context::<Text>::new(&scope);
+    let ctx = Context::new(&scope);
     let entities = recognizer
-        .recognize(&Subject::new(data), &ctx)
+        .recognize(&Subject::<Text>::new(data), &ctx)
         .await
         .expect("recognize");
     assert_eq!(entities.len(), 1, "the dropped dictionary emits nothing");

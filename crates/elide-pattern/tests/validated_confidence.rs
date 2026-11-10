@@ -18,8 +18,8 @@ async fn card_confidences(text: &str) -> Vec<f32> {
         .expect("recognizer builds");
     let data = TextData::new(text.to_owned());
     let scope = Scope::new().with_catalog(LabelCatalog::with_builtins());
-    let ctx = Context::<Text>::new(&scope);
-    let subject = Subject::new(data);
+    let ctx = Context::new(&scope);
+    let subject = Subject::<Text>::new(data);
     Recognizer::<Text>::recognize(&recognizer, &subject, &ctx)
         .await
         .expect("recognize")

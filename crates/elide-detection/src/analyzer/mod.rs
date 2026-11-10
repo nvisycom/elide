@@ -24,8 +24,7 @@ use std::sync::Arc;
 
 use elide_core::enrichment::Enricher;
 use elide_core::entity::Entity;
-use elide_core::modality::{Chunk, Modality, ModalityLocation, StreamDataReader};
-use elide_core::recognition::annotation::{Annotations, Exclusion};
+use elide_core::modality::{Chunk, Modality, StreamDataReader};
 use elide_core::recognition::{Context, Recognizer, Scope, Subject};
 use elide_core::{Error, Result};
 use futures::future;
@@ -102,25 +101,10 @@ impl<M: Modality> Analyzer<M> {
     ///
     /// Runs the full analysis pipeline over `data`, with `scope` supplying the
     /// caller's modality-free assertions (languages, jurisdictions, labels,
-    /// catalog). Use [`analyze_with`](Self::analyze_with) to also pass
-    /// per-modality region [`Annotations`], or [`analyze_stream`](Self::analyze_stream)
-    /// for an I/O-backed source that yields many chunks.
+    /// catalog). Use [`analyze_stream`](Self::analyze_stream) for an I/O-backed
+    /// source that yields many chunks.
     pub async fn analyze(&self, data: M::Data, scope: &Scope) -> Result<Analysis<M>> {
-        self.analyze_with(data, scope, &Annotations::new()).await
-    }
-
-    /// Analyze a single in-memory payload with both the `scope` and the caller's
-    /// per-request region [`Annotations`].
-    ///
-    /// The region-aware counterpart to [`analyze`](Self::analyze): `annotations`
-    /// is a per-call input, not analyzer config, so it is passed here.
-    pub async fn analyze_with(
-        &self,
-        data: M::Data,
-        scope: &Scope,
-        annotations: &Annotations<M>,
-    ) -> Result<Analysis<M>> {
-        self.analyze_in(data, scope, annotations, None).await
+        self.analyze_in(data, scope, None).await
     }
 
     /// Analyze one payload, optionally pre-seeded with a prior enrichment `seed`
@@ -134,10 +118,9 @@ impl<M: Modality> Analyzer<M> {
         &self,
         data: M::Data,
         scope: &Scope,
-        annotations: &Annotations<M>,
         seed: Option<M::Artifact>,
     ) -> Result<Analysis<M>> {
-        let ctx = Context::new(scope).with_annotations(annotations);
+        let ctx = Context::new(scope);
         if ctx.catalog().is_empty() {
             return Ok(Analysis::seeded(seed));
         }
@@ -153,33 +136,15 @@ impl<M: Modality> Analyzer<M> {
     ///
     /// The [`analyze`](Self::analyze) counterpart for I/O-backed sources (a
     /// decoded codec document, say): the caller never sees a chunk or a
-    /// recognizer-local coordinate. Use [`analyze_stream_with`](Self::analyze_stream_with)
-    /// to also pass per-request region [`Annotations`].
+    /// recognizer-local coordinate.
     pub async fn analyze_stream<S>(&self, source: &mut S, scope: &Scope) -> Result<Analysis<M>>
     where
         S: StreamDataReader<M> + ?Sized,
     {
-        self.analyze_stream_with(source, scope, &Annotations::new())
-            .await
+        self.analyze_stream_in(source, scope, None).await
     }
 
-    /// Analyze a streamed source with both the `scope` and the caller's
-    /// per-request region [`Annotations`]. The region-aware counterpart to
-    /// [`analyze_stream`](Self::analyze_stream).
-    pub async fn analyze_stream_with<S>(
-        &self,
-        source: &mut S,
-        scope: &Scope,
-        annotations: &Annotations<M>,
-    ) -> Result<Analysis<M>>
-    where
-        S: StreamDataReader<M> + ?Sized,
-    {
-        self.analyze_stream_in(source, scope, annotations, None)
-            .await
-    }
-
-    /// [`analyze_stream_with`](Self::analyze_stream_with) seeded with a prior
+    /// [`analyze_stream`](Self::analyze_stream) seeded with a prior
     /// enrichment `seed`, so a re-run re-recognizes without re-enriching: the
     /// source's subjects are pre-seeded, and the enrichers self-skip because one
     /// is already present. `Some` (even an empty artifact) restores; `None` is a
@@ -188,7 +153,6 @@ impl<M: Modality> Analyzer<M> {
         &self,
         source: &mut S,
         scope: &Scope,
-        annotations: &Annotations<M>,
         seed: Option<M::Artifact>,
     ) -> Result<Analysis<M>>
     where
@@ -196,7 +160,7 @@ impl<M: Modality> Analyzer<M> {
     {
         let mut sources = [source];
         let mut analyses = self
-            .analyze_sources(&mut sources, scope, annotations, vec![seed])
+            .analyze_sources(&mut sources, scope, vec![seed])
             .await?;
         // One source in, one analysis out.
         Ok(analyses
@@ -217,14 +181,12 @@ impl<M: Modality> Analyzer<M> {
         &self,
         sources: &mut [&mut S],
         scope: &Scope,
-        annotations: &Annotations<M>,
         seeds: Vec<Option<M::Artifact>>,
     ) -> Result<Vec<Analysis<M>>>
     where
         S: StreamDataReader<M> + ?Sized,
     {
-        self.analyze_sources(sources, scope, annotations, seeds)
-            .await
+        self.analyze_sources(sources, scope, seeds).await
     }
 
     // --- The engine: the one core every entry funnels through. ---
@@ -249,7 +211,6 @@ impl<M: Modality> Analyzer<M> {
         &self,
         sources: &mut [&mut S],
         scope: &Scope,
-        annotations: &Annotations<M>,
         seeds: Vec<Option<M::Artifact>>,
     ) -> Result<Vec<Analysis<M>>>
     where
@@ -262,7 +223,7 @@ impl<M: Modality> Analyzer<M> {
                 seeds.len()
             )));
         }
-        let ctx = Context::new(scope).with_annotations(annotations);
+        let ctx = Context::new(scope);
 
         // An empty catalog requests no entity types: detect nothing, but carry
         // each source's seed through. Gate before any read/enrich/recognize.
@@ -337,7 +298,7 @@ impl<M: Modality> Analyzer<M> {
     async fn analyze_subject(
         &self,
         subject: &mut Subject<M>,
-        ctx: &Context<'_, M>,
+        ctx: &Context<'_>,
     ) -> Result<Analysis<M>> {
         for enricher in &self.enrichers {
             enricher.enrich(subject, ctx).await?;
@@ -360,7 +321,7 @@ impl<M: Modality> Analyzer<M> {
     async fn recognize_batch(
         &self,
         subjects: &[Subject<M>],
-        ctx: &Context<'_, M>,
+        ctx: &Context<'_>,
     ) -> Result<Vec<Vec<Entity<M>>>> {
         let futures = self
             .recognizers
@@ -391,11 +352,11 @@ impl<M: Modality> Analyzer<M> {
 
     /// Turn an already-enriched, already-recognized `subject`'s raw `entities`
     /// into its [`Analysis`]: stamp languages, reduce, restrict to the catalog,
-    /// apply exclusions, and carry the enrichment artifact out.
+    /// and carry the enrichment artifact out.
     fn finish_subject(
         &self,
         subject: &Subject<M>,
-        ctx: &Context<'_, M>,
+        ctx: &Context<'_>,
         mut entities: Vec<Entity<M>>,
     ) -> Analysis<M> {
         ctx.languages(subject).stamp(&mut entities);
@@ -403,8 +364,7 @@ impl<M: Modality> Analyzer<M> {
         // Restrict the *output* to the requested catalog only after reconciliation,
         // so a strong out-of-catalog detection can subsume a weak in-catalog one
         // nested inside it before being culled itself.
-        let in_catalog = ctx.catalog().retain_declared(reduced);
-        let entities = Self::apply_exclusions(in_catalog, ctx.exclusions());
+        let entities = ctx.catalog().retain_declared(reduced);
         // Carry the enrichment artifact out with the entities so it can be
         // persisted and restored for a re-run without re-enriching.
         Analysis::new(entities).with_artifact(subject.artifact().cloned())
@@ -429,26 +389,6 @@ impl<M: Modality> Analyzer<M> {
         );
         entities
     }
-
-    /// Drop every entity whose location overlaps a caller [`Exclusion`].
-    ///
-    /// Runs after deduplication so it culls the reconciled set, not per-recognizer
-    /// duplicates. A no-op when no exclusions are asserted.
-    ///
-    /// [`Exclusion`]: elide_core::recognition::annotation::Exclusion
-    fn apply_exclusions(entities: Vec<Entity<M>>, exclusions: &[Exclusion<M>]) -> Vec<Entity<M>> {
-        if exclusions.is_empty() {
-            return entities;
-        }
-        entities
-            .into_iter()
-            .filter(|entity| {
-                !exclusions
-                    .iter()
-                    .any(|exclusion| entity.location.overlaps(&exclusion.location))
-            })
-            .collect()
-    }
 }
 
 impl<M: Modality> Default for Analyzer<M> {
@@ -463,7 +403,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use elide_core::ErrorKind;
-    use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
+    use elide_core::entity::audit::{AuditEvent, PatternEvent};
     use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
     use elide_core::mocks::MockRecognizer;
     use elide_core::modality::Chunk;
@@ -515,18 +455,14 @@ mod tests {
             ComponentId::new("spy", "1")
         }
 
-        async fn enrich(
-            &self,
-            _subject: &mut Subject<Text>,
-            _ctx: &Context<'_, Text>,
-        ) -> Result<()> {
+        async fn enrich(&self, _subject: &mut Subject<Text>, _ctx: &Context<'_>) -> Result<()> {
             Ok(())
         }
 
         async fn enrich_batch(
             &self,
             subjects: &mut [Subject<Text>],
-            _ctx: &Context<'_, Text>,
+            _ctx: &Context<'_>,
         ) -> Result<()> {
             self.batches.fetch_add(1, Ordering::Relaxed);
             self.subjects.fetch_add(subjects.len(), Ordering::Relaxed);
@@ -547,7 +483,7 @@ mod tests {
                 ..PatternEvent::default()
             },
         );
-        Entity::new(label, location, AuditLog::new(event))
+        Entity::new(label, location).with_event(event)
     }
 
     fn scope_for(ids: &[&str]) -> Scope {
@@ -573,12 +509,7 @@ mod tests {
         let mut sources: Vec<&mut VecTextSource> = vec![&mut a, &mut b, &mut c];
 
         let analyses = analyzer
-            .analyze_streams(
-                &mut sources,
-                &scope_for(&["EMAIL"]),
-                &Default::default(),
-                vec![None, None, None],
-            )
+            .analyze_streams(&mut sources, &scope_for(&["EMAIL"]), vec![None, None, None])
             .await
             .unwrap();
 
@@ -605,12 +536,7 @@ mod tests {
         let mut sources: Vec<&mut VecTextSource> = vec![&mut a, &mut c];
 
         let analyses = analyzer
-            .analyze_streams(
-                &mut sources,
-                &scope_for(&["EMAIL"]),
-                &Default::default(),
-                vec![None, None],
-            )
+            .analyze_streams(&mut sources, &scope_for(&["EMAIL"]), vec![None, None])
             .await
             .unwrap();
 
@@ -641,12 +567,7 @@ mod tests {
 
         // Two sources, one seed.
         let err = analyzer
-            .analyze_streams(
-                &mut sources,
-                &scope_for(&["EMAIL"]),
-                &Default::default(),
-                vec![None],
-            )
+            .analyze_streams(&mut sources, &scope_for(&["EMAIL"]), vec![None])
             .await
             .expect_err("mismatched seed count is malformed input");
         assert_eq!(err.kind(), ErrorKind::MalformedInput);
@@ -665,7 +586,7 @@ mod tests {
         async fn recognize(
             &self,
             _subject: &Subject<Text>,
-            _ctx: &Context<'_, Text>,
+            _ctx: &Context<'_>,
         ) -> Result<Vec<Entity<Text>>> {
             Ok(Vec::new())
         }
@@ -673,7 +594,7 @@ mod tests {
         async fn recognize_batch(
             &self,
             _subjects: &[Subject<Text>],
-            _ctx: &Context<'_, Text>,
+            _ctx: &Context<'_>,
         ) -> Result<Vec<Vec<Entity<Text>>>> {
             // One short, regardless of subject count.
             Ok(Vec::new())
@@ -691,12 +612,7 @@ mod tests {
         let mut sources: Vec<&mut VecTextSource> = vec![&mut a];
 
         let err = analyzer
-            .analyze_streams(
-                &mut sources,
-                &scope_for(&["EMAIL"]),
-                &Default::default(),
-                vec![None],
-            )
+            .analyze_streams(&mut sources, &scope_for(&["EMAIL"]), vec![None])
             .await
             .expect_err("a recognizer returning the wrong count is a contract violation");
         assert_eq!(err.kind(), ErrorKind::Recognition);

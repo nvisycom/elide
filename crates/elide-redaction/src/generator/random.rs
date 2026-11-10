@@ -39,7 +39,7 @@ mod tests {
     use super::*;
 
     fn entity(label: &str) -> Entity<Text> {
-        Entity::custom(LabelRef::new(label), TextLocation::inline(0..5)).build()
+        Entity::new(LabelRef::new(label), TextLocation::inline(0..5))
     }
 
     fn surrogate(label: &str) -> TextReplacement {

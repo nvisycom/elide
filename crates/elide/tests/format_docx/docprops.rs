@@ -18,7 +18,7 @@ use elide::modality::text::Text;
 use elide::recognition::Scope;
 use elide::redaction::operators::Erase;
 use elide::redaction::{Anonymizer, Disposition, HiddenContentPolicy, Rule};
-use elide::{Directives, Document, Orchestrator};
+use elide::{Document, Orchestrator};
 use elide_office::fixtures::{pack_parts, part_names, property_fields, read_part};
 
 use super::FIXTURE;
@@ -59,10 +59,7 @@ async fn docx_core_properties_are_stripped_through_the_facade() {
         .expect("decode docx");
     let mut documents = [Document::new("body_header_hyperlink.docx", handle)];
 
-    let analyzed = orchestrator
-        .analyze(&mut documents, &Directives::new())
-        .await
-        .expect("analyze");
+    let analyzed = orchestrator.analyze(&mut documents).await.expect("analyze");
     orchestrator
         .anonymize_with(&mut documents, analyzed.report)
         .await
@@ -179,7 +176,7 @@ async fn findings_inside_property_values_are_redacted_alone() {
         .expect("decode docx");
     let mut documents = [Document::new("report.docx", handle)];
     orchestrator
-        .anonymize(&mut documents, &Directives::new())
+        .anonymize(&mut documents)
         .await
         .expect("anonymize");
     let out = documents[0].document.encode().expect("encode").to_bytes();

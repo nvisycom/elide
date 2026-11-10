@@ -16,9 +16,7 @@
 // The core recognition vocabulary, minus `Enricher`, enrichers are a
 // pre-recognition concern and live in the `enrichment` module.
 #[doc(inline)]
-pub use elide_core::recognition::{
-    Context, LabelMap, Recognizer, Scope, ScopeMetadata, Subject, annotation,
-};
+pub use elide_core::recognition::{Context, LabelMap, Recognizer, Scope, ScopeMetadata, Subject};
 
 /// Recognizer decorators: wrap a [`Recognizer`] to change *how* it runs without
 /// changing *what* it detects.

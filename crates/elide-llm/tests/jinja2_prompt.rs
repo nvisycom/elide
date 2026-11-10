@@ -1,19 +1,16 @@
 //! End-to-end: load a [`Jinja2Prompt`] from a `.j2` template and render
 //! the prompt wording against a populated payload + [`Context`].
 //!
-//! Covers the minijinja code path (variable interpolation, `{% for %}`,
-//! `{% if %}`, the `| join` filter, hint snippet rendering for text, and
-//! nested bbox access for image). The prompt is wording-only: the response
-//! shape and entity lifting are not the prompt's concern.
+//! Covers the minijinja code path (variable interpolation, `{% if %}`, and the
+//! `| join` filter) for text and image. The prompt is wording-only: the
+//! response shape and entity lifting are not the prompt's concern.
 
 #![cfg(feature = "jinja2")]
 
-use elide_core::entity::builtins;
-use elide_core::modality::text::{Text, TextData, TextLocation};
-use elide_core::recognition::annotation::{Annotations, Inclusion};
+use elide_core::entity::{LabelCatalog, builtins};
+use elide_core::modality::text::{Text, TextData};
 use elide_core::recognition::{Context, Scope, Subject};
-use elide_image::modality::{Image, ImageLocation};
-use elide_image::primitive::{BoundingBox, Dimensions, Point};
+use elide_image::modality::Image;
 use elide_llm::prompt::{Jinja2Prompt, Prompt};
 
 const TEXT_J2: &str = include_str!("../testdata/text.j2");
@@ -24,18 +21,11 @@ fn text_prompt_renders_template() {
     let prompt = Jinja2Prompt::<Text>::from_template(TEXT_J2).expect("text.j2 compiles");
 
     let body = "From: Alice Carter <alice.carter@acme.test>\nSubject: hello";
-    let alice_start = body.find("Alice Carter").expect("alice substring");
-    let alice_end = alice_start + "Alice Carter".len();
-
-    let inclusion = Inclusion::<Text>::new(TextLocation::inline(alice_start..alice_end))
-        .with_name("uploader-alice")
-        .with_label(builtins::PERSON_NAME.to_ref());
-
-    let data = TextData::new(body);
-    let scope = Scope::new().with_tags(vec!["medical".to_owned(), "gdpr-request".to_owned()]);
-    let annotations: Annotations<Text> = Annotations::new().with_inclusions(vec![inclusion]);
-    let ctx = Context::new(&scope).with_annotations(&annotations);
-    let subject = Subject::new(data);
+    let scope = Scope::new()
+        .with_tags(vec!["medical".to_owned(), "gdpr-request".to_owned()])
+        .with_catalog(LabelCatalog::from_iter([builtins::PERSON_NAME.clone()]));
+    let ctx = Context::new(&scope);
+    let subject = Subject::<Text>::new(TextData::new(body));
 
     let rendered = prompt.build(&subject, &ctx);
     assert!(rendered.contains(body), "source text missing: {rendered}");
@@ -44,17 +34,8 @@ fn text_prompt_renders_template() {
         "tags `| join` filter not applied: {rendered}",
     );
     assert!(
-        rendered.contains("Uploader hints:"),
-        "`{{% if hints %}}` branch not taken: {rendered}",
-    );
-    assert!(
-        rendered.contains("uploader-alice (person_name): value=Alice Carter"),
-        "`{{% for %}}` over hints didn't render name/kind/value: {rendered}",
-    );
-    assert!(
-        rendered
-            .contains("snippet=\"From: Alice Carter <alice.carter@acme.test>\nSubject: hello\""),
-        "hint snippet not rendered: {rendered}",
+        rendered.contains("Emit only: person_name"),
+        "target labels not rendered: {rendered}",
     );
 }
 
@@ -62,29 +43,17 @@ fn text_prompt_renders_template() {
 fn image_prompt_renders_template() {
     let prompt = Jinja2Prompt::<Image>::from_template(IMAGE_J2).expect("image.j2 compiles");
 
-    let inclusion = Inclusion::<Image>::new(ImageLocation::new(BoundingBox::from_origin(
-        Point::new(10.0, 20.0),
-        Dimensions::new(100.0, 50.0),
-    )))
-    .with_name("uploader-face")
-    .with_label(builtins::PERSON_NAME.to_ref());
-
     let data = elide_image::fixtures::image_data(
         elide_image::fixtures::png(4, 4),
         elide_image::modality::ImageFormat::Png,
     );
     let scope = Scope::new().with_tags(vec!["badge".to_owned()]);
-    let annotations: Annotations<Image> = Annotations::new().with_inclusions(vec![inclusion]);
-    let ctx = Context::new(&scope).with_annotations(&annotations);
-    let subject = Subject::new(data);
+    let ctx = Context::new(&scope);
+    let subject = Subject::<Image>::new(data);
 
     let rendered = prompt.build(&subject, &ctx);
     assert!(
         rendered.contains("Tags: badge"),
         "tags `| join` not rendered: {rendered}",
-    );
-    assert!(
-        rendered.contains("uploader-face (person_name): bbox=[10.0,20.0,100.0x50.0]"),
-        "`{{% for %}}` over image hints with nested bbox access broken: {rendered}",
     );
 }

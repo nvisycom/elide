@@ -6,15 +6,12 @@
 
 use elide_core::entity::Label;
 use elide_core::primitive::LanguageTag;
-use elide_core::recognition::annotation::Inclusion;
-use elide_image::modality::Image;
 use hipstr::HipStr;
 
 use super::target_labels_block;
 
 /// Builds user prompts for the image detect pass.
 pub(super) struct ImagePromptBuilder<'a> {
-    inclusions: &'a [Inclusion<Image>],
     tags: &'a [HipStr<'static>],
     target_labels: &'a [Label],
     language: Option<&'a LanguageTag>,
@@ -22,13 +19,11 @@ pub(super) struct ImagePromptBuilder<'a> {
 
 impl<'a> ImagePromptBuilder<'a> {
     pub fn new(
-        inclusions: &'a [Inclusion<Image>],
         tags: &'a [HipStr<'static>],
         target_labels: &'a [Label],
         language: Option<&'a LanguageTag>,
     ) -> Self {
         Self {
-            inclusions,
             tags,
             target_labels,
             language,
@@ -50,31 +45,6 @@ impl<'a> ImagePromptBuilder<'a> {
                 "\n\nDocument context tags (adjust sensitivity to domain-specific \
                  visual content accordingly): {tags}."
             ));
-        }
-
-        if !self.inclusions.is_empty() {
-            prompt.push_str(
-                "\n\nThe uploader marked these regions as likely sensitive. \
-                 Confirm or relocate each via your detections; ignore those you \
-                 disagree with. Hints:",
-            );
-            for (i, h) in self.inclusions.iter().enumerate() {
-                let bbox = &h.location.bounding_box;
-                let kind = h
-                    .label
-                    .as_ref()
-                    .map(|l| l.as_str().to_owned())
-                    .unwrap_or_else(|| "unknown".to_string());
-                let name = h.name.as_deref().unwrap_or("");
-                prompt.push_str(&format!(
-                    "\n[hint {i}] name=\"{name}\", kind={kind}, \
-                     bbox=({x}, {y}, {w}, {h})",
-                    x = bbox.min.x,
-                    y = bbox.min.y,
-                    w = bbox.width(),
-                    h = bbox.height(),
-                ));
-            }
         }
 
         prompt

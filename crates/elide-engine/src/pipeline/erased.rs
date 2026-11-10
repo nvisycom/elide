@@ -16,7 +16,6 @@ use elide_core::{Error, Result};
 use super::outcome::{BoxFuture, PartAnalysis};
 use super::{ModalityPipeline, flagged};
 use crate::analysis::{ArtifactGroup, EntityGroup};
-use crate::directives::AnnotationSet;
 
 /// A type-erased pipeline the orchestrator stores per modality.
 ///
@@ -51,7 +50,6 @@ pub(crate) trait ErasedPipeline: Send + Sync {
         handles: &'a mut [&'a mut ErasedStream],
         scope: &'a Scope,
         policy: HiddenContentPolicy,
-        annotations: &'a AnnotationSet,
         seeds: &'a [&'a dyn ArtifactGroup],
     ) -> BoxFuture<'a, Result<Vec<PartAnalysis>>>;
 
@@ -63,6 +61,10 @@ pub(crate) trait ErasedPipeline: Send + Sync {
         entities: &'a mut dyn EntityGroup,
         scope: &'a Scope,
     ) -> BoxFuture<'a, Result<()>>;
+
+    /// Record on each of `entities` the operator this pipeline's anonymizer
+    /// will apply, as a `Selection` event, without touching the document.
+    fn pick(&self, entities: &mut dyn EntityGroup, scope: &Scope) -> Result<()>;
 
     /// The pipeline as `&mut dyn Any`, to `downcast_mut` to a concrete
     /// `ModalityPipeline<M>`, how [`with_analyzer`] / [`with_anonymizer`] reach
@@ -89,11 +91,9 @@ where
         handles: &'a mut [&'a mut ErasedStream],
         scope: &'a Scope,
         policy: HiddenContentPolicy,
-        annotations: &'a AnnotationSet,
         seeds: &'a [&'a dyn ArtifactGroup],
     ) -> BoxFuture<'a, Result<Vec<PartAnalysis>>> {
         Box::pin(async move {
-            let regions = annotations.get::<M>();
             // The orchestrator grouped these handles by `matches`, so every one
             // downcasts; a `None` here would mean a caller mixed modalities.
             let mut streams = Vec::with_capacity(handles.len());
@@ -105,7 +105,7 @@ where
             }
             let flagged = streams
                 .iter()
-                .map(|stream| flagged::entities(stream, scope, policy, &regions))
+                .map(|stream| flagged::entities(stream, scope, policy))
                 .collect::<Result<Vec<_>>>()?;
             // Each seed downcasts as in `analyze_stream`: a matching prior artifact
             // restores, anything else (first-pass `NoArtifact`, other modality) is
@@ -116,7 +116,7 @@ where
                 .collect();
             let mut analyses = self
                 .analyzer
-                .analyze_streams(&mut streams, scope, &regions, seeds)
+                .analyze_streams(&mut streams, scope, seeds)
                 .await?;
             for (analysis, entities) in analyses.iter_mut().zip(flagged) {
                 analysis.entities.extend(entities);
@@ -160,6 +160,17 @@ where
             };
             self.anonymizer.anonymize(stream, entities, scope).await
         })
+    }
+
+    fn pick(&self, entities: &mut dyn EntityGroup, scope: &Scope) -> Result<()> {
+        let Some(entities) = entities.as_any_mut().downcast_mut::<Vec<Entity<M>>>() else {
+            return Err(Error::malformed(format!(
+                "report entities for this part are not {}",
+                M::NAME
+            )));
+        };
+        self.anonymizer.pick(entities, scope);
+        Ok(())
     }
 
     fn as_any_mut(&mut self) -> &mut dyn Any {

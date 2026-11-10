@@ -18,7 +18,7 @@ use elide::recognition::Scope;
 use elide::recognition::pattern::PatternRecognizer;
 use elide::redaction::operators::{Mask, Replace};
 use elide::redaction::{Anonymizer, HiddenContentPolicy, Rule};
-use elide::{Directives, Document, Orchestrator, RegistryDocumentExt};
+use elide::{Document, Orchestrator, RegistryDocumentExt};
 use tokio::runtime::{Builder, Runtime};
 
 const PARAGRAPH: &str = "Contact alice.johnson@example.com or call +1 (628) 555-0175. \
@@ -92,7 +92,7 @@ fn bench_pipeline(c: &mut Criterion) {
             rt.block_on(async {
                 let mut doc = fresh_text(&registry, &text).await;
                 orchestrator
-                    .analyze(black_box(&mut doc), &Directives::new())
+                    .analyze(black_box(&mut doc))
                     .await
                     .expect("analyze")
             })
@@ -104,7 +104,7 @@ fn bench_pipeline(c: &mut Criterion) {
             rt.block_on(async {
                 let mut doc = fresh_text(&registry, &text).await;
                 orchestrator
-                    .anonymize(black_box(&mut doc), &Directives::new())
+                    .anonymize(black_box(&mut doc))
                     .await
                     .expect("anonymize")
             })
@@ -136,7 +136,7 @@ fn bench_docx(c: &mut Criterion) {
             rt.block_on(async {
                 let mut doc = fresh_docx(&registry).await;
                 orchestrator
-                    .analyze(black_box(&mut doc), &Directives::new())
+                    .analyze(black_box(&mut doc))
                     .await
                     .expect("analyze")
             })
@@ -148,7 +148,7 @@ fn bench_docx(c: &mut Criterion) {
             rt.block_on(async {
                 let mut doc = fresh_docx(&registry).await;
                 orchestrator
-                    .anonymize(black_box(&mut doc), &Directives::new())
+                    .anonymize(black_box(&mut doc))
                     .await
                     .expect("anonymize")
             })

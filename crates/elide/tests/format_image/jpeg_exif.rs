@@ -15,7 +15,7 @@ use elide::modality::metadata::Metadata;
 use elide::recognition::Scope;
 use elide::redaction::operators::Erase;
 use elide::redaction::{Anonymizer, Disposition, HiddenContentPolicy, Rule};
-use elide::{Directives, Document, Orchestrator};
+use elide::{Document, Orchestrator};
 use elide_image::fixtures::{
     description, has_gps, is_valid_image, jpeg_with_description, jpeg_with_gps,
 };
@@ -43,10 +43,7 @@ async fn jpeg_gps_is_stripped_through_the_facade() {
         .expect("decode jpeg");
     let mut documents = [Document::new("photo.jpg", handle)];
 
-    let analyzed = orchestrator
-        .analyze(&mut documents, &Directives::new())
-        .await
-        .expect("analyze");
+    let analyzed = orchestrator.analyze(&mut documents).await.expect("analyze");
     orchestrator
         .anonymize_with(&mut documents, analyzed.report)
         .await
@@ -78,7 +75,7 @@ async fn a_finding_inside_an_image_description_is_redacted_alone() {
         .expect("decode jpeg");
     let mut documents = [Document::new("photo.jpg", handle)];
     orchestrator
-        .anonymize(&mut documents, &Directives::new())
+        .anonymize(&mut documents)
         .await
         .expect("anonymize");
 

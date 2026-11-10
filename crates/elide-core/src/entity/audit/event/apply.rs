@@ -200,7 +200,7 @@ impl Selection {
 /// [`source`], not a payload field.
 ///
 /// [`source`]: super::AuditEvent::source
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     feature = "serde",
@@ -232,6 +232,18 @@ pub struct Manual<M: Modality> {
         serde(default, skip_serializing_if = "Option::is_none")
     )]
     pub attribution: Option<Attribution>,
+}
+
+// Manual `Clone`: `derive` would add a spurious `M: Clone` bound, but `M` is
+// a zero-size marker. The location clones via its own bound.
+impl<M: Modality> Clone for Manual<M> {
+    fn clone(&self) -> Self {
+        Self {
+            intent: self.intent,
+            location: self.location.clone(),
+            attribution: self.attribution.clone(),
+        }
+    }
 }
 
 impl<M: Modality> Manual<M> {

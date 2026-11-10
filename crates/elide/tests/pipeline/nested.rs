@@ -19,7 +19,7 @@ use elide::modality::image::{Image, ImageLocation, LayoutRegion};
 use elide::modality::text::Text;
 use elide::primitive::{BoundingBox, Dimensions, Point};
 use elide::redaction::HiddenContentPolicy;
-use elide::{Directives, PartId, RegistryDocumentExt, Result};
+use elide::{PartId, RegistryDocumentExt, Result};
 
 use crate::support::orchestrator::{
     TestOrchestrator, build_anonymizer, default_text_analyzer, erase_anonymizer, ocr_analyzer,
@@ -66,9 +66,7 @@ async fn a_set_treats_each_file_as_a_named_part() -> Result<()> {
             .await?,
     ];
 
-    let analyzed = orchestrator
-        .analyze(&mut documents, &Directives::new())
-        .await?;
+    let analyzed = orchestrator.analyze(&mut documents).await?;
 
     // No single body: every file is a depth-1 part keyed by name, so a set of
     // two has two depth-1 parts (not one privileged body).
@@ -133,15 +131,15 @@ async fn a_set_redacts_each_files_own_content() -> Result<()> {
             .await?,
     ];
 
-    let analyzed = orchestrator
-        .analyze(&mut documents, &Directives::new())
-        .await?;
+    let analyzed = orchestrator.analyze(&mut documents).await?;
 
     for name in ["first.docx", "second.docx"] {
         let id = PartId::new(name);
         let entities = analyzed
             .report
-            .part_entities::<Text>(&id)
+            .part::<Text>(&id)
+            .ok()
+            .map(|part| part.entities())
             .unwrap_or_else(|| panic!("{name}'s body reconstructs as Text"));
         assert!(
             !entities.is_empty(),
@@ -197,9 +195,7 @@ async fn a_nested_container_keeps_its_own_redaction_when_a_descendant_folds() ->
         .document("outer.docx", NESTED_DOCX, HiddenContentPolicy::default())
         .await?;
 
-    let analyzed = orchestrator
-        .analyze(&mut document, &Directives::new())
-        .await?;
+    let analyzed = orchestrator.analyze(&mut document).await?;
     // All three bodies are reached: outer (depth 1), middle (depth 2, a
     // container with its own body), and leaf (depth 3).
     let depths: Vec<usize> = analyzed
@@ -267,10 +263,7 @@ async fn duplicate_document_names_are_rejected() -> Result<()> {
             .document("scan.png", SAMPLE_PNG, HiddenContentPolicy::default())
             .await?,
     ];
-    let err = match orchestrator
-        .analyze(&mut documents, &Directives::new())
-        .await
-    {
+    let err = match orchestrator.analyze(&mut documents).await {
         Ok(_) => panic!("duplicate document names must be rejected"),
         Err(e) => e,
     };

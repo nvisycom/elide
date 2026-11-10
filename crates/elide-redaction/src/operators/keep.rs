@@ -142,7 +142,7 @@ impl Operator<Metadata> for Keep {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
+    use elide_core::entity::audit::{AuditEvent, PatternEvent};
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
     use elide_core::primitive::Confidence;
@@ -158,7 +158,7 @@ mod tests {
             location.clone(),
             PatternEvent::default(),
         );
-        Entity::new(LabelRef::new("AMOUNT"), location, AuditLog::new(event))
+        Entity::new(LabelRef::new("AMOUNT"), location).with_event(event)
     }
 
     #[tokio::test]
@@ -184,8 +184,7 @@ mod tests {
             location.clone(),
             PatternEvent::default(),
         );
-        let entity: Entity<Image> =
-            Entity::new(LabelRef::new("FACE"), location, AuditLog::new(event));
+        let entity: Entity<Image> = Entity::new(LabelRef::new("FACE"), location).with_event(event);
         let data = elide_image::fixtures::blank_image_data();
 
         let out = Keep.anonymize(&entity, &data).await.unwrap();

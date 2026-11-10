@@ -27,7 +27,7 @@ impl Recognizer<Text> for TicketRecognizer {
         ComponentId::new("ticket-recognizer", "1.0.0")
     }
 
-    async fn recognize(&self, subject: &Subject<Text>, _ctx: &Context<'_, Text>) -> Result<Vec<Entity<Text>>> {
+    async fn recognize(&self, subject: &Subject<Text>, _ctx: &Context<'_>) -> Result<Vec<Entity<Text>>> {
         let text = subject.data().as_str();
         let confidence = Confidence::clamped(0.9);
 
@@ -37,7 +37,7 @@ impl Recognizer<Text> for TicketRecognizer {
                 let digits = text[start + 4..].bytes().take_while(u8::is_ascii_digit).count();
                 (digits > 0).then(|| start..start + 4 + digits)
             })
-            .filter_map(|span| {
+            .map(|span| {
                 let location = TextLocation::inline(span.clone());
                 let event = AuditEvent::pattern(
                     "ticket-recognizer",
@@ -45,12 +45,9 @@ impl Recognizer<Text> for TicketRecognizer {
                     location.clone(),
                     PatternEvent { name: "ops-ticket".into(), ..PatternEvent::default() },
                 );
-                Entity::builder()
-                    .with_label(builtins::INTERNAL_ID.to_ref())
-                    .with_location(location)
+                Entity::new(builtins::INTERNAL_ID.to_ref(), location)
                     .with_recognized_range(span)
                     .with_event(event)
-                    .build()
             })
             .collect();
         Ok(entities)

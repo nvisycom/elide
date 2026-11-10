@@ -65,9 +65,7 @@ async fn main() -> Result<()> {
     // 3. Detect across the body and every container part. The report keeps
     //    each part's findings separate so you can inspect (and edit) them
     //    before anything is redacted.
-    let analyzed = orchestrator
-        .analyze(&mut document, &Directives::new())
-        .await?;
+    let analyzed = orchestrator.analyze(&mut document).await?;
     print_report(&analyzed.report);
 
     // 4. Apply the (here unedited) report: redact the body, redact each
@@ -105,9 +103,9 @@ fn print_report(report: &Report) {
     for (id, _) in report.part_ids() {
         any_part = true;
         let n = report
-            .part_entities::<Text>(id)
-            .map(<[_]>::len)
-            .or_else(|| report.part_entities::<Image>(id).map(<[_]>::len))
+            .part::<Text>(id)
+            .map(|part| part.entities().len())
+            .or_else(|_| report.part::<Image>(id).map(|part| part.entities().len()))
             .unwrap_or(0);
         println!("part {id}: {n} entities");
     }

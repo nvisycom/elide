@@ -12,7 +12,7 @@ use elide::entity::builtins;
 use elide::modality::text::Text;
 use elide::redaction::operators::Keep;
 use elide::redaction::{Anonymizer, Disposition, HiddenContentPolicy, Rule};
-use elide::{Directives, Document, Orchestrator};
+use elide::{Document, Orchestrator};
 use elide_office::fixtures::{pack_parts, read_part};
 
 const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
@@ -55,7 +55,7 @@ async fn encoded(collaboration: Disposition, anonymizer: Anonymizer<Text>) -> Ve
         .expect("decode docx");
     let mut documents = [Document::new("review.docx", handle)];
     orchestrator
-        .anonymize(&mut documents, &Directives::new())
+        .anonymize(&mut documents)
         .await
         .expect("anonymize");
     documents[0]
@@ -144,7 +144,7 @@ async fn a_plain_orchestrator_still_erases_what_is_flagged() {
         .expect("decode docx");
     let mut documents = [Document::new("review.docx", handle)];
     orchestrator
-        .anonymize(&mut documents, &Directives::new())
+        .anonymize(&mut documents)
         .await
         .expect("anonymize");
     let out = documents[0].document.encode().expect("encode").to_bytes();

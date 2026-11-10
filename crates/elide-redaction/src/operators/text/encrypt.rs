@@ -240,7 +240,7 @@ impl Operator<Metadata> for AesEncrypt {
 #[cfg(test)]
 mod tests {
     use elide_core::ErrorKind;
-    use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
+    use elide_core::entity::audit::{AuditEvent, PatternEvent};
     use elide_core::modality::text::TextLocation;
     use elide_core::primitive::Confidence;
     use zeroize::Zeroizing;
@@ -255,11 +255,7 @@ mod tests {
             location.clone(),
             PatternEvent::default(),
         );
-        Entity::new(
-            LabelRef::new("email_address"),
-            location,
-            AuditLog::new(event),
-        )
+        Entity::new(LabelRef::new("email_address"), location).with_event(event)
     }
 
     fn encryptor() -> AesEncrypt {
@@ -334,13 +330,13 @@ mod tests {
             let loc = TextLocation::inline(0..5);
             let event =
                 AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
-            Entity::<Text>::new(LabelRef::new("payment_card"), loc, AuditLog::new(event))
+            Entity::<Text>::new(LabelRef::new("payment_card"), loc).with_event(event)
         };
         let ssn = {
             let loc = TextLocation::inline(0..5);
             let event =
                 AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
-            Entity::<Text>::new(LabelRef::new("ssn"), loc, AuditLog::new(event))
+            Entity::<Text>::new(LabelRef::new("ssn"), loc).with_event(event)
         };
 
         let replacement = op.anonymize(&card, &TextData::new("secret")).await.unwrap();

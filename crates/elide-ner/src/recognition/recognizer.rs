@@ -149,14 +149,9 @@ impl<B> NerRecognizer<B> {
             },
         );
         Some(
-            Entity::builder()
-                .with_label(label)
-                .with_location(location)
-                .with_confidence(span.confidence)
+            Entity::new(label, location)
                 .with_recognized_range(range)
-                .with_event(event)
-                .build()
-                .expect("required fields provided"),
+                .with_event(event),
         )
     }
 }
@@ -171,11 +166,7 @@ where
         ComponentId::new(self.name().to_owned(), env!("CARGO_PKG_VERSION"))
     }
 
-    async fn recognize(
-        &self,
-        subject: &Subject<M>,
-        ctx: &Context<'_, M>,
-    ) -> Result<Vec<Entity<M>>> {
+    async fn recognize(&self, subject: &Subject<M>, ctx: &Context<'_>) -> Result<Vec<Entity<M>>> {
         // No recognizable text at this chunk (an un-transcribed clip, an
         // un-OCR'd image): skip the model call and recognize nothing.
         let effective_labels = target_labels(ctx.catalog());
@@ -189,7 +180,7 @@ where
     async fn recognize_batch(
         &self,
         subjects: &[Subject<M>],
-        ctx: &Context<'_, M>,
+        ctx: &Context<'_>,
     ) -> Result<Vec<Vec<Entity<M>>>> {
         // One NER request per subject with recognizable text; no-text subjects are
         // skipped and recognize nothing. `targets` keeps each request aligned with
@@ -263,7 +254,7 @@ fn target_labels(catalog: &LabelCatalog) -> Vec<Label> {
 /// recognizable text (an un-transcribed clip, an un-OCR'd image).
 fn ner_request<'a, M: TextRecognizable>(
     subject: &'a Subject<M>,
-    ctx: &'a Context<'_, M>,
+    ctx: &'a Context<'_>,
     effective_labels: &'a [Label],
 ) -> Option<NerRequest<'a>> {
     let text = M::as_text(subject.data(), subject.artifact())?;
@@ -291,8 +282,8 @@ mod tests {
         let rec = NerRecognizer::mock().with_name("test");
         let data = TextData::new("Alice Smith".to_owned());
         let scope = Scope::new().with_catalog(LabelCatalog::with_builtins());
-        let ctx = Context::<Text>::new(&scope);
-        let subject = Subject::new(data);
+        let ctx = Context::new(&scope);
+        let subject = Subject::<Text>::new(data);
         let out = rec.recognize(&subject, &ctx).await.unwrap();
         assert!(out.is_empty());
     }
@@ -365,8 +356,8 @@ mod tests {
         let counters = backend.clone();
         let recognizer = NerRecognizer::new(backend);
         let scope = Scope::new();
-        let ctx = Context::<Text>::new(&scope);
-        let subjects = [
+        let ctx = Context::new(&scope);
+        let subjects: [Subject<Text>; _] = [
             Subject::new(TextData::new("a".to_owned())),
             Subject::new(TextData::new("b".to_owned())),
             Subject::new(TextData::new("c".to_owned())),
@@ -389,8 +380,8 @@ mod tests {
     async fn recognize_batch_rejects_a_short_response() {
         let recognizer = NerRecognizer::new(MockBackend::new().with_dropped_responses(1));
         let scope = Scope::new();
-        let ctx = Context::<Text>::new(&scope);
-        let subjects = [
+        let ctx = Context::new(&scope);
+        let subjects: [Subject<Text>; _] = [
             Subject::new(TextData::new("a".to_owned())),
             Subject::new(TextData::new("b".to_owned())),
         ];

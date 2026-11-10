@@ -16,7 +16,7 @@ use elide::recognition::Scope;
 use elide::recognition::pattern::PatternRecognizer;
 use elide::redaction::operators::Replace;
 use elide::redaction::{Anonymizer, HiddenContentPolicy, Rule};
-use elide::{Directives, Orchestrator, RegistryDocumentExt, Result};
+use elide::{Orchestrator, RegistryDocumentExt, Result};
 
 use crate::support::orchestrator::TestOrchestrator;
 
@@ -42,11 +42,13 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
     let mut doc = registry
         .document(DOC, SAMPLE, HiddenContentPolicy::default())
         .await?;
-    let report = orchestrator
-        .analyze(&mut doc, &Directives::new())
-        .await?
-        .report;
-    let detected = report.entities::<Text>().expect("text content").len();
+    let report = orchestrator.analyze(&mut doc).await?.report;
+    let detected = report
+        .document::<Text>()
+        .ok()
+        .map(|part| part.entities())
+        .expect("text content")
+        .len();
     assert!(detected > 0, "the fixture detected entities");
     let json = serde_json::to_string(&report).expect("report serializes");
 
@@ -56,7 +58,9 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
 
     // Same entities, same modality, audit trail intact.
     let body = rebuilt
-        .entities::<Text>()
+        .document::<Text>()
+        .ok()
+        .map(|part| part.entities())
         .expect("content reconstructed as Text");
     assert_eq!(body.len(), detected, "every detected entity survived");
     assert!(
@@ -70,7 +74,13 @@ async fn report_round_trips_through_serialize_and_deserialize() -> Result<()> {
         .document(DOC, SAMPLE, HiddenContentPolicy::default())
         .await?;
     let applied = orchestrator.anonymize_with(&mut doc2, rebuilt).await?;
-    for entity in applied.entities::<Text>().expect("applied content").iter() {
+    for entity in applied
+        .document::<Text>()
+        .ok()
+        .map(|part| part.entities())
+        .expect("applied content")
+        .iter()
+    {
         assert!(entity.audit.selection().is_some(), "records the pick");
         assert!(entity.is_redacted(), "records the redaction");
     }
@@ -112,11 +122,13 @@ async fn report_deserializer_rebuilds_a_report_standalone() -> Result<()> {
     let mut doc = registry
         .document(DOC, SAMPLE, HiddenContentPolicy::default())
         .await?;
-    let report = orchestrator
-        .analyze(&mut doc, &Directives::new())
-        .await?
-        .report;
-    let detected = report.entities::<Text>().expect("text content").len();
+    let report = orchestrator.analyze(&mut doc).await?.report;
+    let detected = report
+        .document::<Text>()
+        .ok()
+        .map(|part| part.entities())
+        .expect("text content")
+        .len();
     let json = serde_json::to_string(&report).expect("serializes");
 
     // No orchestrator here, just the modalities the report may contain.
@@ -128,7 +140,9 @@ async fn report_deserializer_rebuilds_a_report_standalone() -> Result<()> {
 
     assert_eq!(
         rebuilt
-            .entities::<Text>()
+            .document::<Text>()
+            .ok()
+            .map(|part| part.entities())
             .expect("content reconstructed")
             .len(),
         detected,
@@ -159,9 +173,13 @@ async fn split_pipeline_halves_detect_and_redact() -> Result<()> {
     let mut doc = registry
         .document(DOC, SAMPLE, HiddenContentPolicy::default())
         .await?;
-    let applied = orchestrator.anonymize(&mut doc, &Directives::new()).await?;
+    let applied = orchestrator.anonymize(&mut doc).await?;
 
-    let body = applied.entities::<Text>().expect("text content");
+    let body = applied
+        .document::<Text>()
+        .ok()
+        .map(|part| part.entities())
+        .expect("text content");
     assert!(!body.is_empty(), "the analyzer half detected entities");
     assert!(
         body.iter().all(|e| e.is_redacted()),

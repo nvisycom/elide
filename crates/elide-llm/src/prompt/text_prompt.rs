@@ -4,24 +4,15 @@
 //! [`DefaultPrompt`]: super::DefaultPrompt
 //! [`Prompt<Text>`]: super::Prompt
 
-use std::ops::Range;
-
 use elide_core::entity::Label;
-use elide_core::modality::text::Text;
 use elide_core::primitive::LanguageTag;
-use elide_core::recognition::annotation::Inclusion;
 use hipstr::HipStr;
 
 use super::target_labels_block;
 
-/// Snippet window (in bytes) emitted on each side of an inclusion's
-/// range so the LLM has surrounding context for judgement.
-const SNIPPET_HALF_WIDTH: usize = 80;
-
 /// Builds user prompts for the text detect pass.
 pub(super) struct TextPromptBuilder<'a> {
     text: &'a str,
-    inclusions: &'a [Inclusion<Text>],
     tags: &'a [HipStr<'static>],
     target_labels: &'a [Label],
     language: Option<&'a LanguageTag>,
@@ -30,14 +21,12 @@ pub(super) struct TextPromptBuilder<'a> {
 impl<'a> TextPromptBuilder<'a> {
     pub fn new(
         text: &'a str,
-        inclusions: &'a [Inclusion<Text>],
         tags: &'a [HipStr<'static>],
         target_labels: &'a [Label],
         language: Option<&'a LanguageTag>,
     ) -> Self {
         Self {
             text,
-            inclusions,
             tags,
             target_labels,
             language,
@@ -66,66 +55,6 @@ impl<'a> TextPromptBuilder<'a> {
             ));
         }
 
-        if !self.inclusions.is_empty() {
-            prompt.push_str(
-                "\n\nThe uploader marked these regions as likely sensitive. \
-                 Use them as priors when scoring candidates. Hints:",
-            );
-            for (i, h) in self.inclusions.iter().enumerate() {
-                // The prompt quotes a snippet of the decoded `self.text`; a
-                // source-only hint has no decoded range to locate, so skip it.
-                let Some(range) = h.location.range() else {
-                    continue;
-                };
-                let range = range.start..range.end;
-                let value = value_at(self.text, range.clone());
-                let snippet = snippet_around(self.text, range);
-                let name = h.name.as_deref().unwrap_or("");
-                let kind = h
-                    .label
-                    .as_ref()
-                    .map(|l| l.as_str().to_owned())
-                    .unwrap_or_else(|| "unknown".to_string());
-                prompt.push_str(&format!(
-                    "\n[hint {i}] name=\"{name}\", kind={kind}, \
-                     value=\"{value}\"\n  snippet: \"{snippet}\""
-                ));
-            }
-        }
-
         prompt
     }
-}
-
-fn snippet_around(text: &str, range: Range<usize>) -> &str {
-    let lo = floor_char_boundary(text, range.start.saturating_sub(SNIPPET_HALF_WIDTH));
-    let hi = ceil_char_boundary(text, (range.end + SNIPPET_HALF_WIDTH).min(text.len()));
-    &text[lo..hi]
-}
-
-fn value_at(text: &str, range: Range<usize>) -> &str {
-    let Range { start, end } = range;
-    if start < end
-        && end <= text.len()
-        && text.is_char_boundary(start)
-        && text.is_char_boundary(end)
-    {
-        &text[start..end]
-    } else {
-        ""
-    }
-}
-
-fn floor_char_boundary(s: &str, mut pos: usize) -> usize {
-    while pos > 0 && !s.is_char_boundary(pos) {
-        pos -= 1;
-    }
-    pos
-}
-
-fn ceil_char_boundary(s: &str, mut pos: usize) -> usize {
-    while pos < s.len() && !s.is_char_boundary(pos) {
-        pos += 1;
-    }
-    pos
 }

@@ -94,7 +94,7 @@ impl<M: TextRecognizable> Enricher<M> for LinguaEnricher {
         ComponentId::new("elide-lingua", env!("CARGO_PKG_VERSION"))
     }
 
-    async fn enrich(&self, subject: &mut Subject<M>, ctx: &Context<'_, M>) -> Result<()> {
+    async fn enrich(&self, subject: &mut Subject<M>, ctx: &Context<'_>) -> Result<()> {
         // One asserted language is authoritative and monolingual: skip detection
         // and let every entity be attributed to it. Two or more means a mixed
         // document, so detection still runs, but restricted to the asserted set,
@@ -136,8 +136,8 @@ mod tests {
     async fn detects_english_onto_input() {
         let data = TextData::new("The quick brown fox jumps over the lazy dog.");
         let scope = Scope::new();
-        let ctx = Context::<Text>::new(&scope);
-        let mut subject = Subject::new(data);
+        let ctx = Context::new(&scope);
+        let mut subject = Subject::<Text>::new(data);
         LinguaEnricher::unrestricted()
             .enrich(&mut subject, &ctx)
             .await
@@ -154,8 +154,8 @@ mod tests {
         // pipeline to its detected language.
         let data = TextData::new("The quick brown fox jumps over the lazy dog.");
         let scope = Scope::new();
-        let ctx = Context::<Tabular>::new(&scope);
-        let mut subject = Subject::new(data);
+        let ctx = Context::new(&scope);
+        let mut subject = Subject::<Tabular>::new(data);
         LinguaEnricher::unrestricted()
             .enrich(&mut subject, &ctx)
             .await
@@ -171,8 +171,8 @@ mod tests {
         let de: LanguageTag = "de".parse().unwrap();
         let data = TextData::new("The quick brown fox");
         let scope = Scope::new().with_language(de);
-        let ctx = Context::<Text>::new(&scope);
-        let mut subject = Subject::new(data);
+        let ctx = Context::new(&scope);
+        let mut subject = Subject::<Text>::new(data);
         LinguaEnricher::unrestricted()
             .enrich(&mut subject, &ctx)
             .await
@@ -196,8 +196,8 @@ mod tests {
             .with_language("pl".parse::<LanguageTag>().unwrap())
             .with_language("en".parse::<LanguageTag>().unwrap());
         let data = TextData::new("The quick brown fox jumps over the lazy dog.");
-        let ctx = Context::<Text>::new(&scope);
-        let mut subject = Subject::new(data);
+        let ctx = Context::new(&scope);
+        let mut subject = Subject::<Text>::new(data);
         LinguaEnricher::unrestricted()
             .enrich(&mut subject, &ctx)
             .await
@@ -231,8 +231,8 @@ mod tests {
             .with_language("zz".parse::<LanguageTag>().unwrap())
             .with_language("qq".parse::<LanguageTag>().unwrap());
         let data = TextData::new("The quick brown fox jumps over the lazy dog.");
-        let ctx = Context::<Text>::new(&scope);
-        let mut subject = Subject::new(data);
+        let ctx = Context::new(&scope);
+        let mut subject = Subject::<Text>::new(data);
         LinguaEnricher::unrestricted()
             .enrich(&mut subject, &ctx)
             .await

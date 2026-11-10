@@ -16,7 +16,7 @@
 
 use elide_codec::mocks::{MOCK_EXT, MockPart, decode_mock, encode_mock, mock_format};
 use elide_core::Result;
-use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
+use elide_core::entity::audit::{AuditEvent, PatternEvent};
 use elide_core::entity::builtins::EMAIL_ADDRESS;
 use elide_core::entity::{Entity, LabelCatalog};
 use elide_core::mocks::MockOperator;
@@ -25,7 +25,7 @@ use elide_core::primitive::{ComponentId, Confidence};
 use elide_core::recognition::{Context, Recognizer, Scope, Subject};
 use elide_core::redaction::HiddenContentPolicy;
 use elide_detection::Analyzer;
-use elide_engine::{Directives, Document, Orchestrator};
+use elide_engine::{Document, Orchestrator};
 use elide_format::FormatRegistry;
 use elide_redaction::{Anonymizer, Rule};
 
@@ -47,7 +47,7 @@ impl Recognizer<Text> for PiiRecognizer {
     async fn recognize(
         &self,
         subject: &Subject<Text>,
-        _ctx: &Context<'_, Text>,
+        _ctx: &Context<'_>,
     ) -> Result<Vec<Entity<Text>>> {
         let text = subject.data().as_str();
         let mut entities = Vec::new();
@@ -62,11 +62,7 @@ impl Recognizer<Text> for PiiRecognizer {
                 loc.clone(),
                 PatternEvent::default(),
             );
-            entities.push(Entity::new(
-                EMAIL_ADDRESS.to_ref(),
-                loc,
-                AuditLog::new(event),
-            ));
+            entities.push(Entity::new(EMAIL_ADDRESS.to_ref(), loc).with_event(event));
             from = end;
         }
         Ok(entities)
@@ -123,9 +119,7 @@ async fn nested_container_keeps_its_own_redaction_with_an_extensionless_id() -> 
         .await?;
     let mut documents = [Document::new("outer.mock", handle)];
 
-    let analyzed = orchestrator
-        .analyze(&mut documents, &Directives::new())
-        .await?;
+    let analyzed = orchestrator.analyze(&mut documents).await?;
     // Every level's body is reached (outer depth 1, inner depth 2, leaf depth 3).
     let depths: Vec<usize> = analyzed
         .report

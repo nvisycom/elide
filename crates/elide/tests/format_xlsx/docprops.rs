@@ -15,7 +15,7 @@ use elide::modality::tabular::Tabular;
 use elide::recognition::Scope;
 use elide::redaction::operators::Erase;
 use elide::redaction::{Anonymizer, Disposition, HiddenContentPolicy, Rule};
-use elide::{Directives, Document, Orchestrator};
+use elide::{Document, Orchestrator};
 use elide_office::fixtures::read_part;
 
 use super::FIXTURE;
@@ -53,10 +53,7 @@ async fn xlsx_core_property_timestamps_are_stripped_through_the_facade() {
         .expect("decode xlsx");
     let mut documents = [Document::new("shared_string_cells.xlsx", handle)];
 
-    let analyzed = orchestrator
-        .analyze(&mut documents, &Directives::new())
-        .await
-        .expect("analyze");
+    let analyzed = orchestrator.analyze(&mut documents).await.expect("analyze");
     orchestrator
         .anonymize_with(&mut documents, analyzed.report)
         .await

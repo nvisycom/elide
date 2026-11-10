@@ -17,7 +17,7 @@ use elide_core::primitive::{ComponentId, Confidence};
 use elide_core::recognition::{Context, Recognizer, Scope, Subject};
 use elide_core::redaction::{Disposition, HiddenContentPolicy};
 use elide_detection::Analyzer;
-use elide_engine::{Directives, Document, Orchestrator};
+use elide_engine::{Document, Orchestrator};
 use elide_format::FormatRegistry;
 use elide_image::modality::{Image, ImageLocation};
 use elide_image::primitive::{BoundingBox, Dimensions, Point};
@@ -89,7 +89,7 @@ async fn redact_under(
         .expect("decode jpeg");
     let mut documents = [Document::new("photo.jpg", handle)];
     orchestrator
-        .anonymize(&mut documents, &Directives::new())
+        .anonymize(&mut documents)
         .await
         .expect("anonymize");
     documents[0].document.encode().expect("encode").to_bytes()
@@ -115,10 +115,7 @@ async fn labelled_fields_are_detected_and_erased_with_nothing_configured() {
         .await
         .expect("decode jpeg");
     let mut documents = [Document::new("photo.jpg", handle)];
-    let analyzed = orchestrator
-        .analyze(&mut documents, &Directives::new())
-        .await
-        .expect("analyze");
+    let analyzed = orchestrator.analyze(&mut documents).await.expect("analyze");
 
     // The `#exif` stream was reached: a depth-2 part exists.
     assert!(
@@ -230,7 +227,7 @@ async fn a_kept_field_goes_with_its_group() {
         .expect("decode jpeg");
     let mut documents = [Document::new("photo.jpg", handle)];
     orchestrator
-        .anonymize(&mut documents, &Directives::new())
+        .anonymize(&mut documents)
         .await
         .expect("anonymize");
     let out = documents[0].document.encode().expect("encode").to_bytes();
@@ -291,7 +288,7 @@ impl Recognizer<Image> for WholeFrame {
     async fn recognize(
         &self,
         subject: &Subject<Image>,
-        _ctx: &Context<'_, Image>,
+        _ctx: &Context<'_>,
     ) -> Result<Vec<Entity<Image>>> {
         let dims = subject.data().dimensions();
         let bbox = BoundingBox::from_origin(
@@ -305,13 +302,8 @@ impl Recognizer<Image> for WholeFrame {
             location.clone(),
             ModelEvent::default(),
         );
-        let entity = Entity::builder()
-            .with_label(builtins::PERSON_NAME.to_ref())
-            .with_location(location)
-            .with_confidence(Confidence::MAX)
-            .with_event(event)
-            .build();
-        Ok(entity.into_iter().collect())
+        let entity = Entity::new(builtins::PERSON_NAME.to_ref(), location).with_event(event);
+        Ok(vec![entity])
     }
 }
 

@@ -270,44 +270,16 @@ impl<M: Modality> AuditEvent<M> {
     /// A human override recording `manual` (built with its intent, location, and
     /// optional [`Attribution`]) at the entity's asserted `confidence`. The
     /// `source` names the reviewer who made the override, pass their id, or
-    /// `"manual"` when unattributed. Prefer the [`manual_flag`] /
-    /// [`manual_suppress`] shorthands for an unattributed override; build a
-    /// [`Manual`] directly (e.g. `Manual::new(ManualIntent::Amend, loc)`) for the
-    /// other intents.
+    /// `"manual"` when unattributed. To record one on an entity, use
+    /// `Entity::record_manual`, which takes the entity's own confidence.
     ///
     /// [`Attribution`]: crate::entity::audit::Attribution
-    /// [`manual_flag`]: Self::manual_flag
-    /// [`manual_suppress`]: Self::manual_suppress
     pub fn manual(
         source: impl Into<HipStr<'static>>,
         confidence: Confidence,
         manual: Manual<M>,
     ) -> Self {
         Self::new(source, confidence, manual)
-    }
-
-    /// An unattributed [`manual`](Self::manual) event flagging a manually-added
-    /// entity ([`ManualIntent::Flag`]), sourced to `"manual"`.
-    ///
-    /// [`ManualIntent::Flag`]: crate::entity::audit::ManualIntent::Flag
-    pub fn manual_flag(location: M::Location, confidence: Confidence) -> Self {
-        Self::manual(
-            HipStr::borrowed("manual"),
-            confidence,
-            Manual::new(ManualIntent::Flag, location),
-        )
-    }
-
-    /// An unattributed [`manual`](Self::manual) event suppressing a detected
-    /// entity ([`ManualIntent::Suppress`]), sourced to `"manual"`.
-    ///
-    /// [`ManualIntent::Suppress`]: crate::entity::audit::ManualIntent::Suppress
-    pub fn manual_suppress(location: M::Location, confidence: Confidence) -> Self {
-        Self::manual(
-            HipStr::borrowed("manual"),
-            confidence,
-            Manual::new(ManualIntent::Suppress, location),
-        )
     }
 
     /// Whether this event is a recognition (pattern, model, or flagged item).

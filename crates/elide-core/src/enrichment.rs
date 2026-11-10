@@ -39,7 +39,7 @@ where
     ///
     /// [`Subject`]: crate::recognition::Subject
     /// [`Context`]: crate::recognition::Context
-    async fn enrich(&self, subject: &mut Subject<M>, ctx: &Context<'_, M>) -> Result<()>;
+    async fn enrich(&self, subject: &mut Subject<M>, ctx: &Context<'_>) -> Result<()>;
 
     /// Enrich a batch of `subjects` in place, under one shared context.
     ///
@@ -55,7 +55,7 @@ where
     ///
     /// The first enrichment error; a batched enricher surfaces a whole-batch
     /// failure the same way, aborting the call before recognition.
-    async fn enrich_batch(&self, subjects: &mut [Subject<M>], ctx: &Context<'_, M>) -> Result<()> {
+    async fn enrich_batch(&self, subjects: &mut [Subject<M>], ctx: &Context<'_>) -> Result<()> {
         for subject in subjects {
             self.enrich(subject, ctx).await?;
         }

@@ -148,7 +148,6 @@ mod tests {
     use elide_core::entity::{EntityCoRef, LabelRef};
     use elide_core::modality::tabular::TabularLocation;
     use elide_core::modality::text::TextLocation;
-    use elide_core::primitive::Confidence;
 
     use super::*;
 
@@ -170,22 +169,12 @@ mod tests {
     /// Build a Text entity over the full span of `source` so
     /// offsets are self-documenting.
     fn entity_over(label: LabelRef, source: &str) -> Entity<Text> {
-        Entity::<Text>::builder()
-            .with_label(label)
-            .with_location(TextLocation::inline(0..source.len()))
-            .with_confidence(Confidence::clamped(1.0))
-            .build()
-            .expect("text entity has label + location + confidence")
+        Entity::<Text>::new(label, TextLocation::inline(0..source.len()))
     }
 
     fn coref_entity(label: LabelRef, source: &str, coref_id: &str) -> Entity<Text> {
-        Entity::<Text>::builder()
-            .with_label(label)
-            .with_location(TextLocation::inline(0..source.len()))
-            .with_confidence(Confidence::clamped(1.0))
+        Entity::<Text>::new(label, TextLocation::inline(0..source.len()))
             .with_coref(EntityCoRef::new(coref_id))
-            .build()
-            .expect("text entity has label + location + confidence")
     }
 
     #[tokio::test]
@@ -223,13 +212,11 @@ mod tests {
     async fn entity_language_overrides_default() {
         let op = fake();
         let source = TextData::new("名前");
-        let entity = Entity::<Text>::builder()
-            .with_label(person_name())
-            .with_location(TextLocation::inline(0..source.as_str().len()))
-            .with_confidence(Confidence::clamped(1.0))
-            .with_language("ja".parse().unwrap())
-            .build()
-            .unwrap();
+        let entity = Entity::<Text>::new(
+            person_name(),
+            TextLocation::inline(0..source.as_str().len()),
+        )
+        .with_language("ja".parse().unwrap());
         let out = op.anonymize(&entity, &source).await.unwrap();
         let TextReplacement::Substituted(value) = out else {
             panic!("expected Substituted variant");
@@ -289,18 +276,16 @@ mod tests {
     #[tokio::test]
     async fn tabular_impl_emits_cell_substituted() {
         let op = fake();
-        let entity = Entity::<Tabular>::builder()
-            .with_label(person_name())
-            .with_location(TabularLocation {
+        let entity = Entity::<Tabular>::new(
+            person_name(),
+            TabularLocation {
                 row_index: 0u32,
                 column_index: 0u32,
                 span: None,
                 column_name: None,
                 sheet_name: None,
-            })
-            .with_confidence(Confidence::clamped(1.0))
-            .build()
-            .unwrap();
+            },
+        );
         let out =
             <Fake<Mask> as Operator<Tabular>>::anonymize(&op, &entity, &TextData::new("alice"))
                 .await

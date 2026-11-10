@@ -35,17 +35,13 @@ impl LlmModality for Text {
                 },
             );
 
-            let mut builder = Entity::builder()
-                .with_label(label)
-                .with_location(location)
-                .with_confidence(confidence)
-                .with_event(event);
+            let mut entity = Entity::new(label, location).with_event(event);
             // The model groups mentions of the same real-world entity under
             // a shared id; carry it onto the entity as a coreference cluster.
             if let Some(id) = l.candidate.coreference.clone() {
-                builder = builder.with_coref(EntityCoRef::new(id));
+                entity = entity.with_coref(EntityCoRef::new(id));
             }
-            out.push(builder.build().expect("required fields provided"));
+            out.push(entity);
         }
         out
     }

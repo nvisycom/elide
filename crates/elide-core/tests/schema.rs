@@ -11,7 +11,6 @@ use elide_core::entity::Entity;
 use elide_core::entity::audit::AuditEvent;
 use elide_core::modality::text::{Text, TextLocation};
 use elide_core::recognition::Scope;
-use elide_core::recognition::annotation::Annotations;
 use schemars::schema_for;
 
 /// The generic `Entity<Text>` generates a schema covering its fields, with the
@@ -153,13 +152,6 @@ fn scope_schema() {
             "scope schema should mention `{field}`"
         );
     }
-}
-
-/// The generic `Annotations<Text>` (Vec of M::Location-bounded regions)
-/// generates without panicking.
-#[test]
-fn annotations_schema() {
-    let _ = schema_for!(Annotations<Text>);
 }
 
 /// Generic types carry the modality in their schema name, so two modalities'

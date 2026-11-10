@@ -32,14 +32,14 @@ pub use async_trait::async_trait;
 pub use elide_core::entity;
 #[doc(inline)]
 pub use elide_core::{Error, ErrorKind, Result};
-// The orchestration engine (`Orchestrator`, `Report`, `Directives`, …), a
+// The orchestration engine (`Orchestrator`, `Report`, `PartMut`, …), a
 // small curated set, re-exported flat at the root under the `engine` feature.
 // `engine` implies `codec` (the orchestrator decodes through it) and serde.
 #[cfg(feature = "engine")]
 #[cfg_attr(docsrs, doc(cfg(feature = "engine")))]
 #[doc(inline)]
 pub use elide_engine::{
-    AnalyzedDocument, ArtifactSet, AsDocuments, Directives, Document, Orchestrator, PartId,
+    AnalyzedDocument, ArtifactSet, AsDocuments, Document, Orchestrator, Part, PartId, PartMut,
     RegistryDocumentExt, Report, ReportDeserializer, StrippedItem,
 };
 

@@ -95,7 +95,7 @@ fn record_conflicts<M: Modality>(
             name.to_owned(),
         );
         let event = AuditEvent::conflict(conflict, entities[winner].confidence);
-        entities[winner].audit.record(event);
+        entities[winner].record(event);
     }
 }
 
@@ -126,8 +126,8 @@ fn record_contests<M: Modality>(
             ),
             entities[b].confidence,
         );
-        entities[a].audit.record(on_a);
-        entities[b].audit.record(on_b);
+        entities[a].record(on_a);
+        entities[b].record(on_b);
     }
 }
 

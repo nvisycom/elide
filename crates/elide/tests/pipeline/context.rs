@@ -50,9 +50,9 @@ async fn image_context_boosts_and_keeps_the_native_region() {
         LayoutRegion::new(img_loc(45.0, 0.0, 155.0, 20.0), "123-45-6789"),
     ];
     let scope = Scope::new();
-    let ctx = Context::<Image>::new(&scope);
-    let subject =
-        Subject::new(elide_image::fixtures::blank_image_data()).with_artifact(Layout::new(regions));
+    let ctx = Context::new(&scope);
+    let subject = Subject::<Image>::new(elide_image::fixtures::blank_image_data())
+        .with_artifact(Layout::new(regions));
     let entities = ssn_recognizer().recognize(&subject, &ctx).await.unwrap();
 
     assert_eq!(entities.len(), 1);
@@ -88,8 +88,8 @@ async fn audio_context_boosts_and_keeps_the_native_timespan() {
             TranscriptWord::new(TimeSpan::from_millis(400, 1500), "123-45-6789"),
         ]);
     let scope = Scope::new();
-    let ctx = Context::<Audio>::new(&scope);
-    let subject = Subject::new(elide_audio::fixtures::blank_audio_data())
+    let ctx = Context::new(&scope);
+    let subject = Subject::<Audio>::new(elide_audio::fixtures::blank_audio_data())
         .with_artifact(Transcription::new(vec![segment]));
     let entities = ssn_recognizer().recognize(&subject, &ctx).await.unwrap();
 

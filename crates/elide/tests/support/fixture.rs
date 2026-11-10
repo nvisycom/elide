@@ -24,9 +24,7 @@ use elide::primitive::LanguageTag;
 use elide::recognition::Scope;
 use elide::redaction::operators::{Erase, Mask, Replace};
 use elide::redaction::{Anonymizer, HiddenContentPolicy, Operator, Rule};
-use elide::{
-    Directives, Document, Error, ErrorKind, Orchestrator, RegistryDocumentExt, Report, Result,
-};
+use elide::{Document, Error, ErrorKind, Orchestrator, RegistryDocumentExt, Report, Result};
 
 #[cfg(all(feature = "image", feature = "llm"))]
 use super::orchestrator::image_analyzer;
@@ -244,19 +242,16 @@ impl Fixture {
             .with_registry(registry)
             .with_modality::<Audio>(analyzer, anonymizer);
 
-        let report = orchestrator
-            .analyze(&mut document, &Directives::new())
-            .await?
-            .report;
+        let report = orchestrator.analyze(&mut document).await?.report;
         let entities: Vec<Entity<Audio>> = report
-            .entities::<Audio>()
-            .map(|e| e.to_vec())
+            .document::<Audio>()
+            .map(|part| part.entities().to_vec())
             .unwrap_or_default();
         self.write_entities(&report);
         let applied = orchestrator.anonymize_with(&mut document, report).await?;
         let audited: Vec<Entity<Audio>> = applied
-            .entities::<Audio>()
-            .map(|e| e.to_vec())
+            .document::<Audio>()
+            .map(|part| part.entities().to_vec())
             .unwrap_or_default();
 
         let redacted = document.document.encode()?.as_bytes().to_vec();
@@ -303,19 +298,16 @@ impl Fixture {
             .with_registry(registry)
             .with_modality::<Image>(analyzer, anonymizer);
 
-        let report = orchestrator
-            .analyze(&mut document, &Directives::new())
-            .await?
-            .report;
+        let report = orchestrator.analyze(&mut document).await?.report;
         let entities: Vec<Entity<Image>> = report
-            .entities::<Image>()
-            .map(|e| e.to_vec())
+            .document::<Image>()
+            .map(|part| part.entities().to_vec())
             .unwrap_or_default();
         self.write_entities(&report);
         let applied = orchestrator.anonymize_with(&mut document, report).await?;
         let audited: Vec<Entity<Image>> = applied
-            .entities::<Image>()
-            .map(|e| e.to_vec())
+            .document::<Image>()
+            .map(|part| part.entities().to_vec())
             .unwrap_or_default();
 
         let redacted = document.document.encode()?.as_bytes().to_vec();
@@ -403,13 +395,10 @@ impl Fixture {
 
         // Two phases so the entities surface for assertions: detect, copy
         // the document's own entities out, then apply with no editing.
-        let report = orchestrator
-            .analyze(&mut document, &Directives::new())
-            .await?
-            .report;
+        let report = orchestrator.analyze(&mut document).await?.report;
         let entities: Vec<Entity<M>> = report
-            .entities::<M>()
-            .map(|e| e.to_vec())
+            .document::<M>()
+            .map(|part| part.entities().to_vec())
             .unwrap_or_default();
         // Write the detected entities as JSON for inspection before the
         // report is consumed by `anonymize_with`.
@@ -418,8 +407,8 @@ impl Fixture {
         // The returned report's entities now carry the redaction event ,
         // the post-redaction audit trail.
         let audited: Vec<Entity<M>> = applied
-            .entities::<M>()
-            .map(|e| e.to_vec())
+            .document::<M>()
+            .map(|part| part.entities().to_vec())
             .unwrap_or_default();
 
         let redacted = document.document.encode()?.as_bytes().to_vec();

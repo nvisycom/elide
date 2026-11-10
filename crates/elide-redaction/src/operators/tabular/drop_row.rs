@@ -45,7 +45,7 @@ impl Operator<Tabular> for DropRow {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::{AuditEvent, AuditLog, PatternEvent};
+    use elide_core::entity::audit::{AuditEvent, PatternEvent};
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::modality::tabular::TabularLocation;
     use elide_core::primitive::Confidence;
@@ -61,7 +61,7 @@ mod tests {
             location.clone(),
             PatternEvent::default(),
         );
-        Entity::new(LabelRef::new("PERSON"), location, AuditLog::new(event))
+        Entity::new(LabelRef::new("PERSON"), location).with_event(event)
     }
 
     #[tokio::test]
