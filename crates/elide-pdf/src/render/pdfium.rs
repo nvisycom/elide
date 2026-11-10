@@ -81,9 +81,13 @@ struct Binding {
 
 impl Binding {
     fn new() -> Result<Self> {
-        let bindings = Pdfium::bind_to_system_library()
-            .or_else(|_| Pdfium::bind_to_library("libpdfium"))
-            .map_err(|e| Error::malformed(format!("failed to load PDFium library: {e}")))?;
+        let bindings = Pdfium::bind_to_system_library().or_else(|system| {
+            Pdfium::bind_to_library("libpdfium").map_err(|local| {
+                Error::malformed(format!(
+                    "failed to load PDFium library: {system}; fallback: {local}"
+                ))
+            })
+        })?;
         Ok(Self {
             pdfium: Pdfium::new(bindings),
         })

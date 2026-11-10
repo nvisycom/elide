@@ -38,7 +38,7 @@ PLATFORM="${1:-${PDFIUM_PLATFORM:-$(detect_platform)}}"
 # Pin a specific pdfium-binaries release rather than the mutable `latest`, so
 # the download is reproducible and can be checksum-verified. Bump PDFIUM_TAG
 # and the matching per-platform sha256s below together.
-PDFIUM_TAG="chromium/7999"
+PDFIUM_TAG="chromium/8125"
 BASE_URL="https://github.com/bblanchon/pdfium-binaries/releases/download/${PDFIUM_TAG}"
 URL="${BASE_URL}/pdfium-${PLATFORM}.tgz"
 
@@ -48,10 +48,10 @@ URL="${BASE_URL}/pdfium-${PLATFORM}.tgz"
 # so this runs under macOS's system Bash 3.2. An unlisted platform yields an
 # empty value and installation is refused for it.
 case "$PLATFORM" in
-	linux-x64) EXPECTED_SHA="c3af580f9df0fef9545b44115bc5ea440f286956b5f231df69fb373b8efc4f69" ;;
-	linux-arm64) EXPECTED_SHA="a19862a36e2b2da3c3fb43f0deef45fbbc331f58cd47943782ae4bd9db4c66d9" ;;
-	mac-x64) EXPECTED_SHA="4b924d948d2ec4863435d375a94541b4003c59f8adc28cc5e4236b0ab81a355d" ;;
-	mac-arm64) EXPECTED_SHA="e214ee33f22b2204daa765a545aee1e425d88448e6154dac95c6a06206b7437f" ;;
+	linux-x64) EXPECTED_SHA="e1c3ce6e270cb5e0c20816b379ad9f2c1309972697c505f508de92bf5e7d6659" ;;
+	linux-arm64) EXPECTED_SHA="8b8818f2ec57d1b213d952ca6d7f0ffeca9d0110487d0e20ad83ba918bc92efa" ;;
+	mac-x64) EXPECTED_SHA="8a5193535b80c7215d8932f6647ae5097465b6dba2811602c21e120c2af112b0" ;;
+	mac-arm64) EXPECTED_SHA="4939bd935ac83ddc09a3a4f038bc43a19cea1660316a3667f26cb07a070e139d" ;;
 	*) EXPECTED_SHA="" ;;
 esac
 
