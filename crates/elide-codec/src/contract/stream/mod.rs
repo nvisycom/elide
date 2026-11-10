@@ -16,11 +16,13 @@
 //! [`DataWriter`]: elide_core::modality::DataWriter
 
 mod erased;
+mod flagged;
 
 use elide_core::Result;
 use elide_core::modality::{Chunk, DataReader, DataWriter, Modality};
 
 pub use self::erased::{ErasedStream, TypedStream};
+pub use self::flagged::FlaggedItem;
 use super::FormatId;
 use crate::content::ContentData;
 
@@ -31,7 +33,7 @@ use crate::content::ContentData;
 /// so a codec-backed stream plugs straight into anything that bounds on them
 /// (the toolkit's anonymizer). On top of that base it adds the codec surface:
 /// identify and serialise ([`format`], [`encode`]), hand back its decoded chunks
-/// ([`chunks`]), and lift a chunk-local finding back to source coordinates
+/// ([`chunks`]) and the hidden content its format labels ([`flagged`]), and lift a chunk-local finding back to source coordinates
 /// ([`lift`]).
 ///
 /// A stream's chunks are materialized when it is decoded, so [`chunks`] is a
@@ -45,6 +47,7 @@ use crate::content::ContentData;
 /// [`format`]: Stream::format
 /// [`encode`]: Stream::encode
 /// [`chunks`]: Stream::chunks
+/// [`flagged`]: Stream::flagged
 /// [`lift`]: Stream::lift
 pub trait Stream<M: Modality>: DataReader<M> + DataWriter<M> + Send + Sync + 'static {
     /// Stable id of the format this stream represents (e.g. `"elide.text.txt"`).
@@ -69,6 +72,17 @@ pub trait Stream<M: Modality>: DataReader<M> + DataWriter<M> + Send + Sync + 'st
     ///
     /// Returns the source's decode error.
     fn chunks(&self) -> Result<Vec<Chunk<M>>>;
+
+    /// The items of hidden content this stream keeps and its format labels
+    /// (metadata fields, comments, their authors, tracked deletions), front to
+    /// back. Empty by default: a stream of visible content flags nothing.
+    ///
+    /// # Errors
+    ///
+    /// Returns the source's decode error.
+    fn flagged(&self) -> Result<Vec<FlaggedItem<M>>> {
+        Ok(Vec::new())
+    }
 
     /// Promote a `local` location, expressed in `chunk`'s own coordinate
     /// system, to a source-global [`M::Location`].

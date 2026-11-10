@@ -10,10 +10,11 @@ use elide_codec::{ErasedStream, TypedStream};
 use elide_core::entity::Entity;
 use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
 use elide_core::recognition::Scope;
+use elide_core::redaction::HiddenContentPolicy;
 use elide_core::{Error, Result};
 
-use super::ModalityPipeline;
 use super::outcome::{BoxFuture, PartAnalysis};
+use super::{ModalityPipeline, flagged};
 use crate::analysis::{ArtifactGroup, EntityGroup};
 use crate::directives::AnnotationSet;
 
@@ -41,13 +42,15 @@ pub(crate) trait ErasedPipeline: Send + Sync {
     /// Analyze several stream parts of this pipeline's modality together,
     /// coalescing enrichment into one batched provider round-trip, and return one
     /// [`PartAnalysis`] per handle in order. Each handle is paired with its prior
-    /// enrichment `seed` (`NoArtifact` on a first pass). Every handle must already
+    /// enrichment `seed` (`NoArtifact` on a first pass), and its flagged hidden
+    /// content is detected under `policy`. Every handle must already
     /// match this pipeline's modality (the orchestrator groups them with
     /// [`matches`](Self::matches) first); a non-matching handle is a caller error.
     fn analyze_streams<'a>(
         &'a self,
         handles: &'a mut [&'a mut ErasedStream],
         scope: &'a Scope,
+        policy: HiddenContentPolicy,
         annotations: &'a AnnotationSet,
         seeds: &'a [&'a dyn ArtifactGroup],
     ) -> BoxFuture<'a, Result<Vec<PartAnalysis>>>;
@@ -85,6 +88,7 @@ where
         &'a self,
         handles: &'a mut [&'a mut ErasedStream],
         scope: &'a Scope,
+        policy: HiddenContentPolicy,
         annotations: &'a AnnotationSet,
         seeds: &'a [&'a dyn ArtifactGroup],
     ) -> BoxFuture<'a, Result<Vec<PartAnalysis>>> {
@@ -99,13 +103,10 @@ where
                 })?;
                 streams.push(stream);
             }
-            let schema = match self.schema {
-                Some(schema) => streams
-                    .iter()
-                    .map(|stream| schema(stream, scope, &regions))
-                    .collect::<Result<Vec<_>>>()?,
-                None => Vec::new(),
-            };
+            let flagged = streams
+                .iter()
+                .map(|stream| flagged::entities(stream, scope, policy, &regions))
+                .collect::<Result<Vec<_>>>()?;
             // Each seed downcasts as in `analyze_stream`: a matching prior artifact
             // restores, anything else (first-pass `NoArtifact`, other modality) is
             // `None` so the group enriches from scratch.
@@ -117,7 +118,7 @@ where
                 .analyzer
                 .analyze_streams(&mut streams, scope, &regions, seeds)
                 .await?;
-            for (analysis, entities) in analyses.iter_mut().zip(schema) {
+            for (analysis, entities) in analyses.iter_mut().zip(flagged) {
                 analysis.entities.extend(entities);
             }
             Ok(analyses

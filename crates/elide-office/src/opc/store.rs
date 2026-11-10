@@ -7,7 +7,7 @@ use elide_codec::extract::Passage;
 use elide_core::{Error, Result};
 use hipstr::HipStr;
 
-use crate::opc::attributes::TextAttribute;
+use crate::opc::attributes::{Collaboration, TextAttribute};
 use crate::opc::block::{Block, IssueKind, Replacement};
 use crate::opc::kind::PartKind;
 use crate::opc::part::{PartPath, PartRole};
@@ -101,6 +101,11 @@ impl StoredPart {
         let mut blocks = Vec::new();
         for span in self.spans(raw).map_err(|_| IssueKind::MalformedXml)? {
             let (text, offsets) = span.decode(raw).map_err(|_| IssueKind::MalformedXml)?;
+            // All a comments part's text is what its comments say.
+            let collaboration = span.collaboration.or_else(|| {
+                (self.kind == PartKind::Comments && span.kind == BlockKind::Text)
+                    .then_some(Collaboration::Text)
+            });
             blocks.push(Block {
                 part: self.path.clone(),
                 text: HipStr::from(text).into_owned(),
@@ -108,6 +113,7 @@ impl StoredPart {
                 end: span.range.end,
                 offsets,
                 passage: span.passage,
+                flag: collaboration.map(Collaboration::flag),
             });
         }
         Ok(blocks)

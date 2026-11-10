@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 
 pub use self::attribution::{Attribution, CitedAttribution, FreeformAttribution};
 pub use self::event::{
-    AuditEvent, AuditKind, Calibration, Conflict, Contested, Deduplication, Manual, ManualIntent,
-    Metadata, MetadataEvent, Model, ModelEvent, Pattern, PatternEvent, Redaction, Refinement,
+    AuditEvent, AuditKind, Calibration, Conflict, Contested, Deduplication, Flagged, FlaggedEvent,
+    Manual, ManualIntent, Model, ModelEvent, Pattern, PatternEvent, Redaction, Refinement,
     Selection,
 };
 pub use self::hash::AuditHash;
@@ -160,6 +160,14 @@ impl<M: Modality> AuditLog<M> {
         self.events
             .iter()
             .any(|e| matches!(e.kind, AuditKind::Redaction(_)))
+    }
+
+    /// Whether this entity is hidden content its format flagged, i.e. a
+    /// [`Flagged`] event is on the trail.
+    pub fn is_flagged(&self) -> bool {
+        self.events
+            .iter()
+            .any(|e| matches!(e.kind, AuditKind::Flagged(_)))
     }
 
     /// Whether a reviewer has suppressed this entity, i.e. its most recent

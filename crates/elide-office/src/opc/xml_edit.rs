@@ -15,9 +15,9 @@ use std::ops::Range;
 
 use elide_core::redaction::HiddenContent;
 use elide_core::{Error, Result};
-use quick_xml::NsReader;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::{Namespace, ResolveResult};
+use quick_xml::{NsReader, Reader};
 
 /// A namespace-qualified element or attribute name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,6 +102,49 @@ pub(crate) trait Edit {
     ///
     /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if `raw` is not well-formed XML.
     fn apply(&self, raw: &str) -> Result<Option<Edited>>;
+}
+
+/// The XML comments of a part. Nothing in a package reads one and no reader of
+/// the document sees it, so it goes whatever the policy.
+pub(crate) struct XmlComments;
+
+impl Edit for XmlComments {
+    fn content(&self) -> Option<HiddenContent> {
+        Some(HiddenContent::Undisplayed)
+    }
+
+    fn apply(&self, raw: &str) -> Result<Option<Edited>> {
+        if !raw.contains("<!--") {
+            return Ok(None);
+        }
+        let mut reader = Reader::from_str(raw);
+        let bom = if raw.starts_with('\u{feff}') { 3 } else { 0 };
+        let mut last = bom;
+        let mut text = String::new();
+        let mut cursor = 0;
+        let mut count = 0;
+        loop {
+            let event = reader
+                .read_event()
+                .map_err(|e| Error::malformed(format!("malformed part XML: {e}")))?;
+            let span = last..reader.buffer_position() as usize + bom;
+            last = span.end;
+            match event {
+                Event::Eof => break,
+                Event::Comment(_) => {
+                    text.push_str(&raw[cursor..span.start]);
+                    cursor = span.end;
+                    count += 1;
+                }
+                _ => {}
+            }
+        }
+        if count == 0 {
+            return Ok(None);
+        }
+        text.push_str(&raw[cursor..]);
+        Ok(Some(Edited { text, count }))
+    }
 }
 
 impl<R: Rules> Edit for R {

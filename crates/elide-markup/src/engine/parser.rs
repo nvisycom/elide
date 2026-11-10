@@ -21,17 +21,20 @@
 
 use std::ops::Range;
 
-use elide_codec::extract::Passage;
+use elide_codec::extract::{ItemFlag, Passage};
 use elide_codec::string::ContextWords;
+use elide_core::entity::builtins;
 use elide_core::modality::ResolvedHint;
 use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation};
+use elide_core::redaction::HiddenContentKind;
 use elide_core::{Error, Result};
 use quick_xml::Reader;
 use quick_xml::events::{BytesEnd, BytesStart, Event};
 
 use super::address::{SpanKind, XmlItem, XmlSpan};
 use super::config::MarkupConfig;
-use super::source::{AttributeSpan, MarkupSink, MarkupSource};
+use super::meta::MetaTag;
+use super::source::{AttributeSpan, MarkupSink, MarkupSource, StartTag};
 use super::tag::HtmlTagExt;
 
 /// Extract the redactable markup items from `raw` under `config`. Exposed for
@@ -140,13 +143,15 @@ impl<'a> MarkupParser<'a> {
             match event {
                 Event::Eof => break,
                 Event::Start(ref e) => {
-                    let tag = self.source.start_tag(e, self.config.lenient)?;
+                    let mut tag = self.source.start_tag(e, self.config.lenient)?;
+                    self.flag_meta(&mut tag);
                     self.open_passage_element(&tag.name, span.clone());
                     self.attributes(tag.attributes);
                     self.open_element(tag.name, &tag.written, span);
                 }
                 Event::Empty(ref e) => {
-                    let tag = self.source.start_tag(e, self.config.lenient)?;
+                    let mut tag = self.source.start_tag(e, self.config.lenient)?;
+                    self.flag_meta(&mut tag);
                     self.open_passage_element(&tag.name, span);
                     self.attributes(tag.attributes);
                 }
@@ -247,10 +252,32 @@ impl<'a> MarkupParser<'a> {
         }
     }
 
-    /// Push a comment body.
+    /// Push a comment body, flagged as what a collaborator wrote.
     fn comment(&mut self, inner: Range<usize>) {
-        self.items
+        let index = self
+            .items
             .push(XmlSpan::verbatim(self.source.raw(), inner), Passage::Start);
+        let flag = ItemFlag::new(
+            builtins::COMMUNICATIONS_CONTENT.to_ref(),
+            HiddenContentKind::Collaboration,
+        );
+        self.items.flag(index, flag);
+    }
+
+    /// Flag every `content` of an HTML `<meta>` field as the metadata it is.
+    fn flag_meta(&self, tag: &mut StartTag) {
+        let Some(label) = tag.meta.as_ref().and_then(MetaTag::label) else {
+            return;
+        };
+        for attr in &mut tag.attributes {
+            let is_content = attr
+                .name
+                .clone()
+                .is_some_and(|name| self.source.slice(name).eq_ignore_ascii_case("content"));
+            if is_content {
+                attr.flag = Some(ItemFlag::new(label.clone(), HiddenContentKind::Metadata));
+            }
+        }
     }
 
     /// Push a redactable attribute value as an item hinted by its attribute
@@ -258,6 +285,9 @@ impl<'a> MarkupParser<'a> {
     fn attribute(&mut self, attr: AttributeSpan) {
         let value = self.escaped(attr.value, SpanKind::Attribute);
         let idx = self.items.push(value, Passage::Start);
+        if let Some(flag) = attr.flag {
+            self.items.flag(idx, flag);
+        }
         // Hint the value with its attribute name's location and context
         // words, when the name was placed in the source (the out-of-band
         // context that boosts it). Strip any namespace prefix (`ns:attr`)

@@ -6,13 +6,14 @@
 use std::borrow::Cow;
 use std::ops::Range;
 
-use elide_codec::extract::{ExtractedItem, Passage};
+use elide_codec::extract::{ExtractedItem, ItemFlag, Passage};
 use elide_core::modality::ResolvedHint;
 use elide_core::modality::text::Text;
 use elide_core::{Error, Result};
 use quick_xml::events::BytesStart;
 
 use super::address::{XmlItem, XmlSpan};
+use super::meta::MetaTag;
 use super::tag::HtmlTagExt;
 
 /// One redactable attribute's source spans: its `value` (the redactable inner
@@ -21,6 +22,8 @@ use super::tag::HtmlTagExt;
 pub(crate) struct AttributeSpan {
     pub(crate) name: Option<Range<usize>>,
     pub(crate) value: Range<usize>,
+    /// The hidden content the value is, when its format flags it.
+    pub(crate) flag: Option<ItemFlag>,
 }
 
 /// A start tag as the engine reads it.
@@ -31,6 +34,8 @@ pub(crate) struct StartTag {
     pub(crate) written: String,
     /// The redactable attributes, in source order.
     pub(crate) attributes: Vec<AttributeSpan>,
+    /// What an HTML `<meta>` tag is, read from all its attributes.
+    pub(crate) meta: Option<MetaTag>,
 }
 
 /// The retained source document, read-only. Owns the span queries the engine
@@ -80,10 +85,18 @@ impl<'a> MarkupSource<'a> {
                     self.push_attribute(&mut attributes, attr.name, value)?;
                 }
             }
+            let meta = tag.name.eq_ignore_ascii_case("meta").then(|| {
+                MetaTag::new(
+                    tag.attributes
+                        .iter()
+                        .map(|attr| (attr.name, attr.value.unwrap_or_default())),
+                )
+            });
             return Ok(StartTag {
                 name: tag.name.to_ascii_lowercase(),
                 written: tag.name.to_owned(),
                 attributes,
+                meta,
             });
         }
         for attr in e.attributes() {
@@ -102,6 +115,7 @@ impl<'a> MarkupSource<'a> {
             name: written.to_ascii_lowercase(),
             written,
             attributes,
+            meta: None,
         })
     }
 
@@ -118,6 +132,7 @@ impl<'a> MarkupSource<'a> {
         out.push(AttributeSpan {
             name: self.slice_span(name),
             value: value_span,
+            flag: None,
         });
         Ok(())
     }
@@ -168,8 +183,14 @@ impl MarkupSink {
             address,
             hints: Vec::new(),
             passage,
+            flag: None,
         });
         index
+    }
+
+    /// Mark the item at `index` as the hidden content `flag` says it is.
+    pub(crate) fn flag(&mut self, index: usize, flag: ItemFlag) {
+        self.items[index].flag = Some(flag);
     }
 
     /// Attach hints to items, each pair naming an item index and its hints.

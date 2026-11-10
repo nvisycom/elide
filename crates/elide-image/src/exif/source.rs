@@ -135,15 +135,15 @@ impl<'a> Source<'a> {
         })
     }
 
-    /// Reduce the metadata to what [`TreatAsContent`] can stand behind: every EXIF tag
-    /// a surfaced field reads or clears, the render tag, the structure, and a
-    /// TIFF's pixel layout. Every other EXIF tag (one no field surfaces, an
-    /// embedded thumbnail, a maker note, a vendor tag) and every block outside
+    /// Reduce the metadata to what [`ScanAsContent`] can stand behind: every EXIF tag
+    /// a field the image surfaces reads or clears, the render tag, the structure,
+    /// and a TIFF's pixel layout. Every other EXIF tag (one no surfaced field
+    /// stands for, an embedded thumbnail, a maker note, a vendor tag) and every block outside
     /// EXIF is removed, since none of it can reach detection. Returns the
     /// resulting container, how many tags and blocks went, and how many
     /// thumbnails.
     ///
-    /// [`TreatAsContent`]: elide_core::redaction::Disposition::TreatAsContent
+    /// [`ScanAsContent`]: elide_core::redaction::Disposition::ScanAsContent
     pub(crate) fn reduce_to_surfaced(&self) -> Result<Scrubbed> {
         let tiff = matches!(self.format, FileExtension::TIFF);
         let (edited, tags, thumbnails) = match self.parse()? {
@@ -189,6 +189,15 @@ impl<'a> Source<'a> {
     /// not keep, each once.
     fn unsurfaced(&self, exif: &ExifMetadata) -> Vec<(u16, ExifTagGroup)> {
         let tiff = matches!(self.format, FileExtension::TIFF);
+        let surfaced: Vec<&str> = FIELD_KEYS
+            .into_iter()
+            .filter(|key| {
+                guard(AssertUnwindSafe(|| render(key, exif)))
+                    .ok()
+                    .flatten()
+                    .is_some()
+            })
+            .collect();
         let mut out: Vec<(u16, ExifTagGroup)> = exif
             .get_ifds()
             .iter()
@@ -196,7 +205,7 @@ impl<'a> Source<'a> {
                 let group = ifd.get_ifd_type();
                 ifd.get_tags().iter().map(move |tag| (tag.as_u16(), group))
             })
-            .filter(|&(hex, group)| !kept_as_content(hex, group, tiff))
+            .filter(|&(hex, group)| !kept_as_content(hex, group, tiff, &surfaced))
             .collect();
         out.sort_unstable_by_key(|&(hex, group)| (hex, group as u8));
         out.dedup();
@@ -215,6 +224,8 @@ impl<'a> Source<'a> {
     /// A field is cleared with its whole logical group (the GPS IFD for a
     /// coordinate, the lens tags for a device), and an overwritten field is
     /// then written back alone; a field that cannot hold text is only cleared.
+    /// A field left out of both goes with its group when another field of the
+    /// group is named: clearing the group is what makes the redaction hold.
     /// A key not present, or not one this crate maps to a tag, is skipped. The
     /// blocks outside EXIF (XMP, IPTC, comments, text chunks) cannot be
     /// addressed as fields, so they are always removed, even when nothing is
@@ -444,6 +455,45 @@ mod tests {
     }
 
     #[test]
+    fn a_group_tag_no_surfaced_field_stands_for_is_stripped() {
+        let rational = || {
+            vec![little_exif::rational::uR64 {
+                nominator: 51,
+                denominator: 1,
+            }]
+        };
+        let orphans = jpeg_with(vec![
+            ExifTag::GPSDestLatitude(rational()),
+            ExifTag::LensModel("Lens".into()),
+            ExifTag::ModifyDate("2024:01:02 03:04:05".into()),
+        ]);
+        let reduced = source(&orphans).reduce_to_surfaced().expect("reduce");
+        let exif = source(&reduced.bytes).parse().expect("parse");
+        let has = |tag: &ExifTag| {
+            exif.as_ref()
+                .is_some_and(|e| e.get_tag(tag).next().is_some())
+        };
+        assert!(!has(&ExifTag::GPSDestLatitude(Vec::new())));
+        assert!(!has(&ExifTag::LensModel(String::new())));
+        assert!(!has(&ExifTag::ModifyDate(String::new())));
+
+        let represented = jpeg_with(vec![
+            ExifTag::GPSLatitude(rational()),
+            ExifTag::GPSDestLatitude(rational()),
+            ExifTag::Make("Nvisy".into()),
+            ExifTag::LensModel("Lens".into()),
+        ]);
+        let reduced = source(&represented).reduce_to_surfaced().expect("reduce");
+        let exif = source(&reduced.bytes).parse().expect("parse");
+        let has = |tag: &ExifTag| {
+            exif.as_ref()
+                .is_some_and(|e| e.get_tag(tag).next().is_some())
+        };
+        assert!(has(&ExifTag::GPSDestLatitude(Vec::new())));
+        assert!(has(&ExifTag::LensModel(String::new())));
+    }
+
+    #[test]
     fn values_surface_identity_time_and_free_text_fields() {
         let bytes = jpeg_with(vec![
             ExifTag::Make("Nvisy".into()),
@@ -650,12 +700,12 @@ mod tests {
         }
     }
 
-    /// Under `TreatAsContent` only what a surfaced field reads or clears stays:
+    /// Under `ScanAsContent` only what a surfaced field reads or clears stays:
     /// a maker note and a tag no field surfaces go, and the output check holds
     /// the reduced image to the same allowlist.
     #[cfg(feature = "codec")]
     #[test]
-    fn treat_as_content_keeps_only_what_a_field_surfaces() {
+    fn scan_as_content_keeps_only_what_a_field_surfaces() {
         let bytes = jpeg_with(vec![
             ExifTag::Artist("Jane Roe".to_owned()),
             ExifTag::MakerNote(b"body serial 1234".to_vec()),
@@ -676,9 +726,9 @@ mod tests {
     }
 
     /// An embedded thumbnail is a preview of the unredacted pixels:
-    /// `TreatAsContent` strips it, counted as a thumbnail rather than as two tags.
+    /// `ScanAsContent` strips it, counted as a thumbnail rather than as two tags.
     #[test]
-    fn treat_as_content_strips_an_embedded_thumbnail() {
+    fn scan_as_content_strips_an_embedded_thumbnail() {
         let preview = b"\xFF\xD8 preview of Jane \xFF\xD9".to_vec();
         let bytes = jpeg_with(vec![
             ExifTag::Artist("Jane Roe".to_owned()),

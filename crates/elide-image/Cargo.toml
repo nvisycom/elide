@@ -47,7 +47,7 @@ exif = ["dep:little_exif", "elide-core/metadata"]
 ## registry assembles. Pulls `exif` (the metadata stream reads and edits EXIF
 ## fields); needs at least one format feature (`png`/`jpeg`/`tiff`) to register
 ## a pixel format.
-codec = ["dep:elide-codec", "dep:async-trait", "exif"]
+codec = ["dep:elide-codec", "dep:async-trait", "exif", "elide-codec/metadata"]
 
 ## Expose `fixtures`: build small in-memory image fixtures (a JPEG carrying a
 ## GPS EXIF tag) and inspect them, so a downstream crate can exercise the EXIF

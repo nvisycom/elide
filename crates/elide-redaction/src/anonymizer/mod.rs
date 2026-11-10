@@ -437,12 +437,15 @@ fn cluster_overlaps<M: Modality>(entities: &[Entity<M>], candidates: &[usize]) -
 #[cfg(test)]
 mod tests {
     use elide_core::entity::LabelRef;
-    use elide_core::entity::audit::{AuditEvent, AuditKind, Manual, ManualIntent, RuleMatch};
+    use elide_core::entity::audit::{
+        AuditEvent, AuditKind, FlaggedEvent, Manual, ManualIntent, RuleMatch,
+    };
     use elide_core::modality::text::{Text, TextDoc};
     use elide_core::primitive::Confidence;
+    use elide_core::redaction::HiddenContentKind;
 
     use super::*;
-    use crate::operators::{Erase, Mask, Replace};
+    use crate::operators::{Erase, Keep, Mask, Replace};
 
     fn entity(label: &str, start: usize, end: usize) -> Entity<Text> {
         Entity::fixture_conf(label, (start, end), Confidence::new(0.9).unwrap())
@@ -755,6 +758,33 @@ mod tests {
         // Each live span erased separately: [0,5) and [10,15) removed, leaving
         // the middle gap [5,10) and the tail [15,16).
         assert_eq!(target.text(), "56789f");
+    }
+
+    /// A flagged item merges like any other: a finding inside a kept comment
+    /// takes the whole comment, over-redacting it rather than leaving it exposed.
+    #[tokio::test]
+    async fn a_finding_inside_a_kept_flagged_entity_takes_all_of_it() {
+        let mut target = TextDoc::new("ask bob by Friday");
+        let mut comment = entity("COMMENT", 0, 17);
+        comment.audit.record(AuditEvent::flagged(
+            "test",
+            comment.confidence,
+            comment.location.clone(),
+            FlaggedEvent {
+                content: HiddenContentKind::Collaboration,
+            },
+        ));
+        let mut entities = vec![comment, entity("NAME", 4, 7)];
+        let anonymizer = Anonymizer::new()
+            .with(Rule::label(LabelRef::new("COMMENT"), Keep))
+            .with(Rule::label(LabelRef::new("NAME"), Replace::new("[NAME]")));
+
+        anonymizer
+            .anonymize(&mut target, &mut entities, &Scope::default())
+            .await
+            .unwrap();
+
+        assert_eq!(target.text(), "[NAME]");
     }
 
     /// A failed write records no redaction events: the audit trail is the

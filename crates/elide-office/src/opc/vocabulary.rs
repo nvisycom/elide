@@ -154,9 +154,21 @@ pub(crate) fn is_known(namespace: &str) -> bool {
 #[derive(Default)]
 pub(crate) struct Vocabulary {
     unknown: RefCell<Option<String>>,
+    /// Whether an element in no namespace is allowed.
+    unqualified: bool,
 }
 
 impl Vocabulary {
+    /// The rules for a legacy VML drawing, which unlike the rest of OOXML has a
+    /// root (`<xml>`) and HTML text markup (`<div>`, `<font>`) in no namespace.
+    /// Its text is read like any other drawing's.
+    pub(crate) fn vml() -> Self {
+        Self {
+            unqualified: true,
+            ..Self::default()
+        }
+    }
+
     /// The first unreviewed namespace met, if any.
     pub(crate) fn unknown(&self) -> Option<String> {
         self.unknown.borrow().clone()
@@ -175,11 +187,12 @@ impl Rules for Vocabulary {
     }
 
     fn element(&self, name: Name<'_>, attributes: &[Attribute<'_>]) -> Action {
-        // Every OOXML element is namespaced; one in no namespace (or under an
-        // undeclared prefix) is in no vocabulary at all.
+        // Every other OOXML element is namespaced; one in no namespace (or under
+        // an undeclared prefix) is in no vocabulary at all.
         match name.namespace {
             Some(namespace) if is_known(namespace) => {}
             Some(namespace) => self.record(namespace),
+            None if self.unqualified => {}
             None => self.record("(no namespace)"),
         }
         // Unqualified attributes are the norm; a qualified one must be known.
@@ -216,6 +229,22 @@ mod tests {
         let vocabulary = Vocabulary::default();
         edit("<w:p><w:r/></w:p>", &vocabulary).unwrap();
         assert_eq!(vocabulary.unknown().as_deref(), Some("(no namespace)"));
+    }
+
+    #[test]
+    fn a_vml_drawing_may_use_no_namespace_but_no_unreviewed_one() {
+        let vocabulary = Vocabulary::vml();
+        let raw = r#"<xml xmlns:v="urn:schemas-microsoft-com:vml"><v:shape><v:textbox><div>x</div></v:textbox></v:shape></xml>"#;
+        edit(raw, &vocabulary).unwrap();
+        assert_eq!(vocabulary.unknown(), None);
+
+        let vocabulary = Vocabulary::vml();
+        edit(
+            r#"<xml xmlns:s="urn:vendor:secret"><s:note/></xml>"#,
+            &vocabulary,
+        )
+        .unwrap();
+        assert_eq!(vocabulary.unknown().as_deref(), Some("urn:vendor:secret"));
     }
 
     #[test]

@@ -88,7 +88,7 @@ impl<'a, V: PartVisitor> Walk<'a, V> {
 
             let mut changed = self
                 .visitor
-                .visit_streams(self.orchestrator, streams)
+                .visit_streams(self.orchestrator, streams, policy)
                 .await?;
 
             // Blobs are nested containers: decode, recurse, fold back. Post-order,

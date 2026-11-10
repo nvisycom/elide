@@ -3,62 +3,55 @@
 //! (analyze, then apply).
 //!
 //! [`ModalityPipeline`] is the concrete typed pipeline (an [`Analyzer`] + an
-//! [`Anonymizer`], plus the schema detection a format carries); [`erased`] boxes it behind [`ErasedPipeline`] so the
+//! [`Anonymizer`]); [`erased`] boxes it behind [`ErasedPipeline`] so the
 //! orchestrator can store one per modality and match a stream part to it
-//! without naming the modality; [`outcome`] holds the result type the erased
-//! analyze method returns; [`metadata`] holds the built-in metadata
-//! pipeline's schema detection.
+//! without naming the modality, and runs [`flagged`] beside the analyzer to
+//! make entities of the hidden content a format labels; [`outcome`] holds the
+//! result type the erased analyze method returns; [`metadata`] holds the
+//! built-in metadata pipeline.
 //!
 //! [`Orchestrator`]: super::Orchestrator
 //! [`ErasedPipeline`]: erased::ErasedPipeline
 
 mod erased;
+mod flagged;
 pub(crate) mod metadata;
 mod outcome;
 
-use elide_codec::TypedStream;
-use elide_core::Result;
-use elide_core::entity::Entity;
 use elide_core::modality::Modality;
-use elide_core::recognition::Scope;
-use elide_core::recognition::annotation::Annotations;
+use elide_core::redaction::Operator;
 use elide_detection::Analyzer;
 use elide_redaction::Anonymizer;
+use elide_redaction::operators::Erase;
 
 pub(crate) use self::erased::ErasedPipeline;
 pub(crate) use self::outcome::BoxFuture;
 
-/// The entities a stream carries by its format's schema, before any
-/// recognizer runs, kept when the scope's catalog declares them and no
-/// exclusion covers them.
-pub(crate) type SchemaFn<M> =
-    fn(&TypedStream<M>, &Scope, &Annotations<M>) -> Result<Vec<Entity<M>>>;
-
 /// The concrete analyze + redact pipeline for one modality `M`: the
 /// [`Analyzer`] and [`Anonymizer`] the erased layer drives against a matched
-/// stream part, plus the detection the format's schema carries.
+/// stream part.
+///
+/// The anonymizer always ends in [`flagged::erase_rule`], so flagged hidden
+/// content no caller rule covers is erased rather than kept.
 pub(crate) struct ModalityPipeline<M: Modality> {
     pub(crate) analyzer: Analyzer<M>,
-    pub(crate) anonymizer: Anonymizer<M>,
-    /// Detection the format's schema carries, run beside the analyzer. Set
-    /// only for the built-in metadata pipeline; the orchestrator's builders
-    /// replace the analyzer and anonymizer and never touch it.
-    pub(crate) schema: Option<SchemaFn<M>>,
+    anonymizer: Anonymizer<M>,
 }
 
-impl<M: Modality> ModalityPipeline<M> {
+impl<M: Modality> ModalityPipeline<M>
+where
+    Erase: Operator<M>,
+{
     /// Pair an analyzer and anonymizer into a pipeline for modality `M`.
     pub(crate) fn new(analyzer: Analyzer<M>, anonymizer: Anonymizer<M>) -> Self {
         Self {
             analyzer,
-            anonymizer,
-            schema: None,
+            anonymizer: anonymizer.with(flagged::erase_rule()),
         }
     }
 
-    /// This pipeline with `schema` detecting beside its analyzer.
-    pub(crate) fn with_schema(mut self, schema: SchemaFn<M>) -> Self {
-        self.schema = Some(schema);
-        self
+    /// Replace the anonymizer, keeping the flagged-content rule last.
+    pub(crate) fn set_anonymizer(&mut self, anonymizer: Anonymizer<M>) {
+        self.anonymizer = anonymizer.with(flagged::erase_rule());
     }
 }

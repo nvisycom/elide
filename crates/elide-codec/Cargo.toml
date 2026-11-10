@@ -35,6 +35,10 @@ serde = ["elide-core/serde"]
 ## Forward `schemars::JsonSchema` derives to `elide-core`.
 schema = ["elide-core/schema"]
 
+## The `Metadata` modality, forwarded to `elide-core`: a stream of metadata
+## fields flags each one with `FlaggedItem::field`.
+metadata = ["elide-core/metadata"]
+
 ## Compile the `extract` module: the shared text-extract-and-splice engine
 ## (`Encoder`, `ExtractHandler`) that maps a decoded value back to raw source
 ## offsets. Enabled by a crate that drives a structured text format on it

@@ -11,11 +11,12 @@ use crate::modality::text::TextReplacement;
 /// A field is atomic, so the natural treatment is [`Removed`], dropping it
 /// entirely. [`Replace`] overwrites the value in place, for a producer that
 /// would rather substitute a field (a blanked author, a redacted-marker date)
-/// than drop it. Non-exhaustive: a hashing or generalizing treatment can be
-/// added without breaking callers.
+/// than drop it. [`Unchanged`] leaves the field as it is. Non-exhaustive: a
+/// hashing or generalizing treatment can be added without breaking callers.
 ///
 /// [`Removed`]: MetadataReplacement::Removed
 /// [`Replace`]: MetadataReplacement::Replace
+/// [`Unchanged`]: MetadataReplacement::Unchanged
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
@@ -26,6 +27,8 @@ pub enum MetadataReplacement {
     Removed,
     /// Overwrite the field's value with the given text.
     Replace(String),
+    /// Leave the field as it is.
+    Unchanged,
 }
 
 impl From<TextReplacement> for MetadataReplacement {

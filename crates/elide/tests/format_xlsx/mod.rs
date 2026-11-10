@@ -14,6 +14,7 @@
 mod codec;
 mod comments;
 mod docprops;
+mod legacy_notes;
 mod redaction;
 
 use crate::support::fixture::Fixture;
