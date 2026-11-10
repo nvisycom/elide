@@ -188,8 +188,8 @@ distinct kinds of state, separated by who owns them.
 
 The per-call scope holds what the _caller_ asserts about an entire analysis and
 is shared, immutable, across every payload of it: the languages and
-jurisdictions to honor, document-level classification labels, caller-supplied
-include and exclude regions, and a correlation id for tracing. It is built once
+jurisdictions to honor, document-level classification labels, the catalog of
+entity types to find, and a correlation id for tracing. It is built once
 and passed by reference into the find engine.
 
 The per-payload context is the working view a recognizer actually sees. It
@@ -304,8 +304,8 @@ comparisons commensurable. Merging same-label findings before arbitrating
 cross-label overlaps keeps concurring same-label evidence from being mistaken
 for a conflict. Filtering last means a low-confidence finding never displaces a
 high-confidence one on its way out. The pipeline is deterministic given the same
-inputs. After the stages run, the caller's exclude regions are applied as the
-final cull.
+inputs. What reaches redaction after it is the caller's to correct, on the
+report (section 7).
 
 ## 9. The Reconciled Entity Set
 

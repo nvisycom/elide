@@ -82,5 +82,4 @@ They are conceptual definitions, not references to any particular interface.
   where the original redaction was declared reversible and the reverser holds
   the requisite authority.
 - **Scope**: the per-call set of controls the caller asserts: languages,
-  jurisdictions, document labels, and the include and exclude regions that steer
-  recognition.
+  jurisdictions, document labels, and the catalog of entity types to find.
