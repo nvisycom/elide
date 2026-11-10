@@ -46,7 +46,7 @@ impl TextRecognizable for Tabular {
     ) -> Option<TabularLocation> {
         // Chunk-local: only the intra-cell byte range is known here; the
         // codec's lift fills the row/column from the chunk.
-        Some(TabularLocation::new(0, 0).with_range(range.start, range.end))
+        Some(TabularLocation::new(0, 0).with_span(range))
     }
 
     fn as_tokens(artifact: Option<&Tokens>) -> Option<&[Token]> {

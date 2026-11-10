@@ -75,6 +75,30 @@ and this project adheres to
   `Replace` and `Mask` overwrite a field that holds text. An image's EXIF and
   an office document's properties are metadata streams of their document,
   not sub-parts decoded through a format of their own
+- `Metadata` is `TextRecognizable`: a metadata analyzer's recognizers read
+  each field's value, and a `MetadataLocation` narrowed to a byte range of the
+  value (`with_span`) is spliced into the field when written back, so a
+  finding inside a free-text field is redacted and the rest of the field
+  kept, and a field left blank is removed. `MetadataReplacement` is a text
+  treatment of the value (`Value(TextReplacement)`) or `Unchanged`, and every
+  text operator a tabular cell takes treats a field's value too. An
+  office document now surfaces its keywords, category, template path,
+  hyperlink base, each entry of `TitlesOfParts` and `HeadingPairs`, and its
+  custom properties
+  (`docProps/custom.xml`) as free-text fields instead of stripping them.
+  `ImageBuffer::edit_metadata` takes each field's new value, and a metadata
+  stream keeps its fields in `elide_codec::metadata::MetadataFields`, which
+  reads, redacts, and reports them. A docProps key is unique in its part: a
+  repeated element is keyed `name#2`, the part lists `TitlesOfParts/<n>` and
+  `HeadingPairs/<n>`, and a custom property by its position, `property/<n>`,
+  with its name a field of its own (`property/<n>/name`) that is scanned and
+  rewritten like its value
+- Under `ScanAsContent` an image keeps only the EXIF tags a surfaced field is
+  read from: the members of a field's group no field reads (the lens tags,
+  destination coordinates, altitude, modify dates, time offsets) are stripped
+  at decode instead of following the field's decision unscanned. A capture
+  time is read from `DateTimeOriginal` alone, so `CreateDate` is stripped
+  like `ModifyDate` instead of standing in for a missing capture time
 - Hidden-content dispositions are `KeepOnlyEssential` (the default),
   `ScanAsContent`, and `FlagEverything`, which also makes every item a format
   labels an entity whatever the catalog declares: each metadata field, and
@@ -119,6 +143,9 @@ and this project adheres to
   are unchanged
 - The recognizer decorators share one module per decorator under
   `elide::recognition::decorator`: `resilient`, `chunked`, and `escalation`
+- `TabularLocation` narrows to part of a cell with one `span:
+  Option<Range<usize>>` (`with_span`), like `TextLocation`, replacing
+  `start_offset`/`end_offset` and `with_range`
 
 ### Crates
 

@@ -16,6 +16,7 @@ use quick_xml::escape::unescape;
 use quick_xml::events::Event;
 
 use crate::opc::part::PartPath;
+use crate::opc::xml_edit::bom_len;
 
 /// The relationship type of an external hyperlink, the one external target that
 /// is visible content (a link a reader follows) rather than a hidden reference.
@@ -95,14 +96,15 @@ pub(crate) fn parse(xml: &str) -> Result<Vec<Relationship>> {
 /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if the part is not well-formed.
 pub(crate) fn without(xml: &str, removed: &HashSet<String>) -> Result<String> {
     let mut reader = Reader::from_str(xml);
+    let bom = bom_len(xml);
     let mut out = String::with_capacity(xml.len());
     let mut cursor = 0;
-    let mut last = 0;
+    let mut last = bom;
     loop {
         let event = reader
             .read_event()
             .map_err(|e| Error::malformed(format!("relationships part malformed: {e}")))?;
-        let span = last..reader.buffer_position() as usize;
+        let span = last..reader.buffer_position() as usize + bom;
         last = span.end;
         let element = match event {
             Event::Eof => break,
@@ -202,6 +204,18 @@ mod tests {
         let out = without(RELS, &removed).unwrap();
         assert!(!out.contains("jsmith"));
         assert!(out.contains(r#"Id="rId1""#) && out.contains(r#"Id="rId3""#));
+    }
+
+    #[test]
+    fn a_removal_after_a_byte_order_mark_cuts_only_its_relationship() {
+        let removed_rel =
+            r#"<Relationship Id="rId2" Type="t/custom" Target="docProps/custom.xml"/>"#;
+        let rels = format!(
+            "\u{feff}<?xml version=\"1.0\"?><Relationships><Relationship Id=\"rId1\" Type=\"t/core\" Target=\"docProps/core.xml\" />{removed_rel}</Relationships>"
+        );
+        let removed: HashSet<String> = ["rId2".to_owned()].into_iter().collect();
+        let out = without(&rels, &removed).unwrap();
+        assert_eq!(out, rels.replace(removed_rel, ""));
     }
 
     #[test]

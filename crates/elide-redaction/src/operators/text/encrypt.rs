@@ -8,6 +8,8 @@ use aes_gcm::{Aes256Gcm, Key, KeyInit};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use elide_core::entity::{Entity, LabelRef};
+#[cfg(feature = "metadata")]
+use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement};
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
@@ -212,6 +214,26 @@ impl ReversibleOperator<Tabular> for AesEncrypt {
             TabularReplacement::Cell(cell) => self.decrypt_replacement(&entity.label, cell),
             _ => Ok(None),
         }
+    }
+}
+
+#[cfg(feature = "metadata")]
+#[async_trait::async_trait]
+impl Operator<Metadata> for AesEncrypt {
+    fn id(&self) -> OperatorId {
+        Self::id()
+    }
+
+    fn leak_profile(&self) -> LeakProfile {
+        LeakProfile::Recoverable
+    }
+
+    async fn anonymize(
+        &self,
+        entity: &Entity<Metadata>,
+        data: &MetadataData,
+    ) -> Result<MetadataReplacement> {
+        Ok(TextReplacement::substituted(self.encrypt_str(&entity.label, data.value())?).into())
     }
 }
 

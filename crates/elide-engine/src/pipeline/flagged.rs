@@ -42,8 +42,9 @@ where
 /// Under [`FlagEverything`](Disposition::FlagEverything) every item is
 /// selected. Under [`ScanAsContent`](Disposition::ScanAsContent) an item of a
 /// metadata stream is selected when the scope's catalog declares its label,
-/// since no recognizer reads a metadata field and its label is its detection;
-/// an item of a text stream is not, since recognizers scan it like body text.
+/// since its label is what the field is, whatever a recognizer finds in its
+/// value; an item of a text stream is not, since recognizers scan it like body
+/// text.
 ///
 /// An exclusion inside an item does not spare it: the item is one entity, and
 /// the rest of it has no other detection to fall back on.

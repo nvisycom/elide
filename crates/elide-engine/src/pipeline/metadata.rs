@@ -4,7 +4,9 @@
 //! A metadata field is detected by its format's label: the codec labels each
 //! field it surfaces, and the field is flagged as an entity as the document's
 //! hidden-content policy says. Nothing is registered for this; a caller's
-//! [`Analyzer<Metadata>`] adds entities on top of the fields, and a caller's
+//! [`Analyzer<Metadata>`] adds entities on top of the fields (its text
+//! recognizers read each field's value, and what they find is a part of the
+//! value), and a caller's
 //! [`Anonymizer<Metadata>`] decides how the selected fields are treated; a
 //! field its rules do not cover is erased. The default anonymizer erases every
 //! entity, flagged or detected.

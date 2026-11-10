@@ -25,7 +25,7 @@ use quick_xml::events::Event;
 
 use super::SheetClassifier;
 use crate::opc::sanitize::{Edits, Sanitizer};
-use crate::opc::xml_edit::{Declared, Edit, Edited, Local, bound};
+use crate::opc::xml_edit::{Declared, Edit, Edited, Local, bom_len, bound};
 use crate::opc::{Collaboration, Ns, PartKind, StripAttributes, TextAttribute};
 
 /// The SpreadsheetML main namespace.
@@ -144,7 +144,7 @@ impl Edit for CommentNoteText {
 /// one's text box. The count is of the notes changed.
 fn cut_notes(raw: &str, whole: bool) -> Result<Option<Edited>> {
     let mut reader = NsReader::from_str(raw);
-    let bom = if raw.starts_with('\u{feff}') { 3 } else { 0 };
+    let bom = bom_len(raw);
     let mut last = bom;
     let mut shapes: Vec<OpenShape> = Vec::new();
     // What each open element is.

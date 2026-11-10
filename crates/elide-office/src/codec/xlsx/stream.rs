@@ -63,19 +63,18 @@ impl Stream<Tabular> for XlsxStream {
     }
 
     fn lift(&self, chunk: &Chunk<Tabular>, local: TabularLocation) -> Option<TabularLocation> {
-        // `local` carries the chunk-local intra-cell range in its offsets; its
-        // row/column/sheet are placeholders. Re-anchor onto the chunk's cell. A
+        // `local` carries the chunk-local intra-cell span; its row/column/sheet
+        // are placeholders. Re-anchor onto the chunk's cell. A
         // chunk always names its own sheet, so the lookup is unambiguous; treat
         // an ambiguous or missing match as no source pre-image.
         let cell = self.state.cell_at(&chunk.location).ok().flatten()?;
-        let start = local.start_offset.unwrap_or(0);
-        let end = local.end_offset.unwrap_or(cell.len());
-        if start > end || end > cell.len() {
+        let span = local.span.unwrap_or(0..cell.len());
+        if span.start > span.end || span.end > cell.len() {
             return None;
         }
         let mut location =
             TabularLocation::new(chunk.location.row_index, chunk.location.column_index)
-                .with_range(start, end);
+                .with_span(span);
         if let Some(sheet) = &chunk.location.sheet_name {
             location = location.with_sheet_name(sheet.clone());
         }
@@ -92,15 +91,10 @@ impl DataReader<Tabular> for XlsxStream {
         let Some(cell) = self.state.cell_at(location)? else {
             return Ok(None);
         };
-        match (location.start_offset, location.end_offset) {
-            // A sub-cell range: an unset end means the rest of the cell, matching
-            // how a write treats a missing end, so read and write agree.
-            (Some(start), end) => {
-                let end = end.unwrap_or(cell.len());
-                Ok(cell.get(start..end).map(TextData::new))
-            }
-            // No start: the whole cell.
-            (None, _) => Ok(Some(TextData::new(cell))),
+        // An intra-cell span slices the cell; no span reads the whole cell.
+        match &location.span {
+            Some(span) => Ok(cell.get(span.clone()).map(TextData::new)),
+            None => Ok(Some(TextData::new(cell))),
         }
     }
 }

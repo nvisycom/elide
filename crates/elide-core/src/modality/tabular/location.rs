@@ -1,6 +1,7 @@
 //! [`TabularLocation`]: a cell-addressed location within tabular content.
 
 use std::cmp::Ordering;
+use std::ops::Range;
 
 use hipstr::HipStr;
 #[cfg(feature = "serde")]
@@ -33,20 +34,13 @@ pub struct TabularLocation {
     pub row_index: u32,
     /// Zero-based column index of the cell.
     pub column_index: u32,
-    /// Byte offset within the cell text where the entity starts. Unset
-    /// means the whole cell.
+    /// The byte range of the cell text the entity spans. Unset means the
+    /// whole cell.
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "Option::is_none")
     )]
-    pub start_offset: Option<usize>,
-    /// Byte offset within the cell text where the entity ends (exclusive).
-    /// Unset means the whole cell.
-    #[cfg_attr(
-        feature = "serde",
-        serde(default, skip_serializing_if = "Option::is_none")
-    )]
-    pub end_offset: Option<usize>,
+    pub span: Option<Range<usize>>,
     /// Header label of the column, when known.
     #[cfg_attr(
         feature = "serde",
@@ -70,19 +64,17 @@ impl TabularLocation {
         Self {
             row_index,
             column_index,
-            start_offset: None,
-            end_offset: None,
+            span: None,
             column_name: None,
             sheet_name: None,
         }
     }
 
-    /// Narrow the location to the byte range `start..end` within the cell
-    /// text, for an entity that spans only part of the cell.
+    /// Narrow the location to the byte range `span` of the cell text, for an
+    /// entity that spans only part of the cell.
     #[must_use]
-    pub fn with_range(mut self, start: usize, end: usize) -> Self {
-        self.start_offset = Some(start);
-        self.end_offset = Some(end);
+    pub fn with_span(mut self, span: Range<usize>) -> Self {
+        self.span = Some(span);
         self
     }
 
@@ -106,15 +98,6 @@ impl TabularLocation {
             && self.row_index == other.row_index
             && self.column_index == other.column_index
     }
-
-    /// Intra-cell byte length when a range is set, else `None` for a
-    /// whole-cell location.
-    fn range_len(&self) -> Option<usize> {
-        match (self.start_offset, self.end_offset) {
-            (Some(start), Some(end)) => Some(end.saturating_sub(start)),
-            _ => None,
-        }
-    }
 }
 
 impl ModalityLocation for TabularLocation {
@@ -123,36 +106,31 @@ impl ModalityLocation for TabularLocation {
         if !self.same_cell(other) {
             return Overlap::Disjoint;
         }
-        // A missing offset means "the whole cell". Two sub-cell ranges
-        // compare by their bytes; anything involving a whole cell is handled
-        // by the containment rules below.
-        match (
-            self.start_offset,
-            self.end_offset,
-            other.start_offset,
-            other.end_offset,
-        ) {
-            (Some(a_start), Some(a_end), Some(b_start), Some(b_end)) => {
-                if a_start >= b_end || b_start >= a_end {
+        // A missing span means "the whole cell". Two sub-cell spans compare
+        // by their bytes; anything involving a whole cell is handled by the
+        // containment rules below.
+        match (&self.span, &other.span) {
+            (Some(a), Some(b)) => {
+                if a.start >= b.end || b.start >= a.end {
                     return Overlap::Disjoint;
                 }
-                if a_start <= b_start && b_end <= a_end {
+                if a.start <= b.start && b.end <= a.end {
                     return Overlap::Contains;
                 }
-                if b_start <= a_start && a_end <= b_end {
+                if b.start <= a.start && a.end <= b.end {
                     return Overlap::ContainedBy;
                 }
-                let inter = a_end.min(b_end) - a_start.max(b_start);
-                let union = a_end.max(b_end) - a_start.min(b_start);
+                let inter = a.end.min(b.end) - a.start.max(b.start);
+                let union = a.end.max(b.end) - a.start.min(b.start);
                 Overlap::Crossing {
                     iou: inter as f32 / union as f32,
                 }
             }
             // `self` is the whole cell: it contains the other (a sub-range,
             // or, reflexively, another whole cell).
-            (None, _, _, _) | (_, None, _, _) => Overlap::Contains,
+            (None, _) => Overlap::Contains,
             // `self` is a sub-range and `other` is the whole cell.
-            _ => Overlap::ContainedBy,
+            (Some(_), None) => Overlap::ContainedBy,
         }
     }
 
@@ -161,22 +139,11 @@ impl ModalityLocation for TabularLocation {
         if !self.same_cell(other) {
             return None;
         }
-        // Union the intra-cell ranges; a whole-cell side (unset offsets)
-        // absorbs the other, so the union is the whole cell.
-        let range = match (
-            self.start_offset,
-            self.end_offset,
-            other.start_offset,
-            other.end_offset,
-        ) {
-            (Some(a_start), Some(a_end), Some(b_start), Some(b_end)) => {
-                Some((a_start.min(b_start), a_end.max(b_end)))
-            }
-            _ => None,
-        };
+        // Union the intra-cell spans; a whole-cell side (no span) absorbs the
+        // other, so the union is the whole cell.
         let mut location = Self::new(self.row_index, self.column_index);
-        if let Some((start, end)) = range {
-            location = location.with_range(start, end);
+        if let (Some(a), Some(b)) = (&self.span, &other.span) {
+            location = location.with_span(a.start.min(b.start)..a.end.max(b.end));
         }
         // Carry the cell's descriptive labels from `self`.
         if let Some(name) = &self.column_name {
@@ -191,7 +158,10 @@ impl ModalityLocation for TabularLocation {
     fn span_cmp(&self, other: &Self) -> Ordering {
         // By intra-cell extent: a whole-cell location is the most specific
         // (largest) and sorts above any sub-cell range.
-        match (self.range_len(), other.range_len()) {
+        match (
+            self.span.as_ref().map(Range::len),
+            other.span.as_ref().map(Range::len),
+        ) {
             (Some(a), Some(b)) => a.cmp(&b),
             (None, None) => Ordering::Equal,
             (None, Some(_)) => Ordering::Greater,
@@ -200,30 +170,23 @@ impl ModalityLocation for TabularLocation {
     }
 
     fn position_cmp(&self, other: &Self) -> Ordering {
-        // Reading order: sheet, then row, then column, then intra-cell
-        // offset. An unnamed sheet and an unset offset sort first.
+        // Reading order: sheet, then row, then column, then intra-cell span.
+        // An unnamed sheet and the whole cell sort first.
+        let span = |location: &Self| location.span.as_ref().map(|span| (span.start, span.end));
         self.sheet_name
             .cmp(&other.sheet_name)
             .then(self.row_index.cmp(&other.row_index))
             .then(self.column_index.cmp(&other.column_index))
-            .then(
-                self.start_offset
-                    .unwrap_or(0)
-                    .cmp(&other.start_offset.unwrap_or(0)),
-            )
-            .then(
-                self.end_offset
-                    .unwrap_or(0)
-                    .cmp(&other.end_offset.unwrap_or(0)),
-            )
+            .then(span(self).cmp(&span(other)))
     }
 
     fn hash(&self) -> Vec<u8> {
-        fn offset(bytes: &mut Vec<u8>, o: Option<usize>) {
-            match o {
-                Some(value) => {
+        fn span(bytes: &mut Vec<u8>, span: &Option<Range<usize>>) {
+            match span {
+                Some(span) => {
                     bytes.push(1);
-                    bytes.extend_from_slice(&(value as u64).to_le_bytes());
+                    bytes.extend_from_slice(&(span.start as u64).to_le_bytes());
+                    bytes.extend_from_slice(&(span.end as u64).to_le_bytes());
                 }
                 None => bytes.push(0),
             }
@@ -245,8 +208,7 @@ impl ModalityLocation for TabularLocation {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&self.row_index.to_le_bytes());
         bytes.extend_from_slice(&self.column_index.to_le_bytes());
-        offset(&mut bytes, self.start_offset);
-        offset(&mut bytes, self.end_offset);
+        span(&mut bytes, &self.span);
         name(&mut bytes, &self.column_name);
         name(&mut bytes, &self.sheet_name);
         bytes
@@ -272,11 +234,11 @@ mod tests {
 
     #[test]
     fn overlaps_intersects_byte_ranges_within_a_cell() {
-        let a = TabularLocation::new(2, 3).with_range(0, 5);
-        let b = TabularLocation::new(2, 3).with_range(4, 9);
+        let a = TabularLocation::new(2, 3).with_span(0..5);
+        let b = TabularLocation::new(2, 3).with_span(4..9);
         assert!(a.overlaps(&b));
         // Touching but disjoint ranges do not overlap.
-        let c = TabularLocation::new(2, 3).with_range(5, 9);
+        let c = TabularLocation::new(2, 3).with_span(5..9);
         assert!(!a.overlaps(&c));
         // A whole-cell location overlaps any sub-cell range.
         let whole = TabularLocation::new(2, 3);
@@ -286,10 +248,10 @@ mod tests {
     #[test]
     fn span_cmp_prefers_whole_cell_then_longer_range() {
         let whole = TabularLocation::new(0, 0);
-        let part = TabularLocation::new(0, 0).with_range(0, 4);
+        let part = TabularLocation::new(0, 0).with_span(0..4);
         assert_eq!(whole.span_cmp(&part), Ordering::Greater);
-        let short = TabularLocation::new(0, 0).with_range(0, 2);
-        let long = TabularLocation::new(0, 0).with_range(0, 8);
+        let short = TabularLocation::new(0, 0).with_span(0..2);
+        let long = TabularLocation::new(0, 0).with_span(0..8);
         assert_eq!(short.span_cmp(&long), Ordering::Less);
     }
 
@@ -300,27 +262,27 @@ mod tests {
         // Earlier row sorts first regardless of column.
         assert_eq!(r0c5.position_cmp(&r1c0), Ordering::Less);
         // Same cell: earlier offset first.
-        let a = TabularLocation::new(0, 0).with_range(0, 3);
-        let b = TabularLocation::new(0, 0).with_range(4, 7);
+        let a = TabularLocation::new(0, 0).with_span(0..3);
+        let b = TabularLocation::new(0, 0).with_span(4..7);
         assert_eq!(a.position_cmp(&b), Ordering::Less);
     }
 
     #[test]
     fn union_within_a_cell_bounds_the_ranges() {
-        let a = TabularLocation::new(2, 3).with_range(0, 5);
-        let b = TabularLocation::new(2, 3).with_range(4, 9);
+        let a = TabularLocation::new(2, 3).with_span(0..5);
+        let b = TabularLocation::new(2, 3).with_span(4..9);
         let u = a.union(&b).expect("same cell");
-        assert_eq!((u.start_offset, u.end_offset), (Some(0), Some(9)));
+        assert_eq!(u.span, Some(0..9));
         // A whole-cell side absorbs the other into the whole cell.
         let whole = TabularLocation::new(2, 3);
         let u2 = whole.union(&a).expect("same cell");
-        assert_eq!((u2.start_offset, u2.end_offset), (None, None));
+        assert_eq!(u2.span, None);
     }
 
     #[test]
     fn union_across_cells_is_none() {
-        let a = TabularLocation::new(0, 0).with_range(0, 5);
-        let b = TabularLocation::new(0, 1).with_range(0, 5);
+        let a = TabularLocation::new(0, 0).with_span(0..5);
+        let b = TabularLocation::new(0, 1).with_span(0..5);
         // A single redactable span can't cross two cells.
         assert_eq!(a.union(&b), None);
     }

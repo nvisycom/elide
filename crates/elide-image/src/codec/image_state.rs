@@ -46,10 +46,10 @@ impl ImageState {
         self.0.lock().unwrap().metadata_fields()
     }
 
-    /// Remove the EXIF fields named by `removed` and overwrite those named by
-    /// `replaced`, in place.
-    pub(super) fn edit_metadata(&self, removed: &[&str], replaced: &[(&str, &str)]) -> Result<()> {
-        self.0.lock().unwrap().edit_metadata(removed, replaced)
+    /// Write each EXIF field's new value in place, a blank value removing the
+    /// field.
+    pub(super) fn edit_metadata(&self, fields: &[(&str, &str)]) -> Result<()> {
+        self.0.lock().unwrap().edit_metadata(fields)
     }
 
     /// The whole decoded frame as an [`ImageData`]: the decoded pixels plus the

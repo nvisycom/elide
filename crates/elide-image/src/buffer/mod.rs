@@ -162,20 +162,20 @@ impl ImageBuffer {
         self.source.clone()
     }
 
-    /// Edit the source's EXIF fields in place: remove those named by `removed`
-    /// and overwrite those named by `replaced` with their new text, each with
-    /// its whole logical group cleared first (the GPS IFD for a coordinate,
-    /// the lens tags for a device). A field that cannot hold text, such as a
-    /// coordinate or a timestamp, is removed instead of overwritten. Every
-    /// metadata block outside EXIF is removed too. The pixels are untouched;
-    /// a later [`encode`](Self::encode) carries the edited metadata.
+    /// Write each EXIF field's new value in place, a blank value removing the
+    /// field, each with its whole logical group cleared first (the GPS IFD for
+    /// a coordinate, the lens tags for a device). A field that cannot hold
+    /// text, such as a coordinate or a timestamp, is removed instead of
+    /// overwritten. Every metadata block outside EXIF is removed too. The
+    /// pixels are untouched; a later [`encode`](Self::encode) carries the
+    /// edited metadata.
     ///
     /// # Errors
     ///
     /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) if a metadata edit fails.
     #[cfg(feature = "exif")]
-    pub fn edit_metadata(&mut self, removed: &[&str], replaced: &[(&str, &str)]) -> Result<()> {
-        let edited = self.exif_source().edit(removed, replaced)?;
+    pub fn edit_metadata(&mut self, fields: &[(&str, &str)]) -> Result<()> {
+        let edited = self.exif_source().edit(fields)?;
         self.source = Bytes::from(edited.bytes);
         Ok(())
     }

@@ -212,31 +212,29 @@ impl<'a> Source<'a> {
         out
     }
 
-    /// Remove the fields named by `removed` (each an EXIF tag key such as
-    /// `"GPSLatitude"`) and overwrite those named by `replaced` with their new
-    /// text, leaving all other EXIF fields intact, then scrub every metadata
-    /// block outside EXIF, returning the resulting container and how many
-    /// blocks outside EXIF were removed.
+    /// Write each field's new value (keyed by an EXIF field key such as
+    /// `"GPSLatitude"`), a blank value removing the field, leaving all other
+    /// EXIF fields intact, then scrub every metadata block outside EXIF,
+    /// returning the resulting container and how many blocks outside EXIF were
+    /// removed.
     ///
     /// Unlike [`strip`](Self::strip), which drops everything but the render
     /// tags, this edits only the caller's chosen keys, so a per-field
     /// redaction decision (from picked entities) maps straight to the byte edit.
     /// A field is cleared with its whole logical group (the GPS IFD for a
-    /// coordinate, the lens tags for a device), and an overwritten field is
-    /// then written back alone; a field that cannot hold text is only cleared.
-    /// A field left out of both goes with its group when another field of the
-    /// group is named: clearing the group is what makes the redaction hold.
-    /// A key not present, or not one this crate maps to a tag, is skipped. The
-    /// blocks outside EXIF (XMP, IPTC, comments, text chunks) cannot be
-    /// addressed as fields, so they are always removed, even when nothing is
-    /// edited.
-    pub(crate) fn edit(&self, removed: &[&str], replaced: &[(&str, &str)]) -> Result<Scrubbed> {
-        let cleared: Vec<ExifTag> = removed
+    /// coordinate, the lens tags for a device), and a new value is then written
+    /// back alone; a field that cannot hold text is only cleared. A field not
+    /// edited goes with its group when another field of the group is: clearing
+    /// the group is what makes the redaction hold. A key not present, or not one
+    /// this crate maps to a tag, is skipped. The blocks outside EXIF (XMP, IPTC,
+    /// comments, text chunks) cannot be addressed as fields, so they are always
+    /// removed, even when nothing is edited.
+    pub(crate) fn edit(&self, fields: &[(&str, &str)]) -> Result<Scrubbed> {
+        let cleared: Vec<ExifTag> = fields
             .iter()
-            .chain(replaced.iter().map(|(key, _)| key))
-            .flat_map(|key| tags_for_key(key))
+            .flat_map(|(key, _)| tags_for_key(key))
             .collect();
-        let written: Vec<ExifTag> = replaced
+        let written: Vec<ExifTag> = fields
             .iter()
             .filter_map(|(key, value)| written_tag(key, value))
             .collect();
@@ -455,42 +453,39 @@ mod tests {
     }
 
     #[test]
-    fn a_group_tag_no_surfaced_field_stands_for_is_stripped() {
+    fn a_tag_no_surfaced_field_reads_is_stripped() {
         let rational = || {
             vec![little_exif::rational::uR64 {
                 nominator: 51,
                 denominator: 1,
             }]
         };
-        let orphans = jpeg_with(vec![
-            ExifTag::GPSDestLatitude(rational()),
-            ExifTag::LensModel("Lens".into()),
-            ExifTag::ModifyDate("2024:01:02 03:04:05".into()),
-        ]);
-        let reduced = source(&orphans).reduce_to_surfaced().expect("reduce");
-        let exif = source(&reduced.bytes).parse().expect("parse");
-        let has = |tag: &ExifTag| {
-            exif.as_ref()
-                .is_some_and(|e| e.get_tag(tag).next().is_some())
-        };
-        assert!(!has(&ExifTag::GPSDestLatitude(Vec::new())));
-        assert!(!has(&ExifTag::LensModel(String::new())));
-        assert!(!has(&ExifTag::ModifyDate(String::new())));
-
-        let represented = jpeg_with(vec![
+        let bytes = jpeg_with(vec![
             ExifTag::GPSLatitude(rational()),
+            ExifTag::GPSLatitudeRef("N".into()),
             ExifTag::GPSDestLatitude(rational()),
             ExifTag::Make("Nvisy".into()),
-            ExifTag::LensModel("Lens".into()),
+            ExifTag::LensSerialNumber("LS-7".into()),
+            ExifTag::DateTimeOriginal("2024:01:02 03:04:05".into()),
+            ExifTag::CreateDate("2024:01:02 03:04:05".into()),
+            ExifTag::ModifyDate("2024:01:02 03:04:05".into()),
         ]);
-        let reduced = source(&represented).reduce_to_surfaced().expect("reduce");
+        let reduced = source(&bytes).reduce_to_surfaced().expect("reduce");
         let exif = source(&reduced.bytes).parse().expect("parse");
         let has = |tag: &ExifTag| {
             exif.as_ref()
                 .is_some_and(|e| e.get_tag(tag).next().is_some())
         };
-        assert!(has(&ExifTag::GPSDestLatitude(Vec::new())));
-        assert!(has(&ExifTag::LensModel(String::new())));
+        // What a surfaced field reads stays, its hemisphere included.
+        assert!(has(&ExifTag::GPSLatitude(Vec::new())));
+        assert!(has(&ExifTag::GPSLatitudeRef(String::new())));
+        assert!(has(&ExifTag::Make(String::new())));
+        assert!(has(&ExifTag::DateTimeOriginal(String::new())));
+        // The rest of each group is never read, so it goes.
+        assert!(!has(&ExifTag::GPSDestLatitude(Vec::new())));
+        assert!(!has(&ExifTag::LensSerialNumber(String::new())));
+        assert!(!has(&ExifTag::CreateDate(String::new())));
+        assert!(!has(&ExifTag::ModifyDate(String::new())));
     }
 
     #[test]
@@ -515,15 +510,6 @@ mod tests {
         assert!(value("DateTimeOriginal").contains("2024"));
         assert!(value("Artist").contains("Jane Roe"));
         assert!(value("ImageDescription").contains("clinic"));
-    }
-
-    #[test]
-    fn a_capture_time_falls_back_to_the_create_date() {
-        let bytes = jpeg_with(vec![ExifTag::CreateDate("2023:05:06 07:08:09".into())]);
-        let values = source(&bytes).values().expect("read");
-        assert_eq!(values.len(), 1);
-        assert_eq!(values[0].0, "DateTimeOriginal");
-        assert!(values[0].1.contains("2023"));
     }
 
     #[test]
@@ -594,7 +580,7 @@ mod tests {
             ExifTag::Artist("Jane Roe".into()),
             ExifTag::Make("Nvisy".into()),
         ]);
-        let stripped = source(&bytes).edit(&["Artist"], &[]).expect("strip").bytes;
+        let stripped = source(&bytes).edit(&[("Artist", "")]).expect("strip").bytes;
         assert_eq!(keys(&stripped), ["Make"]);
     }
 
@@ -605,7 +591,7 @@ mod tests {
             ExifTag::Make("Nvisy".into()),
         ]);
         let edited = source(&bytes)
-            .edit(&[], &[("Artist", "[REDACTED]")])
+            .edit(&[("Artist", "[REDACTED]")])
             .expect("edit")
             .bytes;
         let values = source(&edited).values().expect("values");
@@ -626,7 +612,7 @@ mod tests {
             ExifTag::GPSLatitudeRef("N".into()),
         ]);
         let edited = source(&bytes)
-            .edit(&[], &[("GPSLatitude", "[REDACTED]")])
+            .edit(&[("GPSLatitude", "[REDACTED]")])
             .expect("edit")
             .bytes;
         assert!(keys(&edited).is_empty());
@@ -655,7 +641,7 @@ mod tests {
         ]);
         // The picked key is the one the entity surfaces.
         let stripped = source(&bytes)
-            .edit(&["GPSLatitude"], &[])
+            .edit(&[("GPSLatitude", "")])
             .expect("strip")
             .bytes;
 

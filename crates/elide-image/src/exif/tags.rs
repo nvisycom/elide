@@ -82,17 +82,20 @@ pub(super) const FIELD_KEYS: [&str; 13] = [
     "ImageUniqueID",
 ];
 
-/// The tags a field `key`'s value is read from, in priority order: the first
-/// the image carries is the value. Empty for a key this crate does not map.
+/// The tags a field `key`'s value is read from: its own tag, and for a
+/// coordinate its hemisphere too. Empty for a key this crate does not map.
 ///
 /// Values are placeholders: `get_tag` matches on tag identity, not value.
 pub(super) fn read_tags(key: &str) -> Vec<ExifTag> {
     match key {
-        // A capture time falls back to the create date when the original is
-        // absent, so an image carrying only one still surfaces its time.
-        "DateTimeOriginal" => vec![
-            ExifTag::DateTimeOriginal(String::new()),
-            ExifTag::CreateDate(String::new()),
+        // A coordinate reads as its hemisphere too.
+        "GPSLatitude" => vec![
+            ExifTag::GPSLatitude(Vec::new()),
+            ExifTag::GPSLatitudeRef(String::new()),
+        ],
+        "GPSLongitude" => vec![
+            ExifTag::GPSLongitude(Vec::new()),
+            ExifTag::GPSLongitudeRef(String::new()),
         ],
         _ => own_tag(key).into_iter().collect(),
     }
@@ -129,12 +132,13 @@ pub(super) fn render_tags() -> [ExifTag; 1] {
 
 /// Whether the tag `hex` in an IFD of `group`, in an image of the `tiff`
 /// container or another that surfaces the fields `surfaced`, stays when
-/// metadata is treated as content: a surfaced field's tag (or one of the
-/// logical group it stands for, which follows the field's decision), the render
-/// tag, a structural pointer, or a TIFF's pixel layout. Everything else in EXIF
-/// (a tag no surfaced field stands for, such as a destination coordinate in an
-/// image with no GPS position, an embedded thumbnail, a maker note, vendor
-/// tags) cannot reach detection, so it is stripped.
+/// metadata is treated as content: a tag a surfaced field's value is read from,
+/// the render tag, a structural pointer, or a TIFF's pixel layout. Everything
+/// else in EXIF cannot reach detection, so it is stripped: an embedded
+/// thumbnail, a maker note, vendor tags, and the members of a field's group no
+/// field reads (a lens serial beside a camera's make, a destination coordinate
+/// or altitude beside a position, a create or modify date beside a capture
+/// time).
 pub(super) fn kept_as_content(
     hex: u16,
     group: ExifTagGroup,
@@ -148,17 +152,16 @@ pub(super) fn kept_as_content(
         || surfaced.iter().any(|key| {
             read_tags(key)
                 .into_iter()
-                .chain(tags_for_key(key))
                 .any(|field| field.as_u16() == hex && field.get_group() == group)
         })
 }
 
-/// The one tag a free-standing field `key` names: the authorship, ownership,
-/// free-text, and identifier fields, each cleared on its own.
+/// The one tag a field `key` names.
 fn own_tag(key: &str) -> Option<ExifTag> {
     Some(match key {
         "GPSLatitude" => ExifTag::GPSLatitude(Vec::new()),
         "GPSLongitude" => ExifTag::GPSLongitude(Vec::new()),
+        "DateTimeOriginal" => ExifTag::DateTimeOriginal(String::new()),
         "Make" => ExifTag::Make(String::new()),
         "Model" => ExifTag::Model(String::new()),
         "SerialNumber" => ExifTag::SerialNumber(String::new()),

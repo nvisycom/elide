@@ -122,7 +122,7 @@ async fn read_at_slices_intra_cell_range() {
     // Customers!A2 = "alice@example.com"; bytes 0..5 = "alice".
     let loc = TabularLocation::new(1, 0)
         .with_sheet_name("Customers")
-        .with_range(0, 5);
+        .with_span(0..5);
     assert_eq!(
         stream.read_at(&loc).await.unwrap().unwrap().as_str(),
         "alice"

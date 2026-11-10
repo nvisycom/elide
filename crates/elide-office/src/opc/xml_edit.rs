@@ -118,7 +118,7 @@ impl Edit for XmlComments {
             return Ok(None);
         }
         let mut reader = Reader::from_str(raw);
-        let bom = if raw.starts_with('\u{feff}') { 3 } else { 0 };
+        let bom = bom_len(raw);
         let mut last = bom;
         let mut text = String::new();
         let mut cursor = 0;
@@ -270,7 +270,7 @@ pub(crate) fn edit(raw: &str, rules: &dyn Rules) -> Result<Option<Edited>> {
     let mut reader = NsReader::from_str(raw);
     // quick-xml reports positions past a leading BOM, but the ranges index the
     // original bytes.
-    let bom = if raw.starts_with('\u{feff}') { 3 } else { 0 };
+    let bom = bom_len(raw);
     let mut last = bom;
     // Each byte range cut, and what takes its place (nothing, or a neutral
     // attribute value).
@@ -460,6 +460,13 @@ fn attributes<'a>(
         });
     }
     Ok(out)
+}
+
+/// The byte length of a leading UTF-8 BOM (`U+FEFF`), or 0 if absent. quick-xml
+/// skips it and reports positions past it, so spans over the original bytes must
+/// add it back.
+pub(crate) fn bom_len(raw: &str) -> usize {
+    if raw.starts_with('\u{feff}') { 3 } else { 0 }
 }
 
 #[cfg(test)]

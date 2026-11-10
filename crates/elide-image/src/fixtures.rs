@@ -80,6 +80,37 @@ pub fn jpeg_with_gps() -> Bytes {
     Bytes::from(bytes)
 }
 
+/// A tiny solid-colour JPEG whose EXIF `ImageDescription` is `description`.
+#[must_use]
+pub fn jpeg_with_description(description: &str) -> Bytes {
+    let mut bytes = Vec::new();
+    let image = image::RgbImage::from_pixel(4, 4, image::Rgb([200, 30, 30]));
+    image::DynamicImage::ImageRgb8(image)
+        .write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Jpeg,
+        )
+        .expect("encode jpeg fixture");
+    let mut exif = ExifMetadata::new();
+    exif.set_tag(ExifTag::ImageDescription(description.to_owned()));
+    exif.write_to_vec(&mut bytes, FileExtension::JPEG)
+        .expect("write exif fixture");
+    Bytes::from(bytes)
+}
+
+/// The EXIF `ImageDescription` `jpeg` carries, if any.
+#[must_use]
+pub fn description(jpeg: &[u8]) -> Option<String> {
+    let exif = ExifMetadata::new_from_vec(&jpeg.to_vec(), FileExtension::JPEG).ok()?;
+    match exif
+        .get_tag(&ExifTag::ImageDescription(String::new()))
+        .next()?
+    {
+        ExifTag::ImageDescription(value) => Some(value.trim_end_matches('\0').to_owned()),
+        _ => None,
+    }
+}
+
 /// A tiny solid-colour TIFF carrying a GPS latitude EXIF tag.
 ///
 /// The TIFF counterpart of [`jpeg_with_gps`]: TIFF is EXIF's native container

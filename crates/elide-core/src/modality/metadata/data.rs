@@ -14,8 +14,8 @@ use crate::modality::ModalityData;
 /// rendered as text (a coordinate, a device name, a timestamp), and the
 /// [`label`](Self::label) is what the field is by the format's own schema (a
 /// location, a person, a time), stamped by the codec that surfaced it. The
-/// label is the field's detection: a codec surfaces only the fields its schema
-/// labels and strips the rest.
+/// label flags the field whole; the text recognizers read the value for what it
+/// says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

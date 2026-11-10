@@ -13,6 +13,7 @@ use quick_xml::escape::unescape;
 use quick_xml::events::Event;
 
 use crate::opc::part::PartPath;
+use crate::opc::xml_edit::bom_len;
 
 /// The manifest's own part path.
 pub(crate) const CONTENT_TYPES_PART: &str = "[Content_Types].xml";
@@ -99,14 +100,15 @@ pub(crate) fn without_parts(xml: &str, removed: &HashSet<PartPath>) -> Result<St
         .map(|part| part.as_str().to_ascii_lowercase())
         .collect();
     let mut reader = Reader::from_str(xml);
+    let bom = bom_len(xml);
     let mut out = String::with_capacity(xml.len());
     let mut cursor = 0;
-    let mut last = 0;
+    let mut last = bom;
     loop {
         let event = reader
             .read_event()
             .map_err(|e| Error::malformed(format!("[Content_Types].xml malformed: {e}")))?;
-        let span = last..reader.buffer_position() as usize;
+        let span = last..reader.buffer_position() as usize + bom;
         last = span.end;
         let element = match event {
             Event::Eof => break,
@@ -132,6 +134,18 @@ mod tests {
     use super::*;
 
     const MANIFEST: &str = r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="PNG" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="main"/><Override PartName="/word/comments.xml" ContentType="comments"/></Types>"#;
+
+    #[test]
+    fn a_removal_after_a_byte_order_mark_cuts_only_its_override() {
+        let removed_override =
+            r#"<Override PartName="/docProps/custom.xml" ContentType="custom"/>"#;
+        let manifest = format!(
+            "\u{feff}<?xml version=\"1.0\"?><Types><Override PartName=\"/word/document.xml\" ContentType=\"main\" />{removed_override}</Types>"
+        );
+        let removed: HashSet<PartPath> = [PartPath::from("docProps/custom.xml")].into();
+        let out = without_parts(&manifest, &removed).unwrap();
+        assert_eq!(out, manifest.replace(removed_override, ""));
+    }
 
     #[test]
     fn an_override_wins_over_the_extension_default() {
