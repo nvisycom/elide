@@ -162,7 +162,7 @@ rten-imageproc = { version = "0.26", features = [] }
 # Audio processing
 hound = { version = "3.5", features = [] }
 symphonia = { version = "0.6", default-features = false, features = ["wav", "pcm", "mp3"] }
-mp3lame-encoder = { version = "0.2", features = [] }
+mp3lame-encoder = { version = "0.3", features = [] }
 
 # AI & LLM frameworks
 rig = { version = "0.44", default-features = false, features = ["agent"] }
