@@ -6,6 +6,8 @@ pub mod content;
 mod contract;
 #[cfg(feature = "extract")]
 pub mod extract;
+#[cfg(feature = "metadata")]
+pub mod metadata;
 #[cfg(feature = "mocks")]
 pub mod mocks;
 pub mod string;

@@ -6,37 +6,30 @@ use serde::{Deserialize, Serialize};
 use crate::modality::ModalityReplacement;
 use crate::modality::text::TextReplacement;
 
-/// What a metadata operator produces for a field.
+/// What a metadata operator produces.
 ///
-/// A field is atomic, so the natural treatment is [`Removed`], dropping it
-/// entirely. [`Replace`] overwrites the value in place, for a producer that
-/// would rather substitute a field (a blanked author, a redacted-marker date)
-/// than drop it. [`Unchanged`] leaves the field as it is. Non-exhaustive: a
-/// hashing or generalizing treatment can be added without breaking callers.
+/// A field's value is text, so most treatments are a [`TextReplacement`]
+/// applied to the field, or to the part of its value the location narrows to,
+/// carried as [`Value`]: a removal of the whole field drops it. [`Unchanged`]
+/// leaves the field as it is, which a substitution of its own text cannot do
+/// for a field that holds no free text (a coordinate, a timestamp).
 ///
-/// [`Removed`]: MetadataReplacement::Removed
-/// [`Replace`]: MetadataReplacement::Replace
+/// [`Value`]: MetadataReplacement::Value
 /// [`Unchanged`]: MetadataReplacement::Unchanged
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[non_exhaustive]
 pub enum MetadataReplacement {
-    /// Drop the field entirely.
-    Removed,
-    /// Overwrite the field's value with the given text.
-    Replace(String),
+    /// Apply a text treatment to the field's value.
+    Value(TextReplacement),
     /// Leave the field as it is.
     Unchanged,
 }
 
 impl From<TextReplacement> for MetadataReplacement {
     fn from(replacement: TextReplacement) -> Self {
-        match replacement {
-            TextReplacement::Substituted(value) => Self::Replace(value),
-            TextReplacement::Removed => Self::Removed,
-        }
+        Self::Value(replacement)
     }
 }
 

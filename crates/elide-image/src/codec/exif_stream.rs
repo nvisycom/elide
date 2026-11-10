@@ -2,17 +2,16 @@
 //! the pixel stream.
 //!
 //! Streams each privacy-relevant EXIF field as a [`Metadata`] chunk labelled
-//! with what it is, and applies each field's redaction to the image's shared
-//! buffer: a removal clears the field, an overwrite writes its new text. The
-//! recombiner then encodes the buffer once, carrying both the pixel and the
-//! metadata edits.
+//! with what it is, applies each redaction to the field's value (the whole
+//! value, or the part a span narrows to), and writes the edited fields to the
+//! image's shared buffer, a field left blank removed. The recombiner then
+//! encodes the buffer once, carrying both the pixel and the metadata edits.
 
 use elide_codec::content::ContentData;
+use elide_codec::metadata::MetadataFields;
 use elide_codec::{FlaggedItem, FormatId, Stream};
 use elide_core::Result;
-use elide_core::modality::metadata::{
-    Metadata, MetadataData, MetadataLocation, MetadataReplacement,
-};
+use elide_core::modality::metadata::{Metadata, MetadataData, MetadataLocation};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
 
@@ -23,16 +22,14 @@ use super::image_state::ImageState;
 pub(super) struct ExifStream {
     state: ImageState,
     format_id: FormatId,
-    /// Every surfaced field, read once at decode and kept in document order:
-    /// the chunks a caller sees and the set [`read_at`](DataReader::read_at)
-    /// looks one up in without re-parsing.
-    fields: Vec<MetadataData>,
+    /// Every surfaced field, read once at decode and kept in document order.
+    fields: MetadataFields,
 }
 
 impl ExifStream {
     /// The EXIF stream over `state`, reading its fields once.
     pub(super) fn new(state: ImageState, format_id: FormatId) -> Result<Self> {
-        let fields = state.metadata_fields()?;
+        let fields = MetadataFields::new(state.metadata_fields()?);
         Ok(Self {
             state,
             format_id,
@@ -51,45 +48,29 @@ impl Stream<Metadata> for ExifStream {
     }
 
     fn chunks(&self) -> Result<Vec<Chunk<Metadata>>> {
-        Ok(self
-            .fields
-            .iter()
-            .map(|field| Chunk::new(MetadataLocation::new(field.key.clone()), field.clone()))
-            .collect())
+        Ok(self.fields.chunks())
     }
 
     fn flagged(&self) -> Result<Vec<FlaggedItem<Metadata>>> {
-        Ok(self.fields.iter().map(FlaggedItem::field).collect())
+        Ok(self.fields.flagged())
     }
 }
 
 #[async_trait::async_trait]
 impl DataReader<Metadata> for ExifStream {
     async fn read_at(&self, location: &MetadataLocation) -> Result<Option<MetadataData>> {
-        let key = location.key.as_str();
-        Ok(self.fields.iter().find(|field| field.key == key).cloned())
+        Ok(self.fields.read_at(location))
     }
 }
 
 #[async_trait::async_trait]
 impl DataWriter<Metadata> for ExifStream {
     async fn write_at(&mut self, redactions: Redactions<Metadata>) -> Result<()> {
-        let mut removed = Vec::new();
-        let mut replaced = Vec::new();
-        for (location, replacement) in redactions.into_iter() {
-            match replacement {
-                MetadataReplacement::Replace(value) => replaced.push((location.key, value)),
-                MetadataReplacement::Unchanged => {}
-                // Removal, and any treatment added later, clears the field:
-                // nothing leaves it intact.
-                _ => removed.push(location.key),
-            }
-        }
-        let removed: Vec<&str> = removed.iter().map(|key| key.as_str()).collect();
-        let replaced: Vec<(&str, &str)> = replaced
+        let edits = self.fields.redact(redactions)?;
+        let edits: Vec<(&str, &str)> = edits
             .iter()
             .map(|(key, value)| (key.as_str(), value.as_str()))
             .collect();
-        self.state.edit_metadata(&removed, &replaced)
+        self.state.edit_metadata(&edits)
     }
 }

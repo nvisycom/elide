@@ -36,18 +36,45 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 Each codec labels the fields it surfaces with what they are, by its format's
 own schema: an image's EXIF location, time, device, author, copyright, and
 free-text fields, and a document's author, last editor, company, and
-timestamps. The label is the field's detection, so every orchestrator turns
-each labelled field into an entity, the same way for every format. A field
-whose label the request's catalog declares is redacted; any other field is
-kept, unless every field is flagged (see below).
+timestamps, and its free text: title, subject, description, keywords,
+category, template path, hyperlink base, the titles of its parts (sheet names,
+slide titles), and custom properties. Every orchestrator turns each labelled
+field into an entity, the same way for every format. A field whose label the
+request's catalog declares is redacted; any other field is kept, unless every
+field is flagged (see below).
 
 Metadata a format cannot surface field by field (XMP, IPTC, audio tags, a
 PDF's `/Info`, a camera's maker note, an EXIF tag no field reads) is stripped
 even under `ScanAsContent`, and so is an image's embedded thumbnail, a
-preview of the unredacted pixels. So is a field whose meaning the format's
-schema does not fix (keywords, a template path, a custom document property):
-only labelled fields are surfaced, so nothing ships that detection could not
-see.
+preview of the unredacted pixels. So is a document property no field surfaces,
+such as a revision count or the application that saved it: nothing ships that
+detection could not see.
+
+## Scanning field values
+
+A field's label decides it whole. To find what a free-text field says, such as
+a name inside a photo's description or an e-mail address in a custom
+property, give the metadata modality an analyzer. Its recognizers read each
+field's value as they read text, and what they find is redacted on its own,
+the rest of the field kept. Free-text fields are labelled
+`COMMUNICATIONS_CONTENT`, so a catalog that declares it still takes them
+whole; leave it out to keep what the recognizers do not find:
+
+```rust,no_run
+use elide::prelude::*;
+use elide::recognition::pattern::PatternRecognizer;
+
+let catalog = LabelCatalog::from_iter([builtins::EMAIL_ADDRESS.clone()]);
+let patterns = PatternRecognizer::builder().with_builtin_patterns().build()?;
+let orchestrator = Orchestrator::new()
+    .with_scope(Scope::new().with_catalog(catalog))
+    .with_registry(FormatRegistry::with_builtin())
+    .with_analyzer::<Metadata>(Analyzer::new().with_recognizer(patterns));
+# Ok::<(), elide::Error>(())
+```
+
+A field that cannot hold arbitrary text, such as a timestamp, a coordinate, or
+a typed custom property, is removed rather than partly rewritten.
 
 ## Flagging every field
 

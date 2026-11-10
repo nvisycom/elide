@@ -105,6 +105,9 @@ pub fn text_parts(package: &[u8]) -> Vec<(String, String)> {
 #[must_use]
 pub fn property_fields(xml: &[u8]) -> Vec<(String, String)> {
     props::fields(xml)
+        .into_iter()
+        .map(|field| (field.key, field.value))
+        .collect()
 }
 
 #[cfg(test)]

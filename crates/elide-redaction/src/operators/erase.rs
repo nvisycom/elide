@@ -130,6 +130,6 @@ impl Operator<Metadata> for Erase {
         _entity: &Entity<Metadata>,
         _data: &<Metadata as Modality>::Data,
     ) -> Result<MetadataReplacement> {
-        Ok(MetadataReplacement::Removed)
+        Ok(TextReplacement::Removed.into())
     }
 }

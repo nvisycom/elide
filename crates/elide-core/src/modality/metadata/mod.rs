@@ -6,23 +6,26 @@
 //! place, device, or time just as content can, so a field is a redaction subject
 //! in its own right.
 //!
-//! All metadata fields share one shape — an atomic key ([`MetadataLocation`]), a
-//! text value ([`MetadataData`]), and a drop-or-rewrite treatment
-//! ([`MetadataReplacement`]) — so they are one modality, [`Metadata`]. The
-//! *source* of a field (an image's EXIF, a file's inode, a document's
-//! properties) is not a modality distinction: an artifact exposes metadata as one
-//! of its aspects, and the engine tells two artifacts' metadata apart by their
-//! `PartId`, not by the modality type. Each format's handler reads and writes its
-//! own metadata within its own single encode.
+//! All metadata fields share one shape, a keyed text value ([`MetadataData`]),
+//! so they are one modality, [`Metadata`]. A value is text and is recognized
+//! like text: the location is the field's key, optionally narrowed to a byte
+//! range of its value ([`MetadataLocation`]), and redaction is a text treatment
+//! of the value ([`MetadataReplacement`]). The *source* of a field (an image's EXIF, a file's inode, a
+//! document's properties) is not a modality distinction: an artifact exposes
+//! metadata as one of its aspects, and the engine tells two artifacts' metadata
+//! apart by their `PartId`, not by the modality type. Each format's handler
+//! reads and writes its own metadata within its own single encode.
 
 mod data;
 mod location;
 mod replacement;
 
+use std::ops::Range;
+
 pub use self::data::MetadataData;
 pub use self::location::MetadataLocation;
 pub use self::replacement::MetadataReplacement;
-use super::{Modality, NoArtifact};
+use super::{Modality, NoArtifact, TextRecognizable};
 
 /// A document's out-of-band named fields — EXIF tags, filesystem timestamps and
 /// attributes, document properties — as redaction subjects.
@@ -42,4 +45,18 @@ impl Modality for Metadata {
     type Replacement = MetadataReplacement;
 
     const NAME: &'static str = "metadata";
+}
+
+impl TextRecognizable for Metadata {
+    fn as_text<'a>(data: &'a MetadataData, _artifact: Option<&'a NoArtifact>) -> Option<&'a str> {
+        Some(data.value())
+    }
+
+    fn locate(
+        range: Range<usize>,
+        data: &MetadataData,
+        _artifact: Option<&NoArtifact>,
+    ) -> Option<MetadataLocation> {
+        Some(MetadataLocation::new(data.key.clone()).with_span(range))
+    }
 }

@@ -167,10 +167,9 @@ impl CsvHandler {
         else {
             return Ok(());
         };
-        let start = location.start_offset.unwrap_or(0);
-        let end = location.end_offset.unwrap_or(cell.len());
+        let span = location.span.clone().unwrap_or(0..cell.len());
         let value = replacement.value().unwrap_or_default();
-        cell.redact_range(value, start..end)
+        cell.redact_range(value, span)
     }
 
     /// Drop the data row at `row_index` (the same addressing as
@@ -249,18 +248,17 @@ impl Stream<Tabular> for CsvHandler {
     }
 
     fn lift(&self, chunk: &Chunk<Tabular>, local: TabularLocation) -> Option<TabularLocation> {
-        // `local` carries the chunk-local intra-cell byte range in its
-        // offsets (its row/column are placeholders); a missing range means
-        // the whole cell. Re-anchor onto the chunk's real cell coordinates.
+        // `local` carries the chunk-local intra-cell span (its row/column are
+        // placeholders); a missing span means the whole cell. Re-anchor onto
+        // the chunk's real cell coordinates.
         let cell = self.cell_at(chunk.location.row_index, chunk.location.column_index)?;
-        let start = local.start_offset.unwrap_or(0);
-        let end = local.end_offset.unwrap_or(cell.len());
-        if start > end || end > cell.len() {
+        let span = local.span.unwrap_or(0..cell.len());
+        if span.start > span.end || span.end > cell.len() {
             return None;
         }
         let mut location =
             TabularLocation::new(chunk.location.row_index, chunk.location.column_index)
-                .with_range(start, end);
+                .with_span(span);
         if let Some(name) = &chunk.location.column_name {
             location = location.with_column_name(name.clone());
         }
@@ -277,10 +275,10 @@ impl DataReader<Tabular> for CsvHandler {
         let Some(cell) = self.cell_at(location.row_index, location.column_index) else {
             return Ok(None);
         };
-        // An intra-cell range slices the cell; no range reads the whole cell.
-        match (location.start_offset, location.end_offset) {
-            (Some(start), Some(end)) => Ok(cell.get(start..end).map(TextData::new)),
-            _ => Ok(Some(TextData::new(cell.to_owned()))),
+        // An intra-cell span slices the cell; no span reads the whole cell.
+        match &location.span {
+            Some(span) => Ok(cell.get(span.clone()).map(TextData::new)),
+            None => Ok(Some(TextData::new(cell.to_owned()))),
         }
     }
 }
@@ -360,7 +358,7 @@ mod tests {
     async fn read_at_slices_intra_cell_range() {
         let h = load("name\nAlice Carter\n").await;
         // Row 1, col 0 = "Alice Carter"; bytes 0..5 = "Alice".
-        let loc = TabularLocation::new(1, 0).with_range(0, 5);
+        let loc = TabularLocation::new(1, 0).with_span(0..5);
         assert_eq!(h.read_at(&loc).await.unwrap().unwrap().as_str(), "Alice");
     }
 
@@ -370,14 +368,13 @@ mod tests {
         let chunks = h.chunks().unwrap();
         let cell = &chunks[1];
         // Chunk-local: row/col are placeholders, offsets carry the range.
-        let local = TabularLocation::new(0, 0).with_range(6, 12);
+        let local = TabularLocation::new(0, 0).with_span(6..12);
         let lifted = h.lift(cell, local).expect("in bounds");
         assert_eq!(lifted.row_index, 1);
         assert_eq!(lifted.column_index, 0);
-        assert_eq!(lifted.start_offset, Some(6));
-        assert_eq!(lifted.end_offset, Some(12));
+        assert_eq!(lifted.span, Some(6..12));
         // Out-of-bounds range lifts to nothing.
-        let oob = TabularLocation::new(0, 0).with_range(0, 99);
+        let oob = TabularLocation::new(0, 0).with_span(0..99);
         assert!(h.lift(cell, oob).is_none());
     }
 

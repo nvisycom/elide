@@ -294,8 +294,7 @@ mod tests {
             .with_location(TabularLocation {
                 row_index: 0u32,
                 column_index: 0u32,
-                start_offset: None,
-                end_offset: None,
+                span: None,
                 column_name: None,
                 sheet_name: None,
             })

@@ -4,6 +4,8 @@
 
 use elide_core::Result;
 use elide_core::entity::Entity;
+#[cfg(feature = "metadata")]
+use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement};
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
@@ -269,6 +271,43 @@ impl TryOperator<Tabular> for GeneralizeDate {
     ) -> Result<Option<TabularReplacement>> {
         Ok(self
             .render(data.as_str())
+            .map(|text| TextReplacement::substituted(text).into()))
+    }
+}
+
+#[cfg(feature = "metadata")]
+#[async_trait::async_trait]
+impl Operator<Metadata> for GeneralizeDate {
+    fn id(&self) -> OperatorId {
+        GeneralizeDate::id()
+    }
+
+    fn leak_profile(&self) -> LeakProfile {
+        LeakProfile::Partial
+    }
+
+    async fn anonymize(
+        &self,
+        entity: &Entity<Metadata>,
+        data: &MetadataData,
+    ) -> Result<MetadataReplacement> {
+        Ok(self
+            .try_anonymize(entity, data)
+            .await?
+            .unwrap_or(MetadataReplacement::Value(TextReplacement::Removed)))
+    }
+}
+
+#[cfg(feature = "metadata")]
+#[async_trait::async_trait]
+impl TryOperator<Metadata> for GeneralizeDate {
+    async fn try_anonymize(
+        &self,
+        _entity: &Entity<Metadata>,
+        data: &MetadataData,
+    ) -> Result<Option<MetadataReplacement>> {
+        Ok(self
+            .render(data.value())
             .map(|text| TextReplacement::substituted(text).into()))
     }
 }

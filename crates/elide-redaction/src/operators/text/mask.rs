@@ -143,6 +143,6 @@ impl Operator<Metadata> for Mask {
         _entity: &Entity<Metadata>,
         data: &MetadataData,
     ) -> Result<MetadataReplacement> {
-        Ok(MetadataReplacement::Replace(self.render(data.value())))
+        Ok(TextReplacement::substituted(self.render(data.value())).into())
     }
 }

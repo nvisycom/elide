@@ -212,31 +212,29 @@ impl<'a> Source<'a> {
         out
     }
 
-    /// Remove the fields named by `removed` (each an EXIF tag key such as
-    /// `"GPSLatitude"`) and overwrite those named by `replaced` with their new
-    /// text, leaving all other EXIF fields intact, then scrub every metadata
-    /// block outside EXIF, returning the resulting container and how many
-    /// blocks outside EXIF were removed.
+    /// Write each field's new value (keyed by an EXIF field key such as
+    /// `"GPSLatitude"`), a blank value removing the field, leaving all other
+    /// EXIF fields intact, then scrub every metadata block outside EXIF,
+    /// returning the resulting container and how many blocks outside EXIF were
+    /// removed.
     ///
     /// Unlike [`strip`](Self::strip), which drops everything but the render
     /// tags, this edits only the caller's chosen keys, so a per-field
     /// redaction decision (from picked entities) maps straight to the byte edit.
     /// A field is cleared with its whole logical group (the GPS IFD for a
-    /// coordinate, the lens tags for a device), and an overwritten field is
-    /// then written back alone; a field that cannot hold text is only cleared.
-    /// A field left out of both goes with its group when another field of the
-    /// group is named: clearing the group is what makes the redaction hold.
-    /// A key not present, or not one this crate maps to a tag, is skipped. The
-    /// blocks outside EXIF (XMP, IPTC, comments, text chunks) cannot be
-    /// addressed as fields, so they are always removed, even when nothing is
-    /// edited.
-    pub(crate) fn edit(&self, removed: &[&str], replaced: &[(&str, &str)]) -> Result<Scrubbed> {
-        let cleared: Vec<ExifTag> = removed
+    /// coordinate, the lens tags for a device), and a new value is then written
+    /// back alone; a field that cannot hold text is only cleared. A field not
+    /// edited goes with its group when another field of the group is: clearing
+    /// the group is what makes the redaction hold. A key not present, or not one
+    /// this crate maps to a tag, is skipped. The blocks outside EXIF (XMP, IPTC,
+    /// comments, text chunks) cannot be addressed as fields, so they are always
+    /// removed, even when nothing is edited.
+    pub(crate) fn edit(&self, fields: &[(&str, &str)]) -> Result<Scrubbed> {
+        let cleared: Vec<ExifTag> = fields
             .iter()
-            .chain(replaced.iter().map(|(key, _)| key))
-            .flat_map(|key| tags_for_key(key))
+            .flat_map(|(key, _)| tags_for_key(key))
             .collect();
-        let written: Vec<ExifTag> = replaced
+        let written: Vec<ExifTag> = fields
             .iter()
             .filter_map(|(key, value)| written_tag(key, value))
             .collect();
@@ -594,7 +592,7 @@ mod tests {
             ExifTag::Artist("Jane Roe".into()),
             ExifTag::Make("Nvisy".into()),
         ]);
-        let stripped = source(&bytes).edit(&["Artist"], &[]).expect("strip").bytes;
+        let stripped = source(&bytes).edit(&[("Artist", "")]).expect("strip").bytes;
         assert_eq!(keys(&stripped), ["Make"]);
     }
 
@@ -605,7 +603,7 @@ mod tests {
             ExifTag::Make("Nvisy".into()),
         ]);
         let edited = source(&bytes)
-            .edit(&[], &[("Artist", "[REDACTED]")])
+            .edit(&[("Artist", "[REDACTED]")])
             .expect("edit")
             .bytes;
         let values = source(&edited).values().expect("values");
@@ -626,7 +624,7 @@ mod tests {
             ExifTag::GPSLatitudeRef("N".into()),
         ]);
         let edited = source(&bytes)
-            .edit(&[], &[("GPSLatitude", "[REDACTED]")])
+            .edit(&[("GPSLatitude", "[REDACTED]")])
             .expect("edit")
             .bytes;
         assert!(keys(&edited).is_empty());
@@ -655,7 +653,7 @@ mod tests {
         ]);
         // The picked key is the one the entity surfaces.
         let stripped = source(&bytes)
-            .edit(&["GPSLatitude"], &[])
+            .edit(&[("GPSLatitude", "")])
             .expect("strip")
             .bytes;
 

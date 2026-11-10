@@ -93,6 +93,7 @@ mod tests {
     use bytes::Bytes;
     use elide_codec::DocumentLoader as _;
     use elide_core::modality::metadata::{MetadataLocation, MetadataReplacement};
+    use elide_core::modality::text::TextReplacement;
     use elide_core::modality::{DataReader as _, DataWriter as _, StreamDataReader as _};
     use elide_core::redaction::Redactions;
     use image::GenericImageView;
@@ -255,7 +256,7 @@ mod tests {
         let mut doc = decode(JPEG, Disposition::ScanAsContent, fixtures::jpeg_with_gps()).await;
 
         redact_top_left(&mut doc).await;
-        edit_field(&mut doc, "GPSLatitude", MetadataReplacement::Removed).await;
+        edit_field(&mut doc, "GPSLatitude", TextReplacement::Removed.into()).await;
         let out = doc.encode().unwrap();
 
         // Both edits landed: the corner is dark and the GPS tag is gone.

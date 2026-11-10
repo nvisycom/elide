@@ -125,9 +125,8 @@ impl XlsxState {
             let text = working
                 .entry(index)
                 .or_insert_with(|| inner.cells[index].text.clone());
-            let start = location.start_offset.unwrap_or(0);
-            let end = location.end_offset.unwrap_or(text.len());
-            text.redact_range(replacement.value().unwrap_or_default(), start..end)?;
+            let span = location.span.clone().unwrap_or(0..text.len());
+            text.redact_range(replacement.value().unwrap_or_default(), span)?;
         }
 
         // Every splice succeeded: commit each cell's final text. Only a cell that

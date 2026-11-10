@@ -1,7 +1,7 @@
 //! EXIF metadata read, strip, and field-level removal and overwrite. Each
 //! surfaced field is labelled with what it is (a location, a person, a device,
-//! a time), and the label is the field's detection: the orchestrator turns it
-//! into an `Entity<Metadata>`.
+//! a time), and the orchestrator turns the label into an `Entity<Metadata>`; a
+//! recognizer can also find something inside a free-text field's value.
 //!
 //! Backed by `little_exif`, the one permissive pure-Rust crate that both reads
 //! and edits EXIF for JPEG, PNG, and TIFF. Its parser can panic on malformed

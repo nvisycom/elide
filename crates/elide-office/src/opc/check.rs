@@ -130,6 +130,7 @@ mod tests {
 
     use super::*;
     use crate::docx::WordFormat;
+    use crate::fixtures::{pack_parts, part_names, read_part};
     use crate::pptx::SlideFormat;
     use crate::xlsx::SheetClassifier;
 
@@ -161,5 +162,36 @@ mod tests {
         sanitizes_to_a_clean_package(SAMPLE_PPTX, &SlideFormat);
         sanitizes_to_a_clean_package(SAMPLE_XLSX, &SheetClassifier);
         sanitizes_to_a_clean_package(SAMPLE2_XLSX, &SheetClassifier);
+    }
+
+    /// A property no field surfaces fails the check under `ScanAsContent`,
+    /// since nothing could have detected what it holds.
+    #[test]
+    fn an_unsurfaced_property_fails_the_check() {
+        let policy = HiddenContentPolicy::default().with_metadata(Disposition::ScanAsContent);
+        let (sanitized, _) = sanitize(SAMPLE_DOCX, policy, &WordFormat).unwrap();
+        let sanitized = sanitized.unwrap();
+        let core = read_part(&sanitized, "docProps/core.xml").unwrap();
+        let core = String::from_utf8(core).unwrap().replace(
+            "</coreProperties>",
+            "<revision>7</revision></coreProperties>",
+        );
+        let parts: Vec<(String, Vec<u8>)> = part_names(&sanitized)
+            .into_iter()
+            .map(|name| {
+                let bytes = if name == "docProps/core.xml" {
+                    core.clone().into_bytes()
+                } else {
+                    read_part(&sanitized, &name).unwrap()
+                };
+                (name, bytes)
+            })
+            .collect();
+        let parts: Vec<(&str, &[u8])> = parts
+            .iter()
+            .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
+            .collect();
+        let error = check(&pack_parts(&parts), policy, &WordFormat).unwrap_err();
+        assert!(error.to_string().contains("Properties"), "{error}");
     }
 }

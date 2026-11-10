@@ -4,6 +4,8 @@
 //! [`Mask`]: crate::operators::Mask
 
 use elide_core::entity::Entity;
+#[cfg(feature = "metadata")]
+use elide_core::modality::metadata::{Metadata, MetadataData, MetadataReplacement};
 #[cfg(feature = "tabular")]
 use elide_core::modality::tabular::{Tabular, TabularReplacement};
 use elide_core::modality::text::{Text, TextData, TextReplacement};
@@ -113,6 +115,26 @@ impl Operator<Tabular> for Truncate {
         data: &TextData,
     ) -> Result<TabularReplacement> {
         Ok(TextReplacement::substituted(self.render(data.as_str())?).into())
+    }
+}
+
+#[cfg(feature = "metadata")]
+#[async_trait::async_trait]
+impl Operator<Metadata> for Truncate {
+    fn id(&self) -> OperatorId {
+        Truncate::id()
+    }
+
+    fn leak_profile(&self) -> LeakProfile {
+        LeakProfile::Partial
+    }
+
+    async fn anonymize(
+        &self,
+        _entity: &Entity<Metadata>,
+        data: &MetadataData,
+    ) -> Result<MetadataReplacement> {
+        Ok(TextReplacement::substituted(self.render(data.value())?).into())
     }
 }
 
