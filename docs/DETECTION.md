@@ -85,11 +85,8 @@ The generative recognizer prompts a large language model, or a vision-language
 model for visual payloads, to enumerate entities within a fragment. They are
 valuable for categories that resist both rule authorship and supervised
 training: open-class identifiers, paraphrased references to sensitive
-attributes, contextual mentions ("the patient," "my attorney"). They are also
-the path through which caller-supplied candidate regions are adjudicated, since
-a generative recognizer can confirm, relocate, or reject a region the caller
-only suspected. They are the most expensive recognition path and the least
-calibrated. Their utility is highest where the other families are weakest. As
+attributes, contextual mentions ("the patient," "my attorney"). They are the
+most expensive recognition path and the least calibrated. Their utility is highest where the other families are weakest. As
 with the statistical family, a mock backend exists so the surrounding machinery
 can run without a live model.
 

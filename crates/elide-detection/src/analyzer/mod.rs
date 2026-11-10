@@ -6,17 +6,20 @@
 //! enrich (sequential), recognize (concurrent), reduce (the layers), returning a
 //! clean entity set.
 //!
-//! Every entry — a single in-memory payload, one streamed source, or many
-//! streamed sources — funnels through the one engine, [`analyze_sources`]: it
-//! drains each source's chunks into subjects, enriches the whole flat batch in
-//! one pass (so an OCR/STT enricher issues one `call_batch` across every
+//! Streamed sources, one or many, run through one engine, [`analyze_streams`]:
+//! it drains each source's chunks into subjects, enriches the whole flat batch
+//! in one pass (so an OCR/STT enricher issues one `call_batch` across every
 //! subject), recognizes each, and re-aggregates per source. A text source
 //! contributes many subjects and a single-chunk image/audio source one — the
-//! same path, only the count differs. The [`Analysis`] result type lives in
-//! [`analysis`].
+//! same path, only the count differs. [`analyze_stream`] is its one-source form,
+//! and [`analyze`] runs a single in-memory payload, which has no chunks to lift
+//! back, straight through the per-subject core. The [`Analysis`] result type
+//! lives in [`analysis`].
 //!
 //! [`Layer`]: crate::layer::Layer
-//! [`analyze_sources`]: Analyzer::analyze_sources
+//! [`analyze_streams`]: Analyzer::analyze_streams
+//! [`analyze_stream`]: Analyzer::analyze_stream
+//! [`analyze`]: Analyzer::analyze
 
 mod analysis;
 
@@ -95,8 +98,6 @@ impl<M: Modality> Analyzer<M> {
         self
     }
 
-    // --- Public entry points: thin adapters onto the engine below. ---
-
     /// Analyze a single in-memory payload in the given scope.
     ///
     /// Runs the full analysis pipeline over `data`, with `scope` supplying the
@@ -104,31 +105,11 @@ impl<M: Modality> Analyzer<M> {
     /// catalog). Use [`analyze_stream`](Self::analyze_stream) for an I/O-backed
     /// source that yields many chunks.
     pub async fn analyze(&self, data: M::Data, scope: &Scope) -> Result<Analysis<M>> {
-        self.analyze_in(data, scope, None).await
-    }
-
-    /// Analyze one payload, optionally pre-seeded with a prior enrichment `seed`
-    /// so a re-run re-recognizes without re-enriching (the enrichers self-skip on
-    /// a present artifact). The single-payload counterpart to
-    /// [`analyze_stream_in`](Self::analyze_stream_in).
-    ///
-    /// An in-memory payload is one subject with no source coordinates to lift back
-    /// to, so it runs through the engine's per-subject core directly.
-    pub async fn analyze_in(
-        &self,
-        data: M::Data,
-        scope: &Scope,
-        seed: Option<M::Artifact>,
-    ) -> Result<Analysis<M>> {
         let ctx = Context::new(scope);
         if ctx.catalog().is_empty() {
-            return Ok(Analysis::seeded(seed));
+            return Ok(Analysis::default());
         }
-        let mut subject = Subject::new(data);
-        if let Some(seed) = seed {
-            subject = subject.with_artifact(seed);
-        }
-        self.analyze_subject(&mut subject, &ctx).await
+        self.analyze_subject(&mut Subject::new(data), &ctx).await
     }
 
     /// Analyze a streamed source end to end, returning entities in the source's
@@ -136,66 +117,25 @@ impl<M: Modality> Analyzer<M> {
     ///
     /// The [`analyze`](Self::analyze) counterpart for I/O-backed sources (a
     /// decoded codec document, say): the caller never sees a chunk or a
-    /// recognizer-local coordinate.
+    /// recognizer-local coordinate. The one-source, first-pass form of
+    /// [`analyze_streams`](Self::analyze_streams).
     pub async fn analyze_stream<S>(&self, source: &mut S, scope: &Scope) -> Result<Analysis<M>>
     where
         S: StreamDataReader<M> + ?Sized,
     {
-        self.analyze_stream_in(source, scope, None).await
-    }
-
-    /// [`analyze_stream`](Self::analyze_stream) seeded with a prior
-    /// enrichment `seed`, so a re-run re-recognizes without re-enriching: the
-    /// source's subjects are pre-seeded, and the enrichers self-skip because one
-    /// is already present. `Some` (even an empty artifact) restores; `None` is a
-    /// first pass that enriches from scratch.
-    pub async fn analyze_stream_in<S>(
-        &self,
-        source: &mut S,
-        scope: &Scope,
-        seed: Option<M::Artifact>,
-    ) -> Result<Analysis<M>>
-    where
-        S: StreamDataReader<M> + ?Sized,
-    {
-        let mut sources = [source];
         let mut analyses = self
-            .analyze_sources(&mut sources, scope, vec![seed])
+            .analyze_streams(&mut [source], scope, vec![None])
             .await?;
-        // One source in, one analysis out.
-        Ok(analyses
-            .pop()
-            .expect("analyze_sources returns one analysis per source"))
+        Ok(analyses.pop().expect("one analysis per source"))
     }
 
-    /// Analyze several streamed sources together, coalescing enrichment into one
-    /// batched provider round-trip, and return one [`Analysis`] per source in
-    /// order. Each source is paired with its prior enrichment `seeds` entry.
+    /// Analyze several streamed sources together and return one [`Analysis`] per
+    /// source, in order.
     ///
-    /// # Errors
-    ///
-    /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) when
-    /// `sources` and `seeds` differ in length; otherwise the first enrichment or
-    /// recognition error.
-    pub async fn analyze_streams<S>(
-        &self,
-        sources: &mut [&mut S],
-        scope: &Scope,
-        seeds: Vec<Option<M::Artifact>>,
-    ) -> Result<Vec<Analysis<M>>>
-    where
-        S: StreamDataReader<M> + ?Sized,
-    {
-        self.analyze_sources(sources, scope, seeds).await
-    }
-
-    // --- The engine: the one core every entry funnels through. ---
-
-    /// The one analysis engine: analyze every `source` together and return one
-    /// [`Analysis`] per source, in order.
-    ///
-    /// Each source is seeded from its paired `seeds` entry (a re-run's restored
-    /// artifact, or `None` for a first pass). Every source's chunks become
+    /// Each source is seeded from its paired `seeds` entry: a prior run's
+    /// enrichment artifact, so a re-run re-recognizes without re-enriching (the
+    /// enrichers skip a subject that already has one), or `None` for a first
+    /// pass. Every source's chunks become
     /// subjects in one flat batch, so enrichment coalesces across all of them; a
     /// text source contributes many subjects and a single-chunk image/audio source
     /// one — the same path, only the count differs. Each source's entities are
@@ -207,7 +147,7 @@ impl<M: Modality> Analyzer<M> {
     /// [`ErrorKind::MalformedInput`](elide_core::ErrorKind::MalformedInput) when
     /// `sources` and `seeds` differ in length (the caller must supply one seed
     /// per source); otherwise the first enrichment or recognition error.
-    async fn analyze_sources<S>(
+    pub async fn analyze_streams<S>(
         &self,
         sources: &mut [&mut S],
         scope: &Scope,

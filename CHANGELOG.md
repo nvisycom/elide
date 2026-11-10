@@ -173,7 +173,9 @@ and this project adheres to
   plan before anything is applied
 - Caller region annotations are removed: `recognition::annotation`
   (`Annotations`, `Inclusion`, `Exclusion`), `Directives`,
-  `Analyzer::analyze_with` / `analyze_stream_with`, and the LLM prompts'
+  `Analyzer::analyze_with` / `analyze_stream_with` (with `analyze_in` and
+  `analyze_stream_in`: an analyzer runs `analyze`, `analyze_stream`, or the
+  batched, seeded `analyze_streams`), and the LLM prompts'
   inclusion hints. Their coordinates applied to every part of a modality;
   `PartMut::suppress_within` replaces exclusions per part, after analysis.
   `Orchestrator::analyze`, `re_analyze`, and `anonymize` take only the
