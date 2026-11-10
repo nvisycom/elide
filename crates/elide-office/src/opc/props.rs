@@ -125,13 +125,22 @@ impl Rules for UnsurfacedProperties {
         Some(HiddenContent::Properties)
     }
 
-    fn element(&self, name: Name<'_>, _attributes: &[Attribute<'_>]) -> Action {
+    fn element(&self, name: Name<'_>, attributes: &[Attribute<'_>]) -> Action {
         let property = PROPERTY_NAMESPACES
             .iter()
             .any(|namespace| name.in_namespace(namespace));
+        // A custom property is a field only by its name, as [`fields`] reads
+        // it: one without a readable name is never surfaced.
+        let named = || {
+            attributes.iter().any(|attribute| {
+                attribute.name.namespace.is_none()
+                    && attribute.name.local == "name"
+                    && unescape(attribute.value).is_ok()
+            })
+        };
         let surfaced = ELEMENT_FIELDS.contains(&name.local)
             || LISTS.contains(&name.local)
-            || (name.local == CUSTOM_PROPERTY && name.in_namespace(CUSTOM_NAMESPACE));
+            || (name.local == CUSTOM_PROPERTY && name.in_namespace(CUSTOM_NAMESPACE) && named());
         if property && !PROPERTY_ROOTS.contains(&name.local) && !surfaced {
             Action::Remove
         } else {
@@ -540,6 +549,13 @@ mod tests {
 
         let custom = r#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2" name="Client"><vt:lpwstr>Jane Roe</vt:lpwstr></property></Properties>"#;
         assert!(edit(custom, &UnsurfacedProperties).unwrap().is_none());
+
+        // A custom property with no name cannot be surfaced, so it goes.
+        let unnamed = r#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2"><vt:lpwstr>Jane Roe</vt:lpwstr></property></Properties>"#;
+        assert!(fields(unnamed.as_bytes()).is_empty());
+        let edited = edit(unnamed, &UnsurfacedProperties).unwrap().unwrap();
+        assert_eq!(edited.count, 1);
+        assert!(!edited.text.contains("Jane Roe"));
     }
 
     const APP: &[u8] = br#"<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Template>Normal.dotm</Template><TitlesOfParts><vt:vector size="3" baseType="lpstr"><vt:lpstr>Payroll</vt:lpstr><vt:lpstr/><vt:lpstr>Jane Roe</vt:lpstr></vt:vector></TitlesOfParts></Properties>"#;

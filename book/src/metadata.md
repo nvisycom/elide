@@ -43,6 +43,11 @@ field into an entity, the same way for every format. A field whose label the
 request's catalog declares is redacted; any other field is kept, unless every
 field is flagged (see below).
 
+An HTML page's `<meta>` fields are the exception: they stay in the page's
+text, so the text analyzer scans them like body text, and a catalog label
+alone does not select them. To redact them, give the text modality an
+analyzer and rules that cover what they hold, or flag every field.
+
 Metadata a format cannot surface field by field (XMP, IPTC, audio tags, a
 PDF's `/Info`, a camera's maker note, an EXIF tag no field reads) is stripped
 even under `ScanAsContent`, and so is an image's embedded thumbnail, a
@@ -73,8 +78,9 @@ let orchestrator = Orchestrator::new()
 # Ok::<(), elide::Error>(())
 ```
 
-A field that cannot hold arbitrary text, such as a timestamp, a coordinate, or
-a typed custom property, is removed rather than partly rewritten.
+A field that cannot hold arbitrary text, such as a timestamp, a coordinate, a
+typed custom property, or an EXIF user comment (whose character-code prefix
+cannot be rewritten), is removed rather than partly rewritten.
 
 ## Flagging every field
 
@@ -120,8 +126,9 @@ is kept when no rule covers it, as in every other modality.
 
 Some EXIF fields are redacted as a group, since one alone would still give away
 what the others hold: GPS coordinates clear the whole GPS block, and `Make`,
-`Model`, or `SerialNumber` clear all three and the lens tags. Removal wins inside
-a group: keeping `Model` while erasing `Make` removes both, though `Model`'s audit
-still shows the `Keep` its rule selected. A tag in such a group
-stays only in an image that carries one of its fields; one with no such field
-cannot reach detection, so it is stripped.
+`Model`, or `SerialNumber` clear all three. Removal wins inside a group: keeping
+`Model` while erasing `Make` removes both, though `Model`'s audit still shows
+the `Keep` its rule selected. Under `ScanAsContent` an image keeps only the tags
+a surfaced field is read from, a coordinate's hemisphere included; the rest of
+each group (the lens tags, a destination coordinate or altitude, a modify date
+or time offset) cannot reach detection, so it is stripped.

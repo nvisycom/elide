@@ -453,42 +453,37 @@ mod tests {
     }
 
     #[test]
-    fn a_group_tag_no_surfaced_field_stands_for_is_stripped() {
+    fn a_tag_no_surfaced_field_reads_is_stripped() {
         let rational = || {
             vec![little_exif::rational::uR64 {
                 nominator: 51,
                 denominator: 1,
             }]
         };
-        let orphans = jpeg_with(vec![
-            ExifTag::GPSDestLatitude(rational()),
-            ExifTag::LensModel("Lens".into()),
-            ExifTag::ModifyDate("2024:01:02 03:04:05".into()),
-        ]);
-        let reduced = source(&orphans).reduce_to_surfaced().expect("reduce");
-        let exif = source(&reduced.bytes).parse().expect("parse");
-        let has = |tag: &ExifTag| {
-            exif.as_ref()
-                .is_some_and(|e| e.get_tag(tag).next().is_some())
-        };
-        assert!(!has(&ExifTag::GPSDestLatitude(Vec::new())));
-        assert!(!has(&ExifTag::LensModel(String::new())));
-        assert!(!has(&ExifTag::ModifyDate(String::new())));
-
-        let represented = jpeg_with(vec![
+        let bytes = jpeg_with(vec![
             ExifTag::GPSLatitude(rational()),
+            ExifTag::GPSLatitudeRef("N".into()),
             ExifTag::GPSDestLatitude(rational()),
             ExifTag::Make("Nvisy".into()),
-            ExifTag::LensModel("Lens".into()),
+            ExifTag::LensSerialNumber("LS-7".into()),
+            ExifTag::DateTimeOriginal("2024:01:02 03:04:05".into()),
+            ExifTag::ModifyDate("2024:01:02 03:04:05".into()),
         ]);
-        let reduced = source(&represented).reduce_to_surfaced().expect("reduce");
+        let reduced = source(&bytes).reduce_to_surfaced().expect("reduce");
         let exif = source(&reduced.bytes).parse().expect("parse");
         let has = |tag: &ExifTag| {
             exif.as_ref()
                 .is_some_and(|e| e.get_tag(tag).next().is_some())
         };
-        assert!(has(&ExifTag::GPSDestLatitude(Vec::new())));
-        assert!(has(&ExifTag::LensModel(String::new())));
+        // What a surfaced field reads stays, its hemisphere included.
+        assert!(has(&ExifTag::GPSLatitude(Vec::new())));
+        assert!(has(&ExifTag::GPSLatitudeRef(String::new())));
+        assert!(has(&ExifTag::Make(String::new())));
+        assert!(has(&ExifTag::DateTimeOriginal(String::new())));
+        // The rest of each group is never read, so it goes.
+        assert!(!has(&ExifTag::GPSDestLatitude(Vec::new())));
+        assert!(!has(&ExifTag::LensSerialNumber(String::new())));
+        assert!(!has(&ExifTag::ModifyDate(String::new())));
     }
 
     #[test]

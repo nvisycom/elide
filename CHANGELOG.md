@@ -91,6 +91,10 @@ and this project adheres to
   reads, redacts, and reports them. A docProps key is unique in its part: a
   repeated name is keyed `name#2`, and the part lists are keyed
   `TitlesOfParts/<n>` and `HeadingPairs/<n>`
+- Under `ScanAsContent` an image keeps only the EXIF tags a surfaced field is
+  read from: the members of a field's group no field reads (the lens tags,
+  destination coordinates, altitude, modify dates, time offsets) are stripped
+  at decode instead of following the field's decision unscanned
 - Hidden-content dispositions are `KeepOnlyEssential` (the default),
   `ScanAsContent`, and `FlagEverything`, which also makes every item a format
   labels an entity whatever the catalog declares: each metadata field, and
