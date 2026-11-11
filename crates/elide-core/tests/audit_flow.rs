@@ -4,7 +4,7 @@
 //! fusion step would.
 
 use elide_core::Result;
-use elide_core::entity::audit::{AuditEvent, AuditKind, ModelEvent, PatternEvent};
+use elide_core::entity::audit::{AuditEvent, AuditKind, ModelId, PatternRule};
 use elide_core::entity::{Entity, EntityCoRef, Label, LabelCatalog, LabelLocale, LabelRef};
 use elide_core::modality::Modality;
 use elide_core::primitive::{
@@ -49,7 +49,7 @@ fn two_recognizers_fuse_into_one() {
             "us-phone-pattern",
             pattern_conf,
             TextLocation::inline(10..22),
-            PatternEvent {
+            PatternRule {
                 name: "phone".into(),
                 regex: Some("\\d{3}-\\d{3}-\\d{4}".into()),
                 validator: Some("luhn".into()),
@@ -66,7 +66,7 @@ fn two_recognizers_fuse_into_one() {
             "ner-model",
             ner_conf,
             TextLocation::inline(10..23),
-            ModelEvent {
+            ModelId {
                 name: "ner-model".into(),
                 version: Some("2024.1".into()),
             },
@@ -80,9 +80,8 @@ fn two_recognizers_fuse_into_one() {
     assert_eq!(entity.label, phone);
     assert_eq!(entity.confidence, Confidence::new(0.95).unwrap());
 
-    // The entity has a fresh v7 identity and a matching reference.
+    // The entity has a fresh v7 identity.
     assert_eq!(entity.id.get_version_num(), 7);
-    assert_eq!(entity.as_ref().id(), entity.id);
 
     // Coreference is unset by default; it can be attached.
     assert!(entity.coref.is_none());

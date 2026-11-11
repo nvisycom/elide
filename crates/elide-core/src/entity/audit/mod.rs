@@ -12,9 +12,8 @@ use serde::{Deserialize, Serialize};
 
 pub use self::attribution::{Attribution, CitedAttribution, FreeformAttribution};
 pub use self::event::{
-    AuditEvent, AuditKind, Calibration, Conflict, Contested, Deduplication, Flagged, FlaggedEvent,
-    Manual, ManualIntent, Model, ModelEvent, Pattern, PatternEvent, Redaction, Refinement,
-    Selection,
+    AuditEvent, AuditKind, Calibration, Conflict, Contested, Deduplication, Flagged, Manual,
+    ManualIntent, Model, ModelId, Pattern, PatternRule, Redaction, Refinement, Selection,
 };
 pub use self::hash::AuditHash;
 pub use self::rule_match::RuleMatch;
@@ -133,16 +132,32 @@ impl<M: Modality> AuditLog<M> {
         self.events.iter().filter(|e| e.is_recognition())
     }
 
-    /// The entity's operator *pick*, if one was recorded: the [`Selection`]
-    /// payload from its most recent selection event. `None` when no operator was
-    /// picked (e.g. a suppressed entity, or before the anonymizer's pick ran).
+    /// The entity's current operator *pick*, if one was recorded: the
+    /// [`Selection`] payload from its most recent selection event. `None` when
+    /// no operator was picked (e.g. a suppressed entity, or before the
+    /// anonymizer's pick ran).
+    ///
+    /// This is the plan, which a later pick can change after a redaction; what
+    /// a redaction applied is [`applied_selection`](Self::applied_selection).
     ///
     /// [`Selection`]: crate::entity::audit::Selection
     pub fn selection(&self) -> Option<&Selection> {
-        self.events.iter().rev().find_map(|e| match &e.kind {
+        self.selection_event().and_then(|e| match &e.kind {
             AuditKind::Selection(s) => Some(s),
             _ => None,
         })
+    }
+
+    /// The entity's most recent [`Selection`] event, whose
+    /// [`hash`](AuditEvent::hash) a [`Redaction`] applying it names.
+    ///
+    /// [`Selection`]: crate::entity::audit::Selection
+    /// [`Redaction`]: crate::entity::audit::Redaction
+    pub fn selection_event(&self) -> Option<&AuditEvent<M>> {
+        self.events
+            .iter()
+            .rev()
+            .find(|e| matches!(e.kind, AuditKind::Selection(_)))
     }
 
     /// The entity's redaction, if one was recorded: the [`Redaction`] payload
@@ -153,6 +168,22 @@ impl<M: Modality> AuditLog<M> {
     pub fn redaction(&self) -> Option<&Redaction> {
         self.events.iter().rev().find_map(|e| match &e.kind {
             AuditKind::Redaction(r) => Some(r),
+            _ => None,
+        })
+    }
+
+    /// The [`Selection`] the entity's most recent [`Redaction`] applied, found
+    /// through the hash the redaction names: which operator ran, why, and how
+    /// much its output leaks. `None` when the entity was not redacted, or when
+    /// the named selection is not on this trail (which [`verify`] reports).
+    ///
+    /// [`Selection`]: crate::entity::audit::Selection
+    /// [`Redaction`]: crate::entity::audit::Redaction
+    /// [`verify`]: Self::verify
+    pub fn applied_selection(&self) -> Option<&Selection> {
+        let redaction = self.redaction()?;
+        self.events.iter().find_map(|e| match &e.kind {
+            AuditKind::Selection(s) if e.hash == redaction.selection => Some(s),
             _ => None,
         })
     }
@@ -253,7 +284,9 @@ impl<M: Modality> AuditLog<M> {
     ///   and parents (no event was altered);
     /// - every parent an event names is the hash of an *earlier* event (no
     ///   dangling link, no forward reference, no reorder that moves a parent
-    ///   after its child); and
+    ///   after its child);
+    /// - every [`Redaction`] names an *earlier* [`Selection`] event, the
+    ///   decision it applied; and
     /// - the DAG has exactly **one sink** and it is the last event, while every
     ///   other event is some later event's parent. This anchors the trail's
     ///   length and its tip: an appended tail event, an inserted orphan
@@ -288,6 +321,16 @@ impl<M: Modality> AuditLog<M> {
                 return Err(Error::integrity(format!(
                     "audit event at index {index} was altered: hash mismatch"
                 )));
+            }
+            if let AuditKind::Redaction(redaction) = &event.kind {
+                let applied = self.events[..index].iter().any(|e| {
+                    e.hash == redaction.selection && matches!(e.kind, AuditKind::Selection(_))
+                });
+                if !applied {
+                    return Err(Error::integrity(format!(
+                        "audit event at index {index} is a redaction naming no earlier selection"
+                    )));
+                }
             }
             // Each event is a distinct DAG node: a repeated hash would let a
             // duplicated event stand in as another's referenced parent, masking
@@ -356,7 +399,7 @@ mod tests {
                 "pattern",
                 conf,
                 at.clone(),
-                PatternEvent {
+                PatternRule {
                     name: "ssn".into(),
                     regex: Some(r"\d{3}".into()),
                     validator: Some("luhn".into()),
@@ -366,19 +409,12 @@ mod tests {
                 "model",
                 conf,
                 at.clone(),
-                ModelEvent {
+                ModelId {
                     name: "ner".into(),
                     version: Some("2".into()),
                 },
             ),
-            AuditEvent::flagged(
-                "codec",
-                conf,
-                at.clone(),
-                FlaggedEvent {
-                    content: HiddenContentKind::Collaboration,
-                },
-            ),
+            AuditEvent::flagged("codec", conf, at.clone(), HiddenContentKind::Collaboration),
             AuditEvent::deduplication("union", conf),
             AuditEvent::conflict(Conflict::new(LabelRef::new("iban"), conf, "longest"), conf),
             AuditEvent::contested(Contested::new(LabelRef::new("iban"), conf, "review"), conf),
@@ -391,26 +427,30 @@ mod tests {
                     .with_location(TextLocation::inline(0..2)),
             ),
             AuditEvent::selection(
-                Selection::new(operator.clone(), RuleMatch::Tag("pii".into()))
-                    .with_attribution(why.clone()),
+                Selection::new(
+                    operator.clone(),
+                    LeakProfile::Partial,
+                    RuleMatch::Tag("pii".into()),
+                )
+                .with_attribution(why.clone()),
                 conf,
-            ),
-            AuditEvent::redaction(
-                Redaction::new(operator, RuleMatch::Label(LabelRef::new("ssn")))
-                    .with_leak_profile(LeakProfile::Partial)
-                    .with_attribution(why.clone()),
-                conf,
-            ),
-            AuditEvent::manual(
-                "reviewer",
-                conf,
-                Manual::new(ManualIntent::Suppress, at).with_attribution(why),
             ),
         ];
         let mut log = AuditLog::default();
         for event in events {
             log.record(fixed(event));
         }
+        let selection = log.selection_event().unwrap().hash();
+        log.record(fixed(AuditEvent::redaction(
+            operator.name,
+            Redaction::new(selection),
+            conf,
+        )));
+        log.record(fixed(AuditEvent::manual(
+            "reviewer",
+            conf,
+            Manual::new(ManualIntent::Suppress, at).with_attribution(why),
+        )));
         log
     }
 
@@ -444,21 +484,63 @@ mod tests {
         // refinement
         "e2e2678477a3aec58d3ff282764714ae7ec1ed06f3db3c79122e85e5d5881dab",
         // selection
-        "93422dd7c33f8d227b53e930e4302ae2c4bba532bf6c3c58b59b0ef02da68687",
+        "f1f6a95e400b1a8aadec9dfe910d7ac178f3691e1c7aeaffac4b5d8486fffd72",
         // redaction
-        "977d1745249d663991a333f0a5dd16108796639ceba4070c29544eca9674ef4a",
+        "b43f22e45b1964e65e7e5d310ba0e15df92a3bde426486723258b89dc43e1d00",
         // manual
-        "215d199b8bb6aadc4d747bea55d392aba27b623d6b0b4454b135d4e06ccc0cc9",
+        "e6f24991d01066dfc708b4de5647d2b9e5c1d577a9c2104ad222511abc804a6e",
     ];
 
     /// Editing any recorded payload field breaks verification.
     #[test]
     fn editing_a_payload_field_breaks_verification() {
         let mut log = every_kind();
-        let AuditKind::Redaction(redaction) = &mut log.events[9].kind else {
-            panic!("the tenth event is the redaction");
+        let AuditKind::Selection(selection) = &mut log.events[8].kind else {
+            panic!("the ninth event is the selection");
         };
-        redaction.leak_profile = Some(LeakProfile::Irrecoverable);
+        selection.leak_profile = LeakProfile::Irrecoverable;
+        assert!(log.verify().is_err());
+    }
+
+    /// A selection recorded after a redaction changes the plan, not what the
+    /// redaction applied.
+    #[test]
+    fn a_later_pick_does_not_change_the_applied_selection() {
+        let mut log = every_kind();
+        let applied = log.applied_selection().cloned().unwrap();
+        let conf = Confidence::new(0.5).unwrap();
+        let replan = Selection::new(
+            ComponentId::new("erase", "1"),
+            LeakProfile::Irrecoverable,
+            RuleMatch::Fallback,
+        );
+        log.record(AuditEvent::selection(replan.clone(), conf));
+
+        assert_eq!(log.selection(), Some(&replan));
+        assert_eq!(log.applied_selection(), Some(&applied));
+        assert!(log.verify().is_ok());
+    }
+
+    /// A redaction must name an earlier selection event: one naming any other
+    /// event fails verification, even with every hash intact.
+    #[test]
+    fn a_redaction_naming_no_selection_breaks_verification() {
+        let conf = Confidence::new(0.5).unwrap();
+        let at = TextLocation::inline(0..2);
+        let mut log = AuditLog::<Text>::new(AuditEvent::pattern(
+            "pattern",
+            conf,
+            at,
+            PatternRule::default(),
+        ));
+        let detection = log.events()[0].hash();
+        log.record(AuditEvent::redaction(
+            "mask",
+            Redaction::new(detection),
+            conf,
+        ));
+
+        assert!(log.applied_selection().is_none());
         assert!(log.verify().is_err());
     }
 }

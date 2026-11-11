@@ -1,53 +1,58 @@
 //! Each entity carries its own tamper-evident audit trail (an [`AuditLog`]),
 //! reachable through the facade and verifiable with no `serde` feature.
 
-use elide::entity::audit::{AuditEvent, AuditKind, AuditLog, PatternEvent};
+use elide::entity::audit::{
+    AuditEvent, AuditKind, AuditLog, PatternRule, Redaction, RuleMatch, Selection,
+};
 use elide::entity::{Entity, LabelRef};
 use elide::modality::text::{Text, TextLocation};
-use elide::primitive::Confidence;
+use elide::primitive::{ComponentId, Confidence};
+use elide::redaction::LeakProfile;
 
-/// A text entity found by a pattern, then redacted, so its trail has two
-/// linked events.
+/// A text entity found by a pattern, picked for erasure, then redacted, so its
+/// trail has three linked events.
 fn redacted_entity(label: &str) -> Entity<Text> {
-    use elide::entity::audit::{Redaction, RuleMatch};
-    use elide::primitive::ComponentId;
-    use elide::redaction::LeakProfile;
-
     let location = TextLocation::inline(0..5);
     let conf = Confidence::new(0.9).unwrap();
-    Entity::new(LabelRef::new(label), location.clone())
+    let selection = Selection::new(
+        ComponentId::new("erase", "1.0.0"),
+        LeakProfile::Irrecoverable,
+        RuleMatch::Fallback,
+    );
+    let entity = Entity::new(LabelRef::new(label), location.clone())
         .with_event(AuditEvent::pattern(
             "t",
             conf,
             location,
-            PatternEvent::default(),
+            PatternRule::default(),
         ))
-        .with_event(AuditEvent::redaction(
-            Redaction::new(ComponentId::new("erase", "1.0.0"), RuleMatch::Fallback)
-                .with_leak_profile(LeakProfile::Irrecoverable),
-            conf,
-        ))
+        .with_event(AuditEvent::selection(selection, conf));
+    let picked = entity.audit.selection_event().unwrap().hash();
+    entity.with_event(AuditEvent::redaction("erase", Redaction::new(picked), conf))
 }
 
 #[test]
 fn entity_audit_trail_is_reachable_and_verifies() {
     let entity = redacted_entity("EMAIL_ADDRESS");
 
-    // The trail records both events, linked, and verifies.
-    assert_eq!(entity.audit.events().len(), 2);
-    assert!(matches!(
-        entity.audit.events()[0].kind,
-        AuditKind::Pattern(_)
-    ));
-    assert!(matches!(
-        entity.audit.events()[1].kind,
-        AuditKind::Redaction(_)
-    ));
-    // The redaction links to the detection (its single parent).
-    assert_eq!(entity.audit.events()[1].parents().len(), 1);
+    // The trail records every event, linked, and verifies.
+    let events = entity.audit.events();
+    assert_eq!(events.len(), 3);
+    assert!(matches!(events[0].kind, AuditKind::Pattern(_)));
+    assert!(matches!(events[1].kind, AuditKind::Selection(_)));
+    assert!(matches!(events[2].kind, AuditKind::Redaction(_)));
+    // The redaction follows the pick (its single parent) and names it.
+    assert_eq!(events[2].parents(), [events[1].hash()]);
     assert_eq!(
-        entity.audit.events()[1].parents()[0],
-        entity.audit.events()[0].hash()
+        entity.audit.redaction().map(|r| r.selection),
+        Some(events[1].hash())
+    );
+    assert_eq!(
+        entity
+            .audit
+            .applied_selection()
+            .map(|s| s.operator.name.as_str()),
+        Some("erase")
     );
     assert!(entity.audit.verify().is_ok());
 }

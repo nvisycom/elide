@@ -11,7 +11,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use elide_core::Result;
 use elide_core::backend::{Backend, TokenCounts};
-use elide_core::entity::audit::ModelEvent;
+use elide_core::entity::audit::ModelId;
 use elide_core::modality::text::Text;
 use elide_image::modality::{Image, ImageData, ImageFormat};
 use rig::completion::{Message, Usage};
@@ -150,10 +150,10 @@ impl Backend for RigBackend<Text> {
     type Request<'a> = LlmRequest<'a, Text>;
     type Response = LlmResponse<Text>;
 
-    fn provenance(&self) -> ModelEvent {
-        ModelEvent {
+    fn provenance(&self) -> ModelId {
+        ModelId {
             name: self.model_name.clone().into(),
-            ..ModelEvent::default()
+            ..ModelId::default()
         }
     }
 
@@ -169,10 +169,10 @@ impl Backend for RigBackend<Image> {
     type Request<'a> = LlmRequest<'a, Image>;
     type Response = LlmResponse<Image>;
 
-    fn provenance(&self) -> ModelEvent {
-        ModelEvent {
+    fn provenance(&self) -> ModelId {
+        ModelId {
             name: self.model_name.clone().into(),
-            ..ModelEvent::default()
+            ..ModelId::default()
         }
     }
 

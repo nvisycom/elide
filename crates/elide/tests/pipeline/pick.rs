@@ -59,7 +59,7 @@ async fn anonymize_records_reviewable_body_picks() -> Result<()> {
             .expect("every redacted entity records its pick");
         let applied = entity
             .audit
-            .redaction()
+            .applied_selection()
             .expect("the pick is followed by a redaction");
         let picked = picked.operator.name.as_str();
         assert!(
@@ -141,9 +141,9 @@ async fn pick_previews_the_plan_anonymize_with_follows() -> Result<()> {
             .filter(|event| matches!(event.kind, AuditKind::Selection(_)))
             .count();
         assert_eq!(selections, 1, "applying does not repeat the pick");
-        let redaction = entity.audit.redaction().expect("applied");
+        let applied = entity.audit.applied_selection().expect("applied");
         assert_eq!(
-            redaction.operator.name.as_str(),
+            applied.operator.name.as_str(),
             operator,
             "the planned operator ran"
         );

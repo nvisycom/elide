@@ -137,7 +137,7 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use elide_core::entity::audit::{AuditEvent, PatternEvent};
+    use elide_core::entity::audit::{AuditEvent, PatternRule};
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::mocks::MockRecognizer;
     use elide_core::modality::text::{Text, TextData, TextLocation};
@@ -156,9 +156,9 @@ mod tests {
             "baseline",
             confidence,
             location.clone(),
-            PatternEvent {
+            PatternRule {
                 name: label.as_str().into(),
-                ..PatternEvent::default()
+                ..PatternRule::default()
             },
         );
         Entity::new(label, location).with_event(event)

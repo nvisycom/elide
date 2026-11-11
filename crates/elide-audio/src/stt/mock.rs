@@ -3,7 +3,7 @@
 
 use elide_core::Result;
 use elide_core::backend::Backend;
-use elide_core::entity::audit::ModelEvent;
+use elide_core::entity::audit::ModelId;
 
 use super::{SttRequest, SttResponse};
 use crate::modality::TranscriptSegment;
@@ -56,10 +56,10 @@ impl Backend for MockBackend {
     type Request<'a> = SttRequest<'a>;
     type Response = SttResponse;
 
-    fn provenance(&self) -> ModelEvent {
-        ModelEvent {
+    fn provenance(&self) -> ModelId {
+        ModelId {
             name: "mock-stt".into(),
-            ..ModelEvent::default()
+            ..ModelId::default()
         }
     }
 

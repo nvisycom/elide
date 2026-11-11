@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use elide_core::backend::{Backend, BackendRequest};
-use elide_core::entity::audit::ModelEvent;
+use elide_core::entity::audit::ModelId;
 use elide_core::primitive::LanguageTag;
 use elide_core::{Error, Result};
 
@@ -114,7 +114,7 @@ impl<B: Backend> Backend for LanguageRouted<B> {
     type Request<'a> = B::Request<'a>;
     type Response = B::Response;
 
-    fn provenance(&self) -> ModelEvent {
+    fn provenance(&self) -> ModelId {
         self.fallback.provenance()
     }
 
@@ -213,8 +213,8 @@ mod tests {
         type Request<'a> = Req<'a>;
         type Response = Resp;
 
-        fn provenance(&self) -> ModelEvent {
-            ModelEvent::default()
+        fn provenance(&self) -> ModelId {
+            ModelId::default()
         }
 
         async fn call(&self, request: Req<'_>) -> Result<Resp> {

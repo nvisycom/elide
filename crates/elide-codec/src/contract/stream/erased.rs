@@ -7,7 +7,7 @@ use std::fmt;
 
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::modality::{Chunk, DataReader, DataWriter, Modality, StreamDataReader};
+use elide_core::modality::{Chunk, ChunkReader, DataReader, DataWriter, Modality};
 use elide_core::redaction::Redactions;
 
 use super::{FlaggedItem, Stream};
@@ -36,7 +36,7 @@ trait ErasedStreamObj: Any + Send + Sync {
 /// [`Stream<M>`].
 ///
 /// It is the concrete, `Sized` handle a redaction pipeline drives: it forwards
-/// [`StreamDataReader`] / [`DataReader`] / [`DataWriter`] to the boxed stream, so
+/// [`ChunkReader`] / [`DataReader`] / [`DataWriter`] to the boxed stream, so
 /// a caller never has to name a trait object (which would trip the compiler's
 /// `Send` inference through an `async` boundary).
 pub struct TypedStream<M: Modality> {
@@ -80,7 +80,7 @@ impl<M: Modality> DataWriter<M> for TypedStream<M> {
     }
 }
 
-impl<M: Modality> StreamDataReader<M> for TypedStream<M> {
+impl<M: Modality> ChunkReader<M> for TypedStream<M> {
     fn chunks(&self) -> Result<Vec<Chunk<M>>> {
         Stream::chunks(&*self.stream)
     }

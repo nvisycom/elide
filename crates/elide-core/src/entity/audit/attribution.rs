@@ -12,7 +12,7 @@ use super::hash::AuditHasher;
 /// `Attribution` answers *why the policy demanded it*, a compliance clause, an
 /// internal policy, a data-handling rule. A policy author attaches it to a
 /// selection rule (`Rule::because` in `elide-redaction`); the anonymizer records
-/// it on the entity's [`Redaction`] event so an audit can trace a change back to
+/// it on the entity's [`Selection`] event so an audit can trace a change back to
 /// the policy that demanded it.
 ///
 /// The rationale takes one of two shapes, by how much structure the author has:
@@ -29,7 +29,7 @@ use super::hash::AuditHasher;
 ///         .into();
 /// ```
 ///
-/// [`Redaction`]: crate::entity::audit::AuditKind::Redaction
+/// [`Selection`]: crate::entity::audit::AuditKind::Selection
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(tag = "kind", rename_all = "snake_case"))]

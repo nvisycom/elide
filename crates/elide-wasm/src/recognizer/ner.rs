@@ -9,7 +9,7 @@
 //! label filtering) around whatever inference the app supplies.
 
 use elide::backend::Backend;
-use elide::entity::audit::ModelEvent;
+use elide::entity::audit::ModelId;
 use elide::recognition::ner::NerRecognizer;
 use elide::recognition::ner::backend::{NerRequest, NerResponse, NerSpan};
 use elide::{Error, Result};
@@ -69,8 +69,8 @@ impl Backend for JsCallbackBackend {
     type Request<'a> = NerRequest<'a>;
     type Response = NerResponse;
 
-    fn provenance(&self) -> ModelEvent {
-        ModelEvent {
+    fn provenance(&self) -> ModelId {
+        ModelId {
             name: "js-callback-ner".into(),
             ..Default::default()
         }

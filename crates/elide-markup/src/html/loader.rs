@@ -96,7 +96,7 @@ mod tests {
     use elide_codec::{Document, DocumentPart};
     use elide_core::entity::builtins;
     use elide_core::modality::text::{Text, TextReplacement};
-    use elide_core::modality::{DataReader, DataWriter, StreamDataReader};
+    use elide_core::modality::{ChunkReader, DataReader, DataWriter};
     use elide_core::redaction::{Disposition, HiddenContentKind, Redactions};
 
     use super::*;

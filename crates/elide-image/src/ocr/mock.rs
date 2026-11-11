@@ -3,7 +3,7 @@
 
 use elide_core::Result;
 use elide_core::backend::Backend;
-use elide_core::entity::audit::ModelEvent;
+use elide_core::entity::audit::ModelId;
 
 use super::{OcrRequest, OcrResponse};
 use crate::modality::LayoutRegion;
@@ -56,10 +56,10 @@ impl Backend for MockBackend {
     type Request<'a> = OcrRequest<'a>;
     type Response = OcrResponse;
 
-    fn provenance(&self) -> ModelEvent {
-        ModelEvent {
+    fn provenance(&self) -> ModelId {
+        ModelId {
             name: "mock-ocr".into(),
-            ..ModelEvent::default()
+            ..ModelId::default()
         }
     }
 

@@ -6,7 +6,7 @@ use elide::detection::Analyzer;
 use elide::detection::calibrate::{CalibrateLayer, CalibrationMap};
 use elide::detection::filter::FilterLayer;
 use elide::detection::reconcile::{Merging, ReconcileLayer, Structural};
-use elide_core::entity::audit::{AuditEvent, AuditKind, PatternEvent};
+use elide_core::entity::audit::{AuditEvent, AuditKind, PatternRule};
 use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
 use elide_core::mocks::MockRecognizer;
 use elide_core::primitive::{Confidence, ConfidenceThreshold};
@@ -24,9 +24,9 @@ fn detected(recognizer: &str, label: &str, loc: (usize, usize), conf: f32) -> En
         recognizer.to_owned(),
         confidence,
         location.clone(),
-        PatternEvent {
+        PatternRule {
             name: label.as_str().into(),
-            ..PatternEvent::default()
+            ..PatternRule::default()
         },
     );
     Entity::new(label, location).with_event(event)

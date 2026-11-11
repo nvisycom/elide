@@ -18,7 +18,7 @@
 use elide::Result;
 use elide::codec::pdf::{RasterMode, pdf_format_with};
 use elide::codec::{DocumentPart, FormatRegistry};
-use elide::modality::StreamDataReader;
+use elide::modality::ChunkReader;
 use elide::modality::text::Text;
 use elide::redaction::HiddenContentPolicy;
 

@@ -58,4 +58,5 @@ let rule = Rule::<Text>::label(builtins::IBAN.to_ref(), Erase)
 
 `anonymize` picks an operator for each entity and applies it in one step.
 To look at the picks first, call `pick`, which records each choice on its
-entity, and later `redact`, which applies them.
+entity, then `anonymize`, which applies them, recording first any choice that
+changed since.

@@ -8,7 +8,7 @@ use std::any::Any;
 
 use elide_codec::{ErasedStream, TypedStream};
 use elide_core::entity::Entity;
-use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
+use elide_core::modality::{ChunkReader, DataReader, DataWriter, Modality};
 use elide_core::recognition::Scope;
 use elide_core::redaction::HiddenContentPolicy;
 use elide_core::{Error, Result};
@@ -80,7 +80,7 @@ where
     M: Modality,
     Vec<Entity<M>>: EntityGroup,
     M::Artifact: ArtifactGroup,
-    TypedStream<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
+    TypedStream<M>: ChunkReader<M> + DataReader<M> + DataWriter<M>,
 {
     fn matches(&self, handle: &ErasedStream) -> bool {
         handle.is::<M>()

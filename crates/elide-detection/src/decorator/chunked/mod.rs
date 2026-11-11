@@ -195,7 +195,7 @@ impl<R: Recognizer<Text>, C: Chunking> Recognizer<Text> for ChunkedRecognizer<R,
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::{AuditEvent, ModelEvent};
+    use elide_core::entity::audit::{AuditEvent, ModelId};
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::modality::ResolvedHint;
     use elide_core::modality::text::TextLocation;
@@ -242,7 +242,7 @@ mod tests {
                 "finds-substring",
                 confidence,
                 location.clone(),
-                ModelEvent::default(),
+                ModelId::default(),
             );
             Entity::new(LabelRef::new(label), location)
                 .with_recognized_range(span)

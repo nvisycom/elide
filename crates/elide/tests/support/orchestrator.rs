@@ -16,7 +16,7 @@ use elide::entity::{Entity, LabelCatalog, builtins};
 #[cfg(feature = "image")]
 use elide::modality::image::Image;
 use elide::modality::text::Text;
-use elide::modality::{DataReader, DataWriter, Modality, StreamDataReader, TextRecognizable};
+use elide::modality::{ChunkReader, DataReader, DataWriter, Modality, TextRecognizable};
 use elide::primitive::ConfidenceThreshold;
 use elide::recognition::Scope;
 use elide::recognition::pattern::PatternRecognizer;
@@ -219,7 +219,7 @@ impl TestOrchestrator {
         M: Modality,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
-        TypedStream<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
+        TypedStream<M>: ChunkReader<M> + DataReader<M> + DataWriter<M>,
         Erase: Operator<M>,
     {
         self.inner = self.inner.with_modality::<M>(analyzer, anonymizer);

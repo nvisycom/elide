@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use elide_core::ErrorKind;
 use elide_core::backend::{Meter, TokenCounts, Units};
-use elide_core::entity::audit::ModelEvent;
+use elide_core::entity::audit::ModelId;
 use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -53,11 +53,11 @@ impl ModelUsage {
     }
 }
 
-impl From<ModelEvent> for ModelUsage {
+impl From<ModelId> for ModelUsage {
     /// Take the model identity (name + version) from the audit-trail
-    /// [`ModelEvent`] a backend reports, leaving units unset; a backend that
+    /// [`ModelId`] a backend reports, leaving units unset; a backend that
     /// reports units attaches them with [`with_units`](Self::with_units).
-    fn from(event: ModelEvent) -> Self {
+    fn from(event: ModelId) -> Self {
         Self {
             model: event.name,
             version: event.version,

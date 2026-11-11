@@ -143,7 +143,7 @@ impl Operator<Metadata> for Keep {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::{AuditEvent, PatternEvent};
+    use elide_core::entity::audit::{AuditEvent, PatternRule};
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::modality::text::{Text, TextData, TextLocation, TextReplacement};
     use elide_core::primitive::Confidence;
@@ -157,7 +157,7 @@ mod tests {
             "t",
             Confidence::MAX,
             location.clone(),
-            PatternEvent::default(),
+            PatternRule::default(),
         );
         Entity::new(LabelRef::new("AMOUNT"), location).with_event(event)
     }
@@ -183,7 +183,7 @@ mod tests {
             "t",
             Confidence::MAX,
             location.clone(),
-            PatternEvent::default(),
+            PatternRule::default(),
         );
         let entity: Entity<Image> = Entity::new(LabelRef::new("FACE"), location).with_event(event);
         let data = elide_image::fixtures::blank_image_data();

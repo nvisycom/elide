@@ -230,7 +230,7 @@ labels! {
 
 #[cfg(test)]
 mod tests {
-    use super::super::Category;
+    use super::super::{Category, LabelCatalog};
     use super::*;
     use crate::primitive::LanguageTag;
 
@@ -325,14 +325,13 @@ mod tests {
 
     #[test]
     fn sad_tag_isolates_sensitive_authentication_data() {
-        use super::super::LabelCatalog;
-
         // PCI SAD (must never be stored post-auth) is a subset of PCI scope;
         // the `sad` tag isolates it from the rest.
-        let sad = LabelCatalog::with_builtins().filter_tag("sad");
-        assert!(sad.contains(&CARD_SECURITY_CODE.to_ref()));
-        assert!(sad.contains(&CARD_TRACK_DATA.to_ref()));
-        assert!(sad.contains(&PIN_BLOCK.to_ref()));
+        let catalog = LabelCatalog::with_builtins();
+        let sad: Vec<&str> = catalog.tagged("sad").map(Label::id).collect();
+        assert!(sad.contains(&CARD_SECURITY_CODE.id()));
+        assert!(sad.contains(&CARD_TRACK_DATA.id()));
+        assert!(sad.contains(&PIN_BLOCK.id()));
         // `sad` is additive on top of the existing PCI/financial tags.
         assert!(CARD_SECURITY_CODE.has_tag("pci") && CARD_SECURITY_CODE.has_tag("sad"));
         // The PAN is PCI but not SAD (it may be stored, masked).

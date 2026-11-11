@@ -3,7 +3,7 @@
 
 use elide_core::Result;
 use elide_core::backend::Backend;
-use elide_core::entity::audit::ModelEvent;
+use elide_core::entity::audit::ModelId;
 
 use super::{NerRequest, NerResponse};
 
@@ -43,10 +43,10 @@ impl Backend for MockBackend {
     type Request<'a> = NerRequest<'a>;
     type Response = NerResponse;
 
-    fn provenance(&self) -> ModelEvent {
-        ModelEvent {
+    fn provenance(&self) -> ModelId {
+        ModelId {
             name: "mock-ner".into(),
-            ..ModelEvent::default()
+            ..ModelId::default()
         }
     }
 

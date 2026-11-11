@@ -8,7 +8,7 @@
 
 use elide::backend::Backend;
 use elide::enrichment::stt::{SttEnricher, SttRequest, SttResponse};
-use elide::entity::audit::ModelEvent;
+use elide::entity::audit::ModelId;
 use elide::modality::audio::TranscriptSegment;
 use elide::primitive::TimeSpan;
 use elide::{Error, Result};
@@ -62,8 +62,8 @@ impl Backend for JsCallbackBackend {
     type Request<'a> = SttRequest<'a>;
     type Response = SttResponse;
 
-    fn provenance(&self) -> ModelEvent {
-        ModelEvent {
+    fn provenance(&self) -> ModelId {
+        ModelId {
             name: "js-callback-stt".into(),
             ..Default::default()
         }

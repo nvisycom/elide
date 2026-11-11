@@ -19,7 +19,7 @@
 //! [`Recognizer<Text>`]: elide_core::recognition::Recognizer
 
 use elide_core::backend::Backend;
-use elide_core::entity::audit::{AuditEvent, ModelEvent};
+use elide_core::entity::audit::{AuditEvent, ModelId};
 use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
 use elide_core::modality::TextRecognizable;
 use elide_core::primitive::ComponentId;
@@ -143,9 +143,9 @@ impl<B> NerRecognizer<B> {
             "ner",
             span.confidence,
             location.clone(),
-            ModelEvent {
+            ModelId {
                 name: HipStr::from(self.name().to_owned()),
-                ..ModelEvent::default()
+                ..ModelId::default()
             },
         );
         Some(
@@ -325,10 +325,10 @@ mod tests {
         type Request<'a> = NerRequest<'a>;
         type Response = NerResponse;
 
-        fn provenance(&self) -> ModelEvent {
-            ModelEvent {
+        fn provenance(&self) -> ModelId {
+            ModelId {
                 name: "batch-counting".into(),
-                ..ModelEvent::default()
+                ..ModelId::default()
             }
         }
 

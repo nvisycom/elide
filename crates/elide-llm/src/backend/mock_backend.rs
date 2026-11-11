@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 
 use elide_core::Result;
 use elide_core::backend::Backend;
-use elide_core::entity::audit::ModelEvent;
+use elide_core::entity::audit::ModelId;
 
 use super::{LlmRequest, LlmResponse};
 use crate::modality::LlmModality;
@@ -38,10 +38,10 @@ impl<M: LlmModality> Backend for MockBackend<M> {
     type Request<'a> = LlmRequest<'a, M>;
     type Response = LlmResponse<M>;
 
-    fn provenance(&self) -> ModelEvent {
-        ModelEvent {
+    fn provenance(&self) -> ModelId {
+        ModelId {
             name: "mock".into(),
-            ..ModelEvent::default()
+            ..ModelId::default()
         }
     }
 

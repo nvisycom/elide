@@ -12,7 +12,7 @@ implements `Recognizer<M>`:
   answer for several at once.
 
 ```rust
-use elide::entity::audit::{AuditEvent, PatternEvent};
+use elide::entity::audit::{AuditEvent, PatternRule};
 use elide::modality::text::TextLocation;
 use elide::prelude::*;
 use elide::primitive::ComponentId;
@@ -43,7 +43,7 @@ impl Recognizer<Text> for TicketRecognizer {
                     "ticket-recognizer",
                     confidence,
                     location.clone(),
-                    PatternEvent { name: "ops-ticket".into(), ..PatternEvent::default() },
+                    PatternRule { name: "ops-ticket".into(), ..PatternRule::default() },
                 );
                 Entity::new(builtins::INTERNAL_ID.to_ref(), location)
                     .with_recognized_range(span)

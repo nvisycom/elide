@@ -68,10 +68,16 @@ list which entities redaction leaves alone and which it considers.
 
 To show the reviewer what redaction will do, not only what was found, call
 `orchestrator.pick(&mut report)`. Each entity records the operator it will get,
-and the rule that chose it, as a `Selection` event, picked by the same
-anonymizers and scope `anonymize_with` applies, so the plan shown is the plan
-that runs. Pick again after an edit to update it; an unchanged pick is not
-recorded twice.
+how much that operator's output leaks, the rule that chose it, and the policy's
+rationale, as a `Selection` event, picked by the same anonymizers and scope
+`anonymize_with` applies, so the plan shown is the plan that runs. Pick again
+after an edit to update it; an unchanged pick is not recorded twice.
+
+Applying records a `Redaction` event naming, by its hash, the `Selection` it
+applied. If an edit changed the decision since the pick, the new `Selection` is
+recorded first and the `Redaction` names that one. `audit.applied_selection()`
+reads what a redaction ran, and `verify` rejects a `Redaction` that names no
+earlier `Selection`.
 
 ## Across processes
 

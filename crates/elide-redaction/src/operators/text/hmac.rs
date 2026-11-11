@@ -166,7 +166,7 @@ impl Operator<Metadata> for HmacHash {
 
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::{AuditEvent, PatternEvent};
+    use elide_core::entity::audit::{AuditEvent, PatternRule};
     use elide_core::modality::text::TextLocation;
     use elide_core::primitive::Confidence;
     use zeroize::Zeroizing;
@@ -179,7 +179,7 @@ mod tests {
             "t",
             Confidence::MAX,
             location.clone(),
-            PatternEvent::default(),
+            PatternRule::default(),
         );
         Entity::new(LabelRef::new(label), location).with_event(event)
     }

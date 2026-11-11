@@ -16,7 +16,7 @@
 
 use elide_codec::mocks::{MOCK_EXT, MockPart, decode_mock, encode_mock, mock_format};
 use elide_core::Result;
-use elide_core::entity::audit::{AuditEvent, PatternEvent};
+use elide_core::entity::audit::{AuditEvent, PatternRule};
 use elide_core::entity::builtins::EMAIL_ADDRESS;
 use elide_core::entity::{Entity, LabelCatalog};
 use elide_core::mocks::MockOperator;
@@ -60,7 +60,7 @@ impl Recognizer<Text> for PiiRecognizer {
                 "mock-pii",
                 Confidence::MAX,
                 loc.clone(),
-                PatternEvent::default(),
+                PatternRule::default(),
             );
             entities.push(Entity::new(EMAIL_ADDRESS.to_ref(), loc).with_event(event));
             from = end;

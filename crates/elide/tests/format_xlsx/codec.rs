@@ -7,7 +7,7 @@ use elide::codec::office::xlsx_format;
 use elide::codec::{ContentData, Document, DocumentPart, LocalId, TypedStream};
 use elide::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
 use elide::modality::text::{Text, TextReplacement};
-use elide::modality::{DataReader as _, DataWriter as _, StreamDataReader as _};
+use elide::modality::{ChunkReader as _, DataReader as _, DataWriter as _};
 use elide::redaction::{Disposition, HiddenContent, HiddenContentPolicy, Redactions};
 use elide_office::fixtures::part_names;
 

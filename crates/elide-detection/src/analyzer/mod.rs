@@ -27,7 +27,7 @@ use std::sync::Arc;
 
 use elide_core::enrichment::Enricher;
 use elide_core::entity::Entity;
-use elide_core::modality::{Chunk, Modality, StreamDataReader};
+use elide_core::modality::{Chunk, ChunkReader, Modality};
 use elide_core::recognition::{Context, Recognizer, Scope, Subject};
 use elide_core::{Error, Result};
 use futures::future;
@@ -121,7 +121,7 @@ impl<M: Modality> Analyzer<M> {
     /// [`analyze_streams`](Self::analyze_streams).
     pub async fn analyze_stream<S>(&self, source: &mut S, scope: &Scope) -> Result<Analysis<M>>
     where
-        S: StreamDataReader<M> + ?Sized,
+        S: ChunkReader<M> + ?Sized,
     {
         let mut analyses = self
             .analyze_streams(&mut [source], scope, vec![None])
@@ -154,7 +154,7 @@ impl<M: Modality> Analyzer<M> {
         seeds: Vec<Option<M::Artifact>>,
     ) -> Result<Vec<Analysis<M>>>
     where
-        S: StreamDataReader<M> + ?Sized,
+        S: ChunkReader<M> + ?Sized,
     {
         if sources.len() != seeds.len() {
             return Err(Error::malformed(format!(
@@ -343,7 +343,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use elide_core::ErrorKind;
-    use elide_core::entity::audit::{AuditEvent, PatternEvent};
+    use elide_core::entity::audit::{AuditEvent, PatternRule};
     use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
     use elide_core::mocks::MockRecognizer;
     use elide_core::modality::Chunk;
@@ -366,7 +366,7 @@ mod tests {
         }
     }
 
-    impl StreamDataReader<Text> for VecTextSource {
+    impl ChunkReader<Text> for VecTextSource {
         fn chunks(&self) -> Result<Vec<Chunk<Text>>> {
             Ok(self.0.clone())
         }
@@ -418,9 +418,9 @@ mod tests {
             "mock",
             confidence,
             location.clone(),
-            PatternEvent {
+            PatternRule {
                 name: label.as_str().into(),
-                ..PatternEvent::default()
+                ..PatternRule::default()
             },
         );
         Entity::new(label, location).with_event(event)

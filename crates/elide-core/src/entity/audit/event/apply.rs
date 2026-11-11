@@ -8,89 +8,20 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::super::hash::AuditHasher;
+use super::super::hash::{AuditHash, AuditHasher};
 use super::super::{Attribution, RuleMatch};
 use crate::modality::{Modality, ModalityLocation};
 use crate::primitive::ComponentId;
 use crate::redaction::LeakProfile;
 
-/// An operator hid the entity.
-#[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct Redaction {
-    /// Which operator (name + version) ran.
-    pub operator: ComponentId,
-    /// How much the output leaks about the original, when the operator claimed a
-    /// profile; `None` when it made no claim.
-    #[cfg_attr(
-        feature = "serde",
-        serde(default, skip_serializing_if = "Option::is_none")
-    )]
-    pub leak_profile: Option<LeakProfile>,
-    /// Which selection rule chose this operator: the automatic "why" (matched a
-    /// label, a tag, a predicate, or the fallback).
-    pub matched_by: RuleMatch,
-    /// The author-supplied policy rationale, when the operator carried an
-    /// [`Attribution`]; `None` otherwise.
-    #[cfg_attr(
-        feature = "serde",
-        serde(default, skip_serializing_if = "Option::is_none")
-    )]
-    pub attribution: Option<Attribution>,
-}
-
-impl Redaction {
-    /// This kind's discriminant byte (see the [payloads overview](super)).
-    pub(crate) const TAG: u8 = 7;
-
-    /// A redaction by `operator`, chosen by the rule `matched_by`. The leak
-    /// profile and policy attribution are attached with the `with_*` builders.
-    pub fn new(operator: ComponentId, matched_by: RuleMatch) -> Self {
-        Self {
-            operator,
-            leak_profile: None,
-            matched_by,
-            attribution: None,
-        }
-    }
-
-    /// Attach how much the operator's output leaks about the original.
-    #[must_use]
-    pub fn with_leak_profile(mut self, leak_profile: LeakProfile) -> Self {
-        self.leak_profile = Some(leak_profile);
-        self
-    }
-
-    /// Attach the author-supplied policy [`Attribution`] the operator carried.
-    #[must_use]
-    pub fn with_attribution(mut self, attribution: impl Into<Attribution>) -> Self {
-        self.attribution = Some(attribution.into());
-        self
-    }
-
-    pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
-        out.bytes(self.operator.name.as_bytes());
-        out.bytes(self.operator.version.as_bytes());
-        match self.leak_profile {
-            Some(profile) => {
-                out.byte(1);
-                out.byte(profile as u8);
-            }
-            None => {
-                out.byte(0);
-            }
-        }
-        self.matched_by.hash_into(out);
-        hash_opt_attribution(out, self.attribution.as_ref());
-    }
-}
-
-/// An operator was *picked* to hide the entity, the redaction decision,
+/// The redaction *decision*: an operator was picked to hide the entity,
 /// recorded before it is applied so it can be reviewed (and the entity edited)
-/// first. The [`Redaction`] event that follows records the operator actually
-/// run.
-#[derive(Debug, Clone)]
+/// first.
+///
+/// It carries the whole decision: which operator, how much its output leaks,
+/// which rule chose it, and the policy's rationale. The [`Redaction`] that
+/// applies it names this event by its hash.
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Selection {
@@ -98,6 +29,8 @@ pub struct Selection {
     /// recorded; it lives in the policy that will run it, so apply re-resolves
     /// the configured operator rather than reading it here.
     pub operator: ComponentId,
+    /// How much the operator's output leaks about the original.
+    pub leak_profile: LeakProfile,
     /// Which selection rule chose this operator: the automatic "why" (matched a
     /// label, a tag, a predicate, or the fallback).
     pub matched_by: RuleMatch,
@@ -114,11 +47,13 @@ impl Selection {
     /// This kind's discriminant byte (see the [payloads overview](super)).
     pub(crate) const TAG: u8 = 9;
 
-    /// A pick of `operator`, chosen by the rule `matched_by`, with no policy
-    /// attribution. Attach one with [`with_attribution`](Self::with_attribution).
-    pub fn new(operator: ComponentId, matched_by: RuleMatch) -> Self {
+    /// A pick of `operator`, whose output leaks as `leak_profile`, chosen by the
+    /// rule `matched_by`, with no policy attribution. Attach one with
+    /// [`with_attribution`](Self::with_attribution).
+    pub fn new(operator: ComponentId, leak_profile: LeakProfile, matched_by: RuleMatch) -> Self {
         Self {
             operator,
+            leak_profile,
             matched_by,
             attribution: None,
         }
@@ -134,8 +69,41 @@ impl Selection {
     pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
         out.bytes(self.operator.name.as_bytes());
         out.bytes(self.operator.version.as_bytes());
+        out.byte(self.leak_profile as u8);
         self.matched_by.hash_into(out);
         hash_opt_attribution(out, self.attribution.as_ref());
+    }
+}
+
+/// The redaction *execution*: the entity was hidden by applying a
+/// [`Selection`].
+///
+/// It names that selection event by its hash, so which operator ran, why, and
+/// how much its output leaks are read from the decision itself, see
+/// [`AuditLog::applied_selection`]. [`AuditLog::verify`] checks the link names
+/// an earlier selection event on the same trail.
+///
+/// [`AuditLog::applied_selection`]: crate::entity::audit::AuditLog::applied_selection
+/// [`AuditLog::verify`]: crate::entity::audit::AuditLog::verify
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct Redaction {
+    /// The hash of the [`Selection`] event this redaction applied.
+    pub selection: AuditHash,
+}
+
+impl Redaction {
+    /// This kind's discriminant byte (see the [payloads overview](super)).
+    pub(crate) const TAG: u8 = 7;
+
+    /// A redaction applying the [`Selection`] event whose hash is `selection`.
+    pub fn new(selection: AuditHash) -> Self {
+        Self { selection }
+    }
+
+    pub(crate) fn hash_into(&self, out: &mut AuditHasher) {
+        out.raw(self.selection.as_bytes());
     }
 }
 

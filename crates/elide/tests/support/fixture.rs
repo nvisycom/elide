@@ -19,7 +19,7 @@ use elide::modality::image::Image;
 #[cfg(feature = "tabular")]
 use elide::modality::tabular::Tabular;
 use elide::modality::text::Text;
-use elide::modality::{DataReader, DataWriter, Modality, StreamDataReader, TextRecognizable};
+use elide::modality::{ChunkReader, DataReader, DataWriter, Modality, TextRecognizable};
 use elide::primitive::LanguageTag;
 use elide::recognition::Scope;
 use elide::redaction::operators::{Erase, Mask, Replace};
@@ -338,7 +338,7 @@ impl Fixture {
         M: TextRecognizable,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
-        TypedStream<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
+        TypedStream<M>: ChunkReader<M> + DataReader<M> + DataWriter<M>,
         Replace: Operator<M>,
         Mask: Operator<M>,
         Erase: Operator<M>,
@@ -367,7 +367,7 @@ impl Fixture {
         M: TextRecognizable,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
-        TypedStream<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
+        TypedStream<M>: ChunkReader<M> + DataReader<M> + DataWriter<M>,
         Replace: Operator<M>,
         Mask: Operator<M>,
         Erase: Operator<M>,

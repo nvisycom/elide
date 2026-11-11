@@ -4,12 +4,11 @@
 //! rules plus its entry points. [`pick`] resolves each entity's operator and
 //! records the decision as a [`Selection`] event on the entity's audit trail,
 //! without touching the data, so the picks can be reviewed (and the entities
-//! edited) first; [`redact`] re-resolves the configured operator, computes each
-//! [`Replacement`], and applies the batch back into the target; [`anonymize`]
-//! does both in one step.
+//! edited) first; [`anonymize`] resolves the configured operators, records any
+//! decision not already on the trail, computes each [`Replacement`], and
+//! applies the batch back into the target.
 //!
 //! [`pick`]: Anonymizer::pick
-//! [`redact`]: Anonymizer::redact
 //! [`anonymize`]: Anonymizer::anonymize
 //! [`Selection`]: elide_core::entity::audit::AuditKind::Selection
 //! [`Replacement`]: elide_core::modality::Modality::Replacement
@@ -20,7 +19,7 @@ mod rule;
 use std::sync::Arc;
 
 use elide_core::Result;
-use elide_core::entity::audit::{Attribution, AuditEvent, Redaction, RuleMatch, Selection};
+use elide_core::entity::audit::{AuditEvent, Redaction, Selection};
 use elide_core::entity::{Entity, LabelCatalog};
 use elide_core::modality::{DataReader, DataWriter, Modality, ModalityLocation};
 use elide_core::recognition::Scope;
@@ -140,16 +139,16 @@ impl<M: Modality> Anonymizer<M> {
     /// is applied.
     ///
     /// For each overlap cluster it resolves the winning operator (see the merge
-    /// rule below) and records a [`Selection`] event, naming the operator, the
-    /// rule that matched, and any policy attribution, on **every** entity the
-    /// cluster covers, so a merged non-winner still shows why it will be hidden.
+    /// rule below) and records a [`Selection`] event, naming the operator, its
+    /// leak profile, the rule that matched, and any policy attribution, on
+    /// **every** entity the cluster covers, so a merged non-winner still shows
+    /// why it will be hidden.
     /// No document data is touched. Entities whose label has no operator and no
     /// fallback get no pick; a reviewer-suppressed entity is skipped entirely.
     ///
-    /// Idempotent per operator: re-running `pick` (or calling it before
-    /// [`anonymize`], which picks again) does not stack a second identical
-    /// [`Selection`] on an entity whose latest pick already names the same
-    /// operator. A pick that resolves to a *different* operator still records.
+    /// Idempotent: re-running `pick`, or calling [`anonymize`] after it, does
+    /// not stack a second identical [`Selection`]; a decision that differs in
+    /// operator, rule, or rationale records anew.
     ///
     /// `scope` is the caller-asserted request [`Scope`], passed to
     /// [predicate rules](Rule::predicate) via [`MatchContext::scope`] so the pick
@@ -168,41 +167,19 @@ impl<M: Modality> Anonymizer<M> {
     /// A purely mechanical safety step: it makes no semantic choice about which
     /// *finding* is right, that is detection's job.
     ///
-    /// [`anonymize`] runs `pick` and applies in one step.
+    /// [`anonymize`] records the same decisions and applies them.
     ///
     /// [`anonymize`]: Self::anonymize
     /// [`LeakProfile`]: elide_core::redaction::LeakProfile
     pub fn pick(&self, entities: &mut [Entity<M>], scope: &Scope) {
         for cluster in self.resolve_clusters(entities, scope) {
-            // Record the same pick on every covered entity. Built per member
-            // (rather than cloned) because `AuditEvent<M>: Clone` would demand
-            // `M: Clone`, which a modality marker need not be.
-            for &i in &cluster.members {
-                // Idempotent: a consumer that reviews picks then applies calls
-                // pick() then anonymize() (which picks again). Skip when this
-                // entity's latest selection already names the same operator, so
-                // re-picking never stacks a duplicate event.
-                if entities[i]
-                    .audit
-                    .selection()
-                    .is_some_and(|s| s.operator == cluster.operator.id())
-                {
-                    continue;
-                }
-                let mut selection =
-                    Selection::new(cluster.operator.id(), cluster.matched_by.clone());
-                if let Some(attribution) = cluster.attribution.clone() {
-                    selection = selection.with_attribution(attribution);
-                }
-                let event = AuditEvent::selection(selection, entities[i].confidence);
-                entities[i].record(event);
-            }
+            cluster.record_selection(entities);
         }
     }
 
     /// Resolve each overlap cluster to its winning operator, dropping
     /// reviewer-suppressed entities and clusters no rule covers, the shared
-    /// decision behind [`pick`](Self::pick) and [`redact`](Self::redact).
+    /// decision behind [`pick`](Self::pick) and [`anonymize`](Self::anonymize).
     ///
     /// Operators are cloned out of the rule registry (config intact) so the
     /// borrow on `self` ends and the caller can mutate `entities` freely.
@@ -221,7 +198,7 @@ impl<M: Modality> Anonymizer<M> {
             // Pick the safest operator among the members, the one that leaks
             // least; ties go to the wider span, then the earlier position.
             // `None` means no member had an operator.
-            let Some((winner, operator, matched_by, attribution)) = members
+            let Some((winner, operator, selection)) = members
                 .iter()
                 .copied()
                 .filter_map(|i| self.operators.resolve(&entities[i], scope).map(|r| (i, r)))
@@ -233,12 +210,12 @@ impl<M: Modality> Anonymizer<M> {
                         .then_with(|| entities[*j].location.position_cmp(&entities[*i].location))
                 })
                 .map(|(i, r)| {
-                    (
-                        i,
-                        Arc::clone(r.operator),
-                        r.matched_by,
-                        r.attribution.cloned(),
-                    )
+                    let mut selection =
+                        Selection::new(r.operator.id(), r.operator.leak_profile(), r.matched_by);
+                    if let Some(attribution) = r.attribution {
+                        selection = selection.with_attribution(attribution.clone());
+                    }
+                    (i, Arc::clone(r.operator), selection)
                 })
             else {
                 continue;
@@ -247,58 +224,35 @@ impl<M: Modality> Anonymizer<M> {
                 members,
                 winner,
                 operator,
-                matched_by,
-                attribution,
+                selection,
             });
         }
         resolved
     }
 
-    /// Hide every entity by applying its operator's replacement back into
-    /// `target`.
+    /// Hide every entity: for each overlap cluster, resolve its winning
+    /// operator from the rules, record that decision as a [`Selection`] when it
+    /// differs from the entity's latest one, read the union span from `target`,
+    /// run the operator, and hand the batch to [`DataWriter::write_at`], then
+    /// record a [`Redaction`] on every covered entity.
     ///
-    /// The complete redaction step: [`pick`]s each entity's operator,
-    /// reads its value from `target`, runs the operator, and hands the batch
-    /// to [`DataWriter::write_at`] so `target` owns the *how* and *ordering*
-    /// of applying it. `target` is both the reader and the writer,
-    /// typically a decoded codec document. Entities must already be in
-    /// `target`'s coordinate system.
+    /// `target` is both the reader and the writer, typically a decoded codec
+    /// document, and owns the *how* and *ordering* of applying the batch.
+    /// Entities must already be in `target`'s coordinate system. `scope` is
+    /// passed to the operator rules for scope-aware selection.
     ///
-    /// `scope` is passed to the operator rules for scope-aware selection.
-    ///
-    /// Use [`pick`] then [`redact`] instead when the picks must be reviewed
-    /// (each recorded on its entity's audit trail) between decision and apply.
-    ///
-    /// [`pick`]: Self::pick
-    /// [`redact`]: Self::redact
-    pub async fn anonymize<T>(
-        &self,
-        target: &mut T,
-        entities: &mut [Entity<M>],
-        scope: &Scope,
-    ) -> Result<()>
-    where
-        T: DataReader<M> + DataWriter<M> + ?Sized,
-    {
-        self.pick(entities, scope);
-        self.redact(target, entities, scope).await
-    }
-
-    /// Apply the redaction back into `target`: for each overlap cluster,
-    /// re-resolve its winning operator from the rules, read the union span, run
-    /// the operator, and record a [`Redaction`] event on every covered entity.
-    ///
-    /// This is the apply half of the reviewable path. Picks live on the
-    /// entities' audit trails ([`pick`]); the operator's *configuration* lives
-    /// in the rules, so `redact` re-resolves the live configured operator here
-    /// rather than reading it from the audit, a reviewer overrides by editing
-    /// the entity (suppress, retag), not by rewriting the pick. A
-    /// reviewer-suppressed entity is left alone. `scope` selects the same rules
-    /// [`pick`] used.
+    /// To review the decisions first, call [`pick`], edit the entities, then
+    /// `anonymize`. The operator's *configuration* lives in the rules, so this
+    /// re-resolves the live configured operator rather than reading it from
+    /// the audit: a reviewer overrides by editing the entity (suppress,
+    /// retag), not by rewriting the pick. A decision an edit changed is
+    /// recorded anew before it is applied, and each redaction names the
+    /// selection event it applied. A reviewer-suppressed entity is left alone.
     ///
     /// [`pick`]: Self::pick
     /// [`Redaction`]: elide_core::entity::audit::AuditKind::Redaction
-    pub async fn redact<T>(
+    /// [`Selection`]: elide_core::entity::audit::AuditKind::Selection
+    pub async fn anonymize<T>(
         &self,
         target: &mut T,
         entities: &mut [Entity<M>],
@@ -314,6 +268,11 @@ impl<M: Modality> Anonymizer<M> {
         // Redaction event must never claim an operator hid an entity while a
         // later error left the document unwritten.
         let mut pending: Vec<(usize, AuditEvent<M>)> = Vec::new();
+        // Every decision is on the trail before anything runs, so a failed
+        // read or operator leaves every decision recorded and no redaction.
+        for cluster in &clusters {
+            cluster.record_selection(entities);
+        }
         for cluster in clusters {
             // Redact the union of every member's span. Clustering groups only
             // entities that coalesce, so the fold never hits `None`; a
@@ -338,16 +297,20 @@ impl<M: Modality> Anonymizer<M> {
                 .anonymize(&entities[cluster.winner], &data)
                 .await?;
 
-            // Stage a redaction event for every member, so each entity's
-            // provenance reflects that this operator hid it.
+            // Stage a redaction event for every member, naming the selection
+            // event it applies, so each entity's provenance reflects that this
+            // operator hid it.
             for &i in &cluster.members {
-                let mut redaction =
-                    Redaction::new(cluster.operator.id(), cluster.matched_by.clone())
-                        .with_leak_profile(cluster.operator.leak_profile());
-                if let Some(attribution) = cluster.attribution.clone() {
-                    redaction = redaction.with_attribution(attribution);
-                }
-                let event = AuditEvent::redaction(redaction, entities[i].confidence);
+                let selection = entities[i]
+                    .audit
+                    .selection_event()
+                    .expect("every member's selection is recorded above")
+                    .hash();
+                let event = AuditEvent::redaction(
+                    cluster.selection.operator.name.clone(),
+                    Redaction::new(selection),
+                    entities[i].confidence,
+                );
                 pending.push((i, event));
             }
             redactions.push(location, replacement);
@@ -365,8 +328,8 @@ impl<M: Modality> Anonymizer<M> {
 /// One overlap cluster resolved to the operator that will hide it: the covered
 /// entity indices (in cluster order), the index of the entity that *won* the
 /// operator selection, the live configured operator (cloned from the rules), and
-/// the pick's provenance. The shared output of [`Anonymizer::pick`] and
-/// [`Anonymizer::redact`].
+/// the decision recorded as each member's [`Selection`]. The shared output of
+/// [`Anonymizer::pick`] and [`Anonymizer::anonymize`].
 struct ResolvedCluster<M: Modality> {
     /// Every covered entity's index, in cluster order (not winner-first).
     members: Vec<usize>,
@@ -375,8 +338,25 @@ struct ResolvedCluster<M: Modality> {
     /// must run against *this* entity, not `members[0]`.
     winner: usize,
     operator: SharedOperator<M>,
-    matched_by: RuleMatch,
-    attribution: Option<Attribution>,
+    selection: Selection,
+}
+
+impl<M: Modality> ResolvedCluster<M> {
+    /// Record this cluster's decision on every member whose latest
+    /// [`Selection`] is not already it.
+    ///
+    /// Idempotent, so re-picking never stacks a duplicate; any change
+    /// (operator, rule, rationale) records anew, so a member's latest selection
+    /// event is the decision [`Anonymizer::anonymize`] applies.
+    fn record_selection(&self, entities: &mut [Entity<M>]) {
+        for &i in &self.members {
+            if entities[i].audit.selection() == Some(&self.selection) {
+                continue;
+            }
+            let event = AuditEvent::selection(self.selection.clone(), entities[i].confidence);
+            entities[i].record(event);
+        }
+    }
 }
 
 impl<M: Modality> Default for Anonymizer<M> {
@@ -438,7 +418,7 @@ fn cluster_overlaps<M: Modality>(entities: &[Entity<M>], candidates: &[usize]) -
 mod tests {
     use elide_core::entity::LabelRef;
     use elide_core::entity::audit::{
-        AuditEvent, AuditKind, FlaggedEvent, Manual, ManualIntent, RuleMatch,
+        Attribution, AuditEvent, AuditKind, Manual, ManualIntent, RuleMatch,
     };
     use elide_core::modality::text::{Text, TextDoc};
     use elide_core::primitive::Confidence;
@@ -501,6 +481,39 @@ mod tests {
         assert_eq!(selections, 1, "re-picking the same operator records once");
     }
 
+    /// A decision that changes between `pick` and `anonymize`, even to the same
+    /// operator under a different rule, is recorded anew before it is applied,
+    /// and the redaction names the new selection.
+    #[tokio::test]
+    async fn anonymize_records_a_changed_decision_before_applying_it() {
+        let mut target = TextDoc::new("alice");
+        let mut entities = vec![entity("NAME", 0, 5)];
+        Anonymizer::new()
+            .with(Rule::label(LabelRef::new("NAME"), Erase))
+            .pick(&mut entities, &Scope::default());
+
+        Anonymizer::new()
+            .with(Rule::fallback(Erase))
+            .anonymize(&mut target, &mut entities, &Scope::default())
+            .await
+            .unwrap();
+
+        let audit = &entities[0].audit;
+        let selections = audit
+            .events()
+            .iter()
+            .filter(|e| matches!(&e.kind, AuditKind::Selection(_)))
+            .count();
+        assert_eq!(selections, 2, "the changed decision is recorded");
+        let selection = audit.selection().expect("picked");
+        assert_eq!(selection.matched_by, RuleMatch::Fallback);
+        assert_eq!(audit.applied_selection(), Some(selection));
+        let selection_at =
+            audit.position(|k| matches!(k, AuditKind::Selection(s) if s == selection));
+        let redaction_at = audit.position(|k| matches!(k, AuditKind::Redaction(_)));
+        assert!(selection_at < redaction_at, "decided before applied");
+    }
+
     /// A [scope-aware predicate](Rule::predicate) reading [`MatchContext::scope`]
     /// lets the *same* entity be picked differently per request `Scope`. Here an
     /// auditor keeps a wider prefix than a support agent, the pick's
@@ -541,7 +554,7 @@ mod tests {
 
     /// Overlapping entities are won by the safest operator, and the pick is
     /// recorded on *every* member of the cluster, mirroring the merge that
-    /// `redact` applies.
+    /// `anonymize` applies.
     #[tokio::test]
     async fn pick_records_the_cluster_winner_on_every_member() {
         // NAME [0,5) → Replace (Partial); SSN [3,12) → Erase (Irrecoverable).
@@ -562,16 +575,16 @@ mod tests {
         }
     }
 
-    /// `redact` applies each cluster's re-resolved live operator and records the
+    /// `anonymize` applies each cluster's re-resolved live operator and records the
     /// redaction on every entity it covers.
     #[tokio::test]
-    async fn redact_applies_the_picks() {
+    async fn anonymize_applies_the_picks() {
         let mut target = TextDoc::new("alice and bob");
         let mut entities = vec![entity("NAME", 0, 5), entity("NAME", 10, 13)];
         let anonymizer = Anonymizer::new().with(Rule::fallback(Erase));
 
         anonymizer
-            .redact(&mut target, &mut entities, &Scope::default())
+            .anonymize(&mut target, &mut entities, &Scope::default())
             .await
             .unwrap();
         // Each covered entity recorded the redaction.
@@ -605,7 +618,7 @@ mod tests {
     }
 
     /// A reviewer-suppressed entity is left alone: `pick` records no pick for
-    /// it, and `redact` records no redaction on it, while a co-located live
+    /// it, and `anonymize` records no redaction on it, while a co-located live
     /// entity is still picked and redacted.
     #[tokio::test]
     async fn a_suppressed_entity_is_not_picked_or_redacted() {
@@ -667,7 +680,7 @@ mod tests {
         let anonymizer = Anonymizer::new().with(Rule::fallback(Replace::new("[{label}]")));
 
         anonymizer
-            .redact(&mut target, &mut entities, &Scope::default())
+            .anonymize(&mut target, &mut entities, &Scope::default())
             .await
             .unwrap();
 
@@ -702,7 +715,7 @@ mod tests {
         // leaked in, the label would be NAME. It must not.
         let anonymizer = Anonymizer::new().with(Rule::fallback(Replace::new("[{label}]")));
         anonymizer
-            .redact(&mut target, &mut entities, &Scope::default())
+            .anonymize(&mut target, &mut entities, &Scope::default())
             .await
             .unwrap();
 
@@ -742,7 +755,7 @@ mod tests {
 
         let anonymizer = Anonymizer::new().with(Rule::fallback(Erase));
         anonymizer
-            .redact(&mut target, &mut entities, &Scope::default())
+            .anonymize(&mut target, &mut entities, &Scope::default())
             .await
             .unwrap();
 
@@ -769,9 +782,7 @@ mod tests {
             "test",
             comment.confidence,
             comment.location.clone(),
-            FlaggedEvent {
-                content: HiddenContentKind::Collaboration,
-            },
+            HiddenContentKind::Collaboration,
         ));
         let mut entities = vec![comment, entity("NAME", 4, 7)];
         let anonymizer = Anonymizer::new()
@@ -796,7 +807,7 @@ mod tests {
         let anonymizer = Anonymizer::new().with(Rule::fallback(Erase));
 
         let result = anonymizer
-            .redact(&mut target, &mut entities, &Scope::default())
+            .anonymize(&mut target, &mut entities, &Scope::default())
             .await;
 
         assert!(result.is_err(), "the write failed");

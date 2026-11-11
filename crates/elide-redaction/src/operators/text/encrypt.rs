@@ -241,7 +241,7 @@ impl Operator<Metadata> for AesEncrypt {
 #[cfg(test)]
 mod tests {
     use elide_core::ErrorKind;
-    use elide_core::entity::audit::{AuditEvent, PatternEvent};
+    use elide_core::entity::audit::{AuditEvent, PatternRule};
     use elide_core::modality::text::TextLocation;
     use elide_core::primitive::Confidence;
     use zeroize::Zeroizing;
@@ -254,7 +254,7 @@ mod tests {
             "t",
             Confidence::MAX,
             location.clone(),
-            PatternEvent::default(),
+            PatternRule::default(),
         );
         Entity::new(LabelRef::new("email_address"), location).with_event(event)
     }
@@ -330,13 +330,13 @@ mod tests {
         let card = {
             let loc = TextLocation::inline(0..5);
             let event =
-                AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
+                AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternRule::default());
             Entity::<Text>::new(LabelRef::new("payment_card"), loc).with_event(event)
         };
         let ssn = {
             let loc = TextLocation::inline(0..5);
             let event =
-                AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
+                AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternRule::default());
             Entity::<Text>::new(LabelRef::new("ssn"), loc).with_event(event)
         };
 

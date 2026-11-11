@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use elide_core::backend::{Backend, BackendResponse};
-use elide_core::entity::audit::ModelEvent;
+use elide_core::entity::audit::ModelId;
 use elide_core::{Error, Result};
 
 use super::usage::{ModelUsage, Usage, UsageSink};
@@ -65,7 +65,7 @@ impl<B: Backend> Backend for Metered<B> {
     type Request<'a> = B::Request<'a>;
     type Response = B::Response;
 
-    fn provenance(&self) -> ModelEvent {
+    fn provenance(&self) -> ModelId {
         self.inner.provenance()
     }
 

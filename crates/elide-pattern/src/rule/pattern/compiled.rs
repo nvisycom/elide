@@ -4,7 +4,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use elide_core::entity::LabelRef;
-use elide_core::entity::audit::PatternEvent;
+use elide_core::entity::audit::PatternRule;
 use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
 use regex::{Match, Regex};
 
@@ -77,7 +77,7 @@ impl CompiledPattern {
             confidence: self.score,
             range,
             context: self.context,
-            pattern: PatternEvent {
+            rule: PatternRule {
                 name: self.name.clone().into(),
                 regex: Some(self.regex.as_str().into()),
                 validator: self.validator.as_ref().map(|_| self.name.clone().into()),

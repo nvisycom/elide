@@ -5,9 +5,7 @@
 
 mod fixtures;
 
-use elide_core::entity::audit::{
-    Attribution, AuditKind, CitedAttribution, FreeformAttribution, RuleMatch,
-};
+use elide_core::entity::audit::{Attribution, CitedAttribution, FreeformAttribution, RuleMatch};
 use elide_core::entity::{Entity, EntityCoRef, Label, LabelCatalog, LabelRef};
 use elide_core::modality::text::Text;
 use elide_core::primitive::{Confidence, ConfidenceThreshold};
@@ -226,27 +224,20 @@ async fn anonymize_records_redaction_provenance_with_rule_and_attribution() {
         .await
         .unwrap();
 
-    // The entity now carries a Redaction event describing *why* and *how*.
-    let redaction = entities[0]
+    // The Selection records the decision, and the Redaction names it.
+    let selection = entities[0]
         .audit
-        .events()
-        .iter()
-        .find_map(|e| match &e.kind {
-            AuditKind::Redaction(r) => Some((
-                r.operator.clone(),
-                r.matched_by.clone(),
-                r.attribution.clone(),
-            )),
-            _ => None,
-        })
-        .expect("a Redaction event was recorded");
-
-    let (operator, matched_by, attribution) = redaction;
-    assert_eq!(operator.name, "replace");
+        .selection()
+        .expect("a Selection was recorded");
+    assert_eq!(selection.operator.name, "replace");
+    assert_eq!(entities[0].audit.applied_selection(), Some(selection));
     // Automatic why: matched the exact-label rule.
-    assert_eq!(matched_by, RuleMatch::Label(LabelRef::new("EMAIL_ADDRESS")));
+    assert_eq!(
+        selection.matched_by,
+        RuleMatch::Label(LabelRef::new("EMAIL_ADDRESS"))
+    );
     // Author why: the attribution the rule carried.
-    let attribution = attribution.expect("attribution recorded");
+    let attribution = selection.attribution.clone().expect("attribution recorded");
     let Attribution::Freeform(FreeformAttribution { name, description }) = attribution else {
         panic!("expected a freeform attribution");
     };
@@ -266,18 +257,13 @@ async fn anonymize_records_fallback_rule_with_no_attribution() {
         .await
         .unwrap();
 
-    let (matched_by, attribution) = entities[0]
+    let selection = entities[0]
         .audit
-        .events()
-        .iter()
-        .find_map(|e| match &e.kind {
-            AuditKind::Redaction(r) => Some((r.matched_by.clone(), r.attribution.clone())),
-            _ => None,
-        })
-        .expect("a Redaction event was recorded");
-
-    assert_eq!(matched_by, RuleMatch::Fallback);
-    assert!(attribution.is_none());
+        .selection()
+        .expect("a Selection was recorded");
+    assert_eq!(selection.matched_by, RuleMatch::Fallback);
+    assert!(selection.attribution.is_none());
+    assert!(entities[0].audit.is_redacted());
 }
 
 #[tokio::test]
@@ -297,12 +283,8 @@ async fn because_records_a_freeform_attribution() {
 
     let attribution = entities[0]
         .audit
-        .events()
-        .iter()
-        .find_map(|e| match &e.kind {
-            AuditKind::Redaction(r) => r.attribution.clone(),
-            _ => None,
-        })
+        .selection()
+        .and_then(|selection| selection.attribution.clone())
         .expect("attribution recorded");
     // A bare name builds a freeform attribution with no description.
     let Attribution::Freeform(FreeformAttribution { name, description }) = attribution else {
@@ -330,12 +312,8 @@ async fn because_records_a_cited_attribution() {
 
     let attribution = entities[0]
         .audit
-        .events()
-        .iter()
-        .find_map(|e| match &e.kind {
-            AuditKind::Redaction(r) => r.attribution.clone(),
-            _ => None,
-        })
+        .selection()
+        .and_then(|selection| selection.attribution.clone())
         .expect("attribution recorded");
 
     let Attribution::Cited(CitedAttribution {

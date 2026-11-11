@@ -126,7 +126,7 @@ where
 }
 #[cfg(test)]
 mod tests {
-    use elide_core::entity::audit::{AuditEvent, AuditKind, PatternEvent};
+    use elide_core::entity::audit::{AuditEvent, AuditKind, PatternRule};
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::modality::text::{Text, TextLocation};
     use elide_core::primitive::Confidence;
@@ -138,7 +138,7 @@ mod tests {
     fn entity(label: &str, start: usize, end: usize, conf: f32) -> Entity<Text> {
         let loc = TextLocation::inline(start..end);
         let confidence = Confidence::new(conf).unwrap();
-        let event = AuditEvent::pattern("t", confidence, loc.clone(), PatternEvent::default());
+        let event = AuditEvent::pattern("t", confidence, loc.clone(), PatternRule::default());
         Entity::new(LabelRef::new(label), loc).with_event(event)
     }
 
