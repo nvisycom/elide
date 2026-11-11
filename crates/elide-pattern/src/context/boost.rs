@@ -235,7 +235,7 @@ mod tests {
     use std::collections::HashMap;
 
     use elide_core::entity::LabelRef;
-    use elide_core::entity::audit::PatternEvent;
+    use elide_core::entity::audit::PatternRule;
 
     use super::*;
     use crate::context::matching::SubstringMatcher;
@@ -266,7 +266,7 @@ mod tests {
             score,
             confidence: score,
             range,
-            pattern: PatternEvent::default(),
+            rule: PatternRule::default(),
             context,
         }
     }

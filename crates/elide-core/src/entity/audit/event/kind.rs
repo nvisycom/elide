@@ -26,7 +26,7 @@ use crate::modality::Modality;
 /// # use elide_core::modality::text::Text;
 /// # fn show(kind: &AuditKind<Text>) {
 /// if let AuditKind::Redaction(redaction) = kind {
-///     let _ = &redaction.operator;
+///     let _ = &redaction.selection;
 /// }
 /// # }
 /// ```

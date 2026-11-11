@@ -164,7 +164,7 @@ fn ocr_request<'a>(subject: &'a Subject<Image>, ctx: &'a Context<'_>) -> OcrRequ
 mod tests {
     use elide_core::ErrorKind;
     use elide_core::backend::Backend;
-    use elide_core::entity::audit::ModelEvent;
+    use elide_core::entity::audit::ModelId;
     use elide_core::modality::TextRecognizable;
     use elide_core::recognition::Scope;
 
@@ -228,7 +228,7 @@ mod tests {
         impl Backend for OcrSpy {
             type Request<'a> = OcrRequest<'a>;
             type Response = OcrResponse;
-            fn provenance(&self) -> ModelEvent;
+            fn provenance(&self) -> ModelId;
             #[mockall::concretize]
             async fn call(&self, request: OcrRequest<'_>) -> Result<OcrResponse>;
         }
@@ -240,9 +240,9 @@ mod tests {
     #[tokio::test]
     async fn a_present_artifact_skips_the_backend() {
         let mut backend = MockOcrSpy::new();
-        backend.expect_provenance().returning(|| ModelEvent {
+        backend.expect_provenance().returning(|| ModelId {
             name: "spy".into(),
-            ..ModelEvent::default()
+            ..ModelId::default()
         });
         // The self-skip, asserted as a call cardinality: recognize fires exactly
         // once across both enrich calls. mockall fails the test on drop if not.
@@ -281,9 +281,9 @@ mod tests {
     #[tokio::test]
     async fn a_restored_empty_artifact_skips_the_backend() {
         let mut backend = MockOcrSpy::new();
-        backend.expect_provenance().returning(|| ModelEvent {
+        backend.expect_provenance().returning(|| ModelId {
             name: "spy".into(),
-            ..ModelEvent::default()
+            ..ModelId::default()
         });
         // The backend must never run: the seeded (empty) artifact is enrichment.
         backend.expect_call().times(0);
@@ -317,10 +317,10 @@ mod tests {
         type Request<'a> = OcrRequest<'a>;
         type Response = OcrResponse;
 
-        fn provenance(&self) -> ModelEvent {
-            ModelEvent {
+        fn provenance(&self) -> ModelId {
+            ModelId {
                 name: "batch-counting".into(),
-                ..ModelEvent::default()
+                ..ModelId::default()
             }
         }
 

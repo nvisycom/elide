@@ -21,7 +21,7 @@ mod usage;
 
 pub use self::usage::{Meter, TokenCounts, Units};
 use crate::Result;
-use crate::entity::audit::ModelEvent;
+use crate::entity::audit::ModelId;
 use crate::primitive::LanguageTag;
 
 /// A request handed to a [`Backend`].
@@ -91,7 +91,7 @@ pub trait Backend: Send + Sync {
 
     /// The model this backend calls, for entity-trail provenance and the usage
     /// record's identity.
-    fn provenance(&self) -> ModelEvent;
+    fn provenance(&self) -> ModelId;
 
     /// Call the model with `request` and return its response.
     ///

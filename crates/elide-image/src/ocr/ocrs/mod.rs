@@ -20,7 +20,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use elide_core::backend::Backend;
-use elide_core::entity::audit::ModelEvent;
+use elide_core::entity::audit::ModelId;
 use elide_core::{Error, Result};
 
 use self::engine::Engine;
@@ -94,10 +94,10 @@ impl Backend for OcrsBackend {
     type Request<'a> = OcrRequest<'a>;
     type Response = OcrResponse;
 
-    fn provenance(&self) -> ModelEvent {
-        ModelEvent {
+    fn provenance(&self) -> ModelId {
+        ModelId {
             name: format!("ocrs {}", self.version).into(),
-            ..ModelEvent::default()
+            ..ModelId::default()
         }
     }
 

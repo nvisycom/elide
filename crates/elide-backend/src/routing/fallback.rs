@@ -5,7 +5,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use elide_core::backend::Backend;
-use elide_core::entity::audit::ModelEvent;
+use elide_core::entity::audit::ModelId;
 use elide_core::{Error, ErrorKind, Result};
 
 /// Which errors fail a call over to the fallback.
@@ -101,7 +101,7 @@ where
     type Request<'a> = P::Request<'a>;
     type Response = P::Response;
 
-    fn provenance(&self) -> ModelEvent {
+    fn provenance(&self) -> ModelId {
         self.primary.provenance()
     }
 
@@ -173,8 +173,8 @@ mod tests {
         type Request<'a> = Req<'a>;
         type Response = Resp;
 
-        fn provenance(&self) -> ModelEvent {
-            ModelEvent::default()
+        fn provenance(&self) -> ModelId {
+            ModelId::default()
         }
 
         async fn call(&self, request: Req<'_>) -> Result<Resp> {

@@ -1,45 +1,10 @@
-//! Lightweight references that point at an entity.
+//! [`EntityCoRef`]: the identifier coreferent entities share.
 
 use std::fmt;
 
 use hipstr::HipStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
-/// Lightweight, stable reference to an [`Entity`] by its identity.
-///
-/// Carries only the entity's [`id`], so other records can point at an
-/// entity without duplicating it. Mirrors [`LabelRef`]: the full entity
-/// is resolved elsewhere, the reference is cheap to copy and store.
-///
-/// [`Entity`]: crate::entity::Entity
-/// [`id`]: crate::entity::Entity::id
-/// [`LabelRef`]: crate::entity::LabelRef
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(transparent))]
-pub struct EntityRef(Uuid);
-
-impl EntityRef {
-    /// Reference an entity by its id.
-    pub const fn new(id: Uuid) -> Self {
-        Self(id)
-    }
-
-    /// Referenced entity's id.
-    pub const fn id(self) -> Uuid {
-        self.0
-    }
-}
-
-impl fmt::Display for EntityRef {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.0, f)
-    }
-}
 
 /// Coreference identifier shared by entities that denote the same
 /// real-world thing.

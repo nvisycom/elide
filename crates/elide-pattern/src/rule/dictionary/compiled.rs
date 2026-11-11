@@ -4,7 +4,7 @@
 use std::ops::Range;
 
 use elide_core::entity::LabelRef;
-use elide_core::entity::audit::PatternEvent;
+use elide_core::entity::audit::PatternRule;
 use elide_core::primitive::{Confidence, CountryCode, LanguageTag};
 
 use crate::recognizer::RawMatch;
@@ -57,9 +57,9 @@ impl CompiledDictionary {
             confidence: score,
             range,
             context: self.context,
-            pattern: PatternEvent {
+            rule: PatternRule {
                 name: self.name.clone().into(),
-                ..PatternEvent::default()
+                ..PatternRule::default()
             },
         }
     }

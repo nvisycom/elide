@@ -16,7 +16,7 @@ use std::collections::HashSet;
 
 use async_trait::async_trait;
 use elide_core::backend::Backend;
-use elide_core::entity::audit::ModelEvent;
+use elide_core::entity::audit::ModelId;
 use elide_core::entity::{Label, LabelRef};
 use elide_core::{Error, Result};
 
@@ -89,7 +89,7 @@ where
     type Request<'a> = NerRequest<'a>;
     type Response = NerResponse;
 
-    fn provenance(&self) -> ModelEvent {
+    fn provenance(&self) -> ModelId {
         self.inner.provenance()
     }
 
@@ -178,8 +178,8 @@ mod tests {
         type Request<'a> = NerRequest<'a>;
         type Response = NerResponse;
 
-        fn provenance(&self) -> ModelEvent {
-            ModelEvent::default()
+        fn provenance(&self) -> ModelId {
+            ModelId::default()
         }
 
         async fn call(&self, request: NerRequest<'_>) -> Result<NerResponse> {
@@ -314,8 +314,8 @@ mod tests {
         type Request<'a> = NerRequest<'a>;
         type Response = NerResponse;
 
-        fn provenance(&self) -> ModelEvent {
-            ModelEvent::default()
+        fn provenance(&self) -> ModelId {
+            ModelId::default()
         }
 
         async fn call(&self, _request: NerRequest<'_>) -> Result<NerResponse> {

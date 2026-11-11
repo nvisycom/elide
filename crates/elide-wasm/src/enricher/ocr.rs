@@ -11,7 +11,7 @@
 
 use elide::backend::Backend;
 use elide::enrichment::ocr::{OcrEnricher, OcrRequest, OcrResponse};
-use elide::entity::audit::ModelEvent;
+use elide::entity::audit::ModelId;
 use elide::modality::image::{ImageLocation, LayoutRegion};
 use elide::primitive::{BoundingBox, Confidence, Dimensions, Point};
 use elide::{Error, Result};
@@ -88,8 +88,8 @@ impl Backend for JsCallbackBackend {
     type Request<'a> = OcrRequest<'a>;
     type Response = OcrResponse;
 
-    fn provenance(&self) -> ModelEvent {
-        ModelEvent {
+    fn provenance(&self) -> ModelId {
+        ModelId {
             name: "js-callback-ocr".into(),
             ..Default::default()
         }

@@ -25,12 +25,13 @@ use serde::{Deserialize, Serialize};
 
 pub use self::apply::{Manual, ManualIntent, Redaction, Selection};
 pub use self::kind::AuditKind;
-pub use self::recognition::{Flagged, FlaggedEvent, Model, ModelEvent, Pattern, PatternEvent};
+pub use self::recognition::{Flagged, Model, ModelId, Pattern, PatternRule};
 pub use self::reconcile::{Calibration, Conflict, Contested, Deduplication, Refinement};
 use super::AuditHash;
 use super::hash::AuditHasher;
 use crate::modality::Modality;
 use crate::primitive::Confidence;
+use crate::redaction::HiddenContentKind;
 
 /// One node in an entity's audit DAG: a thing that happened, with its
 /// effect on confidence and its tamper-evident links.
@@ -170,38 +171,38 @@ impl<M: Modality> AuditEvent<M> {
     }
 
     /// Recognition event from a pattern/dictionary recognizer: the `source`
-    /// recognizer matched at `location`, with the `pattern` metadata.
+    /// recognizer's `rule` matched at `location`.
     pub fn pattern(
         source: impl Into<HipStr<'static>>,
         confidence: Confidence,
         location: M::Location,
-        pattern: PatternEvent,
+        rule: PatternRule,
     ) -> Self {
-        Self::new(source, confidence, Pattern { location, pattern })
+        Self::new(source, confidence, Pattern { location, rule })
     }
 
     /// Recognition event from a model/NER recognizer: the `source` recognizer
-    /// matched at `location`, with the `model` metadata.
+    /// matched at `location` with `model`.
     pub fn model(
         source: impl Into<HipStr<'static>>,
         confidence: Confidence,
         location: M::Location,
-        model: ModelEvent,
+        model: ModelId,
     ) -> Self {
         Self::new(source, confidence, Model { location, model })
     }
 
-    /// A flagged item: the `source` format labels an item of hidden content at
-    /// `location`, flagged as a redaction subject. Unlike
+    /// A flagged item: the `source` format labels an item of hidden content of
+    /// kind `content` at `location`, flagged as a redaction subject. Unlike
     /// [`pattern`](Self::pattern) / [`model`](Self::model), the item is present
     /// rather than matched, so it carries its own event kind.
     pub fn flagged(
         source: impl Into<HipStr<'static>>,
         confidence: Confidence,
         location: M::Location,
-        flagged: FlaggedEvent,
+        content: HiddenContentKind,
     ) -> Self {
-        Self::new(source, confidence, Flagged { location, flagged })
+        Self::new(source, confidence, Flagged { location, content })
     }
 
     /// Deduplication (fusion) event combining several detections. Its
@@ -249,16 +250,20 @@ impl<M: Modality> AuditEvent<M> {
         Self::new(source, confidence, refinement)
     }
 
-    /// Redaction event: the operator in `redaction` hid the entity. The entity's
-    /// `confidence` is unchanged; the `source` is the operator's name.
-    pub fn redaction(redaction: Redaction, confidence: Confidence) -> Self {
-        Self::new(redaction.operator.name.clone(), confidence, redaction)
+    /// Redaction event: the `source` operator hid the entity by applying the
+    /// selection `redaction` names. The entity's `confidence` is unchanged.
+    pub fn redaction(
+        source: impl Into<HipStr<'static>>,
+        redaction: Redaction,
+        confidence: Confidence,
+    ) -> Self {
+        Self::new(source, confidence, redaction)
     }
 
     /// The redaction *decision*: the operator in `selection` was picked to hide
     /// the entity (at its `confidence`), recorded before it is applied so the
     /// pick can be reviewed. The [`redaction`](Self::redaction) event that
-    /// follows records the operator actually run. The `source` is the operator's
+    /// applies it names this event by its hash. The `source` is the operator's
     /// name.
     pub fn selection(selection: Selection, confidence: Confidence) -> Self {
         Self::new(selection.operator.name.clone(), confidence, selection)

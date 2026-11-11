@@ -16,7 +16,7 @@ mod tests {
     use elide_codec::content::ContentData;
     use elide_codec::{Document, DocumentPart, Stripped};
     use elide_core::Result;
-    use elide_core::modality::StreamDataReader as _;
+    use elide_core::modality::ChunkReader as _;
     use elide_core::redaction::{Disposition, HiddenContent, HiddenContentPolicy};
 
     use super::*;

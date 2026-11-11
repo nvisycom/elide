@@ -114,7 +114,7 @@ async fn unknown_extension_is_an_error() {
 #[cfg(feature = "csv")]
 #[tokio::test]
 async fn registry_decodes_and_redacts_csv() {
-    use elide_core::modality::StreamDataReader;
+    use elide_core::modality::ChunkReader;
     use elide_core::modality::tabular::{Tabular, TabularLocation, TabularReplacement};
 
     let reg = FormatRegistry::with_builtin();

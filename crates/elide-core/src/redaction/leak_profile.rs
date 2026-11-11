@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 /// [`Operator::leak_profile`]: crate::redaction::Operator::leak_profile
 // Explicit discriminants: the variant order is the leak ordering (`Recoverable
 // < Partial < Irrecoverable`, via `Ord`, driving safest-operator arbitration)
-// *and* the `Redaction` audit hash folds `profile as u8`. Both the order and
+// *and* the `Selection` audit hash folds `profile as u8`. Both the order and
 // the values are load-bearing, so pin them, keep the ascending
 // least-to-most-redacted order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

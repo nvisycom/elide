@@ -1,7 +1,7 @@
 //! [`LlmModality`] for [`Text`]: localize each text candidate into a byte
 //! range and build the entity.
 
-use elide_core::entity::audit::{AuditEvent, ModelEvent};
+use elide_core::entity::audit::{AuditEvent, ModelId};
 use elide_core::entity::{Entity, EntityCoRef, LabelRef};
 use elide_core::modality::text::{Text, TextData, TextLocation};
 use elide_core::primitive::Confidence;
@@ -29,9 +29,9 @@ impl LlmModality for Text {
                 "llm-ner",
                 confidence,
                 location.clone(),
-                ModelEvent {
+                ModelId {
                     name: "llm-ner".into(),
-                    ..ModelEvent::default()
+                    ..ModelId::default()
                 },
             );
 

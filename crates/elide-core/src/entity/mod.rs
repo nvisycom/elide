@@ -4,11 +4,11 @@
 //! piece of sensitive information located somewhere in a medium, the
 //! product of one or more detection layers being merged together. This
 //! module also defines the entity's building blocks: the [`Label`]
-//! taxonomy and the [`EntityRef`] / [`EntityCoRef`] reference types.
+//! taxonomy and the [`EntityCoRef`] coreference identifier.
 
 pub mod audit;
+mod coref;
 mod label;
-mod reference;
 
 use std::ops::Range;
 
@@ -17,10 +17,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[cfg(feature = "fixtures")]
-use self::audit::PatternEvent;
+use self::audit::PatternRule;
 use self::audit::{AuditEvent, AuditLog, Manual, ManualIntent};
+pub use self::coref::EntityCoRef;
 pub use self::label::{Category, Label, LabelCatalog, LabelLocale, LabelRef, builtins};
-pub use self::reference::{EntityCoRef, EntityRef};
 use crate::modality::Modality;
 #[cfg(feature = "fixtures")]
 use crate::modality::text::{Text, TextLocation};
@@ -160,13 +160,6 @@ impl<M: Modality> Entity<M> {
         self
     }
 
-    /// Lightweight reference to this entity, by its [`id`].
-    ///
-    /// [`id`]: Entity::id
-    pub fn as_ref(&self) -> EntityRef {
-        EntityRef::new(self.id)
-    }
-
     /// Set the entity's coreference identifier.
     #[must_use]
     pub fn with_coref(mut self, coref: EntityCoRef) -> Self {
@@ -231,26 +224,22 @@ impl Entity<Text> {
     /// confidence-gated selection tests.
     pub fn fixture_conf(label: &str, loc: (usize, usize), confidence: Confidence) -> Self {
         let location = TextLocation::inline(loc.0..loc.1);
-        let event = AuditEvent::pattern(
-            "test",
-            confidence,
-            location.clone(),
-            PatternEvent::default(),
-        );
+        let event =
+            AuditEvent::pattern("test", confidence, location.clone(), PatternRule::default());
         Entity::new(LabelRef::new(label.to_owned()), location).with_event(event)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::audit::{Attribution, PatternEvent};
+    use super::audit::{Attribution, PatternRule};
     use super::*;
     use crate::modality::text::{Text, TextLocation};
 
     fn text_entity() -> Entity<Text> {
         let loc = TextLocation::inline(0..5);
         let conf = Confidence::MAX;
-        let birth = AuditEvent::pattern("t", conf, loc.clone(), PatternEvent::default());
+        let birth = AuditEvent::pattern("t", conf, loc.clone(), PatternRule::default());
         Entity::new(LabelRef::new("NAME"), loc).with_event(birth)
     }
 
@@ -271,9 +260,9 @@ mod tests {
                 "a",
                 low,
                 loc.clone(),
-                PatternEvent::default(),
+                PatternRule::default(),
             ))
-            .with_event(AuditEvent::pattern("b", high, loc, PatternEvent::default()));
+            .with_event(AuditEvent::pattern("b", high, loc, PatternRule::default()));
         assert_eq!(entity.confidence, high);
         assert_eq!(entity.audit.final_confidence(), Some(high));
         assert!(entity.audit.verify().is_ok());

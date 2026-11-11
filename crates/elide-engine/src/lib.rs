@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use elide_codec::TypedStream;
 use elide_core::entity::Entity;
 use elide_core::modality::text::Text;
-use elide_core::modality::{DataReader, DataWriter, Modality, StreamDataReader};
+use elide_core::modality::{ChunkReader, DataReader, DataWriter, Modality};
 use elide_core::recognition::Scope;
 use elide_core::redaction::Operator;
 use elide_core::{Error, Result};
@@ -156,7 +156,7 @@ impl Orchestrator {
         M: Modality,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
-        TypedStream<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
+        TypedStream<M>: ChunkReader<M> + DataReader<M> + DataWriter<M>,
         Erase: Operator<M>,
     {
         match self.modality_pipeline_mut::<M>() {
@@ -185,7 +185,7 @@ impl Orchestrator {
         M: Modality,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
-        TypedStream<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
+        TypedStream<M>: ChunkReader<M> + DataReader<M> + DataWriter<M>,
         Erase: Operator<M>,
     {
         match self.modality_pipeline_mut::<M>() {
@@ -210,7 +210,7 @@ impl Orchestrator {
         M: Modality,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
-        TypedStream<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
+        TypedStream<M>: ChunkReader<M> + DataReader<M> + DataWriter<M>,
         Erase: Operator<M>,
     {
         match self.modality_pipeline_mut::<M>() {
@@ -239,7 +239,7 @@ impl Orchestrator {
         M: Modality,
         Vec<Entity<M>>: serde::Serialize + serde::de::DeserializeOwned,
         M::Artifact: serde::Serialize + serde::de::DeserializeOwned,
-        TypedStream<M>: StreamDataReader<M> + DataReader<M> + DataWriter<M>,
+        TypedStream<M>: ChunkReader<M> + DataReader<M> + DataWriter<M>,
     {
         self.pipelines.insert(TypeId::of::<M>(), Box::new(pipeline));
         self.groups.register::<M>();

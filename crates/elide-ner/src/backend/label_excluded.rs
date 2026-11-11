@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use elide_core::Result;
 use elide_core::backend::Backend;
 use elide_core::entity::LabelRef;
-use elide_core::entity::audit::ModelEvent;
+use elide_core::entity::audit::ModelId;
 
 use crate::backend::{NerRequest, NerResponse};
 
@@ -66,7 +66,7 @@ where
     type Request<'a> = NerRequest<'a>;
     type Response = NerResponse;
 
-    fn provenance(&self) -> ModelEvent {
+    fn provenance(&self) -> ModelId {
         self.inner.provenance()
     }
 
@@ -101,10 +101,10 @@ mod tests {
         type Request<'a> = NerRequest<'a>;
         type Response = NerResponse;
 
-        fn provenance(&self) -> ModelEvent {
-            ModelEvent {
+        fn provenance(&self) -> ModelId {
+            ModelId {
                 name: "fixed".into(),
-                ..ModelEvent::default()
+                ..ModelId::default()
             }
         }
 
@@ -146,10 +146,10 @@ mod tests {
         type Request<'a> = NerRequest<'a>;
         type Response = NerResponse;
 
-        fn provenance(&self) -> ModelEvent {
-            ModelEvent {
+        fn provenance(&self) -> ModelId {
+            ModelId {
                 name: "counting".into(),
-                ..ModelEvent::default()
+                ..ModelId::default()
             }
         }
 

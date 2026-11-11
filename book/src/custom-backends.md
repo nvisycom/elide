@@ -14,7 +14,7 @@ score.
 
 ```rust
 use elide::backend::Backend;
-use elide::entity::audit::ModelEvent;
+use elide::entity::audit::ModelId;
 use elide::prelude::*;
 use elide::recognition::ner::NerRecognizer;
 use elide::recognition::ner::backend::{NerRequest, NerResponse, NerSpan};
@@ -29,8 +29,8 @@ impl Backend for NerService {
     type Request<'a> = NerRequest<'a>;
     type Response = NerResponse;
 
-    fn provenance(&self) -> ModelEvent {
-        ModelEvent { name: "gliner-multi-v2.1".into(), ..ModelEvent::default() }
+    fn provenance(&self) -> ModelId {
+        ModelId { name: "gliner-multi-v2.1".into(), ..ModelId::default() }
     }
 
     async fn call(&self, request: NerRequest<'_>) -> Result<NerResponse> {

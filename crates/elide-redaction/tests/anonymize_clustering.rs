@@ -6,7 +6,6 @@
 
 mod fixtures;
 
-use elide_core::entity::audit::AuditKind;
 use elide_core::entity::{Entity, LabelRef};
 use elide_core::modality::text::Text;
 use elide_core::recognition::Scope;
@@ -58,9 +57,8 @@ async fn overlap_merges_under_safest_operator() {
     for entity in &entities {
         let redacted = entity
             .audit
-            .events()
-            .iter()
-            .any(|e| matches!(&e.kind, AuditKind::Redaction(r) if r.operator.name == "erase"));
+            .applied_selection()
+            .is_some_and(|s| s.operator.name == "erase");
         assert!(redacted, "every member records the erase redaction");
     }
 }
@@ -107,7 +105,7 @@ async fn non_coalescible_overlap_stays_separate() {
 
     // The invariant under test is a *clustering* one: non-coalescible entities
     // must not merge into a cluster that then drops a member (see the union
-    // `expect` in `redact`). It is asserted on the (page-aware) audit trail ,
+    // `expect` in `anonymize`). It is asserted on the (page-aware) audit trail ,
     // each entity records its own redaction, not on `doc.text()`: the flat
     // `TextDoc` ignores `page`, so page-local write *placement* is out of scope
     // here and would need a page-partitioned double to check.

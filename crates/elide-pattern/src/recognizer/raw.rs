@@ -3,7 +3,7 @@
 use std::ops::Range;
 
 use elide_core::entity::LabelRef;
-use elide_core::entity::audit::PatternEvent;
+use elide_core::entity::audit::PatternRule;
 use elide_core::primitive::Confidence;
 
 /// One pattern/dictionary hit before placement: context lifts its
@@ -18,7 +18,7 @@ pub(crate) struct RawMatch {
     /// The match's confidence: `score`, plus any context lift.
     pub(crate) confidence: Confidence,
     pub(crate) range: Range<usize>,
-    pub(crate) pattern: PatternEvent,
+    pub(crate) rule: PatternRule,
     /// The rule's context, as an index into the recognizer's contexts.
     pub(crate) context: Option<usize>,
 }

@@ -3,7 +3,7 @@
 
 use elide_core::Result;
 use elide_core::backend::Backend;
-use elide_core::entity::audit::ModelEvent;
+use elide_core::entity::audit::ModelId;
 
 /// Wraps a [`Backend`] and caps how many requests one
 /// [`call_batch`](Backend::call_batch) sends to the provider at a time.
@@ -62,7 +62,7 @@ impl<B: Backend> Backend for BatchChunked<B> {
     type Request<'a> = B::Request<'a>;
     type Response = B::Response;
 
-    fn provenance(&self) -> ModelEvent {
+    fn provenance(&self) -> ModelId {
         self.inner.provenance()
     }
 
@@ -142,8 +142,8 @@ mod tests {
         type Request<'a> = Req<'a>;
         type Response = Resp;
 
-        fn provenance(&self) -> ModelEvent {
-            ModelEvent::default()
+        fn provenance(&self) -> ModelId {
+            ModelId::default()
         }
 
         async fn call(&self, request: Req<'_>) -> Result<Resp> {

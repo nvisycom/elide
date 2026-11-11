@@ -8,7 +8,7 @@ use std::any::TypeId;
 use elide_codec::{FlaggedItem, TypedStream};
 use elide_core::Result;
 use elide_core::entity::Entity;
-use elide_core::entity::audit::{Attribution, AuditEvent, FlaggedEvent};
+use elide_core::entity::audit::{Attribution, AuditEvent};
 use elide_core::modality::Modality;
 use elide_core::modality::metadata::Metadata;
 use elide_core::primitive::Confidence;
@@ -77,7 +77,7 @@ fn entity<M: Modality>(source: &str, item: FlaggedItem<M>) -> Entity<M> {
         source.to_owned(),
         Confidence::MAX,
         item.location.clone(),
-        FlaggedEvent { content: item.kind },
+        item.kind,
     );
     Entity::new(item.label, item.location).with_event(event)
 }

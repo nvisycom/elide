@@ -29,7 +29,7 @@ mod serde;
 /// Shared helpers for the analysis unit tests (`report`, `serde`).
 #[cfg(test)]
 mod test_support {
-    use elide_core::entity::audit::{AuditEvent, PatternEvent};
+    use elide_core::entity::audit::{AuditEvent, PatternRule};
     #[cfg(feature = "schema")]
     use elide_core::entity::audit::{Manual, ManualIntent};
     use elide_core::entity::{Entity, LabelRef};
@@ -43,7 +43,7 @@ mod test_support {
     /// A minimal [`Text`] entity carrying `label`, for building reports under test.
     pub(crate) fn text_entity(label: &str) -> Entity<Text> {
         let loc = TextLocation::inline(0..4);
-        let event = AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternEvent::default());
+        let event = AuditEvent::pattern("t", Confidence::MAX, loc.clone(), PatternRule::default());
         Entity::new(LabelRef::new(label), loc).with_event(event)
     }
 

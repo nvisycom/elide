@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use elide_core::Result;
 use elide_core::backend::Backend;
-use elide_core::entity::audit::ModelEvent;
+use elide_core::entity::audit::ModelId;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
@@ -198,7 +198,7 @@ impl<B: Backend> Backend for RateLimited<B> {
     type Request<'a> = B::Request<'a>;
     type Response = B::Response;
 
-    fn provenance(&self) -> ModelEvent {
+    fn provenance(&self) -> ModelId {
         self.inner.provenance()
     }
 
@@ -248,10 +248,10 @@ mod tests {
         type Request<'a> = Req<'a>;
         type Response = Resp;
 
-        fn provenance(&self) -> ModelEvent {
-            ModelEvent {
+        fn provenance(&self) -> ModelId {
+            ModelId {
                 name: "counting".into(),
-                ..ModelEvent::default()
+                ..ModelId::default()
             }
         }
 

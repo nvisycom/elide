@@ -2,7 +2,7 @@
 
 use super::{Modality, ResolvedHint};
 
-/// One decoded unit yielded by a [`StreamDataReader`].
+/// One decoded unit yielded by a [`ChunkReader`].
 ///
 /// `data` is the per-modality wire payload; `location` is the coordinate
 /// the source accepts in [`read_at`] / [`write_at`] to address the same
@@ -12,7 +12,7 @@ use super::{Modality, ResolvedHint};
 /// piece of context paired with its text, so a boost it causes can be traced
 /// back. Sources without such metadata leave it empty.
 ///
-/// [`StreamDataReader`]: super::StreamDataReader
+/// [`ChunkReader`]: super::ChunkReader
 /// [`read_at`]: super::DataReader::read_at
 /// [`write_at`]: super::DataWriter::write_at
 #[derive(Debug, Clone)]

@@ -1,5 +1,5 @@
 //! Reading traits: [`DataReader`] (random access at a location) and
-//! [`StreamDataReader`] (sequential streaming + lift).
+//! [`ChunkReader`] (every decoded chunk, and the lift back to source).
 
 use super::{Chunk, Modality};
 use crate::entity::Entity;
@@ -56,9 +56,9 @@ pub trait DataReader<M: Modality>: Send + Sync {
 /// text, structured documents) override it.
 ///
 /// [`Chunk`]: super::Chunk
-/// [`chunks`]: StreamDataReader::chunks
-/// [`lift`]: StreamDataReader::lift
-pub trait StreamDataReader<M: Modality>: Send {
+/// [`chunks`]: ChunkReader::chunks
+/// [`lift`]: ChunkReader::lift
+pub trait ChunkReader<M: Modality>: Send {
     /// Every decoded [`Chunk`] the source holds, front to back.
     ///
     /// # Errors

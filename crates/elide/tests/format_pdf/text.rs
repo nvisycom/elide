@@ -9,7 +9,7 @@ use elide::Result;
 use elide::codec::{DocumentPart, FormatRegistry};
 use elide::entity::audit::AuditKind;
 use elide::entity::builtins;
-use elide::modality::StreamDataReader;
+use elide::modality::ChunkReader;
 use elide::modality::text::Text;
 use elide::redaction::HiddenContentPolicy;
 use elide_core::assert_label_present;

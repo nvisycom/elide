@@ -94,7 +94,7 @@ mod tests {
     use elide_codec::DocumentLoader as _;
     use elide_core::modality::metadata::{MetadataLocation, MetadataReplacement};
     use elide_core::modality::text::TextReplacement;
-    use elide_core::modality::{DataReader as _, DataWriter as _, StreamDataReader as _};
+    use elide_core::modality::{ChunkReader as _, DataReader as _, DataWriter as _};
     use elide_core::redaction::Redactions;
     use image::GenericImageView;
 

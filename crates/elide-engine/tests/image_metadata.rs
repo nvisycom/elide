@@ -10,7 +10,7 @@
 #![cfg(feature = "image")]
 
 use elide_core::Result;
-use elide_core::entity::audit::{AuditEvent, ModelEvent};
+use elide_core::entity::audit::{AuditEvent, ModelId};
 use elide_core::entity::{Entity, LabelCatalog, builtins};
 use elide_core::modality::metadata::Metadata;
 use elide_core::primitive::{ComponentId, Confidence};
@@ -300,7 +300,7 @@ impl Recognizer<Image> for WholeFrame {
             "whole-frame",
             Confidence::MAX,
             location.clone(),
-            ModelEvent::default(),
+            ModelId::default(),
         );
         let entity = Entity::new(builtins::PERSON_NAME.to_ref(), location).with_event(event);
         Ok(vec![entity])

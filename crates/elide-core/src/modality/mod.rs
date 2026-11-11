@@ -40,7 +40,7 @@ mod hint;
 mod text_recognizable;
 
 pub use self::chunk::Chunk;
-pub use self::data_reader::{DataReader, StreamDataReader};
+pub use self::data_reader::{ChunkReader, DataReader};
 pub use self::data_writer::DataWriter;
 pub use self::hint::{Hint, ResolvedHint};
 pub use self::text_recognizable::TextRecognizable;

@@ -93,29 +93,6 @@ impl LabelCatalog {
         self.get(label).and_then(Label::category)
     }
 
-    /// Group `entities` by the [`Category`] of their label, resolved through
-    /// this catalog.
-    ///
-    /// The grouping key is `Option<`[`Category`]`>`: an entity whose label the
-    /// catalog does not define, or defines without a category, lands under
-    /// `None`. Order within each group follows the input order. Useful for
-    /// organizing a detection or redaction report into sections by kind
-    /// (financial, health, identity, …).
-    pub fn group_by_category<M>(
-        &self,
-        entities: impl IntoIterator<Item = Entity<M>>,
-    ) -> HashMap<Option<Category>, Vec<Entity<M>>>
-    where
-        M: Modality,
-    {
-        let mut groups: HashMap<Option<Category>, Vec<Entity<M>>> = HashMap::new();
-        for entity in entities {
-            let category = self.category(&entity.label).cloned();
-            groups.entry(category).or_default().push(entity);
-        }
-        groups
-    }
-
     /// Number of labels in the catalog.
     pub fn len(&self) -> usize {
         self.0.len()
@@ -146,26 +123,6 @@ impl LabelCatalog {
     pub fn tagged<'a>(&'a self, tag: &'a str) -> impl Iterator<Item = &'a Label> + 'a {
         self.0.values().filter(move |label| label.has_tag(tag))
     }
-
-    /// A [`LabelRef`] for every label carrying `tag`, the ref-only
-    /// counterpart to [`tagged`].
-    ///
-    /// [`tagged`]: Self::tagged
-    pub fn refs_tagged<'a>(&'a self, tag: &'a str) -> impl Iterator<Item = LabelRef> + 'a {
-        self.tagged(tag).map(|label| label.to_ref())
-    }
-
-    /// A new catalog holding only the labels carrying `tag`.
-    ///
-    /// The owned-subset form of [`tagged`], for a caller that wants to drive
-    /// a run with just one category, e.g. build the sub-catalog of `phi`
-    /// labels, then hand it to an analyzer or anonymizer.
-    ///
-    /// [`tagged`]: Self::tagged
-    #[must_use]
-    pub fn filter_tag(&self, tag: &str) -> Self {
-        self.tagged(tag).cloned().collect()
-    }
 }
 
 impl FromIterator<Label> for LabelCatalog {
@@ -185,34 +142,24 @@ mod tests {
 
         // Every `tagged` label carries the tag, and only those.
         assert!(catalog.tagged("phi").all(|l| l.has_tag("phi")));
-        let phi_count = catalog.tagged("phi").count();
-        assert!(phi_count > 0, "built-ins include phi-tagged labels");
-
-        // The owned sub-catalog holds exactly the tagged labels, keyed by id.
-        let phi = catalog.filter_tag("phi");
-        assert_eq!(phi.len(), phi_count);
-        assert!(phi.iter().all(|l| l.has_tag("phi")));
-        assert!(phi.contains(&builtins::MEDICAL_ID.to_ref()));
-        assert!(!phi.contains(&builtins::EMAIL_ADDRESS.to_ref()));
-
-        // The ref-only form agrees with `tagged`.
-        assert_eq!(catalog.refs_tagged("phi").count(), phi_count);
+        let phi: Vec<&str> = catalog.tagged("phi").map(Label::id).collect();
+        assert!(phi.contains(&builtins::MEDICAL_ID.id()));
+        assert!(!phi.contains(&builtins::EMAIL_ADDRESS.id()));
 
         // An unknown tag yields nothing.
         assert_eq!(catalog.tagged("nonexistent").count(), 0);
-        assert!(catalog.filter_tag("nonexistent").is_empty());
     }
 
     #[test]
     fn retain_declared_keeps_only_in_catalog_labels() {
-        use crate::entity::audit::{AuditEvent, PatternEvent};
+        use crate::entity::audit::{AuditEvent, PatternRule};
         use crate::modality::text::{Text, TextLocation};
         use crate::primitive::Confidence;
 
         fn entity(label: &str) -> Entity<Text> {
             let loc = TextLocation::inline(0..1);
             let conf = Confidence::new(0.9).unwrap();
-            let event = AuditEvent::pattern("t", conf, loc.clone(), PatternEvent::default());
+            let event = AuditEvent::pattern("t", conf, loc.clone(), PatternRule::default());
             Entity::new(LabelRef::new(label), loc).with_event(event)
         }
 
@@ -225,42 +172,6 @@ mod tests {
         let none =
             LabelCatalog::new().retain_declared(vec![entity("email_address"), entity("iban")]);
         assert!(none.is_empty());
-    }
-
-    #[test]
-    fn group_by_category_buckets_entities_by_their_labels_category() {
-        use crate::entity::audit::{AuditEvent, PatternEvent};
-        use crate::modality::text::{Text, TextLocation};
-        use crate::primitive::Confidence;
-
-        fn entity(label: &str) -> Entity<Text> {
-            let loc = TextLocation::inline(0..1);
-            let conf = Confidence::new(0.9).unwrap();
-            let event = AuditEvent::pattern("t", conf, loc.clone(), PatternEvent::default());
-            Entity::new(LabelRef::new(label), loc).with_event(event)
-        }
-
-        let catalog: LabelCatalog = [
-            Label::new("iban", "iban").with_category(Category::new("financial")),
-            Label::new("payment_card", "card").with_category(Category::new("financial")),
-            Label::new("email_address", "email").with_category(Category::new("contact")),
-            Label::new("misc", "misc"), // no category
-        ]
-        .into_iter()
-        .collect();
-
-        let groups = catalog.group_by_category(vec![
-            entity("iban"),
-            entity("payment_card"),
-            entity("email_address"),
-            entity("misc"),
-            entity("unknown"), // not in the catalog at all
-        ]);
-
-        assert_eq!(groups[&Some(Category::new("financial"))].len(), 2);
-        assert_eq!(groups[&Some(Category::new("contact"))].len(), 1);
-        // Uncategorized (`misc`) and unknown (`unknown`) share the None bucket.
-        assert_eq!(groups[&None].len(), 2);
     }
 
     #[test]
