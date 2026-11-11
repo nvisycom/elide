@@ -8,11 +8,11 @@
 //! 1. [`calibrate`], scale each entity's confidence by a per-recognizer
 //!    multiplier, so detectors with different score distributions are
 //!    comparable before reconciliation.
-//! 2. [`reconcile`], decide what happens to overlapping entities: cluster
-//!    them ([`GroupPredicate`]) and dispose of each pair ([`Reconciler`]),
-//!    merge same-label findings, keep/contest/resolve cross-label overlaps.
-//! 3. [`filter`], drop entities outside an allow-list of labels or below a
-//!    confidence threshold.
+//! 2. [`reconcile`], decide what happens to overlapping entities: cluster them
+//!    ([`GroupPredicate`]), fuse each cluster of the same finding
+//!    ([`FuseLayer`]), and arbitrate cross-label pairs ([`Reconciler`]):
+//!    keep, contest, or resolve.
+//! 3. [`filter`], drop entities below a confidence threshold.
 //!
 //! Each stage implements [`Layer`], returning a [`LayerOutput`]. Stages are
 //! pure and synchronous, reached through their submodules (e.g.
@@ -20,6 +20,7 @@
 //!
 //! [`Analyzer`]: crate::Analyzer
 //! [`GroupPredicate`]: reconcile::group::GroupPredicate
+//! [`FuseLayer`]: reconcile::FuseLayer
 //! [`Reconciler`]: reconcile::Reconciler
 
 pub mod calibrate;
@@ -32,9 +33,8 @@ use elide_core::modality::Modality;
 /// The result of running one [`Layer`].
 ///
 /// Names the two outcomes explicitly so call sites don't juggle a positional
-/// tuple, and so future per-stage metadata (counts, drop reasons) can be added
-/// without changing every layer's signature. The pipeline threads [`kept`] into
-/// the next layer and accumulates [`dropped`] for logging.
+/// tuple. The pipeline threads [`kept`] into the next layer and accumulates
+/// [`dropped`] for logging.
 ///
 /// [`kept`]: Self::kept
 /// [`dropped`]: Self::dropped
@@ -67,12 +67,14 @@ impl<M: Modality> LayerOutput<M> {
 /// A layer takes the working set of entities and returns the reshaped set plus
 /// anything it removed. Stages are **pure and synchronous**, they operate over
 /// a `Vec<Entity<M>>` in memory with no I/O, so unlike recognition there is no
-/// async here. Concrete layers: [`ReconcileLayer`] (cluster and dispose of
-/// overlapping entities, merge, keep, contest, or resolve), [`FilterLayer`]
-/// (drop by label / confidence), [`CalibrateLayer`] (rescale confidence).
+/// async here. Concrete layers: [`FuseLayer`] (fuse each cluster of the same
+/// finding), [`ReconcileLayer`] (keep, contest, or resolve each overlapping
+/// pair), [`ThresholdLayer`] (drop by confidence), [`CalibrateLayer`] (rescale
+/// confidence).
 ///
+/// [`FuseLayer`]: reconcile::FuseLayer
 /// [`ReconcileLayer`]: reconcile::ReconcileLayer
-/// [`FilterLayer`]: filter::FilterLayer
+/// [`ThresholdLayer`]: filter::ThresholdLayer
 /// [`CalibrateLayer`]: calibrate::CalibrateLayer
 pub trait Layer<M: Modality>: Send + Sync {
     /// Apply this stage to `entities`.

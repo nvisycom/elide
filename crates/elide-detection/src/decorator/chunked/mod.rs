@@ -4,6 +4,7 @@
 mod chunking;
 
 use std::collections::HashMap;
+use std::mem;
 use std::ops::Range;
 
 use elide_core::Result;
@@ -13,6 +14,7 @@ use elide_core::primitive::ComponentId;
 use elide_core::recognition::{Context, Recognizer, Subject};
 
 pub use self::chunking::{CharWindows, Chunking, Window, WordWindows};
+use crate::batch::expect_one_per_input;
 
 /// Wraps a text [`Recognizer`] whose backend caps input length: a [`Chunking`]
 /// strategy splits an over-long subject into overlapping windows, each is
@@ -73,51 +75,37 @@ impl<R, C> ChunkedRecognizer<R, C> {
     }
 }
 
-impl<R: Recognizer<Text>, C: Chunking> ChunkedRecognizer<R, C> {
-    /// Recognize `subject` by windowing its text: run each window on the inner
-    /// recognizer (coalesced into one `recognize_batch`), rebase every finding
-    /// onto the full text, and collapse exact duplicates from the overlaps.
-    async fn recognize_windowed(
-        &self,
-        subject: &Subject<Text>,
-        windows: &[Window],
-        ctx: &Context<'_>,
-    ) -> Result<Vec<Entity<Text>>> {
-        let text = subject.data().as_str();
+/// Where one entry of the inner batch came from.
+enum Entry {
+    /// A subject that fits in one window, recognized as itself.
+    Whole { subject: usize },
+    /// One window of a longer subject; `part` indexes the window subjects.
+    Window {
+        subject: usize,
+        window: Window,
+        part: usize,
+    },
+}
 
-        // One subject per window over a real slice of the original text, so byte
-        // offsets within a window are the full text's offsets minus the window
-        // start — the exact delta `Entity::offset` adds back.
-        //
-        // The subject's hints are chunk-global context (a column header, an
-        // object key — content matched against the whole chunk, not indexed by a
-        // body-text offset), so each window carries all of them unchanged. The
-        // enrichment artifact is left unset: its coordinates (producer tokens)
-        // are body-text-local and would be wrong in a window slice, and
-        // re-tokenizing a window is an enricher's job, not a chunker's.
-        let subjects: Vec<Subject<Text>> = windows
-            .iter()
-            .map(|w| {
-                Subject::new(TextData::new(text[w.span()].to_owned()))
-                    .with_hints(subject.hints().to_vec())
-            })
-            .collect();
-        let per_window = self.inner.recognize_batch(&subjects, ctx).await?;
-
-        let mut found = Vec::new();
-        for (window, entities) in windows.iter().zip(per_window) {
-            for entity in entities {
-                // A window-local finding rebases onto the window's start in the
-                // full text. A location with no span (a mark) can't be rebased;
-                // the inner recognizer scanned plain text, so it does not produce
-                // one, and such an entity is dropped rather than mis-placed.
-                if let Some(entity) = entity.offset(window.start) {
-                    found.push(entity);
-                }
-            }
+/// The window `window` of `subject` as a subject of its own: its slice of the
+/// text, every hint, and the language claims that reach into it, shifted into
+/// the window's coordinates.
+///
+/// The hints are chunk-global context (a column header, an object key, matched
+/// against the whole chunk rather than indexed by a body-text offset), so each
+/// window carries all of them. The enrichment artifact is left out: its
+/// coordinates (producer tokens) are the whole text's and would be wrong in a
+/// window, and re-tokenizing a window is an enricher's job, not a chunker's.
+fn window_subject(subject: &Subject<Text>, window: Window) -> Subject<Text> {
+    let text = &subject.data().as_str()[window.span()];
+    let mut part =
+        Subject::new(TextData::new(text.to_owned())).with_hints(subject.hints().to_vec());
+    for claim in subject.detected_languages() {
+        if let Some(claim) = claim.within(window.span()) {
+            part.detect_language(claim);
         }
-        Ok(dedupe_exact(found))
     }
+    part
 }
 
 /// Collapse entities that are the *same finding* seen twice — identical
@@ -175,31 +163,95 @@ impl<R: Recognizer<Text>, C: Chunking> Recognizer<Text> for ChunkedRecognizer<R,
         subject: &Subject<Text>,
         ctx: &Context<'_>,
     ) -> Result<Vec<Entity<Text>>> {
-        let text = subject.data().as_str();
-        let windows = self.chunking.windows(text);
-        // A single window means the strategy did not split: the text fits. Run
-        // the inner recognizer directly on the *original* subject, which is the
-        // within-limit case the type promises is "recognized in one call,
-        // unchanged" — it avoids the per-window copy and the (no-op) rebase, and
-        // keeps the subject's hints and enrichment artifact, which a
-        // reconstructed window subject would drop. Any content outside the one
-        // window is inter-word whitespace the window omits (e.g. a trailing
-        // newline), never a recognizable region, so delegating the whole subject
-        // can only find the same entities or more — never fewer.
-        if let [_only] = windows.as_slice() {
-            return self.inner.recognize(subject, ctx).await;
+        let mut found = self.recognize_batch(&[subject], ctx).await?;
+        Ok(found.pop().unwrap_or_default())
+    }
+
+    /// Recognize every subject in one inner batch: a subject the strategy keeps
+    /// in a single window as itself (hints, languages, and artifact intact), a
+    /// longer one as its windows. A window's findings are rebased onto its
+    /// subject's text and the exact duplicates the overlaps produce collapsed.
+    ///
+    /// A single window means the text fits: anything outside it is inter-word
+    /// whitespace the window omits (a trailing newline, say), never a
+    /// recognizable region, so recognizing the whole subject finds the same
+    /// entities or more, never fewer.
+    async fn recognize_batch(
+        &self,
+        subjects: &[&Subject<Text>],
+        ctx: &Context<'_>,
+    ) -> Result<Vec<Vec<Entity<Text>>>> {
+        let mut entries = Vec::new();
+        let mut parts = Vec::new();
+        for (index, subject) in subjects.iter().enumerate() {
+            match self.chunking.windows(subject.data().as_str()).as_slice() {
+                [] => {}
+                [_] => entries.push(Entry::Whole { subject: index }),
+                windows => {
+                    for &window in windows {
+                        entries.push(Entry::Window {
+                            subject: index,
+                            window,
+                            part: parts.len(),
+                        });
+                        parts.push(window_subject(subject, window));
+                    }
+                }
+            }
         }
-        self.recognize_windowed(subject, &windows, ctx).await
+
+        if entries.is_empty() {
+            return Ok(vec![Vec::new(); subjects.len()]);
+        }
+        let batch: Vec<&Subject<Text>> = entries
+            .iter()
+            .map(|entry| match *entry {
+                Entry::Whole { subject } => subjects[subject],
+                Entry::Window { part, .. } => &parts[part],
+            })
+            .collect();
+        let found = self.inner.recognize_batch(&batch, ctx).await?;
+        let found = expect_one_per_input(self.inner.id(), found, batch.len())?;
+
+        let mut per_subject: Vec<Vec<Entity<Text>>> = vec![Vec::new(); subjects.len()];
+        let mut windowed = vec![false; subjects.len()];
+        for (entry, entities) in entries.iter().zip(found) {
+            match *entry {
+                Entry::Whole { subject } => per_subject[subject] = entities,
+                Entry::Window {
+                    subject, window, ..
+                } => {
+                    // A window-local finding rebases onto the window's start. A
+                    // location with no span (a mark) can't be rebased; the inner
+                    // recognizer scanned plain text, so it does not produce one,
+                    // and such an entity is dropped rather than mis-placed.
+                    windowed[subject] = true;
+                    per_subject[subject].extend(
+                        entities
+                            .into_iter()
+                            .filter_map(|entity| entity.offset(window.start)),
+                    );
+                }
+            }
+        }
+        for (entities, windowed) in per_subject.iter_mut().zip(windowed) {
+            if windowed {
+                *entities = dedupe_exact(mem::take(entities));
+            }
+        }
+        Ok(per_subject)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use elide_core::entity::audit::{AuditEvent, ModelId};
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::modality::ResolvedHint;
     use elide_core::modality::text::TextLocation;
-    use elide_core::primitive::Confidence;
+    use elide_core::primitive::{Confidence, LanguageClaim, LanguageTag};
     use elide_core::recognition::{Scope, Subject};
 
     use super::*;
@@ -212,7 +264,7 @@ mod tests {
         needle: &'static str,
         labels: &'static [&'static str],
         confidence: f32,
-        seen: std::sync::Mutex<Vec<String>>,
+        seen: Mutex<Vec<String>>,
     }
 
     impl FindsSubstring {
@@ -231,7 +283,7 @@ mod tests {
                 needle,
                 labels,
                 confidence,
-                seen: std::sync::Mutex::new(Vec::new()),
+                seen: Mutex::new(Vec::new()),
             }
         }
 
@@ -277,6 +329,124 @@ mod tests {
 
     fn subject(text: &str) -> Subject<Text> {
         Subject::new(TextData::new(text.to_owned()))
+    }
+
+    /// One batch as a [`Recorder`] saw it: each subject's text and language
+    /// claims.
+    type Batch = Vec<(String, Vec<LanguageClaim>)>;
+
+    /// A recognizer that finds `needle` and records each batch it is handed.
+    #[derive(Default)]
+    struct Recorder {
+        batches: Mutex<Vec<Batch>>,
+    }
+
+    #[async_trait::async_trait]
+    impl Recognizer<Text> for Recorder {
+        fn id(&self) -> ComponentId {
+            ComponentId::new("recorder", "0")
+        }
+
+        async fn recognize(
+            &self,
+            subject: &Subject<Text>,
+            ctx: &Context<'_>,
+        ) -> Result<Vec<Entity<Text>>> {
+            let mut found = self.recognize_batch(&[subject], ctx).await?;
+            Ok(found.pop().unwrap_or_default())
+        }
+
+        async fn recognize_batch(
+            &self,
+            subjects: &[&Subject<Text>],
+            ctx: &Context<'_>,
+        ) -> Result<Vec<Vec<Entity<Text>>>> {
+            self.batches.lock().unwrap().push(
+                subjects
+                    .iter()
+                    .map(|s| {
+                        (
+                            s.data().as_str().to_owned(),
+                            s.detected_languages().to_vec(),
+                        )
+                    })
+                    .collect(),
+            );
+            let finder = FindsSubstring::new("needle", 0.9);
+            let mut found = Vec::new();
+            for subject in subjects {
+                found.push(finder.recognize(subject, ctx).await?);
+            }
+            Ok(found)
+        }
+    }
+
+    /// Each entity's span, as `(start, end)`.
+    fn spans(entities: &[Entity<Text>]) -> Vec<(usize, usize)> {
+        entities
+            .iter()
+            .filter_map(|entity| entity.location.range())
+            .map(|range| (range.start, range.end))
+            .collect()
+    }
+
+    /// A short and a long subject go to the inner recognizer as one batch: the
+    /// short one as itself, the long one as its windows, and each subject gets
+    /// back its own findings in its own coordinates.
+    #[tokio::test]
+    async fn a_mixed_batch_is_one_inner_call() {
+        let recorder = Arc::new(Recorder::default());
+        let chunked =
+            ChunkedRecognizer::with_chunking(Arc::clone(&recorder), WordWindows::new(3, 1));
+        let short = subject("a needle");
+        let long = subject("w0 w1 w2 w3 needle w5");
+        let scope = Scope::new();
+        let ctx = Context::new(&scope);
+
+        let found = chunked
+            .recognize_batch(&[&short, &long], &ctx)
+            .await
+            .unwrap();
+
+        let batches = recorder.batches.lock().unwrap();
+        assert_eq!(batches.len(), 1, "one inner call for the whole batch");
+        let texts: Vec<&str> = batches[0].iter().map(|(text, _)| text.as_str()).collect();
+        assert_eq!(texts, ["a needle", "w0 w1 w2", "w2 w3 needle", "needle w5"]);
+        assert_eq!(spans(&found[0]), [(2, 8)]);
+        // The needle at 12..18 of the long text, seen in two windows, once.
+        assert_eq!(spans(&found[1]), [(12, 18)]);
+    }
+
+    /// Each window carries the subject's language claims: a whole-text claim as
+    /// it is, a span claim clipped to the window and shifted to its start.
+    #[tokio::test]
+    async fn windows_carry_the_language_claims_that_reach_them() {
+        let recorder = Arc::new(Recorder::default());
+        let chunked =
+            ChunkedRecognizer::with_chunking(Arc::clone(&recorder), WordWindows::new(2, 0));
+        let en = LanguageTag::parse("en").unwrap();
+        let uk = LanguageTag::parse("uk").unwrap();
+        let mut long = subject("aa bb cc dd");
+        long.detect_language(LanguageClaim::asserted(en.clone()));
+        // "cc dd" (6..11) is Ukrainian: only the second window holds it.
+        long.detect_language(LanguageClaim::asserted(uk.clone()).with_span(6..11));
+        let scope = Scope::new();
+        let ctx = Context::new(&scope);
+
+        chunked.recognize_batch(&[&long], &ctx).await.unwrap();
+
+        let batches = recorder.batches.lock().unwrap();
+        let windows = &batches[0];
+        assert_eq!(windows[0].0, "aa bb");
+        assert_eq!(windows[0].1, [LanguageClaim::asserted(en.clone())]);
+        assert_eq!(windows[1].0, "cc dd");
+        assert_eq!(
+            windows[1].1,
+            [
+                LanguageClaim::asserted(en),
+                LanguageClaim::asserted(uk).with_span(0..5)
+            ]
+        );
     }
 
     #[tokio::test]
@@ -391,7 +561,7 @@ mod tests {
     /// Records how many hints each window subject carried, to assert chunk-global
     /// context survives the split.
     struct RecordsHints {
-        per_window_hint_count: std::sync::Mutex<Vec<usize>>,
+        per_window_hint_count: Mutex<Vec<usize>>,
     }
 
     #[async_trait::async_trait]
@@ -425,7 +595,7 @@ mod tests {
         let subject = Subject::new(TextData::new(text.to_owned())).with_hints(vec![hint]);
         let recognizer = ChunkedRecognizer::with_chunking(
             RecordsHints {
-                per_window_hint_count: std::sync::Mutex::new(Vec::new()),
+                per_window_hint_count: Mutex::new(Vec::new()),
             },
             WordWindows::new(4, 1),
         );

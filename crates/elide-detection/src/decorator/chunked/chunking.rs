@@ -1,10 +1,11 @@
 //! [`Chunking`]: the windowing strategy [`ChunkedRecognizer`](super::ChunkedRecognizer)
-//! drives, and [`WordWindows`], its word-count implementation.
+//! drives, and its word-count ([`WordWindows`]) and character-count
+//! ([`CharWindows`]) implementations.
 //!
-//! Split out as a trait so the strategy is a seam: word windows today, a
-//! token- or character-budgeted one later, without touching the rebase-and-merge
-//! machinery in the recognizer. Each strategy is pure geometry over a `&str`, so
-//! it is testable on plain strings with no recognizer.
+//! Split out as a trait so the strategy is a seam: another budget (a
+//! tokenizer-backed one) needs no change to the rebase-and-merge machinery in
+//! the recognizer. Each strategy is pure geometry over a `&str`, so it is
+//! testable on plain strings with no recognizer.
 
 use std::ops::Range;
 

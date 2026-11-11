@@ -58,9 +58,9 @@ pub use elide_core::{Error, ErrorKind, Result};
 pub use elide_detection::{
     Analyzer, Layer,
     calibrate::CalibrateLayer,
-    filter::FilterLayer,
+    filter::ThresholdLayer,
     reconcile::{
-        Merging, ReconcileLayer, Structural,
+        FuseLayer, ReconcileLayer, Structural,
         group::{CrossLabel, SameLabel},
         scoring::MaxConfidence,
     },

@@ -110,7 +110,11 @@ where
         Ok(())
     }
 
-    async fn enrich_batch(&self, subjects: &mut [Subject<Image>], ctx: &Context<'_>) -> Result<()> {
+    async fn enrich_batch(
+        &self,
+        subjects: &mut [&mut Subject<Image>],
+        ctx: &Context<'_>,
+    ) -> Result<()> {
         // One OCR request per not-yet-enriched subject, dispatched together; the
         // already-enriched ones (a re-run's restored layouts) are skipped so the
         // model is never re-invoked. `targets` keeps the subject index aligned
@@ -126,7 +130,7 @@ where
         }
         let requests = targets
             .iter()
-            .map(|&index| ocr_request(&subjects[index], ctx))
+            .map(|&index| ocr_request(subjects[index], ctx))
             .collect();
         // Enriching every targeted subject is this method's contract; the backend
         // must answer one response per request to honor it. A short batch would
@@ -350,13 +354,16 @@ mod tests {
         let scope = Scope::new();
         let ctx = Context::new(&scope);
         // One already-enriched subject (must be skipped) and two fresh ones.
-        let mut subjects = vec![
+        let mut subjects = [
             Subject::new(fixtures::blank_image_data()).with_artifact(Layout::default()),
             Subject::new(fixtures::blank_image_data()),
             Subject::new(fixtures::blank_image_data()),
         ];
 
-        enricher.enrich_batch(&mut subjects, &ctx).await.unwrap();
+        enricher
+            .enrich_batch(&mut subjects.iter_mut().collect::<Vec<_>>(), &ctx)
+            .await
+            .unwrap();
 
         // One batched round-trip covered both fresh subjects; no single calls.
         assert_eq!(counters.batch_calls.load(Ordering::Relaxed), 1);
@@ -390,7 +397,7 @@ mod tests {
         ];
 
         let err = enricher
-            .enrich_batch(&mut subjects, &ctx)
+            .enrich_batch(&mut subjects.iter_mut().collect::<Vec<_>>(), &ctx)
             .await
             .expect_err("a short batch response is a contract violation");
         assert_eq!(err.kind(), ErrorKind::Provider);

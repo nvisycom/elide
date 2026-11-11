@@ -103,6 +103,23 @@ impl LanguageClaim {
     pub fn confidence(&self) -> Confidence {
         self.source.confidence()
     }
+
+    /// This claim as it applies within `range` of the text, in `range`'s own
+    /// coordinates: a whole-text claim unchanged, a span claim clipped to
+    /// `range` and shifted to its start, or `None` when the span lies outside
+    /// it.
+    #[must_use]
+    pub fn within(&self, range: Range<usize>) -> Option<Self> {
+        let Some(span) = &self.span else {
+            return Some(self.clone());
+        };
+        let start = span.start.max(range.start);
+        let end = span.end.min(range.end);
+        (start < end).then(|| Self {
+            span: Some(start - range.start..end - range.start),
+            ..self.clone()
+        })
+    }
 }
 
 #[cfg(test)]
@@ -111,6 +128,23 @@ mod tests {
 
     fn tag(s: &str) -> LanguageTag {
         LanguageTag::parse(s).unwrap()
+    }
+
+    #[test]
+    fn within_clips_a_span_claim_and_keeps_a_whole_text_one() {
+        let whole = LanguageClaim::asserted(tag("en"));
+        assert_eq!(whole.within(10..20), Some(whole.clone()));
+
+        let spanned = LanguageClaim::asserted(tag("uk")).with_span(5..15);
+        assert_eq!(
+            spanned.within(10..20).and_then(|claim| claim.span),
+            Some(0..5)
+        );
+        assert_eq!(
+            spanned.within(0..8).and_then(|claim| claim.span),
+            Some(5..8)
+        );
+        assert_eq!(spanned.within(15..30), None);
     }
 
     #[test]

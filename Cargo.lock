@@ -1165,6 +1165,7 @@ dependencies = [
  "async-trait",
  "blake3",
  "celes",
+ "futures",
  "hex",
  "hipstr",
  "jiff",
@@ -1172,6 +1173,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "tokio",
  "uuid",
 ]
 
@@ -1184,6 +1186,7 @@ dependencies = [
  "futures",
  "schemars",
  "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]

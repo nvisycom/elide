@@ -110,7 +110,11 @@ where
         Ok(())
     }
 
-    async fn enrich_batch(&self, subjects: &mut [Subject<Audio>], ctx: &Context<'_>) -> Result<()> {
+    async fn enrich_batch(
+        &self,
+        subjects: &mut [&mut Subject<Audio>],
+        ctx: &Context<'_>,
+    ) -> Result<()> {
         // One STT request per not-yet-transcribed subject, dispatched together;
         // the already-enriched ones (a re-run's restored transcripts) are skipped
         // so the model is never re-invoked. `targets` keeps the subject index
@@ -127,7 +131,7 @@ where
         }
         let requests = targets
             .iter()
-            .map(|&index| stt_request(&subjects[index], ctx))
+            .map(|&index| stt_request(subjects[index], ctx))
             .collect();
         // Enriching every targeted subject is this method's contract; the backend
         // must answer one response per request to honor it. A short batch would
@@ -308,7 +312,7 @@ mod tests {
         ];
 
         let err = enricher
-            .enrich_batch(&mut subjects, &ctx)
+            .enrich_batch(&mut subjects.iter_mut().collect::<Vec<_>>(), &ctx)
             .await
             .expect_err("a short batch response is a contract violation");
         assert_eq!(err.kind(), ErrorKind::Provider);

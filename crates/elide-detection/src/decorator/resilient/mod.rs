@@ -67,7 +67,7 @@ impl<M: Modality, R: Recognizer<M>> Recognizer<M> for ResilientRecognizer<R> {
 
     async fn recognize_batch(
         &self,
-        subjects: &[Subject<M>],
+        subjects: &[&Subject<M>],
         ctx: &Context<'_>,
     ) -> Result<Vec<Vec<Entity<M>>>> {
         match self.inner.recognize_batch(subjects, ctx).await {
@@ -137,7 +137,7 @@ mod tests {
         let ctx = Context::new(&scope);
         let subjects = [subject("a"), subject("b"), subject("c")];
         let out = recognizer
-            .recognize_batch(&subjects, &ctx)
+            .recognize_batch(&subjects.iter().collect::<Vec<_>>(), &ctx)
             .await
             .expect("resilient swallows the error");
         // Exactly one (empty) list per subject — the analyzer's contract.

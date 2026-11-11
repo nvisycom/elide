@@ -9,9 +9,9 @@ one consistent set, in the order they are added:
 use elide::prelude::*;
 
 let analyzer = Analyzer::<Text>::new()
-    .with_layer(ReconcileLayer::same_label(Merging::max()))
+    .with_layer(FuseLayer::max())
     .with_layer(ReconcileLayer::cross_label(Structural::default()))
-    .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE));
+    .with_layer(ThresholdLayer::default());
 ```
 
 ## Calibrating
@@ -22,10 +22,10 @@ Recognizers score on different scales: one model's 0.8 is not another's.
 
 ## Same label
 
-`ReconcileLayer::same_label` fuses findings of one label that cover the
-same content into one entity. Its strategy decides the fused confidence:
-`Merging::max()` keeps the highest. The fused entity's audit trail keeps
-every recognizer's finding.
+`FuseLayer` fuses findings of one label that cover the same content into one
+entity. Its scoring decides the fused confidence: `FuseLayer::max()` keeps the
+highest, `FuseLayer::noisy_or()` accumulates agreeing findings' evidence. The
+fused entity's audit trail keeps every recognizer's finding.
 
 ## Different labels
 
@@ -42,8 +42,10 @@ overlap. `Structural`, the default, reads how the two spans relate:
 
 ## Filtering
 
-`FilterLayer` drops findings below a confidence threshold, or outside a set
-of allowed labels. `ConfidenceThreshold::BASELINE` is a sensible default.
+`ThresholdLayer` drops findings below a confidence threshold. Its default,
+`ConfidenceThreshold::BASELINE`, is a sensible starting point; pass another
+with `ThresholdLayer::new`. Which labels are detected is the request's
+catalog, not a layer.
 
 Weak findings can also be kept and handled at redaction time instead: a
 [rule](rules.md) can leave entities below a threshold untouched while still

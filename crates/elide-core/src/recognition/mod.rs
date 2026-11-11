@@ -16,6 +16,8 @@ mod subject;
 
 use std::sync::Arc;
 
+use futures::future;
+
 pub use self::context::Context;
 pub use self::label::LabelMap;
 pub use self::languages::Languages;
@@ -61,8 +63,14 @@ where
     /// Recognize over a batch of `subjects` under one shared context, returning
     /// one entity list per subject in the same order.
     ///
-    /// The default recognizes each in turn via [`recognize`](Self::recognize). A
-    /// recognizer backed by a provider that accepts several inputs in one
+    /// The batch is a slice of what [`recognize`](Self::recognize) takes, so a
+    /// caller batches subjects it only borrows: a decorator can send a subset, or
+    /// mix subjects with ones it builds, without copying any.
+    ///
+    /// The default runs [`recognize`](Self::recognize) for every subject
+    /// concurrently, so a recognizer that calls a provider per subject waits on
+    /// the slowest call, not on the sum of them. A recognizer backed by a
+    /// provider that accepts several inputs in one
     /// round-trip (a hosted NER or extraction endpoint) overrides this to build
     /// one request per subject and issue a single
     /// [`Backend::call_batch`](crate::backend::Backend::call_batch), turning N
@@ -77,14 +85,10 @@ where
     /// failure the same way.
     async fn recognize_batch(
         &self,
-        subjects: &[Subject<M>],
+        subjects: &[&Subject<M>],
         ctx: &Context<'_>,
     ) -> Result<Vec<Vec<Entity<M>>>> {
-        let mut per_subject = Vec::with_capacity(subjects.len());
-        for subject in subjects {
-            per_subject.push(self.recognize(subject, ctx).await?);
-        }
-        Ok(per_subject)
+        future::try_join_all(subjects.iter().map(|subject| self.recognize(subject, ctx))).await
     }
 }
 
@@ -107,7 +111,7 @@ where
 
     async fn recognize_batch(
         &self,
-        subjects: &[Subject<M>],
+        subjects: &[&Subject<M>],
         ctx: &Context<'_>,
     ) -> Result<Vec<Vec<Entity<M>>>> {
         (**self).recognize_batch(subjects, ctx).await
@@ -138,9 +142,61 @@ where
 
     async fn recognize_batch(
         &self,
-        subjects: &[Subject<M>],
+        subjects: &[&Subject<M>],
         ctx: &Context<'_>,
     ) -> Result<Vec<Vec<Entity<M>>>> {
         (**self).recognize_batch(subjects, ctx).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+    use crate::modality::text::{Text, TextData};
+
+    /// A recognizer that records the most `recognize` calls in flight at once.
+    #[derive(Default)]
+    struct InFlight {
+        now: AtomicUsize,
+        most: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl Recognizer<Text> for InFlight {
+        fn id(&self) -> ComponentId {
+            ComponentId::new("in-flight", "0")
+        }
+
+        async fn recognize(
+            &self,
+            _subject: &Subject<Text>,
+            _ctx: &Context<'_>,
+        ) -> Result<Vec<Entity<Text>>> {
+            let now = self.now.fetch_add(1, Ordering::SeqCst) + 1;
+            self.most.fetch_max(now, Ordering::SeqCst);
+            tokio::task::yield_now().await;
+            self.now.fetch_sub(1, Ordering::SeqCst);
+            Ok(Vec::new())
+        }
+    }
+
+    /// The default batch runs every subject's `recognize` at once, not one
+    /// after another.
+    #[tokio::test]
+    async fn the_default_batch_recognizes_concurrently() {
+        let recognizer = InFlight::default();
+        let subjects: Vec<Subject<Text>> = ["a", "b", "c"]
+            .into_iter()
+            .map(|text| Subject::new(TextData::new(text)))
+            .collect();
+        let scope = Scope::new();
+        let found = recognizer
+            .recognize_batch(&subjects.iter().collect::<Vec<_>>(), &Context::new(&scope))
+            .await
+            .unwrap();
+        assert_eq!(found.len(), 3);
+        assert_eq!(recognizer.most.load(Ordering::SeqCst), 3);
     }
 }

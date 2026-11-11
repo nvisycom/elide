@@ -179,7 +179,7 @@ where
 
     async fn recognize_batch(
         &self,
-        subjects: &[Subject<M>],
+        subjects: &[&Subject<M>],
         ctx: &Context<'_>,
     ) -> Result<Vec<Vec<Entity<M>>>> {
         // One NER request per subject with recognizable text; no-text subjects are
@@ -212,7 +212,7 @@ where
         }
         for (&index, response) in targets.iter().zip(responses) {
             per_subject[index] =
-                self.spans_to_entities(&response.spans, &effective_labels, &subjects[index]);
+                self.spans_to_entities(&response.spans, &effective_labels, subjects[index]);
         }
         Ok(per_subject)
     }
@@ -363,7 +363,10 @@ mod tests {
             Subject::new(TextData::new("c".to_owned())),
         ];
 
-        let out = recognizer.recognize_batch(&subjects, &ctx).await.unwrap();
+        let out = recognizer
+            .recognize_batch(&subjects.iter().collect::<Vec<_>>(), &ctx)
+            .await
+            .unwrap();
 
         // One batched round-trip covered all three subjects; no single calls.
         assert_eq!(counters.batch_calls.load(Ordering::Relaxed), 1);
@@ -387,7 +390,7 @@ mod tests {
         ];
 
         let err = recognizer
-            .recognize_batch(&subjects, &ctx)
+            .recognize_batch(&subjects.iter().collect::<Vec<_>>(), &ctx)
             .await
             .expect_err("a short batch response is a contract violation");
         assert_eq!(err.kind(), ErrorKind::Provider);

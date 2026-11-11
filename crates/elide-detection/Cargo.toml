@@ -52,6 +52,9 @@ schemars = { workspace = true, features = [], optional = true }
 # Internal crates
 elide-core = { workspace = true, features = ["mocks"] }
 
+# (De)serialization
+serde_json = { workspace = true, features = [] }
+
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
 tokio = { workspace = true, features = ["macros", "rt"] }

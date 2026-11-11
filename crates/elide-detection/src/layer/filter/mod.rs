@@ -1,71 +1,43 @@
-//! Filtering: dropping entities outside an allow-list of labels or
-//! below a confidence threshold.
+//! Filtering: dropping entities below a confidence threshold.
 
-use elide_core::entity::{Entity, LabelRef};
+use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 use elide_core::primitive::ConfidenceThreshold;
 
 use super::{Layer, LayerOutput};
 
-/// The filtering stage: drop entities by label allow-list or confidence
-/// threshold.
+/// The filtering stage: drop entities below a confidence threshold.
 ///
-/// Both checks are optional and compose with AND, an entity must clear
-/// every configured filter to be kept. Unlike reconciliation this is plain
-/// configuration, not a strategy, so it is a struct rather than a trait.
-#[derive(Debug, Clone, Default)]
-pub struct FilterLayer {
-    allowed_labels: Option<Vec<LabelRef>>,
-    threshold: Option<ConfidenceThreshold>,
+/// Which labels are detected is the request's catalog, which the analyzer
+/// already applies to its output; this stage only drops the weak findings.
+#[derive(Debug, Clone, Copy)]
+pub struct ThresholdLayer {
+    threshold: ConfidenceThreshold,
 }
 
-impl FilterLayer {
-    /// A filter that keeps everything (configure with the builders).
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Restrict kept entities to these labels.
+impl ThresholdLayer {
+    /// A filter dropping entities below `threshold`.
     #[must_use]
-    pub fn with_allowed_labels(mut self, labels: Vec<LabelRef>) -> Self {
-        self.allowed_labels = Some(labels);
-        self
+    pub fn new(threshold: ConfidenceThreshold) -> Self {
+        Self { threshold }
     }
 
-    /// Drop entities below this confidence threshold.
-    #[must_use]
-    pub fn with_threshold(mut self, threshold: ConfidenceThreshold) -> Self {
-        self.threshold = Some(threshold);
-        self
-    }
-
-    /// Whether `entity` clears every configured filter.
+    /// Whether `entity` clears the threshold.
     pub fn passes<M: Modality>(&self, entity: &Entity<M>) -> bool {
-        if let Some(labels) = &self.allowed_labels
-            && !labels.contains(&entity.label)
-        {
-            return false;
-        }
-        if let Some(threshold) = self.threshold
-            && !threshold.passes(entity.confidence)
-        {
-            return false;
-        }
-        true
+        self.threshold.passes(entity.confidence)
     }
 }
 
-impl<M: Modality> Layer<M> for FilterLayer {
+impl Default for ThresholdLayer {
+    /// A filter at [`ConfidenceThreshold::BASELINE`].
+    fn default() -> Self {
+        Self::new(ConfidenceThreshold::BASELINE)
+    }
+}
+
+impl<M: Modality> Layer<M> for ThresholdLayer {
     fn apply(&self, entities: Vec<Entity<M>>) -> LayerOutput<M> {
-        let mut kept = Vec::new();
-        let mut dropped = Vec::new();
-        for entity in entities {
-            if self.passes(&entity) {
-                kept.push(entity);
-            } else {
-                dropped.push(entity);
-            }
-        }
+        let (kept, dropped) = entities.into_iter().partition(|entity| self.passes(entity));
         LayerOutput::split(kept, dropped)
     }
 }
