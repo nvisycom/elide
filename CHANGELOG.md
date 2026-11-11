@@ -28,8 +28,10 @@ and this project adheres to
 - Codecs for TXT, JSON, CSV, HTML, XML, DOCX, XLSX, PPTX, PDF, PNG, JPEG, TIFF,
   WAV, and MP3, registered in a `FormatRegistry` resolved by extension, MIME
   type, or content sniffing
-- Embedded documents (an image in a DOCX, a file in a PDF) are decoded and
-  redacted as parts of their container, under their parent's policy
+- Embedded documents (an image in a DOCX, a file in a PDF) are decoded as
+  parts of their container, under their parent's policy, and analyzed and
+  redacted through the pipeline registered for their modality; an embedded
+  file no codec can read is removed
 - Optional PDF page rendering to images via the native PDFium library
   (`pdf-render` feature)
 
@@ -88,11 +90,11 @@ and this project adheres to
   item, and count in the format-neutral `HiddenContent` vocabulary
 - Metadata is a modality of its own (`Metadata`): an image's EXIF and an
   office document's core, app, and custom properties are keyed text fields
-  that each codec labels by its format's schema. A field
-  whose label the request's catalog declares is redacted with nothing
-  registered, and the text recognizers read every value, so a finding inside
-  a free-text field is spliced out and the rest kept; a field left blank is
-  removed
+  that each codec labels by its format's schema. Every orchestrator drives
+  them with no recognizer: a field whose label the request's catalog declares
+  is redacted by that label alone. A caller's `Analyzer<Metadata>` adds
+  recognizers that read each value, so a finding inside a free-text field is
+  spliced out and the rest kept; a field left blank is removed
 - Under `ScanAsContent` an image keeps only the EXIF tags a surfaced field is
   read from, and an EXIF tag goes with its group when another of the group is
   redacted
