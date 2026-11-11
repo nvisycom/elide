@@ -1,23 +1,27 @@
 //! Reconciliation: deciding what happens to overlapping entities.
 //!
-//! One layer, two axes. A [`GroupPredicate`] (`G`)
-//! decides *which* entities cluster, and a [`Reconciler`] (`R`) decides *what
-//! to do* with a grouped pair. Fusion and cross-label resolution are two
-//! configurations of the same [`ReconcileLayer`]:
+//! A [`GroupPredicate`] decides *which* entities cluster; two layers then act
+//! on the clusters:
 //!
-//! - fusion = `ReconcileLayer<`[`SameLabel`]`, `[`Merging`]`<…>>`
-//! - resolution = `ReconcileLayer<`[`CrossLabel`]`, `[`Structural`]`<…>>`
+//! - [`FuseLayer`] fuses each cluster into one entity, over the union of its
+//!   spans, pooling confidence with a [`Scoring`](scoring::Scoring): the same
+//!   finding reported more than once (by default, [`SameLabel`](group::SameLabel)
+//!   overlaps).
+//! - [`ReconcileLayer`] arbitrates each pair in a cluster with a
+//!   [`Reconciler`]: keep both, contest, or resolve to a winner (by default,
+//!   [`CrossLabel`] overlaps).
 //!
-//! The [`Reconciler`]s, [`Merging`], [`Structural`], [`Exclusive`],
-//! [`Permissive`], sit here at the root. The customization traits live in
-//! topic modules: [`group`] (the `G` axis), [`scoring`] (how [`Merging`]
-//! combines confidences), and [`tiebreaker`] (how conflicts pick a winner).
+//! The [`Reconciler`]s, [`Structural`], [`Exclusive`], [`Permissive`], sit here
+//! at the root. The customization traits live in topic modules: [`group`] (which
+//! entities cluster), [`scoring`] (how fusion pools confidences), and
+//! [`tiebreaker`] (how a conflict picks a winner).
 
 pub mod group;
 pub mod scoring;
 pub mod tiebreaker;
 
 mod fold;
+mod fuse;
 mod reconciler;
 
 use std::collections::HashMap;
@@ -26,9 +30,10 @@ use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 
 use self::fold::fold;
-use self::group::{CrossLabel, GroupPredicate, SameLabel};
+pub use self::fuse::FuseLayer;
+use self::group::{CrossLabel, GroupPredicate};
 pub use self::reconciler::{
-    Disposition, Exclusive, Merging, OnConflict, Permissive, Reconciler, Structural, Winner,
+    Disposition, Exclusive, OnConflict, Permissive, Reconciler, Structural, Winner,
 };
 use super::{Layer, LayerOutput};
 
@@ -36,14 +41,54 @@ use super::{Layer, LayerOutput};
 /// single-linkage-grouped together, e.g. three overlapping `EMAIL`s become
 /// `[2, 5, 7]`. Clustering works on indices so entities aren't moved or cloned
 /// while groups are built and merged.
-pub(super) type Cluster = Vec<usize>;
+type Cluster = Vec<usize>;
 
-/// The reconciliation stage: cluster overlapping entities, then dispose of
-/// each pair.
+/// Cluster `entities` by `group`: bucket each (O(1) by `bucket`), then
+/// single-linkage by `is_grouped` within its bucket. Every entity lands in
+/// exactly one cluster, a lone entity in a cluster of its own.
+///
+/// The bucket bounds the search: entities with different buckets can never
+/// group (the trait law), so an entity only scans clusters sharing its bucket.
+/// Within a bucket, overlap does the fine grouping, so one bucket can hold
+/// several disjoint clusters (two overlapping emails here, two unrelated ones
+/// elsewhere). Bucket iteration order doesn't affect the result: clusters are
+/// independent, and each layer rebuilds its output in entity order.
+fn cluster<M, G>(group: &G, entities: &[Entity<M>]) -> Vec<Cluster>
+where
+    M: Modality,
+    G: GroupPredicate<M>,
+{
+    let mut buckets: HashMap<G::Bucket, Vec<Cluster>> = HashMap::new();
+    for (index, entity) in entities.iter().enumerate() {
+        let groups = buckets.entry(group.bucket(entity)).or_default();
+        // Join every group this entity links to (single-linkage), merging
+        // bridged groups; else start a new one.
+        let hit: Vec<usize> = (0..groups.len())
+            .filter(|&g| {
+                groups[g]
+                    .iter()
+                    .any(|&other| group.is_grouped(&entities[other], entity))
+            })
+            .collect();
+        match hit.first().copied() {
+            None => groups.push(vec![index]),
+            Some(first) => {
+                groups[first].push(index);
+                for &g in hit.iter().skip(1).rev() {
+                    let merged = groups.remove(g);
+                    groups[first].extend(merged);
+                }
+            }
+        }
+    }
+    buckets.into_values().flatten().collect()
+}
+
+/// The arbitration stage: cluster overlapping entities, then dispose of each
+/// pair with a [`Reconciler`] (keep both, contest, or resolve to a winner).
 ///
 /// Generic over the grouping `G` and the reconciler `R`, each chosen at
-/// construction. Same-label fusion and cross-label arbitration are both
-/// expressed here; see the [module docs].
+/// construction; see the [module docs].
 ///
 /// [module docs]: self
 #[derive(Debug, Clone)]
@@ -57,15 +102,6 @@ impl<G, R> ReconcileLayer<G, R> {
     /// `reconciler`.
     pub fn new(group: G, reconciler: R) -> Self {
         Self { group, reconciler }
-    }
-}
-
-impl<R> ReconcileLayer<SameLabel, R> {
-    /// A reconcile layer over *same-label* overlaps, the fusion pass.
-    /// Clusters co-located findings of the same label and disposes of each
-    /// pair with `reconciler` (typically a [`Merging`]).
-    pub fn same_label(reconciler: R) -> Self {
-        Self::new(SameLabel, reconciler)
     }
 }
 
@@ -85,45 +121,11 @@ where
     R: Reconciler<M>,
 {
     fn apply(&self, entities: Vec<Entity<M>>) -> LayerOutput<M> {
-        // Bucket each entity (O(1) by `bucket`), then single-linkage by
-        // `is_grouped` within its bucket. The bucket bounds the search:
-        // entities with different buckets can never group (the trait law), so a
-        // clustered entity only scans groups sharing its bucket. Bucket
-        // iteration order doesn't affect the result, clusters are independent
-        // and the kept set is rebuilt in entity order.
-        // `Vec<Cluster>`, not `Cluster`: a bucket coarsely groups by label, but
-        // within it overlap clustering can yield *several* disjoint clusters
-        // (two overlapping emails here, two unrelated ones elsewhere), each a
-        // separate `Cluster`. The bucket is the candidate set; overlap does the
-        // fine grouping.
-        let mut buckets: HashMap<G::Bucket, Vec<Cluster>> = HashMap::new();
-        for (index, entity) in entities.iter().enumerate() {
-            let groups = buckets.entry(self.group.bucket(entity)).or_default();
-            // Join every group this entity links to (single-linkage), merging
-            // bridged groups; else start a new one.
-            let hit: Vec<usize> = (0..groups.len())
-                .filter(|&g| {
-                    groups[g]
-                        .iter()
-                        .any(|&other| self.group.is_grouped(&entities[other], entity))
-                })
-                .collect();
-            match hit.first().copied() {
-                None => groups.push(vec![index]),
-                Some(first) => {
-                    groups[first].push(index);
-                    for &g in hit.iter().skip(1).rev() {
-                        let merged = groups.remove(g);
-                        groups[first].extend(merged);
-                    }
-                }
-            }
-        }
-
-        let clusters: Vec<Cluster> = buckets.into_values().flatten().collect();
+        let clusters = cluster(&self.group, &entities);
         fold(&self.reconciler, entities, clusters)
     }
 }
+
 #[cfg(test)]
 mod tests {
     use elide_core::entity::audit::{AuditEvent, AuditKind, PatternRule};
@@ -131,8 +133,7 @@ mod tests {
     use elide_core::modality::text::{Text, TextLocation};
     use elide_core::primitive::Confidence;
 
-    use super::group::{CrossLabel, SameLabel};
-    use super::scoring::NoisyOrConfidence;
+    use super::group::CrossLabel;
     use super::*;
 
     fn entity(label: &str, start: usize, end: usize, conf: f32) -> Entity<Text> {
@@ -144,39 +145,6 @@ mod tests {
 
     fn has_kind(entity: &Entity<Text>, f: impl Fn(&AuditKind<Text>) -> bool) -> bool {
         entity.audit.events().iter().any(|e| f(&e.kind))
-    }
-
-    /// Same-label overlapping findings merge into one entity spanning their
-    /// union, with the pooled confidence.
-    #[test]
-    fn merges_same_label_into_the_union() {
-        let entities = vec![entity("EMAIL", 0, 10, 0.9), entity("EMAIL", 6, 25, 0.6)];
-        let out = ReconcileLayer::same_label(Merging::max()).apply(entities);
-        assert_eq!(out.kept.len(), 1);
-        let s = &out.kept[0];
-        let range = s.location.range().unwrap();
-        assert_eq!((range.start, range.end), (0, 25));
-        assert_eq!(s.label, LabelRef::new("EMAIL"));
-        assert_eq!(s.confidence, Confidence::new(0.9).unwrap()); // max
-    }
-
-    /// `NoisyOrConfidence` accumulates: two agreeing 0.6 witnesses → 0.84.
-    #[test]
-    fn noisy_confidence_accumulates() {
-        let entities = vec![entity("EMAIL", 0, 10, 0.6), entity("EMAIL", 0, 10, 0.6)];
-        let layer = ReconcileLayer::new(SameLabel, Merging::new(NoisyOrConfidence));
-        let out = layer.apply(entities);
-        assert_eq!(out.kept.len(), 1);
-        assert!((out.kept[0].confidence.get() - 0.84).abs() < 1e-5);
-    }
-
-    /// Different labels never group under `SameLabel`, so fusion leaves a
-    /// cross-label overlap alone.
-    #[test]
-    fn fusion_ignores_different_labels() {
-        let entities = vec![entity("EMAIL", 0, 10, 0.9), entity("PHONE", 0, 10, 0.8)];
-        let out = ReconcileLayer::same_label(Merging::max()).apply(entities);
-        assert_eq!(out.kept.len(), 2);
     }
 
     fn structural() -> ReconcileLayer<CrossLabel, Structural> {

@@ -33,6 +33,7 @@ use elide_core::{Error, Result};
 use futures::future;
 
 pub use self::analysis::Analysis;
+use crate::batch::expect_one_per_input;
 use crate::layer::Layer;
 
 /// The find engine: enrichers, recognizers, and deduplication, in one call.
@@ -40,18 +41,19 @@ use crate::layer::Layer;
 /// Generic over the [`Modality`] `M`. Enrichers, recognizers, and deduplication
 /// layers are added with [`with_enricher`], [`with_recognizer`], and
 /// [`with_layer`], each in the order it should run. [`analyze`] runs the three
-/// phases and returns the reconciled entities.
+/// phases and returns an [`Analysis`] carrying the reconciled entities.
 ///
 /// ```ignore
-/// let entities = Analyzer::new()
+/// let analysis = Analyzer::new()
 ///     .with_enricher(lingua)
 ///     .with_recognizer(us_phone)
 ///     .with_recognizer(ner)
-///     .with_layer(ReconcileLayer::same_label(Merging::max()))
+///     .with_layer(FuseLayer::max())
 ///     .with_layer(ReconcileLayer::cross_label(Structural::default()))
-///     .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE))
+///     .with_layer(ThresholdLayer::default())
 ///     .analyze(data, &Scope::new().with_catalog(LabelCatalog::with_builtins()))
 ///     .await?;
+/// let entities = analysis.entities;
 /// ```
 ///
 /// [`with_enricher`]: Analyzer::with_enricher
@@ -191,15 +193,17 @@ impl<M: Modality> Analyzer<M> {
 
         // Batched enrichment: each enricher sees every subject, so an OCR/STT
         // enricher coalesces its provider round-trips into one `call_batch`.
+        let mut batch: Vec<&mut Subject<M>> = subjects.iter_mut().collect();
         for enricher in &self.enrichers {
-            enricher.enrich_batch(&mut subjects, &ctx).await?;
+            enricher.enrich_batch(&mut batch, &ctx).await?;
         }
 
         // Recognize the whole subject batch at once — every recognizer runs
         // concurrently, each over all subjects, so a provider-backed recognizer
         // (NER) coalesces its round-trips into one `call_batch`. `raw[i]` is
         // subject `i`'s entities from every recognizer combined.
-        let raw = self.recognize_batch(&subjects, &ctx).await?;
+        let batch: Vec<&Subject<M>> = subjects.iter().collect();
+        let raw = self.recognize_batch(&batch, &ctx).await?;
 
         // Reduce each subject and aggregate per source: lift its entities back
         // through its own chunk, and carry the source's one enrichment artifact.
@@ -243,9 +247,7 @@ impl<M: Modality> Analyzer<M> {
         for enricher in &self.enrichers {
             enricher.enrich(subject, ctx).await?;
         }
-        let mut raw = self
-            .recognize_batch(std::slice::from_ref(subject), ctx)
-            .await?;
+        let mut raw = self.recognize_batch(&[&*subject], ctx).await?;
         let entities = raw.pop().unwrap_or_default();
         Ok(self.finish_subject(subject, ctx, entities))
     }
@@ -260,13 +262,13 @@ impl<M: Modality> Analyzer<M> {
     /// is returned (fail-fast).
     async fn recognize_batch(
         &self,
-        subjects: &[Subject<M>],
+        subjects: &[&Subject<M>],
         ctx: &Context<'_>,
     ) -> Result<Vec<Vec<Entity<M>>>> {
-        let futures = self
-            .recognizers
-            .iter()
-            .map(|recognizer| recognizer.recognize_batch(subjects, ctx));
+        let futures = self.recognizers.iter().map(|recognizer| async move {
+            let found = recognizer.recognize_batch(subjects, ctx).await?;
+            expect_one_per_input(recognizer.id(), found, subjects.len())
+        });
         // Each recognizer returns one entity list per subject; transpose so
         // `entities[s]` gathers every recognizer's entities for subject s. The
         // recognizers are arbitrary (registered via `with_recognizer`), so this
@@ -275,15 +277,7 @@ impl<M: Modality> Analyzer<M> {
         // over-attribute entities.
         let mut entities: Vec<Vec<Entity<M>>> = subjects.iter().map(|_| Vec::new()).collect();
         for found in future::join_all(futures).await {
-            let found = found?;
-            if found.len() != subjects.len() {
-                return Err(Error::recognition(format!(
-                    "recognizer returned {} entity lists for {} subjects",
-                    found.len(),
-                    subjects.len()
-                )));
-            }
-            for (slot, found_for_subject) in entities.iter_mut().zip(found) {
+            for (slot, found_for_subject) in entities.iter_mut().zip(found?) {
                 slot.extend(found_for_subject);
             }
         }
@@ -401,7 +395,7 @@ mod tests {
 
         async fn enrich_batch(
             &self,
-            subjects: &mut [Subject<Text>],
+            subjects: &mut [&mut Subject<Text>],
             _ctx: &Context<'_>,
         ) -> Result<()> {
             self.batches.fetch_add(1, Ordering::Relaxed);
@@ -533,7 +527,7 @@ mod tests {
 
         async fn recognize_batch(
             &self,
-            _subjects: &[Subject<Text>],
+            _subjects: &[&Subject<Text>],
             _ctx: &Context<'_>,
         ) -> Result<Vec<Vec<Entity<Text>>>> {
             // One short, regardless of subject count.

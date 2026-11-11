@@ -14,7 +14,7 @@ use super::{Disposition, Reconciler, Winner};
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Exclusive<T = HighestConfidence> {
     /// How the winner is chosen.
-    pub tiebreaker: T,
+    tiebreaker: T,
 }
 
 impl<T> Exclusive<T> {

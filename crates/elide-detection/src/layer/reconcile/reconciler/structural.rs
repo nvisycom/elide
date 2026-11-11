@@ -32,24 +32,23 @@ pub enum OnConflict {
 ///   is below `threshold`: two distinct findings that merely touch → keep both.
 /// - **Near-coincident**, IoU at or above `threshold`: two recognizers
 ///   claiming substantially the same span with different labels, a true
-///   conflict → disposed of per [`on_conflict`] (resolve with `tiebreaker`, or
-///   contest for human review).
+///   conflict → resolved with the tiebreaker, or, after
+///   [`reviewing`](Structural::reviewing), contested for human review.
 ///
 /// [intersection-over-union]: elide_core::modality::Overlap::Crossing
-/// [`on_conflict`]: Structural::on_conflict
 #[derive(Debug, Clone, Copy)]
 pub struct Structural<T = HighestConfidence> {
     /// The IoU at or above which a non-nested overlap counts as a conflict
     /// rather than two distinct findings.
-    pub threshold: f32,
+    threshold: f32,
     /// The confidence margin within which a *contained* entity is kept as a
     /// real nesting; a contained entity weaker than its container by at least
     /// this margin (`inner + margin <= container`) is subsumed and dropped.
-    pub margin: f32,
+    margin: f32,
     /// How a true conflict is settled.
-    pub tiebreaker: T,
+    tiebreaker: T,
     /// Whether a true conflict is auto-resolved or surfaced for review.
-    pub on_conflict: OnConflict,
+    on_conflict: OnConflict,
 }
 
 impl Structural<HighestConfidence> {
@@ -162,10 +161,8 @@ where
 }
 
 impl<T> Structural<T> {
-    /// Settle a true conflict per [`on_conflict`]: resolve with the tiebreaker,
-    /// or contest for review.
-    ///
-    /// [`on_conflict`]: Self::on_conflict
+    /// Settle a true conflict per `on_conflict`: resolve with the tiebreaker, or
+    /// contest for review.
     fn settle<M>(&self, a: &Entity<M>, b: &Entity<M>) -> Disposition
     where
         M: Modality,

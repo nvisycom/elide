@@ -242,20 +242,20 @@ the find engine in the order they should run. In their usual order, they are:
   do not mean the same thing at the same numeric value; calibration is what
   makes the later comparisons meaningful.
 
-- **Reconcile.** Decides what happens to overlapping entities. One stage with
-  two axes: a _grouping_ chooses which entities cluster, and a _reconciler_
-  chooses what to do with each grouped pair — combine, keep, contest, or
-  resolve. Fusion (same-label) and cross-label arbitration are two
-  configurations of this one stage, run as two passes:
+- **Reconcile.** Decides what happens to overlapping entities. A _grouping_
+  chooses which entities cluster; two passes then act on the clusters, fusion
+  and arbitration:
 
-  - _Same-label._ Co-located findings of the same label are clustered and
-    **merged** into one entity over the union of their spans, accumulating every
-    contributing detection in the survivor's provenance. The merged confidence
-    is pooled, not picked: a rule-based hit and a statistical hit on the same
-    span are stronger evidence than either alone (noisy-OR), though the
-    conservative default keeps the strongest single score.
+  - _Same-label (fusion)._ Co-located findings of the same label are clustered
+    and **fused**, the whole cluster at once, into one entity over the union of
+    their spans, accumulating every contributing detection in the survivor's
+    provenance. The fused confidence is pooled over every member, not picked:
+    a rule-based hit and a statistical hit on the same span are stronger
+    evidence than either alone (noisy-OR), though the conservative default
+    keeps the strongest single score.
 
-  - _Cross-label._ Overlaps between findings of different labels are read
+  - _Cross-label (arbitration)._ A _reconciler_ decides each overlapping pair
+    of different labels: keep both, contest, or resolve. Overlaps are read
     _structurally_ rather than treated as automatic conflicts. A legitimate
     nesting (a postal code inside an address) keeps both; a subsumed junk match
     (a weak detection inside a much stronger one) is dropped; only a
@@ -267,8 +267,8 @@ the find engine in the order they should run. In their usual order, they are:
     span; the permissive alternative keeps every overlap for downstream
     handling.
 
-- **Filter.** Drops entities below a confidence threshold or outside an
-  allow-list of labels. This is not noise rejection in the signal-processing
+- **Filter.** Drops entities below a confidence threshold; which labels are
+  detected at all is the request's catalog. This is not noise rejection in the signal-processing
   sense; it is a tunable decision about the precision-recall tradeoff
   appropriate for the deployment.
 
@@ -282,14 +282,14 @@ the find engine in the order they should run. In their usual order, they are:
          |
          v
 +------------------+
-|    reconcile     |  cluster overlaps, then per pair:
-|                  |    merge same-label findings,
-|                  |    keep / contest / resolve cross-label
+|    reconcile     |  cluster overlaps, then:
+|                  |    fuse each same-label cluster,
+|                  |    keep / contest / resolve cross-label pairs
 +------------------+
          |
          v
 +------------------+
-|     filter       |  drop below threshold / outside allow-list
+|     filter       |  drop below the confidence threshold
 +------------------+
          |
          v
@@ -297,7 +297,7 @@ the find engine in the order they should run. In their usual order, they are:
 ```
 
 Order matters. Calibration before everything else makes the subsequent
-comparisons commensurable. Merging same-label findings before arbitrating
+comparisons commensurable. Fusing same-label findings before arbitrating
 cross-label overlaps keeps concurring same-label evidence from being mistaken
 for a conflict. Filtering last means a low-confidence finding never displaces a
 high-confidence one on its way out. The pipeline is deterministic given the same

@@ -1,17 +1,17 @@
 //! End-to-end analyzer test: two recognizers find overlapping
-//! `PHONE_NUMBER`s; the analyzer fuses them, and a `FilterLayer` drops a
+//! `PHONE_NUMBER`s; the analyzer fuses them, and a `ThresholdLayer` drops a
 //! low-confidence stray.
 
 use std::assert_matches;
 
 use elide::detection::Analyzer;
 use elide::detection::calibrate::{CalibrateLayer, CalibrationMap};
-use elide::detection::filter::FilterLayer;
-use elide::detection::reconcile::{Merging, ReconcileLayer, Structural};
+use elide::detection::filter::ThresholdLayer;
+use elide::detection::reconcile::{FuseLayer, ReconcileLayer, Structural};
 use elide_core::entity::audit::{AuditEvent, AuditKind, PatternRule};
 use elide_core::entity::{Entity, Label, LabelCatalog, LabelRef};
 use elide_core::mocks::MockRecognizer;
-use elide_core::primitive::{Confidence, ConfidenceThreshold};
+use elide_core::primitive::Confidence;
 use elide_core::recognition::Scope;
 
 use crate::support::{SourceRef, Text, TextData, TextLocation};
@@ -70,9 +70,9 @@ async fn analyze_fuses_resolves_filters() {
         .with_recognizer(a)
         .with_recognizer(b)
         .with_layer(CalibrateLayer::new(CalibrationMap::new())) // identity (empty)
-        .with_layer(ReconcileLayer::same_label(Merging::max()))
+        .with_layer(FuseLayer::max())
         .with_layer(ReconcileLayer::cross_label(Structural::default()))
-        .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE));
+        .with_layer(ThresholdLayer::default());
 
     let mut entities = analyzer
         .analyze(TextData::new(""), &scope_for(&["PHONE_NUMBER", "WEAK"]))
@@ -123,7 +123,7 @@ async fn fusion_keeps_both_operands_source_refs() {
     let analyzer = Analyzer::<Text>::new()
         .with_recognizer(a)
         .with_recognizer(b)
-        .with_layer(ReconcileLayer::same_label(Merging::max()));
+        .with_layer(FuseLayer::max());
 
     let mut entities = analyzer
         .analyze(TextData::new(""), &scope_for(&["PHONE_NUMBER"]))
@@ -175,7 +175,7 @@ fn calibrate_scales_by_originating_recognizer() {
     use elide::detection::Layer;
 
     // "pattern" always fires at 1.0; calibrate it down by 0.5.
-    let calibration: CalibrationMap = [("pattern", 0.5), ("ner", 0.8)].into_iter().collect();
+    let calibration = CalibrationMap::from_multipliers([("pattern", 0.5), ("ner", 0.8)]).unwrap();
     let layer = CalibrateLayer::new(calibration);
 
     let entities = vec![
@@ -220,9 +220,9 @@ async fn out_of_catalog_container_subsumes_then_is_culled() {
 
     let analyzer = Analyzer::<Text>::new()
         .with_recognizer(recognizer)
-        .with_layer(ReconcileLayer::same_label(Merging::max()))
+        .with_layer(FuseLayer::max())
         .with_layer(ReconcileLayer::cross_label(Structural::default()))
-        .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE));
+        .with_layer(ThresholdLayer::default());
 
     let scope = Scope::new().with_catalog(catalog);
     let entities = analyzer

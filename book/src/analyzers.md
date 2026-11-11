@@ -16,8 +16,8 @@ use elide::recognition::pattern::PatternRecognizer;
 # fn main() -> Result<()> {
 let analyzer = Analyzer::<Text>::new()
     .with_recognizer(PatternRecognizer::builder().with_builtin_patterns().build()?)
-    .with_layer(ReconcileLayer::same_label(Merging::max()))
-    .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE));
+    .with_layer(FuseLayer::max())
+    .with_layer(ThresholdLayer::default());
 # Ok(())
 # }
 ```

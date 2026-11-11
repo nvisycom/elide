@@ -11,8 +11,8 @@
 //! recognizer handles.
 
 use elide::detection::Analyzer;
-use elide::detection::filter::FilterLayer;
-use elide::detection::reconcile::{Exclusive, Merging, Permissive, ReconcileLayer, Structural};
+use elide::detection::filter::ThresholdLayer;
+use elide::detection::reconcile::{Exclusive, FuseLayer, Permissive, ReconcileLayer, Structural};
 use elide::modality::Modality;
 use elide::primitive::ConfidenceThreshold;
 use serde::Deserialize;
@@ -171,14 +171,10 @@ impl Layer {
     /// serves any stage.
     pub(crate) fn apply<M: Modality>(self, analyzer: Analyzer<M>) -> Analyzer<M> {
         match self.0 {
-            LayerKind::Filter(threshold) => {
-                analyzer.with_layer(FilterLayer::new().with_threshold(threshold))
-            }
-            LayerKind::SameLabel(SameLabelKind::Max) => {
-                analyzer.with_layer(ReconcileLayer::same_label(Merging::max()))
-            }
+            LayerKind::Filter(threshold) => analyzer.with_layer(ThresholdLayer::new(threshold)),
+            LayerKind::SameLabel(SameLabelKind::Max) => analyzer.with_layer(FuseLayer::max()),
             LayerKind::SameLabel(SameLabelKind::NoisyOr) => {
-                analyzer.with_layer(ReconcileLayer::same_label(Merging::noisy_or()))
+                analyzer.with_layer(FuseLayer::noisy_or())
             }
             LayerKind::CrossLabel(CrossLabelKind::Structural { iou }) => match iou {
                 Some(iou) => analyzer.with_layer(ReconcileLayer::cross_label(

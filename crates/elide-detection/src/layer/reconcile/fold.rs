@@ -1,12 +1,9 @@
 //! Folding pairwise [`Disposition`]s over a cluster into kept/dropped
 //! entities.
 
-use std::mem;
-
 use elide_core::entity::Entity;
 use elide_core::entity::audit::{AuditEvent, Conflict, Contested};
-use elide_core::modality::{Modality, ModalityLocation};
-use elide_core::primitive::Confidence;
+use elide_core::modality::Modality;
 
 use super::Cluster;
 use super::reconciler::{Disposition, Reconciler, Winner};
@@ -14,9 +11,8 @@ use crate::layer::LayerOutput;
 
 /// Fold each cluster's pairwise dispositions into kept/dropped entities.
 ///
-/// Precedence within a cluster: `Resolve` drops losers first (so a span about
-/// to be discarded isn't merged), then `Contest` flags survivors, then `Merge`
-/// unions the survivors still linked by a merge.
+/// Precedence within a cluster: `Resolve` drops losers first, then `Contest`
+/// flags the pairs that both survive.
 pub(super) fn fold<M, R>(
     reconciler: &R,
     mut entities: Vec<Entity<M>>,
@@ -31,7 +27,6 @@ where
     // Deferred provenance writes, applied after the read-only decision pass.
     let mut conflicts: Vec<(usize, usize)> = Vec::new(); // (winner, loser)
     let mut contests: Vec<(usize, usize)> = Vec::new(); // both flagged
-    let mut merges: Vec<(usize, usize, Confidence)> = Vec::new();
 
     for cluster in &clusters {
         for (pi, &i) in cluster.iter().enumerate() {
@@ -44,7 +39,6 @@ where
                 }
                 match reconciler.decide(&entities[i], &entities[j]) {
                     Disposition::KeepBoth => {}
-                    Disposition::Merge { confidence } => merges.push((i, j, confidence)),
                     Disposition::Contest => contests.push((i, j)),
                     Disposition::Resolve { winner } => match winner {
                         Winner::First => {
@@ -64,7 +58,6 @@ where
     let name = reconciler.name();
     record_conflicts(&mut entities, &dropped, &conflicts, name);
     record_contests(&mut entities, &dropped, &contests, name);
-    apply_merges(&mut entities, &mut dropped, &merges, name);
 
     let mut kept = Vec::new();
     let mut out_dropped = Vec::new();
@@ -128,44 +121,5 @@ fn record_contests<M: Modality>(
         );
         entities[a].record(on_a);
         entities[b].record(on_b);
-    }
-}
-
-/// Apply merges: union each pair into a single survivor (the higher-confidence
-/// side is the base), folding the other in and dropping it. Pooled confidence
-/// comes from the disposition.
-fn apply_merges<M: Modality>(
-    entities: &mut [Entity<M>],
-    dropped: &mut [bool],
-    merges: &[(usize, usize, Confidence)],
-    name: &str,
-) {
-    for &(i, j, confidence) in merges {
-        if dropped[i] || dropped[j] {
-            continue;
-        }
-        // The higher-confidence side is the base (donates label + scalar
-        // fields); the other folds in and is dropped.
-        let (base, other) = if entities[i].confidence >= entities[j].confidence {
-            (i, j)
-        } else {
-            (j, i)
-        };
-        if let Some(union) = entities[base].location.union(&entities[other].location) {
-            entities[base].location = union;
-        }
-        // Join the two trails as a DAG: the fusion event names both trails'
-        // heads as its parents, so neither trail is re-linked and no false
-        // linear order is imposed between them.
-        let base_head = entities[base].audit.head_hash();
-        let other_head = entities[other].audit.head_hash();
-        let other_events = mem::take(&mut entities[other].audit).into_events();
-        entities[base].audit.absorb(other_events);
-        entities[base].confidence = confidence;
-        entities[base].audit.record_fusion(
-            AuditEvent::deduplication(name.to_owned(), confidence),
-            [base_head, other_head],
-        );
-        dropped[other] = true;
     }
 }

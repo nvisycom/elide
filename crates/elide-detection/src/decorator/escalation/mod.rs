@@ -15,16 +15,14 @@
 
 mod confidence;
 
-use std::sync::Arc;
-
 use elide_core::Result;
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
 use elide_core::primitive::ComponentId;
 use elide_core::recognition::{Context, Recognizer, Subject};
-use futures::future;
 
 pub use self::confidence::ConfidenceDecider;
+use crate::batch::expect_one_per_input;
 
 /// Decides whether a subject warrants the escalated recognizer, given what the
 /// cheap baseline already found.
@@ -48,31 +46,33 @@ pub trait Decider<M: Modality>: Send + Sync {
 /// either recognizer propagates without returning partial results. Overlap
 /// between the two is left to the reconcile layer, matching the pipeline's "keep
 /// the redundant set, reconcile later" model.
-pub struct EscalatingRecognizer<M: Modality, D> {
-    baseline: Arc<dyn Recognizer<M>>,
-    escalated: Arc<dyn Recognizer<M>>,
+pub struct EscalatingRecognizer<B, E, D> {
+    baseline: B,
+    escalated: E,
     decider: D,
 }
 
-impl<M: Modality, D: Decider<M>> EscalatingRecognizer<M, D> {
+impl<B, E, D> EscalatingRecognizer<B, E, D> {
     /// Wrap `baseline` (always run) and `escalated` (run on escalation), with
     /// `decider` choosing per subject.
     #[must_use]
-    pub fn new<B, E>(baseline: B, escalated: E, decider: D) -> Self
-    where
-        B: Recognizer<M> + 'static,
-        E: Recognizer<M> + 'static,
-    {
+    pub fn new(baseline: B, escalated: E, decider: D) -> Self {
         Self {
-            baseline: Arc::new(baseline),
-            escalated: Arc::new(escalated),
+            baseline,
+            escalated,
             decider,
         }
     }
 }
 
 #[async_trait::async_trait]
-impl<M: Modality, D: Decider<M>> Recognizer<M> for EscalatingRecognizer<M, D> {
+impl<M, B, E, D> Recognizer<M> for EscalatingRecognizer<B, E, D>
+where
+    M: Modality,
+    B: Recognizer<M>,
+    E: Recognizer<M>,
+    D: Decider<M>,
+{
     /// The baseline's id. Each emitted entity already carries its own
     /// originating recognizer in its audit trail (the baseline's or the
     /// escalated one's), so this is only the decorator's own baseline identity.
@@ -90,43 +90,27 @@ impl<M: Modality, D: Decider<M>> Recognizer<M> for EscalatingRecognizer<M, D> {
 
     async fn recognize_batch(
         &self,
-        subjects: &[Subject<M>],
+        subjects: &[&Subject<M>],
         ctx: &Context<'_>,
     ) -> Result<Vec<Vec<Entity<M>>>> {
-        // The baseline batches across all subjects at once (preserving a
-        // provider-backed baseline's own coalescing). The decision needs the
-        // baseline's result, so it runs first; escalation then happens over the
-        // subjects the decider picks.
-        let mut per_subject = self.baseline.recognize_batch(subjects, ctx).await?;
+        // The baseline batches across all subjects at once; the decider needs
+        // its findings, so it runs after them. The subjects it escalates go to
+        // the escalated recognizer as one batch.
+        let per_subject = self.baseline.recognize_batch(subjects, ctx).await?;
+        let mut per_subject =
+            expect_one_per_input(self.baseline.id(), per_subject, subjects.len())?;
 
         let escalated: Vec<usize> = (0..subjects.len())
-            .filter(|&i| self.decider.escalate(&subjects[i], &per_subject[i]))
+            .filter(|&i| self.decider.escalate(subjects[i], &per_subject[i]))
             .collect();
         if escalated.is_empty() {
             return Ok(per_subject);
         }
-
-        // When every subject escalates, hand the whole slice to the escalated
-        // recognizer's own `recognize_batch` — a provider-backed one coalesces it
-        // into one round-trip. A filtered, non-contiguous subset can't form a
-        // slice (`Subject` is deliberately not `Clone`), so run those per subject
-        // but concurrently, not awaited in sequence.
-        if escalated.len() == subjects.len() {
-            let found = self.escalated.recognize_batch(subjects, ctx).await?;
-            for (entities, extra) in per_subject.iter_mut().zip(found) {
-                entities.extend(extra);
-            }
-            return Ok(per_subject);
-        }
-
-        let found = future::join_all(
-            escalated
-                .iter()
-                .map(|&i| self.escalated.recognize(&subjects[i], ctx)),
-        )
-        .await;
-        for (&i, result) in escalated.iter().zip(found) {
-            per_subject[i].extend(result?);
+        let batch: Vec<&Subject<M>> = escalated.iter().map(|&i| subjects[i]).collect();
+        let found = self.escalated.recognize_batch(&batch, ctx).await?;
+        let found = expect_one_per_input(self.escalated.id(), found, batch.len())?;
+        for (&i, extra) in escalated.iter().zip(found) {
+            per_subject[i].extend(extra);
         }
         Ok(per_subject)
     }
@@ -134,8 +118,8 @@ impl<M: Modality, D: Decider<M>> Recognizer<M> for EscalatingRecognizer<M, D> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
 
     use elide_core::entity::audit::{AuditEvent, PatternRule};
     use elide_core::entity::{Entity, LabelRef};
@@ -287,7 +271,7 @@ mod tests {
         let scope = Scope::new();
         let subjects = [subject("a"), subject("b"), subject("c")];
         let out = recognizer
-            .recognize_batch(&subjects, &ctx(&scope))
+            .recognize_batch(&subjects.iter().collect::<Vec<_>>(), &ctx(&scope))
             .await
             .unwrap();
 
@@ -299,8 +283,8 @@ mod tests {
         );
     }
 
-    /// Only some subjects escalate: the escalated recognizer runs for exactly
-    /// those (concurrently), each result scattered to its own position, and the
+    /// Only some subjects escalate: the escalated recognizer gets exactly those,
+    /// as one batch, each result scattered to its own position, and the
     /// non-escalated subjects keep only their baseline entities.
     #[tokio::test]
     async fn batch_escalates_only_weak_subjects() {
@@ -329,23 +313,61 @@ mod tests {
             }
         }
 
-        let calls = Arc::new(AtomicUsize::new(0));
-        let escalated = Spy {
-            entities: vec![entity("PERSON", 0.9)],
-            calls: calls.clone(),
-        };
+        /// Records the subjects of every batch it is handed.
+        struct Batches {
+            seen: Arc<Mutex<Vec<Vec<String>>>>,
+        }
+        #[async_trait::async_trait]
+        impl Recognizer<Text> for Batches {
+            fn id(&self) -> ComponentId {
+                ComponentId::new("batches", "1")
+            }
+
+            async fn recognize(
+                &self,
+                subject: &Subject<Text>,
+                ctx: &Context<'_>,
+            ) -> Result<Vec<Entity<Text>>> {
+                let mut found = self.recognize_batch(&[subject], ctx).await?;
+                Ok(found.pop().unwrap_or_default())
+            }
+
+            async fn recognize_batch(
+                &self,
+                subjects: &[&Subject<Text>],
+                _ctx: &Context<'_>,
+            ) -> Result<Vec<Vec<Entity<Text>>>> {
+                self.seen.lock().unwrap().push(
+                    subjects
+                        .iter()
+                        .map(|subject| subject.data().as_str().to_owned())
+                        .collect(),
+                );
+                Ok(subjects
+                    .iter()
+                    .map(|_| vec![entity("PERSON", 0.9)])
+                    .collect())
+            }
+        }
+
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let escalated = Batches { seen: seen.clone() };
         let recognizer =
             EscalatingRecognizer::new(PerSubject, escalated, ConfidenceDecider::default());
 
         let scope = Scope::new();
         let subjects = [subject("a"), subject("b"), subject("c")];
         let out = recognizer
-            .recognize_batch(&subjects, &ctx(&scope))
+            .recognize_batch(&subjects.iter().collect::<Vec<_>>(), &ctx(&scope))
             .await
             .unwrap();
 
-        // "a" and "c" escalated (empty baseline), "b" did not (confident).
-        assert_eq!(calls.load(Ordering::Relaxed), 2, "only the weak subjects");
+        // "a" and "c" escalated (empty baseline), "b" did not (confident), and
+        // they reached the escalated recognizer as one batch.
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [vec!["a".to_owned(), "c".to_owned()]]
+        );
         assert_eq!(out[0].len(), 1, "a: escalated only");
         assert_eq!(out[1].len(), 1, "b: baseline only, no escalation");
         assert_eq!(out[2].len(), 1, "c: escalated only");

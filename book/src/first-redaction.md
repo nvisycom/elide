@@ -20,8 +20,8 @@ let analyzer = Analyzer::<Text>::new()
             .with_builtin_dictionaries()
             .build()?,
     )
-    .with_layer(ReconcileLayer::same_label(Merging::max()))
-    .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE));
+    .with_layer(FuseLayer::max())
+    .with_layer(ThresholdLayer::default());
 # Ok(())
 # }
 ```
@@ -67,8 +67,8 @@ async fn main() -> Result<()> {
                 .with_builtin_dictionaries()
                 .build()?,
         )
-        .with_layer(ReconcileLayer::same_label(Merging::max()))
-        .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE));
+        .with_layer(FuseLayer::max())
+        .with_layer(ThresholdLayer::default());
 
     let anonymizer = Anonymizer::<Text>::new()
         .with(Rule::label(builtins::EMAIL_ADDRESS.to_ref(), Replace::new("[EMAIL]")))

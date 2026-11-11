@@ -3,6 +3,7 @@
 #![doc = include_str!("../README.md")]
 
 mod analyzer;
+mod batch;
 mod layer;
 
 pub mod decorator;

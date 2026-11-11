@@ -10,14 +10,13 @@
 
 use elide::codec::{FormatRegistry, TypedStream};
 use elide::detection::Analyzer;
-use elide::detection::filter::FilterLayer;
-use elide::detection::reconcile::{Merging, ReconcileLayer, Structural};
+use elide::detection::filter::ThresholdLayer;
+use elide::detection::reconcile::{FuseLayer, ReconcileLayer, Structural};
 use elide::entity::{Entity, LabelCatalog, builtins};
 #[cfg(feature = "image")]
 use elide::modality::image::Image;
 use elide::modality::text::Text;
 use elide::modality::{ChunkReader, DataReader, DataWriter, Modality, TextRecognizable};
-use elide::primitive::ConfidenceThreshold;
 use elide::recognition::Scope;
 use elide::recognition::pattern::PatternRecognizer;
 use elide::redaction::operators::{Erase, Mask, Replace};
@@ -63,9 +62,9 @@ pub fn build_analyzer<M: TextRecognizable>() -> Result<Analyzer<M>> {
     };
 
     Ok(analyzer
-        .with_layer(ReconcileLayer::same_label(Merging::max()))
+        .with_layer(FuseLayer::max())
         .with_layer(ReconcileLayer::cross_label(Structural::default()))
-        .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE)))
+        .with_layer(ThresholdLayer::default()))
 }
 
 /// The default [`Text`] analyzer used by [`TestOrchestrator`] and [`Fixture`]:

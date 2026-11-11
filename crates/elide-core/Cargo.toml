@@ -57,8 +57,6 @@ mocks = []
 # (De)serialization
 serde = { workspace = true, features = ["derive"], optional = true }
 
-# Derive macros & error handling
-
 # Primitive datatypes
 uuid = { workspace = true, features = ["v7"] }
 hipstr = { workspace = true, features = [] }
@@ -70,6 +68,7 @@ celes = { workspace = true, features = [] }
 
 # Async runtime & parallelism
 async-trait = { workspace = true, features = [] }
+futures = { workspace = true, features = [] }
 
 # Templating & schema
 schemars = { workspace = true, features = [], optional = true }
@@ -85,3 +84,6 @@ jiff = { workspace = true, features = ["js"] }
 [dev-dependencies]
 # (De)serialization
 serde_json = { workspace = true, features = [] }
+
+# Async runtime & parallelism
+tokio = { workspace = true, features = ["macros", "rt"] }

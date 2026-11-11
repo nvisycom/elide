@@ -13,14 +13,13 @@
 //! [`layer`]: Analyzer::layer
 
 use elide::detection::Analyzer as RustAnalyzer;
-use elide::detection::filter::FilterLayer;
-use elide::detection::reconcile::{Merging, ReconcileLayer, Structural};
+use elide::detection::filter::ThresholdLayer;
+use elide::detection::reconcile::{FuseLayer, ReconcileLayer, Structural};
 use elide::modality::Modality;
 use elide::modality::audio::Audio;
 use elide::modality::image::Image;
 use elide::modality::tabular::Tabular;
 use elide::modality::text::Text;
-use elide::primitive::ConfidenceThreshold;
 use wasm_bindgen::prelude::*;
 
 use crate::enricher::Enricher;
@@ -187,9 +186,9 @@ impl Analyzer {
 fn with_layers<M: Modality>(mut analyzer: RustAnalyzer<M>, layers: Vec<Layer>) -> RustAnalyzer<M> {
     if layers.is_empty() {
         return analyzer
-            .with_layer(ReconcileLayer::same_label(Merging::max()))
+            .with_layer(FuseLayer::max())
             .with_layer(ReconcileLayer::cross_label(Structural::default()))
-            .with_layer(FilterLayer::new().with_threshold(ConfidenceThreshold::BASELINE));
+            .with_layer(ThresholdLayer::default());
     }
     for layer in layers {
         analyzer = layer.apply(analyzer);

@@ -1,22 +1,20 @@
 //! The [`Reconciler`] trait, the *what to do* axis, and the shipped
 //! reconcilers.
 //!
-//! A reconciler decides each grouped pair's fate. The crate ships [`Merging`]
-//! (combine same-label findings), [`Structural`] (geometry-aware cross-label
-//! handling), [`Exclusive`] (one finding per span), and [`Permissive`] (keep
-//! every overlap).
+//! A reconciler decides each grouped pair's fate. The crate ships
+//! [`Structural`] (geometry-aware cross-label handling), [`Exclusive`] (one
+//! finding per span), and [`Permissive`] (keep every overlap). Fusing the same
+//! finding is not a reconciler's job but the
+//! [`FuseLayer`](super::FuseLayer)'s.
 
 mod exclusive;
-mod merging;
 mod permissive;
 mod structural;
 
 use elide_core::entity::Entity;
 use elide_core::modality::Modality;
-use elide_core::primitive::Confidence;
 
 pub use self::exclusive::Exclusive;
-pub use self::merging::Merging;
 pub use self::permissive::Permissive;
 pub use self::structural::{OnConflict, Structural};
 
@@ -32,17 +30,9 @@ pub enum Winner {
 /// What to do with two grouped entities, the *what* axis of reconciliation.
 ///
 /// The single outcome a [`Reconciler`] returns for a pair. The layer folds
-/// these over a cluster: drops take effect first, then contests flag, then
-/// merges union the survivors.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// these over a cluster: drops take effect first, then contests flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Disposition {
-    /// Combine the pair into one entity: union their spans and set the given
-    /// pooled `confidence`. The reconciler computes the pool, so the layer
-    /// stays free of scoring policy.
-    Merge {
-        /// The pooled confidence the merged entity takes.
-        confidence: Confidence,
-    },
     /// Both entities survive, unflagged, a legitimate co-existence (a
     /// nesting, or two distinct findings that merely touch).
     KeepBoth,
@@ -61,19 +51,18 @@ pub enum Disposition {
 /// Decides what happens to two grouped entities, the `R` parameter of
 /// [`ReconcileLayer`].
 ///
-/// A *type*, not a stringly-tagged enum. Pairwise: the layer owns clustering
-/// and folds the per-pair [`Disposition`]s. The crate ships [`Merging`]
-/// (always merge, pooling confidence), [`Structural`] (geometry-aware:
-/// nesting keeps both, subsumed junk resolves, true conflict resolves or
-/// contests), [`Exclusive`] (always resolve), and [`Permissive`] (always keep
-/// both). A consumer can supply their own.
+/// Pairwise: the layer owns clustering and folds the per-pair
+/// [`Disposition`]s. The crate ships [`Structural`] (geometry-aware: nesting
+/// keeps both, subsumed junk resolves, true conflict resolves or contests),
+/// [`Exclusive`] (always resolve), and [`Permissive`] (always keep both). A
+/// consumer can supply their own.
 ///
 /// [`ReconcileLayer`]: super::ReconcileLayer
 pub trait Reconciler<M: Modality>: Send + Sync {
     /// Decide the disposition of the grouped pair `a`, `b`.
     fn decide(&self, a: &Entity<M>, b: &Entity<M>) -> Disposition;
 
-    /// Stable name, recorded on the provenance of merged / resolved /
-    /// contested entities.
+    /// Stable name, recorded on the provenance of resolved and contested
+    /// entities.
     fn name(&self) -> &'static str;
 }

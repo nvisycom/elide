@@ -1,5 +1,7 @@
 //! [`Enricher<M>`]: the pre-recognition context-enrichment contract.
 
+use futures::future;
+
 use crate::error::Result;
 use crate::modality::Modality;
 use crate::primitive::ComponentId;
@@ -41,9 +43,11 @@ where
     /// [`Context`]: crate::recognition::Context
     async fn enrich(&self, subject: &mut Subject<M>, ctx: &Context<'_>) -> Result<()>;
 
-    /// Enrich a batch of `subjects` in place, under one shared context.
+    /// Enrich a batch of `subjects` in place, under one shared context. The batch
+    /// is a slice of what [`enrich`](Self::enrich) takes.
     ///
-    /// The default enriches each in turn via [`enrich`](Self::enrich). An enricher
+    /// The default runs [`enrich`](Self::enrich) for every subject concurrently.
+    /// An enricher
     /// backed by a provider that accepts several inputs in one round-trip (OCR,
     /// speech-to-text) overrides this to build one request per subject and issue a
     /// single [`Backend::call_batch`](crate::backend::Backend::call_batch), turning
@@ -55,10 +59,12 @@ where
     ///
     /// The first enrichment error; a batched enricher surfaces a whole-batch
     /// failure the same way, aborting the call before recognition.
-    async fn enrich_batch(&self, subjects: &mut [Subject<M>], ctx: &Context<'_>) -> Result<()> {
-        for subject in subjects {
-            self.enrich(subject, ctx).await?;
-        }
+    async fn enrich_batch(
+        &self,
+        subjects: &mut [&mut Subject<M>],
+        ctx: &Context<'_>,
+    ) -> Result<()> {
+        future::try_join_all(subjects.iter_mut().map(|subject| self.enrich(subject, ctx))).await?;
         Ok(())
     }
 }
