@@ -22,7 +22,7 @@ pub(super) struct XlsxStream {
 
 impl Stream<Tabular> for XlsxStream {
     fn format(&self) -> FormatId {
-        FORMAT_ID.clone()
+        FORMAT_ID
     }
 
     fn encode(&self) -> Result<ContentData> {

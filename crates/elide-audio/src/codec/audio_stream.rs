@@ -21,7 +21,7 @@ pub(super) struct AudioStream {
 
 impl Stream<Audio> for AudioStream {
     fn format(&self) -> FormatId {
-        self.format_id.clone()
+        self.format_id
     }
 
     fn encode(&self) -> Result<ContentData> {

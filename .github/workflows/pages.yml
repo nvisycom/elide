@@ -34,7 +34,7 @@ on:
 # build with a matching base path.
 env:
   CARGO_TERM_COLOR: always
-  RUST_TOOLCHAIN: "1.95.0"
+  RUST_TOOLCHAIN: "1.99.1"
   MDBOOK_VERSION: "0.5.4"
   BASE_PATH: "/${{ github.event.repository.name }}/demo/"
 

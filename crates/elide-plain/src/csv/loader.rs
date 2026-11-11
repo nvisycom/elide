@@ -86,7 +86,7 @@ impl Loader for CsvLoader {
 /// (every row of a real delimited file has the same field count), then by
 /// total occurrences. Defaults to a comma when nothing stands out.
 fn detect_delimiter(text: &str) -> u8 {
-    const CANDIDATES: [u8; 4] = [b',', b'\t', b';', b'|'];
+    const CANDIDATES: [u8; 4] = *b",\t;|";
     let lines: Vec<&str> = text.lines().take(5).filter(|l| !l.is_empty()).collect();
     if lines.is_empty() {
         return b',';

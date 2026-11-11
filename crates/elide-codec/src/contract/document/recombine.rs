@@ -35,8 +35,8 @@ pub trait Recombine: Send + Sync {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::Sanitization`](elide_core::ErrorKind::Sanitization) if the output fails a check; the document is
-    /// refused rather than returned.
+    /// [`ErrorKind::Sanitization`](elide_core::ErrorKind::Sanitization) if the
+    /// output fails a check; the document is refused rather than returned.
     fn validate(&self, output: &ContentData) -> Result<()>;
 }
 

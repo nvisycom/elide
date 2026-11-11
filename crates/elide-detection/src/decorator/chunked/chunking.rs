@@ -83,13 +83,10 @@ impl Default for WordWindows {
 impl Chunking for WordWindows {
     fn windows(&self, text: &str) -> Vec<Window> {
         // Each word's byte range in the original text.
+        // `split_whitespace` yields slices of `text`, so each one places.
         let words: Vec<Range<usize>> = text
             .split_whitespace()
-            .map(|word| {
-                // `split_whitespace` yields slices of `text`, so the offset is exact.
-                let start = word.as_ptr() as usize - text.as_ptr() as usize;
-                start..start + word.len()
-            })
+            .filter_map(|word| text.substr_range(word).map(Range::from))
             .collect();
         windows_over(&words, self.size, self.overlap)
     }

@@ -416,6 +416,8 @@ fn cluster_overlaps<M: Modality>(entities: &[Entity<M>], candidates: &[usize]) -
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use elide_core::entity::LabelRef;
     use elide_core::entity::audit::{
         Attribution, AuditEvent, AuditKind, Manual, ManualIntent, RuleMatch,
@@ -536,20 +538,12 @@ mod tests {
         // One detection, two scopes → two different rules fire. The predicate
         // rule matched the auditor; the support agent fell through to the
         // fallback.
-        assert!(
-            matches!(
+        assert_matches!(
                 for_auditor[0].audit.selection(),
-                Some(s) if matches!(s.matched_by, RuleMatch::Predicate)
-            ),
-            "auditor matches the scope predicate",
-        );
-        assert!(
-            matches!(
+                Some(s) if matches!(s.matched_by, RuleMatch::Predicate), "auditor matches the scope predicate");
+        assert_matches!(
                 for_support[0].audit.selection(),
-                Some(s) if matches!(s.matched_by, RuleMatch::Fallback)
-            ),
-            "support falls through to the fallback",
-        );
+                Some(s) if matches!(s.matched_by, RuleMatch::Fallback), "support falls through to the fallback");
     }
 
     /// Overlapping entities are won by the safest operator, and the pick is

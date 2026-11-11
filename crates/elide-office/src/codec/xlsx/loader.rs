@@ -66,18 +66,18 @@ impl DocumentLoader for XlsxDocumentLoader {
             state: state.clone(),
         });
         let text_stream: Box<dyn Stream<Text>> = Box::new(ExtractStream::new(
-            FORMAT_ID.clone(),
+            FORMAT_ID,
             text.clone(),
             Arc::new(OoxmlAddresser),
         ));
         let streams = [
             DocumentPart::Stream {
                 id: LocalId::new(BODY_PART_ID),
-                handle: ErasedStream::new(FORMAT_ID.clone(), cells_stream),
+                handle: ErasedStream::new(cells_stream),
             },
             DocumentPart::Stream {
                 id: LocalId::new(TEXT_PART_ID),
-                handle: ErasedStream::new(FORMAT_ID.clone(), text_stream),
+                handle: ErasedStream::new(text_stream),
             },
         ];
         let embeddings = markup.embeddings.into_iter().map(|embedding| {
@@ -107,6 +107,6 @@ impl DocumentLoader for XlsxDocumentLoader {
             text,
             policy,
         };
-        Ok(Document::new(FORMAT_ID.clone(), parts, Box::new(recombine)).with_stripped(stripped))
+        Ok(Document::new(FORMAT_ID, parts, Box::new(recombine)).with_stripped(stripped))
     }
 }

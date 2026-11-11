@@ -62,14 +62,10 @@ impl PdfDocumentLoader {
         });
         parts.push(DocumentPart::Stream {
             id: LocalId::new(BODY_PART_ID),
-            handle: ErasedStream::new(FORMAT_ID.clone(), stream),
+            handle: ErasedStream::new(stream),
         });
         parts.extend(blobs);
-        Document::new(
-            FORMAT_ID.clone(),
-            parts,
-            Box::new(PdfRecombine { document, state }),
-        )
+        Document::new(FORMAT_ID, parts, Box::new(PdfRecombine { document, state }))
     }
 }
 
@@ -296,7 +292,7 @@ mod tests {
             let err = doc
                 .replace_part(&LocalId::new("img-1-0"), Bytes::from_static(b"x"))
                 .unwrap_err();
-            assert_eq!(err.kind(), elide_core::ErrorKind::MalformedInput);
+            assert_eq!(err.kind(), elide_core::ErrorKind::NotFound);
         }
     }
 
@@ -411,7 +407,7 @@ mod tests {
             let err = doc
                 .replace_part(&LocalId::new("page-1"), Bytes::from_static(b"x"))
                 .unwrap_err();
-            assert_eq!(err.kind(), elide_core::ErrorKind::MalformedInput);
+            assert_eq!(err.kind(), elide_core::ErrorKind::NotFound);
         }
     }
 }

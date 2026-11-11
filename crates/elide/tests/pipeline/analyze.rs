@@ -2,6 +2,8 @@
 //! `PHONE_NUMBER`s; the analyzer fuses them, and a `FilterLayer` drops a
 //! low-confidence stray.
 
+use std::assert_matches;
+
 use elide::detection::Analyzer;
 use elide::detection::calibrate::{CalibrateLayer, CalibrationMap};
 use elide::detection::filter::FilterLayer;
@@ -91,10 +93,9 @@ async fn analyze_fuses_resolves_filters() {
     // The trail: 2 recognition events + 1 deduplication event.
     assert_eq!(phone.audit.events().len(), 3);
     let last = phone.audit.events().last().unwrap();
-    assert!(matches!(
+    assert_matches!(
         last.kind,
-        AuditKind::Deduplication(ref d) if d.strategy == "max"
-    ));
+        AuditKind::Deduplication(ref d) if d.strategy == "max");
     assert_eq!(phone.audit.final_confidence(), Some(phone.confidence));
 }
 

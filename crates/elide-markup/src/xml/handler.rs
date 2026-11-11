@@ -9,7 +9,7 @@ pub const FORMAT_ID: FormatId = FormatId::new("elide.text.xml");
 
 /// [`Format`] descriptor registered into `FormatRegistry`.
 pub fn format() -> Format {
-    Format::with_document_loader(FORMAT_ID.clone(), XmlLoader)
+    Format::with_document_loader(FORMAT_ID, XmlLoader)
         .with_extensions(["xml"])
         .with_content_types(["application/xml", "text/xml"])
 }

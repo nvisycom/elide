@@ -93,5 +93,5 @@ async fn replace_part_rejects_an_unknown_id() {
     let err = doc
         .replace_part(&LocalId::new("img-9999-0"), png(2, 2))
         .unwrap_err();
-    assert_eq!(err.kind(), elide::ErrorKind::MalformedInput);
+    assert_eq!(err.kind(), elide::ErrorKind::NotFound);
 }

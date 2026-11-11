@@ -48,7 +48,7 @@ pub(crate) fn doc_props_parts(
                 Box::new(DocPropsStream::new(part_bytes(path)?));
             Some(DocumentPart::Stream {
                 id: LocalId::new(*path),
-                handle: ErasedStream::new(FORMAT_ID, stream),
+                handle: ErasedStream::new(stream),
             })
         })
         .collect()
@@ -80,7 +80,7 @@ impl DocPropsStream {
 
 impl Stream<Metadata> for DocPropsStream {
     fn format(&self) -> FormatId {
-        FORMAT_ID.clone()
+        FORMAT_ID
     }
 
     fn encode(&self) -> Result<ContentData> {

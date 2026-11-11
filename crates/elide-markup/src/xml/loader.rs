@@ -27,6 +27,6 @@ impl DocumentLoader for XmlLoader {
         let sanitizer = MarkupSanitizer::new(Dialect::Xml, policy);
         let (text, stripped) = sanitizer.sanitize(content.decode()?)?;
         let items = build_items(&text, MarkupConfig::xml())?;
-        Ok(markup_document(FORMAT_ID.clone(), text, items, sanitizer).with_stripped(stripped))
+        Ok(markup_document(FORMAT_ID, text, items, sanitizer).with_stripped(stripped))
     }
 }

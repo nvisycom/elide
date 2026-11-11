@@ -268,9 +268,9 @@ fn pixels(space: &Space, bits: usize, values: &[u8], out: &mut Vec<u8>) -> Optio
         })),
         Space::Rgb => out.extend(values.iter().map(|&v| scale(v))),
         Space::Cmyk => {
-            for cmyk in values.chunks_exact(4) {
-                let k = u16::from(255 - scale(cmyk[3]));
-                for &ink in &cmyk[..3] {
+            for [cyan, magenta, yellow, key] in values.as_chunks::<4>().0 {
+                let k = u16::from(255 - scale(*key));
+                for &ink in [cyan, magenta, yellow] {
                     let value = u16::from(255 - scale(ink)) * k / 255;
                     out.push(u8::try_from(value).unwrap_or(u8::MAX));
                 }

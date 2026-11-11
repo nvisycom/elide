@@ -368,13 +368,7 @@ pub(crate) fn relationship_spans(raw: &str) -> std::result::Result<Vec<Span>, ()
 /// `value` is not a sub-slice of `raw`, so a caller surfaces the part as an issue
 /// rather than dropping a redaction.
 fn sub_slice_range(raw: &str, value: &str) -> std::result::Result<Range<usize>, ()> {
-    let base = raw.as_ptr() as usize;
-    let start = (value.as_ptr() as usize).checked_sub(base).ok_or(())?;
-    let end = start.checked_add(value.len()).ok_or(())?;
-    if end > raw.len() {
-        return Err(());
-    }
-    Ok(start..end)
+    raw.substr_range(value).map(Range::from).ok_or(())
 }
 
 /// Emit the pending text run as a `Text` span in its passage, then clear it. A

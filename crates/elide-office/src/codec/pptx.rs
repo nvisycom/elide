@@ -28,7 +28,7 @@ pub const FORMAT_ID: FormatId = PptxCodec::FORMAT_ID;
 
 /// [`Format`] descriptor registered into `FormatRegistry`.
 pub fn format() -> Format {
-    Format::with_document_loader(FORMAT_ID.clone(), OoxmlLoader::<PptxCodec>::new())
+    Format::with_document_loader(FORMAT_ID, OoxmlLoader::<PptxCodec>::new())
         .with_extensions(["pptx"])
         .with_content_types([
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",

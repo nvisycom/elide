@@ -4,6 +4,7 @@
 use std::ops::Range;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use elide_core::modality::text::{SourceRef, Text, TextData, TextLocation, TextReplacement};
 use elide_core::modality::{Chunk, DataReader, DataWriter};
 use elide_core::redaction::Redactions;
@@ -148,18 +149,16 @@ impl<A: Send + Sync + 'static> ExtractStream<A> {
 
 impl<A: Send + Sync + 'static> Stream<Text> for ExtractStream<A> {
     fn format(&self) -> FormatId {
-        self.format_id.clone()
+        self.format_id
     }
 
     fn encode(&self) -> Result<ContentData> {
-        // The re-pack is the format's [`Recombine`], which holds the same shared
-        // [`SpliceState`] and re-serialises the redacted items into the native
-        // container (splicing markup, re-packing an OOXML zip). A spliced body
-        // has no standalone bytes, so this stream's own encode is an ignored
-        // marker (the document's `Recombine::assemble` discards this part's
-        // `EncodedPart` bytes, exactly as the image codec ignores its pixel
-        // stream's bytes and reads the shared buffer).
-        Ok(ContentData::new(bytes::Bytes::new()))
+        // The re-pack is the format's `Recombine`, which holds the same shared
+        // items and re-serialises them into the native container (splicing
+        // markup, re-packing an OOXML zip). A spliced body has no standalone
+        // bytes, so this stream's own encode is an ignored marker: the
+        // recombiner discards this part's `EncodedPart` bytes.
+        Ok(ContentData::new(Bytes::new()))
     }
 
     fn chunks(&self) -> Result<Vec<Chunk<Text>>> {

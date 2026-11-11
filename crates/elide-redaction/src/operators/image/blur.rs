@@ -62,6 +62,8 @@ impl Operator<Image> for Blur {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use elide_core::entity::audit::{AuditEvent, PatternRule};
     use elide_core::entity::{Entity, LabelRef};
     use elide_core::primitive::Confidence;
@@ -97,6 +99,6 @@ mod tests {
         assert_eq!(pix, ImageReplacement::Pixelate { block_size: 10 });
 
         let box_ = Blackbox::default().anonymize(&entity, &data).await.unwrap();
-        assert!(matches!(box_, ImageReplacement::Block { .. }));
+        assert_matches!(box_, ImageReplacement::Block { .. });
     }
 }

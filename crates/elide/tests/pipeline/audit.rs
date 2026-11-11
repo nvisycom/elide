@@ -1,6 +1,8 @@
 //! Each entity carries its own tamper-evident audit trail (an [`AuditLog`]),
 //! reachable through the facade and verifiable with no `serde` feature.
 
+use std::assert_matches;
+
 use elide::entity::audit::{
     AuditEvent, AuditKind, AuditLog, PatternRule, Redaction, RuleMatch, Selection,
 };
@@ -38,9 +40,9 @@ fn entity_audit_trail_is_reachable_and_verifies() {
     // The trail records every event, linked, and verifies.
     let events = entity.audit.events();
     assert_eq!(events.len(), 3);
-    assert!(matches!(events[0].kind, AuditKind::Pattern(_)));
-    assert!(matches!(events[1].kind, AuditKind::Selection(_)));
-    assert!(matches!(events[2].kind, AuditKind::Redaction(_)));
+    assert_matches!(events[0].kind, AuditKind::Pattern(_));
+    assert_matches!(events[1].kind, AuditKind::Selection(_));
+    assert_matches!(events[2].kind, AuditKind::Redaction(_));
     // The redaction follows the pick (its single parent) and names it.
     assert_eq!(events[2].parents(), [events[1].hash()]);
     assert_eq!(

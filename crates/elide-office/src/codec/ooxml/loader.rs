@@ -119,10 +119,7 @@ pub(crate) fn decode_document<C: OoxmlCodec>(
     let decoded = decode_package::<C>(content, policy)?;
     let body = DocumentPart::Stream {
         id: LocalId::new(BODY_PART_ID),
-        handle: ErasedStream::new(
-            C::FORMAT_ID,
-            Box::new(decoded.stream) as Box<dyn Stream<Text>>,
-        ),
+        handle: ErasedStream::new(Box::new(decoded.stream) as Box<dyn Stream<Text>>),
     };
     let parts = iter::once(body).chain(decoded.parts).collect();
     Ok(

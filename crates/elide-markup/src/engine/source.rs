@@ -138,15 +138,9 @@ impl<'a> MarkupSource<'a> {
     }
 
     /// The byte range a `slice` borrowed out of this source occupies in it, or
-    /// `None` if it is not a valid in-bounds char-aligned subslice.
+    /// `None` if it is not a subslice of it.
     fn slice_span(&self, slice: &str) -> Option<Range<usize>> {
-        let base = self.raw.as_ptr() as usize;
-        let start = (slice.as_ptr() as usize).checked_sub(base)?;
-        let end = start.checked_add(slice.len())?;
-        (end <= self.raw.len()
-            && self.raw.is_char_boundary(start)
-            && self.raw.is_char_boundary(end))
-        .then_some(start..end)
+        self.raw.substr_range(slice).map(Range::from)
     }
 }
 

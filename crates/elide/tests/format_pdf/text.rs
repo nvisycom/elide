@@ -5,6 +5,8 @@
 //! directly; the shipped patterns find the PII and the anonymizer rewrites it
 //! in the re-encoded document.
 
+use std::assert_matches;
+
 use elide::Result;
 use elide::codec::{DocumentPart, FormatRegistry};
 use elide::entity::audit::AuditKind;
@@ -108,10 +110,11 @@ async fn born_digital_pdf_detects_and_redacts() -> Result<()> {
             .events()
             .last()
             .expect("an applied entity has at least one event");
-        assert!(
-            matches!(last.kind, AuditKind::Redaction(_)),
-            "the final provenance event of a redacted entity is its redaction, got {:?}",
+        assert_matches!(
             last.kind,
+            AuditKind::Redaction(_),
+            "the final provenance event of a redacted entity is its redaction, got {:?}",
+            last.kind
         );
     }
     Ok(())

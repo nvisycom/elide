@@ -7,7 +7,7 @@ use elide_core::{Error, Result};
 /// Apply a redaction to a string in place: replace a byte range with a
 /// replacement value.
 ///
-/// The text-shaped handlers use it to splice a redacted span back into a decoded
+/// The text-shaped streams use it to splice a redacted span back into a decoded
 /// value.
 pub trait RedactRange {
     /// Replace `self[range]` with `value` in place.

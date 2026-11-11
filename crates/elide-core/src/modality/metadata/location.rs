@@ -144,6 +144,8 @@ impl ModalityLocation for MetadataLocation {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
 
     fn part(key: &str, range: Range<usize>) -> MetadataLocation {
@@ -153,11 +155,11 @@ mod tests {
     #[test]
     fn same_key_contains_itself_others_disjoint() {
         let a = MetadataLocation::new("GPSLatitude");
-        assert!(matches!(a.overlap(&a), Overlap::Contains));
+        assert_matches!(a.overlap(&a), Overlap::Contains);
         assert!(a.overlaps(&a));
 
         let b = MetadataLocation::new("Make");
-        assert!(matches!(a.overlap(&b), Overlap::Disjoint));
+        assert_matches!(a.overlap(&b), Overlap::Disjoint);
         assert!(!a.overlaps(&b));
     }
 
@@ -165,30 +167,21 @@ mod tests {
     fn the_whole_field_contains_any_part_of_it() {
         let whole = MetadataLocation::new("description");
         let part = part("description", 4..8);
-        assert!(matches!(whole.overlap(&part), Overlap::Contains));
-        assert!(matches!(part.overlap(&whole), Overlap::ContainedBy));
-        assert!(matches!(part.overlap(&part.clone()), Overlap::Contains));
-        assert!(matches!(
-            part.overlap(&self::part("title", 4..8)),
-            Overlap::Disjoint
-        ));
+        assert_matches!(whole.overlap(&part), Overlap::Contains);
+        assert_matches!(part.overlap(&whole), Overlap::ContainedBy);
+        assert_matches!(part.overlap(&part.clone()), Overlap::Contains);
+        assert_matches!(part.overlap(&self::part("title", 4..8)), Overlap::Disjoint);
     }
 
     #[test]
     fn parts_of_a_value_compare_by_their_bytes() {
         let a = part("description", 0..4);
-        assert!(matches!(
-            a.overlap(&part("description", 4..8)),
-            Overlap::Disjoint
-        ));
-        assert!(matches!(
-            a.overlap(&part("description", 1..3)),
-            Overlap::Contains
-        ));
-        assert!(matches!(
+        assert_matches!(a.overlap(&part("description", 4..8)), Overlap::Disjoint);
+        assert_matches!(a.overlap(&part("description", 1..3)), Overlap::Contains);
+        assert_matches!(
             a.overlap(&part("description", 2..6)),
             Overlap::Crossing { .. }
-        ));
+        );
     }
 
     #[test]

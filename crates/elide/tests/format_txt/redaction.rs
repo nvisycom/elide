@@ -3,6 +3,8 @@
 //! The shipped patterns detect the PII spread and the anonymizer rewrites
 //! it, while the surrounding prose passes through unchanged.
 
+use std::assert_matches;
+
 use elide::Result;
 use elide::entity::audit::AuditKind;
 use elide::entity::builtins;
@@ -78,10 +80,11 @@ async fn txt_detects_and_redacts() -> Result<()> {
             .events()
             .last()
             .expect("an applied entity has at least one event");
-        assert!(
-            matches!(last.kind, AuditKind::Redaction(_)),
-            "the final provenance event of a redacted entity is its redaction, got {:?}",
+        assert_matches!(
             last.kind,
+            AuditKind::Redaction(_),
+            "the final provenance event of a redacted entity is its redaction, got {:?}",
+            last.kind
         );
     }
     Ok(())

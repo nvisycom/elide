@@ -53,7 +53,7 @@ const BODY_PART_ID: &str = "body";
 /// Decodes on the glyph-deletion redaction path. To flatten pages to images
 /// instead, build the format with [`pdf_format_with`] and `RasterMode::Always`.
 pub fn pdf_format() -> Format {
-    Format::with_document_loader(FORMAT_ID.clone(), PdfDocumentLoader::new())
+    Format::with_document_loader(FORMAT_ID, PdfDocumentLoader::new())
         .with_extensions(["pdf"])
         .with_content_types(["application/pdf"])
 }
@@ -68,7 +68,7 @@ pub fn pdf_format() -> Format {
 #[cfg(feature = "render")]
 #[cfg_attr(docsrs, doc(cfg(feature = "render")))]
 pub fn pdf_format_with(raster: RasterMode) -> Format {
-    Format::with_document_loader(FORMAT_ID.clone(), PdfDocumentLoader::with_raster(raster))
+    Format::with_document_loader(FORMAT_ID, PdfDocumentLoader::with_raster(raster))
         .with_extensions(["pdf"])
         .with_content_types(["application/pdf"])
 }

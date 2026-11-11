@@ -16,18 +16,17 @@
 //! [`HiddenContentPolicy`]: crate::redaction::HiddenContentPolicy
 
 // The codec contract: the document/stream types and the loader/recombine
-// traits a handler implements, plus the `ContentData`/`TextEncoding` its
-// `decode`/`encode` signatures speak in. The registry that assembles the
-// handlers comes from the assembly crate. The crate's internal helpers
+// traits a format implements, plus the `ContentData` its `decode`/`encode`
+// signatures speak in. The registry that assembles the formats comes from the
+// assembly crate. The crate's internal helpers
 // (`string`, `extract`) and test doubles (`mocks`) are deliberately not
 // re-exported here.
 #[doc(inline)]
-pub use elide_codec::content::{ContentData, TextEncoding};
+pub use elide_codec::content::ContentData;
 #[doc(inline)]
 pub use elide_codec::{
     Document, DocumentLoader, DocumentPart, EncodedPart, ErasedStream, Format, FormatId,
-    LeafLoader, LeafRecombine, Loader, LocalId, Recombine, Stream, Stripped, StrippedContent,
-    TypedStream,
+    LeafRecombine, Loader, LocalId, Recombine, Stream, Stripped, StrippedContent, TypedStream,
 };
 #[doc(inline)]
 pub use elide_format::FormatRegistry;

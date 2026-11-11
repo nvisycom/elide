@@ -549,7 +549,7 @@ mod tests {
     fn handler_with(raw: &str, config: MarkupConfig<'_>) -> ExtractStream<XmlSpan> {
         let items = build_items(raw, config).expect("markup decode succeeds");
         let state = SharedSplice::new(items);
-        ExtractStream::new(FORMAT_ID.clone(), state, Arc::new(MarkupAddresser))
+        ExtractStream::new(FORMAT_ID, state, Arc::new(MarkupAddresser))
     }
 
     fn xml(raw: &str) -> ExtractStream<XmlSpan> {

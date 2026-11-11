@@ -22,7 +22,7 @@ pub(super) struct PdfStream {
 
 impl Stream<Text> for PdfStream {
     fn format(&self) -> FormatId {
-        FORMAT_ID.clone()
+        FORMAT_ID
     }
 
     fn encode(&self) -> Result<ContentData> {

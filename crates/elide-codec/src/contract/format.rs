@@ -15,8 +15,7 @@ use std::sync::Arc;
 use elide_core::Result;
 use elide_core::redaction::HiddenContentPolicy;
 
-use super::loader::LeafLoader;
-use super::{Document, DocumentLoader, Loader};
+use super::{Document, DocumentLoader, LeafLoader, Loader};
 use crate::content::ContentData;
 
 /// Stable identifier for a registered codec format.
@@ -27,30 +26,30 @@ use crate::content::ContentData;
 /// Convention: dot-separated namespace. Built-in formats use the
 /// `elide.` prefix (e.g. `"elide.text.txt"`). Third-party formats use
 /// their own (e.g. `"acme.parquet.v2"`).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct FormatId(Cow<'static, str>);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FormatId(&'static str);
 
 impl FormatId {
-    /// Construct from a static string literal, with no allocation.
+    /// The format id `id`.
     pub const fn new(id: &'static str) -> Self {
-        Self(Cow::Borrowed(id))
+        Self(id)
     }
 
-    /// Borrow as `&str`.
-    pub fn as_str(&self) -> &str {
-        &self.0
+    /// The id as a string slice.
+    pub const fn as_str(&self) -> &'static str {
+        self.0
     }
 }
 
 impl fmt::Display for FormatId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(self.0)
     }
 }
 
 impl AsRef<str> for FormatId {
     fn as_ref(&self) -> &str {
-        &self.0
+        self.0
     }
 }
 
@@ -73,9 +72,8 @@ pub struct Format {
 }
 
 impl Format {
-    /// Build a leaf [`Format`] from a per-modality [`Loader`]: its one handler
-    /// becomes the single stream of a leaf [`Document`] (wrapped in
-    /// [`LeafLoader`]).
+    /// Build a leaf [`Format`] from a per-modality [`Loader`]: the stream it
+    /// decodes becomes the single part of a leaf [`Document`].
     ///
     /// Extensions and content types default to empty; chain
     /// [`with_extensions`] / [`with_content_types`] to declare the lookup
@@ -132,8 +130,8 @@ impl Format {
     }
 
     /// Stable identifier of this format.
-    pub fn id(&self) -> &FormatId {
-        &self.id
+    pub fn id(&self) -> FormatId {
+        self.id
     }
 
     /// File extensions (lowercased, no leading dot) that resolve to this

@@ -1,7 +1,7 @@
 name: Release
 
 env:
-  RUST_TOOLCHAIN: "1.95.0"
+  RUST_TOOLCHAIN: "1.99.1"
   NODE_VERSION: "24"
 
 # Publishes the `@nvisy/elide` npm package (the WebAssembly build of the facade)

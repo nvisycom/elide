@@ -3,7 +3,7 @@
 //! - [`Loader`]: per-modality decoder a leaf format implementation writes.
 //!   Returns a concrete [`Stream`].
 //! - [`DocumentLoader`]: the parts-model decoder the `FormatRegistry` holds
-//!   behind `Arc`; it produces the whole [`Document`]. [`LeafLoader`] adapts a
+//!   behind `Arc`; it produces the whole [`Document`]. `LeafLoader` adapts a
 //!   [`Loader`] into one for a leaf format.
 
 use elide_core::Result;
@@ -16,11 +16,11 @@ use crate::content::ContentData;
 /// Per-modality leaf-format loader.
 ///
 /// A loader validates and parses raw content for its [`Modality`], producing a
-/// single [`Stream`]. Leaf formats with no hidden content (a
-/// `.txt`, a JSON or CSV file) implement this; [`Format::new`] wraps it in a
-/// [`LeafLoader`] to a one-[`Stream`](super::Stream) [`Document`]. A multi-part
-/// format, or one that carries metadata or other hidden content to sanitize
-/// under a [`HiddenContentPolicy`], implements [`DocumentLoader`] directly instead.
+/// single [`Stream`]. Leaf formats with no hidden content (a `.txt`, a JSON or
+/// CSV file) implement this; [`Format::new`] turns it into a format whose
+/// documents have that one stream as their only part. A multi-part format, or
+/// one that carries metadata or other hidden content to sanitize under a
+/// [`HiddenContentPolicy`], implements [`DocumentLoader`] directly instead.
 ///
 /// # Implementing a third-party leaf format
 ///
@@ -80,11 +80,12 @@ pub trait DocumentLoader: Send + Sync + 'static {
 
 /// A [`Loader`] wrapped so it produces a leaf [`Document`].
 ///
-/// Its one handler becomes a stream, with a trivial recombiner: the bridge for a
+/// Its one stream becomes the document's only part, with a trivial recombiner:
+/// the bridge for a
 /// leaf format that has only a [`Loader`] and no sub-parts. Such a format
 /// carries no hidden content, so the [`HiddenContentPolicy`] has nothing to act on; a
 /// format with hidden content implements [`DocumentLoader`] itself.
-pub struct LeafLoader<L>(pub L);
+pub(crate) struct LeafLoader<L>(pub(crate) L);
 
 #[async_trait::async_trait]
 impl<L: Loader> DocumentLoader for LeafLoader<L> {

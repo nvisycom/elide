@@ -16,7 +16,7 @@ pub const FORMAT_ID: FormatId = FormatId::new("elide.text.html");
 
 /// [`Format`] descriptor registered into `FormatRegistry`.
 pub fn format() -> Format {
-    Format::with_document_loader(FORMAT_ID.clone(), HtmlLoader)
+    Format::with_document_loader(FORMAT_ID, HtmlLoader)
         .with_extensions(["html", "htm"])
         .with_content_types(["text/html"])
 }

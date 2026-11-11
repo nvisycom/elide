@@ -127,10 +127,8 @@ pub(super) struct Attribute<'a> {
 /// remove.
 pub(super) fn attributes<'a>(raw: &'a str, tag: &HtmlTag<'a>) -> Result<Vec<Attribute<'a>>> {
     let place = |slice: &str| {
-        (slice.as_ptr() as usize)
-            .checked_sub(raw.as_ptr() as usize)
-            .filter(|&at| at + slice.len() <= raw.len())
-            .map(|at| at..at + slice.len())
+        raw.substr_range(slice)
+            .map(Range::from)
             .ok_or_else(|| Error::malformed("an HTML tag is not in the source"))
     };
     let bytes = raw.as_bytes();

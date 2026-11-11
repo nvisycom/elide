@@ -63,7 +63,9 @@ impl MetadataFields {
     }
 
     /// Apply `redactions` to the fields' values, returning each edited field's
-    /// key and new value, a blank value for a field now removed.
+    /// key and new value, trimmed, and blank for a field now removed. The
+    /// fields keep the same trimmed value, so a later read matches what the
+    /// format wrote.
     ///
     /// Applied right to left, so an edit's length delta does not move an
     /// earlier span in the same value. A redaction for a key no field has is
@@ -100,13 +102,17 @@ impl MetadataFields {
                 edited.push(location.key.as_str().to_owned());
             }
         }
-        let edits = edited
-            .into_iter()
-            .filter_map(|key| {
-                let value = self.field(&key)?.as_str().trim().to_owned();
-                Some((key, value))
-            })
-            .collect();
+        // Trim once every span of a field is applied: trimming between edits
+        // would shift the spans still to come.
+        let mut edits = Vec::with_capacity(edited.len());
+        for key in edited {
+            let Some(field) = self.fields.iter_mut().find(|field| field.key == key) else {
+                continue;
+            };
+            let value = field.as_str().trim().to_owned();
+            field.value = value.clone().into();
+            edits.push((key, value));
+        }
         self.fields
             .retain(|field| !field.as_str().trim().is_empty());
         Ok(edits)
@@ -178,7 +184,7 @@ mod tests {
                 .read_at(&MetadataLocation::new("description"))
                 .unwrap()
                 .value,
-            "Photo of [NAME] in "
+            "Photo of [NAME] in"
         );
     }
 

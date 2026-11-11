@@ -4,7 +4,7 @@ Thank you for your interest in contributing to Elide.
 
 ## Requirements
 
-- Rust 1.95+ (stable)
+- Rust 1.99+ (stable)
 - Cargo
 
 ## Setup

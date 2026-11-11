@@ -28,7 +28,7 @@ pub const FORMAT_ID: FormatId = DocxCodec::FORMAT_ID;
 
 /// [`Format`] descriptor registered into `FormatRegistry`.
 pub fn format() -> Format {
-    Format::with_document_loader(FORMAT_ID.clone(), OoxmlLoader::<DocxCodec>::new())
+    Format::with_document_loader(FORMAT_ID, OoxmlLoader::<DocxCodec>::new())
         .with_extensions(["docx"])
         .with_content_types([
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",

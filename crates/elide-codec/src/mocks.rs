@@ -1,6 +1,6 @@
 //! A mock codec format, behind the `mocks` feature.
 //!
-//! For exercising registry, handler, and orchestration behavior without a real
+//! For exercising registry, stream, and orchestration behavior without a real
 //! file format.
 //!
 //! The mock document is a [`Document`] of a body [`Stream`] plus any number of
@@ -56,7 +56,12 @@ pub struct MockPart {
 pub fn encode_mock(body: &str, parts: &[MockPart]) -> Bytes {
     let mut out = body.to_owned();
     for p in parts {
-        out.push_str(&format!("\n@PART {} {} {}", p.id, p.hint, hex(&p.bytes)));
+        out.push_str(&format!(
+            "\n@PART {} {} {}",
+            p.id,
+            p.hint,
+            hex::encode(&p.bytes)
+        ));
     }
     Bytes::from(out.into_bytes())
 }
@@ -72,7 +77,11 @@ pub fn decode_mock(bytes: &[u8]) -> (String, Vec<MockPart>) {
             let mut it = rest.splitn(3, ' ');
             let id = it.next().unwrap_or_default().to_owned();
             let hint = it.next().unwrap_or_default().to_owned();
-            let bytes = it.next().map(unhex).unwrap_or_default();
+            let bytes = it
+                .next()
+                .and_then(|hex| hex::decode(hex).ok())
+                .map(Bytes::from)
+                .unwrap_or_default();
             parts.push(MockPart { id, hint, bytes });
         } else if i == 0 {
             body = line.to_owned();
@@ -84,22 +93,6 @@ pub fn decode_mock(bytes: &[u8]) -> (String, Vec<MockPart>) {
         }
     }
     (body, parts)
-}
-
-fn hex(bytes: &[u8]) -> String {
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        s.push_str(&format!("{b:02x}"));
-    }
-    s
-}
-
-fn unhex(s: &str) -> Bytes {
-    let bytes: Vec<u8> = (0..s.len())
-        .step_by(2)
-        .filter_map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok())
-        .collect();
-    Bytes::from(bytes)
 }
 
 /// The stream part id of a mock document's body.
@@ -115,7 +108,7 @@ pub struct MockStream {
 
 impl Stream<Text> for MockStream {
     fn format(&self) -> FormatId {
-        MOCK_FORMAT_ID.clone()
+        MOCK_FORMAT_ID
     }
 
     fn encode(&self) -> Result<ContentData> {
@@ -216,10 +209,7 @@ impl DocumentLoader for MockLoader {
         let mut document_parts = Vec::with_capacity(parts.len() + 1);
         document_parts.push(DocumentPart::Stream {
             id: LocalId::new(MOCK_BODY_ID),
-            handle: ErasedStream::new(
-                MOCK_FORMAT_ID.clone(),
-                Box::new(MockStream { body }) as Box<dyn Stream<Text>>,
-            ),
+            handle: ErasedStream::new(Box::new(MockStream { body }) as Box<dyn Stream<Text>>),
         });
         for p in parts {
             document_parts.push(DocumentPart::Blob {
@@ -230,7 +220,7 @@ impl DocumentLoader for MockLoader {
         }
 
         Ok(Document::new(
-            MOCK_FORMAT_ID.clone(),
+            MOCK_FORMAT_ID,
             document_parts,
             Box::new(MockRecombine { hints }),
         ))
@@ -240,5 +230,5 @@ impl DocumentLoader for MockLoader {
 /// The mock [`Format`], registered on [`MOCK_EXT`].
 #[must_use]
 pub fn mock_format() -> Format {
-    Format::with_document_loader(MOCK_FORMAT_ID.clone(), MockLoader).with_extensions([MOCK_EXT])
+    Format::with_document_loader(MOCK_FORMAT_ID, MockLoader).with_extensions([MOCK_EXT])
 }

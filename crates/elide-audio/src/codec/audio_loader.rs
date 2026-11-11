@@ -46,18 +46,15 @@ impl DocumentLoader for AudioDocumentLoader {
         stripped.record(HiddenContent::PriorRevision, None, removed.padding);
         let stream: Box<dyn Stream<Audio>> = Box::new(AudioStream {
             clip,
-            format_id: self.format_id.clone(),
+            format_id: self.format_id,
         });
         let part = DocumentPart::Stream {
             id: LocalId::new(BODY_PART_ID),
-            handle: ErasedStream::new(self.format_id.clone(), stream),
+            handle: ErasedStream::new(stream),
         };
         let recombine = AudioRecombine {
             format: self.format,
         };
-        Ok(
-            Document::new(self.format_id.clone(), vec![part], Box::new(recombine))
-                .with_stripped(stripped),
-        )
+        Ok(Document::new(self.format_id, vec![part], Box::new(recombine)).with_stripped(stripped))
     }
 }

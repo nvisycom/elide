@@ -368,7 +368,7 @@ mod tests {
 
     fn page_content(doc: &Document) -> String {
         let page = doc.get_pages().into_values().next().unwrap();
-        String::from_utf8_lossy(&doc.get_page_content(page)).into_owned()
+        String::from_utf8_lossy_owned(doc.get_page_content(page))
     }
 
     #[test]

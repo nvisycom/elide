@@ -62,12 +62,12 @@ pub(crate) fn markup_document(
     sanitizer: MarkupSanitizer,
 ) -> Document {
     let state: SharedSplice<XmlSpan> = SharedSplice::new(items);
-    let stream = ExtractStream::new(format_id.clone(), state.clone(), Arc::new(MarkupAddresser));
+    let stream = ExtractStream::new(format_id, state.clone(), Arc::new(MarkupAddresser));
     Document::new(
-        format_id.clone(),
+        format_id,
         vec![DocumentPart::Stream {
             id: LocalId::new("body"),
-            handle: ErasedStream::new(format_id, Box::new(stream) as Box<dyn Stream<Text>>),
+            handle: ErasedStream::new(Box::new(stream) as Box<dyn Stream<Text>>),
         }],
         Box::new(MarkupRecombine {
             raw,
@@ -142,8 +142,7 @@ mod tests {
         fn new(raw: &str, config: MarkupConfig<'_>) -> Self {
             let items = build_items(raw, config).expect("markup decode succeeds");
             let state: SharedSplice<XmlSpan> = SharedSplice::new(items);
-            let stream =
-                ExtractStream::new(FORMAT_ID.clone(), state.clone(), Arc::new(MarkupAddresser));
+            let stream = ExtractStream::new(FORMAT_ID, state.clone(), Arc::new(MarkupAddresser));
             Doc {
                 stream,
                 recombine: MarkupRecombine {
